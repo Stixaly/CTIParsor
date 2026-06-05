@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>STIX Graph</title>
+
+  <!-- Original application styles (used by stix2viz internals) -->
+  <link rel="stylesheet" href="application.css"/>
+
+  <style>
+    /* --------------------------------------------------------
+       Dark-theme overrides — matches the React shell
+    -------------------------------------------------------- */
+    :root {
+      --bg:          #0f172a;
+      --surface:     #1e293b;
+      --border:      #334155;
+      --text:        #e2e8f0;
+      --text-muted:  #94a3b8;
+      --accent:      #3b82f6;
+      --danger:      #ef4444;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 13px;
+    }
+
+    /* ---- Loading / error overlays ---- */
+    #loading {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 12px;
+      height: 100vh;
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+    .spinner {
+      width: 32px; height: 32px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #error-msg {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      padding: 2rem;
+      color: var(--danger);
+      white-space: pre-wrap;
+      text-align: center;
+      font-size: 14px;
+    }
+
+    /* ---- Canvas container ---- */
+    #canvas-container {
+      display: none;          /* shown by stix-viz-app.js once data loads */
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Canvas wrapper: fills left portion */
+    #canvas-wrapper {
+      float: left;
+      width: 58%;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 0;
+      margin: 0;
+    }
+
+    /* The vis.js canvas */
+    #canvas {
+      flex: 1;
+      border: 1px solid var(--border);
+      border-radius: 0;
+      background: var(--bg);
+      width: 100%;
+      height: calc(100vh - 36px);  /* leave room for timeline row */
+    }
+
+    /* Timeline row */
+    #timelineControls {
+      height: 36px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 8px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      font-size: 11px;
+      color: var(--text-muted);
+      overflow: hidden;
+    }
+    #timeline { flex: 1; accent-color: var(--accent); }
+    .timeline-hint {
+      font-size: 10px;
+      color: var(--text-muted);
+      padding: 0 8px;
+      white-space: nowrap;
+    }
+
+    /* ---- Sidebar column ---- */
+    .sidebar {
+      display: block;
+      width: 42%;
+      height: 100vh;
+      overflow-y: auto;
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      padding: 12px 14px;
+      vertical-align: top;
+    }
+
+    .sidebar h2 {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      margin: 0 0 8px 0;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sidebar h3 {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin: 10px 0 4px;
+    }
+
+    /* Make all three sidebars stack vertically inside the 42% column */
+    #selected, #connections, #legend {
+      width: 100%;
+      float: none;
+      display: block;
+      height: auto;
+      border-left: none;
+      border-bottom: 1px solid var(--border);
+      padding: 10px 14px;
+      background: var(--surface);
+    }
+    #selected  { min-height: 100px; }
+    #legend    { border-bottom: none; }
+
+    /* ---- Selected-node content (matching application.css class names) ---- */
+    .selected-object-prop-name {
+      color: #93c5fd;   /* blue-300 */
+      margin-right: 0.4em;
+      font-weight: 500;
+    }
+    .selected-object-text-value        { color: #86efac; } /* green-300 */
+    .selected-object-text-value-ref    { color: #67e8f9; text-decoration: underline; cursor: pointer; }
+    .selected-object-text-value-ref-dangling { color: var(--danger); text-decoration: underline; cursor: not-allowed; }
+    .selected-object-nontext-value     { color: #fcd34d; } /* amber-300 */
+    .selected-object-object-content   { margin-left: 1.4em; }
+    .selected-object-list              { padding-left: 1.4em; margin: 0; list-style: none; }
+
+    /* ---- Legend ---- */
+    #legend-content { width: 100%; border-collapse: collapse; }
+    #legend-content td {
+      width: 50%;
+      padding: 3px 4px;
+      font-size: 12px;
+      color: var(--text);
+      cursor: pointer;
+    }
+    #legend-content td:hover { background: rgba(255,255,255,0.04); border-radius: 4px; }
+    #legend-content img      { vertical-align: middle; margin-right: 6px; }
+    #legend-content .typeHidden { font-style: italic; color: var(--text-muted); }
+
+    /* ---- Scrollbars ---- */
+    ::-webkit-scrollbar              { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track        { background: transparent; }
+    ::-webkit-scrollbar-thumb        { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover  { background: #475569; }
+
+    /* ---- Uploader: not used here, keep hidden for DOM compatibility ---- */
+    #uploader { display: none !important; }
+
+    /* ---- Connections details/summary ---- */
+    details > summary { cursor: pointer; color: var(--text-muted); }
+    details > summary:hover { color: var(--text); }
+
+    /* ---- Sidebar layout (flex container) ---- */
+    #sidebar-col {
+      float: left;
+      width: 42%;
+      height: 100vh;
+      overflow-y: auto;
+      border-left: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    /* Clearfix */
+    #canvas-container::after { content: ""; display: table; clear: both; }
+  </style>
+
+  <!-- RequireJS loads stix2viz-app.js as the main module -->
+  <script src="require.js" data-main="stix-viz-app"></script>
+</head>
+<body>
+
+  <!-- Loading spinner (shown while bundle is being fetched) -->
+  <div id="loading">
+    <div class="spinner"></div>
+    <span>Loading STIX bundle…</span>
+  </div>
+
+  <!-- Error message -->
+  <div id="error-msg"></div>
+
+  <!--
+    The upload form DOM elements are required by stix2viz internals
+    (application.css references them). Keep them present but invisible.
+  -->
+  <div id="uploader">
+    <input type="file"     id="files"   name="files"/>
+    <input type="text"     id="url"     name="url"/>
+    <button id="fetch-url">Fetch</button>
+    <textarea id="paste-area-stix-json"   name="pasted"></textarea>
+    <textarea id="paste-area-custom-config" name="config"></textarea>
+    <button id="paste-parser">Parse</button>
+    <span id="chosen-files"></span>
+    <span id="header"></span>
+  </div>
+
+  <!-- Main canvas + sidebars (hidden until data loads) -->
+  <div id="canvas-container">
+
+    <!-- Left: vis.js graph -->
+    <div id="canvas-wrapper">
+      <div id="canvas"></div>
+      <div id="timelineControls">
+        <label for="timeline" style="white-space:nowrap; font-size:11px">Timeline</label>
+        <input type="range" id="timeline" name="timeline" min="0" max="0" step="1" disabled/>
+        <label for="timelineCheckbox" style="white-space:nowrap; font-size:11px">Cumulative</label>
+        <input type="checkbox" id="timelineCheckbox" name="cumulative" checked disabled/>
+      </div>
+    </div><!-- /canvas-wrapper -->
+
+    <!-- Right: stacked sidebars -->
+    <div id="sidebar-col">
+
+      <div id="selected" class="sidebar">
+        <h2>Selected Node</h2>
+        <div id="selection"></div>
+      </div>
+
+      <div id="connections" class="sidebar">
+        <h2>Linked Nodes</h2>
+        <h3>Incoming Edges</h3>
+        <div id="connections-incoming"></div>
+        <h3>Outgoing Edges</h3>
+        <div id="connections-outgoing"></div>
+      </div>
+
+      <div id="legend" class="sidebar">
+        <table id="legend-content">
+          <caption><h2>Legend</h2></caption>
+        </table>
+      </div>
+
+    </div><!-- /sidebar-col -->
+
+  </div><!-- /canvas-container -->
+
+</body>
+</html>

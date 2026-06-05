@@ -1,0 +1,45 @@
+APT29 Threat Intelligence Report — Q2 2025
+
+Executive Summary
+
+In this campaign, APT29 (also known as Cozy Bear), a threat actor attributed to the Russian Foreign Intelligence Service (SVR), targeted government agencies and defense contractors across Europe and North America.
+
+The group leveraged spearphishing emails (T1566.001) containing malicious attachments to gain initial access. Once inside the network, they deployed a custom version of Cobalt Strike as a Command and Control (C2) framework.
+
+Indicators of Compromise (IoCs)
+
+The following network indicators were observed during this campaign:
+
+Command and Control servers:
+- 185.220.101.45
+- 91.108.4.234
+- evil-c2-domain.ru
+- update-service.net
+
+Malicious files:
+- MD5:  d41d8cd98f00b204e9800998ecf8427e
+- SHA256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+- SHA1: da39a3ee5e6b4b0d3255bfef95601890afd80709
+
+Email indicators:
+- phishing@malicious-domain.com
+
+Malware Analysis
+
+The payload identified as WellMess malware (also known as WellMail) was used to establish persistence on compromised systems. This malware uses encrypted communications over HTTP/HTTPS and leverages the following techniques:
+
+- T1059.001 — PowerShell execution for lateral movement
+- T1071.001 — Web Protocols for C2 communication
+- T1547.001 — Registry Run Keys for persistence
+
+Vulnerability Exploitation
+
+APT29 exploited CVE-2021-40444 (Microsoft MSHTML Remote Code Execution) to deliver the initial payload. Additionally, CVE-2020-1472 (Zerologon) was used for privilege escalation within the compromised domain.
+
+Attribution and Context
+
+This activity cluster is attributed to APT29 with high confidence. The group primarily targets the energy sector and government institutions in Germany, France, and the United States.
+
+Recommendations
+
+Security teams should apply patches for CVE-2021-40444 and CVE-2020-1472 immediately and monitor for connections to the listed C2 infrastructure. Network detection rules should flag communications with 185.220.101.45 and evil-c2-domain.ru.

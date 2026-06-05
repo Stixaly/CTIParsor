@@ -1,0 +1,51 @@
+# ── Document ingestion ────────────────────────────────────────────────────────
+pdfplumber>=0.11.0           # PDF text extraction + scan detection
+python-docx>=1.1.0           # Word (.docx) parsing
+beautifulsoup4>=4.12.0       # HTML parsing
+markitdown>=0.1.0            # PDF / DOCX → structured Markdown
+pdf2image>=1.17.0            # PDF → images (scanned PDFs via OCR)
+pytesseract>=0.3.10          # Tesseract OCR wrapper for scanned PDFs
+
+# ── IoC extraction ────────────────────────────────────────────────────────────
+iocextract>=1.16.0           # Regex-based IoC extraction (IPs, hashes, domains…)
+
+# ── NLP / NER ────────────────────────────────────────────────────────────────
+# sentence-transformers installs PyTorch (CPU) automatically — ~800 MB first run.
+# Required for Stage 2c (semantic TTP detection) and Stage 2d (CyNER).
+# Upper bound: each major of sentence-transformers (3→4→5) changed encode() return types.
+# Bump the cap intentionally after running: make test-fast
+sentence-transformers>=2.6.0,<6
+# Upper bound: HuggingFace Transformers 6.x may drop APIs used in Stage 2d.
+transformers>=4.35.0,<6      # HuggingFace Transformers (CyNER model, Stage 2d)
+# Upper bound: numpy 3.x will likely remove more deprecated aliases (np.bool_ etc.).
+numpy>=1.24.0,<3             # Embedding cache (mitre_embeddings.npy)
+rapidfuzz>=3.0.0             # Fuzzy matching — MITRE TTP normalization (Stage 3c)
+pyahocorasick>=2.0.0        # Aho-Corasick multi-pattern search — Stage 2b gazetteer (50× speedup)
+
+# spaCy is optional — the pipeline works without it (gazetteer + CyNER cover NER).
+# Install only if you want the legacy spaCy NER fallback in Stage 2:
+#   pip install "spacy>=3.8.0,<3.9.0" && python -m spacy download en_core_web_sm
+spacy>=3.7.0                 # Optional NER fallback — no model downloaded by default
+
+# ── LLM providers ────────────────────────────────────────────────────────────
+anthropic>=0.40.0            # Claude (default LLM provider)
+# Upper bound: openai 2.x introduced breaking changes from 1.x (Mistral/Ollama client).
+# Bump the cap intentionally after running: make test-fast
+openai>=1.30.0,<3            # Mistral AI / Ollama (OpenAI-compatible endpoint)
+
+# ── Data validation & STIX ───────────────────────────────────────────────────
+pydantic>=2.7.0              # LLM output schema validation
+stix2>=3.0.1                 # STIX 2.1 object & bundle generation
+stix2-validator>=3.2.0       # STIX bundle validation
+
+# ── Utilities ────────────────────────────────────────────────────────────────
+python-dotenv>=1.0.0         # .env file loading
+
+# ── Zero-shot NER (GLiNER — Stage 2e) ────────────────────────────────────────
+# Generalist and Lightweight NER model — zero-shot, no fine-tuning needed.
+# Paper: "0-CTI: A Modular Framework for Zero-Shot CTI Extraction" (ADR-004 P2-A)
+# CPU-friendly (~300 MB). Discovers entity types CyNER cannot (sectors, campaigns…)
+gliner>=0.2.0
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest>=8.0.0

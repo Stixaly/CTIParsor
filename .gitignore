@@ -1,0 +1,27 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+output/
+*.egg-info/
+.pytest_cache/
+dist/
+build/
+# Reports dropped in input/ stay local — never commit sensitive CTI docs
+input/*.pdf
+input/*.docx
+input/*.html
+input/*.txt
+# Web UI
+uploads/
+cti_stix.db
+cti_stix.db-shm
+cti_stix.db-wal
+frontend/node_modules/
+frontend/dist/
+# MITRE ATT&CK bundle (downloaded by scripts/download_attack.py — ~12 MB, do not commit)
+/data/
+# Design artefacts — HTML prototypes, not production code
+docs/design/

@@ -1,0 +1,432 @@
+/* ============================================================
+   Design tokens and type-color helpers for the Review redesign.
+   Covers all STIX 2.1 SDOs, SCOs, and the pipeline's internal
+   entity type names (underscore form).
+   ============================================================ */
+
+export interface TypeStyle {
+  hue: number
+  label: string
+}
+
+// Pipeline-internal names (underscore) AND STIX-canonical names (hyphen).
+// Hues are spaced to be visually distinct while grouping related types.
+export const TYPE_STYLE: Record<string, TypeStyle> = {
+  // ── Network SCOs ──────────────────────────────────────────────────────────
+  ipv4:               { hue: 215, label: 'IPv4' },
+  ipv6:               { hue: 215, label: 'IPv6' },
+  domain:             { hue: 268, label: 'Domain' },
+  url:                { hue: 245, label: 'URL' },
+  email:              { hue: 330, label: 'Email' },
+  mac_addr:           { hue: 210, label: 'MAC' },
+  asn:                { hue: 205, label: 'ASN' },
+  network_traffic:    { hue: 196, label: 'Net traffic' },
+  // ── File / Hash SCOs ─────────────────────────────────────────────────────
+  sha256:             { hue:  40, label: 'SHA-256' },
+  md5:                { hue:  40, label: 'MD5' },
+  sha1:               { hue:  40, label: 'SHA-1' },
+  file:               { hue:  48, label: 'File' },
+  // ── System SCOs ──────────────────────────────────────────────────────────
+  registry_key:       { hue: 285, label: 'Registry key' },
+  mutex:              { hue: 278, label: 'Mutex' },
+  user_account:       { hue: 340, label: 'User account' },
+  // ── Vulnerability ────────────────────────────────────────────────────────
+  cve:                { hue:   8, label: 'CVE' },
+  vulnerability:      { hue:   8, label: 'Vulnerability' },
+  // ── ATT&CK TTPs ──────────────────────────────────────────────────────────
+  technique:          { hue:  30, label: 'Technique' },
+  tactic:             { hue:  50, label: 'Tactic' },
+  procedure:          { hue:  90, label: 'Procedure' },
+  ttp:                { hue:  30, label: 'TTP' },
+  // ── Named SDOs ───────────────────────────────────────────────────────────
+  malware:            { hue:  18, label: 'Malware' },
+  threat_actor:       { hue:   2, label: 'Threat actor' },
+  intrusion_set:      { hue:   5, label: 'Intrusion set' },
+  tool:               { hue: 145, label: 'Tool' },
+  campaign:           { hue: 305, label: 'Campaign' },
+  infrastructure:     { hue: 180, label: 'Infrastructure' },
+  identity:           { hue: 190, label: 'Identity' },
+  location:           { hue: 158, label: 'Location' },
+  incident:           { hue: 352, label: 'Incident' },
+
+  // ── STIX canonical aliases (hyphenated) — used by STIX graph view ────────
+  'attack-pattern':          { hue:  30, label: 'Attack pattern' },
+  'threat-actor':            { hue:   2, label: 'Threat actor' },
+  'intrusion-set':           { hue:   5, label: 'Intrusion set' },
+  'course-of-action':        { hue: 172, label: 'Course of action' },
+  'malware-analysis':        { hue:  22, label: 'Malware analysis' },
+  'observed-data':           { hue: 155, label: 'Observed data' },
+  'grouping':                { hue: 250, label: 'Grouping' },
+  'note':                    { hue: 230, label: 'Note' },
+  'opinion':                 { hue: 260, label: 'Opinion' },
+  'report':                  { hue:  80, label: 'Report' },
+  'sighting':                { hue: 115, label: 'Sighting' },
+  // SCOs — canonical
+  'domain-name':             { hue: 268, label: 'Domain' },
+  'ipv4-addr':               { hue: 215, label: 'IPv4' },
+  'ipv6-addr':               { hue: 215, label: 'IPv6' },
+  'email-addr':              { hue: 330, label: 'Email' },
+  'mac-addr':                { hue: 210, label: 'MAC' },
+  'autonomous-system':       { hue: 205, label: 'ASN' },
+  'network-traffic':         { hue: 196, label: 'Net traffic' },
+  'windows-registry-key':    { hue: 285, label: 'Registry key' },
+  'user-account':            { hue: 340, label: 'User account' },
+  'x509-certificate':        { hue: 200, label: 'X.509 cert' },
+  'software':                { hue: 150, label: 'Software' },
+  'directory':               { hue:  60, label: 'Directory' },
+  'artifact':                { hue:  70, label: 'Artifact' },
+  'email-message':           { hue: 328, label: 'Email message' },
+  'process':                 { hue: 192, label: 'Process' },
+}
+
+// Groups for the entity-type picker — only pipeline-internal names,
+// not STIX canonical aliases (which are only needed by the graph view).
+export const TYPE_GROUPS: Array<{ label: string; types: string[] }> = [
+  { label: 'Network IoC',   types: ['ipv4', 'ipv6', 'domain', 'url', 'email', 'mac_addr', 'asn', 'network_traffic'] },
+  { label: 'File / Hash',   types: ['sha256', 'md5', 'sha1', 'file'] },
+  { label: 'Host artifact', types: ['registry_key', 'mutex', 'user_account'] },
+  { label: 'Vulnerability', types: ['cve', 'vulnerability'] },
+  { label: 'ATT&CK TTP',    types: ['technique', 'tactic', 'procedure', 'ttp'] },
+  { label: 'Threat Intel',  types: ['malware', 'threat_actor', 'intrusion_set', 'tool', 'campaign', 'infrastructure', 'identity', 'location', 'incident'] },
+]
+
+export const SOURCE_LABEL: Record<string, { label: string; hint: string }> = {
+  regex:     { label: 'regex',     hint: 'Deterministic pattern match' },
+  gazetteer: { label: 'gazetteer', hint: 'Known-name dictionary' },
+  semantic:  { label: 'semantic',  hint: 'Embedding similarity' },
+  cyner:     { label: 'CyNER',     hint: 'Specialised CTI NER model' },
+  llm:       { label: 'LLM',       hint: 'claude-sonnet-4-6' },
+  manual:    { label: 'manual',    hint: 'Added by reviewer' },
+  ioc:       { label: 'regex',     hint: 'Deterministic pattern match' },
+}
+
+// ── STIX 2.1 Appendix B relationship constraints ─────────────────────────────
+// Maps "sourceType>targetType" → array of spec-defined verbs for that pair.
+// Source: STIX Version 2.1 OS, Appendix B (authoritative SDO definitions).
+// All pairs additionally accept `related-to`, `duplicate-of`, `derived-from`.
+export const STIX_REL_CONSTRAINTS: Record<string, string[]> = {
+  // attack-pattern
+  'attack-pattern>malware':          ['delivers', 'uses'],
+  'attack-pattern>tool':             ['uses'],
+  'attack-pattern>identity':         ['targets'],
+  'attack-pattern>location':         ['targets'],
+  'attack-pattern>vulnerability':    ['targets'],
+  // campaign
+  'campaign>intrusion-set':          ['attributed-to'],
+  'campaign>threat-actor':           ['attributed-to'],
+  'campaign>infrastructure':         ['compromises', 'uses'],
+  'campaign>location':               ['originates-from', 'targets'],
+  'campaign>identity':               ['targets'],
+  'campaign>vulnerability':          ['targets'],
+  'campaign>attack-pattern':         ['uses'],
+  'campaign>malware':                ['uses'],
+  'campaign>tool':                   ['uses'],
+  // course-of-action
+  'course-of-action>indicator':      ['investigates', 'mitigates'],
+  'course-of-action>attack-pattern': ['mitigates'],
+  'course-of-action>malware':        ['mitigates', 'remediates'],   // validator: remediates → malware
+  'course-of-action>tool':           ['mitigates'],
+  'course-of-action>vulnerability':  ['mitigates', 'remediates'],   // validator: remediates → vulnerability
+  // identity
+  'identity>location':               ['located-at'],
+  // indicator
+  'indicator>attack-pattern':        ['indicates'],
+  'indicator>campaign':              ['indicates'],
+  'indicator>infrastructure':        ['indicates'],
+  'indicator>intrusion-set':         ['indicates'],
+  'indicator>malware':               ['indicates'],
+  'indicator>threat-actor':          ['indicates'],
+  'indicator>tool':                  ['indicates'],
+  'indicator>observed-data':         ['based-on'],
+  // infrastructure
+  'infrastructure>infrastructure':      ['communicates-with', 'consists-of', 'controls', 'uses'],
+  'infrastructure>ipv4-addr':           ['communicates-with', 'consists-of'],
+  'infrastructure>ipv6-addr':           ['communicates-with', 'consists-of'],
+  'infrastructure>domain-name':         ['communicates-with', 'consists-of'],
+  'infrastructure>url':                 ['communicates-with', 'consists-of'],
+  'infrastructure>observed-data':       ['consists-of'],
+  // All STIX SCOs are valid targets for infrastructure consists-of (validator §7.6)
+  'infrastructure>artifact':            ['consists-of'],
+  'infrastructure>autonomous-system':   ['consists-of'],
+  'infrastructure>directory':           ['consists-of'],
+  'infrastructure>email-addr':          ['consists-of'],
+  'infrastructure>email-message':       ['consists-of'],
+  'infrastructure>file':                ['consists-of'],
+  'infrastructure>mac-addr':            ['consists-of'],
+  'infrastructure>mutex':               ['consists-of'],
+  'infrastructure>network-traffic':     ['consists-of'],
+  'infrastructure>process':             ['consists-of'],
+  'infrastructure>software':            ['consists-of'],
+  'infrastructure>user-account':        ['consists-of'],
+  'infrastructure>windows-registry-key':['consists-of'],
+  'infrastructure>x509-certificate':    ['consists-of'],
+  'infrastructure>malware':          ['controls', 'delivers', 'hosts'],
+  'infrastructure>vulnerability':    ['has'],
+  'infrastructure>tool':             ['hosts'],
+  'infrastructure>location':         ['located-at'],
+  // intrusion-set
+  'intrusion-set>threat-actor':      ['attributed-to'],
+  'intrusion-set>infrastructure':    ['compromises', 'hosts', 'owns', 'uses'],
+  'intrusion-set>location':          ['originates-from', 'targets'],
+  'intrusion-set>identity':          ['targets'],
+  'intrusion-set>vulnerability':     ['targets'],
+  'intrusion-set>attack-pattern':    ['uses'],
+  'intrusion-set>malware':           ['uses'],
+  'intrusion-set>tool':              ['uses'],
+  // malware
+  'malware>threat-actor':            ['authored-by'],
+  'malware>intrusion-set':           ['authored-by'],
+  'malware>infrastructure':          ['beacons-to', 'exfiltrates-to', 'targets', 'uses'],
+  'malware>ipv4-addr':               ['communicates-with'],
+  'malware>ipv6-addr':               ['communicates-with'],
+  'malware>domain-name':             ['communicates-with'],
+  'malware>url':                     ['communicates-with'],
+  'malware>malware':                 ['controls', 'downloads', 'drops', 'uses', 'variant-of'],
+  'malware>tool':                    ['downloads', 'drops', 'uses'],
+  'malware>file':                    ['downloads', 'drops'],
+  'malware>vulnerability':           ['exploits', 'targets'],
+  'malware>location':                ['originates-from', 'targets'],
+  'malware>identity':                ['targets'],
+  'malware>attack-pattern':          ['uses'],
+  // malware-analysis (§ 7.6 of the spec)
+  'malware-analysis>malware':        ['characterizes', 'analysis-of', 'static-analysis-of', 'dynamic-analysis-of'],
+  // threat-actor
+  'threat-actor>identity':           ['attributed-to', 'impersonates', 'targets'],
+  'threat-actor>infrastructure':     ['compromises', 'hosts', 'owns', 'uses'],
+  'threat-actor>location':           ['located-at', 'targets'],
+  'threat-actor>vulnerability':      ['targets'],
+  'threat-actor>attack-pattern':     ['uses'],
+  'threat-actor>malware':            ['uses'],
+  'threat-actor>tool':               ['uses'],
+  // tool
+  'tool>malware':                    ['delivers', 'drops'],
+  'tool>vulnerability':              ['has', 'targets'],
+  'tool>identity':                   ['targets'],
+  'tool>infrastructure':             ['uses', 'targets'],  // validator: tool uses → infrastructure
+  'tool>location':                   ['targets'],
+  // SCO-level relationships (stix2validator RELATIONSHIPS table)
+  'domain-name>ipv4-addr':           ['resolves-to'],
+  'domain-name>ipv6-addr':           ['resolves-to'],
+  'domain-name>domain-name':         ['resolves-to'],
+  'ipv4-addr>autonomous-system':     ['belongs-to'],
+  'ipv4-addr>mac-addr':              ['resolves-to'],  // validator: ipv4-addr resolves-to mac-addr
+  'ipv6-addr>autonomous-system':     ['belongs-to'],
+  'ipv6-addr>mac-addr':              ['resolves-to'],  // validator: ipv6-addr resolves-to mac-addr
+}
+
+/**
+ * Return the spec-defined valid verbs for a (src, tgt) STIX type pair,
+ * plus the three universal verbs always allowed for any pair.
+ * Returns null if no constraints are defined for the pair (any verb is valid).
+ */
+export function specVerbs(srcType: string, tgtType: string): string[] | null {
+  const specific = STIX_REL_CONSTRAINTS[`${srcType}>${tgtType}`]
+  if (!specific) return null
+  // Universal verbs always allowed regardless of pair
+  const universal = ['related-to', 'duplicate-of', 'derived-from']
+  return [...new Set([...specific, ...universal])]
+}
+
+// All STIX 2.1 relationship types (Section 4 + Appendix B of the OASIS spec).
+export const REL_TYPES = [
+  // Most common — shown first in dropdowns
+  'uses', 'attributed-to', 'targets', 'indicates', 'mitigates', 'remediates',
+  // Delivery / execution
+  'delivers', 'drops', 'downloads', 'exploits',
+  // Infrastructure / C2
+  'compromises', 'hosts', 'owns', 'beacons-to', 'communicates-with', 'exfiltrates-to',
+  // Attribution / identity
+  'originates-from', 'authored-by', 'impersonates', 'located-at',
+  // Analysis / detection — 'indicates' already listed above; not repeated here
+  'based-on', 'consists-of',
+  'analysis-of', 'static-analysis-of', 'dynamic-analysis-of', 'characterizes',
+  'investigates',
+  // SDO relations
+  'controls', 'has',
+  // SCO-specific
+  'resolves-to', 'belongs-to',
+  // Malware variants
+  'variant-of',
+  // Generic
+  'duplicate-of', 'derived-from', 'related-to',
+]
+
+// ── helpers ─────────────────────────────────────────────────────────────────
+
+function isDark(): boolean {
+  return typeof document !== 'undefined' &&
+    document.documentElement.dataset.theme === 'dark'
+}
+
+export function typeColor(type: string, mode: 'underline' | 'block' = 'underline'): Record<string, string> {
+  const t = TYPE_STYLE[type]
+  if (!t) return {}
+  const h = t.hue
+  const dark = isDark()
+  if (mode === 'block') {
+    return dark
+      ? { background: `oklch(0.28 0.06 ${h})`, color: `oklch(0.92 0.04 ${h})`, borderBottom: `1px solid oklch(0.55 0.16 ${h})` }
+      : { background: `oklch(0.94 0.05 ${h})`, color: `oklch(0.30 0.08 ${h})`, borderBottom: `1px solid oklch(0.65 0.16 ${h})` }
+  }
+  // underline (default)
+  return dark
+    ? { borderBottom: `2px solid oklch(0.62 0.18 ${h})`, background: `oklch(0.22 0.04 ${h})`, color: `oklch(0.94 0.03 ${h})` }
+    : { borderBottom: `2px solid oklch(0.62 0.18 ${h})`, background: `oklch(0.97 0.025 ${h})`, color: `oklch(0.22 0.10 ${h})` }
+}
+
+export function typeDot(type: string): string {
+  const t = TYPE_STYLE[type]
+  if (!t) return '#999'
+  return `oklch(0.58 0.18 ${t.hue})`
+}
+
+export function typeSoft(type: string): string {
+  const t = TYPE_STYLE[type]
+  if (!t) return '#eee'
+  return isDark()
+    ? `oklch(0.28 0.05 ${t.hue})`
+    : `oklch(0.95 0.035 ${t.hue})`
+}
+
+export function typeInk(type: string): string {
+  const t = TYPE_STYLE[type]
+  if (!t) return '#333'
+  return isDark()
+    ? `oklch(0.88 0.07 ${t.hue})`
+    : `oklch(0.32 0.10 ${t.hue})`
+}
+
+export function typeLabel(type: string): string {
+  return TYPE_STYLE[type]?.label ?? type
+}
+
+export function hashHue(str: string): number {
+  let h = 0
+  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0
+  return Math.abs(h) % 360
+}
+
+/** confidence 0-1 or 0-100 → display percentage string */
+export function confPct(c: number): number {
+  return c > 1 ? Math.round(c) : Math.round(c * 100)
+}
+
+/** Suggest a default relationship type given src/tgt entity types.
+ *  Based on the STIX 2.1 spec valid relationship table (Appendix B). */
+/**
+ * Suggest the best default relationship verb for a (srcType, tgtType) pair.
+ *
+ * Driven by STIX_REL_CONSTRAINTS (Appendix B of STIX 2.1 OS) — replaces the
+ * old hardcoded map.  Both hyphenated STIX names ("threat-actor") and
+ * underscored pipeline names ("threat_actor") are accepted; they are
+ * normalised to hyphenated form before the lookup.
+ *
+ * Pipeline entity types that don't map directly to STIX SDO names
+ * (e.g. "cve" → "vulnerability", "sha256" / "md5" → "file") are aliased.
+ */
+export function suggestRelType(srcType: string, tgtType: string): string {
+  // Normalise underscore → hyphen and apply pipeline→STIX aliases
+  const aliases: Record<string, string> = {
+    cve: 'vulnerability', ttp: 'attack-pattern', technique: 'attack-pattern',
+    tactic: 'attack-pattern', procedure: 'attack-pattern',
+    sha256: 'file', sha1: 'file', md5: 'file',
+    asn: 'autonomous-system', domain: 'domain-name',
+    email: 'email-addr', ipv4: 'ipv4-addr', ipv6: 'ipv6-addr',
+    mac_addr: 'mac-addr', registry_key: 'windows-registry-key',
+    user_account: 'user-account', network_traffic: 'network-traffic',
+    intrusion_set: 'intrusion-set', threat_actor: 'threat-actor',
+    attack_pattern: 'attack-pattern', course_of_action: 'course-of-action',
+    malware_analysis: 'malware-analysis',
+  }
+  const norm = (t: string) => {
+    const h = t.replace(/_/g, '-')
+    return aliases[h] ?? aliases[t] ?? h
+  }
+
+  const s = norm(srcType)
+  const x = norm(tgtType)
+  const verbs = specVerbs(s, x)
+
+  if (verbs) {
+    // Return the first specific verb (skip the universal fallbacks)
+    const universal = ['related-to', 'duplicate-of', 'derived-from']
+    const specific  = verbs.filter(v => !universal.includes(v))
+    return specific[0] ?? verbs[0]
+  }
+  return 'related-to'
+}
+
+/**
+ * Return the valid STIX 2.1 verbs for a (srcType, tgtType) pair, suitable
+ * for populating a grouped <select>.
+ *
+ * Returns an object with:
+ *   valid   — spec-defined verbs for this exact pair (+ universal verbs)
+ *   others  — all other STIX verbs not in valid[]
+ *   all     — every known STIX verb (for unconstrained pairs)
+ *   constrained — true when the pair is in the spec
+ *
+ * Both underscore and hyphen type names are accepted.
+ */
+export function verbsForPair(srcType: string, tgtType: string): {
+  valid: string[]
+  others: string[]
+  constrained: boolean
+} {
+  const aliases: Record<string, string> = {
+    cve: 'vulnerability', ttp: 'attack-pattern', technique: 'attack-pattern',
+    tactic: 'attack-pattern', procedure: 'attack-pattern',
+    sha256: 'file', sha1: 'file', md5: 'file',
+    asn: 'autonomous-system', domain: 'domain-name',
+    email: 'email-addr', ipv4: 'ipv4-addr', ipv6: 'ipv6-addr',
+    mac_addr: 'mac-addr', registry_key: 'windows-registry-key',
+    user_account: 'user-account', network_traffic: 'network-traffic',
+    intrusion_set: 'intrusion-set', threat_actor: 'threat-actor',
+    attack_pattern: 'attack-pattern', course_of_action: 'course-of-action',
+    malware_analysis: 'malware-analysis',
+  }
+  const norm = (t: string) => {
+    const h = t.replace(/_/g, '-')
+    return aliases[h] ?? aliases[t] ?? h
+  }
+
+  const all = REL_TYPES
+  const valid = specVerbs(norm(srcType), norm(tgtType))
+  if (!valid) return { valid: all, others: [], constrained: false }
+  const others = all.filter(v => !valid.includes(v))
+  return { valid, others, constrained: true }
+}
+
+/** Build non-overlapping text ranges for all entity occurrences */
+export interface Range {
+  start: number
+  end: number
+  entityId: string
+}
+
+export function buildRanges(text: string, entities: Array<{ id: string; value: string; accepted: boolean | null }>): Range[] {
+  const lower = text.toLowerCase()
+  const used = new Uint8Array(text.length)
+  const ranges: Range[] = []
+  const sorted = [...entities]
+    .filter(e => e.accepted !== false && e.value && e.value.length > 1)
+    .sort((a, b) => b.value.length - a.value.length)
+
+  for (const e of sorted) {
+    const v = e.value.toLowerCase()
+    let pos = 0
+    while (pos < lower.length) {
+      const idx = lower.indexOf(v, pos)
+      if (idx === -1) break
+      const end = idx + v.length
+      let overlap = false
+      for (let i = idx; i < end; i++) if (used[i]) { overlap = true; break }
+      if (!overlap) {
+        ranges.push({ start: idx, end, entityId: e.id })
+        used.fill(1, idx, end)
+      }
+      pos = idx + 1
+    }
+  }
+  return ranges.sort((a, b) => a.start - b.start)
+}
