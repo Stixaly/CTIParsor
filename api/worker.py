@@ -19,6 +19,10 @@ _ROOT = Path(__file__).parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+# Initialize logging
+from api.logging_config import get_logger, set_request_id, get_request_id
+logger = get_logger(__name__)
+
 from api.db import get_conn, emit_progress, set_job_status, now_iso, _lock, backup_db
 
 # ---------------------------------------------------------------------------
@@ -44,7 +48,7 @@ def _check_memory_limit():
         # Get current memory usage in MB
         current_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
         if current_mb > _MAX_MEMORY_MB:
-            print(f"[WORKER] Memory limit exceeded: {current_mb:.0f}MB > {_MAX_MEMORY_MB}MB")
+            logger.warning(f"Memory limit exceeded: {current_mb:.0f}MB > {_MAX_MEMORY_MB}MB")
             return False
         return True
     except (AttributeError, ValueError):
@@ -58,7 +62,7 @@ def _check_job_limit():
         return True  # No limit
     with _job_counter_lock:
         if _job_counter >= _MAX_CONCURRENT_JOBS:
-            print(f"[WORKER] Concurrent job limit reached: {_job_counter} >= {_MAX_CONCURRENT_JOBS}")
+            logger.warning(f"Concurrent job limit reached: {_job_counter} >= {_MAX_CONCURRENT_JOBS}")
             return False
         return True
 
@@ -243,8 +247,9 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
                 # Set soft and hard limits (in bytes)
                 max_bytes = _MAX_MEMORY_MB * 1024 * 1024
                 resource.setrlimit(resource.RLIMIT_AS, (max_bytes, max_bytes))
+                logger.debug(f"Memory limit set: {max_bytes:,} bytes ({_MAX_MEMORY_MB}MB)")
             except (ValueError, resource.error) as e:
-                print(f"[WORKER] Could not set memory limit: {e}")
+                logger.warning(f"Could not set memory limit: {e}")
         
         set_job_status(job_id, "processing")
         
@@ -278,8 +283,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
             _max_chars = 3000   # standard
 
         chunks = chunk_text(text, max_chars=_max_chars)
-        print(f"   [Stage 1] {_doc_len:,} chars — {len(chunks)} chunks "
-              f"(max_chars={_max_chars})")
+        logger.info(f"[Stage 1] {_doc_len:,} chars — {len(chunks)} chunks (max_chars={_max_chars})")
         emit_progress(job_id, "stage", {
             "stage": 1, "label": "Ingestion",
             "chars": len(text), "chunks": len(chunks),
@@ -349,6 +353,9 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
             gliner_entities = extract_gliner_entities(text)
             all_entities = _merge_gliner_into(all_entities, gliner_entities)
 
+        logger.info(f"[Stage 2] Extracted {len(all_entities)} entities "
+                   f"(gazetteer={len(gazetteer_entities)}, semantic_ttp={len(semantic_ttp_entities)}, "
+                   f"cyner={len(cyner_entities)}, gliner={len(gliner_entities)})")
         emit_progress(job_id, "stage", {
             "stage": 2, "label": "Extraction",
             "entities": len(all_entities),
@@ -450,8 +457,9 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
             try:
                 tmp.write_text(json.dumps(data), encoding="utf-8")
                 tmp.rename(_ckpt_path)
+                logger.debug(f"[Stage 3] Checkpoint saved ({len(results)}/{total} chunks)")
             except Exception as _e:
-                print(f"   [Stage 3] ⚠ checkpoint save failed: {_e}")
+                logger.warning(f"[Stage 3] Checkpoint save failed: {_e}")
 
         def _ckpt_load() -> tuple[dict, str]:
             """
@@ -463,24 +471,22 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
             try:
                 data = json.loads(_ckpt_path.read_text(encoding="utf-8"))
                 if data.get("total_chunks") != total:
-                    print(f"   [Stage 3] Checkpoint chunk count mismatch "
-                          f"({data.get('total_chunks')} ≠ {total}) — ignoring")
+                    logger.warning(f"[Stage 3] Checkpoint chunk count mismatch "
+                                  f"({data.get('total_chunks')} ≠ {total}) — ignoring")
                     return {}, ""
                 loaded: dict = {}
                 for k_str, v_json in data.get("chunks", {}).items():
                     loaded[int(k_str)] = _LLMResult.model_validate_json(v_json)
                 return loaded, data.get("saved_at", "")
             except Exception as _e:
-                print(f"   [Stage 3] Could not load checkpoint ({_e}) — starting fresh")
+                logger.warning(f"[Stage 3] Could not load checkpoint ({_e}) — starting fresh")
                 return {}, ""
 
         # ── Attempt checkpoint resume ───────────────────────────────────────
 
         chunk_results, _ckpt_saved_at = _ckpt_load()
         if chunk_results:
-            print(f"   [Stage 3] ↺ Resuming from checkpoint — "
-                  f"{len(chunk_results)}/{total} chunks already done "
-                  f"(saved {_ckpt_saved_at})")
+            logger.info(f"[Stage 3] Resuming from checkpoint — {len(chunk_results)}/{total} chunks already done (saved {_ckpt_saved_at})")
 
         # Reconstruct running totals from any already-loaded results
         _run_malware = sum(len(r.malware_families) for r in chunk_results.values())
@@ -496,15 +502,13 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
                 continue          # already processed in a previous run
             if not _chunk_has_signals(chunk, ents):
                 skipped += 1
-                print(f"   [Stage 3] chunk {i}/{total} — skipped (no CTI signals)")
+                logger.debug(f"[Stage 3] chunk {i}/{total} — skipped (no CTI signals)")
             else:
                 llm_work.append((i, chunk, ents))
 
         n_llm      = len(llm_work)
         _stage3_t0 = time.monotonic()
-        print(f"   [Stage 3] {n_llm} chunks → LLM  "
-              f"({skipped} skipped, {len(chunk_results)} from checkpoint, "
-              f"parallelism={_PARALLELISM})")
+        logger.info(f"[Stage 3] {n_llm} chunks → LLM ({skipped} skipped, {len(chunk_results)} from checkpoint, parallelism={_PARALLELISM})")
 
         # ── Parallel processing ─────────────────────────────────────────────
 
@@ -512,8 +516,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
 
         def _process_chunk(idx: int, chunk: str, ents: list) -> tuple[int, _LLMResult]:
             with _log_lock:
-                print(f"\n   [Stage 3] chunk {idx}/{total} — {len(chunk)} chars  "
-                      f"[elapsed {time.monotonic()-_stage3_t0:.0f}s]")
+                logger.info(f"[Stage 3] chunk {idx}/{total} — {len(chunk)} chars [elapsed {time.monotonic()-_stage3_t0:.0f}s]")
             _t  = time.monotonic()
             res = enrich_chunk(
                 chunk, ents,
@@ -529,8 +532,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
             parts = [f"{x} {n}" for x, n in
                      ((m,"malware"),(a,"actors"),(t_c,"tools"),(r,"rels")) if x]
             with _log_lock:
-                print(f"   [Stage 3] chunk {idx}/{total} ✓  {elapsed:.1f}s — "
-                      f"{', '.join(parts) or 'nothing extracted'}")
+                logger.info(f"[Stage 3] chunk {idx}/{total} ✓ {elapsed:.1f}s — {', '.join(parts) or 'nothing extracted'}")
             return idx, res
 
         with ThreadPoolExecutor(max_workers=_PARALLELISM) as executor:
@@ -542,6 +544,9 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
             _since_last_ckpt    = 0
 
             for future in as_completed(futures):
+                # Check timeout before processing result
+                check_timeout()
+                
                 idx, res = future.result()
                 chunk_results[idx] = res
                 completed        += 1
@@ -557,8 +562,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
                 if _since_last_ckpt >= _CHECKPOINT_EVERY:
                     _ckpt_save(chunk_results)
                     _since_last_ckpt = 0
-                    print(f"   [Stage 3] 💾 checkpoint saved "
-                          f"({len(chunk_results)}/{total} chunks)")
+                    logger.debug(f"[Stage 3] Checkpoint saved ({len(chunk_results)}/{total} chunks)")
 
                 emit_progress(job_id, "stage", {
                     "stage": 3, "label": "LLM enrichment",
@@ -578,10 +582,8 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
             chunk_results.get(i, _LLMResult()) for i in range(1, total + 1)
         ]
 
-        print(f"\n   [Stage 3] done — {n_llm} LLM calls, {skipped} skipped, "
-              f"total elapsed {time.monotonic()-_stage3_t0:.0f}s")
-        print(f"   [Stage 3] totals: {_run_malware} malware, {_run_actors} actors, "
-              f"{_run_tools} tools, {_run_rels} relationships")
+        logger.info(f"[Stage 3] done — {n_llm} LLM calls, {skipped} skipped, total elapsed {time.monotonic()-_stage3_t0:.0f}s")
+        logger.info(f"[Stage 3] totals: {_run_malware} malware, {_run_actors} actors, {_run_tools} tools, {_run_rels} relationships")
 
         from pipeline.stage3_llm import _merge_results
         llm_result = _merge_results(
@@ -627,6 +629,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
             source_hash=source_hash,
             relationship_policy=_policy_s4,
         )
+        logger.info(f"[Stage 4] STIX mapping complete — {len(list(bundle.objects))} objects")
         emit_progress(job_id, "stage", {
             "stage": 4, "label": "STIX mapping", "objects": len(list(bundle.objects)),
         })
@@ -637,6 +640,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
         valid = validate_and_export(bundle, out_path)
         bundle_json = bundle.serialize(pretty=True)
+        logger.info(f"[Stage 5] Validation complete — valid={valid}")
         emit_progress(job_id, "stage", {
             "stage": 5, "label": "Validation", "valid": valid,
         })
@@ -654,27 +658,38 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         # Backup database after successful processing
         try:
             backup_db()
+            logger.info(f"[Worker] Database backup completed for job {job_id}")
         except Exception as e:
-            print(f"[WORKER] Database backup failed: {e}")
+            logger.error(f"[Worker] Database backup failed: {e}")
 
     except TimeoutError as exc:
         error_msg = str(exc)
         set_job_status(job_id, "failed")
         emit_progress(job_id, "done", {"status": "failed", "error": error_msg})
-        print(f"[Worker TIMEOUT] job {job_id}: {error_msg}")
+        logger.error(f"[Worker TIMEOUT] job {job_id}: {error_msg}")
     except MemoryError as exc:
         error_msg = str(exc)
         set_job_status(job_id, "failed")
         emit_progress(job_id, "done", {"status": "failed", "error": "Memory limit exceeded"})
-        print(f"[Worker MEMORY ERROR] job {job_id}: {error_msg}")
+        logger.error(f"[Worker MEMORY ERROR] job {job_id}: {error_msg}")
     except Exception as exc:
         import traceback
         error_msg = traceback.format_exc()
         set_job_status(job_id, "failed")
         emit_progress(job_id, "done", {"status": "failed", "error": str(exc)})
-        print(f"[Worker ERROR] job {job_id}: {error_msg}")
+        logger.error(f"[Worker ERROR] job {job_id}: {error_msg}")
     finally:
+        # Reset resource limits after job completion
+        try:
+            if _MAX_MEMORY_MB > 0 and hasattr(resource, 'RLIMIT_AS'):
+                # Reset to unlimited (or system default)
+                resource.setrlimit(resource.RLIMIT_AS, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
+                logger.debug(f"[Worker] Resource limits reset for job {job_id}")
+        except Exception as e:
+            logger.warning(f"[Worker] Could not reset resource limits: {e}")
+        
         _decrement_job_counter()
+        logger.info(f"[Worker] Job {job_id} completed, active jobs: {_job_counter}")
 
 
 def run_pipeline_async(job_id: str, file_path: str, original_filename: str) -> None:
@@ -683,14 +698,18 @@ def run_pipeline_async(job_id: str, file_path: str, original_filename: str) -> N
     if not _check_job_limit():
         set_job_status(job_id, "queued")
         emit_progress(job_id, "done", {"status": "queued", "error": "Job queue full"})
+        logger.warning(f"[Worker] Job {job_id} queued — job queue full")
         return
     
+    logger.info(f"[Worker] Starting async pipeline for job {job_id}")
     t = threading.Thread(
         target=_run_pipeline,
         args=(job_id, file_path, original_filename),
         daemon=True,
+        name=f"pipeline-{job_id}",
     )
     t.start()
+    logger.debug(f"[Worker] Thread started for job {job_id}")
 
 
 def _lexicon_rescan(job_id: str, report_text: str) -> int:
@@ -802,8 +821,7 @@ def _lexicon_rescan(job_id: str, report_text: str) -> int:
                     to_insert,
                 )
                 conn.commit()
-                print(f"   [lexicon_rescan] +{len(to_insert)} entity rows "
-                      f"(source=report_lexicon, from {len(rows)} accepted SDO entities)")
+                logger.info(f"[lexicon_rescan] +{len(to_insert)} entity rows (source=report_lexicon, from {len(rows)} accepted SDO entities)")
 
     return len(to_insert)
 
@@ -856,7 +874,7 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
     if not skip_rescan:
         new_count = _lexicon_rescan(job_id, report_text)
         if new_count:
-            print(f"   [finalize] Lexicon re-scan added {new_count} new entity rows")
+            logger.info(f"[finalize] Lexicon re-scan added {new_count} new entity rows")
 
     with _lock:
         with get_conn() as conn:

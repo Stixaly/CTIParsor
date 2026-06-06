@@ -11,6 +11,10 @@ import json
 import functools
 from pathlib import Path
 
+# Initialize logging
+from api.logging_config import get_logger
+logger = get_logger(__name__)
+
 _INDEX_PATH = Path(__file__).parent / "data" / "mitre_index.json"
 
 
@@ -21,7 +25,7 @@ def _load() -> dict:
     try:
         return json.loads(_INDEX_PATH.read_text(encoding="utf-8"))
     except Exception as e:
-        print(f"[mitre_db] Could not load index: {e}")
+        logger.error(f"Could not load index: {e}")
         return {"techniques": [], "tactics": []}
 
 

@@ -5,6 +5,10 @@ import shutil
 from pathlib import Path
 from datetime import datetime, timezone
 
+# Initialize logging
+from api.logging_config import get_logger
+logger = get_logger(__name__)
+
 DB_PATH = Path(__file__).parent.parent / "cti_stix.db"
 BACKUP_DIR = Path(__file__).parent.parent / "db_backups"
 # RLock (not Lock) so the same thread can re-acquire inside nested with-blocks
@@ -102,7 +106,7 @@ def backup_db() -> None:
             except OSError:
                 pass
     except Exception as e:
-        print(f"[db] Backup failed: {e}")
+        logger.error(f"[db] Backup failed: {e}")
 
 
 def init_db() -> None:
@@ -174,7 +178,7 @@ def init_db() -> None:
                 pass  # Column / index already exists — safe to skip
             except Exception as exc:
                 # Unexpected migration error — log it but don't crash the server
-                print(f"[db] Migration warning ({stmt[:60]}…): {exc}")
+                logger.warning(f"[db] Migration warning ({stmt[:60]}...): {exc}")
 
 
 def now_iso() -> str:

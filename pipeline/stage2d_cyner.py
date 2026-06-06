@@ -33,6 +33,10 @@ from typing import Sequence
 
 from models.schemas import RawEntity, EntityType
 
+# Initialize logging
+from api.logging_config import get_logger
+logger = get_logger(__name__)
+
 # Model ID — configurable via CYNER_MODEL in .env.
 # The original aiforsec/cyner-xlm-roberta-base model was removed from HuggingFace.
 # If the model cannot be loaded, Stage 2e (GLiNER) covers the same entity types
@@ -91,18 +95,18 @@ def _load_pipeline():
             aggregation_strategy="simple",   # merges B-/I- tokens → full spans
             device=-1,                        # CPU; set to 0 for GPU
         )
-        print(f"[stage2d] CyNER model loaded: {_MODEL_ID}")
+        logger.info(f"CyNER model loaded: {_MODEL_ID}")
         return ner
     except Exception as e:
         msg = str(e)
         if "not a valid model identifier" in msg or "not a local folder" in msg:
-            print(
-                f"[stage2d] CyNER model '{_MODEL_ID}' is not available on HuggingFace.\n"
-                f"          Stage 2e (GLiNER) covers the same entity types as a fallback.\n"
-                f"          To silence this message: set CYNER_ENABLED=false in .env"
+            logger.warning(
+                f"CyNER model '{_MODEL_ID}' is not available on HuggingFace.\n"
+                f"Stage 2e (GLiNER) covers the same entity types as a fallback.\n"
+                f"To silence this message: set CYNER_ENABLED=false in .env"
             )
         else:
-            print(f"[stage2d] Could not load CyNER model '{_MODEL_ID}': {e}")
+            logger.error(f"Could not load CyNER model '{_MODEL_ID}': {e}")
         return None
 
 
@@ -137,7 +141,7 @@ def extract_cyner_entities(text: str) -> list[RawEntity]:
     try:
         predictions: list[dict] = ner_pipeline(text[:50_000])   # cap at 50K chars
     except Exception as e:
-        print(f"[stage2d] CyNER inference error: {e}")
+        logger.error(f"CyNER inference error: {e}")
         return []
 
     results: list[RawEntity] = []

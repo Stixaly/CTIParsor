@@ -4,6 +4,10 @@ from datetime import datetime, timezone
 from models.schemas import RawEntity, EntityType
 from pipeline.stage3_llm import LLMEnrichmentResult
 
+# Initialize logging
+from api.logging_config import get_logger
+logger = get_logger(__name__)
+
 
 def _make_deterministic_id(value: str, entity_type: str, prefix: str = "") -> str:
     """
@@ -292,6 +296,7 @@ def build_stix_bundle(
             key = entity.value.lower()
             if key in name_to_stix:
                 continue  # same CVE from a second source — don't create duplicate SDO
+            vuln_id = _make_deterministic_id(entity.value, "vulnerability", "cti")
             obj = stix2.Vulnerability(
                 name=entity.value,
                 external_references=[
@@ -301,6 +306,7 @@ def build_stix_bundle(
                         url=f"https://nvd.nist.gov/vuln/detail/{entity.value}",
                     )
                 ],
+                id=vuln_id,
             )
             stix_objects.append(obj)
             name_to_stix[key] = obj
@@ -308,7 +314,8 @@ def build_stix_bundle(
     if llm_result.campaign_name:
         _camp_key = llm_result.campaign_name.lower()
         if _camp_key not in name_to_stix:  # may already exist from raw_entities Campaign entity
-            obj = stix2.Campaign(name=llm_result.campaign_name)
+            campaign_id = _make_deterministic_id(llm_result.campaign_name, "campaign", "cti")
+            obj = stix2.Campaign(name=llm_result.campaign_name, id=campaign_id)
             stix_objects.append(obj)
             name_to_stix[_camp_key] = obj
 
@@ -322,7 +329,8 @@ def build_stix_bundle(
                 # region="unknown" is not in the STIX 2.1 vocabulary and would
                 # fail strict validation.
                 continue
-            obj = stix2.Location(name=country, country=iso2)
+            location_id = _make_deterministic_id(f"{country}_{iso2}", "location", "cti")
+            obj = stix2.Location(name=country, country=iso2, id=location_id)
             stix_objects.append(obj)
             name_to_stix[f"location:{country.lower()}"] = obj
         except Exception:
@@ -332,7 +340,8 @@ def build_stix_bundle(
     # Represents a class of organisations in that sector
     for sector in llm_result.targeted_sectors:
         try:
-            obj = stix2.Identity(name=sector, identity_class="class")
+            identity_id = _make_deterministic_id(sector, "identity", "cti")
+            obj = stix2.Identity(name=sector, identity_class="class", id=identity_id)
             stix_objects.append(obj)
             name_to_stix[f"identity:{sector.lower()}"] = obj
         except Exception:
@@ -341,7 +350,8 @@ def build_stix_bundle(
     # --- CourseOfAction SDOs (recommended mitigations) ---
     for coa in llm_result.course_of_action:
         try:
-            obj = stix2.CourseOfAction(name=coa)
+            coa_id = _make_deterministic_id(coa, "course-of-action", "cti")
+            obj = stix2.CourseOfAction(name=coa, id=coa_id)
             stix_objects.append(obj)
             name_to_stix[f"coa:{coa.lower()}"] = obj
         except Exception:
@@ -373,12 +383,14 @@ def build_stix_bundle(
             continue
 
         try:
+            indicator_id = _make_deterministic_id(f"ioc_{assoc.ioc_value}", "indicator", "cti")
             indicator = stix2.Indicator(
                 name=f"Malicious IoC: {assoc.ioc_value}",
                 pattern=pattern,
                 pattern_type="stix",
                 valid_from=datetime.now(timezone.utc),
                 indicator_types=["malicious-activity"],
+                id=indicator_id,
             )
             stix_objects.append(indicator)
             name_to_stix[f"indicator:{ioc_key}"] = indicator
@@ -401,12 +413,14 @@ def build_stix_bundle(
         if not pattern:
             continue
         try:
+            indicator_id = _make_deterministic_id(f"ioc_{entity.value}", "indicator", "cti")
             indicator = stix2.Indicator(
                 name=f"Indicator: {entity.value}",
                 pattern=pattern,
                 pattern_type="stix",
                 valid_from=datetime.now(timezone.utc),
                 indicator_types=["malicious-activity"],
+                id=indicator_id,
             )
             stix_objects.append(indicator)
             name_to_stix[f"indicator:{ioc_key}"] = indicator
@@ -605,25 +619,32 @@ def _entity_to_sdo(entity: RawEntity):
         v = entity.value
 
         if t == EntityType.INFRASTRUCTURE:
+            infra_id = _make_deterministic_id(v, "infrastructure", "cti")
             return stix2.Infrastructure(
                 name=v,
                 infrastructure_types=["unknown"],
+                id=infra_id,
             )
         if t == EntityType.INTRUSION_SET:
-            return stix2.IntrusionSet(name=v)
+            intrusion_id = _make_deterministic_id(v, "intrusion-set", "cti")
+            return stix2.IntrusionSet(name=v, id=intrusion_id)
         if t == EntityType.LOCATION:
             iso2 = _COUNTRY_ISO.get(v.strip().lower())
+            location_id = _make_deterministic_id(f"{v}_{iso2}" if iso2 else v, "location", "cti")
             if iso2:
-                return stix2.Location(name=v, country=iso2)
+                return stix2.Location(name=v, country=iso2, id=location_id)
             # Fall back to name-only Location — region is optional in STIX 2.1
             # and "unknown" is not a valid vocabulary value (raises InvalidValueError)
-            return stix2.Location(name=v)
+            return stix2.Location(name=v, id=location_id)
         if t == EntityType.IDENTITY:
-            return stix2.Identity(name=v, identity_class="class")
+            identity_id = _make_deterministic_id(v, "identity", "cti")
+            return stix2.Identity(name=v, identity_class="class", id=identity_id)
         if t == EntityType.CAMPAIGN:
-            return stix2.Campaign(name=v)
+            campaign_id = _make_deterministic_id(v, "campaign", "cti")
+            return stix2.Campaign(name=v, id=campaign_id)
         if t == EntityType.INCIDENT:
-            return stix2.Incident(name=v)
+            incident_id = _make_deterministic_id(v, "incident", "cti")
+            return stix2.Incident(name=v, id=incident_id)
 
     except Exception:
         pass

@@ -5,6 +5,10 @@ import docx
 from bs4 import BeautifulSoup
 from pathlib import Path
 
+# Initialize logging
+from api.logging_config import get_logger
+logger = get_logger(__name__)
+
 # pdfminer (used internally by pdfplumber) emits WARNING-level messages for PDFs
 # with incomplete font descriptors ("Could not get FontBBox…").  These are benign
 # — the text is still extracted correctly — but they spam the server log.
@@ -103,8 +107,8 @@ def _is_scanned_pdf(path: Path) -> bool:
 def _read_pdf_ocr(path: Path) -> str:
     """OCR path for scanned PDFs — converts each page to an image then runs Tesseract."""
     if not _OCR_AVAILABLE:
-        print(f"      [WARNING] OCR libraries not available. Install pdf2image and pytesseract.")
-        print(f"                On Linux: sudo apt install tesseract-ocr && pip install pdf2image pytesseract")
+        logger.warning("OCR libraries not available. Install pdf2image and pytesseract.")
+        logger.warning("On Linux: sudo apt install tesseract-ocr && pip install pdf2image pytesseract")
         return ""
 
     try:
@@ -117,13 +121,13 @@ def _read_pdf_ocr(path: Path) -> str:
             for img in images:
                 img.close()
     except Exception as e:
-        print(f"      [WARNING] OCR failed: {e}")
+        logger.warning(f"OCR failed: {e}")
         return ""
 
 
 def _read_pdf(path: Path) -> str:
     if _is_scanned_pdf(path):
-        print(f"      [INFO] Scanned PDF detected — using OCR")
+        logger.info("Scanned PDF detected — using OCR")
         return _read_pdf_ocr(path)
 
     # Text-based PDF: markitdown preserves headers, tables, and lists

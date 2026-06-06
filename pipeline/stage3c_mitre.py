@@ -23,13 +23,16 @@ import functools
 
 from pipeline.stage3_llm import TTPExtracted
 
+# Initialize logging
+from api.logging_config import get_logger
+logger = get_logger(__name__)
+
 try:
     from rapidfuzz import fuzz, process as rfprocess
     _RAPIDFUZZ_AVAILABLE = True
 except ImportError:
     _RAPIDFUZZ_AVAILABLE = False
-    print("[WARNING] rapidfuzz not installed — MITRE normalization disabled. "
-          "Run: pip install rapidfuzz")
+    logger.warning("rapidfuzz not installed — MITRE normalization disabled. Run: pip install rapidfuzz")
 
 # Fuzzy match thresholds
 _HIGH_CONF   = 85
@@ -148,8 +151,7 @@ def normalize_ttps(
     """
     index = _load_index()
     if not index:
-        print("      [stage3c] MITRE index not found — "
-              "ensure pipeline/data/mitre_index.json exists")
+        logger.warning("MITRE index not found — ensure pipeline/data/mitre_index.json exists")
         return ttps
 
     normalized: dict[str, TTPExtracted] = {}
