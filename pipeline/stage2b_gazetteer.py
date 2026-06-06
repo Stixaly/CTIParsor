@@ -31,6 +31,10 @@ from pathlib import Path
 
 from models.schemas import RawEntity, EntityType
 
+# Initialize logging
+from api.logging_config import get_logger
+logger = get_logger(__name__)
+
 _INDEX_PATH = Path(__file__).parent / "data" / "gazetteer.json"
 
 # Names shorter than this threshold are skipped (too ambiguous for word-boundary matching)
@@ -55,13 +59,12 @@ def _load() -> list[dict]:
     Entries are pre-sorted longest-first so 'Lazarus Group' matches before 'Lazarus'.
     """
     if not _INDEX_PATH.exists():
-        print("[stage2b] gazetteer.json not found — skipping gazetteer NER. "
-              "Run: python scripts/build_indexes.py")
+        logger.warning("gazetteer.json not found — skipping gazetteer NER. Run: python scripts/build_indexes.py")
         return []
     try:
         return json.loads(_INDEX_PATH.read_text(encoding="utf-8"))
     except Exception as e:
-        print(f"[stage2b] Could not load gazetteer: {e}")
+        logger.error(f"Could not load gazetteer: {e}")
         return []
 
 

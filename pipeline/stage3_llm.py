@@ -15,6 +15,10 @@ from tenacity import (
     RetryError
 )
 
+# Initialize logging
+from api.logging_config import get_logger
+logger = get_logger(__name__)
+
 # Stage 3b and 3c are imported lazily inside functions to avoid circular imports
 
 load_dotenv()
@@ -33,6 +37,16 @@ _RETRY_EXCEPTIONS = (
     ConnectionError,
     TimeoutError,
 )
+
+# ---------------------------------------------------------------------------
+# Input/Output length limits for LLM calls
+# ---------------------------------------------------------------------------
+# Maximum prompt length (characters) to prevent overly large requests
+_MAX_PROMPT_LENGTH = int(os.environ.get("LLM_MAX_PROMPT_LENGTH", "32000"))
+# Maximum response length (characters) to prevent overly large responses
+_MAX_RESPONSE_LENGTH = int(os.environ.get("LLM_MAX_RESPONSE_LENGTH", "16000"))
+# Minimum prompt length to ensure meaningful input
+_MIN_PROMPT_LENGTH = 100
 
 
 def _sanitize_text_for_prompt(text: str, max_length: int = 10000) -> str:
@@ -152,25 +166,25 @@ def _get_provider_diagnostics():
     if _PROVIDER == "anthropic":
         _anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
         if not _anthropic_key:
-            print("[ATTENTION] LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY not set — stage 3 will be skipped.")
+            logger.warning("LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY not set — stage 3 will be skipped.")
     elif _PROVIDER == "mistral":
         _mistral_key = os.environ.get("MISTRAL_API_KEY", "").strip()
         if not _OPENAI_SDK_AVAILABLE:
-            print("[ATTENTION] LLM_PROVIDER=mistral requires the 'openai' package: pip install openai")
+            logger.warning("LLM_PROVIDER=mistral requires the 'openai' package: pip install openai")
         elif not _mistral_key:
-            print("[ATTENTION] LLM_PROVIDER=mistral but MISTRAL_API_KEY not set — stage 3 will be skipped.")
+            logger.warning("LLM_PROVIDER=mistral but MISTRAL_API_KEY not set — stage 3 will be skipped.")
         else:
             _MISTRAL_MODEL = os.environ.get("MISTRAL_MODEL", "mistral-small-latest")
-            print(f"[INFO] LLM_PROVIDER=mistral — model: {_MISTRAL_MODEL}")
+            logger.info(f"LLM_PROVIDER=mistral — model: {_MISTRAL_MODEL}")
     elif _PROVIDER == "ollama":
         if not _OPENAI_SDK_AVAILABLE:
-            print("[ATTENTION] LLM_PROVIDER=ollama requires the 'openai' package: pip install openai")
+            logger.warning("LLM_PROVIDER=ollama requires the 'openai' package: pip install openai")
         else:
             _ollama_base = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
             _OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
-            print(f"[INFO] LLM_PROVIDER=ollama — endpoint: {_ollama_base} — model: {_OLLAMA_MODEL}")
+            logger.info(f"LLM_PROVIDER=ollama — endpoint: {_ollama_base} — model: {_OLLAMA_MODEL}")
     else:
-        print(f"[ATTENTION] Unknown LLM_PROVIDER='{_PROVIDER}'. Valid values: anthropic | mistral | ollama")
+        logger.warning(f"Unknown LLM_PROVIDER='{_PROVIDER}'. Valid values: anthropic | mistral | ollama")
 
 
 # Run diagnostics at module load time (keeps existing behavior)
@@ -398,23 +412,22 @@ def _call_anthropic_impl(system: str, user: str) -> str:
         )
         elapsed = time.monotonic() - t0
         tokens_out = getattr(getattr(response, "usage", None), "output_tokens", "?")
-        print(f"         ↳ Anthropic responded in {elapsed:.1f}s  ({tokens_out} output tokens)")
+        logger.debug(f"Anthropic responded in {elapsed:.1f}s ({tokens_out} output tokens)")
         if not response.content:
-            print("      [ERROR] Anthropic returned an empty content list (possible content filter)")
+            logger.error("Anthropic returned an empty content list (possible content filter)")
             return ""
         return response.content[0].text.strip()
     except anthropic.APITimeoutError:
-        print(f"      [ERROR] Anthropic timed out after {_LLM_TIMEOUT}s — "
-              f"raise LLM_TIMEOUT in .env if your model is slow")
+        logger.error(f"Anthropic timed out after {_LLM_TIMEOUT}s — raise LLM_TIMEOUT in .env if your model is slow")
         raise
     except anthropic.AuthenticationError:
-        print("      [ERROR] Invalid Anthropic API key — check ANTHROPIC_API_KEY in .env")
+        logger.error("Invalid Anthropic API key — check ANTHROPIC_API_KEY in .env")
         raise
     except anthropic.APIConnectionError:
-        print("      [ERROR] Cannot reach Anthropic API — check network")
+        logger.error("Cannot reach Anthropic API — check network")
         raise
     except Exception as e:
-        print(f"      [ERROR] Anthropic ({time.monotonic()-t0:.1f}s): {e}")
+        logger.error(f"Anthropic ({time.monotonic()-t0:.1f}s): {e}")
         raise
 
 
@@ -423,10 +436,10 @@ def _call_anthropic(system: str, user: str) -> str:
     try:
         return _call_anthropic_impl(system, user)
     except RetryError as e:
-        print(f"      [ERROR] Anthropic failed after {_MAX_RETRIES} retries: {e}")
+        logger.error(f"Anthropic failed after {_MAX_RETRIES} retries: {e}")
         return ""
     except Exception as e:
-        print(f"      [ERROR] Anthropic call failed: {e}")
+        logger.error(f"Anthropic call failed: {e}")
         return ""
 
 
@@ -454,22 +467,21 @@ def _call_openai_compatible_impl(client_param, model: str, system: str, user: st
         elapsed = time.monotonic() - t0
         usage  = getattr(response, "usage", None)
         tokens = getattr(usage, "completion_tokens", "?") if usage else "?"
-        print(f"         ↳ {label} responded in {elapsed:.1f}s  ({tokens} output tokens)")
+        logger.debug(f"{label} responded in {elapsed:.1f}s ({tokens} output tokens)")
         if not response.choices:
-            print(f"      [ERROR] {label} returned an empty choices list (possible content filter)")
+            logger.error(f"{label} returned an empty choices list (possible content filter)")
             return ""
         content = response.choices[0].message.content
         if content is None:
-            print(f"      [ERROR] {label} returned null message content")
+            logger.error(f"{label} returned null message content")
             return ""
         return content.strip()
     except Exception as e:
         elapsed = time.monotonic() - t0
         if "timeout" in str(e).lower() or "timed out" in str(e).lower():
-            print(f"      [ERROR] {label} timed out after {_LLM_TIMEOUT}s — "
-                  f"raise LLM_TIMEOUT in .env if your model is slow")
+            logger.error(f"{label} timed out after {_LLM_TIMEOUT}s — raise LLM_TIMEOUT in .env if your model is slow")
         else:
-            print(f"      [ERROR] {label} ({elapsed:.1f}s): {e}")
+            logger.error(f"{label} ({elapsed:.1f}s): {e}")
         raise
 
 
@@ -478,10 +490,10 @@ def _call_openai_compatible(client_param, model: str, system: str, user: str, la
     try:
         return _call_openai_compatible_impl(client_param, model, system, user, label)
     except RetryError as e:
-        print(f"      [ERROR] {label} failed after {_MAX_RETRIES} retries: {e}")
+        logger.error(f"{label} failed after {_MAX_RETRIES} retries: {e}")
         return ""
     except Exception as e:
-        print(f"      [ERROR] {label} call failed: {e}")
+        logger.error(f"{label} call failed: {e}")
         return ""
 
 
@@ -603,17 +615,30 @@ def enrich_chunk(
         detected_semantic_ttps=sem_summary,
     )
 
+    # Validate prompt length
+    if len(prompt) > _MAX_PROMPT_LENGTH:
+        logger.warning(f"Prompt too long ({len(prompt)} chars > {_MAX_PROMPT_LENGTH} max) — truncating")
+        prompt = prompt[:_MAX_PROMPT_LENGTH]
+    elif len(prompt) < _MIN_PROMPT_LENGTH:
+        logger.warning(f"Prompt too short ({len(prompt)} chars < {_MIN_PROMPT_LENGTH} min) — skipping chunk")
+        return LLMEnrichmentResult()
+
     provider_label = {
         "anthropic": f"Anthropic/{os.environ.get('ANTHROPIC_MODEL', 'claude-sonnet-4-6')}",
         "mistral":   f"Mistral/{os.environ.get('MISTRAL_MODEL', 'mistral-small-latest')}",
         "ollama":    f"Ollama/{os.environ.get('OLLAMA_MODEL', 'llama3.2')}",
     }.get(_PROVIDER, _PROVIDER)
-    print(f"         → calling {provider_label}  ({len(prompt)} prompt chars)…")
+    logger.debug(f"Calling {provider_label} ({len(prompt)} prompt chars)")
 
     raw_text = _call_llm(_SYSTEM_PROMPT, prompt)
     if not raw_text:
-        print("         ✗ LLM returned empty response — skipping chunk")
+        logger.warning("LLM returned empty response — skipping chunk")
         return LLMEnrichmentResult()
+
+    # Validate response length
+    if len(raw_text) > _MAX_RESPONSE_LENGTH:
+        logger.warning(f"Response too long ({len(raw_text)} chars > {_MAX_RESPONSE_LENGTH} max) — truncating")
+        raw_text = raw_text[:_MAX_RESPONSE_LENGTH]
 
     # Use raw_decode() to find the first syntactically valid JSON object in
     # the LLM output, ignoring any surrounding prose or markdown fences.
@@ -630,13 +655,13 @@ def enrich_chunk(
                 continue
 
     if parsed_json is None:
-        print(f"         ✗ LLM returned no valid JSON  (raw preview: {raw_text[:120]!r})")
+        logger.warning(f"LLM returned no valid JSON (raw preview: {raw_text[:120]!r})")
         return LLMEnrichmentResult()
 
     try:
         result = LLMEnrichmentResult.model_validate(parsed_json)
     except ValidationError as e:
-        print(f"         ✗ JSON schema validation failed: {e}")
+        logger.warning(f"JSON schema validation failed: {e}")
         return LLMEnrichmentResult()
 
     # Stage 3b — remove hallucinated entity names not present in the source text.
@@ -680,7 +705,7 @@ def enrich_all_chunks(
     total = len(chunks)
 
     for i, (chunk, entities) in enumerate(zip(chunks, entities_per_chunk), 1):
-        print(f"      LLM chunk {i}/{total}...")
+        logger.info(f"LLM chunk {i}/{total}...")
         result = enrich_chunk(
             chunk, entities,
             gazetteer_entities=gazetteer_entities,

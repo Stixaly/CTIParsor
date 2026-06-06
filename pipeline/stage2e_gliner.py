@@ -46,6 +46,10 @@ from typing import Iterator
 
 from models.schemas import RawEntity, EntityType
 
+# Initialize logging
+from api.logging_config import get_logger
+logger = get_logger(__name__)
+
 # Suppress GLiNER's "Sentence of length N has been truncated to 384" warning.
 # This fires for IoC-table chunks that exceed the BERT token limit; those
 # sections are already handled by regex extraction so the truncation is benign.
@@ -131,13 +135,13 @@ def _load_gliner():
     try:
         from gliner import GLiNER
         model = GLiNER.from_pretrained(_GLINER_MODEL_ID)
-        print(f"[stage2e] GLiNER model loaded: {_GLINER_MODEL_ID}")
+        logger.info(f"GLiNER model loaded: {_GLINER_MODEL_ID}")
         return model
     except ImportError:
         # gliner not installed — silent skip (it's optional)
         return None
     except Exception as e:
-        print(f"[stage2e] Could not load GLiNER model '{_GLINER_MODEL_ID}': {e}")
+        logger.error(f"Could not load GLiNER model '{_GLINER_MODEL_ID}': {e}")
         return None
 
 
@@ -207,7 +211,7 @@ def extract_gliner_entities(text: str) -> list[RawEntity]:
             else:
                 batch_preds = raw
         except Exception as e:
-            print(f"[stage2e] Batch inference error (falling back to single): {e}")
+            logger.warning(f"Batch inference error (falling back to single): {e}")
             # Per-chunk fallback
             batch_preds = []
             for chunk_text, char_offset in batch:
@@ -218,7 +222,7 @@ def extract_gliner_entities(text: str) -> list[RawEntity]:
                         flat_ner=True, multi_label=False,
                     ))
                 except Exception as e2:
-                    print(f"[stage2e] Inference error at offset {char_offset}: {e2}")
+                    logger.error(f"Inference error at offset {char_offset}: {e2}")
                     batch_preds.append([])
 
         for predictions, (chunk_text, char_offset) in zip(batch_preds, batch):

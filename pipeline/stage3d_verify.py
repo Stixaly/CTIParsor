@@ -45,6 +45,10 @@ import os
 import json
 from typing import Callable
 
+# Initialize logging
+from api.logging_config import get_logger
+logger = get_logger(__name__)
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -154,12 +158,12 @@ def verify_relationships(
     raw = llm_fn(_VERIFY_SYSTEM, prompt)
     if not raw:
         # LLM call failed — keep all relationships (safe fallback)
-        print("      [Stage 3d] Verification LLM call failed — keeping all relationships")
+        logger.warning("Verification LLM call failed — keeping all relationships")
         return result
 
     verifications = _parse_verification_response(raw, len(rels))
     if verifications is None:
-        print("      [Stage 3d] Could not parse verification response — keeping all relationships")
+        logger.warning("Could not parse verification response — keeping all relationships")
         return result
 
     # ── Apply verification results ────────────────────────────────────────────
@@ -185,13 +189,12 @@ def verify_relationships(
             removed += 1
 
     if removed:
-        print(
-            f"      [Stage 3d] ✓ Verification: removed {removed}/{len(rels)} "
-            f"unsupported relationships  "
-            f"({len(verified_rels)} kept)"
+        logger.info(
+            f"Verification: removed {removed}/{len(rels)} "
+            f"unsupported relationships ({len(verified_rels)} kept)"
         )
     else:
-        print(f"      [Stage 3d] ✓ All {len(rels)} relationships verified")
+        logger.info(f"All {len(rels)} relationships verified")
 
     return result.model_copy(update={"relationships": verified_rels})
 

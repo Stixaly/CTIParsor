@@ -5,6 +5,10 @@ from pathlib import Path
 import stix2
 from stix2validator import validate_string, print_results, ValidationOptions
 
+# Initialize logging
+from api.logging_config import get_logger
+logger = get_logger(__name__)
+
 
 def _schemas_installed() -> bool:
     """Return True if stix2-validator's bundled JSON schemas are present.
@@ -48,11 +52,11 @@ def validate_and_export(bundle: stix2.Bundle, output_path: str) -> bool:
         # write directly.  Install from source to restore full validation:
         #   pip install git+https://github.com/oasis-open/cti-stix-validator
         if not _SCHEMAS_WARNED:
-            print(
-                "[VALIDATION] stix2-validator schemas not found — "
-                "skipping JSON schema check (stix2 library validation still active).\n"
-                "            To restore full validation install from source:\n"
-                "            pip install git+https://github.com/oasis-open/cti-stix-validator"
+            logger.warning(
+                "stix2-validator schemas not found — "
+                "skipping JSON schema check (stix2 library validation still active). "
+                "To restore full validation install from source: "
+                "pip install git+https://github.com/oasis-open/cti-stix-validator"
             )
             _SCHEMAS_WARNED = True
         # Print the skip warning BEFORE writing the file so the output order is:
@@ -62,7 +66,7 @@ def validate_and_export(bundle: stix2.Bundle, output_path: str) -> bool:
         # Suppress after the first occurrence so repeated calls (e.g. finalize)
         # don't spam the log.
         if not _SKIP_WARNED:
-            print("[VALIDATION] ⚠ Validation skipped — schemas unavailable. Bundle written as-is.")
+            logger.warning("Validation skipped — schemas unavailable. Bundle written as-is.")
             _SKIP_WARNED = True
         _write_file(bundle_json, output_path)
         return True
@@ -71,7 +75,7 @@ def validate_and_export(bundle: stix2.Bundle, output_path: str) -> bool:
     results = validate_string(bundle_json, options=options)
 
     if not results.is_valid:
-        print("[VALIDATION] Erreurs STIX 2.1 détectées :")
+        logger.error("STIX 2.1 validation errors detected:")
         print_results(results)
         # Export with _invalid suffix for debugging — use Path to avoid
         # accidentally replacing ".json" in a directory component of the path.
@@ -88,7 +92,7 @@ def _write_file(content: str, output_path: str) -> None:
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
-    print(f"[OK] Fichier écrit : {output_path}")
+    logger.info(f"File written: {output_path}")
 
 
 def print_bundle_summary(bundle: stix2.Bundle) -> None:
@@ -98,8 +102,8 @@ def print_bundle_summary(bundle: stix2.Bundle) -> None:
         t = obj.get("type", "unknown")
         type_counts[t] = type_counts.get(t, 0) + 1
 
-    print("\n--- Résumé du bundle STIX ---")
+    logger.info("--- STIX Bundle Summary ---")
     for stix_type, count in sorted(type_counts.items()):
-        print(f"  {stix_type:<30} {count}")
-    print(f"  {'TOTAL':<30} {sum(type_counts.values())}")
-    print("-----------------------------\n")
+        logger.info(f"  {stix_type:<30} {count}")
+    logger.info(f"  {'TOTAL':<30} {sum(type_counts.values())}")
+    logger.info("-----------------------------")

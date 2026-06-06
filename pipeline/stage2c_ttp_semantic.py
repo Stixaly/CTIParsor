@@ -43,6 +43,10 @@ from pathlib import Path
 
 from models.schemas import RawEntity, EntityType
 
+# Initialize logging
+from api.logging_config import get_logger
+logger = get_logger(__name__)
+
 # ── Model configuration (ADR-004 P1-A) ────────────────────────────────────────
 # Override via TTP_EMBEDDING_MODEL= in .env
 # Changing the model requires rebuilding the embedding cache:
@@ -137,20 +141,20 @@ def _load_model():
     try:
         from sentence_transformers import SentenceTransformer
         model = SentenceTransformer(_TTP_EMBEDDING_MODEL)
-        print(f"[stage2c] Loaded embedding model: {_TTP_EMBEDDING_MODEL}")
+        logger.info(f"Loaded embedding model: {_TTP_EMBEDDING_MODEL}")
         return model
     except Exception as e:
         if _TTP_EMBEDDING_MODEL != _LEGACY_MODEL:
-            print(f"[stage2c] Primary model '{_TTP_EMBEDDING_MODEL}' unavailable: {e}")
-            print(f"[stage2c] Falling back to {_LEGACY_MODEL}")
+            logger.warning(f"Primary model '{_TTP_EMBEDDING_MODEL}' unavailable: {e}")
+            logger.info(f"Falling back to {_LEGACY_MODEL}")
             try:
                 from sentence_transformers import SentenceTransformer
                 model = SentenceTransformer(_LEGACY_MODEL)
                 return model
             except Exception as e2:
-                print(f"[stage2c] Fallback also failed: {e2}")
+                logger.error(f"Fallback also failed: {e2}")
         else:
-            print(f"[stage2c] Could not load SentenceTransformer: {e}")
+            logger.error(f"Could not load SentenceTransformer: {e}")
         return None
 
 
@@ -165,7 +169,7 @@ def _load_corpus() -> tuple | None:
     detect when the embedding model has changed and a rebuild is needed.
     """
     if not _EMB_PATH.exists() or not _META_PATH.exists():
-        print("[stage2c] Embedding cache not found — run: python scripts/build_indexes.py")
+        logger.warning("Embedding cache not found — run: python scripts/build_indexes.py")
         return None
 
     # ── Manifest check — detect stale cache after model change ──────────────
@@ -180,8 +184,8 @@ def _load_corpus() -> tuple | None:
         cache_model = _LEGACY_MODEL
 
     if cache_model != _TTP_EMBEDDING_MODEL:
-        print(
-            f"[stage2c] ⚠  Embedding cache was built with '{cache_model}' "
+        logger.warning(
+            f"Embedding cache was built with '{cache_model}' "
             f"but TTP_EMBEDDING_MODEL='{_TTP_EMBEDDING_MODEL}'. "
             f"Rebuild with: python scripts/build_indexes.py --only embeddings"
         )
@@ -193,7 +197,7 @@ def _load_corpus() -> tuple | None:
         meta = json.loads(_META_PATH.read_text(encoding="utf-8"))
         return embeddings, meta
     except Exception as e:
-        print(f"[stage2c] Could not load embedding cache: {e}")
+        logger.error(f"Could not load embedding cache: {e}")
         return None
 
 
@@ -286,7 +290,7 @@ def detect_ttps_semantic(text: str, top_k_per_sentence: int = 2) -> list[RawEnti
                     best[mid] = (score, sent)
 
     except Exception as e:
-        print(f"[stage2c] Semantic scoring error: {e}")
+        logger.error(f"Semantic scoring error: {e}")
         return []
 
     # Build an O(1) lookup from MITRE ID → meta entry once (avoids O(n²) scan)

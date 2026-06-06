@@ -26,13 +26,16 @@ from __future__ import annotations
 import re
 from pipeline.stage3_llm import LLMEnrichmentResult
 
+# Initialize logging
+from api.logging_config import get_logger
+logger = get_logger(__name__)
+
 try:
     from rapidfuzz import fuzz
     _RAPIDFUZZ_AVAILABLE = True
 except ImportError:
     _RAPIDFUZZ_AVAILABLE = False
-    print("[WARNING] rapidfuzz not installed — hallucination filter disabled. "
-          "Run: pip install rapidfuzz")
+    logger.warning("rapidfuzz not installed — hallucination filter disabled. Run: pip install rapidfuzz")
 
 
 # Similarity thresholds by name length.
@@ -149,7 +152,7 @@ def validate_llm_result(
         # whole document, so they are definitely real even if not in this chunk.
         if doc_context and _name_in_text(name, doc_context):
             return True
-        print(f"      [filter] Dropped hallucinated entity: '{name}'")
+        logger.debug(f"Dropped hallucinated entity: '{name}'")
         return False
 
     filtered_actors  = [a for a in result.threat_actors   if _keep(a)]
@@ -182,7 +185,7 @@ def validate_llm_result(
         search_corpus = chunk_text + " " + doc_context
         if keywords and any(_name_in_text(kw, search_corpus) for kw in keywords):
             return True
-        print(f"      [filter] Dropped campaign (no keyword match): '{name}'")
+        logger.debug(f"Dropped campaign (no keyword match): '{name}'")
         return False
 
     campaign = result.campaign_name

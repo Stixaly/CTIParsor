@@ -7,6 +7,11 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
+# Initialize logging before importing other modules
+from api.logging_config import setup_logging, get_logger, set_request_id, clear_request_id
+setup_logging()
+logger = get_logger(__name__)
+
 from api.db import init_db
 from api.routes import jobs, upload, entities, relationships, progress, policy
 
@@ -24,6 +29,22 @@ async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
         status_code=429,
         content={"detail": "Too many requests. Please try again later."},
     )
+
+# Request ID middleware for tracing
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    """Add a unique request ID to each request for tracing."""
+    # Generate or get request ID from headers
+    request_id = request.headers.get("x-request-id")
+    set_request_id(request_id)
+    logger.debug(f"Request started: {request.method} {request.url}")
+    
+    try:
+        response = await call_next(request)
+        return response
+    finally:
+        clear_request_id()
+        logger.debug(f"Request completed: {request.method} {request.url}")
 
 app.add_middleware(
     CORSMiddleware,
