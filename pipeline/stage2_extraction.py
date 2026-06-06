@@ -1,6 +1,9 @@
+import os
 import re
 from urllib.parse import urlparse
 from models.schemas import RawEntity, EntityType
+
+_SKIP_HEAVY = os.getenv("SKIP_HEAVY_MODELS") == "1"
 
 try:
     import re2 as _re2_module
@@ -68,7 +71,7 @@ except ImportError:
     _IOCEXTRACT_AVAILABLE = False
 
 _nlp = None
-if _spacy_module is not None:
+if _spacy_module is not None and not _SKIP_HEAVY:
     try:
         _nlp = _spacy_module.load("en_core_web_lg")
     except OSError:
@@ -519,3 +522,25 @@ def _deduplicate(entities: list[RawEntity]) -> list[RawEntity]:
             seen.add(key)
             unique.append(entity)
     return unique
+
+
+# ---------------------------------------------------------------------------
+# ExtractionStage class wrapper — consumed by pipeline.registry
+# ---------------------------------------------------------------------------
+
+from pipeline.base import BaseExtractionStage  # noqa: E402
+
+
+class RegexExtractionStage(BaseExtractionStage):
+    """Stage-2 regex extractor as an ExtractionStage implementation."""
+
+    name = "regex"
+
+    def __init__(self, config=None) -> None:  # config ignored; regex has no model
+        pass
+
+    def available(self) -> bool:
+        return True
+
+    def extract(self, text: str) -> list[RawEntity]:
+        return extract_entities(text)

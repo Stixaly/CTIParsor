@@ -24,12 +24,15 @@ Speed:
 """
 from __future__ import annotations
 
+import os
 import re
 import json
 import functools
 from pathlib import Path
 
 from models.schemas import RawEntity, EntityType
+
+_SKIP_HEAVY = os.getenv("SKIP_HEAVY_MODELS") == "1"
 
 # Initialize logging
 from api.logging_config import get_logger
@@ -74,6 +77,7 @@ def _load() -> list[dict]:
 def _build_automaton():
     """
     Build an Aho-Corasick automaton from the gazetteer name keys.
+    Returns None when SKIP_HEAVY_MODELS=1 or pyahocorasick is unavailable.
 
     Each automaton node stores a *list* of gazetteer entries that share the
     same lowercase match key (multiple aliases can map to the same string, e.g.
@@ -81,7 +85,7 @@ def _build_automaton():
 
     Returns None if pyahocorasick is not installed.
     """
-    if not _AHO_AVAILABLE:
+    if _SKIP_HEAVY or not _AHO_AVAILABLE:
         return None
 
     entries = _load()
@@ -265,3 +269,25 @@ def _match_regex(text: str) -> list[RawEntity]:
 def available() -> bool:
     """Return True if the gazetteer index file exists."""
     return _INDEX_PATH.exists()
+
+
+# ---------------------------------------------------------------------------
+# ExtractionStage class wrapper — consumed by pipeline.registry
+# ---------------------------------------------------------------------------
+
+from pipeline.base import BaseExtractionStage  # noqa: E402
+
+
+class GazetteerStage(BaseExtractionStage):
+    """Stage-2b MITRE gazetteer as an ExtractionStage implementation."""
+
+    name = "gazetteer"
+
+    def __init__(self, config=None) -> None:
+        pass
+
+    def available(self) -> bool:
+        return _INDEX_PATH.exists() and not _SKIP_HEAVY
+
+    def extract(self, text: str) -> list[RawEntity]:
+        return match_gazetteer(text)

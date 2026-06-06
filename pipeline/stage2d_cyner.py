@@ -29,21 +29,30 @@ from __future__ import annotations
 import os
 import functools
 import re
+from pathlib import Path
 from typing import Sequence
 
 from models.schemas import RawEntity, EntityType
+
+_SKIP_HEAVY = os.getenv("SKIP_HEAVY_MODELS") == "1"
 
 # Initialize logging
 from api.logging_config import get_logger
 logger = get_logger(__name__)
 
 # Model ID — configurable via CYNER_MODEL in .env.
-# The original aiforsec/cyner-xlm-roberta-base model was removed from HuggingFace.
+# The aiforsec/cyner-xlm-roberta-base model is gated / removed from HuggingFace Hub.
 # If the model cannot be loaded, Stage 2e (GLiNER) covers the same entity types
 # (malware families, threat actor groups) via zero-shot NER.
-# Set CYNER_ENABLED=false to skip this stage entirely.
-_MODEL_ID     = os.getenv("CYNER_MODEL",   "aiforsec/cyner-xlm-roberta-base")
+# Set CYNER_ENABLED=false in .env to skip this stage and silence all warnings.
+_MODEL_ID      = os.getenv("CYNER_MODEL",   "aiforsec/cyner-xlm-roberta-base")
 _CYNER_ENABLED = os.getenv("CYNER_ENABLED", "true").lower() not in ("false", "0", "no")
+
+# Sentinel file written to the project root the first time the model is detected
+# as inaccessible (private/removed).  Future subprocess invocations check for this
+# file and skip the HuggingFace Hub network request entirely, so the 401 warning
+# only ever appears once per server installation (not once per job).
+_SENTINEL_PATH = Path(__file__).parent.parent / ".cyner_model_unavailable"
 
 # Confidence thresholds
 _HIGH_THRESH   = 0.90
@@ -83,28 +92,71 @@ def _load_pipeline():
     """
     Load the CyNER HuggingFace NER pipeline (cached in memory after first call).
     Returns None if disabled, transformers is unavailable, or the model cannot be loaded.
+
+    Load strategy (avoids unnecessary network traffic):
+      1. Sentinel file present → return None immediately (no HTTP, no import)
+      2. local_files_only=True → load from ~/.cache/huggingface/ with no network
+      3. Network download → only if not already cached locally
+      4. On 401/403/not-found → write sentinel so all future subprocesses skip step 3
     """
-    if not _CYNER_ENABLED:
+    if _SKIP_HEAVY or not _CYNER_ENABLED:
         return None
+
+    # Fast path: a previous subprocess already determined the model is inaccessible.
+    if _SENTINEL_PATH.exists():
+        return None
+
     try:
         from transformers import pipeline, logging as hf_logging
-        hf_logging.set_verbosity_error()  # suppress download progress noise
+        hf_logging.set_verbosity_error()  # suppress download-progress noise
+    except ImportError:
+        return None
+
+    # ── Step 1: try local HuggingFace cache (zero network I/O) ──────────────
+    try:
         ner = pipeline(
             "ner",
             model=_MODEL_ID,
-            aggregation_strategy="simple",   # merges B-/I- tokens → full spans
-            device=-1,                        # CPU; set to 0 for GPU
+            aggregation_strategy="simple",  # merges B-/I- tokens → full entity spans
+            device=-1,                      # CPU; set device=0 to use GPU
+            local_files_only=True,
         )
-        logger.info(f"CyNER model loaded: {_MODEL_ID}")
+        logger.info(f"CyNER model loaded from local cache: {_MODEL_ID}")
+        return ner
+    except (OSError, EnvironmentError, ValueError):
+        pass  # Model not in local cache — try downloading below
+
+    # ── Step 2: attempt a one-time download from HuggingFace Hub ────────────
+    logger.info(f"CyNER model '{_MODEL_ID}' not in local cache — attempting download…")
+    try:
+        ner = pipeline(
+            "ner",
+            model=_MODEL_ID,
+            aggregation_strategy="simple",
+            device=-1,
+        )
+        logger.info(f"CyNER model downloaded and loaded: {_MODEL_ID}")
         return ner
     except Exception as e:
         msg = str(e)
-        if "not a valid model identifier" in msg or "not a local folder" in msg:
+        _ACCESS_ERRORS = ("401", "403", "unauthorized", "Repository Not Found",
+                          "not a valid model identifier", "not a local folder",
+                          "gated repo", "access to model")
+        if any(x.lower() in msg.lower() for x in _ACCESS_ERRORS):
             logger.warning(
-                f"CyNER model '{_MODEL_ID}' is not available on HuggingFace.\n"
+                f"CyNER model '{_MODEL_ID}' is not accessible on HuggingFace Hub "
+                f"(private, gated, or removed). "
                 f"Stage 2e (GLiNER) covers the same entity types as a fallback.\n"
-                f"To silence this message: set CYNER_ENABLED=false in .env"
+                f"To disable CyNER and silence this warning permanently, add to your .env:\n"
+                f"  CYNER_ENABLED=false"
             )
+            # Write a sentinel so every subsequent subprocess skips the network check.
+            # One warning total per server installation, not one per job.
+            try:
+                _SENTINEL_PATH.touch()
+                logger.debug(f"CyNER unavailability sentinel written: {_SENTINEL_PATH}")
+            except OSError:
+                pass
         else:
             logger.error(f"Could not load CyNER model '{_MODEL_ID}': {e}")
         return None
@@ -114,14 +166,21 @@ def _load_pipeline():
 
 def cyner_available() -> bool:
     """
-    Return True if the transformers library is installed.
-    The model itself is downloaded on first use — this does NOT attempt a download.
+    Return True only if the CyNER pipeline is actually loaded and ready.
+
+    This calls _load_pipeline() (which is lru_cached) so the model is loaded at
+    most once per subprocess.  Returning False here means worker.py skips the
+    cyner_entities branch entirely — no inference attempt, no misleading empty list.
     """
+    if _SKIP_HEAVY or not _CYNER_ENABLED:
+        return False
+    if _SENTINEL_PATH.exists():
+        return False
     try:
         import transformers  # noqa: F401
-        return True
     except ImportError:
         return False
+    return _load_pipeline() is not None
 
 
 def extract_cyner_entities(text: str) -> list[RawEntity]:
@@ -183,6 +242,28 @@ def extract_cyner_entities(text: str) -> list[RawEntity]:
         ))
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# ExtractionStage class wrapper — consumed by pipeline.registry
+# ---------------------------------------------------------------------------
+
+from pipeline.base import BaseExtractionStage  # noqa: E402
+
+
+class CyNERStage(BaseExtractionStage):
+    """Stage-2d CyNER cybersecurity NER as an ExtractionStage implementation."""
+
+    name = "cyner"
+
+    def __init__(self, config=None) -> None:
+        pass
+
+    def available(self) -> bool:
+        return cyner_available()
+
+    def extract(self, text: str) -> list[RawEntity]:
+        return extract_cyner_entities(text)
 
 
 def _merge_cyner_into(

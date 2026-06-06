@@ -1,0 +1,18 @@
+# Optional dependencies that require system-level libraries or large model downloads.
+# Install these separately AFTER the relevant system package is available.
+#
+# re2 (ReDoS protection — linear-time regex engine):
+#   Linux:  apt install libre2-dev
+#   macOS:  brew install re2
+#   Then:   pip install re2
+#
+# spacy (legacy NER fallback used by Stage 2):
+#   After installing spacy, download the model:
+#   python -m spacy download en_core_web_sm   (fast, lower accuracy)
+#   python -m spacy download en_core_web_lg   (recommended)
+#
+# Both packages are imported with try/except in the pipeline — the pipeline
+# runs correctly without them (regex + gazetteer + CyNER + GLiNER cover the gaps).
+
+re2>=0.2.20
+spacy>=3.7.0,<4

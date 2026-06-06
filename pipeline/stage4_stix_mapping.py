@@ -1,5 +1,5 @@
+import uuid
 import stix2
-import hashlib
 from datetime import datetime, timezone
 from models.schemas import RawEntity, EntityType
 from pipeline.stage3_llm import LLMEnrichmentResult
@@ -8,32 +8,21 @@ from pipeline.stage3_llm import LLMEnrichmentResult
 from api.logging_config import get_logger
 logger = get_logger(__name__)
 
+# STIX 2.1 deterministic ID namespace (SCO/SDO identity namespace per the spec)
+_STIX_NAMESPACE = uuid.UUID("00abedb4-aa42-466c-9c01-fed23315a9b7")
+
 
 def _make_deterministic_id(value: str, entity_type: str, prefix: str = "") -> str:
     """
-    Generate a deterministic STIX ID based on value and type.
-    
-    This ensures the same entity always gets the same STIX ID across different
-    runs and reports, preventing duplicate objects.
-    
-    Args:
-        value: The entity value (e.g., "APT29", "185.220.101.45")
-        entity_type: The STIX entity type (e.g., "threat-actor", "ipv4-addr")
-        prefix: Optional prefix for namespacing
-        
-    Returns:
-        A deterministic STIX ID string
+    Generate a deterministic STIX 2.1-compliant ID for an entity.
+
+    Uses UUID v5 (namespace + name) so the same entity always gets the same
+    STIX ID across runs and reports, preventing duplicate objects in bundles.
+    STIX 2.1 requires IDs to be in <type>--<UUIDv4-or-v5> format.
     """
-    # Normalize the value for consistent hashing
-    normalized_value = value.lower().strip()
-    normalized_type = entity_type.lower().strip()
-    
-    # Create a hash-based identifier
-    hash_input = f"{prefix}:{normalized_type}:{normalized_value}"
-    hash_digest = hashlib.sha256(hash_input.encode('utf-8')).hexdigest()[:32]
-    
-    # Return in STIX ID format
-    return f"{entity_type}--{hash_digest}"
+    normalized = f"{prefix}:{entity_type.lower().strip()}:{value.lower().strip()}"
+    det_uuid = uuid.uuid5(_STIX_NAMESPACE, normalized)
+    return f"{entity_type}--{det_uuid}"
 
 # ---------------------------------------------------------------------------
 # All valid STIX 2.1 relationship types (Section 4 + Appendix B of the spec).
@@ -236,16 +225,30 @@ def build_stix_bundle(
         external_refs = []
         if ttp.mitre_id:
             mid = ttp.mitre_id
-            # Tactic IDs (TA0xxx) use /tactics/, technique IDs (Txxxx) use /techniques/
-            if mid.upper().startswith("TA"):
-                att_url = f"https://attack.mitre.org/tactics/{mid}/"
+            # Route by ID family:
+            #   CAPEC-NNN  → Common Attack Pattern Enumeration and Classification
+            #   TA0NNN     → MITRE ATT&CK tactic
+            #   T1NNN[.NNN] → MITRE ATT&CK technique / sub-technique
+            #
+            # The stix2validator enforces that external references whose external_id
+            # matches CAPEC-N+ format MUST have source_name="capec" (not "mitre-attack").
+            # Routing CAPEC IDs to source_name="mitre-attack" is the STIX 2.1 spec
+            # violation that marks the bundle Invalid with error {104}.
+            if mid.upper().startswith("CAPEC-"):
+                capec_num = mid.split("-", 1)[1]
+                ref_source = "capec"
+                ref_url = f"https://capec.mitre.org/data/definitions/{capec_num}.html"
+            elif mid.upper().startswith("TA"):
+                ref_source = "mitre-attack"
+                ref_url = f"https://attack.mitre.org/tactics/{mid}/"
             else:
-                att_url = f"https://attack.mitre.org/techniques/{mid.replace('.', '/')}/"
+                ref_source = "mitre-attack"
+                ref_url = f"https://attack.mitre.org/techniques/{mid.replace('.', '/')}/"
             external_refs.append(
                 stix2.ExternalReference(
-                    source_name="mitre-attack",
+                    source_name=ref_source,
                     external_id=mid,
-                    url=att_url,
+                    url=ref_url,
                 )
             )
         # Use MITRE ID for deterministic ID if available, otherwise use name
@@ -275,15 +278,23 @@ def build_stix_bundle(
             ext_refs = []
             if entity.mitre_id:
                 mid = entity.mitre_id
-                # Tactic IDs (TA0xxx) live under /tactics/, techniques under /techniques/
-                if mid.upper().startswith("TA"):
-                    url = f"https://attack.mitre.org/tactics/{mid}/"
+                # Same CAPEC / tactic / technique routing as the LLM TTP loop above.
+                # CAPEC IDs require source_name="capec"; mixing them with "mitre-attack"
+                # triggers stix2validator error {104} and marks the bundle Invalid.
+                if mid.upper().startswith("CAPEC-"):
+                    capec_num = mid.split("-", 1)[1]
+                    ref_source = "capec"
+                    ref_url = f"https://capec.mitre.org/data/definitions/{capec_num}.html"
+                elif mid.upper().startswith("TA"):
+                    ref_source = "mitre-attack"
+                    ref_url = f"https://attack.mitre.org/tactics/{mid}/"
                 else:
-                    url = f"https://attack.mitre.org/techniques/{mid.replace('.', '/')}/"
+                    ref_source = "mitre-attack"
+                    ref_url = f"https://attack.mitre.org/techniques/{mid.replace('.', '/')}/"
                 ext_refs.append(stix2.ExternalReference(
-                    source_name="mitre-attack",
+                    source_name=ref_source,
                     external_id=mid,
-                    url=url,
+                    url=ref_url,
                 ))
             obj = stix2.AttackPattern(name=entity.value, external_references=ext_refs)
             stix_objects.append(obj)

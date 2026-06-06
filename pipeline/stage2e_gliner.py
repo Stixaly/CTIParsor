@@ -65,6 +65,7 @@ warnings.filterwarnings(
 # GLiNER medium on multi-domain corpora.  To revert to classic GLiNER:
 #   GLINER_MODEL=urchade/gliner_mediumv2.1
 # See .env.example for the full model option list.
+_SKIP_HEAVY        = os.getenv("SKIP_HEAVY_MODELS") == "1"
 _GLINER_MODEL_ID   = os.getenv("GLINER_MODEL",     "numind/NuNER-Zero-span")
 _GLINER_THRESHOLD  = float(os.getenv("GLINER_THRESHOLD", "0.40"))
 _GLINER_ENABLED    = os.getenv("GLINER_ENABLED", "true").lower() not in ("false", "0", "no")
@@ -130,7 +131,7 @@ def _load_gliner():
     Load the GLiNER model (cached in memory after first call).
     Returns None if the gliner library is not installed or the model fails to load.
     """
-    if not _GLINER_ENABLED:
+    if _SKIP_HEAVY or not _GLINER_ENABLED:
         return None
     try:
         from gliner import GLiNER
@@ -148,8 +149,8 @@ def _load_gliner():
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def gliner_available() -> bool:
-    """Return True if the gliner library is installed and GLINER_ENABLED=true."""
-    if not _GLINER_ENABLED:
+    """Return True if the gliner library is installed, GLINER_ENABLED=true, and SKIP_HEAVY_MODELS is not set."""
+    if _SKIP_HEAVY or not _GLINER_ENABLED:
         return False
     try:
         import gliner  # noqa: F401
@@ -284,6 +285,28 @@ def _recover_casing(value_lower: str, context: str) -> str:
     if m:
         return m.group()
     return value_lower
+
+
+# ---------------------------------------------------------------------------
+# ExtractionStage class wrapper — consumed by pipeline.registry
+# ---------------------------------------------------------------------------
+
+from pipeline.base import BaseExtractionStage  # noqa: E402
+
+
+class GLiNERStage(BaseExtractionStage):
+    """Stage-2e GLiNER zero-shot NER as an ExtractionStage implementation."""
+
+    name = "gliner"
+
+    def __init__(self, config=None) -> None:
+        pass
+
+    def available(self) -> bool:
+        return gliner_available()
+
+    def extract(self, text: str) -> list[RawEntity]:
+        return extract_gliner_entities(text)
 
 
 def _merge_gliner_into(

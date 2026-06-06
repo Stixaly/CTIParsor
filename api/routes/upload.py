@@ -61,34 +61,31 @@ async def upload_file(
     # Read first chunk to validate MIME type
     first_chunk = await file.read(1024 * 1024)  # Read 1MB for MIME check
     
-    # Validate MIME type using python-magic
+    # Validate MIME type using python-magic with filetype as fallback.
+    # HTTPException is re-raised immediately so validation rejections always
+    # surface correctly.  Only actual library errors fall through to the fallback.
     try:
         mime_type = magic.from_buffer(first_chunk, mime=True)
         allowed_mimes = SUPPORTED_MIME.get(suffix, [])
         if allowed_mimes and mime_type not in allowed_mimes:
             raise HTTPException(
-                400,
+                415,
                 f"MIME type '{mime_type}' does not match expected type for '{suffix}'. "
                 f"Expected: {', '.join(allowed_mimes)}"
             )
-    except Exception as e:
-        # Fallback to filetype library
-        try:
-            kind = filetype.guess(first_chunk)
-            if kind is None:
-                raise HTTPException(
-                    400,
-                    f"Could not determine file type. Please ensure the file is valid."
-                )
-            if suffix == ".pdf" and kind.mime != "application/pdf":
-                raise HTTPException(
-                    400,
-                    f"File appears to be '{kind.mime}' but extension is '.pdf'"
-                )
-        except Exception:
+    except HTTPException:
+        raise  # validation rejection — propagate as-is
+    except Exception:
+        # python-magic unavailable or raised an internal error — fall back to filetype.
+        kind = filetype.guess(first_chunk)
+        if kind is None:
+            raise HTTPException(400, "Could not determine file type. Please ensure the file is valid.")
+        allowed_mimes = SUPPORTED_MIME.get(suffix, [])
+        if allowed_mimes and kind.mime not in allowed_mimes:
             raise HTTPException(
-                400,
-                f"File type validation failed: {str(e)}"
+                415,
+                f"File content appears to be '{kind.mime}' but extension is '{suffix}'. "
+                f"Expected: {', '.join(allowed_mimes)}"
             )
 
     # Check total size after reading first chunk

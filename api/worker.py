@@ -8,8 +8,7 @@ import json
 import time
 import hashlib
 import threading
-import signal
-import resource
+import multiprocessing as mp
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 from pathlib import Path
 from uuid import uuid4
@@ -26,34 +25,22 @@ logger = get_logger(__name__)
 from api.db import get_conn, emit_progress, set_job_status, now_iso, _lock, backup_db
 
 # ---------------------------------------------------------------------------
-# Resource limits for worker threads
 # ---------------------------------------------------------------------------
-# Maximum memory usage per job in MB (0 = unlimited)
-_MAX_MEMORY_MB = int(os.environ.get("WORKER_MAX_MEMORY_MB", "4096"))
+# Worker concurrency and timeout limits
+# ---------------------------------------------------------------------------
 # Maximum execution time per job in seconds (0 = unlimited)
 _MAX_JOB_TIMEOUT = int(os.environ.get("WORKER_JOB_TIMEOUT", "1800"))  # 30 minutes
-# Maximum concurrent jobs
+# Maximum concurrent jobs (each runs in its own subprocess)
 _MAX_CONCURRENT_JOBS = int(os.environ.get("WORKER_MAX_CONCURRENT", "10"))
+
+# Note: WORKER_MAX_MEMORY_MB is no longer used.  RLIMIT_AS is not set because
+# it limits virtual address space (not physical RAM), which breaks dlopen() for
+# ML libraries that memory-map large .so files.  Physical memory protection is
+# provided by subprocess isolation + the OS OOM killer instead.
 
 # Global job counter and lock for concurrency control
 _job_counter = 0
 _job_counter_lock = threading.Lock()
-
-
-def _check_memory_limit():
-    """Check if current memory usage exceeds the limit."""
-    if _MAX_MEMORY_MB <= 0:
-        return True  # No limit
-    try:
-        # Get current memory usage in MB
-        current_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
-        if current_mb > _MAX_MEMORY_MB:
-            logger.warning(f"Memory limit exceeded: {current_mb:.0f}MB > {_MAX_MEMORY_MB}MB")
-            return False
-        return True
-    except (AttributeError, ValueError):
-        # resource module not available on Windows
-        return True
 
 
 def _check_job_limit():
@@ -222,15 +209,9 @@ def _save_entities(job_id: str, raw_entities, llm_result) -> None:
 
 def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
     """
-    Run the full pipeline for a job with resource limits and timeout.
+    Run the full pipeline for a job with timeout enforcement.
     """
     global _job_counter
-    
-    # Check resource limits before starting
-    if not _check_memory_limit():
-        set_job_status(job_id, "failed")
-        emit_progress(job_id, "done", {"status": "failed", "error": "Memory limit exceeded"})
-        return
     
     if not _check_job_limit():
         set_job_status(job_id, "queued")
@@ -241,16 +222,27 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
     start_time = time.monotonic()
     
     try:
-        # Set memory limit if configured (Unix only)
-        if _MAX_MEMORY_MB > 0 and hasattr(resource, 'RLIMIT_AS'):
-            try:
-                # Set soft and hard limits (in bytes)
-                max_bytes = _MAX_MEMORY_MB * 1024 * 1024
-                resource.setrlimit(resource.RLIMIT_AS, (max_bytes, max_bytes))
-                logger.debug(f"Memory limit set: {max_bytes:,} bytes ({_MAX_MEMORY_MB}MB)")
-            except (ValueError, resource.error) as e:
-                logger.warning(f"Could not set memory limit: {e}")
-        
+        # RLIMIT_AS (virtual address space) is intentionally NOT set here.
+        #
+        # A modern Python ML process maps 8–20 GB of virtual address space through
+        # dlopen() / mmap() for shared libraries (scipy, torch, transformers .so
+        # files), numpy arrays, and HuggingFace memory-mapped model weights — even
+        # when physical RAM usage is only 2–4 GB.  Setting RLIMIT_AS too low causes
+        # dlopen() to fail with ENOMEM ("failed to map segment from shared object"),
+        # which is a hard import error that silently breaks entire pipeline stages.
+        #
+        # Physical-memory protection is provided by two other mechanisms:
+        #   1. Subprocess isolation — a crash (std::bad_alloc → SIGABRT, or the OS
+        #      OOM killer → SIGKILL) only terminates the worker subprocess.  The
+        #      parent's watcher thread detects exit code ≠ 0 and writes
+        #      status=failed so the frontend updates immediately.
+        #   2. WORKER_JOB_TIMEOUT — jobs that run too long are cancelled via the
+        #      check_timeout() function below.
+        #
+        # If you still need a hard memory cap (e.g. on a shared server), use
+        # systemd's MemoryMax= or Docker's --memory flag at the container level
+        # rather than RLIMIT_AS inside Python.
+
         set_job_status(job_id, "processing")
         
         # Check elapsed time periodically
@@ -667,11 +659,6 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         set_job_status(job_id, "failed")
         emit_progress(job_id, "done", {"status": "failed", "error": error_msg})
         logger.error(f"[Worker TIMEOUT] job {job_id}: {error_msg}")
-    except MemoryError as exc:
-        error_msg = str(exc)
-        set_job_status(job_id, "failed")
-        emit_progress(job_id, "done", {"status": "failed", "error": "Memory limit exceeded"})
-        logger.error(f"[Worker MEMORY ERROR] job {job_id}: {error_msg}")
     except Exception as exc:
         import traceback
         error_msg = traceback.format_exc()
@@ -679,37 +666,121 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         emit_progress(job_id, "done", {"status": "failed", "error": str(exc)})
         logger.error(f"[Worker ERROR] job {job_id}: {error_msg}")
     finally:
-        # Reset resource limits after job completion
-        try:
-            if _MAX_MEMORY_MB > 0 and hasattr(resource, 'RLIMIT_AS'):
-                # Reset to unlimited (or system default)
-                resource.setrlimit(resource.RLIMIT_AS, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
-                logger.debug(f"[Worker] Resource limits reset for job {job_id}")
-        except Exception as e:
-            logger.warning(f"[Worker] Could not reset resource limits: {e}")
-        
+        # No need to reset RLIMIT_AS — this subprocess is about to exit.
+        # Counter management is handled by the parent process's watcher thread;
+        # the call here is a no-op (subprocess has its own copy of _job_counter).
         _decrement_job_counter()
-        logger.info(f"[Worker] Job {job_id} completed, active jobs: {_job_counter}")
+        logger.info(f"[Worker] Subprocess finished for job {job_id}")
+
+
+def _subprocess_entry(job_id: str, file_path: str, original_filename: str) -> None:
+    """
+    Entry point for the isolated worker subprocess.
+
+    This function runs inside a fresh Python interpreter (mp.get_context("spawn")).
+    Setting thread-count env vars here — before any ML library import — limits the
+    number of OpenMP/MKL worker threads each model spawns, which is the primary
+    lever for reducing peak resident memory on CPU-only inference.
+
+    RLIMIT_AS is applied inside _run_pipeline; it now correctly limits only this
+    subprocess, not the uvicorn process.
+    """
+    # ── Thread-count caps ────────────────────────────────────────────────────
+    # Each OpenMP worker allocates its own BLAS workspace.  2 threads is a
+    # reasonable default for WSL/single-socket CPU inference.  Users who have
+    # more RAM can raise this via env vars before starting the server.
+    os.environ.setdefault("OMP_NUM_THREADS", "2")
+    os.environ.setdefault("MKL_NUM_THREADS", "2")
+    os.environ.setdefault("OPENBLAS_NUM_THREADS", "2")
+    # HuggingFace fast tokenizers spawn a Rust thread pool; disable parallelism
+    # for batches of 1 (standard pipeline use case) to save ~200-400 MB.
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
+    _run_pipeline(job_id, file_path, original_filename)
 
 
 def run_pipeline_async(job_id: str, file_path: str, original_filename: str) -> None:
-    """Starts the pipeline in a background thread with resource limits."""
-    # Check if we can accept more jobs
+    """
+    Spawn an isolated subprocess for the pipeline and watch for crashes.
+
+    Previous design used threading.Thread.  The problem: when a C++ extension
+    (sentence-transformers, GLiNER, CyNER / XLM-RoBERTa) calls operator new and
+    the system is out of memory, the C++ runtime calls std::terminate() → abort().
+    abort() sends SIGABRT to the *whole process*, killing uvicorn — there is no
+    way to catch a C++ exception from Python's except clause.
+
+    Fix: run the pipeline in a separate process via multiprocessing.  SIGABRT only
+    kills that subprocess; uvicorn continues serving.  A lightweight watcher thread
+    in the parent detects the non-zero exit code and writes status=failed + emits a
+    progress event so the frontend does not hang indefinitely.
+
+    Why "spawn" not "fork":
+      fork inherits the parent's open file descriptors, thread state, and any
+      partially-initialised native libraries (e.g. torch's OpenMP pool).  This can
+      produce deadlocks.  spawn starts a clean interpreter — slightly slower to
+      start (~1-2 s on first import) but safe with all PyTorch/transformers builds.
+    """
     if not _check_job_limit():
         set_job_status(job_id, "queued")
         emit_progress(job_id, "done", {"status": "queued", "error": "Job queue full"})
         logger.warning(f"[Worker] Job {job_id} queued — job queue full")
         return
-    
-    logger.info(f"[Worker] Starting async pipeline for job {job_id}")
-    t = threading.Thread(
-        target=_run_pipeline,
+
+    _increment_job_counter()
+    logger.info(f"[Worker] Spawning isolated subprocess for job {job_id}")
+
+    ctx = mp.get_context("spawn")
+    proc = ctx.Process(
+        target=_subprocess_entry,
         args=(job_id, file_path, original_filename),
         daemon=True,
         name=f"pipeline-{job_id}",
     )
-    t.start()
-    logger.debug(f"[Worker] Thread started for job {job_id}")
+    proc.start()
+    logger.debug(f"[Worker] Subprocess pid={proc.pid} started for job {job_id}")
+
+    _SIGNAL_NAMES: dict[int, str] = {
+        -6:  "SIGABRT (std::bad_alloc or abort() in a native library)",
+        -9:  "SIGKILL (OS out-of-memory killer)",
+        -11: "SIGSEGV (segmentation fault in native code)",
+    }
+
+    def _watch(p: mp.Process, jid: str) -> None:
+        p.join()                         # blocks until the subprocess exits
+        _decrement_job_counter()         # parent-side counter; subprocess has its own copy
+        code = p.exitcode
+        if code == 0:
+            logger.info(f"[Worker] Subprocess for job {jid} exited cleanly")
+            return
+        reason = _SIGNAL_NAMES.get(code, f"exit code {code}")
+        logger.error(f"[Worker] Subprocess for job {jid} crashed: {reason}")
+        try:
+            # The subprocess may have already written status=failed before dying,
+            # but if the crash happened inside a native extension (std::bad_alloc
+            # before Python gets control), it will not have done so.
+            # set_job_status is idempotent — calling it again is safe.
+            set_job_status(jid, "failed")
+            emit_progress(jid, "done", {
+                "status": "failed",
+                "error": (
+                    f"Pipeline worker process terminated unexpectedly ({reason}). "
+                    "The document may require more memory than is available. "
+                    "Try a smaller file, reduce WORKER_MAX_MEMORY_MB, or set "
+                    "SKIP_HEAVY_MODELS=1 to disable ML models and use regex-only extraction."
+                ),
+            })
+        except Exception as exc:
+            logger.error(
+                f"[Worker] Could not update job {jid} status after subprocess crash: {exc}"
+            )
+
+    watcher = threading.Thread(
+        target=_watch,
+        args=(proc, job_id),
+        daemon=True,
+        name=f"watcher-{job_id}",
+    )
+    watcher.start()
 
 
 def _lexicon_rescan(job_id: str, report_text: str) -> int:

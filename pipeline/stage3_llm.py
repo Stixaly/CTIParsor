@@ -529,6 +529,110 @@ def _provider_ready() -> bool:
     return False
 
 
+# --- LLM output normalisation ---
+
+def _normalize_llm_json(data: dict) -> dict:
+    """
+    Coerce common LLM schema-deviation patterns into the field names and types
+    that LLMEnrichmentResult expects.
+
+    Claude sometimes returns more descriptive objects than the strict schema:
+
+      threat_actors / malware_families / tools
+        Expected: list[str]
+        Seen:     list[{"name": "X", "category": "...", "aliases": []}]
+        Fix:      extract the "name" (or "value"/"label") key as a bare string.
+
+      ttps[*]
+        Expected: {"technique_name": "...", "mitre_id": "T1234"}
+        Seen:     {"name": "...", "id": "T1234"}   OR  {"technique": "...", "id": ...}
+        Fix:      rename "name"→"technique_name" and "id"→"mitre_id".
+
+      relationships[*]
+        Expected: {"source_value": "X", "relationship_type": "uses", "target_value": "Y"}
+        Seen:     {"source": "X", "relationship": "uses", "target": "Y"}
+                  OR {"source": "X", "type": "uses", "target": "Y"}
+        Fix:      rename "source"→"source_value", "relationship"/"type"→"relationship_type",
+                  "target"→"target_value".
+
+    Entries that are still malformed after normalisation are silently dropped
+    (Pydantic will catch them and the caller logs the ValidationError).
+    """
+    out = dict(data)
+
+    # ── String-list fields — extract name from dicts ──────────────────────────
+    for field in ("threat_actors", "malware_families", "tools",
+                  "targeted_sectors", "targeted_countries", "course_of_action"):
+        raw = out.get(field)
+        if not isinstance(raw, list):
+            continue
+        fixed: list[str] = []
+        for item in raw:
+            if isinstance(item, str):
+                if item.strip():
+                    fixed.append(item.strip())
+            elif isinstance(item, dict):
+                # Try common name-carrying keys in priority order
+                for key in ("name", "value", "label", "actor", "family", "title"):
+                    v = item.get(key)
+                    if isinstance(v, str) and v.strip():
+                        fixed.append(v.strip())
+                        break
+        out[field] = fixed
+
+    # ── TTPs — rename "name"→"technique_name", "id"→"mitre_id" ───────────────
+    raw_ttps = out.get("ttps")
+    if isinstance(raw_ttps, list):
+        norm_ttps: list[dict] = []
+        for item in raw_ttps:
+            if not isinstance(item, dict):
+                continue
+            t = dict(item)
+            if "technique_name" not in t:
+                for k in ("name", "technique", "label", "title"):
+                    if isinstance(t.get(k), str) and t[k].strip():
+                        t["technique_name"] = t.pop(k)
+                        break
+            if "mitre_id" not in t:
+                for k in ("id", "mitre", "attack_id", "technique_id", "mitre_technique_id"):
+                    if isinstance(t.get(k), str) and t[k].strip():
+                        t["mitre_id"] = t.pop(k)
+                        break
+            if "technique_name" in t:
+                norm_ttps.append(t)
+        out["ttps"] = norm_ttps
+
+    # ── Relationships — rename source/target/relationship keys ────────────────
+    raw_rels = out.get("relationships")
+    if isinstance(raw_rels, list):
+        norm_rels: list[dict] = []
+        for item in raw_rels:
+            if not isinstance(item, dict):
+                continue
+            r = dict(item)
+            if "source_value" not in r:
+                for k in ("source", "from", "subject", "source_entity", "actor"):
+                    if isinstance(r.get(k), str) and r[k].strip():
+                        r["source_value"] = r.pop(k)
+                        break
+            if "target_value" not in r:
+                for k in ("target", "to", "object", "target_entity", "victim"):
+                    if isinstance(r.get(k), str) and r[k].strip():
+                        r["target_value"] = r.pop(k)
+                        break
+            if "relationship_type" not in r:
+                for k in ("relationship", "type", "rel_type", "relation", "rel"):
+                    if isinstance(r.get(k), str) and r[k].strip():
+                        r["relationship_type"] = r.pop(k)
+                        break
+            # Only keep entries that have all three required fields
+            if all(r.get(f) for f in ("source_value", "relationship_type", "target_value")):
+                norm_rels.append(r)
+        out["relationships"] = norm_rels
+
+    return out
+
+
 # --- Public API ---
 
 def enrich_chunk(
@@ -658,10 +762,17 @@ def enrich_chunk(
         logger.warning(f"LLM returned no valid JSON (raw preview: {raw_text[:120]!r})")
         return LLMEnrichmentResult()
 
+    # Normalise field names/types before Pydantic validation.
+    # Claude sometimes returns richer objects than the schema expects —
+    # e.g. {"name": "GREYVIBE", "aliases": []} where a plain string is required,
+    # or {"id": "T1587.003", "name": "..."} where "mitre_id"/"technique_name" are
+    # expected.  Discarding the whole result on a field-name mismatch would lose
+    # all real intelligence from the chunk.  Normalise instead, then validate.
+    normalized_json = _normalize_llm_json(parsed_json)
     try:
-        result = LLMEnrichmentResult.model_validate(parsed_json)
+        result = LLMEnrichmentResult.model_validate(normalized_json)
     except ValidationError as e:
-        logger.warning(f"JSON schema validation failed: {e}")
+        logger.warning(f"JSON schema validation failed after normalization: {e}")
         return LLMEnrichmentResult()
 
     # Stage 3b — remove hallucinated entity names not present in the source text.
