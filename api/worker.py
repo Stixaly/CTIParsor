@@ -8,7 +8,9 @@ import json
 import time
 import hashlib
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import signal
+import resource
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 from pathlib import Path
 from uuid import uuid4
 
@@ -17,7 +19,62 @@ _ROOT = Path(__file__).parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from api.db import get_conn, emit_progress, set_job_status, now_iso, _lock
+from api.db import get_conn, emit_progress, set_job_status, now_iso, _lock, backup_db
+
+# ---------------------------------------------------------------------------
+# Resource limits for worker threads
+# ---------------------------------------------------------------------------
+# Maximum memory usage per job in MB (0 = unlimited)
+_MAX_MEMORY_MB = int(os.environ.get("WORKER_MAX_MEMORY_MB", "4096"))
+# Maximum execution time per job in seconds (0 = unlimited)
+_MAX_JOB_TIMEOUT = int(os.environ.get("WORKER_JOB_TIMEOUT", "1800"))  # 30 minutes
+# Maximum concurrent jobs
+_MAX_CONCURRENT_JOBS = int(os.environ.get("WORKER_MAX_CONCURRENT", "10"))
+
+# Global job counter and lock for concurrency control
+_job_counter = 0
+_job_counter_lock = threading.Lock()
+
+
+def _check_memory_limit():
+    """Check if current memory usage exceeds the limit."""
+    if _MAX_MEMORY_MB <= 0:
+        return True  # No limit
+    try:
+        # Get current memory usage in MB
+        current_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
+        if current_mb > _MAX_MEMORY_MB:
+            print(f"[WORKER] Memory limit exceeded: {current_mb:.0f}MB > {_MAX_MEMORY_MB}MB")
+            return False
+        return True
+    except (AttributeError, ValueError):
+        # resource module not available on Windows
+        return True
+
+
+def _check_job_limit():
+    """Check if we've reached the maximum concurrent jobs."""
+    if _MAX_CONCURRENT_JOBS <= 0:
+        return True  # No limit
+    with _job_counter_lock:
+        if _job_counter >= _MAX_CONCURRENT_JOBS:
+            print(f"[WORKER] Concurrent job limit reached: {_job_counter} >= {_MAX_CONCURRENT_JOBS}")
+            return False
+        return True
+
+
+def _increment_job_counter():
+    """Increment the job counter."""
+    with _job_counter_lock:
+        global _job_counter
+        _job_counter += 1
+
+
+def _decrement_job_counter():
+    """Decrement the job counter."""
+    with _job_counter_lock:
+        global _job_counter
+        _job_counter = max(0, _job_counter - 1)
 
 
 def _sha256_file(path: str | Path) -> str | None:
@@ -160,13 +217,51 @@ def _save_entities(job_id: str, raw_entities, llm_result) -> None:
 
 
 def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
+    """
+    Run the full pipeline for a job with resource limits and timeout.
+    """
+    global _job_counter
+    
+    # Check resource limits before starting
+    if not _check_memory_limit():
+        set_job_status(job_id, "failed")
+        emit_progress(job_id, "done", {"status": "failed", "error": "Memory limit exceeded"})
+        return
+    
+    if not _check_job_limit():
+        set_job_status(job_id, "queued")
+        emit_progress(job_id, "done", {"status": "queued", "error": "Job queue full"})
+        return
+    
+    _increment_job_counter()
+    start_time = time.monotonic()
+    
     try:
+        # Set memory limit if configured (Unix only)
+        if _MAX_MEMORY_MB > 0 and hasattr(resource, 'RLIMIT_AS'):
+            try:
+                # Set soft and hard limits (in bytes)
+                max_bytes = _MAX_MEMORY_MB * 1024 * 1024
+                resource.setrlimit(resource.RLIMIT_AS, (max_bytes, max_bytes))
+            except (ValueError, resource.error) as e:
+                print(f"[WORKER] Could not set memory limit: {e}")
+        
         set_job_status(job_id, "processing")
-
+        
+        # Check elapsed time periodically
+        def check_timeout():
+            elapsed = time.monotonic() - start_time
+            if _MAX_JOB_TIMEOUT > 0 and elapsed > _MAX_JOB_TIMEOUT:
+                raise TimeoutError(f"Job timeout exceeded: {elapsed:.0f}s > {_MAX_JOB_TIMEOUT}s")
+        
         # --- Stage 1 ---
         from pipeline.stage1_ingestion import ingest, chunk_text
         from pipeline.stage2_extraction import extract_entities, refang
+        
+        check_timeout()
         raw_text = ingest(file_path)
+        
+        check_timeout()
         # Refang immediately so entity values (stored refanged) can be found in the
         # displayed document text.  "keepassxc[.]us[.]org" → "keepassxc.us.org"
         text = refang(raw_text)
@@ -555,17 +650,41 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
                 conn.commit()
 
         emit_progress(job_id, "done", {"status": "for_review"})
+        
+        # Backup database after successful processing
+        try:
+            backup_db()
+        except Exception as e:
+            print(f"[WORKER] Database backup failed: {e}")
 
+    except TimeoutError as exc:
+        error_msg = str(exc)
+        set_job_status(job_id, "failed")
+        emit_progress(job_id, "done", {"status": "failed", "error": error_msg})
+        print(f"[Worker TIMEOUT] job {job_id}: {error_msg}")
+    except MemoryError as exc:
+        error_msg = str(exc)
+        set_job_status(job_id, "failed")
+        emit_progress(job_id, "done", {"status": "failed", "error": "Memory limit exceeded"})
+        print(f"[Worker MEMORY ERROR] job {job_id}: {error_msg}")
     except Exception as exc:
         import traceback
         error_msg = traceback.format_exc()
         set_job_status(job_id, "failed")
         emit_progress(job_id, "done", {"status": "failed", "error": str(exc)})
         print(f"[Worker ERROR] job {job_id}: {error_msg}")
+    finally:
+        _decrement_job_counter()
 
 
 def run_pipeline_async(job_id: str, file_path: str, original_filename: str) -> None:
-    """Starts the pipeline in a background thread."""
+    """Starts the pipeline in a background thread with resource limits."""
+    # Check if we can accept more jobs
+    if not _check_job_limit():
+        set_job_status(job_id, "queued")
+        emit_progress(job_id, "done", {"status": "queued", "error": "Job queue full"})
+        return
+    
     t = threading.Thread(
         target=_run_pipeline,
         args=(job_id, file_path, original_filename),

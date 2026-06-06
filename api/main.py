@@ -1,13 +1,29 @@
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from api.db import init_db
 from api.routes import jobs, upload, entities, relationships, progress, policy
 
+# Rate limiter configuration
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(title="CTI to STIX", version="1.0.0")
+
+# Add rate limiting middleware
+app.state.limiter = limiter
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Too many requests. Please try again later."},
+    )
 
 app.add_middleware(
     CORSMiddleware,
@@ -17,7 +33,12 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Add security headers
+    allow_regular_options_preflight=True,
 )
+
+# Import JSONResponse for rate limit handler
+from fastapi.responses import JSONResponse
 
 
 @app.on_event("startup")
