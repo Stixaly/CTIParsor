@@ -2,14 +2,86 @@ import os
 import json
 import re
 import time
+import html
 import anthropic
 from pydantic import BaseModel, ValidationError
 from models.schemas import RawEntity
 from dotenv import load_dotenv
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    RetryError
+)
 
 # Stage 3b and 3c are imported lazily inside functions to avoid circular imports
 
 load_dotenv()
+
+# ---------------------------------------------------------------------------
+# Retry configuration for LLM calls
+# ---------------------------------------------------------------------------
+_MAX_RETRIES = 3
+_RETRY_WAIT = wait_exponential(multiplier=1, min=2, max=10)
+_RETRY_STOP = stop_after_attempt(_MAX_RETRIES)
+
+# Exception types that should trigger a retry
+_RETRY_EXCEPTIONS = (
+    anthropic.APITimeoutError,
+    anthropic.APIConnectionError,
+    ConnectionError,
+    TimeoutError,
+)
+
+
+def _sanitize_text_for_prompt(text: str, max_length: int = 10000) -> str:
+    """
+    Sanitize text to prevent prompt injection attacks.
+    
+    Args:
+        text: The raw text to sanitize
+        max_length: Maximum length of the sanitized text
+        
+    Returns:
+        Sanitized text safe for LLM prompts
+    """
+    if not text:
+        return ""
+    
+    # Truncate to max length first
+    text = text[:max_length]
+    
+    # Remove null bytes and control characters
+    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text)
+    
+    # Escape special characters that could be used for prompt injection
+    # Replace problematic sequences with safe alternatives
+    text = text.replace('\\', '\\\\')  # Escape backslashes
+    
+    # Remove markdown code blocks that could hide malicious content
+    text = re.sub(r'```[\s\S]*?```', '[code block removed]', text)
+    
+    # Remove XML/HTML tags that could be used for injection
+    text = re.sub(r'<[^>]+>', '', text)
+    
+    # Remove sequences that look like prompt injection attempts
+    injection_patterns = [
+        r'\b(ignore|forget|disregard)\b.*\b(previous|above|prior)\b',
+        r'\brole\s*[:=]\s*system\b',
+        r'\buser\s*[:=]\s*assistant\b',
+        r'\bassistant\s*[:=]\s*user\b',
+        r'\bDAN\b.*\bmode\b',
+        r'\bdeveloper\s*mode\b',
+        r'\bjailbreak\b',
+    ]
+    for pattern in injection_patterns:
+        text = re.sub(pattern, '[REDACTED]', text, flags=re.IGNORECASE)
+    
+    # Normalize whitespace
+    text = re.sub(r'[\s]+', ' ', text).strip()
+    
+    return text
 
 # ---------------------------------------------------------------------------
 # Provider selection — set LLM_PROVIDER in .env
@@ -102,7 +174,9 @@ def _get_provider_diagnostics():
 
 
 # Run diagnostics at module load time (keeps existing behavior)
-_get_provider_diagnostics()
+# Only run if not in production mode (to avoid log pollution)
+if os.environ.get("ENV", "development") == "development":
+    _get_provider_diagnostics()
 
 
 # Terms too generic to be a malware family name — the LLM often returns these
@@ -301,7 +375,14 @@ For ttps: ONLY include techniques NOT already listed in the semantic TTPs sectio
 _LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "120"))
 
 
-def _call_anthropic(system: str, user: str) -> str:
+@retry(
+    retry=retry_if_exception_type(_RETRY_EXCEPTIONS),
+    stop=_RETRY_STOP,
+    wait=_RETRY_WAIT,
+    reraise=True
+)
+def _call_anthropic_impl(system: str, user: str) -> str:
+    """Internal implementation of Anthropic call with retry."""
     client = _get_anthropic_client()
     if not client:
         return ""
@@ -325,17 +406,38 @@ def _call_anthropic(system: str, user: str) -> str:
     except anthropic.APITimeoutError:
         print(f"      [ERROR] Anthropic timed out after {_LLM_TIMEOUT}s — "
               f"raise LLM_TIMEOUT in .env if your model is slow")
+        raise
     except anthropic.AuthenticationError:
         print("      [ERROR] Invalid Anthropic API key — check ANTHROPIC_API_KEY in .env")
+        raise
     except anthropic.APIConnectionError:
         print("      [ERROR] Cannot reach Anthropic API — check network")
+        raise
     except Exception as e:
         print(f"      [ERROR] Anthropic ({time.monotonic()-t0:.1f}s): {e}")
-    return ""
+        raise
 
 
-def _call_openai_compatible(client_param, model: str, system: str, user: str, label: str) -> str:
-    """Shared call logic for OpenAI-compatible endpoints (Mistral, Ollama)."""
+def _call_anthropic(system: str, user: str) -> str:
+    """Call Anthropic with retry logic."""
+    try:
+        return _call_anthropic_impl(system, user)
+    except RetryError as e:
+        print(f"      [ERROR] Anthropic failed after {_MAX_RETRIES} retries: {e}")
+        return ""
+    except Exception as e:
+        print(f"      [ERROR] Anthropic call failed: {e}")
+        return ""
+
+
+@retry(
+    retry=retry_if_exception_type(_RETRY_EXCEPTIONS),
+    stop=_RETRY_STOP,
+    wait=_RETRY_WAIT,
+    reraise=True
+)
+def _call_openai_compatible_impl(client_param, model: str, system: str, user: str, label: str) -> str:
+    """Internal implementation of OpenAI-compatible call with retry."""
     if not client_param:
         return ""
     t0 = time.monotonic()
@@ -368,21 +470,37 @@ def _call_openai_compatible(client_param, model: str, system: str, user: str, la
                   f"raise LLM_TIMEOUT in .env if your model is slow")
         else:
             print(f"      [ERROR] {label} ({elapsed:.1f}s): {e}")
-    return ""
+        raise
+
+
+def _call_openai_compatible(client_param, model: str, system: str, user: str, label: str) -> str:
+    """Shared call logic for OpenAI-compatible endpoints (Mistral, Ollama) with retry."""
+    try:
+        return _call_openai_compatible_impl(client_param, model, system, user, label)
+    except RetryError as e:
+        print(f"      [ERROR] {label} failed after {_MAX_RETRIES} retries: {e}")
+        return ""
+    except Exception as e:
+        print(f"      [ERROR] {label} call failed: {e}")
+        return ""
 
 
 def _call_llm(system: str, user: str) -> str:
-    """Dispatches to the configured LLM provider."""
+    """Dispatches to the configured LLM provider with retry logic."""
+    # Sanitize inputs to prevent prompt injection
+    sanitized_system = _sanitize_text_for_prompt(system)
+    sanitized_user = _sanitize_text_for_prompt(user)
+    
     if _PROVIDER == "anthropic":
-        return _call_anthropic(system, user)
+        return _call_anthropic(sanitized_system, sanitized_user)
     elif _PROVIDER == "mistral":
         client = _get_mistral_client()
         _MISTRAL_MODEL = os.environ.get("MISTRAL_MODEL", "mistral-small-latest")
-        return _call_openai_compatible(client, _MISTRAL_MODEL, system, user, "Mistral")
+        return _call_openai_compatible(client, _MISTRAL_MODEL, sanitized_system, sanitized_user, "Mistral")
     elif _PROVIDER == "ollama":
         client = _get_ollama_client()
         _OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
-        return _call_openai_compatible(client, _OLLAMA_MODEL, system, user, "Ollama")
+        return _call_openai_compatible(client, _OLLAMA_MODEL, sanitized_system, sanitized_user, "Ollama")
     return ""
 
 

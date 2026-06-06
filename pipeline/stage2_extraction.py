@@ -3,9 +3,31 @@ from urllib.parse import urlparse
 from models.schemas import RawEntity, EntityType
 
 try:
+    import re2 as _re2_module
+    _RE2_AVAILABLE = True
+except ImportError:
+    _re2_module = None
+    _RE2_AVAILABLE = False
+
+try:
     import spacy as _spacy_module
 except ImportError:
     _spacy_module = None  # type: ignore[assignment]
+
+
+def _compile_pattern(pattern: str, flags: int = 0):
+    """
+    Compile a regex pattern, using re2 if available for ReDoS protection.
+    
+    re2 guarantees linear time matching and prevents catastrophic backtracking.
+    Falls back to standard re if re2 is not installed.
+    """
+    if _RE2_AVAILABLE:
+        try:
+            return _re2_module.compile(pattern, flags)
+        except Exception:
+            pass
+    return re.compile(pattern, flags)
 
 # Regex to detect bare version numbers (e.g. "0.1.16", "1.167.71") that SpaCy
 # sometimes tags as PRODUCT or even ORG and would otherwise pollute entity lists.

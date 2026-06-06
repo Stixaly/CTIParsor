@@ -19,6 +19,7 @@ uploads/
 cti_stix.db
 cti_stix.db-shm
 cti_stix.db-wal
+db_backups/
 frontend/node_modules/
 frontend/dist/
 # MITRE ATT&CK bundle (downloaded by scripts/download_attack.py — ~12 MB, do not commit)

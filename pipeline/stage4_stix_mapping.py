@@ -1,7 +1,35 @@
 import stix2
+import hashlib
 from datetime import datetime, timezone
 from models.schemas import RawEntity, EntityType
 from pipeline.stage3_llm import LLMEnrichmentResult
+
+
+def _make_deterministic_id(value: str, entity_type: str, prefix: str = "") -> str:
+    """
+    Generate a deterministic STIX ID based on value and type.
+    
+    This ensures the same entity always gets the same STIX ID across different
+    runs and reports, preventing duplicate objects.
+    
+    Args:
+        value: The entity value (e.g., "APT29", "185.220.101.45")
+        entity_type: The STIX entity type (e.g., "threat-actor", "ipv4-addr")
+        prefix: Optional prefix for namespacing
+        
+    Returns:
+        A deterministic STIX ID string
+    """
+    # Normalize the value for consistent hashing
+    normalized_value = value.lower().strip()
+    normalized_type = entity_type.lower().strip()
+    
+    # Create a hash-based identifier
+    hash_input = f"{prefix}:{normalized_type}:{normalized_value}"
+    hash_digest = hashlib.sha256(hash_input.encode('utf-8')).hexdigest()[:32]
+    
+    # Return in STIX ID format
+    return f"{entity_type}--{hash_digest}"
 
 # ---------------------------------------------------------------------------
 # All valid STIX 2.1 relationship types (Section 4 + Appendix B of the spec).
@@ -172,7 +200,9 @@ def build_stix_bundle(
         if actor_name.lower() in _seen_actors:
             continue
         _seen_actors.add(actor_name.lower())
-        obj = stix2.ThreatActor(name=actor_name)
+        # Use deterministic ID to prevent collisions across reports
+        actor_id = _make_deterministic_id(actor_name, "threat-actor", "cti")
+        obj = stix2.ThreatActor(name=actor_name, id=actor_id)
         stix_objects.append(obj)
         name_to_stix[actor_name.lower()] = obj
 
@@ -181,7 +211,9 @@ def build_stix_bundle(
         if malware_name.lower() in _seen_malware:
             continue
         _seen_malware.add(malware_name.lower())
-        obj = stix2.Malware(name=malware_name, is_family=True)
+        # Use deterministic ID to prevent collisions across reports
+        malware_id = _make_deterministic_id(malware_name, "malware", "cti")
+        obj = stix2.Malware(name=malware_name, is_family=True, id=malware_id)
         stix_objects.append(obj)
         name_to_stix[malware_name.lower()] = obj
 
@@ -190,7 +222,9 @@ def build_stix_bundle(
         if tool_name.lower() in _seen_tools:
             continue
         _seen_tools.add(tool_name.lower())
-        obj = stix2.Tool(name=tool_name)
+        # Use deterministic ID to prevent collisions across reports
+        tool_id = _make_deterministic_id(tool_name, "tool", "cti")
+        obj = stix2.Tool(name=tool_name, id=tool_id)
         stix_objects.append(obj)
         name_to_stix[tool_name.lower()] = obj
 
@@ -210,10 +244,14 @@ def build_stix_bundle(
                     url=att_url,
                 )
             )
+        # Use MITRE ID for deterministic ID if available, otherwise use name
+        ttp_id_value = ttp.mitre_id if ttp.mitre_id else ttp.technique_name
+        ttp_id = _make_deterministic_id(ttp_id_value, "attack-pattern", "cti")
         obj = stix2.AttackPattern(
             name=ttp.technique_name,
             description=ttp.description or "",
             external_references=external_refs,
+            id=ttp_id,
         )
         stix_objects.append(obj)
         name_to_stix[ttp.technique_name.lower()] = obj

@@ -1,9 +1,12 @@
 import sqlite3
 import threading
+import os
+import shutil
 from pathlib import Path
 from datetime import datetime, timezone
 
 DB_PATH = Path(__file__).parent.parent / "cti_stix.db"
+BACKUP_DIR = Path(__file__).parent.parent / "db_backups"
 # RLock (not Lock) so the same thread can re-acquire inside nested with-blocks
 # (e.g. set_job_status called from inside another _lock-protected section).
 _lock = threading.RLock()
@@ -13,6 +16,11 @@ _lock = threading.RLock()
 # handle leak that occurs when connections are opened but never explicitly
 # closed (relying on GC instead).
 _local = threading.local()
+
+# Connection timeout in seconds
+_CONNECTION_TIMEOUT = 30
+# Busy timeout in milliseconds (wait for locks)
+_BUSY_TIMEOUT = 5000
 
 
 def get_conn() -> sqlite3.Connection:
@@ -26,17 +34,75 @@ def get_conn() -> sqlite3.Connection:
     for the next call on the same thread).
 
     PRAGMAs are set once per connection rather than on every call.
+    
+    Security: Uses check_same_thread=False for FastAPI compatibility but
+    ensures thread-safety via thread-local storage.
     """
     conn = getattr(_local, "conn", None)
     if conn is None:
-        # timeout=30 prevents "database is locked" under concurrent requests
-        conn = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=30)
+        # timeout prevents "database is locked" under concurrent requests
+        # busy_timeout waits for locks to clear (in milliseconds)
+        conn = sqlite3.connect(
+            str(DB_PATH), 
+            check_same_thread=False, 
+            timeout=_CONNECTION_TIMEOUT,
+            isolation_level=None  # Autocommit mode for better control
+        )
         conn.row_factory = sqlite3.Row
-        # Set once — WAL mode persists in the DB file after the first call
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT}")
+        # Limit WAL file size to prevent disk exhaustion
+        conn.execute("PRAGMA wal_autocheckpoint=1000")  # Checkpoint every 1000 pages
+        conn.execute("PRAGMA wal_max_size=100000000")  # 100MB max WAL size
         _local.conn = conn
     return conn
+
+
+def backup_db() -> None:
+    """
+    Create a backup of the database file.
+    
+    Creates timestamped backups in db_backups/ directory.
+    Keeps last 7 backups, deletes older ones.
+    """
+    import glob
+    from datetime import datetime
+    
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    
+    # Create backup filename with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = BACKUP_DIR / f"cti_stix_{timestamp}.db"
+    
+    # Also backup WAL and SHM files if they exist
+    wal_file = DB_PATH.with_suffix(".db-wal")
+    shm_file = DB_PATH.with_suffix(".db-shm")
+    
+    try:
+        # Copy main DB
+        shutil.copy2(str(DB_PATH), str(backup_path))
+        
+        # Copy WAL file if exists
+        if wal_file.exists():
+            shutil.copy2(str(wal_file), str(backup_path) + "-wal")
+        
+        # Copy SHM file if exists
+        if shm_file.exists():
+            shutil.copy2(str(shm_file), str(backup_path) + "-shm")
+        
+        # Clean up old backups (keep last 7)
+        backup_files = sorted(glob.glob(str(BACKUP_DIR / "cti_stix_*.db")), reverse=True)
+        for old_backup in backup_files[7:]:
+            try:
+                os.remove(old_backup)
+                # Also remove corresponding WAL/SHM backups
+                os.remove(old_backup + "-wal")
+                os.remove(old_backup + "-shm")
+            except OSError:
+                pass
+    except Exception as e:
+        print(f"[db] Backup failed: {e}")
 
 
 def init_db() -> None:
