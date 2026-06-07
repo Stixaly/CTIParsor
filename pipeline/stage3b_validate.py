@@ -24,10 +24,11 @@ What is intentionally NOT filtered:
 from __future__ import annotations
 
 import re
-from pipeline.stage3_llm import LLMEnrichmentResult
 
 # Initialize logging
 from api.logging_config import get_logger
+from pipeline.stage3_llm import LLMEnrichmentResult
+
 logger = get_logger(__name__)
 
 try:

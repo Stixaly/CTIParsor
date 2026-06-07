@@ -1,11 +1,13 @@
 import uuid
-import stix2
 from datetime import datetime, timezone
-from models.schemas import RawEntity, EntityType
-from pipeline.stage3_llm import LLMEnrichmentResult
+
+import stix2
 
 # Initialize logging
 from api.logging_config import get_logger
+from models.schemas import EntityType, RawEntity
+from pipeline.stage3_llm import LLMEnrichmentResult
+
 logger = get_logger(__name__)
 
 # STIX 2.1 deterministic ID namespace (SCO/SDO identity namespace per the spec)
@@ -386,7 +388,10 @@ def build_stix_bundle(
             # Indicator already created for this IoC — just add another indicates rel if needed
             existing_indicator = name_to_stix.get(f"indicator:{ioc_key}")
             if existing_indicator:
-                _add_relationship(stix_objects, existing_indicator, "indicates", malware, confidence=0.8, pol_index=_pol_index)
+                _add_relationship(
+                    stix_objects, existing_indicator, "indicates", malware,
+                    confidence=0.8, pol_index=_pol_index,
+                )
             continue
 
         pattern = _build_stix_pattern(assoc.ioc_value, sco)

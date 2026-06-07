@@ -1,0 +1,12 @@
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint.per-file-ignores]
+# E402 (module-level import not at top of file): intentional throughout this
+# codebase -- logging must be configured before other modules are imported,
+# so setup_logging()/get_logger() calls precede subsequent imports.
+"*.py" = ["E402"]
+
+[tool.pytest.ini_options]
+# Mirrors pytest.ini so both files remain in sync.
+# (If pytest.ini already exists and conflicts, keep pytest.ini authoritative.)

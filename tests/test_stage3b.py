@@ -11,11 +11,8 @@ source text via substring or fuzzy match.  These tests verify that:
 """
 from __future__ import annotations
 
-import pytest
-
+from pipeline.stage3_llm import LLMEnrichmentResult, RelationshipExtracted
 from pipeline.stage3b_validate import validate_llm_result
-from pipeline.stage3_llm import LLMEnrichmentResult, RelationshipExtracted, TTPExtracted
-
 
 TEXT = (
     "APT29 deployed SUNBURST malware against SolarWinds targets. "

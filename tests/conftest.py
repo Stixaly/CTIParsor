@@ -10,14 +10,13 @@ Provides:
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from models.schemas import RawEntity, EntityType
-from models.config import PipelineConfig
 from api.storage import InMemoryJobStorage
-
+from models.config import PipelineConfig
+from models.schemas import EntityType, RawEntity
 
 # ── Input fixtures ─────────────────────────────────────────────────────────────
 
@@ -127,8 +126,9 @@ def api_client():
     api.main must be imported before the patch so that `api.main` is present
     in sys.modules (mock.patch resolves the target lazily on __enter__).
     """
-    import api.main  # ensure module is loaded before patching its attribute
     from fastapi.testclient import TestClient
+
+    import api.main  # ensure module is loaded before patching its attribute
 
     with patch("api.main.init_db"):
         with TestClient(api.main.app, raise_server_exceptions=True) as client:

@@ -8,8 +8,10 @@ Policy shape:
     "rules": [{ "src", "verb", "tgt", "mode": "pin"|"auto", "enabled": bool }] }
 """
 import json
-from fastapi import APIRouter, Request, HTTPException
-from api.db import get_conn, _lock
+
+from fastapi import APIRouter, HTTPException, Request
+
+from api.db import _lock, get_conn
 
 router = APIRouter(prefix="/api/relationship-policy", tags=["policy"])
 

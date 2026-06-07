@@ -1,14 +1,13 @@
 from pathlib import Path
 from uuid import uuid4
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Request
-from fastapi.responses import JSONResponse
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-import magic
+
 import filetype
-from api.db import get_conn, now_iso, _lock
-from api.worker import run_pipeline_async
+import magic
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+
+from api.db import _lock, get_conn, now_iso
 from api.main import limiter
+from api.worker import run_pipeline_async
 
 router = APIRouter(prefix="/api", tags=["upload"])
 
@@ -37,14 +36,14 @@ async def upload_file(
 ):
     """
     Upload a CTI report file for processing.
-    
+
     Rate limited to 10 uploads per minute per IP address.
     """
     # Check file extension
     suffix = Path(file.filename or "file").suffix.lower()
     if suffix not in SUPPORTED:
         raise HTTPException(
-            400, 
+            400,
             f"Unsupported format '{suffix}'. Accepted: {', '.join(SUPPORTED)}"
         )
 
@@ -54,13 +53,13 @@ async def upload_file(
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > _MAX_BYTES:
         raise HTTPException(
-            413, 
+            413,
             f"File too large. Maximum allowed size is {_MAX_BYTES // (1024*1024)} MB."
         )
 
     # Read first chunk to validate MIME type
     first_chunk = await file.read(1024 * 1024)  # Read 1MB for MIME check
-    
+
     # Validate MIME type using python-magic with filetype as fallback.
     # HTTPException is re-raised immediately so validation rejections always
     # surface correctly.  Only actual library errors fall through to the fallback.

@@ -26,18 +26,18 @@ The model is downloaded from HuggingFace Hub on first use (~1.1 GB, cached in
 """
 from __future__ import annotations
 
-import os
 import functools
+import os
 import re
 from pathlib import Path
-from typing import Sequence
 
-from models.schemas import RawEntity, EntityType
+from models.schemas import EntityType, RawEntity
 
 _SKIP_HEAVY = os.getenv("SKIP_HEAVY_MODELS") == "1"
 
 # Initialize logging
 from api.logging_config import get_logger
+
 logger = get_logger(__name__)
 
 # Model ID — configurable via CYNER_MODEL in .env.
@@ -107,7 +107,8 @@ def _load_pipeline():
         return None
 
     try:
-        from transformers import pipeline, logging as hf_logging
+        from transformers import logging as hf_logging
+        from transformers import pipeline
         hf_logging.set_verbosity_error()  # suppress download-progress noise
     except ImportError:
         return None

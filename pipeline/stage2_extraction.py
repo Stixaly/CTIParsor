@@ -1,7 +1,8 @@
 import os
 import re
 from urllib.parse import urlparse
-from models.schemas import RawEntity, EntityType
+
+from models.schemas import EntityType, RawEntity
 
 _SKIP_HEAVY = os.getenv("SKIP_HEAVY_MODELS") == "1"
 
@@ -21,7 +22,7 @@ except ImportError:
 def _compile_pattern(pattern: str, flags: int = 0):
     """
     Compile a regex pattern, using re2 if available for ReDoS protection.
-    
+
     re2 guarantees linear time matching and prevents catastrophic backtracking.
     Falls back to standard re if re2 is not installed.
     """
@@ -169,7 +170,7 @@ _DEFANG_PATTERN = re.compile(
 
 def _defang_repl(match: re.Match) -> str:
     m = match.group(0).lower()
-    
+
     if m.startswith('h') or m.startswith('f'):
         if m.startswith('f'):
             return 'ftp://'
@@ -177,7 +178,7 @@ def _defang_repl(match: re.Match) -> str:
         if 's' in m and m != 'http[:]//' and m != 'hxxp://' and m != 'h[tt]p://':
             return 'https://'
         return 'http://'
-        
+
     if 'dot' in m or '.' in m or '{' in m:
         return '.'
     if 'at' in m or '@' in m:
@@ -233,7 +234,7 @@ def _extract_hashes_regex(text: str) -> list[RawEntity]:
     """
     Extract SHA256, SHA1, and MD5 hashes in a single pass.
     The regex naturally enforces that hashes of different lengths cannot overlap
-    because they are strictly bounded by word boundaries (`\\b`), and hex characters 
+    because they are strictly bounded by word boundaries (`\\b`), and hex characters
     contain no internal word boundaries.
     """
     results = []

@@ -1,15 +1,17 @@
 import re
 from pathlib import Path
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from starlette.exceptions import HTTPException as StarletteHTTPException
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # Initialize logging before importing other modules
-from api.logging_config import setup_logging, get_logger, set_request_id, clear_request_id
+from api.logging_config import clear_request_id, get_logger, set_request_id, setup_logging
+
 setup_logging()
 logger = get_logger(__name__)
 
@@ -19,7 +21,7 @@ from api.db import init_db
 # api/routes/upload.py does `from api.main import limiter` at module level.
 limiter = Limiter(key_func=get_remote_address)
 
-from api.routes import jobs, upload, entities, relationships, progress, policy
+from api.routes import entities, jobs, policy, progress, relationships, upload
 
 app = FastAPI(title="CTI to STIX", version="1.0.0")
 
@@ -44,7 +46,7 @@ async def add_request_id(request: Request, call_next):
     request_id = raw_id if _REQUEST_ID_RE.fullmatch(raw_id) else None
     set_request_id(request_id)
     logger.debug(f"Request started: {request.method} {request.url}")
-    
+
     try:
         response = await call_next(request)
         return response

@@ -38,16 +38,16 @@ The model is downloaded from HuggingFace Hub on first use and cached locally.
 """
 from __future__ import annotations
 
-import os
-import warnings
 import functools
+import os
 import re
+import warnings
 from typing import Iterator
-
-from models.schemas import RawEntity, EntityType
 
 # Initialize logging
 from api.logging_config import get_logger
+from models.schemas import EntityType, RawEntity
+
 logger = get_logger(__name__)
 
 # Suppress GLiNER's "Sentence of length N has been truncated to 384" warning.
@@ -188,8 +188,7 @@ def extract_gliner_entities(text: str) -> list[RawEntity]:
 
     for batch_start in range(0, len(all_chunks), _BATCH_SIZE):
         batch      = all_chunks[batch_start : batch_start + _BATCH_SIZE]
-        batch_texts   = [t for t, _ in batch]
-        batch_offsets = [off for _, off in batch]
+        batch_texts = [t for t, _ in batch]
 
         try:
             raw = model.predict_entities(

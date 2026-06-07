@@ -1,7 +1,9 @@
 from uuid import uuid4
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from api.db import get_conn, _lock
+
+from api.db import _lock, get_conn
 
 router = APIRouter(prefix="/api/jobs/{job_id}/relationships", tags=["relationships"])
 

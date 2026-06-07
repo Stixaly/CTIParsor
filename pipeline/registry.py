@@ -14,9 +14,9 @@ from __future__ import annotations
 import importlib
 import logging
 
-from pipeline.base import BaseExtractionStage
 from models.config import PipelineConfig
 from models.schemas import RawEntity
+from pipeline.base import BaseExtractionStage
 
 logger = logging.getLogger(__name__)
 

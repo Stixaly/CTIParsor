@@ -7,12 +7,13 @@ caches the result for the lifetime of the process.
 """
 from __future__ import annotations
 
-import json
 import functools
+import json
 from pathlib import Path
 
 # Initialize logging
 from api.logging_config import get_logger
+
 logger = get_logger(__name__)
 
 _INDEX_PATH = Path(__file__).parent / "data" / "mitre_index.json"

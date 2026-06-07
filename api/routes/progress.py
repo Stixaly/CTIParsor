@@ -1,7 +1,9 @@
 import asyncio
 import json
+
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
+
 from api.db import get_conn
 
 router = APIRouter(prefix="/api/jobs", tags=["progress"])

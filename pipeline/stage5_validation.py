@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import io
-import os
 import urllib.request
 import zipfile
 from pathlib import Path
+
 import stix2
-from stix2validator import validate_string, print_results, ValidationOptions
+from stix2validator import ValidationOptions, print_results, validate_string
 
 # Initialize logging
 from api.logging_config import get_logger
+
 logger = get_logger(__name__)
 
 # Sentinel written to the project root the first time schemas are confirmed

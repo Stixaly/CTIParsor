@@ -11,16 +11,13 @@ Covers:
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
-import pytest
 import stix2
 
-from pipeline.stage5_validation import validate_and_export, print_bundle_summary
+from models.schemas import EntityType, RawEntity
+from pipeline.stage3_llm import LLMEnrichmentResult, RelationshipExtracted, TTPExtracted
 from pipeline.stage4_stix_mapping import build_stix_bundle
-from pipeline.stage3_llm import LLMEnrichmentResult, TTPExtracted, RelationshipExtracted
-from models.schemas import RawEntity, EntityType
-
+from pipeline.stage5_validation import print_bundle_summary, validate_and_export
 
 # ── Fixtures ───────────────────────────────────────────────────────────────────
 

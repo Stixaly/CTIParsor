@@ -1,12 +1,13 @@
-import sqlite3
-import threading
 import os
 import shutil
-from pathlib import Path
+import sqlite3
+import threading
 from datetime import datetime, timezone
+from pathlib import Path
 
 # Initialize logging
 from api.logging_config import get_logger
+
 logger = get_logger(__name__)
 
 DB_PATH = Path(__file__).parent.parent / "cti_stix.db"
@@ -38,7 +39,7 @@ def get_conn() -> sqlite3.Connection:
     for the next call on the same thread).
 
     PRAGMAs are set once per connection rather than on every call.
-    
+
     Security: Uses check_same_thread=False for FastAPI compatibility but
     ensures thread-safety via thread-local storage.
     """
@@ -47,8 +48,8 @@ def get_conn() -> sqlite3.Connection:
         # timeout prevents "database is locked" under concurrent requests
         # busy_timeout waits for locks to clear (in milliseconds)
         conn = sqlite3.connect(
-            str(DB_PATH), 
-            check_same_thread=False, 
+            str(DB_PATH),
+            check_same_thread=False,
             timeout=_CONNECTION_TIMEOUT,
             isolation_level=None  # Autocommit mode for better control
         )
@@ -66,35 +67,35 @@ def get_conn() -> sqlite3.Connection:
 def backup_db() -> None:
     """
     Create a backup of the database file.
-    
+
     Creates timestamped backups in db_backups/ directory.
     Keeps last 7 backups, deletes older ones.
     """
     import glob
     from datetime import datetime
-    
+
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    
+
     # Create backup filename with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = BACKUP_DIR / f"cti_stix_{timestamp}.db"
-    
+
     # Also backup WAL and SHM files if they exist
     wal_file = DB_PATH.with_suffix(".db-wal")
     shm_file = DB_PATH.with_suffix(".db-shm")
-    
+
     try:
         # Copy main DB
         shutil.copy2(str(DB_PATH), str(backup_path))
-        
+
         # Copy WAL file if exists
         if wal_file.exists():
             shutil.copy2(str(wal_file), str(backup_path) + "-wal")
-        
+
         # Copy SHM file if exists
         if shm_file.exists():
             shutil.copy2(str(shm_file), str(backup_path) + "-shm")
-        
+
         # Clean up old backups (keep last 7)
         backup_files = sorted(glob.glob(str(BACKUP_DIR / "cti_stix_*.db")), reverse=True)
         for old_backup in backup_files[7:]:

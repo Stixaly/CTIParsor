@@ -1,11 +1,13 @@
 import json
-import re
 import mimetypes
+import re
 from pathlib import Path
+
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from api.db import get_conn, now_iso, _lock
+
+from api.db import _lock, get_conn, now_iso
 from api.worker import re_run_final_stages
 
 _ROOT        = Path(__file__).parent.parent.parent

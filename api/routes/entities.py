@@ -1,8 +1,9 @@
 from uuid import uuid4
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from api.db import get_conn, now_iso, _lock
 
+from api.db import _lock, get_conn
 from models.schemas import EntityType
 
 router = APIRouter(prefix="/api/jobs/{job_id}/entities", tags=["entities"])
@@ -70,7 +71,8 @@ def create_entity(job_id: str, body: EntityCreate):
     with _lock:
         with get_conn() as conn:
             conn.execute(
-                "INSERT INTO entities (id,job_id,value,entity_type,context,confidence,mitre_id,source) VALUES (?,?,?,?,?,?,?,?)",
+                "INSERT INTO entities (id,job_id,value,entity_type,context,confidence,mitre_id,source) "
+                "VALUES (?,?,?,?,?,?,?,?)",
                 (eid, job_id, body.value, body.entity_type, body.context, body.confidence, body.mitre_id, "manual"),
             )
             conn.commit()
@@ -168,7 +170,11 @@ def bulk_update_entities(job_id: str, body: BulkPatch):
     if body.scope not in ("pending", "all"):
         raise HTTPException(400, "scope must be one of: pending | all")
     if body.action == "reset" and body.scope == "pending":
-        raise HTTPException(400, "action 'reset' with scope 'pending' is a no-op: pending entities are already in the reset state")
+        raise HTTPException(
+            400,
+            "action 'reset' with scope 'pending' is a no-op: "
+            "pending entities are already in the reset state",
+        )
     if body.entity_type not in VALID_TYPES:
         raise HTTPException(400, f"Unknown entity_type '{body.entity_type}'")
 

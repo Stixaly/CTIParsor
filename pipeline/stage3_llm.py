@@ -1,22 +1,17 @@
-import os
 import json
+import os
 import re
 import time
-import html
+
 import anthropic
-from pydantic import BaseModel, ValidationError
-from models.schemas import RawEntity
 from dotenv import load_dotenv
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_exponential,
-    retry_if_exception_type,
-    RetryError
-)
+from pydantic import BaseModel, ValidationError
+from tenacity import RetryError, retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 # Initialize logging
 from api.logging_config import get_logger
+from models.schemas import RawEntity
+
 logger = get_logger(__name__)
 
 # Stage 3b and 3c are imported lazily inside functions to avoid circular imports
@@ -52,33 +47,33 @@ _MIN_PROMPT_LENGTH = 100
 def _sanitize_text_for_prompt(text: str, max_length: int = 10000) -> str:
     """
     Sanitize text to prevent prompt injection attacks.
-    
+
     Args:
         text: The raw text to sanitize
         max_length: Maximum length of the sanitized text
-        
+
     Returns:
         Sanitized text safe for LLM prompts
     """
     if not text:
         return ""
-    
+
     # Truncate to max length first
     text = text[:max_length]
-    
+
     # Remove null bytes and control characters
     text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text)
-    
+
     # Escape special characters that could be used for prompt injection
     # Replace problematic sequences with safe alternatives
     text = text.replace('\\', '\\\\')  # Escape backslashes
-    
+
     # Remove markdown code blocks that could hide malicious content
     text = re.sub(r'```[\s\S]*?```', '[code block removed]', text)
-    
+
     # Remove XML/HTML tags that could be used for injection
     text = re.sub(r'<[^>]+>', '', text)
-    
+
     # Remove sequences that look like prompt injection attempts
     injection_patterns = [
         r'\b(ignore|forget|disregard)\b.*\b(previous|above|prior)\b',
@@ -91,10 +86,10 @@ def _sanitize_text_for_prompt(text: str, max_length: int = 10000) -> str:
     ]
     for pattern in injection_patterns:
         text = re.sub(pattern, '[REDACTED]', text, flags=re.IGNORECASE)
-    
+
     # Normalize whitespace
     text = re.sub(r'[\s]+', ' ', text).strip()
-    
+
     return text
 
 # ---------------------------------------------------------------------------
@@ -361,7 +356,10 @@ For ttps: ONLY include techniques NOT already listed in the semantic TTPs sectio
   "relationships": [
     {{
       "source_value": "exact source entity name (from any detected list)",
-      "relationship_type": "uses|attributed-to|targets|delivers|drops|exploits|communicates-with|beacons-to|exfiltrates-to|compromises|hosts|owns|indicates|mitigates|remediates|originated-from|authored-by|impersonates|variant-of|related-to|...",
+      "relationship_type": "uses|attributed-to|targets|delivers|drops|exploits|communicates-with|
+beacons-to|exfiltrates-to|compromises|hosts|owns|indicates|mitigates|
+remediates|originated-from|authored-by|impersonates|variant-of|
+related-to|...",
       "target_value": "exact target entity name (from any detected list)",
       "confidence": 0.0-1.0,
       "evidence_text": "verbatim sentence from the text supporting this relationship"
@@ -502,7 +500,7 @@ def _call_llm(system: str, user: str) -> str:
     # Sanitize inputs to prevent prompt injection
     sanitized_system = _sanitize_text_for_prompt(system)
     sanitized_user = _sanitize_text_for_prompt(user)
-    
+
     if _PROVIDER == "anthropic":
         return _call_anthropic(sanitized_system, sanitized_user)
     elif _PROVIDER == "mistral":
@@ -790,7 +788,7 @@ def enrich_chunk(
     # Relationships without textual support are removed (reduces hallucination ~27%→8%).
     # Only runs when ENABLE_STIX_VERIFICATION=true in .env (default: false).
     if result.relationships:
-        from pipeline.stage3d_verify import verify_relationships, verify_enabled
+        from pipeline.stage3d_verify import verify_enabled, verify_relationships
         if verify_enabled():
             result = verify_relationships(text, result, _call_llm)
 

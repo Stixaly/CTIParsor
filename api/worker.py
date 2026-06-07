@@ -1,15 +1,15 @@
 """
 Background worker — runs the 5-stage pipeline and emits progress events to SQLite.
 """
-import os
-import sys
-import re
-import json
-import time
 import hashlib
-import threading
+import json
 import multiprocessing as mp
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
+import os
+import re
+import sys
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from uuid import uuid4
 
@@ -19,10 +19,11 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 # Initialize logging
-from api.logging_config import get_logger, set_request_id, get_request_id
+from api.logging_config import get_logger
+
 logger = get_logger(__name__)
 
-from api.db import get_conn, emit_progress, set_job_status, now_iso, _lock, backup_db
+from api.db import _lock, backup_db, emit_progress, get_conn, now_iso, set_job_status
 
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
@@ -197,11 +198,15 @@ def _save_entities(job_id: str, raw_entities, llm_result) -> None:
     with _lock:
         with get_conn() as conn:
             conn.executemany(
-                "INSERT OR IGNORE INTO entities (id,job_id,value,entity_type,context,confidence,mitre_id,accepted,source) VALUES (?,?,?,?,?,?,?,?,?)",
+                "INSERT OR IGNORE INTO entities "
+                "(id,job_id,value,entity_type,context,confidence,mitre_id,accepted,source) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
                 rows_ioc + rows_llm,
             )
             conn.executemany(
-                "INSERT OR IGNORE INTO relationships (id,job_id,source_value,relationship_type,target_value,confidence,accepted,evidence_text) VALUES (?,?,?,?,?,?,?,?)",
+                "INSERT OR IGNORE INTO relationships "
+                "(id,job_id,source_value,relationship_type,target_value,confidence,accepted,evidence_text) "
+                "VALUES (?,?,?,?,?,?,?,?)",
                 rows_rel,
             )
             conn.commit()
@@ -212,15 +217,15 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
     Run the full pipeline for a job with timeout enforcement.
     """
     global _job_counter
-    
+
     if not _check_job_limit():
         set_job_status(job_id, "queued")
         emit_progress(job_id, "done", {"status": "queued", "error": "Job queue full"})
         return
-    
+
     _increment_job_counter()
     start_time = time.monotonic()
-    
+
     try:
         # RLIMIT_AS (virtual address space) is intentionally NOT set here.
         #
@@ -244,20 +249,20 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         # rather than RLIMIT_AS inside Python.
 
         set_job_status(job_id, "processing")
-        
+
         # Check elapsed time periodically
         def check_timeout():
             elapsed = time.monotonic() - start_time
             if _MAX_JOB_TIMEOUT > 0 and elapsed > _MAX_JOB_TIMEOUT:
                 raise TimeoutError(f"Job timeout exceeded: {elapsed:.0f}s > {_MAX_JOB_TIMEOUT}s")
-        
+
         # --- Stage 1 ---
-        from pipeline.stage1_ingestion import ingest, chunk_text
+        from pipeline.stage1_ingestion import chunk_text, ingest
         from pipeline.stage2_extraction import extract_entities, refang
-        
+
         check_timeout()
         raw_text = ingest(file_path)
-        
+
         check_timeout()
         # Refang immediately so entity values (stored refanged) can be found in the
         # displayed document text.  "keepassxc[.]us[.]org" → "keepassxc.us.org"
@@ -300,7 +305,8 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         regex_entities = list(_best.values())
 
         # --- Stage 2b — Gazetteer NER (malware / tool / APT group names) ---
-        from pipeline.stage2b_gazetteer import match_gazetteer, available as gaz_available
+        from pipeline.stage2b_gazetteer import available as gaz_available
+        from pipeline.stage2b_gazetteer import match_gazetteer
         gazetteer_entities: list = []
         if gaz_available():
             gazetteer_entities = match_gazetteer(text)
@@ -329,7 +335,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
                     sem_keys.add(key)
 
         # --- Stage 2d — CyNER cybersecurity NER ---
-        from pipeline.stage2d_cyner import extract_cyner_entities, cyner_available, _merge_cyner_into
+        from pipeline.stage2d_cyner import _merge_cyner_into, cyner_available, extract_cyner_entities
         cyner_entities: list = []
         if cyner_available():
             cyner_entities = extract_cyner_entities(text)
@@ -339,7 +345,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         # Discovers entity types CyNER and the gazetteer cannot: targeted sectors,
         # campaign names, attack infrastructure, novel actors & malware.
         # Paper: "0-CTI" — CY4GATE (2025) — ADR-004 P2-A
-        from pipeline.stage2e_gliner import extract_gliner_entities, gliner_available, _merge_gliner_into
+        from pipeline.stage2e_gliner import _merge_gliner_into, extract_gliner_entities, gliner_available
         gliner_entities: list = []
         if gliner_available():
             gliner_entities = extract_gliner_entities(text)
@@ -358,7 +364,6 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         })
 
         # --- Stage 3 — LLM enrichment (relationships, novel entities, campaign) ---
-        from pipeline.stage3_llm import enrich_all_chunks, LLMEnrichmentResult
 
         # Build a set of entity values found globally (all NER stages)
         # so we can check whether a chunk that has zero IoCs still *mentions* a known entity.
@@ -425,7 +430,8 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         _PARALLELISM      = int(os.getenv("LLM_PARALLELISM",   "3"))
         _CHECKPOINT_EVERY = int(os.getenv("CHECKPOINT_EVERY",  "5"))
 
-        from pipeline.stage3_llm import enrich_chunk, LLMEnrichmentResult as _LLMResult
+        from pipeline.stage3_llm import LLMEnrichmentResult as _LLMResult
+        from pipeline.stage3_llm import enrich_chunk
 
         total      = len(chunks)
         skipped    = 0
@@ -478,7 +484,10 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
 
         chunk_results, _ckpt_saved_at = _ckpt_load()
         if chunk_results:
-            logger.info(f"[Stage 3] Resuming from checkpoint — {len(chunk_results)}/{total} chunks already done (saved {_ckpt_saved_at})")
+            logger.info(
+                f"[Stage 3] Resuming from checkpoint — {len(chunk_results)}/{total} "
+                f"chunks already done (saved {_ckpt_saved_at})"
+            )
 
         # Reconstruct running totals from any already-loaded results
         _run_malware = sum(len(r.malware_families) for r in chunk_results.values())
@@ -500,7 +509,10 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
 
         n_llm      = len(llm_work)
         _stage3_t0 = time.monotonic()
-        logger.info(f"[Stage 3] {n_llm} chunks → LLM ({skipped} skipped, {len(chunk_results)} from checkpoint, parallelism={_PARALLELISM})")
+        logger.info(
+            f"[Stage 3] {n_llm} chunks → LLM ({skipped} skipped, "
+            f"{len(chunk_results)} from checkpoint, parallelism={_PARALLELISM})"
+        )
 
         # ── Parallel processing ─────────────────────────────────────────────
 
@@ -508,7 +520,10 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
 
         def _process_chunk(idx: int, chunk: str, ents: list) -> tuple[int, _LLMResult]:
             with _log_lock:
-                logger.info(f"[Stage 3] chunk {idx}/{total} — {len(chunk)} chars [elapsed {time.monotonic()-_stage3_t0:.0f}s]")
+                logger.info(
+                    f"[Stage 3] chunk {idx}/{total} — {len(chunk)} chars "
+                    f"[elapsed {time.monotonic()-_stage3_t0:.0f}s]"
+                )
             _t  = time.monotonic()
             res = enrich_chunk(
                 chunk, ents,
@@ -524,7 +539,10 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
             parts = [f"{x} {n}" for x, n in
                      ((m,"malware"),(a,"actors"),(t_c,"tools"),(r,"rels")) if x]
             with _log_lock:
-                logger.info(f"[Stage 3] chunk {idx}/{total} ✓ {elapsed:.1f}s — {', '.join(parts) or 'nothing extracted'}")
+                logger.info(
+                    f"[Stage 3] chunk {idx}/{total} ✓ {elapsed:.1f}s — "
+                    f"{', '.join(parts) or 'nothing extracted'}"
+                )
             return idx, res
 
         with ThreadPoolExecutor(max_workers=_PARALLELISM) as executor:
@@ -538,7 +556,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
             for future in as_completed(futures):
                 # Check timeout before processing result
                 check_timeout()
-                
+
                 idx, res = future.result()
                 chunk_results[idx] = res
                 completed        += 1
@@ -574,8 +592,14 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
             chunk_results.get(i, _LLMResult()) for i in range(1, total + 1)
         ]
 
-        logger.info(f"[Stage 3] done — {n_llm} LLM calls, {skipped} skipped, total elapsed {time.monotonic()-_stage3_t0:.0f}s")
-        logger.info(f"[Stage 3] totals: {_run_malware} malware, {_run_actors} actors, {_run_tools} tools, {_run_rels} relationships")
+        logger.info(
+            f"[Stage 3] done — {n_llm} LLM calls, {skipped} skipped, "
+            f"total elapsed {time.monotonic()-_stage3_t0:.0f}s"
+        )
+        logger.info(
+            f"[Stage 3] totals: {_run_malware} malware, {_run_actors} actors, "
+            f"{_run_tools} tools, {_run_rels} relationships"
+        )
 
         from pipeline.stage3_llm import _merge_results
         llm_result = _merge_results(
@@ -597,8 +621,9 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
                 conn.commit()
 
         # --- Stage 4 ---
-        from pipeline.stage4_stix_mapping import build_stix_bundle
         import json as _json_s4
+
+        from pipeline.stage4_stix_mapping import build_stix_bundle
         report_name  = re.sub(r"[^\w\-]", "_", Path(original_filename).stem)
         source_hash  = _sha256_file(file_path)
 
@@ -646,7 +671,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
                 conn.commit()
 
         emit_progress(job_id, "done", {"status": "for_review"})
-        
+
         # Backup database after successful processing
         try:
             backup_db()
@@ -802,7 +827,6 @@ def _lexicon_rescan(job_id: str, report_text: str) -> int:
 
     Returns the number of new entity rows inserted.
     """
-    from models.schemas import EntityType
     from uuid import uuid4
 
     if not report_text:
@@ -892,7 +916,10 @@ def _lexicon_rescan(job_id: str, report_text: str) -> int:
                     to_insert,
                 )
                 conn.commit()
-                logger.info(f"[lexicon_rescan] +{len(to_insert)} entity rows (source=report_lexicon, from {len(rows)} accepted SDO entities)")
+                logger.info(
+                    f"[lexicon_rescan] +{len(to_insert)} entity rows "
+                    f"(source=report_lexicon, from {len(rows)} accepted SDO entities)"
+                )
 
     return len(to_insert)
 
@@ -925,10 +952,10 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
     if str(_ROOT) not in sys.path:
         sys.path.insert(0, str(_ROOT))
 
+    from models.schemas import EntityType, RawEntity
+    from pipeline.stage3_llm import LLMEnrichmentResult, RelationshipExtracted
     from pipeline.stage4_stix_mapping import build_stix_bundle
     from pipeline.stage5_validation import validate_and_export
-    from pipeline.stage3_llm import LLMEnrichmentResult, RelationshipExtracted
-    from models.schemas import RawEntity, EntityType
 
     with _lock:
         with get_conn() as conn:

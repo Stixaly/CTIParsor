@@ -35,18 +35,19 @@ Outputs feed directly into all_entities in worker.py, complementing:
 """
 from __future__ import annotations
 
+import functools
+import json
 import os
 import re
-import json
-import functools
 from pathlib import Path
 
-from models.schemas import RawEntity, EntityType
+from models.schemas import EntityType, RawEntity
 
 _SKIP_HEAVY = os.getenv("SKIP_HEAVY_MODELS") == "1"
 
 # Initialize logging
 from api.logging_config import get_logger
+
 logger = get_logger(__name__)
 
 # ── Model configuration (ADR-004 P1-A) ────────────────────────────────────────
@@ -269,8 +270,8 @@ def detect_ttps_semantic(text: str, top_k_per_sentence: int = 2) -> list[RawEnti
         candidates = candidates[::step][:_MAX_CANDIDATES]
 
     try:
-        from sentence_transformers import util
         import numpy as np
+        from sentence_transformers import util
 
         # Encode all candidate sentences in one batch
         query_embeddings = model.encode(

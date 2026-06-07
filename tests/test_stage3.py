@@ -11,23 +11,21 @@ Covers:
 """
 from __future__ import annotations
 
-import json
 from unittest.mock import patch
 
 import pytest
 
+from models.schemas import EntityType, RawEntity
 from pipeline.stage3_llm import (
     LLMEnrichmentResult,
-    TTPExtracted,
     RelationshipExtracted,
-    enrich_chunk,
-    enrich_all_chunks,
-    _merge_results,
+    TTPExtracted,
     _dedup_names,
+    _merge_results,
     _normalize_llm_json,
+    enrich_all_chunks,
+    enrich_chunk,
 )
-from models.schemas import RawEntity, EntityType
-
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 

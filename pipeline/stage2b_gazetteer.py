@@ -24,18 +24,19 @@ Speed:
 """
 from __future__ import annotations
 
+import functools
+import json
 import os
 import re
-import json
-import functools
 from pathlib import Path
 
-from models.schemas import RawEntity, EntityType
+from models.schemas import EntityType, RawEntity
 
 _SKIP_HEAVY = os.getenv("SKIP_HEAVY_MODELS") == "1"
 
 # Initialize logging
 from api.logging_config import get_logger
+
 logger = get_logger(__name__)
 
 _INDEX_PATH = Path(__file__).parent / "data" / "gazetteer.json"
