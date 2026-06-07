@@ -1,3 +1,4 @@
+from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
@@ -90,8 +91,11 @@ def update_entity(job_id: str, entity_id: str, patch: EntityPatch):
         if not row:
             raise HTTPException(404, "Entity not found")
 
-    updates = []
-    values = []
+    updates: list[str] = []
+    # SQL parameter values are heterogeneous (int flags, strings, None for
+    # NULL-clearing) — mypy would otherwise infer `list[int]` from the first
+    # `.append(1 if ... else 0)` and flag every later append as incompatible.
+    values: list[Any] = []
 
     if patch.accepted is not None:
         updates.append("accepted=?")

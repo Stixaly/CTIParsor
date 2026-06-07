@@ -7,6 +7,12 @@ line-length = 120
 # so setup_logging()/get_logger() calls precede subsequent imports.
 "*.py" = ["E402"]
 
+[tool.mypy]
+# Pydantic models declare defaults via `Field(default, ...)`; without this
+# plugin mypy can't see through `Field()` and reports spurious "Missing named
+# argument" errors for every constructor call (e.g. ChunkConfig(), LLMConfig()).
+plugins = ["pydantic.mypy"]
+
 [tool.pytest.ini_options]
 # Mirrors pytest.ini so both files remain in sync.
 # (If pytest.ini already exists and conflicts, keep pytest.ini authoritative.)

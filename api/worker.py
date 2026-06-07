@@ -24,6 +24,7 @@ from api.logging_config import get_logger
 logger = get_logger(__name__)
 
 from api.db import _lock, backup_db, emit_progress, get_conn, now_iso, set_job_status
+from models.schemas import RawEntity
 
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
@@ -296,7 +297,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         # --- Stage 2 — Regex IoC extraction ---
         entities_per_chunk = [extract_entities(chunk) for chunk in chunks]
         # Dedup by (value, type) keeping the highest-confidence occurrence
-        _best: dict[tuple, object] = {}
+        _best: dict[tuple, RawEntity] = {}
         for chunk_ents in entities_per_chunk:
             for e in chunk_ents:
                 key = (e.value.lower(), e.entity_type)
@@ -307,7 +308,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         # --- Stage 2b — Gazetteer NER (malware / tool / APT group names) ---
         from pipeline.stage2b_gazetteer import available as gaz_available
         from pipeline.stage2b_gazetteer import match_gazetteer
-        gazetteer_entities: list = []
+        gazetteer_entities: list[RawEntity] = []
         if gaz_available():
             gazetteer_entities = match_gazetteer(text)
             # Merge into regex entities — skip any already found by regex at
@@ -323,7 +324,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
 
         # --- Stage 2c — Semantic TTP detection ---
         from pipeline.stage2c_ttp_semantic import detect_ttps_semantic, semantic_available
-        semantic_ttp_entities: list = []
+        semantic_ttp_entities: list[RawEntity] = []
         if semantic_available():
             semantic_ttp_entities = detect_ttps_semantic(text)
             # Merge into all_entities (dedup by mitre_id — keep highest confidence)
@@ -336,7 +337,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
 
         # --- Stage 2d — CyNER cybersecurity NER ---
         from pipeline.stage2d_cyner import _merge_cyner_into, cyner_available, extract_cyner_entities
-        cyner_entities: list = []
+        cyner_entities: list[RawEntity] = []
         if cyner_available():
             cyner_entities = extract_cyner_entities(text)
             all_entities = _merge_cyner_into(all_entities, cyner_entities)
@@ -346,7 +347,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         # campaign names, attack infrastructure, novel actors & malware.
         # Paper: "0-CTI" — CY4GATE (2025) — ADR-004 P2-A
         from pipeline.stage2e_gliner import _merge_gliner_into, extract_gliner_entities, gliner_available
-        gliner_entities: list = []
+        gliner_entities: list[RawEntity] = []
         if gliner_available():
             gliner_entities = extract_gliner_entities(text)
             all_entities = _merge_gliner_into(all_entities, gliner_entities)
@@ -777,7 +778,14 @@ def run_pipeline_async(job_id: str, file_path: str, original_filename: str) -> N
         if code == 0:
             logger.info(f"[Worker] Subprocess for job {jid} exited cleanly")
             return
-        reason = _SIGNAL_NAMES.get(code, f"exit code {code}")
+        # `Process.exitcode` is `int | None` (None means "still running", which
+        # shouldn't happen after join() but mypy can't know that) — narrow it
+        # before using it as a dict key / format value.
+        reason = (
+            _SIGNAL_NAMES.get(code, f"exit code {code}")
+            if code is not None
+            else "unknown (process has no exit code)"
+        )
         logger.error(f"[Worker] Subprocess for job {jid} crashed: {reason}")
         try:
             # The subprocess may have already written status=failed before dying,

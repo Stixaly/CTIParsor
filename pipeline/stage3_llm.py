@@ -2,6 +2,7 @@ import json
 import os
 import re
 import time
+from typing import cast
 
 import anthropic
 from dotenv import load_dotenv
@@ -790,7 +791,10 @@ def enrich_chunk(
     if result.relationships:
         from pipeline.stage3d_verify import verify_enabled, verify_relationships
         if verify_enabled():
-            result = verify_relationships(text, result, _call_llm)
+            # verify_relationships() returns `object` to avoid a circular
+            # import with LLMEnrichmentResult (defined in this module); it's
+            # always an LLMEnrichmentResult at runtime.
+            result = cast(LLMEnrichmentResult, verify_relationships(text, result, _call_llm))
 
     return result
 
@@ -915,8 +919,11 @@ def _merge_results(
         for assoc in r.ioc_associations:
             if not assoc.ioc_value or not assoc.malware_name:
                 continue
-            key = (assoc.ioc_value.lower(), assoc.malware_name.lower())
-            ioc_map[key] = assoc
+            # Distinct variable name from `key` above — mypy infers a
+            # variable's type from its first assignment (a 3-tuple there),
+            # so reusing it for this 2-tuple would be a type error.
+            ioc_key = (assoc.ioc_value.lower(), assoc.malware_name.lower())
+            ioc_map[ioc_key] = assoc
 
     all_actors = [a for r in results for a in r.threat_actors]
     all_malware = [m for r in results for m in r.malware_families]
@@ -942,8 +949,11 @@ def _merge_results(
         campaign_name = None
 
     # Merge gazetteer blacklist + generic term blocklist to suppress known/generic names
-    actor_blacklist  = _GENERIC_ACTOR_TERMS  | gaz_covered
-    malware_blacklist = _GENERIC_MALWARE_TERMS | gaz_covered
+    # `_GENERIC_ACTOR_TERMS` is a frozenset; `frozenset | set` yields a
+    # frozenset, but `_dedup_names` declares `blacklist: set[str] | None` —
+    # coerce to `set` so the union matches the expected type.
+    actor_blacklist  = set(_GENERIC_ACTOR_TERMS) | gaz_covered
+    malware_blacklist = set(_GENERIC_MALWARE_TERMS) | gaz_covered
     tool_blacklist   = gaz_covered
 
     return LLMEnrichmentResult(

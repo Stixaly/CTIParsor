@@ -153,7 +153,7 @@ def _read_pdf(path: Path) -> str:
 
 
 def _read_docx(path: Path) -> str:
-    doc = docx.Document(path)
+    doc = docx.Document(str(path))
     return "\n".join(para.text for para in doc.paragraphs if para.text.strip())
 
 

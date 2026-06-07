@@ -464,6 +464,12 @@ def _extract_ner_entities(text: str) -> list[RawEntity]:
         Filtered against a small blocklist of directional / generic terms
         that spaCy often mislabels as GPE.
     """
+    if _nlp is None:
+        # Guards mypy (the module-level None-check in the caller can't be
+        # narrowed across the function boundary) and protects against direct
+        # calls when spaCy failed to load / SKIP_HEAVY_MODELS is set.
+        return []
+
     doc = _nlp(text[:100_000])
     results = []
 

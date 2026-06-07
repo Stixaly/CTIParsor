@@ -9,7 +9,12 @@ from api.db import _lock, get_conn, now_iso
 from api.main import limiter
 from api.worker import run_pipeline_async
 
-router = APIRouter(prefix="/api", tags=["upload"])
+# Explicit annotation needed: this module is part of an import cycle
+# (api.main -> api.routes.upload -> api.main, for the `limiter` import),
+# so mypy can't always infer `router`'s type from the call expression alone —
+# it then reports "Cannot determine type of 'router'" at the `include_router`
+# call site in api/main.py.
+router: APIRouter = APIRouter(prefix="/api", tags=["upload"])
 
 UPLOADS_DIR = Path(__file__).parent.parent.parent / "uploads"
 SUPPORTED = {".pdf", ".docx", ".html", ".htm", ".txt", ".md"}

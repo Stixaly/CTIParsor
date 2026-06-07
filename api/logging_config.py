@@ -170,6 +170,7 @@ def setup_logging() -> None:
         root_logger.removeHandler(handler)
 
     # Create formatter based on configuration
+    formatter: logging.Formatter
     if LOG_FORMAT == "json":
         formatter = JSONFormatter()
     else:
