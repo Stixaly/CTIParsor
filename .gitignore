@@ -7,6 +7,8 @@ __pycache__/
 output/
 *.egg-info/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 dist/
 build/
 # Reports dropped in input/ stay local — never commit sensitive CTI docs
