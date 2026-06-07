@@ -1,16 +1,20 @@
 from pathlib import Path
 from uuid import uuid4
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Request
-from fastapi.responses import JSONResponse
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-import magic
-import filetype
-from api.db import get_conn, now_iso, _lock
-from api.worker import run_pipeline_async
-from api.main import limiter
 
-router = APIRouter(prefix="/api", tags=["upload"])
+import filetype
+import magic
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+
+from api.db import _lock, get_conn, now_iso
+from api.main import limiter
+from api.worker import run_pipeline_async
+
+# Explicit annotation needed: this module is part of an import cycle
+# (api.main -> api.routes.upload -> api.main, for the `limiter` import),
+# so mypy can't always infer `router`'s type from the call expression alone —
+# it then reports "Cannot determine type of 'router'" at the `include_router`
+# call site in api/main.py.
+router: APIRouter = APIRouter(prefix="/api", tags=["upload"])
 
 UPLOADS_DIR = Path(__file__).parent.parent.parent / "uploads"
 SUPPORTED = {".pdf", ".docx", ".html", ".htm", ".txt", ".md"}
@@ -37,14 +41,14 @@ async def upload_file(
 ):
     """
     Upload a CTI report file for processing.
-    
+
     Rate limited to 10 uploads per minute per IP address.
     """
     # Check file extension
     suffix = Path(file.filename or "file").suffix.lower()
     if suffix not in SUPPORTED:
         raise HTTPException(
-            400, 
+            400,
             f"Unsupported format '{suffix}'. Accepted: {', '.join(SUPPORTED)}"
         )
 
@@ -54,41 +58,38 @@ async def upload_file(
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > _MAX_BYTES:
         raise HTTPException(
-            413, 
+            413,
             f"File too large. Maximum allowed size is {_MAX_BYTES // (1024*1024)} MB."
         )
 
     # Read first chunk to validate MIME type
     first_chunk = await file.read(1024 * 1024)  # Read 1MB for MIME check
-    
-    # Validate MIME type using python-magic
+
+    # Validate MIME type using python-magic with filetype as fallback.
+    # HTTPException is re-raised immediately so validation rejections always
+    # surface correctly.  Only actual library errors fall through to the fallback.
     try:
         mime_type = magic.from_buffer(first_chunk, mime=True)
         allowed_mimes = SUPPORTED_MIME.get(suffix, [])
         if allowed_mimes and mime_type not in allowed_mimes:
             raise HTTPException(
-                400,
+                415,
                 f"MIME type '{mime_type}' does not match expected type for '{suffix}'. "
                 f"Expected: {', '.join(allowed_mimes)}"
             )
-    except Exception as e:
-        # Fallback to filetype library
-        try:
-            kind = filetype.guess(first_chunk)
-            if kind is None:
-                raise HTTPException(
-                    400,
-                    f"Could not determine file type. Please ensure the file is valid."
-                )
-            if suffix == ".pdf" and kind.mime != "application/pdf":
-                raise HTTPException(
-                    400,
-                    f"File appears to be '{kind.mime}' but extension is '.pdf'"
-                )
-        except Exception:
+    except HTTPException:
+        raise  # validation rejection — propagate as-is
+    except Exception:
+        # python-magic unavailable or raised an internal error — fall back to filetype.
+        kind = filetype.guess(first_chunk)
+        if kind is None:
+            raise HTTPException(400, "Could not determine file type. Please ensure the file is valid.")
+        allowed_mimes = SUPPORTED_MIME.get(suffix, [])
+        if allowed_mimes and kind.mime not in allowed_mimes:
             raise HTTPException(
-                400,
-                f"File type validation failed: {str(e)}"
+                415,
+                f"File content appears to be '{kind.mime}' but extension is '{suffix}'. "
+                f"Expected: {', '.join(allowed_mimes)}"
             )
 
     # Check total size after reading first chunk

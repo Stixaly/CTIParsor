@@ -41,12 +41,13 @@ Design note — circular import avoidance:
 """
 from __future__ import annotations
 
-import os
 import json
+import os
 from typing import Callable
 
 # Initialize logging
 from api.logging_config import get_logger
+
 logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------

@@ -35,16 +35,19 @@ Outputs feed directly into all_entities in worker.py, complementing:
 """
 from __future__ import annotations
 
+import functools
+import json
 import os
 import re
-import json
-import functools
 from pathlib import Path
 
-from models.schemas import RawEntity, EntityType
+from models.schemas import EntityType, RawEntity
+
+_SKIP_HEAVY = os.getenv("SKIP_HEAVY_MODELS") == "1"
 
 # Initialize logging
 from api.logging_config import get_logger
+
 logger = get_logger(__name__)
 
 # ── Model configuration (ADR-004 P1-A) ────────────────────────────────────────
@@ -129,7 +132,11 @@ def _load_model():
 
     Tries the configured model (TTP_EMBEDDING_MODEL) first; falls back to the
     legacy all-MiniLM-L6-v2 if the primary model cannot be downloaded/loaded.
+    Returns None when SKIP_HEAVY_MODELS=1.
     """
+    if _SKIP_HEAVY:
+        return None
+
     # Suppress the verbose "BertModel LOAD REPORT / UNEXPECTED key" table and
     # weight-materialisation progress bars that transformers prints at WARNING level.
     try:
@@ -205,7 +212,10 @@ def _load_corpus() -> tuple | None:
 
 def semantic_available() -> bool:
     """Return True if the sentence-transformers library is installed and the
-    embedding cache exists for the currently configured model."""
+    embedding cache exists for the currently configured model.
+    Always returns False when SKIP_HEAVY_MODELS=1."""
+    if _SKIP_HEAVY:
+        return False
     try:
         from sentence_transformers import SentenceTransformer  # noqa: F401
         if not _EMB_PATH.exists() or not _META_PATH.exists():
@@ -260,8 +270,8 @@ def detect_ttps_semantic(text: str, top_k_per_sentence: int = 2) -> list[RawEnti
         candidates = candidates[::step][:_MAX_CANDIDATES]
 
     try:
-        from sentence_transformers import util
         import numpy as np
+        from sentence_transformers import util
 
         # Encode all candidate sentences in one batch
         query_embeddings = model.encode(
@@ -319,3 +329,25 @@ def detect_ttps_semantic(text: str, top_k_per_sentence: int = 2) -> list[RawEnti
     # Sort by confidence descending
     results.sort(key=lambda x: x.confidence, reverse=True)
     return results
+
+
+# ---------------------------------------------------------------------------
+# ExtractionStage class wrapper — consumed by pipeline.registry
+# ---------------------------------------------------------------------------
+
+from pipeline.base import BaseExtractionStage  # noqa: E402
+
+
+class SemanticTTPStage(BaseExtractionStage):
+    """Stage-2c semantic TTP detector as an ExtractionStage implementation."""
+
+    name = "semantic_ttp"
+
+    def __init__(self, config=None) -> None:
+        pass
+
+    def available(self) -> bool:
+        return semantic_available()
+
+    def extract(self, text: str) -> list[RawEntity]:
+        return detect_ttps_semantic(text)

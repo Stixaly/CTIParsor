@@ -1,6 +1,8 @@
 from pathlib import Path
+
 import pytest
-from pipeline.stage1_ingestion import ingest, chunk_text
+
+from pipeline.stage1_ingestion import chunk_text, ingest
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

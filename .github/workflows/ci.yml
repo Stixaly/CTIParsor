@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # ── Fast tests — no model downloads, no API keys ──────────────────────────
+  fast-tests:
+    name: Fast tests (lint + type check + unit tests)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install API dependencies
+        run: pip install -r requirements-api.txt
+
+      - name: Install core pipeline dependencies (no torch / transformers)
+        run: |
+          pip install \
+            pydantic stix2 stix2-validator iocextract python-dotenv tenacity \
+            rapidfuzz pyahocorasick anthropic \
+            pdfplumber python-docx beautifulsoup4
+
+      - name: Install test + lint dependencies
+        run: pip install pytest pytest-cov httpx ruff mypy
+
+      - name: Lint (ruff)
+        run: ruff check pipeline/ api/ models/ tests/ --select E,F,W,I
+
+      - name: Type check (mypy)
+        run: mypy pipeline/ api/ models/ --ignore-missing-imports --no-error-summary
+        continue-on-error: true   # type-check failures are advisory, not blocking
+
+      - name: Run fast unit tests (no model downloads)
+        env:
+          SKIP_HEAVY_MODELS: "1"
+          ANTHROPIC_API_KEY: "test-key-not-used"
+          LLM_PROVIDER: "anthropic"
+        run: |
+          pytest tests/ \
+            --ignore=tests/eval_pipeline.py \
+            -v \
+            --cov=pipeline \
+            --cov=api \
+            --cov=models \
+            --cov-report=term-missing \
+            --cov-report=xml
+
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v6
+        if: always()
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false
+
+  # ── Model tests — runs only on pushes to main (expensive: ~800 MB downloads) ──
+  model-tests:
+    name: Model tests (full pipeline, with model downloads)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Allow this job to fail without blocking the fast-tests result
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install all dependencies
+        run: pip install -r requirements.txt -r requirements-api.txt
+
+      - name: Install test dependencies
+        run: pip install pytest pytest-cov httpx
+
+      - name: Run full test suite (with model inference)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          LLM_PROVIDER: "anthropic"
+        run: |
+          pytest tests/ \
+            --ignore=tests/eval_pipeline.py \
+            -v \
+            --cov=pipeline \
+            --cov=api \
+            --cov=models \
+            --cov-report=term-missing

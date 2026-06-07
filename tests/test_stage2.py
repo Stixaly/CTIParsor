@@ -1,6 +1,6 @@
-from pipeline.stage2_extraction import extract_entities, _deduplicate, refang
-from pipeline.stage1_ingestion import _join_hyphen_linebreaks
 from models.schemas import EntityType, RawEntity
+from pipeline.stage1_ingestion import _join_hyphen_linebreaks
+from pipeline.stage2_extraction import _deduplicate, extract_entities, refang
 
 SAMPLE_TEXT = """
 APT29 used Cobalt Strike for C2 communications.

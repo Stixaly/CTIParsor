@@ -53,21 +53,19 @@ Partial match mode:
 """
 from __future__ import annotations
 
-import sys
-import json
 import argparse
-from dataclasses import dataclass, field
+import json
+import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple
 
 # Ensure project root is on sys.path
 _ROOT = Path(__file__).parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from pipeline.stage2_extraction import extract_entities
 from models.schemas import EntityType, RawEntity
-
+from pipeline.stage2_extraction import extract_entities
 
 # ---------------------------------------------------------------------------
 # Data structures

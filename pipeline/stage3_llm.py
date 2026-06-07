@@ -1,22 +1,18 @@
-import os
 import json
+import os
 import re
 import time
-import html
+from typing import cast
+
 import anthropic
-from pydantic import BaseModel, ValidationError
-from models.schemas import RawEntity
 from dotenv import load_dotenv
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_exponential,
-    retry_if_exception_type,
-    RetryError
-)
+from pydantic import BaseModel, ValidationError
+from tenacity import RetryError, retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 # Initialize logging
 from api.logging_config import get_logger
+from models.schemas import RawEntity
+
 logger = get_logger(__name__)
 
 # Stage 3b and 3c are imported lazily inside functions to avoid circular imports
@@ -52,33 +48,33 @@ _MIN_PROMPT_LENGTH = 100
 def _sanitize_text_for_prompt(text: str, max_length: int = 10000) -> str:
     """
     Sanitize text to prevent prompt injection attacks.
-    
+
     Args:
         text: The raw text to sanitize
         max_length: Maximum length of the sanitized text
-        
+
     Returns:
         Sanitized text safe for LLM prompts
     """
     if not text:
         return ""
-    
+
     # Truncate to max length first
     text = text[:max_length]
-    
+
     # Remove null bytes and control characters
     text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text)
-    
+
     # Escape special characters that could be used for prompt injection
     # Replace problematic sequences with safe alternatives
     text = text.replace('\\', '\\\\')  # Escape backslashes
-    
+
     # Remove markdown code blocks that could hide malicious content
     text = re.sub(r'```[\s\S]*?```', '[code block removed]', text)
-    
+
     # Remove XML/HTML tags that could be used for injection
     text = re.sub(r'<[^>]+>', '', text)
-    
+
     # Remove sequences that look like prompt injection attempts
     injection_patterns = [
         r'\b(ignore|forget|disregard)\b.*\b(previous|above|prior)\b',
@@ -91,10 +87,10 @@ def _sanitize_text_for_prompt(text: str, max_length: int = 10000) -> str:
     ]
     for pattern in injection_patterns:
         text = re.sub(pattern, '[REDACTED]', text, flags=re.IGNORECASE)
-    
+
     # Normalize whitespace
     text = re.sub(r'[\s]+', ' ', text).strip()
-    
+
     return text
 
 # ---------------------------------------------------------------------------
@@ -361,7 +357,10 @@ For ttps: ONLY include techniques NOT already listed in the semantic TTPs sectio
   "relationships": [
     {{
       "source_value": "exact source entity name (from any detected list)",
-      "relationship_type": "uses|attributed-to|targets|delivers|drops|exploits|communicates-with|beacons-to|exfiltrates-to|compromises|hosts|owns|indicates|mitigates|remediates|originated-from|authored-by|impersonates|variant-of|related-to|...",
+      "relationship_type": "uses|attributed-to|targets|delivers|drops|exploits|communicates-with|
+beacons-to|exfiltrates-to|compromises|hosts|owns|indicates|mitigates|
+remediates|originated-from|authored-by|impersonates|variant-of|
+related-to|...",
       "target_value": "exact target entity name (from any detected list)",
       "confidence": 0.0-1.0,
       "evidence_text": "verbatim sentence from the text supporting this relationship"
@@ -502,7 +501,7 @@ def _call_llm(system: str, user: str) -> str:
     # Sanitize inputs to prevent prompt injection
     sanitized_system = _sanitize_text_for_prompt(system)
     sanitized_user = _sanitize_text_for_prompt(user)
-    
+
     if _PROVIDER == "anthropic":
         return _call_anthropic(sanitized_system, sanitized_user)
     elif _PROVIDER == "mistral":
@@ -527,6 +526,110 @@ def _provider_ready() -> bool:
     if _PROVIDER == "ollama":
         return _OPENAI_SDK_AVAILABLE
     return False
+
+
+# --- LLM output normalisation ---
+
+def _normalize_llm_json(data: dict) -> dict:
+    """
+    Coerce common LLM schema-deviation patterns into the field names and types
+    that LLMEnrichmentResult expects.
+
+    Claude sometimes returns more descriptive objects than the strict schema:
+
+      threat_actors / malware_families / tools
+        Expected: list[str]
+        Seen:     list[{"name": "X", "category": "...", "aliases": []}]
+        Fix:      extract the "name" (or "value"/"label") key as a bare string.
+
+      ttps[*]
+        Expected: {"technique_name": "...", "mitre_id": "T1234"}
+        Seen:     {"name": "...", "id": "T1234"}   OR  {"technique": "...", "id": ...}
+        Fix:      rename "name"→"technique_name" and "id"→"mitre_id".
+
+      relationships[*]
+        Expected: {"source_value": "X", "relationship_type": "uses", "target_value": "Y"}
+        Seen:     {"source": "X", "relationship": "uses", "target": "Y"}
+                  OR {"source": "X", "type": "uses", "target": "Y"}
+        Fix:      rename "source"→"source_value", "relationship"/"type"→"relationship_type",
+                  "target"→"target_value".
+
+    Entries that are still malformed after normalisation are silently dropped
+    (Pydantic will catch them and the caller logs the ValidationError).
+    """
+    out = dict(data)
+
+    # ── String-list fields — extract name from dicts ──────────────────────────
+    for field in ("threat_actors", "malware_families", "tools",
+                  "targeted_sectors", "targeted_countries", "course_of_action"):
+        raw = out.get(field)
+        if not isinstance(raw, list):
+            continue
+        fixed: list[str] = []
+        for item in raw:
+            if isinstance(item, str):
+                if item.strip():
+                    fixed.append(item.strip())
+            elif isinstance(item, dict):
+                # Try common name-carrying keys in priority order
+                for key in ("name", "value", "label", "actor", "family", "title"):
+                    v = item.get(key)
+                    if isinstance(v, str) and v.strip():
+                        fixed.append(v.strip())
+                        break
+        out[field] = fixed
+
+    # ── TTPs — rename "name"→"technique_name", "id"→"mitre_id" ───────────────
+    raw_ttps = out.get("ttps")
+    if isinstance(raw_ttps, list):
+        norm_ttps: list[dict] = []
+        for item in raw_ttps:
+            if not isinstance(item, dict):
+                continue
+            t = dict(item)
+            if "technique_name" not in t:
+                for k in ("name", "technique", "label", "title"):
+                    if isinstance(t.get(k), str) and t[k].strip():
+                        t["technique_name"] = t.pop(k)
+                        break
+            if "mitre_id" not in t:
+                for k in ("id", "mitre", "attack_id", "technique_id", "mitre_technique_id"):
+                    if isinstance(t.get(k), str) and t[k].strip():
+                        t["mitre_id"] = t.pop(k)
+                        break
+            if "technique_name" in t:
+                norm_ttps.append(t)
+        out["ttps"] = norm_ttps
+
+    # ── Relationships — rename source/target/relationship keys ────────────────
+    raw_rels = out.get("relationships")
+    if isinstance(raw_rels, list):
+        norm_rels: list[dict] = []
+        for item in raw_rels:
+            if not isinstance(item, dict):
+                continue
+            r = dict(item)
+            if "source_value" not in r:
+                for k in ("source", "from", "subject", "source_entity", "actor"):
+                    if isinstance(r.get(k), str) and r[k].strip():
+                        r["source_value"] = r.pop(k)
+                        break
+            if "target_value" not in r:
+                for k in ("target", "to", "object", "target_entity", "victim"):
+                    if isinstance(r.get(k), str) and r[k].strip():
+                        r["target_value"] = r.pop(k)
+                        break
+            if "relationship_type" not in r:
+                for k in ("relationship", "type", "rel_type", "relation", "rel"):
+                    if isinstance(r.get(k), str) and r[k].strip():
+                        r["relationship_type"] = r.pop(k)
+                        break
+            # Only keep entries that have all three required fields
+            if all(r.get(f) for f in ("source_value", "relationship_type", "target_value")):
+                norm_rels.append(r)
+        out["relationships"] = norm_rels
+
+    return out
 
 
 # --- Public API ---
@@ -658,10 +761,17 @@ def enrich_chunk(
         logger.warning(f"LLM returned no valid JSON (raw preview: {raw_text[:120]!r})")
         return LLMEnrichmentResult()
 
+    # Normalise field names/types before Pydantic validation.
+    # Claude sometimes returns richer objects than the schema expects —
+    # e.g. {"name": "GREYVIBE", "aliases": []} where a plain string is required,
+    # or {"id": "T1587.003", "name": "..."} where "mitre_id"/"technique_name" are
+    # expected.  Discarding the whole result on a field-name mismatch would lose
+    # all real intelligence from the chunk.  Normalise instead, then validate.
+    normalized_json = _normalize_llm_json(parsed_json)
     try:
-        result = LLMEnrichmentResult.model_validate(parsed_json)
+        result = LLMEnrichmentResult.model_validate(normalized_json)
     except ValidationError as e:
-        logger.warning(f"JSON schema validation failed: {e}")
+        logger.warning(f"JSON schema validation failed after normalization: {e}")
         return LLMEnrichmentResult()
 
     # Stage 3b — remove hallucinated entity names not present in the source text.
@@ -679,9 +789,12 @@ def enrich_chunk(
     # Relationships without textual support are removed (reduces hallucination ~27%→8%).
     # Only runs when ENABLE_STIX_VERIFICATION=true in .env (default: false).
     if result.relationships:
-        from pipeline.stage3d_verify import verify_relationships, verify_enabled
+        from pipeline.stage3d_verify import verify_enabled, verify_relationships
         if verify_enabled():
-            result = verify_relationships(text, result, _call_llm)
+            # verify_relationships() returns `object` to avoid a circular
+            # import with LLMEnrichmentResult (defined in this module); it's
+            # always an LLMEnrichmentResult at runtime.
+            result = cast(LLMEnrichmentResult, verify_relationships(text, result, _call_llm))
 
     return result
 
@@ -806,8 +919,11 @@ def _merge_results(
         for assoc in r.ioc_associations:
             if not assoc.ioc_value or not assoc.malware_name:
                 continue
-            key = (assoc.ioc_value.lower(), assoc.malware_name.lower())
-            ioc_map[key] = assoc
+            # Distinct variable name from `key` above — mypy infers a
+            # variable's type from its first assignment (a 3-tuple there),
+            # so reusing it for this 2-tuple would be a type error.
+            ioc_key = (assoc.ioc_value.lower(), assoc.malware_name.lower())
+            ioc_map[ioc_key] = assoc
 
     all_actors = [a for r in results for a in r.threat_actors]
     all_malware = [m for r in results for m in r.malware_families]
@@ -833,8 +949,11 @@ def _merge_results(
         campaign_name = None
 
     # Merge gazetteer blacklist + generic term blocklist to suppress known/generic names
-    actor_blacklist  = _GENERIC_ACTOR_TERMS  | gaz_covered
-    malware_blacklist = _GENERIC_MALWARE_TERMS | gaz_covered
+    # `_GENERIC_ACTOR_TERMS` is a frozenset; `frozenset | set` yields a
+    # frozenset, but `_dedup_names` declares `blacklist: set[str] | None` —
+    # coerce to `set` so the union matches the expected type.
+    actor_blacklist  = set(_GENERIC_ACTOR_TERMS) | gaz_covered
+    malware_blacklist = set(_GENERIC_MALWARE_TERMS) | gaz_covered
     tool_blacklist   = gaz_covered
 
     return LLMEnrichmentResult(

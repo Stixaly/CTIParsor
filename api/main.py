@@ -1,22 +1,27 @@
+import re
 from pathlib import Path
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from starlette.exceptions import HTTPException as StarletteHTTPException
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # Initialize logging before importing other modules
-from api.logging_config import setup_logging, get_logger, set_request_id, clear_request_id
+from api.logging_config import clear_request_id, get_logger, set_request_id, setup_logging
+
 setup_logging()
 logger = get_logger(__name__)
 
 from api.db import init_db
-from api.routes import jobs, upload, entities, relationships, progress, policy
 
-# Rate limiter configuration
+# Rate limiter must be defined before routes are imported because
+# api/routes/upload.py does `from api.main import limiter` at module level.
 limiter = Limiter(key_func=get_remote_address)
+
+from api.routes import entities, jobs, policy, progress, relationships, upload
 
 app = FastAPI(title="CTI to STIX", version="1.0.0")
 
@@ -31,14 +36,17 @@ async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
     )
 
 # Request ID middleware for tracing
+_REQUEST_ID_RE = re.compile(r"^[a-zA-Z0-9\-_]{1,64}$")
+
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
     """Add a unique request ID to each request for tracing."""
-    # Generate or get request ID from headers
-    request_id = request.headers.get("x-request-id")
+    raw_id = request.headers.get("x-request-id", "")
+    # Validate format before using in logs to prevent log injection via header
+    request_id = raw_id if _REQUEST_ID_RE.fullmatch(raw_id) else None
     set_request_id(request_id)
     logger.debug(f"Request started: {request.method} {request.url}")
-    
+
     try:
         response = await call_next(request)
         return response
@@ -54,8 +62,6 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
-    # Add security headers
-    allow_regular_options_preflight=True,
 )
 
 # Import JSONResponse for rate limit handler

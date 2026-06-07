@@ -18,17 +18,18 @@ against all known technique/tactic names.  Three tiers:
 
 from __future__ import annotations
 
-import re
 import functools
-
-from pipeline.stage3_llm import TTPExtracted
+import re
 
 # Initialize logging
 from api.logging_config import get_logger
+from pipeline.stage3_llm import TTPExtracted
+
 logger = get_logger(__name__)
 
 try:
-    from rapidfuzz import fuzz, process as rfprocess
+    from rapidfuzz import fuzz
+    from rapidfuzz import process as rfprocess
     _RAPIDFUZZ_AVAILABLE = True
 except ImportError:
     _RAPIDFUZZ_AVAILABLE = False
@@ -57,7 +58,7 @@ def _load_index() -> dict[str, dict] | None:
     Builds a lowercase-name / lowercase-ID → entry lookup from the compact
     MITRE index.  Covers enterprise, mobile, ICS, and CAPEC.
     """
-    from pipeline.mitre_db import get_techniques, get_tactics, available
+    from pipeline.mitre_db import available, get_tactics, get_techniques
 
     if not available():
         return None
@@ -158,7 +159,6 @@ def normalize_ttps(
 
     # ── 1. Seed with semantic findings (highest precision) ──────────────────
     if semantic_entities:
-        from models.schemas import RawEntity  # avoid circular import at module level
         for ent in semantic_entities:
             if not hasattr(ent, "mitre_id") or not ent.mitre_id:
                 continue

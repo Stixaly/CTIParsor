@@ -1,6 +1,10 @@
+import os
 import re
 from urllib.parse import urlparse
-from models.schemas import RawEntity, EntityType
+
+from models.schemas import EntityType, RawEntity
+
+_SKIP_HEAVY = os.getenv("SKIP_HEAVY_MODELS") == "1"
 
 try:
     import re2 as _re2_module
@@ -18,7 +22,7 @@ except ImportError:
 def _compile_pattern(pattern: str, flags: int = 0):
     """
     Compile a regex pattern, using re2 if available for ReDoS protection.
-    
+
     re2 guarantees linear time matching and prevents catastrophic backtracking.
     Falls back to standard re if re2 is not installed.
     """
@@ -68,7 +72,7 @@ except ImportError:
     _IOCEXTRACT_AVAILABLE = False
 
 _nlp = None
-if _spacy_module is not None:
+if _spacy_module is not None and not _SKIP_HEAVY:
     try:
         _nlp = _spacy_module.load("en_core_web_lg")
     except OSError:
@@ -166,7 +170,7 @@ _DEFANG_PATTERN = re.compile(
 
 def _defang_repl(match: re.Match) -> str:
     m = match.group(0).lower()
-    
+
     if m.startswith('h') or m.startswith('f'):
         if m.startswith('f'):
             return 'ftp://'
@@ -174,7 +178,7 @@ def _defang_repl(match: re.Match) -> str:
         if 's' in m and m != 'http[:]//' and m != 'hxxp://' and m != 'h[tt]p://':
             return 'https://'
         return 'http://'
-        
+
     if 'dot' in m or '.' in m or '{' in m:
         return '.'
     if 'at' in m or '@' in m:
@@ -230,7 +234,7 @@ def _extract_hashes_regex(text: str) -> list[RawEntity]:
     """
     Extract SHA256, SHA1, and MD5 hashes in a single pass.
     The regex naturally enforces that hashes of different lengths cannot overlap
-    because they are strictly bounded by word boundaries (`\\b`), and hex characters 
+    because they are strictly bounded by word boundaries (`\\b`), and hex characters
     contain no internal word boundaries.
     """
     results = []
@@ -460,6 +464,12 @@ def _extract_ner_entities(text: str) -> list[RawEntity]:
         Filtered against a small blocklist of directional / generic terms
         that spaCy often mislabels as GPE.
     """
+    if _nlp is None:
+        # Guards mypy (the module-level None-check in the caller can't be
+        # narrowed across the function boundary) and protects against direct
+        # calls when spaCy failed to load / SKIP_HEAVY_MODELS is set.
+        return []
+
     doc = _nlp(text[:100_000])
     results = []
 
@@ -519,3 +529,25 @@ def _deduplicate(entities: list[RawEntity]) -> list[RawEntity]:
             seen.add(key)
             unique.append(entity)
     return unique
+
+
+# ---------------------------------------------------------------------------
+# ExtractionStage class wrapper — consumed by pipeline.registry
+# ---------------------------------------------------------------------------
+
+from pipeline.base import BaseExtractionStage  # noqa: E402
+
+
+class RegexExtractionStage(BaseExtractionStage):
+    """Stage-2 regex extractor as an ExtractionStage implementation."""
+
+    name = "regex"
+
+    def __init__(self, config=None) -> None:  # config ignored; regex has no model
+        pass
+
+    def available(self) -> bool:
+        return True
+
+    def extract(self, text: str) -> list[RawEntity]:
+        return extract_entities(text)

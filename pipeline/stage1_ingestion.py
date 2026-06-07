@@ -1,12 +1,14 @@
-import re
 import logging
-import pdfplumber
-import docx
-from bs4 import BeautifulSoup
+import re
 from pathlib import Path
+
+import docx
+import pdfplumber
+from bs4 import BeautifulSoup
 
 # Initialize logging
 from api.logging_config import get_logger
+
 logger = get_logger(__name__)
 
 # pdfminer (used internally by pdfplumber) emits WARNING-level messages for PDFs
@@ -40,8 +42,8 @@ except Exception:  # ImportError, ModuleNotFoundError, native-lib failures
     _MARKITDOWN_AVAILABLE = False
 
 try:
-    from pdf2image import convert_from_path
     import pytesseract
+    from pdf2image import convert_from_path
     _OCR_AVAILABLE = True
 except ImportError:
     _OCR_AVAILABLE = False
@@ -151,7 +153,7 @@ def _read_pdf(path: Path) -> str:
 
 
 def _read_docx(path: Path) -> str:
-    doc = docx.Document(path)
+    doc = docx.Document(str(path))
     return "\n".join(para.text for para in doc.paragraphs if para.text.strip())
 
 
