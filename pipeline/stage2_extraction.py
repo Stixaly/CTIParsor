@@ -83,8 +83,23 @@ if _spacy_module is not None and not _SKIP_HEAVY:
 
 # --- Patterns regex ---
 
-_CVE_PATTERN = re.compile(r"CVE-\d{4}-\d{4,7}", re.IGNORECASE)
-_MITRE_TTP_PATTERN = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")
+# CVE IDs — tolerate the dash/hyphen variants and zero-width characters that
+# "smart" typography (Word/PDF exports) and copy-paste often substitute for
+# the literal hyphen between CVE / year / sequence number.
+# Dashes: hyphen-minus, hyphen..horizontal bar (U+2010-2015), minus sign,
+#         small/fullwidth hyphen-minus, soft hyphen.
+_CVE_DASH = "\\-‐-―−﹣－­"
+# Zero-width / invisible separators that can appear between CVE components.
+_CVE_ZW = "​‌‍⁠﻿"
+_CVE_PATTERN = re.compile(
+    rf"CVE[{_CVE_ZW}]*[{_CVE_DASH}][{_CVE_ZW}]*\d{{4}}[{_CVE_ZW}]*[{_CVE_DASH}][{_CVE_ZW}]*\d{{4,7}}",
+    re.IGNORECASE,
+)
+_CVE_ZW_PATTERN = re.compile(f"[{_CVE_ZW}]")
+_CVE_DASH_PATTERN = re.compile(f"[{_CVE_DASH}]")
+
+# MITRE ATT&CK IDs — technique (T####[.###]) and tactic (TA####).
+_MITRE_TTP_PATTERN = re.compile(r"\bTA?\d{4}(?:\.\d{3})?\b")
 _HASH_PATTERN = re.compile(r"\b([0-9a-fA-F]{64}|[0-9a-fA-F]{40}|[0-9a-fA-F]{32})\b")
 
 _IPV4_PATTERN = re.compile(
@@ -160,17 +175,19 @@ _REG_KEY_PATTERN = re.compile(
 # Combined into a single regex for O(1) matching passes over large documents.
 # ---------------------------------------------------------------------------
 _DEFANG_PATTERN = re.compile(
-    r"hxxps?://|h\[tt\]ps?://|https?\[s\]://|https?\[:\]//|fxx?p://|"
+    r"hxxps?://|h\[tt\]ps?://|https?\[s\]://|https?\[:\]://|meow://|fxx?p://|"
     r"\s+\[\.\]\s+|\s+\(\.\)\s+|\[\.\]|\(\.\)|\{\.?\}|\[dot\]|\(dot\)|"
     r"\[:\]|\(:\)|"
     r"\[//\]|\[/\]|"
-    r"\[@\]|\[at\]|\(at\)",
+    r"\[@\]|\(@\)|\{@\}|\[at\]|\(at\)",
     re.IGNORECASE
 )
 
 def _defang_repl(match: re.Match) -> str:
     m = match.group(0).lower()
 
+    if m.startswith('meow'):
+        return 'http://'
     if m.startswith('h') or m.startswith('f'):
         if m.startswith('f'):
             return 'ftp://'
@@ -179,10 +196,12 @@ def _defang_repl(match: re.Match) -> str:
             return 'https://'
         return 'http://'
 
-    if 'dot' in m or '.' in m or '{' in m:
-        return '.'
+    # Check '@' forms before '.'/'{' — "{@}" and "(@)" would otherwise be
+    # mistaken for the dot-replacement branch below.
     if 'at' in m or '@' in m:
         return '@'
+    if 'dot' in m or '.' in m or '{' in m:
+        return '.'
     if '//' in m:
         return '//'
     if '/' in m:
@@ -411,7 +430,10 @@ def _extract_cves(text: str) -> list[RawEntity]:
     seen: set[str] = set()
     results: list[RawEntity] = []
     for m in _CVE_PATTERN.finditer(text):
-        v = m.group().upper()
+        # Strip zero-width separators and normalise any dash variant to "-"
+        # so "CVE​‑ 2024– 1234" becomes the canonical "CVE-2024-1234".
+        v = _CVE_ZW_PATTERN.sub("", m.group())
+        v = _CVE_DASH_PATTERN.sub("-", v).upper()
         if v not in seen:
             seen.add(v)
             results.append(RawEntity(value=v, entity_type=EntityType.CVE))
@@ -425,7 +447,9 @@ def _extract_mitre_ttps(text: str) -> list[RawEntity]:
         v = m.group()
         if v not in seen:
             seen.add(v)
-            results.append(RawEntity(value=v, entity_type=EntityType.TTP, mitre_id=v))
+            # TA#### IDs are ATT&CK tactics; T####[.###] are techniques/sub-techniques.
+            etype = EntityType.TACTIC if v.startswith("TA") else EntityType.TTP
+            results.append(RawEntity(value=v, entity_type=etype, mitre_id=v))
     return results
 
 
