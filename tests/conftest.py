@@ -47,6 +47,20 @@ def sample_entities() -> list[RawEntity]:
 
 # ── LLM mock fixtures ──────────────────────────────────────────────────────────
 
+@pytest.fixture(autouse=True)
+def _llm_provider_ready(monkeypatch):
+    """
+    Ensure pipeline.stage3_llm._provider_ready() returns True by default.
+
+    enrich_chunk() short-circuits to an empty result when no provider is
+    configured, which would make _call_llm mocks/patches in this suite
+    silently go unused in environments (e.g. CI) without ANTHROPIC_API_KEY.
+    Tests that specifically need the "not ready" path patch
+    _provider_ready directly and are unaffected by this env var.
+    """
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-for-pytest")
+
+
 @pytest.fixture()
 def mock_llm_response() -> dict:
     """Minimal valid LLM JSON response matching the LLMEnrichmentResult schema."""
