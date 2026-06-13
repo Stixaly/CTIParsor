@@ -4,6 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Loader2, FileText, AlignLeft, BookOpen } from 'lucide-react'
 import MarkdownPreview from '../components/MarkdownPreview'
+import PdfViewer from '../components/PdfViewer'
 
 import {
   fetchJob, fetchEntities, fetchRelationships,
@@ -676,14 +677,12 @@ export default function Review() {
               const isPdf = filename.toLowerCase().endsWith('.pdf')
               const url   = sourceUrl(jobId)
               return isPdf ? (
-                <iframe
-                  src={url}
-                  title="Original report"
-                  style={{
-                    flex: 1, border: 'none', width: '100%',
-                    minHeight: '80vh',
-                    marginTop: 12,
-                  }}
+                <PdfViewer
+                  url={url}
+                  filename={filename}
+                  entities={docEntities}
+                  focusedId={focusedId}
+                  onFocusEntity={setFocusedId}
                 />
               ) : (
                 <div style={{
