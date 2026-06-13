@@ -120,6 +120,8 @@ def init_db() -> None:
                 report_text TEXT,
                 bundle_json TEXT,
                 llm_result_json TEXT,
+                tlp_level TEXT,
+                pap_level TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -170,6 +172,8 @@ def init_db() -> None:
         # ── Migrations — safe to run on already-initialised databases ──
         _migrations = [
             "ALTER TABLE relationships ADD COLUMN evidence_text TEXT",
+            "ALTER TABLE jobs ADD COLUMN tlp_level TEXT",
+            "ALTER TABLE jobs ADD COLUMN pap_level TEXT",
         ]
         for stmt in _migrations:
             try:

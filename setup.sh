@@ -335,8 +335,8 @@ else
 
             if [[ "$DOWNLOAD_MITRE" =~ ^[Yy] ]]; then
                 mkdir -p data
-                BASE_URL="https://raw.githubusercontent.com/mitre/cti/master"
-                CAPEC_URL="https://raw.githubusercontent.com/mitre/cti/master/CAPEC/stix-capec.json"
+                BASE_URL="https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master"
+                CAPEC_URL="https://raw.githubusercontent.com/mitre/cti/master/capec/2.1/stix-capec.json"
 
                 _dl() {
                     local url="$1" dst="$2" label="$3"
@@ -480,6 +480,46 @@ else
         echo -e "  ${RED}  nano .env  →  update ANTHROPIC_API_KEY=sk-ant-...${NC}"
     else
         ok "API key configured"
+    fi
+fi
+
+# =============================================================================
+# GLiNER MODEL PRE-DOWNLOAD  (avoids a large download on the first pipeline run)
+# =============================================================================
+echo ""
+hdr "GLiNER MODEL PRE-DOWNLOAD"
+
+if [ "$OPT_NO_TORCH" = true ]; then
+    warn "--no-torch: skipping GLiNER model pre-download (Stage 2e disabled)."
+else
+    GLINER_MODEL_ID=$(grep -E '^GLINER_MODEL=' .env 2>/dev/null | tail -1 | cut -d'=' -f2-)
+    GLINER_ENABLED_VAL=$(grep -E '^GLINER_ENABLED=' .env 2>/dev/null | tail -1 | cut -d'=' -f2-)
+    GLINER_MODEL_ID="${GLINER_MODEL_ID:-urchade/gliner_large-v2.1}"
+    GLINER_ENABLED_VAL="${GLINER_ENABLED_VAL:-true}"
+
+    if [[ "$GLINER_ENABLED_VAL" =~ ^([Ff]alse|0|[Nn]o)$ ]]; then
+        info "GLINER_ENABLED=false in .env — skipping GLiNER model pre-download."
+    else
+        echo "  Stage 2e (GLiNER zero-shot NER) downloads its model from HuggingFace"
+        echo "  on first pipeline run (~800 MB for the default model). Pre-downloading"
+        echo "  it now avoids that delay during the first report processed."
+        echo ""
+        echo -e "  Model: ${CYAN}${GLINER_MODEL_ID}${NC}"
+        echo -e "  ${YELLOW}Download it now? [Y/n]${NC}"
+        read -r -p "  > " DL_GLINER
+        DL_GLINER="${DL_GLINER:-Y}"
+
+        if [[ "$DL_GLINER" =~ ^[Yy] ]]; then
+            info "Downloading ${GLINER_MODEL_ID} (this may take a few minutes)…"
+            if python -c "from gliner import GLiNER; GLiNER.from_pretrained('${GLINER_MODEL_ID}')" 2>/dev/null; then
+                ok "GLiNER model cached: ${GLINER_MODEL_ID}"
+            else
+                warn "GLiNER model pre-download failed — it will be downloaded on first pipeline run instead."
+                info "  Retry manually: python -c \"from gliner import GLiNER; GLiNER.from_pretrained('${GLINER_MODEL_ID}')\""
+            fi
+        else
+            info "Skipping. The model will download on first pipeline run instead."
+        fi
     fi
 fi
 

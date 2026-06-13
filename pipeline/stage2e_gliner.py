@@ -30,7 +30,7 @@ Entity types detected (chosen to avoid overlap with CyNER / gazetteer):
   attack infrastructure → EntityType.INFRASTRUCTURE
 
 Model configuration (via .env):
-  GLINER_MODEL     = urchade/gliner_mediumv2.1   (~300 MB, CPU-friendly, recommended)
+  GLINER_MODEL     = urchade/gliner_large-v2.1   (~800 MB, best zero-shot NER accuracy)
   GLINER_THRESHOLD = 0.40                         (lower than supervised NER: zero-shot)
   GLINER_ENABLED   = true                         (set false to disable stage)
 
@@ -60,13 +60,13 @@ warnings.filterwarnings(
 )
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-# Default: NuNER-Zero-span (NuMind) — GLiNER-compatible with improved token
-# classification heads.  Benchmarks show better zero-shot NER quality than
-# GLiNER medium on multi-domain corpora.  To revert to classic GLiNER:
-#   GLINER_MODEL=urchade/gliner_mediumv2.1
+# Default: GLiNER large v2.1 (urchade) — best zero-shot NER accuracy in the
+# GLiNER v2.1 family.  numind/NuNER-Zero-span (the previous default) was
+# removed from HuggingFace (401/repo-not-found).  For a smaller/faster model:
+#   GLINER_MODEL=urchade/gliner_medium-v2.1
 # See .env.example for the full model option list.
 _SKIP_HEAVY        = os.getenv("SKIP_HEAVY_MODELS") == "1"
-_GLINER_MODEL_ID   = os.getenv("GLINER_MODEL",     "numind/NuNER-Zero-span")
+_GLINER_MODEL_ID   = os.getenv("GLINER_MODEL",     "urchade/gliner_large-v2.1")
 _GLINER_THRESHOLD  = float(os.getenv("GLINER_THRESHOLD", "0.40"))
 _GLINER_ENABLED    = os.getenv("GLINER_ENABLED", "true").lower() not in ("false", "0", "no")
 

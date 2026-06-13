@@ -103,12 +103,12 @@ uvicorn api.main:app --reload --app-dir .
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
-│  Stage 2e — GLiNER / NuNER ZERO-SHOT NER               (offline ✅)  │
+│  Stage 2e — GLiNER ZERO-SHOT NER                       (offline ✅)  │
 │  Zero-shot NER with natural-language label descriptions              │
 │  Detects entity types the gazetteer and CyNER cannot:               │
 │    targeted sectors, campaign names, attack infrastructure,          │
 │    novel actors & malware not yet in MITRE ATT&CK                   │
-│  Default model: numind/NuNER-Zero-span (~300 MB)                    │
+│  Default model: urchade/gliner_large-v2.1 (~800 MB)                 │
 │  Configurable via GLINER_MODEL in .env                              │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
@@ -396,11 +396,11 @@ TTP_EMBEDDING_MODEL=all-MiniLM-L6-v2
 # Stage 2d — CyNER (disabled — model removed from HuggingFace)
 CYNER_ENABLED=false
 
-# Stage 2e — GLiNER / NuNER zero-shot NER
-# numind/NuNER-Zero-span  (recommended, ~300 MB)
-# urchade/gliner_mediumv2.1 (original GLiNER)
-# urchade/gliner_largev2.1  (best GLiNER accuracy, ~800 MB)
-GLINER_MODEL=numind/NuNER-Zero-span
+# Stage 2e — GLiNER zero-shot NER
+# urchade/gliner_large-v2.1  (recommended, best accuracy, ~800 MB)
+# urchade/gliner_medium-v2.1 (good accuracy/speed balance, ~300 MB)
+# urchade/gliner_small-v2.1  (fastest, lower recall, ~120 MB)
+GLINER_MODEL=urchade/gliner_large-v2.1
 GLINER_THRESHOLD=0.40
 GLINER_ENABLED=true
 ```
@@ -467,7 +467,7 @@ Each NER stage adds a different capability:
 | 2b | Aho-Corasick gazetteer | Known malware/tools/APT groups |
 | 2c | Semantic embeddings | MITRE techniques by meaning, not name |
 | 2d | CyNER (optional) | Cybersecurity NER (if model available) |
-| 2e | NuNER zero-shot | Sectors, campaigns, infrastructure, novel actors |
+| 2e | GLiNER zero-shot | Sectors, campaigns, infrastructure, novel actors |
 
 ### 2. Sliding-window chunk overlap (Stage 1)
 
@@ -764,7 +764,7 @@ Schema migrations run automatically on startup (`ALTER TABLE` wrapped in try/exc
 | Stages 1, 2, 4, 5 | ✅ fully offline |
 | Stage 2b — gazetteer NER | ✅ after `build_indexes.py` |
 | Stage 2c — semantic TTP | ✅ after `build_indexes.py` + model download |
-| Stage 2e — GLiNER / NuNER | ✅ after first model download (~300 MB cached) |
+| Stage 2e — GLiNER | ✅ after first model download (~800 MB cached) |
 | Stage 3b — hallucination filter | ✅ fully offline (rapidfuzz) |
 | Stage 3c — MITRE normalisation | ✅ after `build_indexes.py` |
 | Stage 3 — Anthropic / Mistral | ❌ requires internet |
@@ -789,7 +789,7 @@ Schema migrations run automatically on startup (`ALTER TABLE` wrapped in try/exc
 | `sentence-transformers` | Semantic TTP embeddings (Stage 2c) |
 | `transformers` | HuggingFace backbone (CyNER Stage 2d) |
 | `numpy` | Embedding cache (`.npy`) |
-| `gliner` | Zero-shot NER / NuNER (Stage 2e) |
+| `gliner` | Zero-shot NER (Stage 2e) |
 | `pyahocorasick` | Aho-Corasick multi-pattern scan (Stage 2b, 50× faster) |
 | `rapidfuzz` | Fuzzy string matching (Stage 3b filter + Stage 3c normalisation) |
 | `anthropic` | Claude API client |
@@ -944,9 +944,9 @@ Lower = more permissive (hallucination risk). Higher = stricter (false-negative 
 ### Switch NER model for Stage 2e
 ```env
 # .env — no code change required
-GLINER_MODEL=urchade/gliner_largev2.1   # larger GLiNER
-GLINER_MODEL=urchade/gliner_smallv2.1   # faster, less accurate
-GLINER_MODEL=numind/NuNER-Zero          # NuNER variant
+GLINER_MODEL=urchade/gliner_large-v2.1   # default — best accuracy (~800 MB)
+GLINER_MODEL=urchade/gliner_medium-v2.1  # good accuracy/speed balance (~300 MB)
+GLINER_MODEL=urchade/gliner_small-v2.1   # fastest, less accurate (~120 MB)
 ```
 
 ### Use a domain-specific TTP embedding model
