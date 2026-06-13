@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import datetime, timezone
 
@@ -25,6 +26,72 @@ def _make_deterministic_id(value: str, entity_type: str, prefix: str = "") -> st
     normalized = f"{prefix}:{entity_type.lower().strip()}:{value.lower().strip()}"
     det_uuid = uuid.uuid5(_STIX_NAMESPACE, normalized)
     return f"{entity_type}--{det_uuid}"
+
+
+# ---------------------------------------------------------------------------
+# TLP / PAP object markings
+#
+# TLP uses the well-known marking-definition objects bundled with stix2
+# (fixed IDs per the spec, definition_type="tlp").  PAP is not part of the
+# OASIS STIX 2.1 standard, so it's represented as a "statement" marking
+# (definition_type="statement", definition={"statement": "PAP:<level>"}) —
+# this passes strict STIX 2.1 JSON-schema validation while still conveying
+# the PAP level to consumers that understand the convention.
+# ---------------------------------------------------------------------------
+
+_TLP_MARKINGS: dict[str, object] = {
+    "RED": stix2.TLP_RED,
+    "AMBER": stix2.TLP_AMBER,
+    "GREEN": stix2.TLP_GREEN,
+    "WHITE": stix2.TLP_WHITE,
+}
+
+_PAP_LEVELS: frozenset[str] = frozenset({"RED", "AMBER", "GREEN", "WHITE"})
+
+
+def _tlp_marking(level: str | None):
+    """Returns the stix2 TLP marking-definition for `level`, or None."""
+    if not level:
+        return None
+    return _TLP_MARKINGS.get(level.strip().upper())
+
+
+def _pap_marking(level: str | None):
+    """Returns a deterministic PAP statement marking-definition, or None."""
+    if not level:
+        return None
+    lvl = level.strip().upper()
+    if lvl not in _PAP_LEVELS:
+        return None
+    pap_id = _make_deterministic_id(f"PAP:{lvl}", "marking-definition", "cti")
+    return stix2.MarkingDefinition(
+        id=pap_id,
+        definition_type="statement",
+        definition={"statement": f"PAP:{lvl}"},
+    )
+
+
+def _apply_object_markings(stix_objects: list, marking_refs: list[str]) -> list:
+    """
+    Returns a copy of `stix_objects` where every non-marking-definition object
+    has `object_marking_refs` set to `marking_refs`.
+
+    stix2 objects are immutable and SCOs don't support new_version(), so each
+    object is round-tripped through JSON to add the property — this preserves
+    deterministic IDs (object_marking_refs isn't an ID-contributing property).
+    """
+    if not marking_refs:
+        return stix_objects
+    result = []
+    for obj in stix_objects:
+        if obj.get("type") == "marking-definition":
+            result.append(obj)
+            continue
+        d = json.loads(obj.serialize())
+        d["object_marking_refs"] = marking_refs
+        result.append(stix2.parse(d, allow_custom=True))
+    return result
+
 
 # ---------------------------------------------------------------------------
 # All valid STIX 2.1 relationship types (Section 4 + Appendix B of the spec).
@@ -110,6 +177,8 @@ def build_stix_bundle(
     original_filename: str = "",
     source_hash: str | None = None,
     relationship_policy: dict | None = None,
+    tlp_level: str | None = None,
+    pap_level: str | None = None,
 ) -> stix2.Bundle:
     """
     Converts all extracted entities to STIX 2.1 objects and returns a Bundle.
@@ -144,6 +213,14 @@ def build_stix_bundle(
         • global == "auto"              → keep pipeline verb (always)
         • rule exists + enabled + pin   → replace verb with rule.verb
         • otherwise                     → keep pipeline verb
+
+    tlp_level — optional TLP level ("RED"|"AMBER"|"GREEN"|"WHITE", case
+      insensitive). When set, a TLP marking-definition is added to the
+      bundle and referenced via object_marking_refs on every object.
+
+    pap_level — optional PAP level ("RED"|"AMBER"|"GREEN"|"WHITE", case
+      insensitive). When set, a "statement" marking-definition encoding
+      "PAP:<level>" is added and referenced the same way as TLP.
     """
     stix_objects: list = []
 
@@ -551,6 +628,23 @@ def build_stix_bundle(
                 object_refs=[obj.id for obj in stix_objects if hasattr(obj, "id")],
             )
             stix_objects.append(report)
+
+    # --- TLP / PAP markings — applied to every object in the bundle ---
+    marking_defs: list = []
+    marking_refs: list[str] = []
+
+    tlp_marking = _tlp_marking(tlp_level)
+    if tlp_marking is not None:
+        marking_defs.append(tlp_marking)
+        marking_refs.append(tlp_marking.id)
+
+    pap_marking = _pap_marking(pap_level)
+    if pap_marking is not None:
+        marking_defs.append(pap_marking)
+        marking_refs.append(pap_marking.id)
+
+    if marking_refs:
+        stix_objects = marking_defs + _apply_object_markings(stix_objects, marking_refs)
 
     return stix2.Bundle(objects=stix_objects)
 

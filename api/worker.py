@@ -640,12 +640,22 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         except Exception:
             pass
 
+        # TLP / PAP markings selected by the user at upload time
+        with get_conn() as _mc:
+            _mrow = _mc.execute(
+                "SELECT tlp_level, pap_level FROM jobs WHERE id=?", (job_id,)
+            ).fetchone()
+        _tlp_level = _mrow["tlp_level"] if _mrow else None
+        _pap_level = _mrow["pap_level"] if _mrow else None
+
         bundle = build_stix_bundle(
             all_entities, llm_result, report_name,
             report_text=text,
             original_filename=original_filename,
             source_hash=source_hash,
             relationship_policy=_policy_s4,
+            tlp_level=_tlp_level,
+            pap_level=_pap_level,
         )
         logger.info(f"[Stage 4] STIX mapping complete — {len(list(bundle.objects))} objects")
         emit_progress(job_id, "stage", {
@@ -1194,6 +1204,8 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
         original_filename=original_filename,
         source_hash=source_hash,
         relationship_policy=_policy_fin,
+        tlp_level=job["tlp_level"],
+        pap_level=job["pap_level"],
     )
     bundle_json = bundle.serialize(pretty=True)
 
