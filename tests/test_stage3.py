@@ -17,12 +17,14 @@ import pytest
 
 from models.schemas import EntityType, RawEntity
 from pipeline.stage3_llm import (
+    _MAX_PROMPT_LENGTH,
     LLMEnrichmentResult,
     RelationshipExtracted,
     TTPExtracted,
     _dedup_names,
     _merge_results,
     _normalize_llm_json,
+    _sanitize_text_for_prompt,
     enrich_all_chunks,
     enrich_chunk,
 )
@@ -186,6 +188,41 @@ class TestEnrichAllChunks:
         multi = enrich_all_chunks([sample_cti_text], [sample_entities])
         # Both should be valid LLMEnrichmentResult instances with same structure
         assert type(single) is type(multi)
+
+
+# ── _sanitize_text_for_prompt ───────────────────────────────────────────────────
+
+class TestSanitizePromptStructure:
+    """
+    Regression tests for the prompt-sanitization bug: the sanitizer used to
+    truncate to 10 000 chars (overriding the 32 000 cap) and collapse every
+    newline, destroying the Markdown structure the system prompt relies on and
+    cutting the JSON output schema off the end of large prompts.
+    """
+
+    def test_preserves_newlines(self):
+        text = "# Header\n\n- bullet one\n- bullet two\n\nParagraph."
+        out = _sanitize_text_for_prompt(text)
+        assert "\n" in out
+        assert "# Header" in out
+        assert "- bullet one" in out
+
+    def test_collapses_spaces_but_not_lines(self):
+        out = _sanitize_text_for_prompt("a    b\tc\nd")
+        assert out == "a b c\nd"
+
+    def test_caps_blank_line_runs(self):
+        out = _sanitize_text_for_prompt("a\n\n\n\n\nb")
+        assert out == "a\n\nb"
+
+    def test_large_prompt_not_truncated_at_10k(self):
+        # A realistic large-doc chunk assembled prompt exceeds 10 000 chars; with
+        # the full budget the trailing schema instructions must survive.
+        body = "line of report text\n" * 700          # ~14 000 chars, well past 10k
+        text = body + "\nUNIQUE_SCHEMA_TAIL_MARKER"
+        out = _sanitize_text_for_prompt(text, max_length=_MAX_PROMPT_LENGTH)
+        assert len(out) > 10_000
+        assert "UNIQUE_SCHEMA_TAIL_MARKER" in out
 
 
 # ── _normalize_llm_json ────────────────────────────────────────────────────────

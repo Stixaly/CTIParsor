@@ -88,8 +88,15 @@ def _sanitize_text_for_prompt(text: str, max_length: int = 10000) -> str:
     for pattern in injection_patterns:
         text = re.sub(pattern, '[REDACTED]', text, flags=re.IGNORECASE)
 
-    # Normalize whitespace
-    text = re.sub(r'[\s]+', ' ', text).strip()
+    # Normalize whitespace while PRESERVING line structure.  The system prompt
+    # instructs the model to use Markdown layout (headers, tables, bullet lists)
+    # to locate IoC sections, attribution tables, and TTP lists — so newlines
+    # must survive.  Collapsing everything to single spaces (the previous
+    # behaviour) flattened the document and stripped that structure.
+    text = re.sub(r'[^\S\n]+', ' ', text)    # collapse runs of spaces/tabs, keep \n
+    text = re.sub(r' *\n *', '\n', text)     # trim spaces hugging line breaks
+    text = re.sub(r'\n{3,}', '\n\n', text)   # cap blank-line runs at one
+    text = text.strip()
 
     return text
 
@@ -498,20 +505,27 @@ def _call_openai_compatible(client_param, model: str, system: str, user: str, la
 
 def _call_llm(system: str, user: str) -> str:
     """Dispatches to the configured LLM provider with retry logic."""
-    # Sanitize inputs to prevent prompt injection
-    sanitized_system = _sanitize_text_for_prompt(system)
-    sanitized_user = _sanitize_text_for_prompt(user)
+    # Sanitize ONLY the user message — it embeds untrusted report text, so it is
+    # the prompt-injection vector.  The system prompt is developer-controlled;
+    # running it through the sanitizer would needlessly escape its content and
+    # corrupt the Markdown layout the model relies on.
+    #
+    # Use the full prompt-length budget (_MAX_PROMPT_LENGTH) here.  The previous
+    # default of 10 000 chars silently truncated the assembled prompt — cutting
+    # off the JSON output schema at the end of the template for larger chunks —
+    # even though enrich_chunk had already validated it against the 32 000 cap.
+    sanitized_user = _sanitize_text_for_prompt(user, max_length=_MAX_PROMPT_LENGTH)
 
     if _PROVIDER == "anthropic":
-        return _call_anthropic(sanitized_system, sanitized_user)
+        return _call_anthropic(system, sanitized_user)
     elif _PROVIDER == "mistral":
         client = _get_mistral_client()
         _MISTRAL_MODEL = os.environ.get("MISTRAL_MODEL", "mistral-small-latest")
-        return _call_openai_compatible(client, _MISTRAL_MODEL, sanitized_system, sanitized_user, "Mistral")
+        return _call_openai_compatible(client, _MISTRAL_MODEL, system, sanitized_user, "Mistral")
     elif _PROVIDER == "ollama":
         client = _get_ollama_client()
         _OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
-        return _call_openai_compatible(client, _OLLAMA_MODEL, sanitized_system, sanitized_user, "Ollama")
+        return _call_openai_compatible(client, _OLLAMA_MODEL, system, sanitized_user, "Ollama")
     return ""
 
 

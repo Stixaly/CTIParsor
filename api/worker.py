@@ -624,7 +624,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         # --- Stage 4 ---
         import json as _json_s4
 
-        from pipeline.stage4_stix_mapping import build_stix_bundle
+        from pipeline.stage4_stix_mapping import build_stix_bundle, verify_ioc_coverage
         report_name  = re.sub(r"[^\w\-]", "_", Path(original_filename).stem)
         source_hash  = _sha256_file(file_path)
 
@@ -648,8 +648,30 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
             relationship_policy=_policy_s4,
         )
         logger.info(f"[Stage 4] STIX mapping complete — {len(list(bundle.objects))} objects")
+
+        # Verify every regex/defang-extracted IoC became an SCO + Indicator.
+        _cov = verify_ioc_coverage(all_entities, bundle)
+        if _cov["ok"]:
+            logger.info(
+                f"[Stage 4] IoC coverage OK — all {_cov['total_iocs']} regex/defang "
+                f"IoCs have a STIX observable + Indicator"
+            )
+        else:
+            logger.warning(
+                f"[Stage 4] IoC coverage gaps — "
+                f"{len(_cov['missing_indicator'])}/{_cov['total_iocs']} IoCs without an Indicator, "
+                f"{len(_cov['missing_sco'])} without an SCO"
+            )
+            for _m in _cov["missing_indicator"][:10]:
+                logger.warning(f"    no indicator: [{_m['type']}] {_m['value']}")
+
         emit_progress(job_id, "stage", {
             "stage": 4, "label": "STIX mapping", "objects": len(list(bundle.objects)),
+            "ioc_coverage": {
+                "total": _cov["total_iocs"],
+                "with_indicator": _cov["with_indicator"],
+                "ok": _cov["ok"],
+            },
         })
 
         # --- Stage 5 ---

@@ -247,9 +247,10 @@ def _apply_overlap(chunks: list[str], overlap: int) -> list[str]:
     result = [chunks[0]]
     for i in range(1, len(chunks)):
         tail = chunks[i - 1][-overlap:]
-        # Prefer breaking at a newline so the overlap starts at a sentence/line
+        # Prefer breaking at a newline so the overlap starts at a sentence/line.
+        # find() returns -1 when absent; >= 0 also handles a newline at index 0.
         nl = tail.find("\n")
-        if nl > 0:
+        if nl >= 0:
             tail = tail[nl + 1:]
         result.append((tail + "\n\n" + chunks[i]) if tail else chunks[i])
     return result

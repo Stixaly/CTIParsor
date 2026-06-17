@@ -62,10 +62,10 @@ def main() -> None:
         total, subs = _count_techniques(_OUT)
         size_mb = _OUT.stat().st_size / 1e6
         print(f"✔ Bundle already present ({size_mb:.1f} MB, {total} techniques).")
-        print(f"  Use --force to re-download.")
+        print("  Use --force to re-download.")
         return
 
-    print(f"Downloading MITRE ATT&CK enterprise bundle...")
+    print("Downloading MITRE ATT&CK enterprise bundle...")
     print(f"  Source : {_URL}")
     print(f"  Target : {_OUT}")
     print()
