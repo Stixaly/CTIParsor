@@ -49,7 +49,6 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -264,7 +263,6 @@ def build_gazetteer(bundles: dict[str, Path | None]) -> None:
                 if not name or len(name) < 4:
                     continue
 
-                is_canonical = name == canonical_name
                 entry = {
                     "name":        name.lower(),    # match key (lowercase)
                     "canonical":   canonical_name,

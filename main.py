@@ -18,7 +18,7 @@ from pathlib import Path
 from pipeline.stage1_ingestion import ingest, chunk_text
 from pipeline.stage2_extraction import extract_entities, refang
 from pipeline.stage3_llm import enrich_all_chunks
-from pipeline.stage4_stix_mapping import build_stix_bundle
+from pipeline.stage4_stix_mapping import build_stix_bundle, verify_ioc_coverage
 from pipeline.stage5_validation import validate_and_export, print_bundle_summary
 
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".html", ".htm", ".txt", ".md"}
@@ -83,6 +83,16 @@ def run_pipeline(input_file: str, output_file: str) -> bool:
         original_filename=Path(input_file).name,
         source_hash=source_hash,
     )
+
+    # Verify every regex/defang-extracted IoC became a STIX observable + Indicator
+    cov = verify_ioc_coverage(all_entities, bundle)
+    if cov["ok"]:
+        print(f"      IoC coverage : {cov['total_iocs']}/{cov['total_iocs']} observables → SCO + Indicator")
+    else:
+        print(f"      IoC coverage : {cov['with_indicator']}/{cov['total_iocs']} IoCs have an Indicator "
+              f"({len(cov['missing_indicator'])} missing)")
+        for m in cov["missing_indicator"][:10]:
+            print(f"        [!] no indicator: [{m['type']}] {m['value']}")
 
     # Stage 5 — Validation & export
     print("\n[5/5] Validation & export...")

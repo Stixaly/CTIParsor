@@ -57,9 +57,10 @@ def get_conn() -> sqlite3.Connection:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT}")
-        # Limit WAL file size to prevent disk exhaustion
-        conn.execute("PRAGMA wal_autocheckpoint=1000")  # Checkpoint every 1000 pages
-        conn.execute("PRAGMA wal_max_size=100000000")  # 100MB max WAL size
+        # Bound WAL growth: checkpoint every 1000 pages (~4 MB at the default
+        # 4 KB page size).  Note: there is no "PRAGMA wal_max_size" in SQLite —
+        # wal_autocheckpoint is the supported mechanism for capping WAL size.
+        conn.execute("PRAGMA wal_autocheckpoint=1000")
         _local.conn = conn
     return conn
 

@@ -8,6 +8,7 @@ import stix2
 from api.logging_config import get_logger
 from models.schemas import EntityType, RawEntity
 from pipeline.stage3_llm import LLMEnrichmentResult
+from pipeline.stix_rel_spec import rel_is_suggested
 
 logger = get_logger(__name__)
 
@@ -166,6 +167,18 @@ _MIME_TYPES: dict[str, str] = {
     ".txt":  "text/plain",
     ".md":   "text/markdown",
 }
+
+# Entity types that are technical observables (the regex/defang IoC outputs of
+# Stage 2).  Each should map to a STIX SCO and — via _build_stix_pattern — an
+# Indicator.  CVE/TTP/named-entity types are intentionally excluded: they become
+# Vulnerability/AttackPattern/Malware SDOs, not cyber-observable Indicators.
+_OBSERVABLE_IOC_TYPES: frozenset[EntityType] = frozenset({
+    EntityType.IPV4, EntityType.IPV6, EntityType.DOMAIN, EntityType.URL,
+    EntityType.EMAIL, EntityType.MD5, EntityType.SHA1, EntityType.SHA256,
+    EntityType.MAC_ADDR, EntityType.ASN, EntityType.FILE,
+    EntityType.REGISTRY_KEY, EntityType.MUTEX, EntityType.NETWORK_TRAFFIC,
+    EntityType.USER_ACCOUNT,
+})
 
 
 def build_stix_bundle(
@@ -447,6 +460,39 @@ def build_stix_bundle(
         except Exception:
             pass
 
+    # Shared dedup set for ALL Relationship SROs created below (indicates,
+    # based-on, targets, and the semantic relationships loop).  Keyed by
+    # (source_id, rel_type, target_id) so a repeated logical edge is emitted once.
+    seen_rel_keys: set[tuple] = set()
+
+    # ObservedData wrapping for IoC indicators.  STIX 2.1 best-practice chain is
+    #   SCO  ◄─(object_refs)─  observed-data  ◄─(based-on)─  indicator
+    # Linking an indicator --based-on--> directly to a SCO is permitted but raises
+    # a {202} best-practice warning; observed-data is the suggested target.
+    # Cached per SCO id so indicators sharing an observable share one ObservedData.
+    _observed_data_by_sco: dict[str, object] = {}
+
+    def _observed_data_for(sco):
+        """Create (once) an ObservedData SDO referencing one SCO; return it or None."""
+        if sco is None or not hasattr(sco, "id"):
+            return None
+        if sco.id in _observed_data_by_sco:
+            return _observed_data_by_sco[sco.id]
+        try:
+            _now = datetime.now(timezone.utc)
+            od = stix2.ObservedData(
+                id=_make_deterministic_id(sco.id, "observed-data", "cti"),
+                first_observed=_now,
+                last_observed=_now,
+                number_observed=1,
+                object_refs=[sco.id],
+            )
+            stix_objects.append(od)
+            _observed_data_by_sco[sco.id] = od
+            return od
+        except Exception:
+            return None
+
     # --- Indicator SDOs for IoCs linked to malware ---
     # Each ioc_association becomes: Indicator (pattern) --indicates--> Malware
     seen_indicators: set[str] = set()
@@ -467,7 +513,7 @@ def build_stix_bundle(
             if existing_indicator:
                 _add_relationship(
                     stix_objects, existing_indicator, "indicates", malware,
-                    confidence=0.8, pol_index=_pol_index,
+                    confidence=0.8, pol_index=_pol_index, seen=seen_rel_keys,
                 )
             continue
 
@@ -489,7 +535,13 @@ def build_stix_bundle(
             name_to_stix[f"indicator:{ioc_key}"] = indicator
             seen_indicators.add(ioc_key)
 
-            _add_relationship(stix_objects, indicator, "indicates", malware, confidence=0.8, pol_index=_pol_index)
+            _add_relationship(stix_objects, indicator, "indicates", malware, confidence=0.8,
+                              pol_index=_pol_index, seen=seen_rel_keys)
+            # Indicator --based-on--> ObservedData --(object_refs)--> SCO
+            obs = _observed_data_for(sco)
+            if obs is not None:
+                _add_relationship(stix_objects, indicator, "based-on", obs, confidence=0.9,
+                                  pol_index=_pol_index, seen=seen_rel_keys)
         except Exception:
             pass
 
@@ -518,8 +570,11 @@ def build_stix_bundle(
             stix_objects.append(indicator)
             name_to_stix[f"indicator:{ioc_key}"] = indicator
             seen_indicators.add(ioc_key)
-            # Link Indicator → based-on → SCO
-            _add_relationship(stix_objects, indicator, "based-on", sco, confidence=0.9, pol_index=_pol_index)
+            # Indicator --based-on--> ObservedData --(object_refs)--> SCO
+            obs = _observed_data_for(sco)
+            if obs is not None:
+                _add_relationship(stix_objects, indicator, "based-on", obs, confidence=0.9,
+                                  pol_index=_pol_index, seen=seen_rel_keys)
         except Exception:
             pass
 
@@ -531,15 +586,17 @@ def build_stix_bundle(
         for country in llm_result.targeted_countries:
             location = name_to_stix.get(f"location:{country.lower()}")
             if location:
-                _add_relationship(stix_objects, actor, "targets", location, pol_index=_pol_index)
+                _add_relationship(stix_objects, actor, "targets", location,
+                                  pol_index=_pol_index, seen=seen_rel_keys)
         for sector in llm_result.targeted_sectors:
             identity = name_to_stix.get(f"identity:{sector.lower()}")
             if identity:
-                _add_relationship(stix_objects, actor, "targets", identity, pol_index=_pol_index)
+                _add_relationship(stix_objects, actor, "targets", identity,
+                                  pol_index=_pol_index, seen=seen_rel_keys)
 
     # --- SROs — semantic relationships (deduplicated, spec-validated) ---
-    seen_rel_keys: set[tuple] = set()
-
+    # Reuses the shared seen_rel_keys set so a semantic edge that duplicates a
+    # targets/indicates edge created above is also collapsed.
     for rel in llm_result.relationships:
         source = name_to_stix.get(rel.source_value.lower())
         target = name_to_stix.get(rel.target_value.lower())
@@ -558,6 +615,12 @@ def build_stix_bundle(
         if _pol_index:
             rel_type = _apply_policy(rel_type, source, target, _pol_index)
 
+        # STIX 2.1 best-practice: if the verb is not a *suggested* relationship
+        # for this (source-type → target-type) pair, fall back to the universal
+        # 'related-to' so the bundle stays within the spec's relationship model.
+        if not rel_is_suggested(getattr(source, "type", ""), rel_type, getattr(target, "type", "")):
+            rel_type = "related-to"
+
         rel_key = (source.id, rel_type, target.id)
         if rel_key in seen_rel_keys:
             continue
@@ -573,6 +636,47 @@ def build_stix_bundle(
             stix_objects.append(relationship)
         except Exception:
             pass
+
+    # --- Policy-forced relationships (enforce mode, "pin" rules) ---
+    # In "enforce" mode a pinned rule does more than relabel edges the pipeline
+    # already inferred (handled by _apply_policy above): it MATERIALISES the
+    # analyst's link model.  For every enabled "pin" rule, an edge is created
+    # between each object of the rule's source type and each object of its target
+    # type — so e.g. "threat-actor uses malware" links the report's actors to its
+    # malware even when no extraction stage proposed that connection.
+    #
+    # Notes:
+    #   • Existing edges are not duplicated (shared seen_rel_keys set).
+    #   • Self-loops are skipped.
+    #   • This is an all-pairs (Cartesian) materialisation, so high-cardinality
+    #     pairs (e.g. indicator>malware over a large IoC list) can create many
+    #     edges — set such pairs to "Auto" in the policy if that's not wanted.
+    if relationship_policy and relationship_policy.get("global") != "auto":
+        # Snapshot the created SDOs/SCOs grouped by STIX type (taken before we
+        # start appending the forced relationships below).
+        _type_to_objs: dict[str, list] = {}
+        for _obj in stix_objects:
+            _otype = _obj.get("type") if hasattr(_obj, "get") else getattr(_obj, "type", None)
+            if _otype in ("relationship", "report") or _otype is None:
+                continue
+            _type_to_objs.setdefault(_otype, []).append(_obj)
+
+        for _rule in relationship_policy.get("rules", []):
+            if _rule.get("mode") != "pin" or not _rule.get("enabled", True):
+                continue
+            _verb = (_rule.get("verb") or "").strip().lower()
+            if _verb not in VALID_REL_TYPES:
+                continue   # non-spec verb — don't force-create (matches _apply_policy)
+            for _s_obj in _type_to_objs.get(_rule.get("src", ""), []):
+                for _t_obj in _type_to_objs.get(_rule.get("tgt", ""), []):
+                    if _s_obj.id == _t_obj.id:
+                        continue
+                    # pol_index=None: the verb is already the pinned verb, so we
+                    # don't want _apply_policy to re-resolve it.
+                    _add_relationship(
+                        stix_objects, _s_obj, _verb, _t_obj,
+                        pol_index=None, seen=seen_rel_keys,
+                    )
 
     # --- Artifact SCO for the source document ---
     # Represents the original ingested file (PDF, DOCX, …) as a STIX 2.1
@@ -647,6 +751,72 @@ def build_stix_bundle(
         stix_objects = marking_defs + _apply_object_markings(stix_objects, marking_refs)
 
     return stix2.Bundle(objects=stix_objects)
+
+
+def verify_ioc_coverage(raw_entities: list[RawEntity], bundle: stix2.Bundle) -> dict:
+    """
+    Verify that every observable IoC extracted by Stage 2 (regex / defang) is
+    represented in *bundle* as a STIX SCO **and** has an Indicator built from it.
+
+    This is a completeness audit: it catches IoCs that were extracted but then
+    silently dropped from the bundle (e.g. an observable type with no STIX
+    pattern mapping, so no Indicator is generated).
+
+    Detection is exact, not heuristic: SCO ids are the deterministic UUIDv5 the
+    stix2 library derives from the observable value, and Indicator ids are the
+    deterministic ids build_stix_bundle assigns ("ioc_{value}").  We recompute
+    both and check membership in the bundle.
+
+    Returns a report dict:
+        {
+          "total_iocs":        int,   # distinct observable IoCs from regex/defang
+          "with_sco":          int,
+          "with_indicator":    int,
+          "missing_sco":       [{"value", "type"}, ...],
+          "missing_indicator": [{"value", "type"}, ...],
+          "ok":                bool,  # True iff every IoC has both SCO + Indicator
+        }
+    """
+    bundle_ids = {obj.id for obj in bundle.objects if hasattr(obj, "id")}
+
+    total = with_sco = with_indicator = 0
+    missing_sco: list[dict] = []
+    missing_indicator: list[dict] = []
+    seen: set[tuple[str, EntityType]] = set()
+
+    for entity in raw_entities:
+        if entity.entity_type not in _OBSERVABLE_IOC_TYPES:
+            continue
+        key = (entity.value.lower(), entity.entity_type)
+        if key in seen:
+            continue
+        seen.add(key)
+        total += 1
+
+        sco = _entity_to_sco(entity)
+        has_sco = sco is not None and getattr(sco, "id", None) in bundle_ids
+
+        indicator_id = _make_deterministic_id(f"ioc_{entity.value}", "indicator", "cti")
+        has_indicator = indicator_id in bundle_ids
+
+        record = {"value": entity.value, "type": entity.entity_type.value}
+        if has_sco:
+            with_sco += 1
+        else:
+            missing_sco.append(record)
+        if has_indicator:
+            with_indicator += 1
+        else:
+            missing_indicator.append(record)
+
+    return {
+        "total_iocs":        total,
+        "with_sco":          with_sco,
+        "with_indicator":    with_indicator,
+        "missing_sco":       missing_sco,
+        "missing_indicator": missing_indicator,
+        "ok":                not missing_sco and not missing_indicator,
+    }
 
 
 def _map_iocs_to_scos(entities: list[RawEntity]) -> tuple[list, dict[str, object]]:
@@ -842,12 +1012,18 @@ def _add_relationship(
     target,
     confidence: float | None = None,
     pol_index: dict | None = None,
+    seen: set | None = None,
 ) -> None:
     """Appends a Relationship SRO if source and target have ids.
 
     pol_index: optional policy rule index (pre-computed in build_stix_bundle).
     When provided, a pinned rule for the (source.type, target.type) pair
     overrides the inferred rel_type.
+
+    seen: optional shared set of (source_id, rel_type, target_id) keys used to
+    deduplicate.  stix2.Relationship assigns a fresh random UUID on every call,
+    so without this guard the same logical edge (e.g. actor --targets--> country)
+    would appear multiple times in the bundle when its endpoints repeat.
     """
     if not hasattr(source, "id") or not hasattr(target, "id"):
         return
@@ -857,6 +1033,18 @@ def _add_relationship(
         rel_type = _apply_policy(rel_type, source, target, pol_index)
     elif rel_type not in VALID_REL_TYPES:
         rel_type = "related-to"
+
+    # STIX 2.1 best-practice: downgrade a verb that is not *suggested* for this
+    # (source-type → target-type) pair to the universal 'related-to'.  Applies to
+    # the targets/indicates/based-on helpers and to policy-forced edges alike.
+    if not rel_is_suggested(getattr(source, "type", ""), rel_type, getattr(target, "type", "")):
+        rel_type = "related-to"
+
+    if seen is not None:
+        key = (source.id, rel_type, target.id)
+        if key in seen:
+            return
+        seen.add(key)
 
     try:
         kwargs: dict = {
