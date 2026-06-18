@@ -6,7 +6,7 @@ an isolated temp database (see the `temp_db` fixture in conftest).
 """
 import json
 
-from models.schemas import EntityType, EvidenceLabel, RawEntity
+from models.schemas import EvidenceLabel
 from pipeline.stage3_llm import LLMEnrichmentResult, RelationshipExtracted
 
 

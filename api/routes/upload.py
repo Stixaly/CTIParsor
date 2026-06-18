@@ -3,7 +3,7 @@ from uuid import uuid4
 
 import filetype
 import magic
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from api.db import _lock, get_conn, now_iso
 from api.main import limiter
@@ -32,18 +32,35 @@ _MAX_BYTES = 50 * 1024 * 1024
 # Maximum file size to check in memory for MIME validation (10 MB)
 _MAX_MIME_CHECK = 10 * 1024 * 1024
 
+# Allowed TLP / PAP marking levels (object_marking_refs applied to every
+# object in the generated STIX bundle — see stage4_stix_mapping.py)
+_MARKING_LEVELS = {"RED", "AMBER", "GREEN", "WHITE"}
+
 
 @router.post("/upload")
 @limiter.limit("10/minute")
 async def upload_file(
     request: Request,
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
+    tlp_level: str | None = Form(None),
+    pap_level: str | None = Form(None),
 ):
     """
     Upload a CTI report file for processing.
 
     Rate limited to 10 uploads per minute per IP address.
+
+    tlp_level / pap_level — optional TLP/PAP markings ("RED"|"AMBER"|"GREEN"|"WHITE")
+    applied to every object in the generated STIX bundle.
     """
+    if tlp_level is not None:
+        tlp_level = tlp_level.strip().upper() or None
+        if tlp_level and tlp_level not in _MARKING_LEVELS:
+            raise HTTPException(400, f"Invalid tlp_level. Valid: {', '.join(sorted(_MARKING_LEVELS))}")
+    if pap_level is not None:
+        pap_level = pap_level.strip().upper() or None
+        if pap_level and pap_level not in _MARKING_LEVELS:
+            raise HTTPException(400, f"Invalid pap_level. Valid: {', '.join(sorted(_MARKING_LEVELS))}")
     # Check file extension
     suffix = Path(file.filename or "file").suffix.lower()
     if suffix not in SUPPORTED:
@@ -136,8 +153,9 @@ async def upload_file(
     with _lock:
         with get_conn() as conn:
             conn.execute(
-                "INSERT INTO jobs (id, original_filename, status, created_at, updated_at) VALUES (?,?,?,?,?)",
-                (job_id, file.filename, "uploaded", ts, ts),
+                "INSERT INTO jobs (id, original_filename, status, tlp_level, pap_level, created_at, updated_at) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (job_id, file.filename, "uploaded", tlp_level, pap_level, ts, ts),
             )
             conn.commit()
 

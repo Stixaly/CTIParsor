@@ -10,7 +10,6 @@ from pipeline.stage3_llm import (
 from pipeline.stage3e_consensus import reconcile
 from pipeline.stage4_stix_mapping import build_stix_bundle
 
-
 # ── Feature 1 — evidence labels ────────────────────────────────────────────
 
 def test_relationship_default_label_is_reported():

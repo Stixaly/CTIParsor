@@ -15,7 +15,14 @@ export interface Job {
   updated_at: string
   entity_count?: number
   relationship_count?: number
+  tlp_level?: string | null
+  pap_level?: string | null
 }
+
+// TLP / PAP marking levels offered at upload time — applied via
+// object_marking_refs to every object in the generated STIX bundle.
+export const MARKING_LEVELS = ['RED', 'AMBER', 'GREEN', 'WHITE'] as const
+export type MarkingLevel = typeof MARKING_LEVELS[number]
 
 export interface Entity {
   id: string

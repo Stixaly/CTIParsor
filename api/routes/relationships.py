@@ -82,7 +82,8 @@ def create_relationship(job_id: str, body: RelCreate):
         with get_conn() as conn:
             conn.execute(
                 "INSERT INTO relationships "
-                "(id,job_id,source_value,relationship_type,target_value,confidence,accepted,evidence_text,evidence_label) "
+                "(id,job_id,source_value,relationship_type,target_value,"
+                "confidence,accepted,evidence_text,evidence_label) "
                 "VALUES (?,?,?,?,?,?,1,?,?)",
                 (rid, job_id, body.source_value.strip(), body.relationship_type,
                  body.target_value.strip(), body.confidence, body.evidence_text, _label),

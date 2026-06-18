@@ -53,7 +53,8 @@ class StatusPatch(BaseModel):
 def list_jobs():
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, original_filename, status, created_at, updated_at FROM jobs ORDER BY created_at DESC"
+            "SELECT id, original_filename, status, tlp_level, pap_level, created_at, updated_at "
+            "FROM jobs ORDER BY created_at DESC"
         ).fetchall()
     jobs = []
     for row in rows:
@@ -61,6 +62,8 @@ def list_jobs():
             "id": row["id"],
             "original_filename": row["original_filename"],
             "status": row["status"],
+            "tlp_level": row["tlp_level"],
+            "pap_level": row["pap_level"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         })
@@ -85,6 +88,8 @@ def get_job(job_id: str):
         "original_filename": row["original_filename"],
         "status": row["status"],
         "report_text": row["report_text"],
+        "tlp_level": row["tlp_level"],
+        "pap_level": row["pap_level"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
         "entity_count": entity_count,

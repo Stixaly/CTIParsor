@@ -30,35 +30,53 @@ def _make_deterministic_id(value: str, entity_type: str, prefix: str = "") -> st
     return f"{entity_type}--{det_uuid}"
 
 
-# ---------------------------------------------------------------------------
-# Provenance & sharing metadata (TLP marking + authoring Identity)
+# Provenance & sharing metadata — authoring Identity + TLP/PAP markings
 #
 # Every object in the bundle is stamped with:
-#   • object_marking_refs → a TLP marking (configurable via STIX_TLP)
 #   • created_by_ref      → an Identity SDO representing CTIParsor as the
 #                           intelligence AUTHOR (not the threat actor).  SCOs
 #                           are marked but carry no created_by_ref (STIX 2.1
 #                           cyber-observables have no such property).
-# This is what makes a bundle "ingestion-grade" for OpenCTI / MISP, which apply
-# sharing policy from the TLP marking and group intel by author identity.
+#   • object_marking_refs → TLP (and optionally PAP) markings.
+#
+# TLP uses the well-known marking-definition objects bundled with stix2 (fixed
+# IDs per the spec).  The level comes from the per-job `tlp_level`, falling back
+# to the STIX_TLP env default.  PAP is not part of OASIS STIX 2.1, so it's a
+# "statement" marking that still passes strict JSON-schema validation.  Together
+# this makes a bundle "ingestion-grade" for OpenCTI / MISP.
 # ---------------------------------------------------------------------------
 
-_TLP_MARKINGS = {
-    "clear": stix2.TLP_WHITE, "white": stix2.TLP_WHITE,
-    "green": stix2.TLP_GREEN,
-    "amber": stix2.TLP_AMBER,
-    "red":   stix2.TLP_RED,
+_TLP_MARKINGS: dict[str, object] = {
+    "RED": stix2.TLP_RED,
+    "AMBER": stix2.TLP_AMBER,
+    "GREEN": stix2.TLP_GREEN,
+    "WHITE": stix2.TLP_WHITE,
+    "CLEAR": stix2.TLP_WHITE,   # TLP 2.0 naming → STIX 2.1 TLP:WHITE
 }
 
+_PAP_LEVELS: frozenset[str] = frozenset({"RED", "AMBER", "GREEN", "WHITE"})
 
-def _tlp_marking() -> stix2.MarkingDefinition:
-    """Return the TLP MarkingDefinition selected by STIX_TLP (default: clear).
 
-    Uses the stix2 predefined TLP markings, which have the standard interoperable
-    IDs that OpenCTI / MISP recognise out of the box.
-    """
-    level = os.environ.get("STIX_TLP", "clear").strip().lower()
-    return _TLP_MARKINGS.get(level, stix2.TLP_WHITE)
+def _tlp_marking(level: str | None):
+    """Returns the stix2 TLP marking-definition for `level`, or None."""
+    if not level:
+        return None
+    return _TLP_MARKINGS.get(level.strip().upper())
+
+
+def _pap_marking(level: str | None):
+    """Returns a deterministic PAP statement marking-definition, or None."""
+    if not level:
+        return None
+    lvl = level.strip().upper()
+    if lvl not in _PAP_LEVELS:
+        return None
+    pap_id = _make_deterministic_id(f"PAP:{lvl}", "marking-definition", "cti")
+    return stix2.MarkingDefinition(
+        id=pap_id,
+        definition_type="statement",
+        definition={"statement": f"PAP:{lvl}"},
+    )
 
 
 def _authoring_identity() -> stix2.Identity:
@@ -83,29 +101,33 @@ def _authoring_identity() -> stix2.Identity:
     )
 
 
-def _stamp_provenance(obj, author_id: str, marking_id: str):
-    """Return a copy of *obj* carrying the TLP marking (and, for SDO/SRO, the
-    authoring created_by_ref).  Serialises to plain JSON first so nested
-    properties reconstruct cleanly via stix2.parse.
+def _stamp_objects(stix_objects: list, author_id: str, marking_refs: list[str]) -> list:
+    """Return a copy of `stix_objects` with provenance stamped on each object:
+    `object_marking_refs` (all objects) and `created_by_ref` (SDO/SRO only —
+    SCOs have neither a `created` timestamp nor a created_by_ref property).
+
+    stix2 objects are immutable and SCOs don't support new_version(), so each is
+    round-tripped through JSON — this preserves deterministic IDs (neither
+    property contributes to the ID).
     """
-    if obj.get("type") == "marking-definition":
-        return obj  # don't mark the marking itself
-    try:
+    result = []
+    for obj in stix_objects:
+        if obj.get("type") == "marking-definition":
+            result.append(obj)
+            continue
         d = json.loads(obj.serialize())
-    except Exception:
-        return obj
-    marks = list(d.get("object_marking_refs", []))
-    if marking_id not in marks:
-        marks.append(marking_id)
-    d["object_marking_refs"] = marks
-    # SDOs and SROs have a 'created' timestamp and may carry created_by_ref;
-    # SCOs (cyber-observables) do not.  Never self-reference the author.
-    if "created" in d and d.get("id") != author_id:
-        d.setdefault("created_by_ref", author_id)
-    try:
-        return stix2.parse(d, allow_custom=True)
-    except Exception:
-        return obj
+        if marking_refs:
+            existing = list(d.get("object_marking_refs", []))
+            for ref in marking_refs:
+                if ref not in existing:
+                    existing.append(ref)
+            d["object_marking_refs"] = existing
+        # SDOs/SROs have a 'created' timestamp and may carry created_by_ref;
+        # SCOs do not.  Never self-reference the author identity.
+        if "created" in d and d.get("id") != author_id:
+            d.setdefault("created_by_ref", author_id)
+        result.append(stix2.parse(d, allow_custom=True))
+    return result
 
 # ---------------------------------------------------------------------------
 # All valid STIX 2.1 relationship types (Section 4 + Appendix B of the spec).
@@ -203,6 +225,8 @@ def build_stix_bundle(
     original_filename: str = "",
     source_hash: str | None = None,
     relationship_policy: dict | None = None,
+    tlp_level: str | None = None,
+    pap_level: str | None = None,
 ) -> stix2.Bundle:
     """
     Converts all extracted entities to STIX 2.1 objects and returns a Bundle.
@@ -237,6 +261,14 @@ def build_stix_bundle(
         • global == "auto"              → keep pipeline verb (always)
         • rule exists + enabled + pin   → replace verb with rule.verb
         • otherwise                     → keep pipeline verb
+
+    tlp_level — optional TLP level ("RED"|"AMBER"|"GREEN"|"WHITE", case
+      insensitive). When set, a TLP marking-definition is added to the
+      bundle and referenced via object_marking_refs on every object.
+
+    pap_level — optional PAP level ("RED"|"AMBER"|"GREEN"|"WHITE", case
+      insensitive). When set, a "statement" marking-definition encoding
+      "PAP:<level>" is added and referenced the same way as TLP.
     """
     stix_objects: list = []
 
@@ -742,17 +774,31 @@ def build_stix_bundle(
             )
             stix_objects.append(report)
 
-    # --- Stamp provenance: TLP marking + authoring Identity on every object ---
-    # The author Identity and TLP marking are added to the bundle but kept OUT
-    # of the Report's object_refs (they are bundle-level provenance, referenced
-    # via created_by_ref / object_marking_refs rather than report contents).
-    _author = _authoring_identity()
-    _tlp    = _tlp_marking()
-    stamped = [_stamp_provenance(o, _author.id, _tlp.id) for o in stix_objects]
+    # --- Provenance + sharing markings — stamp every object ---
+    # Authoring Identity (created_by_ref) + TLP/PAP object markings.  The author
+    # Identity and marking-definitions are added to the bundle but kept OUT of
+    # the Report's object_refs (bundle-level provenance, not report contents).
+    author = _authoring_identity()
 
-    # allow_custom so Relationship x_evidence_label (and any other x_ props)
-    # pass through Bundle construction + serialization without rejection.
-    return stix2.Bundle(objects=[_author, _tlp, *stamped], allow_custom=True)
+    marking_defs: list = []
+    marking_refs: list[str] = []
+
+    # Per-job tlp_level wins; otherwise fall back to the STIX_TLP env default.
+    tlp_marking = _tlp_marking(tlp_level) or _tlp_marking(os.environ.get("STIX_TLP", "clear"))
+    if tlp_marking is not None:
+        marking_defs.append(tlp_marking)
+        marking_refs.append(tlp_marking.id)
+
+    pap_marking = _pap_marking(pap_level)
+    if pap_marking is not None:
+        marking_defs.append(pap_marking)
+        marking_refs.append(pap_marking.id)
+
+    stamped = _stamp_objects(stix_objects, author.id, marking_refs)
+
+    # allow_custom so Relationship x_evidence_label (and any x_ props) pass
+    # through Bundle construction + serialization without rejection.
+    return stix2.Bundle(objects=[author, *marking_defs, *stamped], allow_custom=True)
 
 
 def verify_ioc_coverage(raw_entities: list[RawEntity], bundle: stix2.Bundle) -> dict:
