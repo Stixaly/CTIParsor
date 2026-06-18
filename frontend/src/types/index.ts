@@ -29,6 +29,8 @@ export interface Entity {
   source: string
 }
 
+export type EvidenceLabel = 'observed' | 'reported' | 'assessed' | 'inferred' | 'gap'
+
 export interface Relationship {
   id: string
   job_id: string
@@ -38,6 +40,7 @@ export interface Relationship {
   confidence: number
   accepted: boolean | null
   evidence_text: string | null
+  evidence_label?: EvidenceLabel
 }
 
 export interface ProgressEvent {

@@ -13,12 +13,16 @@ VALID_REL_TYPES = [
 ]
 
 
+_VALID_LABELS = {"observed", "reported", "assessed", "inferred", "gap"}
+
+
 class RelPatch(BaseModel):
     accepted: bool | None = None
     source_value: str | None = None
     relationship_type: str | None = None
     target_value: str | None = None
     evidence_text: str | None = None
+    evidence_label: str | None = None
 
 
 class RelCreate(BaseModel):
@@ -27,6 +31,7 @@ class RelCreate(BaseModel):
     target_value: str
     confidence: float = 0.8
     evidence_text: str | None = None
+    evidence_label: str = "reported"
 
 
 def _row_to_dict(row) -> dict:
@@ -38,8 +43,13 @@ def _row_to_dict(row) -> dict:
         "target_value": row["target_value"],
         "confidence": row["confidence"],
         "accepted": None if row["accepted"] is None else bool(row["accepted"]),
-        # evidence_text was added via migration; use .get() for safety on old rows
+        # evidence_text / evidence_label were added via migration; guard old rows
         "evidence_text": row["evidence_text"] if "evidence_text" in row.keys() else None,
+        "evidence_label": (
+            row["evidence_label"]
+            if "evidence_label" in row.keys() and row["evidence_label"]
+            else "reported"
+        ),
     }
 
 
@@ -66,18 +76,19 @@ def create_relationship(job_id: str, body: RelCreate):
     with get_conn() as conn:
         if not conn.execute("SELECT id FROM jobs WHERE id=?", (job_id,)).fetchone():
             raise HTTPException(404, "Job not found")
+    _label = body.evidence_label if body.evidence_label in _VALID_LABELS else "reported"
     rid = str(uuid4())
     with _lock:
         with get_conn() as conn:
             conn.execute(
                 "INSERT INTO relationships "
-                "(id,job_id,source_value,relationship_type,target_value,confidence,accepted,evidence_text) "
-                "VALUES (?,?,?,?,?,?,1,?)",
+                "(id,job_id,source_value,relationship_type,target_value,confidence,accepted,evidence_text,evidence_label) "
+                "VALUES (?,?,?,?,?,?,1,?,?)",
                 (rid, job_id, body.source_value.strip(), body.relationship_type,
-                 body.target_value.strip(), body.confidence, body.evidence_text),
+                 body.target_value.strip(), body.confidence, body.evidence_text, _label),
             )
             conn.commit()
-    return {"id": rid, "job_id": job_id, **body.model_dump(), "accepted": True}
+    return {"id": rid, "job_id": job_id, **body.model_dump(), "evidence_label": _label, "accepted": True}
 
 
 @router.patch("/{rel_id}")
@@ -105,6 +116,12 @@ def update_relationship(job_id: str, rel_id: str, patch: RelPatch):
     if "evidence_text" in patch.model_fields_set:
         updates.append("evidence_text=?")
         values.append(patch.evidence_text)
+    if "evidence_label" in patch.model_fields_set and patch.evidence_label is not None:
+        if patch.evidence_label not in _VALID_LABELS:
+            raise HTTPException(400, f"Unknown evidence_label '{patch.evidence_label}'. "
+                                     f"Valid: {', '.join(sorted(_VALID_LABELS))}")
+        updates.append("evidence_label=?")
+        values.append(patch.evidence_label)
 
     if not updates:
         with get_conn() as conn:

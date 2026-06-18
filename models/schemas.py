@@ -39,6 +39,19 @@ class EntityType(str, Enum):
     INCIDENT = "incident"          # incident SDO (STIX 2.1)
 
 
+class EvidenceLabel(str, Enum):
+    """How well a source supports a claim (NATO/Admiralty-style evidence grading).
+
+    Applied to relationships (and, later, entities) so an analyst can tell a
+    directly-observed fact from an LLM inference at the same confidence number.
+    """
+    OBSERVED = "observed"   # directly shown in telemetry/sample/log/screenshot — strongest
+    REPORTED = "reported"   # the source states it (assertion-level)
+    ASSESSED = "assessed"   # the source's analytical judgment
+    INFERRED = "inferred"   # analyst/LLM conclusion combining multiple facts — weakest
+    GAP      = "gap"        # unknown / not proven in the text
+
+
 class RawEntity(BaseModel):
     value: str
     entity_type: EntityType

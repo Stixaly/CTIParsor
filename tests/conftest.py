@@ -68,6 +68,7 @@ def mock_llm_response() -> dict:
                 "target_value": "SUNBURST",
                 "confidence": 0.95,
                 "evidence_text": "APT29 deployed SUNBURST malware against SolarWinds targets.",
+                "evidence_label": "observed",
             }
         ],
         "ioc_associations": [
@@ -114,6 +115,47 @@ def mock_llm_bad_json():
 @pytest.fixture()
 def storage() -> InMemoryJobStorage:
     return InMemoryJobStorage()
+
+
+# ── Isolated SQLite database ────────────────────────────────────────────────────
+
+@pytest.fixture()
+def temp_db(tmp_path, monkeypatch):
+    """Point api.db at a throwaway SQLite file and run migrations.
+
+    Resets the thread-local connection cache before and after so the temp path
+    is actually used and the next test reconnects to the real DB_PATH (which
+    monkeypatch restores). Lets worker/route tests write rows without touching
+    the developer's cti_stix.db.
+    """
+    import api.db as db
+
+    def _drop_conn():
+        conn = getattr(db._local, "conn", None)
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            db._local.conn = None
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "test.db")
+    _drop_conn()
+    db.init_db()
+    yield db
+    _drop_conn()
+
+
+@pytest.fixture()
+def temp_db_client(temp_db):
+    """FastAPI TestClient bound to the isolated temp database."""
+    from fastapi.testclient import TestClient
+
+    import api.main
+
+    with patch("api.main.init_db"):
+        with TestClient(api.main.app, raise_server_exceptions=True) as client:
+            yield client
 
 
 # ── FastAPI test client ────────────────────────────────────────────────────────

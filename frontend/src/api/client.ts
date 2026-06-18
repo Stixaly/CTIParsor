@@ -81,6 +81,7 @@ export const fetchRelationships = (jobId: string) =>
   req<Relationship[]>(`/jobs/${jobId}/relationships`)
 export const createRelationship = (jobId: string, body: {
   source_value: string; relationship_type: string; target_value: string; confidence?: number; evidence_text?: string | null
+  evidence_label?: 'observed' | 'reported' | 'assessed' | 'inferred' | 'gap'
 }) =>
   req<Relationship>(`/jobs/${jobId}/relationships`, { method: 'POST', body: JSON.stringify(body) })
 export const updateRelationship = (jobId: string, relId: string, patch: object) =>

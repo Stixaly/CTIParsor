@@ -1,3 +1,5 @@
+import json
+import os
 import uuid
 from datetime import datetime, timezone
 
@@ -26,6 +28,84 @@ def _make_deterministic_id(value: str, entity_type: str, prefix: str = "") -> st
     normalized = f"{prefix}:{entity_type.lower().strip()}:{value.lower().strip()}"
     det_uuid = uuid.uuid5(_STIX_NAMESPACE, normalized)
     return f"{entity_type}--{det_uuid}"
+
+
+# ---------------------------------------------------------------------------
+# Provenance & sharing metadata (TLP marking + authoring Identity)
+#
+# Every object in the bundle is stamped with:
+#   • object_marking_refs → a TLP marking (configurable via STIX_TLP)
+#   • created_by_ref      → an Identity SDO representing CTIParsor as the
+#                           intelligence AUTHOR (not the threat actor).  SCOs
+#                           are marked but carry no created_by_ref (STIX 2.1
+#                           cyber-observables have no such property).
+# This is what makes a bundle "ingestion-grade" for OpenCTI / MISP, which apply
+# sharing policy from the TLP marking and group intel by author identity.
+# ---------------------------------------------------------------------------
+
+_TLP_MARKINGS = {
+    "clear": stix2.TLP_WHITE, "white": stix2.TLP_WHITE,
+    "green": stix2.TLP_GREEN,
+    "amber": stix2.TLP_AMBER,
+    "red":   stix2.TLP_RED,
+}
+
+
+def _tlp_marking() -> stix2.MarkingDefinition:
+    """Return the TLP MarkingDefinition selected by STIX_TLP (default: clear).
+
+    Uses the stix2 predefined TLP markings, which have the standard interoperable
+    IDs that OpenCTI / MISP recognise out of the box.
+    """
+    level = os.environ.get("STIX_TLP", "clear").strip().lower()
+    return _TLP_MARKINGS.get(level, stix2.TLP_WHITE)
+
+
+def _authoring_identity() -> stix2.Identity:
+    """Stable Identity SDO naming CTIParsor as the author of all bundle objects.
+
+    created_by_ref on every object points here — to the pipeline that produced
+    the intelligence, NOT to the threat actor.  Actor attribution is expressed
+    only via the `attributed-to` relationship.
+    """
+    name = os.environ.get("STIX_AUTHOR_NAME", "CTIParsor").strip() or "CTIParsor"
+    ident_id = _make_deterministic_id(name, "identity", prefix="author")
+    return stix2.Identity(
+        id=ident_id,
+        name=name,
+        identity_class="system",
+        description=(
+            "Automated CTI extraction pipeline. Authored the objects in this "
+            "bundle. created_by_ref refers to this pipeline as the intelligence "
+            "author, not to the threat actor."
+        ),
+        allow_custom=True,
+    )
+
+
+def _stamp_provenance(obj, author_id: str, marking_id: str):
+    """Return a copy of *obj* carrying the TLP marking (and, for SDO/SRO, the
+    authoring created_by_ref).  Serialises to plain JSON first so nested
+    properties reconstruct cleanly via stix2.parse.
+    """
+    if obj.get("type") == "marking-definition":
+        return obj  # don't mark the marking itself
+    try:
+        d = json.loads(obj.serialize())
+    except Exception:
+        return obj
+    marks = list(d.get("object_marking_refs", []))
+    if marking_id not in marks:
+        marks.append(marking_id)
+    d["object_marking_refs"] = marks
+    # SDOs and SROs have a 'created' timestamp and may carry created_by_ref;
+    # SCOs (cyber-observables) do not.  Never self-reference the author.
+    if "created" in d and d.get("id") != author_id:
+        d.setdefault("created_by_ref", author_id)
+    try:
+        return stix2.parse(d, allow_custom=True)
+    except Exception:
+        return obj
 
 # ---------------------------------------------------------------------------
 # All valid STIX 2.1 relationship types (Section 4 + Appendix B of the spec).
@@ -550,11 +630,17 @@ def build_stix_bundle(
         seen_rel_keys.add(rel_key)
 
         try:
+            # Evidence label has no native STIX 2.1 field — carry it as a custom
+            # property (x_ prefix is spec-legal; requires allow_custom=True).
+            _label = getattr(rel, "evidence_label", "reported")
+            _label = getattr(_label, "value", _label)  # EvidenceLabel enum → str
             relationship = stix2.Relationship(
                 relationship_type=rel_type,
                 source_ref=source.id,
                 target_ref=target.id,
                 confidence=max(0, min(100, int(rel.confidence * 100))),
+                allow_custom=True,
+                x_evidence_label=str(_label),
             )
             stix_objects.append(relationship)
         except Exception:
@@ -656,7 +742,17 @@ def build_stix_bundle(
             )
             stix_objects.append(report)
 
-    return stix2.Bundle(objects=stix_objects)
+    # --- Stamp provenance: TLP marking + authoring Identity on every object ---
+    # The author Identity and TLP marking are added to the bundle but kept OUT
+    # of the Report's object_refs (they are bundle-level provenance, referenced
+    # via created_by_ref / object_marking_refs rather than report contents).
+    _author = _authoring_identity()
+    _tlp    = _tlp_marking()
+    stamped = [_stamp_provenance(o, _author.id, _tlp.id) for o in stix_objects]
+
+    # allow_custom so Relationship x_evidence_label (and any other x_ props)
+    # pass through Bundle construction + serialization without rejection.
+    return stix2.Bundle(objects=[_author, _tlp, *stamped], allow_custom=True)
 
 
 def verify_ioc_coverage(raw_entities: list[RawEntity], bundle: stix2.Bundle) -> dict:

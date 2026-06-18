@@ -11,7 +11,7 @@ from tenacity import RetryError, retry, retry_if_exception_type, stop_after_atte
 
 # Initialize logging
 from api.logging_config import get_logger
-from models.schemas import RawEntity
+from models.schemas import EvidenceLabel, RawEntity
 
 logger = get_logger(__name__)
 
@@ -252,6 +252,9 @@ class RelationshipExtracted(BaseModel):
     target_value: str
     confidence: float = 0.8
     evidence_text: str | None = None   # verbatim quote from source text
+    # How well the source supports this claim.  Defaults to "reported" so older
+    # data / models that omit the field validate without error.
+    evidence_label: EvidenceLabel = EvidenceLabel.REPORTED
 
 
 class IoCAssociation(BaseModel):
@@ -303,6 +306,17 @@ Your job is therefore focused on what deterministic models cannot do:
 
 Rules:
 - Never invent a value. If unsure, omit it.
+- Do NOT invent URLs, dates, IDs, or hostnames. If a value is not in the text, omit it.
+- For every relationship, attach an evidence_label describing how well the source
+  text supports it (do NOT upgrade the label — when support is weak, use a weaker one):
+    observed = directly shown in telemetry/sample/log/screenshot/source artifact
+    reported = the source states it (assertion-level)
+    assessed = the source's analytical judgment
+    inferred = your conclusion combining multiple facts across sentences
+    gap      = you believe it is implied but cannot find explicit support in the text
+- When you cannot find explicit support for a relationship, still emit it with
+  evidence_label "gap" and evidence_text "" — never fabricate a supporting quote.
+  A missing answer expressed as "gap" is correct and useful; a fabricated answer is a failure.
 - MITRE ATT&CK IDs follow the format T1234 or T1234.001.
 - Valid STIX 2.1 relationship types (use ONLY these):
   uses, attributed-to, targets, indicates, mitigates, remediates,
@@ -370,7 +384,8 @@ remediates|originated-from|authored-by|impersonates|variant-of|
 related-to|...",
       "target_value": "exact target entity name (from any detected list)",
       "confidence": 0.0-1.0,
-      "evidence_text": "verbatim sentence from the text supporting this relationship"
+      "evidence_text": "verbatim sentence from the text supporting this relationship",
+      "evidence_label": "observed|reported|assessed|inferred|gap"
     }}
   ],
   "ioc_associations": [
@@ -503,8 +518,12 @@ def _call_openai_compatible(client_param, model: str, system: str, user: str, la
         return ""
 
 
-def _call_llm(system: str, user: str) -> str:
-    """Dispatches to the configured LLM provider with retry logic."""
+def _call_llm(system: str, user: str, provider: str | None = None) -> str:
+    """Dispatches to an LLM provider with retry logic.
+
+    `provider` overrides the global LLM_PROVIDER for this call only — used by the
+    Stage 3e consensus pass to run the same prompt through a second model.
+    """
     # Sanitize ONLY the user message — it embeds untrusted report text, so it is
     # the prompt-injection vector.  The system prompt is developer-controlled;
     # running it through the sanitizer would needlessly escape its content and
@@ -516,28 +535,30 @@ def _call_llm(system: str, user: str) -> str:
     # even though enrich_chunk had already validated it against the 32 000 cap.
     sanitized_user = _sanitize_text_for_prompt(user, max_length=_MAX_PROMPT_LENGTH)
 
-    if _PROVIDER == "anthropic":
+    prov = (provider or _PROVIDER).lower()
+    if prov == "anthropic":
         return _call_anthropic(system, sanitized_user)
-    elif _PROVIDER == "mistral":
+    elif prov == "mistral":
         client = _get_mistral_client()
         _MISTRAL_MODEL = os.environ.get("MISTRAL_MODEL", "mistral-small-latest")
         return _call_openai_compatible(client, _MISTRAL_MODEL, system, sanitized_user, "Mistral")
-    elif _PROVIDER == "ollama":
+    elif prov == "ollama":
         client = _get_ollama_client()
         _OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
         return _call_openai_compatible(client, _OLLAMA_MODEL, system, sanitized_user, "Ollama")
     return ""
 
 
-def _provider_ready() -> bool:
-    """Returns False if the current provider cannot make API calls."""
-    if _PROVIDER == "anthropic":
+def _provider_ready(provider: str | None = None) -> bool:
+    """Returns False if the given (or global) provider cannot make API calls."""
+    prov = (provider or _PROVIDER).lower()
+    if prov == "anthropic":
         _anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
         return bool(_anthropic_key)
-    if _PROVIDER == "mistral":
+    if prov == "mistral":
         _mistral_key = os.environ.get("MISTRAL_API_KEY", "").strip()
         return _OPENAI_SDK_AVAILABLE and bool(_mistral_key)
-    if _PROVIDER == "ollama":
+    if prov == "ollama":
         return _OPENAI_SDK_AVAILABLE
     return False
 
@@ -638,6 +659,12 @@ def _normalize_llm_json(data: dict) -> dict:
                     if isinstance(r.get(k), str) and r[k].strip():
                         r["relationship_type"] = r.pop(k)
                         break
+            # Coerce evidence_label to a known value; unknown/missing → "reported"
+            # so a malformed label never discards an otherwise-valid relationship.
+            _lbl = str(r.get("evidence_label", "")).lower().strip()
+            r["evidence_label"] = _lbl if _lbl in {
+                "observed", "reported", "assessed", "inferred", "gap"
+            } else "reported"
             # Only keep entries that have all three required fields
             if all(r.get(f) for f in ("source_value", "relationship_type", "target_value")):
                 norm_rels.append(r)
@@ -656,6 +683,7 @@ def enrich_chunk(
     cyner_entities: list[RawEntity] | None = None,
     doc_context: str | None = None,
     ner_allow_list: set[str] | None = None,
+    provider: str | None = None,
 ) -> LLMEnrichmentResult:
     """
     Enrich a text chunk with LLM intelligence.
@@ -670,7 +698,7 @@ def enrich_chunk(
                                 Passed to every chunk so the LLM can link IoC
                                 appendix entries back to the correct malware/actor.
     """
-    if not _provider_ready():
+    if not _provider_ready(provider):
         return LLMEnrichmentResult()
 
     # IoC summary — regex-extracted technical indicators.
@@ -747,7 +775,7 @@ def enrich_chunk(
     }.get(_PROVIDER, _PROVIDER)
     logger.debug(f"Calling {provider_label} ({len(prompt)} prompt chars)")
 
-    raw_text = _call_llm(_SYSTEM_PROMPT, prompt)
+    raw_text = _call_llm(_SYSTEM_PROMPT, prompt, provider=provider)
     if not raw_text:
         logger.warning("LLM returned empty response — skipping chunk")
         return LLMEnrichmentResult()
@@ -807,8 +835,10 @@ def enrich_chunk(
         if verify_enabled():
             # verify_relationships() returns `object` to avoid a circular
             # import with LLMEnrichmentResult (defined in this module); it's
-            # always an LLMEnrichmentResult at runtime.
-            result = cast(LLMEnrichmentResult, verify_relationships(text, result, _call_llm))
+            # always an LLMEnrichmentResult at runtime.  Bind the same provider
+            # override so verification runs on the model that produced the claims.
+            _verify_call = (lambda s, u: _call_llm(s, u, provider=provider))
+            result = cast(LLMEnrichmentResult, verify_relationships(text, result, _verify_call))
 
     return result
 
