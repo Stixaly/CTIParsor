@@ -55,6 +55,16 @@ class TestEnrichChunkHappyPath:
         result = enrich_chunk(sample_cti_text, sample_entities)
         assert isinstance(result.relationships, list)
 
+    def test_relationship_carries_evidence_label(self, mock_llm, sample_cti_text, sample_entities):
+        # The mock returns a relationship labelled "observed"; the field must
+        # survive enrich_chunk's normalise → validate → hallucination-filter path.
+        from models.schemas import EvidenceLabel
+        result = enrich_chunk(sample_cti_text, sample_entities)
+        rel = next((r for r in result.relationships
+                    if r.source_value.lower() == "apt29" and r.target_value.lower() == "sunburst"), None)
+        assert rel is not None, "expected the APT29→SUNBURST relationship to survive"
+        assert rel.evidence_label == EvidenceLabel.OBSERVED
+
     def test_campaign_name_present(self, mock_llm, sample_cti_text, sample_entities):
         result = enrich_chunk(sample_cti_text, sample_entities)
         # campaign_name may be None if hallucination filter strips it; just check type

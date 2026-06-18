@@ -190,10 +190,15 @@ def _save_entities(job_id: str, raw_entities, llm_result) -> None:
 
     rows_rel = []
     for rel in llm_result.relationships:
+        # evidence_label is an EvidenceLabel enum on the model — store its value
+        _label = (
+            getattr(rel.evidence_label, "value", rel.evidence_label)
+            if getattr(rel, "evidence_label", None) else "reported"
+        )
         rows_rel.append((
             str(uuid4()), job_id,
             rel.source_value, rel.relationship_type, rel.target_value,
-            rel.confidence, 1, rel.evidence_text,
+            rel.confidence, 1, rel.evidence_text, _label,
         ))
 
     with _lock:
@@ -206,8 +211,9 @@ def _save_entities(job_id: str, raw_entities, llm_result) -> None:
             )
             conn.executemany(
                 "INSERT OR IGNORE INTO relationships "
-                "(id,job_id,source_value,relationship_type,target_value,confidence,accepted,evidence_text) "
-                "VALUES (?,?,?,?,?,?,?,?)",
+                "(id,job_id,source_value,relationship_type,target_value,"
+                "confidence,accepted,evidence_text,evidence_label) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
                 rows_rel,
             )
             conn.commit()
@@ -534,6 +540,23 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
                 doc_context=doc_context or None,
                 ner_allow_list=ner_allow_list,
             )
+
+            # ── Stage 3e — cross-model consensus (opt-in) ───────────────────
+            # Only double-run chunks that produced relationships (the highest
+            # hallucination-risk output), to keep the extra cost bounded.
+            from pipeline.stage3e_consensus import consensus_enabled, consensus_provider, reconcile
+            if res.relationships and consensus_enabled():
+                second = enrich_chunk(
+                    chunk, ents,
+                    gazetteer_entities=gazetteer_entities,
+                    cyner_entities=cyner_entities,
+                    semantic_ttp_entities=semantic_ttp_entities,
+                    doc_context=doc_context or None,
+                    ner_allow_list=ner_allow_list,
+                    provider=consensus_provider(),
+                )
+                res = reconcile(res, second)
+
             elapsed = time.monotonic() - _t
             m, a, t_c, r = (len(res.malware_families), len(res.threat_actors),
                              len(res.tools),            len(res.relationships))
@@ -1179,6 +1202,11 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
             target_value=row["target_value"],
             confidence=row["confidence"],
             evidence_text=row["evidence_text"] if "evidence_text" in row.keys() else None,
+            evidence_label=(
+                row["evidence_label"]
+                if "evidence_label" in row.keys() and row["evidence_label"]
+                else "reported"
+            ),
         )
         for row in rel_rows
     ]

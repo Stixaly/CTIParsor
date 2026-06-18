@@ -162,7 +162,14 @@ export default function Review() {
     const autoAcceptIds: string[] = []
     setLocalRels(remoteRels.map(r => {
       const pct = confPct(r.confidence)
-      const shouldAutoAccept = pct >= 90 && r.accepted === null
+      // Promotion threshold (evidence-graded): "observed" claims auto-accept;
+      // otherwise require high confidence AND a label that isn't a weak one.
+      // "inferred"/"gap" never auto-promote — they always wait for a reviewer.
+      const label = r.evidence_label ?? 'reported'
+      const shouldAutoAccept =
+        r.accepted === null &&
+        (label === 'observed' ||
+          (pct >= 90 && label !== 'gap' && label !== 'inferred'))
       if (shouldAutoAccept) autoAcceptIds.push(r.id)
       return { ...r, accepted: shouldAutoAccept ? true : r.accepted }
     }))

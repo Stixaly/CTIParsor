@@ -173,6 +173,7 @@ def init_db() -> None:
         # ── Migrations — safe to run on already-initialised databases ──
         _migrations = [
             "ALTER TABLE relationships ADD COLUMN evidence_text TEXT",
+            "ALTER TABLE relationships ADD COLUMN evidence_label TEXT DEFAULT 'reported'",
             "ALTER TABLE jobs ADD COLUMN tlp_level TEXT",
             "ALTER TABLE jobs ADD COLUMN pap_level TEXT",
         ]
