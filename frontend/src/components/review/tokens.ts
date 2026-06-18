@@ -397,6 +397,52 @@ export function verbsForPair(srcType: string, tgtType: string): {
   return { valid, others, constrained: true }
 }
 
+// Entity types whose values are normalised ("refanged") by Stage 2 before
+// storage — the raw source text may still contain a defanged form
+// (e.g. "evil[.]com") that won't match the clean value via plain indexOf.
+const _DEFANGABLE_TYPES = new Set(['domain', 'url', 'email', 'ipv4', 'ipv6'])
+
+/**
+ * Given a clean (refanged) IOC value, generate the defanged forms a CTI
+ * report might use instead, so occurrences that survived in their original
+ * defanged form in the raw source text can still be highlighted.
+ */
+export function generateDefangedVariants(value: string): string[] {
+  const variants = new Set<string>()
+  const dotForms = ['[.]', '(.)', '{.}']
+
+  if (value.includes('.')) {
+    for (const d of dotForms) variants.add(value.split('.').join(d))
+    // Only the last dot defanged (common form, e.g. "evil.co[.]uk")
+    const lastDot = value.lastIndexOf('.')
+    if (lastDot !== -1) {
+      for (const d of dotForms) {
+        variants.add(value.slice(0, lastDot) + d + value.slice(lastDot + 1))
+      }
+    }
+  }
+
+  // URL scheme defanging — applied to the clean value and every dot-variant
+  if (/^https?:\/\//i.test(value)) {
+    for (const v of [value, ...variants]) {
+      variants.add(v.replace(/^http/i, 'hxxp'))
+      variants.add(v.replace('://', '[://]'))
+      variants.add(v.replace(':', '[:]'))
+    }
+  }
+
+  // Email "@" defanging — applied to the clean value and every dot-variant
+  if (value.includes('@')) {
+    const atForms = ['[at]', '(at)', '[@]', '(@)', '{@}']
+    for (const v of [value, ...variants]) {
+      for (const a of atForms) variants.add(v.replace('@', a))
+    }
+  }
+
+  variants.delete(value)
+  return [...variants]
+}
+
 /** Build non-overlapping text ranges for all entity occurrences */
 export interface Range {
   start: number
@@ -404,7 +450,7 @@ export interface Range {
   entityId: string
 }
 
-export function buildRanges(text: string, entities: Array<{ id: string; value: string; accepted: boolean | null }>): Range[] {
+export function buildRanges(text: string, entities: Array<{ id: string; value: string; entity_type: string; accepted: boolean | null }>): Range[] {
   const lower = text.toLowerCase()
   const used = new Uint8Array(text.length)
   const ranges: Range[] = []
@@ -414,18 +460,25 @@ export function buildRanges(text: string, entities: Array<{ id: string; value: s
 
   for (const e of sorted) {
     const v = e.value.toLowerCase()
-    let pos = 0
-    while (pos < lower.length) {
-      const idx = lower.indexOf(v, pos)
-      if (idx === -1) break
-      const end = idx + v.length
-      let overlap = false
-      for (let i = idx; i < end; i++) if (used[i]) { overlap = true; break }
-      if (!overlap) {
-        ranges.push({ start: idx, end, entityId: e.id })
-        used.fill(1, idx, end)
+    const candidates = [v]
+    if (_DEFANGABLE_TYPES.has(e.entity_type)) {
+      candidates.push(...generateDefangedVariants(v))
+    }
+
+    for (const cand of candidates) {
+      let pos = 0
+      while (pos < lower.length) {
+        const idx = lower.indexOf(cand, pos)
+        if (idx === -1) break
+        const end = idx + cand.length
+        let overlap = false
+        for (let i = idx; i < end; i++) if (used[i]) { overlap = true; break }
+        if (!overlap) {
+          ranges.push({ start: idx, end, entityId: e.id })
+          used.fill(1, idx, end)
+        }
+        pos = idx + 1
       }
-      pos = idx + 1
     }
   }
   return ranges.sort((a, b) => a.start - b.start)

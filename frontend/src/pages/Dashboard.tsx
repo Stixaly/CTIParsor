@@ -6,7 +6,8 @@ import {
   Loader2, X, Play, Clock, AlertTriangle,
 } from 'lucide-react'
 import { fetchJobs, uploadFile, updateJobStatus, deleteJob, fetchBundle } from '../api/client'
-import type { Job, JobStatus } from '../types'
+import type { Job, JobStatus, MarkingLevel } from '../types'
+import { MARKING_LEVELS } from '../types'
 import ProgressModal from '../components/ProgressModal'
 
 // ── Design tokens (fonts as constants — avoids repeating the fallback stack) ──
@@ -346,6 +347,8 @@ export default function Dashboard() {
   const [activeFilename, setActiveFilename] = useState('')
   const [dragOver, setDragOver]             = useState(false)
   const [selectedId, setSelectedId]         = useState<string | null>(null)
+  const [tlpLevel, setTlpLevel]             = useState<MarkingLevel>('AMBER')
+  const [papLevel, setPapLevel]             = useState<MarkingLevel>('AMBER')
   const fileRef = useRef<HTMLInputElement>(null)
 
   // ── Queries & mutations ──────────────────────────────────────────────────
@@ -357,7 +360,7 @@ export default function Dashboard() {
   })
 
   const uploadMutation = useMutation({
-    mutationFn: uploadFile,
+    mutationFn: (file: File) => uploadFile(file, { tlpLevel, papLevel }),
     onSuccess: (data) => {
       setActiveJobId(data.job_id)
       setActiveFilename(data.filename)
@@ -613,6 +616,44 @@ export default function Dashboard() {
               PDF · DOCX · HTML · TXT · MD
             </div>
           </div>
+
+          {/* TLP / PAP markings — applied to every object in the generated bundle */}
+          <div
+            style={{ display: 'flex', gap: 10, flexShrink: 0 }}
+            onClick={e => e.stopPropagation()}
+          >
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, color: 'var(--ink-4)' }}>
+              TLP
+              <select
+                value={tlpLevel}
+                onChange={e => setTlpLevel(e.target.value as MarkingLevel)}
+                disabled={isPending}
+                style={{
+                  fontSize: 11, fontFamily: MONO, padding: '4px 6px',
+                  borderRadius: 6, border: '1px solid var(--rule)',
+                  background: 'var(--bg)', color: 'var(--ink)',
+                }}
+              >
+                {MARKING_LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+              </select>
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, color: 'var(--ink-4)' }}>
+              PAP
+              <select
+                value={papLevel}
+                onChange={e => setPapLevel(e.target.value as MarkingLevel)}
+                disabled={isPending}
+                style={{
+                  fontSize: 11, fontFamily: MONO, padding: '4px 6px',
+                  borderRadius: 6, border: '1px solid var(--rule)',
+                  background: 'var(--bg)', color: 'var(--ink)',
+                }}
+              >
+                {MARKING_LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+              </select>
+            </label>
+          </div>
+
           <button
             className="btn-primary"
             style={{ ...SM, flexShrink: 0 }}

@@ -35,9 +35,16 @@ export const fetchBundle = (id: string) => req<StixBundle>(`/jobs/${id}/bundle`)
 export const sourceUrl  = (id: string) => `/api/jobs/${id}/source`
 
 // Upload
-export async function uploadFile(file: File): Promise<{ job_id: string; filename: string }> {
+export interface UploadOptions {
+  tlpLevel?: string
+  papLevel?: string
+}
+
+export async function uploadFile(file: File, options?: UploadOptions): Promise<{ job_id: string; filename: string }> {
   const form = new FormData()
   form.append('file', file)
+  if (options?.tlpLevel) form.append('tlp_level', options.tlpLevel)
+  if (options?.papLevel) form.append('pap_level', options.papLevel)
   const res = await fetch(`${BASE}/upload`, { method: 'POST', body: form })
   if (!res.ok) throw new Error(`Upload failed: ${res.statusText}`)
   return res.json()

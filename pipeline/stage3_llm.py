@@ -673,6 +673,144 @@ def _normalize_llm_json(data: dict) -> dict:
     return out
 
 
+# --- Truncated-response recovery ---
+
+# All list-valued fields in LLMEnrichmentResult — used to salvage partial
+# results when the LLM response is cut off mid-array (hit max_tokens).
+_LIST_FIELDS = (
+    "threat_actors", "malware_families", "tools", "ttps",
+    "relationships", "ioc_associations", "targeted_sectors",
+    "targeted_countries", "course_of_action",
+)
+
+
+def _unclosed_stack(text: str) -> tuple[list[str], bool]:
+    """
+    Walk text tracking string state, returning the stack of still-open
+    '{'/'[' (in open order) and whether the text ends inside a string.
+    """
+    stack: list[str] = []
+    in_string = False
+    escaped = False
+    for ch in text:
+        if escaped:
+            escaped = False
+            continue
+        if ch == "\\" and in_string:
+            escaped = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch in "{[":
+            stack.append(ch)
+        elif ch in "}]":
+            if stack:
+                stack.pop()
+    return stack, in_string
+
+
+def _try_complete_truncated_json(text: str) -> str | None:
+    """
+    Best-effort repair of a response cut off mid-object (hit max_tokens):
+    drop the dangling fragment at the cut point and close whatever
+    structures are still open, in the correct nesting order.
+    Returns None if the text has no unclosed structures (nothing to repair).
+    """
+    stack, in_string = _unclosed_stack(text)
+    if not stack and not in_string:
+        return None
+
+    completed = text
+    if in_string:
+        completed += '"'
+
+    # Drop a dangling key/value fragment left at the cut point, e.g.
+    # `..., "evidence_text": "the attacker us` or `..., "confidence": 0.`
+    completed = re.sub(r',\s*"[^"]*"\s*:\s*"[^"]*$', "", completed)
+    completed = re.sub(r',\s*"[^"]*"\s*:\s*[^,{\[\]}]*$', "", completed)
+    completed = re.sub(r',\s*"[^"]*$', "", completed)
+    completed = re.sub(r',\s*\{[^{}]*$', "", completed)
+    completed = re.sub(r',\s*$', "", completed)
+
+    # Recompute after trimming — dropping a partial nested object/key can
+    # change which brackets are still open.
+    stack, _ = _unclosed_stack(completed)
+    for opener in reversed(stack):
+        completed += "]" if opener == "[" else "}"
+    return completed
+
+
+def _extract_complete_array_items(text: str, array_start: int) -> list[str]:
+    """
+    Return the raw source slice of each fully-closed top-level item (object
+    or string) inside a JSON array starting at array_start, stopping at the
+    first incomplete item or the array's closing bracket.
+    """
+    items: list[str] = []
+    depth = 0
+    item_start = -1
+    in_string = False
+    escaped = False
+    for i in range(array_start, len(text)):
+        ch = text[i]
+        if escaped:
+            escaped = False
+            continue
+        if ch == "\\" and in_string:
+            escaped = True
+            continue
+        if ch == '"':
+            if in_string:
+                in_string = False
+                if depth == 0 and item_start != -1:
+                    items.append(text[item_start:i + 1])
+                    item_start = -1
+            else:
+                in_string = True
+                if depth == 0 and item_start == -1:
+                    item_start = i
+            continue
+        if in_string:
+            continue
+        if ch in "{[":
+            if depth == 0 and item_start == -1:
+                item_start = i
+            depth += 1
+        elif ch in "}]":
+            depth -= 1
+            if depth == 0 and item_start != -1:
+                items.append(text[item_start:i + 1])
+                item_start = -1
+            elif depth < 0:
+                break  # closing bracket of the outer array itself
+    return items
+
+
+def _try_extract_complete_items(text: str) -> dict | None:
+    """
+    Last-resort salvage: pull whatever complete list items can be found for
+    each known LLMEnrichmentResult field, even when the response is
+    truncated mid-item.
+    """
+    result: dict = {}
+    for field in _LIST_FIELDS:
+        m = re.search(rf'"{field}"\s*:\s*\[', text)
+        if not m:
+            continue
+        items = []
+        for raw in _extract_complete_array_items(text, m.end()):
+            try:
+                items.append(json.loads(raw))
+            except json.JSONDecodeError:
+                continue
+        if items:
+            result[field] = items
+    return result or None
+
+
 # --- Public API ---
 
 def enrich_chunk(
@@ -798,6 +936,23 @@ def enrich_chunk(
                     break
             except json.JSONDecodeError:
                 continue
+
+    # Response was likely cut off by max_tokens — try to repair the dangling
+    # structure before giving up on the whole chunk.
+    if parsed_json is None:
+        completed = _try_complete_truncated_json(raw_text)
+        if completed is not None:
+            try:
+                parsed_json = json.loads(completed)
+                logger.warning("LLM response was truncated — recovered by closing dangling structures")
+            except json.JSONDecodeError:
+                parsed_json = None
+
+    # Still nothing — salvage whatever complete array items survived the cut.
+    if parsed_json is None:
+        parsed_json = _try_extract_complete_items(raw_text)
+        if parsed_json is not None:
+            logger.warning("LLM response was truncated — salvaged partial results from complete array items")
 
     if parsed_json is None:
         logger.warning(f"LLM returned no valid JSON (raw preview: {raw_text[:120]!r})")
