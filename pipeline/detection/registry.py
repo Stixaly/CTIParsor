@@ -26,6 +26,15 @@ _ADAPTERS: dict[str, RuleCorpusAdapter] = {
 }
 
 
+def corpus_root(corpus: dict) -> Path:
+    """Directory the adapter parses for one corpus: `path`, narrowed to `subdir`
+    when set. `subdir` scopes a large clone to its rule subtree (e.g. hayabusa's
+    `sigma/` Sigma-compatible subset) without re-cloning — ADR-0010."""
+    root = Path(corpus.get("path", ""))
+    subdir = str(corpus.get("subdir") or "").strip()
+    return root / subdir if subdir else root
+
+
 def _read_corpora(path: Path) -> list[dict]:
     """Read the `corpora:` list from one registry file (empty if missing/bad)."""
     if not path.exists():
@@ -110,7 +119,7 @@ def iter_rules(config_path: str | Path) -> Iterable[DetectionRule]:
         if adapter is None:
             logger.warning(f"[detection] corpus '{name}': unknown adapter '{corpus.get('adapter')}' — skipped")
             continue
-        root = Path(corpus.get("path", ""))
+        root = corpus_root(corpus)
         if not root.exists():
             logger.warning(f"[detection] corpus '{name}': path '{root}' missing — run sync_corpora first")
             continue

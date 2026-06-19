@@ -34,5 +34,6 @@ class DetectionRule(BaseModel):
     severity: Severity = Severity.UNKNOWN
     license: str = "unknown"                             # carried from the corpus registry entry
     source_ref: str = ""                                 # file path / URL (provenance)
-    content_hash: str = ""                               # sha256 of raw — cross-corpus dedup
+    content_hash: str = ""                               # sha256 of raw — byte-identical match
+    dedup_key: str = ""                                  # sha256 of normalized detection logic (ADR-0010)
     raw: str = ""                                        # original rule text (lossless, for export)
