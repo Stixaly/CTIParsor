@@ -11,11 +11,84 @@
 # Clones live under ./corpora/ (gitignored — large, owned upstream).
 # `license` is honored on export/drill-down — public does NOT mean unrestricted.
 
+# `priority` (ADR-0010): dedup precedence — lower wins as the canonical rule when
+# the same detection logic appears in several corpora. `subdir` scopes a large
+# clone to its rule subtree. Licenses are VERIFIED from each repo (2026-06-19);
+# `none` = no LICENSE file upstream (all-rights-reserved) — safe to ingest for
+# coverage, restricted to redistribute. License is carried to drill-down, not
+# auto-enforced, so the operator decides what to export.
+
 corpora:
   - name: sigmahq
     adapter: sigma
     path: ./corpora/sigmahq
     git:  https://github.com/SigmaHQ/sigma.git
     license: DRL-1.1            # SigmaHQ Detection Rule License
+    priority: 10
+    private: false
+    enabled: true
+
+  - name: dfir-report
+    adapter: sigma
+    path: ./corpora/dfir-report
+    git:  https://github.com/The-DFIR-Report/Sigma-Rules.git
+    license: GPL-3.0
+    priority: 20
+    private: false
+    enabled: true
+
+  - name: tsale
+    adapter: sigma
+    path: ./corpora/tsale
+    git:  https://github.com/tsale/Sigma_rules.git
+    license: GPL-3.0
+    priority: 30
+    private: false
+    enabled: true
+
+  - name: p4t12ick
+    adapter: sigma
+    path: ./corpora/p4t12ick
+    git:  https://github.com/P4T12ICK/Sigma-Rule-Repository.git
+    license: GPL-3.0
+    priority: 40
+    private: false
+    enabled: true
+
+  - name: russianpanda
+    adapter: sigma
+    path: ./corpora/russianpanda
+    git:  https://github.com/RussianPanda95/Sigma-Rules.git
+    license: none              # no LICENSE upstream — all rights reserved
+    priority: 50
+    private: false
+    enabled: true
+
+  - name: linkedin
+    adapter: sigma
+    path: ./corpora/linkedin
+    git:  https://github.com/linkedin/sigma-rules.git
+    license: BSD-2-Clause
+    priority: 60
+    private: false
+    enabled: true
+
+  - name: mthcht
+    adapter: sigma
+    path: ./corpora/mthcht
+    git:  https://github.com/mthcht/ThreatHunting-Keywords-sigma-rules.git
+    license: none              # no LICENSE upstream — all rights reserved
+    priority: 90              # large, auto-generated; low dedup authority
+    subdir: sigma_rules
+    private: false
+    enabled: true
+
+  - name: hayabusa
+    adapter: sigma
+    path: ./corpora/hayabusa
+    git:  https://github.com/Yamato-Security/hayabusa-rules.git
+    license: DRL-1.1
+    priority: 95             # embeds a converted SigmaHQ copy — dedup folds it under sigmahq
+    subdir: sigma
     private: false
     enabled: true

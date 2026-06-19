@@ -183,6 +183,8 @@ def init_db() -> None:
                 license      TEXT DEFAULT 'unknown',
                 source_ref   TEXT DEFAULT '',
                 content_hash TEXT DEFAULT '',
+                dedup_key    TEXT DEFAULT '',  -- sha256 of normalized detection logic (ADR-0010)
+                is_canonical INTEGER DEFAULT 1, -- 0 = duplicate folded by the dedup pass
                 data_sources TEXT DEFAULT '[]',  -- JSON array
                 raw          TEXT DEFAULT ''
             );
@@ -195,6 +197,8 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_rule_tech_tech   ON rule_techniques(technique_id);
             CREATE INDEX IF NOT EXISTS idx_detection_corpus ON detection_rules(corpus);
+            CREATE INDEX IF NOT EXISTS idx_detection_dedup  ON detection_rules(dedup_key);
+            CREATE INDEX IF NOT EXISTS idx_detection_canon  ON detection_rules(is_canonical);
         """)
 
         # ── Migrations — safe to run on already-initialised databases ──
@@ -203,6 +207,11 @@ def init_db() -> None:
             "ALTER TABLE relationships ADD COLUMN evidence_label TEXT DEFAULT 'reported'",
             "ALTER TABLE jobs ADD COLUMN tlp_level TEXT",
             "ALTER TABLE jobs ADD COLUMN pap_level TEXT",
+            # ADR-0010 — cross-corpus rule deduplication
+            "ALTER TABLE detection_rules ADD COLUMN dedup_key TEXT DEFAULT ''",
+            "ALTER TABLE detection_rules ADD COLUMN is_canonical INTEGER DEFAULT 1",
+            "CREATE INDEX IF NOT EXISTS idx_detection_dedup ON detection_rules(dedup_key)",
+            "CREATE INDEX IF NOT EXISTS idx_detection_canon ON detection_rules(is_canonical)",
         ]
         for stmt in _migrations:
             try:

@@ -7,6 +7,7 @@ SIEM backend, which is out of scope for ingestion/coverage.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from collections.abc import Iterable
 from pathlib import Path
@@ -76,6 +77,7 @@ class SigmaAdapter(RuleCorpusAdapter):
         content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
         native_id = str(doc.get("id") or "").strip()
         rule_key = native_id or content_hash[:16]
+        dedup_key = SigmaAdapter._dedup_key(doc) or content_hash
 
         ls = doc.get("logsource") or {}
         data_sources = [
@@ -98,8 +100,53 @@ class SigmaAdapter(RuleCorpusAdapter):
             license=license,
             source_ref=str(path),
             content_hash=content_hash,
+            dedup_key=dedup_key,
             raw=text,
         )
+
+    @staticmethod
+    def _dedup_key(doc: dict) -> str:
+        """Stable hash of a rule's *detection logic* (logsource + detection block).
+
+        Two rules collapse to one logical rule iff they would match the same
+        events — so volatile metadata (title, author, date, references, id) is
+        excluded. Used by the ADR-0010 dedup pass to fold copies/conversions
+        (e.g. hayabusa's converted SigmaHQ rules) across corpora *without*
+        collapsing genuinely-independent rules that happen to share a technique.
+
+        Returns "" when there's no usable detection logic — the caller then
+        falls back to the content hash so such rules never all cluster together.
+        """
+        ls = doc.get("logsource") or {}
+        logsource = {
+            k: str(ls[k]).strip().lower()
+            for k in ("category", "product", "service")
+            if isinstance(ls, dict) and ls.get(k)
+        }
+        detection = SigmaAdapter._canonicalize(doc.get("detection"))
+        if not detection:
+            return ""
+        payload = json.dumps({"logsource": logsource, "detection": detection},
+                             sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _canonicalize(node: object) -> object:
+        """Order-insensitive, case-folded normal form of a detection sub-tree.
+
+        Sigma string matching is case-insensitive by default, and selection /
+        list order is not semantically meaningful — so we lowercase scalars and
+        keys and sort lists, making formatting-only differences hash-identical.
+        """
+        if isinstance(node, dict):
+            return {str(k).strip().lower(): SigmaAdapter._canonicalize(v)
+                    for k, v in sorted(node.items(), key=lambda kv: str(kv[0]).lower())}
+        if isinstance(node, list):
+            items = [SigmaAdapter._canonicalize(v) for v in node]
+            return sorted(items, key=lambda x: json.dumps(x, sort_keys=True))
+        if isinstance(node, str):
+            return node.strip().lower()
+        return node
 
     @staticmethod
     def _split_tags(tags: list) -> tuple[list[str], list[str]]:

@@ -7,6 +7,13 @@ sections group by theme rather than strict semver.
 ## [Unreleased]
 
 ### Added
+- **Default Sigma corpora + cross-corpus dedup** (ADR-0010) — the committed registry
+  now ships 8 public Sigma repos (SigmaHQ, DFIR-Report, tsale, P4T12ICK,
+  RussianPanda95, linkedin, mthcht, Yamato hayabusa) with verified licenses,
+  per-corpus `priority`, and `subdir` scoping. A global `dedupe_store` pass folds
+  rules that share normalized detection logic into one canonical (by priority),
+  losslessly (provenance kept as `also_in`), so a copied rule never inflates the
+  coverage score. Registry columns: `detection_rules.dedup_key`, `is_canonical`.
 - **Detection coverage matrix** (ADR-0008) — per-report ATT&CK techniques scored
   0–3 for *detection readiness* (not lab validation), in a tactic-column matrix at
   `/coverage/:jobId`.
