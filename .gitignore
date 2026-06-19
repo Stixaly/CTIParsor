@@ -28,3 +28,8 @@ frontend/dist/
 /data/
 # Design artefacts — HTML prototypes, not production code
 docs/design/
+# Detection-rule corpus clones (ADR-0006) — large, owned upstream, fetched by sync_corpora.
+/corpora/
+# Local registry overlay — private repo URLs + overrides stay local
+# (the committed detection_corpora.yaml holds public corpuses).
+detection_corpora.local.yaml

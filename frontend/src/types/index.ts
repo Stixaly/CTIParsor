@@ -50,6 +50,49 @@ export interface Relationship {
   evidence_label?: EvidenceLabel
 }
 
+// ── Detection coverage (ADR-0006) ───────────────────────────────────────────
+export interface CoverageCell {
+  technique_id: string
+  score: number            // 0-3 readiness (NOT lab validation)
+  corpora: string[]
+  rule_count: number
+}
+
+export interface CoverageResult {
+  job_id: string
+  techniques_total: number
+  by_score: Record<string, number>
+  validated: boolean
+  cells: CoverageCell[]
+}
+
+export interface CoverageRule {
+  id: string
+  corpus: string
+  title: string
+  severity: string
+  license: string
+  source_ref: string
+}
+
+export interface DetectionCorpus {
+  corpus: string
+  license: string
+  rules: number
+}
+
+// Corpus registry entry as shown in the Settings panel (ADR-0007)
+export interface CorpusConfig {
+  name: string
+  adapter: string
+  path?: string
+  git?: string
+  license: string
+  private?: boolean
+  enabled: boolean
+  rules: number
+}
+
 export interface ProgressEvent {
   stage?: number
   label?: string

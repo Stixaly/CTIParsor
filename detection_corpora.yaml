@@ -1,0 +1,21 @@
+# Detection-rule corpus registry — PUBLIC corpuses (ADR-0006).
+#
+# This file is COMMITTED so a fresh clone reproduces the same coverage:
+#   python scripts/sync_corpora.py          # clone/pull (public = no auth)
+#   python scripts/build_detection_index.py # ingest into the rule store
+#
+# Private corpuses and local overrides go in detection_corpora.local.yaml
+# (gitignored) — see detection_corpora.local.yaml.example. That overlay is merged
+# over this file (override by `name`, append new).
+#
+# Clones live under ./corpora/ (gitignored — large, owned upstream).
+# `license` is honored on export/drill-down — public does NOT mean unrestricted.
+
+corpora:
+  - name: sigmahq
+    adapter: sigma
+    path: ./corpora/sigmahq
+    git:  https://github.com/SigmaHQ/sigma.git
+    license: DRL-1.1            # SigmaHQ Detection Rule License
+    private: false
+    enabled: true

@@ -308,6 +308,7 @@ def build_embeddings(bundles: dict[str, Path | None]) -> None:
       → security-domain BERT, +8-12% TTP F1 on cybersecurity text
     """
     import os
+
     from dotenv import load_dotenv
     load_dotenv()
 
@@ -316,8 +317,8 @@ def build_embeddings(bundles: dict[str, Path | None]) -> None:
 
     # Require sentence-transformers + numpy
     try:
-        from sentence_transformers import SentenceTransformer
         import numpy as np
+        from sentence_transformers import SentenceTransformer
     except ImportError as e:
         print(f"  SKIP  Missing dependency: {e}")
         print("        Install with:  pip install sentence-transformers numpy")

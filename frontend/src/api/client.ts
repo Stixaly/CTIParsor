@@ -1,4 +1,4 @@
-import type { Job, Entity, Relationship, StixBundle } from '../types'
+import type { Job, Entity, Relationship, StixBundle, CoverageResult, CoverageRule, DetectionCorpus, CorpusConfig } from '../types'
 
 const BASE = '/api'
 
@@ -97,6 +97,24 @@ export const updateRelationship = (jobId: string, relId: string, patch: object) 
   })
 export const deleteRelationship = (jobId: string, relId: string) =>
   req<{ deleted: string }>(`/jobs/${jobId}/relationships/${relId}`, { method: 'DELETE' })
+
+// Detection coverage (ADR-0006)
+export const fetchCoverage = (jobId: string) =>
+  req<CoverageResult>(`/jobs/${jobId}/coverage`)
+export const fetchCoverageRules = (jobId: string, techniqueId: string) =>
+  req<{ technique_id: string; rules: CoverageRule[] }>(`/jobs/${jobId}/coverage/${techniqueId}/rules`)
+export const fetchDetectionCorpora = () =>
+  req<{ corpora: DetectionCorpus[] }>(`/detection-corpora`)
+
+// Settings — detection-corpora management (ADR-0007)
+export const fetchCorpora = () =>
+  req<{ corpora: CorpusConfig[] }>('/settings/corpora')
+export const addCorpus = (body: { name: string; git?: string; license?: string; private?: boolean }) =>
+  req<{ ok: boolean; corpora: CorpusConfig[] }>('/settings/corpora', { method: 'POST', body: JSON.stringify(body) })
+export const removeCorpus = (name: string) =>
+  req<{ ok: boolean; corpora: CorpusConfig[] }>(`/settings/corpora/${encodeURIComponent(name)}`, { method: 'DELETE' })
+export const rebuildCorpora = () =>
+  req<{ total: number; written: Record<string, number>; skipped: string[] }>('/settings/corpora/rebuild', { method: 'POST' })
 
 // ── Relationship Policy ───────────────────────────────────────────────────────
 export const getRelationshipPolicy = () =>

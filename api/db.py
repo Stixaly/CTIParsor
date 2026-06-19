@@ -168,6 +168,33 @@ def init_db() -> None:
                 id      INTEGER PRIMARY KEY DEFAULT 1,
                 policy_json TEXT NOT NULL DEFAULT '{}'
             );
+
+            -- Detection-rule store (ADR-0006) — corpus-derived, NOT per-job.
+            -- Populated by scripts/build_detection_index.py from local corpus clones.
+            -- May contain private rule content; cti_stix.db is gitignored.
+            CREATE TABLE IF NOT EXISTS detection_rules (
+                id           TEXT PRIMARY KEY,   -- corpus:native_key
+                corpus       TEXT NOT NULL,
+                native_key   TEXT NOT NULL,      -- Sigma id or content-hash16 (cross-corpus dedup)
+                format       TEXT NOT NULL DEFAULT 'sigma',
+                title        TEXT NOT NULL,
+                description  TEXT DEFAULT '',
+                severity     TEXT DEFAULT 'unknown',
+                license      TEXT DEFAULT 'unknown',
+                source_ref   TEXT DEFAULT '',
+                content_hash TEXT DEFAULT '',
+                data_sources TEXT DEFAULT '[]',  -- JSON array
+                raw          TEXT DEFAULT ''
+            );
+
+            CREATE TABLE IF NOT EXISTS rule_techniques (
+                rule_id      TEXT NOT NULL,
+                technique_id TEXT NOT NULL,
+                PRIMARY KEY (rule_id, technique_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_rule_tech_tech   ON rule_techniques(technique_id);
+            CREATE INDEX IF NOT EXISTS idx_detection_corpus ON detection_rules(corpus);
         """)
 
         # ── Migrations — safe to run on already-initialised databases ──

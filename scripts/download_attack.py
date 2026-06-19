@@ -11,11 +11,11 @@ The file is saved to data/enterprise-attack.json (~12 MB).
 This directory is in .gitignore — do not commit the bundle to the repo.
 """
 
-import sys
-import json
 import argparse
-import urllib.request
+import json
+import sys
 import urllib.error
+import urllib.request
 from pathlib import Path
 
 # Official MITRE CTI GitHub — enterprise ATT&CK STIX 2.1 bundle

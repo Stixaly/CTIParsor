@@ -2,12 +2,14 @@
 
 Converts unstructured CTI reports (PDF, DOCX, HTML, TXT, MD) into valid **STIX 2.1 bundles** consumable by OpenCTI, MISP, and SIEMs.
 
-The pipeline combines **deterministic IoC extraction** (regex + multi-layer NER) with **LLM semantic enrichment** (TTPs, relationships, malware attribution), a **post-LLM hallucination filter**, **self-verification of relationship claims**, and **offline MITRE ATT&CK normalisation**. The LLM stage is optional — the pipeline produces valid STIX even without an API key.
+The pipeline combines **deterministic IoC extraction** (regex + multi-layer NER) with **LLM semantic enrichment** (TTPs, relationships, malware attribution), a **post-LLM hallucination filter**, **self-verification of relationship claims**, optional **cross-model consensus**, NATO-style **evidence grading** of every relationship, and **offline MITRE ATT&CK normalisation**. Every bundle carries **STIX provenance markings** — a TLP (and optional PAP) marking plus an authoring identity (`created_by_ref`). The LLM stage is optional — the pipeline produces valid STIX even without an API key.
+
+It also maps each report's ATT&CK techniques to a **detection-coverage matrix** against local **Sigma** rule corpora (public and private), all managed from an in-app **Settings** panel.
 
 Two modes are available:
 
 - **CLI** — `python main.py report.pdf` — for scripting and batch processing
-- **Web UI** — React + FastAPI — for interactive review, relationship editing, and STIX graph visualisation with official OASIS icons
+- **Web UI** — React + FastAPI — for interactive review, relationship editing, STIX graph visualisation (official OASIS icons), the **detection-coverage matrix**, and **corpus settings**
 
 ---
 
@@ -311,6 +313,29 @@ Custom **d3-force SVG graph** (not the OASIS stix-visualization iframe):
 | **Fit button** | Animate to fit all nodes in viewport |
 | **Download** | Download STIX bundle directly from the graph page |
 
+### Coverage page
+
+Per-report **detection-coverage matrix** (`/coverage/:jobId`). The report's
+extracted ATT&CK techniques are laid out in ATT&CK-tactic columns and coloured by
+a **readiness score** (not lab validation):
+
+| Score | Meaning |
+|---|---|
+| 3 — Corroborated | a rule exists in **≥ 2** corpora |
+| 2 — Covered | a rule exists in **1** corpus |
+| 1 — Telemetry only | ATT&CK data-source mapping, no rule yet |
+| 0 — No coverage | technique extracted, no rule |
+
+Cells show the technique, rule count, and contributing corpora. A banner makes
+the "readiness ≠ validation" distinction explicit.
+
+### Settings page
+
+Manage **detection-rule corpora** (`/settings`): list configured Sigma repos with
+live rule counts, add a repo (written to the gitignored local overlay), remove /
+disable one, and **Rebuild index** to re-ingest the local clones. See
+[Detection coverage](#detection-coverage-sigma).
+
 ---
 
 ## STIX objects produced
@@ -343,7 +368,48 @@ Custom **d3-force SVG graph** (not the OASIS stix-visualization iframe):
 | IoC linked to malware | extra `indicates` SRO Indicator → Malware |
 | Threat actor → country / sector | `targets` SRO |
 | Semantic relationship | `relationship` SRO (confidence score) |
+| Relationship evidence grade | `x_evidence_label` custom property on each `relationship` (`observed` / `reported` / `assessed` / `inferred` / `gap`) |
+| Sharing markings | TLP `marking-definition` (+ optional PAP statement marking) referenced by `object_marking_refs` on every object |
+| Pipeline authorship | one authoring `identity` SDO; `created_by_ref` on every SDO/SRO (the pipeline, **not** the threat actor) |
 | Report wrapper | `report` SDO |
+
+---
+
+## Detection coverage (Sigma)
+
+Each report's extracted ATT&CK techniques are scored against local **Sigma** rule
+corpora — a mix of **public** repos (committed, reproducible) and **private**
+repos (local overlay). This is detection *readiness*, not lab validation.
+
+### Configure corpora — two-tier registry
+
+| File | Tracked | Holds |
+|---|---|---|
+| `detection_corpora.yaml` | committed | public corpora (ships with SigmaHQ) |
+| `detection_corpora.local.yaml` | gitignored | private corpora + local overrides |
+
+The overlay is merged over the committed file (override by `name`, append new).
+Manage both from the **Settings** page, or copy `detection_corpora.local.yaml.example`
+and edit the YAML directly.
+
+### Fetch + build
+
+```bash
+python scripts/sync_corpora.py          # clone/pull each repo (public: no auth; private: SSH agent)
+python scripts/build_detection_index.py # parse local clones → detection-rule store (in cti_stix.db)
+```
+
+Then open `/coverage/:jobId` for any report. The **Rebuild index** button on the
+Settings page re-runs the build step from already-cloned repos.
+
+**Corroboration is fork-safe:** rules are deduplicated by their Sigma `id` across
+corpora, so the same rule mirrored in two repos counts once (score 2), while two
+independent rules for a technique corroborate it (score 3).
+
+Walkthrough: [`docs/detection-coverage.md`](docs/detection-coverage.md). Design:
+ADR [0006](docs/adr/0006-multi-corpus-detection-ingestion.md) /
+[0007](docs/adr/0007-in-app-configuration-panel.md) /
+[0008](docs/adr/0008-detection-coverage-matrix.md).
 
 ---
 
@@ -419,6 +485,19 @@ LLM_TIMEOUT=120
 # Adds ~1.4× LLM calls; reduces relationship hallucination 27% → 8%
 ENABLE_STIX_VERIFICATION=false
 STIX_VERIFY_MIN_RELS=1
+
+# Stage 3e — Cross-model consensus (anti-hallucination)
+# Re-runs relationship-bearing chunks through a SECOND provider; agreement
+# boosts confidence, single-model claims are penalised and can't auto-promote.
+# CONSENSUS_PROVIDER must differ from LLM_PROVIDER and have its key set.
+ENABLE_CONSENSUS=false
+CONSENSUS_PROVIDER=mistral
+
+# Stage 4 — STIX provenance & sharing metadata
+# Every object is stamped with a TLP marking (object_marking_refs) and a
+# created_by_ref pointing at an authoring Identity (the pipeline, not the actor).
+STIX_TLP=clear               # clear | green | amber | red
+STIX_AUTHOR_NAME=CTIParsor
 
 # HuggingFace token (removes rate limits on model downloads)
 HF_TOKEN=
@@ -522,9 +601,17 @@ cti-to-stix/
 │   ├── stage3b_validate.py        # Post-LLM hallucination filter
 │   ├── stage3c_mitre.py           # MITRE ATT&CK TTP normalisation
 │   ├── stage3d_verify.py          # Relationship self-verification
-│   ├── stage4_stix_mapping.py     # STIX 2.1 object construction
+│   ├── stage3e_consensus.py       # Cross-model consensus (opt-in)
+│   ├── stage4_stix_mapping.py     # STIX 2.1 mapping + TLP/PAP + authoring identity
 │   ├── stage5_validation.py       # Bundle validation + export
 │   ├── mitre_db.py                # Lazy-loaded MITRE index (techniques + tactics)
+│   ├── detection/                 # Detection-rule ingestion + coverage (ADR-0006)
+│   │   ├── base.py                # RuleCorpusAdapter (pluggable format seam)
+│   │   ├── sigma.py               # SigmaAdapter (YAML → DetectionRule)
+│   │   ├── registry.py            # Two-tier corpus registry + overlay writes
+│   │   ├── store.py               # detection_rules / rule_techniques persistence
+│   │   ├── coverage.py            # Technique → 0–3 readiness scoring
+│   │   └── builder.py             # Rebuild the rule store from local clones
 │   └── data/
 │       ├── mitre_index.json       # Compact ATT&CK index (built by build_indexes.py)
 │       ├── gazetteer.json         # Named-entity dictionary
@@ -533,10 +620,13 @@ cti-to-stix/
 │
 ├── scripts/
 │   ├── build_indexes.py           # Build all pipeline/data/ indexes
-│   └── download_attack.py         # Download enterprise-attack.json
+│   ├── download_attack.py         # Download enterprise-attack.json
+│   ├── sync_corpora.py            # Clone/pull Sigma corpora (ambient git auth)
+│   └── build_detection_index.py   # Parse clones → detection-rule store
 │
 ├── models/
-│   └── schemas.py                 # Pydantic: RawEntity, EntityType
+│   ├── schemas.py                 # Pydantic: RawEntity, EntityType, EvidenceLabel
+│   └── detection.py               # Pydantic: DetectionRule, Severity
 │
 ├── api/
 │   ├── main.py                    # FastAPI app, CORS, SPA static serving
@@ -548,14 +638,18 @@ cti-to-stix/
 │       ├── jobs.py                # CRUD /api/jobs + finalize + source + bundle
 │       ├── entities.py            # CRUD /api/jobs/{id}/entities
 │       ├── relationships.py       # CRUD /api/jobs/{id}/relationships
-│       └── progress.py            # GET /api/jobs/{id}/progress (SSE)
+│       ├── progress.py            # GET /api/jobs/{id}/progress (SSE)
+│       ├── coverage.py            # GET /api/jobs/{id}/coverage + detection-corpora
+│       └── settings.py            # Corpora management (ADR-0007)
 │
 ├── frontend/                      # React 18 + TypeScript + Vite 6
 │   ├── src/
 │   │   ├── pages/
 │   │   │   ├── Dashboard.tsx      # Kanban, drag-and-drop upload, progress modal
 │   │   │   ├── Review.tsx         # Text / Preview / Source view + marginalia
-│   │   │   └── Graph.tsx          # d3-force graph + relationship editor
+│   │   │   ├── Graph.tsx          # d3-force graph + relationship editor
+│   │   │   ├── Coverage.tsx       # Detection-coverage matrix
+│   │   │   └── Settings.tsx       # Corpus management panel
 │   │   ├── components/
 │   │   │   ├── MarkdownPreview.tsx # VS Code-like .md renderer (react-markdown)
 │   │   │   ├── ProgressModal.tsx   # 5-stage SSE progress display
@@ -570,7 +664,8 @@ cti-to-stix/
 │   │   │   └── graphLayout.ts     # Tier map, radii, static layouts, icon paths
 │   │   ├── hooks/
 │   │   │   ├── useSSE.ts          # EventSource (5-retry on transient error)
-│   │   │   └── useMitreSearch.ts  # Client-side ATT&CK search
+│   │   │   ├── useMitreSearch.ts  # Client-side ATT&CK search
+│   │   │   └── useCoverage.ts     # Coverage data hook (view ↔ source seam)
 │   │   ├── api/client.ts          # Typed fetch wrappers
 │   │   ├── context/ThemeContext.tsx # 5 themes × 7 accent palettes
 │   │   └── types/index.ts         # Shared TS types
@@ -589,6 +684,10 @@ cti-to-stix/
 ├── uploads/                       # Web UI uploads (gitignored)
 ├── cti_stix.db                    # SQLite database (gitignored)
 │
+├── detection_corpora.yaml         # Public Sigma corpus registry (committed)
+├── detection_corpora.local.yaml.example  # Private corpus overlay template
+├── docs/adr/                      # Architecture Decision Records (see docs/adr/README.md)
+├── TESTING.md                     # Test strategy
 ├── .env                           # Secrets (gitignored)
 ├── .env.example                   # Configuration template
 ├── requirements.txt               # Pipeline dependencies
@@ -659,7 +758,8 @@ Job status lifecycle: `uploaded` → `processing` → `for_review` → `reviewin
   "target_value": "Cobalt Strike",
   "confidence": 0.92,
   "accepted": true,
-  "evidence_text": "APT29 was observed deploying Cobalt Strike Beacon…"
+  "evidence_text": "APT29 was observed deploying Cobalt Strike Beacon…",
+  "evidence_label": "observed"
 }
 ```
 
@@ -699,6 +799,32 @@ event: done
 data: {"status":"for_review"}
 ```
 
+### Coverage (detection)
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/jobs/{id}/coverage` | Per-report coverage matrix: each technique's 0–3 score + contributing corpora |
+| `GET` | `/api/jobs/{id}/coverage/{technique}/rules` | License-aware drill-down: which rules cover a technique |
+| `GET` | `/api/detection-corpora` | Per-corpus rule counts in the store |
+
+```json
+// GET /api/jobs/{id}/coverage
+{ "techniques_total": 12, "validated": false,
+  "by_score": { "0": 4, "1": 0, "2": 5, "3": 3 },
+  "cells": [ { "technique_id": "T1059.001", "score": 3, "corpora": ["sigmahq","team"], "rule_count": 4 } ] }
+```
+
+### Settings (corpora)
+
+Manages the gitignored local overlay only — the committed registry is never edited by the app.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/settings/corpora` | List configured corpora (committed + overlay) with rule counts |
+| `POST` | `/api/settings/corpora` | Add a Sigma corpus to the local overlay |
+| `DELETE` | `/api/settings/corpora/{name}` | Remove (or disable, if committed) a corpus |
+| `POST` | `/api/settings/corpora/rebuild` | Re-ingest all enabled corpora from their local clones |
+
 ---
 
 ## Database schema
@@ -711,6 +837,8 @@ CREATE TABLE jobs (
     report_text     TEXT,           -- refanged extracted text (stored once)
     bundle_json     TEXT,           -- serialised STIX bundle
     llm_result_json TEXT,           -- LLM result snapshot for finalize
+    tlp_level       TEXT,           -- per-job TLP marking (clear|green|amber|red)
+    pap_level       TEXT,           -- per-job PAP statement marking
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
@@ -736,7 +864,8 @@ CREATE TABLE relationships (
     target_value      TEXT NOT NULL,
     confidence        REAL DEFAULT 0.8,
     accepted          INTEGER DEFAULT 1,  -- NULL=pending  1=accepted  0=rejected
-    evidence_text     TEXT                -- verbatim supporting quote
+    evidence_text     TEXT,               -- verbatim supporting quote
+    evidence_label    TEXT DEFAULT 'reported'  -- observed|reported|assessed|inferred|gap
 );
 
 CREATE TABLE progress_events (
@@ -750,6 +879,24 @@ CREATE TABLE progress_events (
 CREATE TABLE relationship_policy (
     id          INTEGER PRIMARY KEY,  -- always 1 (singleton row)
     policy_json TEXT NOT NULL         -- serialised policy object
+);
+
+-- Detection-rule store (ADR-0006) — corpus-derived, not per-job.
+-- Built by scripts/build_detection_index.py from local Sigma clones.
+CREATE TABLE detection_rules (
+    id           TEXT PRIMARY KEY,    -- corpus:native_key
+    corpus       TEXT NOT NULL,
+    native_key   TEXT NOT NULL,       -- Sigma id / content hash (cross-corpus dedup)
+    format       TEXT DEFAULT 'sigma',
+    title        TEXT NOT NULL,
+    severity     TEXT, license TEXT, source_ref TEXT,
+    content_hash TEXT, data_sources TEXT, raw TEXT
+);
+
+CREATE TABLE rule_techniques (
+    rule_id      TEXT NOT NULL,
+    technique_id TEXT NOT NULL,       -- ATT&CK id, indexed for coverage lookup
+    PRIMARY KEY (rule_id, technique_id)
 );
 ```
 
@@ -771,6 +918,7 @@ Schema migrations run automatically on startup (`ALTER TABLE` wrapped in try/exc
 | Stage 3 — Ollama | ✅ if instance is local |
 | OCR (Tesseract) | ✅ local binary |
 | Web UI (frontend assets) | ✅ served from local dist/ |
+| Detection coverage (Sigma) | ✅ after `sync_corpora` (one-time clone) + `build_detection_index` |
 
 ---
 
@@ -797,6 +945,7 @@ Schema migrations run automatically on startup (`ALTER TABLE` wrapped in try/exc
 | `pydantic` | LLM output schema validation |
 | `stix2` | STIX 2.1 object + bundle construction |
 | `stix2-validator` | Bundle JSON-schema validation |
+| `PyYAML` | Sigma rule parsing + the detection-corpus registry |
 | `python-dotenv` | `.env` loading |
 | `spacy` | Optional NER fallback (no model downloaded by default) |
 
