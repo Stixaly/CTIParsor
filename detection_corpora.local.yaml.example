@@ -1,0 +1,23 @@
+# Local registry overlay — PRIVATE corpuses + local overrides (ADR-0006 Rev 3).
+#
+# Copy to detection_corpora.local.yaml (gitignored). Entries here are merged OVER
+# the committed detection_corpora.yaml: an entry with an existing `name` overrides
+# it; a new `name` is appended. Because this file is never committed, private repo
+# URLs — and anything derived from them — stay local.
+#
+# Private repos use your ambient git auth (SSH agent / credential.helper); no
+# credentials are stored by CTIParsor.
+
+corpora:
+  # Add a private Sigma repo:
+  - name: team-sigma-private
+    adapter: sigma
+    path: ./corpora/team-sigma-private
+    git:  git@github.com:your-org/private-sigma.git
+    license: proprietary
+    private: true
+    enabled: true
+
+  # Or override a public corpus locally (e.g. disable SigmaHQ on this machine):
+  # - name: sigmahq
+  #   enabled: false

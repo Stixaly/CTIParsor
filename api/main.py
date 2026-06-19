@@ -21,7 +21,7 @@ from api.db import init_db
 # api/routes/upload.py does `from api.main import limiter` at module level.
 limiter = Limiter(key_func=get_remote_address)
 
-from api.routes import entities, jobs, policy, progress, relationships, upload
+from api.routes import coverage, entities, jobs, policy, progress, relationships, settings, upload
 
 app = FastAPI(title="CTI to STIX", version="1.0.0")
 
@@ -82,6 +82,8 @@ app.include_router(entities.router)
 app.include_router(relationships.router)
 app.include_router(progress.router)
 app.include_router(policy.router)
+app.include_router(coverage.router)
+app.include_router(settings.router)
 
 
 @app.get("/api/health")

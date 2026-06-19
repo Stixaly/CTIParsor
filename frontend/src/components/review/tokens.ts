@@ -311,6 +311,32 @@ export function confPct(c: number): number {
   return c > 1 ? Math.round(c) : Math.round(c * 100)
 }
 
+// ── Detection coverage (ADR-0006) — readiness scale, NOT lab validation ───────
+export const COVERAGE_LABEL: Record<number, string> = {
+  3: 'Corroborated',     // rules from ≥2 corpora
+  2: 'Covered',          // rule from 1 corpus
+  1: 'Telemetry only',   // ATT&CK data source, no rule
+  0: 'No coverage',
+}
+
+/** Coverage score (0-3) → theme-aware cell colors. */
+export function coverageColor(score: number): { background: string; color: string; border: string } {
+  const dark = isDark()
+  const hue = ({ 3: 150, 2: 130, 1: 75, 0: 250 } as Record<number, number>)[score] ?? 250
+  const chroma = score === 0 ? 0.02 : 0.14
+  return dark
+    ? {
+        background: `oklch(0.30 ${chroma} ${hue})`,
+        color: `oklch(0.92 0.05 ${hue})`,
+        border: `oklch(0.55 ${chroma} ${hue})`,
+      }
+    : {
+        background: `oklch(0.93 ${chroma * 0.4} ${hue})`,
+        color: `oklch(0.32 ${chroma} ${hue})`,
+        border: `oklch(0.65 ${chroma} ${hue})`,
+      }
+}
+
 /** Suggest a default relationship type given src/tgt entity types.
  *  Based on the STIX 2.1 spec valid relationship table (Appendix B). */
 /**

@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { LayoutDashboard, Github, Link2 } from 'lucide-react'
+import { LayoutDashboard, Github, Link2, Settings as SettingsIcon } from 'lucide-react'
 import ThemeSwitcher from './ThemeSwitcher'
 
 /** Sidebar shell used by Dashboard and Policy.
@@ -31,6 +31,7 @@ export default function Layout() {
           {[
             { to: '/dashboard', icon: <LayoutDashboard size={15} />, label: 'Dashboard' },
             { to: '/policy',    icon: <Link2 size={15} />,           label: 'Policy'    },
+            { to: '/settings',  icon: <SettingsIcon size={15} />,    label: 'Settings'  },
           ].map(({ to, icon, label }) => (
             <NavLink
               key={to}

@@ -40,6 +40,7 @@ stix2-validator>=3.2.0       # STIX bundle validation
 
 # ── Utilities ────────────────────────────────────────────────────────────────
 python-dotenv>=1.0.0         # .env file loading
+PyYAML>=6.0,<7               # Detection-rule corpus parsing (Sigma) + registry (ADR-0006)
 
 # ── Zero-shot NER (GLiNER — Stage 2e) ────────────────────────────────────────
 # Generalist and Lightweight NER model — zero-shot, no fine-tuning needed.
