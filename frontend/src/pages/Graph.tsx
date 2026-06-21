@@ -21,9 +21,10 @@ import {
 
 import {
   fetchJob, fetchEntities, fetchRelationships,
-  createRelationship, updateRelationship, deleteRelationship, fetchBundle,
+  createRelationship, updateRelationship, deleteRelationship,
   createEntity,
 } from '../api/client'
+import { downloadBundle } from '../stix/downloadBundle'
 import { typeDot, typeSoft, typeInk, typeLabel, REL_TYPES, suggestRelType, confPct, TYPE_GROUPS, verbsForPair } from '../components/review/tokens'
 import GraphCanvas, { type GraphCanvasHandle } from '../components/graph/GraphCanvas'
 import { type GraphNode, type GraphEdge, getTier } from '../components/graph/graphLayout'
@@ -857,16 +858,7 @@ export default function Graph() {
 
   const handleDownload = async () => {
     try {
-      const bundle = await fetchBundle(jobId!)
-      const blob   = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' })
-      const url    = URL.createObjectURL(blob)
-      const a      = document.createElement('a')
-      a.href     = url
-      a.download = `${(job?.original_filename ?? 'bundle').replace(/\.[^.]+$/, '')}_stix.json`
-      document.body.appendChild(a); a.click()
-      document.body.removeChild(a)
-      // Defer revocation — revoking synchronously after click() breaks Firefox.
-      setTimeout(() => URL.revokeObjectURL(url), 100)
+      await downloadBundle(jobId!, job?.original_filename)
     } catch { alert('Bundle not yet available') }
   }
 

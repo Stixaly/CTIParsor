@@ -1,4 +1,4 @@
-import { ArrowLeft, GitGraph, ShieldCheck } from 'lucide-react'
+import { ArrowLeft, GitGraph, ShieldCheck, Download, FileCode, Loader2 } from 'lucide-react'
 
 interface Props {
   title: string
@@ -9,6 +9,16 @@ interface Props {
   onGraph: () => void
   onCoverage: () => void
   onFinalize: () => void
+  onDownload: () => void
+  /** Download a ZIP of every detected Sigma rule for this report. */
+  onDownloadSigma: () => void
+  /** Number of detected (linkable) Sigma rules — labels the button and gates it. */
+  sigmaRuleCount: number
+  /** True while the Sigma ZIP is being built/streamed — shows a spinner. */
+  sigmaDownloading: boolean
+  /** True after a successful finalize, until the next mutation. When true the
+   *  primary button is "Download STIX"; otherwise it is "Complete Review". */
+  reviewCompleted: boolean
   onThemeToggle: () => void
   /** True while any entity/relationship mutation has fired but the bundle
    *  has not yet been regenerated. */
@@ -19,7 +29,8 @@ interface Props {
 
 export default function TopChrome({
   title, pendingCount, finalizing, theme,
-  onBack, onGraph, onCoverage, onFinalize, onThemeToggle,
+  onBack, onGraph, onCoverage, onFinalize, onDownload, onDownloadSigma,
+  sigmaRuleCount, sigmaDownloading, reviewCompleted, onThemeToggle,
   bundleStale, autoFinalizing,
 }: Props) {
   const isDark = theme === 'dark'
@@ -100,20 +111,55 @@ export default function TopChrome({
         )}
 
         <button
-          className="btn-primary"
-          onClick={onFinalize}
-          disabled={finalizing}
-          title={pendingCount > 0
-            ? `${pendingCount} entities still unreviewed — they will be included in the bundle. Click to complete the review and generate the final STIX file.`
-            : 'Generate the final STIX 2.1 bundle and mark this report as completed.'
+          className="btn-ghost"
+          onClick={onDownloadSigma}
+          disabled={sigmaRuleCount === 0 || sigmaDownloading}
+          title={sigmaDownloading
+            ? 'Building the Sigma rule archive — this can take a moment for large reports…'
+            : sigmaRuleCount === 0
+              ? 'No Sigma rules match this report’s techniques yet.'
+              : `Download all ${sigmaRuleCount} detected Sigma rule${sigmaRuleCount === 1 ? '' : 's'} as a ZIP.`
           }
         >
-          {finalizing
-            ? 'Completing…'
-            : pendingCount > 0
-              ? `Complete Review · ${pendingCount} unreviewed`
-              : 'Complete Review'}
+          {sigmaDownloading ? (
+            <>
+              <Loader2 size={14} className="bundle-status-spin" />
+              Preparing…
+            </>
+          ) : (
+            <>
+              <FileCode size={14} />
+              Sigma rules{sigmaRuleCount > 0 ? ` · ${sigmaRuleCount}` : ''}
+            </>
+          )}
         </button>
+
+        {reviewCompleted ? (
+          <button
+            className="btn-primary"
+            onClick={onDownload}
+            title="Download the finalized STIX 2.1 bundle for this report."
+          >
+            <Download size={14} />
+            Download STIX
+          </button>
+        ) : (
+          <button
+            className="btn-primary"
+            onClick={onFinalize}
+            disabled={finalizing}
+            title={pendingCount > 0
+              ? `${pendingCount} entities still unreviewed — they will be included in the bundle. Click to complete the review and generate the final STIX file.`
+              : 'Generate the final STIX 2.1 bundle and mark this report as completed.'
+            }
+          >
+            {finalizing
+              ? 'Completing…'
+              : pendingCount > 0
+                ? `Complete Review · ${pendingCount} unreviewed`
+                : 'Complete Review'}
+          </button>
+        )}
       </div>
     </header>
   )

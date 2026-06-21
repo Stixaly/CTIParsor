@@ -11,7 +11,9 @@ import {
   updateEntity, createEntity,
   createRelationship, updateRelationship,
   finalizeJob, finalizeJobQuick, sourceUrl, bulkUpdateEntities,
+  fetchCoverageReportRules, detectionsExportUrl,
 } from '../api/client'
+import { downloadBundle } from '../stix/downloadBundle'
 import type { Entity, Relationship } from '../types'
 import { useAppTheme } from '../context/ThemeContext'
 
@@ -99,6 +101,15 @@ export default function Review() {
     queryFn: () => fetchJob(jobId!),
     enabled: !!jobId,
   })
+
+  // Detected Sigma rules — shared cache key with the Detections tab; drives the
+  // "Download Sigma rules" button's count and enabled state.
+  const { data: coverageRules } = useQuery({
+    queryKey: ['coverage-rules', jobId],
+    queryFn: () => fetchCoverageReportRules(jobId!),
+    enabled: !!jobId,
+  })
+  const sigmaRuleCount = coverageRules?.rule_total ?? 0
 
   const { data: remoteEntities = [], isLoading: entLoading } = useQuery({
     queryKey: ['entities', jobId],
@@ -204,6 +215,11 @@ export default function Review() {
   const [kbdOpen, setKbdOpen] = useState(false)
   const [finalizing, setFinalizing] = useState(false)
   const [finalized, setFinalized] = useState(false)
+  /** True after a successful manual finalize, until the next mutation.
+   *  Drives the primary button's "Complete Review" → "Download STIX" toggle. */
+  const [reviewCompleted, setReviewCompleted] = useState(false)
+  /** True while the detected-Sigma-rules ZIP is being built/streamed. */
+  const [downloadingSigma, setDownloadingSigma] = useState(false)
   const [popover, setPopover] = useState<PopoverState | null>(null)
   const [relCreator, setRelCreator] = useState<RelCreatorState | null>(null)
   const [dragState, setDragState] = useState<{ srcId: string; from: Point; to: Point } | null>(null)
@@ -456,19 +472,58 @@ export default function Review() {
       await finalizeJob(jobId)   // full finalize with lexicon re-scan
       qc.invalidateQueries({ queryKey: ['jobs'] })
       setBundleStale(false)      // bundle is now definitively current
+      setReviewCompleted(true)   // flips the primary button to "Download STIX"
+      // Stay on the page — the bundle is downloadable in place. A brief toast
+      // confirms completion. The report is marked "Completed" server-side and
+      // will appear in the Completed column when the user returns to the dashboard.
       setFinalized(true)
-      // Return to the Dashboard so the user sees the report move to "Completed".
-      // The graph is still accessible from the Completed kanban card.
-      setTimeout(() => {
-        setFinalized(false)
-        navigate('/dashboard')
-      }, 1800)
+      setTimeout(() => setFinalized(false), 2600)
     } catch {
       alert('Finalize failed — check server logs')
     } finally {
       setFinalizing(false)
     }
-  }, [jobId, qc, navigate])
+  }, [jobId, qc])
+
+  // ── download the finalized STIX bundle ────────────────────────────────────
+  // Available once the review is completed; the bundle is guaranteed current in
+  // that state (any edit flips reviewCompleted back to false). Declared before
+  // the keyboard effect so the dep array reference is valid.
+  const handleDownload = useCallback(async () => {
+    if (!jobId) return
+    try {
+      await downloadBundle(jobId, job?.original_filename)
+    } catch { alert('Bundle not yet available') }
+  }, [jobId, job?.original_filename])
+
+  // ── download all detected Sigma rules (ZIP) ───────────────────────────────
+  // The server builds the archive on the fly (can be tens of MB), so we fetch it
+  // with an explicit loading state rather than a bare anchor click — the button
+  // shows a spinner and the user gets an error if it fails, instead of silence.
+  const handleDownloadSigma = useCallback(async () => {
+    if (!jobId || sigmaRuleCount === 0 || downloadingSigma) return
+    setDownloadingSigma(true)
+    try {
+      const res = await fetch(detectionsExportUrl(jobId))
+      if (!res.ok) throw new Error(`${res.status}`)
+      const blob = await res.blob()
+      // Prefer the server-provided filename from Content-Disposition.
+      const disp = res.headers.get('content-disposition') ?? ''
+      const match = /filename="?([^"]+)"?/.exec(disp)
+      const filename = match?.[1]
+        ?? `${(job?.original_filename ?? 'report').replace(/\.[^.]+$/, '')}_sigma_rules.zip`
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = filename
+      document.body.appendChild(a); a.click()
+      document.body.removeChild(a)
+      setTimeout(() => URL.revokeObjectURL(url), 100)
+    } catch {
+      alert('Could not build the Sigma rule archive — check server logs.')
+    } finally {
+      setDownloadingSigma(false)
+    }
+  }, [jobId, sigmaRuleCount, downloadingSigma, job?.original_filename])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -483,11 +538,11 @@ export default function Review() {
       else if (focusedId && (e.key === 'u' || e.key === 'U')) { reset(focusedId) }
       else if (e.key === 'g' || e.key === 'G')        { navigate(`/graph/${jobId}`) }
       else if (e.key === 'c' || e.key === 'C')        { navigate(`/coverage/${jobId}`) }
-      else if (e.key === 'f' || e.key === 'F')        { handleFinalize() }
+      else if (e.key === 'f' || e.key === 'F')        { reviewCompleted ? handleDownload() : handleFinalize() }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [focusedId, orderedEntityIds, goNextPending, handleFinalize])
+  }, [focusedId, orderedEntityIds, goNextPending, handleFinalize, handleDownload, reviewCompleted])
 
   // ── auto-finalize (debounced) ─────────────────────────────────────────────
   //
@@ -515,6 +570,9 @@ export default function Review() {
 
   const markDirty = () => {
     setBundleStale(true)
+    // A STIX object changed/was added → the completed bundle is no longer in
+    // sync with the report, so revert the button to "Complete Review".
+    setReviewCompleted(false)
     if (autoFinalizeTimer.current) clearTimeout(autoFinalizeTimer.current)
     autoFinalizeTimer.current = setTimeout(triggerAutoFinalize, 4000)
   }
@@ -563,6 +621,11 @@ export default function Review() {
         onGraph={() => navigate(`/graph/${jobId}`)}
         onCoverage={() => navigate(`/coverage/${jobId}`)}
         onFinalize={handleFinalize}
+        onDownload={handleDownload}
+        onDownloadSigma={handleDownloadSigma}
+        sigmaRuleCount={sigmaRuleCount}
+        sigmaDownloading={downloadingSigma}
+        reviewCompleted={reviewCompleted}
         onThemeToggle={() => setTheme(theme === 'dark' ? 'warm' : 'dark')}
         bundleStale={bundleStale}
         autoFinalizing={autoFinalizing}
@@ -856,7 +919,7 @@ export default function Review() {
       {/* ── finalize toast ── */}
       {finalized && (
         <div className="toast">
-          ✓ Review completed — STIX 2.1 bundle ready · returning to dashboard…
+          ✓ Review completed — STIX 2.1 bundle ready to download
         </div>
       )}
     </div>

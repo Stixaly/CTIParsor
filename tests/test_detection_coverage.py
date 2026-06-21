@@ -1,8 +1,15 @@
 """Tests for detection coverage scoring + store + API (ADR-0006)."""
+import io
+import json
+import zipfile
 from uuid import uuid4
 
 from models.detection import DetectionRule, Severity
-from pipeline.detection.coverage import compute_for_job, score_techniques
+from pipeline.detection.coverage import (
+    compute_for_job,
+    rule_bodies_for_job,
+    score_techniques,
+)
 from pipeline.detection.store import (
     corpus_counts,
     replace_corpus_rules,
@@ -43,10 +50,11 @@ def test_telemetry_only_scores_1():
 
 # ── Store round-trip + compute_for_job (temp DB) ──────────────────────────────
 
-def _rule(corpus, key, techniques):
+def _rule(corpus, key, techniques, *, raw=None, license="proprietary"):
     return DetectionRule(
         id=f"{corpus}:{key}", corpus=corpus, title=f"rule {key}",
-        technique_ids=techniques, severity=Severity.HIGH, license="proprietary",
+        technique_ids=techniques, severity=Severity.HIGH, license=license,
+        raw=raw if raw is not None else f"title: rule {key}\nlogsource: {corpus}\n",
     )
 
 
@@ -139,3 +147,66 @@ def test_coverage_api(temp_db, temp_db_client):
 
     assert temp_db_client.get("/api/jobs/does-not-exist/coverage").status_code == 404
     assert temp_db_client.get("/api/detection-corpora").json()["corpora"][0]["corpus"] == "core"
+
+
+# ── Sigma export ────────────────────────────────────────────────────────────
+
+def _job_with_technique(temp_db, job_id, mitre_id, *, accepted=1):
+    conn = temp_db.get_conn()
+    conn.execute(
+        "INSERT INTO jobs (id, original_filename, status, created_at, updated_at) "
+        "VALUES (?,?,?,?,?)", (job_id, "r.txt", "reviewing", temp_db.now_iso(), temp_db.now_iso()),
+    )
+    conn.execute(
+        "INSERT INTO entities (id,job_id,value,entity_type,mitre_id,accepted,source) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (str(uuid4()), job_id, mitre_id, "technique", mitre_id, accepted, "llm"),
+    )
+    conn.commit()
+
+
+def test_rule_bodies_for_job_returns_raw_and_techniques(temp_db):
+    conn = temp_db.get_conn()
+    replace_corpus_rules(conn, "core", [_rule("core", "k1", ["T1059"], raw="detection: powershell")])
+    _job_with_technique(temp_db, "jb", "T1059")
+
+    bodies = rule_bodies_for_job(conn, "jb")
+    assert len(bodies) == 1
+    assert bodies[0]["raw"] == "detection: powershell"
+    assert bodies[0]["techniques"] == ["T1059"]
+    assert bodies[0]["corpus"] == "core"
+
+
+def test_export_detections_zip(temp_db, temp_db_client):
+    conn = temp_db.get_conn()
+    replace_corpus_rules(conn, "core", [
+        _rule("core", "k1", ["T1059"], raw="title: ps\ndetection: a", license="DRL-1.1"),
+        _rule("core", "k2", ["T1059"], raw="title: cmd\ndetection: b", license="DRL-1.1"),
+    ])
+    _job_with_technique(temp_db, "jz", "T1059")
+
+    resp = temp_db_client.get("/api/jobs/jz/detections/export")
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["content-type"] == "application/zip"
+    assert "jz" not in resp.headers["content-disposition"]  # named after the report, not the id
+    assert resp.headers["content-disposition"].endswith('_sigma_rules.zip"')
+
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = zf.namelist()
+    rule_files = [n for n in names if n.startswith("rules/")]
+    assert len(rule_files) == 2
+    assert "MANIFEST.json" in names and "README.txt" in names
+
+    manifest = json.loads(zf.read("MANIFEST.json"))
+    assert manifest["rule_count"] == 2
+    assert {r["license"] for r in manifest["rules"]} == {"DRL-1.1"}
+    # raw bodies are actually written
+    assert zf.read(rule_files[0]).decode().startswith("title:")
+
+
+def test_export_detections_404_when_no_rules(temp_db, temp_db_client):
+    _job_with_technique(temp_db, "jn", "T1003")  # nothing covers T1003
+    resp = temp_db_client.get("/api/jobs/jn/detections/export")
+    assert resp.status_code == 404
+
+    assert temp_db_client.get("/api/jobs/missing/detections/export").status_code == 404

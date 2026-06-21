@@ -99,6 +99,54 @@ def rules_for_technique(conn: sqlite3.Connection, technique_id: str) -> list[dic
     return out
 
 
+def canonical_rule_ids_for_techniques(
+    conn: sqlite3.Connection, technique_ids: Iterable[str]
+) -> list[tuple[str, str]]:
+    """(technique_id, rule_id) for every *canonical* rule covering the given
+    techniques, in a single indexed query.
+
+    Unlike rules_for_technique (which computes per-rule `also_in` provenance via
+    an N+1 subquery), this is a flat join — used by the bulk Sigma export where
+    only the rule ids matter, so building the archive stays fast even when a
+    report's techniques fan out to thousands of rules."""
+    ids = sorted({t.upper() for t in technique_ids})
+    if not ids:
+        return []
+    placeholders = ",".join("?" * len(ids))
+    rows = conn.execute(
+        f"SELECT rt.technique_id, rt.rule_id "
+        f"FROM rule_techniques rt JOIN detection_rules d ON d.id = rt.rule_id "
+        f"WHERE rt.technique_id IN ({placeholders}) AND d.is_canonical=1",
+        ids,
+    ).fetchall()
+    return [(r[0], r[1]) for r in rows]
+
+
+def canonical_rule_bodies(conn: sqlite3.Connection, rule_ids: Iterable[str]) -> dict[str, dict]:
+    """Return raw rule bodies + provenance for the given canonical rule ids.
+
+    Keyed by rule id: {corpus, native_key, title, license, source_ref, raw}.
+    Used by the per-report Sigma export (ADR-0006). Unlike the metadata-only
+    drill-down endpoints, this intentionally returns `raw` for local export —
+    callers package each body with its license so provenance survives."""
+    ids = sorted({i for i in rule_ids if i})
+    if not ids:
+        return {}
+    placeholders = ",".join("?" * len(ids))
+    rows = conn.execute(
+        f"SELECT id, corpus, native_key, title, license, source_ref, raw "
+        f"FROM detection_rules WHERE id IN ({placeholders})",
+        ids,
+    ).fetchall()
+    return {
+        r[0]: {
+            "corpus": r[1], "native_key": r[2], "title": r[3],
+            "license": r[4], "source_ref": r[5], "raw": r[6],
+        }
+        for r in rows
+    }
+
+
 def corpus_counts(conn: sqlite3.Connection) -> list[dict]:
     """Per-corpus rule counts — for the /api/detection-corpora endpoint.
 
