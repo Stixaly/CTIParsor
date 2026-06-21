@@ -998,6 +998,28 @@ def enrich_chunk(
                 return _call_llm(s, u, provider=provider)
             result = cast(LLMEnrichmentResult, verify_relationships(text, result, _verify_call))
 
+    # Stage 3f — self-verification of TTP claims (ADR precision §3)
+    # Mirrors Stage 3d for techniques: each LLM-extracted TTP must be supported by
+    # a sentence describing its use, or it is dropped.  TTPs already corroborated
+    # by a high-confidence semantic match are trusted and skipped.
+    # Only runs when ENABLE_TTP_VERIFICATION=true in .env (default: false).
+    if result.ttps:
+        from pipeline.stage3f_ttp_verify import verify_enabled as ttp_verify_enabled
+        from pipeline.stage3f_ttp_verify import verify_ttps
+        if ttp_verify_enabled():
+            corroborated_ids = {
+                e.mitre_id.upper()
+                for e in (semantic_ttp_entities or [])
+                if getattr(e, "mitre_id", None)
+            }
+
+            def _ttp_verify_call(s, u):
+                return _call_llm(s, u, provider=provider)
+            result = cast(
+                LLMEnrichmentResult,
+                verify_ttps(text, result, _ttp_verify_call, corroborated_ids),
+            )
+
     return result
 
 

@@ -622,16 +622,61 @@ def _ate_stage2c_semantic(text: str) -> set[str]:
 
 
 def _ate_combined(text: str) -> set[str]:
-    """Combine regex (Stage 2) + semantic (Stage 2c) TTP extraction."""
+    """Combine regex (Stage 2) + semantic (Stage 2c) TTP extraction, then apply
+    the Stage 3c parent/sub-technique subsumption so the measured set reflects the
+    same precision rules the pipeline ships (Phase C)."""
     ids = _ate_stage2_regex(text)
     ids |= _ate_stage2c_semantic(text)
-    return ids
+    return _subsume_ids(ids)
+
+
+def _subsume_ids(ids: set[str]) -> set[str]:
+    """Drop a parent T-ID when a sub-technique of it is also present."""
+    upper = {i.upper() for i in ids}
+    parents = {i.rsplit(".", 1)[0] for i in upper if "." in i}
+    return {i for i in upper if i not in parents}
+
+
+def _ate_stage_full(text: str) -> set[str]:
+    """
+    Full TTP path: regex + semantic + LLM enrichment + Stage 3c normalize.
+
+    This is the ONLY stage that measures what the pipeline actually emits to the
+    DB — it includes the LLM and the merge/normalize/subsumption logic where the
+    Phase A–C precision rules live.  Requires a configured LLM provider; without
+    one it degrades to regex + semantic so the harness still runs offline.
+    """
+    from models.schemas import EntityType
+    from pipeline.stage2_extraction import extract_entities
+    from pipeline.stage3_llm import _provider_ready, enrich_all_chunks
+
+    regex_ents = extract_entities(text)
+
+    semantic_ents: list = []
+    try:
+        from pipeline.stage2c_ttp_semantic import detect_ttps_semantic, semantic_available
+        if semantic_available():
+            semantic_ents = detect_ttps_semantic(text)
+    except Exception:
+        pass
+
+    ids = {e.value.upper() for e in regex_ents if e.entity_type == EntityType.TTP}
+    ids |= {e.mitre_id.upper() for e in semantic_ents if e.mitre_id}
+
+    if _provider_ready():
+        result = enrich_all_chunks(
+            [text], [regex_ents], semantic_ttp_entities=semantic_ents,
+        )
+        ids |= {t.mitre_id.upper() for t in result.ttps if t.mitre_id}
+
+    return _subsume_ids(ids)
 
 
 _ATE_STAGE_FNS: dict[str, object] = {
     "2":    _ate_stage2_regex,
     "2c":   _ate_stage2c_semantic,
     "all":  _ate_combined,
+    "full": _ate_stage_full,
 }
 
 
@@ -738,6 +783,100 @@ def _load_ate_fixture_samples() -> list[ATESample]:
             description="No TTP — clean executive summary (FP check)",
         ),
     ]
+
+
+# ---------------------------------------------------------------------------
+# ATE adversarial precision fixtures (Phase D)
+#
+# Near-miss text that shares TTP vocabulary but describes NO concrete technique.
+# These exist purely to measure false positives: a precise extractor returns the
+# empty set for every one of them.  They lock in the Phase A recalibration
+# (margin gate + single match/sentence) against future regressions.
+# ---------------------------------------------------------------------------
+
+def _load_ate_adversarial_samples() -> list[ATESample]:
+    return [
+        ATESample(
+            text=(
+                "This quarterly report discusses persistence of threat activity "
+                "and the credential-security posture of the financial sector. "
+                "Organisations should remain vigilant against phishing."
+            ),
+            expected_ids=set(),
+            description="Adversarial — TTP vocabulary in a generic summary (FP check)",
+        ),
+        ATESample(
+            text=(
+                "The vendor's marketing team executed a campaign to download new "
+                "customers, leveraging social media to escalate brand awareness."
+            ),
+            expected_ids=set(),
+            description="Adversarial — action verbs in a non-security sentence (FP check)",
+        ),
+        ATESample(
+            text=(
+                "Our backup process encrypts data at rest and the registry of "
+                "approved vendors is reviewed quarterly for compliance."
+            ),
+            expected_ids=set(),
+            description="Adversarial — 'encrypt'/'registry' in benign IT context (FP check)",
+        ),
+    ]
+
+
+def test_ttp_regex_no_false_positives_on_adversarial():
+    """Explicit-ID regex must extract nothing from TTP-flavoured prose (offline)."""
+    score = run_ate_benchmark(_load_ate_adversarial_samples(), stage="2")
+    assert score.fp == 0, (
+        f"Regex TTP extraction produced {score.fp} false positives on adversarial prose"
+    )
+
+
+def test_ttp_semantic_precision_on_adversarial():
+    """
+    On adversarial (benign, TTP-flavoured) prose the recalibrated semantic stage
+    must produce NO *high-confidence* false positives, and must not flood with
+    medium candidates.
+
+    Medium-confidence matches are expected here — they are *candidates* that the
+    downstream gates handle (Stage 3c stops them overriding the LLM; Stage 3f
+    verifies them). The guarantee the raw stage makes is about high confidence.
+
+    Skipped when the embedding cache / sentence-transformers is unavailable
+    (e.g. SKIP_HEAVY_MODELS=1 in CI).
+    """
+    import pytest
+    try:
+        from pipeline.stage2c_ttp_semantic import (
+            detect_ttps_semantic,
+            high_confidence_threshold,
+            semantic_available,
+        )
+    except ImportError:
+        pytest.skip("sentence-transformers not installed")
+        return
+    if not semantic_available():
+        pytest.skip("embedding cache unavailable (SKIP_HEAVY_MODELS or no cache)")
+        return
+
+    high = high_confidence_threshold()
+    high_conf_fps = 0
+    total_fps = 0
+    for sample in _load_ate_adversarial_samples():
+        for ent in detect_ttps_semantic(sample.text):
+            total_fps += 1
+            if ent.confidence >= high:
+                high_conf_fps += 1
+
+    assert high_conf_fps == 0, (
+        f"Semantic stage produced {high_conf_fps} HIGH-confidence false positives "
+        f"on adversarial prose (expected 0 after Phase A recalibration)"
+    )
+    # Flooding guard: medium candidates are allowed, but a handful at most.
+    assert total_fps <= 4, (
+        f"Semantic stage flooded adversarial prose with {total_fps} spurious "
+        f"techniques (expected ≤4 — margin gate / single-match recalibration)"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -903,8 +1042,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--stage", "-s", choices=["2", "2c", "all"], default="all",
-        help="[ATE mode] Which pipeline stage to evaluate (default: all).",
+        "--stage", "-s", choices=["2", "2c", "all", "full"], default="all",
+        help=(
+            "[ATE mode] Which pipeline stage to evaluate (default: all).\n"
+            "  2    = regex (explicit T-IDs)\n"
+            "  2c   = semantic only\n"
+            "  all  = regex + semantic + subsumption (offline)\n"
+            "  full = regex + semantic + LLM + Stage 3c normalize (needs API key)"
+        ),
     )
     parser.add_argument(
         "--types", "-t", nargs="+", default=None,
@@ -933,7 +1078,7 @@ def main() -> None:
 
         print(f"  Stage: {args.stage}")
 
-        if args.stage in ("2c", "all"):
+        if args.stage in ("2c", "all", "full"):
             try:
                 from pipeline.stage2c_ttp_semantic import semantic_available
                 if not semantic_available():

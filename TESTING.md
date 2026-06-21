@@ -53,9 +53,33 @@ The `mock_llm` fixture patches `pipeline.stage3_llm._call_llm`, so Stage 3 tests
 run offline. Tests that exercise real retry/timeout behaviour are name-tagged
 `llm` and deselected by `-k "not llm"`.
 
+### Measuring TTP precision (ATE benchmark)
+
+`tests/eval_pipeline.py` doubles as a CLI for the **ATT&CK Technique Extraction
+(ATE)** benchmark — the harness for the ADR-0011 precision work. It scores MITRE
+technique extraction (P/R/F1) against the GPT-4 baseline (F1 = 0.64):
+
+```bash
+# Regex + semantic + Stage 3c subsumption (offline, no API key)
+python tests/eval_pipeline.py --benchmark ate --stage all --verbose
+
+# Semantic stage only (needs the embedding cache; tune thresholds here)
+python tests/eval_pipeline.py --benchmark ate --stage 2c --verbose
+
+# The full shipping path: regex + semantic + LLM + Stage 3c normalize (needs API key)
+python tests/eval_pipeline.py --benchmark ate --stage full
+
+# Against the public CTIBench ATE dataset (github.com/xashru/cti-bench)
+python tests/eval_pipeline.py --benchmark ate --stage full --dataset ctibench_ate.json
+```
+
+Use `--stage full` to calibrate per-model thresholds (e.g. the SecureBERT-Plus
+row in `pipeline/stage2c_ttp_semantic._MODEL_THRESHOLDS`) before changing
+`TTP_EMBEDDING_MODEL` in production.
+
 ---
 
-## 3. Current coverage map (172 tests)
+## 3. Current coverage map (254 tests)
 
 | Layer | File | ~Tests | Covers |
 |---|---|---:|---|
@@ -63,6 +87,8 @@ run offline. Tests that exercise real retry/timeout behaviour are name-tagged
 | Extraction | `test_stage2.py` | 60 | regex IoCs, refang/defang matrix, IoC-appendix patterns, hyphen line-breaks |
 | LLM enrich | `test_stage3.py` | 40 | `enrich_chunk` happy/error/transient, `_merge_results`, dedup, prompt sanitiser, `_normalize_llm_json` |
 | Hallucination filter | `test_stage3b.py` | 12 | actor/malware/relationship presence checks, allow-list bypass |
+| **TTP precision** | `test_ttp_precision.py` | 19 | Stage 2c threshold resolution (per-model/manifest/env), medium-semantic-doesn't-override-LLM, parent/sub-technique subsumption, Stage 3f TTP verification (drop/keep/corroborate) |
+| **ATE benchmark** | `eval_pipeline.py` | — | regex/semantic ATE F1 + NER F1 fixtures, adversarial precision (high-conf FP = 0); semantic cases auto-skip under `SKIP_HEAVY_MODELS=1` |
 | STIX mapping | `test_stage4.py` | 33 | SDO/SCO/SRO build, policy pins, IoC coverage, external-ref routing |
 | Validation/export | `test_stage5.py` | 8 | bundle validity, file write, nested dirs |
 | API | `test_api_routes.py` | 8 | health, jobs 404/list, upload filter, progress, policy |

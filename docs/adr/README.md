@@ -13,6 +13,7 @@ choice, and the consequences. They're append-only — supersede rather than rewr
 | [0008](0008-detection-coverage-matrix.md) | Per-report detection-coverage matrix | Accepted |
 | [0009](0009-stix-trust-and-provenance.md) | STIX trust & provenance (evidence labels, consensus, markings) | Accepted |
 | [0010](0010-default-sigma-corpora-and-dedup.md) | Default multi-repo Sigma corpora + cross-corpus deduplication | Accepted |
+| [0011](0011-ttp-extraction-precision.md) | TTP extraction precision (thresholds, margin gate, TTP self-verify, subsumption) | Accepted |
 
 **Numbering notes**
 - `0001` and `0003` are unused gaps (early informal decisions never filed).

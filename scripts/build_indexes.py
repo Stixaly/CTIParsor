@@ -387,9 +387,22 @@ def build_embeddings(bundles: dict[str, Path | None]) -> None:
                           encoding="utf-8")
 
     # Write manifest — records which model built this cache so stage2c can detect
-    # stale caches when TTP_EMBEDDING_MODEL changes (ADR-004 P1-A)
+    # stale caches when TTP_EMBEDDING_MODEL changes (ADR-004 P1-A), plus the
+    # cosine thresholds calibrated for this model so the gate travels with the
+    # cache instead of being hardcoded in stage2c (ADR precision §2).
     dims = int(embeddings.shape[1])
-    manifest = {"model": model_id, "dims": dims, "num_techniques": len(texts)}
+    # Keep in sync with pipeline.stage2c_ttp_semantic._MODEL_THRESHOLDS
+    _MODEL_THRESHOLDS = {
+        "all-MiniLM-L6-v2":            (0.62, 0.48),
+        "ehsanaghaei/SecureBERT-Plus": (0.70, 0.58),
+    }
+    high, medium = _MODEL_THRESHOLDS.get(model_id, (0.62, 0.48))
+    manifest = {
+        "model": model_id,
+        "dims": dims,
+        "num_techniques": len(texts),
+        "thresholds": {"high": high, "medium": medium},
+    }
     _MANIFEST_PATH.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     size_mb = _EMB_PATH.stat().st_size / 1e6
