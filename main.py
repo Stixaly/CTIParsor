@@ -16,11 +16,11 @@ import sys
 from pathlib import Path
 
 from models.schemas import RawEntity
-from pipeline.stage1_ingestion import ingest, chunk_text
+from pipeline.stage1_ingestion import chunk_text, ingest
 from pipeline.stage2_extraction import extract_entities, refang
 from pipeline.stage3_llm import enrich_all_chunks
 from pipeline.stage4_stix_mapping import build_stix_bundle, verify_ioc_coverage
-from pipeline.stage5_validation import validate_and_export, print_bundle_summary
+from pipeline.stage5_validation import print_bundle_summary, validate_and_export
 
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".html", ".htm", ".txt", ".md"}
 

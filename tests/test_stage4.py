@@ -65,8 +65,6 @@ def test_ipv4_becomes_sco():
 def test_duplicate_input_entities_yield_one_sco():
     """Passing the same IoC twice (e.g. the CLI flattening overlapping chunks)
     must not put two identical-id SCO objects into the bundle."""
-    from collections import Counter
-
     entities = [
         RawEntity(value="1.2.3.4", entity_type=EntityType.IPV4),
         RawEntity(value="1.2.3.4", entity_type=EntityType.IPV4),
