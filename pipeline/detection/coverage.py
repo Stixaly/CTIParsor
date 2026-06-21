@@ -171,3 +171,47 @@ def rules_for_job(conn: sqlite3.Connection, job_id: str) -> dict:
         "technique_total": len(groups),
         "rule_total": len(all_rule_ids),
     }
+
+
+def rule_bodies_for_job(conn: sqlite3.Connection, job_id: str) -> list[dict]:
+    """Raw bodies of every canonical detection rule linkable to this report.
+
+    Mirrors rules_for_job's technique selection (parent→sub roll-up) so the
+    export contains exactly the rules the Detections panel shows, but includes
+    each rule's `raw` body for local export (ADR-0006 — license carried alongside
+    via the export manifest). Each entry also lists the report technique(s) it
+    covers. Returns [] when no rules match."""
+    from pipeline.detection.store import (
+        canonical_rule_bodies,
+        canonical_rule_ids_for_techniques,
+    )
+
+    # Map each rule-technique tag to the report technique(s) it covers, applying
+    # the same parent→sub roll-up as compute_for_job (a parent-tagged rule covers
+    # a report's sub-technique).
+    query_ids: set[str] = set()
+    covers: dict[str, set[str]] = {}
+    for t in job_technique_ids(conn, job_id):
+        query_ids.add(t)
+        covers.setdefault(t, set()).add(t)
+        parent = _parent_technique(t)
+        if parent:
+            query_ids.add(parent)
+            covers.setdefault(parent, set()).add(t)
+
+    # One flat query for all (tag, rule_id) pairs, then re-key to report techniques.
+    tech_for_rule: dict[str, set[str]] = {}
+    for tag, rid in canonical_rule_ids_for_techniques(conn, query_ids):
+        for report_t in covers.get(tag.upper(), ()):
+            tech_for_rule.setdefault(rid, set()).add(report_t)
+
+    if not tech_for_rule:
+        return []
+
+    bodies = canonical_rule_bodies(conn, tech_for_rule.keys())
+    out = [
+        {"id": rid, **meta, "techniques": sorted(tech_for_rule[rid])}
+        for rid, meta in bodies.items()
+    ]
+    out.sort(key=lambda r: (r["corpus"], r["title"] or r["native_key"]))
+    return out

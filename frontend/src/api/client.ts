@@ -106,6 +106,9 @@ export const fetchCoverageRules = (jobId: string, techniqueId: string) =>
 /** All Sigma rules linkable to a report, grouped by technique — backs the Review "Detections" tab. */
 export const fetchCoverageReportRules = (jobId: string) =>
   req<CoverageReportRules>(`/jobs/${jobId}/coverage/rules`)
+/** URL that streams a ZIP of every detected Sigma rule (bodies) for a report. */
+export const detectionsExportUrl = (jobId: string) =>
+  `/api/jobs/${jobId}/detections/export`
 export const fetchDetectionCorpora = () =>
   req<{ corpora: DetectionCorpus[] }>(`/detection-corpora`)
 
