@@ -1,12 +1,20 @@
 import asyncio
 import json
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from api.db import get_conn
 
 router = APIRouter(prefix="/api/jobs", tags=["progress"])
+
+# Hard ceiling on how long a single SSE connection stays open.  Without it, a job
+# wedged in a non-terminal status (e.g. the worker subprocess died without the
+# watcher updating the row) keeps the generator polling — and the connection
+# open — forever.  Sized above the default worker job timeout (1800 s) plus
+# headroom so a legitimately long job still streams to completion.
+_POLL_INTERVAL_SECONDS = 0.5
+_MAX_STREAM_SECONDS = 2700  # 45 minutes
 
 
 def _fetch_events_after(job_id: str, last_id: int) -> list[dict]:
@@ -24,10 +32,26 @@ def _fetch_job_status(job_id: str) -> str | None:
     return row["status"] if row else None
 
 
+def _parse_last_event_id(request: Request) -> int:
+    """Resume point for a reconnecting EventSource.
+
+    The browser replays the id of the last event it received via the
+    Last-Event-ID header.  Without honouring it, a transient reconnect restarts
+    the generator at 0 and re-streams every prior progress row — the client then
+    appends them, producing duplicate progress entries in the UI.
+    """
+    raw = request.headers.get("last-event-id", "")
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        return 0
+
+
 @router.get("/{job_id}/progress")
-async def progress_stream(job_id: str):
+async def progress_stream(job_id: str, request: Request):
     async def generator():
-        last_id = 0
+        # Resume from the client's Last-Event-ID on reconnect (0 on first connect)
+        last_id = _parse_last_event_id(request)
         done_sent = False
         # Send initial connection confirmation
         yield f"event: connected\ndata: {json.dumps({'job_id': job_id})}\n\n"
@@ -38,10 +62,13 @@ async def progress_stream(job_id: str):
         _not_found_retries = 0
         _MAX_NOT_FOUND = 6   # 6 × 0.5 s = 3 s grace window
 
+        _elapsed = 0.0
         while True:
             events = _fetch_events_after(job_id, last_id)
             for ev in events:
-                yield f"event: {ev['event_type']}\ndata: {ev['data']}\n\n"
+                # Emit an SSE id: so the browser tracks its resume point and
+                # sends it back as Last-Event-ID after a dropped connection.
+                yield f"id: {ev['id']}\nevent: {ev['event_type']}\ndata: {ev['data']}\n\n"
                 last_id = ev["id"]
 
                 if ev["event_type"] == "done":
@@ -61,7 +88,18 @@ async def progress_stream(job_id: str):
                     return
                 # else: wait and retry — the row may not be committed yet
 
-            await asyncio.sleep(0.5)
+            # Hard timeout — a job stuck in a non-terminal state must not hold the
+            # SSE connection open indefinitely.  Close with an explicit done event
+            # so the client stops waiting and can re-poll the job status.
+            if _elapsed >= _MAX_STREAM_SECONDS:
+                yield (
+                    "event: done\n"
+                    f"data: {json.dumps({'status': status or 'processing', 'error': 'progress stream timed out'})}\n\n"
+                )
+                return
+
+            await asyncio.sleep(_POLL_INTERVAL_SECONDS)
+            _elapsed += _POLL_INTERVAL_SECONDS
 
     return StreamingResponse(
         generator(),

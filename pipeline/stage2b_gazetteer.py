@@ -234,7 +234,18 @@ def _match_regex(text: str) -> list[RawEntity]:
         if len(name_key) < _MIN_NAME_LEN:
             continue
 
-        pattern = r'(?<![a-zA-Z0-9\-])' + re.escape(name_key) + r'(?![a-zA-Z0-9\-])'
+        # Word-boundary lookarounds — kept Unicode-consistent with the
+        # Aho-Corasick path's _is_word_char (alnum-or-hyphen).  An ASCII-only
+        # class ([a-zA-Z0-9]) would diverge from the automaton near accented
+        # letters: e.g. "Café" before a name would be a boundary under ASCII but
+        # not under isalnum(), so the two paths returned different matches.
+        # [^\W_] = Unicode word char minus underscore (i.e. letters/digits); the
+        # extra (?<!-)/(?!-) clauses add hyphen, matching _is_word_char exactly.
+        pattern = (
+            r'(?<![^\W_])(?<!-)'
+            + re.escape(name_key)
+            + r'(?![^\W_])(?!-)'
+        )
         for m in re.finditer(pattern, text_lower):
             start, end = m.start(), m.end()
             if any(s <= start < e2 or s < end <= e2 for s, e2 in claimed):

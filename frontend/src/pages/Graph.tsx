@@ -24,10 +24,10 @@ import {
   createRelationship, updateRelationship, deleteRelationship, fetchBundle,
   createEntity,
 } from '../api/client'
-import type { Entity, Relationship } from '../types'
 import { typeDot, typeSoft, typeInk, typeLabel, REL_TYPES, suggestRelType, confPct, TYPE_GROUPS, verbsForPair } from '../components/review/tokens'
 import GraphCanvas, { type GraphCanvasHandle } from '../components/graph/GraphCanvas'
 import { type GraphNode, type GraphEdge, getTier } from '../components/graph/graphLayout'
+import { buildGraphData } from '../components/graph/buildGraphData'
 
 // ── Deduped relationship-type list for <select> ───────────────────────────────
 const REL_TYPES_UNIQ = [...new Set(REL_TYPES)]
@@ -788,55 +788,10 @@ export default function Graph() {
   // We build a value→entityId map; edges whose endpoints don't resolve are
   // skipped in v1 (the README recommends this for simplicity).
 
-  const { nodes, edges, byId, deg, adj, typeCounts, unmatchedCount } = useMemo(() => {
-    // Show only non-rejected entities
-    const visible = rawEntities.filter((e: Entity) => e.accepted !== false)
-
-    // value (lowercase) → entity id
-    const valueToId = new Map<string, string>()
-    visible.forEach((e: Entity) => valueToId.set(e.value.toLowerCase(), e.id))
-
-    const nodes: GraphNode[] = visible.map((e: Entity) => ({
-      id: e.id, type: e.entity_type, name: e.value,
-      confidence: e.confidence, source: e.source,
-      mitre_id: e.mitre_id, context: e.context ?? '',
-      accepted: e.accepted,
-    }))
-    const byId = new Map(nodes.map(n => [n.id, n]))
-
-    // Degree map
-    const deg: Record<string, number> = {}
-    nodes.forEach(n => { deg[n.id] = 0 })
-
-    // Resolve edges
-    let unmatchedCount = 0
-    const edges: GraphEdge[] = []
-    rawRelations.forEach((r: Relationship) => {
-      const srcId = valueToId.get(r.source_value.toLowerCase())
-      const tgtId = valueToId.get(r.target_value.toLowerCase())
-      if (!srcId || !tgtId) { unmatchedCount++; return }
-      edges.push({
-        id: r.id, source: srcId, target: tgtId,
-        rel: r.relationship_type,
-        confidence: r.confidence,
-        accepted: r.accepted,
-        evidence: r.evidence_text ?? '',
-      })
-      deg[srcId] = (deg[srcId] || 0) + 1
-      deg[tgtId] = (deg[tgtId] || 0) + 1
-    })
-
-    // Adjacency
-    const adj: Record<string, Set<string>> = {}
-    nodes.forEach(n => { adj[n.id] = new Set() })
-    edges.forEach(e => { adj[e.source]?.add(e.target); adj[e.target]?.add(e.source) })
-
-    // Type counts
-    const typeCounts: Record<string, number> = {}
-    nodes.forEach(n => { typeCounts[n.type] = (typeCounts[n.type] || 0) + 1 })
-
-    return { nodes, edges, byId, deg, adj, typeCounts, unmatchedCount }
-  }, [rawEntities, rawRelations])
+  const { nodes, edges, byId, deg, adj, typeCounts, unmatchedCount } = useMemo(
+    () => buildGraphData(rawEntities, rawRelations),
+    [rawEntities, rawRelations],
+  )
 
   // ── UI state ───────────────────────────────────────────────────────────────
 

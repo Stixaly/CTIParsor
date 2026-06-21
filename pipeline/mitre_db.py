@@ -31,11 +31,13 @@ def _load() -> dict:
 
 
 def get_techniques() -> list[dict]:
-    return _load()["techniques"]
+    # .get() not [] — a valid-JSON-but-wrong-shape index (missing the key) would
+    # otherwise KeyError-crash every caller (stage3c MITRE normalization, search).
+    return _load().get("techniques", [])
 
 
 def get_tactics() -> list[dict]:
-    return _load()["tactics"]
+    return _load().get("tactics", [])
 
 
 def lookup_by_id(mitre_id: str) -> dict | None:

@@ -102,8 +102,16 @@ _CVE_DASH_PATTERN = re.compile(f"[{_CVE_DASH}]")
 _MITRE_TTP_PATTERN = re.compile(r"\bTA?\d{4}(?:\.\d{3})?\b")
 _HASH_PATTERN = re.compile(r"\b([0-9a-fA-F]{64}|[0-9a-fA-F]{40}|[0-9a-fA-F]{32})\b")
 
+# The leading/trailing (?<![\d.]) / (?![\d.]) guards stop the pattern from
+# slicing four octets out of a longer dotted-number run.  Without them
+# "192.168.1.1.5" (a 5-part build/sequence string) yielded a bogus IoC
+# "192.168.1.1".  The guards are harmless to .fullmatch() — at the string
+# boundaries the negative lookarounds always succeed — so a real dotted quad
+# like "192.168.1.1" still validates.
 _IPV4_PATTERN = re.compile(
+    r"(?<![\d.])"
     r"(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)"
+    r"(?![\d.])"
 )
 
 # Domaines : structure générique (sous-domaines + TLD ≥ 2 chars)
@@ -135,9 +143,12 @@ _MAC_CISCO = re.compile(
     r"\b[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}\b"
 )
 
-# ASN — "AS15169", "AS 15169", "ASN 15169" (1–10 digits, avoids false hits on
-# short words like "ASCII" or "ASIN" by requiring digit-only suffix)
-_ASN_PATTERN = re.compile(r"\bAS[N]?\s*(\d{1,10})\b", re.IGNORECASE)
+# ASN — "AS15169", "AS 15169", "ASN15169", "ASN 15169" (1–10 digits).
+# Case-sensitive on purpose: matching the lowercase English word "as" (e.g.
+# "as 2024 approached", "increased as 50 percent") generated a flood of bogus
+# AS numbers.  ASNs are conventionally written uppercase, so requiring "AS"/"ASN"
+# in caps removes the prose false positives while keeping every real format.
+_ASN_PATTERN = re.compile(r"\bAS(?:N\s*|\s*)(\d{1,10})\b")
 
 # Windows file paths — drive letter or UNC share, at least one path component,
 # and a file extension.  Spaces are excluded from path components so the match
@@ -176,7 +187,7 @@ _REG_KEY_PATTERN = re.compile(
 # ---------------------------------------------------------------------------
 _DEFANG_PATTERN = re.compile(
     r"hxxps?://|h\[tt\]ps?://|https?\[s\]://|https?\[:\]://|meow://|fxx?p://|"
-    r"\s+\[\.\]\s+|\s+\(\.\)\s+|\[\.\]|\(\.\)|\{\.?\}|\[dot\]|\(dot\)|"
+    r"\s+\[\.\]\s+|\s+\(\.\)\s+|\[\.\]|\(\.\)|\{\.\}|\[dot\]|\(dot\)|"
     r"\[:\]|\(:\)|"
     r"\[//\]|\[/\]|"
     r"\[@\]|\(@\)|\{@\}|\[at\]|\(at\)",

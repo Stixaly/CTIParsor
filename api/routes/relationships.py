@@ -4,13 +4,14 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from api.db import _lock, get_conn
+from models.schemas import STIX_RELATIONSHIP_TYPES
 
 router = APIRouter(prefix="/api/jobs/{job_id}/relationships", tags=["relationships"])
 
-VALID_REL_TYPES = [
-    "uses", "attributed-to", "targets", "indicates", "mitigates",
-    "related-to", "delivers", "drops", "exploits", "originates-from", "compromises",
-]
+# Sorted list of every STIX 2.1 relationship type the pipeline can emit, so the
+# manual add/edit API accepts the same verbs the builder produces (previously a
+# hardcoded 11-type subset rejected valid edges like "communicates-with").
+VALID_REL_TYPES = sorted(STIX_RELATIONSHIP_TYPES)
 
 
 _VALID_LABELS = {"observed", "reported", "assessed", "inferred", "gap"}

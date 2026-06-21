@@ -14,6 +14,7 @@ import {
 } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getRelationshipPolicy, putRelationshipPolicy } from '../api/client'
+import { UNIVERSAL_VERBS, pairVerbs } from '../stix/relConstraints'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -88,92 +89,10 @@ const VERB_GROUPS = [
 const ALL_VERBS = VERB_GROUPS.flatMap(g => g.verbs)
 
 // ── STIX 2.1 Appendix B per-pair constraints ──────────────────────────────────
-// Mirrors STIX_REL_CONSTRAINTS in tokens.ts (duplicated here so Policy.tsx has
-// no import dependency on the review components).
-const STIX_PAIR: Record<string, string[]> = {
-  'attack-pattern>malware': ['delivers','uses'], 'attack-pattern>tool': ['uses'],
-  'attack-pattern>identity': ['targets'], 'attack-pattern>location': ['targets'],
-  'attack-pattern>vulnerability': ['targets'],
-  'campaign>intrusion-set': ['attributed-to'], 'campaign>threat-actor': ['attributed-to'],
-  'campaign>infrastructure': ['compromises','uses'], 'campaign>location': ['originates-from','targets'],
-  'campaign>identity': ['targets'], 'campaign>vulnerability': ['targets'],
-  'campaign>attack-pattern': ['uses'], 'campaign>malware': ['uses'], 'campaign>tool': ['uses'],
-  'course-of-action>indicator': ['investigates','mitigates'],
-  'course-of-action>attack-pattern': ['mitigates'],
-  'course-of-action>malware': ['mitigates','remediates'],
-  'course-of-action>tool': ['mitigates'],
-  'course-of-action>vulnerability': ['mitigates','remediates'],
-  'identity>location': ['located-at'],
-  'indicator>attack-pattern': ['indicates'], 'indicator>campaign': ['indicates'],
-  'indicator>infrastructure': ['indicates'], 'indicator>intrusion-set': ['indicates'],
-  'indicator>malware': ['indicates'], 'indicator>threat-actor': ['indicates'],
-  'indicator>tool': ['indicates'], 'indicator>observed-data': ['based-on'],
-  'infrastructure>infrastructure': ['communicates-with','consists-of','controls','uses'],
-  'infrastructure>ipv4-addr':           ['communicates-with','consists-of'],
-  'infrastructure>ipv6-addr':           ['communicates-with','consists-of'],
-  'infrastructure>domain-name':         ['communicates-with','consists-of'],
-  'infrastructure>url':                 ['communicates-with','consists-of'],
-  'infrastructure>observed-data':       ['consists-of'],
-  // All STIX SCOs are valid targets for infrastructure consists-of (validator §7.6)
-  'infrastructure>artifact':            ['consists-of'],
-  'infrastructure>autonomous-system':   ['consists-of'],
-  'infrastructure>directory':           ['consists-of'],
-  'infrastructure>email-addr':          ['consists-of'],
-  'infrastructure>email-message':       ['consists-of'],
-  'infrastructure>file':                ['consists-of'],
-  'infrastructure>mac-addr':            ['consists-of'],
-  'infrastructure>mutex':               ['consists-of'],
-  'infrastructure>network-traffic':     ['consists-of'],
-  'infrastructure>process':             ['consists-of'],
-  'infrastructure>software':            ['consists-of'],
-  'infrastructure>user-account':        ['consists-of'],
-  'infrastructure>windows-registry-key':['consists-of'],
-  'infrastructure>x509-certificate':    ['consists-of'],
-  'infrastructure>malware': ['controls','delivers','hosts'],
-  'infrastructure>vulnerability': ['has'],
-  'infrastructure>tool': ['hosts'],
-  'infrastructure>location': ['located-at'],
-  'intrusion-set>threat-actor': ['attributed-to'],
-  'intrusion-set>infrastructure': ['compromises','hosts','owns','uses'],
-  'intrusion-set>location': ['originates-from','targets'], 'intrusion-set>identity': ['targets'],
-  'intrusion-set>vulnerability': ['targets'], 'intrusion-set>attack-pattern': ['uses'],
-  'intrusion-set>malware': ['uses'], 'intrusion-set>tool': ['uses'],
-  'malware>threat-actor': ['authored-by'], 'malware>intrusion-set': ['authored-by'],
-  'malware>infrastructure': ['beacons-to','exfiltrates-to','targets','uses'],
-  'malware>ipv4-addr': ['communicates-with'], 'malware>ipv6-addr': ['communicates-with'],
-  'malware>domain-name': ['communicates-with'], 'malware>url': ['communicates-with'],
-  'malware>malware': ['controls','downloads','drops','uses','variant-of'],
-  'malware>tool': ['downloads','drops','uses'], 'malware>file': ['downloads','drops'],
-  'malware>vulnerability': ['exploits','targets'], 'malware>location': ['originates-from','targets'],
-  'malware>identity': ['targets'], 'malware>attack-pattern': ['uses'],
-  'malware-analysis>malware': ['characterizes','analysis-of','static-analysis-of','dynamic-analysis-of'],
-  'threat-actor>identity': ['attributed-to','impersonates','targets'],
-  'threat-actor>infrastructure': ['compromises','hosts','owns','uses'],
-  'threat-actor>location': ['located-at','targets'], 'threat-actor>vulnerability': ['targets'],
-  'threat-actor>attack-pattern': ['uses'], 'threat-actor>malware': ['uses'],
-  'threat-actor>tool': ['uses'],
-  'tool>malware': ['delivers','drops'], 'tool>vulnerability': ['has','targets'],
-  'tool>identity': ['targets'],
-  'tool>infrastructure': ['uses','targets'],   // validator: tool uses → infrastructure
-  'tool>location': ['targets'],
-  // SCO-level relationships — from the stix2validator RELATIONSHIPS table
-  'domain-name>ipv4-addr':          ['resolves-to'],
-  'domain-name>ipv6-addr':          ['resolves-to'],
-  'domain-name>domain-name':        ['resolves-to'],
-  'ipv4-addr>autonomous-system':    ['belongs-to'],
-  'ipv4-addr>mac-addr':             ['resolves-to'],  // validator: ipv4-addr resolves-to mac-addr
-  'ipv6-addr>autonomous-system':    ['belongs-to'],
-  'ipv6-addr>mac-addr':             ['resolves-to'],  // validator: ipv6-addr resolves-to mac-addr
-  'email-message>email-addr':       ['related-to'],
-  'file>malware':                    ['related-to'],
-}
-const UNIVERSAL_VERBS = ['related-to', 'duplicate-of', 'derived-from']
-
-/** Returns spec-defined valid verbs for a pair, or null if pair is unconstrained. */
-function pairVerbs(src: string, tgt: string): string[] | null {
-  const v = STIX_PAIR[`${src}>${tgt}`]
-  return v ? [...new Set([...v, ...UNIVERSAL_VERBS])] : null
-}
+// The constraint table, UNIVERSAL_VERBS, and pairVerbs() now live in the shared,
+// dependency-free module src/stix/relConstraints.ts — imported above.  This page
+// previously kept its own copy of the table, which had already drifted from the
+// Review components' copy; the shared module makes drift impossible.
 
 /** True if the verb is spec-defined for the pair (or pair is unconstrained). */
 function verbIsCompliant(src: string, tgt: string, verb: string): boolean {

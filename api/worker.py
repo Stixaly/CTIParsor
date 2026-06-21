@@ -45,22 +45,26 @@ _job_counter = 0
 _job_counter_lock = threading.Lock()
 
 
-def _check_job_limit():
-    """Check if we've reached the maximum concurrent jobs."""
-    if _MAX_CONCURRENT_JOBS <= 0:
-        return True  # No limit
+def _try_acquire_job_slot() -> bool:
+    """
+    Atomically check the concurrency limit and reserve a slot.
+
+    Combining the check and the increment under a single lock acquisition closes
+    a TOCTOU race: with a separate check-then-increment, two concurrent callers
+    could both pass the check before either incremented, letting the worker
+    exceed WORKER_MAX_CONCURRENT.
+
+    Returns True (and increments the counter) if a slot was reserved, False if the
+    limit is already reached.  Callers that get True MUST pair it with a later
+    _decrement_job_counter().
+    """
+    global _job_counter
     with _job_counter_lock:
-        if _job_counter >= _MAX_CONCURRENT_JOBS:
+        if _MAX_CONCURRENT_JOBS > 0 and _job_counter >= _MAX_CONCURRENT_JOBS:
             logger.warning(f"Concurrent job limit reached: {_job_counter} >= {_MAX_CONCURRENT_JOBS}")
             return False
-        return True
-
-
-def _increment_job_counter():
-    """Increment the job counter."""
-    with _job_counter_lock:
-        global _job_counter
         _job_counter += 1
+        return True
 
 
 def _decrement_job_counter():
@@ -80,6 +84,18 @@ def _sha256_file(path: str | Path) -> str | None:
         return h.hexdigest()
     except OSError:
         return None
+
+
+def bundle_output_path(job_id: str, report_name: str) -> Path:
+    """Per-job path for the exported STIX bundle file.
+
+    The job_id is part of the filename so two uploads that share the same source
+    filename (e.g. two different "report.pdf" submissions) don't overwrite each
+    other's exported bundle — and deleting one job doesn't clobber the other's
+    file on disk.  The DB-stored bundle_json was always per-job; only the
+    on-disk export collided.
+    """
+    return _ROOT / "output" / f"{report_name}_{job_id}_bundle.json"
 
 
 # ---------------------------------------------------------------------------
@@ -225,12 +241,11 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
     """
     global _job_counter
 
-    if not _check_job_limit():
+    if not _try_acquire_job_slot():
         set_job_status(job_id, "queued")
         emit_progress(job_id, "done", {"status": "queued", "error": "Job queue full"})
         return
 
-    _increment_job_counter()
     start_time = time.monotonic()
 
     try:
@@ -709,7 +724,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
 
         # --- Stage 5 ---
         from pipeline.stage5_validation import validate_and_export
-        out_path = str(_ROOT / "output" / f"{report_name}_bundle.json")
+        out_path = str(bundle_output_path(job_id, report_name))
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
         valid = validate_and_export(bundle, out_path)
         bundle_json = bundle.serialize(pretty=True)
@@ -801,13 +816,12 @@ def run_pipeline_async(job_id: str, file_path: str, original_filename: str) -> N
       produce deadlocks.  spawn starts a clean interpreter — slightly slower to
       start (~1-2 s on first import) but safe with all PyTorch/transformers builds.
     """
-    if not _check_job_limit():
+    if not _try_acquire_job_slot():
         set_job_status(job_id, "queued")
         emit_progress(job_id, "done", {"status": "queued", "error": "Job queue full"})
         logger.warning(f"[Worker] Job {job_id} queued — job queue full")
         return
 
-    _increment_job_counter()
     logger.info(f"[Worker] Spawning isolated subprocess for job {job_id}")
 
     ctx = mp.get_context("spawn")
@@ -1259,7 +1273,7 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
     )
     bundle_json = bundle.serialize(pretty=True)
 
-    out_path = str(_ROOT / "output" / f"{report_name}_bundle.json")
+    out_path = str(bundle_output_path(job_id, report_name))
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     validate_and_export(bundle, out_path)
 

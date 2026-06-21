@@ -65,25 +65,27 @@ def _sanitize_text_for_prompt(text: str, max_length: int = 10000) -> str:
     # Remove null bytes and control characters
     text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text)
 
-    # Escape special characters that could be used for prompt injection
-    # Replace problematic sequences with safe alternatives
-    text = text.replace('\\', '\\\\')  # Escape backslashes
-
-    # Remove markdown code blocks that could hide malicious content
-    text = re.sub(r'```[\s\S]*?```', '[code block removed]', text)
+    # NOTE: backslashes are intentionally NOT escaped.  The previous
+    # `text.replace('\\', '\\\\')` corrupted every Windows path in the report
+    # (C:\Windows → C:\\Windows) as seen by the model, which also broke Stage 3b's
+    # "does this name appear in the source text" check.  The text is placed into a
+    # plain message body, not into JSON or a code context, so escaping has no
+    # security value here — only corruption.
 
     # Remove XML/HTML tags that could be used for injection
     text = re.sub(r'<[^>]+>', '', text)
 
-    # Remove sequences that look like prompt injection attempts
+    # Remove sequences that look like genuine instruction-injection attempts.
+    # These target instruction *reassignment*, not security vocabulary.  The old
+    # filter also redacted bare words "jailbreak", "developer mode", and
+    # "DAN ... mode" — terms that appear constantly in legitimate malware/CTI
+    # reports — silently deleting real intelligence.  Those broad single-word
+    # triggers have been removed; only structural injection patterns remain.
     injection_patterns = [
         r'\b(ignore|forget|disregard)\b.*\b(previous|above|prior)\b',
         r'\brole\s*[:=]\s*system\b',
         r'\buser\s*[:=]\s*assistant\b',
         r'\bassistant\s*[:=]\s*user\b',
-        r'\bDAN\b.*\bmode\b',
-        r'\bdeveloper\s*mode\b',
-        r'\bjailbreak\b',
     ]
     for pattern in injection_patterns:
         text = re.sub(pattern, '[REDACTED]', text, flags=re.IGNORECASE)

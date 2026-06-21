@@ -7,7 +7,7 @@ import stix2
 
 # Initialize logging
 from api.logging_config import get_logger
-from models.schemas import EntityType, RawEntity
+from models.schemas import STIX_RELATIONSHIP_TYPES, EntityType, RawEntity
 from pipeline.stage3_llm import LLMEnrichmentResult
 from pipeline.stix_rel_spec import rel_is_suggested
 
@@ -135,30 +135,9 @@ def _stamp_objects(stix_objects: list, author_id: str, marking_refs: list[str]) 
 # creating stix2.Relationship objects.
 # ---------------------------------------------------------------------------
 
-VALID_REL_TYPES: frozenset[str] = frozenset({
-    # Delivery & execution
-    "delivers", "drops", "downloads", "exploits",
-    # Targeting & attribution
-    "targets", "attributed-to", "originates-from", "authored-by", "impersonates",
-    # Usages
-    "uses", "controls", "has", "hosts", "owns",
-    # Infrastructure / C2
-    "compromises", "beacons-to", "communicates-with", "exfiltrates-to",
-    # Detection & analysis
-    "indicates", "based-on", "consists-of",
-    "analysis-of", "static-analysis-of", "dynamic-analysis-of",
-    "characterizes", "investigates",
-    # Mitigation
-    "mitigates", "remediates",
-    # Location
-    "located-at",
-    # SCO-specific
-    "resolves-to", "belongs-to",
-    # Malware variants
-    "variant-of",
-    # Generic
-    "duplicate-of", "derived-from", "related-to",
-})
+# Single source of truth lives in models.schemas so the manual relationship API
+# accepts exactly the verbs this builder can emit (see STIX_RELATIONSHIP_TYPES).
+VALID_REL_TYPES: frozenset[str] = STIX_RELATIONSHIP_TYPES
 
 # Common country name → ISO 3166-1 alpha-2 codes appearing in CTI reports
 _COUNTRY_ISO: dict[str, str] = {
@@ -467,6 +446,18 @@ def build_stix_bundle(
                 # region="unknown" is not in the STIX 2.1 vocabulary and would
                 # fail strict validation.
                 continue
+            # Dedup: a Location for this country may already exist — from a
+            # pipeline LOCATION RawEntity (stored under the bare value key) or
+            # from an earlier iteration of this loop.  Creating a second one
+            # produces a duplicate STIX object with an identical deterministic id
+            # (and a duplicated entry in Report.object_refs), which fails STIX
+            # validation.  Reuse the existing object and register it under the
+            # "location:" key so the targets SRO below still resolves it.
+            existing = (name_to_stix.get(f"location:{country.lower()}")
+                        or name_to_stix.get(country.lower()))
+            if existing is not None and getattr(existing, "type", "") == "location":
+                name_to_stix.setdefault(f"location:{country.lower()}", existing)
+                continue
             location_id = _make_deterministic_id(f"{country}_{iso2}", "location", "cti")
             obj = stix2.Location(name=country, country=iso2, id=location_id)
             stix_objects.append(obj)
@@ -478,6 +469,15 @@ def build_stix_bundle(
     # Represents a class of organisations in that sector
     for sector in llm_result.targeted_sectors:
         try:
+            # Dedup: an Identity for this sector may already exist — from a
+            # pipeline IDENTITY RawEntity (stored under the bare value key) or
+            # from an earlier iteration of this loop.  See the targeted_countries
+            # dedup above — a duplicate identical-id Identity fails validation.
+            existing = (name_to_stix.get(f"identity:{sector.lower()}")
+                        or name_to_stix.get(sector.lower()))
+            if existing is not None and getattr(existing, "type", "") == "identity":
+                name_to_stix.setdefault(f"identity:{sector.lower()}", existing)
+                continue
             identity_id = _make_deterministic_id(sector, "identity", "cti")
             obj = stix2.Identity(name=sector, identity_class="class", id=identity_id)
             stix_objects.append(obj)
@@ -876,10 +876,17 @@ def _map_iocs_to_scos(entities: list[RawEntity]) -> tuple[list, dict[str, object
     value_to_sco: dict[str, object] = {}
 
     for entity in entities:
+        key = entity.value.lower()
+        # Skip values already mapped — a caller that passes duplicate entities
+        # (e.g. the CLI, which flattens overlapping chunks without dedup) would
+        # otherwise append the same SCO twice, putting two objects with an
+        # identical deterministic id into the bundle and Report.object_refs.
+        if key in value_to_sco:
+            continue
         sco = _entity_to_sco(entity)
         if sco is not None:
             scos.append(sco)
-            value_to_sco[entity.value.lower()] = sco
+            value_to_sco[key] = sco
 
     return scos, value_to_sco
 
@@ -904,8 +911,10 @@ def _entity_to_sco(entity: RawEntity):
         if t == EntityType.MAC_ADDR:
             return stix2.MACAddress(value=v)
         if t == EntityType.ASN:
-            # Accept "AS12345", "as12345", or bare "12345"
-            num_str = v.upper().lstrip("AS").strip()
+            # Accept "AS12345", "as12345", or bare "12345".
+            # removeprefix (not lstrip) — lstrip("AS") is a char-set strip that
+            # would also eat leading A/S chars from any digits-less edge value.
+            num_str = v.upper().removeprefix("AS").strip()
             if num_str.isdigit():
                 return stix2.AutonomousSystem(number=int(num_str), name=v)
         if t == EntityType.NETWORK_TRAFFIC:
@@ -1002,8 +1011,9 @@ def _build_stix_pattern(ioc_value: str, sco) -> str | None:
     elif sco_type == "mac-addr":
         return f"[mac-addr:value = '{esc}']"
     elif sco_type == "autonomous-system":
-        # Pattern uses the integer number, not the string
-        num_str = ioc_value.upper().lstrip("AS").strip()
+        # Pattern uses the integer number, not the string.
+        # removeprefix (not lstrip) — see _entity_to_sco for the rationale.
+        num_str = ioc_value.upper().removeprefix("AS").strip()
         if num_str.isdigit():
             return f"[autonomous-system:number = {num_str}]"
     elif sco_type == "windows-registry-key":

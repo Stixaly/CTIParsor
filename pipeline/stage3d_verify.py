@@ -42,6 +42,7 @@ Design note — circular import avoidance:
 from __future__ import annotations
 
 import json
+import math
 import os
 from typing import Callable
 
@@ -229,8 +230,14 @@ def _parse_verification_response(raw: str, count: int) -> dict[int, dict] | None
                         continue
                     n = item.get("n")
                     # Accept both int and float (e.g. 1.0) — LLMs occasionally
-                    # serialise integers as JSON floats.
-                    if isinstance(n, (int, float)) and n == int(n) and 1 <= int(n) <= count:
+                    # serialise integers as JSON floats.  Exclude bool (a subclass
+                    # of int) and non-finite floats: json's default decoder accepts
+                    # NaN/Infinity, and int(nan) would raise and crash the chunk.
+                    if (isinstance(n, (int, float))
+                            and not isinstance(n, bool)
+                            and math.isfinite(n)
+                            and n == int(n)
+                            and 1 <= int(n) <= count):
                         result[int(n)] = item
 
                 # Return even if partial (some claims missing — handled by caller)

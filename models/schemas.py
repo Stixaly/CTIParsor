@@ -39,6 +39,39 @@ class EntityType(str, Enum):
     INCIDENT = "incident"          # incident SDO (STIX 2.1)
 
 
+# Canonical set of valid STIX 2.1 relationship (SRO) types.
+#
+# Single source of truth shared by the STIX builder (pipeline/stage4) and the
+# manual relationship-editing API (api/routes/relationships).  Keeping these in
+# one place prevents the two from drifting: a reviewer must be able to add any
+# verb the pipeline itself can emit, otherwise valid edges like
+# "communicates-with" or "beacons-to" get rejected with a 400.
+STIX_RELATIONSHIP_TYPES: frozenset[str] = frozenset({
+    # Delivery & execution
+    "delivers", "drops", "downloads", "exploits",
+    # Targeting & attribution
+    "targets", "attributed-to", "originates-from", "authored-by", "impersonates",
+    # Usages
+    "uses", "controls", "has", "hosts", "owns",
+    # Infrastructure / C2
+    "compromises", "beacons-to", "communicates-with", "exfiltrates-to",
+    # Detection & analysis
+    "indicates", "based-on", "consists-of",
+    "analysis-of", "static-analysis-of", "dynamic-analysis-of",
+    "characterizes", "investigates",
+    # Mitigation
+    "mitigates", "remediates",
+    # Location
+    "located-at",
+    # SCO-specific
+    "resolves-to", "belongs-to",
+    # Malware variants
+    "variant-of",
+    # Generic
+    "duplicate-of", "derived-from", "related-to",
+})
+
+
 class EvidenceLabel(str, Enum):
     """How well a source supports a claim (NATO/Admiralty-style evidence grading).
 

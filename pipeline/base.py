@@ -47,9 +47,17 @@ class BaseExtractionStage:
         """
         Merge new_entities into existing, deduplicating by (value.lower(), entity_type).
         First-writer policy: the existing entry wins on conflict.
+
+        Deduplication also applies *within* new_entities — `seen` is updated as
+        each entry is accepted, so two equal entries in new_entities don't both
+        land in the result (the previous version seeded `seen` only from
+        `existing`, letting intra-batch duplicates through).
         """
         seen = {(e.value.lower(), e.entity_type) for e in existing}
-        return existing + [
-            e for e in new_entities
-            if (e.value.lower(), e.entity_type) not in seen
-        ]
+        result = list(existing)
+        for e in new_entities:
+            key = (e.value.lower(), e.entity_type)
+            if key not in seen:
+                seen.add(key)
+                result.append(e)
+        return result

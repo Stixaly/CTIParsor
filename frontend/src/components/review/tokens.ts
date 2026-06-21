@@ -4,6 +4,8 @@
    entity type names (underscore form).
    ============================================================ */
 
+import { pairVerbs } from '../../stix/relConstraints'
+
 export interface TypeStyle {
   hue: number
   label: string
@@ -101,118 +103,10 @@ export const SOURCE_LABEL: Record<string, { label: string; hint: string }> = {
 }
 
 // ── STIX 2.1 Appendix B relationship constraints ─────────────────────────────
-// Maps "sourceType>targetType" → array of spec-defined verbs for that pair.
-// Source: STIX Version 2.1 OS, Appendix B (authoritative SDO definitions).
-// All pairs additionally accept `related-to`, `duplicate-of`, `derived-from`.
-export const STIX_REL_CONSTRAINTS: Record<string, string[]> = {
-  // attack-pattern
-  'attack-pattern>malware':          ['delivers', 'uses'],
-  'attack-pattern>tool':             ['uses'],
-  'attack-pattern>identity':         ['targets'],
-  'attack-pattern>location':         ['targets'],
-  'attack-pattern>vulnerability':    ['targets'],
-  // campaign
-  'campaign>intrusion-set':          ['attributed-to'],
-  'campaign>threat-actor':           ['attributed-to'],
-  'campaign>infrastructure':         ['compromises', 'uses'],
-  'campaign>location':               ['originates-from', 'targets'],
-  'campaign>identity':               ['targets'],
-  'campaign>vulnerability':          ['targets'],
-  'campaign>attack-pattern':         ['uses'],
-  'campaign>malware':                ['uses'],
-  'campaign>tool':                   ['uses'],
-  // course-of-action
-  'course-of-action>indicator':      ['investigates', 'mitigates'],
-  'course-of-action>attack-pattern': ['mitigates'],
-  'course-of-action>malware':        ['mitigates', 'remediates'],   // validator: remediates → malware
-  'course-of-action>tool':           ['mitigates'],
-  'course-of-action>vulnerability':  ['mitigates', 'remediates'],   // validator: remediates → vulnerability
-  // identity
-  'identity>location':               ['located-at'],
-  // indicator
-  'indicator>attack-pattern':        ['indicates'],
-  'indicator>campaign':              ['indicates'],
-  'indicator>infrastructure':        ['indicates'],
-  'indicator>intrusion-set':         ['indicates'],
-  'indicator>malware':               ['indicates'],
-  'indicator>threat-actor':          ['indicates'],
-  'indicator>tool':                  ['indicates'],
-  'indicator>observed-data':         ['based-on'],
-  // infrastructure
-  'infrastructure>infrastructure':      ['communicates-with', 'consists-of', 'controls', 'uses'],
-  'infrastructure>ipv4-addr':           ['communicates-with', 'consists-of'],
-  'infrastructure>ipv6-addr':           ['communicates-with', 'consists-of'],
-  'infrastructure>domain-name':         ['communicates-with', 'consists-of'],
-  'infrastructure>url':                 ['communicates-with', 'consists-of'],
-  'infrastructure>observed-data':       ['consists-of'],
-  // All STIX SCOs are valid targets for infrastructure consists-of (validator §7.6)
-  'infrastructure>artifact':            ['consists-of'],
-  'infrastructure>autonomous-system':   ['consists-of'],
-  'infrastructure>directory':           ['consists-of'],
-  'infrastructure>email-addr':          ['consists-of'],
-  'infrastructure>email-message':       ['consists-of'],
-  'infrastructure>file':                ['consists-of'],
-  'infrastructure>mac-addr':            ['consists-of'],
-  'infrastructure>mutex':               ['consists-of'],
-  'infrastructure>network-traffic':     ['consists-of'],
-  'infrastructure>process':             ['consists-of'],
-  'infrastructure>software':            ['consists-of'],
-  'infrastructure>user-account':        ['consists-of'],
-  'infrastructure>windows-registry-key':['consists-of'],
-  'infrastructure>x509-certificate':    ['consists-of'],
-  'infrastructure>malware':          ['controls', 'delivers', 'hosts'],
-  'infrastructure>vulnerability':    ['has'],
-  'infrastructure>tool':             ['hosts'],
-  'infrastructure>location':         ['located-at'],
-  // intrusion-set
-  'intrusion-set>threat-actor':      ['attributed-to'],
-  'intrusion-set>infrastructure':    ['compromises', 'hosts', 'owns', 'uses'],
-  'intrusion-set>location':          ['originates-from', 'targets'],
-  'intrusion-set>identity':          ['targets'],
-  'intrusion-set>vulnerability':     ['targets'],
-  'intrusion-set>attack-pattern':    ['uses'],
-  'intrusion-set>malware':           ['uses'],
-  'intrusion-set>tool':              ['uses'],
-  // malware
-  'malware>threat-actor':            ['authored-by'],
-  'malware>intrusion-set':           ['authored-by'],
-  'malware>infrastructure':          ['beacons-to', 'exfiltrates-to', 'targets', 'uses'],
-  'malware>ipv4-addr':               ['communicates-with'],
-  'malware>ipv6-addr':               ['communicates-with'],
-  'malware>domain-name':             ['communicates-with'],
-  'malware>url':                     ['communicates-with'],
-  'malware>malware':                 ['controls', 'downloads', 'drops', 'uses', 'variant-of'],
-  'malware>tool':                    ['downloads', 'drops', 'uses'],
-  'malware>file':                    ['downloads', 'drops'],
-  'malware>vulnerability':           ['exploits', 'targets'],
-  'malware>location':                ['originates-from', 'targets'],
-  'malware>identity':                ['targets'],
-  'malware>attack-pattern':          ['uses'],
-  // malware-analysis (§ 7.6 of the spec)
-  'malware-analysis>malware':        ['characterizes', 'analysis-of', 'static-analysis-of', 'dynamic-analysis-of'],
-  // threat-actor
-  'threat-actor>identity':           ['attributed-to', 'impersonates', 'targets'],
-  'threat-actor>infrastructure':     ['compromises', 'hosts', 'owns', 'uses'],
-  'threat-actor>location':           ['located-at', 'targets'],
-  'threat-actor>vulnerability':      ['targets'],
-  'threat-actor>attack-pattern':     ['uses'],
-  'threat-actor>malware':            ['uses'],
-  'threat-actor>tool':               ['uses'],
-  // tool
-  'tool>malware':                    ['delivers', 'drops'],
-  'tool>vulnerability':              ['has', 'targets'],
-  'tool>identity':                   ['targets'],
-  'tool>infrastructure':             ['uses', 'targets'],  // validator: tool uses → infrastructure
-  'tool>location':                   ['targets'],
-  // SCO-level relationships (stix2validator RELATIONSHIPS table)
-  'domain-name>ipv4-addr':           ['resolves-to'],
-  'domain-name>ipv6-addr':           ['resolves-to'],
-  'domain-name>domain-name':         ['resolves-to'],
-  'ipv4-addr>autonomous-system':     ['belongs-to'],
-  'ipv4-addr>mac-addr':              ['resolves-to'],  // validator: ipv4-addr resolves-to mac-addr
-  'ipv6-addr>autonomous-system':     ['belongs-to'],
-  'ipv6-addr>mac-addr':              ['resolves-to'],  // validator: ipv6-addr resolves-to mac-addr
-}
+// The table + pairVerbs() now live in src/stix/relConstraints.ts (a shared,
+// dependency-free module) so the Policy page and these Review components can't
+// drift apart.  Re-exported here for existing importers of this module.
+export { STIX_REL_CONSTRAINTS } from '../../stix/relConstraints'
 
 /**
  * Return the spec-defined valid verbs for a (src, tgt) STIX type pair,
@@ -220,11 +114,7 @@ export const STIX_REL_CONSTRAINTS: Record<string, string[]> = {
  * Returns null if no constraints are defined for the pair (any verb is valid).
  */
 export function specVerbs(srcType: string, tgtType: string): string[] | null {
-  const specific = STIX_REL_CONSTRAINTS[`${srcType}>${tgtType}`]
-  if (!specific) return null
-  // Universal verbs always allowed regardless of pair
-  const universal = ['related-to', 'duplicate-of', 'derived-from']
-  return [...new Set([...specific, ...universal])]
+  return pairVerbs(srcType, tgtType)
 }
 
 // All STIX 2.1 relationship types (Section 4 + Appendix B of the OASIS spec).
@@ -476,6 +366,22 @@ export interface Range {
   entityId: string
 }
 
+const _isAlnum = (c: string): boolean => c >= '0' && c <= '9' || c >= 'a' && c <= 'z'
+
+/**
+ * Whole-token boundary check.  A candidate that starts/ends with an
+ * alphanumeric character must not be glued to another alphanumeric character in
+ * the surrounding text — otherwise "Win" highlights inside "Windows", and the
+ * IP "1.2.3.4" highlights inside "11.2.3.40".  Candidates that start/end with a
+ * non-alnum char (e.g. a defanged "[.]" form) impose no constraint on that side.
+ * `text` is already lower-cased by the caller.
+ */
+function _wholeToken(text: string, cand: string, idx: number, end: number): boolean {
+  if (_isAlnum(cand[0]) && idx > 0 && _isAlnum(text[idx - 1])) return false
+  if (_isAlnum(cand[cand.length - 1]) && end < text.length && _isAlnum(text[end])) return false
+  return true
+}
+
 export function buildRanges(text: string, entities: Array<{ id: string; value: string; entity_type: string; accepted: boolean | null }>): Range[] {
   const lower = text.toLowerCase()
   const used = new Uint8Array(text.length)
@@ -497,6 +403,7 @@ export function buildRanges(text: string, entities: Array<{ id: string; value: s
         const idx = lower.indexOf(cand, pos)
         if (idx === -1) break
         const end = idx + cand.length
+        if (!_wholeToken(lower, cand, idx, end)) { pos = idx + 1; continue }
         let overlap = false
         for (let i = idx; i < end; i++) if (used[i]) { overlap = true; break }
         if (!overlap) {

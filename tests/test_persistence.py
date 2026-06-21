@@ -38,6 +38,75 @@ def _llm_result_with_label(label: EvidenceLabel) -> LLMEnrichmentResult:
     )
 
 
+# ── Backup ───────────────────────────────────────────────────────────────────
+
+def test_backup_db_produces_consistent_single_file(temp_db, tmp_path, monkeypatch):
+    """backup_db uses the SQLite online backup API: the result must be a single,
+    self-contained .db file that already contains committed rows — no -wal/-shm
+    sidecars required to read it back."""
+    import sqlite3
+
+    backup_dir = tmp_path / "backups"
+    monkeypatch.setattr(temp_db, "BACKUP_DIR", backup_dir)
+
+    _insert_job(temp_db, job_id="job-backup")
+    temp_db.backup_db()
+
+    backups = list(backup_dir.glob("cti_stix_*.db"))
+    assert len(backups) == 1, "expected exactly one backup file"
+    # No sidecar files should be needed for a consistent read.
+    assert not list(backup_dir.glob("*.db-wal"))
+    assert not list(backup_dir.glob("*.db-shm"))
+
+    # Open the backup standalone and confirm the committed row is present.
+    conn = sqlite3.connect(str(backups[0]))
+    try:
+        row = conn.execute("SELECT id FROM jobs WHERE id=?", ("job-backup",)).fetchone()
+    finally:
+        conn.close()
+    assert row is not None, "backup did not capture the committed job row"
+
+
+# ── Output bundle path is job-scoped (no cross-job collision) ─────────────────
+
+def test_bundle_output_path_is_job_scoped():
+    from api.worker import bundle_output_path
+
+    p1 = bundle_output_path("job-aaa", "report")
+    p2 = bundle_output_path("job-bbb", "report")
+    assert p1 != p2
+    assert "job-aaa" in p1.name
+    assert "job-bbb" in p2.name
+
+
+def test_finalize_same_filename_jobs_do_not_collide(temp_db):
+    """Two uploads sharing a filename must export to distinct bundle files, and
+    deleting one job must not remove the other's exported bundle."""
+    from api import worker
+    from api.routes.jobs import _delete_job_files
+
+    _insert_job(temp_db, job_id="job-a")   # original_filename defaults to report.txt
+    _insert_job(temp_db, job_id="job-b")
+    worker._save_entities("job-a", [], _llm_result_with_label(EvidenceLabel.OBSERVED))
+    worker._save_entities("job-b", [], _llm_result_with_label(EvidenceLabel.OBSERVED))
+    worker.re_run_final_stages("job-a", skip_rescan=True)
+    worker.re_run_final_stages("job-b", skip_rescan=True)
+
+    pa = worker.bundle_output_path("job-a", "report")
+    pb = worker.bundle_output_path("job-b", "report")
+    try:
+        assert pa.exists() and pb.exists()
+        assert pa != pb
+
+        # Deleting job-a's files must leave job-b's bundle intact.
+        _delete_job_files("job-a", "report.txt")
+        assert not pa.exists()
+        assert pb.exists()
+    finally:
+        pa.unlink(missing_ok=True)
+        pb.unlink(missing_ok=True)
+
+
 # ── Migration ───────────────────────────────────────────────────────────────
 
 def test_migration_is_idempotent_and_adds_evidence_label(temp_db):

@@ -62,6 +62,31 @@ def test_ipv4_becomes_sco():
     assert "ipv4-addr" in types
 
 
+def test_duplicate_input_entities_yield_one_sco():
+    """Passing the same IoC twice (e.g. the CLI flattening overlapping chunks)
+    must not put two identical-id SCO objects into the bundle."""
+    from collections import Counter
+
+    entities = [
+        RawEntity(value="1.2.3.4", entity_type=EntityType.IPV4),
+        RawEntity(value="1.2.3.4", entity_type=EntityType.IPV4),
+    ]
+    bundle = build_stix_bundle(entities, LLMEnrichmentResult(), "dup")
+    ids = [o.id for o in bundle.objects if hasattr(o, "id")]
+    assert len(ids) == len(set(ids)), "duplicate object ids in bundle"
+    assert sum(1 for o in bundle.objects if o.get("type") == "ipv4-addr") == 1
+
+
+def test_asn_becomes_autonomous_system_sco():
+    """An 'AS15169' ASN entity must map to an autonomous-system SCO with the
+    correct integer number (removeprefix, not lstrip char-set strip)."""
+    entities = [RawEntity(value="AS15169", entity_type=EntityType.ASN)]
+    bundle = build_stix_bundle(entities, LLMEnrichmentResult(), "test")
+    asn = next((o for o in bundle.objects if o.get("type") == "autonomous-system"), None)
+    assert asn is not None
+    assert asn.number == 15169
+
+
 def test_discovered_observable_gets_indicator_and_link():
     """A bare IoC must yield SCO + Indicator + based-on relationship."""
     entities = [RawEntity(value="185.225.74.19", entity_type=EntityType.IPV4)]
@@ -74,6 +99,37 @@ def test_discovered_observable_gets_indicator_and_link():
         if o.get("type") == "relationship" and o.relationship_type == "based-on"
     ]
     assert len(based_on) == 1
+
+
+def test_no_duplicate_location_identity_sdos():
+    """
+    Regression: a country/sector that appears BOTH as a pipeline LOCATION/IDENTITY
+    RawEntity AND in the LLM's targeted_countries/targeted_sectors used to produce
+    two SDOs with an identical deterministic id (and a duplicated Report.object_refs
+    entry), which fails STIX validation.
+    """
+    from collections import Counter
+
+    raw_entities = [
+        RawEntity(value="Russia", entity_type=EntityType.LOCATION),
+        RawEntity(value="Finance", entity_type=EntityType.IDENTITY),
+    ]
+    llm = LLMEnrichmentResult(
+        targeted_countries=["Russia"],
+        targeted_sectors=["Finance"],
+    )
+    bundle = build_stix_bundle(raw_entities, llm, "dup_test")
+
+    ids = [o.id for o in bundle.objects if hasattr(o, "id")]
+    assert len(ids) == len(set(ids)), "bundle contains duplicate object ids"
+
+    locations = [o for o in bundle.objects if o.get("type") == "location"]
+    assert len(locations) == 1
+
+    report = next((o for o in bundle.objects if o.get("type") == "report"), None)
+    assert report is not None
+    ref_counts = Counter(report.object_refs)
+    assert all(c == 1 for c in ref_counts.values()), "duplicate entries in object_refs"
 
 
 # ── Relationship policy — enforce mode ──────────────────────────────────────────

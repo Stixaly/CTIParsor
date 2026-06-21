@@ -69,6 +69,14 @@ def score_techniques(
     return cells
 
 
+def _parent_technique(technique_id: str) -> str | None:
+    """Return the parent technique of a sub-technique, or None.
+
+    "T1059.001" → "T1059";  "T1059" → None.
+    """
+    return technique_id.split(".", 1)[0] if "." in technique_id else None
+
+
 def compute_for_job(conn: sqlite3.Connection, job_id: str) -> dict:
     """Compute coverage for a job from its accepted technique entities."""
     from pipeline.detection.store import rule_refs_for_techniques
@@ -82,7 +90,28 @@ def compute_for_job(conn: sqlite3.Connection, job_id: str) -> dict:
     ).fetchall()
     technique_ids = [r[0].upper() for r in rows if r[0]]
 
-    refs = rule_refs_for_techniques(conn, technique_ids)
+    # Sub-technique → parent roll-up.  A detection rule tagged with the parent
+    # technique (e.g. T1059) also provides coverage for its sub-techniques
+    # (T1059.001) — detecting the generic behaviour catches the specific case.
+    # We therefore (1) query rules for parents too, and (2) re-key each matching
+    # rule to the report technique(s) it covers before scoring.  The reverse
+    # (a sub-technique rule crediting the parent) is intentionally NOT done — a
+    # rule for one sub-technique doesn't cover all siblings of the parent.
+    query_ids = set(technique_ids)
+    covers: dict[str, set[str]] = {}   # rule technique tag → report techniques covered
+    for t in technique_ids:
+        covers.setdefault(t, set()).add(t)            # exact match
+        parent = _parent_technique(t)
+        if parent:
+            query_ids.add(parent)
+            covers.setdefault(parent, set()).add(t)   # parent rule covers this sub-technique
+
+    raw_refs = rule_refs_for_techniques(conn, query_ids)
+    refs = [
+        (report_t, corpus, key)
+        for tag, corpus, key in raw_refs
+        for report_t in covers.get(tag.upper(), ())
+    ]
     cells = score_techniques(technique_ids, refs)
 
     by_score: dict[int, int] = {0: 0, 1: 0, 2: 0, 3: 0}
