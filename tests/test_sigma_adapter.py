@@ -44,6 +44,17 @@ def test_sigma_adapter_parses_rule(tmp_path):
     assert r.content_hash and r.raw.startswith("title:")
 
 
+def test_sigma_adapter_skips_tactic_id_tags(tmp_path):
+    """A tactic ID tag (attack.ta0001) must not land in tactic_shortnames,
+    which holds kill-chain shortnames like 'execution'."""
+    sample = _SAMPLE + "  - attack.ta0002\n"
+    (tmp_path / "rule.yml").write_text(sample, encoding="utf-8")
+    rules = list(SigmaAdapter().parse(tmp_path, corpus="c"))
+    assert len(rules) == 1
+    assert "ta0002" not in rules[0].tactic_shortnames
+    assert "execution" in rules[0].tactic_shortnames
+
+
 def test_sigma_adapter_ignores_non_rule_yaml(tmp_path):
     (tmp_path / "notarule.yml").write_text("foo: bar\nbaz: 1\n", encoding="utf-8")
     assert list(SigmaAdapter().parse(tmp_path, corpus="c")) == []

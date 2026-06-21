@@ -335,6 +335,10 @@ export function layoutRadial(
 ): PosMap {
   const ringGap = opts.ringGap ?? 130
 
+  // No nodes (e.g. every type toggled off in the legend) — nothing to lay out.
+  // Guard before dereferencing nodes[0].id below.
+  if (nodes.length === 0) return {}
+
   // Root = highest-degree tier-0 node (or fallback to most-connected)
   let root = nodes[0]
   let best = -Infinity

@@ -15,11 +15,12 @@ import hashlib
 import sys
 from pathlib import Path
 
-from pipeline.stage1_ingestion import ingest, chunk_text
+from models.schemas import RawEntity
+from pipeline.stage1_ingestion import chunk_text, ingest
 from pipeline.stage2_extraction import extract_entities, refang
 from pipeline.stage3_llm import enrich_all_chunks
 from pipeline.stage4_stix_mapping import build_stix_bundle, verify_ioc_coverage
-from pipeline.stage5_validation import validate_and_export, print_bundle_summary
+from pipeline.stage5_validation import print_bundle_summary, validate_and_export
 
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".html", ".htm", ".txt", ".md"}
 
@@ -48,7 +49,16 @@ def run_pipeline(input_file: str, output_file: str) -> bool:
     # Stage 2 — Extraction déterministe
     print("\n[2/5] Extraction déterministe (IoCs, NER)...")
     entities_per_chunk = [extract_entities(chunk) for chunk in chunks]
-    all_entities = [e for chunk_ents in entities_per_chunk for e in chunk_ents]
+    # Dedup across chunks (the 400-char chunk overlap re-extracts boundary IoCs)
+    # by (value, type), keeping the highest-confidence occurrence — mirrors the
+    # API worker so counts and the bundle match between the CLI and the server.
+    _best: dict[tuple, RawEntity] = {}
+    for chunk_ents in entities_per_chunk:
+        for e in chunk_ents:
+            key = (e.value.lower(), e.entity_type)
+            if key not in _best or e.confidence > _best[key].confidence:
+                _best[key] = e
+    all_entities = list(_best.values())
 
     type_counts: dict[str, int] = {}
     for e in all_entities:

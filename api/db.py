@@ -1,5 +1,4 @@
 import os
-import shutil
 import sqlite3
 import threading
 from datetime import datetime, timezone
@@ -14,6 +13,13 @@ DB_PATH = Path(__file__).parent.parent / "cti_stix.db"
 BACKUP_DIR = Path(__file__).parent.parent / "db_backups"
 # RLock (not Lock) so the same thread can re-acquire inside nested with-blocks
 # (e.g. set_job_status called from inside another _lock-protected section).
+#
+# Scope note: this lock only serialises writers WITHIN a single process.  The
+# pipeline runs in a `spawn`ed subprocess (see api/worker.py) which imports its
+# own copy of this module and therefore its own _lock — it does NOT coordinate
+# with the uvicorn process via this object.  Cross-process write safety comes
+# from SQLite itself: WAL mode (one writer + concurrent readers) plus the
+# busy_timeout set below.  Don't rely on _lock for inter-process exclusion.
 _lock = threading.RLock()
 
 # Per-thread connection cache — reuses the same connection within a thread
@@ -67,46 +73,49 @@ def get_conn() -> sqlite3.Connection:
 
 def backup_db() -> None:
     """
-    Create a backup of the database file.
+    Create a consistent backup of the database file.
 
-    Creates timestamped backups in db_backups/ directory.
-    Keeps last 7 backups, deletes older ones.
+    Creates timestamped single-file backups in db_backups/ and keeps the last 7.
+
+    Uses SQLite's online backup API (sqlite3.Connection.backup) instead of a
+    filesystem copy.  In WAL mode the live database is spread across the .db,
+    .db-wal, and .db-shm files; copying them with shutil while another
+    connection (or the worker subprocess) is mid-write can capture a torn state
+    where the WAL holds committed frames the main file doesn't.  The backup API
+    takes a read transaction and produces a single self-contained, consistent
+    .db file with no sidecar files required.
     """
     import glob
     from datetime import datetime
 
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Create backup filename with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = BACKUP_DIR / f"cti_stix_{timestamp}.db"
 
-    # Also backup WAL and SHM files if they exist
-    wal_file = DB_PATH.with_suffix(".db-wal")
-    shm_file = DB_PATH.with_suffix(".db-shm")
-
     try:
-        # Copy main DB
-        shutil.copy2(str(DB_PATH), str(backup_path))
-
-        # Copy WAL file if exists
-        if wal_file.exists():
-            shutil.copy2(str(wal_file), str(backup_path) + "-wal")
-
-        # Copy SHM file if exists
-        if shm_file.exists():
-            shutil.copy2(str(shm_file), str(backup_path) + "-shm")
+        src = get_conn()
+        dest = sqlite3.connect(str(backup_path))
+        try:
+            with dest:
+                src.backup(dest)
+        finally:
+            dest.close()
 
         # Clean up old backups (keep last 7)
         backup_files = sorted(glob.glob(str(BACKUP_DIR / "cti_stix_*.db")), reverse=True)
         for old_backup in backup_files[7:]:
             try:
                 os.remove(old_backup)
-                # Also remove corresponding WAL/SHM backups
-                os.remove(old_backup + "-wal")
-                os.remove(old_backup + "-shm")
             except OSError:
                 pass
+            # Remove any legacy WAL/SHM sidecar backups left by the old
+            # copy-based scheme (no-op for backups created by this function).
+            for sidecar in (old_backup + "-wal", old_backup + "-shm"):
+                try:
+                    os.remove(sidecar)
+                except OSError:
+                    pass
     except Exception as e:
         logger.error(f"[db] Backup failed: {e}")
 

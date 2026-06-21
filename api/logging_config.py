@@ -21,7 +21,7 @@ import logging
 import logging.handlers
 import os
 import sys
-import threading
+from contextvars import ContextVar
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -36,8 +36,16 @@ LOG_FILE = os.environ.get("LOG_FILE", "")  # Empty = no file logging
 MAX_LOG_SIZE = int(os.environ.get("MAX_LOG_SIZE", "10485760"))  # 10MB
 LOG_BACKUP_COUNT = int(os.environ.get("LOG_BACKUP_COUNT", "5"))
 
-# Thread-local storage for request IDs
-_thread_local = threading.local()
+# Context-local storage for request IDs.
+#
+# A ContextVar — NOT threading.local — because the consumer is the async HTTP
+# middleware.  All async requests share a single event-loop thread, so a
+# thread-local id set before `await call_next(...)` is overwritten by any
+# concurrent request that runs while the first is suspended (and the first
+# request's clear() then wipes the second's id).  asyncio copies the context per
+# task, so a ContextVar isolates each request correctly; it also works across
+# the worker's threads (each gets the default).
+_request_id_var: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +54,7 @@ _thread_local = threading.local()
 
 def set_request_id(request_id: Optional[str] = None) -> str:
     """
-    Set a request ID for the current thread.
+    Set a request ID for the current context (async task / thread).
 
     If request_id is None, generates a new UUID.
     Returns the request ID that was set.
@@ -54,19 +62,18 @@ def set_request_id(request_id: Optional[str] = None) -> str:
     if request_id is None:
         import uuid
         request_id = str(uuid.uuid4())[:8]
-    _thread_local.request_id = request_id
+    _request_id_var.set(request_id)
     return request_id
 
 
 def get_request_id() -> str:
-    """Get the current request ID for this thread, or 'none' if not set."""
-    return getattr(_thread_local, "request_id", "none")
+    """Get the current request ID for this context, or 'none' if not set."""
+    return _request_id_var.get() or "none"
 
 
 def clear_request_id() -> None:
-    """Clear the request ID for the current thread."""
-    if hasattr(_thread_local, "request_id"):
-        delattr(_thread_local, "request_id")
+    """Clear the request ID for the current context."""
+    _request_id_var.set(None)
 
 
 # ---------------------------------------------------------------------------

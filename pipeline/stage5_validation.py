@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import io
+import os
+import tempfile
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -94,7 +96,24 @@ def _try_restore_schemas() -> bool:
                     continue
                 out = dest / rel
                 out.parent.mkdir(parents=True, exist_ok=True)
-                out.write_bytes(zf.read(entry))
+                # Atomic write: stage to a temp file in the same directory, then
+                # os.replace() into place.  Multiple worker subprocesses can hit
+                # this self-heal concurrently; a plain write_bytes() would let one
+                # process read a half-written schema another is still writing.
+                # os.replace() is atomic on the same filesystem, so a reader sees
+                # either the old absent file or the complete new one — never a
+                # torn JSON document.
+                fd, tmp = tempfile.mkstemp(dir=str(out.parent), suffix=".tmp")
+                try:
+                    with os.fdopen(fd, "wb") as fh:
+                        fh.write(zf.read(entry))
+                    os.replace(tmp, out)
+                except BaseException:
+                    try:
+                        os.unlink(tmp)
+                    except OSError:
+                        pass
+                    raise
                 extracted += 1
 
         if extracted:

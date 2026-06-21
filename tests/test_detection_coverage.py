@@ -90,6 +90,31 @@ def test_compute_for_job_scores_accepted_techniques(temp_db):
     assert result["validated"] is False               # readiness, not validation
 
 
+def test_parent_rule_covers_subtechnique(temp_db):
+    """A rule tagged with the parent technique (T1059) must credit a report's
+    sub-technique (T1059.001); a sibling sub-technique rule (T1059.003) must not."""
+    conn = temp_db.get_conn()
+    replace_corpus_rules(conn, "core", [_rule("core", "k1", ["T1059"])])         # parent rule
+    replace_corpus_rules(conn, "sibling", [_rule("sibling", "k2", ["T1059.003"])])  # sibling sub
+
+    conn.execute(
+        "INSERT INTO jobs (id, original_filename, status, created_at, updated_at) "
+        "VALUES ('jp','r.txt','reviewing',?,?)", (temp_db.now_iso(), temp_db.now_iso()),
+    )
+    conn.execute(
+        "INSERT INTO entities (id,job_id,value,entity_type,mitre_id,accepted,source) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (str(uuid4()), "jp", "PowerShell", "technique", "T1059.001", 1, "llm"),
+    )
+    conn.commit()
+
+    cells = {c["technique_id"]: c for c in compute_for_job(conn, "jp")["cells"]}
+    assert set(cells) == {"T1059.001"}
+    # Covered by the parent rule (score 2 — one corpus), NOT by the sibling sub.
+    assert cells["T1059.001"]["score"] == 2
+    assert cells["T1059.001"]["corpora"] == ["core"]
+
+
 # ── API ───────────────────────────────────────────────────────────────────────
 
 def test_coverage_api(temp_db, temp_db_client):

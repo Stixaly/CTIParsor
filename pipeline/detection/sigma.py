@@ -21,6 +21,10 @@ from pipeline.detection.base import RuleCorpusAdapter
 _TECHNIQUE_RE = re.compile(r"^attack\.t(\d{4}(?:\.\d{3})?)$", re.IGNORECASE)
 # attack.g0016 (group) / attack.s0002 (software) tags — not tactics
 _GROUP_SOFTWARE_RE = re.compile(r"^[gs]\d{4}$", re.IGNORECASE)
+# attack.ta0001 — a tactic *ID*.  tactic_shortnames holds kill-chain shortnames
+# like "defense_evasion", so the numeric ID form is skipped to avoid mixing the
+# two representations in one list.
+_TACTIC_ID_RE = re.compile(r"^ta\d{4}$", re.IGNORECASE)
 
 _LEVEL_MAP = {
     "informational": Severity.INFORMATIONAL,
@@ -161,7 +165,9 @@ class SigmaAdapter(RuleCorpusAdapter):
                 techniques.append("T" + m.group(1).upper())
             elif tag.lower().startswith("attack."):
                 short = tag.split(".", 1)[1].strip().lower()
-                if short and not _GROUP_SOFTWARE_RE.match(short):
+                if (short
+                        and not _GROUP_SOFTWARE_RE.match(short)
+                        and not _TACTIC_ID_RE.match(short)):
                     tactics.append(short)
         # dedup, preserve first-seen order
         return list(dict.fromkeys(techniques)), list(dict.fromkeys(tactics))

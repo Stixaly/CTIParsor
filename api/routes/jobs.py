@@ -21,22 +21,29 @@ router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 def _delete_job_files(job_id: str, original_filename: str) -> None:
     """
     Remove all files that were produced for this job:
-      • uploads/{job_id}.*              — original uploaded document
-      • output/{report_name}_bundle.json         — valid STIX bundle
-      • output/{report_name}_bundle_invalid.json — bundle written when validation fails
-      • output/{job_id}_stage3.ckpt.json         — LLM checkpoint (deleted on clean finish,
-                                                    kept on crash — clean it up now)
-      • output/{job_id}_stage3.ckpt.tmp          — atomic-rename temp file if crash mid-save
+      • uploads/{job_id}.*                              — original uploaded document
+      • output/{report_name}_{job_id}_bundle.json         — valid STIX bundle
+      • output/{report_name}_{job_id}_bundle_invalid.json — bundle written when validation fails
+      • output/{job_id}_stage3.ckpt.json                  — LLM checkpoint (deleted on clean finish,
+                                                            kept on crash — clean it up now)
+      • output/{job_id}_stage3.ckpt.tmp                   — atomic-rename temp file if crash mid-save
 
     All unlinks use missing_ok=True so a partially-created job (e.g. pipeline
     crashed before writing the bundle) doesn't raise.
     """
+    from api.worker import bundle_output_path
+
     # 1 — Original uploaded file (glob so we don't need to know the extension)
     for f in _UPLOADS_DIR.glob(f"{job_id}.*"):
         f.unlink(missing_ok=True)
 
     # 2 — STIX bundle(s) — reconstruct report_name the same way the worker does
     report_name = re.sub(r"[^\w\-]", "_", Path(original_filename).stem)
+    out_path = bundle_output_path(job_id, report_name)
+    out_path.unlink(missing_ok=True)
+    out_path.with_stem(out_path.stem + "_invalid").unlink(missing_ok=True)
+    # Best-effort cleanup of the legacy non-job-scoped names written by older
+    # builds (these collided across same-filename jobs — see bundle_output_path).
     (_OUTPUT_DIR / f"{report_name}_bundle.json").unlink(missing_ok=True)
     (_OUTPUT_DIR / f"{report_name}_bundle_invalid.json").unlink(missing_ok=True)
 

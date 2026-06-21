@@ -293,6 +293,54 @@ class TestIoCAppendixPatterns:
         assert any("10.10.10.10" in e.value for e in ipv4s)
 
 
+class TestRefangNoFalsePositives:
+    """refang() must not mutate text that contains no defanged IoCs."""
+
+    def test_empty_braces_unchanged(self):
+        # Regression: r"\{\.?\}" used to match bare "{}" and replace it with "."
+        # corrupting any report quoting Go/Rust/C source or empty JSON objects.
+        text = "Go code: map[string]interface{} and chan struct{}"
+        assert refang(text) == text
+
+    def test_empty_braces_json_unchanged(self):
+        text = "The config payload was {} (an empty object)."
+        assert refang(text) == text
+
+    def test_curly_dot_still_refanged(self):
+        # The intended "{.}" defang convention must still work.
+        assert refang("evil{.}com") == "evil.com"
+
+
+class TestASNExtraction:
+    def test_real_asn_formats(self):
+        for text in ("AS15169", "AS 15169", "ASN15169", "ASN 15169"):
+            entities = extract_entities(text)
+            asns = {e.value for e in entities if e.entity_type == EntityType.ASN}
+            assert "AS15169" in asns, f"failed for {text!r}"
+
+    def test_english_word_as_not_matched(self):
+        # Regression: case-insensitive r"\bAS[N]?\s*(\d+)" matched the English
+        # word "as" followed by any number, e.g. "as 2024", "as 50 percent".
+        for text in ("as 2024 approached", "increased as 50 percent over the year"):
+            entities = extract_entities(text)
+            asns = [e for e in entities if e.entity_type == EntityType.ASN]
+            assert asns == [], f"false ASN from {text!r}: {[e.value for e in asns]}"
+
+
+class TestIPv4Boundaries:
+    def test_dotted_quad_extracted(self):
+        entities = extract_entities("C2 at 185.220.101.45 was observed.")
+        ipv4s = {e.value for e in entities if e.entity_type == EntityType.IPV4}
+        assert "185.220.101.45" in ipv4s
+
+    def test_five_part_version_not_sliced(self):
+        # Regression: the unbounded pattern sliced the first four octets out of a
+        # longer dotted run, e.g. "192.168.1.1.5" -> bogus IoC "192.168.1.1".
+        entities = extract_entities("Updated to build 192.168.1.1.5 internally.")
+        ipv4s = {e.value for e in entities if e.entity_type == EntityType.IPV4}
+        assert "192.168.1.1" not in ipv4s
+
+
 class TestHyphenLinebreaks:
     def test_single_newline(self):
         text = "git-\ntanstack.com"

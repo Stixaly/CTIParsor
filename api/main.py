@@ -1,8 +1,10 @@
 import re
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
@@ -23,7 +25,23 @@ limiter = Limiter(key_func=get_remote_address)
 
 from api.routes import coverage, entities, jobs, policy, progress, relationships, settings, upload
 
-app = FastAPI(title="CTI to STIX", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup/shutdown hook (replaces the deprecated @app.on_event("startup")).
+
+    Startup: create the DB schema and ensure the working directories exist.
+    Tests patch `api.main.init_db`; the patch still applies here because the
+    name is resolved from the module namespace at call time.
+    """
+    init_db()
+    Path("uploads").mkdir(exist_ok=True)
+    Path("output").mkdir(exist_ok=True)
+    yield
+    # Shutdown: nothing to tear down.
+
+
+app = FastAPI(title="CTI to STIX", version="1.0.0", lifespan=lifespan)
 
 # Add rate limiting middleware
 app.state.limiter = limiter
@@ -63,16 +81,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Import JSONResponse for rate limit handler
-from fastapi.responses import JSONResponse
-
-
-@app.on_event("startup")
-def on_startup():
-    init_db()
-    Path("uploads").mkdir(exist_ok=True)
-    Path("output").mkdir(exist_ok=True)
 
 
 # API routes
