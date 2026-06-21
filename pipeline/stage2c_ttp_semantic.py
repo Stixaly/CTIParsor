@@ -18,10 +18,16 @@ Embedding model (configurable via TTP_EMBEDDING_MODEL in .env):
   After changing TTP_EMBEDDING_MODEL, rebuild cache:
     python scripts/build_indexes.py --only embeddings
 
-Confidence tiers (Arazzi et al. 2023 §8 — ATHRNN, TTPpredictor findings):
-  score ≥ 0.62  → high confidence   (accepted=True,  source="semantic")
-  score 0.48–0.61 → medium confidence (accepted=None,  source="semantic")
-  score < 0.48  → discard
+Confidence tiers (Arazzi et al. 2023 §8 — ATHRNN, TTPpredictor findings).
+Thresholds are MODEL-SPECIFIC (different embedders have different cosine
+distributions) and resolved at runtime by _thresholds(); the values below are
+the all-MiniLM-L6-v2 defaults:
+  score ≥ high (0.62)         → high confidence   — wins over the LLM in Stage 3c
+  score in [medium, high)     → medium confidence — kept only when the LLM does
+                                not cover it; never overrides the LLM
+  score < medium (0.48)       → discard
+A 2nd technique matched to the SAME sentence is dropped unless it is within
+TTP_TOP2_MARGIN of the top match (kills the dominant false-positive source).
 
 The pre-computed embedding cache (pipeline/data/mitre_embeddings.npy + _meta.json)
 is built by running:  python scripts/build_indexes.py
@@ -63,9 +69,71 @@ _EMB_PATH      = _DATA_DIR / "mitre_embeddings.npy"
 _META_PATH     = _DATA_DIR / "mitre_embeddings_meta.json"
 _MANIFEST_PATH = _DATA_DIR / "mitre_embeddings_manifest.json"
 
-# Confidence thresholds for semantic cosine similarity
-_HIGH_THRESH   = 0.62
-_MEDIUM_THRESH = 0.48
+# ── Confidence thresholds for semantic cosine similarity (ADR-004 P1-A) ────────
+# Different embedding models produce different cosine-similarity distributions,
+# so a single hardcoded threshold miscalibrates whenever TTP_EMBEDDING_MODEL
+# changes.  Thresholds are resolved per-model (see _thresholds()).  Calibrate a
+# new model with the ATE benchmark and add a row here:
+#   python tests/eval_pipeline.py --benchmark ate --stage 2c --verbose
+_MODEL_THRESHOLDS: dict[str, tuple[float, float]] = {
+    # model id                       (high, medium)
+    "all-MiniLM-L6-v2":              (0.62, 0.48),
+    # SecureBERT-Plus packs security text into a tighter, higher-similarity band,
+    # so the same precision needs higher cut-points (calibrate via Phase D).
+    "ehsanaghaei/SecureBERT-Plus":   (0.70, 0.58),
+}
+_DEFAULT_THRESHOLDS = (0.62, 0.48)
+
+# A candidate sentence's top-1 match is only accepted alongside its top-2 match
+# when the two are within this cosine margin of each other.  Beyond the margin
+# the 2nd match is a weaker neighbour dragged in by the embedding and is dropped
+# — this is the single biggest semantic false-positive source (ADR precision §2).
+_TOP2_MARGIN = float(os.getenv("TTP_TOP2_MARGIN", "0.05"))
+
+
+def _thresholds() -> tuple[float, float]:
+    """
+    Resolve (high, medium) cosine thresholds for the active embedding model.
+
+    Resolution order (lowest → highest priority):
+      1. per-model default table (_MODEL_THRESHOLDS)
+      2. thresholds recorded in the embedding manifest (written by build_indexes
+         for the model the cache was actually built/calibrated with)
+      3. TTP_HIGH_THRESHOLD / TTP_MEDIUM_THRESHOLD env overrides (operator tuning)
+    """
+    high, medium = _MODEL_THRESHOLDS.get(_TTP_EMBEDDING_MODEL, _DEFAULT_THRESHOLDS)
+
+    if _MANIFEST_PATH.exists():
+        try:
+            manifest = json.loads(_MANIFEST_PATH.read_text(encoding="utf-8"))
+            t = manifest.get("thresholds")
+            if isinstance(t, dict) and "high" in t and "medium" in t:
+                high, medium = float(t["high"]), float(t["medium"])
+        except Exception:
+            pass
+
+    hi_env = os.getenv("TTP_HIGH_THRESHOLD")
+    md_env = os.getenv("TTP_MEDIUM_THRESHOLD")
+    if hi_env:
+        try:
+            high = float(hi_env)
+        except ValueError:
+            pass
+    if md_env:
+        try:
+            medium = float(md_env)
+        except ValueError:
+            pass
+    return high, medium
+
+
+def high_confidence_threshold() -> float:
+    """The high-confidence cut-point for the active model.
+
+    Exposed so Stage 3c can tell a *high-confidence* semantic match (which should
+    win over an LLM guess) apart from a *medium-confidence* candidate (which must
+    not block or override the LLM)."""
+    return _thresholds()[0]
 
 # Maximum number of TTP-keyword-filtered candidate sentences to embed.
 # The cosine similarity matrix is O(n × 1531 techniques); at 800 candidates
@@ -233,7 +301,7 @@ def semantic_available() -> bool:
         return False
 
 
-def detect_ttps_semantic(text: str, top_k_per_sentence: int = 2) -> list[RawEntity]:
+def detect_ttps_semantic(text: str, top_k_per_sentence: int = 1) -> list[RawEntity]:
     """
     Scan *text* for MITRE ATT&CK techniques using semantic sentence similarity.
 
@@ -284,16 +352,25 @@ def detect_ttps_semantic(text: str, top_k_per_sentence: int = 2) -> list[RawEnti
         # Cosine similarity: shape (len(candidates), len(corpus))
         scores = util.cos_sim(query_embeddings, corpus_embeddings).numpy()
 
+        _high_thresh, _medium_thresh = _thresholds()
+
         # Collect best matches per technique (dedup by mitre_id)
         best: dict[str, tuple[float, str]] = {}  # mitre_id → (score, evidence_sentence)
 
         for sent_idx, sent in enumerate(candidates):
-            # Top-k matches for this sentence
+            # Top-k matches for this sentence, best first.
             top_indices = np.argsort(scores[sent_idx])[::-1][:top_k_per_sentence]
-            for idx in top_indices:
+            top1_score = float(scores[sent_idx][top_indices[0]]) if len(top_indices) else 0.0
+            for rank, idx in enumerate(top_indices):
                 score = float(scores[sent_idx][idx])
-                if score < _MEDIUM_THRESH:
+                if score < _medium_thresh:
                     break  # sorted descending, no point continuing
+                # Margin gate: a 2nd/3rd match for the SAME sentence is only kept
+                # when it is within _TOP2_MARGIN of the top match.  A weaker
+                # neighbour further down is the embedding's nearest-but-wrong
+                # technique and is the dominant semantic false-positive source.
+                if rank > 0 and (top1_score - score) > _TOP2_MARGIN:
+                    break
                 entry = meta[idx]
                 mid = entry["id"]
                 if mid not in best or score > best[mid][0]:

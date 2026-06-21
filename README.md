@@ -2,7 +2,7 @@
 
 Converts unstructured CTI reports (PDF, DOCX, HTML, TXT, MD) into valid **STIX 2.1 bundles** consumable by OpenCTI, MISP, and SIEMs.
 
-The pipeline combines **deterministic IoC extraction** (regex + multi-layer NER) with **LLM semantic enrichment** (TTPs, relationships, malware attribution), a **post-LLM hallucination filter**, **self-verification of relationship claims**, optional **cross-model consensus**, NATO-style **evidence grading** of every relationship, and **offline MITRE ATT&CK normalisation**. Every bundle carries **STIX provenance markings** — a TLP (and optional PAP) marking plus an authoring identity (`created_by_ref`). The LLM stage is optional — the pipeline produces valid STIX even without an API key.
+The pipeline combines **deterministic IoC extraction** (regex + multi-layer NER) with **LLM semantic enrichment** (TTPs, relationships, malware attribution), a **post-LLM hallucination filter**, **self-verification of relationship *and* TTP claims**, optional **cross-model consensus**, NATO-style **evidence grading** of every relationship, and **offline MITRE ATT&CK normalisation** with model-aware semantic TTP precision controls (ADR-0011). Every bundle carries **STIX provenance markings** — a TLP (and optional PAP) marking plus an authoring identity (`created_by_ref`). The LLM stage is optional — the pipeline produces valid STIX even without an API key.
 
 It also maps each report's ATT&CK techniques to a **detection-coverage matrix** against local **Sigma** rule corpora (public and private), all managed from an in-app **Settings** panel.
 
@@ -94,7 +94,9 @@ uvicorn api.main:app --reload --app-dir .
 │  MITRE technique descriptions (local .npy cache)                    │
 │  • Default model: all-MiniLM-L6-v2 (80 MB)                         │
 │  • Upgrade: ehsanaghaei/SecureBERT-Plus (+8-12% F1 on CTI text)     │
-│  • Confidence tiers: ≥ 0.62 high / 0.48–0.61 medium                │
+│  • Model-aware tiers: ≥ high wins over LLM / medium = candidate     │
+│    (MiniLM 0.62 / 0.48; resolved per-model — ADR-0011 Phase A)      │
+│  • 1 match per sentence + margin gate kills nearest-wrong neighbour │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
@@ -144,6 +146,8 @@ uvicorn api.main:app --reload --app-dir .
 │  • Score 70–84: keep LLM phrasing, override ID                      │
 │  • Score < 70 : pass through unchanged                              │
 │  Eliminates ~40% of wrong or invented MITRE IDs                     │
+│  + Merge precision (ADR-0011): only HIGH-confidence semantic wins   │
+│    over the LLM; parent technique dropped when a sub-technique fires │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
@@ -153,6 +157,15 @@ uvicorn api.main:app --reload --app-dir .
 │  Effect: hallucination rate 27% → 8% (aCTIon paper, NEC Labs 2023) │
 │  Cost: ~1.4× total LLM calls (only chunks with ≥ 1 relationship)   │
 │  Enable: ENABLE_STIX_VERIFICATION=true in .env                      │
+└─────────────────────────────┬────────────────────────────────────────┘
+                              │
+┌─────────────────────────────▼────────────────────────────────────────┐
+│  Stage 3f — TTP SELF-VERIFICATION                       (optional)   │
+│  TTP analogue of 3d: second LLM call quotes the sentence describing │
+│  each technique's USE (with its expected ATT&CK tactic); unsupported │
+│  techniques are dropped. Semantic-corroborated TTPs are trusted and │
+│  skipped, so cost tracks 3d (~1.4× calls — ADR-0011 Phase B).       │
+│  Enable: ENABLE_TTP_VERIFICATION=true in .env                       │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
@@ -459,6 +472,14 @@ Leave `ANTHROPIC_API_KEY` unset. Stage 3 is skipped. The pipeline still produces
 # After changing: python scripts/build_indexes.py --only embeddings
 TTP_EMBEDDING_MODEL=all-MiniLM-L6-v2
 
+# Stage 2c — semantic precision tuning (ADR-0011 Phase A). Thresholds are
+# model-specific and resolved automatically (per-model defaults → embedding
+# manifest → these overrides). Set only to hand-tune; leave unset for defaults.
+# TTP_HIGH_THRESHOLD=0.62     # ≥ this → high confidence (wins over the LLM)
+# TTP_MEDIUM_THRESHOLD=0.48   # ≥ this → medium candidate; < this → discarded
+# TTP_TOP2_MARGIN=0.05        # drop a 2nd match for the same sentence beyond this
+#                             # cosine gap from the top match
+
 # Stage 2d — CyNER (disabled — model removed from HuggingFace)
 CYNER_ENABLED=false
 
@@ -485,6 +506,12 @@ LLM_TIMEOUT=120
 # Adds ~1.4× LLM calls; reduces relationship hallucination 27% → 8%
 ENABLE_STIX_VERIFICATION=false
 STIX_VERIFY_MIN_RELS=1
+
+# Stage 3f — Self-verification of TTPs (ADR-0011 Phase B)
+# TTP analogue of 3d: each LLM-extracted technique must be supported by a quoted
+# sentence describing its use; semantic-corroborated TTPs are trusted and skipped.
+ENABLE_TTP_VERIFICATION=false
+TTP_VERIFY_MIN=1
 
 # Stage 3e — Cross-model consensus (anti-hallucination)
 # Re-runs relationship-bearing chunks through a SECOND provider; agreement
@@ -529,8 +556,11 @@ The script auto-discovers bundle files in `data/`, `~/Downloads/`, and `~/Docume
 | `pipeline/data/gazetteer.json` | 2b gazetteer NER | ~194 KB |
 | `pipeline/data/mitre_embeddings.npy` | 2c semantic TTP | ~2.3 MB |
 | `pipeline/data/mitre_embeddings_meta.json` | 2c semantic TTP | ~60 KB |
+| `pipeline/data/mitre_embeddings_manifest.json` | 2c cache validity + thresholds | ~1 KB |
 
 These files are not gitignored — commit them to your repo to avoid a per-clone rebuild.
+
+> The **manifest** records the model the cache was built with (so Stage 2c can detect a stale cache after `TTP_EMBEDDING_MODEL` changes) and the calibrated `thresholds` (`high`/`medium`) for that model — written by `build_indexes.py --only embeddings` (ADR-0011 Phase A).
 
 ---
 
@@ -571,13 +601,17 @@ After every LLM call, each returned name is fuzzy-matched against the source chu
 
 ### 4. MITRE normalisation (Stage 3c)
 
-Fuzzy-matched against the full ATT&CK corpus. Eliminates ~40% of wrong or invented MITRE IDs.
+Fuzzy-matched against the full ATT&CK corpus. Eliminates ~40% of wrong or invented MITRE IDs. Merge precision (ADR-0011): only a **high-confidence** semantic match overrides the LLM — a medium-confidence one is kept only when the LLM is silent and never wins the dedup. When a sub-technique (`T1059.001`) is present, its parent (`T1059`) is dropped as redundant.
 
 ### 5. Relationship self-verification (Stage 3d)
 
 Second LLM call per chunk quotes the exact supporting sentence for every relationship. Unsupported relationships are dropped. Reduces hallucination rate from ~27% to ~8% (aCTIon paper benchmark).
 
-### 6. Report lexicon re-scan (Finalize)
+### 6. TTP self-verification (Stage 3f)
+
+The TTP analogue of Stage 3d (ADR-0011 Phase B). For each LLM-extracted technique, a second LLM call must quote the sentence describing that technique being *used* — annotated with the technique's expected ATT&CK tactic so a behaviour-vs-tactic mismatch is also rejected. TTPs already corroborated by a high-confidence semantic match are trusted and skipped, so the cost tracks Stage 3d (~1.4× calls). Opt-in via `ENABLE_TTP_VERIFICATION`.
+
+### 7. Report lexicon re-scan (Finalize)
 
 On **Finalize**, accepted named entities form a per-report domain lexicon. The full text is re-scanned with word-boundary string matching to find additional occurrences that NER or the LLM missed. New occurrences are inserted with `source="report_lexicon"` and `accepted=True`.
 
@@ -602,6 +636,7 @@ cti-to-stix/
 │   ├── stage3c_mitre.py           # MITRE ATT&CK TTP normalisation
 │   ├── stage3d_verify.py          # Relationship self-verification
 │   ├── stage3e_consensus.py       # Cross-model consensus (opt-in)
+│   ├── stage3f_ttp_verify.py      # TTP self-verification (opt-in, ADR-0011)
 │   ├── stage4_stix_mapping.py     # STIX 2.1 mapping + TLP/PAP + authoring identity
 │   ├── stage5_validation.py       # Bundle validation + export
 │   ├── mitre_db.py                # Lazy-loaded MITRE index (techniques + tactics)
@@ -913,7 +948,8 @@ Schema migrations run automatically on startup (`ALTER TABLE` wrapped in try/exc
 | Stage 2c — semantic TTP | ✅ after `build_indexes.py` + model download |
 | Stage 2e — GLiNER | ✅ after first model download (~800 MB cached) |
 | Stage 3b — hallucination filter | ✅ fully offline (rapidfuzz) |
-| Stage 3c — MITRE normalisation | ✅ after `build_indexes.py` |
+| Stage 3c — MITRE normalisation + merge precision | ✅ after `build_indexes.py` |
+| Stage 3f — TTP self-verification (opt-in) | ❌ requires an LLM provider |
 | Stage 3 — Anthropic / Mistral | ❌ requires internet |
 | Stage 3 — Ollama | ✅ if instance is local |
 | OCR (Tesseract) | ✅ local binary |

@@ -7,6 +7,17 @@ sections group by theme rather than strict semver.
 ## [Unreleased]
 
 ### Added
+- **TTP extraction precision** (ADR-0011) — four layers raising MITRE technique
+  precision: **(A)** model-aware Stage 2c cosine thresholds (per-model defaults →
+  embedding manifest → `TTP_HIGH_THRESHOLD`/`TTP_MEDIUM_THRESHOLD` env), one match
+  per sentence with a `TTP_TOP2_MARGIN` gate, and Stage 3c no longer letting a
+  *medium*-confidence semantic match override the LLM; **(B)** Stage 3f TTP
+  self-verification (`ENABLE_TTP_VERIFICATION`) — a second LLM pass must quote the
+  sentence describing each technique's use, semantic-corroborated TTPs skipped;
+  **(C)** parent/sub-technique subsumption + a technique→tactic lookup feeding the
+  3f prompt; **(D)** ATE benchmark `--stage full` (regex + semantic + LLM + Stage 3c
+  normalize) and adversarial precision fixtures. New: `pipeline/stage3f_ttp_verify.py`,
+  `tests/test_ttp_precision.py`.
 - **Default Sigma corpora + cross-corpus dedup** (ADR-0010) — the committed registry
   now ships 8 public Sigma repos (SigmaHQ, DFIR-Report, tsale, P4T12ICK,
   RussianPanda95, linkedin, mthcht, Yamato hayabusa) with verified licenses,
@@ -33,7 +44,7 @@ sections group by theme rather than strict semver.
   TLP (and optional PAP) marking and an authoring `Identity` (`created_by_ref`).
   Config: `STIX_TLP`, `STIX_AUTHOR_NAME`; per-job `tlp_level` / `pap_level`.
 - **Docs** — `SECURITY.md`, `TESTING.md`, `CONTRIBUTING.md`, an ADR index, and ADRs
-  0004/0005/0008/0009.
+  0002–0011.
 
 ### Changed
 - New API routes: `/api/jobs/{id}/coverage`, `/api/detection-corpora`,

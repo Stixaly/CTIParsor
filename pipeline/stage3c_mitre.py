@@ -139,10 +139,15 @@ def normalize_ttps(
     Verifies and corrects MITRE ATT&CK IDs for every LLM-extracted TTP, then
     merges the results with any TTPs already found by Stage 2c semantic matching.
 
-    De-duplication rules:
-      • Semantic match wins over LLM for the same MITRE ID (higher precision).
-      • LLM match is kept only when no semantic match covers the same technique.
-      • Within each source, the entry with the longer description is kept.
+    Precision rules (ADR precision §2-3):
+      • A *high-confidence* semantic match (cosine ≥ the model's high threshold)
+        wins over the LLM for the same ID — it is the highest-precision signal.
+      • A *medium-confidence* semantic match does NOT override the LLM: when both
+        cover the same technique the LLM entry (context-validated, richer) is kept.
+        Lower-precision signals must never silently beat higher-precision ones.
+      • Parent/sub-technique subsumption: when a sub-technique (T1059.001) is
+        present, its parent (T1059) is dropped — the specific entry is strictly
+        more precise and the parent is redundant noise (Phase C).
 
     Returns the list unchanged if the MITRE index is unavailable.
 
@@ -155,12 +160,27 @@ def normalize_ttps(
         logger.warning("MITRE index not found — ensure pipeline/data/mitre_index.json exists")
         return ttps
 
-    normalized: dict[str, TTPExtracted] = {}
+    # The high-confidence cut-point is model-specific; ask Stage 2c so the two
+    # stages can never drift apart on what "high confidence" means.
+    try:
+        from pipeline.stage2c_ttp_semantic import high_confidence_threshold
+        high_thresh = high_confidence_threshold()
+    except Exception:
+        high_thresh = 0.62
 
-    # ── 1. Seed with semantic findings (highest precision) ──────────────────
+    normalized: dict[str, TTPExtracted] = {}
+    semantic_high_keys: set[str] = set()   # keys a high-conf semantic match owns
+
+    # ── 1. Seed with HIGH-confidence semantic findings only ─────────────────
+    # Medium-confidence semantic matches are added later (step 3) and only when
+    # the LLM has not already covered the technique — so they can never override
+    # the LLM's context-aware judgement.
     if semantic_entities:
         for ent in semantic_entities:
-            if not hasattr(ent, "mitre_id") or not ent.mitre_id:
+            if not getattr(ent, "mitre_id", None):
+                continue
+            conf = float(getattr(ent, "confidence", 0.0) or 0.0)
+            if conf < high_thresh:
                 continue
             dedup_key = ent.mitre_id.lower()
             normalized[dedup_key] = TTPExtracted(
@@ -168,8 +188,9 @@ def normalize_ttps(
                 mitre_id=ent.mitre_id,
                 description=ent.context or "",  # evidence sentence stored as context
             )
+            semantic_high_keys.add(dedup_key)
 
-    # ── 2. Resolve and merge LLM TTPs (skip if already covered) ────────────
+    # ── 2. Resolve and merge LLM TTPs ───────────────────────────────────────
     for ttp in ttps:
         canon_name, canon_id, _ = _resolve(ttp.technique_name, ttp.mitre_id)
         dedup_key = canon_id.lower() if canon_id else canon_name.lower()
@@ -180,15 +201,87 @@ def normalize_ttps(
             description=ttp.description,
         )
 
-        if dedup_key in normalized:
-            # Keep whichever entry has the richer description
+        if dedup_key in semantic_high_keys:
+            # A high-confidence semantic match owns this key — keep its canonical
+            # name/ID, but adopt the LLM's description if it is richer.
             existing = normalized[dedup_key]
             if len(result_ttp.description) > len(existing.description):
+                normalized[dedup_key] = TTPExtracted(
+                    technique_name=existing.technique_name,
+                    mitre_id=existing.mitre_id,
+                    description=result_ttp.description,
+                )
+        elif dedup_key in normalized:
+            if len(result_ttp.description) > len(normalized[dedup_key].description):
                 normalized[dedup_key] = result_ttp
         else:
             normalized[dedup_key] = result_ttp
 
-    return list(normalized.values())
+    # ── 3. Add MEDIUM-confidence semantic matches not covered by the LLM ─────
+    if semantic_entities:
+        for ent in semantic_entities:
+            if not getattr(ent, "mitre_id", None):
+                continue
+            dedup_key = ent.mitre_id.lower()
+            if dedup_key in normalized:
+                continue
+            normalized[dedup_key] = TTPExtracted(
+                technique_name=ent.value,
+                mitre_id=ent.mitre_id,
+                description=ent.context or "",
+            )
+
+    return _subsume_parent_techniques(list(normalized.values()))
+
+
+def _subsume_parent_techniques(ttps: list[TTPExtracted]) -> list[TTPExtracted]:
+    """
+    Drop a parent technique (T1059) when one of its sub-techniques (T1059.001)
+    is also present.  The sub-technique is strictly more specific, so keeping the
+    parent adds a redundant, lower-precision entry (Phase C).
+
+    IDs are matched case-insensitively; only dotted ATT&CK technique IDs are
+    considered (tactics 'TA…' and CAPEC 'CAPEC-…' are untouched).
+    """
+    present_ids = {
+        t.mitre_id.upper() for t in ttps
+        if t.mitre_id and _MITRE_ID_RE.match(t.mitre_id.lower())
+    }
+    parents_with_children = {
+        mid.rsplit(".", 1)[0] for mid in present_ids if "." in mid
+    }
+    if not parents_with_children:
+        return ttps
+
+    return [
+        t for t in ttps
+        if not (t.mitre_id and t.mitre_id.upper() in parents_with_children)
+    ]
+
+
+@functools.lru_cache(maxsize=1)
+def _tactics_by_id() -> dict[str, list[str]]:
+    """Map each technique ID (upper-case) → its ATT&CK tactic (kill-chain) names.
+
+    Used to give the Stage 3f verification prompt the expected tactic for a
+    technique, so the fact-checker can also reject a technique whose tactic is
+    inconsistent with how the text describes it (Phase B/C)."""
+    from pipeline.mitre_db import get_techniques
+
+    out: dict[str, list[str]] = {}
+    for t in get_techniques():
+        mid = t.get("id")
+        tactics = t.get("tactics") or []
+        if mid and tactics:
+            out[mid.upper()] = list(tactics)
+    return out
+
+
+def tactics_for(mitre_id: str | None) -> list[str]:
+    """Return the ATT&CK tactic name(s) for a technique ID, or [] if unknown."""
+    if not mitre_id:
+        return []
+    return _tactics_by_id().get(mitre_id.upper(), [])
 
 
 def bundle_available() -> bool:
