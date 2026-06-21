@@ -10,10 +10,7 @@ All LLM calls are mocked; no API key or heavy model is required.
 """
 from __future__ import annotations
 
-import pytest
-
 from pipeline.stage3_llm import LLMEnrichmentResult, TTPExtracted
-
 
 # ── small RawEntity-like stub for semantic matches ──────────────────────────────
 
