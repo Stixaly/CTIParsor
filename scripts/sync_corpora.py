@@ -22,6 +22,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from pipeline.detection.registry import load_corpora  # noqa: E402
+from pipeline.detection.sync import git_command  # noqa: E402
 
 
 def _run(cmd: list[str]) -> bool:
@@ -47,18 +48,13 @@ def main() -> int:
     ok = 0
     for corpus in corpora:
         name = corpus.get("name", "?")
-        remote = corpus.get("git")
         path = Path(corpus.get("path", ""))
-        if not remote:
+        cmd = git_command(corpus)
+        if cmd is None:
             print(f"[sync] {name}: no git remote — assuming '{path}' is managed manually — skipped")
             continue
         print(f"[sync] {name} → {path}")
-        if path.exists():
-            done = _run(["git", "-C", str(path), "pull", "--ff-only"])
-        else:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            done = _run(["git", "clone", "--depth", "1", remote, str(path)])
-        ok += int(done)
+        ok += int(_run(cmd))
 
     print(f"[sync] {ok}/{len(corpora)} corpora synced. Now run: python scripts/build_detection_index.py")
     return 0

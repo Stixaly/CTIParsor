@@ -28,6 +28,10 @@ corpora:
     private: false
     enabled: true
 
+  # DISABLED (2026-06-21): upstream `main` ships only LICENSE+README — the rules
+  # were reworked onto transient PR branches (e.g. 30043-pr-rules, ~60 rules) with
+  # no stable default branch to track, and sync_corpora.py clones the default
+  # branch only. Re-enable if upstream restores rules to `main`.
   - name: dfir-report
     adapter: sigma
     path: ./corpora/dfir-report
@@ -35,7 +39,7 @@ corpora:
     license: GPL-3.0
     priority: 20
     private: false
-    enabled: true
+    enabled: false
 
   - name: tsale
     adapter: sigma

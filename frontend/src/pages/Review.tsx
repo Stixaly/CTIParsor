@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Loader2, FileText, AlignLeft, BookOpen } from 'lucide-react'
+import { Loader2, FileText, AlignLeft, BookOpen, ShieldCheck } from 'lucide-react'
 import MarkdownPreview from '../components/MarkdownPreview'
 import PdfViewer from '../components/PdfViewer'
 
@@ -20,6 +20,7 @@ import PipelineRibbon, { type StageInfo } from '../components/review/PipelineRib
 import AutoAcceptBanner from '../components/review/AutoAcceptBanner'
 import TypeRail from '../components/review/TypeRail'
 import DocumentReader from '../components/review/DocumentReader'
+import DetectionsPanel from '../components/review/DetectionsPanel'
 import Marginalia from '../components/review/Marginalia'
 import InlineHoverChip from '../components/review/InlineHoverChip'
 import RelationshipRail from '../components/review/RelationshipRail'
@@ -196,7 +197,7 @@ export default function Review() {
   }, [remoteRels])
 
   // ── ui state ────────────────────────────────────────────────────────────
-  const [viewMode, setViewMode]   = useState<'text' | 'preview' | 'source'>('text')
+  const [viewMode, setViewMode]   = useState<'text' | 'preview' | 'source' | 'detections'>('text')
   const [focusedId, setFocusedId] = useState<string | null>(null)
   const [hoverEntity, setHoverEntity] = useState<HoverTarget | null>(null)
   const [activeTypes, setActiveTypes] = useState<string[]>([])
@@ -481,6 +482,7 @@ export default function Review() {
       else if (focusedId && (e.key === 'r' || e.key === 'R')) { reject(focusedId); goNextPending(1) }
       else if (focusedId && (e.key === 'u' || e.key === 'U')) { reset(focusedId) }
       else if (e.key === 'g' || e.key === 'G')        { navigate(`/graph/${jobId}`) }
+      else if (e.key === 'c' || e.key === 'C')        { navigate(`/coverage/${jobId}`) }
       else if (e.key === 'f' || e.key === 'F')        { handleFinalize() }
     }
     window.addEventListener('keydown', handler)
@@ -559,6 +561,7 @@ export default function Review() {
         theme={theme}
         onBack={() => navigate('/dashboard')}
         onGraph={() => navigate(`/graph/${jobId}`)}
+        onCoverage={() => navigate(`/coverage/${jobId}`)}
         onFinalize={handleFinalize}
         onThemeToggle={() => setTheme(theme === 'dark' ? 'warm' : 'dark')}
         bundleStale={bundleStale}
@@ -601,10 +604,11 @@ export default function Review() {
               // Preview is shown for all file types — for .md it renders markdown,
               // for PDF/DOCX/HTML/TXT it renders the extracted text with light
               // markdown-like formatting (headers, bold, code fences, etc.).
-              const tabs: { id: 'text' | 'preview' | 'source'; icon: React.ReactNode; label: string }[] = [
-                { id: 'text',    icon: <AlignLeft size={12} />, label: 'Text'    },
-                { id: 'preview', icon: <BookOpen  size={12} />, label: 'Preview' },
-                { id: 'source',  icon: <FileText  size={12} />, label: 'Source'  },
+              const tabs: { id: 'text' | 'preview' | 'source' | 'detections'; icon: React.ReactNode; label: string }[] = [
+                { id: 'text',       icon: <AlignLeft   size={12} />, label: 'Text'    },
+                { id: 'preview',    icon: <BookOpen    size={12} />, label: 'Preview' },
+                { id: 'source',     icon: <FileText    size={12} />, label: 'Source'  },
+                { id: 'detections', icon: <ShieldCheck size={12} />, label: 'Detections' },
               ]
               return (
                 <div style={{
@@ -719,6 +723,11 @@ export default function Review() {
                 </div>
               )
             })()}
+
+            {/* Detections — Sigma rules linkable to this report's techniques */}
+            {viewMode === 'detections' && jobId && (
+              <DetectionsPanel jobId={jobId} />
+            )}
 
           </div>
 

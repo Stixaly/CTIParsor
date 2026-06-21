@@ -7,7 +7,7 @@ decisions and the current rule corpora, with no per-job staleness.
 from fastapi import APIRouter, HTTPException
 
 from api.db import get_conn
-from pipeline.detection.coverage import compute_for_job
+from pipeline.detection.coverage import compute_for_job, rules_for_job
 from pipeline.detection.store import corpus_counts, rules_for_technique
 
 router = APIRouter(prefix="/api", tags=["coverage"])
@@ -19,6 +19,19 @@ def get_coverage(job_id: str):
         if not conn.execute("SELECT id FROM jobs WHERE id=?", (job_id,)).fetchone():
             raise HTTPException(404, "Job not found")
         return compute_for_job(conn, job_id)
+
+
+@router.get("/jobs/{job_id}/coverage/rules")
+def get_coverage_report_rules(job_id: str):
+    """All canonical Sigma rules linkable to this report, grouped by technique.
+
+    Backs the Review "Detections" tab. Declared before the `{technique_id}` route
+    so the literal `/rules` path wins. Metadata only — no rule bodies.
+    """
+    with get_conn() as conn:
+        if not conn.execute("SELECT id FROM jobs WHERE id=?", (job_id,)).fetchone():
+            raise HTTPException(404, "Job not found")
+        return rules_for_job(conn, job_id)
 
 
 @router.get("/jobs/{job_id}/coverage/{technique_id}/rules")

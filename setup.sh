@@ -8,6 +8,7 @@
 #   bash setup.sh --no-torch   # skip sentence-transformers / CyNER (faster, minimal)
 #   bash setup.sh --no-mitre   # skip MITRE bundle download + index build
 #   bash setup.sh --no-spacy   # skip optional spaCy model download
+#   bash setup.sh --no-corpora # skip Sigma detection-corpora clone (~525 MB)
 # =============================================================================
 
 set -e
@@ -27,12 +28,14 @@ hdr()  { sep; echo -e "${CYAN}  $*${NC}"; sep; }
 OPT_NO_TORCH=false
 OPT_NO_MITRE=false
 OPT_NO_SPACY=false
+OPT_NO_CORPORA=false
 
 for arg in "$@"; do
   case $arg in
-    --no-torch) OPT_NO_TORCH=true ;;
-    --no-mitre) OPT_NO_MITRE=true ;;
-    --no-spacy) OPT_NO_SPACY=true ;;
+    --no-torch)   OPT_NO_TORCH=true ;;
+    --no-mitre)   OPT_NO_MITRE=true ;;
+    --no-spacy)   OPT_NO_SPACY=true ;;
+    --no-corpora) OPT_NO_CORPORA=true ;;
   esac
 done
 
@@ -409,6 +412,43 @@ else
             warn "No MITRE bundles found — indexes not built."
             info "To build later: python scripts/build_indexes.py"
         fi
+    fi
+fi
+
+# =============================================================================
+# DETECTION-RULE CORPORA  (Sigma — powers the coverage matrix, ADR-0006)
+# =============================================================================
+echo ""
+hdr "DETECTION-RULE CORPORA (Sigma)"
+
+if [ "$OPT_NO_CORPORA" = true ]; then
+    warn "--no-corpora: skipping Sigma detection-corpora clone."
+    info "  The coverage matrix stays empty until you run:"
+    echo -e "     ${CYAN}python scripts/sync_corpora.py && python scripts/build_detection_index.py${NC}"
+else
+    echo "  Coverage matches each report's MITRE TTPs against public Sigma rule corpora."
+    echo "  This clones the public repos in detection_corpora.yaml into ./corpora/"
+    echo "  (~525 MB, shallow) and ingests them into the rule store."
+    echo ""
+    echo -e "  ${YELLOW}Clone & ingest detection corpora now? [Y/n]${NC}"
+    read -r -p "  > " DL_CORPORA
+    DL_CORPORA="${DL_CORPORA:-Y}"
+
+    if [[ "$DL_CORPORA" =~ ^[Yy] ]]; then
+        info "Cloning corpora (scripts/sync_corpora.py)…"
+        if python scripts/sync_corpora.py; then
+            info "Ingesting rules (scripts/build_detection_index.py)…"
+            if python scripts/build_detection_index.py; then
+                ok "Detection corpora cloned & ingested."
+            else
+                warn "Ingest failed — retry: python scripts/build_detection_index.py"
+            fi
+        else
+            warn "Corpora clone failed — retry: python scripts/sync_corpora.py"
+        fi
+    else
+        info "Skipping. Run later, or use the Settings → Redownload button per corpus:"
+        echo -e "     ${CYAN}python scripts/sync_corpora.py && python scripts/build_detection_index.py${NC}"
     fi
 fi
 

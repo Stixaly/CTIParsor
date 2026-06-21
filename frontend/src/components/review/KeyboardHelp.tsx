@@ -12,6 +12,7 @@ const SHORTCUTS = [
   { key: 'R',      desc: 'Reject focused entity' },
   { key: 'U',      desc: 'Reset to pending' },
   { key: 'G',      desc: 'Open STIX graph' },
+  { key: 'C',      desc: 'Open detection coverage' },
   { key: 'F',      desc: 'Finalize bundle' },
   { key: '?',      desc: 'This help overlay' },
   { key: 'Esc',    desc: 'Clear focus / close' },

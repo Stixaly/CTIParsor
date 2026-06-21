@@ -77,10 +77,9 @@ def _parent_technique(technique_id: str) -> str | None:
     return technique_id.split(".", 1)[0] if "." in technique_id else None
 
 
-def compute_for_job(conn: sqlite3.Connection, job_id: str) -> dict:
-    """Compute coverage for a job from its accepted technique entities."""
-    from pipeline.detection.store import rule_refs_for_techniques
-
+def job_technique_ids(conn: sqlite3.Connection, job_id: str) -> list[str]:
+    """Distinct ATT&CK technique ids from a job's accepted (or pending) entities —
+    the report's technique set, shared by coverage scoring and the rules listing."""
     rows = conn.execute(
         "SELECT DISTINCT mitre_id FROM entities "
         "WHERE job_id=? AND mitre_id IS NOT NULL AND mitre_id != '' "
@@ -88,7 +87,14 @@ def compute_for_job(conn: sqlite3.Connection, job_id: str) -> dict:
         "AND (accepted IS NULL OR accepted=1)",
         (job_id,),
     ).fetchall()
-    technique_ids = [r[0].upper() for r in rows if r[0]]
+    return [r[0].upper() for r in rows if r[0]]
+
+
+def compute_for_job(conn: sqlite3.Connection, job_id: str) -> dict:
+    """Compute coverage for a job from its accepted technique entities."""
+    from pipeline.detection.store import rule_refs_for_techniques
+
+    technique_ids = job_technique_ids(conn, job_id)
 
     # Sub-technique → parent roll-up.  A detection rule tagged with the parent
     # technique (e.g. T1059) also provides coverage for its sub-techniques
@@ -128,4 +134,40 @@ def compute_for_job(conn: sqlite3.Connection, job_id: str) -> dict:
              "corpora": c.corpora, "rule_count": c.rule_count}
             for c in sorted(cells, key=lambda c: (-c.score, c.technique_id))
         ],
+    }
+
+
+def rules_for_job(conn: sqlite3.Connection, job_id: str) -> dict:
+    """Every canonical detection rule linkable to this report, grouped by the
+    report technique it covers. Mirrors compute_for_job's parent→sub roll-up (a
+    rule tagged with the parent technique also covers its sub-techniques), so the
+    Detections panel and the coverage score agree on what's covered. Rule bodies
+    are never returned — metadata only (ADR-0006 license-aware drill-down)."""
+    from pipeline.detection.store import rules_for_technique
+
+    groups: list[dict] = []
+    all_rule_ids: set[str] = set()
+    for t in job_technique_ids(conn, job_id):
+        tags = [t]
+        parent = _parent_technique(t)
+        if parent:
+            tags.append(parent)
+        seen: set[str] = set()
+        rules: list[dict] = []
+        for tag in tags:
+            for r in rules_for_technique(conn, tag):
+                if r["id"] in seen:
+                    continue
+                seen.add(r["id"])
+                rules.append(r)
+                all_rule_ids.add(r["id"])
+        if rules:
+            groups.append({"technique_id": t, "rules": rules})
+
+    groups.sort(key=lambda g: (-len(g["rules"]), g["technique_id"]))
+    return {
+        "job_id": job_id,
+        "techniques": groups,
+        "technique_total": len(groups),
+        "rule_total": len(all_rule_ids),
     }

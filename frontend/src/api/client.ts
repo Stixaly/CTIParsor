@@ -1,4 +1,4 @@
-import type { Job, Entity, Relationship, StixBundle, CoverageResult, CoverageRule, DetectionCorpus, CorpusConfig } from '../types'
+import type { Job, Entity, Relationship, StixBundle, CoverageResult, CoverageRule, CoverageReportRules, DetectionCorpus, CorpusConfig } from '../types'
 
 const BASE = '/api'
 
@@ -103,6 +103,9 @@ export const fetchCoverage = (jobId: string) =>
   req<CoverageResult>(`/jobs/${jobId}/coverage`)
 export const fetchCoverageRules = (jobId: string, techniqueId: string) =>
   req<{ technique_id: string; rules: CoverageRule[] }>(`/jobs/${jobId}/coverage/${techniqueId}/rules`)
+/** All Sigma rules linkable to a report, grouped by technique — backs the Review "Detections" tab. */
+export const fetchCoverageReportRules = (jobId: string) =>
+  req<CoverageReportRules>(`/jobs/${jobId}/coverage/rules`)
 export const fetchDetectionCorpora = () =>
   req<{ corpora: DetectionCorpus[] }>(`/detection-corpora`)
 
@@ -113,6 +116,9 @@ export const addCorpus = (body: { name: string; git?: string; license?: string; 
   req<{ ok: boolean; corpora: CorpusConfig[] }>('/settings/corpora', { method: 'POST', body: JSON.stringify(body) })
 export const removeCorpus = (name: string) =>
   req<{ ok: boolean; corpora: CorpusConfig[] }>(`/settings/corpora/${encodeURIComponent(name)}`, { method: 'DELETE' })
+/** Clone/pull one public corpus's git remote, then re-ingest. Private corpora are CLI-only. */
+export const syncCorpus = (name: string) =>
+  req<{ ok: boolean; detail: string; corpora: CorpusConfig[] }>(`/settings/corpora/${encodeURIComponent(name)}/sync`, { method: 'POST' })
 export const rebuildCorpora = () =>
   req<{ total: number; written: Record<string, number>; skipped: string[] }>('/settings/corpora/rebuild', { method: 'POST' })
 
