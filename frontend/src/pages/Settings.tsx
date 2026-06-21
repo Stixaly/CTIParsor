@@ -2,7 +2,7 @@ import { useState } from 'react'
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { addCorpus, fetchCorpora, rebuildCorpora, removeCorpus } from '../api/client'
+import { addCorpus, fetchCorpora, rebuildCorpora, removeCorpus, syncCorpus } from '../api/client'
 import type { CorpusConfig } from '../types'
 
 export default function Settings() {
@@ -24,6 +24,11 @@ export default function Settings() {
     mutationFn: (n: string) => removeCorpus(n),
     onSuccess: invalidate,
   })
+  const sync = useMutation({
+    mutationFn: (n: string) => syncCorpus(n),
+    onSuccess: () => { setMsg('Downloaded & re-ingested.'); invalidate() },
+    onError: (e: Error) => setMsg(`Download failed: ${e.message}`),
+  })
   const rebuild = useMutation({
     mutationFn: rebuildCorpora,
     onSuccess: r => { setMsg(`Ingested ${r.total} rules${r.skipped.length ? ` · skipped (no clone): ${r.skipped.join(', ')}` : ''}.`); invalidate() },
@@ -41,13 +46,13 @@ export default function Settings() {
       <h2 style={{ fontSize: 14, marginTop: 22, marginBottom: 8 }}>Detection Corpora (Sigma)</h2>
 
       <div style={{ background: 'var(--bg-elev)', border: '1px solid var(--rule)', borderRadius: 9, overflow: 'hidden' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 2fr 0.9fr 70px 80px', background: 'var(--bg-soft)', fontSize: 11, fontWeight: 600, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: 0.3 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 2fr 0.9fr 70px 150px', background: 'var(--bg-soft)', fontSize: 11, fontWeight: 600, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: 0.3 }}>
           <div style={cell}>Name</div><div style={cell}>Repo</div><div style={cell}>License</div><div style={cell}>Rules</div><div style={cell} />
         </div>
         {isLoading && <div style={{ ...cell, color: 'var(--ink-3)' }}>Loading…</div>}
         {!isLoading && corpora.length === 0 && <div style={{ ...cell, color: 'var(--ink-3)' }}>No corpora configured.</div>}
         {corpora.map(c => (
-          <div key={c.name} style={{ display: 'grid', gridTemplateColumns: '1.4fr 2fr 0.9fr 70px 80px', alignItems: 'center', opacity: c.enabled ? 1 : 0.5 }}>
+          <div key={c.name} style={{ display: 'grid', gridTemplateColumns: '1.4fr 2fr 0.9fr 70px 150px', alignItems: 'center', opacity: c.enabled ? 1 : 0.5 }}>
             <div style={cell}>
               <strong>{c.name}</strong>
               {c.private && <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--warn)' }}>private</span>}
@@ -56,7 +61,18 @@ export default function Settings() {
             <div style={{ ...cell, color: 'var(--ink-3)', fontFamily: 'monospace', fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.git ?? c.path ?? '—'}</div>
             <div style={cell}>{c.license}</div>
             <div style={cell}>{c.rules}</div>
-            <div style={cell}>
+            <div style={{ ...cell, display: 'flex', gap: 12 }}>
+              {c.git && !c.private && (
+                <button
+                  onClick={() => sync.mutate(c.name)}
+                  disabled={sync.isPending}
+                  title="git clone/pull this corpus, then re-ingest"
+                  className="link"
+                  style={{ color: 'var(--accent)', background: 'none', border: 'none', cursor: sync.isPending ? 'default' : 'pointer', fontSize: 12 }}
+                >
+                  {sync.isPending && sync.variables === c.name ? 'Downloading…' : 'Redownload'}
+                </button>
+              )}
               <button onClick={() => remove.mutate(c.name)} className="link" style={{ color: 'var(--no)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12 }}>Remove</button>
             </div>
           </div>
@@ -85,9 +101,10 @@ export default function Settings() {
       </div>
 
       <p style={{ fontSize: 11.5, color: 'var(--ink-4)', marginTop: 14, lineHeight: 1.5 }}>
-        New repos are written to <code>detection_corpora.local.yaml</code> (gitignored). Fetch their clones with
-        {' '}<code>python scripts/sync_corpora.py</code>, then <strong>Rebuild index</strong> to ingest the rules.
-        Coverage is then available on each report's Coverage view.
+        New repos are written to <code>detection_corpora.local.yaml</code> (gitignored). Click <strong>Redownload</strong>
+        {' '}on a public corpus to <code>git clone/pull</code> and ingest it in place, or fetch every clone at once with
+        {' '}<code>python scripts/sync_corpora.py</code> then <strong>Rebuild index</strong>. Private corpora are
+        {' '}CLI-only (keeps git credentials out of the app). Coverage is then available on each report's Coverage view.
       </p>
     </div>
   )

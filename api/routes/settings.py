@@ -14,6 +14,7 @@ from api.db import get_conn
 from pipeline.detection.builder import rebuild_store
 from pipeline.detection.registry import add_corpus, merged_corpora, remove_corpus
 from pipeline.detection.store import corpus_counts
+from pipeline.detection.sync import sync_corpus
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -65,6 +66,34 @@ def create_corpus(body: CorpusIn):
 def delete_corpus(name: str):
     remove_corpus(_CONFIG, name)
     return {"ok": True, "corpora": _with_counts()}
+
+
+@router.post("/corpora/{name}/sync")
+def sync_one_corpus(name: str):
+    """Clone/pull ONE public corpus's git remote, then re-ingest the store.
+
+    This is the same networked step as `scripts/sync_corpora.py`, exposed per-row
+    for the Settings "Redownload" button. Restricted to PUBLIC corpora: private
+    ones must use the CLI so git credentials never flow through the app (ADR-0006).
+    Cloning a large repo can take a while — the request blocks until git finishes.
+    """
+    corpus = next((c for c in merged_corpora(_CONFIG) if c.get("name") == name), None)
+    if corpus is None:
+        raise HTTPException(404, f"unknown corpus '{name}'")
+    if not corpus.get("git"):
+        raise HTTPException(400, f"'{name}' has no git remote — its path is managed manually")
+    if corpus.get("private"):
+        raise HTTPException(
+            400,
+            f"'{name}' is private — fetch it with `python scripts/sync_corpora.py` "
+            "so git credentials stay out of the app",
+        )
+    ok, detail = sync_corpus(corpus)
+    if not ok:
+        raise HTTPException(502, f"git sync failed: {detail}")
+    with get_conn() as conn:
+        rebuild_store(conn, _CONFIG)
+    return {"ok": True, "detail": detail, "corpora": _with_counts()}
 
 
 @router.post("/corpora/rebuild")
