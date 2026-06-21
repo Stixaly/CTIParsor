@@ -1,4 +1,4 @@
-import { ArrowLeft, GitGraph } from 'lucide-react'
+import { ArrowLeft, GitGraph, ShieldCheck } from 'lucide-react'
 
 interface Props {
   title: string
@@ -7,6 +7,7 @@ interface Props {
   theme: string
   onBack: () => void
   onGraph: () => void
+  onCoverage: () => void
   onFinalize: () => void
   onThemeToggle: () => void
   /** True while any entity/relationship mutation has fired but the bundle
@@ -18,7 +19,7 @@ interface Props {
 
 export default function TopChrome({
   title, pendingCount, finalizing, theme,
-  onBack, onGraph, onFinalize, onThemeToggle,
+  onBack, onGraph, onCoverage, onFinalize, onThemeToggle,
   bundleStale, autoFinalizing,
 }: Props) {
   const isDark = theme === 'dark'
@@ -66,6 +67,11 @@ export default function TopChrome({
         <button className="btn-ghost" onClick={onGraph}>
           <GitGraph size={14} />
           Graph
+        </button>
+
+        <button className="btn-ghost" onClick={onCoverage} title="Sigma detection coverage for this report's techniques">
+          <ShieldCheck size={14} />
+          Coverage
         </button>
 
         {/* ── Bundle status indicator ─────────────────────────────────────── */}

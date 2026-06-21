@@ -2,7 +2,7 @@ import { useState, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Upload, Trash2, Eye, GitGraph, Download, FileText,
+  Upload, Trash2, Eye, GitGraph, ShieldCheck, Download, FileText,
   Loader2, X, Play, Clock, AlertTriangle,
 } from 'lucide-react'
 import { fetchJobs, uploadFile, updateJobStatus, deleteJob, fetchBundle } from '../api/client'
@@ -148,7 +148,7 @@ function ActBtn({ label, icon, onClick, primary, danger }: {
 
 // ── KanbanCard ────────────────────────────────────────────────────────────────
 
-function KanbanCard({ job, selected, onSelect, onAnalyse, onDelete, onDownload, onGraph }: {
+function KanbanCard({ job, selected, onSelect, onAnalyse, onDelete, onDownload, onGraph, onCoverage }: {
   job: Job
   selected: boolean
   onSelect: () => void
@@ -156,6 +156,7 @@ function KanbanCard({ job, selected, onSelect, onAnalyse, onDelete, onDownload, 
   onDelete: () => void
   onDownload: () => void
   onGraph: () => void
+  onCoverage: () => void
 }) {
   const [hovered, setHovered] = useState(false)
   const hasCounts = job.entity_count !== undefined
@@ -248,6 +249,11 @@ function KanbanCard({ job, selected, onSelect, onAnalyse, onDelete, onDownload, 
             <ActBtn
               icon={<GitGraph size={10} />}
               onClick={onGraph}
+            />
+            <ActBtn
+              label="Coverage"
+              icon={<ShieldCheck size={10} />}
+              onClick={onCoverage}
             />
             <ActBtn
               icon={<Download size={10} />}
@@ -761,6 +767,7 @@ export default function Dashboard() {
                           onDelete={() => deleteMutation.mutate(job.id)}
                           onDownload={() => handleDownload(job)}
                           onGraph={() => navigate(`/graph/${job.id}`)}
+                          onCoverage={() => navigate(`/coverage/${job.id}`)}
                         />
                       ))
                     )}

@@ -1,4 +1,4 @@
-import type { Job, Entity, Relationship, StixBundle, CoverageResult, CoverageRule, DetectionCorpus, CorpusConfig } from '../types'
+import type { Job, Entity, Relationship, StixBundle, CoverageResult, CoverageRule, CoverageReportRules, DetectionCorpus, CorpusConfig } from '../types'
 
 const BASE = '/api'
 
@@ -103,6 +103,9 @@ export const fetchCoverage = (jobId: string) =>
   req<CoverageResult>(`/jobs/${jobId}/coverage`)
 export const fetchCoverageRules = (jobId: string, techniqueId: string) =>
   req<{ technique_id: string; rules: CoverageRule[] }>(`/jobs/${jobId}/coverage/${techniqueId}/rules`)
+/** All Sigma rules linkable to a report, grouped by technique — backs the Review "Detections" tab. */
+export const fetchCoverageReportRules = (jobId: string) =>
+  req<CoverageReportRules>(`/jobs/${jobId}/coverage/rules`)
 export const fetchDetectionCorpora = () =>
   req<{ corpora: DetectionCorpus[] }>(`/detection-corpora`)
 

@@ -73,6 +73,19 @@ export interface CoverageRule {
   severity: string
   license: string
   source_ref: string
+  also_in?: string[]
+}
+
+export interface CoverageRuleGroup {
+  technique_id: string
+  rules: CoverageRule[]
+}
+
+export interface CoverageReportRules {
+  job_id: string
+  techniques: CoverageRuleGroup[]
+  technique_total: number
+  rule_total: number
 }
 
 export interface DetectionCorpus {
