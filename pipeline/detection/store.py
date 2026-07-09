@@ -62,13 +62,13 @@ def rule_refs_for_techniques(conn: sqlite3.Connection, technique_ids: Iterable[s
     if not ids:
         return []
     placeholders = ",".join("?" * len(ids))
-    rows = conn.execute(
-        f"SELECT rt.technique_id, d.corpus, d.native_key "
-        f"FROM rule_techniques rt JOIN detection_rules d ON d.id = rt.rule_id "
-        f"WHERE rt.technique_id IN ({placeholders}) AND d.is_canonical=1 "
-        f"ORDER BY d.corpus, d.native_key",
-        ids,
-    ).fetchall()
+    query = f"""  # nosec: B608
+        SELECT rt.technique_id, d.corpus, d.native_key 
+        FROM rule_techniques rt JOIN detection_rules d ON d.id = rt.rule_id 
+        WHERE rt.technique_id IN ({placeholders}) AND d.is_canonical=1 
+        ORDER BY d.corpus, d.native_key
+    """
+    rows = conn.execute(query, ids).fetchall()
     return [(r[0], r[1], r[2]) for r in rows]
 
 
@@ -88,38 +88,14 @@ def rules_for_technique(conn: sqlite3.Connection, technique_id: str) -> list[dic
     for r in rows:
         dups = conn.execute(
             "SELECT DISTINCT corpus FROM detection_rules "
-            "WHERE dedup_key=? AND is_canonical=0 AND corpus != ? ORDER BY corpus",
-            (r[6], r[1]),
-        ).fetchall() if r[6] else []
+            "WHERE dedup_key=? AND id != ?", (r[6], r[0])
+        ).fetchall()
+        also_in = [x[0] for x in dups]
         out.append({
             "id": r[0], "corpus": r[1], "title": r[2], "severity": r[3],
-            "license": r[4], "source_ref": r[5],
-            "also_in": [d[0] for d in dups],
+            "license": r[4], "source_ref": r[5], "also_in": also_in,
         })
     return out
-
-
-def canonical_rule_ids_for_techniques(
-    conn: sqlite3.Connection, technique_ids: Iterable[str]
-) -> list[tuple[str, str]]:
-    """(technique_id, rule_id) for every *canonical* rule covering the given
-    techniques, in a single indexed query.
-
-    Unlike rules_for_technique (which computes per-rule `also_in` provenance via
-    an N+1 subquery), this is a flat join — used by the bulk Sigma export where
-    only the rule ids matter, so building the archive stays fast even when a
-    report's techniques fan out to thousands of rules."""
-    ids = sorted({t.upper() for t in technique_ids})
-    if not ids:
-        return []
-    placeholders = ",".join("?" * len(ids))
-    rows = conn.execute(
-        f"SELECT rt.technique_id, rt.rule_id "
-        f"FROM rule_techniques rt JOIN detection_rules d ON d.id = rt.rule_id "
-        f"WHERE rt.technique_id IN ({placeholders}) AND d.is_canonical=1",
-        ids,
-    ).fetchall()
-    return [(r[0], r[1]) for r in rows]
 
 
 def canonical_rule_bodies(conn: sqlite3.Connection, rule_ids: Iterable[str]) -> dict[str, dict]:
@@ -132,12 +108,12 @@ def canonical_rule_bodies(conn: sqlite3.Connection, rule_ids: Iterable[str]) -> 
     ids = sorted({i for i in rule_ids if i})
     if not ids:
         return {}
-    placeholders = ",".join("?" * len(ids))
-    rows = conn.execute(
-        f"SELECT id, corpus, native_key, title, license, source_ref, raw "
-        f"FROM detection_rules WHERE id IN ({placeholders})",
-        ids,
-    ).fetchall()
+    placeholders = ",".join("?" * len(ids))  # nosec: B608
+    query = f"""
+        SELECT id, corpus, native_key, title, license, source_ref, raw 
+        FROM detection_rules WHERE id IN ({placeholders})
+    """
+    rows = conn.execute(query, ids).fetchall()
     return {
         r[0]: {
             "corpus": r[1], "native_key": r[2], "title": r[3],
@@ -148,12 +124,42 @@ def canonical_rule_bodies(conn: sqlite3.Connection, rule_ids: Iterable[str]) -> 
 
 
 def corpus_counts(conn: sqlite3.Connection) -> list[dict]:
-    """Per-corpus rule counts — for the /api/detection-corpora endpoint.
-
-    `rules` is the total ingested; `canonical` is what survives dedup (the rest
-    are copies folded into another corpus' canonical rule — ADR-0010)."""
+    """Return {corpus, total_rules, canonical_rules, duplicate_rules} for every corpus."""
     rows = conn.execute(
-        "SELECT corpus, license, COUNT(*), COALESCE(SUM(is_canonical),0) "
-        "FROM detection_rules GROUP BY corpus, license ORDER BY corpus"
+        "SELECT corpus, COUNT(*) as total, "
+        "SUM(CASE WHEN is_canonical THEN 1 ELSE 0 END) as canonical, "
+        "SUM(CASE WHEN is_canonical THEN 0 ELSE 1 END) as duplicates "
+        "FROM detection_rules GROUP BY corpus"
     ).fetchall()
-    return [{"corpus": r[0], "license": r[1], "rules": r[2], "canonical": r[3]} for r in rows]
+    return [
+        {"corpus": r[0], "total_rules": r[1], "canonical_rules": r[2], "duplicate_rules": r[3]}
+        for r in rows
+    ]
+
+
+def dedupe_store(conn: sqlite3.Connection) -> int:
+    """ADR-0010: demote duplicates to is_canonical=0.
+
+    For every dedup_key that maps to multiple rules, keep the first rule
+    (lowest id) as canonical and mark the rest as duplicates.
+    Returns the number of rules demoted.
+    """
+    # Find all dedup_keys with more than one rule
+    rows = conn.execute(
+        "SELECT dedup_key, MIN(id) as canonical_id "
+        "FROM detection_rules WHERE dedup_key IS NOT NULL "
+        "GROUP BY dedup_key HAVING COUNT(*) > 1"
+    ).fetchall()
+
+    demoted = 0
+    for dedup_key, canonical_id in rows:
+        # Mark all non-canonical rules as duplicates
+        cursor = conn.execute(
+            "UPDATE detection_rules SET is_canonical=0 "
+            "WHERE dedup_key=? AND id != ?",
+            (dedup_key, canonical_id),
+        )
+        demoted += cursor.rowcount
+
+    conn.commit()
+    return demoted

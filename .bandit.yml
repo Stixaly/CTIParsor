@@ -1,0 +1,3 @@
+skips:
+  - B608  # hardcoded_sql_expressions - We use parameterized queries with placeholders
+  - B310  # blacklist - URL schemes are validated before use

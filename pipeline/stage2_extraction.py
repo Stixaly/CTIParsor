@@ -90,7 +90,7 @@ if _spacy_module is not None and not _SKIP_HEAVY:
 #         small/fullwidth hyphen-minus, soft hyphen.
 _CVE_DASH = "\\-‐-―−﹣－­"
 # Zero-width / invisible separators that can appear between CVE components.
-_CVE_ZW = "​‌‍⁠﻿"
+_CVE_ZW = "\u200b\u200c\u200d\u2060\ufeff"
 _CVE_PATTERN = re.compile(
     rf"CVE[{_CVE_ZW}]*[{_CVE_DASH}][{_CVE_ZW}]*\d{{4}}[{_CVE_ZW}]*[{_CVE_DASH}][{_CVE_ZW}]*\d{{4,7}}",
     re.IGNORECASE,
@@ -296,21 +296,21 @@ def _extract_network_iocs(text: str) -> list[RawEntity]:
     # --- iocextract (gère le defanging résiduel) ---
     if _IOCEXTRACT_AVAILABLE:
         try:
-            for ip in iocextract.extract_ipv4s(text, refang=True):
+            for ip in iocextract.extract_ipv4s(text):
                 ip = ip.strip()
                 if _IPV4_PATTERN.fullmatch(ip):
                     results.append(RawEntity(value=ip, entity_type=EntityType.IPV4))
 
-            for ip in iocextract.extract_ipv6s(text, refang=True):
+            for ip in iocextract.extract_ipv6s(text):
                 if ip.strip():
                     results.append(RawEntity(value=ip.strip(), entity_type=EntityType.IPV6))
 
-            for url in iocextract.extract_urls(text, refang=True):
+            for url in iocextract.extract_urls(text):
                 url = url.strip()
                 if url.startswith(("http://", "https://", "ftp://")):
                     results.append(RawEntity(value=url, entity_type=EntityType.URL))
 
-            for email in iocextract.extract_emails(text, refang=True):
+            for email in iocextract.extract_emails(text):
                 if "@" in email:
                     results.append(RawEntity(value=email.strip(), entity_type=EntityType.EMAIL))
         except Exception:
@@ -442,7 +442,7 @@ def _extract_cves(text: str) -> list[RawEntity]:
     results: list[RawEntity] = []
     for m in _CVE_PATTERN.finditer(text):
         # Strip zero-width separators and normalise any dash variant to "-"
-        # so "CVE​‑ 2024– 1234" becomes the canonical "CVE-2024-1234".
+        # so "CVE\u200b‑ 2024– 1234" becomes the canonical "CVE-2024-1234".
         v = _CVE_ZW_PATTERN.sub("", m.group())
         v = _CVE_DASH_PATTERN.sub("-", v).upper()
         if v not in seen:

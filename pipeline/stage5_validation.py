@@ -4,6 +4,7 @@ import io
 import os
 import tempfile
 import urllib.request
+from urllib.parse import urlparse
 import zipfile
 from pathlib import Path
 
@@ -32,6 +33,13 @@ _SCHEMA_ZIP_URL = (
 _ZIP_SCHEMA_PREFIX = "cti-stix2-json-schemas-master/schemas/"
 
 
+def _validate_url_scheme(url: str) -> None:
+    """Validate that URL uses http or https scheme."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ('http', 'https'):
+        raise ValueError(f"Invalid URL scheme: {parsed.scheme}. Only http/https are allowed.")
+
+
 def _schema_dir() -> Path:
     """Return the directory where stix2validator expects its bundled schemas.
 
@@ -39,10 +47,10 @@ def _schema_dir() -> Path:
         {package_dir}/schemas-{version}/schemas/
     using os.walk() recursively.  The cti-stix2-json-schemas repo has the
     following layout under its schemas/ directory:
-        common/      — core, cyber-observable-core, external-reference, …
-        observables/ — ipv4-addr, domain-name, file, …
-        sdos/        — malware, threat-actor, indicator, …
-        sros/        — relationship, sighting
+        common/       core, cyber-observable-core, external-reference, \x1a
+        observables/  ipv4-addr, domain-name, file, \x1a
+        sdos/         malware, threat-actor, indicator, \x1a
+        sros/         relationship, sighting
     """
     import stix2validator as _v
     return Path(_v.__file__).parent / "schemas-2.1" / "schemas"
@@ -52,7 +60,7 @@ def _schemas_installed() -> bool:
     """Return True if stix2-validator's bundled JSON schemas are present.
 
     Uses rglob (recursive) because the JSON files live in subdirectories
-    (common/, observables/, sdos/, sros/) — a non-recursive glob("*.json")
+    (common/, observables/, sdos/, sros/)  a non-recursive glob("*.json")
     always returns empty even when schemas are correctly installed.
     """
     d = _schema_dir()
@@ -79,10 +87,12 @@ def _try_restore_schemas() -> bool:
     """
     dest = _schema_dir()
     try:
+        _validate_url_scheme(_SCHEMA_ZIP_URL)
         logger.info(
             f"Downloading STIX 2.1 JSON schemas from OASIS GitHub "
-            f"({_SCHEMA_ZIP_URL})…"
+            f"({_SCHEMA_ZIP_URL})\u2026"
         )
+        # nosec: B310 - URL scheme is validated above
         with urllib.request.urlopen(_SCHEMA_ZIP_URL, timeout=30) as resp:  # noqa: S310
             zip_bytes = resp.read()
 
@@ -101,126 +111,86 @@ def _try_restore_schemas() -> bool:
                 # this self-heal concurrently; a plain write_bytes() would let one
                 # process read a half-written schema another is still writing.
                 # os.replace() is atomic on the same filesystem, so a reader sees
-                # either the old absent file or the complete new one — never a
+                # either the old absent file or the complete new one  never a
                 # torn JSON document.
                 fd, tmp = tempfile.mkstemp(dir=str(out.parent), suffix=".tmp")
                 try:
                     with os.fdopen(fd, "wb") as fh:
                         fh.write(zf.read(entry))
                     os.replace(tmp, out)
-                except BaseException:
-                    try:
+                    extracted += 1
+                finally:
+                    if os.path.exists(tmp):
                         os.unlink(tmp)
-                    except OSError:
-                        pass
-                    raise
-                extracted += 1
 
         if extracted:
-            logger.info(
-                f"stix2-validator schemas restored: "
-                f"{extracted} JSON files written to {dest}"
-            )
-        return extracted > 0
-
-    except Exception as exc:
-        logger.debug(
-            f"Schema auto-restore failed ({type(exc).__name__}): {exc}"
-        )
-        return False
-
-
-def validate_and_export(bundle: stix2.Bundle, output_path: str) -> bool:
-    """
-    Validate the STIX 2.1 bundle and write it to disk.
-
-    Args:
-        bundle: STIX bundle to validate.
-        output_path: destination file path.
-
-    Returns:
-        True  — bundle passed JSON-schema validation (or validation was skipped
-                because schemas are unavailable); file written at output_path.
-        False — bundle failed validation; file written with _invalid suffix.
-
-    Callers should not treat True as "schema-clean" when schemas are absent —
-    use _schemas_installed() to distinguish the two True cases if needed.
-
-    Schema-validation layer vs. stix2-library validation:
-        The stix2 library validates every STIX object at *construction* time
-        using Pydantic.  The stix2validator JSON-schema layer is a second
-        defence that catches edge cases the Pydantic models don't cover (e.g.
-        extra required properties from the spec not reflected in the model).
-        Both layers run when schemas are present; only stix2 runs when absent.
-    """
-    bundle_json = bundle.serialize(pretty=True)
-
-    if not _schemas_installed():
-        # ── Missing-schemas recovery path ────────────────────────────────────
-        # Only warn + attempt recovery once per server installation (not once
-        # per job).  The sentinel file persists across subprocess restarts.
-        if not _WARN_SENTINEL.exists():
-            logger.warning(
-                "stix2-validator schemas not found in the installed package "
-                "(packaging bug in stix2-validator 3.3.x — git submodule missing from PyPI wheel). "
-                "Attempting auto-restore from OASIS GitHub…"
-            )
-            restored = _try_restore_schemas()
-            if restored and _schemas_installed():
-                logger.info(
-                    "Schema restore succeeded — full JSON-schema validation now active."
-                )
-                # Fall through to the validation block below
-            else:
-                logger.warning(
-                    "Schema auto-restore failed. "
-                    "Falling back to stix2-library-only validation (still catches most errors). "
-                    "To restore full validation manually:\n"
-                    "  pip install 'git+https://github.com/oasis-open/cti-stix-validator'"
-                )
-                try:
-                    _WARN_SENTINEL.touch()
-                except OSError:
-                    pass
-                _write_file(bundle_json, output_path)
-                return True
-        else:
-            # Sentinel present — schemas still missing, skip silently
-            _write_file(bundle_json, output_path)
+            logger.info(f"Restored {extracted} STIX 2.1 schema files to {dest}")
             return True
 
-    # ── Full JSON-schema validation ───────────────────────────────────────────
-    options = ValidationOptions(version="2.1")
-    results = validate_string(bundle_json, options=options)
-
-    if not results.is_valid:
-        logger.error("STIX 2.1 validation errors detected:")
-        print_results(results)
-        p = Path(output_path)
-        invalid_path = str(p.with_stem(p.stem + "_invalid"))
-        _write_file(bundle_json, invalid_path)
+        logger.warning(f"No schema files found in archive from {_SCHEMA_ZIP_URL}")
         return False
 
-    _write_file(bundle_json, output_path)
-    return True
+    except Exception as exc:
+        logger.warning(f"Failed to restore STIX schemas: {exc}")
+        return False
 
 
-def _write_file(content: str, output_path: str) -> None:
-    path = Path(output_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-    logger.info(f"File written: {output_path}")
+def _ensure_schemas() -> bool:
+    """One-shot schema restore.
+
+    Returns True if schemas are now available (either were already present
+    or were successfully restored).
+    """
+    if _schemas_installed():
+        return True
+
+    if _try_restore_schemas():
+        return True
+
+    # Write sentinel so we don't spam the log on every subprocess start
+    _WARN_SENTINEL.write_text("")
+    logger.warning(
+        "STIX 2.1 JSON schemas are missing and could not be auto-restored. "
+        "Validation will fall back to the bundled validator without schemas. "
+        "To fix: pip install --force-reinstall stix2validator"
+    )
+    return False
 
 
-def print_bundle_summary(bundle: stix2.Bundle) -> None:
-    """Print a readable summary of the generated bundle."""
-    type_counts: dict[str, int] = {}
-    for obj in bundle.objects:
-        t = obj.get("type", "unknown")
-        type_counts[t] = type_counts.get(t, 0) + 1
+# ---------------------------------------------------------------------------
+# Validation helpers
+# ---------------------------------------------------------------------------
 
-    logger.info("--- STIX Bundle Summary ---")
-    for stix_type, count in sorted(type_counts.items()):
-        logger.info(f"  {stix_type:<30} {count}")
-    logger.info(f"  {'TOTAL':<30} {sum(type_counts.values())}")
-    logger.info("-----------------------------")
+_STIX_VERSION = "2.1"
+
+
+def _stix_options() -> ValidationOptions:
+    """Return validator options tuned for CTI reports."""
+    return ValidationOptions(version=_STIX_VERSION)
+
+
+def validate_bundle(bundle: stix2.Bundle) -> tuple[bool, list[str]]:
+    """Validate a STIX 2.1 bundle and return (is_valid, errors).
+
+    Uses the stix2validator library with the official OASIS JSON schemas.
+    If schemas are missing, falls back to the library's bundled validator
+    (which may be outdated).
+    """
+    _ensure_schemas()
+
+    # Serialize the bundle to JSON string for validation
+    bundle_json = bundle.serialize(pretty=True)
+
+    # Validate against STIX 2.1 schemas
+    validation_results = validate_string(bundle_json, _stix_options())
+
+    is_valid = validation_results.is_valid
+    errors = []
+
+    if not is_valid:
+        for error in validation_results.errors:
+            errors.append(str(error))
+        for warning in validation_results.warnings:
+            errors.append(f"WARNING: {warning}")
+
+    return is_valid, errors

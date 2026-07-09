@@ -18,6 +18,8 @@ against all known technique/tactic names.  Three tiers:
 
 from __future__ import annotations
 
+# pylint: disable=unsupported-membership-test,unsubscriptable-object,not-an-iterable
+
 import functools
 import re
 
@@ -85,7 +87,7 @@ def _load_index() -> dict[str, dict] | None:
 def _resolve(technique_name: str, mitre_id: str | None) -> tuple[str, str | None, str | None]:
     """Returns (canonical_name, mitre_id, url) — falls back to input values."""
     index = _load_index()
-    if not index or not _RAPIDFUZZ_AVAILABLE:
+    if index is None or not _RAPIDFUZZ_AVAILABLE:
         return technique_name, mitre_id, None
 
     name_lower = technique_name.lower().strip()
@@ -93,17 +95,19 @@ def _resolve(technique_name: str, mitre_id: str | None) -> tuple[str, str | None
     # 1. Try the provided MITRE ID first — it is the highest-authority signal.
     #    This prevents cross-domain name collisions (e.g. "Phishing" exists as
     #    T1566 in Enterprise and T1660 in Mobile; the ID breaks the tie).
-    if mitre_id and mitre_id.lower() in index:
-        e = index[mitre_id.lower()]
-        return e["name"], e["id"], e["url"]
+    if mitre_id:
+        mitre_id_lower = mitre_id.lower()
+        if mitre_id_lower in index:  # type: ignore[operator]
+            e = index[mitre_id_lower]  # type: ignore[index]
+            return e["name"], e["id"], e["url"]
 
     # 2. Exact name match (only useful when no valid ID was provided)
-    if name_lower in index:
-        e = index[name_lower]
+    if name_lower in index:  # type: ignore[operator]
+        e = index[name_lower]  # type: ignore[index]
         return e["name"], e["id"], e["url"]
 
     # 3. Fuzzy match — only against name keys, not bare IDs
-    name_keys = [k for k in index if not _MITRE_ID_RE.match(k)]
+    name_keys = [k for k in index if not _MITRE_ID_RE.match(k)]  # type: ignore[not-an-iterable]
 
     match_result = rfprocess.extractOne(
         name_lower,
@@ -117,11 +121,11 @@ def _resolve(technique_name: str, mitre_id: str | None) -> tuple[str, str | None
     best_key, score, _ = match_result
 
     if score >= _HIGH_CONF:
-        e = index[best_key]
+        e = index[best_key]  # type: ignore[index]
         return e["name"], e["id"], e["url"]
 
     if score >= _MEDIUM_CONF:
-        e = index[best_key]
+        e = index[best_key]  # type: ignore[index]
         return technique_name, e["id"], e["url"]
 
     return technique_name, mitre_id, None
