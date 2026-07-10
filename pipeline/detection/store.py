@@ -63,9 +63,9 @@ def rule_refs_for_techniques(conn: sqlite3.Connection, technique_ids: Iterable[s
         return []
     placeholders = ",".join("?" * len(ids))
     query = f"""  # nosec: B608
-        SELECT rt.technique_id, d.corpus, d.native_key 
-        FROM rule_techniques rt JOIN detection_rules d ON d.id = rt.rule_id 
-        WHERE rt.technique_id IN ({placeholders}) AND d.is_canonical=1 
+        SELECT rt.technique_id, d.corpus, d.native_key
+        FROM rule_techniques rt JOIN detection_rules d ON d.id = rt.rule_id
+        WHERE rt.technique_id IN ({placeholders}) AND d.is_canonical=1
         ORDER BY d.corpus, d.native_key
     """
     rows = conn.execute(query, ids).fetchall()
@@ -110,7 +110,7 @@ def canonical_rule_bodies(conn: sqlite3.Connection, rule_ids: Iterable[str]) -> 
         return {}
     placeholders = ",".join("?" * len(ids))  # nosec: B608
     query = f"""
-        SELECT id, corpus, native_key, title, license, source_ref, raw 
+        SELECT id, corpus, native_key, title, license, source_ref, raw
         FROM detection_rules WHERE id IN ({placeholders})
     """
     rows = conn.execute(query, ids).fetchall()

@@ -4,12 +4,12 @@ import io
 import os
 import tempfile
 import urllib.request
-from urllib.parse import urlparse
 import zipfile
 from pathlib import Path
+from urllib.parse import urlparse
 
 import stix2
-from stix2validator import ValidationOptions, print_results, validate_string
+from stix2validator import ValidationOptions, validate_string
 
 # Initialize logging
 from api.logging_config import get_logger

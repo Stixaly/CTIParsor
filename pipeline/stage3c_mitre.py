@@ -18,11 +18,10 @@ against all known technique/tactic names.  Three tiers:
 
 from __future__ import annotations
 
-# pylint: disable=unsupported-membership-test,unsubscriptable-object,not-an-iterable
-
 import functools
 import re
 
+# pylint: disable=unsupported-membership-test,unsubscriptable-object,not-an-iterable
 # Initialize logging
 from api.logging_config import get_logger
 from pipeline.stage3_llm import TTPExtracted
