@@ -25,6 +25,82 @@ def _make_minimal_llm_result() -> LLMEnrichmentResult:
     )
 
 
+def test_alias_actors_merge_into_one_sdo():
+    """Two aliases of the same MITRE group (APT34 / OilRig, G0049) must collapse
+    into a single ThreatActor SDO — the Option B pipeline merge."""
+    llm = LLMEnrichmentResult(threat_actors=["APT34", "OilRig"])
+    bundle = build_stix_bundle([], llm, "alias_merge")
+    actors = [o for o in bundle.objects if getattr(o, "type", "") == "threat-actor"]
+    assert len(actors) == 1, f"expected 1 merged actor, got {[a.name for a in actors]}"
+    assert actors[0].name == "OilRig"   # canonical name wins
+
+
+def test_relationship_resolves_via_alias():
+    """A relationship that names the actor by an alias (APT34) resolves to the
+    canonical node (OilRig), producing a real edge — not a dropped one."""
+    llm = LLMEnrichmentResult(
+        threat_actors=["OilRig"],
+        malware_families=["WellMess"],
+        relationships=[
+            RelationshipExtracted(
+                source_value="APT34",              # alias, not the emitted canonical
+                relationship_type="uses",
+                target_value="WellMess",
+                confidence=0.9,
+            )
+        ],
+    )
+    bundle = build_stix_bundle([], llm, "alias_rel")
+    actors = [o for o in bundle.objects if getattr(o, "type", "") == "threat-actor"]
+    rels = [o for o in bundle.objects if getattr(o, "type", "") == "relationship"]
+    assert len(actors) == 1
+    assert any(r.source_ref == actors[0].id for r in rels), "alias edge should resolve"
+
+
+def test_spurious_observable_to_ttp_edge_dropped():
+    """An observable (domain) → attack-pattern edge is a type error the LLM
+    sometimes emits; Stage 4 must drop it, not emit it as related-to."""
+    entities = [RawEntity(value="evil.example.com", entity_type=EntityType.DOMAIN)]
+    llm = LLMEnrichmentResult(
+        ttps=[TTPExtracted(technique_name="Application Layer Protocol", mitre_id="T1071.001")],
+        relationships=[
+            RelationshipExtracted(
+                source_value="evil.example.com",
+                relationship_type="communicates-with",
+                target_value="Application Layer Protocol",
+                confidence=0.8,
+            )
+        ],
+    )
+    bundle = build_stix_bundle(entities, llm, "spurious")
+    rels = [o for o in bundle.objects if getattr(o, "type", "") == "relationship"]
+    ap = next(o for o in bundle.objects if getattr(o, "type", "") == "attack-pattern")
+    dom = next(o for o in bundle.objects if getattr(o, "type", "") == "domain-name")
+    assert not any(
+        {r.source_ref, r.target_ref} == {ap.id, dom.id} for r in rels
+    ), "observable↔attack-pattern edge should be dropped"
+
+
+def test_valid_actor_uses_ttp_edge_kept():
+    """The type guard must NOT drop a legitimate actor uses attack-pattern edge."""
+    llm = LLMEnrichmentResult(
+        threat_actors=["APT29"],
+        ttps=[TTPExtracted(technique_name="Application Layer Protocol", mitre_id="T1071.001")],
+        relationships=[
+            RelationshipExtracted(
+                source_value="APT29",
+                relationship_type="uses",
+                target_value="Application Layer Protocol",
+                confidence=0.9,
+            )
+        ],
+    )
+    bundle = build_stix_bundle([], llm, "valid")
+    rels = [o for o in bundle.objects if getattr(o, "type", "") == "relationship"]
+    assert any(getattr(r, "relationship_type", "") == "uses" for r in rels), \
+        "actor→TTP 'uses' edge must survive"
+
+
 def test_bundle_is_stix_bundle():
     entities = [RawEntity(value="185.220.101.45", entity_type=EntityType.IPV4)]
     bundle = build_stix_bundle(entities, _make_minimal_llm_result(), "test_report")

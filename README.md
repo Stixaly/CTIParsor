@@ -217,6 +217,27 @@ pytest tests/ -v               # all tests
 pytest tests/ -v -k "not llm"  # skip LLM tests (no key needed)
 ```
 
+### Measure extraction quality (offline)
+
+Three benchmarks live in `tests/eval_pipeline.py` — recall (`ner`, `ate`) and a
+**hallucination-rate** benchmark (`grounding`) that scores how much emitted output
+is *not* supported by the source text (ADR-0012). It reuses the pipeline's own
+grounding primitive, runs fully offline, and can score reports you have already
+processed straight from `cti_stix.db`:
+
+```bash
+# Hallucination rate on your real processed reports, segmented + alias/technique-aware
+python tests/eval_pipeline.py -b grounding --from-db all \
+    --rel-window 1 --alias-aware --rel-proximity 200
+
+# ATT&CK Technique Extraction recall vs the GPT-4 baseline
+python tests/eval_pipeline.py -b ate --stage all
+```
+
+Relationships are reported in two segments — **named-entity** vs **IoC/technical**
+— because a single global number blends two very different regimes. Use this to
+validate any extraction change before/after.
+
 ### make shortcuts
 
 A `Makefile` wraps the most common workflows. Requires `make` (standard on Linux/macOS/WSL).
@@ -615,6 +636,22 @@ The TTP analogue of Stage 3d (ADR-0011 Phase B). For each LLM-extracted techniqu
 ### 7. Report lexicon re-scan (Finalize)
 
 On **Finalize**, accepted named entities form a per-report domain lexicon. The full text is re-scanned with word-boundary string matching to find additional occurrences that NER or the LLM missed. New occurrences are inserted with `source="report_lexicon"` and `accepted=True`.
+
+### 8. Entity canonicalisation & relationship precision (Stage 4, ADR-0012)
+
+`pipeline/aliases.py` builds an offline MITRE alias index from `gazetteer.json` +
+`mitre_index.json` (no new dependencies). Stage 4 uses it to:
+
+- **Merge aliases** — `APT34` and `OilRig` (MITRE group G0049) collapse into one
+  `threat-actor` SDO instead of two, and a relationship naming *any* alias resolves
+  to the merged node.
+- **Drop spurious edges** — an observable ↔ attack-pattern relationship
+  (e.g. `domain communicates-with T1071.001`) is a type error; it is dropped, not
+  emitted as a noisy `related-to`.
+
+Measured effect on a 4-report corpus: named-entity relationship hallucination
+≈ 11 % (the tractable target), entity hallucination ≈ 0. See
+[ADR-0012](docs/adr/0012-hallucination-measurement-and-canonicalization.md).
 
 ---
 
