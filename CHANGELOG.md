@@ -47,6 +47,14 @@ sections group by theme rather than strict semver.
   0002–0011.
 
 ### Changed
+- **Stage 2d NER model → CyNER 2.0 (DeBERTa-v3)** — replaces the removed
+  `aiforsec/cyner-xlm-roberta-base` with `PranavaKailash/CyNER-2.0-DeBERTa-v3-base`
+  (public, F1 91.88%), re-enabled by default (`CYNER_ENABLED=true`). The new model
+  exposes a dedicated `Threat_group` label distinct from `Organization`, so
+  threat-actor detection no longer relies on the `_ORG_BLOCKLIST` heuristic (kept
+  as a safety net). New dependency: `sentencepiece` (DeBERTa-v2 tokenizer). `setup.sh`
+  gains a CyNER pre-download step and clears the stale `.cyner_model_unavailable`
+  sentinel. New: `tests/test_stage2d_cyner.py` (mapping + parsing, no model download).
 - New API routes: `/api/jobs/{id}/coverage`, `/api/detection-corpora`,
   `/api/settings/corpora*`.
 - DB schema: `relationships.evidence_label`, `jobs.tlp_level` / `pap_level`,

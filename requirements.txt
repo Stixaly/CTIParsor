@@ -17,6 +17,8 @@ iocextract>=1.16.0           # Regex-based IoC extraction (IPs, hashes, domains�
 sentence-transformers>=2.6.0,<6
 # Upper bound: HuggingFace Transformers 6.x may drop APIs used in Stage 2d.
 transformers>=4.35.0,<6      # HuggingFace Transformers (CyNER model, Stage 2d)
+# CyNER 2.0 is a deberta-v2 model — its tokenizer requires SentencePiece.
+sentencepiece>=0.1.99        # Tokenizer backend for CyNER 2.0 (DeBERTa-v3, Stage 2d)
 # Upper bound: numpy 3.x will likely remove more deprecated aliases (np.bool_ etc.).
 numpy>=1.24.0,<3             # Embedding cache (mitre_embeddings.npy)
 rapidfuzz>=3.0.0             # Fuzzy matching — MITRE TTP normalization (Stage 3c)
