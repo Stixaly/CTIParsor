@@ -238,7 +238,7 @@ if [ "$OPT_NO_TORCH" = false ]; then
     echo "  │  PyTorch (CPU) is a large dependency (~800 MB download).     │"
     echo "  │  It is required for:                                         │"
     echo "  │    • Stage 2c — Semantic TTP detection (all-MiniLM-L6-v2)   │"
-    echo "  │    • Stage 2d — CyNER cybersecurity NER (XLM-RoBERTa)       │"
+    echo "  │    • Stage 2d — CyNER 2.0 cybersecurity NER (DeBERTa-v3)    │"
     echo "  │  These stages significantly improve entity recognition.      │"
     echo "  │  Skip with: bash setup.sh --no-torch                        │"
     echo "  └──────────────────────────────────────────────────────────────┘"
@@ -464,7 +464,7 @@ if [ "$OPT_NO_SPACY" = true ]; then
 else
     echo "  spaCy's generic NER is now optional — the pipeline uses:"
     echo "    • Stage 2b  Gazetteer NER  (1,792 known malware/APT/tool names)"
-    echo "    • Stage 2d  CyNER          (XLM-RoBERTa trained on CTI text)"
+    echo "    • Stage 2d  CyNER 2.0      (DeBERTa-v3 trained on CTI text)"
     echo "  en_core_web_lg (~600 MB) is only useful as a legacy fallback."
     echo ""
 
@@ -520,6 +520,49 @@ else
         echo -e "  ${RED}  nano .env  →  update ANTHROPIC_API_KEY=sk-ant-...${NC}"
     else
         ok "API key configured"
+    fi
+fi
+
+# =============================================================================
+# CyNER 2.0 MODEL PRE-DOWNLOAD  (Stage 2d — DeBERTa-v3 cybersecurity NER)
+# =============================================================================
+echo ""
+hdr "CyNER 2.0 MODEL PRE-DOWNLOAD"
+
+if [ "$OPT_NO_TORCH" = true ]; then
+    warn "--no-torch: skipping CyNER model pre-download (Stage 2d disabled)."
+else
+    CYNER_MODEL_ID=$(grep -E '^CYNER_MODEL=' .env 2>/dev/null | tail -1 | cut -d'=' -f2-)
+    CYNER_ENABLED_VAL=$(grep -E '^CYNER_ENABLED=' .env 2>/dev/null | tail -1 | cut -d'=' -f2-)
+    CYNER_MODEL_ID="${CYNER_MODEL_ID:-PranavaKailash/CyNER-2.0-DeBERTa-v3-base}"
+    CYNER_ENABLED_VAL="${CYNER_ENABLED_VAL:-true}"
+
+    if [[ "$CYNER_ENABLED_VAL" =~ ^([Ff]alse|0|[Nn]o)$ ]]; then
+        info "CYNER_ENABLED=false in .env — skipping CyNER model pre-download."
+    else
+        echo "  Stage 2d (CyNER 2.0 cybersecurity NER) downloads its model from"
+        echo "  HuggingFace on first pipeline run (~0.8 GB). Pre-downloading it now"
+        echo "  avoids that delay during the first report processed."
+        echo "  (Requires the sentencepiece package — installed above.)"
+        echo ""
+        echo -e "  Model: ${CYAN}${CYNER_MODEL_ID}${NC}"
+        echo -e "  ${YELLOW}Download it now? [Y/n]${NC}"
+        read -r -p "  > " DL_CYNER
+        DL_CYNER="${DL_CYNER:-Y}"
+
+        if [[ "$DL_CYNER" =~ ^[Yy] ]]; then
+            info "Downloading ${CYNER_MODEL_ID} (this may take a few minutes)…"
+            if python -c "from transformers import pipeline; pipeline('ner', model='${CYNER_MODEL_ID}', aggregation_strategy='simple', device=-1)" 2>/dev/null; then
+                # Clear any stale unavailability sentinel from a previous model.
+                rm -f .cyner_model_unavailable
+                ok "CyNER model cached: ${CYNER_MODEL_ID}"
+            else
+                warn "CyNER model pre-download failed — it will be downloaded on first pipeline run instead."
+                info "  Retry manually: python -c \"from transformers import pipeline; pipeline('ner', model='${CYNER_MODEL_ID}', aggregation_strategy='simple')\""
+            fi
+        else
+            info "Skipping. The model will download on first pipeline run instead."
+        fi
     fi
 fi
 
@@ -598,6 +641,7 @@ checks = [
     ("numpy",                "numpy",                   False),
     ("sentence-transformers","sentence_transformers",   False),
     ("transformers",         "transformers",            False),
+    ("sentencepiece",        "sentencepiece",           False),   # CyNER 2.0 tokenizer (Stage 2d)
     ("gliner",               "gliner",                  False),   # Stage 2e — zero-shot NER
     ("spacy",                "spacy",                   False),   # legacy fallback
 ]
@@ -710,7 +754,7 @@ echo -e "    ${GREEN}✔${NC}  Stage 1   — Document ingestion (PDF, DOCX, HTML
 echo -e "    ${GREEN}✔${NC}  Stage 2   — Regex IoC extraction (IP, hash, domain, CVE, registry, MAC…)"
 _check_file "pipeline/data/gazetteer.json"         "Stage 2b  — Gazetteer NER (1,792 named entities, Aho-Corasick)"
 _check_mod  "sentence_transformers"                "Stage 2c  — Semantic TTP detection (all-MiniLM-L6-v2)"
-_check_mod  "transformers"                         "Stage 2d  — CyNER (XLM-RoBERTa cybersecurity NER)"
+_check_mod  "transformers"                         "Stage 2d  — CyNER 2.0 (DeBERTa-v3 cybersecurity NER)"
 _check_mod  "gliner"                               "Stage 2e  — GLiNER zero-shot NER (sectors, campaigns, infra)"
 echo -e "    ${GREEN}✔${NC}  Stage 3   — LLM enrichment (relationships, campaign, novel entities)"
 echo -e "    ${GREEN}✔${NC}  Stage 3b  — Hallucination filter (fuzzy text verification)"

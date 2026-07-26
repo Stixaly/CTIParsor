@@ -100,10 +100,10 @@ uvicorn api.main:app --reload --app-dir .
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
-│  Stage 2d — CyNER  (disabled by default — model removed from HF)    │
-│  XLM-RoBERTa fine-tuned on cybersecurity NER corpora                │
-│  Detects: MalwareFamily, Organization (threat actors)               │
-│  Enable: CYNER_ENABLED=true (auto-falls back to Stage 2e)           │
+│  Stage 2d — CyNER 2.0                       (offline once cached)   │
+│  DeBERTa-v3 fine-tuned on cybersecurity NER (F1 91.88%)             │
+│  Detects: Malware, Threat_group (threat-actor groups)               │
+│  Model: PranavaKailash/CyNER-2.0-DeBERTa-v3-base (CYNER_ENABLED)    │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
@@ -480,8 +480,9 @@ TTP_EMBEDDING_MODEL=all-MiniLM-L6-v2
 # TTP_TOP2_MARGIN=0.05        # drop a 2nd match for the same sentence beyond this
 #                             # cosine gap from the top match
 
-# Stage 2d — CyNER (disabled — model removed from HuggingFace)
-CYNER_ENABLED=false
+# Stage 2d — CyNER 2.0 cybersecurity NER (DeBERTa-v3, F1 91.88%)
+CYNER_ENABLED=true
+# CYNER_MODEL=PranavaKailash/CyNER-2.0-DeBERTa-v3-base   # default; override to swap models
 
 # Stage 2e — GLiNER zero-shot NER
 # urchade/gliner_large-v2.1  (recommended, best accuracy, ~800 MB)
@@ -575,7 +576,7 @@ Each NER stage adds a different capability:
 | 2 | Regex | IoCs (IPs, hashes, domains, CVEs, paths…) |
 | 2b | Aho-Corasick gazetteer | Known malware/tools/APT groups |
 | 2c | Semantic embeddings | MITRE techniques by meaning, not name |
-| 2d | CyNER (optional) | Cybersecurity NER (if model available) |
+| 2d | CyNER 2.0 (DeBERTa-v3) | Cybersecurity NER — malware & threat-actor groups |
 | 2e | GLiNER zero-shot | Sectors, campaigns, infrastructure, novel actors |
 
 ### 2. Sliding-window chunk overlap (Stage 1)
@@ -629,7 +630,7 @@ cti-to-stix/
 │   ├── stage2_extraction.py       # Regex IoC extraction + spaCy fallback
 │   ├── stage2b_gazetteer.py       # Aho-Corasick gazetteer NER (1 792 entities)
 │   ├── stage2c_ttp_semantic.py    # Sentence-transformer TTP detection
-│   ├── stage2d_cyner.py           # CyNER (optional, disabled by default)
+│   ├── stage2d_cyner.py           # CyNER 2.0 cybersecurity NER (DeBERTa-v3)
 │   ├── stage2e_gliner.py          # GLiNER / NuNER zero-shot NER
 │   ├── stage3_llm.py              # LLM enrichment, parallel + checkpoint
 │   ├── stage3b_validate.py        # Post-LLM hallucination filter
@@ -971,7 +972,8 @@ Schema migrations run automatically on startup (`ALTER TABLE` wrapped in try/exc
 | `beautifulsoup4` | HTML parsing |
 | `iocextract` | Regex IoC extraction with defang support |
 | `sentence-transformers` | Semantic TTP embeddings (Stage 2c) |
-| `transformers` | HuggingFace backbone (CyNER Stage 2d) |
+| `transformers` | HuggingFace backbone (CyNER 2.0, Stage 2d) |
+| `sentencepiece` | Tokenizer for CyNER 2.0's DeBERTa-v3 (Stage 2d) |
 | `numpy` | Embedding cache (`.npy`) |
 | `gliner` | Zero-shot NER (Stage 2e) |
 | `pyahocorasick` | Aho-Corasick multi-pattern scan (Stage 2b, 50× faster) |
