@@ -13,6 +13,21 @@ Two modes are available:
 
 ---
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/review-page.png" alt="Review workspace — annotated entities, marginalia and relationships" width="92%">
+  <br><em>Review workspace — entity annotation, marginalia, and evidence-graded relationship review</em>
+</p>
+
+| | |
+|:---:|:---:|
+| <img src="docs/screenshots/homepage.png" alt="Dashboard" width="430"><br>**Dashboard** — drag-and-drop upload + kanban | <img src="docs/screenshots/review-page-PDF-view.png" alt="Review — Source view" width="430"><br>**Source view** — inline original file (PDF / HTML / TXT / MD) |
+| <img src="docs/screenshots/graph-report-view.png" alt="STIX graph" width="430"><br>**STIX graph** — relationships with official OASIS icons | <img src="docs/screenshots/sigma-rules.png" alt="Detection-coverage matrix" width="430"><br>**Detection coverage** — ATT&CK × Sigma readiness matrix |
+| <img src="docs/screenshots/relationships-settings.png" alt="Relationship policy" width="430"><br>**Relationship policy** — canonical STIX links, pin / auto | <img src="docs/screenshots/Sigma-rules-settings.png" alt="Settings" width="430"><br>**Settings** — Sigma corpus management |
+
+---
+
 ## Quick start — CLI
 
 ```bash
