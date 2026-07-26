@@ -167,11 +167,13 @@ _TTP_KEYWORDS = frozenset({
     "living off the land", "lolbin", "lolbas",
 })
 
-# Entity type assigned based on MITRE ID prefix
+# All ATT&CK entities (techniques, tactics, sub-techniques) are typed TTP — they
+# all map to the STIX 2.1 `attack-pattern` SDO, which is the only spec object for
+# this concept ("technique"/"tactic" are not STIX object types).  The tactic vs
+# technique distinction is preserved losslessly in the entity's mitre_id
+# (TA#### = tactic, T#### = technique), which Stage 4 uses for ATT&CK URL routing.
 def _etype_from_id(mitre_id: str) -> EntityType:
-    if mitre_id.startswith("TA"):
-        return EntityType.TACTIC
-    return EntityType.TECHNIQUE
+    return EntityType.TTP
 
 
 def _has_ttp_keyword(sentence: str) -> bool:
@@ -308,7 +310,7 @@ def detect_ttps_semantic(text: str, top_k_per_sentence: int = 1) -> list[RawEnti
     Each candidate sentence is compared against 1,531 pre-embedded technique
     descriptions.  Matches above the confidence threshold are returned as
     RawEntity objects with:
-      entity_type = TECHNIQUE or TACTIC
+      entity_type = TTP (→ STIX attack-pattern; tactic/technique kept in mitre_id)
       mitre_id    = canonical ATT&CK ID (e.g. "T1566.001")
       source      = "semantic"
       confidence  = cosine similarity score (clamped to [0, 1])

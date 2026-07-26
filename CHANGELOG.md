@@ -6,7 +6,44 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Changed
+- **Unified ATT&CK entities under a single `ttp` type** — the extractors no longer
+  emit separate `technique` / `tactic` / `procedure` types; all ATT&CK entities are
+  now `ttp`, which maps to the STIX 2.1 `attack-pattern` SDO (the only spec object
+  for this concept — "technique"/"tactic" are not STIX object types). The
+  tactic/technique distinction is preserved losslessly in each entity's `mitre_id`
+  (TA#### vs T####), which Stage 4 still uses for ATT&CK URL routing. The review's
+  type picker now offers only "TTP" for ATT&CK. Legacy `technique`/`tactic`/
+  `procedure` rows in existing databases still render and still map to
+  attack-pattern (kept for backward compatibility). Bundle output is unchanged —
+  it already emitted only `attack-pattern`.
+
+### Fixed
+- **Wrapped hashes now extracted** — MD5/SHA1/SHA256 values that a PDF wraps
+  across 1, 2 or 3 lines inside a narrow IOC-table cell were silently dropped
+  (the strict contiguous-hex regex couldn't span the newlines). Stage 2 now
+  de-wraps hex blocks and accepts them when the joined length is exactly
+  32/40/64, while a strict fallback keeps stacked full hashes intact and avoids
+  inventing hashes from unrelated hex. Recovered 5 SHA-256 IOCs on the
+  ShinyHunters/PeopleSoft report that previously extracted none.
+- **Wrapped hashes now highlight & locate in the document** — because the stored
+  hash is de-wrapped (contiguous) but the source still has it split across lines,
+  the review couldn't find it verbatim ("not found in document text") and drew no
+  highlight. `buildRanges` now matches hash values with whitespace tolerance, so
+  the wrapped occurrence is highlighted and click-to-locate works across the Text,
+  Source and PDF views.
+- **Bare filenames now extracted** — path-less filenames with an executable /
+  script / installer extension (`payload.exe`, `_fanout.sh`, `meshctrl.js`) are
+  extracted as `file` entities. Previously only path-embedded filenames were
+  captured; the extension allow-list keeps prose (`report.pdf`, `chart.png`) out.
+
 ### Added
+- **Inline source view for all formats** — the Review page's *Source* tab now
+  renders the original upload inline for every supported format, not just PDF:
+  HTML/HTM in a fully-sandboxed iframe (scripts disabled), and TXT/MD as raw
+  source text with the same entity highlights the Text view uses. DOCX keeps a
+  download fallback (no browser-native rendering). New:
+  `frontend/src/components/SourceViewer.tsx`, `frontend/src/components/sourceKind.ts`.
 - **TTP extraction precision** (ADR-0011) — four layers raising MITRE technique
   precision: **(A)** model-aware Stage 2c cosine thresholds (per-model defaults →
   embedding manifest → `TTP_HIGH_THRESHOLD`/`TTP_MEDIUM_THRESHOLD` env), one match

@@ -75,9 +75,9 @@ uvicorn api.main:app --reload --app-dir .
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
 │  Stage 2 — REGEX IOC EXTRACTION                         (offline ✅)  │
-│  IPv4/v6, domains, URLs, emails, MAC, ASN, file paths               │
-│  Registry keys, mutexes, MD5/SHA-1/SHA-256                          │
-│  CVE IDs, raw MITRE ATT&CK technique IDs (T1234 / T1234.001)        │
+│  IPv4/v6, domains, URLs, emails, MAC, ASN, file paths + filenames   │
+│  Registry keys, mutexes, MD5/SHA-1/SHA-256 (incl. line-wrapped)     │
+│  CVE IDs, raw MITRE ATT&CK IDs (T1234 / T1234.001) → ttp            │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
@@ -292,13 +292,14 @@ For Review  ──►  Reviewing  ──►  Completed
 
 ### Review page
 
-Three view modes toggled at the top of the document pane:
+Four view modes toggled at the top of the document pane:
 
 | Mode | Content |
 |---|---|
 | **Text** | Annotated source text — entity occurrences highlighted by type, click to focus in marginalia, keyboard shortcuts |
 | **Preview** | Rendered markdown — VS Code-like typography (headings, tables, code blocks, task lists). Works on all file types; most useful for `.md` reports |
-| **Source** | Original file — inline PDF iframe or download link for other formats |
+| **Source** | The original file, rendered inline for every supported format: **PDF** (pdf.js pages), **HTML/HTM** (sandboxed iframe), **TXT/MD** (raw source). PDF and TXT/MD carry the same entity highlights as the Text view and support click-to-locate; **DOCX** falls back to a download link (no browser-native rendering) |
+| **Detections** | Sigma rules linkable to this report's ATT&CK techniques |
 
 **Entity interaction:**
 - Entities highlighted inline with type-colour coding
@@ -383,12 +384,12 @@ disable one, and **Rebuild index** to re-ingest the local clones. See
 | File hash (MD5 / SHA-1 / SHA-256) | `file` SCO |
 | MAC address | `mac-addr` SCO |
 | ASN | `autonomous-system` SCO |
-| File path (Windows/Unix) | `file` SCO |
+| File path (Windows/Unix) + bare filename | `file` SCO |
 | Registry key | `windows-registry-key` SCO |
 | Mutex | `mutex` SCO |
 | User account | `user-account` SCO |
 | CVE | `vulnerability` SDO |
-| MITRE ATT&CK technique / tactic | `attack-pattern` SDO + external reference |
+| MITRE ATT&CK TTP (internal type `ttp`) | `attack-pattern` SDO + external reference (tactic vs technique preserved in the `mitre_id` / ATT&CK URL) |
 | Malware family | `malware` SDO (`is_family: true`) |
 | Threat actor | `threat-actor` SDO |
 | Offensive tool | `tool` SDO |
@@ -725,6 +726,8 @@ cti-to-stix/
 │   │   │   └── Settings.tsx       # Corpus management panel
 │   │   ├── components/
 │   │   │   ├── MarkdownPreview.tsx # VS Code-like .md renderer (react-markdown)
+│   │   │   ├── SourceViewer.tsx    # Inline original-file view (PDF/HTML/TXT/MD)
+│   │   │   ├── PdfViewer.tsx       # pdf.js pages + entity-highlight overlay
 │   │   │   ├── ProgressModal.tsx   # 5-stage SSE progress display
 │   │   │   ├── EntityPopover.tsx   # Entity type picker
 │   │   │   └── review/

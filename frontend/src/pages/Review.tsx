@@ -4,7 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Loader2, FileText, AlignLeft, BookOpen, ShieldCheck } from 'lucide-react'
 import MarkdownPreview from '../components/MarkdownPreview'
-import PdfViewer from '../components/PdfViewer'
+import SourceViewer from '../components/SourceViewer'
 
 import {
   fetchJob, fetchEntities, fetchRelationships,
@@ -585,6 +585,18 @@ export default function Review() {
     if (notInTextTimer.current)    clearTimeout(notInTextTimer.current)
   }, [])
 
+  // ── "not found verbatim" hint ─────────────────────────────────────────────
+  // LLM-extracted entities (malware/actor/TTP/campaign names) are paraphrased
+  // from context and often don't appear verbatim in the source text.  Shared by
+  // the Text view and the Source view so both give the same self-dismissing hint.
+  const handleEntityNotInText = useCallback((id: string) => {
+    const entity = localEntities.find(e => e.id === id)
+    if (!entity) return
+    if (notInTextTimer.current) clearTimeout(notInTextTimer.current)
+    setNotInTextHint(`"${entity.value}" not found verbatim in document text`)
+    notInTextTimer.current = setTimeout(() => setNotInTextHint(null), 3000)
+  }, [localEntities])
+
   // ── create entity from text selection ────────────────────────────────────
   // value = technique name (ATT&CK) or selected text (other types)
   const finishCreate = (value: string, type: string, mitreId?: string) => {
@@ -727,16 +739,7 @@ export default function Review() {
                 relEvidence={relEvidence}
                 relsForOverlay={localRels}
                 showRelArrows={relInDoc}
-                onEntityNotInText={id => {
-                  // LLM-extracted entities (malware names, actor names, TTPs, campaign
-                  // names) are paraphrased from context and often don't appear verbatim
-                  // in the source text.  Show a brief, self-dismissing hint.
-                  const entity = localEntities.find(e => e.id === id)
-                  if (!entity) return
-                  if (notInTextTimer.current) clearTimeout(notInTextTimer.current)
-                  setNotInTextHint(`"${entity.value}" not found verbatim in document text`)
-                  notInTextTimer.current = setTimeout(() => setNotInTextHint(null), 3000)
-                }}
+                onEntityNotInText={handleEntityNotInText}
               />
             )}
 
@@ -745,47 +748,18 @@ export default function Review() {
               <MarkdownPreview source={job?.report_text ?? ''} />
             )}
 
-            {/* Source file view — inline for PDF, download link for other types */}
-            {viewMode === 'source' && jobId && (() => {
-              const filename = job?.original_filename ?? ''
-              const isPdf = filename.toLowerCase().endsWith('.pdf')
-              const url   = sourceUrl(jobId)
-              return isPdf ? (
-                <PdfViewer
-                  url={url}
-                  filename={filename}
-                  entities={docEntities}
-                  focusedId={focusedId}
-                  onFocusEntity={setFocusedId}
-                />
-              ) : (
-                <div style={{
-                  display: 'flex', flexDirection: 'column',
-                  alignItems: 'center', justifyContent: 'center',
-                  padding: '60px 40px', gap: 14, color: 'var(--ink-3)',
-                }}>
-                  <FileText size={40} style={{ color: 'var(--ink-4)' }} />
-                  <p style={{ margin: 0, fontSize: 14, color: 'var(--ink-2)' }}>
-                    {filename}
-                  </p>
-                  <p style={{ margin: 0, fontSize: 12 }}>
-                    Inline preview is only available for PDF files.
-                  </p>
-                  <a
-                    href={url}
-                    download={filename}
-                    style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 6,
-                      padding: '7px 14px', borderRadius: 7,
-                      background: 'var(--accent-soft)', color: 'var(--accent)',
-                      fontSize: 12, fontWeight: 600, textDecoration: 'none',
-                    }}
-                  >
-                    Download original file
-                  </a>
-                </div>
-              )
-            })()}
+            {/* Source file view — inline for every supported format
+                (PDF, HTML, TXT/MD); download fallback for DOCX. */}
+            {viewMode === 'source' && jobId && (
+              <SourceViewer
+                url={sourceUrl(jobId)}
+                filename={job?.original_filename ?? ''}
+                entities={docEntities}
+                focusedId={focusedId}
+                onFocusEntity={setFocusedId}
+                onEntityNotInText={handleEntityNotInText}
+              />
+            )}
 
             {/* Detections — Sigma rules linkable to this report's techniques */}
             {viewMode === 'detections' && jobId && (

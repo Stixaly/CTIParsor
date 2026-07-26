@@ -297,11 +297,14 @@ export default function PdfViewer({ url, filename, entities, focusedId, onFocusE
   )
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: '80vh' }}>
-      {/* Toolbar */}
+    // Match the sibling tabs (.doc / MarkdownPreview): sit on the app background
+    // with the same horizontal padding, rather than in a distinct gray "stage".
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: '80vh', padding: '12px 36px 40px' }}>
+      {/* Toolbar — sticky so page/zoom controls stay reachable while scrolling */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8,
-        padding: '8px 12px', marginTop: 12,
+        padding: '8px 12px',
+        position: 'sticky', top: 0, zIndex: 5,
         border: '1px solid var(--rule)', borderRadius: 8,
         background: 'var(--bg-soft)',
         flexWrap: 'wrap',
@@ -373,10 +376,10 @@ export default function PdfViewer({ url, filename, entities, focusedId, onFocusE
         style={{
           flex: 1,
           display: 'flex', flexDirection: 'column', alignItems: 'center',
-          padding: '16px 0 40px',
-          background: 'var(--bg-soft)',
-          borderRadius: 8,
-          marginTop: 8,
+          padding: '20px 0 0',
+          // Transparent so the pages read against the app background, like the
+          // Text/Preview tabs — no distinct gray panel behind them.
+          background: 'transparent',
         }}
       >
         {error ? (
