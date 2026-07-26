@@ -102,6 +102,24 @@ _CVE_DASH_PATTERN = re.compile(f"[{_CVE_DASH}]")
 _MITRE_TTP_PATTERN = re.compile(r"\bTA?\d{4}(?:\.\d{3})?\b")
 _HASH_PATTERN = re.compile(r"\b([0-9a-fA-F]{64}|[0-9a-fA-F]{40}|[0-9a-fA-F]{32})\b")
 
+# Wrapped-hash pattern — a run of hex fragments that may be split across
+# whitespace / line breaks.  IOC tables in PDFs frequently wrap a single
+# MD5/SHA1/SHA256 across 1, 2 or 3 lines inside a narrow cell, e.g.
+#     2ab684d93c1553fad87041b4de
+#     a97188a97e78589deee2a7bacf
+#     f905564f3a35
+# which the strict _HASH_PATTERN can't match because the newlines break the
+# contiguous hex run.  We capture the whole block, strip the internal
+# whitespace, and accept it only if the joined length is exactly 32/40/64.
+# The surrounding non-hex text ("File Hash", filenames, descriptions) reliably
+# separates one row's hash from the next, so a block is almost always a single
+# hash.  (?<![...]) / (?![...]) keep us from slicing hex out of a longer token.
+_HASH_BLOCK_PATTERN = re.compile(
+    r"(?<![0-9a-zA-Z])"
+    r"[0-9a-fA-F]{2,}(?:\s+[0-9a-fA-F]{2,})*"
+    r"(?![0-9a-zA-Z])"
+)
+
 # The leading/trailing (?<![\d.]) / (?![\d.]) guards stop the pattern from
 # slicing four octets out of a longer dotted-number run.  Without them
 # "192.168.1.1.5" (a 5-part build/sequence string) yielded a bogus IoC
@@ -158,6 +176,23 @@ _WIN_PATH_PATTERN = re.compile(
     r"(?:[A-Za-z]:\\|\\\\[^\\\s]+\\[^\\\s]+\\)"   # drive root or UNC root
     r"(?:[^\\\s\n\r\t<>:\"|?*\x00-\x1F]+\\)*"      # zero or more directories (no spaces)
     r"[^\\\s\n\r\t<>:\"|?*\x00-\x1F]+\.[A-Za-z]{2,10}\b",  # filename.ext (no spaces)
+    re.IGNORECASE,
+)
+
+# Bare filenames (no path) — only when the extension is executable / script /
+# installer-like, so we capture malware artefacts (payload.exe, _fanout.sh,
+# meshctrl.js) without flooding on prose like "report.pdf" or "figure.png".
+# The lookbehind skips filenames that are already part of a captured path
+# (preceded by "/" or "\") so we don't double-extract them.
+_MALWARE_FILE_EXTS = (
+    "exe|dll|sys|drv|scr|com|cpl|ocx|bin|elf|so|ko|"
+    "ps1|psm1|psd1|bat|cmd|vbs|vbe|js|jse|wsf|wsh|hta|lnk|"
+    "sh|bash|zsh|py|pyc|pyw|pl|rb|php|jar|war|apk|dmg|app|msi|iso|img"
+)
+_BARE_FILENAME_PATTERN = re.compile(
+    r"(?<![\w./\\-])"                          # not mid-word and not inside a path
+    r"([A-Za-z0-9_][\w.-]*\.(?:" + _MALWARE_FILE_EXTS + r"))"
+    r"(?![\w-])",                              # full extension, nothing trailing
     re.IGNORECASE,
 )
 
@@ -252,6 +287,7 @@ def extract_entities(text: str) -> list[RawEntity]:
     entities.extend(_extract_mac_addresses(refanged))
     entities.extend(_extract_asns(refanged))
     entities.extend(_extract_file_paths(refanged))
+    entities.extend(_extract_bare_filenames(refanged))
     entities.extend(_extract_registry_keys(refanged))
 
     if _nlp is not None:
@@ -260,27 +296,45 @@ def extract_entities(text: str) -> list[RawEntity]:
     return _deduplicate(entities)
 
 
+_HASH_TYPE_BY_LEN = {64: EntityType.SHA256, 40: EntityType.SHA1, 32: EntityType.MD5}
+
+
 def _extract_hashes_regex(text: str) -> list[RawEntity]:
     """
-    Extract SHA256, SHA1, and MD5 hashes in a single pass.
-    The regex naturally enforces that hashes of different lengths cannot overlap
-    because they are strictly bounded by word boundaries (`\\b`), and hex characters
-    contain no internal word boundaries.
+    Extract MD5, SHA1 and SHA256 hashes — including hashes that a PDF has wrapped
+    across multiple lines inside a table cell.
+
+    Strategy per hex block (a run of hex fragments joined by whitespace/newlines):
+      • strip the internal whitespace; if the joined length is exactly 32/40/64,
+        it's a single (possibly wrapped) hash → emit it;
+      • otherwise the block is ambiguous (e.g. two full hashes stacked with no
+        separator, or hex-looking prose) → fall back to the strict contiguous
+        matcher so each already-complete hash is still recovered and no spurious
+        hash is invented by joining unrelated fragments.
     """
-    results = []
+    results: list[RawEntity] = []
     seen_values: set[str] = set()
 
-    for m in _HASH_PATTERN.finditer(text):
-        v = m.group(1).lower()
-        if v not in seen_values:
-            seen_values.add(v)
-            length = len(v)
-            if length == 64:
-                results.append(RawEntity(value=v, entity_type=EntityType.SHA256))
-            elif length == 40:
-                results.append(RawEntity(value=v, entity_type=EntityType.SHA1))
-            else:
-                results.append(RawEntity(value=v, entity_type=EntityType.MD5))
+    def emit(v: str) -> None:
+        v = v.lower()
+        if v in seen_values:
+            return
+        et = _HASH_TYPE_BY_LEN.get(len(v))
+        if et is None:
+            return
+        seen_values.add(v)
+        results.append(RawEntity(value=v, entity_type=et))
+
+    for m in _HASH_BLOCK_PATTERN.finditer(text):
+        block = m.group(0)
+        joined = re.sub(r"\s+", "", block)
+        if len(joined) in _HASH_TYPE_BY_LEN:
+            emit(joined)
+        elif len(joined) != len(block):
+            # multi-fragment block whose total isn't a clean hash length — only
+            # trust fragments that are each a complete contiguous hash.
+            for hm in _HASH_PATTERN.finditer(block):
+                emit(hm.group(1))
 
     return results
 
@@ -421,6 +475,25 @@ def _extract_file_paths(text: str) -> list[RawEntity]:
     return results
 
 
+def _extract_bare_filenames(text: str) -> list[RawEntity]:
+    """
+    Extract bare filenames (no directory) that carry an executable / script /
+    installer extension — e.g. `meshagent64-azure-ops.exe`, `_fanout.sh`,
+    `meshctrl.js`.  These are common in IOC tables ("File Path / Name" columns)
+    where the full path isn't given, so `_extract_file_paths` misses them.
+    The extension allow-list keeps prose filenames (report.pdf, chart.png) out.
+    """
+    results: list[RawEntity] = []
+    seen: set[str] = set()
+    for m in _BARE_FILENAME_PATTERN.finditer(text):
+        v = m.group(1).strip()
+        key = v.lower()
+        if key not in seen:
+            seen.add(key)
+            results.append(RawEntity(value=v, entity_type=EntityType.FILE))
+    return results
+
+
 def _extract_registry_keys(text: str) -> list[RawEntity]:
     """
     Extract Windows registry key paths starting with any recognised hive
@@ -458,9 +531,11 @@ def _extract_mitre_ttps(text: str) -> list[RawEntity]:
         v = m.group()
         if v not in seen:
             seen.add(v)
-            # TA#### IDs are ATT&CK tactics; T####[.###] are techniques/sub-techniques.
-            etype = EntityType.TACTIC if v.startswith("TA") else EntityType.TTP
-            results.append(RawEntity(value=v, entity_type=etype, mitre_id=v))
+            # All ATT&CK IDs (TA#### tactics and T####[.###] techniques) are typed
+            # TTP → STIX `attack-pattern` (the only spec object for this concept).
+            # The tactic/technique distinction is preserved in mitre_id / the ID
+            # prefix, which Stage 4 uses for ATT&CK URL routing.
+            results.append(RawEntity(value=v, entity_type=EntityType.TTP, mitre_id=v))
     return results
 
 

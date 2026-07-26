@@ -59,6 +59,31 @@ describe('buildRanges', () => {
     expect(ranges).toHaveLength(1)
     expect(text.slice(ranges[0].start, ranges[0].end)).toBe('1.2.3.4')
   })
+
+  it('locates a contiguous hash on one line', () => {
+    const hash = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+    const text = `File Hash: ${hash} (SHA-256)`
+    const ranges = buildRanges(text, [ent('1', hash, 'sha256')])
+    expect(ranges).toHaveLength(1)
+    expect(text.slice(ranges[0].start, ranges[0].end)).toBe(hash)
+  })
+
+  it('locates a hash wrapped across three lines (de-wrapped stored value)', () => {
+    const hash = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+    const wrapped = `${hash.slice(0, 26)}\n${hash.slice(26, 52)}\n${hash.slice(52)}`
+    const text = `IOC table\n${wrapped}\nmeshagent.exe`
+    const ranges = buildRanges(text, [ent('1', hash, 'sha256')])
+    expect(ranges).toHaveLength(1)
+    // The matched span reassembles to the stored hash once whitespace is stripped.
+    const matched = text.slice(ranges[0].start, ranges[0].end).replace(/\s+/g, '')
+    expect(matched).toBe(hash)
+  })
+
+  it('does not match a hash that is not present in the text', () => {
+    const hash = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+    const ranges = buildRanges('No indicators in this narrative report.', [ent('1', hash, 'sha256')])
+    expect(ranges).toHaveLength(0)
+  })
 })
 
 describe('generateDefangedVariants', () => {
