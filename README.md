@@ -97,15 +97,15 @@ uvicorn api.main:app --reload --app-dir .
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
 │  Stage 2b — GAZETTEER NER                               (offline ✅)  │
-│  Aho-Corasick scan for 1 792 known malware families, offensive tools │
-│  and APT group names (from MITRE ATT&CK Enterprise + Mobile + ICS)  │
+│  Aho-Corasick scan over 1 827 name variants (1 114 unique malware   │
+│  families, offensive tools and APT groups — ATT&CK Ent + Mob + ICS) │
 │  • Longest-match-wins, word-boundary checked                        │
 │  • Confidence: 0.92 canonical / 0.88 alias                          │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
 │  Stage 2c — SEMANTIC TTP DETECTION                      (offline ✅)  │
-│  Sentence-transformer cosine-similarity against 1 531 pre-embedded  │
+│  Sentence-transformer cosine-similarity against 1 533 pre-embedded  │
 │  MITRE technique descriptions (local .npy cache)                    │
 │  • Default model: all-MiniLM-L6-v2 (80 MB)                         │
 │  • Upgrade: ehsanaghaei/SecureBERT-Plus (+8-12% F1 on CTI text)     │
@@ -194,6 +194,34 @@ uvicorn api.main:app --reload --app-dir .
 │  IoC linked to malware → indicates SRO                              │
 │  Threat actor → targets → Location / Identity SROs                 │
 │  Semantic relations → Relationship SRO (deduplicated, spec-valid)   │
+└─────────────────────────────┬────────────────────────────────────────┘
+                              │
+┌─────────────────────────────▼────────────────────────────────────────┐
+│  Stage 4b — GRAPH COMPLETION                (offline ✅ — ADR-0013)   │
+│  Enriches edges AFTER the precision gate, never loosening it.        │
+│  Runs before the Report SDO, so new edges are wrapped + stamped.     │
+│  1. Alias merge     : OFF by default — aliases.py (ADR-0012) already │
+│    (fallback)         canonicalises MITRE aliases at SDO creation.   │
+│                       Fallback for non-gazetteer names only.         │
+│  1b. ATT&CK grounding: add MITRE-curated edges (20 015 G/S/T pairs)  │
+│                       when both endpoints resolve to ATT&CK IDs      │
+│                       → x_evidence_label="reported" (expert fact)    │
+│  2. Transitive infer : compose two verified edges via a fixed table  │
+│                       (uses∘uses→uses …); a composed verb that is    │
+│                       not spec-*suggested* is SKIPPED, not emitted   │
+│  Every inferred edge: x_evidence_label="inferred" + x_inference_rule │
+│  + x_inferred_from (premise ids). Pinned policy rules always win.    │
+└─────────────────────────────┬────────────────────────────────────────┘
+                              │
+┌─────────────────────────────▼────────────────────────────────────────┐
+│  Stage 4c — LONG-DISTANCE PREDICTION                    (optional)   │
+│  Connects still-disconnected sub-graphs (CTINexus Phase 3):          │
+│  DFS components → central node per component (degree centrality) →   │
+│  topic node (global max degree) → ask the LLM for the relation.      │
+│  Same evidence bar as 3d: the model must QUOTE the supporting        │
+│  sentence (stored as x_evidence_text) — no quote ⟹ no edge.          │
+│  Off unless policy completion.long_distance=true AND provider ready  │
+│  (so Stage 4 stays network-free by default).                         │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
@@ -298,7 +326,7 @@ Processing  ─── Real-time 5-stage progress bar (SSE)
   │               Stage 1: Ingestion   → chars + chunks
   │               Stage 2: Extraction  → IoCs + NER counts
   │               Stage 3: LLM         → chunk N/total (live)
-  │               Stage 4: STIX mapping
+  │               Stage 4: STIX mapping (+ 4b graph completion)
   │               Stage 5: Validation
   ▼
 For Review  ──►  Reviewing  ──►  Completed
@@ -419,6 +447,7 @@ disable one, and **Rebuild index** to re-ingest the local clones. See
 | Threat actor → country / sector | `targets` SRO |
 | Semantic relationship | `relationship` SRO (confidence score) |
 | Relationship evidence grade | `x_evidence_label` custom property on each `relationship` (`observed` / `reported` / `assessed` / `inferred` / `gap`) |
+| Completed edge (Stage 4b/4c) | `relationship` SRO + `x_inference_rule` (`transitive:uses+uses`, `attack-reference:G0016>S0002`, `long-distance`) and `x_inferred_from` (premise edge ids); long-distance edges also carry `x_evidence_text` (the quoted sentence) |
 | Sharing markings | TLP `marking-definition` (+ optional PAP statement marking) referenced by `object_marking_refs` on every object |
 | Pipeline authorship | one authoring `identity` SDO; `created_by_ref` on every SDO/SRO (the pipeline, **not** the threat actor) |
 | Report wrapper | `report` SDO |
@@ -572,7 +601,7 @@ HF_TOKEN=
 
 ## MITRE ATT&CK data
 
-Stages 2b, 2c, and 3c use pre-built local indexes in `pipeline/data/`.
+Stages 2b, 2c, 3c, and 4b use pre-built local indexes in `pipeline/data/`.
 
 ### Build the indexes
 
@@ -581,9 +610,10 @@ Stages 2b, 2c, and 3c use pre-built local indexes in `pipeline/data/`.
 python scripts/build_indexes.py
 
 # Or build only specific indexes
-python scripts/build_indexes.py --only mitre      # mitre_index.json
-python scripts/build_indexes.py --only gazetteer  # gazetteer.json
-python scripts/build_indexes.py --only embeddings # mitre_embeddings.npy
+python scripts/build_indexes.py --only mitre         # mitre_index.json
+python scripts/build_indexes.py --only gazetteer     # gazetteer.json
+python scripts/build_indexes.py --only embeddings    # mitre_embeddings.npy
+python scripts/build_indexes.py --only relationships # attack_relationships.json
 ```
 
 The script auto-discovers bundle files in `data/`, `~/Downloads/`, and `~/Documents/`. Accepts `--enterprise`, `--mobile`, `--ics`, `--capec` flags for explicit paths.
@@ -592,6 +622,7 @@ The script auto-discovers bundle files in `data/`, `~/Downloads/`, and `~/Docume
 |---|---|---|
 | `pipeline/data/mitre_index.json` | 3c normalisation | ~430 KB |
 | `pipeline/data/gazetteer.json` | 2b gazetteer NER | ~194 KB |
+| `pipeline/data/attack_relationships.json` | 4b ATT&CK grounding | ~586 KB |
 | `pipeline/data/mitre_embeddings.npy` | 2c semantic TTP | ~2.3 MB |
 | `pipeline/data/mitre_embeddings_meta.json` | 2c semantic TTP | ~60 KB |
 | `pipeline/data/mitre_embeddings_manifest.json` | 2c cache validity + thresholds | ~1 KB |
@@ -681,7 +712,7 @@ cti-to-stix/
 ├── pipeline/
 │   ├── stage1_ingestion.py        # Parsing, defanging, chunking + overlap
 │   ├── stage2_extraction.py       # Regex IoC extraction + spaCy fallback
-│   ├── stage2b_gazetteer.py       # Aho-Corasick gazetteer NER (1 792 entities)
+│   ├── stage2b_gazetteer.py       # Aho-Corasick gazetteer NER (1 114 entities)
 │   ├── stage2c_ttp_semantic.py    # Sentence-transformer TTP detection
 │   ├── stage2d_cyner.py           # CyNER 2.0 cybersecurity NER (DeBERTa-v3)
 │   ├── stage2e_gliner.py          # GLiNER / NuNER zero-shot NER
@@ -692,6 +723,9 @@ cti-to-stix/
 │   ├── stage3e_consensus.py       # Cross-model consensus (opt-in)
 │   ├── stage3f_ttp_verify.py      # TTP self-verification (opt-in, ADR-0011)
 │   ├── stage4_stix_mapping.py     # STIX 2.1 mapping + TLP/PAP + authoring identity
+│   ├── stage4b_graph_completion.py # Alias merge + ATT&CK grounding + transitive (ADR-0013)
+│   ├── stage4c_long_distance.py   # LLM long-distance relation inferer (opt-in)
+│   ├── stix_rel_spec.py           # STIX 2.1 suggested-relationship table (spec guard)
 │   ├── stage5_validation.py       # Bundle validation + export
 │   ├── mitre_db.py                # Lazy-loaded MITRE index (techniques + tactics)
 │   ├── detection/                 # Detection-rule ingestion + coverage (ADR-0006)
@@ -704,6 +738,7 @@ cti-to-stix/
 │   └── data/
 │       ├── mitre_index.json       # Compact ATT&CK index (built by build_indexes.py)
 │       ├── gazetteer.json         # Named-entity dictionary
+│       ├── attack_relationships.json # 20 015 curated ATT&CK edges (Stage 4b grounding)
 │       ├── mitre_embeddings.npy   # Pre-computed TTP embeddings
 │       └── mitre_embeddings_meta.json
 │
@@ -869,12 +904,38 @@ Valid `relationship_type` values: `uses`, `attributed-to`, `targets`, `indicates
   "global": "enforce",
   "rules": [
     { "src": "threat-actor", "verb": "uses", "tgt": "malware", "mode": "pin", "enabled": true }
-  ]
+  ],
+  "completion": {
+    "alias": false,
+    "reference": true,
+    "transitive": true,
+    "long_distance": false,
+    "fuzzy_alias": false,
+    "semantic_alias": false,
+    "max_new_edges": 200
+  }
 }
 ```
 
 - `global`: `"enforce"` (apply rules) · `"auto"` (ignore rules)
 - `mode`: `"pin"` (lock relationship type) · `"auto"` (allow free editing)
+
+**`completion`** (optional) controls Stage 4b graph completion — *the analyst
+specifies the link, or lets the tool decide*. A `"pin"` rule always wins over
+anything inference produces, so completion never contradicts an explicit choice.
+
+| Flag | Default | What it does |
+|---|---|---|
+| `alias` | `false` | **Fallback** post-hoc merge of same-object SDOs, rewiring their edges onto one node. Off because [`pipeline/aliases.py`](pipeline/aliases.py) (ADR-0012) already canonicalises MITRE-known aliases at SDO-creation time — this only adds value for names *absent from the gazetteer*, and it is the one destructive engine. Never merges IOC-shaped names. |
+| `reference` | `true` | Add MITRE-curated ATT&CK edges when both endpoints resolve to ATT&CK IDs. Labelled `reported` — expert fact, not inference. |
+| `transitive` | `true` | Compose two verified edges via a fixed rule table; a composition that is not a *suggested* STIX relationship is skipped. |
+| `long_distance` | `false` | Stage 4c — LLM predicts links between disconnected sub-graphs. Needs a ready LLM provider; the model must quote a supporting sentence. |
+| `fuzzy_alias` | `false` | Extend the alias merge with rapidfuzz name matching (ratio ≥ 93). |
+| `semantic_alias` | `false` | Extend the alias merge with embedding cosine ≥ 0.6, catching aliases with no character overlap ("the Dukes" ↔ "APT29"). No-ops under `SKIP_HEAVY_MODELS=1`. |
+| `max_new_edges` | `200` | Safety cap on edges added by grounding + inference. |
+
+Set `reference: false` for strictly report-scoped bundles: grounding asserts
+*global* ATT&CK knowledge ("APT29 has used Mimikatz"), not what this report says.
 
 ### Progress (SSE)
 
@@ -1000,6 +1061,8 @@ Schema migrations run automatically on startup (`ALTER TABLE` wrapped in try/exc
 | Component | Offline |
 |---|---|
 | Stages 1, 2, 4, 5 | ✅ fully offline |
+| Stage 4b — graph completion (alias, grounding, transitive) | ✅ fully offline (grounding needs `build_indexes.py --only relationships`) |
+| Stage 4c — long-distance prediction (opt-in) | ❌ requires an LLM provider |
 | Stage 2b — gazetteer NER | ✅ after `build_indexes.py` |
 | Stage 2c — semantic TTP | ✅ after `build_indexes.py` + model download |
 | Stage 2e — GLiNER | ✅ after first model download (~800 MB cached) |

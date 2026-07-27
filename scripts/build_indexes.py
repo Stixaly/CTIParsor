@@ -57,8 +57,9 @@ from pathlib import Path
 _REPO_ROOT   = Path(__file__).parent.parent
 _DATA_DIR    = _REPO_ROOT / "pipeline" / "data"
 
-_INDEX_PATH     = _DATA_DIR / "mitre_index.json"
-_GAZ_PATH       = _DATA_DIR / "gazetteer.json"
+_INDEX_PATH      = _DATA_DIR / "mitre_index.json"
+_GAZ_PATH        = _DATA_DIR / "gazetteer.json"
+_ATTACK_REL_PATH = _DATA_DIR / "attack_relationships.json"
 _EMB_PATH       = _DATA_DIR / "mitre_embeddings.npy"
 _META_PATH      = _DATA_DIR / "mitre_embeddings_meta.json"
 _MANIFEST_PATH  = _DATA_DIR / "mitre_embeddings_manifest.json"
@@ -293,6 +294,78 @@ def build_gazetteer(bundles: dict[str, Path | None]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# ATT&CK curated-relationship builder  (ADR-0013 — reference grounding)
+# ---------------------------------------------------------------------------
+
+# ATT&CK relationship verbs worth grounding report edges in.  Structural or
+# defensive edges (subtechnique-of, mitigates, detects, revoked-by) concern
+# object kinds the pipeline doesn't emit, so they are skipped.
+_REL_KEEP_VERBS = frozenset({"uses", "attributed-to", "targets", "delivers", "variant-of"})
+
+# ATT&CK object types whose external_id (G/S/C/T…) we can resolve from report
+# entities: groups via the gazetteer, techniques via their mitre_id.
+_REL_ID_TYPES = frozenset({"intrusion-set", "malware", "tool", "campaign", "attack-pattern"})
+
+
+def build_attack_relationships(bundles: dict[str, Path | None]) -> None:
+    """Build pipeline/data/attack_relationships.json from MITRE STIX bundles.
+
+    Emits the *curated* ATT&CK edge list as ATT&CK-ID triples:
+        {"pairs": [["G0016", "uses", "S0154"], ...]}
+    Stage 4b's reference-grounding engine adds one of these edges to a report
+    bundle when BOTH endpoints appear in the report — an expert-maintained link,
+    not an inference.
+    """
+    print("\n[4/4] Building attack_relationships.json…")
+
+    # Pass 1 — map STIX object id → ATT&CK external_id per bundle set.
+    id_to_attack: dict[str, str] = {}
+    domains: list[str] = []
+    all_rel_objs: list[dict] = []
+
+    for key, path in bundles.items():
+        if path is None or key == "capec":
+            continue
+        domains.append(_domain_from_path(path))
+        for obj in _load_bundle(path):
+            if obj.get("revoked") or obj.get("x_mitre_deprecated"):
+                continue
+            otype = obj.get("type", "")
+            if otype == "relationship":
+                all_rel_objs.append(obj)
+                continue
+            if otype not in _REL_ID_TYPES:
+                continue
+            for ref in obj.get("external_references", []):
+                if ref.get("source_name") in ("mitre-attack", "mitre-mobile-attack",
+                                              "mitre-ics-attack"):
+                    ext = ref.get("external_id")
+                    if ext:
+                        id_to_attack[obj["id"]] = ext
+                    break
+
+    # Pass 2 — keep relationships whose endpoints both resolved.
+    pairs: set[tuple[str, str, str]] = set()
+    for rel in all_rel_objs:
+        verb = rel.get("relationship_type", "")
+        if verb not in _REL_KEEP_VERBS:
+            continue
+        src = id_to_attack.get(rel.get("source_ref", ""))
+        tgt = id_to_attack.get(rel.get("target_ref", ""))
+        if src and tgt and src != tgt:
+            pairs.add((src, verb, tgt))
+
+    out = {
+        "generated_from": sorted(set(domains)),
+        "pairs": sorted(pairs),
+    }
+    _ATTACK_REL_PATH.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
+    size_kb = _ATTACK_REL_PATH.stat().st_size / 1024
+    print(f"  DONE  {len(pairs)} curated ATT&CK edges "
+          f"→ {_ATTACK_REL_PATH.name} ({size_kb:.0f} KB)")
+
+
+# ---------------------------------------------------------------------------
 # Embedding builder
 # ---------------------------------------------------------------------------
 
@@ -426,7 +499,7 @@ def main() -> None:
     parser.add_argument("--ics",        type=Path, help="Path to ics-attack.json")
     parser.add_argument("--capec",      type=Path, help="Path to stix-capec.json")
     parser.add_argument(
-        "--only", choices=["mitre", "gazetteer", "embeddings"],
+        "--only", choices=["mitre", "gazetteer", "embeddings", "relationships"],
         help="Rebuild only the specified index",
     )
     args = parser.parse_args()
@@ -467,6 +540,8 @@ def main() -> None:
         build_gazetteer(bundles)
     if only is None or only == "embeddings":
         build_embeddings(bundles)
+    if only is None or only == "relationships":
+        build_attack_relationships(bundles)
 
     print()
     print("Done.  Index files written to:", _DATA_DIR)

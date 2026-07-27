@@ -38,6 +38,30 @@ sections group by theme rather than strict semver.
   captured; the extension allow-list keeps prose (`report.pdf`, `chart.png`) out.
 
 ### Added
+- **STIX graph completion** (ADR-0013) — a Stage 4b/4c layer that enriches edges
+  *after* the Stage 3d/3f precision gate instead of loosening it, so the base graph
+  is untouched and every added edge is independently justified. Engines, all guarded
+  by `rel_is_suggested` (a composed verb that is not a *suggested* STIX 2.1
+  relationship for the type pair is **skipped, not downgraded**):
+  **(1)** ATT&CK reference grounding — `build_indexes.py --only relationships` distils
+  the ATT&CK bundles into `pipeline/data/attack_relationships.json` (20 015 curated
+  G/S/T triples); curated edges are added when both endpoints resolve to ATT&CK IDs
+  and labelled `reported`, not `inferred`; **(2)** transitive inference over a fixed
+  composition table; **(3)** an alias-merge *fallback* (default **off** — ADR-0012's
+  `pipeline/aliases.py` already canonicalises MITRE-known aliases at SDO-creation
+  time, so this only covers names absent from the gazetteer, with opt-in
+  `fuzzy_alias` / `semantic_alias` matchers); **(4)** Stage 4c long-distance
+  prediction (opt-in) — connects disconnected sub-graphs via degree-centrality
+  central/topic nodes, requiring the LLM to quote a supporting sentence (Stage 3d's
+  evidence bar) stored as `x_evidence_text`. Inferred edges carry `x_inference_rule`
+  + `x_inferred_from` (premise ids). New: `pipeline/stage4b_graph_completion.py`,
+  `pipeline/stage4c_long_distance.py`, `tests/test_stage4b_completion.py`,
+  `tests/test_stage4c_long_distance.py`.
+- **Graph-completion benchmark** (`eval_pipeline.py --benchmark rel`) — edge-level
+  per-engine precision/recall/F1 against gold accept/reject judgments, with built-in
+  fixtures and a documented dataset format for human-annotated reports. Complements
+  `-b grounding` (ADR-0012): grounding measures hallucination in *extracted* output,
+  `rel` measures precision of *completion-added* edges.
 - **Inline source view for all formats** — the Review page's *Source* tab now
   renders the original upload inline for every supported format, not just PDF:
   HTML/HTM in a fully-sandboxed iframe (scripts disabled), and TXT/MD as raw
@@ -92,6 +116,15 @@ sections group by theme rather than strict semver.
   as a safety net). New dependency: `sentencepiece` (DeBERTa-v2 tokenizer). `setup.sh`
   gains a CyNER pre-download step and clears the stale `.cyner_model_unavailable`
   sentinel. New: `tests/test_stage2d_cyner.py` (mapping + parsing, no model download).
+- The relationship policy gained an optional `completion` block
+  (`transitive` / `reference` / `alias` / `long_distance` / `fuzzy_alias` /
+  `semantic_alias` / `max_new_edges`) — the "let the tool decide" switch for graph
+  completion. A `"pin"` rule still always wins, so inference never contradicts an
+  explicit analyst choice.
+- `build_stix_bundle()` gained `long_distance_infer=`; the API worker supplies it
+  via `stage4c_long_distance.default_long_distance_inferer(policy)`, which returns
+  `None` unless the policy enables long-distance *and* the LLM provider is ready —
+  keeping STIX mapping network-free by default.
 - New API routes: `/api/jobs/{id}/coverage`, `/api/detection-corpora`,
   `/api/settings/corpora*`.
 - DB schema: `relationships.evidence_label`, `jobs.tlp_level` / `pap_level`,
