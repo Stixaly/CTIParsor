@@ -33,3 +33,6 @@ docs/design/
 # Local registry overlay — private repo URLs + overrides stay local
 # (the committed detection_corpora.yaml holds public corpuses).
 detection_corpora.local.yaml
+
+# Claude Code local session config (machine-local, not shared)
+.claude/

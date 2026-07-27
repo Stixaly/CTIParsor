@@ -1017,6 +1017,275 @@ def test_stage2_ttp_no_false_positives_on_clean_text():
 
 
 # ---------------------------------------------------------------------------
+# ===========================================================================
+# REL benchmark — Stage 4b graph-completion edge precision  (ADR-0012)
+# ===========================================================================
+#
+# Measures the *completion* engines (reference grounding, transitive inference,
+# long-distance) in isolation: given a base graph of verified objects + edges,
+# does Stage 4b add the edges a human accepts (gold_accept) and none of the
+# edges a human rejects (gold_reject)?
+#
+# This is the edge-level analogue of the ATE benchmark: CTINexus (EuroS&P 2025)
+# reports 90.99% relation-prediction precision; this harness produces the
+# comparable number for CTIParsor's completion layer.
+#
+# Usage:
+#   python tests/eval_pipeline.py --benchmark rel                    # fixtures
+#   python tests/eval_pipeline.py --benchmark rel --dataset gold.json
+#
+# Dataset format — JSON list of samples:
+#   [{
+#      "description": "...",
+#      "objects":     [{"type": "threat-actor", "name": "APT29"},
+#                      {"type": "attack-pattern", "name": "Phishing",
+#                       "mitre_id": "T1566"}],
+#      "edges":       [["APT29", "uses", "WellMess"]],       # base (verified)
+#      "gold_accept": [["APT29", "uses", "Phishing"]],       # must be added
+#      "gold_reject": [["APT29", "targets", "Phishing"]],    # must NOT be added
+#      "closed": false     # true → any unjudged added edge counts as FP
+#   }, ...]
+# ===========================================================================
+
+@dataclass
+class RelSample:
+    """One graph-completion sample: base graph + judged completion edges."""
+    objects: list[dict]
+    edges: list[list[str]]
+    gold_accept: list[list[str]]
+    gold_reject: list[list[str]]
+    closed: bool = False
+    description: str = ""
+
+
+@dataclass
+class RelScore:
+    """Per-engine and overall completion-edge scores."""
+    tp: float = 0.0
+    fp: float = 0.0
+    fn: float = 0.0
+    unjudged: int = 0
+    by_engine: dict = None   # engine → {"added": n, "tp": n, "fp": n}
+
+    def __post_init__(self):
+        if self.by_engine is None:
+            self.by_engine = {}
+
+    @property
+    def precision(self) -> float:
+        d = self.tp + self.fp
+        return self.tp / d if d else 0.0
+
+    @property
+    def recall(self) -> float:
+        d = self.tp + self.fn
+        return self.tp / d if d else 0.0
+
+    @property
+    def f1(self) -> float:
+        p, r = self.precision, self.recall
+        return 2 * p * r / (p + r) if (p + r) else 0.0
+
+
+def _rel_build_objects(specs: list[dict]):
+    """Instantiate stix2 SDOs from the light per-sample object specs."""
+    import stix2
+
+    made = []
+    for spec in specs:
+        t, name = spec.get("type"), spec.get("name", "")
+        kwargs: dict = {"name": name}
+        if t == "attack-pattern" and spec.get("mitre_id"):
+            mid = spec["mitre_id"]
+            kwargs["external_references"] = [stix2.ExternalReference(
+                source_name="mitre-attack", external_id=mid,
+                url=f"https://attack.mitre.org/techniques/{mid.replace('.', '/')}/",
+            )]
+        cls = {
+            "threat-actor": stix2.ThreatActor,
+            "intrusion-set": stix2.IntrusionSet,
+            "campaign": stix2.Campaign,
+            "tool": stix2.Tool,
+            "attack-pattern": stix2.AttackPattern,
+            "identity": stix2.Identity,
+            "location": lambda **kw: stix2.Location(country="FR", **kw),
+            "vulnerability": stix2.Vulnerability,
+            "infrastructure": stix2.Infrastructure,
+        }.get(t)
+        if t == "malware":
+            made.append(stix2.Malware(is_family=True, **kwargs))
+        elif cls is not None:
+            made.append(cls(**kwargs))
+    return made
+
+
+def run_rel_benchmark(samples: list[RelSample], verbose: bool = False) -> RelScore:
+    """Run Stage 4b completion over each sample's base graph and score the
+    added edges against the gold accept/reject judgments."""
+    import stix2
+
+    from pipeline.stage4b_graph_completion import complete_graph
+
+    score = RelScore()
+
+    for sample in samples:
+        objs = _rel_build_objects(sample.objects)
+        by_name = {o.get("name", "").lower(): o for o in objs}
+        for src, verb, tgt in sample.edges:
+            s, t = by_name.get(src.lower()), by_name.get(tgt.lower())
+            if s is not None and t is not None:
+                objs.append(stix2.Relationship(s, verb, t, confidence=90))
+
+        base_keys = {(r.get("source_ref"), r.get("relationship_type"), r.get("target_ref"))
+                     for r in objs if r.get("type") == "relationship"}
+
+        complete_graph(objs)
+
+        # Map post-completion ids → all known names (name + absorbed aliases).
+        id_names: dict[str, set[str]] = {}
+        for o in objs:
+            if o.get("type") == "relationship" or not hasattr(o, "id"):
+                continue
+            names = {(o.get("name") or "").lower()}
+            names.update((a or "").lower() for a in (o.get("aliases") or []))
+            id_names[o.id] = {n for n in names if n}
+
+        def _matches(edge_key, gold_edge) -> bool:
+            src_id, verb, tgt_id = edge_key
+            g_src, g_verb, g_tgt = (x.lower() for x in gold_edge)
+            return (verb == g_verb
+                    and g_src in id_names.get(src_id, set())
+                    and g_tgt in id_names.get(tgt_id, set()))
+
+        added = [
+            r for r in objs
+            if r.get("type") == "relationship"
+            and (r.get("source_ref"), r.get("relationship_type"), r.get("target_ref"))
+            not in base_keys
+        ]
+
+        matched_gold: set[int] = set()
+        for r in added:
+            key = (r.get("source_ref"), r.get("relationship_type"), r.get("target_ref"))
+            engine = (r.get("x_inference_rule") or "unknown").split(":")[0]
+            eng = score.by_engine.setdefault(engine, {"added": 0, "tp": 0, "fp": 0})
+            eng["added"] += 1
+
+            hit = next((i for i, g in enumerate(sample.gold_accept)
+                        if i not in matched_gold and _matches(key, g)), None)
+            if hit is not None:
+                matched_gold.add(hit)
+                score.tp += 1
+                eng["tp"] += 1
+            elif any(_matches(key, g) for g in sample.gold_reject) or sample.closed:
+                score.fp += 1
+                eng["fp"] += 1
+                if verbose:
+                    print(f"  FP [{sample.description}] {key} ({engine})")
+            else:
+                score.unjudged += 1
+
+        missed = len(sample.gold_accept) - len(matched_gold)
+        score.fn += missed
+        if verbose and missed:
+            for i, g in enumerate(sample.gold_accept):
+                if i not in matched_gold:
+                    print(f"  FN [{sample.description}] {g}")
+
+    return score
+
+
+def _load_rel_fixture_samples() -> list[RelSample]:
+    """Built-in graph-completion samples (no external dataset needed)."""
+    return [
+        RelSample(
+            description="transitive uses-chain",
+            objects=[{"type": "intrusion-set", "name": "APT-X"},
+                     {"type": "malware", "name": "Backdoor-Y"},
+                     {"type": "attack-pattern", "name": "Phishing"}],
+            edges=[["APT-X", "uses", "Backdoor-Y"],
+                   ["Backdoor-Y", "uses", "Phishing"]],
+            gold_accept=[["APT-X", "uses", "Phishing"]],
+            gold_reject=[],
+            closed=True,
+        ),
+        RelSample(
+            description="non-suggested composition must be skipped",
+            objects=[{"type": "intrusion-set", "name": "APT-Z"},
+                     {"type": "threat-actor", "name": "Group-Q"},
+                     {"type": "identity", "name": "Ministry"}],
+            edges=[["APT-Z", "attributed-to", "Group-Q"],
+                   ["Group-Q", "attributed-to", "Ministry"]],
+            gold_accept=[],
+            gold_reject=[["APT-Z", "attributed-to", "Ministry"]],
+            closed=True,
+        ),
+        RelSample(
+            description="reference grounding APT29+Mimikatz",
+            objects=[{"type": "threat-actor", "name": "APT29"},
+                     {"type": "malware", "name": "Mimikatz"}],
+            edges=[],
+            gold_accept=[["APT29", "uses", "Mimikatz"]],
+            gold_reject=[["Mimikatz", "uses", "APT29"]],
+        ),
+        RelSample(
+            description="alias merge feeds transitive",
+            objects=[{"type": "threat-actor", "name": "FIN7-Group"},
+                     {"type": "threat-actor", "name": "fin7 group"},
+                     {"type": "malware", "name": "Loader-A"},
+                     {"type": "attack-pattern", "name": "Masquerading"}],
+            edges=[["fin7 group", "uses", "Loader-A"],
+                   ["Loader-A", "uses", "Masquerading"]],
+            gold_accept=[["FIN7-Group", "uses", "Masquerading"]],
+            gold_reject=[],
+        ),
+        RelSample(
+            description="no spurious edges on unrelated objects",
+            objects=[{"type": "tool", "name": "SomeCustomTool-42"},
+                     {"type": "vulnerability", "name": "SomeUnknownVuln-9"}],
+            edges=[],
+            gold_accept=[],
+            gold_reject=[],
+            closed=True,
+        ),
+    ]
+
+
+def load_rel_dataset(path: Path) -> list[RelSample]:
+    """Load a labeled graph-completion dataset (format in the header above)."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return [
+        RelSample(
+            objects=s.get("objects", []),
+            edges=s.get("edges", []),
+            gold_accept=s.get("gold_accept", []),
+            gold_reject=s.get("gold_reject", []),
+            closed=bool(s.get("closed", False)),
+            description=s.get("description", ""),
+        )
+        for s in data
+    ]
+
+
+def print_rel_scores(score: RelScore) -> None:
+    print("\n" + "=" * 60)
+    print("Stage 4b Graph-Completion Benchmark (edge level)")
+    print("=" * 60)
+    print(f"  TP={score.tp:.0f}  FP={score.fp:.0f}  FN={score.fn:.0f}  "
+          f"unjudged={score.unjudged}")
+    print(f"  Precision = {score.precision:.3f}")
+    print(f"  Recall    = {score.recall:.3f}")
+    print(f"  F1        = {score.f1:.3f}")
+    if score.by_engine:
+        print("\n  Per engine:")
+        for eng, s in sorted(score.by_engine.items()):
+            d = s["tp"] + s["fp"]
+            p = s["tp"] / d if d else 1.0
+            print(f"    {eng:<20} added={s['added']:<4} judged-precision={p:.3f}")
+    print("\n  Reference: CTINexus relation prediction ≈ 0.910 (EuroS&P 2025)")
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point  (updated to support --benchmark ate)
 # ---------------------------------------------------------------------------
 
@@ -1026,11 +1295,12 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--benchmark", "-b", choices=["ner", "ate"], default="ner",
+        "--benchmark", "-b", choices=["ner", "ate", "rel"], default="ner",
         help=(
             "Which benchmark to run:\n"
             "  ner  — NER IoC/entity extraction (default)\n"
-            "  ate  — ATT&CK Technique Extraction (CTIBench ATE task)"
+            "  ate  — ATT&CK Technique Extraction (CTIBench ATE task)\n"
+            "  rel  — Stage 4b graph-completion edge precision (ADR-0012)"
         ),
     )
     parser.add_argument(
@@ -1064,6 +1334,20 @@ def main() -> None:
         help="Show false positives and false negatives per sample.",
     )
     args = parser.parse_args()
+
+    # ── REL benchmark (graph completion) ──────────────────────────────────────
+    if args.benchmark == "rel":
+        if args.dataset:
+            print(f"Loading graph-completion dataset: {args.dataset}")
+            rel_samples = load_rel_dataset(args.dataset)
+            print(f"  {len(rel_samples)} samples loaded.")
+        else:
+            print("Using built-in graph-completion fixture samples.")
+            rel_samples = _load_rel_fixture_samples()
+            print(f"  {len(rel_samples)} fixture samples.")
+        rel_score = run_rel_benchmark(rel_samples, verbose=args.verbose)
+        print_rel_scores(rel_score)
+        return
 
     # ── ATE benchmark ─────────────────────────────────────────────────────────
     if args.benchmark == "ate":

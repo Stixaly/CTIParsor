@@ -77,9 +77,50 @@ Use `--stage full` to calibrate per-model thresholds (e.g. the SecureBERT-Plus
 row in `pipeline/stage2c_ttp_semantic._MODEL_THRESHOLDS`) before changing
 `TTP_EMBEDDING_MODEL` in production.
 
+### Measuring graph completion (REL benchmark)
+
+The same CLI scores **Stage 4b graph completion** at the edge level (ADR-0012).
+Given a base graph of verified objects + edges and gold accept/reject judgments,
+it runs `complete_graph` and reports per-engine judged precision, recall, and F1:
+
+```bash
+# Built-in fixtures (offline, no API key)
+python tests/eval_pipeline.py --benchmark rel --verbose
+
+# Against your own annotated reports
+python tests/eval_pipeline.py --benchmark rel --dataset gold_edges.json
+```
+
+Dataset format (one object per sample):
+
+```json
+[{
+  "description": "APT29 report",
+  "objects":     [{"type": "threat-actor", "name": "APT29"},
+                  {"type": "malware", "name": "WellMess"},
+                  {"type": "attack-pattern", "name": "Phishing", "mitre_id": "T1566"}],
+  "edges":       [["APT29", "uses", "WellMess"]],
+  "gold_accept": [["APT29", "uses", "Phishing"]],
+  "gold_reject": [["APT29", "targets", "Phishing"]],
+  "closed":      false
+}]
+```
+
+- `edges` — the base (already-verified) graph completion runs on top of.
+- `gold_accept` — edges completion **must** add (missing one ⟹ FN).
+- `gold_reject` — edges it **must not** add (adding one ⟹ FP).
+- `closed` — `true` means the judgments are exhaustive, so any *unjudged* added
+  edge counts as a FP. Leave `false` while an annotation set is still partial;
+  unjudged edges are then just counted and reported, not penalised.
+
+Run this **before** changing a threshold or the transitive rule table — it is
+what turns "no accuracy loss" from a design claim into a measured number.
+Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
+(IEEE EuroS&P 2025).
+
 ---
 
-## 3. Current coverage map (254 tests)
+## 3. Current coverage map (284 tests)
 
 | Layer | File | ~Tests | Covers |
 |---|---|---:|---|
@@ -88,8 +129,10 @@ row in `pipeline/stage2c_ttp_semantic._MODEL_THRESHOLDS`) before changing
 | LLM enrich | `test_stage3.py` | 40 | `enrich_chunk` happy/error/transient, `_merge_results`, dedup, prompt sanitiser, `_normalize_llm_json` |
 | Hallucination filter | `test_stage3b.py` | 12 | actor/malware/relationship presence checks, allow-list bypass |
 | **TTP precision** | `test_ttp_precision.py` | 19 | Stage 2c threshold resolution (per-model/manifest/env), medium-semantic-doesn't-override-LLM, parent/sub-technique subsumption, Stage 3f TTP verification (drop/keep/corroborate) |
-| **ATE benchmark** | `eval_pipeline.py` | — | regex/semantic ATE F1 + NER F1 fixtures, adversarial precision (high-conf FP = 0); semantic cases auto-skip under `SKIP_HEAVY_MODELS=1` |
+| **ATE + REL benchmarks** | `eval_pipeline.py` | — | regex/semantic ATE F1 + NER F1 fixtures, adversarial precision (high-conf FP = 0); REL edge-level completion precision; semantic cases auto-skip under `SKIP_HEAVY_MODELS=1` |
 | STIX mapping | `test_stage4.py` | 33 | SDO/SCO/SRO build, policy pins, IoC coverage, external-ref routing |
+| **Graph completion** | `test_stage4b_completion.py` | 17 | transitive composition + non-suggested skip, cap, alias merge/rewire, IOC guard, ATT&CK grounding (hit/miss/disabled), semantic alias (fake model + no-model), pins beat inference, end-to-end bundle |
+| **Long-distance** | `test_stage4c_long_distance.py` | 10 | quote required, direction swap, invalid verb/empty response rejected, island connection + `x_evidence_text`, provider/policy gating |
 | Validation/export | `test_stage5.py` | 8 | bundle validity, file write, nested dirs |
 | API | `test_api_routes.py` | 8 | health, jobs 404/list, upload filter, progress, policy |
 | **Evidence labels** | `test_evidence_consensus.py` | 4 | default label, normalize coercion, `x_evidence_label` in STIX, consensus reconcile |

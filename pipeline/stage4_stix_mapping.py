@@ -9,6 +9,7 @@ import stix2
 from api.logging_config import get_logger
 from models.schemas import STIX_RELATIONSHIP_TYPES, EntityType, RawEntity
 from pipeline.stage3_llm import LLMEnrichmentResult
+from pipeline.stage4b_graph_completion import complete_graph
 from pipeline.stix_rel_spec import rel_is_suggested
 
 logger = get_logger(__name__)
@@ -206,6 +207,7 @@ def build_stix_bundle(
     relationship_policy: dict | None = None,
     tlp_level: str | None = None,
     pap_level: str | None = None,
+    long_distance_infer=None,
 ) -> stix2.Bundle:
     """
     Converts all extracted entities to STIX 2.1 objects and returns a Bundle.
@@ -248,6 +250,13 @@ def build_stix_bundle(
     pap_level — optional PAP level ("RED"|"AMBER"|"GREEN"|"WHITE", case
       insensitive). When set, a "statement" marking-definition encoding
       "PAP:<level>" is added and referenced the same way as TLP.
+
+    long_distance_infer — optional callable (central, topic, report_text) ->
+      InferredEdge | None for Stage 4b's long-distance step (ADR-0012).  Keeps
+      the mapping network-free by default; callers build it with
+      stage4c_long_distance.default_long_distance_inferer(policy) so it is only
+      active when the policy enables completion.long_distance AND the LLM
+      provider is ready.
     """
     stix_objects: list = []
 
@@ -736,6 +745,18 @@ def build_stix_bundle(
             stix_objects.append(artifact_obj)
         except Exception:
             artifact_obj = None
+
+    # --- Graph completion (Stage 4b) — alias merge + inferred edges ---
+    # Runs here, before the Report SDO wraps object_refs and before provenance
+    # stamping, so any edges it adds are included in the report and stamped like
+    # every other object.  Append-only + spec-guarded: see stage4b_graph_completion
+    # and ADR-0012.  Governed by the policy "completion" block; pinned rules win.
+    complete_graph(
+        stix_objects,
+        policy=relationship_policy,
+        report_text=report_text,
+        long_distance_infer=long_distance_infer,
+    )
 
     # --- Report SDO wrapping all objects ---
     # description : full extracted text so STIX consumers see the narrative

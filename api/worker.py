@@ -686,6 +686,11 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         _tlp_level = _mrow["tlp_level"] if _mrow else None
         _pap_level = _mrow["pap_level"] if _mrow else None
 
+        # Stage 4b long-distance prediction — only built when the policy enables
+        # completion.long_distance AND the LLM provider is ready (else None).
+        from pipeline.stage4c_long_distance import default_long_distance_inferer
+        _ld_infer = default_long_distance_inferer(_policy_s4)
+
         bundle = build_stix_bundle(
             all_entities, llm_result, report_name,
             report_text=text,
@@ -694,6 +699,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
             relationship_policy=_policy_s4,
             tlp_level=_tlp_level,
             pap_level=_pap_level,
+            long_distance_infer=_ld_infer,
         )
         logger.info(f"[Stage 4] STIX mapping complete — {len(list(bundle.objects))} objects")
 
@@ -1262,6 +1268,9 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
     except Exception:
         pass
 
+    from pipeline.stage4c_long_distance import default_long_distance_inferer
+    _ld_infer_fin = default_long_distance_inferer(_policy_fin)
+
     bundle = build_stix_bundle(
         raw_entities, llm_result, report_name,
         report_text=report_text,
@@ -1270,6 +1279,7 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
         relationship_policy=_policy_fin,
         tlp_level=job["tlp_level"],
         pap_level=job["pap_level"],
+        long_distance_infer=_ld_infer_fin,
     )
     bundle_json = bundle.serialize(pretty=True)
 
