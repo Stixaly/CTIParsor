@@ -1,4 +1,4 @@
-"""Tests for Stage 4b — STIX graph completion (ADR-0012).
+"""Tests for Stage 4b — STIX graph completion (ADR-0013).
 
 Covers the two deterministic engines (alias merge, transitive inference), the
 spec-suggested guard, policy control (off switch + pins winning), and the
@@ -105,6 +105,19 @@ def test_max_new_edges_cap():
 
 
 # ── Step 1: alias merge ───────────────────────────────────────────────────────
+def test_alias_merge_is_off_by_default():
+    """aliases.py (ADR-0012) canonicalises MITRE-known aliases at SDO-creation
+    time, so this post-hoc fallback must not run unless explicitly enabled."""
+    a1 = stix2.ThreatActor(name="APT29")
+    a2 = stix2.ThreatActor(name="apt-29")
+    objs = [a1, a2]
+
+    stats = complete_graph(objs)
+
+    assert stats.aliases_merged == 0
+    assert len([o for o in objs if o.get("type") == "threat-actor"]) == 2
+
+
 def test_alias_merge_reconnects_and_dedups():
     """Two threat-actor SDOs that are the same actor by normalised name get
     merged; the duplicate's edge is rewired onto the canonical node."""
@@ -113,7 +126,9 @@ def test_alias_merge_reconnects_and_dedups():
     mw = stix2.Malware(name="WellMess", is_family=True)
     objs = [a1, a2, mw, stix2.Relationship(a2, "uses", mw)]
 
-    stats = complete_graph(objs, policy={"completion": {"transitive": False}})
+    stats = complete_graph(
+        objs, policy={"completion": {"alias": True, "transitive": False}}
+    )
 
     actors = [o for o in objs if o.get("type") == "threat-actor"]
     assert len(actors) == 1                       # duplicate removed
@@ -199,8 +214,8 @@ def test_semantic_alias_merges_on_fake_model(monkeypatch):
 
     stats = complete_graph(
         objs,
-        policy={"completion": {"semantic_alias": True, "transitive": False,
-                               "reference": False}},
+        policy={"completion": {"alias": True, "semantic_alias": True,
+                               "transitive": False, "reference": False}},
     )
 
     actors = [o for o in objs if o.get("type") == "threat-actor"]
@@ -217,7 +232,8 @@ def test_semantic_alias_noop_without_model(monkeypatch):
     objs = [a1, a2]
     stats = complete_graph(
         objs,
-        policy={"completion": {"semantic_alias": True, "reference": False}},
+        policy={"completion": {"alias": True, "semantic_alias": True,
+                               "reference": False}},
     )
     assert stats.aliases_merged == 0
     assert any("model unavailable" in n for n in stats.notes)

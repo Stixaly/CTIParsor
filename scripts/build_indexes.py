@@ -294,7 +294,7 @@ def build_gazetteer(bundles: dict[str, Path | None]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# ATT&CK curated-relationship builder  (ADR-0012 — reference grounding)
+# ATT&CK curated-relationship builder  (ADR-0013 — reference grounding)
 # ---------------------------------------------------------------------------
 
 # ATT&CK relationship verbs worth grounding report edges in.  Structural or

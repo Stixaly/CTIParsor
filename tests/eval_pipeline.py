@@ -1648,7 +1648,7 @@ def test_grounding_cosentence_gap():
 
 # ---------------------------------------------------------------------------
 # ===========================================================================
-# REL benchmark — Stage 4b graph-completion edge precision  (ADR-0012)
+# REL benchmark — Stage 4b graph-completion edge precision  (ADR-0013)
 # ===========================================================================
 #
 # Measures the *completion* engines (reference grounding, transitive inference,
@@ -1673,7 +1673,10 @@ def test_grounding_cosentence_gap():
 #      "edges":       [["APT29", "uses", "WellMess"]],       # base (verified)
 #      "gold_accept": [["APT29", "uses", "Phishing"]],       # must be added
 #      "gold_reject": [["APT29", "targets", "Phishing"]],    # must NOT be added
-#      "closed": false     # true → any unjudged added edge counts as FP
+#      "closed": false,    # true → any unjudged added edge counts as FP
+#      "completion": {"alias": true}   # optional: per-sample engine config, for
+#                                      #   measuring an engine that is off by
+#                                      #   default; omit to use ship defaults
 #   }, ...]
 # ===========================================================================
 
@@ -1686,6 +1689,10 @@ class RelSample:
     gold_reject: list[list[str]]
     closed: bool = False
     description: str = ""
+    # Optional per-sample completion config, so a sample can measure an engine
+    # that is off by default (e.g. the alias fallback).  Merged into the policy
+    # as {"completion": {...}}; None means "ship defaults".
+    completion: dict | None = None
 
 
 @dataclass
@@ -1769,7 +1776,10 @@ def run_rel_benchmark(samples: list[RelSample], verbose: bool = False) -> RelSco
         base_keys = {(r.get("source_ref"), r.get("relationship_type"), r.get("target_ref"))
                      for r in objs if r.get("type") == "relationship"}
 
-        complete_graph(objs)
+        complete_graph(
+            objs,
+            policy={"completion": sample.completion} if sample.completion else None,
+        )
 
         # Map post-completion ids → all known names (name + absorbed aliases).
         id_names: dict[str, set[str]] = {}
@@ -1859,7 +1869,8 @@ def _load_rel_fixture_samples() -> list[RelSample]:
             gold_reject=[["Mimikatz", "uses", "APT29"]],
         ),
         RelSample(
-            description="alias merge feeds transitive",
+            description="alias merge feeds transitive (fallback engine, opt-in)",
+            completion={"alias": True},
             objects=[{"type": "threat-actor", "name": "FIN7-Group"},
                      {"type": "threat-actor", "name": "fin7 group"},
                      {"type": "malware", "name": "Loader-A"},
@@ -1892,6 +1903,7 @@ def load_rel_dataset(path: Path) -> list[RelSample]:
             gold_reject=s.get("gold_reject", []),
             closed=bool(s.get("closed", False)),
             description=s.get("description", ""),
+            completion=s.get("completion"),
         )
         for s in data
     ]
@@ -1925,13 +1937,14 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--benchmark", "-b", choices=["ner", "ate", "grounding"], default="ner",
+        "--benchmark", "-b", choices=["ner", "ate", "grounding", "rel"], default="ner",
         help=(
             "Which benchmark to run:\n"
             "  ner       — NER IoC/entity extraction recall (default)\n"
             "  ate       — ATT&CK Technique Extraction (CTIBench ATE task)\n"
             "  grounding — hallucination rate: how much emitted output is NOT\n"
-            "              supported by the source text (offline)"
+            "              supported by the source text (offline)\n"
+            "  rel       — Stage 4b graph-completion edge precision (ADR-0013)"
         ),
     )
     parser.add_argument(
@@ -2002,6 +2015,19 @@ def main() -> None:
         help="Show false positives and false negatives per sample.",
     )
     args = parser.parse_args()
+
+    # ── REL benchmark (Stage 4b graph completion) ─────────────────────────────
+    if args.benchmark == "rel":
+        if args.dataset:
+            print(f"Loading graph-completion dataset: {args.dataset}")
+            rel_samples = load_rel_dataset(args.dataset)
+            print(f"  {len(rel_samples)} samples loaded.")
+        else:
+            print("Using built-in graph-completion fixture samples.")
+            rel_samples = _load_rel_fixture_samples()
+            print(f"  {len(rel_samples)} fixture samples.")
+        print_rel_scores(run_rel_benchmark(rel_samples, verbose=args.verbose))
+        return
 
     # ── Grounding / hallucination-rate benchmark ──────────────────────────────
     if args.benchmark == "grounding":

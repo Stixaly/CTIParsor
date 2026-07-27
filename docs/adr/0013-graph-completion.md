@@ -1,4 +1,4 @@
-# ADR-0012: STIX Graph Completion (edge enrichment)
+# ADR-0013: STIX Graph Completion (edge enrichment)
 
 **Status:** Accepted
 **Date:** 2026-07-27
@@ -43,7 +43,7 @@ engines, in order:
 
 | Step | Engine | Guarantee |
 |---|---|---|
-| **1** | **Alias merge** — collapse same-type SDOs (threat-actor / intrusion-set / malware / campaign / tool) whose normalised name or `aliases` denote the same object; rewire their edges onto one canonical node and drop the duplicates. Optional `fuzzy_alias` adds rapidfuzz name matching (ratio ≥ 93). An **IOC guard** (CVE / hash / IP regex) never merges look-alike-but-distinct observables (CVE-2023-23397 vs -23392). | Reconnects fragmented edges; the only destructive step, but SCO identity is untouched. |
+| **1** | **Alias merge — fallback, default OFF.** ADR-0012 already canonicalises MITRE-known aliases in `pipeline/aliases.py` at SDO-*creation* time, so `APT34`/`OilRig` never split into two nodes — a strictly better fix than merging after the fact. This engine therefore only covers aliases **absent from the gazetteer** (novel or report-specific names), plus the opt-in `fuzzy_alias` (rapidfuzz ≥ 93) and `semantic_alias` (embedding cosine ≥ 0.6) matchers. An **IOC guard** (CVE / hash / IP regex) never merges look-alike-but-distinct observables (CVE-2023-23397 vs -23392). | Off by default because it is the only *destructive* engine and mostly redundant with ADR-0012; opt in when a corpus has many non-MITRE aliases. |
 | **1b** | **ATT&CK reference grounding** — `scripts/build_indexes.py --only relationships` distils the MITRE ATT&CK STIX bundles into `pipeline/data/attack_relationships.json` (~20 000 curated `G/S/T`-ID triples, 586 KB). At mapping time, report SDOs are resolved to ATT&CK IDs (techniques via their `mitre-attack` external reference; actors/malware/tools via the gazetteer's `mitre_id`), and any curated edge whose two endpoints both appear in the report is added — labelled `x_evidence_label="reported"` with the ATT&CK pair in `x_inference_rule` (e.g. `attack-reference:G0016>S0002`). Runs *before* transitive inference so curated edges can serve as premises. | Expert-maintained facts, not inferences — the highest-precision edge source available; no LLM, no network. |
 | **2** | **Transitive inference** — compose two verified edges along a fixed table `(v1,v2)→v3` (e.g. `uses∘uses→uses`, `attributed-to∘attributed-to→attributed-to`, `uses∘exploits→targets`). Every candidate is guarded by `rel_is_suggested`; if the composed verb is not a *suggested* STIX 2.1 relationship for the actual (src-type → tgt-type) pair, it is **skipped, not downgraded**. | No invalid or speculative edge ships; premises are already verified. |
 | **3** | **Long-distance prediction** (opt-in) — CTINexus Phase 3: DFS the remaining disconnected sub-graphs, pick each sub-graph's central node by degree centrality and the report's topic node (global max degree), and ask an **injected** LLM inferer (`stage4c_long_distance`) for the relation between them. The inferer requires the model to **quote the exact supporting sentence** — the same evidence bar as Stage 3d — so no quote ⟹ no edge; the quote is stored as `x_evidence_text`. Same `rel_is_suggested` guard. Off unless a callable is supplied, so Stage 4 stays network-free by default. | Bounded to O(components) edges, not O(n²); evidence-grounded (a supporting sentence is mandatory). |
@@ -57,7 +57,7 @@ them. Confidence is discounted from the weaker premise (`min(conf) × 0.9`).
 policy (ADR-0007 panel) via a new optional `completion` block:
 
 ```json
-"completion": { "transitive": true, "alias": true, "reference": true,
+"completion": { "transitive": true, "reference": true, "alias": false,
                 "long_distance": false, "fuzzy_alias": false,
                 "semantic_alias": false, "max_new_edges": 200 }
 ```

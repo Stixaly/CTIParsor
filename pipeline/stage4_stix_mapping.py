@@ -272,7 +272,7 @@ def build_stix_bundle(
       "PAP:<level>" is added and referenced the same way as TLP.
 
     long_distance_infer — optional callable (central, topic, report_text) ->
-      InferredEdge | None for Stage 4b's long-distance step (ADR-0012).  Keeps
+      InferredEdge | None for Stage 4b's long-distance step (ADR-0013).  Keeps
       the mapping network-free by default; callers build it with
       stage4c_long_distance.default_long_distance_inferer(policy) so it is only
       active when the policy enables completion.long_distance AND the LLM
@@ -784,7 +784,7 @@ def build_stix_bundle(
     # Runs here, before the Report SDO wraps object_refs and before provenance
     # stamping, so any edges it adds are included in the report and stamped like
     # every other object.  Append-only + spec-guarded: see stage4b_graph_completion
-    # and ADR-0012.  Governed by the policy "completion" block; pinned rules win.
+    # and ADR-0013.  Governed by the policy "completion" block; pinned rules win.
     complete_graph(
         stix_objects,
         policy=relationship_policy,

@@ -197,12 +197,12 @@ uvicorn api.main:app --reload --app-dir .
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
-│  Stage 4b — GRAPH COMPLETION                (offline ✅ — ADR-0012)   │
+│  Stage 4b — GRAPH COMPLETION                (offline ✅ — ADR-0013)   │
 │  Enriches edges AFTER the precision gate, never loosening it.        │
 │  Runs before the Report SDO, so new edges are wrapped + stamped.     │
-│  1. Alias merge     : collapse same-object SDOs (APT29 / Cozy Bear)  │
-│                       and rewire their edges onto one node           │
-│                       (IOC guard: never merges look-alike CVEs/IPs)  │
+│  1. Alias merge     : OFF by default — aliases.py (ADR-0012) already │
+│    (fallback)         canonicalises MITRE aliases at SDO creation.   │
+│                       Fallback for non-gazetteer names only.         │
 │  1b. ATT&CK grounding: add MITRE-curated edges (20 015 G/S/T pairs)  │
 │                       when both endpoints resolve to ATT&CK IDs      │
 │                       → x_evidence_label="reported" (expert fact)    │
@@ -723,7 +723,7 @@ cti-to-stix/
 │   ├── stage3e_consensus.py       # Cross-model consensus (opt-in)
 │   ├── stage3f_ttp_verify.py      # TTP self-verification (opt-in, ADR-0011)
 │   ├── stage4_stix_mapping.py     # STIX 2.1 mapping + TLP/PAP + authoring identity
-│   ├── stage4b_graph_completion.py # Alias merge + ATT&CK grounding + transitive (ADR-0012)
+│   ├── stage4b_graph_completion.py # Alias merge + ATT&CK grounding + transitive (ADR-0013)
 │   ├── stage4c_long_distance.py   # LLM long-distance relation inferer (opt-in)
 │   ├── stix_rel_spec.py           # STIX 2.1 suggested-relationship table (spec guard)
 │   ├── stage5_validation.py       # Bundle validation + export
@@ -906,7 +906,7 @@ Valid `relationship_type` values: `uses`, `attributed-to`, `targets`, `indicates
     { "src": "threat-actor", "verb": "uses", "tgt": "malware", "mode": "pin", "enabled": true }
   ],
   "completion": {
-    "alias": true,
+    "alias": false,
     "reference": true,
     "transitive": true,
     "long_distance": false,
@@ -926,7 +926,7 @@ anything inference produces, so completion never contradicts an explicit choice.
 
 | Flag | Default | What it does |
 |---|---|---|
-| `alias` | `true` | Merge same-object SDOs by normalised name / `aliases`, rewiring their edges onto one node. Never merges IOC-shaped names. |
+| `alias` | `false` | **Fallback** post-hoc merge of same-object SDOs, rewiring their edges onto one node. Off because [`pipeline/aliases.py`](pipeline/aliases.py) (ADR-0012) already canonicalises MITRE-known aliases at SDO-creation time — this only adds value for names *absent from the gazetteer*, and it is the one destructive engine. Never merges IOC-shaped names. |
 | `reference` | `true` | Add MITRE-curated ATT&CK edges when both endpoints resolve to ATT&CK IDs. Labelled `reported` — expert fact, not inference. |
 | `transitive` | `true` | Compose two verified edges via a fixed rule table; a composition that is not a *suggested* STIX relationship is skipped. |
 | `long_distance` | `false` | Stage 4c — LLM predicts links between disconnected sub-graphs. Needs a ready LLM provider; the model must quote a supporting sentence. |

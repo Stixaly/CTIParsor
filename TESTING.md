@@ -79,7 +79,7 @@ row in `pipeline/stage2c_ttp_semantic._MODEL_THRESHOLDS`) before changing
 
 ### Measuring graph completion (REL benchmark)
 
-The same CLI scores **Stage 4b graph completion** at the edge level (ADR-0012).
+The same CLI scores **Stage 4b graph completion** at the edge level (ADR-0013).
 Given a base graph of verified objects + edges and gold accept/reject judgments,
 it runs `complete_graph` and reports per-engine judged precision, recall, and F1:
 
@@ -112,6 +112,9 @@ Dataset format (one object per sample):
 - `closed` — `true` means the judgments are exhaustive, so any *unjudged* added
   edge counts as a FP. Leave `false` while an annotation set is still partial;
   unjudged edges are then just counted and reported, not penalised.
+- `completion` *(optional)* — per-sample engine config, e.g. `{"alias": true}`,
+  for measuring an engine that ships **off** by default. Omit to score the
+  default configuration (what actually runs in production).
 
 Run this **before** changing a threshold or the transitive rule table — it is
 what turns "no accuracy loss" from a design claim into a measured number.
@@ -120,7 +123,7 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 
 ---
 
-## 3. Current coverage map (284 tests)
+## 3. Current coverage map (308 tests)
 
 | Layer | File | ~Tests | Covers |
 |---|---|---:|---|

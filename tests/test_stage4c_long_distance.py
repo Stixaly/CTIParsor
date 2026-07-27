@@ -1,4 +1,4 @@
-"""Tests for Stage 4c — LLM-backed long-distance relation inferer (ADR-0012).
+"""Tests for Stage 4c — LLM-backed long-distance relation inferer (ADR-0013).
 
 The inferer is exercised with a fake ``llm_fn`` (no network): it must enforce the
 same evidence bar as Stage 3d (a quoted supporting sentence is mandatory), honour

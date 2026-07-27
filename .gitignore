@@ -36,3 +36,6 @@ detection_corpora.local.yaml
 
 # Claude Code local session config (machine-local, not shared)
 .claude/
+
+# Stage 2d runtime sentinel — written when the CyNER model cannot be loaded
+.cyner_model_unavailable

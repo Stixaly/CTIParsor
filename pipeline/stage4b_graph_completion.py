@@ -10,15 +10,21 @@ together but were never described in one sentence get no edge, and aliasing
 ("APT29" vs "Cozy Bear") fragments the graph into disconnected islands.
 
 This stage adds edges *after* the precision-gated extraction, without touching
-it, through three append-only / non-speculative mechanisms (design: ADR-0012,
+it, through three append-only / non-speculative mechanisms (design: ADR-0013,
 inspired by CTINexus, arXiv:2410.21060):
 
-1. Alias merge          — collapse same-type SDOs whose names/aliases denote the
-                          same real-world object, rewiring their edges onto one
-                          canonical node so fragmented edges reconnect.  This is
-                          the only destructive step; IOC-bearing SCOs are never
-                          merged (deterministic value identity already dedups
-                          them, and near-identical IOCs are *distinct*).
+1. Alias merge          — FALLBACK, default OFF.  ``pipeline/aliases.py`` (ADR-0012)
+   (default off)          already canonicalises MITRE-known aliases at SDO-creation
+                          time in Stage 4, so "APT34"/"OilRig" never become two
+                          nodes in the first place — the better fix, since it
+                          prevents the split rather than repairing it.  This pass
+                          only helps for aliases *absent from the gazetteer*
+                          (novel or report-specific names), and for the opt-in
+                          ``fuzzy_alias`` / ``semantic_alias`` matchers.  It is the
+                          only destructive step, so it is off unless asked for;
+                          IOC-bearing SCOs are never merged (deterministic value
+                          identity already dedups them, and near-identical IOCs
+                          are *distinct*).
 2. Transitive inference — compose two verified edges along a fixed, spec-safe
                           rule table (A--v1-->B, B--v2-->C  ⟹  A--v3-->C).  Every
                           candidate is guarded by ``rel_is_suggested`` and dropped
@@ -43,10 +49,13 @@ Controlled by an optional ``completion`` block on the relationship policy::
 
     "completion": {
         "transitive":    true,     # step 2 (default on)
-        "alias":         true,     # step 1 (default on)
+        "reference":     true,     # ATT&CK curated-edge grounding (default on)
+        "alias":         false,    # step 1 fallback — aliases.py handles the
+                                   #   MITRE-known case at SDO-creation time
         "long_distance": false,    # step 3 (default off; needs an LLM inferer)
         "fuzzy_alias":   false,    # allow rapidfuzz name matching, not just norm-eq
-        "max_new_edges": 200       # safety cap on step 2+3 output
+        "semantic_alias": false,   # embedding cosine >= 0.6 matching (needs model)
+        "max_new_edges": 200       # safety cap on added-edge output
     }
 
 A pinned rule ("mode":"pin") always wins: an inferred verb is overridden by the
@@ -75,7 +84,10 @@ VALID_REL_TYPES = STIX_RELATIONSHIP_TYPES
 # ── Defaults for the policy "completion" block ────────────────────────────────
 _DEFAULTS = {
     "transitive": True,
-    "alias": True,
+    # Off by default: pipeline/aliases.py (ADR-0012) canonicalises MITRE-known
+    # aliases at SDO-creation time, so this post-hoc merge is only a fallback for
+    # names absent from the gazetteer.  It is also the only destructive engine.
+    "alias": False,
     "reference": True,        # ATT&CK curated-edge grounding
     "long_distance": False,
     "fuzzy_alias": False,
@@ -103,7 +115,7 @@ _IOC_GUARD = re.compile(
     r"(?i)\b(?:CVE-\d{4}-\d+|[0-9a-f]{32,64}|(?:\d{1,3}\.){3}\d{1,3})\b"
 )
 
-# ── Deterministic transitive composition table (ADR-0012) ─────────────────────
+# ── Deterministic transitive composition table (ADR-0013) ─────────────────────
 # (verb_ab, verb_bc) -> verb_ac.  Every emission is still guarded by
 # rel_is_suggested(type_a, verb_ac, type_c); a composed verb that is not a
 # suggested relationship for the actual type pair is skipped, never downgraded.

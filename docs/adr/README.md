@@ -15,6 +15,7 @@ choice, and the consequences. They're append-only — supersede rather than rewr
 | [0010](0010-default-sigma-corpora-and-dedup.md) | Default multi-repo Sigma corpora + cross-corpus deduplication | Accepted |
 | [0011](0011-ttp-extraction-precision.md) | TTP extraction precision (thresholds, margin gate, TTP self-verify, subsumption) | Accepted |
 | [0012](0012-hallucination-measurement-and-canonicalization.md) | Hallucination measurement, entity canonicalisation & relationship precision | Accepted |
+| [0013](0013-graph-completion.md) | STIX graph completion (alias fallback, ATT&CK grounding, transitive, long-distance) | Accepted |
 
 **Numbering notes**
 - `0001` and `0003` are unused gaps (early informal decisions never filed).
@@ -32,9 +33,10 @@ choice, and the consequences. They're append-only — supersede rather than rewr
    ▲   measured & extended by     │
    └── 0012 hallucination metric  │
        + canonicalisation         ▼
-0008 coverage matrix ◄── consumes techniques
-   ▲   implemented by
-   └── 0006 multi-corpus rules ── managed by ── 0007 settings panel
-          ▲   extended by
-          └── 0010 default corpora + dedup
+          ▲            0008 coverage matrix ◄── consumes techniques
+          │               ▲   implemented by
+ canonical names         └── 0006 multi-corpus rules ── managed by ── 0007 settings panel
+ feed node identity          ▲   extended by
+          │                  └── 0010 default corpora + dedup
+          └── 0013 graph completion (denser edges, same precision gate)
 ```
