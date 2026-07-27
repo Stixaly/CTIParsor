@@ -345,7 +345,8 @@ def _semantic_alias_pass(sdos: list, union: Callable[[str, str], None],
     """Union same-type SDOs whose name embeddings exceed _SEMANTIC_THRESHOLD.
 
     Uses the Stage 2c sentence-embedding model (lazy, cached there).  No-ops
-    when the model is unavailable — the caller treats this pass as optional.
+    when the model or numpy is unavailable — the caller treats this pass as
+    optional, and neither is a hard dependency of the STIX mapping path.
     """
     from pipeline.stage2c_ttp_semantic import _load_model
 
@@ -354,7 +355,11 @@ def _semantic_alias_pass(sdos: list, union: Callable[[str, str], None],
         stats.notes.append("semantic_alias requested but embedding model unavailable")
         return
 
-    import numpy as np
+    try:
+        import numpy as np
+    except ImportError:
+        stats.notes.append("semantic_alias requested but numpy is not installed")
+        return
 
     by_type: dict[str, list] = {}
     for o in sdos:

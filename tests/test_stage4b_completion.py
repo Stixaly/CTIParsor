@@ -1,9 +1,11 @@
 """Tests for Stage 4b — STIX graph completion (ADR-0013).
 
-Covers the two deterministic engines (alias merge, transitive inference), the
-spec-suggested guard, policy control (off switch + pins winning), and the
-opt-in long-distance step with a fake inferer.  No network / no LLM.
+Covers the deterministic engines (ATT&CK reference grounding, transitive
+inference, the alias-merge fallback), the spec-suggested guard, policy control
+(off switches + pins winning), and the opt-in long-distance step with a fake
+inferer.  No network / no LLM.
 """
+import pytest
 import stix2
 
 from models.schemas import EntityType, RawEntity
@@ -154,7 +156,6 @@ def test_reference_grounding_adds_curated_edge():
     list — grounding adds the edge with 'reported' evidence and provenance."""
     import pipeline.stage4b_graph_completion as s4b
     if not s4b._attack_pairs():
-        import pytest
         pytest.skip("attack_relationships.json not built")
 
     actor = stix2.ThreatActor(name="APT29")
@@ -190,7 +191,9 @@ def test_reference_grounding_no_edge_for_unknown_names():
 def test_semantic_alias_merges_on_fake_model(monkeypatch):
     """With a fake embedding model that maps two names to the same vector, the
     semantic pass merges them; unrelated names stay separate."""
-    import numpy as np
+    # numpy is not installed in the CI fast-unit-test job (it only pulls the
+    # parsing + test deps), and the semantic pass is optional by design.
+    np = pytest.importorskip("numpy")
 
     import pipeline.stage2c_ttp_semantic as s2c
 
