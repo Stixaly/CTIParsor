@@ -23,10 +23,16 @@ class EntityType(str, Enum):
     # ── CVE / Vulnerability ───────────────────────────────────────────────────
     CVE = "cve"                    # vulnerability SDO (CVE id)
     # ── ATT&CK TTPs ───────────────────────────────────────────────────────────
+    # TTP is the single category for all ATT&CK entities — it maps to the STIX 2.1
+    # `attack-pattern` SDO (the only spec object for this concept).  The extractors
+    # no longer emit TECHNIQUE/TACTIC/PROCEDURE; those are kept only for backward
+    # compatibility with entities already stored in existing databases (Stage 4
+    # still maps them to attack-pattern).  The tactic/technique distinction lives
+    # in the entity's mitre_id (TA#### vs T####).
     TTP = "ttp"
-    TECHNIQUE = "technique"        # attack-pattern SDO
-    TACTIC = "tactic"
-    PROCEDURE = "procedure"
+    TECHNIQUE = "technique"        # deprecated — legacy rows only; → attack-pattern
+    TACTIC = "tactic"             # deprecated — legacy rows only; → attack-pattern
+    PROCEDURE = "procedure"        # deprecated — legacy rows only; → attack-pattern
     # ── Named SDOs ────────────────────────────────────────────────────────────
     MALWARE = "malware"
     THREAT_ACTOR = "threat_actor"  # threat-actor SDO

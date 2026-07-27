@@ -55,8 +55,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 # Ensure project root is on sys.path
@@ -1016,6 +1017,635 @@ def test_stage2_ttp_no_false_positives_on_clean_text():
     )
 
 
+# ===========================================================================
+# Grounding / Hallucination-rate benchmark  (ADR-0012 — measurement keystone)
+#
+# The NER and ATE benchmarks above measure RECALL (did we find the real
+# entities/techniques?).  This benchmark measures the opposite failure mode:
+# HALLUCINATION — of what the pipeline actually emits, how much is NOT supported
+# by the source text?
+#
+# It is deliberately OFFLINE.  It reuses the pipeline's own grounding primitive
+# (_name_in_text from stage3b) so the number it reports is the *same* notion of
+# "present in the source" that the hallucination filter enforces.  Measuring
+# POST-filter output therefore reports the filter's residual leak (should be ~0
+# for entities — a regression guard), while relationship co-sentence grounding
+# reports the claim-support gap that the name filter structurally cannot close
+# (that is Stage 3d's job, and this is its offline scorecard).
+#
+# Three metrics:
+#   entity_grounding_rate       — emitted named entities found verbatim/fuzzily
+#                                 in the source. < 1.0 ⇒ hallucinated names leaked.
+#   rel_endpoint_grounding_rate — relationships whose BOTH endpoints are grounded
+#                                 (a dangling endpoint ⇒ a hallucinated edge).
+#   rel_cosentence_grounding    — relationships whose endpoints co-occur in a
+#                                 SINGLE sentence — the offline proxy for "the
+#                                 text actually asserts this relation".  This is
+#                                 the headline claim-grounding number.
+#
+# Usage:
+#   python tests/eval_pipeline.py -b grounding                 # built-in fixtures
+#   python tests/eval_pipeline.py -b grounding --from-db all   # your real jobs
+#   python tests/eval_pipeline.py -b grounding --from-db <job_id>
+#   python tests/eval_pipeline.py -b grounding --dataset out.json --verbose
+#
+# --from-db reads cti_stix.db (report_text + emitted entities + relationships),
+# so it scores the hallucination rate on reports you have ALREADY processed —
+# no API key, no re-run.  Filter to LLM-origin entities with --llm-only to
+# isolate the stage that actually hallucinates.
+# ===========================================================================
+
+# Entity types that are NAMED by the LLM (and therefore hallucination-prone).
+# IoCs (regex) and TTPs (regex/semantic) are grounded by construction, so they
+# are excluded from the entity grounding rate by default.
+_NAMED_ENTITY_TYPES: frozenset[str] = frozenset({
+    "malware", "threat_actor", "intrusion_set", "tool",
+    "campaign", "infrastructure", "identity",
+})
+
+
+# Prefer the pipeline's real grounding primitive so the metric matches the
+# filter.  Fall back to a self-contained copy if the import chain is unavailable
+# (keeps the harness runnable in a minimal environment).
+try:
+    from pipeline.stage3b_validate import _name_in_text as _grounded_in
+except Exception:  # pragma: no cover - fallback path
+    import re as _re
+
+    def _grounded_in(name: str, text: str, threshold=None) -> bool:  # type: ignore
+        if not name or len(name) < 3:
+            return True
+        nl, tl = name.lower().strip(), text.lower()
+        if len(nl) <= 5:
+            return bool(_re.search(r"(?<![a-z0-9])" + _re.escape(nl) + r"(?![a-z0-9])", tl))
+        return nl in tl
+
+
+def _ground_split_sentences(text: str) -> list[str]:
+    """Sentence splitter for co-sentence relationship grounding (mirrors 2c)."""
+    text = re.sub(r"\r\n|\r", "\n", text)
+    raw = re.split(r"(?<=[.!?])\s+|\n{1,}|;\s+", text)
+    return [s.strip() for s in raw if len(s.strip()) > 2]
+
+
+@dataclass
+class GroundingSample:
+    """A source text plus the entities/relationships the pipeline EMITTED for it."""
+    text: str
+    entities: list[tuple[str, str]] = field(default_factory=list)          # (value, type)
+    relationships: list[tuple[str, str, str]] = field(default_factory=list)  # (src, verb, tgt)
+    rel_evidence: list[str] = field(default_factory=list)                 # aligned quote per rel
+    description: str = ""
+
+
+@dataclass
+class GroundingScore:
+    ent_total: int = 0
+    ent_grounded: int = 0
+    rel_total: int = 0
+    # Exclusive best-grade counts, weakest → strongest support:
+    #   none       — a dangling endpoint (not in the source at all)
+    #   endpoints  — both endpoints in text, but no sentence/window/evidence link
+    #   evidence   — both endpoints appear in the stored evidence quote
+    #   window     — both endpoints co-occur within a ±N-sentence window
+    #   cosentence — both endpoints in a SINGLE sentence (strongest)
+    g_none: int = 0
+    g_endpoints: int = 0
+    g_proximity: int = 0
+    g_evidence: int = 0
+    g_window: int = 0
+    g_cosentence: int = 0
+
+    # Per-segment grade tallies (grade → count), so one global number stops
+    # hiding two very different populations (named-entity vs IoC/technical rels).
+    rel_named_grades: dict = field(default_factory=dict)
+    rel_tech_grades: dict = field(default_factory=dict)
+
+    # ── Entities ──────────────────────────────────────────────────────────────
+    @property
+    def entity_grounding_rate(self) -> float:
+        return self.ent_grounded / self.ent_total if self.ent_total else 1.0
+
+    @property
+    def entity_hallucination_rate(self) -> float:
+        return 1.0 - self.entity_grounding_rate
+
+    # ── Relationships (backward-compatible names retained) ────────────────────
+    @property
+    def rel_endpoints_grounded(self) -> int:
+        """Both endpoints present somewhere in text (everything but dangling)."""
+        return self.rel_total - self.g_none
+
+    @property
+    def rel_endpoint_grounding_rate(self) -> float:
+        return self.rel_endpoints_grounded / self.rel_total if self.rel_total else 1.0
+
+    @property
+    def rel_cosentence_grounded(self) -> int:
+        return self.g_cosentence
+
+    @property
+    def rel_cosentence_grounding_rate(self) -> float:
+        return self.g_cosentence / self.rel_total if self.rel_total else 1.0
+
+    @property
+    def rel_claim_grounded(self) -> int:
+        """Supported by one sentence, a ±window, the stored evidence quote, OR
+        raw-text proximity (tables/lists) — the honest 'is this relation actually
+        asserted by the source' count."""
+        return self.g_cosentence + self.g_window + self.g_evidence + self.g_proximity
+
+    @property
+    def rel_claim_grounding_rate(self) -> float:
+        return self.rel_claim_grounded / self.rel_total if self.rel_total else 1.0
+
+    @property
+    def rel_unsupported(self) -> int:
+        """True hallucination candidates: dangling, or endpoints with no link."""
+        return self.g_none + self.g_endpoints
+
+    @property
+    def rel_hallucination_rate(self) -> float:
+        return self.rel_unsupported / self.rel_total if self.rel_total else 0.0
+
+    def segment_stats(self, segment: str) -> tuple[int, float, float]:
+        """(total, claim_grounding_rate, hallucination_rate) for a segment
+        ('named' or 'technical')."""
+        grades = self.rel_named_grades if segment == "named" else self.rel_tech_grades
+        total = sum(grades.values())
+        if not total:
+            return 0, 1.0, 0.0
+        claim = (grades.get("cosentence", 0) + grades.get("window", 0)
+                 + grades.get("evidence", 0) + grades.get("proximity", 0))
+        unsup = grades.get("none", 0) + grades.get("endpoints", 0)
+        return total, claim / total, unsup / total
+
+
+def _quote_from_source(evidence: str, text: str) -> bool:
+    """Guard against a fabricated evidence quote: a real quote's opening slice
+    appears in the source text."""
+    probe = evidence.strip()[:40].lower()
+    return bool(probe) and probe in text.lower()
+
+
+_TID_RE = re.compile(r"(?:T\d{4}(?:\.\d{3})?|CAPEC-\d+)", re.IGNORECASE)
+
+# Endpoint classification (metric segmentation): a relationship is "technical"
+# if either endpoint is an IoC or a TTP — that population lives in tables/lists
+# where the co-sentence proxy is structurally blind.  "named" relationships link
+# named SDOs (actor/malware/tool/…) and are where the proxy actually works.
+_IPV4_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
+_HASH_RE = re.compile(r"^[a-fA-F0-9]{32}$|^[a-fA-F0-9]{40}$|^[a-fA-F0-9]{64}$")
+_FILE_EXT_RE = re.compile(
+    r"\.(?:ps1|js|mjs|exe|dll|pyz|py|bat|vbs|jar|zip|dat|bin|sh|scr|hta|lnk|iso|msi|dmg|apk)$",
+    re.IGNORECASE,
+)
+_DOMAINLIKE_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9-]+)+$")
+
+
+def _endpoint_kind(value: str, named_set: set[str]) -> str:
+    """Classify a relationship endpoint: 'named' | 'ioc' | 'ttp'."""
+    v = (value or "").strip()
+    vl = v.lower()
+    if vl in named_set:
+        return "named"
+    # TTP: an explicit MITRE id anywhere, or a known canonical technique name.
+    if _TID_RE.search(v):
+        return "ttp"
+    try:
+        from pipeline.aliases import technique_id_for
+        if technique_id_for(_TID_RE.sub("", v).strip(" ()")):
+            return "ttp"
+    except Exception:
+        pass
+    # IoC: url / email / ip / hash / filename / bare domain
+    if vl.startswith(("http://", "https://")):
+        return "ioc"
+    if "@" in v and "." in v:
+        return "ioc"
+    if _IPV4_RE.match(v) or _HASH_RE.match(v) or _FILE_EXT_RE.search(v):
+        return "ioc"
+    if " " not in v and _DOMAINLIKE_RE.match(vl):
+        return "ioc"
+    return "named"
+
+
+def _relationship_segment(src: str, tgt: str, named_set: set[str]) -> str:
+    """'named' if both endpoints are named entities; else 'technical'."""
+    if _endpoint_kind(src, named_set) == "named" and _endpoint_kind(tgt, named_set) == "named":
+        return "named"
+    return "technical"
+
+
+def _technique_grounded(name: str, text: str) -> bool:
+    """Technique-aware grounding for TTP relationship endpoints.
+
+    Handles the composite 'Name (T1234.001)' form the pipeline emits by trying:
+      1. the explicit MITRE id embedded in the endpoint, present in the text;
+      2. the bare technique name with the '(T####)' suffix stripped;
+      3. the canonical technique's id (looked up by name), present in the text.
+    """
+    tl = text.lower()
+    m = _TID_RE.search(name)
+    if m and m.group(0).lower() in tl:
+        return True
+    bare = _TID_RE.sub("", name).replace("()", "").strip(" ()")
+    if bare and bare != name and _grounded_in(bare, text):
+        return True
+    try:
+        from pipeline.aliases import technique_id_for
+        tid = technique_id_for(bare or name)
+        if tid and tid.lower() in tl:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _grounded_alias(name: str, text: str) -> bool:
+    """Alias-aware grounding: a name is grounded if it — OR any MITRE alias that
+    shares its canonical id, OR its MITRE id, OR (for techniques) its T-ID /
+    canonical technique name — appears in the text.  Resolves the 'OilRig'
+    (canonical, emitted) vs 'APT34' (alias, in text) mismatch, plus the
+    'Spearphishing Link (T1566.002)' composite-TTP-endpoint case."""
+    if _grounded_in(name, text):
+        return True
+    try:
+        from pipeline.aliases import alias_surface_forms
+        base = name.lower().strip()
+        for form in alias_surface_forms(name):
+            if form != base and len(form) >= 3 and _grounded_in(form, text):
+                return True
+    except Exception:
+        pass
+    if _technique_grounded(name, text):
+        return True
+    return False
+
+
+def _occurrence_positions(name: str, text_lower: str, alias_aware: bool) -> list[int]:
+    """Start offsets of every literal occurrence of *name* (and, when alias-aware,
+    its MITRE surface forms) in the lowercased text."""
+    forms = {name.lower().strip()}
+    if alias_aware:
+        try:
+            from pipeline.aliases import alias_surface_forms
+            forms |= {f for f in alias_surface_forms(name) if len(f) >= 3}
+        except Exception:
+            pass
+    positions: list[int] = []
+    for f in forms:
+        if not f:
+            continue
+        start = 0
+        while True:
+            i = text_lower.find(f, start)
+            if i < 0:
+                break
+            positions.append(i)
+            start = i + 1
+    return positions
+
+
+def _proximity_grounded(src: str, tgt: str, text_lower: str, max_gap: int,
+                        alias_aware: bool) -> bool:
+    """True if an occurrence of *src* and one of *tgt* fall within *max_gap*
+    characters — the structure-aware proxy for IoC relationships that live in
+    tables/lists rather than narrative sentences."""
+    ps = sorted(_occurrence_positions(src, text_lower, alias_aware))
+    pt = sorted(_occurrence_positions(tgt, text_lower, alias_aware))
+    i = j = 0
+    while i < len(ps) and j < len(pt):
+        if abs(ps[i] - pt[j]) <= max_gap:
+            return True
+        if ps[i] < pt[j]:
+            i += 1
+        else:
+            j += 1
+    return False
+
+
+def _relationship_grounding(
+    src: str, tgt: str, sentences: list[str], text: str,
+    window: int = 0, evidence: str = "", match=_grounded_in,
+    proximity: int = 0, alias_aware: bool = False,
+) -> str:
+    """Classify a relationship's textual support (best grade wins).
+
+    Returns 'cosentence' | 'window' | 'evidence' | 'proximity' | 'endpoints' | 'none'.
+    *match* is the grounding predicate (swap in _grounded_alias for alias-aware).
+    *proximity* (chars) enables the table/list-aware tier for IoC relationships.
+    """
+    both_in_text = match(src, text) and match(tgt, text)
+
+    if both_in_text:
+        for s in sentences:
+            if match(src, s) and match(tgt, s):
+                return "cosentence"
+        if window > 0:
+            for i in range(len(sentences)):
+                joined = " ".join(sentences[max(0, i - window): i + window + 1])
+                if match(src, joined) and match(tgt, joined):
+                    return "window"
+
+    # Honour the pipeline's own cited support — but only if the quote is real
+    # (its opening slice is present in the source, so it wasn't fabricated).
+    if evidence and match(src, evidence) and match(tgt, evidence) \
+            and _quote_from_source(evidence, text):
+        return "evidence"
+
+    # Structure-aware tier: endpoints co-located in the raw text (same table row
+    # / list item) even though no sentence links them.
+    if both_in_text and proximity > 0 \
+            and _proximity_grounded(src, tgt, text.lower(), proximity, alias_aware):
+        return "proximity"
+
+    return "endpoints" if both_in_text else "none"
+
+
+def score_grounding(
+    samples: list[GroundingSample],
+    named_only: bool = True,
+    window: int = 0,
+    alias_aware: bool = False,
+    proximity: int = 0,
+    verbose: bool = False,
+) -> GroundingScore:
+    """Compute entity + relationship grounding over emitted pipeline output."""
+    total = GroundingScore()
+    match = _grounded_alias if alias_aware else _grounded_in
+
+    for sample in samples:
+        sentences = _ground_split_sentences(sample.text)
+        named_set = {v.lower().strip() for v, _ in sample.entities}
+
+        ungrounded_ents: list[tuple[str, str]] = []
+        for value, etype in sample.entities:
+            if named_only and etype not in _NAMED_ENTITY_TYPES:
+                continue
+            total.ent_total += 1
+            if match(value, sample.text):
+                total.ent_grounded += 1
+            else:
+                ungrounded_ents.append((value, etype))
+
+        unsupported_rels: list[tuple[str, str, str, str]] = []
+        for idx, (src, verb, tgt) in enumerate(sample.relationships):
+            total.rel_total += 1
+            evidence = sample.rel_evidence[idx] if idx < len(sample.rel_evidence) else ""
+            grade = _relationship_grounding(
+                src, tgt, sentences, sample.text, window=window, evidence=evidence,
+                match=match, proximity=proximity, alias_aware=alias_aware,
+            )
+            setattr(total, f"g_{grade}", getattr(total, f"g_{grade}") + 1)
+            # Segment tally (named-entity vs IoC/technical relationship).
+            seg_grades = (total.rel_named_grades
+                          if _relationship_segment(src, tgt, named_set) == "named"
+                          else total.rel_tech_grades)
+            seg_grades[grade] = seg_grades.get(grade, 0) + 1
+            if grade in ("none", "endpoints"):
+                unsupported_rels.append((src, verb, tgt, grade))
+
+        if verbose and (ungrounded_ents or unsupported_rels):
+            print(f"\n  [{sample.description or 'sample'}]")
+            for v, t in ungrounded_ents:
+                print(f"    UNGROUNDED entity:  {t}: '{v}'")
+            for s, verb, t, grade in unsupported_rels:
+                why = "dangling endpoint" if grade == "none" else "no sentence/window/evidence link"
+                print(f"    UNSUPPORTED rel:    '{s}' {verb} '{t}'  ({why})")
+
+    return total
+
+
+def print_grounding_scores(score: GroundingScore, window: int = 0) -> None:
+    print(f"\n{'=' * 64}")
+    print("  Grounding / Hallucination-rate benchmark")
+    print(f"{'=' * 64}")
+    print("  Entities (named types):")
+    print(f"    grounding rate       : {score.entity_grounding_rate:.3f}  "
+          f"({score.ent_grounded}/{score.ent_total})")
+    print(f"    hallucination rate   : {score.entity_hallucination_rate:.3f}"
+          f"   ← ungroundable emitted names")
+    print(f"  Relationships  (co-sentence window = ±{window}):")
+    print(f"    endpoint grounding   : {score.rel_endpoint_grounding_rate:.3f}  "
+          f"({score.rel_endpoints_grounded}/{score.rel_total})   both ends in text")
+    print(f"    co-sentence only     : {score.rel_cosentence_grounding_rate:.3f}  "
+          f"({score.g_cosentence}/{score.rel_total})")
+    print(f"    CLAIM grounding      : {score.rel_claim_grounding_rate:.3f}  "
+          f"({score.rel_claim_grounded}/{score.rel_total})"
+          f"   ← sentence + ±window + evidence quote")
+    print(f"    hallucination rate   : {score.rel_hallucination_rate:.3f}  "
+          f"({score.rel_unsupported}/{score.rel_total})   ← truly unsupported")
+    print(f"      breakdown: cosentence={score.g_cosentence} window={score.g_window} "
+          f"evidence={score.g_evidence} proximity={score.g_proximity} "
+          f"endpoints-only={score.g_endpoints} dangling={score.g_none}")
+    # ── Segmentation: named-entity vs IoC/technical relationships ─────────────
+    n_total, n_claim, n_hall = score.segment_stats("named")
+    t_total, t_claim, t_hall = score.segment_stats("technical")
+    print("  Relationships by SEGMENT (one global number hides two populations):")
+    print(f"    named-entity rels    : claim {n_claim:.3f}  halluc {n_hall:.3f}  (n={n_total})"
+          f"   ← proxy works here")
+    print(f"    IoC / technical rels : claim {t_claim:.3f}  halluc {t_hall:.3f}  (n={t_total})"
+          f"   ← table/list blind spot + loose links")
+    print(f"{'=' * 64}")
+
+
+# ---------------------------------------------------------------------------
+# Grounding loaders
+# ---------------------------------------------------------------------------
+
+def load_grounding_dataset(path: Path) -> list[GroundingSample]:
+    """
+    Load emitted pipeline output for grounding analysis.
+
+    Format:
+      [
+        {
+          "text": "source report text ...",
+          "entities":      [{"value": "APT29", "type": "threat_actor"}, ...],
+          "relationships": [{"source": "APT29", "type": "uses",
+                             "target": "Cobalt Strike"}, ...]
+        }, ...
+      ]
+    """
+    data = json.loads(path.read_text(encoding="utf-8"))
+    samples: list[GroundingSample] = []
+    for item in data:
+        text = item.get("text", "")
+        if not text:
+            continue
+        ents = [(e["value"], e.get("type", "")) for e in item.get("entities", []) if e.get("value")]
+        rels, rel_ev = [], []
+        for r in item.get("relationships", []):
+            if r.get("source") and r.get("target"):
+                rels.append((r["source"], r.get("type", "related-to"), r["target"]))
+                rel_ev.append(r.get("evidence", "") or "")
+        samples.append(GroundingSample(text=text, entities=ents, relationships=rels,
+                                       rel_evidence=rel_ev,
+                                       description=item.get("description", "")))
+    return samples
+
+
+def load_grounding_from_db(
+    db_path: Path,
+    job_id: str = "all",
+    llm_only: bool = False,
+) -> list[GroundingSample]:
+    """
+    Build grounding samples from a real cti_stix.db: report_text + the entities
+    and relationships the pipeline emitted for each job.  Fully offline — scores
+    the hallucination rate on reports you have already processed.
+
+    llm_only=True restricts entities to source='llm' (the stage that actually
+    invents names); relationships are LLM-derived regardless of the flag.
+    """
+    import sqlite3
+
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+
+    if job_id == "all":
+        jobs = conn.execute(
+            "SELECT id, report_text FROM jobs "
+            "WHERE report_text IS NOT NULL AND length(report_text) > 0"
+        ).fetchall()
+    else:
+        jobs = conn.execute(
+            "SELECT id, report_text FROM jobs WHERE id = ? "
+            "AND report_text IS NOT NULL AND length(report_text) > 0",
+            (job_id,),
+        ).fetchall()
+
+    samples: list[GroundingSample] = []
+    for job in jobs:
+        ent_q = "SELECT value, entity_type FROM entities WHERE job_id = ?"
+        ent_params: tuple = (job["id"],)
+        if llm_only:
+            ent_q += " AND source = 'llm'"
+        entities = [(r["value"], r["entity_type"]) for r in conn.execute(ent_q, ent_params)]
+
+        rels, rel_ev = [], []
+        for r in conn.execute(
+            "SELECT source_value, relationship_type, target_value, evidence_text "
+            "FROM relationships WHERE job_id = ?",
+            (job["id"],),
+        ):
+            rels.append((r["source_value"], r["relationship_type"], r["target_value"]))
+            rel_ev.append(r["evidence_text"] or "")
+        samples.append(GroundingSample(
+            text=job["report_text"], entities=entities, relationships=rels,
+            rel_evidence=rel_ev, description=f"job {job['id'][:8]}",
+        ))
+
+    conn.close()
+    return samples
+
+
+# ---------------------------------------------------------------------------
+# Grounding fixtures — planted hallucinations prove the metric discriminates
+# ---------------------------------------------------------------------------
+
+def _load_grounding_fixture_samples() -> list[GroundingSample]:
+    return [
+        # Fully grounded — everything appears in the text, rels are co-sentence.
+        GroundingSample(
+            text=(
+                "APT29 deployed Cobalt Strike against government agencies. "
+                "APT29 also used WellMess for command and control."
+            ),
+            entities=[("APT29", "threat_actor"), ("Cobalt Strike", "tool"),
+                      ("WellMess", "malware")],
+            relationships=[("APT29", "uses", "Cobalt Strike"),
+                           ("APT29", "uses", "WellMess")],
+            description="Fully grounded (expect 1.0 across the board)",
+        ),
+        # Hallucinated entity + dangling relationship endpoint.
+        GroundingSample(
+            text="The intrusion relied on Cobalt Strike beacons for lateral movement.",
+            entities=[("Cobalt Strike", "tool"), ("WizardSpider", "threat_actor")],
+            relationships=[("WizardSpider", "uses", "Cobalt Strike")],
+            description="Hallucinated actor 'WizardSpider' not in text (expect <1.0)",
+        ),
+        # Both endpoints present but in DIFFERENT sentences — no textual assertion
+        # of the relation.  Endpoint-grounded but NOT co-sentence-grounded: this is
+        # the claim-support gap the name filter cannot see.
+        GroundingSample(
+            text=(
+                "Emotet was observed in phishing campaigns this quarter. "
+                "Separately, the TA542 group has been active in Europe."
+            ),
+            entities=[("Emotet", "malware"), ("TA542", "threat_actor")],
+            relationships=[("TA542", "uses", "Emotet")],
+            description="Endpoints in different sentences (co-sentence grounding <1.0)",
+        ),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# pytest — grounding metric discrimination
+# ---------------------------------------------------------------------------
+
+def test_grounding_metric_discriminates():
+    """The metric must score a clean sample 1.0 and a hallucinated sample <1.0."""
+    fixtures = _load_grounding_fixture_samples()
+
+    clean = score_grounding([fixtures[0]])
+    assert clean.entity_grounding_rate == 1.0
+    assert clean.rel_cosentence_grounding_rate == 1.0
+
+    hallucinated = score_grounding([fixtures[1]])
+    assert hallucinated.entity_grounding_rate < 1.0, "should flag ungrounded actor"
+    assert hallucinated.rel_endpoint_grounding_rate < 1.0, "dangling edge should fail"
+
+
+def test_grounding_segments_named_vs_technical():
+    """The metric separates named-entity relationships from IoC/technical ones so
+    a global number can't hide two populations."""
+    sample = GroundingSample(
+        text="APT29 used WellMess. Unrelated appendix mentions evil.example.com in a table.",
+        entities=[("APT29", "threat_actor"), ("WellMess", "malware")],
+        relationships=[
+            ("APT29", "uses", "WellMess"),               # named, co-sentence → grounded
+            ("WellMess", "communicates-with", "evil.example.com"),  # technical, split → not
+        ],
+    )
+    score = score_grounding([sample], window=0)
+    n_total, n_claim, _ = score.segment_stats("named")
+    t_total, t_claim, _ = score.segment_stats("technical")
+    assert n_total == 1 and n_claim == 1.0, "named rel should be claim-grounded"
+    assert t_total == 1 and t_claim == 0.0, "technical rel (IoC endpoint) should not"
+
+
+def test_grounding_proximity_rescues_table_iocs():
+    """A file→domain relationship whose endpoints sit in a compact IoC list —
+    more than one sentence apart, so unsupported at window ±1 — is grounded once
+    raw-text proximity is enabled."""
+    sample = GroundingSample(
+        text=(
+            "dropper.exe flagged.\n"
+            "row filler one.\n"
+            "row filler two.\n"
+            "evil.example.com flagged."
+        ),
+        entities=[],
+        relationships=[("dropper.exe", "communicates-with", "evil.example.com")],
+    )
+    without = score_grounding([sample], window=1)
+    assert without.rel_claim_grounding_rate == 0.0, "no sentence/window links them"
+    with_prox = score_grounding([sample], window=1, proximity=200)
+    assert with_prox.rel_claim_grounding_rate == 1.0, "co-located in the list → grounded"
+    assert with_prox.g_proximity == 1
+
+
+def test_grounding_cosentence_gap():
+    """Endpoints present but in different sentences ⇒ endpoint-grounded but not
+    co-sentence-grounded (the claim-support gap)."""
+    fixtures = _load_grounding_fixture_samples()
+    score = score_grounding([fixtures[2]])
+    assert score.rel_endpoint_grounding_rate == 1.0, "both names are in the text"
+    assert score.rel_cosentence_grounding_rate == 0.0, "but never in one sentence"
+
+
 # ---------------------------------------------------------------------------
 # ===========================================================================
 # REL benchmark — Stage 4b graph-completion edge precision  (ADR-0012)
@@ -1295,12 +1925,50 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--benchmark", "-b", choices=["ner", "ate", "rel"], default="ner",
+        "--benchmark", "-b", choices=["ner", "ate", "grounding"], default="ner",
         help=(
             "Which benchmark to run:\n"
-            "  ner  — NER IoC/entity extraction (default)\n"
-            "  ate  — ATT&CK Technique Extraction (CTIBench ATE task)\n"
-            "  rel  — Stage 4b graph-completion edge precision (ADR-0012)"
+            "  ner       — NER IoC/entity extraction recall (default)\n"
+            "  ate       — ATT&CK Technique Extraction (CTIBench ATE task)\n"
+            "  grounding — hallucination rate: how much emitted output is NOT\n"
+            "              supported by the source text (offline)"
+        ),
+    )
+    parser.add_argument(
+        "--from-db", dest="from_db", default=None,
+        help=(
+            "[grounding mode] Score real processed reports from cti_stix.db.\n"
+            "  'all' for every job, or a specific job_id."
+        ),
+    )
+    parser.add_argument(
+        "--llm-only", dest="llm_only", action="store_true",
+        help="[grounding mode, --from-db] Restrict entities to source='llm'.",
+    )
+    parser.add_argument(
+        "--db-path", dest="db_path", type=Path, default=Path("cti_stix.db"),
+        help="[grounding mode] Path to the SQLite DB (default: cti_stix.db).",
+    )
+    parser.add_argument(
+        "--rel-window", dest="rel_window", type=int, default=1,
+        help=(
+            "[grounding mode] ± sentence window for relationship claim grounding "
+            "(default: 1). 0 = strict single-sentence."
+        ),
+    )
+    parser.add_argument(
+        "--alias-aware", dest="alias_aware", action="store_true",
+        help=(
+            "[grounding mode] Resolve MITRE aliases when grounding (e.g. emitted "
+            "'OilRig' grounds against 'APT34' in the text). Prototype — Option B."
+        ),
+    )
+    parser.add_argument(
+        "--rel-proximity", dest="rel_proximity", type=int, default=0,
+        help=(
+            "[grounding mode] Char window for structure-aware (table/list) "
+            "grounding of IoC relationships. 0 = off; try 200. Endpoints co-located "
+            "within N chars count as claim-grounded even without a linking sentence."
         ),
     )
     parser.add_argument(
@@ -1335,18 +2003,35 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    # ── REL benchmark (graph completion) ──────────────────────────────────────
-    if args.benchmark == "rel":
-        if args.dataset:
-            print(f"Loading graph-completion dataset: {args.dataset}")
-            rel_samples = load_rel_dataset(args.dataset)
-            print(f"  {len(rel_samples)} samples loaded.")
+    # ── Grounding / hallucination-rate benchmark ──────────────────────────────
+    if args.benchmark == "grounding":
+        if args.from_db:
+            if not args.db_path.exists():
+                print(f"  ERROR: DB not found: {args.db_path}")
+                return
+            print(f"Loading grounding samples from {args.db_path} (job={args.from_db}, "
+                  f"llm_only={args.llm_only})")
+            samples = load_grounding_from_db(args.db_path, args.from_db, args.llm_only)
+        elif args.dataset:
+            print(f"Loading emitted pipeline output: {args.dataset}")
+            samples = load_grounding_dataset(args.dataset)
         else:
-            print("Using built-in graph-completion fixture samples.")
-            rel_samples = _load_rel_fixture_samples()
-            print(f"  {len(rel_samples)} fixture samples.")
-        rel_score = run_rel_benchmark(rel_samples, verbose=args.verbose)
-        print_rel_scores(rel_score)
+            print("Using built-in grounding fixtures (planted hallucinations).")
+            samples = _load_grounding_fixture_samples()
+        print(f"  {len(samples)} sample(s).")
+
+        if not samples:
+            print("  No samples to score (no jobs with report_text?).")
+            return
+
+        score = score_grounding(
+            samples, window=args.rel_window,
+            alias_aware=args.alias_aware, proximity=args.rel_proximity,
+            verbose=args.verbose,
+        )
+        if args.alias_aware:
+            print("  (alias-aware grounding ON — MITRE aliases resolved)")
+        print_grounding_scores(score, window=args.rel_window)
         return
 
     # ── ATE benchmark ─────────────────────────────────────────────────────────

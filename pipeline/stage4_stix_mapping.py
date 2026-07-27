@@ -8,6 +8,7 @@ import stix2
 # Initialize logging
 from api.logging_config import get_logger
 from models.schemas import STIX_RELATIONSHIP_TYPES, EntityType, RawEntity
+from pipeline.aliases import alias_surface_forms, canonical_name
 from pipeline.stage3_llm import LLMEnrichmentResult
 from pipeline.stage4b_graph_completion import complete_graph
 from pipeline.stix_rel_spec import rel_is_suggested
@@ -195,6 +196,25 @@ _OBSERVABLE_IOC_TYPES: frozenset[EntityType] = frozenset({
     EntityType.USER_ACCOUNT,
 })
 
+# STIX 2.1 cyber-observable (SCO) type strings.  Used to reject spurious
+# LLM edges that link a raw observable directly to an attack-pattern (e.g.
+# "domain communicates-with T1071.001") — not a valid STIX relationship: a
+# technique is expressed via a malware/actor `uses` attack-pattern, and the
+# observable is tied to that malware via `indicates`, never straight to the TTP.
+_OBSERVABLE_SCO_TYPES: frozenset[str] = frozenset({
+    "ipv4-addr", "ipv6-addr", "domain-name", "url", "email-addr", "mac-addr",
+    "autonomous-system", "file", "windows-registry-key", "mutex",
+    "user-account", "network-traffic", "software", "artifact",
+})
+
+
+def _is_spurious_observable_ttp_edge(source, target) -> bool:
+    """True for an observable-SCO ↔ attack-pattern edge (a type error the LLM
+    sometimes emits).  Such an edge carries no valid STIX meaning and is dropped
+    to protect relationship precision (ADR-0012)."""
+    types = {getattr(source, "type", ""), getattr(target, "type", "")}
+    return "attack-pattern" in types and bool(types & _OBSERVABLE_SCO_TYPES)
+
 
 def build_stix_bundle(
     raw_entities: list[RawEntity],
@@ -300,41 +320,49 @@ def build_stix_bundle(
             name_to_stix[key] = sdo
 
     # --- SDOs from LLM results ---
-    # Deduplicate names case-insensitively before creating SDOs so that
-    # "APT29" and "apt29" don't produce two separate ThreatActor objects.
+    # Deduplicate case-insensitively AND canonicalise MITRE aliases before
+    # creating SDOs, so that "APT29"/"apt29" — and "APT34"/"OilRig" (the same
+    # MITRE group G0049) — collapse into a SINGLE SDO instead of two nodes.
+    #
+    # The deterministic id is derived from the *canonical* name, so every alias
+    # of the same entity resolves to one id.  Every alias surface form is also
+    # registered in name_to_stix, so a relationship that names the entity by any
+    # alias still resolves to this node (fixes the dangling edges the grounding
+    # benchmark surfaced — ADR-0012).
+    _named_seen_ids: dict[str, object] = {}
 
-    _seen_actors: set[str] = set()
+    def _register_named(name: str, stix_type: str, factory):
+        canon = canonical_name(name)
+        det_id = _make_deterministic_id(canon, stix_type, "cti")
+        obj = _named_seen_ids.get(det_id)
+        if obj is None:
+            obj = factory(canon, det_id)
+            stix_objects.append(obj)
+            _named_seen_ids[det_id] = obj
+        # Resolve this entity by the emitted name, its canonical, and every alias.
+        name_to_stix[name.lower()] = obj
+        name_to_stix.setdefault(canon.lower(), obj)
+        for form in alias_surface_forms(name):
+            name_to_stix.setdefault(form, obj)
+        return obj
+
     for actor_name in llm_result.threat_actors:
-        if actor_name.lower() in _seen_actors:
-            continue
-        _seen_actors.add(actor_name.lower())
-        # Use deterministic ID to prevent collisions across reports
-        actor_id = _make_deterministic_id(actor_name, "threat-actor", "cti")
-        obj = stix2.ThreatActor(name=actor_name, id=actor_id)
-        stix_objects.append(obj)
-        name_to_stix[actor_name.lower()] = obj
+        _register_named(
+            actor_name, "threat-actor",
+            lambda n, i: stix2.ThreatActor(name=n, id=i),
+        )
 
-    _seen_malware: set[str] = set()
     for malware_name in llm_result.malware_families:
-        if malware_name.lower() in _seen_malware:
-            continue
-        _seen_malware.add(malware_name.lower())
-        # Use deterministic ID to prevent collisions across reports
-        malware_id = _make_deterministic_id(malware_name, "malware", "cti")
-        obj = stix2.Malware(name=malware_name, is_family=True, id=malware_id)
-        stix_objects.append(obj)
-        name_to_stix[malware_name.lower()] = obj
+        _register_named(
+            malware_name, "malware",
+            lambda n, i: stix2.Malware(name=n, is_family=True, id=i),
+        )
 
-    _seen_tools: set[str] = set()
     for tool_name in llm_result.tools:
-        if tool_name.lower() in _seen_tools:
-            continue
-        _seen_tools.add(tool_name.lower())
-        # Use deterministic ID to prevent collisions across reports
-        tool_id = _make_deterministic_id(tool_name, "tool", "cti")
-        obj = stix2.Tool(name=tool_name, id=tool_id)
-        stix_objects.append(obj)
-        name_to_stix[tool_name.lower()] = obj
+        _register_named(
+            tool_name, "tool",
+            lambda n, i: stix2.Tool(name=n, id=i),
+        )
 
     for ttp in llm_result.ttps:
         external_refs = []
@@ -648,6 +676,12 @@ def build_stix_bundle(
         if not source or not target:
             continue
         if not hasattr(source, "id") or not hasattr(target, "id"):
+            continue
+
+        # Precision guard: drop spurious observable-SCO ↔ attack-pattern edges
+        # (e.g. "domain communicates-with T1071.001") rather than emitting them
+        # as a noisy `related-to`.  See _is_spurious_observable_ttp_edge.
+        if _is_spurious_observable_ttp_edge(source, target):
             continue
 
         # Normalise and validate relationship type against the STIX 2.1 spec

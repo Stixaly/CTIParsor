@@ -1,6 +1,12 @@
 from models.schemas import EntityType, RawEntity
 from pipeline.stage1_ingestion import _join_hyphen_linebreaks
-from pipeline.stage2_extraction import _deduplicate, extract_entities, refang
+from pipeline.stage2_extraction import (
+    _deduplicate,
+    _extract_bare_filenames,
+    _extract_hashes_regex,
+    extract_entities,
+    refang,
+)
 
 SAMPLE_TEXT = """
 APT29 used Cobalt Strike for C2 communications.
@@ -365,3 +371,74 @@ class TestHyphenLinebreaks:
         joined = _join_hyphen_linebreaks(raw)
         refanged = refang(joined)
         assert refanged == "https://git-tanstack.com/transformers.pyz"
+
+
+class TestWrappedHashes:
+    """Hashes wrapped across lines inside narrow PDF/DOCX table cells."""
+
+    # 64-hex SHA256 = e3b0c442... (three fragments of 26 + 26 + 12).
+    _SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+    def test_contiguous_single_line_still_works(self):
+        got = {e.value for e in _extract_hashes_regex(self._SHA256)}
+        assert self._SHA256 in got
+
+    def test_hash_wrapped_across_three_lines(self):
+        wrapped = f"{self._SHA256[:26]}\n{self._SHA256[26:52]}\n{self._SHA256[52:]}"
+        hits = _extract_hashes_regex(wrapped)
+        assert any(
+            e.value == self._SHA256 and e.entity_type == EntityType.SHA256
+            for e in hits
+        )
+
+    def test_hash_wrapped_across_two_lines(self):
+        wrapped = f"{self._SHA256[:40]}\n{self._SHA256[40:]}"
+        got = {e.value for e in _extract_hashes_regex(wrapped)}
+        assert self._SHA256 in got
+
+    def test_ioc_table_cell_with_surrounding_text(self):
+        # Real-world shape: filename + "File Hash" label separate the rows.
+        text = (
+            "Value / Hash (SHA-256)\n"
+            "meshagent64-azure-ops.exe\n"
+            "File Hash\n"
+            "Pre-configured agent\n"
+            f"{self._SHA256[:26]}\n{self._SHA256[26:52]}\n{self._SHA256[52:]}\n"
+        )
+        got = {e.value for e in _extract_hashes_regex(text)}
+        assert self._SHA256 in got
+
+    def test_two_full_hashes_stacked_are_both_recovered(self):
+        # No separator between two already-complete hashes: the merged block
+        # isn't a clean length, so the strict fallback recovers each one.
+        a = "d41d8cd98f00b204e9800998ecf8427e"                          # md5
+        b = "da39a3ee5e6b4b0d3255bfef95601890afd80709"                  # sha1
+        got = {e.value for e in _extract_hashes_regex(f"{a}\n{b}")}
+        assert a in got and b in got
+
+    def test_hex_prose_does_not_invent_a_hash(self):
+        # Short hex words on separate lines must not join into a bogus hash.
+        text = "cafe\nbabe\ndead\nbeef"
+        assert _extract_hashes_regex(text) == []
+
+
+class TestBareFilenames:
+    """Bare (path-less) filenames with executable/script extensions."""
+
+    def test_extracts_malware_filenames(self):
+        text = (
+            "The actor dropped meshagent64-azure-ops.exe and ran _fanout.sh "
+            "via meshctrl.js on the host."
+        )
+        got = {e.value.lower() for e in _extract_bare_filenames(text)}
+        assert {"meshagent64-azure-ops.exe", "_fanout.sh", "meshctrl.js"} <= got
+        assert all(e.entity_type == EntityType.FILE for e in _extract_bare_filenames(text))
+
+    def test_ignores_document_and_image_extensions(self):
+        text = "See report.pdf, the chart.png, and summary.docx for details."
+        assert _extract_bare_filenames(text) == []
+
+    def test_does_not_double_extract_filename_inside_a_path(self):
+        # Filenames already captured as part of a full path must be skipped here.
+        text = r"Payload staged at C:\Windows\Temp\payload.exe on disk."
+        assert _extract_bare_filenames(text) == []

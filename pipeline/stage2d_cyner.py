@@ -1,17 +1,18 @@
 """
 Stage 2d — CyNER Cybersecurity Named Entity Recognition.
 
-Uses the aiforsec/cyner-xlm-roberta-base model (XLM-RoBERTa fine-tuned on
-cybersecurity NER corpora) to extract named entities from CTI text.
+Uses the PranavaKailash/CyNER-2.0-DeBERTa-v3-base model (DeBERTa-v3 fine-tuned on
+cybersecurity NER corpora, F1 91.88%) to extract named entities from CTI text.
 
 Why CyNER instead of generic spaCy?
   SpaCy's en_core_web_lg was trained on newswire and Wikipedia.  It labels every
   organisation, cloud provider, and package registry as ORG / PRODUCT and cannot
-  reliably distinguish a threat-actor name from a victim company.  CyNER was
+  reliably distinguish a threat-actor name from a victim company.  CyNER 2.0 was
   fine-tuned specifically on cybersecurity text and recognises:
 
-    MalwareFamily  — specific named malware families (Emotet, WannaCry, …)
-    Organization   — threat-actor groups (APT29, Lazarus Group, FIN7, …)
+    Malware        — specific named malware families (Emotet, WannaCry, …)
+    Threat_group   — threat-actor groups (APT29, Lazarus Group, FIN7, …)
+    Organization   — victim companies / vendors (skipped — not threat actors)
     Vulnerability  — descriptive vulnerability references ("EternalBlue exploit")
     Indicator      — network/file indicators (skipped here — regex handles these)
     System         — operating-system / software names (skipped — too noisy)
@@ -21,7 +22,7 @@ Confidence tiers:
   score 0.70–0.89 → medium confidence (accepted=None)
   score < 0.70  → discard
 
-The model is downloaded from HuggingFace Hub on first use (~1.1 GB, cached in
+The model is downloaded from HuggingFace Hub on first use (~0.8 GB, cached in
 ~/.cache/huggingface/).  Subsequent runs load from the local cache.
 """
 from __future__ import annotations
@@ -41,11 +42,17 @@ from api.logging_config import get_logger
 logger = get_logger(__name__)
 
 # Model ID — configurable via CYNER_MODEL in .env.
-# The aiforsec/cyner-xlm-roberta-base model is gated / removed from HuggingFace Hub.
+# Default: PranavaKailash/CyNER-2.0-DeBERTa-v3-base — a publicly available
+# DeBERTa-v3 NER model fine-tuned on cybersecurity corpora (F1 91.88%).
+# It replaces the old aiforsec/cyner-xlm-roberta-base, which is gated / removed
+# from HuggingFace Hub.  CyNER 2.0 exposes a dedicated "Threat_group" label
+# distinct from "Organization", so threat-actor detection no longer relies on
+# the _ORG_BLOCKLIST heuristic below.
+# NOTE: model_type is deberta-v2 → the `sentencepiece` package is required.
 # If the model cannot be loaded, Stage 2e (GLiNER) covers the same entity types
 # (malware families, threat actor groups) via zero-shot NER.
 # Set CYNER_ENABLED=false in .env to skip this stage and silence all warnings.
-_MODEL_ID      = os.getenv("CYNER_MODEL",   "aiforsec/cyner-xlm-roberta-base")
+_MODEL_ID      = os.getenv("CYNER_MODEL",   "PranavaKailash/CyNER-2.0-DeBERTa-v3-base")
 _CYNER_ENABLED = os.getenv("CYNER_ENABLED", "true").lower() not in ("false", "0", "no")
 
 # Sentinel file written to the project root the first time the model is detected
@@ -58,18 +65,24 @@ _SENTINEL_PATH = Path(__file__).parent.parent / ".cyner_model_unavailable"
 _HIGH_THRESH   = 0.90
 _MEDIUM_THRESH = 0.70
 
-# CyNER label → our EntityType
+# CyNER 2.0 label → our EntityType.
+# Labels come from the model's config.json (entity_group after aggregation):
+#   Malware, Threat_group, Organization, Indicator, System, Vulnerability,
+#   Date, Location.
 _LABEL_MAP: dict[str, EntityType] = {
-    "MalwareFamily": EntityType.MALWARE,
-    "Organization":  EntityType.THREAT_ACTOR,
+    "Malware":      EntityType.MALWARE,
+    "Threat_group": EntityType.THREAT_ACTOR,
+    # "Organization": skip — victim companies / vendors, not threat actors
     # "Vulnerability": EntityType.CVE — CVEs are handled more precisely by regex
     # "Indicator": skip — regex is more reliable for IoCs
     # "System": skip — too noisy (e.g. "Windows", "Linux")
+    # "Date" / "Location": skip — not modelled as CTI entities here
 }
 
-# Tokens/terms to block from Organization → THREAT_ACTOR mapping.
-# CyNER is much better than spaCy at this but still occasionally labels
-# victim companies or generic nouns as Organization.
+# Tokens/terms to block from THREAT_ACTOR mapping (safety net).
+# CyNER 2.0 has a dedicated Threat_group label, so mislabelled victim companies
+# should be rare — but the model occasionally tags a well-known vendor as a
+# threat group, so this blocklist stays as a cheap guardrail.
 _ORG_BLOCKLIST = frozenset({
     # Victim/neutral orgs often mentioned in CTI reports
     "microsoft", "google", "amazon", "apple", "facebook", "meta",

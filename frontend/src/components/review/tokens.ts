@@ -88,7 +88,11 @@ export const TYPE_GROUPS: Array<{ label: string; types: string[] }> = [
   { label: 'File / Hash',   types: ['sha256', 'md5', 'sha1', 'file'] },
   { label: 'Host artifact', types: ['registry_key', 'mutex', 'user_account'] },
   { label: 'Vulnerability', types: ['cve', 'vulnerability'] },
-  { label: 'ATT&CK TTP',    types: ['technique', 'tactic', 'procedure', 'ttp'] },
+  // Single ATT&CK category — all map to the STIX attack-pattern SDO. The legacy
+  // technique/tactic/procedure names are intentionally omitted from the picker so
+  // reviewers only create `ttp`; existing entities of those types still render
+  // (their styles/labels are kept in TYPE_STYLE).
+  { label: 'ATT&CK TTP',    types: ['ttp'] },
   { label: 'Threat Intel',  types: ['malware', 'threat_actor', 'intrusion_set', 'tool', 'campaign', 'infrastructure', 'identity', 'location', 'incident'] },
 ]
 
@@ -318,6 +322,12 @@ export function verbsForPair(srcType: string, tgtType: string): {
 // (e.g. "evil[.]com") that won't match the clean value via plain indexOf.
 const _DEFANGABLE_TYPES = new Set(['domain', 'url', 'email', 'ipv4', 'ipv6'])
 
+// Hash types whose stored value is the de-wrapped (contiguous) hash, while the
+// source document may still have it wrapped across lines inside a table cell.
+// These are matched with whitespace tolerance so the wrapped occurrence is
+// highlighted and click-to-locate works.
+const _HASH_TYPES = new Set(['md5', 'sha1', 'sha256'])
+
 /**
  * Given a clean (refanged) IOC value, generate the defanged forms a CTI
  * report might use instead, so occurrences that survived in their original
@@ -392,6 +402,29 @@ export function buildRanges(text: string, entities: Array<{ id: string; value: s
 
   for (const e of sorted) {
     const v = e.value.toLowerCase()
+
+    // Hashes wrap across lines in PDF/table cells, so the contiguous stored
+    // value won't be found by indexOf.  Match the characters with optional
+    // whitespace between them so the wrapped occurrence is still located.
+    // (Value is hex-only, so it's safe to embed directly in a RegExp.)
+    if (_HASH_TYPES.has(e.entity_type)) {
+      const re = new RegExp(v.split('').join('\\s*'), 'g')
+      let m: RegExpExecArray | null
+      while ((m = re.exec(lower)) !== null) {
+        const idx = m.index
+        const end = idx + m[0].length
+        if (_wholeToken(lower, v, idx, end)) {
+          let overlap = false
+          for (let i = idx; i < end; i++) if (used[i]) { overlap = true; break }
+          if (!overlap) {
+            ranges.push({ start: idx, end, entityId: e.id })
+            used.fill(1, idx, end)
+          }
+        }
+      }
+      continue
+    }
+
     const candidates = [v]
     if (_DEFANGABLE_TYPES.has(e.entity_type)) {
       candidates.push(...generateDefangedVariants(v))

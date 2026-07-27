@@ -14,7 +14,7 @@ choice, and the consequences. They're append-only — supersede rather than rewr
 | [0009](0009-stix-trust-and-provenance.md) | STIX trust & provenance (evidence labels, consensus, markings) | Accepted |
 | [0010](0010-default-sigma-corpora-and-dedup.md) | Default multi-repo Sigma corpora + cross-corpus deduplication | Accepted |
 | [0011](0011-ttp-extraction-precision.md) | TTP extraction precision (thresholds, margin gate, TTP self-verify, subsumption) | Accepted |
-| [0012](0012-graph-completion.md) | STIX graph completion (alias merge, transitive inference, long-distance) | Accepted |
+| [0012](0012-hallucination-measurement-and-canonicalization.md) | Hallucination measurement, entity canonicalisation & relationship precision | Accepted |
 
 **Numbering notes**
 - `0001` and `0003` are unused gaps (early informal decisions never filed).
@@ -29,13 +29,12 @@ choice, and the consequences. They're append-only — supersede rather than rewr
 0004 extraction quality ─┐
 0005 IoC/defang ─────────┤→ better structured intel
 0009 trust & provenance ─┘        │
-          │                       ▼
-          │            0008 coverage matrix ◄── consumes techniques
-          │               ▲   implemented by
-          │               └── 0006 multi-corpus rules ── managed by ── 0007 settings panel
-          │                      ▲   extended by                          │
-          │                      └── 0010 default corpora + dedup         │
-          │                                                    controls   │
-          └── labels + provenance reused by ── 0012 graph completion ◄─────┘
-                                                (denser graph, same gate)
+   ▲   measured & extended by     │
+   └── 0012 hallucination metric  │
+       + canonicalisation         ▼
+0008 coverage matrix ◄── consumes techniques
+   ▲   implemented by
+   └── 0006 multi-corpus rules ── managed by ── 0007 settings panel
+          ▲   extended by
+          └── 0010 default corpora + dedup
 ```

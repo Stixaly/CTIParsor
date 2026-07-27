@@ -13,6 +13,21 @@ Two modes are available:
 
 ---
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/review-page.png" alt="Review workspace — annotated entities, marginalia and relationships" width="92%">
+  <br><em>Review workspace — entity annotation, marginalia, and evidence-graded relationship review</em>
+</p>
+
+| | |
+|:---:|:---:|
+| <img src="docs/screenshots/homepage.png" alt="Dashboard" width="430"><br>**Dashboard** — drag-and-drop upload + kanban | <img src="docs/screenshots/review-page-PDF-view.png" alt="Review — Source view" width="430"><br>**Source view** — inline original file (PDF / HTML / TXT / MD) |
+| <img src="docs/screenshots/graph-report-view.png" alt="STIX graph" width="430"><br>**STIX graph** — relationships with official OASIS icons | <img src="docs/screenshots/sigma-rules.png" alt="Detection-coverage matrix" width="430"><br>**Detection coverage** — ATT&CK × Sigma readiness matrix |
+| <img src="docs/screenshots/relationships-settings.png" alt="Relationship policy" width="430"><br>**Relationship policy** — canonical STIX links, pin / auto | <img src="docs/screenshots/Sigma-rules-settings.png" alt="Settings" width="430"><br>**Settings** — Sigma corpus management |
+
+---
+
 ## Quick start — CLI
 
 ```bash
@@ -75,9 +90,9 @@ uvicorn api.main:app --reload --app-dir .
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
 │  Stage 2 — REGEX IOC EXTRACTION                         (offline ✅)  │
-│  IPv4/v6, domains, URLs, emails, MAC, ASN, file paths               │
-│  Registry keys, mutexes, MD5/SHA-1/SHA-256                          │
-│  CVE IDs, raw MITRE ATT&CK technique IDs (T1234 / T1234.001)        │
+│  IPv4/v6, domains, URLs, emails, MAC, ASN, file paths + filenames   │
+│  Registry keys, mutexes, MD5/SHA-1/SHA-256 (incl. line-wrapped)     │
+│  CVE IDs, raw MITRE ATT&CK IDs (T1234 / T1234.001) → ttp            │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
@@ -100,10 +115,10 @@ uvicorn api.main:app --reload --app-dir .
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
-│  Stage 2d — CyNER  (disabled by default — model removed from HF)    │
-│  XLM-RoBERTa fine-tuned on cybersecurity NER corpora                │
-│  Detects: MalwareFamily, Organization (threat actors)               │
-│  Enable: CYNER_ENABLED=true (auto-falls back to Stage 2e)           │
+│  Stage 2d — CyNER 2.0                       (offline once cached)   │
+│  DeBERTa-v3 fine-tuned on cybersecurity NER (F1 91.88%)             │
+│  Detects: Malware, Threat_group (threat-actor groups)               │
+│  Model: PranavaKailash/CyNER-2.0-DeBERTa-v3-base (CYNER_ENABLED)    │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
@@ -245,6 +260,27 @@ pytest tests/ -v               # all tests
 pytest tests/ -v -k "not llm"  # skip LLM tests (no key needed)
 ```
 
+### Measure extraction quality (offline)
+
+Three benchmarks live in `tests/eval_pipeline.py` — recall (`ner`, `ate`) and a
+**hallucination-rate** benchmark (`grounding`) that scores how much emitted output
+is *not* supported by the source text (ADR-0012). It reuses the pipeline's own
+grounding primitive, runs fully offline, and can score reports you have already
+processed straight from `cti_stix.db`:
+
+```bash
+# Hallucination rate on your real processed reports, segmented + alias/technique-aware
+python tests/eval_pipeline.py -b grounding --from-db all \
+    --rel-window 1 --alias-aware --rel-proximity 200
+
+# ATT&CK Technique Extraction recall vs the GPT-4 baseline
+python tests/eval_pipeline.py -b ate --stage all
+```
+
+Relationships are reported in two segments — **named-entity** vs **IoC/technical**
+— because a single global number blends two very different regimes. Use this to
+validate any extraction change before/after.
+
 ### make shortcuts
 
 A `Makefile` wraps the most common workflows. Requires `make` (standard on Linux/macOS/WSL).
@@ -299,13 +335,14 @@ For Review  ──►  Reviewing  ──►  Completed
 
 ### Review page
 
-Three view modes toggled at the top of the document pane:
+Four view modes toggled at the top of the document pane:
 
 | Mode | Content |
 |---|---|
 | **Text** | Annotated source text — entity occurrences highlighted by type, click to focus in marginalia, keyboard shortcuts |
 | **Preview** | Rendered markdown — VS Code-like typography (headings, tables, code blocks, task lists). Works on all file types; most useful for `.md` reports |
-| **Source** | Original file — inline PDF iframe or download link for other formats |
+| **Source** | The original file, rendered inline for every supported format: **PDF** (pdf.js pages), **HTML/HTM** (sandboxed iframe), **TXT/MD** (raw source). PDF and TXT/MD carry the same entity highlights as the Text view and support click-to-locate; **DOCX** falls back to a download link (no browser-native rendering) |
+| **Detections** | Sigma rules linkable to this report's ATT&CK techniques |
 
 **Entity interaction:**
 - Entities highlighted inline with type-colour coding
@@ -390,12 +427,12 @@ disable one, and **Rebuild index** to re-ingest the local clones. See
 | File hash (MD5 / SHA-1 / SHA-256) | `file` SCO |
 | MAC address | `mac-addr` SCO |
 | ASN | `autonomous-system` SCO |
-| File path (Windows/Unix) | `file` SCO |
+| File path (Windows/Unix) + bare filename | `file` SCO |
 | Registry key | `windows-registry-key` SCO |
 | Mutex | `mutex` SCO |
 | User account | `user-account` SCO |
 | CVE | `vulnerability` SDO |
-| MITRE ATT&CK technique / tactic | `attack-pattern` SDO + external reference |
+| MITRE ATT&CK TTP (internal type `ttp`) | `attack-pattern` SDO + external reference (tactic vs technique preserved in the `mitre_id` / ATT&CK URL) |
 | Malware family | `malware` SDO (`is_family: true`) |
 | Threat actor | `threat-actor` SDO |
 | Offensive tool | `tool` SDO |
@@ -509,8 +546,9 @@ TTP_EMBEDDING_MODEL=all-MiniLM-L6-v2
 # TTP_TOP2_MARGIN=0.05        # drop a 2nd match for the same sentence beyond this
 #                             # cosine gap from the top match
 
-# Stage 2d — CyNER (disabled — model removed from HuggingFace)
-CYNER_ENABLED=false
+# Stage 2d — CyNER 2.0 cybersecurity NER (DeBERTa-v3, F1 91.88%)
+CYNER_ENABLED=true
+# CYNER_MODEL=PranavaKailash/CyNER-2.0-DeBERTa-v3-base   # default; override to swap models
 
 # Stage 2e — GLiNER zero-shot NER
 # urchade/gliner_large-v2.1  (recommended, best accuracy, ~800 MB)
@@ -606,7 +644,7 @@ Each NER stage adds a different capability:
 | 2 | Regex | IoCs (IPs, hashes, domains, CVEs, paths…) |
 | 2b | Aho-Corasick gazetteer | Known malware/tools/APT groups |
 | 2c | Semantic embeddings | MITRE techniques by meaning, not name |
-| 2d | CyNER (optional) | Cybersecurity NER (if model available) |
+| 2d | CyNER 2.0 (DeBERTa-v3) | Cybersecurity NER — malware & threat-actor groups |
 | 2e | GLiNER zero-shot | Sectors, campaigns, infrastructure, novel actors |
 
 ### 2. Sliding-window chunk overlap (Stage 1)
@@ -646,6 +684,22 @@ The TTP analogue of Stage 3d (ADR-0011 Phase B). For each LLM-extracted techniqu
 
 On **Finalize**, accepted named entities form a per-report domain lexicon. The full text is re-scanned with word-boundary string matching to find additional occurrences that NER or the LLM missed. New occurrences are inserted with `source="report_lexicon"` and `accepted=True`.
 
+### 8. Entity canonicalisation & relationship precision (Stage 4, ADR-0012)
+
+`pipeline/aliases.py` builds an offline MITRE alias index from `gazetteer.json` +
+`mitre_index.json` (no new dependencies). Stage 4 uses it to:
+
+- **Merge aliases** — `APT34` and `OilRig` (MITRE group G0049) collapse into one
+  `threat-actor` SDO instead of two, and a relationship naming *any* alias resolves
+  to the merged node.
+- **Drop spurious edges** — an observable ↔ attack-pattern relationship
+  (e.g. `domain communicates-with T1071.001`) is a type error; it is dropped, not
+  emitted as a noisy `related-to`.
+
+Measured effect on a 4-report corpus: named-entity relationship hallucination
+≈ 11 % (the tractable target), entity hallucination ≈ 0. See
+[ADR-0012](docs/adr/0012-hallucination-measurement-and-canonicalization.md).
+
 ---
 
 ## Project structure
@@ -660,7 +714,7 @@ cti-to-stix/
 │   ├── stage2_extraction.py       # Regex IoC extraction + spaCy fallback
 │   ├── stage2b_gazetteer.py       # Aho-Corasick gazetteer NER (1 114 entities)
 │   ├── stage2c_ttp_semantic.py    # Sentence-transformer TTP detection
-│   ├── stage2d_cyner.py           # CyNER (optional, disabled by default)
+│   ├── stage2d_cyner.py           # CyNER 2.0 cybersecurity NER (DeBERTa-v3)
 │   ├── stage2e_gliner.py          # GLiNER / NuNER zero-shot NER
 │   ├── stage3_llm.py              # LLM enrichment, parallel + checkpoint
 │   ├── stage3b_validate.py        # Post-LLM hallucination filter
@@ -722,6 +776,8 @@ cti-to-stix/
 │   │   │   └── Settings.tsx       # Corpus management panel
 │   │   ├── components/
 │   │   │   ├── MarkdownPreview.tsx # VS Code-like .md renderer (react-markdown)
+│   │   │   ├── SourceViewer.tsx    # Inline original-file view (PDF/HTML/TXT/MD)
+│   │   │   ├── PdfViewer.tsx       # pdf.js pages + entity-highlight overlay
 │   │   │   ├── ProgressModal.tsx   # 5-stage SSE progress display
 │   │   │   ├── EntityPopover.tsx   # Entity type picker
 │   │   │   └── review/
@@ -1034,7 +1090,8 @@ Schema migrations run automatically on startup (`ALTER TABLE` wrapped in try/exc
 | `beautifulsoup4` | HTML parsing |
 | `iocextract` | Regex IoC extraction with defang support |
 | `sentence-transformers` | Semantic TTP embeddings (Stage 2c) |
-| `transformers` | HuggingFace backbone (CyNER Stage 2d) |
+| `transformers` | HuggingFace backbone (CyNER 2.0, Stage 2d) |
+| `sentencepiece` | Tokenizer for CyNER 2.0's DeBERTa-v3 (Stage 2d) |
 | `numpy` | Embedding cache (`.npy`) |
 | `gliner` | Zero-shot NER (Stage 2e) |
 | `pyahocorasick` | Aho-Corasick multi-pattern scan (Stage 2b, 50× faster) |
