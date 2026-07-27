@@ -6,14 +6,14 @@ opt-in long-distance step with a fake inferer.  No network / no LLM.
 """
 import stix2
 
+from models.schemas import EntityType, RawEntity
+from pipeline.stage3_llm import LLMEnrichmentResult, RelationshipExtracted, TTPExtracted
 from pipeline.stage4_stix_mapping import build_stix_bundle
 from pipeline.stage4b_graph_completion import (
     InferredEdge,
     _connected_components,
     complete_graph,
 )
-from pipeline.stage3_llm import LLMEnrichmentResult, RelationshipExtracted, TTPExtracted
-from models.schemas import EntityType, RawEntity
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
