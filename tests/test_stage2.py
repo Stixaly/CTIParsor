@@ -416,6 +416,54 @@ class TestWrappedHashes:
         got = {e.value for e in _extract_hashes_regex(f"{a}\n{b}")}
         assert a in got and b in got
 
+    # ── stacked columns must not be joined into a hash that does not exist ────
+    # 32 + 32 = 64, so a column of MD5s reads as a SHA-256 unless the stack is
+    # recognised.  The fabricated value matches nothing in the report or in VT,
+    # and both real MD5s disappear — the analyst has no way to reconcile it.
+    _MD5_A = "d41d8cd98f00b204e9800998ecf8427e"
+    _MD5_B = "5d41402abc4b2a76b9719d911017c592"
+
+    def test_stacked_md5_column_yields_both_md5s_not_one_sha256(self):
+        got = {e.value for e in _extract_hashes_regex(
+            f"File Hash\n{self._MD5_A}\n{self._MD5_B}\n"
+        )}
+        assert got == {self._MD5_A, self._MD5_B}
+
+    def test_stacked_md5_column_types_are_md5(self):
+        hits = _extract_hashes_regex(f"File Hash\n{self._MD5_A}\n{self._MD5_B}\n")
+        assert all(e.entity_type == EntityType.MD5 for e in hits)
+
+    def test_stacked_md5s_on_one_line_are_not_joined(self):
+        got = {e.value for e in _extract_hashes_regex(f"{self._MD5_A} {self._MD5_B}")}
+        assert got == {self._MD5_A, self._MD5_B}
+
+    def test_three_stacked_md5s_are_all_recovered(self):
+        c = "5d41402abc4b2a76b9719d911017c593"
+        got = {e.value for e in _extract_hashes_regex(
+            f"{self._MD5_A}\n{self._MD5_B}\n{c}\n"
+        )}
+        assert got == {self._MD5_A, self._MD5_B, c}
+
+    def test_sha256_header_disambiguates_a_32_32_wrap(self):
+        # Same shape as a stacked MD5 pair — only the column label says which
+        # reading is right, so an explicit SHA-256 header must win.
+        wrapped = f"{self._SHA256[:32]}\n{self._SHA256[32:]}"
+        got = {e.value for e in _extract_hashes_regex(f"Hash (SHA-256)\n{wrapped}\n")}
+        assert got == {self._SHA256}
+
+    def test_md5_label_keeps_a_stacked_pair_split(self):
+        got = {e.value for e in _extract_hashes_regex(
+            f"Hash (MD5)\n{self._MD5_A}\n{self._MD5_B}\n"
+        )}
+        assert got == {self._MD5_A, self._MD5_B}
+
+    def test_md5_label_rejects_a_join_with_trailing_hex_noise(self):
+        # 32 + 8 = 40 would fabricate a SHA-1 from an MD5 plus a short hex token.
+        got = {e.value for e in _extract_hashes_regex(
+            f"MD5\n{self._MD5_A}\ndeadbeef\n"
+        )}
+        assert got == {self._MD5_A}
+
     def test_hex_prose_does_not_invent_a_hash(self):
         # Short hex words on separate lines must not join into a bogus hash.
         text = "cafe\nbabe\ndead\nbeef"
