@@ -105,13 +105,15 @@ uvicorn api.main:app --reload --app-dir .
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
 │  Stage 2c — SEMANTIC TTP DETECTION                      (offline ✅)  │
-│  Sentence-transformer cosine-similarity against 1 533 pre-embedded  │
+│  Sentence-transformer cosine-similarity against the pre-embedded    │
 │  MITRE technique descriptions (local .npy cache)                    │
 │  • Default model: all-MiniLM-L6-v2 (80 MB)                         │
 │  • Upgrade: ehsanaghaei/SecureBERT-Plus (+8-12% F1 on CTI text)     │
 │  • Model-aware tiers: ≥ high wins over LLM / medium = candidate     │
 │    (MiniLM 0.62 / 0.48; resolved per-model — ADR-0011 Phase A)      │
 │  • 1 match per sentence + margin gate kills nearest-wrong neighbour │
+│  • ATT&CK-only by default (918 of 1 533): CAPEC shadows the real    │
+│    technique, so it is excluded — TTP_SEMANTIC_DOMAINS=all restores │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
@@ -574,11 +576,17 @@ LLM_TIMEOUT=120
 ENABLE_STIX_VERIFICATION=false
 STIX_VERIFY_MIN_RELS=1
 
-# Stage 3f — Self-verification of TTPs (ADR-0011 Phase B)
+# Stage 3f — Self-verification of TTPs (ADR-0011 Phase B).  Recommended ON:
 # TTP analogue of 3d: each LLM-extracted technique must be supported by a quoted
-# sentence describing its use; semantic-corroborated TTPs are trusted and skipped.
-ENABLE_TTP_VERIFICATION=false
+# sentence describing its use.  Only a HIGH-confidence semantic match waives the
+# check — a medium one (≥ 0.48) is the nearest-but-wrong tier and must not grant
+# a bypass.  Without this stage TTPs have no evidence gate at all.
+ENABLE_TTP_VERIFICATION=true
 TTP_VERIFY_MIN=1
+
+# Stage 2c — taxonomies the semantic matcher may return (ATT&CK-only default;
+# "all" restores CAPEC, which otherwise shadows the real ATT&CK technique)
+# TTP_SEMANTIC_DOMAINS=enterprise-attack,mobile-attack,ics-attack
 
 # Stage 3e — Cross-model consensus (anti-hallucination)
 # Re-runs relationship-bearing chunks through a SECOND provider; agreement
@@ -678,7 +686,21 @@ Second LLM call per chunk quotes the exact supporting sentence for every relatio
 
 ### 6. TTP self-verification (Stage 3f)
 
-The TTP analogue of Stage 3d (ADR-0011 Phase B). For each LLM-extracted technique, a second LLM call must quote the sentence describing that technique being *used* — annotated with the technique's expected ATT&CK tactic so a behaviour-vs-tactic mismatch is also rejected. TTPs already corroborated by a high-confidence semantic match are trusted and skipped, so the cost tracks Stage 3d (~1.4× calls). Opt-in via `ENABLE_TTP_VERIFICATION`.
+The TTP analogue of Stage 3d (ADR-0011 Phase B). For each LLM-extracted technique, a second LLM call must quote the sentence describing that technique being *used* — annotated with the technique's expected ATT&CK tactic so a behaviour-vs-tactic mismatch is also rejected. Enable with `ENABLE_TTP_VERIFICATION` (recommended on — without it TTPs pass no evidence gate while relationships pass two).
+
+Only a **high-confidence** semantic match (cosine ≥ the model's high cut-point) waives the check. That floor matters: a *medium* match (≥ 0.48) is precisely the nearest-but-wrong tier the Phase A margin gate exists to suppress, so letting it grant a bypass would hand the weakest signal in the pipeline veto power over the strongest check. On a real 12-page report, 13 of 16 corroborators sat below the cut-point and were waving through techniques with no textual support at all.
+
+### 6b. Why TTP counts stay bounded
+
+A report with no explicit T-IDs is where technique counts run away, because every entry is inferred. Four controls keep the number honest:
+
+| Control | Effect |
+|---|---|
+| Stage 3f verification | drops techniques with no supporting sentence |
+| High-confidence corroboration floor | stops weak semantic matches waiving 3f |
+| Cross-source dedup at persistence | one row per technique, not one per source — the review UI matches the bundle |
+| Parent/sub subsumption across sources | `T1027` dropped when `T1027.004` is present, even when the two came from different stages |
+| ATT&CK-only semantic corpus | removes CAPEC near-duplicates of the technique that belongs in the bundle |
 
 ### 7. Report lexicon re-scan (Finalize)
 

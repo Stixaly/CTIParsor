@@ -39,3 +39,6 @@ detection_corpora.local.yaml
 
 # Stage 2d runtime sentinel — written when the CyNER model cannot be loaded
 .cyner_model_unavailable
+
+# Local .env backups (contain secrets — never commit)
+.env.bak*

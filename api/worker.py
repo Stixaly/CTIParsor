@@ -176,12 +176,45 @@ def _build_doc_context(
     return "\n".join(lines)
 
 
+def _ttp_ids_covered(llm_result) -> tuple[set[str], set[str]]:
+    """Return (ids, parents) already covered by the normalized LLM TTP set.
+
+    ``llm_result.ttps`` is Stage 3c's output: semantic findings are *already*
+    merged into it and parent techniques already subsumed.  Re-persisting the
+    raw Stage 2c entities on top therefore double-counts every technique both
+    stages found — which is why the review UI showed 65 TTPs for a report whose
+    bundle contained 51.
+
+    ids     — canonical ATT&CK ids present (upper-case)
+    parents — parents of any sub-technique present (T1027.004 → T1027), so the
+              less-precise parent is not reintroduced alongside its child.
+    """
+    ids = {
+        t.mitre_id.upper()
+        for t in getattr(llm_result, "ttps", []) or []
+        if getattr(t, "mitre_id", None)
+    }
+    parents = {i.split(".")[0] for i in ids if "." in i}
+    return ids, parents
+
+
 def _save_entities(job_id: str, raw_entities, llm_result) -> None:
     """Persist Stage 2 IoCs, Stage 2b gazetteer, and Stage 3 LLM entities to the DB."""
+    _covered_ids, _covered_parents = _ttp_ids_covered(llm_result)
+
     rows_ioc = []
     for e in raw_entities:
         # Use the source field from RawEntity (ioc | gazetteer) so provenance is tracked
         source = getattr(e, "source", "ioc")
+
+        # Skip a raw TTP the normalized LLM set already covers (same id, or the
+        # parent of a sub-technique it contains) so the review UI matches the
+        # bundle instead of listing the same technique once per source.
+        if e.entity_type.value == "ttp" and getattr(e, "mitre_id", None):
+            _mid = e.mitre_id.upper()
+            if _mid in _covered_ids or _mid in _covered_parents:
+                continue
+
         rows_ioc.append((
             str(uuid4()), job_id,
             e.value, e.entity_type.value,

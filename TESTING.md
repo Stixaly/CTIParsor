@@ -123,7 +123,7 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 
 ---
 
-## 3. Current coverage map (308 tests)
+## 3. Current coverage map (324 tests)
 
 | Layer | File | ~Tests | Covers |
 |---|---|---:|---|
@@ -134,6 +134,7 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 | **TTP precision** | `test_ttp_precision.py` | 19 | Stage 2c threshold resolution (per-model/manifest/env), medium-semantic-doesn't-override-LLM, parent/sub-technique subsumption, Stage 3f TTP verification (drop/keep/corroborate) |
 | **ATE + REL benchmarks** | `eval_pipeline.py` | — | regex/semantic ATE F1 + NER F1 fixtures, adversarial precision (high-conf FP = 0); REL edge-level completion precision; semantic cases auto-skip under `SKIP_HEAVY_MODELS=1` |
 | STIX mapping | `test_stage4.py` | 33 | SDO/SCO/SRO build, policy pins, IoC coverage, external-ref routing |
+| **TTP volume controls** | `test_ttp_volume_controls.py` | 16 | cross-source dedup + parent subsumption at persistence, Stage 3f corroboration floor (medium match must not waive verification), semantic-corpus taxonomy filter (CAPEC excluded by default, `all` restores) |
 | **Graph completion** | `test_stage4b_completion.py` | 17 | transitive composition + non-suggested skip, cap, alias merge/rewire, IOC guard, ATT&CK grounding (hit/miss/disabled), semantic alias (fake model + no-model), pins beat inference, end-to-end bundle |
 | **Long-distance** | `test_stage4c_long_distance.py` | 10 | quote required, direction swap, invalid verb/empty response rejected, island connection + `x_evidence_text`, provider/policy gating |
 | Validation/export | `test_stage5.py` | 8 | bundle validity, file write, nested dirs |
