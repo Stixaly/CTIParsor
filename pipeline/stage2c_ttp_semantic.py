@@ -135,6 +135,25 @@ def high_confidence_threshold() -> float:
     not block or override the LLM)."""
     return _thresholds()[0]
 
+
+# Taxonomies the semantic matcher is allowed to return, as domain values found in
+# mitre_embeddings_meta.json.  ATT&CK-only by default: CAPEC describes abstract
+# attack patterns rather than observed adversary behaviour, so its entries mostly
+# shadow the ATT&CK technique that belongs in the bundle.
+_DEFAULT_SEMANTIC_DOMAINS = "enterprise-attack,mobile-attack,ics-attack"
+
+
+def _enabled_domains() -> set[str] | None:
+    """Domains the semantic corpus is restricted to, or None for no restriction.
+
+    ``TTP_SEMANTIC_DOMAINS=all`` (or an empty value) disables filtering and
+    restores the full corpus including CAPEC.
+    """
+    raw = os.getenv("TTP_SEMANTIC_DOMAINS", _DEFAULT_SEMANTIC_DOMAINS).strip()
+    if not raw or raw.lower() == "all":
+        return None
+    return {d.strip().lower() for d in raw.split(",") if d.strip()}
+
 # Maximum number of TTP-keyword-filtered candidate sentences to embed.
 # The cosine similarity matrix is O(n × 1531 techniques); at 800 candidates
 # that's 1.2 M float operations — ~4× slower than the 200-candidate cap with
@@ -272,10 +291,35 @@ def _load_corpus() -> tuple | None:
         import numpy as np
         embeddings = np.load(str(_EMB_PATH))
         meta = json.loads(_META_PATH.read_text(encoding="utf-8"))
-        return embeddings, meta
     except Exception as e:
         logger.error(f"Could not load embedding cache: {e}")
         return None
+
+    # ── Restrict the corpus to the enabled taxonomies ───────────────────────
+    # The cache mixes ATT&CK (Enterprise/Mobile/ICS) with CAPEC, and CAPEC is
+    # ~40% of it.  CAPEC catalogues *abstract* attack patterns while a CTI report
+    # describes *observed adversary behaviour*, so a CAPEC row usually competes
+    # with — and sometimes outranks — the ATT&CK technique that actually belongs
+    # in the bundle, producing near-duplicate pairs (CAPEC-163 "Spear Phishing"
+    # beside T1566.001 "Spearphishing Attachment").  ATT&CK-only by default;
+    # set TTP_SEMANTIC_DOMAINS to re-enable CAPEC or narrow further.
+    enabled = _enabled_domains()
+    if enabled is not None:
+        total = len(meta)
+        keep = [i for i, m in enumerate(meta) if m.get("domain") in enabled]
+        if not keep:
+            logger.warning(
+                "TTP_SEMANTIC_DOMAINS=%s matched no corpus entries — using the "
+                "full corpus.", ",".join(sorted(enabled)),
+            )
+        elif len(keep) < total:
+            embeddings = embeddings[keep]
+            meta = [meta[i] for i in keep]
+            logger.info(
+                "[Stage 2c] semantic corpus restricted to %s (%d of %d entries)",
+                ",".join(sorted(enabled)), len(meta), total,
+            )
+    return embeddings, meta
 
 
 # ── Public API ────────────────────────────────────────────────────────────────

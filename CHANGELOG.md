@@ -19,6 +19,30 @@ sections group by theme rather than strict semver.
   it already emitted only `attack-pattern`.
 
 ### Fixed
+- **Runaway TTP counts on reports with no explicit T-IDs** — a 12-page report
+  produced 65 TTP rows in the review UI against 51 attack-patterns in its bundle.
+  Four compounding defects, each fixed and pinned by tests
+  (`tests/test_ttp_volume_controls.py`):
+  **(1)** `_save_entities` persisted the Stage 2c row *and* the Stage 3c-normalized
+  LLM row for the same technique, so the UI double-counted every technique both
+  stages found — it now skips a raw TTP the normalized set already covers, making
+  the UI count match the bundle; **(2)** the same path reintroduced a parent
+  technique next to its sub-technique when the two came from different stages
+  (`T1027` beside `T1027.004`) — parents of a present sub-technique are now
+  subsumed across sources; **(3)** Stage 3f's "already corroborated, skip
+  verification" exemption ignored confidence despite its docstring promising
+  *high*-confidence — every medium semantic match (≥ 0.48, the nearest-but-wrong
+  tier the Phase A margin gate suppresses) was waiving quote-verification for its
+  LLM twin. On the sample report 13 of 16 corroborators sat below the 0.62
+  cut-point, waving through techniques with zero textual support (`T0873`
+  "Project File Infection" at 0.52, in a report containing no ICS content).
+  Extracted as `stage3_llm.corroborated_ttp_ids()` and floored at the model's
+  high threshold; **(4)** CAPEC is ~40% of the embedding corpus (615/1533) and
+  shadowed the ATT&CK technique that belonged in the bundle — the semantic corpus
+  is now ATT&CK-only by default (`TTP_SEMANTIC_DOMAINS`, set to `all` to restore
+  CAPEC), which also makes the *correct* technique surface instead
+  (`CAPEC-648 Collect Data from Screen Capture` → `T1113 Screen Capture`).
+  `ENABLE_TTP_VERIFICATION` now defaults to `true` in `.env.example`.
 - **Wrapped hashes now extracted** — MD5/SHA1/SHA256 values that a PDF wraps
   across 1, 2 or 3 lines inside a narrow IOC-table cell were silently dropped
   (the strict contiguous-hex regex couldn't span the newlines). Stage 2 now

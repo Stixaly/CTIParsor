@@ -815,6 +815,32 @@ def _try_extract_complete_items(text: str) -> dict | None:
 
 # --- Public API ---
 
+def corroborated_ttp_ids(semantic_ttp_entities) -> set[str]:
+    """MITRE IDs a semantic match corroborates strongly enough to waive Stage 3f.
+
+    Only a **high-confidence** match (cosine ≥ the model's high cut-point) may
+    exempt an LLM technique from quote-verification.  Without this floor every
+    *medium* match (≥ 0.48 — precisely the nearest-but-wrong tier ADR-0011
+    Phase A added the margin gate to suppress) whitelists its LLM twin, so the
+    weakest signal in the pipeline silently grants the strongest claim a free
+    pass.  Measured on a real report: 13 of 16 corroborators sat below the 0.62
+    cut-point, waving through techniques with no textual support at all
+    (e.g. T0873 "Project File Infection" at 0.52, in a report with no ICS
+    content whatsoever).
+    """
+    try:
+        from pipeline.stage2c_ttp_semantic import high_confidence_threshold
+        floor = high_confidence_threshold()
+    except Exception:
+        floor = 0.62
+    return {
+        e.mitre_id.upper()
+        for e in (semantic_ttp_entities or [])
+        if getattr(e, "mitre_id", None)
+        and float(getattr(e, "confidence", 0.0) or 0.0) >= floor
+    }
+
+
 def enrich_chunk(
     text: str,
     detected_entities: list[RawEntity],
@@ -1007,11 +1033,7 @@ def enrich_chunk(
         from pipeline.stage3f_ttp_verify import verify_enabled as ttp_verify_enabled
         from pipeline.stage3f_ttp_verify import verify_ttps
         if ttp_verify_enabled():
-            corroborated_ids = {
-                e.mitre_id.upper()
-                for e in (semantic_ttp_entities or [])
-                if getattr(e, "mitre_id", None)
-            }
+            corroborated_ids = corroborated_ttp_ids(semantic_ttp_entities)
 
             def _ttp_verify_call(s, u):
                 return _call_llm(s, u, provider=provider)
