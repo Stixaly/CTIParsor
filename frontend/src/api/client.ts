@@ -1,4 +1,4 @@
-import type { Job, Entity, Relationship, StixBundle, CoverageResult, CoverageRule, CoverageReportRules, DetectionCorpus, CorpusConfig } from '../types'
+import type { Job, Entity, Relationship, StixBundle, CoverageResult, CoverageRule, CoverageReportRules, DetectionProposals, DetectionCorpus, CorpusConfig } from '../types'
 
 const BASE = '/api'
 
@@ -103,9 +103,13 @@ export const fetchCoverage = (jobId: string) =>
   req<CoverageResult>(`/jobs/${jobId}/coverage`)
 export const fetchCoverageRules = (jobId: string, techniqueId: string) =>
   req<{ technique_id: string; rules: CoverageRule[] }>(`/jobs/${jobId}/coverage/${techniqueId}/rules`)
-/** All Sigma rules linkable to a report, grouped by technique — backs the Review "Detections" tab. */
+/** All Sigma rules linkable to a report, grouped by technique — the unranked tag join. */
 export const fetchCoverageReportRules = (jobId: string) =>
   req<CoverageReportRules>(`/jobs/${jobId}/coverage/rules`)
+/** Rules ranked by the report's own observables, with match evidence (ADR-0014) —
+ *  backs the Review "Detections" tab. */
+export const fetchDetectionProposals = (jobId: string, limit = 200) =>
+  req<DetectionProposals>(`/jobs/${jobId}/detections/proposals?limit=${limit}`)
 /** URL that streams a ZIP of every detected Sigma rule (bodies) for a report. */
 export const detectionsExportUrl = (jobId: string) =>
   `/api/jobs/${jobId}/detections/export`

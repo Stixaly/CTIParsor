@@ -378,6 +378,32 @@ export interface Range {
 
 const _isAlnum = (c: string): boolean => c >= '0' && c <= '9' || c >= 'a' && c <= 'z'
 
+const _WS = /\s/
+
+/**
+ * Split a match into the ranges of its non-whitespace runs, offset by `base`.
+ *
+ * A hash the layout wrapped across table-cell lines matches as one span that
+ * includes the line breaks.  Highlighting that span as a single range paints
+ * the whitespace too: in the text view the mark runs to the right margin on
+ * every wrapped line, and in the PDF view each whitespace text item between the
+ * fragments becomes its own full-width rectangle over the neighbouring cells.
+ * Highlighting each hex run separately keeps the mark on the characters that
+ * actually belong to the hash.
+ */
+function _nonSpaceRuns(match: string, base: number): Array<{ start: number; end: number }> {
+  const runs: Array<{ start: number; end: number }> = []
+  let i = 0
+  while (i < match.length) {
+    while (i < match.length && _WS.test(match[i])) i++
+    if (i >= match.length) break
+    const start = i
+    while (i < match.length && !_WS.test(match[i])) i++
+    runs.push({ start: base + start, end: base + i })
+  }
+  return runs
+}
+
 /**
  * Whole-token boundary check.  A candidate that starts/ends with an
  * alphanumeric character must not be glued to another alphanumeric character in
@@ -417,8 +443,14 @@ export function buildRanges(text: string, entities: Array<{ id: string; value: s
           let overlap = false
           for (let i = idx; i < end; i++) if (used[i]) { overlap = true; break }
           if (!overlap) {
-            ranges.push({ start: idx, end, entityId: e.id })
-            used.fill(1, idx, end)
+            // One range per hex run — never a single range across the line
+            // breaks, which would blanket the whitespace and the cells beside
+            // it.  All runs carry the same entity id, so the occurrence stays
+            // one clickable entity across its fragments.
+            for (const run of _nonSpaceRuns(m[0], idx)) {
+              ranges.push({ start: run.start, end: run.end, entityId: e.id })
+              used.fill(1, run.start, run.end)
+            }
           }
         }
       }

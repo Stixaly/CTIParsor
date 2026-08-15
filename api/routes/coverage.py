@@ -15,6 +15,7 @@ from fastapi.responses import Response
 
 from api.db import get_conn
 from pipeline.detection.coverage import compute_for_job, rule_bodies_for_job, rules_for_job
+from pipeline.detection.relevance import propose_for_job
 from pipeline.detection.store import corpus_counts, rules_for_technique
 
 router = APIRouter(prefix="/api", tags=["coverage"])
@@ -39,6 +40,23 @@ def get_coverage_report_rules(job_id: str):
         if not conn.execute("SELECT id FROM jobs WHERE id=?", (job_id,)).fetchone():
             raise HTTPException(404, "Job not found")
         return rules_for_job(conn, job_id)
+
+
+@router.get("/jobs/{job_id}/detections/proposals")
+def get_detection_proposals(job_id: str, limit: int = 200):
+    """Rules ranked by what the report actually contains (ADR-0014).
+
+    Unlike `/coverage/rules` — which returns every rule sharing an ATT&CK tag —
+    this scores each candidate on its overlap with the report's observables
+    (hashes, domains, binaries, paths, registry keys, CVEs) and on platform
+    compatibility, and returns the evidence behind each rank. Metadata only, no
+    rule bodies.
+    """
+    limit = max(1, min(limit, 1000))
+    with get_conn() as conn:
+        if not conn.execute("SELECT id FROM jobs WHERE id=?", (job_id,)).fetchone():
+            raise HTTPException(404, "Job not found")
+        return propose_for_job(conn, job_id, limit=limit)
 
 
 @router.get("/jobs/{job_id}/coverage/{technique_id}/rules")

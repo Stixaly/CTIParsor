@@ -88,6 +88,52 @@ export interface CoverageReportRules {
   rule_total: number
 }
 
+// ── Observable-driven rule proposals (ADR-0014) ─────────────────────────────
+export type ProposalTier = 'direct' | 'behavioural' | 'weak'
+
+/** Why a rule was proposed: a report observable that matched a rule field. */
+export interface ProposalMatch {
+  obs_class: string   // report side: hash | domain | ip | file | image | registry | name | cve …
+  field: string       // rule side: the atom class, or "title" for a text match
+  value: string       // normalized value that matched
+  display: string     // the report's original spelling
+  exact: boolean      // false = substring match
+  weight: number
+}
+
+export interface RuleProposal {
+  id: string
+  corpus: string
+  title: string
+  severity: string
+  license: string
+  source_ref: string
+  platform: string
+  score: number
+  tier: ProposalTier
+  techniques: string[]
+  matches: ProposalMatch[]
+}
+
+export interface ProposalObservable {
+  class: string
+  value: string
+  display: string
+  entity_type: string
+}
+
+export interface DetectionProposals {
+  job_id: string
+  platform: string             // windows | linux | macos | multi | ""
+  atom_index_built: boolean
+  observables: ProposalObservable[]
+  observables_total: number
+  candidate_total: number
+  counts: Record<ProposalTier, number>
+  returned: number
+  proposals: RuleProposal[]
+}
+
 export interface DetectionCorpus {
   corpus: string
   license: string

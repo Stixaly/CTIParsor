@@ -31,6 +31,9 @@ class DetectionRule(BaseModel):
     technique_ids: list[str] = Field(default_factory=list)       # ["T1059.001", "T1027", ...]
     tactic_shortnames: list[str] = Field(default_factory=list)   # ["execution", ...]
     data_sources: list[str] = Field(default_factory=list)        # logsource-derived telemetry
+    platform: str = ""                                           # windows|linux|macos|"" (ADR-0014)
+    # Literal values the rule looks for, as (atom_class, value) — ADR-0014.
+    atoms: list[tuple[str, str]] = Field(default_factory=list)
     severity: Severity = Severity.UNKNOWN
     license: str = "unknown"                             # carried from the corpus registry entry
     source_ref: str = ""                                 # file path / URL (provenance)

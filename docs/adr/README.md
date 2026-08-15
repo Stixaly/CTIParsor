@@ -16,6 +16,7 @@ choice, and the consequences. They're append-only — supersede rather than rewr
 | [0011](0011-ttp-extraction-precision.md) | TTP extraction precision (thresholds, margin gate, TTP self-verify, subsumption) | Accepted |
 | [0012](0012-hallucination-measurement-and-canonicalization.md) | Hallucination measurement, entity canonicalisation & relationship precision | Accepted |
 | [0013](0013-graph-completion.md) | STIX graph completion (alias fallback, ATT&CK grounding, transitive, long-distance) | Accepted |
+| [0014](0014-observable-driven-detection-proposals.md) | Observable-driven detection proposals (rule atom index, IDF relevance, platform) | Accepted |
 
 **Numbering notes**
 - `0001` and `0003` are unused gaps (early informal decisions never filed).
@@ -37,6 +38,7 @@ choice, and the consequences. They're append-only — supersede rather than rewr
           │               ▲   implemented by
  canonical names         └── 0006 multi-corpus rules ── managed by ── 0007 settings panel
  feed node identity          ▲   extended by
-          │                  └── 0010 default corpora + dedup
+          │                  ├── 0010 default corpora + dedup
+          │                  └── 0014 observable-driven proposals ◄── consumes IoCs (0005)
           └── 0013 graph completion (denser edges, same precision gate)
 ```

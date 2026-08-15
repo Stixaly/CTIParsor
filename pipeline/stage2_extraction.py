@@ -100,20 +100,18 @@ _CVE_DASH_PATTERN = re.compile(f"[{_CVE_DASH}]")
 
 # MITRE ATT&CK IDs — technique (T####[.###]) and tactic (TA####).
 _MITRE_TTP_PATTERN = re.compile(r"\bTA?\d{4}(?:\.\d{3})?\b")
-_HASH_PATTERN = re.compile(r"\b([0-9a-fA-F]{64}|[0-9a-fA-F]{40}|[0-9a-fA-F]{32})\b")
 
-# Wrapped-hash pattern — a run of hex fragments that may be split across
-# whitespace / line breaks.  IOC tables in PDFs frequently wrap a single
-# MD5/SHA1/SHA256 across 1, 2 or 3 lines inside a narrow cell, e.g.
+# Hash-block pattern — a run of hex fragments separated only by whitespace or
+# line breaks.  A plain contiguous-hex pattern can't read IOC tables, which wrap
+# a single MD5/SHA1/SHA256 across 1, 2 or 3 lines inside a narrow cell, e.g.
 #     2ab684d93c1553fad87041b4de
 #     a97188a97e78589deee2a7bacf
 #     f905564f3a35
-# which the strict _HASH_PATTERN can't match because the newlines break the
-# contiguous hex run.  We capture the whole block, strip the internal
-# whitespace, and accept it only if the joined length is exactly 32/40/64.
-# The surrounding non-hex text ("File Hash", filenames, descriptions) reliably
-# separates one row's hash from the next, so a block is almost always a single
-# hash.  (?<![...]) / (?![...]) keep us from slicing hex out of a longer token.
+# so we capture the whole block and let _extract_hashes_regex decide whether the
+# fragments are one wrapped hash or several stacked ones.  The surrounding
+# non-hex text ("File Hash", filenames, descriptions) separates one table row
+# from the next.  (?<![...]) / (?![...]) keep us from slicing hex out of a
+# longer token.
 _HASH_BLOCK_PATTERN = re.compile(
     r"(?<![0-9a-zA-Z])"
     r"[0-9a-fA-F]{2,}(?:\s+[0-9a-fA-F]{2,})*"
@@ -298,19 +296,60 @@ def extract_entities(text: str) -> list[RawEntity]:
 
 _HASH_TYPE_BY_LEN = {64: EntityType.SHA256, 40: EntityType.SHA1, 32: EntityType.MD5}
 
+# Algorithm labels that precede a hash column/cell in an IOC table ("SHA-256",
+# "Hash (md5)", "SHA 1"…).  Used only to break genuinely ambiguous blocks, where
+# the fragments read equally well as one wrapped hash or as several stacked ones.
+_HASH_LABEL_PATTERNS = (
+    (64, re.compile(r"sha[\s\-_]*256", re.IGNORECASE)),
+    (40, re.compile(r"sha[\s\-_]*1(?!\d)", re.IGNORECASE)),
+    (32, re.compile(r"md[\s\-_]*5(?!\d)", re.IGNORECASE)),
+)
+# How far back to look for that label — one or two table rows.
+_HASH_LABEL_WINDOW = 200
+
+
+def _labelled_hash_len(text: str, block_start: int) -> int | None:
+    """
+    Length (32/40/64) of the hash algorithm named closest before `block_start`,
+    or None when the preceding text names no algorithm.
+    """
+    window = text[max(0, block_start - _HASH_LABEL_WINDOW):block_start]
+    best_pos, best_len = -1, None
+    for hash_len, pattern in _HASH_LABEL_PATTERNS:
+        last = None
+        for last in pattern.finditer(window):
+            pass
+        if last is not None and last.start() > best_pos:
+            best_pos, best_len = last.start(), hash_len
+    return best_len
+
 
 def _extract_hashes_regex(text: str) -> list[RawEntity]:
     """
     Extract MD5, SHA1 and SHA256 hashes — including hashes that a PDF has wrapped
     across multiple lines inside a table cell.
 
-    Strategy per hex block (a run of hex fragments joined by whitespace/newlines):
-      • strip the internal whitespace; if the joined length is exactly 32/40/64,
-        it's a single (possibly wrapped) hash → emit it;
-      • otherwise the block is ambiguous (e.g. two full hashes stacked with no
-        separator, or hex-looking prose) → fall back to the strict contiguous
-        matcher so each already-complete hash is still recovered and no spurious
-        hash is invented by joining unrelated fragments.
+    A "block" is a run of hex fragments separated only by whitespace/newlines.
+    Such a block has two possible readings, and picking the wrong one hands the
+    analyst a hash that appears nowhere in the report:
+
+      • a *wrap* — one hash the layout broke across lines
+        (26 + 26 + 12 → one SHA-256);
+      • a *stack* — several complete hashes in one table column with no other
+        text between them (32 + 32 → two MD5s, NOT one SHA-256).
+
+    Rules, in order:
+      1. every fragment is itself a complete hash length → stack; emit each one.
+         Joining them would fabricate a hash (the common IOC-table failure).
+      2. otherwise, if the joined length is 32/40/64 → wrap; emit the join.
+         At least one fragment can't stand alone, so the join is the only
+         reading that yields a hash at all.
+      3. otherwise → emit whichever fragments are complete hashes, nothing else.
+
+    A hash-algorithm label in the preceding ~200 characters ("SHA-256", "MD5")
+    overrides rules 1 and 2 when it contradicts them — that is the only signal
+    that separates a SHA-256 wrapped at exactly 32 characters from two stacked
+    MD5s.
     """
     results: list[RawEntity] = []
     seen_values: set[str] = set()
@@ -327,14 +366,35 @@ def _extract_hashes_regex(text: str) -> list[RawEntity]:
 
     for m in _HASH_BLOCK_PATTERN.finditer(text):
         block = m.group(0)
-        joined = re.sub(r"\s+", "", block)
-        if len(joined) in _HASH_TYPE_BY_LEN:
+        fragments = block.split()
+        if len(fragments) == 1:
+            emit(block)
+            continue
+
+        joined = "".join(fragments)
+        complete = [f for f in fragments if len(f) in _HASH_TYPE_BY_LEN]
+        join_is_hash = len(joined) in _HASH_TYPE_BY_LEN
+        label_len = _labelled_hash_len(text, m.start())
+
+        if len(complete) == len(fragments):
+            # Stack — unless the column is explicitly labelled with the joined
+            # algorithm (a SHA-256 that wrapped at exactly 32 characters).
+            if join_is_hash and label_len == len(joined):
+                emit(joined)
+            else:
+                for f in fragments:
+                    emit(f)
+        elif join_is_hash and not (
+            # A label naming a different algorithm that one fragment already
+            # satisfies means the fragments are real and the join is noise.
+            label_len is not None
+            and label_len != len(joined)
+            and any(len(f) == label_len for f in complete)
+        ):
             emit(joined)
-        elif len(joined) != len(block):
-            # multi-fragment block whose total isn't a clean hash length — only
-            # trust fragments that are each a complete contiguous hash.
-            for hm in _HASH_PATTERN.finditer(block):
-                emit(hm.group(1))
+        else:
+            for f in complete:
+                emit(f)
 
     return results
 

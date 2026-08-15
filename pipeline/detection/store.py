@@ -24,34 +24,181 @@ def replace_corpus_rules(conn: sqlite3.Connection, corpus: str, rules: Iterable[
     ).fetchall()]
     if old:
         conn.executemany("DELETE FROM rule_techniques WHERE rule_id=?", [(i,) for i in old])
+        conn.executemany("DELETE FROM rule_atoms WHERE rule_id=?", [(i,) for i in old])
         conn.execute("DELETE FROM detection_rules WHERE corpus=?", (corpus,))
 
-    rule_rows, tech_rows = [], []
+    rule_rows, tech_rows, atom_rows = [], [], []
     for r in rules:
         sev = getattr(r.severity, "value", r.severity)
         rule_rows.append((
             r.id, r.corpus, _native_key(r.id), r.format, r.title, r.description,
             sev, r.license, r.source_ref, r.content_hash, r.dedup_key,
-            json.dumps(r.data_sources), r.raw,
+            json.dumps(r.data_sources), r.platform, r.raw,
         ))
         for t in r.technique_ids:
             tech_rows.append((r.id, t.upper()))
+        for cls, value in r.atoms:
+            atom_rows.append((r.id, cls, value))
 
     # is_canonical defaults to 1; the ADR-0010 dedup pass (dedupe_store) runs after
     # the full rebuild and demotes duplicates. Newly-inserted rows start canonical.
     conn.executemany(
         "INSERT OR REPLACE INTO detection_rules "
         "(id,corpus,native_key,format,title,description,severity,license,"
-        "source_ref,content_hash,dedup_key,data_sources,raw,is_canonical) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1)",
+        "source_ref,content_hash,dedup_key,data_sources,platform,raw,is_canonical) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)",
         rule_rows,
     )
     conn.executemany(
         "INSERT OR IGNORE INTO rule_techniques (rule_id, technique_id) VALUES (?,?)",
         tech_rows,
     )
+    conn.executemany(
+        "INSERT OR IGNORE INTO rule_atoms (rule_id, atom_class, value) VALUES (?,?,?)",
+        atom_rows,
+    )
     conn.commit()
     return len(rule_rows)
+
+
+# ── Atom index queries (ADR-0014) ────────────────────────────────────────────
+
+def replace_rule_atoms(conn: sqlite3.Connection, rows: Iterable[tuple[str, str, str]]) -> int:
+    """Insert (rule_id, atom_class, value) atoms, replacing each rule's existing set.
+
+    Used by the offline backfill (scripts/build_rule_atoms.py), which re-derives
+    atoms from `detection_rules.raw` so an already-built store gains the index
+    without re-cloning any corpus.
+    """
+    rows = list(rows)
+    if not rows:
+        return 0
+    conn.executemany(
+        "DELETE FROM rule_atoms WHERE rule_id=?",
+        [(rid,) for rid in dict.fromkeys(r[0] for r in rows)],
+    )
+    conn.executemany(
+        "INSERT OR IGNORE INTO rule_atoms (rule_id, atom_class, value) VALUES (?,?,?)",
+        rows,
+    )
+    conn.commit()
+    return len(rows)
+
+
+def atom_hits(
+    conn: sqlite3.Connection, values: Iterable[str], *, chunk: int = 400
+) -> list[tuple[str, str, str]]:
+    """(rule_id, atom_class, value) for every *canonical* rule holding one of
+    these exact atom values.
+
+    Values are chunked: a report can carry hundreds of observables and SQLite
+    caps a statement at 999 bound parameters.
+
+    The canonical filter is an EXISTS, not a JOIN, on purpose: given a JOIN the
+    planner drives from `idx_detection_canon` — a near-constant column, so it
+    scans all 11k rules and probes atoms by rule_id, taking ~2.7s. EXISTS leaves
+    `idx_rule_atoms_value` as the only entry point (~8ms).
+    """
+    vals = sorted({v for v in values if v})
+    if not vals:
+        return []
+    out: list[tuple[str, str, str]] = []
+    for i in range(0, len(vals), chunk):
+        batch = vals[i:i + chunk]
+        placeholders = ",".join("?" * len(batch))
+        out.extend(conn.execute(
+            f"SELECT a.rule_id, a.atom_class, a.value FROM rule_atoms a "
+            f"WHERE a.value IN ({placeholders}) AND EXISTS ("
+            f"  SELECT 1 FROM detection_rules d WHERE d.id = a.rule_id AND d.is_canonical=1)",
+            batch,
+        ).fetchall())
+    return [(r[0], r[1], r[2]) for r in out]
+
+
+def atom_document_frequency(
+    conn: sqlite3.Connection, values: Iterable[str], *, chunk: int = 400
+) -> dict[str, int]:
+    """How many canonical rules hold each value — the `df` of the IDF weight.
+
+    A value present in thousands of rules (`cmd.exe`) says nothing about a
+    specific report; one present in none-but-this-rule says almost everything.
+    """
+    vals = sorted({v for v in values if v})
+    if not vals:
+        return {}
+    df: dict[str, int] = {}
+    for i in range(0, len(vals), chunk):
+        batch = vals[i:i + chunk]
+        placeholders = ",".join("?" * len(batch))
+        for value, n in conn.execute(
+            f"SELECT a.value, COUNT(DISTINCT a.rule_id) FROM rule_atoms a "
+            f"WHERE a.value IN ({placeholders}) AND EXISTS ("
+            f"  SELECT 1 FROM detection_rules d WHERE d.id = a.rule_id AND d.is_canonical=1) "
+            f"GROUP BY a.value",
+            batch,
+        ).fetchall():
+            df[value] = n
+    return df
+
+
+def canonical_rule_count(conn: sqlite3.Connection) -> int:
+    """Total canonical rules in the store — the `N` of the IDF weight."""
+    return int(conn.execute(
+        "SELECT COUNT(*) FROM detection_rules WHERE is_canonical=1"
+    ).fetchone()[0])
+
+
+def atom_index_size(conn: sqlite3.Connection) -> int:
+    """Number of rows in the atom index (0 = never built; proposals degrade to
+    technique-only ranking)."""
+    try:
+        return int(conn.execute("SELECT COUNT(*) FROM rule_atoms").fetchone()[0])
+    except sqlite3.OperationalError:
+        return 0   # table absent on a database older than the ADR-0014 migration
+
+
+def rule_details(conn: sqlite3.Connection, rule_ids: Iterable[str]) -> dict[str, dict]:
+    """Metadata for the given rules, keyed by id (no raw bodies).
+
+    One flat query — the proposal ranking touches hundreds of rules and cannot
+    afford `rules_for_technique`'s per-rule `also_in` sub-query.
+    """
+    ids = sorted({i for i in rule_ids if i})
+    if not ids:
+        return {}
+    out: dict[str, dict] = {}
+    for i in range(0, len(ids), 400):
+        batch = ids[i:i + 400]
+        placeholders = ",".join("?" * len(batch))
+        for r in conn.execute(
+            f"SELECT id, corpus, title, description, severity, license, source_ref, platform "
+            f"FROM detection_rules WHERE id IN ({placeholders})",
+            batch,
+        ).fetchall():
+            out[r[0]] = {
+                "id": r[0], "corpus": r[1], "title": r[2], "description": r[3],
+                "severity": r[4], "license": r[5], "source_ref": r[6],
+                "platform": r[7] or "",
+            }
+    return out
+
+
+def techniques_for_rules(conn: sqlite3.Connection, rule_ids: Iterable[str]) -> dict[str, list[str]]:
+    """ATT&CK technique tags per rule id, for the given rules."""
+    ids = sorted({i for i in rule_ids if i})
+    if not ids:
+        return {}
+    out: dict[str, list[str]] = {}
+    for i in range(0, len(ids), 400):
+        batch = ids[i:i + 400]
+        placeholders = ",".join("?" * len(batch))
+        for rid, tech in conn.execute(
+            f"SELECT rule_id, technique_id FROM rule_techniques "
+            f"WHERE rule_id IN ({placeholders})",
+            batch,
+        ).fetchall():
+            out.setdefault(rid, []).append(tech)
+    return {k: sorted(v) for k, v in out.items()}
 
 
 def rule_refs_for_techniques(conn: sqlite3.Connection, technique_ids: Iterable[str]) -> list[tuple[str, str, str]]:
@@ -106,17 +253,20 @@ def canonical_rule_ids_for_techniques(
     techniques, in a single indexed query.
 
     Unlike rules_for_technique (which computes per-rule `also_in` provenance via
-    an N+1 subquery), this is a flat join — used by the bulk Sigma export where
-    only the rule ids matter, so building the archive stays fast even when a
-    report's techniques fan out to thousands of rules."""
+    an N+1 subquery), this is a flat lookup — used by the bulk Sigma export and
+    by the ADR-0014 proposal ranking, where only the rule ids matter.
+
+    The canonical filter is an EXISTS for the same reason as `atom_hits`: as a
+    JOIN, the planner enters through `idx_detection_canon` and scans every rule
+    (~1s); as an EXISTS it drives off the technique index (~10ms)."""
     ids = sorted({t.upper() for t in technique_ids})
     if not ids:
         return []
     placeholders = ",".join("?" * len(ids))
     rows = conn.execute(
-        f"SELECT rt.technique_id, rt.rule_id "
-        f"FROM rule_techniques rt JOIN detection_rules d ON d.id = rt.rule_id "
-        f"WHERE rt.technique_id IN ({placeholders}) AND d.is_canonical=1",
+        f"SELECT rt.technique_id, rt.rule_id FROM rule_techniques rt "
+        f"WHERE rt.technique_id IN ({placeholders}) AND EXISTS ("
+        f"  SELECT 1 FROM detection_rules d WHERE d.id = rt.rule_id AND d.is_canonical=1)",
         ids,
     ).fetchall()
     return [(r[0], r[1]) for r in rows]

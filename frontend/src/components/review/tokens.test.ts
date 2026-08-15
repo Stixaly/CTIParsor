@@ -73,10 +73,43 @@ describe('buildRanges', () => {
     const wrapped = `${hash.slice(0, 26)}\n${hash.slice(26, 52)}\n${hash.slice(52)}`
     const text = `IOC table\n${wrapped}\nmeshagent.exe`
     const ranges = buildRanges(text, [ent('1', hash, 'sha256')])
-    expect(ranges).toHaveLength(1)
-    // The matched span reassembles to the stored hash once whitespace is stripped.
-    const matched = text.slice(ranges[0].start, ranges[0].end).replace(/\s+/g, '')
-    expect(matched).toBe(hash)
+    // One range per wrapped line, all pointing at the same entity.
+    expect(ranges).toHaveLength(3)
+    expect(new Set(ranges.map(r => r.entityId))).toEqual(new Set(['1']))
+    // The ranges together reassemble to the stored hash.
+    expect(ranges.map(r => text.slice(r.start, r.end)).join('')).toBe(hash)
+  })
+
+  it('does not extend a wrapped-hash highlight over the line breaks', () => {
+    // A single range spanning the wrap paints the trailing whitespace of every
+    // line — in the reader it runs to the right margin, and in the PDF view it
+    // covers the table cells beside the hash.
+    const hash = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+    const wrapped = `${hash.slice(0, 26)}\n${hash.slice(26, 52)}\n${hash.slice(52)}`
+    const text = `IOC table\n${wrapped}\nmeshagent.exe`
+    const ranges = buildRanges(text, [ent('1', hash, 'sha256')])
+    for (const r of ranges) {
+      expect(text.slice(r.start, r.end)).not.toMatch(/\s/)
+    }
+  })
+
+  it('keeps the first range at the start of a wrapped hash (scroll target)', () => {
+    const hash = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+    const text = `IOC table\n${hash.slice(0, 40)}\n${hash.slice(40)}\nmeshagent.exe`
+    const ranges = buildRanges(text, [ent('1', hash, 'sha256')])
+    expect(text.slice(ranges[0].start, ranges[0].end)).toBe(hash.slice(0, 40))
+  })
+
+  it('highlights stacked hashes in a column as separate entities', () => {
+    // Two MD5s in one table column: each must light up on its own row, with no
+    // highlight bridging the gap between them.
+    const a = 'd41d8cd98f00b204e9800998ecf8427e'
+    const b = '5d41402abc4b2a76b9719d911017c592'
+    const text = `File Hash\n${a}\n${b}\n`
+    const ranges = buildRanges(text, [ent('1', a, 'md5'), ent('2', b, 'md5')])
+    expect(ranges).toHaveLength(2)
+    expect(text.slice(ranges[0].start, ranges[0].end)).toBe(a)
+    expect(text.slice(ranges[1].start, ranges[1].end)).toBe(b)
   })
 
   it('does not match a hash that is not present in the text', () => {

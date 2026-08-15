@@ -6,6 +6,40 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Added
+- **Observable-driven detection proposals** (ADR-0014) — the Review "Detections"
+  tab ranked rules by ATT&CK tag alone, which on a real Linux/WebLogic intrusion
+  proposed **2 688 rules**, its two largest buckets being 760 PowerShell rules and
+  500 generic `T1059` rules. Nothing in the selection knew the report mentioned
+  `meshagent64-azure-ops.exe`, `azurenetfiles.net`, `_fanout.sh` or `/etc/hosts`,
+  or that the intrusion was not on Windows. Three parts:
+  **(1)** each Sigma rule's `detection:` block is now reduced to normalized
+  **atoms** — the literal values it looks for, keyed by field class (`image`,
+  `cmdline`, `file`, `registry`, `hash`, `domain`, `ip`, `url`, `pipe`, `service`,
+  `port`, `user`) — stored in a new `rule_atoms` table, alongside a `platform`
+  column derived from `logsource` (`pipeline/detection/atoms.py`);
+  **(2)** a report's entities are normalized into the same vocabulary, with URLs
+  expanded to their host, executable paths to path *and* basename, and defanged
+  IoCs refanged, plus an inferred report platform
+  (`pipeline/detection/observables.py`);
+  **(3)** rules are scored on IDF-weighted observable overlap + a technique term
+  + a platform factor, and tiered `direct` / `behavioural` / `weak`
+  (`pipeline/detection/relevance.py`). IDF is what makes it work without a
+  stoplist: a match on `cmd.exe` scores ~0, a match on a campaign-specific binary
+  scores ~1. Every proposal carries the evidence behind its rank — which
+  observable matched which rule field — so the ranking is auditable.
+  Scoring is deterministic and offline (no model, honouring ADR-0008's constraint
+  on the detection artifact). New endpoint
+  `GET /api/jobs/{id}/detections/proposals`; the unranked
+  `GET /api/jobs/{id}/coverage/rules` is unchanged. Coverage's 0–3 readiness
+  score (ADR-0008) is untouched — readiness and relevance are separate questions.
+- **`scripts/build_rule_atoms.py`** — backfills the atom index from the stored
+  rule bodies, so a store built before ADR-0014 gains observable ranking without
+  re-cloning several gigabytes of Sigma corpora.
+- **Untagged rules are reachable** — 1 049 of the 11 396 rules in the default
+  corpora carry no `attack.tXXXX` tag and were invisible to a tag-keyed join.
+  They now surface when one of their atoms matches a report observable.
+
 ### Changed
 - **Unified ATT&CK entities under a single `ttp` type** — the extractors no longer
   emit separate `technique` / `tactic` / `procedure` types; all ATT&CK entities are

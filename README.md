@@ -344,7 +344,7 @@ Four view modes toggled at the top of the document pane:
 | **Text** | Annotated source text — entity occurrences highlighted by type, click to focus in marginalia, keyboard shortcuts |
 | **Preview** | Rendered markdown — VS Code-like typography (headings, tables, code blocks, task lists). Works on all file types; most useful for `.md` reports |
 | **Source** | The original file, rendered inline for every supported format: **PDF** (pdf.js pages), **HTML/HTM** (sandboxed iframe), **TXT/MD** (raw source). PDF and TXT/MD carry the same entity highlights as the Text view and support click-to-locate; **DOCX** falls back to a download link (no browser-native rendering) |
-| **Detections** | Sigma rules linkable to this report's ATT&CK techniques |
+| **Detections** | Sigma rules **ranked by this report's own technical content** — hashes, domains, binaries, paths, registry keys, CVEs — and by platform, each with the evidence behind its rank (ADR-0014) |
 
 **Entity interaction:**
 - Entities highlighted inline with type-colour coding
@@ -487,10 +487,47 @@ Settings page re-runs the build step from already-cloned repos.
 corpora, so the same rule mirrored in two repos counts once (score 2), while two
 independent rules for a technique corroborate it (score 3).
 
+### Rule proposals — ranked on the report, not on its tags
+
+Coverage answers *"does a rule exist for this technique?"*. The **Detections** tab
+answers a different question — *which rules should I read first?* — and answers it
+from the report's technical content rather than its ATT&CK tags alone.
+
+A tag-only join proposes every rule sharing a technique: on a real Linux/WebLogic
+intrusion that is **2 688 rules**, the largest bucket being 760 PowerShell rules.
+Ranking on observables cuts that to a handful of rules that actually name the
+report's artifacts.
+
+Each rule's `detection:` block is reduced to normalized **atoms** — the literal
+values it looks for (`Image`, `CommandLine`, `TargetFilename`, `TargetObject`,
+`Hashes`, `DestinationHostname`, …) — and each report's entities are normalized
+into the same vocabulary. A rule is then scored on:
+
+| Signal | Effect |
+|---|---|
+| **Observable overlap**, weighted by IDF | a match on `cmd.exe` (in thousands of rules) scores ~0; a match on a campaign-specific binary scores ~1 |
+| **ATT&CK technique** | still counted — just no longer the only selector |
+| **Platform** | a Windows rule is demoted on a Linux report, never dropped |
+
+Proposals land in three tiers — `direct` (matched report content, with evidence),
+`behavioural` (technique only), `weak` (off-platform) — and each carries *which*
+observable matched *which* rule field. Rules with **no ATT&CK tag at all** (1 049
+of 11 396 in the default corpora) become reachable this way for the first time.
+
+If your store predates this feature, build the atom index without re-cloning:
+
+```bash
+python scripts/build_rule_atoms.py      # re-derives atoms from the stored rule bodies
+```
+
+Scoring is deterministic and offline — no model, no network (ADR-0008's constraint
+that the detection artifact stays trustworthy).
+
 Walkthrough: [`docs/detection-coverage.md`](docs/detection-coverage.md). Design:
 ADR [0006](docs/adr/0006-multi-corpus-detection-ingestion.md) /
 [0007](docs/adr/0007-in-app-configuration-panel.md) /
-[0008](docs/adr/0008-detection-coverage-matrix.md).
+[0008](docs/adr/0008-detection-coverage-matrix.md) /
+[0014](docs/adr/0014-observable-driven-detection-proposals.md).
 
 ---
 
@@ -754,8 +791,11 @@ cti-to-stix/
 │   │   ├── base.py                # RuleCorpusAdapter (pluggable format seam)
 │   │   ├── sigma.py               # SigmaAdapter (YAML → DetectionRule)
 │   │   ├── registry.py            # Two-tier corpus registry + overlay writes
-│   │   ├── store.py               # detection_rules / rule_techniques persistence
+│   │   ├── store.py               # detection_rules / rule_techniques / rule_atoms persistence
 │   │   ├── coverage.py            # Technique → 0–3 readiness scoring
+│   │   ├── atoms.py               # Sigma detection block → atoms + platform (ADR-0014)
+│   │   ├── observables.py         # Report entities → normalized observables (ADR-0014)
+│   │   ├── relevance.py           # IDF-weighted rule ranking + evidence (ADR-0014)
 │   │   └── builder.py             # Rebuild the rule store from local clones
 │   └── data/
 │       ├── mitre_index.json       # Compact ATT&CK index (built by build_indexes.py)
@@ -978,7 +1018,9 @@ data: {"status":"for_review"}
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/jobs/{id}/coverage` | Per-report coverage matrix: each technique's 0–3 score + contributing corpora |
+| `GET` | `/api/jobs/{id}/coverage/rules` | Every rule sharing an ATT&CK tag with the report, grouped by technique (unranked) |
 | `GET` | `/api/jobs/{id}/coverage/{technique}/rules` | License-aware drill-down: which rules cover a technique |
+| `GET` | `/api/jobs/{id}/detections/proposals` | Rules **ranked** on the report's observables + platform, with match evidence (ADR-0014) |
 | `GET` | `/api/detection-corpora` | Per-corpus rule counts in the store |
 
 ```json
@@ -986,6 +1028,19 @@ data: {"status":"for_review"}
 { "techniques_total": 12, "validated": false,
   "by_score": { "0": 4, "1": 0, "2": 5, "3": 3 },
   "cells": [ { "technique_id": "T1059.001", "score": 3, "corpora": ["sigmahq","team"], "rule_count": 4 } ] }
+```
+
+```json
+// GET /api/jobs/{id}/detections/proposals?limit=200
+{ "platform": "linux", "atom_index_built": true,
+  "observables_total": 44, "candidate_total": 2691,
+  "counts": { "direct": 17, "behavioural": 812, "weak": 1862 },
+  "proposals": [
+    { "id": "mthcht:…", "title": "MeshAgent Remote Access Tool", "corpus": "mthcht",
+      "score": 0.94, "tier": "direct", "platform": "", "techniques": ["T1219"],
+      "matches": [ { "obs_class": "image", "field": "image", "exact": true,
+                     "value": "meshagent64-v2.exe", "display": "meshagent64-v2.exe",
+                     "weight": 0.68 } ] } ] }
 ```
 
 ### Settings (corpora)
@@ -1064,7 +1119,17 @@ CREATE TABLE detection_rules (
     format       TEXT DEFAULT 'sigma',
     title        TEXT NOT NULL,
     severity     TEXT, license TEXT, source_ref TEXT,
-    content_hash TEXT, data_sources TEXT, raw TEXT
+    content_hash TEXT, data_sources TEXT, raw TEXT,
+    platform     TEXT DEFAULT ''      -- windows|linux|macos|'' from logsource (ADR-0014)
+);
+
+-- Detection atoms (ADR-0014) — the literal values each rule looks for.
+-- Built alongside detection_rules; backfillable via scripts/build_rule_atoms.py.
+CREATE TABLE rule_atoms (
+    rule_id    TEXT NOT NULL,
+    atom_class TEXT NOT NULL,         -- image|cmdline|file|registry|hash|domain|ip|url|pipe|service|port|user
+    value      TEXT NOT NULL,         -- normalized, indexed for observable lookup
+    PRIMARY KEY (rule_id, atom_class, value)
 );
 
 CREATE TABLE rule_techniques (
