@@ -45,8 +45,16 @@ Clones land under `./corpora/` (gitignored). No credentials are stored.
 python scripts/build_detection_index.py
 ```
 Parses every enabled corpus's local clone into the `detection_rules` /
-`rule_techniques` tables in `cti_stix.db`. Re-runnable and idempotent. The
-**Rebuild index** button on the Settings page does the same from already-cloned repos.
+`rule_techniques` / `rule_atoms` tables in `cti_stix.db`. Re-runnable and
+idempotent. The **Rebuild index** button on the Settings page does the same from
+already-cloned repos.
+
+If your store was built before ADR-0014, add the atom index in place — no
+re-clone needed, it re-derives everything from the stored rule bodies:
+
+```bash
+python scripts/build_rule_atoms.py
+```
 
 ## 4. Read the matrix
 
@@ -71,6 +79,30 @@ a technique corroborate it (score 3). Forks/mirrors never inflate the score.
 
 `license` travels with every rule; honor it before exporting or sharing rules.
 
+## 5. Read the proposals
+
+The coverage matrix tells you *whether* a rule exists. The Review **Detections**
+tab tells you *which rules to read first* — a different question, answered from
+the report's own technical content (ADR-0014).
+
+Each rule's `detection:` block is indexed into normalized **atoms** (the literal
+values it looks for) and each report's IoCs, file paths, registry keys, tool
+names and CVEs are normalized into the same vocabulary. Proposals are ranked on
+that overlap, weighted by how rare each value is across the whole corpus, then
+adjusted for platform:
+
+| Tier | Meaning | Read it because |
+|---|---|---|
+| **Matched this report** | a rule field matches an extracted observable | it names your artifact — start here |
+| **Behavioural** | ATT&CK technique match, platform-compatible | it covers the behaviour, not your specific IoC |
+| **Off-platform** | technique match, but the rule targets another OS | usually noise; kept for mixed intrusions |
+
+Each proposal shows *why* it ranked: `Image ≡ meshagent64-v2.exe` (exact) or
+`cmdline ⊃ sshpass` (substring). Rules carrying **no ATT&CK tag** are reachable
+here even though the coverage matrix cannot see them.
+
+Ranking is deterministic and offline — no model is involved (ADR-0008).
+
 ## Troubleshooting
 
 | Symptom | Cause / fix |
@@ -78,5 +110,7 @@ a technique corroborate it (score 3). Forks/mirrors never inflate the score.
 | `[build] skipped (no clone)` | run `sync_corpora.py` first; check the corpus `path` |
 | corpus shows `0` rules | rules untagged with `attack.tXXXX`, or pointed at a non-rules dir |
 | private repo won't clone | ensure your SSH agent has the key; `git clone` it manually to confirm access |
-| a technique reads 0 despite a known rule | the rule lacks an `attack.tXXXX` tag — coverage keys on ATT&CK tags |
+| a technique reads 0 despite a known rule | the rule lacks an `attack.tXXXX` tag — coverage keys on ATT&CK tags (the Detections tab still finds it via its atoms) |
+| Detections warns the atom index is empty | run `python scripts/build_rule_atoms.py`; until then rules can only be ranked by technique |
+| no proposal is tiered "Matched this report" | the report has few IoCs, or its observables appear in no rule — the behavioural tier is then the real answer |
 | score never reaches 1 ("telemetry only") | the ATT&CK data-source enrichment (ADR-0008 Phase 1) isn't built yet — scores are rule-based (0/2/3) until then |

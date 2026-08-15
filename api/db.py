@@ -204,10 +204,21 @@ def init_db() -> None:
                 PRIMARY KEY (rule_id, technique_id)
             );
 
+            -- Detection atoms (ADR-0014) — the literal values a rule looks for,
+            -- extracted from its `detection:` block. Lets a report's observables
+            -- rank rules by content instead of by ATT&CK tag alone.
+            CREATE TABLE IF NOT EXISTS rule_atoms (
+                rule_id    TEXT NOT NULL,
+                atom_class TEXT NOT NULL,   -- image|cmdline|file|registry|hash|domain|ip|url|pipe|service|port|user
+                value      TEXT NOT NULL,   -- normalized, lowercase, wildcard-free
+                PRIMARY KEY (rule_id, atom_class, value)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_rule_tech_tech   ON rule_techniques(technique_id);
             CREATE INDEX IF NOT EXISTS idx_detection_corpus ON detection_rules(corpus);
             CREATE INDEX IF NOT EXISTS idx_detection_dedup  ON detection_rules(dedup_key);
             CREATE INDEX IF NOT EXISTS idx_detection_canon  ON detection_rules(is_canonical);
+            CREATE INDEX IF NOT EXISTS idx_rule_atoms_value ON rule_atoms(value);
         """)
 
         # ── Migrations — safe to run on already-initialised databases ──
@@ -221,6 +232,12 @@ def init_db() -> None:
             "ALTER TABLE detection_rules ADD COLUMN is_canonical INTEGER DEFAULT 1",
             "CREATE INDEX IF NOT EXISTS idx_detection_dedup ON detection_rules(dedup_key)",
             "CREATE INDEX IF NOT EXISTS idx_detection_canon ON detection_rules(is_canonical)",
+            # ADR-0014 — observable-driven proposals. `platform` is derived from
+            # the rule's logsource; rule_atoms is backfillable offline from
+            # detection_rules.raw (scripts/build_rule_atoms.py), so an existing
+            # database needs no corpus re-clone.
+            "ALTER TABLE detection_rules ADD COLUMN platform TEXT DEFAULT ''",
+            "CREATE INDEX IF NOT EXISTS idx_rule_atoms_value ON rule_atoms(value)",
         ]
         for stmt in _migrations:
             try:

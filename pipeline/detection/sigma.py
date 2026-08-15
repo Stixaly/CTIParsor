@@ -15,6 +15,7 @@ from pathlib import Path
 import yaml
 
 from models.detection import DetectionRule, Severity
+from pipeline.detection.atoms import extract_atoms, rule_platform
 from pipeline.detection.base import RuleCorpusAdapter
 
 # Sigma technique tag → ATT&CK technique id, e.g. "attack.t1059.001" → "T1059.001"
@@ -100,6 +101,8 @@ class SigmaAdapter(RuleCorpusAdapter):
             technique_ids=techniques,
             tactic_shortnames=tactics,
             data_sources=data_sources,
+            platform=rule_platform(doc),
+            atoms=extract_atoms(doc),
             severity=_LEVEL_MAP.get(level, Severity.UNKNOWN),
             license=license,
             source_ref=str(path),
