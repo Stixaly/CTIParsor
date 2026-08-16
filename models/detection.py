@@ -39,4 +39,8 @@ class DetectionRule(BaseModel):
     source_ref: str = ""                                 # file path / URL (provenance)
     content_hash: str = ""                               # sha256 of raw — byte-identical match
     dedup_key: str = ""                                  # sha256 of normalized detection logic (ADR-0010)
+    # Declared provenance from the Sigma `related:` block, as (bare_rule_id, type)
+    # where type is derived|renamed|similar|obsolete|merged. Dedup folds only on
+    # `derived`/`renamed` — see ADR-0017.
+    related: list[tuple[str, str]] = Field(default_factory=list)
     raw: str = ""                                        # original rule text (lossless, for export)

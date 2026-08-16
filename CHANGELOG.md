@@ -6,6 +6,80 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Changed
+- **The detection-proposal ranking no longer collapses into one score** (ADR-0018).
+  ADR-0014's technique term was a flat `TECH_EXACT = 0.30`, so a report's 34–48
+  techniques tagged ~1,400 rules that all scored *identically*. **99.7% of
+  proposals were tied**, and since `rank_rules` sorts by `(-score, corpus, title)`,
+  everything past the handful of evidence-backed hits was ordered alphabetically —
+  "7Zip Compressing Dump Files", "ADFS Database Named Pipe", "APT29".
+  The term is now weighted by the technique's **IDF** — the same argument that
+  already makes atom IDF work, applied to the axis it was never applied to. Being
+  tagged `T1059` says little when 358 rules carry it; a technique carried by a
+  handful says a lot. A `1/sqrt(n)` breadth damping then separates rules tagged
+  with one technique from rules tagged with eight.
+
+  | | Distinct scores | Largest tie |
+  |---|---|---|
+  | ShinyHunters | 6 → **284** | 1,469 → **107** |
+  | GREYVIBE | 4 → **296** | 1,336 → **95** |
+
+  The improvement is qualitative too: for a Linux PeopleSoft intrusion the list
+  now surfaces `Chmod Targeting Sensitive Directories`, `Remove Immutable File
+  Attribute` and `File or Folder Permissions Change` behind the MeshAgent hits.
+  An earlier formula that ranked by rule *quality* (breadth × corpus authority)
+  was simulated and rejected — it barely dented the tie and put `Screen Capture -
+  macOS` and `Too Many Global Admins` at the top of a Linux report.
+  Evidence-backed proposals still occupy the top of the list; latency is +1.7%.
+  Absolute scores shift downward (technique-only hits now ~0.20–0.26 rather than
+  0.300), so any saved threshold is stale.
+  Requires the ADR-0017 dedup: a technique's document frequency is meaningless
+  against a store that counts the same rule twice.
+
+### Fixed
+- **A redacted IoC placeholder could fail an entire ingestion job.** Stage 2 called
+  `urlparse()` on report-derived text; since Python 3.11 `urlsplit` validates a
+  bracketed netloc as an IPv6 literal via `ipaddress.ip_address()`, so any URL
+  whose host is bracketed but not a valid address raises `ValueError`. A real
+  Mandiant report contained `http://[actor-controlled-ip]/…` — a redaction
+  placeholder — and the unguarded call killed the job at stage 2. The report was
+  otherwise fully processable: after the fix it yields **83 entities and 35
+  relationships**, where it previously produced nothing.
+  Brackets are routine in this corpus (defanging, redaction), so the failure is
+  recurring rather than exotic. Hostname extraction moves to `_url_host()`, which
+  falls back to a lexical split and keeps a valid IPv6 literal intact — stripping
+  brackets then splitting on `:` turned `[2001:db8::1]:8080` into `2001`.
+  Found by ingesting a 15-report corpus of public vendor reporting; two reports
+  were never going to surface it.
+- **Cross-corpus dedup was folding 11 rules out of 11,396** (ADR-0017). ADR-0010
+  clusters on `dedup_key`, a hash of the normalised detection logic, and the
+  registry claimed hayabusa's converted SigmaHQ copies folded under sigmahq. They
+  did not: hayabusa shared **exactly one** `dedup_key` with sigmahq, because its
+  conversion injects a `Channel`/`EventID` selection, wraps the condition around
+  it, and renames `Image` to `NewProcessName` for the Security-4688 variant. Same
+  detection, different hash.
+  Rules are now also clustered on **declared provenance** — the Sigma `related:`
+  block — via union-find, so derivation chains collapse. 4,758 of hayabusa's
+  4,759 rules declare a `related:` id present in sigmahq, so the signal is
+  near-total where the hash was useless. Only `derived` and `renamed` fold:
+  `similar` means same idea but *different* logic (SigmaHQ's own MeshAgent
+  Windows and MacOS rules declare each other `similar`), and `obsolete` runs the
+  other way.
+  Canonical rules drop **11,385 → 6,349**, hayabusa **4,758 → 5**, and the top-20
+  on both stored reports goes from four duplicate-title slots to zero.
+  The canonical rule now also inherits the **union of its cluster's ATT&CK
+  techniques** — added after validation showed the first version losing two
+  techniques, because SigmaHQ's "Double Extension" derivatives carry `T1036.007`
+  while the parent they derive from does not. With the union propagated, coverage
+  rises 885 → 887 techniques instead of falling.
+  This also corrects ADR-0014's IDF denominator, which had been computed against
+  a store roughly 44% redundant — an error ADR-0015 would have carried into a
+  7.5× larger store.
+  The pre-existing dedup test passed throughout, because its fixture made the
+  "converted" rule byte-identical to its source — a conversion that never occurs
+  upstream. It now asserts the fixture's own limitation, and a second test models
+  the real conversion and fails if provenance folding is removed.
+
 ### Added
 - **Report-derived Sigma rule synthesis** (ADR-0016) — ADR-0014 ranks rules that
   already exist; on a real 41-observable intrusion it found **2** `direct`-tier

@@ -25,9 +25,10 @@ def replace_corpus_rules(conn: sqlite3.Connection, corpus: str, rules: Iterable[
     if old:
         conn.executemany("DELETE FROM rule_techniques WHERE rule_id=?", [(i,) for i in old])
         conn.executemany("DELETE FROM rule_atoms WHERE rule_id=?", [(i,) for i in old])
+        conn.executemany("DELETE FROM rule_related WHERE rule_id=?", [(i,) for i in old])
         conn.execute("DELETE FROM detection_rules WHERE corpus=?", (corpus,))
 
-    rule_rows, tech_rows, atom_rows = [], [], []
+    rule_rows, tech_rows, atom_rows, related_rows = [], [], [], []
     for r in rules:
         sev = getattr(r.severity, "value", r.severity)
         rule_rows.append((
@@ -39,6 +40,8 @@ def replace_corpus_rules(conn: sqlite3.Connection, corpus: str, rules: Iterable[
             tech_rows.append((r.id, t.upper()))
         for cls, value in r.atoms:
             atom_rows.append((r.id, cls, value))
+        for related_key, rel_type in getattr(r, "related", ()) or ():
+            related_rows.append((r.id, related_key, rel_type))
 
     # is_canonical defaults to 1; the ADR-0010 dedup pass (dedupe_store) runs after
     # the full rebuild and demotes duplicates. Newly-inserted rows start canonical.
@@ -56,6 +59,10 @@ def replace_corpus_rules(conn: sqlite3.Connection, corpus: str, rules: Iterable[
     conn.executemany(
         "INSERT OR IGNORE INTO rule_atoms (rule_id, atom_class, value) VALUES (?,?,?)",
         atom_rows,
+    )
+    conn.executemany(
+        "INSERT OR IGNORE INTO rule_related (rule_id, related_key, rel_type) VALUES (?,?,?)",
+        related_rows,
     )
     conn.commit()
     return len(rule_rows)
@@ -139,6 +146,75 @@ def atom_document_frequency(
         ).fetchall():
             df[value] = n
     return df
+
+
+def technique_document_frequency(
+    conn: sqlite3.Connection, technique_ids: Iterable[str], *, chunk: int = 400
+) -> dict[str, int]:
+    """How many *canonical* rules carry each technique — the technique's DF (ADR-0018).
+
+    The canonical filter is an EXISTS, not a JOIN, for the same reason as
+    `atom_hits`: given a JOIN the planner drives from `idx_detection_canon`, a
+    near-constant column, and scans every rule. EXISTS leaves `idx_rule_tech_tech`
+    as the only entry point.
+
+    Args:
+        conn:          open store connection.
+        technique_ids: technique ids, already upper-cased by the caller.
+        chunk:         batch size — SQLite caps a statement at 999 bound params.
+
+    Returns:
+        technique_id → count. A technique carried by no canonical rule is absent
+        from the mapping rather than present with 0, so callers use `.get(t, 0)`.
+    """
+    vals = sorted({v for v in technique_ids if isinstance(v, str) and v.strip()})
+    if not vals:
+        return {}
+    out: dict[str, int] = {}
+    for i in range(0, len(vals), chunk):
+        batch = vals[i:i + chunk]
+        placeholders = ",".join("?" * len(batch))
+        for key, n in conn.execute(
+            f"SELECT t.technique_id, COUNT(*) FROM rule_techniques t "
+            f"WHERE t.technique_id IN ({placeholders}) AND EXISTS ("
+            f"  SELECT 1 FROM detection_rules d WHERE d.id = t.rule_id AND d.is_canonical=1) "
+            f"GROUP BY t.technique_id",
+            batch,
+        ):
+            out[key] = n
+    return out
+
+
+def technique_counts_for_rules(
+    conn: sqlite3.Connection, rule_ids: Iterable[str], *, chunk: int = 400
+) -> dict[str, int]:
+    """How many techniques each rule carries — its breadth (ADR-0018).
+
+    No canonical filter: the caller only ever asks about rules already selected as
+    candidates, so re-checking would cost an EXISTS for nothing.
+
+    Args:
+        conn:     open store connection.
+        rule_ids: candidate rule ids.
+        chunk:    batch size.
+
+    Returns:
+        rule_id → technique count. A rule with no techniques is absent.
+    """
+    vals = sorted({v for v in rule_ids if isinstance(v, str) and v.strip()})
+    if not vals:
+        return {}
+    out: dict[str, int] = {}
+    for i in range(0, len(vals), chunk):
+        batch = vals[i:i + chunk]
+        placeholders = ",".join("?" * len(batch))
+        for key, n in conn.execute(
+            f"SELECT rule_id, COUNT(*) FROM rule_techniques "
+            f"WHERE rule_id IN ({placeholders}) GROUP BY rule_id",
+            batch,
+        ):
+            out[key] = n
+    return out
 
 
 def canonical_rule_count(conn: sqlite3.Connection) -> int:

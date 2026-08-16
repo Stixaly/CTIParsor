@@ -104,6 +104,7 @@ class SigmaAdapter(RuleCorpusAdapter):
             platform=rule_platform(doc),
             atoms=extract_atoms(doc),
             severity=_LEVEL_MAP.get(level, Severity.UNKNOWN),
+            related=SigmaAdapter._split_related(doc.get("related")),
             license=license,
             source_ref=str(path),
             content_hash=content_hash,
@@ -154,6 +155,39 @@ class SigmaAdapter(RuleCorpusAdapter):
         if isinstance(node, str):
             return node.strip().lower()
         return node
+
+    @staticmethod
+    def _split_related(related: object) -> list[tuple[str, str]]:
+        """Normalize a rule's `related:` block into (id, type) pairs (ADR-0017).
+
+        Args:
+            related: raw value of the `related` key. Expected to be a list of
+                dicts, but may be None, a dict, a str — third-party YAML.
+
+        Returns:
+            (bare_rule_id, type) pairs, deduplicated on the full pair, in
+            first-seen order.  The type is normalized but *not* filtered here:
+            which relations fold is the dedup pass's decision, not the adapter's,
+            so `similar` and `obsolete` are carried through and dropped later.
+        """
+        if not isinstance(related, list):
+            return []
+
+        seen: set[tuple[str, str]] = set()
+        result: list[tuple[str, str]] = []
+        for element in related:
+            if not isinstance(element, dict):
+                continue
+            rid = element.get("id")
+            if not isinstance(rid, str) or not rid.strip():
+                continue
+            rtype = element.get("type")
+            rtype = rtype.strip().lower() if isinstance(rtype, str) else ""
+            pair = (rid.strip(), rtype)
+            if pair not in seen:
+                seen.add(pair)
+                result.append(pair)
+        return result
 
     @staticmethod
     def _split_tags(tags: list) -> tuple[list[str], list[str]]:

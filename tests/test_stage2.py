@@ -490,3 +490,32 @@ class TestBareFilenames:
         # Filenames already captured as part of a full path must be skipped here.
         text = r"Payload staged at C:\Windows\Temp\payload.exe on disk."
         assert _extract_bare_filenames(text) == []
+
+
+# ── Bracketed-host URLs (regression) ─────────────────────────────────────────
+# Found by ingesting a real Mandiant report: it contained the redaction
+# placeholder `http://[actor-controlled-ip]/…`, and since Python 3.11 urlsplit
+# validates a bracketed netloc as an IPv6 literal via ipaddress.ip_address().
+# The unguarded urlparse raised ValueError and failed the ENTIRE ingestion job at
+# stage 2 — a fully processable report lost to one placeholder string.
+
+def test_bracketed_placeholder_host_does_not_raise():
+    """A redacted bracketed host must not kill extraction (real Mandiant case)."""
+    text = "Beacon traffic went to http://[actor-controlled-ip]/gate.php during the intrusion."
+    entities = extract_entities(refang(text))
+    assert isinstance(entities, list)
+
+
+def test_url_host_handles_brackets_and_ipv6():
+    """_url_host must survive bad brackets and keep a valid IPv6 literal intact."""
+    from pipeline.stage2_extraction import _url_host
+
+    # The crash case: bracketed, not an IP.
+    assert _url_host("http://[actor-controlled-ip]/x") == "actor-controlled-ip"
+    # A real IPv6 host keeps its colons — splitting on ":" first yields "2001".
+    assert _url_host("http://[2001:db8::1]:8080/a") == "2001:db8::1"
+    assert _url_host("http://[2001:db8::1]/a") == "2001:db8::1"
+    # Ordinary hosts still lose userinfo and port.
+    assert _url_host("https://user:pw@evil.com:443/p") == "evil.com"
+    assert _url_host("http://1.2.3.4/x") == "1.2.3.4"
+    assert _url_host("not a url") == ""

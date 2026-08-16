@@ -214,6 +214,21 @@ def init_db() -> None:
                 PRIMARY KEY (rule_id, atom_class, value)
             );
 
+            -- Declared rule provenance (ADR-0017) — the Sigma `related:` block.
+            -- Cross-corpus dedup clusters on this as well as on dedup_key: a
+            -- converted corpus (hayabusa) rewrites field names and injects a
+            -- Channel/EventID binding, so the detection hash differs even though
+            -- the rule is the same. 4,758 of hayabusa's 4,759 rules declare a
+            -- `related:` id that exists in sigmahq; exactly 1 shares a dedup_key.
+            -- `related_key` is a BARE Sigma id, not a corpus-prefixed rule id.
+            CREATE TABLE IF NOT EXISTS rule_related (
+                rule_id     TEXT NOT NULL,
+                related_key TEXT NOT NULL,
+                rel_type    TEXT NOT NULL,   -- derived|renamed|similar|obsolete|merged
+                PRIMARY KEY (rule_id, related_key, rel_type)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_rule_related_key ON rule_related(related_key);
             CREATE INDEX IF NOT EXISTS idx_rule_tech_tech   ON rule_techniques(technique_id);
             CREATE INDEX IF NOT EXISTS idx_detection_corpus ON detection_rules(corpus);
             CREATE INDEX IF NOT EXISTS idx_detection_dedup  ON detection_rules(dedup_key);
@@ -238,6 +253,13 @@ def init_db() -> None:
             # database needs no corpus re-clone.
             "ALTER TABLE detection_rules ADD COLUMN platform TEXT DEFAULT ''",
             "CREATE INDEX IF NOT EXISTS idx_rule_atoms_value ON rule_atoms(value)",
+            # ADR-0017 — provenance-based dedup. Populated on the next index
+            # rebuild; dedupe_store falls back to ADR-0010 behaviour while the
+            # table is absent or empty, so an existing database stays correct.
+            "CREATE TABLE IF NOT EXISTS rule_related ("
+            " rule_id TEXT NOT NULL, related_key TEXT NOT NULL, rel_type TEXT NOT NULL,"
+            " PRIMARY KEY (rule_id, related_key, rel_type))",
+            "CREATE INDEX IF NOT EXISTS idx_rule_related_key ON rule_related(related_key)",
         ]
         for stmt in _migrations:
             try:

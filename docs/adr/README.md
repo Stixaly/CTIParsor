@@ -19,6 +19,8 @@ choice, and the consequences. They're append-only — supersede rather than rewr
 | [0014](0014-observable-driven-detection-proposals.md) | Observable-driven detection proposals (rule atom index, IDF relevance, platform) | Accepted |
 | [0015](0015-multi-format-detection-matching.md) | Multi-format detection matching (Suricata + YARA adapters, per-format IDF) | Proposed |
 | [0016](0016-report-derived-sigma-synthesis.md) | Report-derived Sigma rule synthesis (gated templates, deterministic ids) | Proposed |
+| [0017](0017-provenance-based-rule-dedup.md) | Provenance-based rule dedup (`related:` folding, technique union) | Proposed |
+| [0018](0018-technique-idf-ranking.md) | Technique-IDF ranking (breaks the ~1,400-rule score plateau) | Proposed |
 
 **Numbering notes**
 - `0001` and `0003` are unused gaps (early informal decisions never filed).
@@ -41,7 +43,14 @@ choice, and the consequences. They're append-only — supersede rather than rewr
  canonical names         └── 0006 multi-corpus rules ── managed by ── 0007 settings panel
  feed node identity          ▲   extended by
           │                  ├── 0010 default corpora + dedup
+          │                  │      └── 0017 fixed by: dedup_key alone folded 11
+          │                  │          of 11,396 rules; `related:` folds 5,036
+          │                  │          and corrects 0014's IDF denominator
           │                  └── 0014 observable-driven proposals ◄── consumes IoCs (0005)
+          │                         ▲   plateau broken by
+          │                         ├── 0018 technique-IDF ranking ── needs 0017:
+          │                         │      a technique's document frequency is
+          │                         │      meaningless if rules are counted twice
           │                         ▲   generalised to N formats by
           │                         ├── 0015 multi-format matching (suricata + yara)
           │                         │       └── scopes IDF per format so 0014's

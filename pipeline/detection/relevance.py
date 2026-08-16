@@ -61,8 +61,34 @@ PARTIAL_FACTOR = 0.55
 
 #: Technique contribution — deliberately below the weight of a single strong
 #: observable match, since it is what over-selected before.
+#:
+#: This is the *ceiling*, not the value (ADR-0018): the term is scaled by the
+#: technique's IDF and by how many techniques the rule carries. As a flat constant
+#: it gave ~1,400 rules per report an identical score, so past the handful of
+#: evidence-backed hits the list was ordered alphabetically.
 TECH_EXACT = 0.30
 TECH_PARENT = 0.18
+
+#: Parent-technique matches keep their ADR-0014 discount as a *ratio* now that the
+#: term is weighted: TECH_PARENT / TECH_EXACT.
+TECH_PARENT_RATIO = TECH_PARENT / TECH_EXACT
+
+#: Floor under the technique IDF. Unlike an atom match — where a hit on `cmd.exe`
+#: genuinely carries no information — a technique tag match always means the rule
+#: addresses something the report describes, so IDF should modulate it, never
+#: annihilate it. Without the floor the term collapses to exactly 0 whenever a
+#: technique is carried by every canonical rule, which is unreachable on a real
+#: store (the commonest, T1059 at 358 of 6,349 rules, scores 0.33) but routine on
+#: a small or freshly-seeded one, where it would flatten the ranking to zero.
+TECH_IDF_FLOOR = 0.15
+
+#: A rule tagged with many techniques is diffuse; one tagged with a single
+#: technique is *about* that technique. Damping is 1/sqrt(n): gentle enough that a
+#: 2-technique rule keeps 71% of its weight, firm enough to separate an 8-technique
+#: rule (35%). Measured: IDF alone still left a 200-rule tie, IDF x breadth 107.
+def technique_breadth(n_techniques: int) -> float:
+    """Damp a rule's technique term by how many techniques it carries."""
+    return 1.0 / math.sqrt(max(1, n_techniques))
 
 #: A rule written for another OS than the report is demoted, never dropped: a
 #: mixed intrusion can legitimately involve both.
@@ -313,25 +339,46 @@ def rank_rules(
     # Rule technique tag → the report technique(s) it covers, with the ADR-0008
     # parent→sub roll-up (a rule on T1059 covers a report's T1059.004).
     covers: dict[str, set[str]] = {}
-    weight_of_tag: dict[str, float] = {}
+    is_parent_tag: dict[str, bool] = {}
     for t in techniques:
         covers.setdefault(t, set()).add(t)
-        weight_of_tag[t] = TECH_EXACT
+        is_parent_tag[t] = False
         parent = _parent(t)
         if parent:
             covers.setdefault(parent, set()).add(t)
-            weight_of_tag.setdefault(parent, TECH_PARENT)
+            is_parent_tag.setdefault(parent, True)
 
     tech_rules: dict[str, set[str]] = {}     # rule_id → report techniques covered
     tech_weight: dict[str, float] = {}       # rule_id → best technique weight
     if covers:
-        from pipeline.detection.store import canonical_rule_ids_for_techniques
+        from pipeline.detection.store import (
+            canonical_rule_ids_for_techniques,
+            technique_counts_for_rules,
+            technique_document_frequency,
+        )
+        # IDF on the technique axis (ADR-0018), the same argument that makes atom
+        # IDF work: "tagged T1059" is worth almost nothing when 358 rules carry
+        # T1059, and a lot when the technique is carried by a handful.
+        tech_df = technique_document_frequency(conn, covers.keys())
+        tech_total = canonical_rule_count(conn) or 1
+        weight_of_tag = {
+            tag: TECH_EXACT
+            * max(TECH_IDF_FLOOR, idf(tech_df.get(tag, 0), tech_total))
+            * (TECH_PARENT_RATIO if is_parent_tag.get(tag) else 1.0)
+            for tag in covers
+        }
+
         for tag, rule_id in canonical_rule_ids_for_techniques(conn, covers):
             tag = tag.upper()
             tech_rules.setdefault(rule_id, set()).update(covers.get(tag, ()))
             w = weight_of_tag.get(tag, 0.0)
             if w > tech_weight.get(rule_id, 0.0):
                 tech_weight[rule_id] = w
+
+        # Breadth damping is per *rule*, so it applies once the best tag is known.
+        breadth_of = technique_counts_for_rules(conn, tech_rules.keys())
+        for rule_id, w in tech_weight.items():
+            tech_weight[rule_id] = w * technique_breadth(breadth_of.get(rule_id, 1))
 
     exact = _exact_matches(conn, observables)
     candidates = set(tech_rules) | set(exact)
