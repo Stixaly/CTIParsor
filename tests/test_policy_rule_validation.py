@@ -10,9 +10,7 @@ import inspect
 
 import pytest
 import stix2
-from fastapi.testclient import TestClient
 
-from api.main import app
 from pipeline.stage4_stix_mapping import build_stix_bundle
 from pipeline.stage4b_graph_completion import _pol_index, complete_graph
 
@@ -66,25 +64,29 @@ def test_build_stix_bundle_survives_a_malformed_policy(policy):
     # passing None for the real inputs will legitimately fail some other way.
 
 
-def test_api_rejects_non_object_rules():
-    client = TestClient(app)
+# These three PUT a policy, so they must run against the isolated database the
+# `temp_db_client` fixture builds (tmp_path + init_db). A bare TestClient(app)
+# binds to the real DB_PATH: in CI that database has no `relationship_policy`
+# table yet and the write raises OperationalError, and on a developer machine it
+# silently OVERWRITES the operator's stored policy.
+def test_api_rejects_non_object_rules(temp_db_client):
     for policy in MALFORMED_POLICIES:
-        r = client.put("/api/relationship-policy", json=policy)
+        r = temp_db_client.put("/api/relationship-policy", json=policy)
         assert r.status_code == 400, f"accepted {policy['rules']!r}"
         assert "rules[" in r.json()["detail"]
 
 
-def test_api_still_accepts_a_valid_policy():
-    client = TestClient(app)
+def test_api_still_accepts_a_valid_policy(temp_db_client):
     good = {"version": 1, "global": "enforce",
             "rules": [{"src": "threat-actor", "tgt": "malware",
                        "verb": "uses", "mode": "pin", "enabled": True}]}
-    r = client.put("/api/relationship-policy", json=good)
+    r = temp_db_client.put("/api/relationship-policy", json=good)
     assert r.status_code == 200
     # guards against the validation being over-tightened.
 
 
-def test_api_still_accepts_empty_rules():
-    client = TestClient(app)
-    r = client.put("/api/relationship-policy", json={"version": 1, "global": "enforce", "rules": []})
+def test_api_still_accepts_empty_rules(temp_db_client):
+    r = temp_db_client.put(
+        "/api/relationship-policy", json={"version": 1, "global": "enforce", "rules": []}
+    )
     assert r.status_code == 200
