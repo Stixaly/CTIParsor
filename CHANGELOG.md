@@ -37,6 +37,20 @@ sections group by theme rather than strict semver.
   against a store that counts the same rule twice.
 
 ### Fixed
+- **A redacted IoC placeholder could fail an entire ingestion job.** Stage 2 called
+  `urlparse()` on report-derived text; since Python 3.11 `urlsplit` validates a
+  bracketed netloc as an IPv6 literal via `ipaddress.ip_address()`, so any URL
+  whose host is bracketed but not a valid address raises `ValueError`. A real
+  Mandiant report contained `http://[actor-controlled-ip]/…` — a redaction
+  placeholder — and the unguarded call killed the job at stage 2. The report was
+  otherwise fully processable: after the fix it yields **83 entities and 35
+  relationships**, where it previously produced nothing.
+  Brackets are routine in this corpus (defanging, redaction), so the failure is
+  recurring rather than exotic. Hostname extraction moves to `_url_host()`, which
+  falls back to a lexical split and keeps a valid IPv6 literal intact — stripping
+  brackets then splitting on `:` turned `[2001:db8::1]:8080` into `2001`.
+  Found by ingesting a 15-report corpus of public vendor reporting; two reports
+  were never going to surface it.
 - **Cross-corpus dedup was folding 11 rules out of 11,396** (ADR-0017). ADR-0010
   clusters on `dedup_key`, a hash of the normalised detection logic, and the
   registry claimed hayabusa's converted SigmaHQ copies folded under sigmahq. They

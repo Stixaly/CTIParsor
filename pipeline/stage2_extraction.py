@@ -455,7 +455,7 @@ def _extract_network_iocs(text: str) -> list[RawEntity]:
     url_hostnames = set()
     for e in results:
         if e.entity_type == EntityType.URL:
-            host = urlparse(e.value).netloc.lower().split(":")[0]  # strip port
+            host = _url_host(e.value)
             if host:
                 url_hostnames.add(host)
         elif e.entity_type == EntityType.EMAIL:
@@ -468,6 +468,38 @@ def _extract_network_iocs(text: str) -> list[RawEntity]:
             results.append(RawEntity(value=domain, entity_type=EntityType.DOMAIN))
 
     return results
+
+
+def _url_host(url: str) -> str:
+    """Hostname of a URL, port stripped — never raising on report-derived text.
+
+    `urlparse` is not safe to call on arbitrary strings. Since Python 3.11
+    `urlsplit` validates a bracketed netloc as an IPv6 literal via
+    `ipaddress.ip_address()`, so any URL whose host is bracketed but not a valid
+    address raises ValueError. CTI reports produce exactly that: a real Mandiant
+    report contained `http://[actor-controlled-ip]/…` — a redaction placeholder —
+    and the unguarded call killed the whole ingestion job at stage 2, losing a
+    report that was otherwise fully processable.
+
+    Brackets are routine in this corpus (defanging, redaction), so the failure is
+    recurring rather than exotic. Returns "" when the host cannot be determined:
+    the caller only uses these to suppress duplicate domain matches, and missing
+    one suppression is trivial next to failing the report.
+    """
+    try:
+        netloc = urlparse(url).netloc
+    except ValueError:
+        # Fall back to a purely lexical split — no validation, no exceptions.
+        rest = url.split("://", 1)[-1]
+        netloc = rest.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
+    netloc = netloc.rsplit("@", 1)[-1].strip()   # strip userinfo
+    if netloc.startswith("["):
+        # Bracketed host: everything to the closing bracket IS the host. Splitting
+        # on ":" first would cut a valid IPv6 literal at its own separator and
+        # turn "[2001:db8::1]:8080" into "2001".
+        end = netloc.find("]")
+        return netloc[1:end].lower() if end != -1 else netloc[1:].lower()
+    return netloc.lower().split(":")[0]          # host:port
 
 
 def _extract_mac_addresses(text: str) -> list[RawEntity]:
