@@ -69,7 +69,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import stix2
 
@@ -489,7 +489,10 @@ def _ground_reference(
     if not pairs:
         return
 
-    resolved: list[tuple[object, str]] = []   # (sdo, attack_id)
+    # `Any`, not `object`: these are stix2 SDOs, which this module duck-types
+    # throughout (see _otype/_own_names). `object` has no `.id`, so annotating
+    # them that way makes every downstream attribute access a type error.
+    resolved: list[tuple[Any, str]] = []   # (sdo, attack_id)
     for o in stix_objects:
         if _is_rel(o) or not hasattr(o, "id"):
             continue
@@ -558,7 +561,8 @@ def _infer_transitive(
     rels = [o for o in stix_objects if _is_rel(o)]
 
     # Adjacency: source_id -> list of (verb, target_id, rel_obj)
-    out_edges: dict[str, list[tuple[str, str, object]]] = {}
+    # The third element is a stix2 Relationship, duck-typed like the SDOs above.
+    out_edges: dict[str, list[tuple[str, str, Any]]] = {}
     for r in rels:
         out_edges.setdefault(r.get("source_ref"), []).append(
             (r.get("relationship_type"), r.get("target_ref"), r)
