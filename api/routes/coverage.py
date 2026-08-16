@@ -10,11 +10,16 @@ import re
 import zipfile
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 
 from api.db import get_conn
-from pipeline.detection.coverage import compute_for_job, rule_bodies_for_job, rules_for_job
+from pipeline.detection.coverage import (
+    compute_for_job,
+    rule_bodies_for_job,
+    rule_facets_for_job,
+    rules_for_job,
+)
 from pipeline.detection.relevance import propose_for_job
 from pipeline.detection.store import corpus_counts, rules_for_technique
 
@@ -68,82 +73,236 @@ def get_coverage_rules(job_id: str, technique_id: str):
         return {"technique_id": technique_id.upper(), "rules": rules_for_technique(conn, technique_id)}
 
 
+#: File extension per format. A Suricata rule written as `.yml` loads in no tool;
+#: measured, 8,380 of 10,372 rules in a real export are Suricata (ADR-0020).
+_EXPORT_EXTENSIONS = {
+    "sigma": "yml",
+    "suricata": "rules",
+    "yara": "yar",
+}
+_DEFAULT_EXTENSION = "txt"
+
+_FILTER_DEFAULTS = {"format": "sigma", "corpus": "unknown",
+                    "license": "unknown", "severity": "unknown"}
+
+
 def _safe_slug(text: str, fallback: str) -> str:
     """Filesystem-safe slug for a rule filename inside the export ZIP."""
     slug = re.sub(r"[^\w\-]+", "_", (text or "").strip()).strip("_")[:80]
     return slug or fallback
 
 
-@router.get("/jobs/{job_id}/detections/export")
-def export_detections(job_id: str):
-    """Download every detected Sigma rule for this report as a ZIP.
+def _load_rules(conn, job_id: str) -> list[dict]:
+    """Technique-selected rules for a job, enriched with `format` and `severity`.
 
-    "Detected" = the canonical rules linkable to the report's accepted ATT&CK
-    techniques (same set as the Review "Detections" tab). One `.yml` per rule
-    plus a MANIFEST.json and README carrying each rule's license and source, so
-    provenance/license travels with the export (ADR-0006)."""
+    `rule_bodies_for_job` predates the multi-format store and returns neither, so
+    they are joined on here — in one query for the whole store rather than one per
+    rule, which at ~18k selected rules is the difference between a scan and a
+    round-trip storm.
+    """
+    rules = rule_bodies_for_job(conn, job_id)
+    if not rules:
+        return []
+    meta = {
+        r[0]: (r[1] or "sigma", r[2] or "unknown")
+        for r in conn.execute("SELECT id, format, severity FROM detection_rules")
+    }
+    for r in rules:
+        fmt, sev = meta.get(r["id"], ("sigma", "unknown"))
+        r["format"] = fmt
+        r["severity"] = sev
+    return rules
+
+
+def _apply_filters(
+    rules: list[dict],
+    formats: list[str] | None,
+    corpora: list[str] | None,
+    licenses: list[str] | None,
+    severities: list[str] | None,
+) -> list[dict]:
+    """Keep rules matching every non-empty axis (axes combine with AND).
+
+    An empty or absent axis means "no constraint", so an unfiltered request keeps
+    the pre-ADR-0020 behaviour. Comparison is case-folded on both sides.
+    """
+    # Normalise once, not per rule: at 18k rules x 4 axes the inline form rebuilt
+    # 72k sets for nothing.
+    wanted = {
+        "format": {v.strip().lower() for v in (formats or [])},
+        "corpus": {v.strip().lower() for v in (corpora or [])},
+        "license": {v.strip().lower() for v in (licenses or [])},
+        "severity": {v.strip().lower() for v in (severities or [])},
+    }
+    active = {k: v for k, v in wanted.items() if v}
+    if not active:
+        return list(rules)
+    out = []
+    for r in rules:
+        if all(
+            (r.get(axis) or _FILTER_DEFAULTS[axis]).strip().lower() in allowed
+            for axis, allowed in active.items()
+        ):
+            out.append(r)
+    return out
+
+
+def _facet(rules: list[dict], key: str) -> list[dict]:
+    """Aggregate rules by one axis: value -> rule count and raw byte size."""
+    counts: dict[str, dict] = {}
+    for r in rules:
+        val = (r.get(key) or _FILTER_DEFAULTS.get(key, "unknown")).strip().lower()
+        entry = counts.setdefault(val, {"value": val, "rules": 0, "bytes": 0})
+        entry["rules"] += 1
+        entry["bytes"] += len(r.get("raw") or "")
+    return sorted(counts.values(), key=lambda x: (-x["rules"], x["value"]))
+
+
+@router.get("/jobs/{job_id}/detections/export/facets")
+def export_facets(job_id: str):
+    """Per-axis rule counts and byte sizes for the export filter UI (ADR-0020).
+
+    Exists so the operator sees the volume and the licence split *before*
+    downloading: a real report yields 18,196 rules / 268 MB, of which 1,642 are
+    all-rights-reserved. Disclosing the size is why no silent cap is needed.
+
+    A job with no matching rules returns `total: 0`, not 404 — the UI must be able
+    to render "nothing to export".
+    """
     with get_conn() as conn:
         row = conn.execute(
             "SELECT original_filename FROM jobs WHERE id=?", (job_id,)
         ).fetchone()
         if not row:
             raise HTTPException(404, "Job not found")
-        rules = rule_bodies_for_job(conn, job_id)
+        return rule_facets_for_job(conn, job_id)
 
-    if not rules:
+
+@router.get("/jobs/{job_id}/detections/export")
+def export_detections(
+    job_id: str,
+    format: list[str] | None = Query(None),
+    corpus: list[str] | None = Query(None),
+    license: list[str] | None = Query(None),
+    severity: list[str] | None = Query(None),
+):
+    """Download the report's detection rules as a ZIP, optionally filtered (ADR-0020).
+
+    "Detected" = the canonical rules linkable to the report's accepted ATT&CK
+    techniques (same set as the Review "Detections" tab). One file per rule, named
+    with the extension its format requires, plus MANIFEST.json and README carrying
+    each rule's licence and source so provenance travels with the export (ADR-0006).
+    """
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT original_filename FROM jobs WHERE id=?", (job_id,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Job not found")
+        all_rules = _load_rules(conn, job_id)
+
+    if not all_rules:
         raise HTTPException(404, "No detection rules match this report's techniques")
 
-    report_stem = _safe_slug(Path(row["original_filename"]).stem, "report")
+    rules = _apply_filters(all_rules, format, corpus, license, severity)
+    if not rules:
+        raise HTTPException(404, "No rules match the selected filters")
+
+    report_name = row["original_filename"]
+    report_stem = _safe_slug(Path(report_name).stem, "report")
 
     manifest: list[dict] = []
-    used_names: set[str] = set()
+    used_paths: set[str] = set()
     licenses: dict[str, set[str]] = {}
+    fmt_counts: dict[str, int] = {}
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for r in rules:
+            fmt = r.get("format") or "sigma"
+            ext = _EXPORT_EXTENSIONS.get(fmt, _DEFAULT_EXTENSION)
             base = _safe_slug(r["title"] or r["native_key"] or r["id"], "rule")
-            fname = f"{r['corpus']}__{base}.yml"
-            n = 2
-            while fname in used_names:
-                fname = f"{r['corpus']}__{base}_{n}.yml"
-                n += 1
-            used_names.add(fname)
+            corpus_val = r.get("corpus") or "unknown"
 
-            zf.writestr(f"rules/{fname}", r["raw"] or "")
+            path_base = f"rules/{fmt}/{corpus_val}__{base}"
+            path = f"{path_base}.{ext}"
+            n = 2
+            while path in used_paths:
+                path = f"{path_base}_{n}.{ext}"
+                n += 1
+            used_paths.add(path)
+
+            zf.writestr(path, r["raw"] or "")
             manifest.append({
-                "file": f"rules/{fname}",
+                "file": path,
                 "id": r["id"],
                 "corpus": r["corpus"],
-                "title": r["title"],
-                "license": r["license"],
-                "source_ref": r["source_ref"],
-                "techniques": r["techniques"],
+                "format": fmt,
+                "severity": r.get("severity") or "unknown",
+                "title": r.get("title"),
+                "license": r.get("license") or "unknown",
+                "source_ref": r.get("source_ref"),
+                "techniques": r.get("techniques", []),
             })
-            licenses.setdefault(r["license"] or "unknown", set()).add(r["corpus"])
+            licenses.setdefault(r.get("license") or "unknown", set()).add(r["corpus"])
+            fmt_counts[fmt] = fmt_counts.get(fmt, 0) + 1
+
+        # Excluded counts by id, NOT by `r not in rules`: that is a linear scan
+        # comparing dicts by value — including multi-kilobyte `raw` — which at
+        # 18k x 2.5k rules is ~45M deep comparisons and hangs the request.
+        kept_ids = {r["id"] for r in rules}
+        excluded = [r for r in all_rules if r["id"] not in kept_ids]
+
+        def _count_excluded(key: str) -> dict[str, int]:
+            counts: dict[str, int] = {}
+            for r in excluded:
+                val = (r.get(key) or _FILTER_DEFAULTS.get(key, "unknown")).strip().lower()
+                counts[val] = counts.get(val, 0) + 1
+            return counts
 
         zf.writestr("MANIFEST.json", json.dumps({
             "job_id": job_id,
-            "report": row["original_filename"],
+            "report": report_name,
             "rule_count": len(manifest),
+            "filters": {
+                "format": format or [], "corpus": corpus or [],
+                "license": license or [], "severity": severity or [],
+            },
+            # Without this, an export that silently omitted 1,642 rules would be
+            # indistinguishable from one where they never matched.
+            "excluded": {
+                "total": len(all_rules) - len(rules),
+                "format": _count_excluded("format"),
+                "corpus": _count_excluded("corpus"),
+                "license": _count_excluded("license"),
+                "severity": _count_excluded("severity"),
+            },
             "rules": manifest,
         }, indent=2))
 
+        format_lines = "\n".join(
+            f"  - {f}: {n}" for f, n in sorted(fmt_counts.items(), key=lambda kv: -kv[1])
+        )
         license_lines = "\n".join(
-            f"  - {lic}: {', '.join(sorted(corpora))}"
-            for lic, corpora in sorted(licenses.items())
+            f"  - {lic}: {', '.join(sorted(corpora_set))}"
+            for lic, corpora_set in sorted(licenses.items())
         )
         zf.writestr("README.txt", (
-            "Sigma detection rules for this CTI report\n"
-            "=========================================\n\n"
-            f"Report : {row['original_filename']}\n"
+            "Detection rules for this CTI report\n"
+            "===================================\n\n"
+            f"Report : {report_name}\n"
             f"Rules  : {len(manifest)} canonical rule(s)\n\n"
+            "Formats present:\n"
+            f"{format_lines}\n\n"
             "These are the public detection rules whose ATT&CK techniques match\n"
             "the techniques extracted from this report. This reflects detection\n"
             "READINESS — that a rule exists — not that any rule was validated\n"
             "against live telemetry.\n\n"
             "Each rule retains its original license. Respect each license before\n"
-            "redistributing. See MANIFEST.json for per-rule license and source.\n\n"
+            "redistributing. A license of 'none' means ALL RIGHTS RESERVED: the\n"
+            "upstream repository ships no license file, so those rules may be used\n"
+            "for local coverage but NOT redistributed. See MANIFEST.json for\n"
+            "per-rule license and source.\n\n"
             "Licenses present:\n"
             f"{license_lines}\n"
         ))
@@ -152,7 +311,7 @@ def export_detections(job_id: str):
         content=buf.getvalue(),
         media_type="application/zip",
         headers={
-            "Content-Disposition": f'attachment; filename="{report_stem}_sigma_rules.zip"'
+            "Content-Disposition": f'attachment; filename="{report_stem}_detection_rules.zip"'
         },
     )
 

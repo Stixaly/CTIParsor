@@ -189,7 +189,9 @@ def test_export_detections_zip(temp_db, temp_db_client):
     assert resp.status_code == 200, resp.text
     assert resp.headers["content-type"] == "application/zip"
     assert "jz" not in resp.headers["content-disposition"]  # named after the report, not the id
-    assert resp.headers["content-disposition"].endswith('_sigma_rules.zip"')
+    # ADR-0020 renamed the archive: it is no longer Sigma-only, and a mixed export
+    # labelled "_sigma_rules" would misdescribe its contents.
+    assert resp.headers["content-disposition"].endswith('_detection_rules.zip"')
 
     zf = zipfile.ZipFile(io.BytesIO(resp.content))
     names = zf.namelist()

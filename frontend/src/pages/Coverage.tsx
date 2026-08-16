@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
 
+import ExportPanel from '../components/review/ExportPanel'
+
 import { fetchJob } from '../api/client'
 import { COVERAGE_LABEL, coverageColor } from '../components/review/tokens'
 import { useCoverage } from '../hooks/useCoverage'
@@ -150,6 +152,8 @@ export default function Coverage() {
           </div>
         ))}
       </div>
+
+      <ExportPanel jobId={jobId} />
     </div>
   )
 }
