@@ -146,9 +146,22 @@ export interface CorpusConfig {
   adapter: string
   path?: string
   git?: string
+  tarball?: string
+  subdir?: string
   license: string
+  priority?: number
   private?: boolean
   enabled: boolean
+  rules: number
+  /** False when no parser for this format is compiled in — the repo is
+   *  configured but will not ingest until its adapter ships (ADR-0019). */
+  adapter_available: boolean
+}
+
+export interface FormatInfo {
+  format: string
+  available: boolean
+  corpora: number
   rules: number
 }
 

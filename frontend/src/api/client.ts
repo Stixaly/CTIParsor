@@ -1,4 +1,4 @@
-import type { Job, Entity, Relationship, StixBundle, CoverageResult, CoverageRule, CoverageReportRules, DetectionProposals, DetectionCorpus, CorpusConfig } from '../types'
+import type { Job, Entity, Relationship, StixBundle, CoverageResult, CoverageRule, CoverageReportRules, DetectionProposals, DetectionCorpus, CorpusConfig, FormatInfo } from '../types'
 
 const BASE = '/api'
 
@@ -119,11 +119,14 @@ export const fetchDetectionCorpora = () =>
 // Settings — detection-corpora management (ADR-0007)
 export const fetchCorpora = () =>
   req<{ corpora: CorpusConfig[] }>('/settings/corpora')
-export const addCorpus = (body: { name: string; git?: string; license?: string; private?: boolean }) =>
-  req<{ ok: boolean; corpora: CorpusConfig[] }>('/settings/corpora', { method: 'POST', body: JSON.stringify(body) })
+export const fetchFormats = () =>
+  req<{ formats: FormatInfo[] }>('/settings/formats')
+export const addCorpus = (body: { name: string; adapter: string; git?: string; tarball?: string; subdir?: string; license?: string; priority?: number; private?: boolean }) =>
+  req<{ ok: boolean; warning: string | null; corpora: CorpusConfig[] }>('/settings/corpora', { method: 'POST', body: JSON.stringify(body) })
+export const setCorpusEnabled = (name: string, enabled: boolean) =>
+  req<{ ok: boolean; corpora: CorpusConfig[] }>(`/settings/corpora/${encodeURIComponent(name)}`, { method: 'PATCH', body: JSON.stringify({ enabled }) })
 export const removeCorpus = (name: string) =>
   req<{ ok: boolean; corpora: CorpusConfig[] }>(`/settings/corpora/${encodeURIComponent(name)}`, { method: 'DELETE' })
-/** Clone/pull one public corpus's git remote, then re-ingest. Private corpora are CLI-only. */
 export const syncCorpus = (name: string) =>
   req<{ ok: boolean; detail: string; corpora: CorpusConfig[] }>(`/settings/corpora/${encodeURIComponent(name)}/sync`, { method: 'POST' })
 export const rebuildCorpora = () =>

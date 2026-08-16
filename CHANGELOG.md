@@ -6,6 +6,64 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Added
+- **Suricata and YARA adapters — the formats now actually ingest** (completes
+  ADR-0015 §1). ADR-0015 shipped the atom extractors, the store schema and the
+  corpora registry, but never the `RuleCorpusAdapter` implementations, so
+  `_ADAPTERS` held only Sigma and both formats reported `adapter unavailable`.
+  `pipeline/detection/suricata.py` and `pipeline/detection/yara.py` close that.
+  Measured on the real corpora: **86,183 rules ingested (75,127 canonical,
+  363,166 atoms)** against 11,396 before — ET Open 51,799, Yara-Rules 12,258,
+  signature-base 5,889, elastic-artifacts 2,877, rl-yara 1,240, tbg-hunting 682,
+  inquest-yara 39. Severity is mapped from ET's own `signature_severity`
+  distribution and `sid` is the native key (all 51,799 verified distinct).
+  Four defects were found by reading the output rather than by tests:
+  **(1)** the YARA rule regex required the opening brace on the `rule` line, but
+  brace-on-next-line outnumbers it **7:1** (10,720 vs 1,492) — `peid.yar` alone
+  holds 7,615 rules and yielded zero, and `inquest-yara` yielded zero entirely;
+  **(2)** the Suricata `dedup_key` hashed only the option body, so the 854
+  `ET TOR Known Tor Exit Node Traffic` rules — which differ *only* in their header
+  address list — collapsed into one cluster, and ADR-0017 would have demoted 853
+  of them, discarding thousands of exit-node addresses. The header is detection
+  logic, and is now hashed with the options;
+  **(3)** bracketed header address lists were skipped as "not a literal", which
+  threw away precisely the C2 addresses the atom index exists to match — atoms
+  rose 47,117 → 72,632 once unpacked;
+  **(4)** `meta.id` was the YARA native key, but YARA has no uniqueness rule for
+  it and signature-base reuses it across families (the eleven distinct
+  `APT30_Sample_10..19` share one id, in 57 such groups) — they collided on
+  `detection_rules.id` where `INSERT OR REPLACE` would have silently dropped them.
+  YARA `private` rules are skipped: a private rule is a helper predicate that
+  cannot fire alone, so counting it would overstate coverage.
+
+- **Multi-format corpus management in Settings** (ADR-0019) — the panel was
+  Sigma-only in three places at once: the API hardcoded
+  `if body.adapter != "sigma"`, the heading read *"Detection Corpora (Sigma)"*,
+  and the add form collected **name, git, license** and nothing else. That form
+  could not express what the registry already supports, which blocked the corpora
+  committed in ADR-0015: `subdir` (3 of the 5 YARA repos keep rules under
+  `yara/`), `tarball` (ET Open is published only as a tarball, and is 70% of all
+  Suricata rules), and `priority` (dedup authority).
+  It also closes a trap of my own making: ADR-0015 committed seven corpora as
+  `enabled: false`, and **there was no way to enable them** — `Remove` writes a
+  *disable override*, with no route back short of hand-editing
+  `detection_corpora.local.yaml`. `PATCH /api/settings/corpora/{name}` now
+  toggles `enabled`, verified to round-trip through `load_corpora()` so the
+  toggle actually changes what gets ingested.
+  New `GET /api/settings/formats` reports each format with `available` derived
+  from the adapter registry, so the UI never hardcodes a format list and lights
+  up on its own when an adapter ships. **Configuring and ingesting are separate
+  gates**: a repo may be configured for any of sigma/suricata/yara, while
+  `available` reflects whether a parser is compiled in. Gating creation on the
+  registry alone would have refused to create the very corpora the committed
+  registry already holds. Corpora whose adapter is missing are badged
+  `adapter unavailable` and the create response carries an explicit `warning`,
+  so the operator learns at creation time rather than after a Rebuild returns
+  zero rules.
+  The table now groups by format with per-format repo and rule counts.
+  Today that reads: **sigma available (8 repos, 11,396 rules), suricata and yara
+  unavailable (2 and 5 repos, 0 rules)** — which is the truth, displayed.
+
 ### Changed
 - **The detection-proposal ranking no longer collapses into one score** (ADR-0018).
   ADR-0014's technique term was a flat `TECH_EXACT = 0.30`, so a report's 34–48
