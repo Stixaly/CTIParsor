@@ -23,7 +23,7 @@ from pipeline.detection.observables import Observable, observables_from_entities
 from pipeline.detection.store import (
     atom_document_frequency,
     atom_hits,
-    atom_index_size,
+    atom_index_built,
     canonical_rule_count,
     rule_details,
     techniques_for_rules,
@@ -452,7 +452,7 @@ def rank_rules(
 
     return {
         "platform": plat,
-        "atom_index_built": atom_index_size(conn) > 0,
+        "atom_index_built": atom_index_built(conn),
         "observables": [
             {"class": o.obs_class, "value": o.value,
              "display": o.display, "entity_type": o.entity_type}

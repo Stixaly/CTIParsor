@@ -69,12 +69,13 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import stix2
 
 from api.logging_config import get_logger
 from models.schemas import STIX_RELATIONSHIP_TYPES
+from pipeline.aliases import mitre_id_for
 from pipeline.stix_rel_spec import rel_is_suggested
 
 logger = get_logger(__name__)
@@ -202,10 +203,18 @@ def _completion_cfg(policy: Optional[dict]) -> dict:
 
 
 def _pol_index(policy: Optional[dict]) -> dict[str, dict]:
-    """Index pinned rules by 'srcType>tgtType' (mirrors build_stix_bundle)."""
+    """Index pinned rules by 'srcType>tgtType' (mirrors build_stix_bundle).
+
+    Non-dict entries are skipped rather than trusted: this runs *before* the
+    per-engine try/except below, so an unguarded `.get` here defeated the whole
+    "completion must never break the bundle" contract — and a stored policy of
+    `{"rules": ["oops"]}` failed every job until the policy was edited by hand.
+    """
     idx: dict[str, dict] = {}
     if policy and policy.get("global") != "auto":
-        for rule in policy.get("rules", []):
+        for rule in policy.get("rules", []) or []:
+            if not isinstance(rule, dict):
+                continue
             s, t = rule.get("src", ""), rule.get("tgt", "")
             if s and t:
                 idx[f"{s}>{t}"] = rule
@@ -435,19 +444,20 @@ def _attack_pairs() -> dict[tuple[str, str], str]:
         return {}
 
 
-@functools.lru_cache(maxsize=1)
-def _gazetteer_attack_ids() -> dict[str, str]:
-    """lowercase gazetteer name → ATT&CK ID (G/S…), or {} when absent."""
-    try:
-        from pipeline.stage2b_gazetteer import _load
+def _own_names(obj) -> list[str]:
+    """The object's name followed by its aliases, skipping anything not a string.
 
-        return {
-            e["name"]: e["mitre_id"]
-            for e in _load()
-            if e.get("mitre_id") and e.get("name")
-        }
-    except Exception:
-        return {}
+    `aliases` is guarded rather than trusted: a STIX object carrying a bare
+    string there would otherwise be spread into single characters by `list()`,
+    and every one-letter fragment would be looked up as a name.
+    """
+    names = [obj.get("name", "")]
+    aliases = obj.get("aliases")
+    if isinstance(aliases, (list, tuple, set)):
+        names.extend(aliases)
+    elif isinstance(aliases, str):
+        names.append(aliases)
+    return [n for n in names if isinstance(n, str) and n.strip()]
 
 
 def _attack_id_for(obj) -> Optional[str]:
@@ -461,9 +471,12 @@ def _attack_id_for(obj) -> Optional[str]:
         return None
     if otype not in ("threat-actor", "intrusion-set", "malware", "tool", "campaign"):
         return None
-    gaz = _gazetteer_attack_ids()
-    for nm in [obj.get("name", "")] + list(obj.get("aliases", []) or []):
-        aid = gaz.get((nm or "").lower().strip())
+    # Resolved through the shared, type-aware alias index (ADR-0021). The local
+    # name→id map this replaced was built with last-write-wins, so a malware node
+    # named "Sofacy" resolved to the APT28 *group* and inherited that group's
+    # curated ATT&CK edges.
+    for nm in _own_names(obj):
+        aid = mitre_id_for(nm, otype)
         if aid:
             return aid
     return None
@@ -476,7 +489,10 @@ def _ground_reference(
     if not pairs:
         return
 
-    resolved: list[tuple[object, str]] = []   # (sdo, attack_id)
+    # `Any`, not `object`: these are stix2 SDOs, which this module duck-types
+    # throughout (see _otype/_own_names). `object` has no `.id`, so annotating
+    # them that way makes every downstream attribute access a type error.
+    resolved: list[tuple[Any, str]] = []   # (sdo, attack_id)
     for o in stix_objects:
         if _is_rel(o) or not hasattr(o, "id"):
             continue
@@ -545,7 +561,8 @@ def _infer_transitive(
     rels = [o for o in stix_objects if _is_rel(o)]
 
     # Adjacency: source_id -> list of (verb, target_id, rel_obj)
-    out_edges: dict[str, list[tuple[str, str, object]]] = {}
+    # The third element is a stix2 Relationship, duck-typed like the SDOs above.
+    out_edges: dict[str, list[tuple[str, str, Any]]] = {}
     for r in rels:
         out_edges.setdefault(r.get("source_ref"), []).append(
             (r.get("relationship_type"), r.get("target_ref"), r)

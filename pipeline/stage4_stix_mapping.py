@@ -285,7 +285,11 @@ def build_stix_bundle(
     # Only built when the policy is in "enforce" mode; ignored when "auto".
     _pol_index: dict[str, dict] = {}
     if relationship_policy and relationship_policy.get("global") != "auto":
-        for _rule in relationship_policy.get("rules", []):
+        for _rule in relationship_policy.get("rules", []) or []:
+            # Skip non-dict entries: the policy is operator-supplied JSON, and a
+            # malformed rule here used to abort the whole mapping stage.
+            if not isinstance(_rule, dict):
+                continue
             _src = _rule.get("src", "")
             _tgt = _rule.get("tgt", "")
             if _src and _tgt:
@@ -332,7 +336,12 @@ def build_stix_bundle(
     _named_seen_ids: dict[str, object] = {}
 
     def _register_named(name: str, stix_type: str, factory):
-        canon = canonical_name(name)
+        # The STIX type is passed to both lookups (ADR-0021): 23 gazetteer
+        # surface forms denote two different MITRE objects — "snake" is both the
+        # Turla group and the Uroburos malware — and resolving them type-blind
+        # renamed the SDO after the wrong one *and* registered that object's
+        # entire alias set here, mis-wiring every later relationship endpoint.
+        canon = canonical_name(name, stix_type)
         det_id = _make_deterministic_id(canon, stix_type, "cti")
         obj = _named_seen_ids.get(det_id)
         if obj is None:
@@ -342,7 +351,7 @@ def build_stix_bundle(
         # Resolve this entity by the emitted name, its canonical, and every alias.
         name_to_stix[name.lower()] = obj
         name_to_stix.setdefault(canon.lower(), obj)
-        for form in alias_surface_forms(name):
+        for form in alias_surface_forms(name, stix_type):
             name_to_stix.setdefault(form, obj)
         return obj
 

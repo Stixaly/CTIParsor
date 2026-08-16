@@ -163,6 +163,46 @@ def _unquote(value: str) -> str:
     return value
 
 
+#: Suricata `content:` escape sequences, decoded in ONE left-to-right pass.
+#:
+#: Suricata escapes only these four characters inside a content string. Decoding
+#: them with chained `str.replace` collapsed `\\` before `\:` was read, turning a
+#: literal backslash-colon into a bare colon.
+_SURICATA_ESCAPES: dict[str, str] = {
+    ";": ";",
+    '"': '"',
+    "\\": "\\",
+    ":": ":",
+}
+
+
+def _unescape_content(value: str) -> str:
+    """Decode one Suricata content string in a single left-to-right pass.
+
+    The single pass is what prevents a decoded backslash from being re-read as
+    the start of a new escape. Undefined escapes are preserved verbatim.
+    """
+    if not isinstance(value, str):
+        return ""
+
+    parts: list[str] = []
+    i = 0
+    n = len(value)
+    while i < n:
+        if value[i] == "\\" and i + 1 < n:
+            nxt = value[i + 1]
+            if nxt in _SURICATA_ESCAPES:
+                parts.append(_SURICATA_ESCAPES[nxt])
+            else:
+                parts.append("\\")
+                parts.append(nxt)
+            i += 2
+        else:
+            parts.append(value[i])
+            i += 1
+    return "".join(parts)
+
+
 def _content_text(value: str) -> str:
     """Extract the textual content from a raw content: value.
 
@@ -172,12 +212,7 @@ def _content_text(value: str) -> str:
     s = _unquote(value)
     # Remove hex segments (binary data, not text)
     s = _RE_HEX_SEGMENT.sub(" ", s)
-    # Decode escape sequences
-    s = s.replace("\\;", ";")
-    s = s.replace('\\"', '"')
-    s = s.replace("\\\\", "\\")
-    s = s.replace("\\:", ":")
-    return s.strip()
+    return _unescape_content(s).strip()
 
 
 def _normalize(cls: str, raw: str) -> list[str]:

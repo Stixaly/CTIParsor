@@ -221,6 +221,49 @@ def _find_rule_end(text: str, start: int) -> int:
     return -1
 
 
+#: YARA text-string escape sequences, decoded in ONE left-to-right pass.
+#:
+#: The pass matters more than the table. Chained `str.replace` calls collapse
+#: `\\` to `\` first and then re-read that backslash as the start of the next
+#: escape, so the literal "C:\\Windows\\notepad.exe" decoded to
+#: "C:\Windows" + NEWLINE + "otepad.exe" and lost its `file` atom entirely.
+_YARA_ESCAPES: dict[str, str] = {
+    '"': '"',
+    "\\": "\\",
+    "n": "\n",
+    "t": "\t",
+    "r": "\r",
+}
+
+
+def _unescape_literal(value: str) -> str:
+    """Decode one YARA text-string literal in a single left-to-right pass.
+
+    The single pass is what prevents a decoded backslash from being re-read as
+    the start of a new escape. Undefined escapes (``\\x41``) are preserved
+    verbatim, matching the previous behaviour.
+    """
+    if not isinstance(value, str):
+        return ""
+
+    parts: list[str] = []
+    i = 0
+    n = len(value)
+    while i < n:
+        if value[i] == "\\" and i + 1 < n:
+            nxt = value[i + 1]
+            if nxt in _YARA_ESCAPES:
+                parts.append(_YARA_ESCAPES[nxt])
+            else:
+                parts.append("\\")
+                parts.append(nxt)
+            i += 2
+        else:
+            parts.append(value[i])
+            i += 1
+    return "".join(parts)
+
+
 def _parse_meta(body: str) -> dict[str, str]:
     """Extract the ``meta:`` section from a rule body.
 
@@ -247,8 +290,7 @@ def _parse_meta(body: str) -> dict[str, str]:
         raw_val = m.group(2).strip()
         # Parse value
         if raw_val.startswith('"') and raw_val.endswith('"') and len(raw_val) >= 2:
-            val = raw_val[1:-1]
-            val = val.replace('\\"', '"').replace("\\\\", "\\")
+            val = _unescape_literal(raw_val[1:-1])
         elif raw_val in ("true", "false"):
             val = raw_val
         else:
@@ -296,9 +338,7 @@ def _parse_strings(body: str) -> list[tuple[str, str, str]]:
                     m_end = k
                     break
                 k += 1
-            val = raw_val[1:m_end] if m_end != -1 else raw_val[1:]
-            val = val.replace('\\"', '"').replace("\\\\", "\\")
-            val = val.replace("\\n", "\n").replace("\\t", "\t")
+            val = _unescape_literal(raw_val[1:m_end] if m_end != -1 else raw_val[1:])
             strings.append((ident, "text", val))
         elif raw_val.startswith("{"):
             # Hex string

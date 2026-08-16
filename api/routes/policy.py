@@ -61,6 +61,12 @@ async def put_policy(request: Request) -> dict:
         raise HTTPException(400, "Policy must be a JSON object")
     if "rules" in body and not isinstance(body["rules"], list):
         raise HTTPException(400, "'rules' must be an array")
+    # Validate the items, not just the container: `{"rules": ["oops"]}` used to
+    # pass this check, get stored, and then fail every subsequent job in
+    # build_stix_bundle with an opaque AttributeError.
+    for _i, _rule in enumerate(body.get("rules") or []):
+        if not isinstance(_rule, dict):
+            raise HTTPException(400, f"'rules[{_i}]' must be a JSON object")
     if "global" in body and body["global"] not in ("enforce", "auto"):
         raise HTTPException(400, "'global' must be 'enforce' or 'auto'")
     if "completion" in body:

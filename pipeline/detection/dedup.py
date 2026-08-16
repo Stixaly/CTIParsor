@@ -224,9 +224,12 @@ def dedupe_store(conn: sqlite3.Connection, priority: dict[str, int] | None = Non
     # Election: sort each cluster by (priority, corpus, rule_id), first is canonical
     canonical: list[str] = []
     duplicates: list[str] = []
-    for members in final_clusters.values():
+    # Distinct name from the `members` of the dedup_key loop above: that one is
+    # a list[str] of rule ids, this one a list[tuple[rule_id, corpus]], and
+    # rebinding the same name to a second type is what mypy flags here.
+    for cluster in final_clusters.values():
         winner, *rest = sorted(
-            members,
+            cluster,
             key=lambda m: (priority.get(m[1], _DEFAULT_PRIORITY), m[1], m[0]),
         )
         canonical.append(winner[0])
