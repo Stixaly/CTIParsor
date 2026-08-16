@@ -1,6 +1,14 @@
 [tool.ruff]
 line-length = 120
 
+[tool.ruff.lint]
+# Pinned so a bare `ruff check` matches CI.  Without an explicit `select`, ruff
+# falls back to E4,E7,E9,F -- which silently omits both I (import sorting) and
+# E501 (line length), despite `line-length` being set right above.  That gap let
+# an unsorted import block and a 147-column line reach a commit while local
+# linting reported clean.
+select = ["E", "F", "W", "I"]
+
 [tool.ruff.lint.per-file-ignores]
 # E402 (module-level import not at top of file): intentional throughout this
 # codebase -- logging must be configured before other modules are imported,
