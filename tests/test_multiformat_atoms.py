@@ -11,13 +11,13 @@ from pipeline.detection.suricata_atoms import (
     rule_header,
     technique_ids,
 )
+from pipeline.detection.tlds import looks_like_domain
+from pipeline.detection.yara_atoms import extract_atoms as yara_extract_atoms
 from pipeline.detection.yara_atoms import (
-    extract_atoms as yara_extract_atoms,
     rule_hashes,
     rule_platform,
     split_rules,
 )
-from pipeline.detection.tlds import looks_like_domain
 
 
 def _sur(body: str) -> str:
@@ -143,7 +143,11 @@ class TestSuricataHeaderAndMeta:
 
     def test_technique_ids_from_metadata(self):
         """MITRE technique IDs are extracted from metadata."""
-        rule = 'alert tcp any any -> any any (msg:"x"; metadata:created_at 2020_01_01, mitre_technique_id T1071, signature_severity Major; sid:1;)'
+        rule = (
+            'alert tcp any any -> any any (msg:"x"; '
+            "metadata:created_at 2020_01_01, mitre_technique_id T1071, "
+            "signature_severity Major; sid:1;)"
+        )
         assert technique_ids(rule) == ["T1071"]
 
     def test_technique_ids_absent_returns_empty(self):
