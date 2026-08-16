@@ -7,6 +7,59 @@ sections group by theme rather than strict semver.
 ## [Unreleased]
 
 ### Added
+- **Report-derived Sigma rule synthesis** (ADR-0016) — ADR-0014 ranks rules that
+  already exist; on a real 41-observable intrusion it found **2** `direct`-tier
+  proposals, meaning the campaign's hashes, binaries and C2 addresses were in no
+  corpus rule at all. `pipeline/detection/synth_sigma.py` closes that gap: it
+  turns a report's observables into draft Sigma, grouped **one rule per telemetry
+  type** (`dns_query`, `proxy_url`, `network_connection`, `process_hash`,
+  `process_image`, `file_event`, `registry_set`) rather than one rule per
+  observable, so a 41-observable report yields 4 reviewable rules instead of 41.
+  Deterministic throughout — UUIDv5 rule ids over `(job_id, kind)` and an explicit
+  `date` — so re-running a report reproduces byte-identical rules.
+  Observables are gated before they may key a rule: values already carried by a
+  canonical corpus rule are skipped (ADR-0014 will propose that rule instead), and
+  `domain` values must pass the ADR-0015 hostname test — which on a real report
+  rejects `agent.ashx`, `exfil.tar.zst` and `psemhub.war`, three filenames that
+  upstream extraction had labelled as domains.
+  Three further defects were found only by reading the generated rules, not by
+  the tests: the report's entire technique list was being stamped on every rule
+  (a `file_event` rule tagged with 34 techniques, including an ICS one), so tags
+  are now one well-founded tactic per kind and none where the tactic is not
+  determinable; `/etc/hosts` was being rendered as the Windows pattern `\hosts`,
+  so path separators are now derived from the value's shape rather than assumed;
+  and `/usr/bin:/bin`, a `$PATH` fragment, was producing a file rule. Every rule
+  carries `status: experimental`, the source report, and the observables behind
+  it — nothing is written to the corpus store, which stays a record of *ingested*
+  rules only.
+
+- **Multi-format detection matching — atom extractors** (ADR-0015, in progress) —
+  groundwork for ranking a report against Suricata and YARA corpora, not Sigma
+  alone. The store has always been format-agnostic on paper (`format` column,
+  `RuleCorpusAdapter` seam) and single-format in practice: **11 396 rules, 100 %
+  `sigma`**. Landed so far:
+  **(1)** `pipeline/detection/suricata_atoms.py` — parses Snort/Suricata syntax
+  (sticky buffers *and* legacy content modifiers, which are disambiguated by
+  position since the two vocabularies overlap), yielding `domain`/`url`/`ip`/
+  `port`/`hash`/`strlit` atoms. Validated on ET Open 7.0.3: **51 799 active rules
+  → 45 682 atoms at 12 700 rules/s**;
+  **(2)** `pipeline/detection/yara_atoms.py` — brace-balanced rule splitter plus
+  meta/strings parser. Metadata hashes are extracted first as the highest-value
+  atoms a YARA rule carries (**8 932 distinct hashes** across the corpora), and
+  hex/regex strings are deliberately *not* indexed — a report never carries a byte
+  pattern as an observable. Validated on 10 668 rules from five corpora;
+  **(3)** `pipeline/detection/tlds.py` — one shared "is this a hostname" test.
+  An allowlist, not the generic shape used for IoC extraction: an atom index needs
+  precision where extraction needs recall, and the generic shape admitted ActiveX
+  ProgIDs (`aventail.epinstaller`) and `kernel32.dll` as domains. Because such
+  values are rare they earn *high* IDF and score near 1.0 — the ADR-0014 failure
+  mode of confident nonsense at the top of the list.
+  Registry entries for seven new corpora (five YARA, two Suricata) are committed
+  **disabled** pending the adapters, with every licence verified from the repo.
+  `Neo23x0/signature-base` is DRL-1.1 — the same licence as SigmaHQ, not the
+  CC BY-NC it is widely reported to be. `ptresearch/AttackDetection` is excluded:
+  proprietary Positive Technologies EULA, sanctioned entity.
+
 - **Observable-driven detection proposals** (ADR-0014) — the Review "Detections"
   tab ranked rules by ATT&CK tag alone, which on a real Linux/WebLogic intrusion
   proposed **2 688 rules**, its two largest buckets being 760 PowerShell rules and

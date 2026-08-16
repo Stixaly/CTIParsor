@@ -17,6 +17,8 @@ choice, and the consequences. They're append-only — supersede rather than rewr
 | [0012](0012-hallucination-measurement-and-canonicalization.md) | Hallucination measurement, entity canonicalisation & relationship precision | Accepted |
 | [0013](0013-graph-completion.md) | STIX graph completion (alias fallback, ATT&CK grounding, transitive, long-distance) | Accepted |
 | [0014](0014-observable-driven-detection-proposals.md) | Observable-driven detection proposals (rule atom index, IDF relevance, platform) | Accepted |
+| [0015](0015-multi-format-detection-matching.md) | Multi-format detection matching (Suricata + YARA adapters, per-format IDF) | Proposed |
+| [0016](0016-report-derived-sigma-synthesis.md) | Report-derived Sigma rule synthesis (gated templates, deterministic ids) | Proposed |
 
 **Numbering notes**
 - `0001` and `0003` are unused gaps (early informal decisions never filed).
@@ -40,5 +42,12 @@ choice, and the consequences. They're append-only — supersede rather than rewr
  feed node identity          ▲   extended by
           │                  ├── 0010 default corpora + dedup
           │                  └── 0014 observable-driven proposals ◄── consumes IoCs (0005)
+          │                         ▲   generalised to N formats by
+          │                         ├── 0015 multi-format matching (suricata + yara)
+          │                         │       └── scopes IDF per format so 0014's
+          │                         │           Sigma scores survive a 7.5× store
+          │                         └── 0016 sigma synthesis — fills the gap 0014
+          │                                 leaves (reuses its observables + IDF,
+          │                                 and 0015's hostname gate)
           └── 0013 graph completion (denser edges, same precision gate)
 ```

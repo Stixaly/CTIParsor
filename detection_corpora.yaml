@@ -96,3 +96,93 @@ corpora:
     subdir: sigma
     private: false
     enabled: true
+
+  # ── YARA (ADR-0015) ────────────────────────────────────────────────────────
+  # DISABLED until the `yara` adapter lands — registry.iter_rules() skips an
+  # unknown adapter with a warning, so enabling these early only adds log noise.
+  # Clones are already present under ./corpora/. Licences VERIFIED from each repo
+  # (2026-08-16), not assumed: signature-base is DRL-1.1 — the same licence as
+  # SigmaHQ — NOT the CC BY-NC it is often reported to be.
+  # Rule counts measured by parsing the clones, not taken from upstream READMEs.
+
+  - name: yara-rules
+    adapter: yara
+    path: ./corpora/yara-rules
+    git:  https://github.com/Yara-Rules/rules.git
+    license: GPL-2.0
+    priority: 110            # 12,336 rules — the broadest public set
+    private: false
+    enabled: false
+
+  - name: signature-base
+    adapter: yara
+    path: ./corpora/signature-base
+    git:  https://github.com/Neo23x0/signature-base.git
+    license: DRL-1.1
+    priority: 100            # 5,990 rules — highest signal/noise, so best dedup authority
+    subdir: yara
+    private: false
+    enabled: false
+
+  - name: elastic-artifacts
+    adapter: yara
+    path: ./corpora/elastic-artifacts
+    git:  https://github.com/elastic/protections-artifacts.git
+    license: Elastic-2.0     # restricted — flagged on export, ingested for coverage
+    priority: 120            # 2,877 rules; the only corpus carrying `os =` meta
+    subdir: yara
+    private: false
+    enabled: false
+
+  - name: rl-yara
+    adapter: yara
+    path: ./corpora/rl-yara
+    git:  https://github.com/reversinglabs/reversinglabs-yara-rules.git
+    license: MIT
+    priority: 130            # 1,240 rules
+    subdir: yara
+    private: false
+    enabled: false
+
+  - name: inquest-yara
+    adapter: yara
+    path: ./corpora/inquest-yara
+    git:  https://github.com/InQuest/yara-rules.git
+    license: MIT
+    priority: 140            # 39 rules — small but high quality
+    private: false
+    enabled: false
+
+  # ── Suricata (ADR-0015) ────────────────────────────────────────────────────
+  # ET Open is published ONLY as a tarball, so it needs the `tarball:` source
+  # type ADR-0015 §5 adds to sync_corpora.py — `git:` cannot fetch it.
+  # 51,799 active rules (+19,479 shipped commented-out, which the adapter skips;
+  # all 3,329 `ET DELETED` deprecated rules live in that commented block).
+
+  - name: et-open
+    adapter: suricata
+    path: ./corpora/et-open
+    tarball: https://rules.emergingthreats.net/open/suricata-7.0.3/emerging.rules.tar.gz
+    # ET ships THREE licences keyed to sid range (see LICENSE in the tarball):
+    # GPLv2 for sids 1-3464 and 100000000-100000908, BSD for 2000000-2799999.
+    # Verified 2026-08-16: all 51,799 active rules fall in the BSD range, so the
+    # corpus-level licence is accurate *for this distribution*. Re-check on
+    # upgrade — a future drop containing GPLv2 sids would need per-rule licence.
+    license: BSD-3-Clause
+    priority: 200            # largest corpus by far; low dedup authority
+    subdir: rules
+    private: false
+    enabled: false
+
+  - name: tbg-hunting
+    adapter: suricata
+    path: ./corpora/tbg-hunting
+    git:  https://github.com/travisbgreen/hunting-rules.git
+    license: GPL-3.0
+    priority: 210            # 682 rules — hunting-oriented, high false-positive rate by design
+    private: false
+    enabled: false
+
+  # NOT INGESTED — ptresearch/AttackDetection (~14k Suricata rules): the LICENSE
+  # is a Positive Technologies proprietary EULA, not an open licence, and PT is a
+  # US-sanctioned entity. Excluded on compliance grounds, not technical ones.
