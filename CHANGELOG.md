@@ -6,6 +6,55 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Fixed
+- **Alias canonicalisation conflated groups with malware** (ADR-0021) — the
+  gazetteer index was built with `name2id[name] = mid`, assuming a surface form
+  identifies one MITRE object. It does not: **23 of the 1,814 surface forms carry
+  two ids**, and for **18 of them the two objects have different canonical
+  names**. `snake` resolved to the Turla *group* G0010 over the Uroburos
+  *malware* S0022; `sofacy` and `sednit` to APT28 over CORESHELL/JHUHUGIT;
+  `uac-0056` merged two distinct ATT&CK groups (G1031 and G1003).
+  The rename was the visible half. The damaging half was in
+  `stage4_stix_mapping._register_named`, which registered *every alias of the
+  winning id* in `name_to_stix` — so a report describing the Snake malware
+  registered `turla`, `secret blizzard`, `krypton`, `group 88` and
+  `belugasturgeon` pointing at the **malware** node, and every later
+  relationship naming "Turla" attached to the wrong object. Node counts looked
+  correct throughout, which is why this was invisible.
+  Lookups now take the STIX type the caller is about to create — which both
+  production call sites already knew — and use the gazetteer's own `entity_type`
+  to break ties. An unambiguous form still resolves whatever the type says, so
+  the 1,791 unaffected forms behave exactly as before; a form the type cannot
+  narrow resolves to nothing and passes through unchanged rather than being
+  guessed. `stage4b_graph_completion` dropped its own last-write-wins copy of the
+  index and now shares this one, so a malware node can no longer inherit a
+  group's curated ATT&CK edges.
+- **YARA and Suricata escape decoding corrupted Windows paths** — both parsers
+  unescaped with a chain of `str.replace` that collapsed `\\` to `\` *first* and
+  then re-read that backslash as the start of the next escape. The literal
+  `"C:\\Windows\\notepad.exe"` decoded to `C:\Windows` + NEWLINE + `otepad.exe`.
+  Measured over the real corpora: **349 atoms changed across 138 files**, and the
+  mangled values failed the file-extension test and fell through to the
+  unmatchable `strlit` class — **232 `file` and 7 `registry` atoms were missing
+  from the index entirely**, while 41 truncated fragments sat in it matching
+  nothing. `M:\\sc\\p\\testbuild.pdb` produced *no atoms at all*; it now yields
+  two, including the PDB basename. Both parsers now decode in one left-to-right
+  pass, and undefined escapes (`\x41`) are preserved verbatim as before.
+- **A valid-looking relationship policy could fail every job** — `PUT
+  /api/relationship-policy` checked that `rules` was a list but never checked its
+  items, so `{"rules": ["oops"]}` was accepted and stored, then raised
+  `AttributeError` in `build_stix_bundle` and `complete_graph` for every
+  subsequent job until the policy was edited by hand. This also defeated Stage
+  4b's own contract: it wraps all four completion engines in `try/except` because
+  "completion must never break the bundle", but `_pol_index` ran *before* the
+  first guard. The endpoint now validates each rule is an object, and both
+  index builders skip non-dict entries.
+- **The proposals endpoint counted 363k rows to answer a yes/no** —
+  `atom_index_size` ran `SELECT COUNT(*) FROM rule_atoms` on every request purely
+  to test `> 0`, costing **0.54 s** of each response. Replaced by
+  `atom_index_built`, a `SELECT 1 … LIMIT 1` at 0.5 ms. Measured end-to-end on
+  real reports: 4.30 s → 3.20 s and 13.95 s → 12.22 s, with identical results.
+
 ### Added
 - **Filtered, multi-format rule export** (ADR-0020) — the export ZIPped every rule
   matching the report's techniques, and was written when the store held 11,396

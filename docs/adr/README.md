@@ -23,6 +23,7 @@ choice, and the consequences. They're append-only — supersede rather than rewr
 | [0018](0018-technique-idf-ranking.md) | Technique-IDF ranking (breaks the ~1,400-rule score plateau) | Proposed |
 | [0019](0019-multi-format-corpus-management.md) | Multi-format corpus management (format discovery, enable/disable, subdir/tarball) | Proposed |
 | [0020](0020-filtered-multi-format-export.md) | Filtered multi-format export (facets, per-format extensions, licence gating) | Proposed |
+| [0021](0021-type-aware-alias-resolution.md) | Type-aware alias resolution (a surface form can denote two MITRE objects) | Proposed |
 
 **Numbering notes**
 - `0001` and `0003` are unused gaps (early informal decisions never filed).
@@ -39,7 +40,13 @@ choice, and the consequences. They're append-only — supersede rather than rewr
 0009 trust & provenance ─┘        │
    ▲   measured & extended by     │
    └── 0012 hallucination metric  │
-       + canonicalisation         ▼
+       + canonicalisation         │
+          ▲   corrected by        │
+          └── 0021 type-aware alias resolution — 23 gazetteer surface
+              forms denote two MITRE objects ("snake" = Turla G0010 AND
+              Uroburos S0022); resolving them type-blind renamed the SDO
+              after the wrong one and mis-wired relationship endpoints
+                                         ▼
           ▲            0008 coverage matrix ◄── consumes techniques
           │               ▲   implemented by
  canonical names         └── 0006 multi-corpus rules ── managed by ── 0007 settings panel

@@ -224,13 +224,18 @@ def canonical_rule_count(conn: sqlite3.Connection) -> int:
     ).fetchone()[0])
 
 
-def atom_index_size(conn: sqlite3.Connection) -> int:
-    """Number of rows in the atom index (0 = never built; proposals degrade to
-    technique-only ranking)."""
+def atom_index_built(conn: sqlite3.Connection) -> bool:
+    """Whether the atom index holds anything (False = proposals degrade to
+    technique-only ranking).
+
+    `LIMIT 1`, not `COUNT(*)`: the only caller needs a yes/no, and counting all
+    363k rows to answer it cost 0.54s on every proposals request — a thousand
+    times the 0.5ms this takes.
+    """
     try:
-        return int(conn.execute("SELECT COUNT(*) FROM rule_atoms").fetchone()[0])
+        return conn.execute("SELECT 1 FROM rule_atoms LIMIT 1").fetchone() is not None
     except sqlite3.OperationalError:
-        return 0   # table absent on a database older than the ADR-0014 migration
+        return False   # table absent on a database older than the ADR-0014 migration
 
 
 def rule_details(conn: sqlite3.Connection, rule_ids: Iterable[str]) -> dict[str, dict]:
