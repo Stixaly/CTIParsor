@@ -7,6 +7,35 @@ sections group by theme rather than strict semver.
 ## [Unreleased]
 
 ### Added
+- **Filtered, multi-format rule export** (ADR-0020) — the export ZIPped every rule
+  matching the report's techniques, and was written when the store held 11,396
+  Sigma rules. At 86,183 rules across three formats it was broken three ways:
+  a real report produced **10,372 rules / 224 MB** (another **18,196 / 268 MB**);
+  **8,380 of those 10,372 were Suricata rules written with a `.yml` extension**,
+  which no tool loads; and 1,290–1,642 rules carried licence `none`
+  (all-rights-reserved) with no way to leave them out.
+  Export now accepts `format`, `corpus`, `license` and `severity` — repeatable,
+  combining with AND, applied to the technique-selected set so ADR-0008's coverage
+  semantics are untouched. Files land as `rules/{format}/…` with the extension the
+  format requires (`.yml` / `.rules` / `.yar`), and the archive drops `_sigma_`
+  from its name. `MANIFEST.json` records both the filters requested and the
+  per-axis counts **excluded**, so an export that omitted 1,642 rules is
+  distinguishable from one where they never matched.
+  A new `GET /jobs/{id}/detections/export/facets` reports each axis with rule
+  counts and byte size, so the operator sees the volume and licence split *before*
+  downloading — which is why no silent cap was added; truncating a detection
+  package without saying so is worse than a large one.
+  This makes ADR-0006's stance actionable: licence was always "carried, not
+  enforced — the operator decides", but the operator had no mechanism to decide.
+  Measured end-to-end: "Sigma only, redistributable licences, high severity"
+  returns **324 rules / 0.30 MB**, with zero all-rights-reserved files.
+  Known limitation, documented rather than hidden: facets take **12.4 s** because
+  byte totals need `LENGTH(raw)` over 219 MB of overflow-page text. An earlier
+  per-axis SQL version measured **43 s** — 2.4× worse, since each axis re-read the
+  same bodies — and the fix (a `raw_bytes` column written at ingest) is scoped out.
+  YARA still cannot be exported at all: selection is technique-based and YARA
+  carries 0 techniques across all 16,314 canonical rules.
+
 - **Suricata and YARA adapters — the formats now actually ingest** (completes
   ADR-0015 §1). ADR-0015 shipped the atom extractors, the store schema and the
   corpora registry, but never the `RuleCorpusAdapter` implementations, so

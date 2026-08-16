@@ -1,4 +1,4 @@
-import type { Job, Entity, Relationship, StixBundle, CoverageResult, CoverageRule, CoverageReportRules, DetectionProposals, DetectionCorpus, CorpusConfig, FormatInfo } from '../types'
+import type { Job, Entity, Relationship, StixBundle, CoverageResult, CoverageRule, CoverageReportRules, DetectionProposals, DetectionCorpus, CorpusConfig, FormatInfo, ExportFacets, ExportSelection, ExportAxis } from '../types'
 
 const BASE = '/api'
 
@@ -141,3 +141,21 @@ export const putRelationshipPolicy = (policy: Record<string, unknown>) =>
     method: 'PUT',
     body: JSON.stringify(policy),
   })
+
+
+export function fetchExportFacets(jobId: string): Promise<ExportFacets> {
+  return req<ExportFacets>(`/jobs/${encodeURIComponent(jobId)}/detections/export/facets`)
+}
+
+// Returns a full URL rather than calling req() because the browser must handle
+// the ZIP download natively (via <a download>), not parse a JSON response.
+export function buildExportUrl(jobId: string, sel: ExportSelection): string {
+  const params = new URLSearchParams()
+  for (const axis of Object.keys(sel) as ExportAxis[]) {
+    for (const value of sel[axis]) {
+      params.append(axis, value)
+    }
+  }
+  const qs = params.toString()
+  return `${BASE}/jobs/${encodeURIComponent(jobId)}/detections/export${qs ? `?${qs}` : ''}`
+}

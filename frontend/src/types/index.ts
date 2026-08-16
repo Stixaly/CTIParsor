@@ -346,3 +346,22 @@ export const ENTITY_TYPE_LABELS: Record<string, string> = {
   'directory': 'Directory', 'artifact': 'Artifact',
   'email-message': 'Email Message', 'process': 'Process',
 }
+
+export interface ExportFacet {
+  value: string
+  rules: number
+  bytes: number
+}
+
+export interface ExportFacets {
+  total: number
+  bytes: number
+  format: ExportFacet[]
+  corpus: ExportFacet[]
+  license: ExportFacet[]
+  severity: ExportFacet[]
+}
+
+export type ExportAxis = 'format' | 'corpus' | 'license' | 'severity'
+
+export type ExportSelection = Record<ExportAxis, string[]>
