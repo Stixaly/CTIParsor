@@ -21,6 +21,7 @@ choice, and the consequences. They're append-only — supersede rather than rewr
 | [0016](0016-report-derived-sigma-synthesis.md) | Report-derived Sigma rule synthesis (gated templates, deterministic ids) | Proposed |
 | [0017](0017-provenance-based-rule-dedup.md) | Provenance-based rule dedup (`related:` folding, technique union) | Proposed |
 | [0018](0018-technique-idf-ranking.md) | Technique-IDF ranking (breaks the ~1,400-rule score plateau) | Proposed |
+| [0019](0019-multi-format-corpus-management.md) | Multi-format corpus management (format discovery, enable/disable, subdir/tarball) | Proposed |
 
 **Numbering notes**
 - `0001` and `0003` are unused gaps (early informal decisions never filed).
