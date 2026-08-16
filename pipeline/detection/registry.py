@@ -17,12 +17,18 @@ from api.logging_config import get_logger
 from models.detection import DetectionRule
 from pipeline.detection.base import RuleCorpusAdapter
 from pipeline.detection.sigma import SigmaAdapter
+from pipeline.detection.suricata import SuricataAdapter
+from pipeline.detection.yara import YaraAdapter
 
 logger = get_logger(__name__)
 
 # format key → adapter instance.  Register new formats here (the ADR-0006 seam).
+# This dict is also what the settings API reports as "available" (ADR-0019), so
+# adding a line here is what makes a format ingestible *and* visible in the UI.
 _ADAPTERS: dict[str, RuleCorpusAdapter] = {
     SigmaAdapter.format: SigmaAdapter(),
+    SuricataAdapter.format: SuricataAdapter(),
+    YaraAdapter.format: YaraAdapter(),
 }
 
 

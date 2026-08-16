@@ -70,8 +70,13 @@ NOISE_LITERALS: frozenset[str] = frozenset({
 # Compiled regexes (compiled once at module level)
 # ---------------------------------------------------------------------------
 
+# `\s*\{` before the brace, NOT `[ \t]*\{`: putting the opening brace on its own
+# line is the dominant YARA style, by 7:1 in Yara-Rules/rules (10,720 rules vs
+# 1,492). Requiring it on the `rule` line silently skipped whole files — peid.yar
+# alone holds 7,615 rules and yielded zero.
+# The tag group stays line-bound (`[^\{\n]*`): tags never wrap.
 _RE_RULE = re.compile(
-    r"(?m)^[ \t]*(?:(private|global)[ \t]+)*rule[ \t]+([A-Za-z_]\w*)[ \t]*(?::[ \t]*([^\{\n]*))?[ \t]*\{"
+    r"(?m)^[ \t]*(?:(private|global)[ \t]+)*rule[ \t]+([A-Za-z_]\w*)[ \t]*(?::[ \t]*([^\{\n]*))?\s*\{"
 )
 _RE_HASH = re.compile(r"^[0-9a-f]{32,128}$")
 _RE_IP = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
