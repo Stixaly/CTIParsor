@@ -38,6 +38,36 @@ tags:
   - attack.t1059.001
 """
 
+# What a hayabusa conversion ACTUALLY looks like (ADR-0017): a Channel/EventID
+# selection is injected, the condition is wrapped around it, and Image is renamed
+# to NewProcessName for the Security-4688 variant.  The detection semantics are
+# unchanged but the dedup_key is not — which is why, on the real store, exactly 1
+# of hayabusa's 4,759 rules shared a dedup_key with SigmaHQ.  It declares its
+# origin in `related:`, and that is the only reliable way to fold it.
+_HAYABUSA_REALISTIC = """\
+title: PowerShell EncodedCommand
+id: aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+related:
+  - id: 11111111-2222-3333-4444-555555555555
+    type: derived
+author: Yamato Security
+description: Converted rule.
+logsource:
+  product: windows
+  category: process_creation
+detection:
+  process_creation:
+    Channel: Security
+    EventID: 4688
+  selection:
+    CommandLine|contains: '-EncodedCommand'
+    NewProcessName|endswith: '\\powershell.exe'
+  condition: process_creation and selection
+level: high
+tags:
+  - attack.t1059.001
+"""
+
 _HAYABUSA_CONVERTED = """\
 title: PowerShell EncodedCommand (converted)
 id: 99999999-8888-7777-6666-555555555555
@@ -105,13 +135,44 @@ def test_dedupe_elects_canonical_by_priority(temp_db):
     replace_corpus_rules(conn, "hayabusa", [_parse(_HAYABUSA_CONVERTED, "hayabusa")])
 
     summary = dedupe_store(conn, {"sigmahq": 10, "hayabusa": 95})
-    assert summary == {"total": 2, "clusters": 1, "canonical": 1, "duplicates": 1}
+    # Subset, not equality: ADR-0017 added provenance/propagation counters, and
+    # pinning the whole dict makes every future field a false failure.
+    assert {k: summary[k] for k in ("total", "clusters", "canonical", "duplicates")} == {
+        "total": 2, "clusters": 1, "canonical": 1, "duplicates": 1
+    }
+    # This fixture folds on dedup_key alone — its detection block is byte-identical
+    # to the SigmaHQ one, which real converted rules never are. See
+    # test_realistic_hayabusa_conversion_folds_only_via_provenance.
+    assert summary["provenance_edges"] == 0
 
     # both rows survive (lossless) — only the flag differs; sigmahq wins (lower priority)
     rows = dict(conn.execute(
         "SELECT corpus, is_canonical FROM detection_rules"
     ).fetchall())
     assert rows == {"sigmahq": 1, "hayabusa": 0}
+
+
+def test_realistic_hayabusa_conversion_folds_only_via_provenance(temp_db):
+    """A real converted rule shares no dedup_key — only `related:` can fold it.
+
+    This is the case the original fixture missed: it made the converted rule
+    byte-identical to its source, so dedup looked healthy in tests while folding
+    1 of hayabusa's 4,759 rules in production.
+    """
+    conn = temp_db.get_conn()
+    replace_corpus_rules(conn, "sigmahq", [_parse(_SIGMAHQ, "sigmahq")])
+    replace_corpus_rules(conn, "hayabusa", [_parse(_HAYABUSA_REALISTIC, "hayabusa")])
+
+    # The premise: the conversion genuinely changed the detection hash.
+    keys = [r[0] for r in conn.execute("SELECT dedup_key FROM detection_rules")]
+    assert len(set(keys)) == 2, "fixture no longer models a real conversion"
+
+    summary = dedupe_store(conn, {"sigmahq": 10, "hayabusa": 95})
+    assert summary["provenance_edges"] == 1
+    assert summary["canonical"] == 1
+    assert dict(conn.execute("SELECT corpus, is_canonical FROM detection_rules")) == {
+        "sigmahq": 1, "hayabusa": 0,
+    }
 
 
 def test_dedupe_keeps_independent_rules(temp_db):
