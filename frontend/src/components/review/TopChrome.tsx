@@ -10,11 +10,12 @@ interface Props {
   onCoverage: () => void
   onFinalize: () => void
   onDownload: () => void
-  /** Download a ZIP of every detected Sigma rule for this report. */
+  /** Download a ZIP of every detected rule for this report, in every format.
+   *  (The `sigma*` prop names predate the multi-format store — ADR-0015/0022.) */
   onDownloadSigma: () => void
-  /** Number of detected (linkable) Sigma rules — labels the button and gates it. */
+  /** Number of detected (linkable) rules — labels the button and gates it. */
   sigmaRuleCount: number
-  /** True while the Sigma ZIP is being built/streamed — shows a spinner. */
+  /** True while the archive is being built/streamed — shows a spinner. */
   sigmaDownloading: boolean
   /** True after a successful finalize, until the next mutation. When true the
    *  primary button is "Download STIX"; otherwise it is "Complete Review". */
@@ -115,10 +116,11 @@ export default function TopChrome({
           onClick={onDownloadSigma}
           disabled={sigmaRuleCount === 0 || sigmaDownloading}
           title={sigmaDownloading
-            ? 'Building the Sigma rule archive — this can take a moment for large reports…'
+            ? 'Building the detection-rule archive — this can take a moment for large reports…'
             : sigmaRuleCount === 0
-              ? 'No Sigma rules match this report’s techniques yet.'
-              : `Download all ${sigmaRuleCount} detected Sigma rule${sigmaRuleCount === 1 ? '' : 's'} as a ZIP.`
+              ? 'No detection rules match this report’s techniques yet.'
+              : `Download all ${sigmaRuleCount} detected rule${sigmaRuleCount === 1 ? '' : 's'} as a ZIP. `
+                + 'Use the Coverage page to pick a subset.'
           }
         >
           {sigmaDownloading ? (
@@ -129,7 +131,7 @@ export default function TopChrome({
           ) : (
             <>
               <FileCode size={14} />
-              Sigma rules{sigmaRuleCount > 0 ? ` · ${sigmaRuleCount}` : ''}
+              Detection rules{sigmaRuleCount > 0 ? ` · ${sigmaRuleCount}` : ''}
             </>
           )}
         </button>

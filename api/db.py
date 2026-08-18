@@ -198,6 +198,16 @@ def init_db() -> None:
                 raw          TEXT DEFAULT ''
             );
 
+            -- Byte length of each rule body, in its own table (ADR-0022). It is
+            -- NOT a column on detection_rules: any column added there lands
+            -- after `raw`, and SQLite must walk the multi-kilobyte body and its
+            -- overflow pages to reach it — measured 8.2s to read one integer
+            -- for 10,372 rules, versus 0.1s from this side table.
+            CREATE TABLE IF NOT EXISTS rule_bytes (
+                rule_id TEXT PRIMARY KEY,
+                bytes   INTEGER NOT NULL DEFAULT 0
+            );
+
             CREATE TABLE IF NOT EXISTS rule_techniques (
                 rule_id      TEXT NOT NULL,
                 technique_id TEXT NOT NULL,
@@ -260,6 +270,12 @@ def init_db() -> None:
             " rule_id TEXT NOT NULL, related_key TEXT NOT NULL, rel_type TEXT NOT NULL,"
             " PRIMARY KEY (rule_id, related_key, rel_type))",
             "CREATE INDEX IF NOT EXISTS idx_rule_related_key ON rule_related(related_key)",
+            # ADR-0022 — body size for the coverage selection UI, in a side table
+            # (a column on detection_rules would sit after `raw` and cost 8.2s to
+            # read). Written on ingest; an already-built store is backfilled
+            # offline by scripts/backfill_rule_bytes.py — no corpus re-clone.
+            "CREATE TABLE IF NOT EXISTS rule_bytes ("
+            " rule_id TEXT PRIMARY KEY, bytes INTEGER NOT NULL DEFAULT 0)",
         ]
         for stmt in _migrations:
             try:

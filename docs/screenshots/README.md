@@ -10,7 +10,8 @@ Product screenshots referenced by the top-level [`README.md`](../../README.md#sc
 | `homepage.png`               | Dashboard — upload + kanban board |
 | `review-page-PDF-view.png`   | Review — inline Source view (PDF) |
 | `graph-report-view.png`      | STIX relationship graph (OASIS icons) |
-| `sigma-rules.png`            | Detection-coverage matrix (ATT&CK × Sigma) |
+| `detection-coverage.png`     | Detection coverage — format board, matrix, drill-in, granular export (ADR-0022) |
+| `sigma-rules.png`            | *Superseded* — the pre-ADR-0022 matrix (Sigma-only, no format lanes) |
 | `relationships-settings.png` | Relationship policy — canonical STIX links |
 | `Sigma-rules-settings.png`   | Settings — Sigma corpus management |
 

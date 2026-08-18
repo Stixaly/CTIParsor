@@ -4,8 +4,9 @@ import { useQuery } from '@tanstack/react-query'
 import { ShieldCheck, ExternalLink, AlertTriangle } from 'lucide-react'
 
 import { fetchDetectionProposals } from '../../api/client'
-import type { ProposalMatch, ProposalTier, RuleProposal } from '../../types'
-import { typeInk, typeSoft } from './tokens'
+import type { DetectionFormat, ProposalMatch } from '../../types'
+import { DETECTION_FORMATS } from '../../types'
+import { typeInk, typeSoft, FORMAT_STYLE, formatDot, formatInk } from './tokens'
 
 /** Detection rules ranked by what this report actually contains — hashes,
  *  domains, binaries, paths, registry keys, CVEs — and by platform, not by
@@ -17,6 +18,9 @@ export default function DetectionsPanel({ jobId }: { jobId: string }) {
     queryFn: () => fetchDetectionProposals(jobId),
     enabled: !!jobId,
   })
+
+  const [fmtFilter, setFmtFilter] = useState<'all' | DetectionFormat>('all')
+  const [showAll, setShowAll] = useState(false)
 
   if (isLoading) return <Wrap><p style={dim}>Ranking detections…</p></Wrap>
   if (isError) return <Wrap><p style={{ ...dim, color: 'var(--no)' }}>Could not load detections.</p></Wrap>
@@ -41,15 +45,12 @@ export default function DetectionsPanel({ jobId }: { jobId: string }) {
   }
 
   const counts = data!.counts
-  const groups: Array<{ tier: ProposalTier; label: string; hint: string }> = [
-    { tier: 'direct', label: 'Matched this report', hint: 'a rule field matches an observable extracted from the report' },
-    { tier: 'behavioural', label: 'Behavioural', hint: 'ATT&CK technique match only, compatible with the report platform' },
-    { tier: 'weak', label: 'Off-platform', hint: 'technique match, but the rule targets another OS than this report' },
-  ]
+  const filtered = fmtFilter === 'all' ? proposals : proposals.filter(p => p.format === fmtFilter)
+  const shown = showAll ? filtered : filtered.slice(0, 30)
 
   return (
     <Wrap>
-      {!data!.atom_index_built && <AtomIndexWarning />}
+      {data && !data.atom_index_built && <AtomIndexWarning />}
 
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
         <h2 style={{ fontSize: 15, margin: 0, color: 'var(--ink)' }}>Proposed detections</h2>
@@ -58,7 +59,30 @@ export default function DetectionsPanel({ jobId }: { jobId: string }) {
           {' · '}{counts.direct} matched on {data!.observables_total} observable
           {data!.observables_total === 1 ? '' : 's'}
         </span>
+        <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
+          <FilterChip
+            active={fmtFilter === 'all'}
+            label="All"
+            count={proposals.length}
+            dotColor="var(--ink-4)"
+            onClick={() => { setFmtFilter('all'); setShowAll(false) }}
+          />
+          {DETECTION_FORMATS.map(f => (
+            <FilterChip
+              key={f}
+              active={fmtFilter === f}
+              label={FORMAT_STYLE[f].label}
+              count={proposals.filter(p => p.format === f).length}
+              dotColor={formatDot(f)}
+              onClick={() => { setFmtFilter(f); setShowAll(false) }}
+            />
+          ))}
+        </div>
       </div>
+
+      <p style={{ fontSize: 11.5, color: 'var(--ink-4)', margin: '0 0 12px', lineHeight: 1.5 }}>
+        One ranked list; format is a column, not a section — so the top of the list is the top of the list regardless of which tool the rule belongs to.
+      </p>
 
       <p style={{ fontSize: 11.5, color: 'var(--ink-4)', margin: '0 0 6px', lineHeight: 1.5 }}>
         Ranked by overlap with this report's technical content and by platform — not by
@@ -74,95 +98,182 @@ export default function DetectionsPanel({ jobId }: { jobId: string }) {
         </p>
       )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-        {groups.map(g => {
-          const rows = proposals.filter(p => p.tier === g.tier)
-          if (rows.length === 0) return null
-          return (
-            <TierSection key={g.tier} label={g.label} hint={g.hint} total={counts[g.tier] ?? rows.length}>
-              {rows}
-            </TierSection>
-          )
-        })}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '44px 88px 1fr 190px 150px',
+        gap: '0 12px',
+        alignItems: 'center',
+        fontSize: 10.5,
+        fontWeight: 600,
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em',
+        color: 'var(--ink-3)',
+        paddingBottom: 6,
+        borderBottom: '1px solid var(--rule)',
+      }}>
+        <span>Rank</span>
+        <span>Format</span>
+        <span>Rule</span>
+        <span>Evidence</span>
+        <span>Corpus · license</span>
       </div>
+
+      {filtered.length === 0 ? (
+        <p style={{ ...dim, padding: '14px 0' }}>
+          No {FORMAT_STYLE[fmtFilter as DetectionFormat].label} rule matches this report.
+        </p>
+      ) : (
+        <>
+          {shown.map(p => (
+            <div
+              key={p.id}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '44px 88px 1fr 190px 150px',
+                gap: '0 12px',
+                alignItems: 'center',
+                padding: '8px 0',
+                borderBottom: '1px solid var(--rule-soft)',
+              }}
+            >
+              <div style={{ textAlign: 'center' }}>
+                <ScorePill score={p.score} />
+              </div>
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                fontSize: 11.5,
+                fontWeight: 600,
+                color: formatInk(p.format),
+              }}>
+                <span style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  background: formatDot(p.format),
+                  flexShrink: 0,
+                }} />
+                {FORMAT_STYLE[p.format].label}
+              </span>
+              <div style={{ minWidth: 0 }}>
+                <div style={{
+                  fontSize: 12.5,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  color: 'var(--ink)',
+                }}>
+                  {p.title || p.id}
+                </div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 2 }}>
+                  {p.techniques[0] && (
+                    <span style={{ fontSize: 10.5, fontFamily: 'monospace', color: 'var(--accent)' }}>
+                      {p.techniques[0]}
+                    </span>
+                  )}
+                  <span style={{ fontSize: 10.5, color: 'var(--ink-4)' }}>{p.tier}</span>
+                  <span style={{ fontSize: 10.5, fontFamily: 'monospace', color: 'var(--ink-4)' }}>
+                    {FORMAT_STYLE[p.format].ext}
+                  </span>
+                  {p.source_ref && /^https?:\/\//.test(p.source_ref) && (
+                    <a
+                      href={p.source_ref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="Open rule source"
+                      style={{ color: 'var(--ink-3)', display: 'inline-flex', alignItems: 'center' }}
+                    >
+                      <ExternalLink size={12} />
+                    </a>
+                  )}
+                </div>
+              </div>
+              <div>
+                {p.matches.length > 0
+                  ? <EvidenceChip match={p.matches[0]} />
+                  : <span style={{ fontSize: 10.5, color: 'var(--ink-4)' }}>—</span>}
+              </div>
+              <span style={{ fontSize: 11, color: 'var(--ink-2)' }}>
+                {p.corpus} ·{' '}
+                <span style={{ color: p.license === 'none' ? 'var(--warn)' : 'var(--ink-3)' }}>
+                  {p.license}
+                </span>
+              </span>
+            </div>
+          ))}
+          {filtered.length > 30 && (
+            <button
+              onClick={() => setShowAll(s => !s)}
+              style={{
+                marginTop: 8,
+                fontSize: 11.5,
+                color: 'var(--ink-3)',
+                background: 'none',
+                border: '1px solid var(--rule)',
+                borderRadius: 6,
+                padding: '3px 10px',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              {showAll ? 'Show less' : `Show ${filtered.length - 30} more`}
+            </button>
+          )}
+        </>
+      )}
     </Wrap>
   )
 }
 
-/** One tier of proposals, collapsed to a preview when long. */
-function TierSection({ label, hint, total, children }: {
-  label: string; hint: string; total: number; children: RuleProposal[]
+function FilterChip({
+  active,
+  label,
+  count,
+  dotColor,
+  onClick,
+}: {
+  active: boolean
+  label: string
+  count: number
+  dotColor: string
+  onClick: () => void
 }) {
-  const PREVIEW = 12
-  const [expanded, setExpanded] = useState(false)
-  const shown = expanded ? children : children.slice(0, PREVIEW)
-
   return (
-    <div>
-      <div style={{
-        display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6,
-        paddingBottom: 4, borderBottom: '1px solid var(--rule)',
+    <button
+      onClick={onClick}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        fontSize: 11.5,
+        fontFamily: 'inherit',
+        padding: '4px 10px',
+        borderRadius: 5,
+        fontWeight: 600,
+        cursor: 'pointer',
+        background: active ? 'var(--accent-soft)' : 'var(--bg-elev)',
+        border: active ? '1px solid var(--accent)' : '1px solid var(--rule)',
+        color: active ? 'var(--accent)' : 'var(--ink-2)',
+      }}
+    >
+      <span style={{
+        width: 6,
+        height: 6,
+        borderRadius: '50%',
+        background: dotColor,
+        flexShrink: 0,
+      }} />
+      {label}
+      <span style={{
+        fontFamily: 'monospace',
+        fontSize: 10,
+        fontWeight: 500,
+        opacity: 0.75,
       }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{label}</span>
-        <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{total}</span>
-        <span style={{ fontSize: 10.5, color: 'var(--ink-4)', marginLeft: 'auto', textAlign: 'right' }}>{hint}</span>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {shown.map(p => <ProposalRow key={p.id} proposal={p} />)}
-      </div>
-      {children.length > PREVIEW && (
-        <button
-          onClick={() => setExpanded(v => !v)}
-          style={{
-            marginTop: 8, fontSize: 11.5, color: 'var(--ink-3)', background: 'none',
-            border: '1px solid var(--rule)', borderRadius: 6, padding: '3px 10px', cursor: 'pointer',
-          }}
-        >
-          {expanded ? 'Show less' : `Show ${children.length - PREVIEW} more`}
-        </button>
-      )}
-    </div>
-  )
-}
-
-function ProposalRow({ proposal: r }: { proposal: RuleProposal }) {
-  const isUrl = /^https?:\/\//i.test(r.source_ref ?? '')
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'flex-start', gap: 10,
-      padding: '7px 10px', borderRadius: 7,
-      border: '1px solid var(--rule-soft)', background: 'var(--bg-elev)',
-    }}>
-      <ScorePill score={r.score} />
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ fontSize: 13, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {r.title || r.id}
-        </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 3, alignItems: 'center' }}>
-          <Badge>{r.corpus}</Badge>
-          {r.severity && r.severity !== 'unknown' && <Badge>{r.severity}</Badge>}
-          {r.platform && <Badge>{r.platform}</Badge>}
-          <Badge subtle>{r.license}</Badge>
-          {r.techniques.slice(0, 3).map(t => (
-            <span key={t} style={{ fontSize: 10.5, fontFamily: 'monospace', color: 'var(--accent)' }}>{t}</span>
-          ))}
-          {r.techniques.length > 3 && (
-            <span style={{ fontSize: 10.5, color: 'var(--ink-4)' }}>+{r.techniques.length - 3}</span>
-          )}
-        </div>
-        {r.matches.length > 0 && (
-          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 5 }}>
-            {r.matches.map((m, i) => <EvidenceChip key={`${m.value}-${m.field}-${i}`} match={m} />)}
-          </div>
-        )}
-      </div>
-      {isUrl && (
-        <a href={r.source_ref} target="_blank" rel="noopener noreferrer"
-          title="Open rule source" style={{ color: 'var(--ink-3)', flexShrink: 0, display: 'flex', marginTop: 2 }}>
-          <ExternalLink size={14} />
-        </a>
-      )}
-    </div>
+        {count}
+      </span>
+    </button>
   )
 }
 
@@ -224,20 +335,6 @@ function AtomIndexWarning() {
         Run <code>python scripts/build_rule_atoms.py</code> to index what each rule looks for.
       </p>
     </div>
-  )
-}
-
-function Badge({ children, subtle }: { children: React.ReactNode; subtle?: boolean }) {
-  return (
-    <span style={{
-      fontSize: 10.5, padding: '1px 6px', borderRadius: 5,
-      background: subtle ? 'transparent' : 'var(--bg-soft)',
-      border: '1px solid var(--rule)',
-      color: subtle ? 'var(--ink-4)' : 'var(--ink-2)',
-      fontFamily: 'monospace',
-    }}>
-      {children}
-    </span>
   )
 }
 

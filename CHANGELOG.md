@@ -6,7 +6,74 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Added
+- **Granular multi-format detection selection on `/coverage/:jobId`** (ADR-0022) —
+  the page now makes Sigma, Suricata and YARA distinct throughout, and lets an
+  analyst select rules at every level (rule → technique → ATT&CK tactic → corpus
+  → format) before exporting. A **format board** shows per-format selected counts,
+  byte volume and a per-technique tick strip; matrix cells gained tri-state
+  checkboxes and format ticks; a **drill-in strip** lists every rule of the
+  focused technique in three always-present format columns (a format with no rule
+  renders as a visible absence, not a missing lane); the **export panel** groups
+  by tactic or by format/corpus, previews the actual ZIP contents, and warns on
+  all-rights-reserved licences. Selection is modelled as an exclusion set, so
+  "everything that matches the report" remains the default.
+- **Rule-id export** — `POST /api/jobs/{id}/detections/export` with
+  `{"rule_ids": [...]}` packages exactly the requested rules. The axis-filtered
+  `GET` cannot express an arbitrary set, and ~10k ids cannot ride on a URL. Both
+  routes share one ZIP builder, so layout, manifest and README cannot drift; ids
+  are intersected with the report's linkable rules.
+- **Detections tab reworked** (option 1b) — one ranked list with format as a
+  column plus `All / Sigma / Suricata / YARA` filter chips carrying counts,
+  instead of tier sections.
+- **Per-format coverage breakdown** (ADR-0022) — `CoverageCell` now carries
+  `by_format`, an entry per detection format (`sigma` / `suricata` / `yara`) with
+  its own `rule_count` and `corpora`, and `CoverageRule` carries `format`. Every
+  format key is always present, so a format with no rule renders as an explicit
+  zero rather than a missing lane. The coverage *score* is unchanged and still
+  computed across all formats combined — corroboration is a property of the
+  technique, not of one tool's rule language. Per-format `corpora` reuses the
+  same first-seen-corpus attribution as the score, so the panel can never claim
+  more corroboration than the score does.
+
 ### Fixed
+- **`/api/jobs/{id}/coverage/rules` was unusable on real reports** (ADR-0022) —
+  the endpoint the Detection Coverage page selects over did not complete: on a
+  34-technique report (9,777 canonical rules) a 600 s measurement finished 3 of
+  34 techniques, extrapolating to **~2.4 hours**. Two instances of one planner
+  pathology in `rules_for_technique`, both already documented elsewhere in the
+  same module: the `is_canonical` JOIN predicate made SQLite enter through
+  `idx_detection_canon` (~43k of 86k rows) at **4.11 s per technique — even for a
+  technique with zero rules** — and the per-rule `also_in` sub-query repeated the
+  same scan at **871-1,227 ms per rule**. The first is now an `EXISTS`, the second
+  one batched sweep pinned to `idx_detection_dedup`. Measured after: T1190's 6,404
+  rules in **1.99 s**, T1082 235.66 s → **0.123 s**, a zero-rule technique
+  4.11 s → **0.000 s**. Verified key-by-key against the original query on live
+  rules with folded duplicates: 0 mismatches.
+- **The Detection Coverage page could not be scrolled** (ADR-0022) — `body` and
+  `#root` are `height:100vh; overflow:hidden` so the Review page can own its
+  internal scroll panes, which means a full-screen route gets no page scrollbar
+  at any window size. The coverage page is ~1,680px tall, so everything below the
+  fold — including the whole export panel — was unreachable even on a 1920×1080
+  display. It now scrolls itself (`flex:1; min-height:0; overflow-y:auto`), the
+  same pattern Policy and Dashboard use, and the page is responsive: the archive
+  preview stacks under the selection table at 1180px, and the format board and
+  drill-in columns fold 3 → 2 → 1 at 1000px and 720px. Those declarations moved
+  from inline styles into `index.css`, since inline styles silently override
+  media queries.
+- **Three more per-element query patterns in the same area** (ADR-0022) —
+  `rules_for_job` called `rules_for_technique` once per technique (34 EXISTS
+  joins + 34 `also_in` sweeps, **26.34 s → 5.44 s** as one flat sweep); the
+  rule-id export loaded all 10,372 rule bodies (219 MB) to package 45
+  (**14.83 s → 4.08 s** via a `body_ids` restriction); and `_load_rules` scanned
+  all 86,180 store rows to enrich ~10k (**4.83 s → ~0.3 s** batched by id).
+- **Rule body sizes moved to a `rule_bytes` side table** (ADR-0022) — the
+  selection UI needs a per-rule byte count, and both obvious placements are slow:
+  `LENGTH(raw)` per query costs 8.78 s for 10,372 rules, and a `raw_bytes` column
+  on `detection_rules` costs **8.19 s** — no better, because `ALTER TABLE`
+  appends it after `raw`, so SQLite still walks each record past a multi-kilobyte
+  body. From its own table the same read is ~0.1 s. Written on ingest; existing
+  stores are filled by `scripts/backfill_rule_bytes.py` (86,180 rows in 23 s).
 - **Alias canonicalisation conflated groups with malware** (ADR-0021) — the
   gazetteer index was built with `name2id[name] = mid`, assuming a surface form
   identifies one MITRE object. It does not: **23 of the 1,814 surface forms carry

@@ -103,14 +103,16 @@ export const fetchCoverage = (jobId: string) =>
   req<CoverageResult>(`/jobs/${jobId}/coverage`)
 export const fetchCoverageRules = (jobId: string, techniqueId: string) =>
   req<{ technique_id: string; rules: CoverageRule[] }>(`/jobs/${jobId}/coverage/${techniqueId}/rules`)
-/** All Sigma rules linkable to a report, grouped by technique — the unranked tag join. */
+/** Every rule linkable to a report, in every format, grouped by technique — the
+ *  unranked tag join. Backs the coverage page's selection set (ADR-0022). */
 export const fetchCoverageReportRules = (jobId: string) =>
   req<CoverageReportRules>(`/jobs/${jobId}/coverage/rules`)
 /** Rules ranked by the report's own observables, with match evidence (ADR-0014) —
  *  backs the Review "Detections" tab. */
 export const fetchDetectionProposals = (jobId: string, limit = 200) =>
   req<DetectionProposals>(`/jobs/${jobId}/detections/proposals?limit=${limit}`)
-/** URL that streams a ZIP of every detected Sigma rule (bodies) for a report. */
+/** URL that streams a ZIP of every detected rule (bodies) for a report, in every
+ *  format. For an arbitrary subset use `downloadExportSelection` (ADR-0022). */
 export const detectionsExportUrl = (jobId: string) =>
   `/api/jobs/${jobId}/detections/export`
 export const fetchDetectionCorpora = () =>
@@ -158,4 +160,26 @@ export function buildExportUrl(jobId: string, sel: ExportSelection): string {
   }
   const qs = params.toString()
   return `${BASE}/jobs/${encodeURIComponent(jobId)}/detections/export${qs ? `?${qs}` : ''}`
+}
+
+/** POST the selected rule ids and hand back the ZIP as a blob.
+ *  Unlike the axis-filtered GET (buildExportUrl), an arbitrary rule set cannot
+ *  ride on <a href> query params — 9k ids exceed any URL limit — so the caller
+ *  triggers the download itself from the returned blob (ADR-0022). */
+export async function downloadExportSelection(
+  jobId: string,
+  ruleIds: string[],
+): Promise<{ blob: Blob; filename: string }> {
+  const res = await fetch(`${BASE}/jobs/${encodeURIComponent(jobId)}/detections/export`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rule_ids: ruleIds }),
+  })
+  if (!res.ok) {
+    throw new Error(await res.text().catch(() => res.statusText))
+  }
+  const disposition = res.headers.get('content-disposition') ?? ''
+  const match = disposition.match(/filename="([^"]+)"/)
+  const filename = match ? match[1] : 'detection_rules.zip'
+  return { blob: await res.blob(), filename }
 }

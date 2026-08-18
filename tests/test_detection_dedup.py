@@ -243,7 +243,7 @@ def test_drilldown_preserves_duplicate_provenance(temp_db):
 
     # coverage refs are canonical-only
     refs = rule_refs_for_techniques(conn, ["T1059.001"])
-    assert {c for _t, c, _k in refs} == {"sigmahq"}
+    assert {c for _t, c, _k, _f in refs} == {"sigmahq"}
 
 
 def test_corpus_counts_reports_total_and_canonical(temp_db):

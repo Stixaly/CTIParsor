@@ -23,7 +23,7 @@ Two modes are available:
 | | |
 |:---:|:---:|
 | <img src="docs/screenshots/homepage.png" alt="Dashboard" width="430"><br>**Dashboard** — drag-and-drop upload + kanban | <img src="docs/screenshots/review-page-PDF-view.png" alt="Review — Source view" width="430"><br>**Source view** — inline original file (PDF / HTML / TXT / MD) |
-| <img src="docs/screenshots/graph-report-view.png" alt="STIX graph" width="430"><br>**STIX graph** — relationships with official OASIS icons | <img src="docs/screenshots/sigma-rules.png" alt="Detection-coverage matrix" width="430"><br>**Detection coverage** — ATT&CK × Sigma readiness matrix |
+| <img src="docs/screenshots/graph-report-view.png" alt="STIX graph" width="430"><br>**STIX graph** — relationships with official OASIS icons | <img src="docs/screenshots/detection-coverage.png" alt="Detection coverage — format board, matrix and granular export" width="430"><br>**Detection coverage** — per-format readiness + granular rule selection |
 | <img src="docs/screenshots/relationships-settings.png" alt="Relationship policy" width="430"><br>**Relationship policy** — canonical STIX links, pin / auto | <img src="docs/screenshots/Sigma-rules-settings.png" alt="Settings" width="430"><br>**Settings** — Sigma corpus management |
 
 ---
@@ -1021,14 +1021,24 @@ data: {"status":"for_review"}
 | `GET` | `/api/jobs/{id}/coverage/rules` | Every rule sharing an ATT&CK tag with the report, grouped by technique (unranked) |
 | `GET` | `/api/jobs/{id}/coverage/{technique}/rules` | License-aware drill-down: which rules cover a technique |
 | `GET` | `/api/jobs/{id}/detections/proposals` | Rules **ranked** on the report's observables + platform, with match evidence (ADR-0014) |
+| `POST` | `/api/jobs/{id}/detections/export` | ZIP of exactly the rules in `{"rule_ids": [...]}` — the granular selection the axis filters cannot express (ADR-0022) |
 | `GET` | `/api/detection-corpora` | Per-corpus rule counts in the store |
 
 ```json
 // GET /api/jobs/{id}/coverage
 { "techniques_total": 12, "validated": false,
   "by_score": { "0": 4, "1": 0, "2": 5, "3": 3 },
-  "cells": [ { "technique_id": "T1059.001", "score": 3, "corpora": ["sigmahq","team"], "rule_count": 4 } ] }
+  "cells": [ { "technique_id": "T1059.001", "score": 3, "corpora": ["sigmahq","team"], "rule_count": 4,
+               "by_format": { "sigma":    { "rule_count": 3, "corpora": ["sigmahq","team"] },
+                              "suricata": { "rule_count": 1, "corpora": ["et-open"] },
+                              "yara":     { "rule_count": 0, "corpora": [] } } } ] }
 ```
+
+`by_format` always carries all three format keys, so a format with no rule is an
+explicit zero rather than a missing lane (ADR-0022). The `score` is deliberately
+*not* per-format — corroboration is a property of the technique, not of one tool's
+rule language. Drill-down rules (`/coverage/{technique}/rules`) each carry
+`format` alongside `severity` and `license`.
 
 ```json
 // GET /api/jobs/{id}/detections/proposals?limit=200

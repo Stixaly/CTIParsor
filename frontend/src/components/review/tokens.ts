@@ -5,6 +5,7 @@
    ============================================================ */
 
 import { pairVerbs } from '../../stix/relConstraints'
+import type { DetectionFormat } from '../../types'
 
 export interface TypeStyle {
   hue: number
@@ -203,6 +204,52 @@ export function hashHue(str: string): number {
 /** confidence 0-1 or 0-100 → display percentage string */
 export function confPct(c: number): number {
   return c > 1 ? Math.round(c) : Math.round(c * 100)
+}
+
+// ── Detection formats (ADR-0022) ─────────────────────────────────────────────
+// One visual identity per rule language, shared by the coverage page and the
+// Detections tab. Hues reuse the TYPE_STYLE families on purpose: sigma sits on
+// the ATT&CK/behaviour hue, suricata on the network hue, yara on the tool hue.
+// `ext` must match _EXPORT_EXTENSIONS in api/routes/coverage.py.
+export interface FormatStyle {
+  hue: number
+  label: string
+  ext: string     // file extension the export writes, dot included
+  letter: string  // one-letter tag for the mini chips in the export table
+  dest: string    // where an analyst deploys this format
+}
+
+export const FORMAT_STYLE: Record<DetectionFormat, FormatStyle> = {
+  sigma:    { hue: 30,  label: 'Sigma',    ext: '.yml',   letter: 'S', dest: 'SIEM · log correlation' },
+  suricata: { hue: 215, label: 'Suricata', ext: '.rules', letter: 'N', dest: 'IDS · network sensor' },
+  yara:     { hue: 145, label: 'YARA',     ext: '.yar',   letter: 'Y', dest: 'Scanner · files & memory' },
+}
+
+export function formatDot(f: DetectionFormat): string {
+  return `oklch(0.58 0.18 ${FORMAT_STYLE[f].hue})`
+}
+
+export function formatLine(f: DetectionFormat): string {
+  return `oklch(0.62 0.18 ${FORMAT_STYLE[f].hue})`
+}
+
+export function formatSoft(f: DetectionFormat): string {
+  return isDark()
+    ? `oklch(0.28 0.05 ${FORMAT_STYLE[f].hue})`
+    : `oklch(0.95 0.035 ${FORMAT_STYLE[f].hue})`
+}
+
+export function formatInk(f: DetectionFormat): string {
+  return isDark()
+    ? `oklch(0.88 0.07 ${FORMAT_STYLE[f].hue})`
+    : `oklch(0.32 0.10 ${FORMAT_STYLE[f].hue})`
+}
+
+/** Raw byte count → compact display ("824 B", "128 KB", "3.1 MB"). */
+export function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 ** 2) return `${(n / 1024).toFixed(0)} KB`
+  return `${(n / 1024 ** 2).toFixed(1)} MB`
 }
 
 // ── Detection coverage (ADR-0006) — readiness scale, NOT lab validation ───────

@@ -12,6 +12,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
 
 from api.db import get_conn
 from pipeline.detection.coverage import (
@@ -92,21 +93,34 @@ def _safe_slug(text: str, fallback: str) -> str:
     return slug or fallback
 
 
-def _load_rules(conn, job_id: str) -> list[dict]:
+def _load_rules(conn, job_id: str, body_ids: set[str] | None = None) -> list[dict]:
     """Technique-selected rules for a job, enriched with `format` and `severity`.
 
     `rule_bodies_for_job` predates the multi-format store and returns neither, so
     they are joined on here — in one query for the whole store rather than one per
     rule, which at ~18k selected rules is the difference between a scan and a
     round-trip storm.
+
+    `body_ids` is passed straight through: the rule-id export only needs the
+    bodies it actually packages (ADR-0022).
     """
-    rules = rule_bodies_for_job(conn, job_id)
+    rules = rule_bodies_for_job(conn, job_id, body_ids=body_ids)
     if not rules:
         return []
-    meta = {
-        r[0]: (r[1] or "sigma", r[2] or "unknown")
-        for r in conn.execute("SELECT id, format, severity FROM detection_rules")
-    }
+    # Batched by the ids we already hold, not a scan of the whole store: the
+    # store is 86,180 rows against a report's ~10k, and the full scan measured
+    # 4.8s of the export's runtime for rows it then discarded (ADR-0022).
+    meta: dict[str, tuple[str, str]] = {}
+    ids = sorted(r["id"] for r in rules)
+    for i in range(0, len(ids), 400):
+        batch = ids[i:i + 400]
+        placeholders = ",".join("?" * len(batch))
+        for rid, fmt, sev in conn.execute(
+            f"SELECT id, format, severity FROM detection_rules "
+            f"WHERE id IN ({placeholders})",
+            batch,
+        ):
+            meta[rid] = (fmt or "sigma", sev or "unknown")
     for r in rules:
         fmt, sev = meta.get(r["id"], ("sigma", "unknown"))
         r["format"] = fmt
@@ -178,37 +192,23 @@ def export_facets(job_id: str):
         return rule_facets_for_job(conn, job_id)
 
 
-@router.get("/jobs/{job_id}/detections/export")
-def export_detections(
+class ExportSelection(BaseModel):
+    """Body of the rule-id export: the exact rules to package (ADR-0022)."""
+    rule_ids: list[str] = Field(default_factory=list)
+
+
+def _zip_export(
     job_id: str,
-    format: list[str] | None = Query(None),
-    corpus: list[str] | None = Query(None),
-    license: list[str] | None = Query(None),
-    severity: list[str] | None = Query(None),
-):
-    """Download the report's detection rules as a ZIP, optionally filtered (ADR-0020).
+    report_name: str,
+    all_rules: list[dict],
+    rules: list[dict],
+    filters_meta: dict,
+) -> Response:
+    """Shared ZIP builder for the axis-filtered GET and the rule-id POST.
 
-    "Detected" = the canonical rules linkable to the report's accepted ATT&CK
-    techniques (same set as the Review "Detections" tab). One file per rule, named
-    with the extension its format requires, plus MANIFEST.json and README carrying
-    each rule's licence and source so provenance travels with the export (ADR-0006).
+    One builder so the two exports can never drift in layout, manifest or
+    README.
     """
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT original_filename FROM jobs WHERE id=?", (job_id,)
-        ).fetchone()
-        if not row:
-            raise HTTPException(404, "Job not found")
-        all_rules = _load_rules(conn, job_id)
-
-    if not all_rules:
-        raise HTTPException(404, "No detection rules match this report's techniques")
-
-    rules = _apply_filters(all_rules, format, corpus, license, severity)
-    if not rules:
-        raise HTTPException(404, "No rules match the selected filters")
-
-    report_name = row["original_filename"]
     report_stem = _safe_slug(Path(report_name).stem, "report")
 
     manifest: list[dict] = []
@@ -264,10 +264,7 @@ def export_detections(
             "job_id": job_id,
             "report": report_name,
             "rule_count": len(manifest),
-            "filters": {
-                "format": format or [], "corpus": corpus or [],
-                "license": license or [], "severity": severity or [],
-            },
+            "filters": filters_meta,
             # Without this, an export that silently omitted 1,642 rules would be
             # indistinguishable from one where they never matched.
             "excluded": {
@@ -314,6 +311,92 @@ def export_detections(
             "Content-Disposition": f'attachment; filename="{report_stem}_detection_rules.zip"'
         },
     )
+
+
+@router.get("/jobs/{job_id}/detections/export")
+def export_detections(
+    job_id: str,
+    format: list[str] | None = Query(None),
+    corpus: list[str] | None = Query(None),
+    license: list[str] | None = Query(None),
+    severity: list[str] | None = Query(None),
+):
+    """Download the report's detection rules as a ZIP, optionally filtered (ADR-0020).
+
+    "Detected" = the canonical rules linkable to the report's accepted ATT&CK
+    techniques (same set as the Review "Detections" tab). One file per rule, named
+    with the extension its format requires, plus MANIFEST.json and README carrying
+    each rule's licence and source so provenance travels with the export (ADR-0006).
+    """
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT original_filename FROM jobs WHERE id=?", (job_id,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Job not found")
+        all_rules = _load_rules(conn, job_id)
+
+    if not all_rules:
+        raise HTTPException(404, "No detection rules match this report's techniques")
+
+    rules = _apply_filters(all_rules, format, corpus, license, severity)
+    if not rules:
+        raise HTTPException(404, "No rules match the selected filters")
+
+    return _zip_export(
+        job_id,
+        row["original_filename"],
+        all_rules,
+        rules,
+        {
+            "format": format or [],
+            "corpus": corpus or [],
+            "license": license or [],
+            "severity": severity or [],
+        },
+    )
+
+
+@router.post("/jobs/{job_id}/detections/export")
+def export_detections_selection(job_id: str, selection: ExportSelection):
+    """Download exactly the requested rules as a ZIP (ADR-0022).
+
+    The axis-filtered GET cannot express an arbitrary rule set; the granular
+    coverage UI selects per rule, so it POSTs the ids. Ids are intersected with
+    the rules linkable to this report — the export can never reach rules outside
+    the report's technique set. Same archive layout, manifest and README as the
+    GET.
+    """
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT original_filename FROM jobs WHERE id=?", (job_id,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Job not found")
+        # Validate before loading: an empty selection must not pay for a scan.
+        wanted = {i.strip() for i in selection.rule_ids if i and i.strip()}
+        if not wanted:
+            raise HTTPException(400, "rule_ids must be a non-empty list")
+        all_rules = _load_rules(conn, job_id, body_ids=wanted)
+
+    if not all_rules:
+        raise HTTPException(404, "No detection rules match this report's techniques")
+
+    rules = [r for r in all_rules if r["id"] in wanted]
+    if not rules:
+        raise HTTPException(404, "No requested rule matches this report")
+
+    # The manifest records the COUNT of requested ids, not the list: 10,000 ids
+    # copied into the manifest would double its size without audit value.
+    filters_meta = {
+        "format": [],
+        "corpus": [],
+        "license": [],
+        "severity": [],
+        "rule_ids": len(wanted),
+    }
+
+    return _zip_export(job_id, row["original_filename"], all_rules, rules, filters_meta)
 
 
 @router.get("/detection-corpora")

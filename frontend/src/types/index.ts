@@ -51,11 +51,30 @@ export interface Relationship {
 }
 
 // ── Detection coverage (ADR-0006) ───────────────────────────────────────────
+// The three detection formats the store can hold, kept in step with
+// DETECTION_FORMATS in pipeline/detection/coverage.py and _EXPORT_EXTENSIONS in
+// api/routes/coverage.py. A format missing here is one the coverage UI cannot render.
+export type DetectionFormat = 'sigma' | 'suricata' | 'yara'
+
+// Display order for the format board, matrix ticks and drill-in columns —
+// deliberate, not alphabetical.
+export const DETECTION_FORMATS: readonly DetectionFormat[] = ['sigma', 'suricata', 'yara']
+
+export interface CoverageFormatBreakdown {
+  rule_count: number
+  // Same first-seen-corpus attribution as the cell's own score, so a forked rule
+  // contributes one corpus here exactly as it does to the score.
+  corpora: string[]
+}
+
 export interface CoverageCell {
   technique_id: string
   score: number            // 0-3 readiness (NOT lab validation)
   corpora: string[]
   rule_count: number
+  // Every format key is always present; a format with no rule is an explicit
+  // zero, so the UI can render an absence rather than omitting the lane.
+  by_format: Record<DetectionFormat, CoverageFormatBreakdown>
 }
 
 export interface CoverageResult {
@@ -74,6 +93,8 @@ export interface CoverageRule {
   license: string
   source_ref: string
   also_in?: string[]
+  format: DetectionFormat  // source rule language — decides the export file extension
+  bytes: number            // raw body length — powers the live archive-size figures
 }
 
 export interface CoverageRuleGroup {
@@ -109,6 +130,7 @@ export interface RuleProposal {
   license: string
   source_ref: string
   platform: string
+  format: DetectionFormat  // source rule language
   score: number
   tier: ProposalTier
   techniques: string[]

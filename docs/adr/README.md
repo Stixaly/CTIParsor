@@ -24,6 +24,7 @@ choice, and the consequences. They're append-only — supersede rather than rewr
 | [0019](0019-multi-format-corpus-management.md) | Multi-format corpus management (format discovery, enable/disable, subdir/tarball) | Proposed |
 | [0020](0020-filtered-multi-format-export.md) | Filtered multi-format export (facets, per-format extensions, licence gating) | Proposed |
 | [0021](0021-type-aware-alias-resolution.md) | Type-aware alias resolution (a surface form can denote two MITRE objects) | Proposed |
+| [0022](0022-per-format-coverage-breakdown.md) | Per-format coverage breakdown, granular multi-format selection + rule-id export (`/coverage/rules`: ~2.4 h → 5.4 s) | Proposed |
 
 **Numbering notes**
 - `0001` and `0003` are unused gaps (early informal decisions never filed).
@@ -67,5 +68,11 @@ choice, and the consequences. They're append-only — supersede rather than rewr
           │                         └── 0016 sigma synthesis — fills the gap 0014
           │                                 leaves (reuses its observables + IDF,
           │                                 and 0015's hostname gate)
+          │                  └── 0020 filtered multi-format export ── made granular by
+          │                         └── 0022 per-format coverage + rule-id export:
+          │                             0008's cells gain a per-format split, and
+          │                             the drill-down that feeds it went from
+          │                             ~2.4 h to 5.4 s (same planner pathology as
+          │                             0014's atom_hits, three more times over)
           └── 0013 graph completion (denser edges, same precision gate)
 ```
