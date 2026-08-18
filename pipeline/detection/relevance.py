@@ -140,12 +140,14 @@ class Proposal:
     tier: str                                     # direct | behavioural | weak
     techniques: list[str] = field(default_factory=list)   # report techniques covered
     matches: list[Match] = field(default_factory=list)
+    format: str = "sigma"                         # source rule language — Sigma / Suricata / YARA
 
     def as_dict(self) -> dict:
         return {
             "id": self.rule_id, "corpus": self.corpus, "title": self.title,
             "severity": self.severity, "license": self.license,
             "source_ref": self.source_ref, "platform": self.platform,
+            "format": self.format,
             "score": round(self.score, 4), "tier": self.tier,
             "techniques": self.techniques,
             "matches": [
@@ -438,6 +440,7 @@ def rank_rules(
             license=meta["license"] or "unknown",
             source_ref=meta["source_ref"] or "",
             platform=meta["platform"],
+            format=meta.get("format") or "sigma",
             score=score,
             tier=tier_of(bool(matches), rule_id in tech_rules, factor == 1.0),
             techniques=sorted(tech_rules.get(rule_id, ())) or rule_techs.get(rule_id, []),

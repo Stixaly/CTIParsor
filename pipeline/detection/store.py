@@ -23,12 +23,13 @@ def replace_corpus_rules(conn: sqlite3.Connection, corpus: str, rules: Iterable[
         "SELECT id FROM detection_rules WHERE corpus=?", (corpus,)
     ).fetchall()]
     if old:
+        conn.executemany("DELETE FROM rule_bytes WHERE rule_id=?", [(i,) for i in old])
         conn.executemany("DELETE FROM rule_techniques WHERE rule_id=?", [(i,) for i in old])
         conn.executemany("DELETE FROM rule_atoms WHERE rule_id=?", [(i,) for i in old])
         conn.executemany("DELETE FROM rule_related WHERE rule_id=?", [(i,) for i in old])
         conn.execute("DELETE FROM detection_rules WHERE corpus=?", (corpus,))
 
-    rule_rows, tech_rows, atom_rows, related_rows = [], [], [], []
+    rule_rows, tech_rows, atom_rows, related_rows, byte_rows = [], [], [], [], []
     for r in rules:
         sev = getattr(r.severity, "value", r.severity)
         rule_rows.append((
@@ -36,6 +37,7 @@ def replace_corpus_rules(conn: sqlite3.Connection, corpus: str, rules: Iterable[
             sev, r.license, r.source_ref, r.content_hash, r.dedup_key,
             json.dumps(r.data_sources), r.platform, r.raw,
         ))
+        byte_rows.append((r.id, len(r.raw or "")))
         for t in r.technique_ids:
             tech_rows.append((r.id, t.upper()))
         for cls, value in r.atoms:
@@ -51,6 +53,10 @@ def replace_corpus_rules(conn: sqlite3.Connection, corpus: str, rules: Iterable[
         "source_ref,content_hash,dedup_key,data_sources,platform,raw,is_canonical) "
         "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)",
         rule_rows,
+    )
+    conn.executemany(
+        "INSERT OR REPLACE INTO rule_bytes (rule_id, bytes) VALUES (?,?)",
+        byte_rows,
     )
     conn.executemany(
         "INSERT OR IGNORE INTO rule_techniques (rule_id, technique_id) VALUES (?,?)",
@@ -252,7 +258,8 @@ def rule_details(conn: sqlite3.Connection, rule_ids: Iterable[str]) -> dict[str,
         batch = ids[i:i + 400]
         placeholders = ",".join("?" * len(batch))
         for r in conn.execute(
-            f"SELECT id, corpus, title, description, severity, license, source_ref, platform "
+            f"SELECT id, corpus, title, description, severity, license, source_ref, "
+            f"platform, format "
             f"FROM detection_rules WHERE id IN ({placeholders})",
             batch,
         ).fetchall():
@@ -260,6 +267,7 @@ def rule_details(conn: sqlite3.Connection, rule_ids: Iterable[str]) -> dict[str,
                 "id": r[0], "corpus": r[1], "title": r[2], "description": r[3],
                 "severity": r[4], "license": r[5], "source_ref": r[6],
                 "platform": r[7] or "",
+                "format": r[8] or "sigma",
             }
     return out
 
@@ -282,22 +290,67 @@ def techniques_for_rules(conn: sqlite3.Connection, rule_ids: Iterable[str]) -> d
     return {k: sorted(v) for k, v in out.items()}
 
 
-def rule_refs_for_techniques(conn: sqlite3.Connection, technique_ids: Iterable[str]) -> list[tuple[str, str, str]]:
-    """Return (technique_id, corpus, native_key) for every *canonical* rule covering
-    the given techniques. Duplicates folded by the ADR-0010 dedup pass are excluded
-    so cross-corpus copies never inflate the corroboration score."""
+def rule_refs_for_techniques(
+    conn: sqlite3.Connection, technique_ids: Iterable[str]
+) -> list[tuple[str, str, str, str]]:
+    """Return (technique_id, corpus, native_key, format) for every *canonical* rule
+    covering the given techniques. Duplicates folded by the ADR-0010 dedup pass are
+    excluded so cross-corpus copies never inflate the corroboration score.
+
+    The canonical filter is an EXISTS for the same reason as
+    `canonical_rule_ids_for_techniques`: as a JOIN predicate the planner enters
+    through `idx_detection_canon` (`is_canonical` has two distinct values, so that
+    index selects ~43k of 86k rows) and scans them on every call — measured 4.11s
+    for a technique with ZERO matching rules. As an EXISTS it drives off
+    `idx_rule_tech_tech` instead: 0.001s (ADR-0022).
+    """
     ids = sorted({t.upper() for t in technique_ids})
     if not ids:
         return []
     placeholders = ",".join("?" * len(ids))
     rows = conn.execute(
-        f"SELECT rt.technique_id, d.corpus, d.native_key "
+        f"SELECT rt.technique_id, d.corpus, d.native_key, d.format "
         f"FROM rule_techniques rt JOIN detection_rules d ON d.id = rt.rule_id "
-        f"WHERE rt.technique_id IN ({placeholders}) AND d.is_canonical=1 "
+        f"WHERE rt.technique_id IN ({placeholders}) AND EXISTS ("
+        f"  SELECT 1 FROM detection_rules x WHERE x.id = rt.rule_id AND x.is_canonical=1) "
         f"ORDER BY d.corpus, d.native_key",
         ids,
     ).fetchall()
-    return [(r[0], r[1], r[2]) for r in rows]
+    # The column is `NOT NULL DEFAULT 'sigma'`, so this only ever guards an empty
+    # string — kept because `_load_rules` in api/routes/coverage.py applies the
+    # same fallback, and a blank format would otherwise drop a rule from every lane.
+    return [(r[0], r[1], r[2], r[3] or "sigma") for r in rows]
+
+
+def _also_in_map(conn: sqlite3.Connection, dedup_keys: Iterable[str]) -> dict[str, set[str]]:
+    """Map dedup_key → the corpora of the non-canonical rules folded into it.
+
+    One sweep for the whole batch, not one query per rule. `INDEXED BY` is
+    required, not decorative: left to itself the planner enters through
+    `idx_detection_canon` and scans ~43k rows per key — measured 871-1227 ms per
+    rule, which is what made the drill-down endpoint take hours on a real report.
+    Driven off `idx_detection_dedup` the same lookup is 0.4 ms, and batched it is
+    0.14 ms per key (ADR-0022).
+
+    Returns the raw corpus set per key; the caller subtracts the rule's own
+    corpus, since this helper does not know which rule a key was fetched for.
+    """
+    keys = sorted({k for k in dedup_keys if k})
+    if not keys:
+        return {}
+    out: dict[str, set[str]] = {}
+    # 400 per statement — SQLite caps a statement at 999 bound parameters, and
+    # this is the batch size `rule_facets_for_job` already uses.
+    for i in range(0, len(keys), 400):
+        batch = keys[i:i + 400]
+        placeholders = ",".join("?" * len(batch))
+        for key, corpus in conn.execute(
+            f"SELECT dedup_key, corpus FROM detection_rules INDEXED BY idx_detection_dedup "
+            f"WHERE dedup_key IN ({placeholders}) AND is_canonical=0",
+            batch,
+        ):
+            out.setdefault(key, set()).add(corpus)
+    return out
 
 
 def rules_for_technique(conn: sqlite3.Connection, technique_id: str) -> list[dict]:
@@ -305,26 +358,33 @@ def rules_for_technique(conn: sqlite3.Connection, technique_id: str) -> list[dic
 
     Each canonical rule carries `also_in` — the other corpora that shipped a
     duplicate folded into it (ADR-0010), so provenance survives deduplication.
+    `format` decides the file extension the export writes, and `bytes` is the raw
+    body length, so the selection UI can display live archive sizes without ever
+    fetching bodies (ADR-0022).
+
+    Both the canonical filter and the `also_in` lookup avoid `idx_detection_canon`
+    — see `rule_refs_for_techniques` and `_also_in_map` for the measurements.
     """
     rows = conn.execute(
-        "SELECT d.id, d.corpus, d.title, d.severity, d.license, d.source_ref, d.dedup_key "
+        "SELECT d.id, d.corpus, d.title, d.severity, d.license, d.source_ref, "
+        "d.format, d.dedup_key, COALESCE(b.bytes, 0) "
         "FROM rule_techniques rt JOIN detection_rules d ON d.id = rt.rule_id "
-        "WHERE rt.technique_id=? AND d.is_canonical=1 ORDER BY d.corpus, d.title",
+        "LEFT JOIN rule_bytes b ON b.rule_id = rt.rule_id "
+        "WHERE rt.technique_id=? AND EXISTS ("
+        "  SELECT 1 FROM detection_rules x WHERE x.id = rt.rule_id AND x.is_canonical=1) "
+        "ORDER BY d.corpus, d.title",
         (technique_id.upper(),),
     ).fetchall()
-    out = []
-    for r in rows:
-        dups = conn.execute(
-            "SELECT DISTINCT corpus FROM detection_rules "
-            "WHERE dedup_key=? AND is_canonical=0 AND corpus != ? ORDER BY corpus",
-            (r[6], r[1]),
-        ).fetchall() if r[6] else []
-        out.append({
+    also_in = _also_in_map(conn, (r[7] for r in rows))
+    return [
+        {
             "id": r[0], "corpus": r[1], "title": r[2], "severity": r[3],
-            "license": r[4], "source_ref": r[5],
-            "also_in": [d[0] for d in dups],
-        })
-    return out
+            "license": r[4], "source_ref": r[5], "format": r[6] or "sigma",
+            "bytes": r[8],
+            "also_in": sorted(also_in.get(r[7], set()) - {r[1]}) if r[7] else [],
+        }
+        for r in rows
+    ]
 
 
 def canonical_rule_ids_for_techniques(

@@ -3,12 +3,28 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
 
-import ExportPanel from '../components/review/ExportPanel'
-
-import { fetchJob } from '../api/client'
-import { COVERAGE_LABEL, coverageColor } from '../components/review/tokens'
+import {
+  fetchCoverageReportRules,
+  fetchDetectionProposals,
+  fetchJob,
+} from '../api/client'
+import {
+  COVERAGE_LABEL,
+  coverageColor,
+  FORMAT_STYLE,
+  formatLine,
+  formatSoft,
+} from '../components/review/tokens'
 import { useCoverage } from '../hooks/useCoverage'
-import type { CoverageCell } from '../types'
+import { useRuleSelection } from '../hooks/useRuleSelection'
+import type { SelectableRule } from '../hooks/useRuleSelection'
+import type { ProposalMatch } from '../types'
+import { DETECTION_FORMATS } from '../types'
+import DrillInStrip from '../components/coverage/DrillInStrip'
+import FormatBoard from '../components/coverage/FormatBoard'
+import TriCheckbox from '../components/coverage/TriCheckbox'
+import CoverageExportPanel from '../components/coverage/CoverageExportPanel'
+import type { TechEntry } from '../components/coverage/model'
 
 // ATT&CK enterprise tactics in kill-chain order (column order).
 const TACTIC_ORDER = [
@@ -32,7 +48,11 @@ interface MitreTech { id?: string; name?: string; tactics?: string[] }
 
 export default function Coverage() {
   const { jobId } = useParams<{ jobId: string }>()
-  const { data: job } = useQuery({ queryKey: ['job', jobId], queryFn: () => fetchJob(jobId!), enabled: !!jobId })
+  const { data: job } = useQuery({
+    queryKey: ['job', jobId],
+    queryFn: () => fetchJob(jobId!),
+    enabled: !!jobId,
+  })
   const { data: coverage, isLoading, isError } = useCoverage(jobId)
   const [meta, setMeta] = useState<Record<string, TechMeta>>({})
 
@@ -50,27 +70,107 @@ export default function Coverage() {
       .catch(() => { /* names degrade to ids — non-fatal */ })
   }, [])
 
+  const { data: reportRules, isLoading: rulesLoading } = useQuery({
+    queryKey: ['coverage-report-rules', jobId],
+    queryFn: () => fetchCoverageReportRules(jobId!),
+    enabled: !!jobId,
+  })
+  // Evidence enrichment for the drill-in chips: the strongest proposal match per
+  // rule id. Optional — the strip renders without it.
+  const { data: proposals } = useQuery({
+    queryKey: ['detection-proposals', jobId, 1000],
+    queryFn: () => fetchDetectionProposals(jobId!, 1000),
+    enabled: !!jobId,
+  })
+
+  // Flatten rules: a single rule may cover MULTIPLE techniques, so it must
+  // become ONE selection entry (deduped by id) while each technique keeps a
+  // reference to it.
+  const { rules, rulesById, techRuleIds } = useMemo(() => {
+    const byId = new Map<string, SelectableRule>()
+    const techRuleIds = new Map<string, string[]>()
+    for (const g of reportRules?.techniques ?? []) {
+      const ids: string[] = []
+      for (const r of g.rules) {
+        ids.push(r.id)
+        const seen = byId.get(r.id)
+        if (seen) { seen.techniques.push(g.technique_id) }
+        else {
+          byId.set(r.id, {
+            id: r.id, format: r.format, corpus: r.corpus,
+            license: r.license ?? 'unknown', severity: r.severity ?? 'unknown',
+            title: r.title || r.id, bytes: r.bytes ?? 0,
+            techniques: [g.technique_id],
+          })
+        }
+      }
+      techRuleIds.set(g.technique_id, ids)
+    }
+    return { rules: [...byId.values()], rulesById: byId, techRuleIds }
+  }, [reportRules])
+
+  const selection = useRuleSelection(jobId, rules)
+
+  // One TechEntry per coverage cell, in cell order (already sorted by score
+  // desc on the API side).
+  const techs = useMemo<TechEntry[]>(() => {
+    const out: TechEntry[] = []
+    for (const cell of coverage?.cells ?? []) {
+      const id = cell.technique_id
+      const tactics = (meta[id]?.tactics ?? []).filter(t => TACTIC_ORDER.includes(t))
+      const ruleIds = techRuleIds.get(id) ?? []
+      const byFormat: Record<string, string[]> = {
+        sigma: [], suricata: [], yara: [],
+      }
+      for (const rid of ruleIds) {
+        const f = rulesById.get(rid)?.format
+        if (f && f in byFormat) byFormat[f].push(rid)
+      }
+      out.push({
+        id,
+        name: meta[id]?.name ?? id,
+        tactics: tactics.length ? tactics : ['other'],
+        score: cell.score,
+        ruleIds,
+        byFormat: byFormat as TechEntry['byFormat'],
+      })
+    }
+    return out
+  }, [coverage, meta, techRuleIds, rulesById])
+
+  const techsById = useMemo(() => new Map(techs.map(t => [t.id, t])), [techs])
+
+  // Group techniques by tactic (kill-chain order) for the matrix columns.
   const columns = useMemo(() => {
-    const byTactic: Record<string, CoverageCell[]> = {}
-    for (const c of coverage?.cells ?? []) {
-      const tactics = meta[c.technique_id]?.tactics ?? []
-      const targets = tactics.length ? tactics : ['other']
-      for (const t of targets) {
-        const key = TACTIC_ORDER.includes(t) ? t : 'other'
-        ;(byTactic[key] ??= []).push(c)
+    const byTactic: Record<string, TechEntry[]> = {}
+    for (const t of techs) {
+      for (const tac of t.tactics) {
+        const key = TACTIC_ORDER.includes(tac) ? tac : 'other'
+        ;(byTactic[key] ??= []).push(t)
       }
     }
     return [...TACTIC_ORDER, 'other']
       .filter(t => byTactic[t]?.length)
-      .map(t => ({ tactic: t, cells: byTactic[t] }))
-  }, [coverage, meta])
+      .map(t => ({ tactic: t, label: TACTIC_LABEL[t] ?? t, techs: byTactic[t] }))
+  }, [techs])
+
+  // Strongest proposal match per rule id (matches arrive sorted by weight desc).
+  const evidence = useMemo(() => {
+    const m = new Map<string, ProposalMatch>()
+    for (const p of proposals?.proposals ?? []) {
+      if (p.matches.length > 0) m.set(p.id, p.matches[0])
+    }
+    return m
+  }, [proposals])
+
+  const [drillId, setDrillId] = useState<string | null>(null)
+  // Default to the first (highest-scoring) technique once coverage arrives.
+  const drillTech = (drillId ? techsById.get(drillId) : undefined) ?? techs[0] ?? null
 
   if (!jobId) return null
 
-  const by = coverage?.by_score ?? {}
-
   return (
-    <div style={{ padding: '20px 28px', maxWidth: '100%', color: 'var(--ink)' }}>
+    <div className="cov-page" style={{ padding: '20px 28px', maxWidth: '100%', color: 'var(--ink)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 8 }}>
         <Link to={`/review/${jobId}`} className="link">← Review</Link>
         <Link to={`/graph/${jobId}`} className="link">Graph</Link>
@@ -87,21 +187,9 @@ export default function Coverage() {
         a rule was tested against live telemetry.
       </div>
 
-      {/* summary + legend */}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
-        {[3, 2, 1, 0].map(s => {
-          const col = coverageColor(s)
-          return (
-            <span key={s} style={{
-              display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12,
-              background: col.background, color: col.color, border: `1px solid ${col.border}`,
-              borderRadius: 6, padding: '3px 9px',
-            }}>
-              <strong>{by[String(s)] ?? 0}</strong> {COVERAGE_LABEL[s]}
-            </span>
-          )
-        })}
-      </div>
+      {techs.length > 0 && (
+        <FormatBoard techs={techs} rules={rules} selection={selection} />
+      )}
 
       {isLoading && <p style={{ color: 'var(--ink-3)' }}>Computing coverage…</p>}
       {isError && <p style={{ color: 'var(--no)' }}>Could not load coverage.</p>}
@@ -109,51 +197,128 @@ export default function Coverage() {
         <p style={{ color: 'var(--ink-3)' }}>No ATT&CK techniques were extracted from this report.</p>
       )}
 
-      <div style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 12 }}>
-        {columns.map(({ tactic, cells }) => (
-          <div key={tactic} style={{ minWidth: 190, flex: '0 0 auto' }}>
-            <div style={{
-              fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.3,
-              color: 'var(--ink-3)', marginBottom: 6, paddingBottom: 4,
-              borderBottom: '1px solid var(--rule)',
-            }}>
-              {TACTIC_LABEL[tactic] ?? tactic}
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {cells.map(c => {
-                const col = coverageColor(c.score)
-                const name = meta[c.technique_id]?.name
-                const title = c.corpora.length
-                  ? `${COVERAGE_LABEL[c.score]} · ${c.rule_count} rule(s) · ${c.corpora.join(', ')}`
-                  : COVERAGE_LABEL[c.score]
-                return (
-                  <Link
-                    key={`${tactic}:${c.technique_id}`}
-                    to={`/review/${jobId}`}
-                    title={title}
-                    style={{
-                      background: col.background, color: col.color,
-                      border: `1px solid ${col.border}`, borderRadius: 6,
-                      padding: '6px 8px', textDecoration: 'none', display: 'block',
-                    }}
-                  >
-                    <div style={{ fontSize: 11, fontWeight: 600, fontFamily: 'monospace' }}>{c.technique_id}</div>
-                    {name && <div style={{ fontSize: 11.5, lineHeight: 1.25 }}>{name}</div>}
-                    {c.rule_count > 0 && (
-                      <div style={{ fontSize: 10.5, opacity: 0.85, marginTop: 2 }}>
-                        {c.rule_count} rule{c.rule_count > 1 ? 's' : ''} · {c.corpora.length} corpus
-                        {c.corpora.length > 1 ? 'es' : ''}
-                      </div>
-                    )}
-                  </Link>
-                )
-              })}
-            </div>
-          </div>
-        ))}
-      </div>
+      {coverage && coverage.techniques_total > 0 && (
+        <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 12 }}>
+          {columns.map(({ tactic, label, techs: colTechs }) => {
+            // Union of rule ids across the column (a rule under two techniques
+            // of the same tactic counts once).
+            const colIds = [...new Set(colTechs.flatMap(t => t.ruleIds))]
+            const colSel = selection.selectedOf(colIds)
+            return (
+              <div key={tactic} style={{ minWidth: 196, flex: '0 0 auto' }}>
+                <div
+                  onClick={() => selection.toggleScope(colIds)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '3px 4px 5px', borderBottom: '1px solid var(--rule)',
+                    marginBottom: 6, cursor: 'pointer',
+                  }}
+                >
+                  <TriCheckbox
+                    sel={colSel}
+                    total={colIds.length}
+                    size={14}
+                    onToggle={() => selection.toggleScope(colIds)}
+                  />
+                  <span style={{
+                    fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
+                    letterSpacing: '0.3px', color: 'var(--ink-3)',
+                  }}>{label}</span>
+                  <span style={{
+                    fontFamily: '"JetBrains Mono",monospace', fontSize: 10, color: 'var(--ink-4)',
+                    marginLeft: 'auto',
+                  }}>{colIds.length ? `${colSel}/${colIds.length}` : '—'}</span>
+                </div>
 
-      <ExportPanel jobId={jobId} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {colTechs.map(t => {
+                    const cc = coverageColor(t.score)
+                    const tSel = selection.selectedOf(t.ruleIds)
+                    const present = DETECTION_FORMATS
+                      .filter(f => t.byFormat[f].length > 0)
+                      .map(f => `${FORMAT_STYLE[f].label} ${t.byFormat[f].length}`)
+                    const cellTitle = present.length
+                      ? `${COVERAGE_LABEL[t.score]} · ${present.join(' · ')}`
+                      : `${COVERAGE_LABEL[t.score]} · no rule in any format`
+                    return (
+                      <div
+                        key={t.id}
+                        onClick={() => setDrillId(t.id)}
+                        title={cellTitle}
+                        style={{
+                          background: cc.background, color: cc.color,
+                          border: `1px solid ${cc.border}`,
+                          outline: drillTech?.id === t.id ? '2px solid var(--accent)' : 'none',
+                          borderRadius: 5, padding: '5px 7px',
+                          display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+                        }}
+                      >
+                        <TriCheckbox
+                          sel={tSel}
+                          total={t.ruleIds.length}
+                          size={14}
+                          title={t.ruleIds.length
+                            ? `${tSel} of ${t.ruleIds.length} rules selected`
+                            : 'No rules to select'}
+                          onToggle={() => selection.toggleScope(t.ruleIds)}
+                        />
+                        <span style={{
+                          fontFamily: '"JetBrains Mono",monospace', fontSize: 10.5, fontWeight: 600,
+                          flexShrink: 0,
+                        }}>{t.id}</span>
+                        <span style={{
+                          fontSize: 11, lineHeight: 1.2, minWidth: 0,
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        }}>{t.name}</span>
+                        <span style={{
+                          display: 'flex', gap: 2, marginLeft: 'auto', flexShrink: 0,
+                        }}>
+                          {DETECTION_FORMATS.map(f => {
+                            const has = t.byFormat[f].length > 0
+                            const anySel = has && selection.selectedOf(t.byFormat[f]) > 0
+                            return (
+                              <span
+                                key={f}
+                                title={`${FORMAT_STYLE[f].label}: ${t.byFormat[f].length} rule(s)`}
+                                style={{
+                                  width: 5, height: 14, borderRadius: 1.5,
+                                  background: anySel ? formatLine(f) : has ? formatSoft(f) : 'transparent',
+                                  border: `1px solid ${has ? formatLine(f) : 'var(--rule)'}`,
+                                }}
+                              />
+                            )
+                          })}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {rulesLoading
+        ? <p style={{ color: 'var(--ink-3)' }}>Loading rules…</p>
+        : (
+          <>
+            <DrillInStrip
+              tech={drillTech}
+              selection={selection}
+              rulesById={rulesById}
+              evidence={evidence}
+            />
+            <CoverageExportPanel
+              jobId={jobId}
+              reportName={job?.original_filename ?? ''}
+              columns={columns}
+              rules={rules}
+              rulesById={rulesById}
+              selection={selection}
+            />
+          </>
+        )}
     </div>
   )
 }

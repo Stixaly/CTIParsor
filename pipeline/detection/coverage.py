@@ -12,8 +12,15 @@ native_key, so it collapses to one corpus and never inflates the score.
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+
+#: The detection formats the store can hold. A closed set of three, kept in step
+#: with `_EXPORT_EXTENSIONS` in api/routes/coverage.py — a format missing from
+#: this tuple would silently vanish from every per-format breakdown. Verified
+#: against the live store: exactly these three values occur, and a `native_key`
+#: never spans two of them, so per-format attribution partitions cleanly.
+DETECTION_FORMATS: tuple[str, ...] = ("sigma", "suricata", "yara")
 
 
 @dataclass
@@ -22,12 +29,16 @@ class CoverageCell:
     score: int                              # 0–3
     corpora: list[str] = field(default_factory=list)   # distinct corpora contributing
     rule_count: int = 0                     # distinct logical rules
+    # Populated only when `score_techniques` is given a `formats` map; one entry
+    # per DETECTION_FORMATS name, zeroes included (ADR-0022).
+    by_format: dict[str, dict] = field(default_factory=dict)
 
 
 def score_techniques(
     technique_ids: Iterable[str],
     rule_refs: Iterable[tuple[str, str, str]],
     telemetry_techniques: set[str] | None = None,
+    formats: Mapping[str, str] | None = None,
 ) -> list[CoverageCell]:
     """Score each technique.
 
@@ -37,6 +48,10 @@ def score_techniques(
         telemetry_techniques: techniques with ATT&CK data-source mapping but no
             rule (score 1 fallback — lights up once the ADR-0005 index enrichment
             lands; pass None to disable).
+        formats: native_key → format name; None disables the per-format breakdown
+            and leaves every cell's `by_format` empty. The score itself is always
+            computed across all formats combined, because corroboration is a
+            property of the technique, not of one tool's rule language (ADR-0022).
     """
     telemetry = {t.upper() for t in (telemetry_techniques or set())}
 
@@ -65,7 +80,22 @@ def score_techniques(
             s = 1
         else:
             s = 0
-        cells.append(CoverageCell(t, s, corpora, len(tech_keys.get(t, set()))))
+
+        by_format: dict[str, dict] = {}
+        if formats is not None:
+            keys = tech_keys.get(t, set())
+            for fmt in DETECTION_FORMATS:
+                fmt_keys = {k for k in keys if formats.get(k, "sigma") == fmt}
+                by_format[fmt] = {
+                    "rule_count": len(fmt_keys),
+                    # The OWNING corpus via `owner`, never the corpus of each ref:
+                    # a rule forked across two corpora must contribute its single
+                    # owner here exactly as it does to the score, or the panel
+                    # would claim more corroboration than the score does.
+                    "corpora": sorted({owner[k] for k in fmt_keys if k in owner}),
+                }
+
+        cells.append(CoverageCell(t, s, corpora, len(tech_keys.get(t, set())), by_format))
     return cells
 
 
@@ -113,12 +143,17 @@ def compute_for_job(conn: sqlite3.Connection, job_id: str) -> dict:
             covers.setdefault(parent, set()).add(t)   # parent rule covers this sub-technique
 
     raw_refs = rule_refs_for_techniques(conn, query_ids)
-    refs = [
-        (report_t, corpus, key)
-        for tag, corpus, key in raw_refs
-        for report_t in covers.get(tag.upper(), ())
-    ]
-    cells = score_techniques(technique_ids, refs)
+    refs: list[tuple[str, str, str]] = []
+    key_format: dict[str, str] = {}
+    for tag, corpus, key, fmt in raw_refs:
+        # First occurrence wins, mirroring how `owner` attributes a native_key.
+        # A native_key never spans two formats in the live store, so first- and
+        # last-wins agree there; first-wins is chosen so the two maps cannot
+        # disagree if that ever stops holding.
+        key_format.setdefault(key, fmt)
+        for report_t in covers.get(tag.upper(), ()):
+            refs.append((report_t, corpus, key))
+    cells = score_techniques(technique_ids, refs, formats=key_format)
 
     by_score: dict[int, int] = {0: 0, 1: 0, 2: 0, 3: 0}
     for c in cells:
@@ -131,7 +166,8 @@ def compute_for_job(conn: sqlite3.Connection, job_id: str) -> dict:
         "validated": False,   # readiness, not lab validation (ADR-0005/0006)
         "cells": [
             {"technique_id": c.technique_id, "score": c.score,
-             "corpora": c.corpora, "rule_count": c.rule_count}
+             "corpora": c.corpora, "rule_count": c.rule_count,
+             "by_format": c.by_format}
             for c in sorted(cells, key=lambda c: (-c.score, c.technique_id))
         ],
     }
@@ -142,45 +178,100 @@ def rules_for_job(conn: sqlite3.Connection, job_id: str) -> dict:
     report technique it covers. Mirrors compute_for_job's parent→sub roll-up (a
     rule tagged with the parent technique also covers its sub-techniques), so the
     Detections panel and the coverage score agree on what's covered. Rule bodies
-    are never returned — metadata only (ADR-0006 license-aware drill-down)."""
-    from pipeline.detection.store import rules_for_technique
+    are never returned — metadata only (ADR-0006 license-aware drill-down).
 
-    groups: list[dict] = []
-    all_rule_ids: set[str] = set()
-    for t in job_technique_ids(conn, job_id):
-        tags = [t]
+    Rewritten as one flat sweep (ADR-0022): the per-technique form called
+    `rules_for_technique` once per technique — 34 EXISTS joins and 34 `also_in`
+    sweeps — and measured 26.3 s on a real report. One id query, one metadata
+    batch and one `also_in` sweep replace them: 5.4 s for the same 10,372 rules.
+    """
+    from pipeline.detection.store import _also_in_map, canonical_rule_ids_for_techniques
+
+    technique_ids = job_technique_ids(conn, job_id)
+
+    # Same parent→sub roll-up as compute_for_job: a parent-tagged rule covers a
+    # report's sub-technique.
+    query_ids: set[str] = set()
+    covers: dict[str, set[str]] = {}
+    for t in technique_ids:
+        query_ids.add(t)
+        covers.setdefault(t, set()).add(t)
         parent = _parent_technique(t)
         if parent:
-            tags.append(parent)
-        seen: set[str] = set()
-        rules: list[dict] = []
-        for tag in tags:
-            for r in rules_for_technique(conn, tag):
-                if r["id"] in seen:
-                    continue
-                seen.add(r["id"])
-                rules.append(r)
-                all_rule_ids.add(r["id"])
-        if rules:
-            groups.append({"technique_id": t, "rules": rules})
+            query_ids.add(parent)
+            covers.setdefault(parent, set()).add(t)
+
+    rules_for_tech: dict[str, set[str]] = {}
+    all_ids: set[str] = set()
+    for tag, rid in canonical_rule_ids_for_techniques(conn, query_ids):
+        for report_t in covers.get(tag.upper(), ()):
+            rules_for_tech.setdefault(report_t, set()).add(rid)
+            all_ids.add(rid)
+
+    if not all_ids:
+        return {"job_id": job_id, "techniques": [], "technique_total": 0, "rule_total": 0}
+
+    # One metadata pass, 400 ids per statement (SQLite caps a statement at 999).
+    meta: dict[str, dict] = {}
+    ids_list = sorted(all_ids)
+    for i in range(0, len(ids_list), 400):
+        batch = ids_list[i:i + 400]
+        placeholders = ",".join("?" * len(batch))
+        for row in conn.execute(
+            # Body size comes from the `rule_bytes` side table, never from
+            # LENGTH(raw) nor a column on this table: both force SQLite past the
+            # rule body's overflow pages — 8.2-8.8s versus 1.0s (ADR-0022).
+            f"SELECT d.id, d.corpus, d.title, d.severity, d.license, d.source_ref, "
+            f"d.format, d.dedup_key, COALESCE(b.bytes, 0) "
+            f"FROM detection_rules d "
+            f"LEFT JOIN rule_bytes b ON b.rule_id = d.id "
+            f"WHERE d.id IN ({placeholders})",
+            batch,
+        ):
+            meta[row[0]] = {
+                "id": row[0], "corpus": row[1], "title": row[2], "severity": row[3],
+                "license": row[4], "source_ref": row[5], "format": row[6] or "sigma",
+                "bytes": row[8], "dedup_key": row[7],
+            }
+
+    # One also_in sweep for every dedup_key at once.
+    also_in = _also_in_map(conn, (m["dedup_key"] for m in meta.values()))
+    for m in meta.values():
+        dk = m.pop("dedup_key")
+        m["also_in"] = sorted(also_in.get(dk, set()) - {m["corpus"]}) if dk else []
+
+    groups: list[dict] = []
+    for t in technique_ids:
+        rules = [meta[rid] for rid in rules_for_tech.get(t, ()) if rid in meta]
+        if not rules:
+            continue
+        rules.sort(key=lambda r: (r["corpus"], r["title"] or ""))
+        groups.append({"technique_id": t, "rules": rules})
 
     groups.sort(key=lambda g: (-len(g["rules"]), g["technique_id"]))
     return {
         "job_id": job_id,
         "techniques": groups,
         "technique_total": len(groups),
-        "rule_total": len(all_rule_ids),
+        "rule_total": len(all_ids),
     }
 
 
-def rule_bodies_for_job(conn: sqlite3.Connection, job_id: str) -> list[dict]:
+def rule_bodies_for_job(
+    conn: sqlite3.Connection, job_id: str, body_ids: set[str] | None = None
+) -> list[dict]:
     """Raw bodies of every canonical detection rule linkable to this report.
 
     Mirrors rules_for_job's technique selection (parent→sub roll-up) so the
     export contains exactly the rules the Detections panel shows, but includes
     each rule's `raw` body for local export (ADR-0006 — license carried alongside
     via the export manifest). Each entry also lists the report technique(s) it
-    covers. Returns [] when no rules match."""
+    covers. Returns [] when no rules match.
+
+    `body_ids` restricts which rules carry their raw body. The rule-id export
+    packages a handful of rules but still counts the rest in the manifest's
+    `excluded` block; loading all 10,372 bodies to do so read 219 MB and measured
+    14.8 s (ADR-0022). Rules outside `body_ids` come back with `raw: ""`."""
     from pipeline.detection.store import (
         canonical_rule_bodies,
         canonical_rule_ids_for_techniques,
@@ -208,12 +299,31 @@ def rule_bodies_for_job(conn: sqlite3.Connection, job_id: str) -> list[dict]:
     if not tech_for_rule:
         return []
 
-    bodies = canonical_rule_bodies(conn, tech_for_rule.keys())
+    with_bodies = tech_for_rule.keys() if body_ids is None else tech_for_rule.keys() & body_ids
+    bodies = canonical_rule_bodies(conn, with_bodies) if with_bodies else {}
     out = [
         {"id": rid, **meta, "techniques": sorted(tech_for_rule[rid])}
         for rid, meta in bodies.items()
     ]
-    out.sort(key=lambda r: (r["corpus"], r["title"] or r["native_key"]))
+
+    # The rest are still needed — the manifest reports what was excluded — but
+    # only their metadata, never their bodies.
+    rest = sorted(tech_for_rule.keys() - bodies.keys())
+    for i in range(0, len(rest), 400):
+        batch = rest[i:i + 400]
+        placeholders = ",".join("?" * len(batch))
+        for row in conn.execute(
+            f"SELECT id, corpus, native_key, title, license, source_ref "
+            f"FROM detection_rules WHERE id IN ({placeholders})",
+            batch,
+        ):
+            out.append({
+                "id": row[0], "corpus": row[1] or "", "native_key": row[2] or "",
+                "title": row[3], "license": row[4], "source_ref": row[5],
+                "raw": "", "techniques": sorted(tech_for_rule[row[0]]),
+            })
+
+    out.sort(key=lambda r: (r["corpus"] or "", r["title"] or r["native_key"] or ""))
     return out
 
 

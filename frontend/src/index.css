@@ -1241,6 +1241,62 @@ html[data-theme="dark"] .rel-ev-hl {
 }
 
 /* ===========================================================
+   DETECTION COVERAGE (ADR-0022)
+   `body` and `#root` are height:100vh / overflow:hidden so the
+   Review page can own its internal scroll panes. A full-screen
+   route therefore has to scroll itself — without this the
+   coverage page is simply clipped at the fold, with no
+   scrollbar at any window size.
+   =========================================================== */
+.cov-page {
+  flex: 1;
+  min-height: 0;      /* required, or the flex child refuses to shrink */
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Format board — three cards, then two, then stacked. */
+.cov-board {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+/* Drill-in — one column per format, always all three while they fit. */
+.cov-drill-cols {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+/* Export — selection table beside the archive preview. */
+.cov-export-body {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.cov-archive {
+  width: 390px;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 1180px) {
+  /* The handoff's breakpoint: the archive preview drops under the table. */
+  .cov-export-body { flex-direction: column; }
+  .cov-archive { width: 100%; }
+}
+@media (max-width: 1000px) {
+  .cov-board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cov-drill-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 720px) {
+  .cov-board,
+  .cov-drill-cols { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ===========================================================
    SHARED THEME UTILITY CLASSES
    Used by Dashboard, Graph, Layout — all non-Review pages.
    These replace hardcoded Tailwind dark-mode colour classes.
