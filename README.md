@@ -306,6 +306,9 @@ A `Makefile` wraps the most common workflows. Requires `make` (standard on Linux
 | `make api-dev` | Start API with hot-reload (dev backend) |
 | `make frontend-dev` | Start Vite dev server with HMR (dev frontend) |
 | `make check` | Diagnostic: list which pipeline stages are available |
+| `make corpora` | Clone/pull the rule corpora (Sigma, Suricata, YARA) |
+| `make detection-index` | Parse the clones into the rule store (dedups, writes rule sizes) |
+| `make backfill-rules` | Backfill rule body sizes on a store built before ADR-0022 |
 | `make audit` | Scan Python + npm deps for known CVEs (`pip-audit` + `npm audit`) |
 | `make lock` | Freeze exact installed versions → `requirements.lock.txt` |
 | `make update-deps` | Upgrade Python packages, run tests, re-lock |
@@ -1328,6 +1331,9 @@ Schema migrations run automatically on startup (`ALTER TABLE` wrapped in try/exc
 [2]   Python venv      — creates .venv/
 [3]   Python packages  — pip install requirements.txt + requirements-api.txt
 [4]   MITRE data       — downloads bundle files + runs build_indexes.py
+[4b]  Detection corpora — clones the Sigma/Suricata/YARA repos (~525 MB) and
+                          ingests them; on an existing store it also applies
+                          pending schema migrations and backfills rule sizes
 [5]   spaCy model      — optional en_core_web_sm (~12 MB)
 [6]   API key          — creates .env from .env.example
       STIX icons       — checks/downloads 27 official OASIS SVG icons
@@ -1340,6 +1346,7 @@ bash setup.sh              # full setup
 bash setup.sh --no-torch   # skip sentence-transformers / GLiNER (faster, minimal)
 bash setup.sh --no-mitre   # skip MITRE bundle download
 bash setup.sh --no-spacy   # skip spaCy model download
+bash setup.sh --no-corpora # skip the detection-rule corpora clone + ingest
 ```
 
 ---

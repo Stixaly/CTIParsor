@@ -6,6 +6,7 @@ UVICORN  = .venv/bin/uvicorn
         model test test-fast run run-dir \
         api api-dev frontend-install frontend-build frontend-dev \
         check clean \
+        corpora detection-index backfill-rules \
         audit lock update-deps npm-outdated npm-update
 
 # ── Setup ────────────────────────────────────────────────────────────────────
@@ -52,6 +53,20 @@ build-indexes:
 
 ## Download bundles + build indexes in one step
 mitre: download-mitre build-indexes
+
+# ── Detection-rule store (ADR-0006 / 0015 / 0022) ────────────────────────────
+
+## Clone/pull the rule corpora (Sigma, Suricata, YARA) into ./corpora
+corpora:
+	$(PYTHON) scripts/sync_corpora.py
+
+## Parse the local clones into the rule store (also dedups and writes rule_bytes)
+detection-index:
+	$(PYTHON) scripts/build_detection_index.py
+
+## Backfill rule body sizes on a store built before ADR-0022 (no re-clone needed)
+backfill-rules:
+	$(PYTHON) -m scripts.backfill_rule_bytes
 
 ## Download + install optional spaCy small model
 model:
@@ -103,46 +118,7 @@ frontend-dev:
 
 ## Check which pipeline stages are available (imports + data files)
 check:
-	@$(PYTHON) - <<'EOF'
-import sys
-GREEN = '\033[0;32m'; YELLOW = '\033[1;33m'; RED = '\033[0;31m'; NC = '\033[0m'
-from pathlib import Path
-
-def chk_import(name):
-    try: __import__(name); return True
-    except ImportError: return False
-
-def chk_file(path):
-    return Path(path).exists()
-
-rows = [
-    ("Stage 1  — Document ingestion",             chk_import("pdfplumber"),                 "pip install pdfplumber"),
-    ("Stage 2  — Regex IoC extraction",           chk_import("iocextract"),                 "pip install iocextract"),
-    ("Stage 2b — Gazetteer NER",                  chk_file("pipeline/data/gazetteer.json"), "make mitre"),
-    ("Stage 2c — Semantic TTP detection",         chk_import("sentence_transformers"),      "pip install sentence-transformers"),
-    ("Stage 2c — Embedding cache",                chk_file("pipeline/data/mitre_embeddings.npy"), "make build-indexes"),
-    ("Stage 2d — CyNER NER",                      chk_import("transformers"),               "pip install transformers"),
-    ("Stage 3  — LLM enrichment",                 chk_import("anthropic") or chk_import("openai"), "pip install anthropic"),
-    ("Stage 3c — MITRE TTP normalization",        chk_file("pipeline/data/mitre_index.json"), "make mitre"),
-    ("Stage 4  — STIX bundle generation",         chk_import("stix2"),                      "pip install stix2"),
-    ("Stage 5  — STIX validation",                chk_import("stix2validator"),             "pip install stix2-validator"),
-    ("Web API  — FastAPI backend",                chk_import("fastapi"),                    "pip install fastapi"),
-]
-
-all_ok = True
-for label, ok, fix in rows:
-    if ok:
-        print(f"  {GREEN}✔{NC}  {label}")
-    else:
-        print(f"  {YELLOW}–{NC}  {label}   →  {fix}")
-        all_ok = False
-
-print()
-if all_ok:
-    print(f"  {GREEN}All pipeline stages available.{NC}")
-else:
-    print(f"  {YELLOW}Some stages need additional setup (see above).{NC}")
-EOF
+	@$(PYTHON) scripts/check_stages.py
 
 # ── Dependency maintenance ────────────────────────────────────────────────────
 
