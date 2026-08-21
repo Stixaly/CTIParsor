@@ -4,7 +4,7 @@ Converts unstructured CTI reports (PDF, DOCX, HTML, TXT, MD) into valid **STIX 2
 
 The pipeline combines **deterministic IoC extraction** (regex + multi-layer NER) with **LLM semantic enrichment** (TTPs, relationships, malware attribution), a **post-LLM hallucination filter**, **self-verification of relationship *and* TTP claims**, optional **cross-model consensus**, NATO-style **evidence grading** of every relationship, and **offline MITRE ATT&CK normalisation** with model-aware semantic TTP precision controls (ADR-0011). Every bundle carries **STIX provenance markings** — a TLP (and optional PAP) marking plus an authoring identity (`created_by_ref`). The LLM stage is optional — the pipeline produces valid STIX even without an API key.
 
-It also maps each report's ATT&CK techniques to a **detection-coverage matrix** against local **Sigma** rule corpora (public and private), all managed from an in-app **Settings** panel.
+It also maps each report's ATT&CK techniques to a **detection-coverage matrix** against local **Sigma, Suricata and YARA** rule corpora (public and private), then lets you select rules per technique, tactic, corpus or format and export exactly those — all managed from an in-app **Settings** panel.
 
 Two modes are available:
 
@@ -306,6 +306,9 @@ A `Makefile` wraps the most common workflows. Requires `make` (standard on Linux
 | `make api-dev` | Start API with hot-reload (dev backend) |
 | `make frontend-dev` | Start Vite dev server with HMR (dev frontend) |
 | `make check` | Diagnostic: list which pipeline stages are available |
+| `make corpora` | Clone/pull the rule corpora (Sigma, Suricata, YARA) |
+| `make detection-index` | Parse the clones into the rule store (dedups, writes rule sizes) |
+| `make backfill-rules` | Backfill rule body sizes on a store built before ADR-0022 |
 | `make audit` | Scan Python + npm deps for known CVEs (`pip-audit` + `npm audit`) |
 | `make lock` | Freeze exact installed versions → `requirements.lock.txt` |
 | `make update-deps` | Upgrade Python packages, run tests, re-lock |
@@ -456,11 +459,21 @@ disable one, and **Rebuild index** to re-ingest the local clones. See
 
 ---
 
-## Detection coverage (Sigma)
+## Detection coverage
 
-Each report's extracted ATT&CK techniques are scored against local **Sigma** rule
-corpora — a mix of **public** repos (committed, reproducible) and **private**
-repos (local overlay). This is detection *readiness*, not lab validation.
+Each report's extracted ATT&CK techniques are scored against local rule corpora —
+a mix of **public** repos (committed, reproducible) and **private** repos (local
+overlay). This is detection *readiness*, not lab validation.
+
+The store holds three rule languages, and they are not a footnote: a real store
+is **52,481 Suricata**, **22,303 YARA** and **11,396 Sigma** rules. Coverage,
+drill-in and export keep them distinct throughout (ADR-0015 / ADR-0022).
+
+| Format | Extension | Deploys to |
+|---|---|---|
+| Sigma | `.yml` | SIEM · log correlation |
+| Suricata | `.rules` | IDS · network sensor |
+| YARA | `.yar` | Scanner · files & memory |
 
 ### Configure corpora — two-tier registry
 
@@ -486,6 +499,42 @@ Settings page re-runs the build step from already-cloned repos.
 **Corroboration is fork-safe:** rules are deduplicated by their Sigma `id` across
 corpora, so the same rule mirrored in two repos counts once (score 2), while two
 independent rules for a technique corroborate it (score 3).
+
+### Selecting and exporting rules
+
+The coverage page is also where you build the rule package you actually deploy.
+Selection is per rule and rolls up through technique → ATT&CK tactic → corpus →
+format; every level shows a dash when only part of it is selected. Everything
+matching the report starts selected, so the workflow is *deselect what you don't
+want*.
+
+The export panel recomputes as you go — per-format counts, byte size, a licence
+warning when any selected rule is all-rights-reserved, and a preview of the ZIP
+you are about to get:
+
+```
+<report>_detection_rules.zip
+├─ rules/sigma/     · 1992 × .yml
+├─ rules/suricata/  · 8380 × .rules
+├─ MANIFEST.json    · licence + source per rule, and what was excluded
+└─ README.txt       · formats present, excluded counts
+```
+
+Each rule keeps the extension its tool requires — a Suricata rule written as
+`.yml` loads in nothing — and `MANIFEST.json` records the excluded count, so an
+export that dropped rules is distinguishable from one where they never matched.
+
+> **A YARA lane that reads 0 is not a bug.** YARA rules carry no `attack.tXXXX`
+> tags, so a technique-keyed join structurally cannot reach them (ADR-0020). The
+> board shows this as an honest absence. The Detections tab, which keys on
+> observables instead, still ranks YARA candidates.
+
+If your store predates this feature, rule sizes read `0 B` until you backfill
+them — no corpus re-clone needed:
+
+```bash
+python -m scripts.backfill_rule_bytes    # fills the rule_bytes side table
+```
 
 ### Rule proposals — ranked on the report, not on its tags
 
@@ -527,7 +576,10 @@ Walkthrough: [`docs/detection-coverage.md`](docs/detection-coverage.md). Design:
 ADR [0006](docs/adr/0006-multi-corpus-detection-ingestion.md) /
 [0007](docs/adr/0007-in-app-configuration-panel.md) /
 [0008](docs/adr/0008-detection-coverage-matrix.md) /
-[0014](docs/adr/0014-observable-driven-detection-proposals.md).
+[0014](docs/adr/0014-observable-driven-detection-proposals.md) /
+[0015](docs/adr/0015-multi-format-detection-matching.md) /
+[0020](docs/adr/0020-filtered-multi-format-export.md) /
+[0022](docs/adr/0022-per-format-coverage-breakdown.md).
 
 ---
 
@@ -807,8 +859,11 @@ cti-to-stix/
 ├── scripts/
 │   ├── build_indexes.py           # Build all pipeline/data/ indexes
 │   ├── download_attack.py         # Download enterprise-attack.json
-│   ├── sync_corpora.py            # Clone/pull Sigma corpora (ambient git auth)
-│   └── build_detection_index.py   # Parse clones → detection-rule store
+│   ├── sync_corpora.py            # Clone/pull rule corpora (ambient git auth)
+│   ├── build_detection_index.py   # Parse clones → detection-rule store
+│   ├── build_rule_atoms.py        # Backfill rule_atoms from stored bodies (ADR-0014)
+│   ├── backfill_rule_bytes.py     # Backfill rule_bytes on an older store (ADR-0022)
+│   └── audit_coverage_formats.py  # Read-only: per-format breakdown + drill-down latency
 │
 ├── models/
 │   ├── schemas.py                 # Pydantic: RawEntity, EntityType, EvidenceLabel
@@ -834,7 +889,7 @@ cti-to-stix/
 │   │   │   ├── Dashboard.tsx      # Kanban, drag-and-drop upload, progress modal
 │   │   │   ├── Review.tsx         # Text / Preview / Source view + marginalia
 │   │   │   ├── Graph.tsx          # d3-force graph + relationship editor
-│   │   │   ├── Coverage.tsx       # Detection-coverage matrix
+│   │   │   ├── Coverage.tsx       # Coverage matrix + granular rule selection
 │   │   │   └── Settings.tsx       # Corpus management panel
 │   │   ├── components/
 │   │   │   ├── MarkdownPreview.tsx # VS Code-like .md renderer (react-markdown)
@@ -847,13 +902,20 @@ cti-to-stix/
 │   │   │       ├── Marginalia.tsx      # Sidebar entity cards
 │   │   │       ├── RelationshipRail.tsx# Sticky relationships panel
 │   │   │       └── …
+│   │   ├── components/coverage/   # Detection coverage (ADR-0022)
+│   │   │   ├── FormatBoard.tsx    # One card per format: counts, size, per-technique ticks
+│   │   │   ├── DrillInStrip.tsx   # A technique's rules in three format columns
+│   │   │   ├── CoverageExportPanel.tsx # Selection table + live archive preview
+│   │   │   ├── TriCheckbox.tsx    # ✓ / – / empty marker used at every scope
+│   │   │   └── model.ts           # TechEntry — the shared per-technique shape
 │   │   ├── components/graph/
 │   │   │   ├── GraphCanvas.tsx    # d3-force SVG renderer, STIX icons
 │   │   │   └── graphLayout.ts     # Tier map, radii, static layouts, icon paths
 │   │   ├── hooks/
 │   │   │   ├── useSSE.ts          # EventSource (5-retry on transient error)
 │   │   │   ├── useMitreSearch.ts  # Client-side ATT&CK search
-│   │   │   └── useCoverage.ts     # Coverage data hook (view ↔ source seam)
+│   │   │   ├── useCoverage.ts     # Coverage data hook (view ↔ source seam)
+│   │   │   └── useRuleSelection.ts # Rule selection as an exclusion set (ADR-0022)
 │   │   ├── api/client.ts          # Typed fetch wrappers
 │   │   ├── context/ThemeContext.tsx # 5 themes × 7 accent palettes
 │   │   └── types/index.ts         # Shared TS types
@@ -1040,6 +1102,18 @@ explicit zero rather than a missing lane (ADR-0022). The `score` is deliberately
 rule language. Drill-down rules (`/coverage/{technique}/rules`) each carry
 `format` alongside `severity` and `license`.
 
+```jsonc
+// POST /api/jobs/{id}/detections/export      → 200 application/zip
+{ "rule_ids": ["sigmahq:1a2b3c", "et-open:2010935"] }
+// 400 if the list is empty · 404 if no requested id belongs to this report.
+// Ids are intersected with the report's linkable rules, so this can never be
+// used to dump arbitrary rules from the store.
+```
+
+The GET form (axis filters) and this POST form share one archive builder, so both
+produce the same layout — `rules/{format}/{corpus}__{slug}.{ext}`, `MANIFEST.json`
+(licence + source per rule, plus what was excluded) and `README.txt`.
+
 ```json
 // GET /api/jobs/{id}/detections/proposals?limit=200
 { "platform": "linux", "atom_index_built": true,
@@ -1126,11 +1200,33 @@ CREATE TABLE detection_rules (
     id           TEXT PRIMARY KEY,    -- corpus:native_key
     corpus       TEXT NOT NULL,
     native_key   TEXT NOT NULL,       -- Sigma id / content hash (cross-corpus dedup)
-    format       TEXT DEFAULT 'sigma',
+    format       TEXT NOT NULL DEFAULT 'sigma',  -- sigma|suricata|yara (ADR-0015)
     title        TEXT NOT NULL,
+    description  TEXT DEFAULT '',
     severity     TEXT, license TEXT, source_ref TEXT,
     content_hash TEXT, data_sources TEXT, raw TEXT,
-    platform     TEXT DEFAULT ''      -- windows|linux|macos|'' from logsource (ADR-0014)
+    platform     TEXT DEFAULT '',     -- windows|linux|macos|'' from logsource (ADR-0014)
+    dedup_key    TEXT DEFAULT '',     -- sha256 of normalized detection logic (ADR-0010)
+    is_canonical INTEGER DEFAULT 1    -- 0 = duplicate folded by the dedup pass
+);
+
+-- Rule body sizes (ADR-0022) — a side table, deliberately NOT a column on
+-- detection_rules: ALTER TABLE appends after `raw`, so SQLite would have to walk
+-- each record past a multi-kilobyte body to read one integer (8.2s for 10k rules
+-- vs ~0.1s here). Written on ingest; backfill an older store with
+-- scripts/backfill_rule_bytes.py.
+CREATE TABLE rule_bytes (
+    rule_id TEXT PRIMARY KEY,
+    bytes   INTEGER NOT NULL DEFAULT 0
+);
+
+-- Declared provenance from a rule's `related:` block (ADR-0017) — lets dedup
+-- fold renamed/derived copies that no content hash would catch.
+CREATE TABLE rule_related (
+    rule_id     TEXT NOT NULL,
+    related_key TEXT NOT NULL,
+    rel_type    TEXT NOT NULL,        -- derived|renamed|similar|obsolete|merged
+    PRIMARY KEY (rule_id, related_key, rel_type)
 );
 
 -- Detection atoms (ADR-0014) — the literal values each rule looks for.
@@ -1235,6 +1331,9 @@ Schema migrations run automatically on startup (`ALTER TABLE` wrapped in try/exc
 [2]   Python venv      — creates .venv/
 [3]   Python packages  — pip install requirements.txt + requirements-api.txt
 [4]   MITRE data       — downloads bundle files + runs build_indexes.py
+[4b]  Detection corpora — clones the Sigma/Suricata/YARA repos (~525 MB) and
+                          ingests them; on an existing store it also applies
+                          pending schema migrations and backfills rule sizes
 [5]   spaCy model      — optional en_core_web_sm (~12 MB)
 [6]   API key          — creates .env from .env.example
       STIX icons       — checks/downloads 27 official OASIS SVG icons
@@ -1247,6 +1346,7 @@ bash setup.sh              # full setup
 bash setup.sh --no-torch   # skip sentence-transformers / GLiNER (faster, minimal)
 bash setup.sh --no-mitre   # skip MITRE bundle download
 bash setup.sh --no-spacy   # skip spaCy model download
+bash setup.sh --no-corpora # skip the detection-rule corpora clone + ingest
 ```
 
 ---

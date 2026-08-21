@@ -416,17 +416,18 @@ else
 fi
 
 # =============================================================================
-# DETECTION-RULE CORPORA  (Sigma — powers the coverage matrix, ADR-0006)
+# DETECTION-RULE CORPORA  (Sigma / Suricata / YARA — coverage matrix, ADR-0006)
 # =============================================================================
 echo ""
-hdr "DETECTION-RULE CORPORA (Sigma)"
+hdr "DETECTION-RULE CORPORA (Sigma / Suricata / YARA)"
 
 if [ "$OPT_NO_CORPORA" = true ]; then
-    warn "--no-corpora: skipping Sigma detection-corpora clone."
+    warn "--no-corpora: skipping the detection-corpora clone."
     info "  The coverage matrix stays empty until you run:"
     echo -e "     ${CYAN}python scripts/sync_corpora.py && python scripts/build_detection_index.py${NC}"
 else
-    echo "  Coverage matches each report's MITRE TTPs against public Sigma rule corpora."
+    echo "  Coverage matches each report's MITRE TTPs against public rule corpora"
+    echo "  in three formats (Sigma .yml, Suricata .rules, YARA .yar)."
     echo "  This clones the public repos in detection_corpora.yaml into ./corpora/"
     echo "  (~525 MB, shallow) and ingests them into the rule store."
     echo ""
@@ -449,6 +450,47 @@ else
     else
         info "Skipping. Run later, or use the Settings → Redownload button per corpus:"
         echo -e "     ${CYAN}python scripts/sync_corpora.py && python scripts/build_detection_index.py${NC}"
+    fi
+
+    # ---------------------------------------------------------------------
+    # Upgrading an existing store.  Schema migrations normally run on API
+    # startup, so a store built by an older checkout can sit here with tables
+    # the new code expects but has never populated.  A fresh ingest above
+    # writes them; an upgrade that skipped the ingest does not, and the
+    # symptom is silent (the coverage UI shows every rule size as "0 B"
+    # rather than failing).  Apply the migrations and backfill here.
+    # ---------------------------------------------------------------------
+    if [ -f cti_stix.db ]; then
+        info "Applying schema migrations to the existing store…"
+        python -c "from api.db import init_db; init_db()" 2>/dev/null \
+            && ok "Schema up to date." \
+            || warn "Could not apply migrations — start the API once to run them."
+
+        NEEDS_BYTES=$(python - <<'PYEOF' 2>/dev/null
+import sqlite3
+try:
+    c = sqlite3.connect("file:cti_stix.db?mode=ro", uri=True)
+    names = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if {"detection_rules", "rule_bytes"} <= names:
+        print(c.execute(
+            "SELECT COUNT(*) FROM detection_rules d WHERE NOT EXISTS "
+            "(SELECT 1 FROM rule_bytes b WHERE b.rule_id = d.id)"
+        ).fetchone()[0])
+    else:
+        print(0)
+except Exception:
+    print(0)
+PYEOF
+)
+        if [ "${NEEDS_BYTES:-0}" -gt 0 ] 2>/dev/null; then
+            info "Backfilling rule body sizes for ${NEEDS_BYTES} rules (ADR-0022)…"
+            if python -m scripts.backfill_rule_bytes >/dev/null 2>&1; then
+                ok "Rule sizes backfilled."
+            else
+                warn "Backfill failed — retry: python -m scripts.backfill_rule_bytes"
+                info "  Until then the coverage page shows every rule size as 0 B."
+            fi
+        fi
     fi
 fi
 
@@ -762,6 +804,33 @@ _check_file "pipeline/data/mitre_index.json"       "Stage 3c  — MITRE TTP norm
 echo -e "    ${GREEN}✔${NC}  Stage 3d  — Self-verification of relationship claims"
 echo -e "    ${GREEN}✔${NC}  Stage 4   — STIX 2.1 bundle generation"
 echo -e "    ${GREEN}✔${NC}  Stage 5   — STIX validation + export"
+
+# The detection store is optional and built separately, so report what is
+# actually in it rather than assuming the corpora step ran.
+python - <<'PYEOF' 2>/dev/null || echo -e "    ${YELLOW}–${NC}  Detection coverage — rule store not built yet (see step 6)"
+import sqlite3, sys
+GREEN, YELLOW, NC = "\033[0;32m", "\033[1;33m", "\033[0m"
+try:
+    c = sqlite3.connect("file:cti_stix.db?mode=ro", uri=True)
+    names = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "detection_rules" not in names:
+        raise SystemExit(1)
+    n = c.execute("SELECT COUNT(*) FROM detection_rules").fetchone()[0]
+    if not n:
+        raise SystemExit(1)
+    fmts = ", ".join(
+        f"{f or 'sigma'} {k}" for f, k in
+        c.execute("SELECT format, COUNT(*) FROM detection_rules GROUP BY format ORDER BY 2 DESC")
+    )
+    atoms = c.execute("SELECT COUNT(DISTINCT rule_id) FROM rule_atoms").fetchone()[0] \
+        if "rule_atoms" in names else 0
+    print(f"    {GREEN}\u2714{NC}  Detection coverage — {n:,} rules ({fmts})")
+    print(f"    {GREEN}\u2714{NC}  Rule proposals    — atoms indexed for {atoms:,} rules")
+except SystemExit:
+    raise
+except Exception:
+    raise SystemExit(1)
+PYEOF
 echo ""
 
 echo "  Next steps:"
@@ -795,5 +864,9 @@ fi
 echo ""
 echo -e "  ${YELLOW}6.${NC}  Rebuild MITRE indexes (after updating bundle files):"
 echo -e "       ${CYAN}python scripts/build_indexes.py${NC}"
+echo ""
+echo -e "  ${YELLOW}7.${NC}  Detection coverage (if you skipped the corpora step):"
+echo -e "       ${CYAN}python scripts/sync_corpora.py && python scripts/build_detection_index.py${NC}"
+echo      "       Then open /coverage/<job-id> to select and export rules."
 echo ""
 sep

@@ -54,12 +54,23 @@ cd frontend && npx tsc --noEmit   # frontend type-check
 - **ADRs** — significant decisions get an Architecture Decision Record in
   [`docs/adr/`](docs/adr/). Copy an existing one; append, don't rewrite. Update the
   [ADR index](docs/adr/README.md).
-- **DB migrations** — additive `ALTER TABLE` appended to the `_migrations` list in
-  `api/db.py` (wrapped in try/except; safe to re-run).
+- **DB migrations** — additive `ALTER TABLE` / `CREATE TABLE IF NOT EXISTS`
+  appended to the `_migrations` list in `api/db.py` (wrapped in try/except; safe
+  to re-run). Document the new table or column in the README's
+  [Database schema](README.md#database-schema) section.
+  - **Never add a bulk-read column to `detection_rules`.** `ALTER TABLE` appends
+    after `raw`, which holds multi-kilobyte rule bodies, so SQLite must walk each
+    record past the body (and its overflow pages) to reach the new field —
+    measured 8.2s to read one integer for 10,372 rules, versus ~0.1s from a side
+    table. Put per-rule scalars in their own table keyed by `rule_id`, as
+    `rule_atoms`, `rule_techniques`, `rule_related` and `rule_bytes` do (ADR-0022).
 - **Line length** is 120 (ruff). Keep imports sorted (`ruff --fix` handles `I001`).
 - **Commits** — branch off `main`; keep a change + its tests + doc update together.
 
 ## Docs to keep current
-When a feature lands, update: [`README.md`](README.md) (user-facing),
+When a feature lands, update: [`README.md`](README.md) (user-facing — including
+the **Database schema** and **Project structure** sections if either changed),
 [`CHANGELOG.md`](CHANGELOG.md), the relevant ADR, and [`TESTING.md`](TESTING.md) if
-coverage changed.
+coverage changed. Feature-specific walkthroughs live in [`docs/`](docs/); if you
+add or replace a screenshot, follow
+[`docs/screenshots/README.md`](docs/screenshots/README.md) and update its index.
