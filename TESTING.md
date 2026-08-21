@@ -123,7 +123,7 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 
 ---
 
-## 3. Current coverage map (324 tests)
+## 3. Current coverage map (571 tests)
 
 | Layer | File | ~Tests | Covers |
 |---|---|---:|---|
@@ -143,6 +143,10 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 | **Provenance** | `test_provenance.py` | 5 | authoring Identity, TLP marking, `created_by_ref` on SDO/SRO, SCO marked-only, `STIX_TLP` switch |
 | **Persistence / worker** | `test_persistence.py` | 4 | migration idempotency, `_save_entities` write, finalize read→bundle, NULL-label default |
 | **Relationships API** | `test_relationships_api.py` | 4 | create/read/patch evidence_label, default + unknown-label coercion, PATCH 400 |
+| **Detection coverage** | `test_detection_coverage.py` | 36 | 0–3 scoring policy (fork-safe), parent→sub roll-up, per-format `by_format` split + owner attribution, drill-down key order and `bytes`, rule-id export (intersection, 400/404, shared archive layout), flat-sweep query-count and index-pinning locks |
+| **Rule dedup** | `test_detection_dedup.py` | 10 | `dedup_key` ignores metadata/field order, canonical election by corpus priority, `related:` provenance folding, independent rules kept |
+| **Rule relevance** | `test_detection_relevance.py` | 27 | atom extraction (field→class, wildcards, composite hashes, caps, malformed rules), IDF weighting, platform factor, tiering |
+| **Export filters** | `test_export_filters.py` | 13 | facet totals per axis, per-format extensions, format/licence/severity filtering, empty job is 200 not 404 |
 
 **Shared infra** (`conftest.py`): `sample_cti_text`, `sample_entities`,
 `mock_llm` / `mock_llm_empty` / `mock_llm_bad_json`, `storage`, `api_client`.
