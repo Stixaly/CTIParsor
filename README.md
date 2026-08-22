@@ -91,7 +91,7 @@ uvicorn api.main:app --reload --app-dir .
 ┌─────────────────────────────▼────────────────────────────────────────┐
 │  Stage 2 — REGEX IOC EXTRACTION                         (offline ✅)  │
 │  IPv4/v6, domains, URLs, emails, MAC, ASN, file paths + filenames   │
-│  Registry keys, mutexes, MD5/SHA-1/SHA-256 (incl. line-wrapped)     │
+│  Registry keys, MD5/SHA-1/SHA-256 (incl. line-wrapped hashes)        │
 │  CVE IDs, raw MITRE ATT&CK IDs (T1234 / T1234.001) → ttp            │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
@@ -111,7 +111,7 @@ uvicorn api.main:app --reload --app-dir .
 │  • Upgrade: ehsanaghaei/SecureBERT-Plus (+8-12% F1 on CTI text)     │
 │  • Model-aware tiers: ≥ high wins over LLM / medium = candidate     │
 │    (MiniLM 0.62 / 0.48; resolved per-model — ADR-0011 Phase A)      │
-│  • 1 match per sentence + margin gate kills nearest-wrong neighbour │
+│  • 1 match/sentence (top_k=1); TTP_TOP2_MARGIN guards any 2nd match  │
 │  • ATT&CK-only by default (918 of 1 533): CAPEC shadows the real    │
 │    technique, so it is excluded — TTP_SEMANTIC_DOMAINS=all restores │
 └─────────────────────────────┬────────────────────────────────────────┘
@@ -152,19 +152,7 @@ uvicorn api.main:app --reload --app-dir .
 │  • 6–9 chars (LummaC2)      : 80% similarity threshold             │
 │  • ≥ 10 chars (Cobalt Strike): 75% similarity threshold            │
 │  Campaign names: word-level fallback to avoid over-filtering        │
-│  Dropped names are logged. Improves precision ~8–15%.               │
-└─────────────────────────────┬────────────────────────────────────────┘
-                              │
-┌─────────────────────────────▼────────────────────────────────────────┐
-│  Stage 3c — MITRE ATT&CK NORMALISATION                 (offline ✅)  │
-│  Fuzzy-matches extracted TTPs against the full ATT&CK corpus        │
-│  (Enterprise + Mobile + ICS + CAPEC, compact local JSON index)      │
-│  • Score ≥ 85 : canonical name + correct MITRE ID                  │
-│  • Score 70–84: keep LLM phrasing, override ID                      │
-│  • Score < 70 : pass through unchanged                              │
-│  Eliminates ~40% of wrong or invented MITRE IDs                     │
-│  + Merge precision (ADR-0011): only HIGH-confidence semantic wins   │
-│    over the LLM; parent technique dropped when a sub-technique fires │
+│  Names already confirmed by NER or doc context skip the fuzzy scan   │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
@@ -186,16 +174,39 @@ uvicorn api.main:app --reload --app-dir .
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
+│  Stage 3e — CROSS-MODEL CONSENSUS                       (optional)   │
+│  Re-runs every relationship-bearing chunk through a SECOND provider  │
+│  and treats agreement as a trust signal — a model is a poor judge of │
+│  its own hallucination; two different models disagreeing is signal.  │
+│  • Agreed by both   : confidence +0.10                               │
+│  • Primary only     : confidence −0.20, "observed" → "reported"      │
+│  Enable: ENABLE_CONSENSUS=true + CONSENSUS_PROVIDER (≠ LLM_PROVIDER) │
+└─────────────────────────────┬────────────────────────────────────────┘
+                              │
+┌─────────────────────────────▼────────────────────────────────────────┐
+│  Stage 3c — MITRE ATT&CK NORMALISATION                 (offline ✅)  │
+│  Runs ONCE per document, after every chunk is merged — not per chunk │
+│  Fuzzy-matches extracted TTPs against the full ATT&CK corpus         │
+│  (Enterprise + Mobile + ICS + CAPEC, compact local JSON index)       │
+│  • Score ≥ 85 : canonical name + correct MITRE ID                    │
+│  • Score 70–84: keep LLM phrasing, override ID                       │
+│  • Score < 70 : pass through unchanged                               │
+│  + Merge precision (ADR-0011): only HIGH-confidence semantic wins    │
+│    over the LLM; parent technique dropped when a sub-technique fires │
+└─────────────────────────────┬────────────────────────────────────────┘
+                              │
+┌─────────────────────────────▼────────────────────────────────────────┐
 │  Stage 4 — STIX 2.1 MAPPING                            (offline ✅)  │
 │  IoC → SCO  (IPv4Address, DomainName, File, URL, Email, MACAddr…)  │
 │  Malware / Actor / Tool / TTP / CVE / Campaign / Infra → SDO        │
 │  Location → SDO (targeted country, ISO 3166-1 lookup, 80+ nations)  │
 │  Identity → SDO (targeted sector, identity_class=class)             │
 │  CourseOfAction → SDO (recommended remediations)                    │
-│  All accepted IoCs → Indicator SDO (STIX pattern)                  │
+│  All accepted IoCs → Indicator → based-on → ObservedData → SCO       │
 │  IoC linked to malware → indicates SRO                              │
 │  Threat actor → targets → Location / Identity SROs                 │
-│  Semantic relations → Relationship SRO (deduplicated, spec-valid)   │
+│  Semantic relations → Relationship SRO (deduplicated, spec-valid)    │
+│  Every object: TLP/PAP marking + created_by_ref → authoring Identity │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
@@ -239,6 +250,16 @@ On Finalize (web UI):
     domain lexicon to find additional occurrences missed by NER/LLM.
     Source tagged "report_lexicon". Zero ML cost, pure string matching.
 ```
+
+**This diagram describes the web/API path** (`api/worker.py`), which is the full
+pipeline. The `python main.py` CLI is a thinner subset — it runs Stage 2 regex
+extraction only (no gazetteer, semantic TTP, CyNER or GLiNER), uses a fixed
+3 000-char chunk size instead of the adaptive one, and has no consensus or
+lexicon re-scan. Use the web UI, or `make api`, to exercise every stage.
+
+Stage order note: 3b, 3d, 3f and 3e run **per chunk**; 3c runs **once per
+document**, after every chunk has been merged. The boxes are drawn in that
+execution order.
 
 ---
 
@@ -306,6 +327,7 @@ A `Makefile` wraps the most common workflows. Requires `make` (standard on Linux
 | `make api-dev` | Start API with hot-reload (dev backend) |
 | `make frontend-dev` | Start Vite dev server with HMR (dev frontend) |
 | `make check` | Diagnostic: list which pipeline stages are available |
+| `make check-docs` | Verify every number claimed in this README against the source of truth |
 | `make corpora` | Clone/pull the rule corpora (Sigma, Suricata, YARA) |
 | `make detection-index` | Parse the clones into the rule store (dedups, writes rule sizes) |
 | `make backfill-rules` | Backfill rule body sizes on a store built before ADR-0022 |
@@ -434,8 +456,9 @@ disable one, and **Rebuild index** to re-ingest the local clones. See
 | ASN | `autonomous-system` SCO |
 | File path (Windows/Unix) + bare filename | `file` SCO |
 | Registry key | `windows-registry-key` SCO |
-| Mutex | `mutex` SCO |
-| User account | `user-account` SCO |
+| Mutex † | `mutex` SCO |
+| User account † | `user-account` SCO |
+| Network traffic † | `network-traffic` SCO |
 | CVE | `vulnerability` SDO |
 | MITRE ATT&CK TTP (internal type `ttp`) | `attack-pattern` SDO + external reference (tactic vs technique preserved in the `mitre_id` / ATT&CK URL) |
 | Malware family | `malware` SDO (`is_family: true`) |
@@ -456,6 +479,11 @@ disable one, and **Rebuild index** to re-ingest the local clones. See
 | Sharing markings | TLP `marking-definition` (+ optional PAP statement marking) referenced by `object_marking_refs` on every object |
 | Pipeline authorship | one authoring `identity` SDO; `created_by_ref` on every SDO/SRO (the pipeline, **not** the threat actor) |
 | Report wrapper | `report` SDO |
+
+† **Mappable, but never auto-extracted.** No Stage 2 pattern produces a mutex,
+user account or network-traffic entity — Stage 4 maps them so an analyst who adds
+one by hand in the Review page gets a correct SCO. Everything else in this table
+is produced by the pipeline itself.
 
 ---
 
@@ -616,9 +644,10 @@ OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=mistral
 ```
 Pull a model first: `ollama pull mistral`. Models smaller than ~13B may produce malformed JSON.
+If `OLLAMA_MODEL` is left unset the code falls back to `llama3.2`, not `mistral` — set it explicitly.
 
 #### Running without an LLM
-Leave `ANTHROPIC_API_KEY` unset. Stage 3 is skipped. The pipeline still produces a valid STIX bundle from Stages 1–2b–2c–2e results.
+Leave `ANTHROPIC_API_KEY` unset. Stage 3 is skipped. The pipeline still produces a valid STIX bundle from the Stage 1, 2, 2b, 2c, 2d and 2e results (every offline stage).
 
 ### NLP stages
 
@@ -842,12 +871,20 @@ cti-to-stix/
 │   ├── detection/                 # Detection-rule ingestion + coverage (ADR-0006)
 │   │   ├── base.py                # RuleCorpusAdapter (pluggable format seam)
 │   │   ├── sigma.py               # SigmaAdapter (YAML → DetectionRule)
+│   │   ├── suricata.py            # SuricataAdapter (rule text → DetectionRule, ADR-0015)
+│   │   ├── yara.py                # YaraAdapter (rule text → DetectionRule, ADR-0015)
 │   │   ├── registry.py            # Two-tier corpus registry + overlay writes
 │   │   ├── store.py               # detection_rules / rule_techniques / rule_atoms persistence
 │   │   ├── coverage.py            # Technique → 0–3 readiness scoring
 │   │   ├── atoms.py               # Sigma detection block → atoms + platform (ADR-0014)
+│   │   ├── suricata_atoms.py      # Suricata sticky-buffer → atoms (ADR-0015)
+│   │   ├── yara_atoms.py          # YARA strings/condition → atoms (ADR-0015)
 │   │   ├── observables.py         # Report entities → normalized observables (ADR-0014)
 │   │   ├── relevance.py           # IDF-weighted rule ranking + evidence (ADR-0014)
+│   │   ├── dedup.py               # Cross-corpus rule dedup, `related:` folding (ADR-0017)
+│   │   ├── synth_sigma.py         # Report-derived Sigma synthesis (ADR-0016)
+│   │   ├── tlds.py                # TLD table backing the hostname gate (ADR-0015)
+│   │   ├── sync.py                # Corpus clone/pull driver
 │   │   └── builder.py             # Rebuild the rule store from local clones
 │   └── data/
 │       ├── mitre_index.json       # Compact ATT&CK index (built by build_indexes.py)
@@ -863,10 +900,13 @@ cti-to-stix/
 │   ├── build_detection_index.py   # Parse clones → detection-rule store
 │   ├── build_rule_atoms.py        # Backfill rule_atoms from stored bodies (ADR-0014)
 │   ├── backfill_rule_bytes.py     # Backfill rule_bytes on an older store (ADR-0022)
-│   └── audit_coverage_formats.py  # Read-only: per-format breakdown + drill-down latency
+│   ├── audit_coverage_formats.py  # Read-only: per-format breakdown + drill-down latency
+│   ├── check_stages.py            # Diagnostic: which stages are available (make check)
+│   └── check_doc_claims.py        # Doc drift guard: README numbers vs source (make check-docs)
 │
 ├── models/
 │   ├── schemas.py                 # Pydantic: RawEntity, EntityType, EvidenceLabel
+│   ├── config.py                  # PipelineConfig (chunk size, model ids, env binding)
 │   └── detection.py               # Pydantic: DetectionRule, Severity
 │
 ├── api/
@@ -881,7 +921,8 @@ cti-to-stix/
 │       ├── relationships.py       # CRUD /api/jobs/{id}/relationships
 │       ├── progress.py            # GET /api/jobs/{id}/progress (SSE)
 │       ├── coverage.py            # GET /api/jobs/{id}/coverage + detection-corpora
-│       └── settings.py            # Corpora management (ADR-0007)
+│       ├── settings.py            # Corpora management (ADR-0007)
+│       └── policy.py              # Relationship policy: pinned rules + completion block
 │
 ├── frontend/                      # React 18 + TypeScript + Vite 6
 │   ├── src/
@@ -923,10 +964,12 @@ cti-to-stix/
 │       ├── stix-icons/            # 27 official OASIS STIX 2.1 White SVG icons
 │       └── mitre_index.json       # ATT&CK index served to the frontend
 │
-├── tests/
+├── tests/                         # 31 modules, 571 tests — map in TESTING.md
 │   ├── test_stage1.py             # Ingestion, chunking, overlap, defanging
 │   ├── test_stage2.py             # IoC extraction, refanging, deduplication
 │   ├── test_stage4.py             # STIX mapping
+│   ├── …                          # one module per stage + per ADR feature
+│   ├── eval_pipeline.py           # Offline quality benchmarks (ATE, grounding)
 │   └── fixtures/sample_report.txt
 │
 ├── input/                         # Drop CTI reports here (gitignored)

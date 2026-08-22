@@ -7,6 +7,13 @@ sections group by theme rather than strict semver.
 ## [Unreleased]
 
 ### Added
+- **`make check-docs` — a documentation drift guard** (`scripts/check_doc_claims.py`)
+  — recomputes every precise number the README asserts (gazetteer size, semantic
+  corpus split, ATT&CK grounding pairs, all fuzzy thresholds, the ISO country
+  table) from the actual JSON data files and module constants, and exits non-zero
+  on any mismatch. Standard library only, read-only, degrades to SKIP when a data
+  file is absent so it runs on a fresh clone. Every one of the 11 claims checked
+  currently passes.
 - **Granular multi-format detection selection on `/coverage/:jobId`** (ADR-0022) —
   the page now makes Sigma, Suricata and YARA distinct throughout, and lets an
   analyst select rules at every level (rule → technique → ATT&CK tactic → corpus
@@ -37,6 +44,33 @@ sections group by theme rather than strict semver.
   more corroboration than the score does.
 
 ### Fixed
+- **Pipeline diagram corrected against the implementation** — the README's stage
+  diagram drew Stage 3c (MITRE normalisation) between 3b and 3d, but
+  `normalize_ttps()` runs once per document in `_merge_results()`, after every
+  chunk is merged; the real per-chunk order is 3b → 3d → 3f → 3e. Stage 3e
+  (cross-model consensus) was missing from the diagram entirely although it is
+  configured in `.env.example` and listed in the file tree. Stage 2 no longer
+  claims to extract mutexes (no pattern produces one — they are analyst-entered
+  only, now footnoted in the STIX object table alongside user-account and
+  network-traffic). Stage 2c's "margin gate" line implied two active filters when
+  `top_k=1` is the operative one and `TTP_TOP2_MARGIN` guards a 2nd match that
+  the default configuration never requests (ADR-0011 Phase A). Stage 4 now shows
+  the real `Indicator → based-on → ObservedData → SCO` chain and the TLP/PAP +
+  `created_by_ref` stamping that Stage 4b's note already referenced. Added a
+  scope note: the diagram describes the API worker, not the thinner
+  `python main.py` CLI.
+- **File-tree drift in the README** — `pipeline/detection/` was missing eight
+  modules (the whole Suricata/YARA multi-format layer from ADR-0015, plus
+  `dedup.py`, `synth_sigma.py`, `tlds.py`, `sync.py`); `api/routes/` was missing
+  `policy.py`; `models/` was missing `config.py`; and `tests/` listed 3 of 31
+  modules with no indication it was a sample (571 tests, mapped in TESTING.md).
+- **Stale counts** — `stage2b_gazetteer.py` still documented a 1,792-name
+  gazetteer (actual: 1,827 variants / 1,114 unique) and a ~194 KB index (~275 KB).
+  ADR-0002 was marked *Proposed* despite `WORKER_MAX_CONCURRENT` shipping;
+  ADR-0012's status line did not use the same bold form as every other ADR.
+- **Undocumented Ollama fallback** — the README and `.env.example` both set
+  `OLLAMA_MODEL=mistral`, but leaving it unset falls back to `llama3.2`. Stated
+  explicitly rather than leaving the two defaults to disagree silently.
 - **`/api/jobs/{id}/coverage/rules` was unusable on real reports** (ADR-0022) —
   the endpoint the Detection Coverage page selects over did not complete: on a
   34-technique report (9,777 canonical rules) a 600 s measurement finished 3 of

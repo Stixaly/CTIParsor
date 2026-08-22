@@ -5,7 +5,7 @@ UVICORN  = .venv/bin/uvicorn
 .PHONY: setup install install-api download-mitre build-indexes \
         model test test-fast run run-dir \
         api api-dev frontend-install frontend-build frontend-dev \
-        check clean \
+        check check-docs clean \
         corpora detection-index backfill-rules \
         audit lock update-deps npm-outdated npm-update
 
@@ -119,6 +119,10 @@ frontend-dev:
 ## Check which pipeline stages are available (imports + data files)
 check:
 	@$(PYTHON) scripts/check_stages.py
+
+## Verify every number claimed in README.md still matches the source of truth
+check-docs:
+	@$(PYTHON) scripts/check_doc_claims.py
 
 # ── Dependency maintenance ────────────────────────────────────────────────────
 

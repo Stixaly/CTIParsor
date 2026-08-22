@@ -1,9 +1,9 @@
 """
 Stage 2b — Gazetteer-based Named Entity Recognition.
 
-Scans a document for 1,792 known malware families, offensive tools, and APT group
-names sourced from the MITRE ATT&CK Enterprise, Mobile, and ICS STIX bundles
-(including all canonical names and aliases).
+Scans a document for 1,827 name variants — 1,114 unique malware families,
+offensive tools and APT groups — sourced from the MITRE ATT&CK Enterprise,
+Mobile, and ICS STIX bundles (all canonical names plus their aliases).
 
 This deterministic approach has near-zero hallucination risk for *known* threat
 actors and malware families, and complements:
@@ -14,11 +14,11 @@ Paper basis: Arazzi et al. 2023 §8 — Dictionary-template-enhanced NER
 (Dict+BiLSTM+CRF achieves 88.36% F1; gazetteer alone adds ~10–15 F1 points
  over generic spaCy NER on CTI text).
 
-Index file: pipeline/data/gazetteer.json  (~194 KB, rebuilt by scripts/build_indexes.py)
+Index file: pipeline/data/gazetteer.json  (~275 KB, rebuilt by scripts/build_indexes.py)
 
 Speed:
   The default path uses Aho-Corasick (pyahocorasick) for O(text_len) multi-pattern
-  search — ~50× faster than the previous regex approach for a 1 792-entry gazetteer
+  search — ~50× faster than the previous regex approach at this gazetteer size
   on 100k-char documents.  Falls back to the regex path if pyahocorasick is not
   installed (pip install pyahocorasick).
 """

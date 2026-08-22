@@ -1,6 +1,6 @@
 # ADR-0012 — Hallucination measurement, entity canonicalisation & relationship precision
 
-Status: Accepted
+**Status:** Accepted
 
 ## Context
 
