@@ -270,6 +270,12 @@ def init_db() -> None:
             " rule_id TEXT NOT NULL, related_key TEXT NOT NULL, rel_type TEXT NOT NULL,"
             " PRIMARY KEY (rule_id, related_key, rel_type))",
             "CREATE INDEX IF NOT EXISTS idx_rule_related_key ON rule_related(related_key)",
+            # ADR-0024 — run configuration snapshot, so a bundle can be
+            # reproduced and attributed.  The relationship policy is a single
+            # mutable row, so without this a bundle cannot be explained after the
+            # policy changes: the 872 unlabelled edges in job 32b5475b were made
+            # by pinned rules the policy no longer contains.
+            "ALTER TABLE jobs ADD COLUMN run_config_json TEXT",
             # ADR-0022 — body size for the coverage selection UI, in a side table
             # (a column on detection_rules would sit after `raw` and cost 8.2s to
             # read). Written on ingest; an already-built store is backfilled

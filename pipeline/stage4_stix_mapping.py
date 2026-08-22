@@ -208,6 +208,17 @@ _OBSERVABLE_SCO_TYPES: frozenset[str] = frozenset({
 })
 
 
+# ADR-0024 Phase A2 -- provenance for the ordinary mapping edges.
+# These are not synthesised links: each restates something an extraction stage
+# already produced.  "based-on" is structural (the Indicator restates an IoC
+# actually found in the text, so it inherits `observed`), while "indicates" and
+# "targets" carry a model claim about the document and are therefore `reported`.
+# The grade is not bookkeeping: the review-UI auto-accept gate promotes only
+# `observed`, so it decides what an analyst has to check by hand.
+_EV_OBSERVED = {"x_evidence_label": "observed"}
+_EV_REPORTED = {"x_evidence_label": "reported"}
+
+
 def _is_spurious_observable_ttp_edge(source, target) -> bool:
     """True for an observable-SCO ↔ attack-pattern edge (a type error the LLM
     sometimes emits).  Such an edge carries no valid STIX meaning and is dropped
@@ -595,6 +606,7 @@ def build_stix_bundle(
                 _add_relationship(
                     stix_objects, existing_indicator, "indicates", malware,
                     confidence=0.8, pol_index=_pol_index, seen=seen_rel_keys,
+                    custom=_EV_REPORTED,
                 )
             continue
 
@@ -617,12 +629,14 @@ def build_stix_bundle(
             seen_indicators.add(ioc_key)
 
             _add_relationship(stix_objects, indicator, "indicates", malware, confidence=0.8,
-                              pol_index=_pol_index, seen=seen_rel_keys)
+                              pol_index=_pol_index, seen=seen_rel_keys,
+                              custom=_EV_REPORTED)
             # Indicator --based-on--> ObservedData --(object_refs)--> SCO
             obs = _observed_data_for(sco)
             if obs is not None:
                 _add_relationship(stix_objects, indicator, "based-on", obs, confidence=0.9,
-                                  pol_index=_pol_index, seen=seen_rel_keys)
+                                  pol_index=_pol_index, seen=seen_rel_keys,
+                                  custom=_EV_OBSERVED)
         except Exception:
             pass
 
@@ -655,7 +669,8 @@ def build_stix_bundle(
             obs = _observed_data_for(sco)
             if obs is not None:
                 _add_relationship(stix_objects, indicator, "based-on", obs, confidence=0.9,
-                                  pol_index=_pol_index, seen=seen_rel_keys)
+                                  pol_index=_pol_index, seen=seen_rel_keys,
+                                  custom=_EV_OBSERVED)
         except Exception:
             pass
 
@@ -668,12 +683,14 @@ def build_stix_bundle(
             location = name_to_stix.get(f"location:{country.lower()}")
             if location:
                 _add_relationship(stix_objects, actor, "targets", location,
-                                  pol_index=_pol_index, seen=seen_rel_keys)
+                                  pol_index=_pol_index, seen=seen_rel_keys,
+                                  custom=_EV_REPORTED)
         for sector in llm_result.targeted_sectors:
             identity = name_to_stix.get(f"identity:{sector.lower()}")
             if identity:
                 _add_relationship(stix_objects, actor, "targets", identity,
-                                  pol_index=_pol_index, seen=seen_rel_keys)
+                                  pol_index=_pol_index, seen=seen_rel_keys,
+                                  custom=_EV_REPORTED)
 
     # --- SROs — semantic relationships (deduplicated, spec-validated) ---
     # Reuses the shared seen_rel_keys set so a semantic edge that duplicates a
@@ -731,19 +748,6 @@ def build_stix_bundle(
             pass
 
     # --- Policy-forced relationships (enforce mode, "pin" rules) ---
-    # In "enforce" mode a pinned rule does more than relabel edges the pipeline
-    # already inferred (handled by _apply_policy above): it MATERIALISES the
-    # analyst's link model.  For every enabled "pin" rule, an edge is created
-    # between each object of the rule's source type and each object of its target
-    # type — so e.g. "threat-actor uses malware" links the report's actors to its
-    # malware even when no extraction stage proposed that connection.
-    #
-    # Notes:
-    #   • Existing edges are not duplicated (shared seen_rel_keys set).
-    #   • Self-loops are skipped.
-    #   • This is an all-pairs (Cartesian) materialisation, so high-cardinality
-    #     pairs (e.g. indicator>malware over a large IoC list) can create many
-    #     edges — set such pairs to "Auto" in the policy if that's not wanted.
     if relationship_policy and relationship_policy.get("global") != "auto":
         # Snapshot the created SDOs/SCOs grouped by STIX type (taken before we
         # start appending the forced relationships below).
@@ -754,22 +758,64 @@ def build_stix_bundle(
                 continue
             _type_to_objs.setdefault(_otype, []).append(_obj)
 
-        for _rule in relationship_policy.get("rules", []):
+        _max_pinned = relationship_policy.get("max_pinned_edges", 200)
+        try:
+            _max_pinned = int(_max_pinned)
+        except (TypeError, ValueError):
+            _max_pinned = 200
+        if _max_pinned < 0:
+            _max_pinned = 0
+
+        _pinned_added = 0
+        _capped = False
+
+        # A cap of 0 disables materialisation entirely.  The counter is checked
+        # after the append, so without this guard the first edge still ships.
+        _rules = relationship_policy.get("rules", []) if _max_pinned > 0 else []
+        for _rule in _rules:
+            if _capped:
+                break
             if _rule.get("mode") != "pin" or not _rule.get("enabled", True):
                 continue
             _verb = (_rule.get("verb") or "").strip().lower()
             if _verb not in VALID_REL_TYPES:
                 continue   # non-spec verb — don't force-create (matches _apply_policy)
-            for _s_obj in _type_to_objs.get(_rule.get("src", ""), []):
-                for _t_obj in _type_to_objs.get(_rule.get("tgt", ""), []):
+            _src_type = _rule.get("src", "")
+            _tgt_type = _rule.get("tgt", "")
+            # A pinned rule materialises the analyst's link model, not a claim the
+            # document made.  Of the ADR-0009 vocabulary that is "assessed": it fails
+            # the review-UI auto-accept gate (only "observed" auto-promotes), so these
+            # edges queue for review instead of shipping indistinguishable from
+            # extracted fact.  x_policy_rule names the rule, mirroring Stage 4b's
+            # x_inference_rule.  Built once per rule: identical for every pair, and
+            # _add_relationship copies it into kwargs rather than mutating it.
+            _custom = {
+                "x_evidence_label": "assessed",
+                "x_policy_rule": f"{_src_type} {_verb} {_tgt_type}",
+            }
+            for _s_obj in _type_to_objs.get(_src_type, []):
+                if _capped:
+                    break
+                for _t_obj in _type_to_objs.get(_tgt_type, []):
                     if _s_obj.id == _t_obj.id:
                         continue
-                    # pol_index=None: the verb is already the pinned verb, so we
-                    # don't want _apply_policy to re-resolve it.
+                    _before = len(stix_objects)
                     _add_relationship(
                         stix_objects, _s_obj, _verb, _t_obj,
                         pol_index=None, seen=seen_rel_keys,
+                        custom=_custom,
                     )
+                    if len(stix_objects) > _before:
+                        _pinned_added += 1
+                        if _pinned_added >= _max_pinned:
+                            logger.warning(
+                                "[Stage 4] policy-pin materialisation capped at %d edges "
+                                "(rule '%s %s %s'); raise max_pinned_edges in the relationship policy "
+                                "to allow more.",
+                                _max_pinned, _src_type, _verb, _tgt_type,
+                            )
+                            _capped = True
+                            break
 
     # --- Artifact SCO for the source document ---
     # Represents the original ingested file (PDF, DOCX, …) as a STIX 2.1
@@ -1135,6 +1181,7 @@ def _add_relationship(
     confidence: float | None = None,
     pol_index: dict | None = None,
     seen: set | None = None,
+    custom: dict | None = None,
 ) -> None:
     """Appends a Relationship SRO if source and target have ids.
 
@@ -1146,6 +1193,10 @@ def _add_relationship(
     deduplicate.  stix2.Relationship assigns a fresh random UUID on every call,
     so without this guard the same logical edge (e.g. actor --targets--> country)
     would appear multiple times in the bundle when its endpoints repeat.
+
+    custom: optional STIX custom properties (x_ prefixed) merged into the
+    relationship.  Passing any triggers allow_custom=True; passing none leaves
+    the object byte-identical to before, so existing edges are unaffected.
     """
     if not hasattr(source, "id") or not hasattr(target, "id"):
         return
@@ -1176,6 +1227,9 @@ def _add_relationship(
         }
         if confidence is not None:
             kwargs["confidence"] = max(0, min(100, int(confidence * 100)))
+        if isinstance(custom, dict) and custom:
+            kwargs.update(custom)
+            kwargs["allow_custom"] = True
         stix_objects.append(stix2.Relationship(**kwargs))
     except Exception:
         pass

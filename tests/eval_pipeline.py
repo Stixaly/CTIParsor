@@ -517,26 +517,71 @@ class ATESample:
 
 
 @dataclass
-class ATEScore:
-    """Precision/Recall/F1 for the ATE task."""
-    tp: float = 0.0
-    fp: float = 0.0
-    fn: float = 0.0
+class GranularityScore:
+    """Macro-averaged P/R/F1 at one ATT&CK ID granularity."""
+    n_samples:         int   = 0
+    sum_precision:     float = 0.0
+    sum_recall:        float = 0.0
+    sum_f1:            float = 0.0
+    sum_pred_labels:   int   = 0
+    sum_gold_labels:   int   = 0
+    tp:                int   = 0
+    fp:                int   = 0
+    fn:                int   = 0
 
     @property
     def precision(self) -> float:
-        d = self.tp + self.fp
-        return self.tp / d if d else 0.0
+        if self.n_samples == 0:
+            return 0.0
+        return self.sum_precision / self.n_samples
 
     @property
     def recall(self) -> float:
-        d = self.tp + self.fn
-        return self.tp / d if d else 0.0
+        if self.n_samples == 0:
+            return 0.0
+        return self.sum_recall / self.n_samples
 
     @property
     def f1(self) -> float:
-        p, r = self.precision, self.recall
-        return 2 * p * r / (p + r) if (p + r) else 0.0
+        # NOTE: f1 is the mean of per-sample F1 scores, NOT the F1 recomputed from
+        # the mean precision and recall.  The two differ; the macro-averaged form is
+        # the one both reference protocols report.
+        if self.n_samples == 0:
+            return 0.0
+        return self.sum_f1 / self.n_samples
+
+    @property
+    def mean_labels_predicted(self) -> float:
+        if self.n_samples == 0:
+            return 0.0
+        return self.sum_pred_labels / self.n_samples
+
+    @property
+    def mean_labels_gold(self) -> float:
+        if self.n_samples == 0:
+            return 0.0
+        return self.sum_gold_labels / self.n_samples
+
+    def add_sample(self, precision: float, recall: float, f1: float,
+                   n_pred: int, n_gold: int,
+                   tp: int, fp: int, fn: int) -> None:
+        """Increment n_samples and accumulate all fields for one sample."""
+        self.n_samples += 1
+        self.sum_precision += precision
+        self.sum_recall += recall
+        self.sum_f1 += f1
+        self.sum_pred_labels += n_pred
+        self.sum_gold_labels += n_gold
+        self.tp += tp
+        self.fp += fp
+        self.fn += fn
+
+
+@dataclass
+class ATEScore:
+    """ATE result reported at both ATT&CK ID granularities."""
+    technique:    GranularityScore = field(default_factory=GranularityScore)
+    subtechnique: GranularityScore = field(default_factory=GranularityScore)
 
 
 # ---------------------------------------------------------------------------
@@ -548,56 +593,100 @@ def _normalize_tid(tid: str) -> str:
     return tid.strip().upper()
 
 
+def _truncate_to_parent(tid: str) -> str:
+    """
+    Return the parent technique ID of a MITRE T-ID.
+
+    "T1059.001" -> "T1059"
+    "T1059"     -> "T1059"
+    "t1059.001" -> "T1059"   (normalized first via _normalize_tid)
+
+    Splits on the LAST "." only. If the string contains no ".", the
+    normalized string is returned as-is.
+    """
+    normalized = _normalize_tid(tid)
+    if "." in normalized:
+        return normalized.rsplit(".", 1)[0]
+    return normalized
+
+
+def _clean_ids(ids) -> set[str]:
+    """
+    Normalize an iterable of IDs into a set of canonical T-IDs.
+
+    - Applies _normalize_tid to each element.
+    - Ignores any element that is not a str (type guard: input may come
+      from external JSON and contain integers or None).
+    - Ignores empty strings after strip.
+
+    Returns a set[str].
+    """
+    result: set[str] = set()
+    for item in ids:
+        if not isinstance(item, str):
+            continue
+        stripped = item.strip()
+        if not stripped:
+            continue
+        result.add(_normalize_tid(item))
+    return result
+
+
+def _score_one_granularity(pred: set[str], gold: set[str]) -> tuple[float, float, float, int, int, int]:
+    """
+    Score one sample at a single ATT&CK ID granularity using exact set matching.
+
+    Returns (precision, recall, f1, tp, fp, fn).
+    """
+    tp = len(pred & gold)
+    fp = len(pred - gold)
+    fn = len(gold - pred)
+
+    # Empty-set conventions.  An empty prediction on an empty gold set is a
+    # correct rejection and scores 1.0; any other empty-set combination scores
+    # 0.0 on every metric.  This keeps negative samples meaningful: emitting a
+    # technique where the gold set is empty must cost precision.
+    if len(pred) == 0 and len(gold) == 0:
+        return 1.0, 1.0, 1.0, tp, fp, fn
+    if len(pred) == 0 and len(gold) > 0:
+        return 0.0, 0.0, 0.0, tp, fp, fn
+    if len(pred) > 0 and len(gold) == 0:
+        return 0.0, 0.0, 0.0, tp, fp, fn
+
+    precision = tp / len(pred)
+    recall = tp / len(gold)
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+    return precision, recall, f1, tp, fp, fn
+
+
 def _score_ate_sample(
     predicted_ids: set[str],
     expected_ids:  set[str],
-    parent_credit: float = 0.5,
-) -> tuple[float, float, float]:
+) -> tuple[tuple[float, float, float, int, int, int],
+           tuple[float, float, float, int, int, int]]:
     """
-    Score one ATE sample.  Returns (tp, fp, fn).
+    Score one ATE sample at both ATT&CK ID granularities.
 
-    parent_credit:
-      If 0.5 — predicting the parent T-ID (e.g. T1059) when the ground truth is
-      a sub-technique (T1059.001) gives partial credit (0.5).  This is fair
-      because Stage 2c may match at technique level while the report means a
-      specific sub-technique.
-      If 0.0 — strict exact match only (no partial credit for parents).
+    Returns (technique_result, subtechnique_result), where each result is
+    (precision, recall, f1, tp, fp, fn).
+
+    Partial credit for parent/sub-technique mismatches is deliberately NOT
+    awarded: predicting a parent technique when a sub-technique is the gold
+    label (or vice versa) is scored as one false positive plus one false
+    negative at sub-technique level, and as a match at technique level.
     """
-    pred = {_normalize_tid(t) for t in predicted_ids}
-    gold = {_normalize_tid(t) for t in expected_ids}
+    pred = _clean_ids(predicted_ids)
+    gold = _clean_ids(expected_ids)
 
-    tp: float = 0.0
-    matched_gold: set[str] = set()
+    # Sub-technique granularity: score raw sets
+    sub_res = _score_one_granularity(pred, gold)
 
-    for pt in pred:
-        if pt in gold:
-            tp += 1.0
-            matched_gold.add(pt)
-        elif parent_credit > 0:
-            # Check if predicted is the parent of any gold sub-technique
-            for gt in gold:
-                if gt in matched_gold:
-                    continue
-                if "." in gt and gt.rsplit(".", 1)[0] == pt:
-                    tp += parent_credit
-                    matched_gold.add(gt)
-                    break
-                # Or if gold is the parent of a predicted sub-technique
-                if "." in pt and pt.rsplit(".", 1)[0] == gt:
-                    tp += parent_credit
-                    matched_gold.add(gt)
-                    break
+    # Technique granularity: truncate both sets to parent IDs before scoring
+    tech_pred = {_truncate_to_parent(t) for t in pred}
+    tech_gold = {_truncate_to_parent(t) for t in gold}
+    tech_res = _score_one_granularity(tech_pred, tech_gold)
 
-    fp = len(pred)  - sum(
-        1 for p in pred if p in gold or any(
-            ("." in g and g.rsplit(".", 1)[0] == p) or
-            ("." in p and p.rsplit(".", 1)[0] == g)
-            for g in gold
-        )
-    )
-    fn = len(gold - matched_gold)
-
-    return max(0.0, tp), max(0.0, float(fp)), max(0.0, float(fn))
+    return tech_res, sub_res
 
 
 # ---------------------------------------------------------------------------
@@ -828,8 +917,9 @@ def _load_ate_adversarial_samples() -> list[ATESample]:
 def test_ttp_regex_no_false_positives_on_adversarial():
     """Explicit-ID regex must extract nothing from TTP-flavoured prose (offline)."""
     score = run_ate_benchmark(_load_ate_adversarial_samples(), stage="2")
-    assert score.fp == 0, (
-        f"Regex TTP extraction produced {score.fp} false positives on adversarial prose"
+    assert score.subtechnique.fp == 0, (
+        f"Regex TTP extraction produced {score.subtechnique.fp} false "
+        f"positives on adversarial prose"
     )
 
 
@@ -943,46 +1033,216 @@ def run_ate_benchmark(
         verbose:  Print per-sample false positives / negatives.
 
     Returns:
-        ATEScore with aggregated P/R/F1 across all samples.
+        ATEScore with macro-averaged P/R/F1 at both granularities.
     """
     stage_fn = _ATE_STAGE_FNS.get(stage, _ate_combined)
-    total = ATEScore()
+    score = ATEScore()
 
     for sample in samples:
         predicted_ids = stage_fn(sample.text)
-        tp, fp, fn = _score_ate_sample(predicted_ids, sample.expected_ids)
-        total.tp += tp
-        total.fp += fp
-        total.fn += fn
+        tech_res, sub_res = _score_ate_sample(predicted_ids, sample.expected_ids)
 
-        if verbose and sample.expected_ids:
-            pred_norm = {_normalize_tid(t) for t in predicted_ids}
-            gold_norm = {_normalize_tid(t) for t in sample.expected_ids}
-            fps = pred_norm - gold_norm
-            fns = gold_norm - pred_norm
-            if fps or fns:
+        # Compute n_pred / n_gold at each granularity
+        pred_clean = _clean_ids(predicted_ids)
+        gold_clean = _clean_ids(sample.expected_ids)
+        tech_pred_set = {_truncate_to_parent(t) for t in pred_clean}
+        tech_gold_set = {_truncate_to_parent(t) for t in gold_clean}
+
+        score.technique.add_sample(
+            precision=tech_res[0], recall=tech_res[1], f1=tech_res[2],
+            n_pred=len(tech_pred_set), n_gold=len(tech_gold_set),
+            tp=tech_res[3], fp=tech_res[4], fn=tech_res[5]
+        )
+        score.subtechnique.add_sample(
+            precision=sub_res[0], recall=sub_res[1], f1=sub_res[2],
+            n_pred=len(pred_clean), n_gold=len(gold_clean),
+            tp=sub_res[3], fp=sub_res[4], fn=sub_res[5]
+        )
+
+        if verbose:
+            sub_pred = pred_clean
+            sub_gold = gold_clean
+            tech_pred = tech_pred_set
+            tech_gold = tech_gold_set
+            if (sub_pred - sub_gold) or (sub_gold - sub_pred) or \
+               (tech_pred - tech_gold) or (tech_gold - tech_pred):
                 print(f"\n  [{sample.description or 'sample'}]")
-                if fps:
-                    print(f"    FP (unexpected): {fps}")
-                if fns:
-                    print(f"    FN (missed):     {fns}")
+                print(f"    sub  FP={sorted(sub_pred - sub_gold)} FN={sorted(sub_gold - sub_pred)}")
+                print(f"    tech FP={sorted(tech_pred - tech_gold)} FN={sorted(tech_gold - tech_pred)}")
 
-    return total
+    return score
 
 
 def print_ate_scores(score: ATEScore, stage: str, gpt4_baseline: float = 0.64) -> None:
     """Print the ATE benchmark result with comparison to the GPT-4 baseline."""
-    print(f"\n{'=' * 55}")
+    print(f"\n{'=' * 68}")
     print(f"  ATT&CK Technique Extraction (ATE) — Stage {stage}")
-    print(f"{'=' * 55}")
-    print(f"  Precision : {score.precision:.3f}")
-    print(f"  Recall    : {score.recall:.3f}")
-    print(f"  F1        : {score.f1:.3f}   (GPT-4 baseline: {gpt4_baseline:.2f})")
-    print(f"  TP={score.tp:.1f}  FP={score.fp:.1f}  FN={score.fn:.1f}")
-    delta = score.f1 - gpt4_baseline
+    print(f"{'=' * 68}")
+    print(f"  {'':<14} {'Prec':>7} {'Rec':>7} {'F1':>7}   {'TP':>5} {'FP':>5} {'FN':>5}")
+    for label, g in (("technique", score.technique),
+                     ("sub-technique", score.subtechnique)):
+        print(f"  {label:<14} {g.precision:>7.3f} {g.recall:>7.3f} {g.f1:>7.3f}"
+              f"   {g.tp:>5d} {g.fp:>5d} {g.fn:>5d}")
+    print(f"{'-' * 68}")
+    print(f"  samples: {score.subtechnique.n_samples}"
+          f"   mean labels predicted: {score.subtechnique.mean_labels_predicted:.2f}"
+          f"   gold: {score.subtechnique.mean_labels_gold:.2f}")
+
+    # The GPT-4 baseline (F1 0.64) comes from CTIBench ATE, which labels parent
+    # techniques only.  Compare it against the technique-level score; the
+    # sub-technique score has no published counterpart on that dataset.
+    delta = score.technique.f1 - gpt4_baseline
     sign = "+" if delta >= 0 else ""
-    print(f"  vs GPT-4  : {sign}{delta:.3f}  {'✓ above baseline' if delta >= 0 else '✗ below baseline'}")
-    print(f"{'=' * 55}")
+    print(f"  technique-level vs GPT-4 (CTIBench ATE): {sign}{delta:.3f}")
+    print(f"{'=' * 68}")
+
+
+# ---------------------------------------------------------------------------
+# Retrieval recall @ k  (ADR-0023 Phase 2)
+#
+# The fraction of gold techniques present in Stage 2c's top-k candidates before
+# any confidence threshold.  RCPO reports this as a first-class number because a
+# downstream selector can only ever pick from what retrieval proposed: "As the
+# LLM selects only from the retrieved candidate list, this caps the model's
+# attainable recall."  Their figures span 97.3% down to 78.6% by dataset.
+# ---------------------------------------------------------------------------
+
+@dataclass
+class RetrievalRecall:
+    """Macro-averaged retrieval recall at one k, at both ATT&CK ID granularities."""
+    k: int = 0
+    n_samples: int = 0
+    sum_recall_tech: float = 0.0
+    sum_recall_sub: float = 0.0
+    sum_candidates: int = 0
+
+    @property
+    def recall_technique(self) -> float:
+        if self.n_samples == 0:
+            return 0.0
+        return self.sum_recall_tech / self.n_samples
+
+    @property
+    def recall_subtechnique(self) -> float:
+        if self.n_samples == 0:
+            return 0.0
+        return self.sum_recall_sub / self.n_samples
+
+    @property
+    def mean_candidates(self) -> float:
+        if self.n_samples == 0:
+            return 0.0
+        return self.sum_candidates / self.n_samples
+
+
+def _recall_of(retrieved: set[str], gold: set[str]) -> float:
+    """Fraction of *gold* IDs present in *retrieved*."""
+    if not gold:
+        # A sample with no gold techniques cannot lower retrieval recall: there is
+        # nothing to miss.  Precision on negative samples is what run_ate_benchmark
+        # measures; this metric answers only "could the retriever have found it?".
+        return 1.0
+    return len(retrieved & gold) / len(gold)
+
+
+def run_retrieval_recall(
+    samples: list[ATESample],
+    ks: list[int],
+    verbose: bool = False,
+) -> list[RetrievalRecall]:
+    """Measure the retrieval ceiling at each k in *ks*.
+
+    One embedding pass per (sample, k).  An earlier draft skipped larger k once a
+    sample already scored recall 1.0 -- recall is monotone in k, so the skip is
+    sound for recall -- but it reused the smaller k's candidate set and therefore
+    reported the wrong mean_candidates for every skipped k.  Correctness of a
+    reported number beats saving passes on a corpus this size; when Phase 5
+    introduces a ranked candidate API, one pass will serve every k honestly.
+    """
+    try:
+        from pipeline.stage2c_ttp_semantic import semantic_available, semantic_topk_ids
+    except ImportError:
+        return []
+
+    if not semantic_available():
+        return []
+
+    sorted_ks = sorted({k for k in ks if k >= 1})
+    if not sorted_ks:
+        return []
+
+    results = [RetrievalRecall(k=k, n_samples=len(samples)) for k in sorted_ks]
+    max_k = sorted_ks[-1]
+
+    for sample in samples:
+        gold_sub = _clean_ids(sample.expected_ids)
+        gold_tech = {_truncate_to_parent(t) for t in gold_sub}
+
+        for pos, k in enumerate(sorted_ks):
+            ret_sub = _clean_ids(semantic_topk_ids(sample.text, k))
+            ret_tech = {_truncate_to_parent(t) for t in ret_sub}
+
+            results[pos].sum_recall_sub += _recall_of(ret_sub, gold_sub)
+            results[pos].sum_recall_tech += _recall_of(ret_tech, gold_tech)
+            results[pos].sum_candidates += len(ret_sub)
+
+            if verbose and k == max_k and gold_sub - ret_sub:
+                print(f"    [{sample.description or 'sample'}] missed at k={k}: "
+                      f"{sorted(gold_sub - ret_sub)}")
+
+    return results
+
+
+def print_retrieval_recall(results: list[RetrievalRecall]) -> None:
+    """Print the retrieval-recall table, or explain why it is unavailable."""
+    if not results:
+        print("\n  Retrieval recall unavailable: Stage 2c embedding cache or "
+              "sentence-transformers is missing.")
+        print("  Run: python scripts/build_indexes.py --only embeddings")
+        return
+
+    print(f"\n{'=' * 68}")
+    print("  Retrieval recall @ k  (ceiling on every downstream stage)")
+    print(f"{'=' * 68}")
+    print(f"  {'k':>5} {'technique':>12} {'sub-technique':>15} {'mean cands':>12}")
+    for r in results:
+        print(f"  {r.k:>5d} {r.recall_technique:>12.3f} "
+              f"{r.recall_subtechnique:>15.3f} {r.mean_candidates:>12.1f}")
+    print(f"{'-' * 68}")
+    print(f"  samples: {results[0].n_samples}")
+    print(f"{'=' * 68}")
+
+
+def print_gate_stats(samples: list[ATESample]) -> None:
+    """Aggregate and print the two Stage 2c sentence gates over *samples*."""
+    try:
+        from pipeline.stage2c_ttp_semantic import sentence_gate_stats
+    except ImportError:
+        print("\n  WARNING: could not import sentence_gate_stats.")
+        return
+
+    total_sent = total_kept = total_scored = total_drop_kw = total_drop_cap = 0
+    for sample in samples:
+        stats = sentence_gate_stats(sample.text)
+        total_sent += stats.get("sentences_total", 0)
+        total_kept += stats.get("kept_by_keyword", 0)
+        total_scored += stats.get("scored", 0)
+        total_drop_kw += stats.get("dropped_by_keyword", 0)
+        total_drop_cap += stats.get("dropped_by_cap", 0)
+
+    pct_kept = (total_kept / total_sent * 100) if total_sent else 0.0
+    pct_scored = (total_scored / total_sent * 100) if total_sent else 0.0
+
+    print(f"\n{'=' * 68}")
+    print("  Stage 2c sentence gates")
+    print(f"{'=' * 68}")
+    print(f"  sentences total      : {total_sent}")
+    print(f"  kept by keyword gate : {total_kept} ({pct_kept:.1f}%)")
+    print(f"  actually scored      : {total_scored} ({pct_scored:.1f}%)")
+    print(f"  dropped by keyword   : {total_drop_kw}")
+    print(f"  dropped by cap       : {total_drop_cap}")
+    print(f"{'=' * 68}")
+
 
 
 # ---------------------------------------------------------------------------
@@ -999,9 +1259,11 @@ def test_stage2_ttp_regex_ate_fixtures():
         if "Explicit" in s.description
     ]
     score = run_ate_benchmark(explicit_samples, stage="2")
-    assert score.f1 >= 0.95, (
-        f"Stage 2 regex ATE F1={score.f1:.3f} on explicit T-ID samples — "
-        f"expected ≥0.95.  TP={score.tp} FP={score.fp} FN={score.fn}"
+    assert score.subtechnique.f1 >= 0.95, (
+        f"Stage 2 regex ATE sub-technique F1={score.subtechnique.f1:.3f} on "
+        f"explicit T-ID samples — expected >=0.95.  "
+        f"TP={score.subtechnique.tp} FP={score.subtechnique.fp} "
+        f"FN={score.subtechnique.fn}"
     )
 
 
@@ -1012,8 +1274,9 @@ def test_stage2_ttp_no_false_positives_on_clean_text():
         if "FP check" in s.description
     ]
     score = run_ate_benchmark(clean_samples, stage="all")
-    assert score.fp == 0, (
-        f"Stage 2 TTP extracted {score.fp} false-positive T-IDs from clean text"
+    assert score.subtechnique.fp == 0, (
+        f"Stage 2 TTP extracted {score.subtechnique.fp} false-positive "
+        f"T-IDs from clean text"
     )
 
 
@@ -1542,6 +1805,162 @@ def load_grounding_from_db(
 
 
 # ---------------------------------------------------------------------------
+# Grounding over the SHIPPED bundle, split by evidence label (ADR-0024 Phase C)
+#
+# load_grounding_from_db above scores the `relationships` table -- 65 edges of
+# the 1,207 actually shipped.  This reads bundle_json instead, and scores only
+# the edges that claim evidential support: an `assessed` or `inferred` edge
+# makes no claim about a sentence in the report, so measuring it against the
+# report text reports an assertion as a hallucination.
+# ---------------------------------------------------------------------------
+# ADR-0024 Phase C.  An "assessed" or "inferred" edge makes no claim to be
+# supported by a sentence in the report, so scoring it against the report
+# text measures nothing -- it would report a hallucination that is really an
+# assertion.  Only edges claiming evidential support are scored.
+_EVIDENTIAL_LABELS = frozenset({"observed", "reported"})
+_SYNTHESISED_LABELS = frozenset({"assessed", "inferred", "gap"})
+
+
+def _stix_display_name(obj: dict) -> str:
+    """Return the human-readable label of a STIX object.
+
+    Tries, in order: ``name``, ``value``, first hash, ``path``, ``id``.
+    Returns an empty string if none are present or ``obj`` is not a dict.
+    """
+    if not isinstance(obj, dict):
+        return ""
+    name = obj.get("name")
+    if name:
+        return name
+    value = obj.get("value")
+    if value:
+        return value
+    hashes = obj.get("hashes")
+    if isinstance(hashes, dict) and hashes:
+        first_val = next(iter(hashes.values()), None)
+        if first_val:
+            return first_val
+    path = obj.get("path")
+    if path:
+        return path
+    return obj.get("id", "")
+
+
+def load_grounding_from_bundle(
+    db_path: Path,
+    job_id: str = "all",
+) -> tuple[list[GroundingSample], dict[str, int]]:
+    """Load grounding samples from the shipped STIX bundle.
+
+    Reads ``jobs.bundle_json`` — what is actually delivered — instead of the
+    ``relationships`` table, which contains only 3.3% of the edges.
+    """
+    import sqlite3
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    query = (
+        "SELECT id, report_text, bundle_json FROM jobs "
+        "WHERE report_text IS NOT NULL AND length(report_text) > 0 "
+        "AND bundle_json IS NOT NULL"
+    )
+    params: list = []
+    if job_id != "all":
+        query += " AND id = ?"
+        params.append(job_id)
+
+    rows = conn.execute(query, params).fetchall()
+    conn.close()
+
+    samples: list[GroundingSample] = []
+    census: dict[str, int] = {}
+
+    for row in rows:
+        try:
+            bundle = json.loads(row["bundle_json"])
+        except Exception:
+            continue
+
+        objects = bundle.get("objects")
+        if not isinstance(objects, list):
+            continue
+
+        by_id = {
+            o["id"]: o for o in objects if isinstance(o, dict) and "id" in o
+        }
+
+        relationships: list[tuple[str, str, str]] = []
+        rel_evidence: list[str] = []
+
+        for o in objects:
+            if not isinstance(o, dict) or o.get("type") != "relationship":
+                continue
+
+            label = o.get("x_evidence_label", "(unlabelled)")
+            census[label] = census.get(label, 0) + 1
+
+            if label not in _EVIDENTIAL_LABELS:
+                continue
+
+            src = _stix_display_name(by_id.get(o.get("source_ref", ""), {}))
+            tgt = _stix_display_name(by_id.get(o.get("target_ref", ""), {}))
+            if not src or not tgt:
+                continue
+
+            verb = o.get("relationship_type", "related-to")
+            relationships.append((src, verb, tgt))
+            rel_evidence.append(o.get("x_evidence_text", ""))
+
+        entities: list[tuple[str, str]] = []
+        skip_types = {
+            "relationship", "report", "marking-definition",
+            "identity", "observed-data", "artifact",
+        }
+        for o in objects:
+            if not isinstance(o, dict):
+                continue
+            if o.get("type") in skip_types:
+                continue
+            name = _stix_display_name(o)
+            if name:
+                entities.append((name, o.get("type", "")))
+
+        job_id_court = row["id"][:8]
+        samples.append(GroundingSample(
+            text=row["report_text"],
+            entities=entities,
+            relationships=relationships,
+            rel_evidence=rel_evidence,
+            description=f"job {job_id_court}",
+        ))
+
+    return samples, census
+
+
+def print_label_census(census: dict[str, int]) -> None:
+    """Print a summary of shipped edges grouped by evidence label."""
+    if not census:
+        print("  No relationship objects found in any bundle.")
+        return
+
+    total = sum(census.values())
+    print(f"\n{'=' * 68}")
+    print("  Shipped edges by evidence label")
+    print(f"{'=' * 68}")
+    for label, n in sorted(census.items(), key=lambda kv: -kv[1]):
+        pct = (n / total * 100) if total else 0.0
+        marker = "  <- scored below" if label in _EVIDENTIAL_LABELS else ""
+        print(f"  {label:<16} {n:>7} ({pct:>5.1f}%){marker}")
+    print(f"{'-' * 68}")
+    print(f"  {'total':<16} {total:>7}")
+
+    if census.get("(unlabelled)", 0) > 0:
+        print("\n  Unlabelled edges carry no provenance: a materialised assumption")
+        print("  is indistinguishable from an extracted fact.  See ADR-0024.")
+
+
+# ---------------------------------------------------------------------------
 # Grounding fixtures — planted hallucinations prove the metric discriminates
 # ---------------------------------------------------------------------------
 
@@ -1963,6 +2382,15 @@ def main() -> None:
         help="[grounding mode] Path to the SQLite DB (default: cti_stix.db).",
     )
     parser.add_argument(
+        "--from-bundle", dest="from_bundle", default=None,
+        help=(
+            "[grounding mode] Score the emitted STIX bundle instead of the "
+            "relationships table.  'all' for every job, or a job_id.  Only edges "
+            "labelled observed/reported are scored; assessed/inferred are "
+            "assertions, not claims about the text."
+        ),
+    )
+    parser.add_argument(
         "--rel-window", dest="rel_window", type=int, default=1,
         help=(
             "[grounding mode] ± sentence window for relationship claim grounding "
@@ -2003,6 +2431,15 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--retrieval-recall", dest="retrieval_recall", default=None,
+        help=(
+            "[ATE mode] Comma-separated k values (e.g. '1,5,10,25').  Reports the "
+            "fraction of gold techniques present in Stage 2c's top-k candidates, "
+            "before any confidence threshold.  This is the ceiling on every "
+            "downstream stage."
+        ),
+    )
+    parser.add_argument(
         "--types", "-t", nargs="+", default=None,
         help="[NER mode] Entity types to evaluate (e.g. ipv4 sha256 malware).",
     )
@@ -2031,6 +2468,29 @@ def main() -> None:
 
     # ── Grounding / hallucination-rate benchmark ──────────────────────────────
     if args.benchmark == "grounding":
+        if args.from_bundle:
+            print(f"Loading grounding samples from bundle_json (job={args.from_bundle})")
+            samples, census = load_grounding_from_bundle(
+                args.db_path, args.from_bundle)
+            print_label_census(census)
+            if not samples:
+                print()
+                print("  No evidential edges to score.")
+                return
+            n_scored = sum(len(s.relationships) for s in samples)
+            print()
+            print(f"  Scoring {n_scored} evidential edge(s) across "
+                  f"{len(samples)} bundle(s).")
+            print_grounding_scores(
+                score_grounding(
+                    samples,
+                    window=args.rel_window,
+                    alias_aware=args.alias_aware,
+                    proximity=args.rel_proximity,
+                ),
+                window=args.rel_window,
+            )
+            return
         if args.from_db:
             if not args.db_path.exists():
                 print(f"  ERROR: DB not found: {args.db_path}")
@@ -2087,6 +2547,30 @@ def main() -> None:
 
         score = run_ate_benchmark(samples, stage=args.stage, verbose=args.verbose)
         print_ate_scores(score, stage=args.stage)
+
+        if args.stage in ("2c", "all", "full"):
+            print_gate_stats(samples)
+
+        if args.retrieval_recall:
+            ks: list[int] = []
+            for raw in args.retrieval_recall.split(","):
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    k_val = int(raw)
+                except ValueError:
+                    print(f"  Ignoring invalid k value: {raw!r}")
+                    continue
+                if k_val >= 1:
+                    ks.append(k_val)
+            ks = sorted(set(ks))
+            if not ks:
+                print("  No valid k values given; skipping retrieval recall.")
+            else:
+                print_retrieval_recall(
+                    run_retrieval_recall(samples, ks, verbose=args.verbose)
+                )
         return
 
     # ── NER benchmark (default) ───────────────────────────────────────────────

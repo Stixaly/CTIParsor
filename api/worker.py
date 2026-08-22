@@ -711,6 +711,23 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         except Exception:
             pass
 
+        # Record the configuration this bundle was built under (ADR-0024).
+        # Stamped here, immediately after the policy is read, so the snapshot is
+        # the policy actually passed to build_stix_bundle rather than whatever
+        # the mutable relationship_policy row holds when someone later asks.
+        try:
+            from api.run_config import build_run_config
+            _rc = _json_s4.dumps(build_run_config(_policy_s4))
+            with _lock:
+                with get_conn() as _rcc:
+                    _rcc.execute(
+                        "UPDATE jobs SET run_config_json=?, updated_at=? WHERE id=?",
+                        (_rc, now_iso(), job_id),
+                    )
+                    _rcc.commit()
+        except Exception as _rc_exc:
+            logger.warning(f"[run-config] not recorded for job {job_id}: {_rc_exc}")
+
         # TLP / PAP markings selected by the user at upload time
         with get_conn() as _mc:
             _mrow = _mc.execute(

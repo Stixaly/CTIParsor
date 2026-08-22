@@ -7,6 +7,80 @@ sections group by theme rather than strict semver.
 ## [Unreleased]
 
 ### Added
+- **Grounding over the shipped bundle, split by evidence label** (ADR-0024
+  Phase C) — `tests/eval_pipeline.py -b grounding --from-bundle all` reads
+  `jobs.bundle_json` instead of the `relationships` table, which held only 65 of
+  the 1,207 edges actually delivered. It prints a census of every edge by
+  `x_evidence_label` and scores hallucination **only** over `observed`/`reported`:
+  an `assessed` or `inferred` edge makes no claim about a sentence in the report,
+  so measuring it against the text reports an assertion as a hallucination.
+  What the split reveals: **endpoint grounding is 1.000 (38/38, zero dangling)** —
+  every flagged edge has both entities present in the report, just never close
+  enough together. Widening to `--rel-window 3 --alias-aware` takes hallucination
+  from 0.500 to **0.211**, leaving 8 edges genuinely worth a human read.
+- **`scripts/rebuild_bundle_provenance.py`** — replays a stored job in memory
+  (strictly read-only, `mode=ro`) under an explicit relationship policy and counts
+  the resulting edges by label. Rebuilding the GREYVIBE report under the two
+  pinned rules its edge arithmetic implies: **1,140 edges with 914 unlabelled
+  becomes 350 edges with 0 unlabelled**, the cap holds at 200, and the warning
+  names the rule that hit it.
+- **Run-configuration provenance** (ADR-0024 Phase B) — new `jobs.run_config_json`
+  column, stamped by the worker immediately after the relationship policy is read,
+  so the snapshot is the policy actually passed to `build_stix_bundle` rather than
+  whatever the mutable `relationship_policy` row holds when someone later asks. It
+  records the policy, the enabled stage list, the embedding model, the resolved
+  TTP thresholds, `git rev-parse HEAD`, and an **allow-listed** set of `TTP_*` /
+  `ENABLE_*` environment variables — never a scan of `os.environ`, which holds API
+  keys. Without this a bundle cannot be explained: the 872 unlabelled edges in job
+  `32b5475b` were produced by pinned rules the stored policy no longer contains.
+- **`scripts/audit_edge_provenance.py`** — read-only, stdlib-only audit of what
+  fraction of each stored bundle's edges carry provenance, broken down by
+  `x_evidence_label` and by source-type -> target-type pair. Current baseline
+  across both stored bundles: **1,207 edges, 245 labelled (20.3%), 962
+  unlabelled**, and both report `run config: ABSENT`.
+- **`custom=` on `_add_relationship`** — merges STIX custom properties and sets
+  `allow_custom` only when properties are actually passed, so every existing edge
+  stays byte-identical.
+- **Retrieval recall @ k** (ADR-0023 Phase 2) — `tests/eval_pipeline.py -b ate
+  --retrieval-recall 1,5,10,25` reports the fraction of gold techniques present in
+  Stage 2c's top-k candidates *before* any confidence threshold, at both ATT&CK
+  granularities. This is the ceiling on every downstream stage: a selector can
+  only pick what retrieval proposed. On the ATE fixtures the retriever reaches
+  **0.967 technique recall at k=25** while production runs at k=1 and scores F1
+  0.550 — roughly 43 points of attainable recall discarded by never looking past
+  rank 1. (n=10 hand-written fixtures; a hypothesis to re-measure on TRAM2 in
+  Phase 3, not yet a result.)
+- **Stage 2c sentence-gate instrumentation** — `sentence_gate_stats()` reports
+  `sentences_total / kept_by_keyword / scored / dropped_by_keyword /
+  dropped_by_cap` without loading a model, and the ATE benchmark prints the
+  aggregate. Two measurement escape hatches: `TTP_KEYWORD_GATE=off` prices the
+  keyword allow-list against a baseline, `TTP_UNWRAP_LINES=0` restores the old
+  splitter. Both default to production behaviour and are read per call.
+- **`semantic_topk_ids(text, k)`** — measurement-only top-k retrieval that
+  deliberately ignores the confidence thresholds and the top-2 margin, so the
+  ceiling can be measured independently of the gates applied under it.
+- **`--gate-off` on `scripts/probe_ttp_recall_caps.py`** — runs the measurement
+  twice and prints what the keyword gate costs in sentences of retrieval surface.
+- **Dual-granularity ATE scoring** (ADR-0023 Phase 1) — the ATT&CK Technique
+  Extraction benchmark now reports **technique-level** (all IDs truncated to their
+  parent) and **sub-technique-level** (exact match only) scores side by side,
+  macro-averaged per sample, following the protocols of Buchel et al. (SoK, 2025)
+  and Zhang et al. (TTP-R1 / RCPO). Every run also prints
+  `mean labels predicted` vs `gold` — the one-line diagnostic that separates
+  over-prediction (frontier LLMs emit ~4.2 labels against a gold mean of 1.7) from
+  the conservative under-prediction of token-level fine-tuned models.
+- **`scripts/verify_ate_scorer.py`** — a mutation harness for the scorer. It
+  re-implements the pre-ADR-0023 scorer verbatim and replays every case the
+  regression tests assert on, requiring each defect case to diverge and each
+  control case to agree; it separately replays a two-sample corpus to prove the
+  micro-to-macro aggregation change is real (old micro F1 0.1667 vs new macro
+  0.5000). A regression test that agrees with the old code is a test that locks
+  nothing.
+- **`scripts/probe_ttp_recall_caps.py`** — measures how many sentences Stage 2c
+  discards before computing a single embedding. On the two real reports in
+  `cti_stix.db`: the `_has_ttp_keyword` allow-list drops **400 of 477 sentences
+  (83.9%)**, while `_MAX_CANDIDATES=200` drops **zero** — the keyword gate is the
+  binding recall ceiling, the candidate cap is latent.
 - **`make check-docs` — a documentation drift guard** (`scripts/check_doc_claims.py`)
   — recomputes every precise number the README asserts (gazetteer size, semantic
   corpus split, ATT&CK grounding pairs, all fuzzy thresholds, the ISO country
@@ -44,6 +118,54 @@ sections group by theme rather than strict semver.
   more corroboration than the score does.
 
 ### Fixed
+- **The six ordinary Stage 4 mapping edges shipped without provenance**
+  (ADR-0024 Phase A2). Phase A labelled the policy-materialised edges, but the
+  audit showed that was not the only unlabelled source: `indicates`, `based-on`
+  and `targets` call `_add_relationship` too, and account for 48 of the 67 edges
+  in the second stored bundle. `based-on` now carries `observed` — the Indicator
+  restates an IoC regex actually found in the text — while `indicates` and
+  `targets` carry `reported`, being model claims about the document. The grade is
+  not bookkeeping: the review-UI auto-accept gate promotes only `observed`, so it
+  decides what an analyst checks by hand.
+- **Policy-materialised edges shipped with no provenance and no cap** (ADR-0024
+  Phase A). Stage 4's pinned-rule materialisation is an intentional all-pairs
+  feature — it expresses the analyst's link model — but unlike Stage 4b it stamped
+  no `x_evidence_label` and had no ceiling, so on one real report it emitted **872
+  of 1,140 edges** with nothing distinguishing a materialised assumption from an
+  extracted fact. Pinned edges now carry `x_evidence_label="assessed"` and
+  `x_policy_rule="<src> <verb> <tgt>"`, mirroring 4b's `x_inference_rule`, and
+  obey a `max_pinned_edges` cap (default 200, matching 4b's `max_new_edges`) that
+  logs a warning naming the rule when it truncates. `assessed` correctly fails the
+  review-UI auto-accept gate, so these edges now queue for review — **the analyst
+  workload this adds was always there, it was just invisible.**
+- **`_split_sentences` fragmented PDF-extracted text** (ADR-0023 Phase 2). Its
+  regex treated every newline as a sentence boundary, so each hard-wrapped PDF
+  line became its own "sentence" — fragments like `"AI across state-aligned
+  operations -"`. The obvious fix (protect runs of two-or-more newlines as
+  paragraph breaks) does nothing, because the ingested corpus carries **237
+  `\n\n` runs against 2 single `\n`**: every wrapped line arrives doubled, so
+  that rule protects exactly the newlines that need joining. Deciding on content
+  alone — join unless the previous segment ended in `.!?:;` or the next opens a
+  list item — takes the corpus from 477 segments to 195, median length 68 to 155
+  chars, and the share ending in sentence punctuation from **27% to 81%**.
+  Measured consequence: the keyword gate's cost falls from 83.9% to 68.2%, so the
+  earlier figure was partly measuring the splitter rather than the gate.
+- **10 tests in `tests/eval_pipeline.py` had never run in CI.** The file holds the
+  ADR-0011 Phase D adversarial precision tests plus the ATE benchmark tests, but
+  its name does not match pytest's default `test_*.py` glob, so `pytest` collected
+  it zero times — the suite went from 584 to 593 passing once `python_files` in
+  `pytest.ini` named it explicitly. The file is also a documented CLI entry point
+  (`python tests/eval_pipeline.py -b ate`), so it was named rather than renamed.
+- **The ATE scorer was inflating both precision and recall** (ADR-0023 Phase 1).
+  `_score_ate_sample` awarded 0.5 partial credit for a parent/sub-technique
+  mismatch but excluded the prediction from the false-positive count, so half the
+  prediction's mass left the accounting. Predicting `T1059.001` **and**
+  `T1059.002` against a gold `T1059` scored precision 1.00 and recall 1.00.
+  Partial credit is now removed entirely in favour of the two-granularity report,
+  and `tp + fp == len(predictions)` is asserted as an invariant. Aggregation also
+  moved from corpus-level micro-averaging — which let long, technique-dense
+  reports dominate — to per-sample macro-averaging. **Any ATE number recorded
+  before this change is not comparable to one recorded after it.**
 - **Pipeline diagram corrected against the implementation** — the README's stage
   diagram drew Stage 3c (MITRE normalisation) between 3b and 3d, but
   `normalize_ttps()` runs once per document in `_merge_results()`, after every
