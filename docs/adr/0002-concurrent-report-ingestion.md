@@ -1,6 +1,6 @@
 # ADR-0002: Handling Concurrent Ingestion of 10+ CTI Reports
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-06-07
 **Deciders:** CTIParsor maintainers
 
