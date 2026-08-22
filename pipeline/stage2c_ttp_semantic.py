@@ -195,21 +195,188 @@ def _etype_from_id(mitre_id: str) -> EntityType:
     return EntityType.TTP
 
 
+# Hard-wrap unwrapping (ADR-0023 Phase 2).
+_BULLET_CHARS = ("-", "*", "\u2022", "\u2013", "\u2014")
+_LIST_NUMBER = re.compile(r"^\d+[.)]\s")
+
+
+def _unwrap_hard_linebreaks(text: str) -> str:
+    """Join hard line breaks from PDF extraction before sentence splitting.
+
+    Reconstructs paragraphs by joining lines the PDF layout engine wrapped,
+    while preserving genuine sentence boundaries and list items.
+    """
+    if not isinstance(text, str):
+        return ""
+    text = re.sub(r"\r\n|\r", "\n", text)
+    parts = re.split(r"\n+", text)
+    if not parts:
+        return text
+    out: list[str] = [parts[0]]
+    # A newline inside a PDF paragraph is a hard wrap, not a sentence boundary,
+    # and the run length says nothing about which it is: the ingested corpus
+    # carries 237 "\n\n" runs against 2 single "\n", because every wrapped PDF
+    # line arrives doubled.  Decide on content alone -- join unless the previous
+    # segment actually ended a sentence, or the next one opens a list item.
+    # Splitting on every newline instead produced fragments like "AI across
+    # state-aligned operations -" and left only 27% of segments ending in
+    # sentence punctuation; this rule brings that to 81%.
+    for nxt in parts[1:]:
+        prev = out[-1].rstrip()
+        nxt_s = nxt.lstrip()
+        ends_sentence = bool(prev) and prev[-1] in ".!?:;"
+        starts_list = (
+            nxt_s.startswith(_BULLET_CHARS)
+            or bool(_LIST_NUMBER.match(nxt_s))
+        )
+        if prev and nxt_s and not ends_sentence and not starts_list:
+            out[-1] = prev + " " + nxt_s
+        else:
+            out.append(nxt)
+    return "\n".join(out)
+
+
+def _unwrap_enabled() -> bool:
+    """True unless TTP_UNWRAP_LINES disables hard-wrap joining.
+
+    Read on every call rather than at import so a benchmark run can price the
+    unwrapping against the un-unwrapped baseline without reloading the module.
+    """
+    return os.getenv("TTP_UNWRAP_LINES", "1").strip().lower() not in {
+        "0", "off", "false", "no"}
+
+
+def _keyword_gate_enabled() -> bool:
+    """True unless TTP_KEYWORD_GATE disables the keyword allow-list."""
+    # Measurement escape hatch (ADR-0023 Phase 2).  The keyword allow-list decides
+    # which sentences are embedded at all and discards ~84% of them on real
+    # reports, so its cost has to be priceable against a baseline rather than
+    # assumed.  Production default is on.
+    return os.getenv("TTP_KEYWORD_GATE", "1").strip().lower() not in {
+        "0", "off", "false", "no"}
+
+
 def _has_ttp_keyword(sentence: str) -> bool:
+    """True when *sentence* carries a TTP-suggestive keyword.
+
+    Returns True for every sentence when the gate is disabled, and False for a
+    non-str input (the caller may hand us raw values from external documents).
+    """
+    if not isinstance(sentence, str):
+        return False
+    if not _keyword_gate_enabled():
+        return True
     s = sentence.lower()
     return any(kw in s for kw in _TTP_KEYWORDS)
 
 
 def _split_sentences(text: str) -> list[str]:
     """
-    Simple sentence splitter that handles the variety of CTI report formats.
-    Splits on '. ', '\n', '; ' and keeps segments longer than 20 chars.
+    Sentence splitter for the variety of CTI report formats.
+
+    PDF-extracted text arrives hard-wrapped, so unless TTP_UNWRAP_LINES disables
+    it the wraps are joined first (see _unwrap_hard_linebreaks); without that
+    step every wrapped line became its own "sentence" and only 27% of segments
+    ended in sentence punctuation.  Splits on '. ', newline and '; ', keeping
+    segments longer than 20 chars.
     """
-    # Normalize whitespace
-    text = re.sub(r'\r\n|\r', '\n', text)
-    # Split on end-of-sentence punctuation, newlines, semicolons
+    if not isinstance(text, str):
+        return []
+
+    if _unwrap_enabled():
+        text = _unwrap_hard_linebreaks(text)
+    else:
+        text = re.sub(r'\r\n|\r', '\n', text)
+
     raw = re.split(r'(?<=[.!?])\s+|\n{1,}|;\s+', text)
     return [s.strip() for s in raw if len(s.strip()) > 20]
+
+
+def _apply_candidate_cap(candidates: list[str]) -> list[str]:
+    """Strided-sample *candidates* down to _MAX_CANDIDATES.
+
+    A stride rather than a head slice so all sections of a long document stay
+    represented instead of just its opening pages.  Kept as one function so the
+    production path and sentence_gate_stats can never disagree about what was
+    dropped.
+    """
+    if len(candidates) > _MAX_CANDIDATES:
+        step = max(1, len(candidates) // _MAX_CANDIDATES)
+        return candidates[::step][:_MAX_CANDIDATES]
+    return candidates
+
+
+def _select_candidates(text: str) -> list[str]:
+    """The sentences Stage 2c will actually embed, after both recall gates."""
+    return _apply_candidate_cap(
+        [s for s in _split_sentences(text) if _has_ttp_keyword(s)]
+    )
+
+
+def sentence_gate_stats(text: str) -> dict[str, int]:
+    """Count how many sentences survive each Stage 2c gate. Loads no model.
+
+    Both gates discard sentences before a single embedding is computed, which
+    caps recall in a way no threshold or encoder change can recover.  Measured on
+    the project's real reports the keyword gate drops ~84% of sentences and the
+    candidate cap drops none, so the two are not interchangeable and are reported
+    separately.
+    """
+    sentences = _split_sentences(text)
+    kept = [s for s in sentences if _has_ttp_keyword(s)]
+    scored = _apply_candidate_cap(kept)
+    return {
+        "sentences_total":    len(sentences),
+        "kept_by_keyword":    len(kept),
+        "scored":             len(scored),
+        "dropped_by_keyword": len(sentences) - len(kept),
+        "dropped_by_cap":     len(kept) - len(scored),
+    }
+
+
+def semantic_topk_ids(text: str, k: int = 25) -> set[str]:
+    """Union of the top-k MITRE IDs over every candidate sentence.
+
+    Measurement only: this is the retrieval ceiling that caps every downstream
+    stage, reported the way RCPO reports it.  The production detector is
+    detect_ttps_semantic; this function deliberately ignores the confidence
+    thresholds and the top-2 margin so that the ceiling is measured independently
+    of the gates applied under it.
+    """
+    if k < 1:
+        k = 1
+
+    model = _load_model()
+    corpus = _load_corpus()
+    if model is None or corpus is None:
+        return set()
+
+    candidates = _select_candidates(text)
+    if not candidates:
+        return set()
+
+    try:
+        import numpy as np
+        from sentence_transformers import util
+
+        corpus_embeddings, meta = corpus
+        query_embeddings = model.encode(
+            candidates,
+            batch_size=32,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+        )
+        scores = util.cos_sim(query_embeddings, corpus_embeddings).numpy()
+
+        top_ids: set[str] = set()
+        for sent_idx in range(len(candidates)):
+            for idx in np.argsort(scores[sent_idx])[::-1][:k]:
+                top_ids.add(meta[idx]["id"])
+        return top_ids
+
+    except Exception as e:
+        logger.error(f"Semantic top-k scoring error: {e}")
+        return set()
 
 
 # ── Lazy-loaded model and cached embeddings ───────────────────────────────────
@@ -369,19 +536,12 @@ def detect_ttps_semantic(text: str, top_k_per_sentence: int = 1) -> list[RawEnti
 
     corpus_embeddings, meta = corpus
 
-    # Filter to TTP-suggestive sentences only
-    sentences  = _split_sentences(text)
-    candidates = [s for s in sentences if _has_ttp_keyword(s)]
+    # Both recall gates (keyword allow-list, candidate cap) live in
+    # _select_candidates so sentence_gate_stats measures exactly what runs here.
+    candidates = _select_candidates(text)
 
     if not candidates:
         return []
-
-    # Cap candidates to avoid an O(n × 1531) cosine matrix that is slow for
-    # large documents.  Use a strided sample so all sections of the document
-    # are represented rather than just the opening pages.
-    if len(candidates) > _MAX_CANDIDATES:
-        step       = max(1, len(candidates) // _MAX_CANDIDATES)
-        candidates = candidates[::step][:_MAX_CANDIDATES]
 
     try:
         import numpy as np

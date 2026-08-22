@@ -25,6 +25,8 @@ choice, and the consequences. They're append-only — supersede rather than rewr
 | [0020](0020-filtered-multi-format-export.md) | Filtered multi-format export (facets, per-format extensions, licence gating) | Proposed |
 | [0021](0021-type-aware-alias-resolution.md) | Type-aware alias resolution (a surface form can denote two MITRE objects) | Proposed |
 | [0022](0022-per-format-coverage-breakdown.md) | Per-format coverage breakdown, granular multi-format selection + rule-id export (`/coverage/rules`: ~2.4 h → 5.4 s) | Proposed |
+| [0023](0023-ttp-extraction-measurement-and-retrieval.md) | TTP extraction: fix the ruler, then retrieve-then-validate (dual-granularity scoring, procedure corpus, BM25+dense candidates) | Proposed |
+| [0024](0024-edge-synthesis-provenance-and-run-config.md) | Edge-synthesis provenance & run config (label + cap policy-materialised edges, `jobs.run_config_json`, grounding by evidence label) | Proposed |
 
 **Numbering notes**
 - `0001` and `0003` are unused gaps (early informal decisions never filed).
@@ -75,4 +77,23 @@ choice, and the consequences. They're append-only — supersede rather than rewr
           │                             ~2.4 h to 5.4 s (same planner pathology as
           │                             0014's atom_hits, three more times over)
           └── 0013 graph completion (denser edges, same precision gate)
+                 ▲   its discipline applied to the OTHER edge source by
+                 └── 0024 edge-synthesis provenance: 4b labels and caps every
+                     edge it adds (200 max); the policy-pin all-pairs
+                     materialisation at stage4:769 does neither, and produced
+                     872 of 1,140 shipped edges on one report with no
+                     x_evidence_label at all.  Adds jobs.run_config_json --
+                     the stored policy is now `rules: []`, so that bundle
+                     cannot be reproduced.  Blocks 0023 Phase 3: a baseline
+                     with no run config is not attributable
+
+0011 TTP precision (thresholds, margin gate, 3f verify, subsumption)
+   ▲   measured — and partly corrected — by
+   └── 0023 fix the ruler, then retrieve-then-validate: the ATE scorer
+       leaked partial credit (a parent + two subs scored P=R=1.00), and
+       0011 Phase A specified `top_k=1` *with* a 2nd-match margin gate —
+       two clauses that cannot both hold, so TTP_TOP2_MARGIN never fired.
+       Reverses 0004 P1-A's SecureBERT-Plus pick for the unlabeled
+       similarity setting (ATT&CK-BERT wins there; CTI-pretrained
+       encoders do not consistently beat generic ones)
 ```
