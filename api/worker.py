@@ -198,8 +198,15 @@ def _ttp_ids_covered(llm_result) -> tuple[set[str], set[str]]:
     return ids, parents
 
 
-def _save_entities(job_id: str, raw_entities, llm_result) -> None:
-    """Persist Stage 2 IoCs, Stage 2b gazetteer, and Stage 3 LLM entities to the DB."""
+def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "") -> None:
+    """Persist Stage 2 IoCs, Stage 2b gazetteer, and Stage 3 LLM entities to the DB.
+
+    TTPs additionally carry the verbatim quote the extractor was asked for
+    (ADR-0028) and its resolved offset into `report_text`.  An unlocatable quote
+    stores a NULL offset and demotes the grade — it never drops the technique:
+    99.4% of unlocatable evidence was measured to be paraphrase of real report
+    content rather than invention.
+    """
     _covered_ids, _covered_parents = _ttp_ids_covered(llm_result)
 
     rows_ioc = []
@@ -231,10 +238,34 @@ def _save_entities(job_id: str, raw_entities, llm_result) -> None:
         rows_llm.append((str(uuid4()), job_id, name, "tool", "", 0.9, None, None, "llm"))
     if llm_result.campaign_name:
         rows_llm.append((str(uuid4()), job_id, llm_result.campaign_name, "campaign", "", 0.9, None, None, "llm"))
-    for ttp in llm_result.ttps:
+    # ADR-0028 — resolve each TTP quote to an offset in the report.
+    from pipeline.evidence_span import locate
+
+    _ttp_evidence: dict[int, tuple[str | None, str | None, int | None]] = {}
+    for _i, ttp in enumerate(llm_result.ttps):
+        _quote = (getattr(ttp, "evidence_text", None) or "").strip()
+        _label = getattr(ttp, "evidence_label", None)
+        _label = getattr(_label, "value", _label) or "reported"
+        _start = None
+        if _quote and report_text:
+            try:
+                _span = locate(_quote, report_text)
+            except Exception:   # locating must never fail a job
+                _span = None
+            if _span is not None:
+                _start = _span.start
+            else:
+                # The quote is not in the document. Demote one grade rather than
+                # drop the technique — see the docstring.
+                _label = "inferred" if _label in ("observed", "reported") else _label
+        _ttp_evidence[_i] = (_quote or None, _label, _start)
+
+    for _i, ttp in enumerate(llm_result.ttps):
+        _ev_text, _ev_label, _ev_start = _ttp_evidence[_i]
         rows_llm.append((
             str(uuid4()), job_id, ttp.technique_name, "ttp",
             ttp.description, 0.9, ttp.mitre_id, None, "llm",
+            _ev_text, _ev_label, _ev_start,
         ))
 
     rows_rel = []
@@ -252,11 +283,18 @@ def _save_entities(job_id: str, raw_entities, llm_result) -> None:
 
     with _lock:
         with get_conn() as conn:
+            # Only TTP rows carry evidence (ADR-0028); every other row is padded
+            # here rather than at each of the six places they are built.
+            _entity_rows = [
+                r if len(r) == 12 else (*r, None, None, None)
+                for r in rows_ioc + rows_llm
+            ]
             conn.executemany(
                 "INSERT OR IGNORE INTO entities "
-                "(id,job_id,value,entity_type,context,confidence,mitre_id,accepted,source) "
-                "VALUES (?,?,?,?,?,?,?,?,?)",
-                rows_ioc + rows_llm,
+                "(id,job_id,value,entity_type,context,confidence,mitre_id,accepted,source,"
+                "evidence_text,evidence_label,evidence_start) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                _entity_rows,
             )
             conn.executemany(
                 "INSERT OR IGNORE INTO relationships "
@@ -682,7 +720,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         )
 
         # Save entities and relationships
-        _save_entities(job_id, all_entities, llm_result)
+        _save_entities(job_id, all_entities, llm_result, report_text=text)
 
         # Persist LLM result JSON for finalize
         llm_json = llm_result.model_dump_json()
@@ -769,6 +807,28 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
             for _m in _cov["missing_indicator"][:10]:
                 logger.warning(f"    no indicator: [{_m['type']}] {_m['value']}")
 
+        # Per-rule synthesis accounting (ADR-0026).  Read back off the Report SDO
+        # so the live progress channel consumes the same record that ships inside
+        # the bundle, rather than running as a parallel path that could disagree.
+        # Absent on bundles built before ADR-0026 — treat as optional.
+        _synth: dict | None = None
+        for _o in bundle.objects:
+            _otype = _o.get("type") if hasattr(_o, "get") else getattr(_o, "type", None)
+            if _otype == "report":
+                _synth = (
+                    _o.get("x_synthesis_stats") if hasattr(_o, "get")
+                    else getattr(_o, "x_synthesis_stats", None)
+                )
+                break
+        _pin = (_synth or {}).get("pin") or {}
+        if _pin.get("rules"):
+            logger.info(
+                "[Stage 4] policy pins — %d of %d candidate edges emitted across "
+                "%d rules (budget %d, mode %s)",
+                _pin.get("total_emitted", 0), _pin.get("total_candidates", 0),
+                len(_pin["rules"]), _pin.get("budget", 0), _pin.get("mode", ""),
+            )
+
         emit_progress(job_id, "stage", {
             "stage": 4, "label": "STIX mapping", "objects": len(list(bundle.objects)),
             "ioc_coverage": {
@@ -776,6 +836,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
                 "with_indicator": _cov["with_indicator"],
                 "ok": _cov["ok"],
             },
+            "synthesis": _synth,
         })
 
         # --- Stage 5 ---

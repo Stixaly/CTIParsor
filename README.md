@@ -475,7 +475,10 @@ disable one, and **Rebuild index** to re-ingest the local clones. See
 | Threat actor → country / sector | `targets` SRO |
 | Semantic relationship | `relationship` SRO (confidence score) |
 | Relationship evidence grade | `x_evidence_label` custom property on each `relationship` (`observed` / `reported` / `assessed` / `inferred` / `gap`) |
+| TTP evidence (ADR-0028) | each extracted technique carries `evidence_text` — a **verbatim quote** from the report — plus `evidence_label` and `evidence_start`, the resolved character offset. Kept apart from `description`, which is a summary the extractor writes: measured across four reports, quotes locate to a sentence **85.6%** of the time and descriptions **38.9%**. A quote that cannot be located stores a NULL offset and demotes the grade one step; the technique is never dropped |
 | Completed edge (Stage 4b/4c) | `relationship` SRO + `x_inference_rule` (`transitive:uses+uses`, `attack-reference:G0016>S0002`, `long-distance`) and `x_inferred_from` (premise edge ids); long-distance edges also carry `x_evidence_text` (the quoted sentence) |
+| Policy-materialised edge | `relationship` SRO + `x_evidence_label="assessed"` and `x_policy_rule` (`"malware uses attack-pattern"`) — the analyst's link model, not a claim the document made, so it fails the review auto-accept gate |
+| Synthesis accounting | `x_synthesis_stats` on the `report` SDO — per-rule `candidates / emitted / truncated` for the pin pass, plus Stage 4b's completion counters |
 | Sharing markings | TLP `marking-definition` (+ optional PAP statement marking) referenced by `object_marking_refs` on every object |
 | Pipeline authorship | one authoring `identity` SDO; `created_by_ref` on every SDO/SRO (the pipeline, **not** the threat actor) |
 | Report wrapper | `report` SDO |
@@ -489,9 +492,26 @@ is produced by the pipeline itself.
 
 ## Detection coverage
 
-Each report's extracted ATT&CK techniques are scored against local rule corpora —
-a mix of **public** repos (committed, reproducible) and **private** repos (local
-overlay). This is detection *readiness*, not lab validation.
+Each report is scored against local rule corpora — a mix of **public** repos
+(committed, reproducible) and **private** repos (local overlay). This is detection
+*readiness*, not lab validation.
+
+> **Coverage is keyed on the report's technical content, not on its ATT&CK tags**
+> (ADR-0025). Scoring by technique measured badly: across two real reports the tag
+> join selects **25,493 rules of which 4 match anything in them**, and **58 of 64
+> cells scoring "covered" have no matching rule at all** — a statement about
+> ATT&CK's tag distribution, not about the intrusion.
+>
+> `GET /api/jobs/{id}/coverage/artifacts` scores one row per hash, address,
+> domain, path, registry key, tool or malware identity, on whether a rule actually
+> holds that value and from how many independent corpora, grouped by **Pyramid of
+> Pain** tier. Every score above 0 names the rule and field that matched.
+> Expect it to be sparse — a current campaign's indicators are not in public
+> corpora yet, and the uncovered list is the detection backlog.
+>
+> ATT&CK stays as an unscored **phase band**: which kill-chain steps the report
+> spans, beside which steps the matched rules actually cover. The two rows are
+> independent, so the gap between them means something.
 
 The store holds three rule languages, and they are not a footnote: a real store
 is **52,481 Suricata**, **22,303 YARA** and **11,396 Sigma** rules. Coverage,
@@ -607,7 +627,8 @@ ADR [0006](docs/adr/0006-multi-corpus-detection-ingestion.md) /
 [0014](docs/adr/0014-observable-driven-detection-proposals.md) /
 [0015](docs/adr/0015-multi-format-detection-matching.md) /
 [0020](docs/adr/0020-filtered-multi-format-export.md) /
-[0022](docs/adr/0022-per-format-coverage-breakdown.md).
+[0022](docs/adr/0022-per-format-coverage-breakdown.md) /
+[0025](docs/adr/0025-evidence-keyed-detection-coverage.md).
 
 ---
 
@@ -875,7 +896,9 @@ cti-to-stix/
 │   │   ├── yara.py                # YaraAdapter (rule text → DetectionRule, ADR-0015)
 │   │   ├── registry.py            # Two-tier corpus registry + overlay writes
 │   │   ├── store.py               # detection_rules / rule_techniques / rule_atoms persistence
-│   │   ├── coverage.py            # Technique → 0–3 readiness scoring
+│   │   ├── coverage.py            # Technique → 0–3 readiness scoring (superseded by ADR-0025)
+│   │   ├── artifacts.py           # Artifact → 0–3 evidence scoring, Pyramid tiers (ADR-0025)
+│   │   ├── phases.py              # ATT&CK phase band: report row vs covered row (ADR-0025)
 │   │   ├── atoms.py               # Sigma detection block → atoms + platform (ADR-0014)
 │   │   ├── suricata_atoms.py      # Suricata sticky-buffer → atoms (ADR-0015)
 │   │   ├── yara_atoms.py          # YARA strings/condition → atoms (ADR-0015)
@@ -1064,6 +1087,7 @@ Valid `relationship_type` values: `uses`, `attributed-to`, `targets`, `indicates
 |---|---|---|
 | `GET` | `/api/relationship-policy` | Return the current policy (or factory default) |
 | `PUT` | `/api/relationship-policy` | Replace the policy (full replacement) |
+| `GET` | `/api/relationship-policy/last-run` | Synthesis accounting of the newest bundle — per-rule `candidates / emitted / truncated` (ADR-0026) |
 
 ```json
 {
@@ -1072,6 +1096,9 @@ Valid `relationship_type` values: `uses`, `attributed-to`, `targets`, `indicates
   "rules": [
     { "src": "threat-actor", "verb": "uses", "tgt": "malware", "mode": "pin", "enabled": true }
   ],
+  "max_pinned_edges": 200,
+  "pin_budget_mode": "fair-share",
+  "pin_evidence": { "mode": "cooccurrence", "window": 3 },
   "completion": {
     "alias": false,
     "reference": true,
@@ -1086,6 +1113,47 @@ Valid `relationship_type` values: `uses`, `attributed-to`, `targets`, `indicates
 
 - `global`: `"enforce"` (apply rules) · `"auto"` (ignore rules)
 - `mode`: `"pin"` (lock relationship type) · `"auto"` (allow free editing)
+
+**Pin budget** (ADR-0026). A `"pin"` rule materialises every pair of its two
+object types, so a single rule can generate thousands of edges;
+`max_pinned_edges` bounds the total. `pin_budget_mode` decides how that budget
+is split:
+
+| Mode | Behaviour |
+|---|---|
+| `"fair-share"` *(default)* | max-min fair share — rules served in ascending demand order, each taking at most an equal share of the remainder, so a small rule is always satisfied in full |
+| `"sequential"` | legacy first-come-first-served — the first rules in the array take everything, later ones can emit nothing |
+
+Measured over the four bundles in `cti_stix.db`, switching to fair share takes
+the number of rules that actually emit an edge from **20 to 46**. Every
+materialised edge carries `x_evidence_label="assessed"` and `x_policy_rule`, and
+the Report SDO carries `x_synthesis_stats` with the per-rule
+`candidates / emitted / truncated / blocked` breakdown.
+
+`max_pinned_edges` is a policy field but is **not offered in the Policy UI**: an
+analyst cannot know the right total before reading the report, and the number
+scales with report size rather than with anything they can judge. It stays as a
+safety ceiling; the evidence window below is the knob the interface exposes.
+
+**Evidence gate** (ADR-0027). `pin_evidence` decides whether a pair has to be
+supported by the text at all:
+
+| Setting | Behaviour |
+|---|---|
+| `"mode": "cooccurrence"` *(default)* | emit only when both objects appear within `window` sentences of each other |
+| `"mode": "cartesian"` | legacy — emit every pair |
+| `"window": 3` | sentence distance; reused from the ADR-0024 Phase C measurement |
+
+The gate is **applied only to types that actually appear in prose**. Measured
+over the stored bundles: SCOs, `malware`, `tool` and `threat-actor` are 91–100%
+verbatim, but `attack-pattern` is 24.3% and `course-of-action` 0/344 — they come
+from ATT&CK mapping, not the report — so pairs touching them always pass. An
+Indicator is anchored on the values inside its `pattern` (96.3%), never on its
+`name` (0%). Each emitted edge records which applied, in `x_pin_evidence`:
+`cosentence`, `window:N`, `unanchorable`, or `unchecked`.
+
+Measured effect: **18,426 → 10,278 candidate pairs**, and the share of shipped
+pin edges carrying a real textual anchor goes from **0% to 32.7%**.
 
 **`completion`** (optional) controls Stage 4b graph completion — *the analyst
 specifies the link, or lets the tool decide*. A `"pin"` rule always wins over

@@ -102,12 +102,12 @@ def test_rule_platform_from_product_service_and_list_category():
 
 def test_observables_expand_url_and_executables():
     obs = observables_from_entities([
-        {"value": "hxxps://bad[.]example/a?b=/c", "entity_type": "url"},
+        {"value": "hxxps://bad[.]example.com/a?b=/c", "entity_type": "url"},
         {"value": "/opt/app/meshagent64.exe", "entity_type": "file"},
     ])
     pairs = {(o.obs_class, o.value) for o in obs}
-    assert ("url", "https://bad.example/a?b=/c") in pairs     # refanged
-    assert ("domain", "bad.example") in pairs                  # host extracted
+    assert ("url", "https://bad.example.com/a?b=/c") in pairs  # refanged
+    assert ("domain", "bad.example.com") in pairs              # host extracted
     assert ("file", "/opt/app/meshagent64.exe") in pairs
     assert ("file", "meshagent64.exe") in pairs                # basename
     assert ("image", "meshagent64.exe") in pairs               # executable suffix
@@ -148,11 +148,11 @@ def test_observables_drop_values_that_can_never_be_indicators():
 
 def test_observables_deduplicate_on_class_and_value():
     obs = observables_from_entities([
-        {"value": "evil.example", "entity_type": "domain"},
-        {"value": "EVIL.example", "entity_type": "domain"},
+        {"value": "evil.example.com", "entity_type": "domain"},
+        {"value": "EVIL.example.com", "entity_type": "domain"},
     ])
     assert len(obs) == 1
-    assert obs[0].display == "evil.example"   # first spelling wins
+    assert obs[0].display == "evil.example.com"   # first spelling wins
 
 
 @pytest.mark.parametrize("values,expected", [

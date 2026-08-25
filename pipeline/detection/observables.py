@@ -15,6 +15,8 @@ import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
+from pipeline.detection.tlds import looks_like_domain
+
 OBS_CLASSES: frozenset[str] = frozenset({
     "hash", "ip", "domain", "url", "file", "image",
     "registry", "user", "port", "name", "cve",
@@ -25,6 +27,18 @@ EXECUTABLE_SUFFIXES: frozenset[str] = frozenset({
     ".js", ".jar", ".msi", ".sh", ".elf", ".bin", ".py", ".jsp", ".war",
 })
 _EXEC_SUFFIXES: tuple[str, ...] = tuple(sorted(EXECUTABLE_SUFFIXES))
+
+#: Suffixes that disqualify a domain-shaped value in `_is_report_domain`.
+#:
+#: `.com` is deliberately NOT here even though it is an executable suffix: it is
+#: also the most common TLD in existence, so blocking it would silently drop the
+#: majority of real domains from the evidence path — far worse than accepting the
+#: occasional DOS COM filename, which must still pass `looks_like_domain` first.
+#: `.sh` and `.py` are assigned ccTLDs and stay blocked: as CTI report values they
+#: are shell and Python scripts essentially every time.
+_DOMAIN_BLOCKING_SUFFIXES: tuple[str, ...] = tuple(
+    sorted(EXECUTABLE_SUFFIXES - {".com"})
+)
 
 WINDOWS_HINTS: tuple[str, ...] = (
     "c:/", "d:/", "\\", ".exe", ".dll", ".sys", ".ps1", ".bat", ".cmd",
@@ -107,6 +121,46 @@ def _extract_host(url: str) -> str:
     return url.split(":", 1)[0].strip().lower()
 
 
+def _is_report_domain(value: str) -> bool:
+    """Is this value a hostname, or a filename that merely looks like one?
+
+    The same gate `pipeline.detection.tlds` applies to *rule* atoms (ADR-0015),
+    applied here to the *report* side — an asymmetry ADR-0025 measured: the
+    extractor typed `agent.ashx`, `exfil.tar.zst` and `psemhub.war` as `domain`
+    entities on one real report. A bogus domain is rare by construction, so its
+    IDF is ~1.0 and it ranks at the top with maximum confidence.
+
+    `looks_like_domain` alone is not enough here: it accepts any two-letter
+    final label as a ccTLD, so `meshctrl.js` passes it. Requiring the value not
+    to end in an executable/script suffix closes that, and costs nothing real —
+    `.js`, `.sh`, `.py` and `.pl` are ccTLDs no CTI report uses as such.
+
+    Erring toward rejection is safe here only because it was measured: on 1,399
+    domain-shaped Sigma atoms that fail the TLD test, every category but
+    `.onion` was a filename, and `.onion` is now in GTLDS.
+    """
+    if not looks_like_domain(value):
+        return False
+    return not value.endswith(_DOMAIN_BLOCKING_SUFFIXES)
+
+
+def _is_executable_name(value: str) -> bool:
+    """Does this filesystem value name an executable?
+
+    The mirror of `_is_report_domain`, and it needs the same `.com` carve-out for
+    the same reason. `.com` is a DOS executable suffix, so a value the extractor
+    typed as a `file` was emitted as an `image` too — measured on a real report,
+    `pastebin.com` and `curity.com` became "executables" that way, each turning
+    one domain into three artifacts.
+
+    A `.com` value that is also a well-formed hostname is a domain essentially
+    every time; genuine `.com` executables are a DOS-era rarity.
+    """
+    if not value.endswith(_EXEC_SUFFIXES):
+        return False
+    return not (value.endswith(".com") and looks_like_domain(value))
+
+
 def observables_from_entities(rows: Iterable[Mapping[str, object]]) -> list[Observable]:
     """Convert entity rows into deduplicated, normalized observables.
 
@@ -155,7 +209,7 @@ def observables_from_entities(rows: Iterable[Mapping[str, object]]) -> list[Obse
 
             elif etype == "domain":
                 val = _refang(raw_value).lower().removeprefix("www.").removesuffix(".")
-                if len(val) >= 4:
+                if len(val) >= 4 and _is_report_domain(val):
                     add("domain", val, etype, display)
 
             elif etype == "url":
@@ -163,14 +217,14 @@ def observables_from_entities(rows: Iterable[Mapping[str, object]]) -> list[Obse
                 if len(val) >= 4:
                     add("url", val, etype, display)
                 host = _extract_host(val)
-                if len(host) >= 4:
+                if len(host) >= 4 and _is_report_domain(host):
                     add("domain", host, etype, display)
 
             elif etype == "email":
                 val = _refang(raw_value).lower()
                 if "@" in val:
                     host = val.rsplit("@", 1)[-1]
-                    if len(host) >= 4:
+                    if len(host) >= 4 and _is_report_domain(host):
                         add("domain", host, etype, display)
 
             elif etype == "file":
@@ -188,7 +242,7 @@ def observables_from_entities(rows: Iterable[Mapping[str, object]]) -> list[Obse
                     if len(cand) < 4:
                         continue
                     add("file", cand, etype, display)
-                    if cand.endswith(_EXEC_SUFFIXES):
+                    if _is_executable_name(cand):
                         add("image", cand, etype, display)
 
             elif etype == "registry_key":
@@ -215,7 +269,7 @@ def observables_from_entities(rows: Iterable[Mapping[str, object]]) -> list[Obse
                 val = raw_value.strip().lower()
                 if len(val) >= 4:
                     add("name", val, etype, display)
-                    if val.endswith(_EXEC_SUFFIXES):
+                    if _is_executable_name(val):
                         add("image", val, etype, display)
 
             # Every other entity type (ttp, threat_actor, campaign, …) is not a

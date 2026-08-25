@@ -102,3 +102,12 @@ class RawEntity(BaseModel):
     # "gazetteer" = MITRE name dictionary match (Stage 2b)
     # "llm"       = LLM extraction (Stage 3)
     source: str = "ioc"
+    # ADR-0028 — evidence, kept separate from `context`.  `context` is a summary
+    # the extractor writes and is NOT locatable in the report (36.8% measured);
+    # `evidence_text` is a verbatim quote and `evidence_start` its resolved
+    # offset into the report, or None when the quote could not be located.
+    # An unlocatable quote demotes the grade, it never drops the entity: 99.4%
+    # of unlocatable contexts were paraphrases of real content, not inventions.
+    evidence_text: str | None = None
+    evidence_label: EvidenceLabel | None = None
+    evidence_start: int | None = None

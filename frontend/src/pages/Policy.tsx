@@ -9,12 +9,14 @@
  * Design reference: design_handoff_relationship_policy/README.md
  */
 import {
-  useState, useEffect, useRef, useCallback,
+  useState, useEffect, useRef, useCallback, useMemo,
   type CSSProperties,
 } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getRelationshipPolicy, putRelationshipPolicy } from '../api/client'
+import { getRelationshipPolicy, putRelationshipPolicy, getPolicyLastRun } from '../api/client'
 import { UNIVERSAL_VERBS, pairVerbs } from '../stix/relConstraints'
+import { LastRunPanel, RuleRunBadge, pinStatIndex } from '../components/PolicySynthesis'
+import type { PinBudgetMode, PinRuleStat } from '../types'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -135,6 +137,22 @@ const DEFAULT_RULES: PolicyRule[] = [
   R('indicator',      'indicates',        'malware'),
   // indicator→domain-name: not in Appendix B — use universal verb
   R('indicator',      'related-to',       'domain-name'),
+  // Mitigations — deliberately 'auto', never 'pin'.
+  //
+  // Measured over the four stored bundles: 344 course-of-action objects, 10.4%
+  // of every bundle, and NOT ONE carries a single edge. A STIX consumer
+  // receives them as orphan nodes. These rules put the pair in the model so the
+  // link is declared and an analyst can see it.
+  //
+  // They must stay on Auto. A pinned rule is a Cartesian product, and
+  // course-of-action is unanchorable (0/344 locatable), so the ADR-0027
+  // evidence gate cannot filter it: pinning these would add 12,768 candidate
+  // pairs on CERT Polska and 18,408 on APT44 — tripling the pool with no
+  // guard. The real fix is upstream, in what Stage 3 is asked to return.
+  R('course-of-action', 'mitigates',      'attack-pattern', 'auto'),
+  R('course-of-action', 'mitigates',      'malware',        'auto'),
+  R('course-of-action', 'mitigates',      'vulnerability',  'auto'),
+  R('course-of-action', 'mitigates',      'tool',           'auto'),
 ]
 
 // ── Sample report for live preview ────────────────────────────────────────────
@@ -377,10 +395,12 @@ function TypeSelect({ value, onChange, placeholder }: { value: string; onChange:
 
 // ── Rule row ──────────────────────────────────────────────────────────────────
 
-function RuleRow({ rule, onPatch, onDelete }: {
+function RuleRow({ rule, onPatch, onDelete, stat }: {
   rule: PolicyRule
   onPatch: (p: Partial<PolicyRule>) => void
   onDelete: () => void
+  /** What this rule produced on the last run — undefined when unmeasured. */
+  stat?: PinRuleStat
 }) {
   const pinned = rule.mode === 'pin'
   const accentColor = !rule.enabled ? 'var(--ink-4)' : pinned ? 'var(--accent)' : 'var(--frost)'
@@ -440,6 +460,7 @@ function RuleRow({ rule, onPatch, onDelete }: {
           ⚠ non-spec
         </span>
       )}
+      <RuleRunBadge stat={stat} />
       <ModeToggle mode={rule.mode} onChange={m => onPatch({ mode: m })} />
       <button
         onClick={onDelete}
@@ -540,11 +561,13 @@ function AddRuleComposer({ onAdd }: { onAdd: (r: Omit<PolicyRule, 'id'>) => void
 
 // ── Rules editor (left column) ────────────────────────────────────────────────
 
-function RulesEditor({ rules, setRules, query, paused }: {
+function RulesEditor({ rules, setRules, query, paused, statIndex }: {
   rules: PolicyRule[]
   setRules: (fn: (rs: PolicyRule[]) => PolicyRule[]) => void
   query: string
   paused: boolean
+  /** Keyed by "<src> <verb> <tgt>" — the join key Stage 4 stamps on each edge. */
+  statIndex: Map<string, PinRuleStat>
 }) {
   const patch  = (id: string, p: Partial<PolicyRule>) =>
     setRules(rs => rs.map(r => r.id === id ? { ...r, ...p } : r))
@@ -593,7 +616,8 @@ function RulesEditor({ rules, setRules, query, paused }: {
             {g.rules.map(r => (
               <RuleRow key={r.id} rule={r}
                 onPatch={p => patch(r.id, p)}
-                onDelete={() => remove(r.id)} />
+                onDelete={() => remove(r.id)}
+                stat={statIndex.get(`${r.src} ${r.verb} ${r.tgt}`)} />
             ))}
           </div>
         </div>
@@ -914,9 +938,70 @@ export default function Policy() {
       // editor isn't presented blank on first visit.
       setRulesRaw(p.rules.length ? p.rules : DEFAULT_RULES)
       setGlobalMode(p.global === 'auto' ? 'auto' : 'enforce')
+      // Pin budget (ADR-0026) — absent on policies saved before it existed, so
+      // fall back to the same defaults Stage 4 applies.
+      setPinMode(p.pin_budget_mode === 'sequential' ? 'sequential' : 'fair-share')
+      // Evidence gate (ADR-0027) — absent on policies saved before it existed,
+      // so fall back to the same defaults Stage 4 applies.
+      const ev = p.pin_evidence
+      setEvidenceOn(!(ev && ev.mode === 'cartesian'))
+      if (ev && Number.isInteger(ev.window) && ev.window >= 0) {
+        setWindowSize(ev.window)
+      }
     }
     seeded.current = true   // always mark done once we have a server response
   }, [remotePolicy])
+
+  // Last policy received from the server, kept verbatim.  PUT is a FULL
+  // replacement, so a save that sends only {version, global, rules} silently
+  // DROPS every other top-level key — which is how the stored policy lost its
+  // `completion` block (ADR-0013) even though Stage 4b still reads it.  Every
+  // mutate below spreads this first so unknown keys survive a round-trip.
+  const serverPolicyRef = useRef<Record<string, unknown>>({})
+  useEffect(() => {
+    if (remotePolicy && typeof remotePolicy === 'object') {
+      serverPolicyRef.current = remotePolicy as Record<string, unknown>
+    }
+  }, [remotePolicy])
+
+  const savePolicy = useCallback((patch: Record<string, unknown>) => {
+    saveMut.mutate({ ...serverPolicyRef.current, version: 1, ...patch } as any)
+  }, [saveMut])
+
+  // ── Pin budget (ADR-0026) ───────────────────────────────────────────────────
+  // What the LAST run produced, per rule.  Read-only measurement, separate from
+  // the settings below it.
+  const { data: lastRun } = useQuery({
+    queryKey: ['policy-last-run'],
+    queryFn: getPolicyLastRun,
+  })
+  const statIndex = useMemo(() => pinStatIndex(lastRun), [lastRun])
+
+  // `max_pinned_edges` is intentionally not editable here — see LastRunPanel.
+  // It stays in the policy as a safety ceiling; the evidence window is the knob
+  // an analyst can actually reason about.
+  const [pinMode,    setPinMode]    = useState<PinBudgetMode>('fair-share')
+  const [evidenceOn, setEvidenceOn] = useState(true)
+  const [windowSize, setWindowSize] = useState(3)
+
+  const changePinMode = (m: PinBudgetMode) => {
+    setPinMode(m)
+    savePolicy({ global: globalMode, rules: pendingRulesRef.current, pin_budget_mode: m })
+  }
+  const changeEvidence = (on: boolean) => {
+    setEvidenceOn(on)
+    savePolicy({
+      global: globalMode, rules: pendingRulesRef.current,
+      pin_evidence: { mode: on ? 'cooccurrence' : 'cartesian', window: windowSize },
+    })
+  }
+  const changeWindow = (n: number) => {
+    setWindowSize(n)
+    savePolicy({
+      global: globalMode, rules: pendingRulesRef.current,
+      pin_evidence: { mode: evidenceOn ? 'cooccurrence' : 'cartesian', window: n },
+    })
+  }
 
   // ── Auto-save with 1.5s debounce ────────────────────────────────────────────
   const saveTimer    = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -938,7 +1023,7 @@ export default function Policy() {
     })
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => {
-      saveMut.mutate({ version: 1, global: globalMode, rules: pendingRulesRef.current } as any)
+      savePolicy({ global: globalMode, rules: pendingRulesRef.current })
     }, 1500)
   }, [globalMode, saveMut])
 
@@ -948,7 +1033,7 @@ export default function Policy() {
     saveTimer.current = setTimeout(() => {
       // Use the ref so we always save the *latest* rules, not the rules that
       // were in scope when this timeout was scheduled (stale closure bug).
-      saveMut.mutate({ version: 1, global: m, rules: pendingRulesRef.current } as any)
+      savePolicy({ global: m, rules: pendingRulesRef.current })
     }, 1500)
   }
 
@@ -965,7 +1050,7 @@ export default function Policy() {
     const fresh = DEFAULT_RULES.map(r => ({ ...r, id: 'rule-' + Math.random().toString(36).slice(2) }))
     setRulesRaw(fresh)
     setGlobalMode('enforce')
-    saveMut.mutate({ version: 1, global: 'enforce', rules: fresh } as any)
+    savePolicy({ global: 'enforce', rules: fresh })
   }
 
   // ── Page ────────────────────────────────────────────────────────────────────
@@ -1155,9 +1240,23 @@ export default function Policy() {
             </div>
           )}
 
+          {/* Pin budget + last-run accounting */}
+          <div style={{ padding: '12px 16px 0' }}>
+            <LastRunPanel
+              run={lastRun}
+              mode={pinMode}
+              evidenceOn={evidenceOn}
+              windowSize={windowSize}
+              onSelectBudgetMode={changePinMode}
+              onToggleEvidence={changeEvidence}
+              onSelectWindow={changeWindow}
+            />
+          </div>
+
           {/* Scrollable rule list */}
           <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px 0' }}>
-            <RulesEditor rules={rules} setRules={setRules} query={query} paused={paused} />
+            <RulesEditor rules={rules} setRules={setRules} query={query} paused={paused}
+              statIndex={statIndex} />
           </div>
         </div>
 
@@ -1176,7 +1275,7 @@ export default function Policy() {
           onImport={(rs, gm) => {
             setRulesRaw(rs)
             setGlobalMode(gm)
-            saveMut.mutate({ version: 1, global: gm, rules: rs } as any)
+            savePolicy({ global: gm, rules: rs })
           }}
         />
       )}

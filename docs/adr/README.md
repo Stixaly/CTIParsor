@@ -27,6 +27,10 @@ choice, and the consequences. They're append-only — supersede rather than rewr
 | [0022](0022-per-format-coverage-breakdown.md) | Per-format coverage breakdown, granular multi-format selection + rule-id export (`/coverage/rules`: ~2.4 h → 5.4 s) | Proposed |
 | [0023](0023-ttp-extraction-measurement-and-retrieval.md) | TTP extraction: fix the ruler, then retrieve-then-validate (dual-granularity scoring, procedure corpus, BM25+dense candidates) | Proposed |
 | [0024](0024-edge-synthesis-provenance-and-run-config.md) | Edge-synthesis provenance & run config (label + cap policy-materialised edges, `jobs.run_config_json`, grounding by evidence label) | Proposed |
+| [0025](0025-evidence-keyed-detection-coverage.md) | Evidence-keyed detection coverage — artifacts score, TTPs locate (Pyramid-of-Pain tiers, unscored tactic phase band; 58 of 64 cells scored ≥2 had no matching rule) | Proposed |
+| [0026](0026-pin-budget-allocation-and-synthesis-stats.md) | Per-rule budget for policy pins + `x_synthesis_stats` (max-min fair share replaces rank-order starvation: 20 → 46 rules served across 4 bundles; 18,426 candidates for a budget of 200) | Proposed |
+| [0027](0027-evidence-gated-pin-materialisation.md) | Evidence-gated pin materialisation, anchorable types only (SCOs/malware/tool 91–100% verbatim; `attack-pattern` 24.3%, `indicator` 0% by name but 96.3% by pattern value — 47% of candidates fail open by design) | Proposed |
+| [0028](0028-ttp-evidence-contract.md) | TTPs must quote, not describe — `TTPExtracted` gains `evidence_text`/`evidence_label` (relationship quotes locate at 79.4%, TTP descriptions at 36.8%, same call; 99.4% of failures are paraphrase, not invention) | Proposed |
 
 **Numbering notes**
 - `0001` and `0003` are unused gaps (early informal decisions never filed).
@@ -51,6 +55,18 @@ choice, and the consequences. They're append-only — supersede rather than rewr
               after the wrong one and mis-wired relationship endpoints
                                          ▼
           ▲            0008 coverage matrix ◄── consumes techniques
+          │               ▲   its SCORING superseded by
+          │               ├── 0025 evidence-keyed coverage: the technique key
+          │               │   selected 25,493 rules across two reports of which
+          │               │   4 matched anything in them, and 58 of 64 cells
+          │               │   scored >=2 had no matching rule at all.  The
+          │               │   artifact becomes the scored unit (Pyramid-of-Pain
+          │               │   tiers) and ATT&CK keeps only the phase band, which
+          │               │   is sourced from the MATCHING RULE's tags, never
+          │               │   from the report's own TTP extraction.  Generalises
+          │               │   0014 from ranking to scoring, and carries 0015's
+          │               │   hostname gate across to the report side — an
+          │               │   asymmetry that had made `agent.ashx` a domain
           │               ▲   implemented by
  canonical names         └── 0006 multi-corpus rules ── managed by ── 0007 settings panel
  feed node identity          ▲   extended by
@@ -86,6 +102,32 @@ choice, and the consequences. They're append-only — supersede rather than rewr
                      the stored policy is now `rules: []`, so that bundle
                      cannot be reproduced.  Blocks 0023 Phase 3: a baseline
                      with no run config is not attributable
+                        ▲   its cap shown to be the wrong lever by
+                        └── 0026 per-rule budget: the cap truncated by the RANK
+                            of a rule in the policy array -- saturated 4 times
+                            out of 4, and on one report the 10th rule took all
+                            200 while the 13 after it emitted nothing.  Max-min
+                            fair share: 20 -> 46 rules served.  Adds
+                            x_synthesis_stats, which also rescues the
+                            CompletionStats 0013 had been returning and having
+                            discarded at the call site
+                               ▲   is the instrument for
+                               └── 0027 evidence-gated materialisation: a pin
+                                   emits only where the report links the two
+                                   objects (18,426 -> 10,278 pairs).  Applied
+                                   PER TYPE because it must be -- attack-pattern
+                                   is 24.3% verbatim and course-of-action 0/344,
+                                   so 47% of the pool fails open by design
+                                      ▲   its exemption is lifted by
+                                      └── 0028 TTPs must quote, not describe:
+                                          `description` was read as evidence and
+                                          locates 38.9%, against 85.6% for the
+                                          quotes 0009's contract already asks of
+                                          relationships.  Not hallucination --
+                                          99.4% of failures are paraphrase of
+                                          real content.  Gives a technique an
+                                          offset, which is what 0027 needs to
+                                          gate the attack-pattern rules at all
 
 0011 TTP precision (thresholds, margin gate, 3f verify, subsumption)
    ▲   measured — and partly corrected — by

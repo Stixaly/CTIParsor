@@ -259,7 +259,7 @@ def rule_details(conn: sqlite3.Connection, rule_ids: Iterable[str]) -> dict[str,
         placeholders = ",".join("?" * len(batch))
         for r in conn.execute(
             f"SELECT id, corpus, title, description, severity, license, source_ref, "
-            f"platform, format "
+            f"platform, format, native_key "
             f"FROM detection_rules WHERE id IN ({placeholders})",
             batch,
         ).fetchall():
@@ -268,6 +268,10 @@ def rule_details(conn: sqlite3.Connection, rule_ids: Iterable[str]) -> dict[str,
                 "severity": r[4], "license": r[5], "source_ref": r[6],
                 "platform": r[7] or "",
                 "format": r[8] or "sigma",
+                # The persisted column, not a re-derivation from the id: it is
+                # what the ADR-0008 corroboration rule keys on, and callers must
+                # not have to reimplement `_native_key` to agree with coverage.
+                "native_key": r[9] or r[0],
             }
     return out
 

@@ -75,6 +75,90 @@ Below it, techniques are laid out in ATT&CK-tactic columns and coloured by score
 | 1 — Telemetry only | data-source mapped, no rule | write a detection |
 | 0 — No coverage | extracted, no rule | gap — prioritise |
 
+> **This scoring is superseded.** It answers "does a rule carry this ATT&CK tag?",
+> which turns out not to be a statement about your report. Measured across the two
+> reports in the local store: the technique key selects **25,493 rules of which 4
+> match anything in them**, and **58 of 64 cells scoring ≥2 have no matching rule
+> at all**. See [ADR-0025](adr/0025-evidence-keyed-detection-coverage.md) and the
+> artifact coverage below, which scores the report's own technical content instead.
+
+## Artifact coverage (ADR-0025)
+
+`GET /api/jobs/{id}/coverage/artifacts` scores one row per **technical artifact**
+the report gives you to match on, rather than per technique:
+
+| Score | Meaning |
+|---|---|
+| 3 | corroborated by ≥ 2 independent corpora |
+| 2 | 1 corpus |
+| 1 | weak match only |
+| 0 | no rule matches this value |
+
+Every score above 0 names the rule and the field it matched, so the claim is
+checkable rather than asserted.
+
+**What counts as corroboration depends on what the artifact is.** For everything
+except a malware family, only an exact value match inside a rule's detection
+block can reach 2 or 3. For a **malware identity**, a rule whose *title* names the
+family counts too — YARA rules are named after families and ET signatures likewise,
+so that title is the detection artifact, not a passing mention. Measured: capping
+it made `BlackEnergy` (28 rules across 3 corpora) score 1 while the LOLBin `Ping`
+scored 2. A tool name never earns title corroboration, and a mention in a
+*description* stays weak in every case.
+
+**One element, one row.** A binary yields both `file` and `image` observables and
+a value typed as both a domain and a file yields three — they fold into a single
+artifact on the normalized value, and the score is recomputed over the combined
+evidence. `classes` lists what was folded; `corpora` is what drove the score;
+`evidence_corpora` is every corpus with any evidence, which for a title-only match
+is the informative one.
+
+Rows are grouped by **Pyramid of Pain** tier, and coverage is reported per tier —
+never as one number, because a hash match and a tool-identity match are not the
+same detection claim:
+
+| Tier | Classes | What a match is worth |
+|---|---|---|
+| trivial | hash | the adversary changes it by recompiling |
+| easy | ip, domain, url, cve | changed by moving infrastructure |
+| annoying | file, image, registry, user, port | costs them tooling changes |
+| challenging | tool / malware identity | costs them capability |
+
+Expect this view to be **sparse**, and read that as the truth rather than a fault:
+a fresh campaign's indicators are by definition not yet in public rule corpora.
+Measured over three real reports (146 artifacts, 30 covered), the per-tier shape
+is the thing to read:
+
+| Tier | Covered |
+|---|---|
+| 1 trivial (hashes) | 3.7% |
+| 2 easy (IP / domain / URL / CVE) | 5.6% |
+| 3 annoying (files, registry) | 21.4% |
+| 4 challenging (tool / malware identity) | 38.2% |
+
+On the CERT Polska energy-sector report, **none of its 22 hashes is covered** and
+the only two tier-2 hits are `github.com` and `pastebin.com` — legitimate services
+named in rules that detect exfiltration behaviour, not that intrusion. The
+uncovered list is the deliverable: it is your detection-engineering backlog.
+
+Two kinds of row are shown but left out of the totals: `vocabulary` (the value is
+carried by so many rules that it is corpus vocabulary, not an indicator — the
+threshold is `max(20, 0.0005 × canonical_rules)`) and `not_matchable`.
+
+### The ATT&CK phase band
+
+ATT&CK stays, unscored, as the answer to *where in the kill chain is this
+intrusion* — two rows that are never derived from each other:
+
+- **report** — tactics of the techniques extracted from the report. Off-matrix ids
+  (mobile, ICS, CAPEC, or a tactic id in a technique field) are listed separately
+  as extraction noise rather than quietly placed in a column.
+- **covered** — tactics of the rules that actually matched an artifact, taken from
+  each rule's own ATT&CK tags.
+
+The gap between the rows is the roadmap. On the ShinyHunters report the intrusion
+spans 14 phases and the matched detections reach 6 of them.
+
 Each cell carries three thin ticks on its right — one per format — filled when
 that format has a selected rule for the technique, faint when it has rules but
 none are selected, and hollow when it has none. Hovering gives the score and the
@@ -173,3 +257,6 @@ Ranking is deterministic and offline — no model is involved (ADR-0008).
 | sizes all show `0 B` | the `rule_bytes` side table is empty on a store built before ADR-0022 — run `python -m scripts.backfill_rule_bytes` (no corpus re-clone needed) |
 | the coverage page seems cut off | it scrolls itself; if it does not, the page's own scroll container is missing — `body`/`#root` are `overflow:hidden` by design so the Review page can own its panes |
 | score never reaches 1 ("telemetry only") | the ATT&CK data-source enrichment (ADR-0008 Phase 1) isn't built yet — scores are rule-based (0/2/3) until then |
+| artifact coverage is almost all 0 | expected, and true: a current campaign's indicators are not in public corpora yet. Read the per-tier fractions and treat the uncovered list as the backlog (ADR-0025) |
+| a technique sits in the "Other" tactic column | it is genuinely off the enterprise matrix (mobile/ICS/CAPEC), or the column list drifted from `mitre_index.json`. `pipeline/detection/phases.py` carries fifteen enterprise tactics — `stealth` (TA0005) and `defense-impairment` (TA0112) included — and a test fails if the index ever adds another |
+| artifact coverage takes ~4 s | the title/description sweep dominates it. A `LIKE` there costs ~3.6 s whatever the needle, so it is done as one streaming pass over all canonical rules rather than one query per value |

@@ -39,8 +39,23 @@ _RETRY_EXCEPTIONS = (
 # ---------------------------------------------------------------------------
 # Maximum prompt length (characters) to prevent overly large requests
 _MAX_PROMPT_LENGTH = int(os.environ.get("LLM_MAX_PROMPT_LENGTH", "32000"))
-# Maximum response length (characters) to prevent overly large responses
-_MAX_RESPONSE_LENGTH = int(os.environ.get("LLM_MAX_RESPONSE_LENGTH", "16000"))
+# Maximum response length (characters) to prevent overly large responses.
+#
+# This cap TRUNCATES the string, so a value below what the token ceiling allows
+# turns a complete, valid reply into invalid JSON and loses the whole chunk.
+# Measured on GREYVIBE under the ADR-0028 contract: the model returned 23,324
+# valid characters and this guard cut them to 16,000.  It must therefore stay
+# above `_MAX_OUTPUT_TOKENS` x ~4 characters per token; the two are raised
+# together or not at all.
+_MAX_RESPONSE_LENGTH = int(os.environ.get("LLM_MAX_RESPONSE_LENGTH", "48000"))
+# Output token ceiling.  ADR-0028 gave every TTP a verbatim `evidence_text`
+# sentence, which roughly doubles the size of a TTP-heavy response: measured on
+# GREYVIBE, the reply hit the previous 4096 ceiling at 14,812 characters and was
+# cut off mid-object, losing the WHOLE chunk — TTPs, relationships and malware
+# families alike, because a truncated JSON body salvages poorly.  Raised in
+# proportion to the payload the new contract adds.
+_MAX_OUTPUT_TOKENS = int(os.environ.get("LLM_MAX_OUTPUT_TOKENS", "8192"))
+
 # Minimum prompt length to ensure meaningful input
 _MIN_PROMPT_LENGTH = 100
 
@@ -245,7 +260,15 @@ _GENERIC_ACTOR_TERMS = frozenset({
 class TTPExtracted(BaseModel):
     technique_name: str
     mitre_id: str | None = None
+    # A summary the model writes.  Useful, but NOT evidence — measured over 280
+    # stored TTPs, only 36.8% of these can be found in the report, while 79.4%
+    # of the verbatim quotes asked for below can.  The two fields do two jobs;
+    # reading `description` as evidence was the ADR-0028 defect.
     description: str = ""
+    evidence_text: str | None = None   # verbatim quote from source text
+    # How well the source supports this technique.  Defaults to "reported" so
+    # older data / models that omit the field validate without error.
+    evidence_label: EvidenceLabel = EvidenceLabel.REPORTED
 
 
 class RelationshipExtracted(BaseModel):
@@ -319,6 +342,16 @@ Rules:
 - When you cannot find explicit support for a relationship, still emit it with
   evidence_label "gap" and evidence_text "" — never fabricate a supporting quote.
   A missing answer expressed as "gap" is correct and useful; a fabricated answer is a failure.
+- EVERY TTP carries the SAME two fields, under the SAME rules:
+    description   = your summary, in your own words. Keep writing it.
+    evidence_text = a sentence COPIED CHARACTER FOR CHARACTER from the text
+                    above. Not a paraphrase, not a merge of two sentences, not
+                    a tidied version. Copy and paste one sentence.
+                    If no single sentence supports the technique, set it to ""
+                    and set evidence_label to "gap".
+    evidence_label = the same five-grade scale, chosen the same way, never upgraded.
+  A TTP whose evidence_text cannot be found in the text is treated as unsupported,
+  so rewriting the sentence costs the technique its grade. Copying costs nothing.
 - MITRE ATT&CK IDs follow the format T1234 or T1234.001.
 - Valid STIX 2.1 relationship types (use ONLY these):
   uses, attributed-to, targets, indicates, mitigates, remediates,
@@ -374,7 +407,9 @@ For ttps: ONLY include techniques NOT already listed in the semantic TTPs sectio
     {{
       "technique_name": "MITRE technique name",
       "mitre_id": "T1234.001 or null",
-      "description": "brief description of how this technique was used"
+      "description": "brief description of how this technique was used",
+      "evidence_text": "VERBATIM sentence copied from the text (empty string if none)",
+      "evidence_label": "observed|reported|assessed|inferred|gap"
     }}
   ],
   "relationships": [
@@ -428,7 +463,7 @@ def _call_anthropic_impl(system: str, user: str) -> str:
         _ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
         response = client.messages.create(
             model=_ANTHROPIC_MODEL,
-            max_tokens=4096,
+            max_tokens=_MAX_OUTPUT_TOKENS,
             system=system,
             messages=[{"role": "user", "content": user}],
             timeout=_LLM_TIMEOUT,
@@ -480,7 +515,7 @@ def _call_openai_compatible_impl(client_param, model: str, system: str, user: st
     try:
         response = client_param.chat.completions.create(
             model=model,
-            max_tokens=4096,
+            max_tokens=_MAX_OUTPUT_TOKENS,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -633,6 +668,21 @@ def _normalize_llm_json(data: dict) -> dict:
                 for k in ("id", "mitre", "attack_id", "technique_id", "mitre_technique_id"):
                     if isinstance(t.get(k), str) and t[k].strip():
                         t["mitre_id"] = t.pop(k)
+                        break
+            # ADR-0028 — accept the aliases models reach for instead of
+            # `evidence_text`, the same way relationship keys are normalised
+            # below.  Without this the quote is silently dropped and the
+            # technique looks unsupported.
+            if "evidence_text" not in t:
+                for k in ("evidence", "quote", "evidence_quote", "supporting_text",
+                          "source_text", "excerpt"):
+                    if isinstance(t.get(k), str):
+                        t["evidence_text"] = t.pop(k)
+                        break
+            if "evidence_label" not in t:
+                for k in ("label", "evidence_grade", "support", "confidence_label"):
+                    if isinstance(t.get(k), str) and t[k].strip():
+                        t["evidence_label"] = t.pop(k)
                         break
             if "technique_name" in t:
                 norm_ttps.append(t)
