@@ -6,7 +6,258 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Fixed
+- **Stage 2c's evidence was being thrown away at the merge.** The semantic
+  matcher *selects* a sentence from the report, so its evidence is verbatim by
+  construction — measured **120/120 locatable**, against 109/280 for the LLM's
+  written descriptions. But Stage 2c stored that sentence in `description`, and
+  `normalize_ttps` then picked between the two by **length**:
+
+  ```python
+  if len(result_ttp.description) > len(existing.description):
+      # the LLM's description replaces the semantic evidence sentence
+  ```
+
+  A quote and a summary compared by length in one field — the ADR-0028 defect
+  one stage earlier. The two now live in separate fields and merge on separate
+  rules: the description by length, the evidence by provenance.
+
+  A second distinction the code did not make: the 0.62 cosine floor answers
+  *"may this match create a technique?"* — it does **not** answer *"may it supply
+  the sentence for a technique the LLM independently found?"* In that
+  corroboration case two signals agree on the id and the LLM already vouched for
+  it, so the semantic sentence is the better citation at any confidence.
+  Restricting evidence to the high floor left the first fix inert (only 16 of
+  120 matches clear 0.62): 38.9% → 39.3%. Lifting it for corroboration only:
+  **38.9% → 43.9%** across the four reports, 43.6% → 50.4% on APT44 — **without
+  re-running the LLM**. That is a floor, not a ceiling: it measures old stored
+  TTPs that carry no `evidence_text` of their own.
+
+  Agreement between the two extractors is large — 116 of 120 semantic techniques
+  are also found by the LLM, which contributes 164 more — so the semantic stage
+  is not a second opinion on *what* is present, it is a source of *evidence* for
+  what the LLM already found.
+- **Two response ceilings silently discarded whole LLM chunks.** Found on the
+  first real call under the ADR-0028 contract, invisible to every unit test.
+  `max_tokens` was hard-coded to 4096 at both provider call sites: the reply was
+  cut mid-object at 14,812 characters and **TTPs, relationships and malware
+  families were all lost**, not just the truncated tail. Raising it exposed the
+  second guard — `_MAX_RESPONSE_LENGTH` at 16,000 characters, which *truncates
+  the string*, so a complete and valid 23,324-character reply became invalid
+  JSON. Now `_MAX_OUTPUT_TOKENS` (8192, `LLM_MAX_OUTPUT_TOKENS`) and 48,000
+  characters, coupled in a comment: the character cap must stay above the token
+  ceiling times ~4 or it silently undoes it.
+- **344 orphan `course-of-action` objects.** Measured across the four stored
+  bundles: 10.4% of every bundle — the third most numerous object type — and
+  **not one carried a single relationship**. A STIX consumer received them as
+  free-floating nodes. The default relationship model now declares the four
+  `mitigates` pairs STIX 2.1 Appendix B allows, deliberately on **Auto**: a
+  pinned rule is a Cartesian product and `course-of-action` is unanchorable
+  (0/344 locatable), so the ADR-0027 gate cannot filter it — pinning would add
+  12,768 candidate pairs on CERT Polska and 18,408 on APT44.
+
 ### Added
+- **TTPs must quote, not describe** (ADR-0028) — what the pipeline read as
+  evidence for a technique was a **`description`**, and the prompt asked for
+  exactly that. `TTPExtracted` had no evidence field at all, while
+  `RelationshipExtracted` twenty lines below already carried `evidence_text`
+  ("verbatim quote from source text") and `evidence_label`, and the prompt's
+  anti-fabrication rules applied only to relationships.
+
+  Measured over every stored quote with the new locator — same model, same
+  reports, same call: relationship quotes locate to a sentence **85.6%** of the
+  time (215/277 exact, 22 partial), TTP descriptions **38.9%** (103/280 exact).
+  **2.2× apart, from the contract alone.**
+
+  Two hypotheses were tested and discarded first. PDF mangling: rejoining
+  end-of-line hyphenation recovered **0** of the 166 failures, the alphanumeric
+  skeleton 0.7%, fuzzy matching 3.9%. Invention: of those 166, **99.4% have at
+  least half their distinctive tokens present in the report** and 24.7% have all
+  of them — the model recomposes real facts, it does not fabricate them. One
+  case in 166 falls below half.
+
+  `TTPExtracted` now carries `evidence_text` + `evidence_label` under the same
+  rules as relationships; `description` is kept and keeps its job. `entities`
+  gains `evidence_text`, `evidence_label` and `evidence_start` (additive
+  migration). A quote that cannot be located stores a NULL offset and demotes
+  the grade one step — it never drops the technique.
+- **`pipeline/evidence_span.py`** — locates a quote in the source text and
+  returns a span in *original* coordinates, keeping an index map through
+  normalisation of the substitutions PDF extraction introduces (curly quotes,
+  en/em dashes, five space characters, five ligatures), with a longest-prefix
+  and longest-suffix fallback worth 7.9 points over exact matching alone.
+  Ligatures are handled apart from the character map because that map may only
+  hold one-to-one substitutions — the offset invariant depends on it.
+- **Evidence-gated pin materialisation** (ADR-0027) — a pinned rule now emits an
+  edge only when the report links the two objects within three sentences. The
+  gate applies **only to types whose identity actually appears in prose**,
+  measured over the four stored bundles before any code was written: SCOs,
+  `malware`, `tool` and `threat-actor` land at **91–100% verbatim**, while
+  `attack-pattern` reaches only **24.3%** (16.8% by ATT&CK `external_id`) and
+  `course-of-action` **0/344** — those come from ATT&CK mapping, not from the
+  text, so pairs touching them are never gated. That exempts 47% of the
+  candidate pool by design, and the ADR says so rather than glossing it.
+
+  A second correction the measurement forced: an Indicator's `name`
+  (`"Indicator: evil.com"`) never appears in prose — **0/136** — so its anchor is
+  the literals parsed out of its `pattern`, which reach **131/136 (96.3%)**.
+
+  Result over the four bundles: **18,426 → 10,278 candidate pairs, 8,148 blocked
+  (44.2%)**, with build latency unchanged (399→310 ms, 457→472 ms) because one
+  inverted sentence index is built per bundle instead of scanning the text per
+  pair. On the edges actually shipped, `x_pin_evidence` goes from **100%
+  `unchecked`** to **32.7% carrying a real textual anchor** (`cosentence` or
+  `window:N`), the rest explicitly marked `unanchorable`. ShinyHunters stops
+  saturating the ADR-0026 cap entirely — the first time on real data that the
+  budget is no longer what decides which edges ship.
+
+  `PinRuleStat.blocked` is reported **separately from `truncated`**: "the budget
+  ran out" and "the report does not support this pair" are different verdicts.
+  Controlled by `"pin_evidence": {"mode": "cooccurrence"|"cartesian", "window": 3}`;
+  `"cartesian"` restores the previous behaviour exactly. The window of 3 is
+  reused from ADR-0024 Phase C, the only proximity threshold in this project
+  backed by a measurement.
+- **Rejected, and recorded as such:** dropping the two `attack-pattern` pin rules
+  would remove 8,679 candidate pairs for zero code, but Stage 4b only infers 49
+  of the edges the pin rule materialises 200 of — so it would cost analysts the
+  "which techniques does this malware use, which does this campaign use" view.
+  Coverage of that question outweighs graph tidiness.
+- **Per-rule budget for policy pins + `x_synthesis_stats`** (ADR-0026) — the
+  `max_pinned_edges` cap ADR-0024 introduced turned out to truncate by the
+  **rank of the rule in the policy array**. Measured over the four bundles in
+  `cti_stix.db`: the cap was saturated **4 times out of 4** (exactly 200 pinned
+  edges each, 800 of 2,023 relationships), and on GREYVIBE the 10th rule
+  (`malware uses attack-pattern`, 13 × 39 = 507 candidate pairs) consumed the
+  whole budget while the **13 rules after it emitted nothing, silently**.
+
+  The budget is now split by **max-min fair share**: rules are served in
+  ascending demand order, each taking at most an equal share of the remainder,
+  so a small rule is always satisfied in full and its unspent share flows to the
+  larger ones. Replaying all four jobs read-only, rules actually served go from
+  **20 to 46** (+26). `pin_budget_mode: "sequential"` restores the old
+  behaviour; `max_pinned_edges` and `pin_budget_mode` are now validated at the
+  API boundary instead of being coerced silently in Stage 4.
+
+  The Report SDO gains `x_synthesis_stats` — per-rule `candidates / emitted /
+  truncated` for the pin pass, plus the `CompletionStats` Stage 4b had been
+  **returning and having discarded** at the call site since ADR-0013. The worker
+  reads it back off the Report for `emit_progress`, so the live channel consumes
+  the same record that ships in the bundle.
+
+  What the measurement also showed, and it is in the ADR: the candidate pool is
+  **18,426 pairs for a budget of 200**. Fair share ends the starvation, but at
+  ~14 edges per rule it distributes arbitrariness evenly rather than removing
+  it — which is the evidence for gating pins on textual co-occurrence next.
+- **`scripts/measure_pin_allocation.py`** — read-only harness that replays every
+  stored job under both allocation modes and prints the per-rule table, read
+  back off the rebuilt bundle's `x_synthesis_stats`.
+- **Evidence gate in the Policy UI** — a panel above the rule list showing what
+  the last run produced (edges emitted / candidate pairs / cut by budget /
+  unevidenced, plus Stage 4b's completion counters), and a per-rule badge
+  `emitted / candidates` with a fill bar that turns amber when the rule was
+  truncated. A rule absent from the last run shows **nothing** rather than `0` —
+  unmeasured and zero are not the same claim.
+
+  The controls are the evidence gate (On/Off) and its window, offered as three
+  named steps — Strict 1 / Normal 3 / Wide 10 — because a free number field
+  invites typing 50 without realising that switches the gate off in practice.
+  **`max_pinned_edges` is deliberately NOT exposed**: an analyst cannot know the
+  right total before reading the report, and the number scales with report size
+  rather than with anything they can judge. It stays in the policy as a safety
+  ceiling. "How close must two things be in the text before I link them?" is
+  answerable without knowing how big the report is; "how many edges in total?"
+  is not.
+
+  New `GET /api/relationship-policy/last-run` serves it from the newest bundle's
+  `x_synthesis_stats`. It parses **exactly one** `bundle_json` by design: at
+  ~475 KB–1.3 MB per bundle, scanning back until one carries the property would
+  make latency depend on how many old bundles are stored. When the newest bundle
+  predates ADR-0026 the answer is `available: false` — measured at **101 ms
+  median** warm on the real database, of which **0.7 ms is the JSON parse**; the
+  rest is reading the blob off the NTFS mount.
+
+### Fixed
+- **Saving the relationship policy wiped its `completion` block.** `PUT
+  /api/relationship-policy` is a full replacement, and all four save paths in
+  the Policy page sent only `{version, global, rules}` — so every edit silently
+  dropped the Stage 4b configuration (ADR-0013) that `complete_graph` still
+  reads. The stored policy had no `completion` key at all, despite the API
+  documenting it. Saves now spread the last server response, so unknown
+  top-level keys survive a round-trip.
+- **`max_pinned_edges` was never validated.** It was accepted at any type and
+  coerced silently inside Stage 4; it is now rejected at the API boundary
+  alongside the new `pin_budget_mode`.
+
+### Added
+- **Evidence-keyed detection coverage** (ADR-0025) — coverage stops being indexed
+  on ATT&CK techniques and becomes indexed on the report's own technical content.
+  The measurement that forced it, over the two real reports in `cti_stix.db`
+  (75,127 canonical rules): the technique key selects **25,493 rules of which 4
+  match anything in the reports**, and **58 of the 64 cells scored ≥2 have no
+  matching rule at all**. `T1071.003` scored 3 on 6,573 rules with zero evidence.
+
+  New `GET /api/jobs/{id}/coverage/artifacts` returns one row per technical
+  artifact — hash, IP, domain, URL, file, registry key, tool or malware identity —
+  scored 3/2/1/0 on whether canonical rules actually hold that value and from how
+  many independent corpora, tiered by **Pyramid of Pain** so a hash match and a
+  tool-identity match are never averaged together. Every score above 0 names the
+  rule and the field that matched. Measured result: **58 artifacts, 4 covered, 50
+  uncovered** — sparse by construction, because a fresh campaign's indicators are
+  not in public rule corpora, and the uncovered list is the point.
+
+  ATT&CK is kept as an unscored **phase band** in kill-chain order, with two
+  independent rows: what the report claims, and where the rules that actually
+  matched an artifact sit. The second is sourced from the matching rule's own
+  tags, never from the report's TTP extraction, so the gap between them is a real
+  roadmap. On ShinyHunters the report spans 14 phases and detections reach 6.
+- **`scripts/measure_ttp_vs_observable_coverage.py`** and
+  **`scripts/validate_artifact_coverage.py`** — the before/after harness and the
+  real-data validation behind ADR-0025.
+
+### Fixed
+- **Malware families scored below system utilities.** Validated against a CERT
+  Polska energy-sector report (119 techniques, 22 hashes, 25 tools, 10 malware):
+  `Ping` scored 2 and `netstat` 3, while `BlackEnergy` scored **1** despite 28
+  dedicated YARA/Suricata rules named after it across three corpora. `tool`
+  entities scored 2–3 in 12 of 18 cases; `malware` entities scored 0–1 in 8 of 10.
+
+  Structural cause: a tool's binary name is an atom value inside a rule's
+  detection block (exact match, 2–3), while a malware family name lives in the
+  rule **title** — which was capped at 1. For a family, the rule named after it
+  *is* the detection. Title evidence now corroborates, but only for `malware`
+  entities, only on the title (a description mention stays weak), and carrying
+  the rule's `native_key` so a forked rule still folds to one owner. Result:
+  BlackEnergy 1→3, PrestigeRansomware 1→2, Impacket 2→3, while `Ping` stays 2.
+- **One technical element was counted several times.** `nircmd.exe` counted twice
+  (file + image) and `pastebin.com` three times (domain + file + image); 16 values
+  duplicated on one report, and **13 of 28 "covered" rows were duplicate halves**.
+  ADR-0014 had already drawn this lesson for ranking and it was never carried into
+  coverage. Artifacts fold on the normalized value, with the score recomputed over
+  the unioned evidence rather than taken as a max. 116→97 artifacts on CERT
+  Polska, 38→29 on ShinyHunters.
+- **`.com` was treated as an executable suffix on the file branch**, so
+  `pastebin.com` and `curity.com` became `image` observables — DOS COM
+  executables. Same carve-out as the domain guard: a `.com` value that is also a
+  well-formed hostname is not an executable.
+- **The ATT&CK phase columns were missing two tactics.** `mitre_index.json`
+  renames `TA0005` to `stealth` (not `defense-evasion`) and adds `TA0112`
+  `defense-impairment`, but the Coverage page hard-coded the classic fourteen —
+  so **204 enterprise techniques were silently bucketed as "other"**. Both the
+  page and `pipeline/detection/phases.py` now carry fifteen columns, locked by
+  `test_every_enterprise_tactic_in_the_index_has_a_column`, which fails if a
+  future ATT&CK version adds another.
+- **The hostname gate ran on rules but not on reports.** `looks_like_domain`
+  (ADR-0015) was applied when extracting atoms from Suricata/YARA rules and never
+  when normalising a report, so `agent.ashx`, `exfil.tar.zst` and `psemhub.war`
+  became `domain` observables — and a bogus domain is rare by construction, so its
+  IDF is ~1.0 and it ranks first with maximum confidence. One real report drops
+  from 41 to 38 observables with no genuine domain lost. `onion` joins `GTLDS`:
+  on 1,399 domain-shaped Sigma atoms failing only the TLD test, Tor addresses were
+  the sole real-domain category among filenames (`.exe` 382, `.zip` 163).
+- **`store.rule_details` now returns `native_key`.** Corroboration folds a rule
+  forked across corpora onto one owner; artifact scoring was re-deriving that key
+  from the rule id, which matches the persisted column only by accident of how ids
+  are built.
 - **Grounding over the shipped bundle, split by evidence label** (ADR-0024
   Phase C) — `tests/eval_pipeline.py -b grounding --from-bundle all` reads
   `jobs.bundle_json` instead of the `relationships` table, which held only 65 of

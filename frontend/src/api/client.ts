@@ -1,4 +1,4 @@
-import type { Job, Entity, Relationship, StixBundle, CoverageResult, CoverageRule, CoverageReportRules, DetectionProposals, DetectionCorpus, CorpusConfig, FormatInfo, ExportFacets, ExportSelection, ExportAxis } from '../types'
+import type { Job, Entity, Relationship, StixBundle, CoverageResult, CoverageRule, CoverageReportRules, DetectionProposals, DetectionCorpus, CorpusConfig, FormatInfo, ExportFacets, ExportSelection, ExportAxis, LastRun } from '../types'
 
 const BASE = '/api'
 
@@ -143,6 +143,11 @@ export const putRelationshipPolicy = (policy: Record<string, unknown>) =>
     method: 'PUT',
     body: JSON.stringify(policy),
   })
+
+// Per-rule synthesis accounting from the most recent bundle (ADR-0026) — what
+// each pinned rule actually produced on the last run.
+export const getPolicyLastRun = () =>
+  req<LastRun>('/relationship-policy/last-run')
 
 
 export function fetchExportFacets(jobId: string): Promise<ExportFacets> {

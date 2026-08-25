@@ -15,6 +15,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from api.db import get_conn
+from pipeline.detection.artifacts import coverage_with_phases
 from pipeline.detection.coverage import (
     compute_for_job,
     rule_bodies_for_job,
@@ -63,6 +64,26 @@ def get_detection_proposals(job_id: str, limit: int = 200):
         if not conn.execute("SELECT id FROM jobs WHERE id=?", (job_id,)).fetchone():
             raise HTTPException(404, "Job not found")
         return propose_for_job(conn, job_id, limit=limit)
+
+
+@router.get("/jobs/{job_id}/coverage/artifacts")
+def get_artifact_coverage(job_id: str):
+    """Evidence-keyed coverage: artifacts score, ATT&CK locates (ADR-0025).
+
+    The unit is the report's own technical content — hashes, addresses, paths,
+    tool and malware identities — scored on whether a rule actually holds that
+    value, and tiered by Pyramid of Pain. The ATT&CK band rides along unscored,
+    to say where in the kill chain the intrusion sits.
+
+    Unlike `/coverage/rules`, this needs no ordering against the
+    `{technique_id}` route below: that template carries a trailing `/rules`
+    segment, so `/coverage/artifacts` cannot match it either way. Verified by
+    moving this route below it — every test still passed.
+    """
+    with get_conn() as conn:
+        if not conn.execute("SELECT id FROM jobs WHERE id=?", (job_id,)).fetchone():
+            raise HTTPException(404, "Job not found")
+        return coverage_with_phases(conn, job_id)
 
 
 @router.get("/jobs/{job_id}/coverage/{technique_id}/rules")

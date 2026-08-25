@@ -282,6 +282,15 @@ def init_db() -> None:
             # offline by scripts/backfill_rule_bytes.py — no corpus re-clone.
             "CREATE TABLE IF NOT EXISTS rule_bytes ("
             " rule_id TEXT PRIMARY KEY, bytes INTEGER NOT NULL DEFAULT 0)",
+            # ADR-0028 — evidence for entities, kept apart from `context`.
+            # `context` holds a summary the extractor writes: measured over 280
+            # stored TTPs, only 36.8% of it can be found in the report, against
+            # 79.4% for the verbatim quotes the relationship contract already
+            # asks for.  These columns carry the quote and its resolved offset
+            # so a technique can be located in the text it came from.
+            "ALTER TABLE entities ADD COLUMN evidence_text TEXT",
+            "ALTER TABLE entities ADD COLUMN evidence_label TEXT",
+            "ALTER TABLE entities ADD COLUMN evidence_start INTEGER",
         ]
         for stmt in _migrations:
             try:

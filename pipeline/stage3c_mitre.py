@@ -171,6 +171,27 @@ def normalize_ttps(
     normalized: dict[str, TTPExtracted] = {}
     semantic_high_keys: set[str] = set()   # keys a high-conf semantic match owns
 
+    # Every semantic match by id, at ANY confidence — used only to SUPPLY
+    # EVIDENCE, never to create or rename a technique.
+    #
+    # The two questions are different and the cut-point only answers the first:
+    #   "may this match create a technique?"          -> needs high confidence
+    #   "may it supply the sentence for a technique   -> the LLM already vouched
+    #    the LLM independently found?"                   for the technique
+    #
+    # In the corroboration case two independent signals agree on the id, and the
+    # semantic sentence is SELECTED from the report where the LLM's is written
+    # about it — measured 120/120 locatable against 109/280.  Restricting this to
+    # high confidence is what left the earlier fix inert: only 16 of 120 semantic
+    # matches clear 0.62, so the better evidence reached almost nothing.
+    semantic_evidence: dict[str, str] = {}
+    if semantic_entities:
+        for ent in semantic_entities:
+            mid = getattr(ent, "mitre_id", None)
+            ctx = (getattr(ent, "context", "") or "").strip()
+            if mid and ctx:
+                semantic_evidence.setdefault(mid.lower(), ctx)
+
     # ── 1. Seed with HIGH-confidence semantic findings only ─────────────────
     # Medium-confidence semantic matches are added later (step 3) and only when
     # the LLM has not already covered the technique — so they can never override
@@ -186,7 +207,13 @@ def normalize_ttps(
             normalized[dedup_key] = TTPExtracted(
                 technique_name=ent.value,
                 mitre_id=ent.mitre_id,
-                description=ent.context or "",  # evidence sentence stored as context
+                description=ent.context or "",
+                # Stage 2c SELECTS a sentence from the report rather than writing
+                # one, so its context is verbatim by construction — measured
+                # 120/120 locatable against 109/280 for LLM descriptions.  It
+                # goes in evidence_text, where a summary can no longer displace
+                # it (ADR-0028).
+                evidence_text=ent.context or None,
             )
             semantic_high_keys.add(dedup_key)
 
@@ -195,25 +222,49 @@ def normalize_ttps(
         canon_name, canon_id, _ = _resolve(ttp.technique_name, ttp.mitre_id)
         dedup_key = canon_id.lower() if canon_id else canon_name.lower()
 
+        # Prefer the LLM's own quote; fall back to the corroborating semantic
+        # sentence when it has none.  The LLM identified the technique either
+        # way — this only decides which sentence is cited for it.
+        _evidence = ttp.evidence_text or semantic_evidence.get(dedup_key)
+
         result_ttp = TTPExtracted(
             technique_name=canon_name,
             mitre_id=canon_id,
             description=ttp.description,
+            evidence_text=_evidence,
+            evidence_label=ttp.evidence_label,
         )
 
         if dedup_key in semantic_high_keys:
             # A high-confidence semantic match owns this key — keep its canonical
             # name/ID, but adopt the LLM's description if it is richer.
+            #
+            # The two fields are merged on DIFFERENT rules, on purpose. The
+            # description is prose and the longer one is usually the better
+            # summary. The evidence is a quote, and "longer" says nothing about
+            # it: the semantic sentence is verbatim by construction while the
+            # LLM's is verbatim only 38.9% of the time, so the semantic one is
+            # kept unless it is absent. Comparing the two by length in a single
+            # field is what silently discarded the better evidence before.
             existing = normalized[dedup_key]
             if len(result_ttp.description) > len(existing.description):
                 normalized[dedup_key] = TTPExtracted(
                     technique_name=existing.technique_name,
                     mitre_id=existing.mitre_id,
                     description=result_ttp.description,
+                    evidence_text=existing.evidence_text or result_ttp.evidence_text,
+                    evidence_label=existing.evidence_label,
                 )
         elif dedup_key in normalized:
             if len(result_ttp.description) > len(normalized[dedup_key].description):
-                normalized[dedup_key] = result_ttp
+                _prev = normalized[dedup_key]
+                normalized[dedup_key] = TTPExtracted(
+                    technique_name=result_ttp.technique_name,
+                    mitre_id=result_ttp.mitre_id,
+                    description=result_ttp.description,
+                    evidence_text=_prev.evidence_text or result_ttp.evidence_text,
+                    evidence_label=result_ttp.evidence_label,
+                )
         else:
             normalized[dedup_key] = result_ttp
 
@@ -229,6 +280,7 @@ def normalize_ttps(
                 technique_name=ent.value,
                 mitre_id=ent.mitre_id,
                 description=ent.context or "",
+                evidence_text=ent.context or None,
             )
 
     return _subsume_parent_techniques(list(normalized.values()))

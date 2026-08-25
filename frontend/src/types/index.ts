@@ -387,3 +387,53 @@ export interface ExportFacets {
 export type ExportAxis = 'format' | 'corpus' | 'license' | 'severity'
 
 export type ExportSelection = Record<ExportAxis, string[]>
+
+// ── Edge-synthesis accounting (ADR-0026) ─────────────────────────────────────
+// Carried on the bundle's report SDO as `x_synthesis_stats` and served by
+// GET /api/relationship-policy/last-run.
+
+export type PinBudgetMode = 'fair-share' | 'sequential'
+
+export interface PinRuleStat {
+  /** "<src> <verb> <tgt>", e.g. "malware uses attack-pattern" — join key. */
+  rule: string
+  /** Pairs that survived the evidence gate, before the budget was applied. */
+  candidates: number
+  emitted: number
+  /** Cut by the budget. */
+  truncated: number
+  /** Refused by the ADR-0027 evidence gate — the report never links the pair.
+   *  Deliberately distinct from `truncated`: "the budget ran out" and "the
+   *  document does not support this" read differently to an analyst. */
+  blocked?: number
+}
+
+export interface PinStats {
+  budget: number
+  mode: string
+  total_candidates: number
+  total_emitted: number
+  total_truncated: number
+  total_blocked?: number
+  rules: PinRuleStat[]
+}
+
+export interface CompletionStats {
+  aliases_merged: number
+  reference_added: number
+  transitive_added: number
+  long_distance_added: number
+  skipped_not_suggested: number
+  capped: boolean
+  notes: string[]
+}
+
+/** `pin`/`completion` are null when the newest bundle predates ADR-0026. */
+export interface LastRun {
+  job_id: string | null
+  filename: string | null
+  created_at: string | null
+  available: boolean
+  pin: PinStats | null
+  completion: CompletionStats | null
+}

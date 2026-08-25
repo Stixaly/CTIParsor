@@ -177,14 +177,29 @@ def test_build_run_config_omits_absent_env_vars(monkeypatch):
     assert "TTP_KEYWORD_GATE" not in config["env"]
 
 
-def test_build_run_config_records_stage_flags(monkeypatch):
-    """Verify that stage flags are correctly recorded."""
-    # Test with SKIP_HEAVY_MODELS=1
-    monkeypatch.setenv("SKIP_HEAVY_MODELS", "1")
-    config = build_run_config()
-    assert config["stages"]["semantic"] is False
+def test_build_run_config_records_what_actually_ran(monkeypatch):
+    """Stage flags must mirror each stage's own availability predicate.
 
-    # Test with SKIP_HEAVY_MODELS unset
-    monkeypatch.delenv("SKIP_HEAVY_MODELS", raising=False)
+    They used to be guessed from environment variables, and the guess was wrong
+    in both directions on the stored jobs: `semantic: True` while Stage 2c never
+    ran, and `llm: False` while the LLM did — because LLM_PROVIDER defaults to
+    "anthropic" when unset.  A run config that misattributes the bundle defeats
+    the purpose of recording one (ADR-0024 Phase B), so the flags are now the
+    predicates themselves.
+    """
+    from pipeline.stage2c_ttp_semantic import semantic_available
+    from pipeline.stage3_llm import _provider_ready
+
     config = build_run_config()
-    assert config["stages"]["semantic"] is True
+
+    # Each flag equals the predicate the worker itself branches on.
+    assert config["stages"]["semantic"] == semantic_available()
+    assert config["stages"]["llm"] == _provider_ready()
+
+    # SKIP_HEAVY_MODELS is recorded separately: the predicates conflate "heavy
+    # models were switched off" with "the embedding cache was missing", and an
+    # audit needs to tell those apart.
+    monkeypatch.setenv("SKIP_HEAVY_MODELS", "1")
+    assert build_run_config()["stages"]["skip_heavy_models"] is True
+    monkeypatch.delenv("SKIP_HEAVY_MODELS", raising=False)
+    assert build_run_config()["stages"]["skip_heavy_models"] is False

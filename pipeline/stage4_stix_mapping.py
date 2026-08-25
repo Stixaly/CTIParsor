@@ -1,6 +1,8 @@
 import json
 import os
+import re
 import uuid
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 import stix2
@@ -14,6 +16,80 @@ from pipeline.stage4b_graph_completion import complete_graph
 from pipeline.stix_rel_spec import rel_is_suggested
 
 logger = get_logger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Policy-pin synthesis accounting (ADR-0026)
+#
+# ADR-0024 capped policy-pin materialisation at `max_pinned_edges`.  Measured
+# afterwards, that cap was saturated on 4 of 4 stored bundles and truncated by
+# the RANK of the rule in the policy array: on GREYVIBE the 10th rule
+# (`malware uses attack-pattern`, 13 x 39 = 507 candidate pairs) consumed the
+# whole budget and the 13 rules after it emitted nothing, silently.
+#
+# These types carry the per-rule accounting out of the pass so the truncation
+# is visible instead of being a single log line naming one rule.
+# ---------------------------------------------------------------------------
+@dataclass
+class PinRuleStat:
+    """Per-rule accounting for one policy-pin materialisation rule."""
+    rule: str          # "<src> <verb> <tgt>", e.g. "malware uses attack-pattern"
+    candidates: int    # pairs that survived the evidence gate, before budgeting
+    emitted: int       # pairs actually emitted after budget allocation
+    truncated: int     # candidates - emitted (cut by the budget)
+    # Pairs the ADR-0027 evidence gate refused because the report never links
+    # the two objects.  Kept apart from `truncated` on purpose: "the budget ran
+    # out" and "the document does not support this" are different verdicts and
+    # an analyst reads them differently.
+    blocked: int = 0
+
+
+@dataclass
+class PinStats:
+    """Outcome of the policy-pin materialisation pass."""
+    budget: int = 0
+    mode: str = "fair-share"
+    rules: list[PinRuleStat] = field(default_factory=list)
+
+    @property
+    def total_candidates(self) -> int:
+        return sum(r.candidates for r in self.rules)
+
+    @property
+    def total_emitted(self) -> int:
+        return sum(r.emitted for r in self.rules)
+
+    @property
+    def total_truncated(self) -> int:
+        return sum(r.truncated for r in self.rules)
+
+    @property
+    def total_blocked(self) -> int:
+        return sum(r.blocked for r in self.rules)
+
+    def to_dict(self) -> dict:
+        """Serialise stats, excluding rules that neither matched nor were gated."""
+        filtered = [r for r in self.rules if r.candidates > 0 or r.blocked > 0]
+        filtered.sort(key=lambda r: (-(r.candidates + r.blocked), r.rule))
+        return {
+            "budget": self.budget,
+            "mode": self.mode,
+            "total_candidates": self.total_candidates,
+            "total_emitted": self.total_emitted,
+            "total_truncated": self.total_truncated,
+            "total_blocked": self.total_blocked,
+            "rules": [
+                {
+                    "rule": r.rule,
+                    "candidates": r.candidates,
+                    "emitted": r.emitted,
+                    "truncated": r.truncated,
+                    "blocked": r.blocked,
+                }
+                for r in filtered
+            ],
+        }
+
 
 # STIX 2.1 deterministic ID namespace (SCO/SDO identity namespace per the spec)
 _STIX_NAMESPACE = uuid.UUID("00abedb4-aa42-466c-9c01-fed23315a9b7")
@@ -748,74 +824,11 @@ def build_stix_bundle(
             pass
 
     # --- Policy-forced relationships (enforce mode, "pin" rules) ---
-    if relationship_policy and relationship_policy.get("global") != "auto":
-        # Snapshot the created SDOs/SCOs grouped by STIX type (taken before we
-        # start appending the forced relationships below).
-        _type_to_objs: dict[str, list] = {}
-        for _obj in stix_objects:
-            _otype = _obj.get("type") if hasattr(_obj, "get") else getattr(_obj, "type", None)
-            if _otype in ("relationship", "report") or _otype is None:
-                continue
-            _type_to_objs.setdefault(_otype, []).append(_obj)
-
-        _max_pinned = relationship_policy.get("max_pinned_edges", 200)
-        try:
-            _max_pinned = int(_max_pinned)
-        except (TypeError, ValueError):
-            _max_pinned = 200
-        if _max_pinned < 0:
-            _max_pinned = 0
-
-        _pinned_added = 0
-        _capped = False
-
-        # A cap of 0 disables materialisation entirely.  The counter is checked
-        # after the append, so without this guard the first edge still ships.
-        _rules = relationship_policy.get("rules", []) if _max_pinned > 0 else []
-        for _rule in _rules:
-            if _capped:
-                break
-            if _rule.get("mode") != "pin" or not _rule.get("enabled", True):
-                continue
-            _verb = (_rule.get("verb") or "").strip().lower()
-            if _verb not in VALID_REL_TYPES:
-                continue   # non-spec verb — don't force-create (matches _apply_policy)
-            _src_type = _rule.get("src", "")
-            _tgt_type = _rule.get("tgt", "")
-            # A pinned rule materialises the analyst's link model, not a claim the
-            # document made.  Of the ADR-0009 vocabulary that is "assessed": it fails
-            # the review-UI auto-accept gate (only "observed" auto-promotes), so these
-            # edges queue for review instead of shipping indistinguishable from
-            # extracted fact.  x_policy_rule names the rule, mirroring Stage 4b's
-            # x_inference_rule.  Built once per rule: identical for every pair, and
-            # _add_relationship copies it into kwargs rather than mutating it.
-            _custom = {
-                "x_evidence_label": "assessed",
-                "x_policy_rule": f"{_src_type} {_verb} {_tgt_type}",
-            }
-            for _s_obj in _type_to_objs.get(_src_type, []):
-                if _capped:
-                    break
-                for _t_obj in _type_to_objs.get(_tgt_type, []):
-                    if _s_obj.id == _t_obj.id:
-                        continue
-                    _before = len(stix_objects)
-                    _add_relationship(
-                        stix_objects, _s_obj, _verb, _t_obj,
-                        pol_index=None, seen=seen_rel_keys,
-                        custom=_custom,
-                    )
-                    if len(stix_objects) > _before:
-                        _pinned_added += 1
-                        if _pinned_added >= _max_pinned:
-                            logger.warning(
-                                "[Stage 4] policy-pin materialisation capped at %d edges "
-                                "(rule '%s %s %s'); raise max_pinned_edges in the relationship policy "
-                                "to allow more.",
-                                _max_pinned, _src_type, _verb, _tgt_type,
-                            )
-                            _capped = True
-                            break
+    # Budget is split across rules by max-min fair share, not first-come-first-
+    # served: see _materialise_pinned_edges and ADR-0026.
+    _pin_stats = _materialise_pinned_edges(
+        stix_objects, relationship_policy, seen_rel_keys, report_text,
+    )
 
     # --- Artifact SCO for the source document ---
     # Represents the original ingested file (PDF, DOCX, …) as a STIX 2.1
@@ -840,7 +853,7 @@ def build_stix_bundle(
     # stamping, so any edges it adds are included in the report and stamped like
     # every other object.  Append-only + spec-guarded: see stage4b_graph_completion
     # and ADR-0013.  Governed by the policy "completion" block; pinned rules win.
-    complete_graph(
+    _completion_stats = complete_graph(
         stix_objects,
         policy=relationship_policy,
         report_text=report_text,
@@ -871,6 +884,24 @@ def build_stix_bundle(
             ext_refs.append(stix2.ExternalReference(**ref_kwargs))
         if ext_refs:
             report_kwargs["external_references"] = ext_refs
+
+        # Synthesis accounting (ADR-0026) — what the two edge synthesisers did,
+        # carried in the bundle so it survives export.  ADR-0024 made each edge
+        # say where it came from; this says what the pass as a whole did, which
+        # is the only way to see a rule that produced nothing.
+        report_kwargs["allow_custom"] = True
+        report_kwargs["x_synthesis_stats"] = {
+            "pin": _pin_stats.to_dict(),
+            "completion": {
+                "aliases_merged":        _completion_stats.aliases_merged,
+                "reference_added":       _completion_stats.reference_added,
+                "transitive_added":      _completion_stats.transitive_added,
+                "long_distance_added":   _completion_stats.long_distance_added,
+                "skipped_not_suggested": _completion_stats.skipped_not_suggested,
+                "capped":                _completion_stats.capped,
+                "notes":                 list(_completion_stats.notes),
+            },
+        }
 
         try:
             report = stix2.Report(**report_kwargs)
@@ -1146,6 +1177,418 @@ def _build_stix_pattern(ioc_value: str, sco) -> str | None:
         if name:
             return f"[file:name = '{_escape_stix_value(name)}']"
     return None
+
+
+def _pin_edge_key(src_obj, verb: str, tgt_obj) -> tuple[str, str, str] | None:
+    """Compute the deduplication key a pinned edge would get, without emitting.
+
+    Mirrors exactly what _add_relationship does when called with pol_index=None:
+    validate the verb, downgrade it to 'related-to' when the (source-type →
+    target-type) pair does not suggest it, then key on
+    (source_id, final_verb, target_id).
+
+    Returns None when the pair can never produce an edge (missing id, self-pair).
+
+    Extracted so the counting pass and the emitting pass of
+    _materialise_pinned_edges cannot drift apart: budgeting needs each rule's
+    demand *before* anything is emitted, and re-deriving that test separately
+    would diverge the first time either side changed.
+    """
+    if not hasattr(src_obj, "id") or not hasattr(tgt_obj, "id"):
+        return None
+    if src_obj.id == tgt_obj.id:
+        return None
+
+    final_verb = verb if verb in VALID_REL_TYPES else "related-to"
+    if not rel_is_suggested(
+        getattr(src_obj, "type", ""), final_verb, getattr(tgt_obj, "type", "")
+    ):
+        final_verb = "related-to"
+
+    return (src_obj.id, final_verb, tgt_obj.id)
+
+
+def _fair_share(demands: list[int], budget: int) -> list[int]:
+    """Split `budget` across `demands` by max-min fair share (water-filling).
+
+    Returns a list the same length and order as `demands`, where each grant is
+    at most its demand and the total is at most the budget.
+
+    Rules are served in ASCENDING demand order, each taking at most an equal
+    share of what remains.  That ordering is the point: a small rule is always
+    served in full and its unspent share flows to the larger ones, so two rules
+    that both exceed their share are truncated to the same number instead of by
+    their rank in the policy array.  Pure and deterministic — the same policy
+    over the same job must rebuild the same bundle.
+    """
+    if budget <= 0 or not demands:
+        return [0] * len(demands)
+
+    grants = [0] * len(demands)
+    # Process indices by ASCENDING demand; break ties by ascending index.
+    order = sorted(range(len(demands)), key=lambda i: (demands[i], i))
+    remaining = budget
+    left = len(order)
+    for pos, i in enumerate(order):
+        share = remaining // (left - pos)      # equal share of what is left
+        grant = min(demands[i], share)
+        grants[i] = grant
+        remaining -= grant
+
+    # Leftover pass: hand out the remaining units one at a time, in the same
+    # order, to rules that are still unsatisfied.  Needed when
+    # budget < len(demands) (otherwise share == 0 everywhere and every grant is
+    # zero), and to recover the units lost to integer division.
+    while remaining > 0:
+        progressed = False
+        for i in order:
+            if remaining == 0:
+                break
+            if grants[i] < demands[i]:
+                grants[i] += 1
+                remaining -= 1
+                progressed = True
+        if not progressed:
+            break
+
+    return grants
+
+
+# Object types whose identity is produced by ATT&CK mapping rather than by a
+# verbatim mention in the report, measured over the four stored bundles:
+#
+#   attack-pattern : MITRE name 74/304 (24.3%) · external_id 51/304 (16.8%)
+#   course-of-action:                       0/344 (0.0%)
+#
+# A textual co-occurrence gate cannot judge these objects, so pairs touching
+# them are never gated (ADR-0027).  This is fail-open by doctrine, not an
+# escape hatch: their evidence comes from the scored extraction stages
+# (ADR-0011, ADR-0023), and a proximity heuristic is the wrong instrument to
+# re-judge it with.
+_UNANCHORABLE_TYPES: frozenset[str] = frozenset({
+    "attack-pattern",
+    "course-of-action",
+})
+
+# Sentence terminators used to window the report text.  Deliberately crude:
+# the window is 3 sentences wide, so a missed split costs proximity, never
+# correctness.
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n{2,}")
+
+# Literals inside a STIX pattern: [domain-name:value = 'evil.com'] and
+# [autonomous-system:number = 1234].  An Indicator's `name` is
+# "Indicator: evil.com", which never appears in prose (0/136 measured), while
+# its pattern values do (131/136, 96.3%) — so the pattern is its anchor.
+_PATTERN_STR_RE = re.compile(r"'((?:[^'\\]|\\.)*)'")
+_PATTERN_NUM_RE = re.compile(r"=\s*(\d+)\s*\]")
+
+
+def _field(obj: object, key: str) -> object | None:
+    """Read a field from a mapping or attribute-based object."""
+    if hasattr(obj, "get"):
+        return obj.get(key)  # type: ignore[union-attr]
+    return getattr(obj, key, None)
+
+
+def _evidence_terms(obj: object) -> list[str]:
+    """Return strings that identify `obj` in report text; empty if unanchorable."""
+    otype = _field(obj, "type")
+    if not otype:
+        return []
+    if otype in _UNANCHORABLE_TYPES:
+        return []
+
+    if otype == "indicator":
+        pattern = _field(obj, "pattern")
+        if not isinstance(pattern, str):
+            return []
+        terms: list[str] = []
+        terms.extend(_PATTERN_STR_RE.findall(pattern))
+        terms.extend(_PATTERN_NUM_RE.findall(pattern))
+        cleaned: list[str] = []
+        for t in terms:
+            t = t.replace("\\'", "'").replace("\\\\", "\\")
+            t = t.strip()
+            if len(t) >= 3:
+                cleaned.append(t)
+        # Deduplicate preserving order
+        seen: set[str] = set()
+        result: list[str] = []
+        for t in cleaned:
+            if t not in seen:
+                seen.add(t)
+                result.append(t)
+        return result
+
+    # Non-indicator path
+    raw_terms: list[str] = []
+    name = _field(obj, "name")
+    if isinstance(name, str):
+        raw_terms.append(name)
+    value = _field(obj, "value")
+    if isinstance(value, str):
+        raw_terms.append(value)
+    aliases = _field(obj, "aliases")
+    if isinstance(aliases, list):
+        for a in aliases:
+            if isinstance(a, str):
+                raw_terms.append(a)
+    hashes = _field(obj, "hashes")
+    if isinstance(hashes, dict):
+        for v in hashes.values():
+            if isinstance(v, str):
+                raw_terms.append(v)
+
+    cleaned = []
+    for t in raw_terms:
+        t = t.strip()
+        if len(t) >= 3:
+            cleaned.append(t)
+
+    seen = set()
+    result = []
+    for t in cleaned:
+        if t not in seen:
+            seen.add(t)
+            result.append(t)
+    return result
+
+
+def _split_sentences(text: str) -> list[str]:
+    """Split text into sentences, discarding empty fragments."""
+    if not isinstance(text, str) or not text:
+        return []
+    parts = _SENTENCE_SPLIT_RE.split(text)
+    return [p for p in (s.strip() for s in parts) if p]
+
+
+def _build_sentence_index(objects: list, sentences: list[str]) -> dict[str, set[int]]:
+    """Build inverse index: object id -> set of sentence indices where its terms appear."""
+    lowered = [s.lower() for s in sentences]
+    index: dict[str, set[int]] = {}
+    for obj in objects:
+        oid = _field(obj, "id")
+        if not isinstance(oid, str):
+            continue
+        terms = _evidence_terms(obj)
+        if not terms:
+            continue
+        lowered_terms = [t.lower() for t in terms]
+        hits: set[int] = set()
+        for i, s in enumerate(lowered):
+            if any(t in s for t in lowered_terms):
+                hits.add(i)
+        if hits:
+            index[oid] = hits
+    return index
+
+
+def _pair_is_grounded(
+    src_obj: object,
+    tgt_obj: object,
+    index: dict[str, set[int]],
+    window: int,
+) -> tuple[bool, str]:
+    """Decide if a pair can be materialised; return (ok, anchor_label)."""
+    src_type = _field(src_obj, "type")
+    tgt_type = _field(tgt_obj, "type")
+    if src_type in _UNANCHORABLE_TYPES or tgt_type in _UNANCHORABLE_TYPES:
+        return (True, "unanchorable")
+    if not index:
+        return (True, "unanchorable")
+
+    src_id = _field(src_obj, "id")
+    tgt_id = _field(tgt_obj, "id")
+    if not isinstance(src_id, str) or not isinstance(tgt_id, str):
+        return (True, "unanchorable")
+    if src_id not in index or tgt_id not in index:
+        return (True, "unanchorable")
+
+    a = index[src_id]
+    b = index[tgt_id]
+
+    # Cosentence check via set intersection
+    if a & b:
+        return (True, "cosentence")
+
+    # Minimum distance via two-pointer on sorted lists
+    sa = sorted(a)
+    sb = sorted(b)
+    min_dist = float("inf")
+    i = 0
+    j = 0
+    while i < len(sa) and j < len(sb):
+        d = abs(sa[i] - sb[j])
+        if d < min_dist:
+            min_dist = d
+        if sa[i] < sb[j]:
+            i += 1
+        else:
+            j += 1
+
+    if min_dist <= window:
+        return (True, f"window:{min_dist}")
+    return (False, "")
+
+
+def _materialise_pinned_edges(
+    stix_objects: list,
+    relationship_policy: dict | None,
+    seen_rel_keys: set,
+    report_text: str = "",
+) -> PinStats:
+    """Materialise policy-pinned edges under a per-rule budget (ADR-0026).
+
+    Mutates `stix_objects` and `seen_rel_keys` in place and returns the per-rule
+    accounting.  Three passes: collect each rule's candidate pairs, allocate the
+    budget across them, then emit a prefix of each rule's candidate list.
+
+    A pinned rule materialises the analyst's link model, not a claim the
+    document made, so every edge carries x_evidence_label="assessed" (which
+    fails the review-UI auto-accept gate) and x_policy_rule naming the rule —
+    see ADR-0009 and ADR-0024.
+    """
+    # Guard: no policy, or the whole model is paused.
+    if not relationship_policy or relationship_policy.get("global") == "auto":
+        return PinStats()
+
+    _max_pinned = relationship_policy.get("max_pinned_edges", 200)
+    try:
+        _max_pinned = int(_max_pinned)
+    except (TypeError, ValueError):
+        _max_pinned = 200
+    if _max_pinned < 0:
+        _max_pinned = 0
+
+    mode = relationship_policy.get("pin_budget_mode", "fair-share")
+    if mode not in ("fair-share", "sequential"):
+        mode = "fair-share"
+
+    _ev = relationship_policy.get("pin_evidence")
+    if not isinstance(_ev, dict):
+        _ev = {}
+    ev_mode = _ev.get("mode", "cooccurrence")
+    if ev_mode not in ("cooccurrence", "cartesian"):
+        ev_mode = "cooccurrence"
+    try:
+        ev_window = int(_ev.get("window", 3))
+    except (TypeError, ValueError):
+        ev_window = 3
+    if ev_window < 0:
+        ev_window = 0
+
+    # Snapshot the created SDOs/SCOs grouped by STIX type, taken before any
+    # forced relationship is appended below.
+    _type_to_objs: dict[str, list] = {}
+    for _obj in stix_objects:
+        _otype = _obj.get("type") if hasattr(_obj, "get") else getattr(_obj, "type", None)
+        if _otype in ("relationship", "report") or _otype is None:
+            continue
+        _type_to_objs.setdefault(_otype, []).append(_obj)
+
+    sentences = _split_sentences(report_text) if ev_mode == "cooccurrence" else []
+    ev_index = _build_sentence_index(stix_objects, sentences) if sentences else {}
+    # No report text (the CLI path passes it optionally) means the gate cannot
+    # judge anything, so it must not judge: every pair passes.
+    gating = ev_mode == "cooccurrence" and bool(sentences)
+
+    # --- Pass 1: collect candidates (emits nothing) ---
+    # `claimed` accumulates ACROSS rules in policy order, so a rule duplicated
+    # in the policy (the stored policy has one) does not double its demand.
+    # Trade-off: a key claimed by a rule that is later truncated is not offered
+    # to a subsequent rule.  That needs two rules on the same type pair whose
+    # verbs both downgrade to 'related-to'; the alternative — claiming at emit
+    # time — spends budget on calls that dedup into no-ops.
+    plans: list[tuple[str, dict, list[tuple], int]] = []
+    claimed: set[tuple[str, str, str]] = set()
+
+    for _rule in relationship_policy.get("rules", []) or []:
+        # The policy is operator-supplied JSON; a malformed entry here used to
+        # abort the whole mapping stage.
+        if not isinstance(_rule, dict):
+            continue
+        if _rule.get("mode") != "pin" or not _rule.get("enabled", True):
+            continue
+        _verb = (_rule.get("verb") or "").strip().lower()
+        if _verb not in VALID_REL_TYPES:
+            continue   # non-spec verb — don't force-create (matches _apply_policy)
+        _src_type = _rule.get("src", "")
+        _tgt_type = _rule.get("tgt", "")
+        label = f"{_src_type} {_verb} {_tgt_type}"
+
+        candidates: list[tuple] = []
+        blocked = 0
+        for _s_obj in _type_to_objs.get(_src_type, []):
+            for _t_obj in _type_to_objs.get(_tgt_type, []):
+                key = _pin_edge_key(_s_obj, _verb, _t_obj)
+                if key is None or key in seen_rel_keys or key in claimed:
+                    continue
+                anchor = "unchecked"
+                if gating:
+                    ok, anchor = _pair_is_grounded(_s_obj, _t_obj, ev_index, ev_window)
+                    if not ok:
+                        blocked += 1
+                        continue
+                claimed.add(key)
+                candidates.append((_s_obj, _verb, _t_obj, anchor))
+
+        plans.append((label, _rule, candidates, blocked))
+
+    # --- Pass 2: allocate the budget ---
+    if mode == "sequential":
+        grants: list[int] = []
+        remaining_budget = _max_pinned
+        for _, _, cands, _ in plans:
+            grant = min(len(cands), remaining_budget)
+            grants.append(grant)
+            remaining_budget -= grant
+    else:
+        grants = _fair_share([len(c) for _, _, c, _ in plans], _max_pinned)
+
+    # --- Pass 3: emit a prefix of each rule's candidates ---
+    stats_rules: list[PinRuleStat] = []
+    for idx, (label, _rule, candidates, blocked) in enumerate(plans):
+        emitted = 0
+        for _s_obj, _verb, _t_obj, _anchor in candidates[:grants[idx]]:
+            _before = len(stix_objects)
+            _custom = {
+                "x_evidence_label": "assessed",
+                "x_policy_rule": label,
+                "x_pin_evidence": _anchor,
+            }
+            _add_relationship(
+                stix_objects, _s_obj, _verb, _t_obj,
+                pol_index=None, seen=seen_rel_keys, custom=_custom,
+            )
+            if len(stix_objects) > _before:
+                emitted += 1
+
+        candidates_count = len(candidates)
+        truncated = candidates_count - emitted
+        stats_rules.append(PinRuleStat(
+            rule=label,
+            candidates=candidates_count,
+            emitted=emitted,
+            truncated=truncated,
+            blocked=blocked,
+        ))
+
+        if blocked > 0:
+            logger.info(
+                "[Stage 4] policy-pin rule '%s': evidence gate blocked %d of %d "
+                "candidate pairs (window %d)",
+                label, blocked, blocked + candidates_count, ev_window,
+            )
+
+        if truncated > 0:
+            logger.warning(
+                "[Stage 4] policy-pin rule '%s' truncated: %d of %d candidate "
+                "edges emitted (budget %d, mode %s); raise max_pinned_edges in "
+                "the relationship policy to allow more.",
+                label, emitted, candidates_count, _max_pinned, mode,
+            )
+
+    return PinStats(budget=_max_pinned, mode=mode, rules=stats_rules)
 
 
 def _apply_policy(

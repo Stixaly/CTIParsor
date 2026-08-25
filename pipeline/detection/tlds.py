@@ -34,6 +34,11 @@ GTLDS: frozenset[str] = frozenset({
     "win", "bid", "loan", "men", "party", "review", "trade", "date", "racing",
     "science", "accountant", "faith", "cricket", "name", "mobi", "asia", "tel",
     "email", "life", "world", "host", "press", "wiki", "blog", "agency",
+    # Reserved (RFC 7686) rather than generic, but a Tor hidden service is a
+    # first-class C2 indicator in CTI. Measured: on 1,399 domain-shaped Sigma
+    # atoms that failed only the TLD test, `.onion` was the sole real-domain
+    # category — everything else was a filename (.exe 382, .zip 163, .ps1 152).
+    "onion",
 })
 
 _RE_DOMAIN = re.compile(
