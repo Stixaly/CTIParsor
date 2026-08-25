@@ -102,6 +102,32 @@ choice, and the consequences. They're append-only — supersede rather than rewr
                      the stored policy is now `rules: []`, so that bundle
                      cannot be reproduced.  Blocks 0023 Phase 3: a baseline
                      with no run config is not attributable
+                        ▲   its cap shown to be the wrong lever by
+                        └── 0026 per-rule budget: the cap truncated by the RANK
+                            of a rule in the policy array -- saturated 4 times
+                            out of 4, and on one report the 10th rule took all
+                            200 while the 13 after it emitted nothing.  Max-min
+                            fair share: 20 -> 46 rules served.  Adds
+                            x_synthesis_stats, which also rescues the
+                            CompletionStats 0013 had been returning and having
+                            discarded at the call site
+                               ▲   is the instrument for
+                               └── 0027 evidence-gated materialisation: a pin
+                                   emits only where the report links the two
+                                   objects (18,426 -> 10,278 pairs).  Applied
+                                   PER TYPE because it must be -- attack-pattern
+                                   is 24.3% verbatim and course-of-action 0/344,
+                                   so 47% of the pool fails open by design
+                                      ▲   its exemption is lifted by
+                                      └── 0028 TTPs must quote, not describe:
+                                          `description` was read as evidence and
+                                          locates 38.9%, against 85.6% for the
+                                          quotes 0009's contract already asks of
+                                          relationships.  Not hallucination --
+                                          99.4% of failures are paraphrase of
+                                          real content.  Gives a technique an
+                                          offset, which is what 0027 needs to
+                                          gate the attack-pattern rules at all
 
 0011 TTP precision (thresholds, margin gate, 3f verify, subsumption)
    ▲   measured — and partly corrected — by
