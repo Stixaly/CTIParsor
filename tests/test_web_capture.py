@@ -1,0 +1,240 @@
+# tests/test_web_capture.py
+from pathlib import Path
+
+import pytest
+
+from pipeline import web_capture
+from pipeline.web_capture import CaptureError, CaptureResult, suggest_filename, validate_url
+
+
+def test_bare_domain_gets_https_prefix(monkeypatch):
+    monkeypatch.setattr(web_capture, "_resolve_all", lambda h: ["93.184.216.34"])
+    assert validate_url("example.com/a") == "https://example.com/a"
+
+
+def test_fragment_is_stripped(monkeypatch):
+    monkeypatch.setattr(web_capture, "_resolve_all", lambda h: ["93.184.216.34"])
+    assert validate_url("https://example.com/a#frag") == "https://example.com/a"
+
+
+def test_empty_path_becomes_slash(monkeypatch):
+    monkeypatch.setattr(web_capture, "_resolve_all", lambda h: ["93.184.216.34"])
+    assert validate_url("https://example.com") == "https://example.com/"
+
+
+def test_rejects_file_scheme():
+    with pytest.raises(CaptureError, match="scheme"):
+        validate_url("file:///etc/passwd")
+
+
+def test_rejects_javascript_scheme():
+    with pytest.raises(CaptureError):
+        validate_url("javascript:alert(1)")
+
+
+def test_rejects_credentials_in_url():
+    with pytest.raises(CaptureError, match="Credentials"):
+        validate_url("https://user:pw@example.com/")
+
+
+def test_rejects_localhost():
+    with pytest.raises(CaptureError):
+        validate_url("http://localhost:8000/")
+
+
+def test_rejects_dot_internal_host():
+    with pytest.raises(CaptureError):
+        validate_url("https://api.internal/")
+
+
+def test_rejects_loopback_literal():
+    with pytest.raises(CaptureError):
+        validate_url("http://127.0.0.1/")
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://10.0.0.5/",
+        "http://192.168.1.1/",
+        "http://172.16.0.1/",
+        "http://169.254.169.254/",
+        "http://[::1]/",
+    ],
+)
+def test_rejects_private_literal(url):
+    with pytest.raises(CaptureError):
+        validate_url(url)
+
+
+def test_rejects_disallowed_port():
+    with pytest.raises(CaptureError, match="Port"):
+        validate_url("https://example.com:11434/")
+
+
+def test_rejects_when_any_resolved_ip_is_private(monkeypatch):
+    monkeypatch.setattr(web_capture, "_resolve_all", lambda h: ["93.184.216.34", "10.1.2.3"])
+    with pytest.raises(CaptureError):
+        validate_url("https://evil.example/")
+
+
+def test_rejects_ipv4_mapped_private_v6():
+    with pytest.raises(CaptureError):
+        validate_url("http://[::ffff:10.0.0.1]/")
+
+
+def test_accepts_public_host(monkeypatch):
+    monkeypatch.setattr(web_capture, "_resolve_all", lambda h: ["93.184.216.34"])
+    url = "https://thedfirreport.com/2024/08/12/x/"
+    assert validate_url(url) == url
+
+
+def test_unresolvable_host_raises(monkeypatch):
+    def fake_resolve(h):
+        raise CaptureError("Cannot resolve host: nope")
+    monkeypatch.setattr(web_capture, "_resolve_all", fake_resolve)
+    with pytest.raises(CaptureError):
+        validate_url("https://nope.invalid/")
+
+
+def test_slugify_strips_accents_and_punctuation():
+    assert (
+        web_capture._slugify("Volt Typhoon : Living off the Land (2023) — Microsoft")
+        == "volt-typhoon-living-off-the-land-2023-microsoft"
+    )
+
+
+def test_slugify_truncates():
+    assert len(web_capture._slugify("a" * 200)) == 80
+
+
+def test_slugify_empty_input():
+    assert web_capture._slugify("···") == ""
+
+
+def test_suggest_filename_falls_back_to_host():
+    result = CaptureResult(
+        pdf_path=Path("x.pdf"),
+        final_url="https://thedfirreport.com/a/",
+        title="",
+        bytes_written=1,
+        js_enabled=False,
+        blocked_requests=0,
+    )
+    assert suggest_filename(result) == "thedfirreport-com.pdf"
+
+
+def test_capture_without_playwright_raises(monkeypatch, tmp_path):
+    monkeypatch.setattr(web_capture, "_PLAYWRIGHT_AVAILABLE", False)
+    with pytest.raises(CaptureError, match="Playwright"):
+        web_capture.capture_url_to_pdf("https://example.com/", tmp_path / "o.pdf")
+
+
+def test_blank_render_is_rejected_with_a_javascript_hint(monkeypatch, tmp_path):
+    """
+    A client-rendered page yields a valid PDF that is a blank sheet.
+
+    Locks the cert.gov.ua case: 200 OK, a 944-byte PDF, and zero extractable
+    text. Only a zero-byte guard existed, so the job was created and five
+    pipeline stages ran to build an empty bundle.
+    """
+    captured: dict[str, object] = {}
+
+    class _FakePage:
+        def goto(self, url, **kw):
+            return _FakeResponse(url)
+
+        def wait_for_load_state(self, *a, **kw):
+            return None
+
+        def emulate_media(self, **kw):
+            return None
+
+        def title(self):
+            return "CERT-UA"
+
+        def inner_text(self, selector):
+            return "   "  # a nav shell and nothing else
+
+        def pdf(self, **kw):
+            captured["pdf_written"] = True
+
+    class _FakeResponse:
+        def __init__(self, url):
+            self.url = url
+            self.status = 200
+
+    class _FakeContext:
+        def set_default_timeout(self, *a):
+            return None
+
+        def route(self, *a):
+            return None
+
+        def new_page(self):
+            return _FakePage()
+
+    class _FakeBrowser:
+        def new_context(self, **kw):
+            return _FakeContext()
+
+        def close(self):
+            return None
+
+    class _FakePlaywright:
+        def __init__(self):
+            self.chromium = self
+
+        def launch(self, **kw):
+            return _FakeBrowser()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(web_capture, "_PLAYWRIGHT_AVAILABLE", True)
+    monkeypatch.setattr(web_capture, "sync_playwright", lambda: _FakePlaywright(), raising=False)
+    monkeypatch.setattr(web_capture, "_resolve_all", lambda host: ["93.184.216.34"])
+
+    with pytest.raises(CaptureError) as exc:
+        web_capture.capture_url_to_pdf("https://cert.example/article/1", tmp_path / "o.pdf")
+
+    assert "rendered 3 characters" in str(exc.value)
+    assert "JavaScript" in str(exc.value)
+    # The blank page must be rejected before a PDF is ever written.
+    assert "pdf_written" not in captured
+
+
+def test_launch_hint_names_the_root_sandbox_conflict(monkeypatch):
+    """
+    Running as root with the sandbox on is its own failure, and its own fix.
+
+    Chromium refuses to run as root while sandboxed.  Reported as a generic
+    "could not start" it sends the reader to reinstall a browser that is already
+    there, which is what happened in practice.
+    """
+    monkeypatch.setattr(web_capture.os, "geteuid", lambda: 0, raising=False)
+    msg = web_capture._launch_hint(Exception("Failed to launch"), sandboxed=True)
+    assert "running as root" in msg
+    assert web_capture._UNSANDBOXED_ENV in msg
+    assert "Underlying error: Failed to launch" in msg
+
+
+def test_launch_hint_names_a_missing_browser(monkeypatch):
+    monkeypatch.setattr(web_capture.os, "geteuid", lambda: 1000, raising=False)
+    msg = web_capture._launch_hint(
+        Exception("Executable doesn't exist at /root/.cache/ms-playwright/..."),
+        sandboxed=True,
+    )
+    assert "not installed for the account" in msg
+    assert "playwright install chromium" in msg
+
+
+def test_launch_hint_always_carries_the_underlying_reason(monkeypatch):
+    """The first version swallowed it, which is what made the report unactionable."""
+    monkeypatch.setattr(web_capture.os, "geteuid", lambda: 1000, raising=False)
+    msg = web_capture._launch_hint(Exception("libasound.so.2: cannot open"), sandboxed=False)
+    assert "libasound.so.2" in msg
+    assert "install-deps" in msg

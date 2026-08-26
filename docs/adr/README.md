@@ -31,6 +31,7 @@ choice, and the consequences. They're append-only — supersede rather than rewr
 | [0026](0026-pin-budget-allocation-and-synthesis-stats.md) | Per-rule budget for policy pins + `x_synthesis_stats` (max-min fair share replaces rank-order starvation: 20 → 46 rules served across 4 bundles; 18,426 candidates for a budget of 200) | Proposed |
 | [0027](0027-evidence-gated-pin-materialisation.md) | Evidence-gated pin materialisation, anchorable types only (SCOs/malware/tool 91–100% verbatim; `attack-pattern` 24.3%, `indicator` 0% by name but 96.3% by pattern value — 47% of candidates fail open by design) | Proposed |
 | [0028](0028-ttp-evidence-contract.md) | TTPs must quote, not describe — `TTPExtracted` gains `evidence_text`/`evidence_label` (relationship quotes locate at 79.4%, TTP descriptions at 36.8%, same call; 99.4% of failures are paraphrase, not invention) | Proposed |
+| [0029](0029-pasted-text-and-captured-url-ingestion.md) | Pasted text and captured URLs as ingestion sources — Chromium renders the archive, the DOM text is what gets ingested (the PDF keeps 99.6% of characters but only 72.2% of observables: 9 of 12 hashes lost to a wrapped table column; JS off is both the security and the functional default — Unit 42 serves 0 chars to a JS-enabled headless browser) | Proposed |
 
 **Numbering notes**
 - `0001` and `0003` are unused gaps (early informal decisions never filed).
@@ -138,4 +139,14 @@ choice, and the consequences. They're append-only — supersede rather than rewr
        Reverses 0004 P1-A's SecureBERT-Plus pick for the unlabeled
        similarity setting (ATT&CK-BERT wins there; CTI-pretrained
        encoders do not consistently beat generic ones)
+
+0029 ingestion entry points (paste, URL capture)
+   stands alone: it adds ways IN, and converges on the file-on-disk
+   contract every later ADR already assumes.  Nothing downstream of
+   Stage 1 can tell an uploaded file from a pasted excerpt or a
+   rendered page -- which is why it depends on none of the above and
+   none of the above changes.  Its own finding is about the library,
+   not the pipeline: Playwright defaults chromium_sandbox to False and
+   appends --no-sandbox itself, so the careful arg list read correct
+   while the sandbox was off
 ```

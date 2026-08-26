@@ -188,3 +188,65 @@ export async function downloadExportSelection(
   const filename = match ? match[1] : 'detection_rules.zip'
   return { blob: await res.blob(), filename }
 }
+
+// Alternative ingestion — pasted text and captured web pages (ADR-0029).
+// Both land in the same job queue as an uploaded file.
+
+export interface IngestResponse {
+  job_id: string
+  filename: string
+  status: string
+}
+
+export interface UrlIngestResponse extends IngestResponse {
+  source_url: string
+  blocked_requests: number
+}
+
+export const ingestText = (body: {
+  text: string
+  title?: string | null
+  tlp_level?: string | null
+  pap_level?: string | null
+}) => req<IngestResponse>('/ingest/text', { method: 'POST', body: JSON.stringify(body) })
+
+export const ingestUrl = (body: {
+  url: string
+  enable_js?: boolean
+  tlp_level?: string | null
+  pap_level?: string | null
+}) => req<UrlIngestResponse>('/ingest/url', { method: 'POST', body: JSON.stringify(body) })
+
+/**
+ * Pull the human-readable message out of an Error thrown by `req`.
+ *
+ * `req` throws `Error("<status>: <raw body>")` and FastAPI's body is
+ * `{"detail": "..."}`, so a raw message reaches the user as
+ * `400: {"detail":"Port 11434 is not allowed."}`.  This unwraps both layers and
+ * falls back to the original message when the body is not FastAPI JSON.
+ */
+export function errorDetail(err: unknown): string {
+  if (!(err instanceof Error)) {
+    return String(err)
+  }
+  const idx = err.message.indexOf(': ')
+  if (idx === -1) {
+    return err.message
+  }
+  const body = err.message.slice(idx + 2)
+  try {
+    const parsed: unknown = JSON.parse(body)
+    if (
+      parsed !== null &&
+      typeof parsed === 'object' &&
+      'detail' in parsed &&
+      typeof (parsed as { detail: unknown }).detail === 'string' &&
+      (parsed as { detail: string }).detail.length > 0
+    ) {
+      return (parsed as { detail: string }).detail
+    }
+  } catch {
+    // Not JSON — fall through to raw body
+  }
+  return body.length > 0 ? body : err.message
+}

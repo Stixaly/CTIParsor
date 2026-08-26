@@ -195,6 +195,16 @@ def get_source_file(job_id: str):
     if not matches:
         raise HTTPException(404, "Source file not found — it may have been removed")
 
+    # A URL capture writes two files under this job id: the .pdf the analyst
+    # should look at, and the .txt the pipeline actually ingested (ADR-0029).
+    # Glob order is arbitrary, so pick the one meant for the viewer rather than
+    # whichever the filesystem listed first; `.pdf.part` is a capture that timed
+    # out mid-render and must never be served.
+    matches = [m for m in matches if m.suffix.lower() != ".part"]
+    if not matches:
+        raise HTTPException(404, "Source file not found — it may have been removed")
+    matches.sort(key=lambda m: (m.suffix.lower() != ".pdf", m.name))
+
     fpath     = matches[0]
     mime, _   = mimetypes.guess_type(str(fpath))
     mime      = mime or "application/octet-stream"

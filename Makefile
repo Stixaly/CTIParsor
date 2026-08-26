@@ -2,7 +2,7 @@ PYTHON   = .venv/bin/python
 PIP      = .venv/bin/pip
 UVICORN  = .venv/bin/uvicorn
 
-.PHONY: setup install install-api download-mitre build-indexes \
+.PHONY: setup install install-api install-capture download-mitre build-indexes \
         model test test-fast run run-dir \
         api api-dev frontend-install frontend-build frontend-dev \
         check check-docs clean \
@@ -23,6 +23,16 @@ install:
 ## Install API packages only
 install-api:
 	$(PIP) install -r requirements-api.txt
+
+## Install web capture (URL -> PDF ingestion): Playwright + a headless Chromium.
+## The system libraries need root and are NOT installed here -- that step is what
+## fixes the opaque "error while loading shared libraries: libasound.so.2" failure.
+install-capture:
+	$(PIP) install playwright
+	$(PYTHON) -m playwright install chromium
+	@echo ""
+	@echo "System libraries need root. Run:"
+	@echo "    sudo $(PYTHON) -m playwright install-deps chromium"
 
 # ── MITRE Data ───────────────────────────────────────────────────────────────
 

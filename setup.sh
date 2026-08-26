@@ -9,6 +9,7 @@
 #   bash setup.sh --no-mitre   # skip MITRE bundle download + index build
 #   bash setup.sh --no-spacy   # skip optional spaCy model download
 #   bash setup.sh --no-corpora # skip Sigma detection-corpora clone (~525 MB)
+#   bash setup.sh --no-capture # skip Playwright + Chromium (disables URL ingestion)
 # =============================================================================
 
 set -e
@@ -29,6 +30,7 @@ OPT_NO_TORCH=false
 OPT_NO_MITRE=false
 OPT_NO_SPACY=false
 OPT_NO_CORPORA=false
+OPT_NO_CAPTURE=false
 
 for arg in "$@"; do
   case $arg in
@@ -36,6 +38,7 @@ for arg in "$@"; do
     --no-mitre)   OPT_NO_MITRE=true ;;
     --no-spacy)   OPT_NO_SPACY=true ;;
     --no-corpora) OPT_NO_CORPORA=true ;;
+    --no-capture) OPT_NO_CAPTURE=true ;;
   esac
 done
 
@@ -651,6 +654,81 @@ fi
 # =============================================================================
 # FINAL IMPORT VERIFICATION
 # =============================================================================
+# WEB CAPTURE  (URL → PDF ingestion — optional)
+# =============================================================================
+echo ""
+hdr "WEB CAPTURE  (URL → PDF)"
+
+# Read by the summary block at the end of this script.  Only a real Chromium
+# launch sets it: `playwright install chromium` succeeds without the system
+# libraries and the browser then dies at runtime, so an import check lies.
+CAPTURE_READY=false
+
+if [ "$OPT_NO_CAPTURE" = true ]; then
+    warn "--no-capture: skipping Playwright / Chromium install."
+    info "  The 'File' and 'Paste' tabs work as usual. Only the 'URL' tab will return a 503."
+else
+    echo "  The URL tab renders a web page to PDF server-side, then ingests it."
+    echo "  It needs Playwright + a Chromium build (~170 MB) and a set of system"
+    echo "  libraries. JavaScript stays DISABLED unless the analyst enables it"
+    echo "  per capture, and the Chromium sandbox is kept on."
+    echo ""
+
+    CAPTURE_WANTED=true
+
+    if python -c "from playwright.sync_api import sync_playwright" 2>/dev/null; then
+        ok "Playwright Python package already installed"
+    else
+        echo -e "  ${YELLOW}Install Playwright and a headless Chromium (~170 MB)? [Y/n]${NC}"
+        read -r -p "  > " DL_CAPTURE
+        DL_CAPTURE="${DL_CAPTURE:-Y}"
+
+        if [[ "$DL_CAPTURE" =~ ^[Nn] ]]; then
+            info "Skipping Playwright install. The URL tab will return a 503."
+            CAPTURE_WANTED=false
+        else
+            info "Installing Playwright…"
+            pip install -q playwright || { warn "pip install playwright failed."; CAPTURE_WANTED=false; }
+        fi
+    fi
+
+    if [ "$CAPTURE_WANTED" = true ]; then
+        info "Downloading Chromium for Playwright…"
+        python -m playwright install chromium || { warn "Chromium download failed."; }
+    fi
+
+    if [ "$CAPTURE_WANTED" = true ]; then
+        if sudo -n true 2>/dev/null; then
+            info "Installing system dependencies for Chromium…"
+            python -m playwright install-deps chromium || { warn "System dependency installation failed."; }
+        else
+            warn "Passwordless sudo is not available. Please run the following command manually:"
+            echo -e "    ${CYAN}sudo .venv/bin/python -m playwright install-deps chromium${NC}"
+            info "  Without these libraries, Chromium fails with 'error while loading shared libraries: libasound.so.2'."
+        fi
+    fi
+
+    if [ "$CAPTURE_WANTED" = true ]; then
+        if python - <<'PYEOF' 2>/dev/null
+from playwright.sync_api import sync_playwright
+with sync_playwright() as p:
+    b = p.chromium.launch(headless=True, chromium_sandbox=True)
+    b.close()
+PYEOF
+        then
+            CAPTURE_READY=true
+            ok "Chromium launches — the URL tab is ready"
+        else
+            warn "Chromium is installed but does not launch."
+            info "  Usually a missing system library (e.g. libasound.so.2)."
+            info "  Fix it with:"
+            echo -e "    ${CYAN}sudo .venv/bin/python -m playwright install-deps chromium${NC}"
+            info "  Until then, the URL tab returns 503 — use the Paste tab."
+        fi
+    fi
+fi
+
+# =============================================================================
 echo ""
 hdr "IMPORT VERIFICATION"
 
@@ -686,6 +764,8 @@ checks = [
     ("sentencepiece",        "sentencepiece",           False),   # CyNER 2.0 tokenizer (Stage 2d)
     ("gliner",               "gliner",                  False),   # Stage 2e — zero-shot NER
     ("spacy",                "spacy",                   False),   # legacy fallback
+    # ── Optional ingestion ─────────────────────────────────────
+    ("playwright",           "playwright",              False),   # ADR-0029 — URL → PDF capture
 ]
 
 GREEN = '\033[0;32m'; YELLOW = '\033[1;33m'; RED = '\033[0;31m'; NC = '\033[0m'
@@ -793,6 +873,14 @@ _check_mod()  { python -c "import $1" 2>/dev/null \
     && echo -e "    ${GREEN}✔${NC} $2" || echo -e "    ${YELLOW}–${NC} $2 (install: pip install $1)"; }
 
 echo -e "    ${GREEN}✔${NC}  Stage 1   — Document ingestion (PDF, DOCX, HTML, TXT, MD)"
+echo -e "    ${GREEN}✔${NC}  Ingest    — File upload + pasted text (ADR-0029)"
+if [ "$CAPTURE_READY" = true ]; then
+    echo -e "    ${GREEN}✔${NC}  Ingest    — URL capture (Chromium renders the page, sandboxed)"
+elif [ "$OPT_NO_CAPTURE" = true ]; then
+    echo -e "    ${YELLOW}–${NC}  Ingest    — URL capture skipped (--no-capture); the URL tab returns 503"
+else
+    echo -e "    ${YELLOW}–${NC}  Ingest    — URL capture NOT ready; the URL tab returns 503 (see step 8)"
+fi
 echo -e "    ${GREEN}✔${NC}  Stage 2   — Regex IoC extraction (IP, hash, domain, CVE, registry, MAC…)"
 _check_file "pipeline/data/gazetteer.json"         "Stage 2b  — Gazetteer NER (1,792 named entities, Aho-Corasick)"
 _check_mod  "sentence_transformers"                "Stage 2c  — Semantic TTP detection (all-MiniLM-L6-v2)"
@@ -848,7 +936,9 @@ echo ""
 echo -e "  ${YELLOW}4.${NC}  Run on a sample report:"
 echo      "       python main.py tests/fixtures/sample_report.txt"
 echo ""
-echo -e "  ${YELLOW}5.${NC}  Launch the web UI:"
+echo -e "  ${YELLOW}5.${NC}  Launch the web UI  ${YELLOW}(not as root)${NC}:"
+echo      "       Chromium will not render URLs as root with its sandbox on,"
+echo      "       so /api/ingest/url returns 503. Leave any sudo shell first."
 if [ "$NODE_OK" = true ]; then
     echo "       uvicorn api.main:app --reload --app-dir ."
     if [ "$IS_WSL" = true ] && [ "$WSL_VERSION" = "WSL2" ]; then
@@ -869,4 +959,12 @@ echo -e "  ${YELLOW}7.${NC}  Detection coverage (if you skipped the corpora step
 echo -e "       ${CYAN}python scripts/sync_corpora.py && python scripts/build_detection_index.py${NC}"
 echo      "       Then open /coverage/<job-id> to select and export rules."
 echo ""
+if [ "$CAPTURE_READY" != true ] && [ "$OPT_NO_CAPTURE" != true ]; then
+echo -e "  ${YELLOW}8.${NC}  Finish web capture (the URL tab needs root once):"
+echo -e "       ${CYAN}sudo .venv/bin/python -m playwright install-deps chromium${NC}"
+echo      "       Chromium is installed but cannot start without those libraries;"
+echo      "       it fails with 'error while loading shared libraries: libasound.so.2'."
+echo      "       Until then use the File or Paste tab — both work."
+echo ""
+fi
 sep
