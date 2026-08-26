@@ -156,6 +156,72 @@ Renders the page with Playwright Chromium and writes **two artefacts**:
 its renderer off. `/jobs/{id}/source` now sorts its glob to prefer the `.pdf`
 rather than trusting filesystem order, and skips `.pdf.part`.
 
+### The page is printed as one tall sheet, not paginated
+
+A4 pagination made the archive worse than the page it archives. Measured on the
+INDUSTROYER.V2 report:
+
+| | A4 (before) | one tall sheet |
+|---|---|---|
+| pages | 25 | **2** |
+| boundaries where content is cut | 24 | **1** |
+| pages with the nav painted over the text | 6 | **0** |
+| garbled text | yes | no |
+
+Two separate causes, and only one was obvious. Page 9 of the A4 output reads
+`Cloud BloSgleep Prior tCoo InEtCac-1t 0s4ales` — the site's `position: sticky`
+nav bar, repainted onto that sheet and interleaved with the article character by
+character. `emulate_media("print")` does **not** fix it: tested, the output is
+byte-identical, because that site ships no print stylesheet. Neutralising
+`position` on every pinned element does, and there were 12 of them.
+
+The second cause is pagination itself: every boundary is a place an image or a
+paragraph is cut. So the document is printed at its own height instead, capped
+at 19,200px — 14,400pt, 200 inches, the largest page Acrobat reads. Long
+articles get two or three tall sheets rather than twenty-five short ones.
+
+`page.evaluate()` does the un-pinning, and works even though the context sets
+`java_script_enabled=False`: that flag stops the page's own scripts, not
+Playwright's injected evaluation.
+
+### What is invisible on screen is destructive on paper
+
+Two more defects surfaced only by capturing reports an analyst actually asked
+for, and neither shows up in a page's own rendering:
+
+**Scrollable containers are cut, not scrolled.** On a Google Cloud Threat
+Intelligence post, two `<pre>` blocks measure 952px and 1071px inside a 739px
+column, with `overflow-x: auto`. On screen the reader drags them sideways; on
+paper 22% and 31% of two command listings were simply missing. Expanding the
+scrollers and switching `pre`/`nowrap` to `pre-wrap` before printing recovered
+**530 characters of code**. `overflow: hidden` is left alone — that is usually a
+layout decision rather than content parked behind a scrollbar.
+
+**JavaScript lazy-loaders leave the figures behind.** With page scripts
+disabled, a loader that parks its URL in `data-src` never copies it into `src`,
+so the browser never requests the image. On the unit42 Aeternum report, which
+uses lozad.js, **31 of 98 images had no `src` at all**:
+
+| | before | after |
+|---|---|---|
+| distinct images embedded | 11 | **32** |
+| of those, figures ≥400px | 10 | **26** |
+| file size | 2.8 MB | **9.5 MB** |
+
+Every one of the 11 was an icon or a logo — not a single figure of the report.
+The fix makes that copy from `data-src`/`data-srcset` itself and waits, bounded,
+for the images to arrive. It runs no page script: `page.evaluate` works with
+`java_script_enabled=False`, and the URLs it causes to be fetched still pass
+through the request filter.
+
+**Known cosmetic gap.** One of three sites tested (welivesecurity.com) still
+emits a trailing blank sheet. It is not a height problem: adding 16px, 200px and
+1,000px of slack all produce the same two pages, the lowest element on the page
+sits 20px above the fold, and the page declares no `break-before`/`break-after`
+rules. A slack constant was written and then removed, because its stated reason
+did not survive measurement. The sheet is empty — no text, no images — so it
+costs a scroll, not content.
+
 A capture whose DOM renders fewer than 200 characters is **refused**, with a
 message naming JavaScript as the likely cause. cert.gov.ua is why: it is fully
 client-rendered, so with JS off it produced a valid 944-byte PDF containing a

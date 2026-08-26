@@ -70,14 +70,44 @@ sections group by theme rather than strict semver.
 - **One "New report" modal replaces the three-tab ingest panel.**  A single
   field works out whether it was handed prose, a URL, or a dropped file, so the
   tab click before the most common action is gone; the dashboard gets a page-wide
-  drop target, a ⌘N / Ctrl+N shortcut, and denser kanban cards (the status pill
-  was saying the same thing as the column it sat in, so it became a dot and a
-  row disappeared).
+  drop target and denser kanban cards (the status pill was saying the same thing
+  as the column it sat in, so it became a dot and a row disappeared).
+
+  The design called for a ⌘N / Ctrl+N shortcut and it was built, then removed:
+  both are reserved by the browser for "new window" and never reach the page, so
+  `preventDefault()` cannot claim them. It worked on no platform, while the badge
+  on the button promised that it did.
 
   **Behaviour change worth noting: TLP and PAP no longer default to `AMBER`.**
   They start unset and gate submission — the button reads "Set TLP & PAP to
   continue" until both are chosen, and they reset every time the modal opens.
   Every marking in `object_marking_refs` is now a decision rather than a default.
+
+- **Captured pages print as one tall sheet instead of 25 A4 pages.**  On the
+  INDUSTROYER.V2 report the archive went from 25 pages to 2, from 24 places
+  where an image or paragraph is cut to 1, and from 6 pages with the site's
+  sticky nav painted over the article text to none.  Page 9 of the old output
+  read `Cloud BloSgleep Prior tCoo InEtCac-1t 0s4ales` — the nav bar interleaved
+  with the prose, character by character.  `emulate_media("print")` was tried
+  first and changed nothing at all: that site ships no print stylesheet.  The
+  fix is to neutralise `position: fixed`/`sticky` before printing (12 elements
+  on that page) and to size the sheet to the document, capped at 14,400pt — the
+  largest page Acrobat will read.
+
+- **Captured pages keep their code blocks and their figures.**  Two defects that
+  only show on paper, both found on reports an analyst asked to capture:
+
+  A container that scrolls on screen is a container that is *cut* in a PDF.  Two
+  `<pre>` blocks 952px and 1071px wide inside a 739px column lost 22% and 31% of
+  two command listings; expanding scrollers and wrapping `pre` before printing
+  recovered **530 characters of code**.
+
+  A JavaScript lazy-loader parks its URL in `data-src`, and with page scripts
+  disabled nothing ever copies it into `src` — so the browser never fetches the
+  image.  On a report using lozad.js, **31 of 98 images had no `src`**, and the
+  archive held 11 distinct images, every one an icon.  Making that copy directly
+  takes it to **32, of which 26 are figures**, and the file from 2.8 MB to
+  9.5 MB.  No page script runs, and the images still pass the request filter.
 
 - **A full-screen composer for pasted reports.**  The inline box in the
   dashboard panel is 180 px — about nine lines of a 50,000-character report —
