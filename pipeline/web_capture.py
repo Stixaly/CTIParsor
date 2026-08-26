@@ -23,9 +23,16 @@ import unicodedata
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit, urlunsplit
 
 from api.logging_config import get_logger
+
+if TYPE_CHECKING:
+    # Type-only: `new_context(viewport=…)` wants the ViewportSize TypedDict, and
+    # a plain dict[str, int] does not satisfy it.  Imported under TYPE_CHECKING
+    # so the module still loads when Playwright is not installed.
+    from playwright.sync_api import ViewportSize
 
 logger = get_logger(__name__)
 
@@ -123,7 +130,7 @@ _UNSANDBOXED_ENV = "CTIPARSOR_CAPTURE_UNSANDBOXED"
 
 _DEFAULT_TIMEOUT_MS = 30_000
 _MAX_PDF_BYTES = 50 * 1024 * 1024
-_VIEWPORT = {"width": 1280, "height": 1696}
+_VIEWPORT: ViewportSize = {"width": 1280, "height": 1696}
 
 # A client-rendered page yields a PDF that is a valid file and a blank sheet.
 # cert.gov.ua is one: with JavaScript off its body is 0 characters, and the
@@ -198,10 +205,14 @@ def _resolve_all(host: str) -> list[str]:
     except (socket.gaierror, UnicodeError, OSError) as e:
         raise CaptureError(f"Cannot resolve host: {host}") from e
 
-    seen = set()
-    unique_ips = []
+    seen: set[str] = set()
+    unique_ips: list[str] = []
     for entry in results:
-        ip = entry[4][0]
+        # sockaddr is (host, port) for AF_INET and a 4-tuple for AF_INET6, so
+        # typeshed widens element 0 to `str | int`.  It is always the address
+        # string for the two families asked for here; str() makes that explicit
+        # rather than leaving the list typed `list[str | int]`.
+        ip = str(entry[4][0])
         if ip not in seen:
             seen.add(ip)
             unique_ips.append(ip)
@@ -402,7 +413,7 @@ def capture_url_to_pdf(
                 bypass_csp=False,
                 service_workers="block",
                 user_agent=_USER_AGENT,
-                viewport=dict(_VIEWPORT),
+                viewport=_VIEWPORT,
                 locale="en-US",
                 extra_http_headers={"Accept-Language": "en-US,en;q=0.9"},
             )
