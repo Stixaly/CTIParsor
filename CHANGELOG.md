@@ -6,6 +6,98 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Added
+- **Two more ways to start a job: paste text, or give a URL** (ADR-0029).  Both
+  land exactly where an upload lands — a file under `uploads/{job_id}`, a `jobs`
+  row, `run_pipeline_async` — so nothing downstream of Stage 1 knows the
+  difference, including the source viewer and `_delete_job_files`.
+
+  `POST /api/ingest/text` stores the paste as `.md` when at least 2 of 6
+  Markdown signals match, `.txt` otherwise.
+
+  `POST /api/ingest/url` renders the page with a headless Chromium.  A plain
+  HTTP fetch was tried first and rejected on measurement: the Microsoft security
+  blog answers **403** to any non-browser client, and on a DFIR Report post the
+  usual `article`/`main` heuristic returns **506 characters of 50,800** — the
+  page has no `<article>` element at all.
+
+  The capture writes **two artefacts**, and they are not interchangeable: the
+  `.pdf` is the archive the analyst reviews, the rendered DOM text is what the
+  pipeline ingests.  Measured over 7 CTI reports, ingesting the PDF instead
+  keeps **99.6% of the characters and 72.2% of the observables** — on the
+  COLDRIVER report, 9 of 12 SHA-256 hashes are destroyed, because the IOC table
+  renders in a narrow column and each 64-character hash wraps into 24-character
+  fragments that the text layer interleaves with the neighbouring cells.
+  Keeping the prose and losing the IOC table is the worst available trade.
+
+  A capture whose DOM renders under 200 characters is **refused**, naming
+  JavaScript as the likely cause.  cert.gov.ua is fully client-rendered and
+  produced a valid 944-byte PDF containing a blank page — a zero-byte check does
+  not catch that, and the pipeline would have run five stages on nothing.
+
+  The capture assumes the page is hostile, because the URL comes from a report
+  about an adversary:
+
+  - JavaScript **off** unless the analyst opts in per capture — which also turns
+    out to be what makes capture work at all: unit42.paloaltonetworks.com serves
+    a **0-character** body to a JS-enabled headless browser (bot protection) and
+    **25,909** characters with JS off, because the blanking script never runs;
+  - every URL — the page and each subresource — checked for scheme, port,
+    credentials, blocked host, and **every** resolved address being public.  One
+    private answer among several rejects it, which is what stops DNS rebinding;
+  - only `document`/`stylesheet`/`image`/`font` allowed through the context;
+  - **the Chromium sandbox forced back on.**  Playwright's `launch()` defaults
+    `chromium_sandbox` to `False` and appends `--no-sandbox` itself, so an
+    argument list written specifically to avoid it still ran unsandboxed.
+
+  Playwright is an **optional** dependency: absent, `/api/ingest/url` answers
+  503 and the UI points at the Paste tab.  `make install-capture` installs it;
+  `setup.sh` gained a `--no-capture` flag and ends its capture section with a
+  real Chromium launch, because `playwright install chromium` succeeds without
+  the system libraries and then dies at runtime with
+  `error while loading shared libraries: libasound.so.2`.
+
+- **One "New report" modal replaces the three-tab ingest panel.**  A single
+  field works out whether it was handed prose, a URL, or a dropped file, so the
+  tab click before the most common action is gone; the dashboard gets a page-wide
+  drop target, a ⌘N / Ctrl+N shortcut, and denser kanban cards (the status pill
+  was saying the same thing as the column it sat in, so it became a dot and a
+  row disappeared).
+
+  **Behaviour change worth noting: TLP and PAP no longer default to `AMBER`.**
+  They start unset and gate submission — the button reads "Set TLP & PAP to
+  continue" until both are chosen, and they reset every time the modal opens.
+  Every marking in `object_marking_refs` is now a decision rather than a default.
+
+- **A full-screen composer for pasted reports.**  The inline box in the
+  dashboard panel is 180 px — about nine lines of a 50,000-character report —
+  and on a 1280×620 window the "Ingest text" button sat **34 px below the fold**
+  with the TLP/PAP selects 88 px below it, so the analyst could see neither what
+  they had pasted nor how to submit it.  An **Expand** button opens a modal
+  composer: the textarea fills the dialog (363 px on that same window), TLP/PAP
+  and the submit button ride in its footer, Escape and a backdrop click close
+  it, and the text is shared with the inline tab in both directions.
+
+  The backdrop closes on `mousedown`, not `click`: with `click`, a text
+  selection that starts inside the textarea and releases on the backdrop would
+  dismiss the dialog and discard the paste.
+
+  The URL tab's controls now wrap instead of overflowing on a narrow window.
+
+- **The server must not run as root**, now that the Chromium sandbox is forced
+  on: Chromium refuses to run as root while sandboxed, so `/api/ingest/url`
+  answers 503 from a `sudo su` shell.  Documented in the README quick start and
+  in `setup.sh`'s next steps.  A browser that cannot launch now raises
+  `CaptureUnavailable` → **503** instead of escaping as a 500 ASGI traceback, and
+  the message separates the three causes — running as root, a browser installed
+  under a different account's HOME, or a missing system library — and always
+  quotes the underlying Playwright error.  `make check` launches a real Chromium
+  rather than importing the package, which is what reported a green tick while
+  the endpoint was failing.
+
+- `scripts/measure_web_capture.py` — measures what the PDF round-trip costs:
+  character retention against the DOM, and how many IOCs survive it.
+
 ### Fixed
 - **Stage 2c's evidence was being thrown away at the merge.** The semantic
   matcher *selects* a sentence from the report, so its evidence is verbatim by

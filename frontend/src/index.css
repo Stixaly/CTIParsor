@@ -1403,3 +1403,16 @@ html[data-theme="dark"] .rel-ev-hl {
   dominant-baseline: central; text-anchor: middle;
   pointer-events: none;
 }
+
+/* ── Dashboard ingest redesign (ADR-0029) ─────────────────────────────────────
+   Two enter animations, additive: the page-wide drop overlay fades, the New
+   report dialog rises 8px. Kept here rather than inline so both the overlay and
+   the modal reference one definition. */
+@keyframes dashFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes dashModalIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

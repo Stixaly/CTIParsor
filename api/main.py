@@ -23,7 +23,17 @@ from api.db import init_db
 # api/routes/upload.py does `from api.main import limiter` at module level.
 limiter = Limiter(key_func=get_remote_address)
 
-from api.routes import coverage, entities, jobs, policy, progress, relationships, settings, upload
+from api.routes import (
+    coverage,
+    entities,
+    ingest,
+    jobs,
+    policy,
+    progress,
+    relationships,
+    settings,
+    upload,
+)
 
 
 @asynccontextmanager
@@ -86,6 +96,7 @@ app.add_middleware(
 # API routes
 app.include_router(jobs.router)
 app.include_router(upload.router)
+app.include_router(ingest.router)
 app.include_router(entities.router)
 app.include_router(relationships.router)
 app.include_router(progress.router)

@@ -31,6 +31,30 @@ def chk_file(path: str) -> bool:
     return Path(path).exists()
 
 
+def chk_browser() -> bool:
+    """
+    Actually launch Chromium, rather than importing playwright and hoping.
+
+    The import proves only that the Python package is installed.  The browser is
+    a separate download that lands under the invoking account's HOME, so an API
+    running as root cannot see a browser installed by a user — and the system
+    libraries are a third, independent thing.  This check reported a green tick
+    while /api/ingest/url was answering 500s, which is the whole reason it now
+    starts a browser instead.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception:
+        return False
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True, chromium_sandbox=True)
+            browser.close()
+        return True
+    except Exception:
+        return False
+
+
 def detection_store() -> tuple[int, int] | None:
     """(rule count, rules with no recorded body size), or None if not built.
 
@@ -78,6 +102,11 @@ rows: list[tuple[str, bool, str]] = [
     ("Stage 5  — STIX validation",
      chk_import("stix2validator"), "pip install stix2-validator"),
     ("Web API  — FastAPI backend",         chk_import("fastapi"),      "pip install fastapi"),
+    # ADR-0029.  The import succeeding only proves the Python package is there;
+    # Chromium still needs its system libraries, and without them it dies at
+    # launch with "error while loading shared libraries: libasound.so.2".
+    ("Ingest    — URL capture (Playwright)",
+     chk_import("playwright"), "make install-capture"),
 ]
 
 _store = detection_store()

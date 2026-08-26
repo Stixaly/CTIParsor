@@ -1,18 +1,25 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import {
-  Upload, Trash2, Eye, GitGraph, ShieldCheck, Download, FileText,
-  Loader2, X, Play, Clock, AlertTriangle,
-} from 'lucide-react'
-import { fetchJobs, uploadFile, updateJobStatus, deleteJob, fetchBundle } from '../api/client'
-import type { Job, JobStatus, MarkingLevel } from '../types'
-import { MARKING_LEVELS } from '../types'
+import { Plus, Loader2 } from 'lucide-react'
+import { fetchJobs, updateJobStatus, deleteJob, fetchBundle } from '../api/client'
+import type { Job, JobStatus } from '../types'
 import ProgressModal from '../components/ProgressModal'
+import NewReportModal from '../components/NewReportModal'
+import KanbanCard from '../components/dashboard/KanbanCard'
+import ActivityCard from '../components/dashboard/ActivityCard'
 
 // ── Design tokens (fonts as constants — avoids repeating the fallback stack) ──
 
 const SERIF = "'Source Serif 4', Georgia, serif"
+
+// Shortcut badge on the New report button.  Empty on touch, where there is no
+// keyboard to press it with and the badge would just be noise.
+const NEW_REPORT_HINT: string =
+  typeof navigator === 'undefined' ? ''
+    : /iPhone|iPad|Android/i.test(navigator.userAgent) ? ''
+    : /Mac/i.test(navigator.platform) ? '⌘N'
+    : 'Ctrl+N'
 const MONO  = "'JetBrains Mono', ui-monospace, monospace"
 
 // ── Column definitions ────────────────────────────────────────────────────────
@@ -52,37 +59,6 @@ function computeAvgTurnaround(jobs: Job[]): string | null {
   return `${(avg / 60).toFixed(1)}h`
 }
 
-// ── StatusPill ────────────────────────────────────────────────────────────────
-
-const STATUS_META: Record<JobStatus, { label: string; color: string }> = {
-  uploaded:   { label: 'Queued',      color: 'var(--ink-4)' },
-  processing: { label: 'Processing',  color: 'var(--accent)' },
-  for_review: { label: 'For review',  color: 'var(--warn)' },
-  reviewing:  { label: 'Reviewing',   color: 'var(--accent)' },
-  completed:  { label: 'Completed',   color: 'var(--ok)' },
-  failed:     { label: 'Failed',      color: 'var(--no)' },
-}
-
-function StatusPill({ status }: { status: JobStatus }) {
-  const m = STATUS_META[status]
-  return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 4,
-      fontSize: 10, fontWeight: 600, letterSpacing: '0.03em',
-      padding: '2px 7px', borderRadius: 20,
-      color: m.color,
-      background: `color-mix(in oklab, ${m.color} 13%, transparent)`,
-      flexShrink: 0,
-    }}>
-      <span style={{
-        width: 5, height: 5, borderRadius: '50%',
-        background: m.color, flexShrink: 0,
-      }} />
-      {m.label}
-    </span>
-  )
-}
-
 // ── StatTile ──────────────────────────────────────────────────────────────────
 
 function StatTile({ n, label, sub, tone, borderLeft }: {
@@ -120,242 +96,22 @@ function StatTile({ n, label, sub, tone, borderLeft }: {
   )
 }
 
-// ── Small action button ───────────────────────────────────────────────────────
-
-const SM: React.CSSProperties = {
-  fontSize: 11, padding: '5px 9px', gap: 5,
-  display: 'flex', alignItems: 'center',
-}
-
-function ActBtn({ label, icon, onClick, primary, danger }: {
-  label?: string
-  icon: React.ReactNode
-  onClick: (e: React.MouseEvent) => void
-  primary?: boolean
-  danger?: boolean
-}) {
-  return (
-    <button
-      className={primary ? 'btn-primary' : 'btn-ghost'}
-      style={{ ...SM, ...(danger ? { color: 'var(--no)' } : {}) }}
-      onClick={e => { e.stopPropagation(); onClick(e) }}
-    >
-      {icon}
-      {label}
-    </button>
-  )
-}
-
-// ── KanbanCard ────────────────────────────────────────────────────────────────
-
-function KanbanCard({ job, selected, onSelect, onAnalyse, onDelete, onDownload, onGraph, onCoverage }: {
-  job: Job
-  selected: boolean
-  onSelect: () => void
-  onAnalyse: () => void
-  onDelete: () => void
-  onDownload: () => void
-  onGraph: () => void
-  onCoverage: () => void
-}) {
-  const [hovered, setHovered] = useState(false)
-  const hasCounts = job.entity_count !== undefined
-
-  return (
-    <article
-      onClick={onSelect}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        background: 'var(--bg)',
-        border: `1px solid ${
-          selected ? 'var(--accent)' : hovered ? 'var(--rule)' : 'var(--rule-soft)'
-        }`,
-        borderRadius: 9,
-        padding: 12,
-        cursor: 'pointer',
-        display: 'flex', flexDirection: 'column', gap: 9,
-        transition: 'border-color .12s ease, box-shadow .12s ease, transform .12s ease',
-        boxShadow: selected
-          ? '0 0 0 2px color-mix(in oklab, var(--accent) 22%, transparent)'
-          : hovered ? 'var(--shadow-card)' : 'none',
-      }}
-    >
-      {/* File icon + title */}
-      <header style={{ display: 'flex', alignItems: 'flex-start', gap: 6, minWidth: 0 }}>
-        <FileText size={13} style={{ color: 'var(--ink-4)', flexShrink: 0, marginTop: 2 }} />
-        <h3 style={{
-          margin: 0, minWidth: 0,
-          fontFamily: SERIF, fontSize: 15, fontWeight: 600, lineHeight: 1.3,
-          color: 'var(--ink)',
-          // 2-line clamp
-          display: '-webkit-box',
-          WebkitLineClamp: 2,
-          WebkitBoxOrient: 'vertical' as const,
-          overflow: 'hidden',
-        } as React.CSSProperties}>
-          {job.original_filename}
-        </h3>
-      </header>
-
-      {/* Meta: entities · relationships */}
-      <div style={{ fontSize: 10.5, fontFamily: MONO, color: 'var(--ink-3)' }}>
-        {hasCounts
-          ? `${job.entity_count} entities · ${job.relationship_count ?? 0} relationships`
-          : 'awaiting extraction'
-        }
-      </div>
-
-      {/* Footer: relative time + status pill */}
-      <footer style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
-      }}>
-        <span style={{
-          display: 'flex', alignItems: 'center', gap: 4,
-          fontSize: 11, fontFamily: MONO, color: 'var(--ink-4)',
-        }}>
-          <Clock size={11} />
-          {relTime(job.updated_at)}
-        </span>
-        <StatusPill status={job.status} />
-      </footer>
-
-      {/* Status-aware actions */}
-      <div
-        style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' }}
-        onClick={e => e.stopPropagation()}
-      >
-        {job.status === 'for_review' && (
-          <ActBtn
-            label="Analyse" primary
-            icon={<Play size={10} />}
-            onClick={onAnalyse}
-          />
-        )}
-        {job.status === 'reviewing' && (
-          <ActBtn
-            label="Resume" primary
-            icon={<Eye size={10} />}
-            onClick={onAnalyse}
-          />
-        )}
-        {job.status === 'completed' && (
-          <>
-            <ActBtn
-              label="Open" primary
-              icon={<Eye size={10} />}
-              onClick={onAnalyse}
-            />
-            <ActBtn
-              icon={<GitGraph size={10} />}
-              onClick={onGraph}
-            />
-            <ActBtn
-              label="Coverage"
-              icon={<ShieldCheck size={10} />}
-              onClick={onCoverage}
-            />
-            <ActBtn
-              icon={<Download size={10} />}
-              onClick={onDownload}
-            />
-          </>
-        )}
-        {/* Trash — always last */}
-        <ActBtn
-          icon={<Trash2 size={10} />}
-          onClick={onDelete}
-          danger
-          {...{ style: { marginLeft: 'auto' } }}
-        />
-      </div>
-    </article>
-  )
-}
-
-// ── ActivityCard ──────────────────────────────────────────────────────────────
-
-function ActivityCard({ job, onViewProgress, onDelete }: {
-  job: Job
-  onViewProgress: () => void
-  onDelete: () => void
-}) {
-  const isFailed = job.status === 'failed'
-  return (
-    <div style={{
-      background: isFailed
-        ? 'color-mix(in oklab, var(--no) 4%, var(--bg-elev))'
-        : 'var(--bg-elev)',
-      border: `1px solid ${isFailed
-        ? 'color-mix(in oklab, var(--no) 40%, var(--rule))'
-        : 'var(--rule)'}`,
-      borderRadius: 10,
-      padding: '11px 13px',
-      display: 'flex', flexDirection: 'column', gap: 7,
-    }}>
-      {/* Top row: status icon + filename + dismiss */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-        {isFailed
-          ? <AlertTriangle size={13} style={{ color: 'var(--no)', flexShrink: 0 }} />
-          : <Loader2 size={13} className="animate-spin" style={{ color: 'var(--accent)', flexShrink: 0 }} />
-        }
-        <span style={{
-          flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          fontSize: 12.5, fontWeight: 600, color: 'var(--ink)',
-        }}>
-          {job.original_filename}
-        </span>
-        <button
-          onClick={onDelete}
-          title="Remove job"
-          style={{
-            background: 'none', border: 'none', padding: 3, cursor: 'pointer',
-            color: 'var(--ink-4)', display: 'flex', flexShrink: 0,
-          }}
-        >
-          <X size={12} />
-        </button>
-      </div>
-
-      {/* Processing: "View progress" link → opens ProgressModal */}
-      {!isFailed && (
-        <button
-          onClick={onViewProgress}
-          style={{
-            background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-            fontSize: 11, color: 'var(--accent)',
-            textAlign: 'left', textDecoration: 'underline',
-          }}
-        >
-          View progress →
-        </button>
-      )}
-
-      {/* Failed: timestamp */}
-      {isFailed && (
-        <span style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>
-          Pipeline failed · {relTime(job.updated_at)}
-          {/* Retry requires a backend re-queue endpoint — not yet implemented */}
-        </span>
-      )}
-    </div>
-  )
-}
-
 // ── Dashboard page ────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
   const navigate = useNavigate()
   const qc = useQueryClient()
 
-  // Local state
+  // Local state.  Everything an ingestion needs — the source, the markings, the
+  // file input — lives inside NewReportModal.  The Dashboard keeps only what it
+  // owns: which job the progress modal follows, which card is selected, and the
+  // page-level drag that opens the modal with a file already attached.
   const [activeJobId, setActiveJobId]       = useState<string | null>(null)
   const [activeFilename, setActiveFilename] = useState('')
-  const [dragOver, setDragOver]             = useState(false)
   const [selectedId, setSelectedId]         = useState<string | null>(null)
-  const [tlpLevel, setTlpLevel]             = useState<MarkingLevel>('AMBER')
-  const [papLevel, setPapLevel]             = useState<MarkingLevel>('AMBER')
-  const fileRef = useRef<HTMLInputElement>(null)
+  const [modalOpen, setModalOpen]           = useState(false)
+  const [pendingFile, setPendingFile]       = useState<File | null>(null)
+  const [pageDrag, setPageDrag]             = useState(false)
 
   // ── Queries & mutations ──────────────────────────────────────────────────
 
@@ -363,15 +119,6 @@ export default function Dashboard() {
     queryKey: ['jobs'],
     queryFn: fetchJobs,
     refetchInterval: 3000,
-  })
-
-  const uploadMutation = useMutation({
-    mutationFn: (file: File) => uploadFile(file, { tlpLevel, papLevel }),
-    onSuccess: (data) => {
-      setActiveJobId(data.job_id)
-      setActiveFilename(data.filename)
-      qc.invalidateQueries({ queryKey: ['jobs'] })
-    },
   })
 
   const deleteMutation = useMutation({
@@ -382,16 +129,51 @@ export default function Dashboard() {
 
   // ── Handlers (existing logic, unchanged) ─────────────────────────────────
 
-  const handleFiles = useCallback((files: FileList | null) => {
-    if (!files?.length) return
-    uploadMutation.mutate(files[0])
-  }, [uploadMutation])
+  const openModal = useCallback((file?: File | null) => {
+    setPendingFile(file ?? null)
+    setModalOpen(true)
+  }, [])
 
-  const handleDrop = (e: React.DragEvent) => {
+  // Closing always clears pendingFile: without it, a file dropped once would be
+  // re-attached by the modal's initialFile effect the next time ⌘N opens it.
+  const closeModal = useCallback(() => {
+    setModalOpen(false)
+    setPendingFile(null)
+  }, [])
+
+  // ⌘N / Ctrl+N opens the modal; Escape clears the drag overlay.  The modal
+  // owns its own Escape handling, so this one only unsticks the overlay.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n') {
+        e.preventDefault()
+        setModalOpen(true)
+      } else if (e.key === 'Escape') {
+        setPageDrag(false)
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
+
+  const handlePageDragOver = (e: React.DragEvent) => {
     e.preventDefault()
-    setDragOver(false)
-    // Guard: don't start a second upload while one is already in progress
-    if (!isPending) handleFiles(e.dataTransfer.files)
+    setPageDrag(true)
+  }
+
+  // relatedTarget is null only when the pointer leaves the window entirely.
+  // Clearing on every child boundary makes the overlay flicker as the cursor
+  // crosses cards on the way to the drop.
+  const handlePageDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    if (e.relatedTarget === null) setPageDrag(false)
+  }
+
+  const handlePageDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setPageDrag(false)
+    const f = e.dataTransfer.files?.[0]
+    if (f) openModal(f)
   }
 
   const handleAnalyse = async (job: Job) => {
@@ -439,8 +221,6 @@ export default function Dashboard() {
   const totalEntities   = jobs.reduce((s, j) => s + (j.entity_count ?? 0), 0)
   const avgTurnaround   = computeAvgTurnaround(jobs)
 
-  const isPending = uploadMutation.isPending
-
   // ── Style objects ────────────────────────────────────────────────────────
 
   const s = {
@@ -469,24 +249,6 @@ export default function Dashboard() {
       boxShadow: 'var(--shadow-card)',
     } as React.CSSProperties,
 
-    dropzone: (over: boolean): React.CSSProperties => ({
-      display: 'flex', alignItems: 'center', gap: 16,
-      padding: '16px 20px',
-      border: `1.5px dashed ${over ? 'var(--accent)' : 'var(--rule)'}`,
-      borderRadius: 12,
-      background: over ? 'var(--accent-soft)' : 'var(--bg-soft)',
-      cursor: 'pointer',
-      transition: 'border-color .15s ease, background .15s ease',
-    }),
-
-    iconTile: {
-      width: 42, height: 42, borderRadius: 10, flexShrink: 0,
-      background: 'var(--bg-elev)',
-      border: '1px solid var(--rule)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      color: 'var(--accent)',
-    } as React.CSSProperties,
-
     kanbanGrid: {
       display: 'grid',
       gridTemplateColumns: 'repeat(3, 1fr)',
@@ -506,7 +268,12 @@ export default function Dashboard() {
   // ── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <div
+      style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+      onDragOver={handlePageDragOver}
+      onDragLeave={handlePageDragLeave}
+      onDrop={handlePageDrop}
+    >
 
       {/* ── Top bar ── */}
       <div style={s.topbar}>
@@ -516,9 +283,6 @@ export default function Dashboard() {
           <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--ink-2)' }}>Reports</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: 11, fontFamily: MONO, color: 'var(--ink-3)' }}>
-            {jobs.length} reports
-          </span>
           <div style={{
             width: 28, height: 28, borderRadius: '50%',
             background: 'var(--accent-soft)', color: 'var(--accent)',
@@ -534,6 +298,7 @@ export default function Dashboard() {
       <div style={s.body}>
 
         {/* Page head ─────────────────────────────────────────────────────── */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
         <div>
           <h1 style={{
             margin: '0 0 5px',
@@ -547,6 +312,20 @@ export default function Dashboard() {
           <p style={{ margin: 0, fontSize: 13, color: 'var(--ink-3)' }}>
             Triage extracted intelligence and finalize STIX 2.1 bundles.
           </p>
+        </div>
+
+          {/* Makes the page-wide drop target discoverable — without it the
+              behaviour exists but nothing announces it. */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0,
+            fontSize: 11.5, color: 'var(--ink-4)',
+          }}>
+            <span style={{
+              width: 14, height: 9, flexShrink: 0,
+              border: '1px dashed var(--ink-4)', borderRadius: 2,
+            }} />
+            Drop a PDF anywhere on this page to start
+          </div>
         </div>
 
         {/* Stat ribbon ────────────────────────────────────────────────────── */}
@@ -585,90 +364,34 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Upload zone ────────────────────────────────────────────────────── */}
-        <input
-          ref={fileRef}
-          type="file"
-          className="hidden"
-          accept=".pdf,.docx,.html,.htm,.txt,.md"
-          onChange={e => handleFiles(e.target.files)}
-        />
-        <div
-          style={s.dropzone(dragOver)}
-          onDrop={handleDrop}
-          onDragOver={e => { e.preventDefault(); setDragOver(true) }}
-          onDragLeave={() => setDragOver(false)}
-          onClick={() => !isPending && fileRef.current?.click()}
-        >
-          <div style={s.iconTile}>
-            {isPending
-              ? <Loader2 size={18} className="animate-spin" />
-              : <Upload size={18} />
-            }
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.4 }}>
-              {isPending ? (
-                <span>Uploading…</span>
-              ) : (
-                <>
-                  <strong style={{ fontWeight: 600 }}>Drop a CTI report</strong>
-                  {' '}
-                  <span style={{ color: 'var(--accent)', fontWeight: 600 }}>or browse</span>
-                </>
-              )}
-            </div>
-            <div style={{ fontSize: 11, fontFamily: MONO, color: 'var(--ink-4)', marginTop: 2 }}>
-              PDF · DOCX · HTML · TXT · MD
-            </div>
-          </div>
-
-          {/* TLP / PAP markings — applied to every object in the generated bundle */}
-          <div
-            style={{ display: 'flex', gap: 10, flexShrink: 0 }}
-            onClick={e => e.stopPropagation()}
-          >
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, color: 'var(--ink-4)' }}>
-              TLP
-              <select
-                value={tlpLevel}
-                onChange={e => setTlpLevel(e.target.value as MarkingLevel)}
-                disabled={isPending}
-                style={{
-                  fontSize: 11, fontFamily: MONO, padding: '4px 6px',
-                  borderRadius: 6, border: '1px solid var(--rule)',
-                  background: 'var(--bg)', color: 'var(--ink)',
-                }}
-              >
-                {MARKING_LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
-              </select>
-            </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, color: 'var(--ink-4)' }}>
-              PAP
-              <select
-                value={papLevel}
-                onChange={e => setPapLevel(e.target.value as MarkingLevel)}
-                disabled={isPending}
-                style={{
-                  fontSize: 11, fontFamily: MONO, padding: '4px 6px',
-                  borderRadius: 6, border: '1px solid var(--rule)',
-                  background: 'var(--bg)', color: 'var(--ink)',
-                }}
-              >
-                {MARKING_LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
-              </select>
-            </label>
-          </div>
-
+        {/* Action row — the single entry point for ingestion (ADR-0029). */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <button
             className="btn-primary"
-            style={{ ...SM, flexShrink: 0 }}
-            disabled={isPending}
-            onClick={e => { e.stopPropagation(); fileRef.current?.click() }}
+            onClick={() => openModal(null)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '7px 12px 7px 11px',
+              fontSize: 12.5, fontWeight: 600, borderRadius: 7,
+              letterSpacing: '.01em', cursor: 'pointer',
+            }}
           >
-            <Upload size={12} />
-            Browse files
+            <Plus size={14} strokeWidth={2.4} />
+            New report
+            {NEW_REPORT_HINT && (
+              <span style={{
+                fontFamily: MONO, fontSize: 10,
+                padding: '1px 4px', borderRadius: 4,
+                background: 'rgba(255,255,255,.16)',
+                border: '1px solid rgba(255,255,255,.22)',
+              }}>
+                {NEW_REPORT_HINT}
+              </span>
+            )}
           </button>
+          <span style={{ fontSize: 11, fontFamily: MONO, color: 'var(--ink-3)' }}>
+            {jobs.length} reports
+          </span>
         </div>
 
         {/* Activity strip ─────────────────────────────────────────────────── */}
@@ -690,6 +413,7 @@ export default function Dashboard() {
                 <ActivityCard
                   key={job.id}
                   job={job}
+                  relTime={relTime}
                   onViewProgress={() => {
                     setActiveJobId(job.id)
                     setActiveFilename(job.original_filename)
@@ -741,8 +465,8 @@ export default function Dashboard() {
 
                   {/* Column body */}
                   <div style={{
-                    padding: 11,
-                    display: 'flex', flexDirection: 'column', gap: 11,
+                    padding: 9,
+                    display: 'flex', flexDirection: 'column', gap: 8,
                     minHeight: 120,
                   }}>
                     {list.length === 0 ? (
@@ -760,6 +484,7 @@ export default function Dashboard() {
                           key={job.id}
                           job={job}
                           selected={selectedId === job.id}
+                          relTime={relTime}
                           onSelect={() =>
                             setSelectedId(prev => prev === job.id ? null : job.id)
                           }
@@ -782,6 +507,42 @@ export default function Dashboard() {
       </div>{/* end scrolling body */}
 
       {/* Progress modal ─────────────────────────────────────────────────────── */}
+      <NewReportModal
+        open={modalOpen}
+        initialFile={pendingFile}
+        onClose={closeModal}
+        onJobCreated={(jobId, filename) => {
+          setActiveJobId(jobId)
+          setActiveFilename(filename)
+        }}
+      />
+
+      {/* Full-screen drop affordance.  pointer-events: none so it never eats
+          the drop it is advertising. */}
+      {pageDrag && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 80,
+          background: 'color-mix(in oklab, var(--accent) 12%, rgba(250,247,241,.86))',
+          backdropFilter: 'blur(2px)',
+          pointerEvents: 'none',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          animation: 'dashFadeIn .12s ease',
+        }}>
+          <div style={{
+            border: '2px dashed var(--accent)', borderRadius: 16,
+            padding: '36px 56px', background: 'var(--bg-elev)',
+            boxShadow: 'var(--shadow-pop)', textAlign: 'center',
+          }}>
+            <div style={{ fontFamily: SERIF, fontSize: 22, fontWeight: 600, color: 'var(--ink)' }}>
+              Drop to start a report
+            </div>
+            <div style={{ fontFamily: MONO, fontSize: 12, color: 'var(--ink-3)', marginTop: 6 }}>
+              PDF · DOCX · HTML · TXT · MD
+            </div>
+          </div>
+        </div>
+      )}
+
       {activeJobId && (
         <ProgressModal
           jobId={activeJobId}

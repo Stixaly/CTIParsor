@@ -42,3 +42,6 @@ detection_corpora.local.yaml
 
 # Local .env backups (contain secrets — never commit)
 .env.bak*
+
+# Large local archives (a 278 MB CLAUDE.zip was sitting in the repo root)
+*.zip

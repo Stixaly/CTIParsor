@@ -16,3 +16,18 @@
 
 re2>=0.2.20
 spacy>=3.7.0,<4
+
+# playwright (ADR-0029 — URL → PDF ingestion, the "URL" tab):
+#   pip install playwright
+#   python -m playwright install chromium
+#   sudo python -m playwright install-deps chromium   <- needs root
+#
+# The last step is the one people miss.  Without those system libraries Chromium
+# is installed but dies at launch with:
+#   error while loading shared libraries: libasound.so.2
+#
+# The API degrades cleanly: /api/ingest/url answers 503 and the UI tells the
+# analyst to paste the report text instead.  `make install-capture` does the
+# first two steps and prints the third.
+
+playwright>=1.44

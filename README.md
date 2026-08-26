@@ -63,6 +63,18 @@ uvicorn api.main:app --reload --app-dir .
 # → http://localhost:8000
 ```
 
+> **Do not run the server as root.** URL ingestion (ADR-0029) renders the page in
+> a sandboxed Chromium, and Chromium refuses to run as root with its sandbox on —
+> so `/api/ingest/url` answers 503 there. The sandbox is what keeps a renderer
+> exploit on a hostile page from becoming code execution on the host, so the fix
+> is to drop root, not to disable it. If you are in a `sudo su` shell, `exit`
+> first.
+>
+> A container that genuinely cannot grant unprivileged user namespaces can set
+> `CTIPARSOR_CAPTURE_UNSANDBOXED=1`, which renders without the sandbox and logs a
+> warning naming the risk on every capture. Nothing else in the pipeline needs
+> root.
+
 > **Development mode** (live reload on both sides):
 > ```bash
 > # Terminal 1 — FastAPI backend
@@ -346,7 +358,11 @@ A `Makefile` wraps the most common workflows. Requires `make` (standard on Linux
 ### Workflow
 
 ```
-Upload (drag-and-drop or file picker)
+Ingest — one of three (ADR-0029)
+  │   File   drag-and-drop or file picker (PDF/DOCX/HTML/TXT/MD, 50 MB)
+  │   Paste  plain text or Markdown, stored as a reviewable source
+  │   URL    headless Chromium renders the page server-side; the PDF is
+  │          archived for review, its DOM text is what gets ingested
   │
   ▼
 Processing  ─── Real-time 5-stage progress bar (SSE)
@@ -939,6 +955,7 @@ cti-to-stix/
 │   │                              #   └─ _lexicon_rescan() on Finalize
 │   └── routes/
 │       ├── upload.py              # POST /api/upload (50 MB limit, streamed)
+│       ├── ingest.py              # POST /api/ingest/{text,url} — paste + URL capture
 │       ├── jobs.py                # CRUD /api/jobs + finalize + source + bundle
 │       ├── entities.py            # CRUD /api/jobs/{id}/entities
 │       ├── relationships.py       # CRUD /api/jobs/{id}/relationships
@@ -950,7 +967,7 @@ cti-to-stix/
 ├── frontend/                      # React 18 + TypeScript + Vite 6
 │   ├── src/
 │   │   ├── pages/
-│   │   │   ├── Dashboard.tsx      # Kanban, drag-and-drop upload, progress modal
+│   │   │   ├── Dashboard.tsx      # Kanban, stat ribbon, progress modal
 │   │   │   ├── Review.tsx         # Text / Preview / Source view + marginalia
 │   │   │   ├── Graph.tsx          # d3-force graph + relationship editor
 │   │   │   ├── Coverage.tsx       # Coverage matrix + granular rule selection
@@ -1022,6 +1039,8 @@ Interactive docs at `http://localhost:8000/docs`.
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/api/upload` | Upload a file (multipart `file=`). Returns `{ job_id }`. Starts pipeline. |
+| `POST` | `/api/ingest/text` | Ingest pasted text (JSON `text`, optional `title`). Stored `.md` or `.txt` by content. 20 chars min, 2 MB max. |
+| `POST` | `/api/ingest/url` | Render a URL with headless Chromium (JSON `url`, optional `enable_js`). Writes `{job_id}.pdf` (archive, shown in Review) and `{job_id}.txt` (rendered DOM text, ingested). 400 policy refusal · 502 unreachable or blank render · 503 Playwright absent · 504 timeout. |
 | `GET` | `/api/jobs` | List all jobs |
 | `GET` | `/api/jobs/{id}` | Get a single job (includes entity/relationship counts) |
 | `PATCH` | `/api/jobs/{id}` | Update status |
