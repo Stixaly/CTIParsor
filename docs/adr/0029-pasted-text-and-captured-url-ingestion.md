@@ -193,10 +193,12 @@ share one surface and one TLP/PAP control — first `IngestPanel.tsx`, then the
 it used to own.
 
 **The three-tab panel became one modal, and markings became a gate.** A design
-pass (`design_handoff_dashboard_ingest/`) replaced the inline panel with a
-`New report` modal: one field detects whether it was given prose, a URL, or a
-dropped file, so the tab strip disappears along with the click it cost before
-the most common action.
+pass replaced the inline panel with a `New report` modal: one field detects
+whether it was given prose, a URL, or a dropped file, so the tab strip
+disappears along with the click it cost before the most common action. (Its handoff
+bundle sits in `docs/design/`, which this repo gitignores — handoffs are
+inputs, and this one carries generated build output. What it decided is
+recorded here instead, which is the point of this file.)
 
 The consequential part is not the layout. **TLP and PAP previously defaulted to
 `AMBER`** — every job created before this pass carried a marking nobody chose.
