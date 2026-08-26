@@ -12,14 +12,6 @@ import ActivityCard from '../components/dashboard/ActivityCard'
 // ── Design tokens (fonts as constants — avoids repeating the fallback stack) ──
 
 const SERIF = "'Source Serif 4', Georgia, serif"
-
-// Shortcut badge on the New report button.  Empty on touch, where there is no
-// keyboard to press it with and the badge would just be noise.
-const NEW_REPORT_HINT: string =
-  typeof navigator === 'undefined' ? ''
-    : /iPhone|iPad|Android/i.test(navigator.userAgent) ? ''
-    : /Mac/i.test(navigator.platform) ? '⌘N'
-    : 'Ctrl+N'
 const MONO  = "'JetBrains Mono', ui-monospace, monospace"
 
 // ── Column definitions ────────────────────────────────────────────────────────
@@ -135,22 +127,22 @@ export default function Dashboard() {
   }, [])
 
   // Closing always clears pendingFile: without it, a file dropped once would be
-  // re-attached by the modal's initialFile effect the next time ⌘N opens it.
+  // re-attached by the modal's initialFile effect the next time it opens.
   const closeModal = useCallback(() => {
     setModalOpen(false)
     setPendingFile(null)
   }, [])
 
-  // ⌘N / Ctrl+N opens the modal; Escape clears the drag overlay.  The modal
-  // owns its own Escape handling, so this one only unsticks the overlay.
+  // Escape clears the drag overlay.  The modal owns its own Escape handling,
+  // so this one only unsticks the overlay.
+  //
+  // There is deliberately no ⌘N / Ctrl+N here.  Both are reserved by the
+  // browser for "new window" and never reach the page, so preventDefault()
+  // cannot claim them — the shortcut worked on no platform, while its badge
+  // promised that it did.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n') {
-        e.preventDefault()
-        setModalOpen(true)
-      } else if (e.key === 'Escape') {
-        setPageDrag(false)
-      }
+      if (e.key === 'Escape') setPageDrag(false)
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
@@ -378,16 +370,6 @@ export default function Dashboard() {
           >
             <Plus size={14} strokeWidth={2.4} />
             New report
-            {NEW_REPORT_HINT && (
-              <span style={{
-                fontFamily: MONO, fontSize: 10,
-                padding: '1px 4px', borderRadius: 4,
-                background: 'rgba(255,255,255,.16)',
-                border: '1px solid rgba(255,255,255,.22)',
-              }}>
-                {NEW_REPORT_HINT}
-              </span>
-            )}
           </button>
           <span style={{ fontSize: 11, fontFamily: MONO, color: 'var(--ink-3)' }}>
             {jobs.length} reports

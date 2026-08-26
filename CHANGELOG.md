@@ -70,9 +70,13 @@ sections group by theme rather than strict semver.
 - **One "New report" modal replaces the three-tab ingest panel.**  A single
   field works out whether it was handed prose, a URL, or a dropped file, so the
   tab click before the most common action is gone; the dashboard gets a page-wide
-  drop target, a ⌘N / Ctrl+N shortcut, and denser kanban cards (the status pill
-  was saying the same thing as the column it sat in, so it became a dot and a
-  row disappeared).
+  drop target and denser kanban cards (the status pill was saying the same thing
+  as the column it sat in, so it became a dot and a row disappeared).
+
+  The design called for a ⌘N / Ctrl+N shortcut and it was built, then removed:
+  both are reserved by the browser for "new window" and never reach the page, so
+  `preventDefault()` cannot claim them. It worked on no platform, while the badge
+  on the button promised that it did.
 
   **Behaviour change worth noting: TLP and PAP no longer default to `AMBER`.**
   They start unset and gate submission — the button reads "Set TLP & PAP to
