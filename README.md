@@ -360,7 +360,7 @@ A `Makefile` wraps the most common workflows. Requires `make` (standard on Linux
 ```
 Ingest — one of three (ADR-0029)
   │   File   drag-and-drop or file picker (PDF/DOCX/HTML/TXT/MD, 50 MB)
-  │   Paste  plain text or Markdown, stored as a reviewable source
+  │   Paste  plain text, Markdown, or HTML source — markup is stripped
   │   URL    headless Chromium renders the page server-side; the PDF is
   │          archived for review, its DOM text is what gets ingested
   │
@@ -1039,7 +1039,7 @@ Interactive docs at `http://localhost:8000/docs`.
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/api/upload` | Upload a file (multipart `file=`). Returns `{ job_id }`. Starts pipeline. |
-| `POST` | `/api/ingest/text` | Ingest pasted text (JSON `text`, optional `title`). Stored `.md` or `.txt` by content. 20 chars min, 2 MB max. |
+| `POST` | `/api/ingest/text` | Ingest pasted text (JSON `text`, optional `title`). Stored `.html`, `.md` or `.txt` by content — pasted markup is stripped, not ingested raw. 20 chars min, 2 MB max. |
 | `POST` | `/api/ingest/url` | Render a URL with headless Chromium (JSON `url`, optional `enable_js`). Writes `{job_id}.pdf` (archive, shown in Review) and `{job_id}.txt` (rendered DOM text, ingested). 400 policy refusal · 502 unreachable or blank render · 503 Playwright absent · 504 timeout. |
 | `GET` | `/api/jobs` | List all jobs |
 | `GET` | `/api/jobs/{id}` | Get a single job (includes entity/relationship counts) |

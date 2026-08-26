@@ -12,8 +12,18 @@ sections group by theme rather than strict semver.
   row, `run_pipeline_async` — so nothing downstream of Stage 1 knows the
   difference, including the source viewer and `_delete_job_files`.
 
-  `POST /api/ingest/text` stores the paste as `.md` when at least 2 of 6
-  Markdown signals match, `.txt` otherwise.
+  `POST /api/ingest/text` picks between `.html`, `.md` and `.txt` from the paste
+  itself, HTML first — a `<li>` also trips the Markdown list pattern, and
+  misfiling markup as Markdown keeps the tags.
+
+  **Pasted HTML is now stripped instead of ingested raw.**  It used to land as
+  `.txt` and reach the extractor with its markup, so `<div class="post">` read as
+  content.  On the live Unit 42 page, pasting its source: 258,095 characters
+  handed to Stage 1 before, **35,971** now, and 41 bogus observables gone —
+  `cdn.cookielaw.org`, `fonts.googleapis.com`, the site's own navigation.  Only
+  one real observable is lost with them, a SHA-256 that exists solely inside a
+  VirusTotal `href`; `get_text()` reads text, not attributes.  A paste that is
+  markup and nothing else is refused rather than queued.
 
   `POST /api/ingest/url` renders the page with a headless Chromium.  A plain
   HTTP fetch was tried first and rejected on measurement: the Microsoft security

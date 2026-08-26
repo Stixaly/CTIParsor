@@ -23,6 +23,7 @@ from api.main import limiter
 from api.routes.upload import _MARKING_LEVELS, UPLOADS_DIR
 from api.worker import run_pipeline_async
 from pipeline import web_capture
+from pipeline.stage1_ingestion import html_to_text
 
 logger = get_logger(__name__)
 
@@ -93,6 +94,43 @@ def _looks_like_markdown(text: str) -> bool:
     return count >= _MARKDOWN_MIN_SIGNALS
 
 
+# Pasted HTML.  An analyst who hits a page the URL capture cannot reach — one
+# behind bot protection, say — falls back to "view source" and pastes the markup.
+# Stored as .txt it reaches the extractor with its tags intact, and `<div
+# class="post">` becomes content.  Detected here so it lands as .html, where
+# Stage 1 already knows to strip it.
+#
+# A document declaring itself is decisive on its own; anything else needs two
+# distinct tags, so prose that merely mentions "<script>" is not misfiled.
+_HTML_STRONG_RE = re.compile(r"<!DOCTYPE\s+html|<html[\s>]", re.IGNORECASE)
+
+_HTML_TAG_PATTERNS = (
+    r"<body[\s>]",
+    r"<div[\s>]",
+    r"<p[\s>]",
+    r"<span[\s>]",
+    r"<table[\s>]",
+    r"<t[rdh][\s>]",
+    r"<h[1-6][\s>]",
+    r"<[uo]l[\s>]",
+    r"<li[\s>]",
+    r"<a\s[^>]*href",
+    r"<br\s*/?>",
+    r"<img\s[^>]*src",
+)
+_HTML_MIN_SIGNALS = 2
+_HTML_TAG_RE = tuple(re.compile(p, re.IGNORECASE) for p in _HTML_TAG_PATTERNS)
+
+
+def _looks_like_html(text: str) -> bool:
+    """True when the paste is an HTML document or fragment, not prose."""
+    if _HTML_STRONG_RE.search(text):
+        return True
+    count = sum(1 for rx in _HTML_TAG_RE if rx.search(text))
+    return count >= _HTML_MIN_SIGNALS
+
+
+
 def _timestamp_slug() -> str:
     """UTC stamp used to name an untitled paste."""
     return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
@@ -135,7 +173,24 @@ async def ingest_text(request: Request, body: TextIngestRequest):
     if len(text) > _MAX_TEXT_CHARS:
         raise HTTPException(413, f"Pasted text is too large ({len(text)} chars, maximum {_MAX_TEXT_CHARS})")
 
-    suffix = ".md" if _looks_like_markdown(text) else ".txt"
+    # HTML first: a <li> or a <table> would also trip the Markdown list and
+    # table patterns, and misfiling markup as Markdown keeps the tags.
+    if _looks_like_html(text):
+        suffix = ".html"
+    elif _looks_like_markdown(text):
+        suffix = ".md"
+    else:
+        suffix = ".txt"
+
+    if suffix == ".html":
+        extracted = html_to_text(text).strip()
+        if len(extracted) < _MIN_TEXT_CHARS:
+            raise HTTPException(
+                400,
+                f"That looks like HTML, but only {len(extracted)} characters of "
+                f"text survive once the markup is stripped (minimum "
+                f"{_MIN_TEXT_CHARS}). Paste the article text instead.",
+            )
 
     slug = web_capture._slugify(body.title or "")
     if not slug:
@@ -151,7 +206,10 @@ async def ingest_text(request: Request, body: TextIngestRequest):
     except OSError as exc:
         raise HTTPException(500, "Could not store pasted text") from exc
 
-    logger.info("Ingested pasted text job_id=%s suffix=%s chars=%d", job_id, suffix, len(text))
+    logger.info(
+        "Ingested pasted text job_id=%s suffix=%s chars=%d",
+        job_id, suffix, len(text),
+    )
 
     return _start_job(job_id, dest, filename, tlp, pap)
 

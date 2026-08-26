@@ -289,3 +289,82 @@ def test_browser_that_cannot_start_is_503_not_a_500(client, monkeypatch):
     assert resp.status_code == 503, f"got {resp.status_code}: {resp.text}"
     assert "could not start" in resp.json()["detail"]
     assert client.spawn.call_count == 0
+
+
+from pipeline.stage1_ingestion import ingest
+
+_HTML_PAGE = (
+    "<html><body><h1>Volt Typhoon</h1>"
+    "<div class=\"post\"><p>APT29 contacted 185.220.101.45 for command and control.</p>"
+    "<ul><li>exploited a Fortinet appliance</li></ul></div>"
+    "<script>var tracking = 1;</script></body></html>"
+)
+_HTML_FRAGMENT = (
+    "<div class=\"ioc-table\"><table><tr><td>"
+    "02ce477a07681ee1671c7164c9cc847b01c2e1cd50e709f7e861eaab89c69b6f"
+    "</td><td>LOSTKEYS loader from December 2023</td></tr></table></div>"
+)
+
+
+def test_pasted_html_page_is_stored_as_html(client, tmp_path):
+    resp = client.post("/api/ingest/text", json={"text": _HTML_PAGE})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["filename"].endswith(".html")
+    job_id = data["job_id"]
+    assert (tmp_path / f"{job_id}.html").exists()
+
+
+def test_pasted_html_fragment_is_detected(client, tmp_path):
+    resp = client.post("/api/ingest/text", json={"text": _HTML_FRAGMENT})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["filename"].endswith(".html")
+    job_id = data["job_id"]
+    assert (tmp_path / f"{job_id}.html").exists()
+
+
+def test_pasted_html_is_read_without_its_tags(client, tmp_path):
+    resp = client.post("/api/ingest/text", json={"text": _HTML_PAGE})
+    assert resp.status_code == 200
+    job_id = resp.json()["job_id"]
+    # ingest() takes a path, not the content — this is the file the worker gets.
+    result = ingest(str(tmp_path / f"{job_id}.html"))
+    assert "185.220.101.45" in result
+    assert "Volt Typhoon" in result
+    assert "<div" not in result
+    assert "var tracking" not in result
+
+
+def test_markup_only_paste_is_rejected(client):
+    resp = client.post(
+        "/api/ingest/text",
+        json={"text": "<html><body><div class=\"a\"></div><div class=\"b\"></div><span></span></body></html>"},
+    )
+    assert resp.status_code == 400
+    assert "survive once the markup is stripped" in resp.json()["detail"]
+
+
+def test_prose_mentioning_a_tag_is_not_misfiled_as_html(client):
+    resp = client.post(
+        "/api/ingest/text",
+        json={"text": "The dropper injects a <script> tag into every page it serves to visitors."},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["filename"].endswith(".txt")
+
+
+def test_markdown_still_wins_over_txt(client):
+    resp = client.post("/api/ingest/text", json={"text": _MARKDOWN})
+    assert resp.status_code == 200
+    assert resp.json()["filename"].endswith(".md")
+
+
+def test_html_detection_precedes_markdown(client):
+    text = (
+        "<html><body><ul><li>alpha</li><li>beta</li></ul>"
+        "<p>See [the advisory](https://example.com/a) for 185.220.101.45 details.</p></body></html>"
+    )
+    resp = client.post("/api/ingest/text", json={"text": text})
+    assert resp.status_code == 200
+    assert resp.json()["filename"].endswith(".html")
