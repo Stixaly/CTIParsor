@@ -184,6 +184,36 @@ articles get two or three tall sheets rather than twenty-five short ones.
 `java_script_enabled=False`: that flag stops the page's own scripts, not
 Playwright's injected evaluation.
 
+### What is invisible on screen is destructive on paper
+
+Two more defects surfaced only by capturing reports an analyst actually asked
+for, and neither shows up in a page's own rendering:
+
+**Scrollable containers are cut, not scrolled.** On a Google Cloud Threat
+Intelligence post, two `<pre>` blocks measure 952px and 1071px inside a 739px
+column, with `overflow-x: auto`. On screen the reader drags them sideways; on
+paper 22% and 31% of two command listings were simply missing. Expanding the
+scrollers and switching `pre`/`nowrap` to `pre-wrap` before printing recovered
+**530 characters of code**. `overflow: hidden` is left alone — that is usually a
+layout decision rather than content parked behind a scrollbar.
+
+**JavaScript lazy-loaders leave the figures behind.** With page scripts
+disabled, a loader that parks its URL in `data-src` never copies it into `src`,
+so the browser never requests the image. On the unit42 Aeternum report, which
+uses lozad.js, **31 of 98 images had no `src` at all**:
+
+| | before | after |
+|---|---|---|
+| distinct images embedded | 11 | **32** |
+| of those, figures ≥400px | 10 | **26** |
+| file size | 2.8 MB | **9.5 MB** |
+
+Every one of the 11 was an icon or a logo — not a single figure of the report.
+The fix makes that copy from `data-src`/`data-srcset` itself and waits, bounded,
+for the images to arrive. It runs no page script: `page.evaluate` works with
+`java_script_enabled=False`, and the URLs it causes to be fetched still pass
+through the request filter.
+
 **Known cosmetic gap.** One of three sites tested (welivesecurity.com) still
 emits a trailing blank sheet. It is not a height problem: adding 16px, 200px and
 1,000px of slack all produce the same two pages, the lowest element on the page

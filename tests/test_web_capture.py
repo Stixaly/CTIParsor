@@ -241,19 +241,40 @@ def test_launch_hint_always_carries_the_underlying_reason(monkeypatch):
 class _FakePage:
     """Records what _render_pdf asks for, without a browser."""
 
-    def __init__(self, height, *, evaluate_fails=False):
+    def __init__(self, height, *, evaluate_fails=False, unclip_fails=False,
+                 eager_count=32, image_wait_fails=False):
         self._height = height
         self._evaluate_fails = evaluate_fails
+        self._unclip_fails = unclip_fails
+        self._eager_count = eager_count
+        self._image_wait_fails = image_wait_fails
         self.pdf_kwargs = None
         self.unstick_calls = 0
+        self.unclip_calls = 0
+        self.eager_calls = 0
+        self.waited_for_images = False
 
     def evaluate(self, script):
         if self._evaluate_fails:
             raise web_capture.PlaywrightError("evaluate blew up")
+        # The three preparation scripts are told apart by what they look for.
+        if "data-src" in script:
+            self.eager_calls += 1
+            return self._eager_count
+        if "CODEISH" in script:
+            if self._unclip_fails:
+                raise web_capture.PlaywrightError("unclip blew up")
+            self.unclip_calls += 1
+            return 108
         if "position" in script:
             self.unstick_calls += 1
             return 12
         return self._height
+
+    def wait_for_function(self, script, **kwargs):
+        self.waited_for_images = True
+        if self._image_wait_fails:
+            raise web_capture.PlaywrightError("an image never completed")
 
     def pdf(self, **kwargs):
         self.pdf_kwargs = kwargs
@@ -295,3 +316,57 @@ def test_render_pdf_falls_back_to_a4_when_evaluate_raises(tmp_path):
     page = _FakePage(5000, evaluate_fails=True)
     web_capture._render_pdf(page, tmp_path / "o.pdf")
     assert page.pdf_kwargs["format"] == "A4"
+
+
+def test_render_pdf_expands_scrollers_before_printing(tmp_path):
+    """
+    A container that scrolls on screen is a container that is cut on paper.
+
+    Locks the Google Cloud Threat Intelligence case: two <pre> blocks 952px and
+    1071px wide inside a 739px column lost 22% and 31% of two command listings.
+    Expanding them recovered 530 characters of code.
+    """
+    page = _FakePage(5000)
+    web_capture._render_pdf(page, tmp_path / "o.pdf")
+    assert page.unclip_calls == 1
+
+
+def test_render_pdf_survives_an_unclip_that_throws(tmp_path):
+    """A page that refuses the expansion still gets captured, just clipped."""
+    page = _FakePage(5000, unclip_fails=True)
+    web_capture._render_pdf(page, tmp_path / "o.pdf")
+    assert page.pdf_kwargs is not None
+    assert page.pdf_kwargs["height"] == "5000px"
+
+
+def test_render_pdf_eager_loads_javascript_lazy_images(tmp_path):
+    """
+    Lazy-loaders park the real URL in data-src; with page scripts off nothing
+    ever copies it into src, and the figure is absent from the archive.
+
+    Locks the unit42 Aeternum report, which uses lozad.js: 31 of its 98 images
+    had no src at all, and the capture embedded 11 distinct images, every one an
+    icon or a logo. Making that copy here takes it to 32 distinct images, every
+    one a figure of the report.
+    """
+    page = _FakePage(5000)
+    web_capture._render_pdf(page, tmp_path / "o.pdf")
+    assert page.eager_calls == 1
+    # And they have to be waited for, or the sheet prints before they arrive.
+    assert page.waited_for_images is True
+
+
+def test_render_pdf_does_not_wait_when_there_is_nothing_to_eager_load(tmp_path):
+    """A page with no lazy images must not pay the settle timeout."""
+    page = _FakePage(5000, eager_count=0)
+    web_capture._render_pdf(page, tmp_path / "o.pdf")
+    assert page.waited_for_images is False
+    assert page.pdf_kwargs is not None
+
+
+def test_render_pdf_prints_even_if_an_image_never_completes(tmp_path):
+    """One straggler must not cost the whole capture."""
+    page = _FakePage(5000, image_wait_fails=True)
+    web_capture._render_pdf(page, tmp_path / "o.pdf")
+    assert page.pdf_kwargs is not None
+    assert page.pdf_kwargs["height"] == "5000px"

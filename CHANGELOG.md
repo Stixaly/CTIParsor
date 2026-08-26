@@ -94,6 +94,21 @@ sections group by theme rather than strict semver.
   on that page) and to size the sheet to the document, capped at 14,400pt — the
   largest page Acrobat will read.
 
+- **Captured pages keep their code blocks and their figures.**  Two defects that
+  only show on paper, both found on reports an analyst asked to capture:
+
+  A container that scrolls on screen is a container that is *cut* in a PDF.  Two
+  `<pre>` blocks 952px and 1071px wide inside a 739px column lost 22% and 31% of
+  two command listings; expanding scrollers and wrapping `pre` before printing
+  recovered **530 characters of code**.
+
+  A JavaScript lazy-loader parks its URL in `data-src`, and with page scripts
+  disabled nothing ever copies it into `src` — so the browser never fetches the
+  image.  On a report using lozad.js, **31 of 98 images had no `src`**, and the
+  archive held 11 distinct images, every one an icon.  Making that copy directly
+  takes it to **32, of which 26 are figures**, and the file from 2.8 MB to
+  9.5 MB.  No page script runs, and the images still pass the request filter.
+
 - **A full-screen composer for pasted reports.**  The inline box in the
   dashboard panel is 180 px — about nine lines of a 50,000-character report —
   and on a 1280×620 window the "Ingest text" button sat **34 px below the fold**

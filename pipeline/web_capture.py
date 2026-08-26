@@ -172,6 +172,86 @@ _UNSTICK_JS = """
 """
 
 
+# JavaScript lazy-loaders park the real URL in `data-src` and copy it into `src`
+# only when their own script decides the image is near the viewport.  With page
+# scripts disabled that copy never happens, `src` is never set, and the browser
+# never requests the image — so the figures are simply absent from the archive.
+#
+# Measured on unit42.paloaltonetworks.com/aeternum-blockchain-c2-analysis, which
+# uses lozad.js: 31 of 98 images had no `src` at all.  The capture embedded 11
+# distinct images, all icons and logos.  Doing the copy here brings it to 32
+# distinct images, every one a figure of the report, and the file from 2.8 MB to
+# 9.5 MB.
+#
+# This is the copy the page's own script would have made — it does not run any
+# of that script, and the fetched URLs still go through the request filter.
+_EAGER_IMAGES_JS = """
+(() => {
+  let n = 0;
+  const move = (el, from, to) => {
+    const v = el.getAttribute(from);
+    if (v && !el.getAttribute(to)) { el.setAttribute(to, v); return 1; }
+    return 0;
+  };
+  for (const el of document.querySelectorAll('img, source')) {
+    let touched = 0;
+    touched += move(el, 'data-src', 'src');
+    touched += move(el, 'data-lazy-src', 'src');
+    touched += move(el, 'data-original', 'src');
+    touched += move(el, 'data-srcset', 'srcset');
+    touched += move(el, 'data-lazy-srcset', 'srcset');
+    if (el.tagName === 'IMG') el.loading = 'eager';
+    if (touched) n += 1;
+  }
+  return n;
+})()
+"""
+
+# Bound on waiting for those images to arrive.  One straggler that never
+# completes must not hold the capture: the deadline expires and the page prints
+# with whatever loaded.
+_IMAGE_SETTLE_MS = 15_000
+
+
+# A container that scrolls on screen is a container that is CUT on paper: the
+# reader can drag a code block sideways, the PDF just loses what is past the
+# edge.  Measured on a Google Cloud Threat Intelligence post — two <pre> blocks
+# 952px and 1071px wide inside a 739px column, so 22% and 31% of two command
+# listings were missing from the archive.  Expanding them recovered 530
+# characters of code.
+#
+# `pre` and `nowrap` also get `pre-wrap`, because making the container visible
+# is not enough when the content itself refuses to wrap: the line would run off
+# the sheet instead of off the box.  Wrapping changes where the lines break; it
+# is the only way to keep the characters.
+#
+# Deliberately not touching `overflow: hidden`: that one is usually a layout
+# decision — a decorative element clipped on purpose — rather than content
+# parked behind a scrollbar.
+_UNCLIP_JS = """
+(() => {
+  const CODEISH = new Set(['PRE', 'CODE', 'TABLE', 'SAMP', 'KBD']);
+  let n = 0;
+  for (const el of document.querySelectorAll('*')) {
+    const s = getComputedStyle(el);
+    const scrollable = ['auto', 'scroll'].includes(s.overflowX)
+                    || ['auto', 'scroll'].includes(s.overflowY);
+    const overflows = el.scrollWidth > el.clientWidth + 2
+                   || el.scrollHeight > el.clientHeight + 2;
+    if (!scrollable && !(overflows && CODEISH.has(el.tagName))) continue;
+    el.style.setProperty('overflow', 'visible', 'important');
+    el.style.setProperty('max-height', 'none', 'important');
+    if (['pre', 'nowrap'].includes(s.whiteSpace)) {
+      el.style.setProperty('white-space', 'pre-wrap', 'important');
+      el.style.setProperty('word-break', 'break-word', 'important');
+    }
+    n += 1;
+  }
+  return n;
+})()
+"""
+
+
 @dataclass(frozen=True)
 class CaptureResult:
     pdf_path: Path
@@ -252,17 +332,41 @@ def _resolve_all(host: str) -> list[str]:
 
 def _render_pdf(page: "Page", dest: Path) -> None:
     """
-    Print the page to `dest` as one tall sheet, with viewport-pinned elements
-    neutralised first.
+    Print the page to `dest` as one tall sheet.
+
+    Two things are undone first, because both are invisible on screen and
+    destructive on paper: elements pinned to the viewport, which repaint over
+    the text, and containers that scroll, whose overflow is simply cut off.
 
     Falls back to A4 pagination if the document height cannot be measured — a
     wrong height would produce a blank or clipped sheet, and A4 at least yields
     something readable.
     """
+    # First, because the images have to be fetched before anything is measured:
+    # they change the document height, and they are what the archive is for.
+    try:
+        eager = page.evaluate(_EAGER_IMAGES_JS)
+    except PlaywrightError:
+        eager = 0
+
+    if eager:
+        try:
+            page.wait_for_function(
+                '[...document.querySelectorAll("img")].every(i => i.complete)',
+                timeout=_IMAGE_SETTLE_MS,
+            )
+        except PlaywrightError:
+            pass  # a straggler that never completes must not block the capture
+
     try:
         unstuck = page.evaluate(_UNSTICK_JS)
     except PlaywrightError:
         unstuck = 0
+
+    try:
+        expanded = page.evaluate(_UNCLIP_JS)
+    except PlaywrightError:
+        expanded = 0
 
     try:
         height = int(page.evaluate(
@@ -291,7 +395,11 @@ def _render_pdf(page: "Page", dest: Path) -> None:
         height=f"{page_height}px",
         margin={"top": "0", "bottom": "0", "left": "0", "right": "0"},
     )
-    logger.debug("Unstuck %d elements; document height %dpx; page height %dpx", unstuck, height, page_height)
+    logger.debug(
+        "Eager-loaded %d images, unstuck %d elements, expanded %d scrollers; "
+        "document height %dpx; page height %dpx",
+        eager, unstuck, expanded, height, page_height,
+    )
 
 
 def _launch_hint(exc: Exception, *, sandboxed: bool) -> str:
