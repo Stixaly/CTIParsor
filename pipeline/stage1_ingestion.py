@@ -157,12 +157,23 @@ def _read_docx(path: Path) -> str:
     return "\n".join(para.text for para in doc.paragraphs if para.text.strip())
 
 
-def _read_html(path: Path) -> str:
-    html = path.read_text(encoding="utf-8", errors="replace")
+def html_to_text(html: str) -> str:
+    """
+    Strip markup from an HTML document and return its visible text.
+
+    Split out of `_read_html` so the ingestion API can measure what the pipeline
+    will actually read from a pasted document before it creates a job: raw HTML
+    can be thousands of characters and yield almost no prose, and a job built on
+    that runs five stages to produce nothing.
+    """
     soup = BeautifulSoup(html, "html.parser")
-    for tag in soup(["script", "style"]):
+    for tag in soup(["script", "style", "noscript", "template"]):
         tag.decompose()
     return soup.get_text(separator="\n")
+
+
+def _read_html(path: Path) -> str:
+    return html_to_text(path.read_text(encoding="utf-8", errors="replace"))
 
 
 def chunk_text(text: str, max_chars: int = 3000, overlap: int = 400) -> list[str]:

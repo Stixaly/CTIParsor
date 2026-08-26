@@ -26,6 +26,12 @@ const MARKING_TONE: Record<MarkingLevel, string> = {
 // pasted.  A bare URL on its own line is a capture; anything else is prose.
 const URL_RE = /^(https?:\/\/|www\.)\S+$/i
 
+// Display hint only — the server owns the real detection (api/routes/ingest.py).
+// Deliberately looser than the server's rule: it is fine for this to say "HTML"
+// on something the server files as text, but not fine for markup to reach the
+// analyst looking like it went in raw.
+const HTML_HINT_RE = /<!DOCTYPE\s+html|<html[\s>]|<(div|p|table|tr|td|h[1-6]|ul|li|span|body)[\s>]/i
+
 // Below this a paste is a mis-click, not a report — the API rejects it too.
 const MIN_TEXT_CHARS = 20
 
@@ -69,10 +75,17 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
 
   const submitLabel = sourceReady && !marksSet ? 'Set TLP & PAP to continue' : 'Create job'
 
+  // Pasted markup is a real case — "view source" is the fallback when a page is
+  // behind bot protection the URL capture cannot get past.  The server does the
+  // authoritative detection and strips the tags; this only tells the analyst
+  // their paste was recognised, so markup does not look like it went in raw.
+  const looksLikeHtml = mode === 'text' && HTML_HINT_RE.test(trimmed)
+
   const statusText =
     mode === 'empty' ? 'nothing pasted yet'
     : mode === 'url' ? 'link detected — no typing needed, just paste'
     : tooShort ? 'need at least 20 characters'
+    : looksLikeHtml ? `${chars.toLocaleString()} chars of HTML — tags stripped server-side`
     : `${chars.toLocaleString()} chars`
   const statusTone =
     mode === 'empty' || mode === 'url' || !tooShort ? 'var(--ink-4)' : 'var(--warn)'

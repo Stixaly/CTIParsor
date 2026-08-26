@@ -103,11 +103,45 @@ fourth entry point exist.**
 
 ### `POST /api/ingest/text`
 
-Stored as `.md` when at least 2 of 6 Markdown signals match (ATX heading, list
-item, fence, table row, inline link, bold), `.txt` otherwise — the source viewer
-renders both, and the chunker's paragraph cascade needs the blank lines either
-way. CRLF is normalised. Bounds: 20 chars minimum (below that it is a mis-paste
-that would run five stages to produce an empty bundle), 2 MB maximum.
+A three-way cascade on the paste itself, **HTML first**, then Markdown, then
+plain text. CRLF is normalised. Bounds: 20 chars minimum (below that it is a
+mis-paste that would run five stages to produce an empty bundle), 2 MB maximum.
+
+`.md` when at least 2 of 6 Markdown signals match (ATX heading, list item,
+fence, table row, inline link, bold) — the source viewer renders both, and the
+chunker's paragraph cascade needs the blank lines either way.
+
+`.html` when the paste declares itself (`<!DOCTYPE html`, `<html`) or shows two
+distinct tags. HTML is tested **before** Markdown because a `<li>` or a `<table>`
+also trips the Markdown list and table patterns, and misfiling markup as
+Markdown keeps the tags. One signal is not enough, so prose that merely mentions
+`<script>` stays plain text.
+
+This matters because markup was previously stored as `.txt` and reached the
+extractor **with its tags intact** — `<div class="post">` read as content.
+Measured on the live Unit 42 page, pasting its source:
+
+| | raw `.txt` (before) | `.html` (now) |
+|---|---|---|
+| characters handed to Stage 1 | 258,095 | **35,971** |
+| observables matched | 70 | 29 |
+
+The lower count is the correct one. Of the 41 that disappear, **40 are markup**:
+`cdn.cookielaw.org`, `fonts.googleapis.com`, `api.w.org`, the site's own
+navigation, and `2funit42.paloaltonetworks.com` — a mis-decoded `%2F`. Nothing
+real is lost to the strip: the set present only in the `.html` path is empty.
+
+**One real loss, measured and accepted.** The 41st is a SHA-256 that exists only
+inside `<a href="https://virustotal.com/gui/file/…">`. `get_text()` reads text,
+not attributes, so a hash carried solely by a link URL does not survive. Roughly
+3% of that page's real observables. Recovering it means re-emitting hrefs, which
+is where most of the other 40 came from — so it is left as a known gap rather
+than traded for the noise it would bring back.
+
+A paste that is markup and nothing else is refused: if under 20 characters
+survive the strip, the job is never created. Same guard as the blank-render
+check on the capture path, for the same reason — a document can be thousands of
+characters and contain no prose.
 
 ### `POST /api/ingest/url`
 
