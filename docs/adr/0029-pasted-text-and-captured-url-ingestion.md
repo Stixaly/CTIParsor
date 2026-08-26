@@ -156,6 +156,42 @@ Renders the page with Playwright Chromium and writes **two artefacts**:
 its renderer off. `/jobs/{id}/source` now sorts its glob to prefer the `.pdf`
 rather than trusting filesystem order, and skips `.pdf.part`.
 
+### The page is printed as one tall sheet, not paginated
+
+A4 pagination made the archive worse than the page it archives. Measured on the
+INDUSTROYER.V2 report:
+
+| | A4 (before) | one tall sheet |
+|---|---|---|
+| pages | 25 | **2** |
+| boundaries where content is cut | 24 | **1** |
+| pages with the nav painted over the text | 6 | **0** |
+| garbled text | yes | no |
+
+Two separate causes, and only one was obvious. Page 9 of the A4 output reads
+`Cloud BloSgleep Prior tCoo InEtCac-1t 0s4ales` — the site's `position: sticky`
+nav bar, repainted onto that sheet and interleaved with the article character by
+character. `emulate_media("print")` does **not** fix it: tested, the output is
+byte-identical, because that site ships no print stylesheet. Neutralising
+`position` on every pinned element does, and there were 12 of them.
+
+The second cause is pagination itself: every boundary is a place an image or a
+paragraph is cut. So the document is printed at its own height instead, capped
+at 19,200px — 14,400pt, 200 inches, the largest page Acrobat reads. Long
+articles get two or three tall sheets rather than twenty-five short ones.
+
+`page.evaluate()` does the un-pinning, and works even though the context sets
+`java_script_enabled=False`: that flag stops the page's own scripts, not
+Playwright's injected evaluation.
+
+**Known cosmetic gap.** One of three sites tested (welivesecurity.com) still
+emits a trailing blank sheet. It is not a height problem: adding 16px, 200px and
+1,000px of slack all produce the same two pages, the lowest element on the page
+sits 20px above the fold, and the page declares no `break-before`/`break-after`
+rules. A slack constant was written and then removed, because its stated reason
+did not survive measurement. The sheet is empty — no text, no images — so it
+costs a scroll, not content.
+
 A capture whose DOM renders fewer than 200 characters is **refused**, with a
 message naming JavaScript as the likely cause. cert.gov.ua is why: it is fully
 client-rendered, so with JS off it produced a valid 944-byte PDF containing a

@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     # Type-only: `new_context(viewport=…)` wants the ViewportSize TypedDict, and
     # a plain dict[str, int] does not satisfy it.  Imported under TYPE_CHECKING
     # so the module still loads when Playwright is not installed.
-    from playwright.sync_api import ViewportSize
+    from playwright.sync_api import Page, ViewportSize
 
 logger = get_logger(__name__)
 
@@ -140,6 +140,37 @@ _VIEWPORT: ViewportSize = {"width": 1280, "height": 1696}
 # than the PDF, because that is where the emptiness actually is.
 _MIN_RENDERED_CHARS = 200
 
+# A PDF page may not exceed 14,400 points — 200 inches — and stay readable by
+# Acrobat.  At 96 dpi that is 19,200 CSS pixels.  Rendering the whole document
+# on one sheet is the goal, because every page boundary is a place an image or a
+# paragraph gets cut in half; the cap is what keeps that sheet a legal PDF.
+# Measured: a 20,636px article becomes 2 pages of exactly 14,400pt instead of 25
+# A4 pages, so 24 cut boundaries become 1.
+_MAX_PDF_PAGE_PX = 19_200
+
+# Elements pinned to the viewport are repainted onto every printed page, landing
+# on top of the text.  Page 9 of an uncorrected capture reads "Cloud BloSgleep
+# Prior tCoo InEtCac-1t 0s4ales" — a sticky nav bar interleaved with the article
+# character by character.  Neutralising position before printing is the fix;
+# emulate_media("print") is not, and was measured to change nothing at all.
+#
+# This runs through page.evaluate(), which works even when the context has
+# java_script_enabled=False: that flag stops the page's own scripts, not
+# Playwright's injected evaluation.
+_UNSTICK_JS = """
+(() => {
+  let n = 0;
+  for (const el of document.querySelectorAll('*')) {
+    const pos = getComputedStyle(el).position;
+    if (pos === 'fixed' || pos === 'sticky') {
+      el.style.setProperty('position', 'static', 'important');
+      n += 1;
+    }
+  }
+  return n;
+})()
+"""
+
 
 @dataclass(frozen=True)
 class CaptureResult:
@@ -217,6 +248,50 @@ def _resolve_all(host: str) -> list[str]:
             seen.add(ip)
             unique_ips.append(ip)
     return unique_ips
+
+
+def _render_pdf(page: "Page", dest: Path) -> None:
+    """
+    Print the page to `dest` as one tall sheet, with viewport-pinned elements
+    neutralised first.
+
+    Falls back to A4 pagination if the document height cannot be measured — a
+    wrong height would produce a blank or clipped sheet, and A4 at least yields
+    something readable.
+    """
+    try:
+        unstuck = page.evaluate(_UNSTICK_JS)
+    except PlaywrightError:
+        unstuck = 0
+
+    try:
+        height = int(page.evaluate(
+            "Math.ceil(Math.max("
+            "document.documentElement.scrollHeight,"
+            "document.body ? document.body.scrollHeight : 0))"
+        ))
+    except (PlaywrightError, TypeError, ValueError):
+        height = 0
+
+    if height <= 0:
+        logger.warning("Document height could not be measured; falling back to A4 pagination")
+        page.pdf(
+            path=str(dest),
+            format="A4",
+            print_background=True,
+            margin={"top": "12mm", "bottom": "12mm", "left": "10mm", "right": "10mm"},
+        )
+        return
+
+    page_height = min(height, _MAX_PDF_PAGE_PX)
+    page.pdf(
+        path=str(dest),
+        print_background=True,
+        width=f"{_VIEWPORT['width']}px",
+        height=f"{page_height}px",
+        margin={"top": "0", "bottom": "0", "left": "0", "right": "0"},
+    )
+    logger.debug("Unstuck %d elements; document height %dpx; page height %dpx", unstuck, height, page_height)
 
 
 def _launch_hint(exc: Exception, *, sandboxed: bool) -> str:
@@ -471,12 +546,7 @@ def capture_url_to_pdf(
             # document, which would fail every capture shorter than the cap.
             # `max_bytes` below is the bound that actually holds.
             try:
-                page.pdf(
-                    path=str(dest),
-                    format="A4",
-                    print_background=True,
-                    margin={"top": "12mm", "bottom": "12mm", "left": "10mm", "right": "10mm"},
-                )
+                _render_pdf(page, dest)
             except PlaywrightError as exc:
                 raise CaptureError(f"PDF rendering failed: {exc}") from exc
         finally:

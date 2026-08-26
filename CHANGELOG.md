@@ -79,6 +79,17 @@ sections group by theme rather than strict semver.
   continue" until both are chosen, and they reset every time the modal opens.
   Every marking in `object_marking_refs` is now a decision rather than a default.
 
+- **Captured pages print as one tall sheet instead of 25 A4 pages.**  On the
+  INDUSTROYER.V2 report the archive went from 25 pages to 2, from 24 places
+  where an image or paragraph is cut to 1, and from 6 pages with the site's
+  sticky nav painted over the article text to none.  Page 9 of the old output
+  read `Cloud BloSgleep Prior tCoo InEtCac-1t 0s4ales` — the nav bar interleaved
+  with the prose, character by character.  `emulate_media("print")` was tried
+  first and changed nothing at all: that site ships no print stylesheet.  The
+  fix is to neutralise `position: fixed`/`sticky` before printing (12 elements
+  on that page) and to size the sheet to the document, capped at 14,400pt — the
+  largest page Acrobat will read.
+
 - **A full-screen composer for pasted reports.**  The inline box in the
   dashboard panel is 180 px — about nine lines of a 50,000-character report —
   and on a 1280×620 window the "Ingest text" button sat **34 px below the fold**

@@ -238,3 +238,60 @@ def test_launch_hint_always_carries_the_underlying_reason(monkeypatch):
     msg = web_capture._launch_hint(Exception("libasound.so.2: cannot open"), sandboxed=False)
     assert "libasound.so.2" in msg
     assert "install-deps" in msg
+class _FakePage:
+    """Records what _render_pdf asks for, without a browser."""
+
+    def __init__(self, height, *, evaluate_fails=False):
+        self._height = height
+        self._evaluate_fails = evaluate_fails
+        self.pdf_kwargs = None
+        self.unstick_calls = 0
+
+    def evaluate(self, script):
+        if self._evaluate_fails:
+            raise web_capture.PlaywrightError("evaluate blew up")
+        if "position" in script:
+            self.unstick_calls += 1
+            return 12
+        return self._height
+
+    def pdf(self, **kwargs):
+        self.pdf_kwargs = kwargs
+
+
+def test_render_pdf_uses_one_tall_page_for_a_normal_document(tmp_path):
+    page = _FakePage(5000)
+    web_capture._render_pdf(page, tmp_path / "o.pdf")
+    assert page.pdf_kwargs["height"] == "5000px"
+    assert page.pdf_kwargs["width"] == "1280px"
+    assert "format" not in page.pdf_kwargs
+    assert page.pdf_kwargs["margin"]["top"] == "0"
+    assert page.pdf_kwargs["margin"]["bottom"] == "0"
+    assert page.pdf_kwargs["margin"]["left"] == "0"
+    assert page.pdf_kwargs["margin"]["right"] == "0"
+
+
+def test_render_pdf_caps_the_page_at_the_pdf_limit(tmp_path):
+    page = _FakePage(20636)
+    web_capture._render_pdf(page, tmp_path / "o.pdf")
+    # 19,200px = 14,400pt = 200in, the largest page Acrobat reads.
+    assert page.pdf_kwargs["height"] == "19200px"
+
+
+def test_render_pdf_neutralises_pinned_elements_first(tmp_path):
+    page = _FakePage(5000)
+    web_capture._render_pdf(page, tmp_path / "o.pdf")
+    assert page.unstick_calls == 1
+
+
+def test_render_pdf_falls_back_to_a4_when_height_is_unmeasurable(tmp_path):
+    page = _FakePage(0)
+    web_capture._render_pdf(page, tmp_path / "o.pdf")
+    assert page.pdf_kwargs["format"] == "A4"
+    assert "height" not in page.pdf_kwargs
+
+
+def test_render_pdf_falls_back_to_a4_when_evaluate_raises(tmp_path):
+    page = _FakePage(5000, evaluate_fails=True)
+    web_capture._render_pdf(page, tmp_path / "o.pdf")
+    assert page.pdf_kwargs["format"] == "A4"
