@@ -85,6 +85,19 @@ export interface CoverageResult {
   cells: CoverageCell[]
 }
 
+/** One report value a rule holds verbatim — the evidence behind its proposal. */
+export interface CoverageMatch {
+  obs_class: string       // report side: hash | domain | ip | file | image | name …
+  display: string         // the report's original spelling
+  value: string           // normalized value that matched
+  field: string           // rule side: the atom class that matched
+  discriminating: boolean // false = ubiquitous (a LOLBin, a free-mail domain)
+  /** "atom" = the rule HOLDS this value; "title" = the rule is ABOUT it
+   *  (a brand mined from the campaign's own domains, ADR-0031). Title
+   *  evidence admits a rule but never corroborates. */
+  kind: 'atom' | 'title'
+}
+
 export interface CoverageRule {
   id: string
   corpus: string
@@ -95,6 +108,12 @@ export interface CoverageRule {
   also_in?: string[]
   format: DetectionFormat  // source rule language — decides the export file extension
   bytes: number            // raw body length — powers the live archive-size figures
+  /** ADR-0030 — the report values this rule holds verbatim. */
+  matches: CoverageMatch[]
+  /** How many of those are DISCRIMINATING; ubiquitous values never count. */
+  evidence_count: number
+  /** Brand/title matches (ADR-0031) — counted apart, never corroboration. */
+  title_count: number
 }
 
 export interface CoverageRuleGroup {
@@ -104,9 +123,16 @@ export interface CoverageRuleGroup {
 
 export interface CoverageReportRules {
   job_id: string
+  /** A group whose technique_id is "(untagged)" holds rules reached by evidence
+   *  alone — every YARA rule is in that case, none carries an ATT&CK tag. */
   techniques: CoverageRuleGroup[]
   technique_total: number
   rule_total: number
+  /** What the unfiltered ATT&CK tag join WOULD have returned (ADR-0030). */
+  tag_total: number
+  /** Of `rule_total`, how many carry at least one match. */
+  evidence_total: number
+  evidence_only: boolean
 }
 
 // ── Observable-driven rule proposals (ADR-0014) ─────────────────────────────
@@ -120,6 +146,7 @@ export interface ProposalMatch {
   display: string     // the report's original spelling
   exact: boolean      // false = substring match
   weight: number
+  discriminating: boolean  // false = ubiquitous value; shown, never scored (ADR-0030)
 }
 
 export interface RuleProposal {
@@ -135,6 +162,8 @@ export interface RuleProposal {
   tier: ProposalTier
   techniques: string[]
   matches: ProposalMatch[]
+  evidence_count: number   // distinct DISCRIMINATING observables matched
+  support_count: number    // distinct ubiquitous observables matched
 }
 
 export interface ProposalObservable {
@@ -152,6 +181,8 @@ export interface DetectionProposals {
   observables_total: number
   candidate_total: number
   counts: Record<ProposalTier, number>
+  /** Proposals holding at least two distinct discriminating report values. */
+  corroborated_total: number
   returned: number
   proposals: RuleProposal[]
 }
@@ -436,4 +467,26 @@ export interface LastRun {
   available: boolean
   pin: PinStats | null
   completion: CompletionStats | null
+}
+
+/** One rule returned by POST /api/rules/lookup. `raw` is "" unless the lookup
+ *  asked for the body — bodies are large (219 MB for one real report). */
+export interface RuleLookupEntry {
+  id: string
+  corpus: string
+  title: string
+  description: string
+  severity: string
+  license: string
+  source_ref: string
+  platform: string
+  format: DetectionFormat
+  bytes: number
+  techniques: string[]
+  raw: string
+}
+
+export interface RuleLookupResult {
+  rules: RuleLookupEntry[]
+  requested: number
 }

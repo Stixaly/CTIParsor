@@ -7,6 +7,7 @@ import {
   fetchCoverageReportRules,
   fetchDetectionProposals,
   fetchJob,
+  lookupRules,
 } from '../api/client'
 import {
   COVERAGE_LABEL,
@@ -24,6 +25,8 @@ import DrillInStrip from '../components/coverage/DrillInStrip'
 import FormatBoard from '../components/coverage/FormatBoard'
 import TriCheckbox from '../components/coverage/TriCheckbox'
 import CoverageExportPanel from '../components/coverage/CoverageExportPanel'
+import { usePromotedRules } from '../hooks/usePromotedRules'
+import EvidenceGateBanner from '../components/coverage/EvidenceGateBanner'
 import type { TechEntry } from '../components/coverage/model'
 
 // ATT&CK enterprise tactics in kill-chain order (column order).
@@ -54,6 +57,11 @@ const TACTIC_LABEL: Record<string, string> = {
   'command-and-control': 'Command & Control', 'exfiltration': 'Exfiltration',
   'impact': 'Impact', 'other': 'Other',
 }
+
+/** Pseudo-technique for rules promoted from the Proposed-detections panel. They
+ *  carry none of the report's techniques — that is why the coverage set missed
+ *  them — so they need a bucket of their own rather than a real technique id. */
+const PROMOTED_GROUP = '(promoted)'
 
 interface TechMeta { name: string; tactics: string[] }
 interface MitreTech { id?: string; name?: string; tactics?: string[] }
@@ -121,7 +129,36 @@ export default function Coverage() {
     return { rules: [...byId.values()], rulesById: byId, techRuleIds }
   }, [reportRules])
 
-  const selection = useRuleSelection(jobId, rules)
+  // Rules promoted from the Review "Proposed detections" panel. They are by
+  // construction OUTSIDE the coverage set — 199 of 200 proposals on one real
+  // report — so their metadata has to be fetched by id rather than read off
+  // `/coverage/rules`.
+  const promoted = usePromotedRules(jobId)
+  const promotedIds = useMemo(
+    () => [...promoted.promoted].filter(id => !rulesById.has(id)),
+    [promoted.promoted, rulesById],
+  )
+  const { data: promotedMeta } = useQuery({
+    queryKey: ['promoted-rules', jobId, promotedIds.join(',')],
+    queryFn: () => lookupRules(promotedIds),
+    enabled: promotedIds.length > 0,
+  })
+
+  // One selection set over coverage rules AND promoted ones, so the export and
+  // every count include both.
+  const allRules = useMemo<SelectableRule[]>(() => {
+    const extra: SelectableRule[] = (promotedMeta?.rules ?? [])
+      .filter(r => !rulesById.has(r.id))
+      .map(r => ({
+        id: r.id, format: r.format, corpus: r.corpus,
+        license: r.license, severity: r.severity,
+        title: r.title || r.id, bytes: r.bytes,
+        techniques: [PROMOTED_GROUP],
+      }))
+    return extra.length ? [...rules, ...extra] : rules
+  }, [rules, rulesById, promotedMeta])
+
+  const selection = useRuleSelection(jobId, allRules)
 
   // One TechEntry per coverage cell, in cell order (already sorted by score
   // desc on the API side).
@@ -175,6 +212,33 @@ export default function Coverage() {
     return m
   }, [proposals])
 
+  // ADR-0030 gate figures. `(untagged)` is the group of rules reached by evidence
+  // alone — no YARA rule carries an ATT&CK tag, so that group is their only route.
+  const gate = useMemo(() => {
+    const untagged = (reportRules?.techniques ?? [])
+      .find(g => g.technique_id === '(untagged)')?.rules.length ?? 0
+    // Counted over DISTINCT ids: one rule can sit under several techniques and
+    // would otherwise be counted once per group.
+    const corroboratedIds = new Set<string>()
+    // Rules admitted ONLY by a brand/title match — no literal value at all.
+    const brandOnlyIds = new Set<string>()
+    for (const g of reportRules?.techniques ?? []) {
+      for (const r of g.rules) {
+        if (r.evidence_count >= 2) corroboratedIds.add(r.id)
+        if (r.title_count > 0 && r.matches.every(m => m.kind === 'title')) {
+          brandOnlyIds.add(r.id)
+        }
+      }
+    }
+    return {
+      ruleTotal: reportRules?.rule_total ?? 0,
+      tagTotal: reportRules?.tag_total ?? 0,
+      untagged,
+      corroborated: corroboratedIds.size,
+      brand: brandOnlyIds.size,
+    }
+  }, [reportRules])
+
   const [drillId, setDrillId] = useState<string | null>(null)
   // Default to the first (highest-scoring) technique once coverage arrives.
   const drillTech = (drillId ? techsById.get(drillId) : undefined) ?? techs[0] ?? null
@@ -199,8 +263,18 @@ export default function Coverage() {
         a rule was tested against live telemetry.
       </div>
 
+      <div style={{ marginBottom: 14 }}>
+        <EvidenceGateBanner
+          ruleTotal={gate.ruleTotal}
+          tagTotal={gate.tagTotal}
+          untaggedCount={gate.untagged}
+          corroboratedCount={gate.corroborated}
+          brandCount={gate.brand}
+        />
+      </div>
+
       {techs.length > 0 && (
-        <FormatBoard techs={techs} rules={rules} selection={selection} />
+        <FormatBoard techs={techs} rules={allRules} selection={selection} />
       )}
 
       {isLoading && <p style={{ color: 'var(--ink-3)' }}>Computing coverage…</p>}
@@ -325,9 +399,10 @@ export default function Coverage() {
               jobId={jobId}
               reportName={job?.original_filename ?? ''}
               columns={columns}
-              rules={rules}
+              rules={allRules}
               rulesById={rulesById}
               selection={selection}
+              hasPromoted={allRules.length > rules.length}
             />
           </>
         )}

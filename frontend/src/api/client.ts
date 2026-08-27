@@ -1,4 +1,4 @@
-import type { Job, Entity, Relationship, StixBundle, CoverageResult, CoverageRule, CoverageReportRules, DetectionProposals, DetectionCorpus, CorpusConfig, FormatInfo, ExportFacets, ExportSelection, ExportAxis, LastRun } from '../types'
+import type { Job, Entity, Relationship, StixBundle, CoverageResult, CoverageRule, CoverageReportRules, DetectionProposals, DetectionCorpus, CorpusConfig, FormatInfo, ExportFacets, ExportSelection, ExportAxis, LastRun, RuleLookupResult } from '../types'
 
 const BASE = '/api'
 
@@ -250,3 +250,12 @@ export function errorDetail(err: unknown): string {
   }
   return body.length > 0 ? body : err.message
 }
+
+/** Metadata for arbitrary canonical rule ids — and their bodies on demand.
+ *  Not scoped to a job: the proposals panel shows rules outside the report's
+ *  ATT&CK tag join by construction. At most 500 ids per call. */
+export const lookupRules = (ruleIds: string[], includeBody = false) =>
+  req<RuleLookupResult>('/rules/lookup', {
+    method: 'POST',
+    body: JSON.stringify({ rule_ids: ruleIds, include_body: includeBody }),
+  })

@@ -31,6 +31,7 @@ import DragRubberBand from '../components/review/DragRubberBand'
 import KeyboardHelp from '../components/review/KeyboardHelp'
 import { typeDot, typeLabel, confPct } from '../components/review/tokens'
 import EntityPopover from '../components/EntityPopover'
+import { usePromotedRules } from '../hooks/usePromotedRules'
 
 // ── Review-specific types ─────────────────────────────────────────────────────
 // Theme type is re-exported from ThemeContext; imported via useAppTheme()
@@ -109,7 +110,21 @@ export default function Review() {
     queryFn: () => fetchCoverageReportRules(jobId!),
     enabled: !!jobId,
   })
-  const sigmaRuleCount = coverageRules?.rule_total ?? 0
+  const promoted = usePromotedRules(jobId)
+  // Ids the report itself matched, kept as a set so a promotion that is ALREADY
+  // covered is not counted twice — the top proposals usually are, being the
+  // evidence-backed ones, and the button read 6 for a 5-rule archive.
+  const coverageIds = useMemo(
+    () => new Set((coverageRules?.techniques ?? []).flatMap(g => g.rules.map(r => r.id))),
+    [coverageRules],
+  )
+  const promotedExtra = useMemo(
+    () => [...promoted.promoted].filter(id => !coverageIds.has(id)),
+    [promoted.promoted, coverageIds],
+  )
+  // Promotions ADD to what the report matched, so the button's count must
+  // include them or it contradicts the ZIP it produces.
+  const sigmaRuleCount = (coverageRules?.rule_total ?? 0) + promotedExtra.length
 
   const { data: remoteEntities = [], isLoading: entLoading } = useQuery({
     queryKey: ['entities', jobId],
@@ -504,7 +519,19 @@ export default function Review() {
     if (!jobId || sigmaRuleCount === 0 || downloadingSigma) return
     setDownloadingSigma(true)
     try {
-      const res = await fetch(detectionsExportUrl(jobId))
+      // The streaming GET rebuilds the archive from the report's OWN rules and
+      // knows nothing about promotions, so once anything has been promoted the
+      // explicit id list is the only correct request — otherwise the ZIP
+      // silently omits exactly the rules the analyst chose to add.
+      const res = promotedExtra.length === 0
+        ? await fetch(detectionsExportUrl(jobId))
+        : await fetch(`/api/jobs/${jobId}/detections/export`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              rule_ids: [...coverageIds, ...promotedExtra],
+            }),
+          })
       if (!res.ok) throw new Error(`${res.status}`)
       const blob = await res.blob()
       // Prefer the server-provided filename from Content-Disposition.
@@ -523,7 +550,8 @@ export default function Review() {
     } finally {
       setDownloadingSigma(false)
     }
-  }, [jobId, sigmaRuleCount, downloadingSigma, job?.original_filename])
+  }, [jobId, sigmaRuleCount, downloadingSigma, job?.original_filename,
+      promotedExtra, coverageIds])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

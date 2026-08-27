@@ -4,9 +4,15 @@ import { useQuery } from '@tanstack/react-query'
 import { ShieldCheck, ExternalLink, AlertTriangle } from 'lucide-react'
 
 import { fetchDetectionProposals } from '../../api/client'
+import { usePromotedRules } from '../../hooks/usePromotedRules'
 import type { DetectionFormat, ProposalMatch } from '../../types'
 import { DETECTION_FORMATS } from '../../types'
+import RuleBodyDrawer from './RuleBodyDrawer'
 import { typeInk, typeSoft, FORMAT_STYLE, formatDot, formatInk } from './tokens'
+
+/** Grid template shared by the header row and every proposal row — they must
+ *  stay in step or the columns drift apart. */
+const GRID = '26px 44px 84px 1fr 180px 140px'
 
 /** Detection rules ranked by what this report actually contains — hashes,
  *  domains, binaries, paths, registry keys, CVEs — and by platform, not by
@@ -21,6 +27,11 @@ export default function DetectionsPanel({ jobId }: { jobId: string }) {
 
   const [fmtFilter, setFmtFilter] = useState<'all' | DetectionFormat>('all')
   const [showAll, setShowAll] = useState(false)
+  // A proposal is not in the coverage rule set — measured, 199 of 200 on one
+  // real report — so promoting it is an ADDITION, tracked apart from the
+  // coverage page's exclusion-based selection.
+  const promoted = usePromotedRules(jobId)
+  const [openRuleId, setOpenRuleId] = useState<string | null>(null)
 
   if (isLoading) return <Wrap><p style={dim}>Ranking detections…</p></Wrap>
   if (isError) return <Wrap><p style={{ ...dim, color: 'var(--no)' }}>Could not load detections.</p></Wrap>
@@ -58,6 +69,22 @@ export default function DetectionsPanel({ jobId }: { jobId: string }) {
           top {data!.returned} of {data!.candidate_total} candidates
           {' · '}{counts.direct} matched on {data!.observables_total} observable
           {data!.observables_total === 1 ? '' : 's'}
+          {data!.corroborated_total > 0 && (
+            <span
+              style={{ color: 'var(--accent)' }}
+              title="Rules holding at least two distinct discriminating report values"
+            >
+              {' · '}{data!.corroborated_total} corroborated
+            </span>
+          )}
+          {promoted.count > 0 && (
+            <span
+              style={{ color: 'var(--accent)' }}
+              title="Added to the coverage selection — they will be in the export"
+            >
+              {' · '}{promoted.count} added to coverage
+            </span>
+          )}
         </span>
         <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
           <FilterChip
@@ -100,7 +127,7 @@ export default function DetectionsPanel({ jobId }: { jobId: string }) {
 
       <div style={{
         display: 'grid',
-        gridTemplateColumns: '44px 88px 1fr 190px 150px',
+        gridTemplateColumns: GRID,
         gap: '0 12px',
         alignItems: 'center',
         fontSize: 10.5,
@@ -111,6 +138,7 @@ export default function DetectionsPanel({ jobId }: { jobId: string }) {
         paddingBottom: 6,
         borderBottom: '1px solid var(--rule)',
       }}>
+        <span title="Add to the coverage selection and the export">Add</span>
         <span>Rank</span>
         <span>Format</span>
         <span>Rule</span>
@@ -129,13 +157,24 @@ export default function DetectionsPanel({ jobId }: { jobId: string }) {
               key={p.id}
               style={{
                 display: 'grid',
-                gridTemplateColumns: '44px 88px 1fr 190px 150px',
+                gridTemplateColumns: GRID,
                 gap: '0 12px',
                 alignItems: 'center',
                 padding: '8px 0',
                 borderBottom: '1px solid var(--rule-soft)',
               }}
             >
+              <input
+                type="checkbox"
+                checked={promoted.isPromoted(p.id)}
+                onChange={() => promoted.toggle(p.id)}
+                title={
+                  promoted.isPromoted(p.id)
+                    ? 'Added to coverage — it will be selected and exported'
+                    : 'Add this rule to the coverage selection'
+                }
+                style={{ cursor: 'pointer', margin: 0 }}
+              />
               <div style={{ textAlign: 'center' }}>
                 <ScorePill score={p.score} />
               </div>
@@ -157,15 +196,30 @@ export default function DetectionsPanel({ jobId }: { jobId: string }) {
                 {FORMAT_STYLE[p.format].label}
               </span>
               <div style={{ minWidth: 0 }}>
-                <div style={{
-                  fontSize: 12.5,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  color: 'var(--ink)',
-                }}>
+                <button
+                  onClick={() => setOpenRuleId(p.id)}
+                  title="Open the rule body — read it before trusting the rank"
+                  style={{
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    color: 'var(--ink)',
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    margin: 0,
+                    fontFamily: 'inherit',
+                    fontSize: 12.5,
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    width: '100%',
+                    textDecoration: 'underline',
+                    textDecorationColor: 'var(--rule)',
+                    textUnderlineOffset: 3,
+                  }}
+                >
                   {p.title || p.id}
-                </div>
+                </button>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 2 }}>
                   {p.techniques[0] && (
                     <span style={{ fontSize: 10.5, fontFamily: 'monospace', color: 'var(--accent)' }}>
@@ -189,10 +243,22 @@ export default function DetectionsPanel({ jobId }: { jobId: string }) {
                   )}
                 </div>
               </div>
-              <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
                 {p.matches.length > 0
                   ? <EvidenceChip match={p.matches[0]} />
                   : <span style={{ fontSize: 10.5, color: 'var(--ink-4)' }}>—</span>}
+                {p.evidence_count > 1 && (
+                  <span
+                    title={`${p.evidence_count} distinct report values corroborate this rule`}
+                    style={{
+                      flexShrink: 0, fontSize: 10, fontWeight: 700, fontFamily: 'monospace',
+                      padding: '1px 5px', borderRadius: 4,
+                      background: 'var(--accent-soft)', color: 'var(--accent)',
+                    }}
+                  >
+                    ×{p.evidence_count}
+                  </span>
+                )}
               </div>
               <span style={{ fontSize: 11, color: 'var(--ink-2)' }}>
                 {p.corpus} ·{' '}
@@ -222,6 +288,8 @@ export default function DetectionsPanel({ jobId }: { jobId: string }) {
           )}
         </>
       )}
+
+      <RuleBodyDrawer ruleId={openRuleId} onClose={() => setOpenRuleId(null)} />
     </Wrap>
   )
 }
