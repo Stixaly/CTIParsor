@@ -231,6 +231,22 @@ def observables_from_entities(rows: Iterable[Mapping[str, object]]) -> list[Obse
                 val = _refang(raw_value).lower().replace("\\", "/")
                 if val.startswith(_PSEUDO_FS):
                     continue
+                # A hostname typed as a file is not a file. ADR-0025 put this
+                # gate on the domain side, so `agent.ashx` cannot become a
+                # domain; ADR-0031 measured the mirror defect. On the UNC6671
+                # report all 78 `file` entities were the campaign's phishing
+                # domains, and 77 were already emitted as `domain` observables —
+                # duplicates that inflated the observable count and opened a
+                # substring-match path (`file: gmail.com` matched an lsassy
+                # rule). A value carrying a path separator is always kept: a
+                # path is a file, whatever its final segment looks like.
+                # Re-routed, never dropped: `add` dedups on (class, value), so
+                # when a `domain` entity already produced it this is a no-op,
+                # and when the extractor typed it ONLY as a file the observable
+                # survives in the class it actually belongs to.
+                if "/" not in val and _is_report_domain(val):
+                    add("domain", val, etype, display)
+                    continue
                 # Index the full path *and* the basename: a report naming only
                 # the binary must still match a rule pinning its install path.
                 candidates = [val]

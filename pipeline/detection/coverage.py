@@ -22,6 +22,21 @@ from dataclasses import dataclass, field
 #: never spans two of them, so per-format attribution partitions cleanly.
 DETECTION_FORMATS: tuple[str, ...] = ("sigma", "suricata", "yara")
 
+#: Rule-side atom classes each report class additionally reaches under ADR-0030.
+#: `strlit` holds every YARA string and every Suricata `content:` — 53,517 atoms
+#: that no MATCHABLE value set referenced, which is why all 16,314 canonical YARA
+#: rules were unreachable except by an exact hash. `pipe` holds Sigma named pipes.
+WIDENED_EXTRA: dict[str, frozenset[str]] = {
+    "hash":     frozenset({"strlit"}),
+    "ip":       frozenset({"strlit"}),
+    "domain":   frozenset({"strlit"}),
+    "url":      frozenset({"strlit"}),
+    "file":     frozenset({"strlit"}),
+    "image":    frozenset({"strlit"}),
+    "registry": frozenset({"strlit"}),
+    "name":     frozenset({"strlit", "pipe"}),
+}
+
 
 @dataclass
 class CoverageCell:
@@ -173,12 +188,130 @@ def compute_for_job(conn: sqlite3.Connection, job_id: str) -> dict:
     }
 
 
-def rules_for_job(conn: sqlite3.Connection, job_id: str) -> dict:
-    """Every canonical detection rule linkable to this report, grouped by the
-    report technique it covers. Mirrors compute_for_job's parent→sub roll-up (a
-    rule tagged with the parent technique also covers its sub-techniques), so the
-    Detections panel and the coverage score agree on what's covered. Rule bodies
-    are never returned — metadata only (ADR-0006 license-aware drill-down).
+def _widened_matchable() -> dict[str, frozenset[str]]:
+    """MATCHABLE unioned with WIDENED_EXTRA, class by class (ADR-0030).
+
+    Rebuilt per call rather than cached at module level: a mutable module-level
+    dict would be shared between tests that tune the tables.
+    """
+    from pipeline.detection.relevance import MATCHABLE
+
+    return {
+        cls: atoms | WIDENED_EXTRA.get(cls, frozenset())
+        for cls, atoms in MATCHABLE.items()
+    }
+
+
+def _admits(evidence: list[dict]) -> bool:
+    """Does this evidence justify putting the rule in front of an analyst?
+
+    A UBIQUITOUS value must not admit a rule. ADR-0030 ruled it contributes zero
+    to corroboration, but leaving it able to admit was worse than letting it
+    score: it put the rule in the export. Measured on the Cisco SD-WAN report —
+    60 rules served, of which **50 matched nothing but `/bin/bash` (39),
+    `/etc/passwd` (10) and `/etc/shadow` (3)**, while the proposals panel next to
+    it reported 14 direct hits. A ubiquitous match is still carried in `matches`
+    and displayed, but only as support on a rule that earned its place.
+
+    Brand/title evidence (`kind == "title"`) admits by design: it is
+    non-discriminating by construction and is ADR-0031's whole point.
+    """
+    return any(
+        e.get("kind") == "title" or (e["discriminating"] and e.get("kind") == "atom")
+        for e in evidence
+    )
+
+
+def _evidence_for_job(conn: sqlite3.Connection, job_id: str) -> dict[str, list[dict]]:
+    """rule_id → one entry per DISTINCT report observable the rule holds verbatim.
+
+    A rule appears here only if at least one hit survives the matchable filter —
+    never merely because `atom_hits` touched it. That distinction is the gate: an
+    empty-list entry would let a rule through `rid in evidence` with no evidence
+    at all.
+    """
+    from pipeline.detection.brands import brand_evidence, brand_tokens, cve_evidence
+    from pipeline.detection.control import is_ubiquitous
+    from pipeline.detection.observables import observables_from_entities
+    from pipeline.detection.relevance import job_observable_rows
+    from pipeline.detection.store import atom_hits
+
+    observables = observables_from_entities(job_observable_rows(conn, job_id))
+    if not observables:
+        return {}
+
+    by_value: dict[str, list] = {}
+    for obs in observables:
+        by_value.setdefault(obs.value, []).append(obs)
+
+    hits = atom_hits(conn, by_value.keys())
+
+    widened = _widened_matchable()
+    evidence: dict[str, list[dict]] = {}
+    seen: dict[str, set[str]] = {}
+
+    for rule_id, atom_class, value in hits:
+        for obs in by_value.get(value, ()):
+            if atom_class not in widened.get(obs.obs_class, frozenset()):
+                continue
+            # One entry per source ENTITY: a file path is emitted as both `file`
+            # and `image` and must not corroborate twice.
+            marks = seen.setdefault(rule_id, set())
+            if obs.display in marks:
+                continue
+            marks.add(obs.display)
+            evidence.setdefault(rule_id, []).append({
+                "obs_class": obs.obs_class,
+                "display": obs.display,
+                "value": obs.value,
+                "field": atom_class,
+                "discriminating": not is_ubiquitous(obs.obs_class, obs.value),
+                "kind": "atom",
+            })
+
+    # ADR-0031 — brand evidence. A rule whose TITLE names what the report is
+    # about is admitted too, in its own weaker tier: on UNC6671 every one of the
+    # campaign's 79 domains was freshly registered, so no rule held a single
+    # value and the panel served 0 — while 31 Okta rules sat in the store and
+    # "okta" appeared in 7 of those domains. These matches carry
+    # `discriminating: False`, so they never lift `evidence_count`.
+    brands = brand_tokens(conn, [o.value for o in observables if o.obs_class == "domain"])
+    for rule_id, brand_matches in brand_evidence(conn, brands).items():
+        evidence.setdefault(rule_id, []).extend(brand_matches)
+
+    # CVE ids the same way. A CVE reaches no atom class at all — `MATCHABLE` has
+    # no `cve` key — so a rule naming the vulnerability a report is *about* was
+    # invisible to this panel. Measured: `cve-2021-44228` names 120 rules.
+    for rule_id, cve_matches in cve_evidence(
+        conn, [o.value for o in observables if o.obs_class == "cve"]
+    ).items():
+        evidence.setdefault(rule_id, []).extend(cve_matches)
+
+    for evs in evidence.values():
+        # Literal-value evidence first, then brand/title evidence, which is a
+        # weaker claim: the rule is ABOUT this, it does not HOLD this.
+        evs.sort(key=lambda e: (e.get("kind") != "atom", not e["discriminating"], e["display"]))
+    return evidence
+
+
+def rules_for_job(
+    conn: sqlite3.Connection, job_id: str, *, evidence_only: bool = True
+) -> dict:
+    """Detection rules for this report, grouped by the technique they cover.
+
+    ADR-0030: the panel serves ONLY rules backed by something the report actually
+    contains. The tag join alone proposed 86,453 rules across seven reports of
+    which 908 (1.05%) held any report value; on one report the ratio was 3 in
+    12,280. `evidence_only=False` restores the unfiltered tag join, which the ZIP
+    export and the detection-engineering backlog still want.
+
+    Evidence also *adds* rules the tag join cannot reach: none of the 16,314
+    canonical YARA rules carries an ATT&CK tag, so they arrive here only through
+    `_evidence_for_job` and are grouped under `(untagged)`.
+
+    Mirrors compute_for_job's parent→sub roll-up (a rule tagged with the parent
+    technique also covers its sub-techniques). Rule bodies are never returned —
+    metadata only (ADR-0006 license-aware drill-down).
 
     Rewritten as one flat sweep (ADR-0022): the per-technique form called
     `rules_for_technique` once per technique — 34 EXISTS joins and 34 `also_in`
@@ -187,6 +320,7 @@ def rules_for_job(conn: sqlite3.Connection, job_id: str) -> dict:
     """
     from pipeline.detection.store import _also_in_map, canonical_rule_ids_for_techniques
 
+    evidence = _evidence_for_job(conn, job_id)
     technique_ids = job_technique_ids(conn, job_id)
 
     # Same parent→sub roll-up as compute_for_job: a parent-tagged rule covers a
@@ -208,8 +342,18 @@ def rules_for_job(conn: sqlite3.Connection, job_id: str) -> dict:
             rules_for_tech.setdefault(report_t, set()).add(rid)
             all_ids.add(rid)
 
+    tag_total = len(all_ids)
+
+    if evidence_only:
+        admitted = {rid for rid, evs in evidence.items() if _admits(evs)}
+        for t, ids in rules_for_tech.items():
+            rules_for_tech[t] = {rid for rid in ids if rid in admitted}
+        all_ids = admitted
+
     if not all_ids:
-        return {"job_id": job_id, "techniques": [], "technique_total": 0, "rule_total": 0}
+        return {"job_id": job_id, "techniques": [], "technique_total": 0,
+                "rule_total": 0, "tag_total": tag_total, "evidence_total": 0,
+                "evidence_only": evidence_only}
 
     # One metadata pass, 400 ids per statement (SQLite caps a statement at 999).
     meta: dict[str, dict] = {}
@@ -240,20 +384,51 @@ def rules_for_job(conn: sqlite3.Connection, job_id: str) -> dict:
         dk = m.pop("dedup_key")
         m["also_in"] = sorted(also_in.get(dk, set()) - {m["corpus"]}) if dk else []
 
+    evidence_total = 0
+    for rid, m in meta.items():
+        evs = evidence.get(rid, [])
+        m["matches"] = evs
+        # Corroboration counts literal, discriminating values ONLY. A brand match
+        # is admitted evidence but never corroboration (ADR-0031).
+        m["evidence_count"] = sum(
+            1 for e in evs if e["discriminating"] and e.get("kind") == "atom"
+        )
+        m["title_count"] = sum(1 for e in evs if e.get("kind") == "title")
+        if evs:
+            evidence_total += 1
+
+    def _rank(r: dict) -> tuple:
+        """Most-corroborated first: discriminating matches, then any match."""
+        return (-r["evidence_count"], -len(r["matches"]), r["corpus"], r["title"] or "")
+
     groups: list[dict] = []
     for t in technique_ids:
         rules = [meta[rid] for rid in rules_for_tech.get(t, ()) if rid in meta]
         if not rules:
             continue
-        rules.sort(key=lambda r: (r["corpus"], r["title"] or ""))
+        rules.sort(key=_rank)
         groups.append({"technique_id": t, "rules": rules})
 
     groups.sort(key=lambda g: (-len(g["rules"]), g["technique_id"]))
+
+    # Rules reached by evidence alone carry none of this report's techniques —
+    # every YARA rule in the store is in this case. Computed against the rules
+    # actually PLACED in a group, never against `all_ids`, which by then already
+    # contains them.
+    tagged_ids = {rid for ids in rules_for_tech.values() for rid in ids}
+    untagged = [m for rid, m in meta.items() if rid not in tagged_ids]
+    if untagged:
+        untagged.sort(key=_rank)
+        groups.append({"technique_id": "(untagged)", "rules": untagged})
+
     return {
         "job_id": job_id,
         "techniques": groups,
         "technique_total": len(groups),
         "rule_total": len(all_ids),
+        "tag_total": tag_total,
+        "evidence_total": evidence_total,
+        "evidence_only": evidence_only,
     }
 
 
@@ -295,6 +470,16 @@ def rule_bodies_for_job(
     for tag, rid in canonical_rule_ids_for_techniques(conn, query_ids):
         for report_t in covers.get(tag.upper(), ()):
             tech_for_rule.setdefault(rid, set()).add(report_t)
+
+    # Evidence-reached rules too, or the export cannot package what the panel
+    # serves. Measured before this was added: 582 of 1,069 served rules — 54% —
+    # were silently dropped from the ZIP, every one of them a rule reached by
+    # evidence alone (ADR-0030 `strlit`/YARA, ADR-0031 brand). They carry no
+    # ATT&CK tag, so the tag join above cannot see them; `techniques` stays empty
+    # for them, which is the truth and is what the manifest should say.
+    for rid, evs in _evidence_for_job(conn, job_id).items():
+        if _admits(evs):
+            tech_for_rule.setdefault(rid, set())
 
     if not tech_for_rule:
         return []

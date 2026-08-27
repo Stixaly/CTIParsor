@@ -7,6 +7,161 @@ sections group by theme rather than strict semver.
 ## [Unreleased]
 
 ### Added
+- **Proposals can be promoted into the coverage selection.** Each row in
+  *Proposed detections* gains an **Add** checkbox; ticked rules join the coverage
+  selection, the format-board counts and the export. They need it: measured on
+  the ShinyHunters report, **199 of the 200 proposals are outside the coverage
+  set**, so before this the panel could rank a rule an analyst had no way to act
+  on. Promotions persist per job under `coverage.promoted.{jobId}` — a set of
+  ADDITIONS, deliberately separate from `coverage.selection.{jobId}`, which holds
+  exclusions.
+
+- **A rule's body can be read before trusting its rank.** Clicking a proposal's
+  title opens a side drawer with the rule text, its ATT&CK tags, its source link
+  and its licence. Bodies are capped at 20,000 characters with the rest one click
+  away — the mthcht corpus averages ~176 KB per rule and one measured **825,817
+  characters**. The licence is shown prominently rather than in the metadata
+  line: `none` means ALL RIGHTS RESERVED, usable locally and not redistributable.
+
+- **`POST /api/rules/lookup`** — metadata for arbitrary canonical rule ids, and
+  their bodies on demand (`include_body`, capped at 500 ids). Deliberately not
+  job-scoped: the proposals panel shows rules outside the report's tag join by
+  construction.
+
+### Fixed
+- **A ubiquitous value could admit a rule into the panel and the export.**
+  ADR-0030 ruled such a value contributes zero to corroboration, but it was still
+  allowed to *admit* — which is worse, because admission is what reaches the ZIP.
+  Measured on the Cisco SD-WAN report: **60 rules served, 50 justified by nothing
+  but `/bin/bash` (39), `/etc/passwd` (10) and `/etc/shadow` (3)**, while the
+  proposals panel beside it reported 14. Across eleven reports the panel now
+  serves **267 rules rather than 1,069**. A ubiquitous hit is still displayed as
+  support on a rule that earned its place.
+
+- **A file's basename escaped the ubiquity check.** Observables carry both the
+  full path and its basename, so `/etc/shadow` was classified ubiquitous while
+  bare `shadow` read as discriminating — it and `auth.log` were the only thing
+  admitting all 10 rules the Cisco report served after the fix above.
+  `UBIQUITOUS_SYSTEM_FILES` now covers standard OS files by name, and the
+  `/var/log` paths joined the exact-path table.
+
+- **CVE ids reached no evidence path.** `MATCHABLE` has no `cve` key, so a rule
+  naming the vulnerability a report is *about* was invisible to the coverage
+  panel. `cve_evidence` resolves them through the ADR-0031 FTS index, as title
+  evidence that admits but never corroborates. `cve-2021-44228` names 120 rules;
+  a 2026 zero-day names none, which is the honest answer rather than a failure.
+
+- **Promoted rules never reached the ZIP.** Both download buttons took a
+  shortcut: when nothing was *excluded* — the default state — they used the
+  streaming `GET /detections/export`, which rebuilds the archive server-side from
+  the report's own rules and knows nothing about promotions. So ticking **Add**
+  updated the coverage counts and then the ZIP silently shipped without those
+  rules. Both buttons now send the explicit id list as soon as anything has been
+  promoted. The Review button's count also double-counted a promotion that was
+  already covered — it read 6 for a 5-rule archive.
+
+- **The export could not package half of what the coverage panel served.**
+  `rule_bodies_for_job` still selected by ATT&CK tag alone, so every rule reached
+  by evidence — all of YARA, plus ADR-0031 brand hits — appeared in the panel and
+  was then silently dropped from the ZIP. Measured across six reports: **582 of
+  1,069 served rules, 54%**, including 264 of CERT Polska's 508 and 124 of
+  aeternum's 160. Evidence-reached rules now join the export selection with an
+  empty `techniques` list, which is the truth about them.
+
+### Added
+- **Brand evidence, mined from the campaign's own domains** (ADR-0031).  A rule
+  whose **title** names what the report targets is now admitted to the coverage
+  panel, in a weaker tier that never corroborates and always sorts below
+  literal-value evidence.
+
+  This fixes a false-negative mode ADR-0030 introduced and did not measure: it
+  validated the top of the *kept* list and never looked at what was *dropped*.
+  On the UNC6671 vishing report all 79 campaign domains were freshly registered,
+  so no public rule held a single one of its 98 values — verified against the
+  whole 363,166-row atom index — and the panel served **0**.  Meanwhile the store
+  held **32 Okta rules**, including `Okta FastPass Phishing Detection`, and
+  "okta" appeared in 7 of those domains (`oktaenroll.com`, `keyokta.com`,
+  `myoktasso.com`, …).
+
+  Brands are found without a gazetteer: **a substring recurring across ≥3 of the
+  report's domains is a campaign theme**, and recurrence is itself the noise
+  filter — the one-off `sqfepjvmrd.xyz` yields nothing at any threshold.  Three
+  guards, each forced by measurement: word boundaries (as substrings, `reat`
+  matched **52,775** rules — it is inside "c*reat*ed" and "th*reat*"), a cap of
+  50 rules per token (okta 31, polygon 22, ms365 8 — against port 160, create
+  155, secure 124), and a stoplist of domain-construction vocabulary
+  (`passkey` recurs 60 times on UNC6671 and names a concept, not a product).
+
+  Result: UNC6671 **0 → 31 rules**, all Okta and Scattered Spider — the cluster
+  the report is about.  aeternum 138 → 160 (`polygon`), distinct-clusters 3 → 11
+  (`ms365`).  apt44 and CERT Polska gain nothing, which is the noise floor
+  holding.  `≥2 corroborated` stayed at 26 across all reports: brand evidence
+  corroborated nowhere.
+
+- **An FTS5 index over rule title and description** (`rule_text`), built by
+  `scripts/build_rule_text.py`.  Looking a token up by scanning `detection_rules`
+  cost **4.1 s**, and the first implementation needed two sweeps — 12.8 s on one
+  report, against a panel that answers in 2.9 s.  FTS5 answers in **0.4 ms**, and
+  its tokenizer *is* the word-boundary semantics the match needs, so the regex
+  went away rather than being reimplemented.  Builds in 26.9 s, costs 22 MB, and
+  is optional: brand evidence is simply absent while the table is empty, exactly
+  as proposals degrade while the atom index is unbuilt.  No corpus re-clone.
+
+### Fixed
+- **A hostname typed as a file is no longer treated as a file** (ADR-0031).
+  ADR-0025 put this gate on the domain side so `agent.ashx` cannot become a
+  domain; the mirror was missing.  On UNC6671 all 78 `file`/`image` observables
+  were the campaign's domains and 77 duplicated a `domain` observable already
+  present — **175 observables for 98 distinct values**.  Beyond the wrong count,
+  `file` reaches `{file, image, cmdline, strlit}` and admits substring matching,
+  which is how `file: gmail.com` came to match an lsassy rule.
+
+  The value is **re-routed to `domain`, not dropped**, so it survives when the
+  extractor typed it only as a file; a value carrying a path separator is always
+  kept as a file.  UNC6671 175 → 97 observables, distinct-clusters 71 → 56, while
+  genuine files are untouched (CERT Polska keeps all 40, aeternum all 26).
+
+### Changed
+- **The coverage panel now serves only rules backed by something the report
+  actually contains** (ADR-0030).  Measured across the seven reports in the live
+  store, the ATT&CK tag join proposed **86,453 rules of which 1,011 — 1.05% —
+  hold any report value**; on one report the ratio was 3 in 12,280.  The panel is
+  also 2.3× faster (41.6 s → 18.3 s in total), because it stops materialising
+  rules it was going to show without justification.  `evidence_only=False`
+  restores the unfiltered join for the ZIP export and the backlog view.
+
+  **526 rules become visible that no view could previously reach** — over half
+  the gated set.  Two atom classes were indexed and referenced by nothing:
+  `strlit` (53,517 atoms — every YARA string and every Suricata `content:`) and
+  `pipe` (14,468 Sigma named pipes).  Since **none of the 16,314 canonical YARA
+  rules carries an ATT&CK tag**, an exact hash was YARA's only way into any view;
+  the tag join could not reach it and the atom matcher would not.  Widening
+  `MATCHABLE` takes YARA rules with evidence from 32 to 73 and Suricata from 71
+  to 117.  On the Aeternum report the panel goes from 0 YARA rules to 16.
+
+- **Corroboration is counted over discriminating values, and ranks the list**
+  (ADR-0030).  Rules holding several distinct report values now sort first, and
+  the noisy-OR over a hard cap of four matches is replaced by a saturating sum,
+  so a third and a fourth genuine observable keep moving the score instead of
+  hitting the ceiling.
+
+  Document frequency could not decide what counts: on the live store it keeps
+  `certutil` (df 15), `ping` (10), `tasklist` (7) and `netstat` (9) while
+  stripping `api.telegram.org` (60) — it measures rarity in the *rule corpus*,
+  which is not the question.  A static table (`pipeline/detection/control.py`,
+  seeded from LOLBAS and the OS binary sets) classifies each value instead.
+  Ubiquitous values are still shown as supporting evidence; they never score.
+  Effect: rules with ≥2 corroborating values fell from 174 to 26, losing
+  fourteen apt44 rules tied on `powershell.exe + schtasks.exe` and keeping
+  `SMOKELOADER + TrickBot` and `rsocx + rsocx.exe`.
+
+  On the Aeternum blockchain-C2 report the top of the list is now its GitHub C2
+  path, its Telegram channel and the Smart Chain RPC endpoints the report is
+  about.  Previously it was `gmail.com` matching ET "Google Talk" signatures,
+  reached because an attacker's mail address had been reduced to its free-mail
+  domain.
+
+### Added
 - **Two more ways to start a job: paste text, or give a URL** (ADR-0029).  Both
   land exactly where an upload lands — a file under `uploads/{job_id}`, a `jobs`
   row, `run_pipeline_async` — so nothing downstream of Stage 1 knows the

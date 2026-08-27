@@ -8,6 +8,52 @@ matrix. For the design rationale see [ADR-0006](adr/0006-multi-corpus-detection-
 > (and from how many independent corpora) for each extracted technique — not that a
 > rule was tested against live telemetry.
 
+> **Evidence-gated since [ADR-0030](adr/0030-evidence-gated-coverage-and-corroboration-scoring.md).**
+> The panel lists only rules that hold a value the report actually contains —
+> a hash, a C2 domain, a campaign filename, a malware family name. Sharing an
+> ATT&CK tag is no longer enough. Expect the list to be **short**: across the
+> seven reports measured, the tag join proposed 86,453 rules and 1,011 of them
+> held anything from the report. On a fresh campaign it can be zero, because
+> that campaign's indicators are by construction absent from public corpora.
+> **That is the answer, not a failure** — the uncovered artifacts are your
+> detection-engineering backlog. The unfiltered tag join is still what the ZIP
+> export packages.
+
+> **Brand evidence, since [ADR-0031](adr/0031-brand-evidence-from-campaign-domains.md).**
+> A rule whose *title* names what the report targets is admitted too, marked
+> `by name` in the banner. It sorts below every rule holding a literal value and
+> never counts as corroboration. This is what a campaign built on freshly
+> registered infrastructure leaves you: on the UNC6671 vishing report no public
+> rule held any of its 98 values, but "okta" recurred across 7 of its domains and
+> the panel now serves the 31 Okta and Scattered Spider rules that matter.
+>
+> Brand lookup needs the FTS5 index — build it alongside the atom index:
+>
+> ```bash
+> python scripts/build_rule_text.py
+> ```
+>
+> Rebuild it whenever the rule corpora change. While it is absent, brand evidence
+> is simply not produced; nothing else degrades.
+
+## Working from *Proposed detections*
+
+The Review tab's **Proposed detections** panel ranks rules by what the report
+contains, and it reaches further than the coverage panel: measured on the
+ShinyHunters report, **199 of its 200 proposals are outside the coverage set**.
+Two controls turn that list into something actionable:
+
+- **Add** (the checkbox on each row) puts the rule into the coverage selection.
+  It then counts in the format board, in the byte totals and in the export.
+  Promotions are per report and survive a reload.
+- **Clicking the rule title** opens its body, tags, source link and licence, so
+  you can judge whether it actually fits the report before adopting it. Long
+  bodies are truncated at 20,000 characters — some rules run past 800,000.
+
+A licence of `none` means ALL RIGHTS RESERVED: use it for local coverage, do not
+redistribute it. The drawer says so on the rule itself, and the export manifest
+repeats it per rule.
+
 ## 1. Configure corpora
 
 Two registry files:
@@ -54,6 +100,7 @@ re-clone needed, it re-derives everything from the stored rule bodies:
 
 ```bash
 python scripts/build_rule_atoms.py
+python scripts/build_rule_text.py
 ```
 
 ## 4. Read the matrix

@@ -32,6 +32,10 @@ interface Props {
   rules: readonly SelectableRule[]
   rulesById: ReadonlyMap<string, SelectableRule>
   selection: RuleSelection
+  /** True when at least one rule was promoted from the proposals panel. Such a
+   *  rule is an addition the server-side selection cannot reproduce, so the
+   *  streaming GET export must not be used. */
+  hasPromoted: boolean
 }
 
 export default function CoverageExportPanel({
@@ -41,6 +45,7 @@ export default function CoverageExportPanel({
   rules,
   rulesById,
   selection,
+  hasPromoted,
 }: Props): JSX.Element {
   const [view, setView] = useState<'tactic' | 'format'>('tactic')
   const [downloading, setDownloading] = useState(false)
@@ -573,8 +578,13 @@ export default function CoverageExportPanel({
           >
             Nothing selected
           </span>
-        ) : selection.excluded.size === 0 ? (
+        ) : selection.excluded.size === 0 && !hasPromoted ? (
           // Full set rides the GET so the browser streams it — no blob in memory.
+          //
+          // Only valid when the selection IS the server's own set. A promoted
+          // rule is an ADDITION the server-side selection does not know about,
+          // so the GET would silently ship the report's rules and drop every
+          // promotion — the bug this guard exists for.
           <a href={detectionsExportUrl(jobId)} download style={primaryStyle}>
             {`Download ZIP · ${selection.selectedCount} rules`}
           </a>

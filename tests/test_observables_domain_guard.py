@@ -102,13 +102,19 @@ def test_dot_com_domain_typed_as_a_file_is_not_an_executable():
     The extractor emitted `pastebin.com` as both a `domain` and a `file` entity
     on a real report; the file branch then added an `image` observable because
     the value "ends in .com", turning one domain into three artifacts.
+
+    ADR-0031 finishes the job: a hostname typed as a file is not a file at all,
+    so it is re-routed to `domain` rather than kept as one. Measured on UNC6671,
+    where all 78 `file` entities were the campaign's phishing domains and 77
+    duplicated a `domain` observable already present — 175 observables became 97.
+    Re-routing rather than dropping is what keeps the value when the extractor
+    typed it ONLY as a file, as here.
     """
     obs = observables_from_entities([
         {"value": "pastebin.com", "entity_type": "file"},
     ])
     classes = {o.obs_class for o in obs}
-    assert "file" in classes
-    assert "image" not in classes
+    assert classes == {"domain"}
 
 
 def test_real_dos_com_executable_still_yields_an_image():
