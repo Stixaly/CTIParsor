@@ -214,6 +214,16 @@ def init_db() -> None:
                 PRIMARY KEY (rule_id, technique_id)
             );
 
+            -- ADR-0031 — full-text index over each canonical rule's title and
+            -- description. A brand token is looked up here in 0.4ms; the same
+            -- lookup as a scan of `detection_rules` measured 4.1s, and FTS5's
+            -- tokenizer gives the word-boundary semantics the match needs
+            -- anyway (substring matching put `reat` inside 52,775 rules).
+            CREATE VIRTUAL TABLE IF NOT EXISTS rule_text USING fts5(
+                rule_id UNINDEXED,
+                body
+            );
+
             -- Detection atoms (ADR-0014) — the literal values a rule looks for,
             -- extracted from its `detection:` block. Lets a report's observables
             -- rank rules by content instead of by ATT&CK tag alone.
@@ -291,6 +301,12 @@ def init_db() -> None:
             "ALTER TABLE entities ADD COLUMN evidence_text TEXT",
             "ALTER TABLE entities ADD COLUMN evidence_label TEXT",
             "ALTER TABLE entities ADD COLUMN evidence_start INTEGER",
+            # ADR-0031 — full-text index over rule title+description. Populated
+            # offline by scripts/build_rule_text.py; brand evidence is simply
+            # absent while the table is empty, exactly as proposals degrade
+            # while the atom index is unbuilt. No corpus re-clone.
+            "CREATE VIRTUAL TABLE IF NOT EXISTS rule_text USING fts5("
+            " rule_id UNINDEXED, body)",
         ]
         for stmt in _migrations:
             try:

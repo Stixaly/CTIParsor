@@ -624,7 +624,7 @@ def test_rules_for_job_flat_rewrite_keeps_parent_rollup(temp_db):
     replace_corpus_rules(conn, "yr", [_fmt_rule("yr", "y1", ["T1486"], "yara")])
     _job_with_techniques(temp_db, "jflat", ["T1059", "T1059.001"])
 
-    out = rules_for_job(conn, "jflat")
+    out = rules_for_job(conn, "jflat", evidence_only=False)
     groups = {g["technique_id"]: {r["id"] for r in g["rules"]} for g in out["techniques"]}
 
     assert set(groups) == {"T1059", "T1059.001"}
@@ -639,6 +639,11 @@ def test_rules_for_job_flat_rewrite_keeps_parent_rollup(temp_db):
             assert list(r.keys()) == [
                 "id", "corpus", "title", "severity", "license", "source_ref",
                 "format", "bytes", "also_in",
+                # ADR-0030: the evidence behind a rule travels with it, so the
+                # panel can show WHY it is proposed and rank on it.
+                # ADR-0031 adds `title_count`: brand evidence is admitted but
+                # counted apart, because it never corroborates.
+                "matches", "evidence_count", "title_count",
             ]
             # Sizes must be real, not a silent zero: they come from the
             # `rule_bytes` side table, and a store missing that join would
@@ -661,7 +666,7 @@ def test_rules_for_job_query_count_is_flat(temp_db):
 
     stmts = []
     conn.set_trace_callback(stmts.append)
-    out = rules_for_job(conn, "jcount")
+    out = rules_for_job(conn, "jcount", evidence_only=False)
     conn.set_trace_callback(None)
 
     assert len(out["techniques"]) == 3
@@ -718,3 +723,279 @@ def test_rule_bodies_for_job_body_ids_restricts_raw_only(temp_db):
     assert by_id["sig:b2"]["raw"] == ""
     # Metadata survives for the body-less entries — the manifest still needs it.
     assert by_id["sig:b2"]["corpus"] == "sig" and by_id["sig:b2"]["title"]
+
+
+# ── ADR-0030: the panel serves only evidence-backed rules ────────────────────
+
+def _add_observable(temp_db, job_id, value, entity_type):
+    """Insère une entité NON-technique (donc un observable) dans le job."""
+    conn = temp_db.get_conn()
+    conn.execute(
+        "INSERT INTO entities (id,job_id,value,entity_type,mitre_id,accepted,source) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (str(uuid4()), job_id, value, entity_type, None, 1, "llm"),
+    )
+    conn.commit()
+
+
+def _add_atoms(temp_db, rows):
+    """rows = liste de (rule_id, atom_class, value). Indexe les atomes d'une règle."""
+    from pipeline.detection.store import replace_rule_atoms
+    replace_rule_atoms(temp_db.get_conn(), rows)
+
+
+def test_coverage_panel_serves_only_evidence_backed_rules(temp_db):
+    """Only rules with matching evidence atoms are served when evidence_only=True."""
+    job_id = str(uuid4())
+    _job_with_techniques(temp_db, job_id, ["T1059"])
+    _add_observable(temp_db, job_id, "evil-campaign-c2.com", "domain")
+
+    rules = [
+        _fmt_rule("sig", "e1", ["T1059"], "sigma"),
+        _fmt_rule("sig", "e2", ["T1059"], "sigma"),
+        _fmt_rule("sig", "e3", ["T1059"], "sigma"),
+    ]
+    replace_corpus_rules(temp_db.get_conn(), "sig", rules)
+    _add_atoms(temp_db, [("sig:e2", "domain", "evil-campaign-c2.com")])
+
+    out = rules_for_job(temp_db.get_conn(), job_id, evidence_only=True)
+    assert out["tag_total"] == 3
+    assert out["rule_total"] == 1
+    assert out["evidence_total"] == 1
+    group = next(g for g in out["techniques"] if g["technique_id"] == "T1059")
+    assert len(group["rules"]) == 1
+    assert group["rules"][0]["id"] == "sig:e2"
+
+
+def test_evidence_only_false_restores_the_tag_join(temp_db):
+    """evidence_only=False restores the full tag-join result set."""
+    job_id = str(uuid4())
+    _job_with_techniques(temp_db, job_id, ["T1059"])
+    _add_observable(temp_db, job_id, "evil-campaign-c2.com", "domain")
+
+    rules = [
+        _fmt_rule("sig", "e1", ["T1059"], "sigma"),
+        _fmt_rule("sig", "e2", ["T1059"], "sigma"),
+        _fmt_rule("sig", "e3", ["T1059"], "sigma"),
+    ]
+    replace_corpus_rules(temp_db.get_conn(), "sig", rules)
+    _add_atoms(temp_db, [("sig:e2", "domain", "evil-campaign-c2.com")])
+
+    out = rules_for_job(temp_db.get_conn(), job_id, evidence_only=False)
+    assert out["evidence_only"] is False
+    assert out["rule_total"] == 3
+    group = next(g for g in out["techniques"] if g["technique_id"] == "T1059")
+    ids = {r["id"] for r in group["rules"]}
+    assert ids == {"sig:e1", "sig:e2", "sig:e3"}
+
+
+def test_an_untagged_rule_reaches_the_panel_through_evidence(temp_db):
+    """An untagged YARA rule with evidence reaches the panel under (untagged)."""
+    job_id = str(uuid4())
+    _job_with_techniques(temp_db, job_id, ["T1059"])
+    _add_observable(temp_db, job_id, "Sandworm2024", "malware")
+
+    rules = [
+        _fmt_rule("yr", "y1", [], "yara"),
+        _fmt_rule("sig", "s1", ["T1059"], "sigma"),
+    ]
+    replace_corpus_rules(temp_db.get_conn(), "yr", [rules[0]])
+    replace_corpus_rules(temp_db.get_conn(), "sig", [rules[1]])
+    _add_atoms(temp_db, [("yr:y1", "strlit", "sandworm2024")])
+
+    out = rules_for_job(temp_db.get_conn(), job_id, evidence_only=True)
+    untagged = next(g for g in out["techniques"] if g["technique_id"] == "(untagged)")
+    assert any(r["id"] == "yr:y1" for r in untagged["rules"])
+    assert out["techniques"][-1]["technique_id"] == "(untagged)"
+
+
+def test_a_ubiquitous_value_alone_does_not_admit_a_rule(temp_db):
+    """A ubiquitous value must not even ADMIT a rule, let alone corroborate it.
+
+    Letting it admit was worse than letting it score: it put the rule in the
+    export. Measured on the Cisco SD-WAN report before this gate — 60 rules
+    served, 50 of them justified by nothing but `/bin/bash` (39), `/etc/passwd`
+    (10) and `/etc/shadow` (3), while the proposals panel beside it reported 14.
+    """
+    job_id = str(uuid4())
+    _job_with_techniques(temp_db, job_id, ["T1059"])
+    _add_observable(temp_db, job_id, "cmd.exe", "file")
+
+    rules = [_fmt_rule("sig", "s1", ["T1059"], "sigma")]
+    replace_corpus_rules(temp_db.get_conn(), "sig", rules)
+    _add_atoms(temp_db, [("sig:s1", "image", "cmd.exe")])
+
+    out = rules_for_job(temp_db.get_conn(), job_id, evidence_only=True)
+    assert out["rule_total"] == 0
+    assert out["techniques"] == []
+
+
+def test_a_ubiquitous_value_still_shows_as_support(temp_db):
+    """On a rule that earned its place, a ubiquitous hit is displayed, not scored."""
+    job_id = str(uuid4())
+    _job_with_techniques(temp_db, job_id, ["T1059"])
+    _add_observable(temp_db, job_id, "cmd.exe", "file")
+    _add_observable(temp_db, job_id, "beacon-implant.exe", "file")
+
+    rules = [_fmt_rule("sig", "s1", ["T1059"], "sigma")]
+    replace_corpus_rules(temp_db.get_conn(), "sig", rules)
+    _add_atoms(temp_db, [
+        ("sig:s1", "image", "cmd.exe"),
+        ("sig:s1", "image", "beacon-implant.exe"),
+    ])
+
+    out = rules_for_job(temp_db.get_conn(), job_id, evidence_only=True)
+    group = next(g for g in out["techniques"] if g["technique_id"] == "T1059")
+    rule = next(r for r in group["rules"] if r["id"] == "sig:s1")
+    # Admitted by the campaign binary, and only that one counts.
+    assert rule["evidence_count"] == 1
+    cmd_match = next(m for m in rule["matches"] if m["value"] == "cmd.exe")
+    assert cmd_match["discriminating"] is False
+
+
+def test_rules_rank_by_discriminating_evidence_count(temp_db):
+    """Rules are ranked by descending discriminating evidence count."""
+    job_id = str(uuid4())
+    _job_with_techniques(temp_db, job_id, ["T1059"])
+    _add_observable(temp_db, job_id, "alpha-c2.com", "domain")
+    _add_observable(temp_db, job_id, "beta-c2.com", "domain")
+    _add_observable(temp_db, job_id, "gamma-c2.com", "domain")
+
+    rules = [
+        _fmt_rule("sig", "one", ["T1059"], "sigma"),
+        _fmt_rule("sig", "two", ["T1059"], "sigma"),
+    ]
+    replace_corpus_rules(temp_db.get_conn(), "sig", rules)
+    _add_atoms(temp_db, [
+        ("sig:two", "domain", "alpha-c2.com"),
+        ("sig:two", "domain", "beta-c2.com"),
+        ("sig:one", "domain", "gamma-c2.com"),
+    ])
+
+    out = rules_for_job(temp_db.get_conn(), job_id, evidence_only=True)
+    group = next(g for g in out["techniques"] if g["technique_id"] == "T1059")
+    assert group["rules"][0]["id"] == "sig:two"
+    assert group["rules"][0]["evidence_count"] == 2
+    one = next(r for r in group["rules"] if r["id"] == "sig:one")
+    assert one["evidence_count"] == 1
+
+
+def test_a_rule_with_no_atom_is_dropped_even_when_tagged(temp_db):
+    """A tagged rule with no indexed atoms is dropped from the evidence panel."""
+    job_id = str(uuid4())
+    _job_with_techniques(temp_db, job_id, ["T1059"])
+    _add_observable(temp_db, job_id, "evil-campaign-c2.com", "domain")
+
+    rules = [_fmt_rule("sig", "s1", ["T1059"], "sigma")]
+    replace_corpus_rules(temp_db.get_conn(), "sig", rules)
+
+    out = rules_for_job(temp_db.get_conn(), job_id, evidence_only=True)
+    assert out["techniques"] == []
+    assert out["rule_total"] == 0
+    assert out["tag_total"] == 1
+    assert out["evidence_total"] == 0
+    for key in ("techniques", "technique_total", "rule_total", "tag_total",
+                "evidence_total", "evidence_only"):
+        assert key in out
+
+
+# ── ADR-0031: brand evidence from the campaign's own domains ───────────────
+
+def _index_rule_text(temp_db, rows):
+    """rows = list of (rule_id, body). Populate the ADR-0031 FTS5 index."""
+    conn = temp_db.get_conn()
+    conn.executemany("INSERT INTO rule_text (rule_id, body) VALUES (?,?)",
+                     [(rid, body.lower()) for rid, body in rows])
+    conn.commit()
+
+
+def test_a_brand_from_campaign_domains_admits_a_rule(temp_db):
+    """Locks in ADR-0031: recurring domain substrings admit rules without atoms."""
+    job_id = str(uuid4())
+    rules = [_fmt_rule("sig", "okta1", ["T1566"], "sigma")]
+    replace_corpus_rules(temp_db.get_conn(), "sig", rules)
+    _job_with_techniques(temp_db, job_id, ["T1566"])
+    _add_observable(temp_db, job_id, "oktaenroll.com", "domain")
+    _add_observable(temp_db, job_id, "keyokta.com", "domain")
+    _add_observable(temp_db, job_id, "myoktasso.com", "domain")
+    _index_rule_text(temp_db, [("sig:okta1", "Okta FastPass Phishing Detection")])
+    out = rules_for_job(temp_db.get_conn(), job_id, evidence_only=True)
+    assert out["rule_total"] == 1
+    rule_out = next(r for t in out["techniques"] for r in t["rules"] if r["id"] == "sig:okta1")
+    assert len(rule_out["matches"]) == 1
+    m = rule_out["matches"][0]
+    assert m["obs_class"] == "brand"
+    assert m["display"] == "okta"
+    assert m["kind"] == "title"
+
+
+def test_a_brand_never_corroborates(temp_db):
+    """A brand is admitted evidence but never counts toward evidence_count."""
+    job_id = str(uuid4())
+    rules = [_fmt_rule("sig", "okta1", ["T1566"], "sigma")]
+    replace_corpus_rules(temp_db.get_conn(), "sig", rules)
+    _job_with_techniques(temp_db, job_id, ["T1566"])
+    _add_observable(temp_db, job_id, "oktaenroll.com", "domain")
+    _add_observable(temp_db, job_id, "keyokta.com", "domain")
+    _add_observable(temp_db, job_id, "myoktasso.com", "domain")
+    _index_rule_text(temp_db, [("sig:okta1", "Okta FastPass Phishing Detection")])
+    out = rules_for_job(temp_db.get_conn(), job_id, evidence_only=True)
+    rule_out = next(r for t in out["techniques"] for r in t["rules"] if r["id"] == "sig:okta1")
+    assert rule_out["evidence_count"] == 0
+    assert rule_out["title_count"] == 1
+
+
+def test_a_theme_in_only_two_domains_is_not_a_brand(temp_db):
+    """Two domains are below the recurrence threshold; no brand is extracted."""
+    job_id = str(uuid4())
+    rules = [_fmt_rule("sig", "okta1", ["T1566"], "sigma")]
+    replace_corpus_rules(temp_db.get_conn(), "sig", rules)
+    _job_with_techniques(temp_db, job_id, ["T1566"])
+    _add_observable(temp_db, job_id, "oktaenroll.com", "domain")
+    _add_observable(temp_db, job_id, "keyokta.com", "domain")
+    _index_rule_text(temp_db, [("sig:okta1", "Okta FastPass Phishing Detection")])
+    out = rules_for_job(temp_db.get_conn(), job_id, evidence_only=True)
+    assert out["rule_total"] == 0
+    assert out["techniques"] == []
+
+
+def test_atom_evidence_sorts_before_brand_evidence(temp_db):
+    """Atom matches must precede title matches within a rule's evidence list."""
+    job_id = str(uuid4())
+    rules = [_fmt_rule("sig", "both", ["T1566"], "sigma")]
+    replace_corpus_rules(temp_db.get_conn(), "sig", rules)
+    _add_atoms(temp_db, [("sig:both", "domain", "evil-campaign-c2.com")])
+    _job_with_techniques(temp_db, job_id, ["T1566"])
+    _add_observable(temp_db, job_id, "oktaenroll.com", "domain")
+    _add_observable(temp_db, job_id, "keyokta.com", "domain")
+    _add_observable(temp_db, job_id, "myoktasso.com", "domain")
+    _add_observable(temp_db, job_id, "evil-campaign-c2.com", "domain")
+    _index_rule_text(temp_db, [("sig:both", "Okta FastPass Phishing Detection")])
+    out = rules_for_job(temp_db.get_conn(), job_id, evidence_only=True)
+    rule_out = next(r for t in out["techniques"] for r in t["rules"] if r["id"] == "sig:both")
+    assert len(rule_out["matches"]) == 2
+    assert rule_out["matches"][0]["kind"] == "atom"
+    assert rule_out["matches"][1]["kind"] == "title"
+    assert rule_out["evidence_count"] == 1
+    assert rule_out["title_count"] == 1
+
+
+def test_an_evidence_reached_rule_is_exportable(temp_db):
+    """A rule the panel serves must be packageable, tag or no tag.
+
+    `rule_bodies_for_job` selected by ATT&CK tag alone, so every rule reached by
+    evidence — all of YARA, plus ADR-0031 brand hits — was served in the panel
+    and then silently dropped from the ZIP. Measured before the fix: 582 of
+    1,069 served rules, 54%.
+    """
+    conn = temp_db.get_conn()
+    replace_corpus_rules(conn, "yr", [_fmt_rule("yr", "y1", [], "yara")])
+    _add_atoms(temp_db, [("yr:y1", "strlit", "sandworm2024")])
+    _job_with_techniques(temp_db, "jexp", ["T1059"])
+    _add_observable(temp_db, "jexp", "Sandworm2024", "malware")
+
+    served = {r["id"] for g in rules_for_job(conn, "jexp")["techniques"] for r in g["rules"]}
+    exportable = {r["id"] for r in rule_bodies_for_job(conn, "jexp")}
+
+    assert "yr:y1" in served
+    assert served <= exportable, "the panel must never serve a rule the export cannot package"

@@ -442,6 +442,70 @@ def canonical_rule_bodies(conn: sqlite3.Connection, rule_ids: Iterable[str]) -> 
     }
 
 
+def lookup_rules(
+    conn: sqlite3.Connection,
+    rule_ids: Iterable[str],
+    *,
+    include_body: bool = False,
+) -> list[dict]:
+    """Metadata (and optionally the raw body) for arbitrary CANONICAL rule ids.
+
+    Unlike the job-scoped helpers, this answers "what is this rule?" for ids the
+    caller already holds — the proposals panel shows rules outside the report's
+    ATT&CK tag join by construction, so it cannot use a technique-selected path.
+
+    `bytes` comes from the `rule_bytes` side table, never `LENGTH(raw)`: a column
+    read after `raw` forces SQLite through the body's overflow pages — 8.2s
+    versus 0.1s (ADR-0022). `raw` itself is opt-in for the same reason.
+    """
+    ids = sorted({i.strip() for i in rule_ids if isinstance(i, str) and i.strip()})
+    if not ids:
+        return []
+
+    body_col = ", d.raw" if include_body else ""
+    all_rows: list[tuple] = []
+    for i in range(0, len(ids), 400):
+        batch = ids[i:i + 400]
+        placeholders = ",".join("?" * len(batch))
+        all_rows.extend(conn.execute(
+            f"SELECT d.id, d.corpus, d.title, d.description, d.severity, "
+            f"d.license, d.source_ref, d.platform, d.format, "
+            f"COALESCE(b.bytes, 0){body_col} "
+            f"FROM detection_rules d "
+            f"LEFT JOIN rule_bytes b ON b.rule_id = d.id "
+            f"WHERE d.id IN ({placeholders}) AND d.is_canonical = 1",
+            batch,
+        ).fetchall())
+
+    if not all_rows:
+        return []
+
+    # One technique lookup for every row at once, never one per rule.
+    techniques_map = techniques_for_rules(conn, [r[0] for r in all_rows])
+
+    results: list[dict] = []
+    for row in all_rows:
+        rid, corpus, title, desc, sev, lic, src, plat, fmt, nbytes = row[:10]
+        raw = row[10] if include_body and len(row) > 10 else ""
+        results.append({
+            "id": rid,
+            "corpus": corpus or "",
+            "title": title,
+            "description": desc or "",
+            "severity": sev or "unknown",
+            "license": lic or "unknown",
+            "source_ref": src or "",
+            "platform": plat or "",
+            "format": fmt or "sigma",
+            "bytes": nbytes or 0,
+            "techniques": sorted(techniques_map.get(rid, [])),
+            "raw": raw or "",
+        })
+
+    results.sort(key=lambda x: (x["corpus"], x["title"] or "", x["id"]))
+    return results
+
+
 def corpus_counts(conn: sqlite3.Connection) -> list[dict]:
     """Per-corpus rule counts — for the /api/detection-corpora endpoint.
 

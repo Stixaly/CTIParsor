@@ -23,7 +23,7 @@ from pipeline.detection.coverage import (
     rules_for_job,
 )
 from pipeline.detection.relevance import propose_for_job
-from pipeline.detection.store import corpus_counts, rules_for_technique
+from pipeline.detection.store import corpus_counts, lookup_rules, rules_for_technique
 
 router = APIRouter(prefix="/api", tags=["coverage"])
 
@@ -418,6 +418,56 @@ def export_detections_selection(job_id: str, selection: ExportSelection):
     }
 
     return _zip_export(job_id, row["original_filename"], all_rules, rules, filters_meta)
+
+
+#: Cap on one lookup. The proposals panel promotes a handful at a time and the
+#: coverage page hydrates its promoted set; neither needs more, and an unbounded
+#: list would let one request pull every body in the store.
+RULE_LOOKUP_MAX = 500
+
+
+class RuleLookup(BaseModel):
+    """Body of the rule lookup: which rules, and whether to include their text."""
+    rule_ids: list[str] = Field(default_factory=list)
+    include_body: bool = False
+
+
+@router.post("/rules/lookup")
+def post_rule_lookup(lookup: RuleLookup):
+    """Metadata for arbitrary canonical rule ids — and their bodies on demand.
+
+    Deliberately NOT scoped to a job. It serves the Proposed-detections panel,
+    which shows rules outside the report's ATT&CK tag join by construction —
+    measured, 199 of 200 proposals on one real report. The store holds only
+    public corpora already cloned locally, so scoping would protect nothing that
+    the export does not already hand over.
+
+    `include_body` is opt-in because bodies are large: 219 MB for one real
+    report (ADR-0022), against metadata that costs a single indexed read.
+
+    Each rule carries its licence. A licence of `none` means ALL RIGHTS
+    RESERVED — usable for local coverage, never redistributable (ADR-0006).
+    """
+    seen: set[str] = set()
+    wanted: list[str] = []
+    for raw_id in lookup.rule_ids:
+        if not isinstance(raw_id, str):
+            continue
+        rid = raw_id.strip()
+        if rid and rid not in seen:
+            seen.add(rid)
+            wanted.append(rid)
+
+    if not wanted:
+        raise HTTPException(400, "rule_ids must be a non-empty list")
+    if len(wanted) > RULE_LOOKUP_MAX:
+        raise HTTPException(413, f"at most {RULE_LOOKUP_MAX} rule ids per lookup")
+
+    with get_conn() as conn:
+        return {
+            "rules": lookup_rules(conn, wanted, include_body=lookup.include_body),
+            "requested": len(wanted),
+        }
 
 
 @router.get("/detection-corpora")

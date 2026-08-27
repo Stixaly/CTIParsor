@@ -19,6 +19,7 @@ import sqlite3
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
+from pipeline.detection.control import is_ubiquitous
 from pipeline.detection.observables import Observable, observables_from_entities, report_platform
 from pipeline.detection.store import (
     atom_document_frequency,
@@ -34,17 +35,22 @@ from pipeline.detection.store import (
 #: Which rule atom classes a report observable class may legitimately match.
 #: An IP can show up in a rule's command line; a registry key only ever matches
 #: a registry field.
+#: `strlit` and `pipe` were indexed and referenced by nothing: 53,517 and 14,468
+#: atoms reachable by no report class at all. All 16,314 canonical YARA rules
+#: carry no ATT&CK tag, so an exact hash was their only way in. Measured after
+#: widening, across seven real reports: YARA rules with evidence 32 → 73,
+#: Suricata 71 → 117, Sigma 467 → 468 (ADR-0030).
 MATCHABLE: dict[str, frozenset[str]] = {
-    "hash":     frozenset({"hash"}),
-    "ip":       frozenset({"ip", "url", "cmdline"}),
-    "domain":   frozenset({"domain", "url", "cmdline"}),
-    "url":      frozenset({"url", "cmdline"}),
-    "file":     frozenset({"file", "image", "cmdline"}),
-    "image":    frozenset({"image", "file", "cmdline"}),
-    "registry": frozenset({"registry"}),
+    "hash":     frozenset({"hash", "strlit"}),
+    "ip":       frozenset({"ip", "url", "cmdline", "strlit"}),
+    "domain":   frozenset({"domain", "url", "cmdline", "strlit"}),
+    "url":      frozenset({"url", "cmdline", "strlit"}),
+    "file":     frozenset({"file", "image", "cmdline", "strlit"}),
+    "image":    frozenset({"image", "file", "cmdline", "strlit"}),
+    "registry": frozenset({"registry", "strlit"}),
     "user":     frozenset({"user"}),
     "port":     frozenset({"port"}),
-    "name":     frozenset({"image", "file", "service", "cmdline"}),
+    "name":     frozenset({"image", "file", "service", "cmdline", "strlit", "pipe"}),
 }
 
 #: How much a match of this observable class is worth before IDF. A hash match
@@ -103,9 +109,9 @@ MIN_PARTIAL_LEN = 8
 #: it, "meshagent64-v2.exe" would match a rule looking for any ".exe" download.
 MIN_PARTIAL_RATIO = 0.5
 
-#: Only the strongest few matches feed the score. Noisy-OR saturates at 1.0
-#: given enough mediocre evidence, which would let a report with many weak
-#: observables push unrelated rules to a perfect score.
+#: No longer consulted by `rank_rules` since ADR-0030 replaced the noisy-OR with
+#: `corroborate`. Kept because `combine` is still exported and tested, and because
+#: the cap is what the new curve is measured against.
 MAX_SCORING_MATCHES = 4
 
 #: A tool/malware name matching more than this share of the candidate rules is
@@ -123,6 +129,7 @@ class Match:
     display: str        # the report's original spelling, for the UI
     exact: bool         # False = substring match
     weight: float       # contribution to the score
+    discriminating: bool = True   # False = ubiquitous value, never corroborates
 
 
 @dataclass(slots=True)
@@ -141,6 +148,8 @@ class Proposal:
     techniques: list[str] = field(default_factory=list)   # report techniques covered
     matches: list[Match] = field(default_factory=list)
     format: str = "sigma"                         # source rule language — Sigma / Suricata / YARA
+    evidence_count: int = 0   # distinct DISCRIMINATING observables matched
+    support_count: int = 0    # distinct ubiquitous observables matched
 
     def as_dict(self) -> dict:
         return {
@@ -150,9 +159,12 @@ class Proposal:
             "format": self.format,
             "score": round(self.score, 4), "tier": self.tier,
             "techniques": self.techniques,
+            "evidence_count": self.evidence_count,
+            "support_count": self.support_count,
             "matches": [
                 {"obs_class": m.obs_class, "field": m.atom_class, "value": m.value,
-                 "display": m.display, "exact": m.exact, "weight": round(m.weight, 4)}
+                 "display": m.display, "exact": m.exact, "weight": round(m.weight, 4),
+                 "discriminating": m.discriminating}
                 for m in self.matches
             ],
         }
@@ -183,6 +195,18 @@ def combine(weights: Iterable[float]) -> float:
     for w in weights:
         product *= (1.0 - max(0.0, min(1.0, w)))
     return 1.0 - product
+
+
+def corroborate(weights: Iterable[float]) -> float:
+    """Saturating sum of independent match weights — 0..1, never above 1.
+
+    Replaces the noisy-OR over a hard cap of MAX_SCORING_MATCHES (ADR-0030).
+    Noisy-OR saturated so fast that a third and a fourth genuine observable
+    changed almost nothing (0.99 → 0.997); summing inside `1 - exp(-x)` keeps
+    headroom while still bounding the result, so corroboration keeps paying.
+    """
+    total = sum(max(0.0, w) for w in weights)
+    return 1.0 - math.exp(-total)
 
 
 def platform_factor(rule_platform: str, report_plat: str) -> float:
@@ -421,16 +445,21 @@ def rank_rules(
                 w = base * idf(df.get(value, 0), total_rules)
                 if not is_exact:
                     w *= PARTIAL_FACTOR
+                disc = not is_ubiquitous(obs.obs_class, obs.value)
                 current = best.get(obs.display)
                 if current is None or w > current.weight:
                     best[obs.display] = Match(obs.obs_class, atom_class, obs.value,
-                                              obs.display, is_exact, w)
+                                              obs.display, is_exact, w, disc)
 
-        matches = sorted(best.values(), key=lambda m: -m.weight)
-        obs_component = combine(m.weight for m in matches[:MAX_SCORING_MATCHES])
+        # Evidence that counts, first — a `cmd.exe` hit is still shown, never scored.
+        matches = sorted(best.values(), key=lambda m: (not m.discriminating, -m.weight))
+        disc_weights = [m.weight for m in matches if m.discriminating]
         tech_component = tech_weight.get(rule_id, 0.0)
         factor = platform_factor(meta["platform"], plat)
-        score = min(1.0, obs_component + tech_component) * factor
+        # The technique term enters the SAME sum rather than being added after:
+        # that is what caps a tag-only rule at 1 - exp(-0.30) = 0.26, below any
+        # single discriminating match.
+        score = corroborate(disc_weights + [tech_component]) * factor
 
         proposals.append(Proposal(
             rule_id=rule_id,
@@ -442,12 +471,16 @@ def rank_rules(
             platform=meta["platform"],
             format=meta.get("format") or "sigma",
             score=score,
-            tier=tier_of(bool(matches), rule_id in tech_rules, factor == 1.0),
+            # `disc_weights`, not `matches`: a rule reached only through `cmd.exe`
+            # has not matched report content in any sense worth calling direct.
+            tier=tier_of(bool(disc_weights), rule_id in tech_rules, factor == 1.0),
             techniques=sorted(tech_rules.get(rule_id, ())) or rule_techs.get(rule_id, []),
             matches=matches[:8],     # evidence is for reading, not exhaustiveness
+            evidence_count=sum(1 for m in matches if m.discriminating),
+            support_count=sum(1 for m in matches if not m.discriminating),
         ))
 
-    proposals.sort(key=lambda p: (-p.score, p.corpus, p.title))
+    proposals.sort(key=lambda p: (-p.evidence_count, -p.score, p.corpus, p.title))
 
     counts = {"direct": 0, "behavioural": 0, "weak": 0}
     for p in proposals:
@@ -464,6 +497,7 @@ def rank_rules(
         "observables_total": len(observables),
         "candidate_total": len(proposals),
         "counts": counts,
+        "corroborated_total": sum(1 for p in proposals if p.evidence_count >= 2),
         "returned": min(limit, len(proposals)),
         "proposals": [p.as_dict() for p in proposals[:limit]],
     }

@@ -32,6 +32,9 @@ choice, and the consequences. They're append-only — supersede rather than rewr
 | [0027](0027-evidence-gated-pin-materialisation.md) | Evidence-gated pin materialisation, anchorable types only (SCOs/malware/tool 91–100% verbatim; `attack-pattern` 24.3%, `indicator` 0% by name but 96.3% by pattern value — 47% of candidates fail open by design) | Proposed |
 | [0028](0028-ttp-evidence-contract.md) | TTPs must quote, not describe — `TTPExtracted` gains `evidence_text`/`evidence_label` (relationship quotes locate at 79.4%, TTP descriptions at 36.8%, same call; 99.4% of failures are paraphrase, not invention) | Proposed |
 | [0029](0029-pasted-text-and-captured-url-ingestion.md) | Pasted text and captured URLs as ingestion sources — Chromium renders the archive, the DOM text is what gets ingested (the PDF keeps 99.6% of characters but only 72.2% of observables: 9 of 12 hashes lost to a wrapped table column; JS off is both the security and the functional default — Unit 42 serves 0 chars to a JS-enabled headless browser) | Proposed |
+| [0030](0030-evidence-gated-coverage-and-corroboration-scoring.md) | Evidence-gated coverage + corroboration scored on discriminating values (the tag join proposes 86 453 rules across 7 reports, 908 of them — 1.05 % — hold anything the report contains; `strlit`/`pipe` were indexed and unreachable, hiding all 16 314 YARA rules; df keeps `certutil` at 15 and strips `api.telegram.org` at 60, so it cuts the wrong way) | Proposed |
+
+| [0031](0031-brand-evidence-from-campaign-domains.md) | Brand evidence mined from campaign domains + an FTS5 rule-text index (UNC6671's 79 domains were all freshly registered, so the gate served 0 — while 32 Okta rules sat in the store and `okta` appeared in 7 of those domains; recurrence across domains is the anti-noise filter, and FTS5 makes the lookup 0.4 ms instead of 4.1 s) | Proposed |
 
 **Numbering notes**
 - `0001` and `0003` are unused gaps (early informal decisions never filed).
@@ -68,6 +71,44 @@ choice, and the consequences. They're append-only — supersede rather than rewr
           │               │   0014 from ranking to scoring, and carries 0015's
           │               │   hostname gate across to the report side — an
           │               │   asymmetry that had made `agent.ashx` a domain
+          │               │      ▲   shipped to the analyst, and repaired, by
+          │               │      └── 0030 evidence-gated coverage: 0025 was built
+          │               │          and the frontend never called it, so the
+          │               │          panel still served the tag join — 86,453
+          │               │          rules across 7 reports, 908 (1.05%) holding
+          │               │          anything the report contains.  Gates the
+          │               │          panel on evidence, and fixes two holes 0025
+          │               │          did not see: `strlit`/`pipe` were indexed
+          │               │          yet in no MATCHABLE set, so all 16,314
+          │               │          canonical YARA rules (none of which carry an
+          │               │          ATT&CK tag) were unreachable except by hash;
+          │               │          and 0025's df vocabulary cut keeps `certutil`
+          │               │          (15) while stripping `api.telegram.org` (60).
+          │               │          Corroboration is therefore counted over
+          │               │          DISCRIMINATING values, from a static table —
+          │               │          not over df, and not over adversary control,
+          │               │          which would have stripped Telegram too
+          │               │             ▲   its false-negative mode fixed by
+          │               │             └── 0031 brand evidence: 0030 validated
+          │               │                 the top of the KEPT list and never
+          │               │                 looked at what it DROPPED.  On a
+          │               │                 campaign whose 79 domains are all
+          │               │                 freshly registered no rule holds any
+          │               │                 value, so the panel served 0 — while
+          │               │                 32 Okta rules sat in the store and
+          │               │                 `okta` appeared in 7 of those domains.
+          │               │                 A rule whose TITLE names what the
+          │               │                 report targets is now admitted, in a
+          │               │                 weaker tier that never corroborates.
+          │               │                 Brands are mined from the campaign's
+          │               │                 own domains by recurrence — no
+          │               │                 gazetteer, because recurrence IS the
+          │               │                 noise filter.  Adds an FTS5 index:
+          │               │                 0.4 ms per lookup against 4.1 s, and
+          │               │                 its tokenizer supplies the
+          │               │                 word-boundary semantics that plain
+          │               │                 containment could not (`reat` matched
+          │               │                 52,775 rules)
           │               ▲   implemented by
  canonical names         └── 0006 multi-corpus rules ── managed by ── 0007 settings panel
  feed node identity          ▲   extended by

@@ -631,6 +631,7 @@ If your store predates this feature, build the atom index without re-cloning:
 
 ```bash
 python scripts/build_rule_atoms.py      # re-derives atoms from the stored rule bodies
+python scripts/build_rule_text.py       # FTS5 index over rule titles, for brand evidence (ADR-0031)
 ```
 
 Scoring is deterministic and offline — no model, no network (ADR-0008's constraint
@@ -938,6 +939,7 @@ cti-to-stix/
 │   ├── sync_corpora.py            # Clone/pull rule corpora (ambient git auth)
 │   ├── build_detection_index.py   # Parse clones → detection-rule store
 │   ├── build_rule_atoms.py        # Backfill rule_atoms from stored bodies (ADR-0014)
+│   ├── build_rule_text.py         # FTS5 index over rule title+description (ADR-0031)
 │   ├── backfill_rule_bytes.py     # Backfill rule_bytes on an older store (ADR-0022)
 │   ├── audit_coverage_formats.py  # Read-only: per-format breakdown + drill-down latency
 │   ├── check_stages.py            # Diagnostic: which stages are available (make check)
@@ -1210,10 +1212,11 @@ data: {"status":"for_review"}
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/jobs/{id}/coverage` | Per-report coverage matrix: each technique's 0–3 score + contributing corpora |
-| `GET` | `/api/jobs/{id}/coverage/rules` | Every rule sharing an ATT&CK tag with the report, grouped by technique (unranked) |
+| `GET` | `/api/jobs/{id}/coverage/rules` | Rules **backed by a value the report contains**, grouped by technique; rules carrying no ATT&CK tag (all YARA) arrive under `(untagged)`. Carries `tag_total` — what the unfiltered tag join would have returned (ADR-0030) |
 | `GET` | `/api/jobs/{id}/coverage/{technique}/rules` | License-aware drill-down: which rules cover a technique |
 | `GET` | `/api/jobs/{id}/detections/proposals` | Rules **ranked** on the report's observables + platform, with match evidence (ADR-0014) |
 | `POST` | `/api/jobs/{id}/detections/export` | ZIP of exactly the rules in `{"rule_ids": [...]}` — the granular selection the axis filters cannot express (ADR-0022) |
+| `POST` | `/api/rules/lookup` | Metadata for arbitrary canonical rule ids, bodies on demand (`include_body`, ≤ 500 ids). Not job-scoped — the proposals panel shows rules outside the report's tag join by construction |
 | `GET` | `/api/detection-corpora` | Per-corpus rule counts in the store |
 
 ```json
