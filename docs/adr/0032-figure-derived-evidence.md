@@ -275,11 +275,23 @@ vision at all, and a text model handed an image does not raise — it invents.
 Stage 1f gets `VISION_PROVIDER` / `VISION_MODEL` and a capability probe.
 
 **Tier 2 — graph extraction, same call, gated on `figure_kind`.** `edges` are
-read only when Tier 1 returns `attack-chain` or `network-diagram`, and they
-enter as `inferred` relationships, never `observed` — a node label is a drawing,
-not telemetry. The probe shows this works on a linear chain and says nothing
-about a branching one, so Tier 2 ships **behind its own flag**, off by default,
-until it has been measured on a topology diagram.
+read only when Tier 1 returns `attack-chain` or `network-diagram`.
+
+They enter `report_text` **as text**, one `src -> dst` line per arrow, inside the
+figure's own block. Not as typed relationships written straight into the bundle:
+that would bypass Stage 3's evidence contract, Stage 3d's self-verification and
+Stage 3e's consensus — every hallucination gate this pipeline was built around.
+Rendered as text, an arrow is quotable, locatable, and gated exactly like a
+sentence of prose.
+
+The arrow is ASCII (` -> `) on purpose. `_normalise` rewrites a table of Unicode
+punctuation one-for-one and leaves it alone; the surrounding spaces keep it clear
+of `_HYPHEN_LINEBREAK`. A rendered edge reaches `report_text` byte for byte, and
+`locate()` finds it exactly — which is what makes the relationship traceable back
+to its figure by offset.
+
+Numeric labels are dropped. Diagram numbering ("1", "2") is step order, and
+repeating it invites the LLM to read it as a relationship verb.
 
 ### 4. Figure-derived evidence is graded `observed`, and never corroborates prose
 
@@ -318,7 +330,35 @@ outside one. It admits, it grades, it does not count twice.
   stored offsets — the migration is "do not re-ingest", not a backfill.
 - **The UI must render the marker.** A raw `⟦figure 7 · screenshot⟧` leaking
   into the report pane is a bug, not a feature.
-- **Tier 2 is half-proven.** One linear kill-chain came back correctly; no
+- **Tier 2 is proven on diagrams, and it changes what the pipeline can see.**
+  `silkparasite-tracking-a-china-nexus-apt-across-central-asia` is the case this
+  ADR was missing: a 2-page capture whose 12 figures include **seven
+  `attack-chain` diagrams and one `network-diagram`**, carrying 35 arrows that
+  describe seven complete DLL-sideloading chains. Its text yields only
+  **+4 observables** — the value there is entirely in the links.
+
+  Before the arrows were rendered, all 35 were dropped by `render_block`.
+  After, Stage 3 turned the figure-bearing chunks into 26 relationships, of which
+  **24 have evidence landing inside a figure block**:
+
+  ```
+  mpclient.dll      --delivers-->   DriveSilkRAT   <- figure 5
+  calibre-launcher.dll --delivers--> SpiceRAT      <- figure 6
+  tak_deco_lib.dll  --delivers-->   CookiETagRAT   <- figure 7
+  dsp_ippv2_x64.dll --delivers-->   BloodAlchemy   <- figure 8
+  scansts.dll       --delivers-->   NomadRAT       <- figure 9
+  SpiceRAT          --beacons-to--> C2 server      <- figure 6
+  ```
+
+  Note where the good verbs come from. An arrow the model quoted verbatim
+  (`Mp3tag.exe -> tak_deco_lib.dll`) becomes `related-to`, the weakest verb in
+  the vocabulary, because ` -> ` carries no semantics. The `delivers`,
+  `drops` and `beacons-to` edges were inferred from the figure's *caption text*
+  sitting in the same block. **The arrow supplies the edge; the surrounding
+  transcription supplies the verb** — which is an argument for keeping both in
+  the block, and for a later prompt revision that asks the VLM to name the action
+  on the connector when the diagram shows one.
+- **Tier 2's earlier caveat, for the record.** One linear kill-chain came back correctly; no
   branching topology was tested, and on a screenshot montage the model invented
   plausible UI-flow edges (`Chat notification → Chat window`) that are a reading
   of the layout, not a claim the report makes. That is why edges are `inferred`
@@ -387,6 +427,14 @@ reading it:
   That capture predates `82c259d`; whether the current path inlines the images,
   and whether Tier 0's bbox geometry means anything on a sheet that is one page
   tall, are both unverified.
+- **An arrow can be quoted as evidence for a claim it does not make.** Stage 3
+  emitted `DriveSilkRAT --related-to--> NomadRAT` citing
+  `DriveSilkRAT -> Acrobatlog.exe`, and Stage 3d let it through. The conclusion
+  is right — figure 9 does chain those three — but the quote does not support
+  the pair as stated. A rendered arrow is short and syntactically uniform, which
+  makes it easy for the verifier to accept as "supporting" almost any edge among
+  the nodes in the same figure. Worth measuring across more diagram-heavy
+  reports before it is called a pattern.
 - **Figure text is denser in filenames than prose, and Stage 2 misreads them as
   domains.** The same run that gained 26 observables also produced
   `domain:lsass.dm`, `domain:pagefile.sys`, `domain:default.rdp` and
@@ -399,3 +447,57 @@ reading it:
   such a report is chunked, scored and gated as if its prose were the substance.
 - **`c3a0ccb2` — 66 pages, 75 figures — has never been run through the pipeline.**
   It is the natural before/after subject and it is sitting in `uploads/`.
+
+## Amendment (2026-08-28) — the capture path, measured
+
+"Still open" asked whether Tier 0's bbox geometry means anything on a sheet that
+is one page tall. It does not, and the answer was worse than the question
+implied: **the capture path reached Tier 0 in only one of two senses, and failed
+both.**
+
+**Stage 1f never ran on a capture at all.** `worker.py` gated it on the ingested
+file's suffix, and ADR-0029 ingests `{job_id}.txt`. `{job_id}.pdf` — the archive,
+where the figures are — was never opened. The two ADRs did not compose. Fixed by
+resolving the archive beside the ingested text: prose still comes from the DOM,
+figures now come from the PDF, which is what each ADR wanted separately.
+
+**And had it run, the area test would have thrown most of them away.**
+`MIN_AREA_RATIO` divides by page area, and the SilkParasite capture is
+960 × 14400 pt — 17× an A4:
+
+| figure (pt) | share of the sheet | share of an A4 | old verdict |
+|---|---|---|---|
+| 576×384 | 1.60% | 44% | discarded |
+| 576×443 | 1.85% | 51% | discarded |
+| 576×425 | 1.77% | 49% | discarded ×2 |
+| 576×418 | 1.74% | 48% | discarded |
+| 450×253 | 0.83% | 23% | discarded |
+| 576×661 | 2.75% | 76% | kept |
+
+Six half-page diagrams lost, and the five survivors cleared the bar by 12–37% —
+a slightly longer article would have taken those too.
+
+The fix is `MIN_FIGURE_AREA_PT2 = 40_000` (≈200×200 pt) as an **OR** with the
+ratio. Chosen so it cannot regress anything: on a normal page an image of that
+area is already 8% of an A4, well over the 2% bar, so the disjunct never fires
+where the ratio did not already pass. Measured over every PDF on disk, which is
+the property being claimed:
+
+| | old | new |
+|---|---|---|
+| 4 normal PDFs | 10, 8, 75, 27 | **identical** |
+| 13 tall captures | 146 | **214 (+47%)** |
+
+Several captures went from **0 figures to 5–7**: Tier 0 had been finding nothing
+at all on them. These are candidates offered to the model, not confirmed
+figures — a `logo` or `none` still renders an empty block — so the cost is model
+calls and the benefit is not silently discarding real diagrams.
+
+This also corrects the Context table above. Its 341 images / 141 figures were
+counted with the page-relative rule over a corpus that already contained
+captures, so the figure count there is an undercount for that subset.
+
+**Tier 2 remains unbuilt.** There is no flag and no consumer: `FigureEdge` is
+extracted by the prompt, carried through `figure_store`'s cache JSON, and then
+dropped, because `render_block` injects only `verbatim_text`. A schema's node
+labels therefore reach STIX as ordinary text, and its arrows do not.

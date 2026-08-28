@@ -198,6 +198,33 @@ def _ttp_ids_covered(llm_result) -> tuple[set[str], set[str]]:
     return ids, parents
 
 
+def _figure_source_pdf(file_path: str | Path) -> Path | None:
+    """The PDF whose figures belong to this job, or None when there is none.
+
+    An upload is its own source.  A URL capture is not, and gating Stage 1f on
+    the *ingested* file's suffix skipped every one of them.  ADR-0029
+    deliberately feeds the pipeline `{job_id}.txt`, the rendered DOM, because
+    the PDF's text layer wraps a 64-character hash into column fragments and
+    loses 28% of the observables — on the COLDRIVER report, 9 of 12 SHA-256
+    hashes.  But the capture also writes `{job_id}.pdf` beside it as the
+    archive, and the archive is where the figures are.  So the text keeps coming
+    from the DOM and the figures now come from the PDF, which is what both ADRs
+    wanted separately.
+
+    Offsets are unaffected: `inject_append` appends figure blocks *after* the
+    document text, so the spans it records are relative to the final
+    `report_text` whichever document the crops came from.
+
+    `.pdf.part` is never returned — that is a capture which timed out
+    mid-render, and `/jobs/{id}/source` already refuses to serve it.
+    """
+    path = Path(file_path)
+    if path.suffix.lower() == ".pdf":
+        return path if path.is_file() else None
+    sibling = path.with_suffix(".pdf")
+    return sibling if sibling.is_file() else None
+
+
 def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "") -> None:
     """Persist Stage 2 IoCs, Stage 2b gazetteer, and Stage 3 LLM entities to the DB.
 
@@ -374,7 +401,8 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         # are refanged on the same terms, then appended; only then are offsets
         # final.
         figure_spans = []
-        if Path(file_path).suffix.lower() == ".pdf":
+        _figure_pdf = _figure_source_pdf(file_path)
+        if _figure_pdf is not None:
             from pipeline.vlm import get_backend
             _vision = get_backend()
             if _vision is not None:
@@ -386,7 +414,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
                 )
                 try:
                     _reads = read_figures(
-                        file_path, _vision, cache=SqliteReadCache()
+                        str(_figure_pdf), _vision, cache=SqliteReadCache()
                     )
                     _reads = map_verbatim(_reads, refang)
                     text, figure_spans = inject_append(text, _reads)
