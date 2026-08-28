@@ -87,8 +87,15 @@ Normalise for comparison, keeping a map back to original offsets.
             while i < n and text[i].isspace():
                 i += 1
         else:
-            normalised_chars.append(char.lower())
-            index_map.append(i)
+            # `str.lower()` is NOT length-preserving: U+0130 (Turkish dotted I)
+            # lowercases to two characters.  Appending that as one list element
+            # made the joined string longer than index_map, so every `imap[...]`
+            # after it named the wrong character and every span was shifted.
+            # Emit each character against the SAME original index, exactly as
+            # the ligature branch above does.
+            for c in char.lower():
+                normalised_chars.append(c)
+                index_map.append(i)
             i += 1
 
     return "".join(normalised_chars), index_map
@@ -141,6 +148,12 @@ Locate *quote* in *text*, returning a span in original coordinates.
     nq, _ = _normalise(quote)
     nt, imap = _normalise(text)
 
+    # Edge whitespace carries no information, and leaving it in makes
+    # `nq.split(' ')` below produce empty words that inflate the coverage.
+    # `_normalise` emits only the ordinary space as a separator, so stripping
+    # that one character is exact.
+    nq = nq.strip(" ")
+
     # Check word count of quote
     q_words = _word_spans(nq)
     total_mots = len(q_words)
@@ -157,14 +170,14 @@ Locate *quote* in *text*, returning a span in original coordinates.
         end_orig = min(end_orig, len(text))
         return Span(start=start_orig, end=end_orig, coverage=1.0, exact=True)
 
-    # d) Longest prefix
-    # We need to find the largest k such that the first k words of nq joined by space are in nt.
-    # Binary search on k? Or linear?
-    # "par recherche dichotomique sur le nombre de mots"
-
-    # Let's extract the words of nq
-    # We can just split nq by space since it's normalized
-    nq_words = nq.split(' ')
+    # d) Longest prefix — binary search on the number of words.
+    #
+    # The words come from `q_words`, NOT from `nq.split(' ')`.  Splitting
+    # yielded an empty leading/trailing word whenever the normalised quote had
+    # edge whitespace, so `len(nq_words)` exceeded `total_mots` and the two
+    # binary searches indexed different words than the coverage was computed
+    # against — a quote with a hallucinated final word reported coverage 1.0.
+    nq_words = [nq[s:e] for s, e in q_words]
 
     def find_prefix_span(k: int) -> Span | None:
         if k <= 0:

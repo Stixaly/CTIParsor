@@ -1151,6 +1151,58 @@ def _dedup_names(names: list[str], blacklist: set[str] | None = None) -> list[st
     return list(seen.values())
 
 
+def _evidence_rank(obj: object) -> tuple[int, int]:
+    """How well-evidenced an extracted item is, for merge tie-breaking.
+
+    `(has_quote, quote_length)`.  Length is the tie-break because a merge
+    between two quoted duplicates should keep the one carrying more of the
+    sentence: measured, a one-word quote ("downloaded") was replacing a full
+    clause purely because its chunk came later.
+    """
+    evidence = getattr(obj, "evidence_text", None)
+    if not isinstance(evidence, str) or not evidence.strip():
+        return (0, 0)
+    return (1, len(evidence.strip()))
+
+
+def _prefer(incumbent, candidate):
+    """Pick the better of two duplicates, keeping the incumbent on a tie.
+
+    Duplicates are the SAME claim seen in two chunks, so the merge is free to
+    keep whichever carries more support.  Plain last-write-wins made the result
+    depend on chunk order, and silently dropped an evidence quote whenever a
+    later chunk restated the technique without one — which is precisely what
+    ADR-0028 exists to prevent.
+
+    Keeping the incumbent on a tie is what makes the merge deterministic: the
+    first chunk that made a claim owns it unless a later one is strictly better.
+    """
+    if incumbent is None:
+        return candidate
+
+    cand_rank = _evidence_rank(candidate)
+    inc_rank = _evidence_rank(incumbent)
+
+    if cand_rank > inc_rank:
+        return candidate
+    if inc_rank > cand_rank:
+        return incumbent
+
+    cand_conf = getattr(candidate, "confidence", None)
+    inc_conf = getattr(incumbent, "confidence", None)
+
+    if (
+        isinstance(cand_conf, (int, float))
+        and not isinstance(cand_conf, bool)
+        and isinstance(inc_conf, (int, float))
+        and not isinstance(inc_conf, bool)
+        and cand_conf > inc_conf
+    ):
+        return candidate
+
+    return incumbent
+
+
 def _merge_results(
     results: list[LLMEnrichmentResult],
     gazetteer_entities: list[RawEntity] | None = None,
@@ -1190,7 +1242,8 @@ def _merge_results(
         for t in r.ttps:
             if t.mitre_id:
                 # Always prefer the id-keyed entry
-                ttp_map[t.mitre_id] = t
+                # Better-evidenced wins, not last-seen.
+                ttp_map[t.mitre_id] = _prefer(ttp_map.get(t.mitre_id), t)
                 # Also remove any earlier name-only entry for this technique
                 ttp_map.pop(t.technique_name.lower(), None)
             else:
@@ -1208,7 +1261,8 @@ def _merge_results(
     for r in results:
         for rel in r.relationships:
             key = (rel.source_value.lower(), rel.relationship_type, rel.target_value.lower())
-            rel_map[key] = rel
+            # Better-evidenced wins, not last-seen.
+            rel_map[key] = _prefer(rel_map.get(key), rel)
 
     ioc_map: dict[tuple, IoCAssociation] = {}
     for r in results:
@@ -1219,6 +1273,7 @@ def _merge_results(
             # variable's type from its first assignment (a 3-tuple there),
             # so reusing it for this 2-tuple would be a type error.
             ioc_key = (assoc.ioc_value.lower(), assoc.malware_name.lower())
+            # No evidence or confidence on this model — last-seen is harmless here.
             ioc_map[ioc_key] = assoc
 
     all_actors = [a for r in results for a in r.threat_actors]

@@ -241,31 +241,37 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "")
     # ADR-0028 — resolve each TTP quote to an offset in the report.
     from pipeline.evidence_span import locate
 
-    _ttp_evidence: dict[int, tuple[str | None, str | None, int | None]] = {}
+    _ttp_evidence: dict[int, tuple[str | None, str | None, int | None, int | None]] = {}
     for _i, ttp in enumerate(llm_result.ttps):
         _quote = (getattr(ttp, "evidence_text", None) or "").strip()
         _label = getattr(ttp, "evidence_label", None)
         _label = getattr(_label, "value", _label) or "reported"
         _start = None
+        _end = None
         if _quote and report_text:
             try:
                 _span = locate(_quote, report_text)
             except Exception:   # locating must never fail a job
                 _span = None
             if _span is not None:
+                # BOTH ends. `evidence_text` is the model's wording and
+                # `_normalise` folds curly quotes and whitespace runs, so
+                # `start + len(evidence_text)` does not delimit the quote —
+                # measured wrong for 68 of 313 stored TTPs. The span does.
                 _start = _span.start
+                _end = _span.end
             else:
                 # The quote is not in the document. Demote one grade rather than
                 # drop the technique — see the docstring.
                 _label = "inferred" if _label in ("observed", "reported") else _label
-        _ttp_evidence[_i] = (_quote or None, _label, _start)
+        _ttp_evidence[_i] = (_quote or None, _label, _start, _end)
 
     for _i, ttp in enumerate(llm_result.ttps):
-        _ev_text, _ev_label, _ev_start = _ttp_evidence[_i]
+        _ev_text, _ev_label, _ev_start, _ev_end = _ttp_evidence[_i]
         rows_llm.append((
             str(uuid4()), job_id, ttp.technique_name, "ttp",
             ttp.description, 0.9, ttp.mitre_id, None, "llm",
-            _ev_text, _ev_label, _ev_start,
+            _ev_text, _ev_label, _ev_start, _ev_end,
         ))
 
     rows_rel = []
@@ -286,14 +292,14 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "")
             # Only TTP rows carry evidence (ADR-0028); every other row is padded
             # here rather than at each of the six places they are built.
             _entity_rows = [
-                r if len(r) == 12 else (*r, None, None, None)
+                r if len(r) == 13 else (*r, None, None, None, None)
                 for r in rows_ioc + rows_llm
             ]
             conn.executemany(
                 "INSERT OR IGNORE INTO entities "
                 "(id,job_id,value,entity_type,context,confidence,mitre_id,accepted,source,"
-                "evidence_text,evidence_label,evidence_start) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                "evidence_text,evidence_label,evidence_start,evidence_end) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 _entity_rows,
             )
             conn.executemany(
@@ -361,6 +367,43 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         # displayed document text.  "keepassxc[.]us[.]org" → "keepassxc.us.org"
         text = refang(raw_text)
 
+        # --- Stage 1f — figures (ADR-0032, ADR-0033) ---
+        # Runs after refang and before chunking, and that order is load-bearing:
+        # refang rewrites "[.]" to "." and so shortens the text, so a span
+        # computed before it would point at the wrong characters.  Figure lines
+        # are refanged on the same terms, then appended; only then are offsets
+        # final.
+        figure_spans = []
+        if Path(file_path).suffix.lower() == ".pdf":
+            from pipeline.vlm import get_backend
+            _vision = get_backend()
+            if _vision is not None:
+                from pipeline.figure_store import SqliteReadCache
+                from pipeline.stage1f_figures import (
+                    inject_append,
+                    map_verbatim,
+                    read_figures,
+                )
+                try:
+                    _reads = read_figures(
+                        file_path, _vision, cache=SqliteReadCache()
+                    )
+                    _reads = map_verbatim(_reads, refang)
+                    text, figure_spans = inject_append(text, _reads)
+                    _kept = sum(1 for _, r, _ in _reads if r.kind != "unread")
+                    logger.info(
+                        f"[Stage 1f] {len(_reads)} figures, {_kept} read "
+                        f"via {_vision.name}/{_vision.model}"
+                    )
+                    emit_progress(job_id, "stage", {
+                        "stage": "1f", "label": "Figures",
+                        "figures": len(_reads), "read": _kept,
+                    })
+                except Exception as exc:
+                    # A figure that cannot be read must never cost the report.
+                    logger.warning(f"[Stage 1f] skipped: {exc}")
+                    figure_spans = []
+
         # Adaptive chunk size — larger chunks for large documents so the total
         # number of LLM calls stays manageable.  Each extra 1 500 chars saves
         # ~1 LLM call per 30 000 chars of document (~33% fewer calls at 4 500).
@@ -385,6 +428,14 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
                 conn.execute("UPDATE jobs SET report_text=?, updated_at=? WHERE id=?",
                              (text, now_iso(), job_id))
                 conn.commit()
+
+        # Figure provenance is written only after report_text is stored: the
+        # spans index into it, and a row pointing at text that was never saved
+        # is worse than no row.
+        if figure_spans:
+            from pipeline.figure_store import save_spans
+            _n = save_spans(job_id, figure_spans, _vision.name)
+            logger.info(f"[Stage 1f] {_n} figure spans recorded")
 
         # --- Stage 2 — Regex IoC extraction ---
         entities_per_chunk = [extract_entities(chunk) for chunk in chunks]

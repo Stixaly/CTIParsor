@@ -63,15 +63,21 @@ export function useRuleSelection(
     }
   }, [jobId])
 
-  // Persist exclusions on change. Only this hook's own key is ever written.
-  useEffect(() => {
+  // Persisted by the MUTATORS, never by an effect on `excluded` — the same rule
+  // `usePromotedRules` documents, and for the same reason. An effect with
+  // `[excluded, jobId]` deps also fires on the pass where jobId has ALREADY
+  // changed but `excluded` still holds the previous job's value, so it wrote
+  // job A's exclusions under job B's key; and on the mount pass its closure
+  // holds the initial empty set, so it wrote `[]` over the stored selection.
+  // Both were reproduced in useRuleSelection.test.ts before this changed.
+  const persist = useCallback((next: ReadonlySet<string>) => {
     if (jobId === undefined) return
     try {
-      localStorage.setItem(`coverage.selection.${jobId}`, JSON.stringify([...excluded]))
+      localStorage.setItem(`coverage.selection.${jobId}`, JSON.stringify([...next]))
     } catch {
       // Quota exceeded — ignore silently.
     }
-  }, [excluded, jobId])
+  }, [jobId])
 
   // Prune stale ids only after rules have loaded.
   // TRAP: never prune while `rules` is empty — rules arrive asynchronously, and
@@ -88,9 +94,11 @@ export function useRuleSelection(
           changed = true
         }
       }
-      return changed ? next : prev
+      if (!changed) return prev
+      persist(next)
+      return next
     })
-  }, [rules])
+  }, [rules, persist])
 
   const byId = useMemo(() => new Map(rules.map(r => [r.id, r])), [rules])
 
@@ -137,17 +145,22 @@ export function useRuleSelection(
       } else {
         for (const id of ids) next.delete(id)
       }
+      persist(next)
       return next
     })
-  }, [selectedOf])
+  }, [selectedOf, persist])
 
   const selectAll = useCallback(() => {
-    setExcluded(new Set())
-  }, [])
+    const next = new Set<string>()
+    setExcluded(next)
+    persist(next)
+  }, [persist])
 
   const clearAll = useCallback(() => {
-    setExcluded(new Set(rules.map(r => r.id)))
-  }, [rules])
+    const next = new Set(rules.map(r => r.id))
+    setExcluded(next)
+    persist(next)
+  }, [rules, persist])
 
   return useMemo(() => ({
     excluded,

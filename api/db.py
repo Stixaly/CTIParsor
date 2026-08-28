@@ -1,6 +1,8 @@
 import os
 import sqlite3
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -69,6 +71,32 @@ def get_conn() -> sqlite3.Connection:
         conn.execute("PRAGMA wal_autocheckpoint=1000")
         _local.conn = conn
     return conn
+
+
+@contextmanager
+def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
+    """Run a block as ONE SQLite transaction, rolling back on any exception.
+
+    `get_conn()` opens with `isolation_level=None`, and under autocommit
+    `with conn:` is **not** a transaction: sqlite3's context manager commits on
+    exit, but every statement inside has already been committed on its own, so
+    the rollback it performs on an exception has nothing left to undo.
+
+    Verified rather than assumed — a DELETE followed by an INSERT inside
+    `with conn:`, with an exception raised between them, leaves the INSERT
+    committed and the original row gone.
+
+    Every multi-statement write that must be all-or-nothing uses this instead.
+    `BEGIN IMMEDIATE` takes the write lock up front, so two writers queue on
+    `busy_timeout` rather than one failing at COMMIT with SQLITE_BUSY.
+    """
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        yield conn
+    except BaseException:
+        conn.rollback()
+        raise
+    conn.commit()
 
 
 def backup_db() -> None:
@@ -301,12 +329,58 @@ def init_db() -> None:
             "ALTER TABLE entities ADD COLUMN evidence_text TEXT",
             "ALTER TABLE entities ADD COLUMN evidence_label TEXT",
             "ALTER TABLE entities ADD COLUMN evidence_start INTEGER",
+            # `evidence_start` alone does not delimit the quote.  `evidence_text`
+            # is what the model wrote; the offsets are in report coordinates, and
+            # `evidence_span._normalise` folds curly quotes and whitespace runs,
+            # so the two differ in LENGTH.  Measured over 313 stored quotes, 68
+            # (21.7%) had report_text[start:start+len(text)] != text — every one
+            # of them a normalisation difference, not a wrong offset.  `locate()`
+            # already returns the end; it was simply being dropped.
+            "ALTER TABLE entities ADD COLUMN evidence_end INTEGER",
             # ADR-0031 — full-text index over rule title+description. Populated
             # offline by scripts/build_rule_text.py; brand evidence is simply
             # absent while the table is empty, exactly as proposals degrade
             # while the atom index is unbuilt. No corpus re-clone.
             "CREATE VIRTUAL TABLE IF NOT EXISTS rule_text USING fts5("
             " rule_id UNINDEXED, body)",
+            # ADR-0032 — provenance for figure-derived evidence.  A side table
+            # rather than columns on `jobs`, because `jobs.report_text` is a
+            # large blob and a column added after it is paid for on every read
+            # (the same reason ADR-0022 put rule body sizes in `rule_bytes`).
+            #
+            # `char_start`/`char_end` index into `jobs.report_text`, so a range
+            # lookup answers "was this evidence read from an image?" for
+            # entities, relationships and coverage alike — no per-entity
+            # provenance column anywhere.
+            "CREATE TABLE IF NOT EXISTS report_figures ("
+            " id TEXT PRIMARY KEY,"
+            " job_id TEXT NOT NULL,"
+            " ordinal INTEGER NOT NULL,"
+            " page INTEGER NOT NULL,"
+            " bbox TEXT NOT NULL,"
+            " kind TEXT NOT NULL,"
+            " char_start INTEGER NOT NULL,"
+            " char_end INTEGER NOT NULL,"
+            " provider TEXT NOT NULL DEFAULT '',"
+            " model TEXT NOT NULL DEFAULT '',"
+            " sha256 TEXT NOT NULL DEFAULT '',"
+            " UNIQUE (job_id, ordinal),"
+            " FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE)",
+            "CREATE INDEX IF NOT EXISTS idx_report_figures_span"
+            " ON report_figures(job_id, char_start)",
+            # ADR-0033 — the figure read cache, keyed on the crop bytes rather
+            # than on the figure's position: re-ingesting a report, or A/B-ing
+            # two models, must not pay for the same crop twice.  `prompt_version`
+            # is in the key so a stored read is never served against a contract
+            # it did not answer.  Not FK'd to jobs — a crop outlives the job that
+            # first read it, which is the whole point.
+            "CREATE TABLE IF NOT EXISTS figure_reads ("
+            " sha256 TEXT NOT NULL,"
+            " model TEXT NOT NULL,"
+            " prompt_version INTEGER NOT NULL,"
+            " read_json TEXT NOT NULL,"
+            " created_at TEXT NOT NULL,"
+            " PRIMARY KEY (sha256, model, prompt_version))",
         ]
         for stmt in _migrations:
             try:

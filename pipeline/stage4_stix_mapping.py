@@ -780,6 +780,17 @@ def build_stix_bundle(
         if not hasattr(source, "id") or not hasattr(target, "id"):
             continue
 
+        # An edge from an object to itself says nothing.  It is not the LLM
+        # inventing one: `name_to_stix` resolves aliases, so two distinct
+        # surface forms in the same sentence collapse onto one id — measured on
+        # the stored bundles, "Sandworm" / "Sandworm Team" and an EXARAMEL alias
+        # pair produced `related-to` and `drops` edges onto themselves.  The
+        # `seen_rel_keys` dedup cannot catch these: each is a single edge, not a
+        # repeat.  `_pin_edge_key` and `_rewrite_refs` already refuse self-pairs;
+        # this is the path that did not.
+        if source.id == target.id:
+            continue
+
         # Precision guard: drop spurious observable-SCO ↔ attack-pattern edges
         # (e.g. "domain communicates-with T1071.001") rather than emitting them
         # as a noisy `related-to`.  See _is_spurious_observable_ttp_edge.
@@ -1642,6 +1653,12 @@ def _add_relationship(
     the object byte-identical to before, so existing edges are unaffected.
     """
     if not hasattr(source, "id") or not hasattr(target, "id"):
+        return
+
+    # Same self-pair refusal as `_pin_edge_key`, which mirrors this function:
+    # without it the two drift, and the counting pass rejects a pinned edge the
+    # emitting pass then writes.
+    if source.id == target.id:
         return
 
     # Apply policy override if available
