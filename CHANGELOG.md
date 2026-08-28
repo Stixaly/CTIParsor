@@ -23,6 +23,21 @@ sections group by theme rather than strict semver.
   `figure_kind` right where the page returns one blanket verdict for three
   figures.
 
+- **Attack-chain diagrams become relationships in the graph and the bundle.**
+  A figure classified `attack-chain` or `network-diagram` has its connectors
+  rendered into `report_text` as `src -> dst` lines, inside the figure's own
+  block. Stage 3 then extracts them with the evidence contract it already has,
+  so they pass Stage 3d verification and Stage 4 mapping like any other
+  relationship — nothing bypasses a hallucination gate.
+
+  Measured on `silkparasite-tracking-a-china-nexus-apt-across-central-asia`,
+  whose twelve figures include seven attack-chain diagrams: **35 arrows that were
+  previously dropped** now yield **26 relationships, 24 of them with evidence
+  inside a figure block** — seven complete DLL-sideloading chains
+  (`mpclient.dll → DriveSilkRAT`, `tak_deco_lib.dll → CookiETagRAT`,
+  `dsp_ippv2_x64.dll → BloodAlchemy`, …) that appear nowhere in the report's
+  text, which on its own yields only 4 extra observables.
+
 - **`VISION_PROVIDER` / `VISION_MODEL`** — a vision backend for `anthropic`,
   `mistral` or `ollama`, deliberately separate from `LLM_PROVIDER`. None of the
   Stage-3 Ollama models can see (`mistral`, `mistral-nemo`, `llama3.2` are all

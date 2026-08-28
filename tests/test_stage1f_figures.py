@@ -6,6 +6,7 @@ import pytest
 
 from pipeline.stage1f_figures import (
     CLOSE,
+    MAX_EDGES_PER_FIGURE,
     OPEN,
     FigureCandidate,
     inject,
@@ -13,8 +14,9 @@ from pipeline.stage1f_figures import (
     map_verbatim,
     read_figures,
     render_block,
+    render_edges,
 )
-from pipeline.vlm import PROMPT, FigureRead
+from pipeline.vlm import PROMPT, FigureEdge, FigureRead
 
 
 def _read(kind: str = "screenshot", text: list[str] | None = None,
@@ -368,3 +370,85 @@ def test_map_verbatim_keeps_every_other_field() -> None:
     assert mapped.kind == original.kind
     assert mapped.model == original.model
     assert mapped.provider == original.provider
+
+
+def _edge_read(kind: str = "attack-chain", edges=None, text=None) -> FigureRead:
+    return FigureRead(
+        kind=kind,
+        verbatim_text=text if text is not None else ["Figure 5. Sideloading"],
+        edges=edges or [],
+        iocs=[],
+        provider="x",
+        model="m",
+        elapsed_s=0.0,
+    )
+
+
+def test_render_edges_emits_one_line_per_arrow() -> None:
+    read = _edge_read(edges=[
+        FigureEdge("MpDefenderCoreService.exe", "mpclient.dll", "1"),
+        FigureEdge("mpclient.dll", "DriveSilkRAT", "2"),
+    ])
+    assert render_edges(read) == [
+        "MpDefenderCoreService.exe -> mpclient.dll",
+        "mpclient.dll -> DriveSilkRAT",
+    ]
+
+
+def test_render_edges_drops_numeric_step_labels() -> None:
+    """Diagram numbering is step order, not a relationship verb."""
+    read = _edge_read(edges=[FigureEdge("a", "b", "3")])
+    assert render_edges(read) == ["a -> b"]
+
+
+def test_render_edges_keeps_a_meaningful_label() -> None:
+    read = _edge_read(edges=[FigureEdge("implant", "1.2.3.4", "exfiltrates to")])
+    assert render_edges(read) == ["implant -> 1.2.3.4 (exfiltrates to)"]
+
+
+def test_render_edges_is_silent_on_non_diagram_kinds() -> None:
+    """The one measured invention was a screenshot montage read as a flow."""
+    read = _edge_read(kind="screenshot", edges=[FigureEdge("chat", "window", "")])
+    assert render_edges(read) == []
+
+
+def test_render_edges_dedupes_and_drops_self_loops() -> None:
+    read = _edge_read(edges=[
+        FigureEdge("a", "b", ""),
+        FigureEdge("a", "b", ""),
+        FigureEdge("c", "c", ""),
+        FigureEdge("", "d", ""),
+    ])
+    assert render_edges(read) == ["a -> b"]
+
+
+def test_render_edges_caps_a_runaway_topology() -> None:
+    read = _edge_read(edges=[FigureEdge(f"n{i}", f"n{i+1}", "") for i in range(100)])
+    assert len(render_edges(read)) == MAX_EDGES_PER_FIGURE
+
+
+def test_render_block_carries_the_arrows_into_the_text() -> None:
+    read = _edge_read(edges=[FigureEdge("ebook-edit.exe", "calibre-launcher.dll", "1")])
+    block = render_block(5, read)
+    assert "ebook-edit.exe -> calibre-launcher.dll" in block
+    assert block.startswith(OPEN)
+    assert block.endswith(CLOSE)
+
+
+def test_render_block_arrow_survives_refang_and_normalisation() -> None:
+    """The rendered arrow must reach report_text byte for byte.
+
+    Stage 3 quotes it and evidence_span.resolve_span has to find that quote, so
+    neither refang nor the offset-preserving normaliser may touch it.
+    """
+    from pipeline.evidence_span import locate
+    from pipeline.stage2_extraction import refang
+
+    read = _edge_read(edges=[FigureEdge("node.exe", "update.js", "2")])
+    block = render_block(11, read)
+    text = "prose before\n\n" + refang(block) + "\n\nprose after"
+    quote = "node.exe -> update.js"
+    assert quote in text
+    span = locate(quote, text)
+    assert span is not None
+    assert text[span.start:span.end] == quote

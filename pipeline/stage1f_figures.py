@@ -55,6 +55,17 @@ CLOSE = "⟧"
 # renumber depending on what a model decided — but their block stays empty.
 EMPTY_KINDS: frozenset[str] = frozenset({"logo", "none", "unread"})
 
+# The only kinds whose arrows are rendered.  Measured on silkparasite: its
+# twelve figures yield 35 edges, every one of them from these two kinds, and
+# together they describe seven complete DLL-sideloading chains that appear
+# nowhere in the report's text.
+EDGE_KINDS: frozenset[str] = frozenset({"attack-chain", "network-diagram"})
+
+# A diagram that draws more connectors than this is a topology map, not a chain;
+# rendering all of it would swamp the block it sits in.  The cap is on rendered
+# lines, after de-duplication.
+MAX_EDGES_PER_FIGURE = 24
+
 
 @dataclass(frozen=True)
 class FigureCandidate:
@@ -272,6 +283,45 @@ def read_figures(pdf_path: Path | str, backend: VisionBackend,
     return results
 
 
+def render_edges(read: FigureRead) -> list[str]:
+    """Render a diagram's arrows as one `src -> dst` line each.
+
+    Only for `attack-chain` and `network-diagram`.  The prompt already restricts
+    edges to those kinds; this is the second half of the belt and braces, because
+    the one place a model invented edges was a screenshot montage, where it read
+    layout adjacency as flow (ADR-0032).
+
+    The arrow is ASCII on purpose.  `evidence_span._normalise` rewrites a table
+    of Unicode punctuation one-for-one and leaves `->` alone, and the spaces keep
+    it clear of `_HYPHEN_LINEBREAK`, which rejoins an alphanumeric-hyphen at a
+    line break.  A rendered edge therefore survives into `report_text` byte for
+    byte, which is what lets Stage 3 quote it and `evidence_span.locate` find it.
+
+    A label is kept only when it says something: diagram numbering ("1", "2")
+    is step order, not a relationship, and repeating it would invite the LLM to
+    read it as one.
+    """
+    if read.kind not in EDGE_KINDS:
+        return []
+
+    lines: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    for edge in read.edges:
+        src = edge.src.strip()
+        dst = edge.dst.strip()
+        if not src or not dst or src == dst:
+            continue
+        if (src, dst) in seen:
+            continue
+        seen.add((src, dst))
+        label = edge.label.strip()
+        suffix = f" ({label})" if label and not label.isdigit() else ""
+        lines.append(f"{src} -> {dst}{suffix}")
+        if len(lines) >= MAX_EDGES_PER_FIGURE:
+            break
+    return lines
+
+
 def render_block(ordinal: int, read: FigureRead) -> str:
     """Render a figure block with sentinels."""
     if read.kind in EMPTY_KINDS:
@@ -279,6 +329,18 @@ def render_block(ordinal: int, read: FigureRead) -> str:
 
     body_lines = [line.strip() for line in read.verbatim_text]
     body_lines = [line for line in body_lines if line]
+
+    # The arrows go in as text, in the same coordinate system as everything
+    # else, so Stage 3 extracts them with the evidence contract it already has
+    # and Stage 4 maps them like any other relationship.  Emitting typed
+    # relationships straight into the bundle would bypass every hallucination
+    # gate this pipeline was built around.
+    edge_lines = render_edges(read)
+    if edge_lines:
+        if body_lines:
+            body_lines.append("")
+        body_lines.extend(edge_lines)
+
     body = "\n".join(body_lines)
 
     # Neutralize sentinels in body
