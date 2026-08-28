@@ -21,6 +21,21 @@ MIN_SIDE_PT = 48.0
 MIN_AREA_RATIO = 0.02
 MAX_ASPECT = 6.0
 
+# An image this large is a figure whatever the page around it is.
+#
+# The ratio test alone assumes a page the reader takes in at once.  An ADR-0029
+# URL capture is not that: it is one tall sheet — measured on the SilkParasite
+# capture, 960 x 14400 pt, 17x an A4 — so dividing by its area turns real
+# diagrams into rounding errors.  Six figures there occupied 37-51% of an A4 and
+# scored 1.3-1.9%, under the 2% bar; the five that survived cleared it by only
+# 12-37%, so a slightly longer article would have dropped those too.
+#
+# Deliberately an OR with MIN_AREA_RATIO and never a replacement for it.  On a
+# normal page an image of this area already exceeds 2% (40,000 / (595*842) =
+# 8%), so nothing currently kept changes and no icon is admitted — the largest
+# icon measured on that capture is 112 x 150 = 16,800 pt².
+MIN_FIGURE_AREA_PT2 = 40_000.0   # ~200 x 200 pt, ~2.8 inches square
+
 # An image whose bytes repeat on this many pages is furniture: a running header,
 # a footer logo, a watermark.  Counted per document, not per page.
 REPEAT_PAGE_LIMIT = 3
@@ -117,7 +132,7 @@ def find_figures(pdf_path: Path | str) -> list[FigureCandidate]:
 
                     if w < MIN_SIDE_PT or h < MIN_SIDE_PT:
                         continue
-                    if (w * h) / page_area < MIN_AREA_RATIO:
+                    if (w * h) / page_area < MIN_AREA_RATIO and (w * h) < MIN_FIGURE_AREA_PT2:
                         continue
                     if h > 0 and w / h > MAX_ASPECT:
                         continue

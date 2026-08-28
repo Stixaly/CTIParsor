@@ -173,6 +173,35 @@ every pure function in the detection and evidence modules, which raised nothing.
   into the mutators, which is the rule its twin `usePromotedRules` already
   documents and the last place in the frontend that had not adopted it.
 
+- **Stage 1f never ran on a URL capture, and its figures sat one filename
+  away.** ADR-0029 deliberately ingests `{job_id}.txt`, the rendered DOM, because
+  the PDF text layer wraps a 64-character hash into column fragments and loses
+  28% of the observables. But `worker.py` gated Stage 1f on the *ingested*
+  file's suffix, so every capture was skipped — while `{job_id}.pdf`, the
+  archive holding every diagram, sat beside it untouched. ADR-0029 and ADR-0032
+  did not compose. `_figure_source_pdf()` now resolves the archive; the text
+  still comes from the DOM and the figures now come from the PDF, which is what
+  both ADRs wanted separately. Offsets are unaffected — `inject_append` appends
+  figure blocks after the document text either way.
+
+- **The geometric triage discarded most figures on a tall-sheet capture.**
+  `MIN_AREA_RATIO` is measured against page area, and a capture is one sheet:
+  the SilkParasite report is 960 × 14400 pt, **17× an A4**. Diagrams occupying
+  37–51% of a normal page scored 1.3–1.9% and were dropped; the survivors
+  cleared the 2% bar by only 12–37%, so a slightly longer article would have
+  lost those too. Adds `MIN_FIGURE_AREA_PT2` (40,000 pt², ~200×200) as an **OR**
+  with the ratio, never a replacement — on a normal page an image that large
+  already exceeds 2%, so nothing previously kept can change.
+
+  Measured across every PDF on disk, which is exactly what that property
+  predicts: **all four normal PDFs unchanged** (10→10, 8→8, 75→75, 27→27),
+  **13 tall captures 146 → 214 figures (+47%)**, several going from **0 to 5–7**
+  — the triage had been finding nothing at all on them. SilkParasite itself goes
+  5 → 12, with the 112×150 icon still correctly dropped. These are candidates
+  offered to the model, not confirmed figures; the model still classifies a
+  `logo` or `none` into an empty block, so the cost is calls, and the benefit is
+  not silently discarding real diagrams.
+
 - **`scripts/audit_bundle_invariants.py`** — 16 read-only invariants over every
   stored STIX bundle (id uniqueness and format, dangling `source_ref` /
   `target_ref` / `created_by_ref` / marking refs, report `object_refs`,

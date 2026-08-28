@@ -399,3 +399,57 @@ reading it:
   such a report is chunked, scored and gated as if its prose were the substance.
 - **`c3a0ccb2` — 66 pages, 75 figures — has never been run through the pipeline.**
   It is the natural before/after subject and it is sitting in `uploads/`.
+
+## Amendment (2026-08-28) — the capture path, measured
+
+"Still open" asked whether Tier 0's bbox geometry means anything on a sheet that
+is one page tall. It does not, and the answer was worse than the question
+implied: **the capture path reached Tier 0 in only one of two senses, and failed
+both.**
+
+**Stage 1f never ran on a capture at all.** `worker.py` gated it on the ingested
+file's suffix, and ADR-0029 ingests `{job_id}.txt`. `{job_id}.pdf` — the archive,
+where the figures are — was never opened. The two ADRs did not compose. Fixed by
+resolving the archive beside the ingested text: prose still comes from the DOM,
+figures now come from the PDF, which is what each ADR wanted separately.
+
+**And had it run, the area test would have thrown most of them away.**
+`MIN_AREA_RATIO` divides by page area, and the SilkParasite capture is
+960 × 14400 pt — 17× an A4:
+
+| figure (pt) | share of the sheet | share of an A4 | old verdict |
+|---|---|---|---|
+| 576×384 | 1.60% | 44% | discarded |
+| 576×443 | 1.85% | 51% | discarded |
+| 576×425 | 1.77% | 49% | discarded ×2 |
+| 576×418 | 1.74% | 48% | discarded |
+| 450×253 | 0.83% | 23% | discarded |
+| 576×661 | 2.75% | 76% | kept |
+
+Six half-page diagrams lost, and the five survivors cleared the bar by 12–37% —
+a slightly longer article would have taken those too.
+
+The fix is `MIN_FIGURE_AREA_PT2 = 40_000` (≈200×200 pt) as an **OR** with the
+ratio. Chosen so it cannot regress anything: on a normal page an image of that
+area is already 8% of an A4, well over the 2% bar, so the disjunct never fires
+where the ratio did not already pass. Measured over every PDF on disk, which is
+the property being claimed:
+
+| | old | new |
+|---|---|---|
+| 4 normal PDFs | 10, 8, 75, 27 | **identical** |
+| 13 tall captures | 146 | **214 (+47%)** |
+
+Several captures went from **0 figures to 5–7**: Tier 0 had been finding nothing
+at all on them. These are candidates offered to the model, not confirmed
+figures — a `logo` or `none` still renders an empty block — so the cost is model
+calls and the benefit is not silently discarding real diagrams.
+
+This also corrects the Context table above. Its 341 images / 141 figures were
+counted with the page-relative rule over a corpus that already contained
+captures, so the figure count there is an undercount for that subset.
+
+**Tier 2 remains unbuilt.** There is no flag and no consumer: `FigureEdge` is
+extracted by the prompt, carried through `figure_store`'s cache JSON, and then
+dropped, because `render_block` injects only `verbatim_text`. A schema's node
+labels therefore reach STIX as ordinary text, and its arrows do not.
