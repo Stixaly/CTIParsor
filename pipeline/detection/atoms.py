@@ -157,10 +157,120 @@ WINDOWS_CATEGORIES: frozenset[str] = frozenset({
 #: Structural keys of a detection block — never field names.
 _SKIP_KEYS = frozenset({"condition", "timeframe"})
 
+#: Tokens of a Sigma `condition` expression.  Digits are their own token so
+#: `not 1 of filter_*` parses as three operands, not two.
+_COND_TOKEN = re.compile(r"[A-Za-z_][\w*.]*|\d+|\(|\)")
+
+#: Condition words that are never a selection name.
+_COND_KEYWORDS: frozenset[str] = frozenset({"and", "or", "not", "of"})
+
+#: Quantifiers that introduce an `<quantifier> of <pattern>` operand.
+_COND_QUANTIFIERS: frozenset[str] = frozenset({"all", "any"})
+
 _HASH_RE = re.compile(r"^[0-9a-f]{32,128}$")
 
 
 # ── Internal helpers ─────────────────────────────────────────────────────────
+
+def _expand_selector(pattern: str, keys: frozenset[str]) -> set[str]:
+    """Resolve one condition operand to the detection keys it names."""
+    if pattern == "them":
+        return set(keys)
+    if "*" in pattern:
+        # Built by escaping each literal piece and joining with `.*`, NOT by
+        # `re.escape(pattern).replace("\\*", ".*")`: re.escape stopped escaping
+        # `*` in newer Pythons, which makes that replacement silently inert.
+        regex = ".*".join(re.escape(p) for p in pattern.split("*"))
+        compiled = re.compile(f"^{regex}$")
+        return {k for k in keys if compiled.match(k)}
+    return {pattern} & keys
+
+
+def _negated_selections(detection: dict) -> set[str]:
+    """Names of the detection selections the `condition` negates.
+
+    Sigma puts a rule's EXCLUSIONS in the same `detection:` block as the things
+    it looks for, and only the condition says which is which.  An excluded value
+    is not something the rule looks for, so it must not become an atom: indexing
+    it makes a report that merely mentions the excluded software match the very
+    rule written to ignore it.
+
+    Naming is not a usable signal here — measured on the 11,393 Sigma rules in
+    the store, 10 use a `filter*` selection POSITIVELY and 72 negate a selection
+    that is not named `filter*` — so this reads the condition and nothing else.
+
+    Accepted limit: a double negation inside a group, `not (a and not b)`, marks
+    `b` negated although it is positive.  Nine rules in the store use `not (` at
+    all, and over-excluding only ever costs an atom, where under-excluding
+    invents one.
+    """
+    cond = detection.get("condition")
+    if isinstance(cond, list):
+        cond = " or ".join(str(x) for x in cond)
+    if not isinstance(cond, str):
+        return set()
+
+    # Lowercase BEFORE dropping the structural keys, or a rule writing
+    # `Condition:` would leave "condition" in `keys` and let the word in the
+    # expression resolve to a selection.
+    keys = frozenset(
+        k.strip().lower() for k in detection if isinstance(k, str)
+    ) - _SKIP_KEYS
+    if not keys:
+        return set()
+
+    tokens = _COND_TOKEN.findall(cond.lower())
+    negated: set[str] = set()
+    i = 0
+    n = len(tokens)
+
+    while i < n:
+        if tokens[i] != "not":
+            i += 1
+            continue
+
+        j = i + 1
+        if j >= n:
+            break
+
+        # `not ( ... )` — every name in the group is negated.  No depth guard:
+        # by De Morgan a nested operand is negated too, and over-excluding is
+        # the safe direction.
+        if tokens[j] == "(":
+            depth = 1
+            k = j + 1
+            while k < n and depth > 0:
+                tok = tokens[k]
+                if tok == "(":
+                    depth += 1
+                elif tok == ")":
+                    depth -= 1
+                elif (
+                    tok not in _COND_KEYWORDS
+                    and tok not in _COND_QUANTIFIERS
+                    and not tok.isdigit()
+                ):
+                    negated |= _expand_selector(tok, keys)
+                k += 1
+            i = k
+            continue
+
+        # `not <quantifier> of <pattern>`
+        if (
+            j + 2 < n
+            and tokens[j + 1] == "of"
+            and (tokens[j].isdigit() or tokens[j] in _COND_QUANTIFIERS)
+        ):
+            negated |= _expand_selector(tokens[j + 2], keys)
+            i = j + 3
+            continue
+
+        # `not <name>`
+        negated |= _expand_selector(tokens[j], keys)
+        i = j + 1
+
+    return negated
+
 
 def _strip_quotes(s: str) -> str:
     """Remove one pair of surrounding single or double quotes."""
@@ -202,7 +312,13 @@ def _normalize(cls: str, raw: object) -> list[str]:
     if cls in ("image", "file"):
         if "\\" in s or "/" in s:
             path = s.replace("\\", "/")
-            base = path.rsplit("/", 1)[-1]
+            # Strip the basename: `s` was stripped at its ends, but the segment
+            # after the last separator can still start with a space, and an atom
+            # carrying one can never equal a report observable (which is
+            # stripped).  Measured on the store: 49 such values, e.g. " 2>nul"
+            # and " rev_shell.py" — dead weight that also broke the documented
+            # "normalized" contract of rule_atoms.value.
+            base = path.rsplit("/", 1)[-1].strip()
             return [v for v in (path, base) if len(v) >= 4]
         return [s] if len(s) >= 4 else []
 
@@ -295,6 +411,9 @@ def _logsource_values(val: object) -> set[str]:
 def extract_atoms(doc: object, *, max_atoms: int = 120) -> list[tuple[str, str]]:
     """Return normalized (class, value) atoms from a parsed Sigma rule.
 
+    Selections the rule's `condition` negates are skipped: they are what the
+    rule excludes, not what it looks for.
+
     Args:
         doc: a parsed Sigma rule.  Anything that isn't a dict yields [].
         max_atoms: hard cap on atoms per rule — keeps auto-generated keyword
@@ -308,6 +427,17 @@ def extract_atoms(doc: object, *, max_atoms: int = 120) -> list[tuple[str, str]]
     detection = doc.get("detection")
     if not isinstance(detection, dict):
         return []
+
+    # A negated selection is what the rule EXCLUDES.  Dropped here rather than
+    # inside `_collect` so the walk stays unaware of condition semantics, and so
+    # the exclusion is confined to the top level: negation names a top-level
+    # selection, never a nested field.
+    negated = _negated_selections(detection)
+    if negated:
+        detection = {
+            k: v for k, v in detection.items()
+            if not (isinstance(k, str) and k.strip().lower() in negated)
+        }
 
     out: list[tuple[str, str]] = []
     _collect(detection, out, set(), max_atoms)

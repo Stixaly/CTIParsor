@@ -235,13 +235,29 @@ def dedupe_store(conn: sqlite3.Connection, priority: dict[str, int] | None = Non
         canonical.append(winner[0])
         duplicates.extend(m[0] for m in rest)
 
-    # Write results
-    conn.execute("UPDATE detection_rules SET is_canonical=0")
-    conn.executemany(
-        "UPDATE detection_rules SET is_canonical=1 WHERE id=?",
-        [(rid,) for rid in canonical],
-    )
-    promoted = _propagate_techniques(conn, final_clusters)
+    # Write results inside ONE transaction.
+    #
+    # `get_conn()` runs in autocommit, where a bare `with conn:` is not a
+    # transaction, so the demotion below used to commit on its own: between it
+    # and the re-election, every rule in the store was non-canonical, and
+    # coverage and drill-down both read canonical-only.  A crash or a killed
+    # rebuild in that window left the whole store reading as empty until dedup
+    # was run again.  BEGIN IMMEDIATE takes the write lock up front so a
+    # concurrent writer queues on busy_timeout instead of failing at COMMIT.
+    #
+    # Written inline rather than with `api.db.transaction` to keep this module
+    # importable without the api package, as the rest of it already is.
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute("UPDATE detection_rules SET is_canonical=0")
+        conn.executemany(
+            "UPDATE detection_rules SET is_canonical=1 WHERE id=?",
+            [(rid,) for rid in canonical],
+        )
+        promoted = _propagate_techniques(conn, final_clusters)
+    except BaseException:
+        conn.rollback()
+        raise
     conn.commit()
 
     clusters_after_fusion2 = len(final_clusters)

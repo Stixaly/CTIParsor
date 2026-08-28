@@ -7,6 +7,30 @@ sections group by theme rather than strict semver.
 ## [Unreleased]
 
 ### Added
+- **Figures in CTI reports can be read, not just skipped** (ADR-0032, ADR-0033).
+  A geometric triage keeps the 141 real figures out of 341 images across the
+  corpus — **56.9% are icons and logos, discarded before any model is involved** —
+  crops each one, and transcribes it into `report_text` between `⟦figure n⟧`
+  sentinels so every downstream stage works unchanged. One FortiGate console
+  screenshot in the CERT Polska report carries three techniques the text layer
+  never states; one Ukrainian lure page carries a payload filename found nowhere
+  else.
+
+  Crops, never whole pages: a 1:15 web-capture sheet is 105 pixels wide after any
+  long-edge normalisation, which is why the local model returned empty JSON after
+  100 s and the Anthropic API returns a 400. On real figures a crop costs 977
+  input tokens against 2 191 for its page, runs ~5× faster, and gets the
+  `figure_kind` right where the page returns one blanket verdict for three
+  figures.
+
+- **`VISION_PROVIDER` / `VISION_MODEL`** — a vision backend for `anthropic`,
+  `mistral` or `ollama`, deliberately separate from `LLM_PROVIDER`. None of the
+  Stage-3 Ollama models can see (`mistral`, `mistral-nemo`, `llama3.2` are all
+  text-only), and a text model handed an image does not error — it invents. The
+  model is probed for image support before a single figure is sent;
+  `python -m pipeline.vlm` reports what the current environment resolves to and
+  why, without starting the pipeline.
+
 - **Proposals can be promoted into the coverage selection.** Each row in
   *Proposed detections* gains an **Add** checkbox; ticked rules join the coverage
   selection, the format-board counts and the export. They need it: measured on
@@ -29,6 +53,142 @@ sections group by theme rather than strict semver.
   construction.
 
 ### Fixed
+
+#### Bug hunt, 2026-08-28
+
+A sweep over the detection, evidence, STIX and UI paths, driven by real-store
+measurement rather than by reading alone. The 938-test suite was green before
+and after every one of these — none of them was visible to it, so each fix
+lands with a test that fails when the defect is put back (verified by putting
+it back).
+
+Checked against real data and found **clean**, which is worth recording so the
+next sweep can start elsewhere: the regex extractors over 415,981 characters of
+stored report text (0 contract violations across hashes, IPs, domains, URLs,
+emails, MACs, ASNs, CVEs, paths, registry keys); the Suricata negation guard
+(3,628 rules with a negated `content:`, 0 leaked atoms); the YARA extractor
+(777 rules using `not`, none indexing a negated string — YARA negates
+`filesize` and `pe.*`, not literals); dedup election (75,127 clusters, exactly
+one canonical each); graph-completion provenance (2,586 premise refs, 0
+dangling); `web_capture`'s SSRF validation (scheme, port, host blocklist and
+every resolved address must be public — a trailing-dot `localhost.` is caught
+by the IP check); STIX pattern escaping; and an adversarial-input sweep over
+every pure function in the detection and evidence modules, which raised nothing.
+
+- **The atom index held what rules EXCLUDE, indexed as what they look for**
+  (ADR-0034). `extract_atoms` walked the whole `detection:` block, but a Sigma
+  rule keeps its exclusions there too — only the `condition` says which is
+  which. Measured over the full store: **14,037 atoms across 1,742 rules
+  (15.3%)** existed solely because a negated selection was walked. They are the
+  exclusion vocabulary of Windows detection engineering — `svchost.exe` (80
+  rules), `explorer.exe` (75), `msmpeng.exe` (62, Windows Defender),
+  `teams.exe` (43), `c:/windows/system32/` (112). A report mentioning
+  `explorer.exe` was pulling in 75 rules whose only reason to name it is to not
+  fire on it.
+
+  The condition is parsed rather than the `filter*` naming convention trusted:
+  measured, **10 rules use a `filter*` selection positively and 72 negate a
+  selection not named `filter*`** (`legitimate_process_path`, `falsepositives`,
+  `exclude_tlds`, `z_flag_unset`). Both failure modes are silent.
+  **Requires a store rebuild to take effect** — the fix is in the extractor.
+
+  Measured at the other end, the panel: **7 of 2,400 served proposals (0.3%)**
+  rested only on excluded values — IDF already suppresses `svchost.exe` and
+  friends, so what survived was the *specific* exclusion. Small, but inverted:
+  *"Notepad++ Updater DNS Query to Uncommon Domains"* was served at score 0.470
+  because the report mentioned `github.com`, which that rule excludes precisely
+  because it is where the updater is supposed to go.
+
+- **`locate()` reported full coverage for a quote containing a word absent from
+  the report.** When the normalised quote had edge whitespace, `nq.split(' ')`
+  produced empty words, so the two binary searches indexed more words than the
+  coverage fraction was computed against. A quote whose last word was
+  hallucinated came back `coverage = 1.000` instead of `0.875` — a hole in the
+  guard that demotes an unlocatable quote from `reported` to `inferred`.
+
+- **One character silently shifted every evidence offset after it.**
+  `_normalise` assumed `str.lower()` is length-preserving. U+0130 (Turkish
+  dotted I) lowercases to two characters, which made the normalised string
+  longer than its index map, so every span resolved after it was off by one.
+  Now handled the way ligatures already were.
+
+- **`evidence_start` did not delimit anything.** `locate()` returns a start
+  *and an end*; only the start was stored. Since `evidence_text` is the model's
+  wording and normalisation folds curly quotes and whitespace runs, the two
+  differ in length — measured, **68 of 313 stored quotes (21.7%)** could not be
+  recovered by `report_text[start:start + len(evidence_text)]`. New
+  `entities.evidence_end` column; existing rows are reported as legacy rather
+  than as corrupt.
+
+- **Figure ordinals followed thread-completion order, not reading order.**
+  `read_figures` appends cache hits in candidate order and parallel reads in
+  arrival order, then sorted on `page` alone. Python's sort being stable, two
+  figures on one page kept that construction order — so a cached figure, or one
+  whose read finished first, took ordinal 1 from the figure printed above it.
+  Now sorted on `(page, top, x0)`, the key `find_figures` itself uses and the
+  key `inject_append`'s docstring already claimed.
+
+- **`with get_conn() as conn:` was never a transaction.** Connections open with
+  `isolation_level=None`, so every statement inside such a block is already
+  committed and sqlite3's rollback on exception has nothing to undo — verified
+  with a DELETE + INSERT that survived an exception raised between them. New
+  `api.db.transaction()`, applied where a partial write loses data:
+  `figure_store.save_spans` (DELETE then INSERT) and `dedupe_store`, whose
+  `UPDATE ... SET is_canonical=0` used to commit on its own — leaving a window
+  in which **every rule in the store read as non-canonical**, which is what
+  coverage and drill-down filter on.
+
+- **Atoms could carry a leading space and so match nothing.** For `image` and
+  `file`, the basename was taken after the path split but not re-stripped;
+  49 values in the store, e.g. `" 2>nul"` and `" rev_shell.py"`. A report
+  observable is stripped, so these could never match.
+
+- **An object could be related to itself.** `_add_relationship` and the LLM
+  edge loop both resolve their endpoints through `name_to_stix`, which merges
+  aliases — so two surface forms of one actor collapse onto a single id and the
+  edge survived. `seen_rel_keys` cannot catch it: each is one edge, not a
+  repeat. Measured over the 12 stored bundles: **6 self-edges in 2 reports** —
+  `Sandworm Team related-to Sandworm Team`, `EXARAMEL drops EXARAMEL`, and four
+  IP addresses related to themselves. `_pin_edge_key` and
+  `stage4b._rewrite_refs` already refused self-pairs; these two paths had
+  drifted from the mirror they document.
+
+- **Merging chunks silently dropped evidence quotes.** `_merge_results`
+  deduplicated TTPs and relationships with plain last-write-wins, and
+  `evidence_text` is optional — so a later chunk restating a technique *without*
+  a quote erased the chunk that had one. The result depended on chunk order:
+  reversing two chunks changed the output. It also let confidence 0.5 replace
+  0.9, and a one-word quote (`"downloaded"`) replace a full clause. Duplicates
+  are now resolved by evidence, then by confidence, keeping the incumbent on a
+  tie so the merge is deterministic. This is the field ADR-0028 is entirely
+  about.
+
+- **Frontend: a job's rule selection could be written under another job's key.**
+  `useRuleSelection` persisted through a `useEffect` on `[excluded, jobId]`.
+  That effect also fires on the pass where `jobId` has already changed but
+  `excluded` still holds the previous job's value, and on the mount pass where
+  the closure holds the initial empty set — both reproduced in
+  `useRuleSelection.test.ts`, which recorded job A's exclusions being written to
+  job B's key and `[]` being written over a stored selection. Persistence moved
+  into the mutators, which is the rule its twin `usePromotedRules` already
+  documents and the last place in the frontend that had not adopted it.
+
+- **`scripts/audit_bundle_invariants.py`** — 16 read-only invariants over every
+  stored STIX bundle (id uniqueness and format, dangling `source_ref` /
+  `target_ref` / `created_by_ref` / marking refs, report `object_refs`,
+  indicator pattern well-formedness, timestamp parsing, confidence range,
+  orphans, relationship vocabulary). 15 of the 16 were clean on first run; the
+  self-edge check is what found the bug above.
+
+- **`scripts/audit_store_invariants.py`** — a read-only harness checking 16
+  invariants over the live store (orphans, dedup election, atom
+  normalisation, figure spans, evidence spans, JSON columns). Two of its
+  invariants were wrong when first written and are documented as such: grouping
+  the dedup election on `dedup_key` reported 5,036 false failures, because
+  provenance folding merges rules that do not share a key; and the
+  "wildcard-free" atom contract is a Sigma rule — YARA and Suricata literals
+  carry `*` and `?` as content (`select * from moz_logins`).
+
 - **A ubiquitous value could admit a rule into the panel and the export.**
   ADR-0030 ruled such a value contributes zero to corroboration, but it was still
   allowed to *admit* — which is worse, because admission is what reaches the ZIP.

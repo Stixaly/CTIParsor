@@ -942,6 +942,9 @@ cti-to-stix/
 │   ├── build_rule_text.py         # FTS5 index over rule title+description (ADR-0031)
 │   ├── backfill_rule_bytes.py     # Backfill rule_bytes on an older store (ADR-0022)
 │   ├── audit_coverage_formats.py  # Read-only: per-format breakdown + drill-down latency
+│   ├── audit_store_invariants.py  # Read-only: 16 invariants over the rule/entity store
+│   ├── audit_bundle_invariants.py # Read-only: 16 invariants over every stored STIX bundle
+│   ├── measure_negated_atoms.py   # Before/after of the ADR-0034 negation fix on the store
 │   ├── check_stages.py            # Diagnostic: which stages are available (make check)
 │   └── check_doc_claims.py        # Doc drift guard: README numbers vs source (make check-docs)
 │
