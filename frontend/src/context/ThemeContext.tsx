@@ -14,6 +14,7 @@
  */
 
 import { createContext, useContext, useState, useEffect, useLayoutEffect, useCallback, type ReactNode } from 'react'
+import { usePref } from '../hooks/usePref'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -53,18 +54,6 @@ export const ACCENT_PALETTES: Record<string, {
 export const ACCENT_KEYS = Object.keys(ACCENT_PALETTES) as string[]
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
-
-function usePref<T>(key: string, init: T): [T, (v: T) => void] {
-  const [val, setVal] = useState<T>(() => {
-    try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : init }
-    catch { return init }
-  })
-  const set = (v: T) => {
-    setVal(v)
-    try { localStorage.setItem(key, JSON.stringify(v)) } catch {}
-  }
-  return [val, set]
-}
 
 /** Push theme tokens to html[data-theme] + CSS custom properties. */
 function applyTheme(theme: Theme, accentKey: string) {

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 
+from pipeline.detection.textutil import unescape
 from pipeline.detection.tlds import looks_like_domain
 
 ATOM_CLASSES: frozenset[str] = frozenset({
@@ -177,30 +178,8 @@ _SURICATA_ESCAPES: dict[str, str] = {
 
 
 def _unescape_content(value: str) -> str:
-    """Decode one Suricata content string in a single left-to-right pass.
-
-    The single pass is what prevents a decoded backslash from being re-read as
-    the start of a new escape. Undefined escapes are preserved verbatim.
-    """
-    if not isinstance(value, str):
-        return ""
-
-    parts: list[str] = []
-    i = 0
-    n = len(value)
-    while i < n:
-        if value[i] == "\\" and i + 1 < n:
-            nxt = value[i + 1]
-            if nxt in _SURICATA_ESCAPES:
-                parts.append(_SURICATA_ESCAPES[nxt])
-            else:
-                parts.append("\\")
-                parts.append(nxt)
-            i += 2
-        else:
-            parts.append(value[i])
-            i += 1
-    return "".join(parts)
+    """Decode one Suricata `content:` string. See `textutil.unescape`."""
+    return unescape(value, _SURICATA_ESCAPES)
 
 
 def _content_text(value: str) -> str:

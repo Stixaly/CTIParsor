@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sqlite3
 import sys
 from dataclasses import dataclass
@@ -131,96 +132,71 @@ def check_dedup_cluster_canonical(conn: sqlite3.Connection) -> Finding:
         return Finding("dedup.cluster_canonical", "error", 0, 0, str(e)[:160], "SKIP")
 
 
-def check_atoms_orphan(conn: sqlite3.Connection) -> Finding:
-    """Check for rule_atoms referencing non-existent detection_rules."""
+@dataclass(frozen=True)
+class _OrphanSpec:
+    """One "rows whose foreign key resolves to nothing" invariant."""
+    severity: str      # "error" or "warn"
+    child: str         # table whose rows are counted
+    fk: str            # column of `child` holding the reference
+    parent: str        # table the reference must resolve in
+    key: str           # column of `parent` the fk must match
+    ok_detail: str     # Finding.detail when nothing is orphaned
+    fail_label: str    # prefix of the FAIL detail
+
+#: The six orphan invariants, previously six near-identical functions.
+#: `rule_bytes.missing` runs the relation the other way round — rules
+#: with no bytes row — but it is the same query shape, so it belongs
+#: here rather than in a copy of its own.
+_ORPHAN_SPECS: dict[str, _OrphanSpec] = {
+    "atoms.orphan": _OrphanSpec(
+        "error", "rule_atoms", "rule_id", "detection_rules", "id",
+        "no orphan atoms", "orphan rule_ids"),
+    "techniques.orphan": _OrphanSpec(
+        "error", "rule_techniques", "rule_id", "detection_rules", "id",
+        "no orphan techniques", "orphan rule_ids"),
+    "related.orphan": _OrphanSpec(
+        "error", "rule_related", "rule_id", "detection_rules", "id",
+        "no orphan related", "orphan rule_ids"),
+    "rule_bytes.missing": _OrphanSpec(
+        "warn", "detection_rules", "id", "rule_bytes", "rule_id",
+        "all rules have bytes", "missing rule_ids"),
+    "entity.orphan_job": _OrphanSpec(
+        "error", "entities", "job_id", "jobs", "id",
+        "no orphan entities", "orphan job_ids"),
+    "relationship.orphan_job": _OrphanSpec(
+        "error", "relationships", "job_id", "jobs", "id",
+        "no orphan relationships", "orphan job_ids"),
+}
+
+_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+def _check_orphan(conn: sqlite3.Connection, name: str) -> Finding:
+    """Generic orphan check driven by _ORPHAN_SPECS."""
+    spec = _ORPHAN_SPECS[name]
+    # SQLite does not support parameter binding for table/column names,
+    # so we must validate identifiers to prevent SQL injection.
+    for ident in (spec.child, spec.fk, spec.parent, spec.key):
+        if not _IDENT_RE.match(ident):
+            return Finding(name, spec.severity, 0, 0, "invalid identifier", "SKIP")
     try:
-        if not _table_exists(conn, "rule_atoms") or not _table_exists(conn, "detection_rules"):
-            return Finding("atoms.orphan", "error", 0, 0, "table missing", "SKIP")
-        total = conn.execute("SELECT COUNT(*) AS c FROM rule_atoms").fetchone()["c"]
-        count = conn.execute("""
-            SELECT COUNT(*) AS c FROM rule_atoms ra
-            WHERE NOT EXISTS (SELECT 1 FROM detection_rules dr WHERE dr.id = ra.rule_id)
+        if not _table_exists(conn, spec.child) or not _table_exists(conn, spec.parent):
+            return Finding(name, spec.severity, 0, 0, "table missing", "SKIP")
+        total = conn.execute(f"SELECT COUNT(*) AS c FROM {spec.child}").fetchone()["c"]
+        count = conn.execute(f"""
+            SELECT COUNT(*) AS c FROM {spec.child} a
+            WHERE NOT EXISTS (SELECT 1 FROM {spec.parent} b WHERE b.{spec.key} = a.{spec.fk})
         """).fetchone()["c"]
         if count == 0:
-            return Finding("atoms.orphan", "error", 0, total, "no orphan atoms", "OK")
-        examples = [r["rule_id"] for r in conn.execute("""
-            SELECT ra.rule_id FROM rule_atoms ra
-            WHERE NOT EXISTS (SELECT 1 FROM detection_rules dr WHERE dr.id = ra.rule_id)
+            return Finding(name, spec.severity, 0, total, spec.ok_detail, "OK")
+        examples = [r["v"] for r in conn.execute(f"""
+            SELECT a.{spec.fk} AS v FROM {spec.child} a
+            WHERE NOT EXISTS (SELECT 1 FROM {spec.parent} b WHERE b.{spec.key} = a.{spec.fk})
             LIMIT 3
         """).fetchall()]
-        detail = f"orphan rule_ids: {_sample(examples)}"
-        return Finding("atoms.orphan", "error", count, total, detail[:160], "FAIL")
+        detail = f"{spec.fail_label}: {_sample(examples)}"
+        return Finding(name, spec.severity, count, total, detail[:160], "FAIL")
     except sqlite3.Error as e:
-        return Finding("atoms.orphan", "error", 0, 0, str(e)[:160], "SKIP")
-
-
-def check_techniques_orphan(conn: sqlite3.Connection) -> Finding:
-    """Check for rule_techniques referencing non-existent detection_rules."""
-    try:
-        if not _table_exists(conn, "rule_techniques") or not _table_exists(conn, "detection_rules"):
-            return Finding("techniques.orphan", "error", 0, 0, "table missing", "SKIP")
-        total = conn.execute("SELECT COUNT(*) AS c FROM rule_techniques").fetchone()["c"]
-        count = conn.execute("""
-            SELECT COUNT(*) AS c FROM rule_techniques rt
-            WHERE NOT EXISTS (SELECT 1 FROM detection_rules dr WHERE dr.id = rt.rule_id)
-        """).fetchone()["c"]
-        if count == 0:
-            return Finding("techniques.orphan", "error", 0, total, "no orphan techniques", "OK")
-        examples = [r["rule_id"] for r in conn.execute("""
-            SELECT rt.rule_id FROM rule_techniques rt
-            WHERE NOT EXISTS (SELECT 1 FROM detection_rules dr WHERE dr.id = rt.rule_id)
-            LIMIT 3
-        """).fetchall()]
-        detail = f"orphan rule_ids: {_sample(examples)}"
-        return Finding("techniques.orphan", "error", count, total, detail[:160], "FAIL")
-    except sqlite3.Error as e:
-        return Finding("techniques.orphan", "error", 0, 0, str(e)[:160], "SKIP")
-
-
-def check_related_orphan(conn: sqlite3.Connection) -> Finding:
-    """Check for rule_related referencing non-existent detection_rules."""
-    try:
-        if not _table_exists(conn, "rule_related") or not _table_exists(conn, "detection_rules"):
-            return Finding("related.orphan", "error", 0, 0, "table missing", "SKIP")
-        total = conn.execute("SELECT COUNT(*) AS c FROM rule_related").fetchone()["c"]
-        count = conn.execute("""
-            SELECT COUNT(*) AS c FROM rule_related rr
-            WHERE NOT EXISTS (SELECT 1 FROM detection_rules dr WHERE dr.id = rr.rule_id)
-        """).fetchone()["c"]
-        if count == 0:
-            return Finding("related.orphan", "error", 0, total, "no orphan related", "OK")
-        examples = [r["rule_id"] for r in conn.execute("""
-            SELECT rr.rule_id FROM rule_related rr
-            WHERE NOT EXISTS (SELECT 1 FROM detection_rules dr WHERE dr.id = rr.rule_id)
-            LIMIT 3
-        """).fetchall()]
-        detail = f"orphan rule_ids: {_sample(examples)}"
-        return Finding("related.orphan", "error", count, total, detail[:160], "FAIL")
-    except sqlite3.Error as e:
-        return Finding("related.orphan", "error", 0, 0, str(e)[:160], "SKIP")
-
-
-def check_rule_bytes_missing(conn: sqlite3.Connection) -> Finding:
-    """Check for detection_rules without a rule_bytes entry."""
-    try:
-        if not _table_exists(conn, "detection_rules") or not _table_exists(conn, "rule_bytes"):
-            return Finding("rule_bytes.missing", "warn", 0, 0, "table missing", "SKIP")
-        total = conn.execute("SELECT COUNT(*) AS c FROM detection_rules").fetchone()["c"]
-        count = conn.execute("""
-            SELECT COUNT(*) AS c FROM detection_rules dr
-            WHERE NOT EXISTS (SELECT 1 FROM rule_bytes rb WHERE rb.rule_id = dr.id)
-        """).fetchone()["c"]
-        if count == 0:
-            return Finding("rule_bytes.missing", "warn", 0, total, "all rules have bytes", "OK")
-        examples = [r["id"] for r in conn.execute("""
-            SELECT dr.id FROM detection_rules dr
-            WHERE NOT EXISTS (SELECT 1 FROM rule_bytes rb WHERE rb.rule_id = dr.id)
-            LIMIT 3
-        """).fetchall()]
-        detail = f"missing rule_ids: {_sample(examples)}"
-        return Finding("rule_bytes.missing", "warn", count, total, detail[:160], "FAIL")
-    except sqlite3.Error as e:
-        return Finding("rule_bytes.missing", "warn", 0, 0, str(e)[:160], "SKIP")
+        return Finding(name, spec.severity, 0, 0, str(e)[:160], "SKIP")
 
 
 def check_rule_bytes_zero(conn: sqlite3.Connection) -> Finding:
@@ -460,52 +436,6 @@ def check_entity_evidence_offset(conn: sqlite3.Connection) -> Finding:
         return Finding("entity.evidence_offset", "error", 0, 0, str(e)[:160], "SKIP")
 
 
-def check_entity_orphan_job(conn: sqlite3.Connection) -> Finding:
-    """Check for entities referencing non-existent jobs."""
-    try:
-        if not _table_exists(conn, "entities") or not _table_exists(conn, "jobs"):
-            return Finding("entity.orphan_job", "error", 0, 0, "table missing", "SKIP")
-        total = conn.execute("SELECT COUNT(*) AS c FROM entities").fetchone()["c"]
-        count = conn.execute("""
-            SELECT COUNT(*) AS c FROM entities e
-            WHERE NOT EXISTS (SELECT 1 FROM jobs j WHERE j.id = e.job_id)
-        """).fetchone()["c"]
-        if count == 0:
-            return Finding("entity.orphan_job", "error", 0, total, "no orphan entities", "OK")
-        examples = [r["job_id"] for r in conn.execute("""
-            SELECT e.job_id FROM entities e
-            WHERE NOT EXISTS (SELECT 1 FROM jobs j WHERE j.id = e.job_id)
-            LIMIT 3
-        """).fetchall()]
-        detail = f"orphan job_ids: {_sample(examples)}"
-        return Finding("entity.orphan_job", "error", count, total, detail[:160], "FAIL")
-    except sqlite3.Error as e:
-        return Finding("entity.orphan_job", "error", 0, 0, str(e)[:160], "SKIP")
-
-
-def check_relationship_orphan_job(conn: sqlite3.Connection) -> Finding:
-    """Check for relationships referencing non-existent jobs."""
-    try:
-        if not _table_exists(conn, "relationships") or not _table_exists(conn, "jobs"):
-            return Finding("relationship.orphan_job", "error", 0, 0, "table missing", "SKIP")
-        total = conn.execute("SELECT COUNT(*) AS c FROM relationships").fetchone()["c"]
-        count = conn.execute("""
-            SELECT COUNT(*) AS c FROM relationships r
-            WHERE NOT EXISTS (SELECT 1 FROM jobs j WHERE j.id = r.job_id)
-        """).fetchone()["c"]
-        if count == 0:
-            return Finding("relationship.orphan_job", "error", 0, total, "no orphan relationships", "OK")
-        examples = [r["job_id"] for r in conn.execute("""
-            SELECT r.job_id FROM relationships r
-            WHERE NOT EXISTS (SELECT 1 FROM jobs j WHERE j.id = r.job_id)
-            LIMIT 3
-        """).fetchall()]
-        detail = f"orphan job_ids: {_sample(examples)}"
-        return Finding("relationship.orphan_job", "error", count, total, detail[:160], "FAIL")
-    except sqlite3.Error as e:
-        return Finding("relationship.orphan_job", "error", 0, 0, str(e)[:160], "SKIP")
-
-
 def check_json_columns(conn: sqlite3.Connection) -> Finding:
     """Verify JSON columns contain valid JSON when non-empty."""
     try:
@@ -582,10 +512,10 @@ def run_all(conn: sqlite3.Connection) -> list[Finding]:
     """Run all invariant checks and return findings."""
     return [
         check_dedup_cluster_canonical(conn),
-        check_atoms_orphan(conn),
-        check_techniques_orphan(conn),
-        check_related_orphan(conn),
-        check_rule_bytes_missing(conn),
+        _check_orphan(conn, "atoms.orphan"),
+        _check_orphan(conn, "techniques.orphan"),
+        _check_orphan(conn, "related.orphan"),
+        _check_orphan(conn, "rule_bytes.missing"),
         check_rule_bytes_zero(conn),
         check_atom_value_normalised(conn),
         check_atom_value_too_short(conn),
@@ -593,8 +523,8 @@ def run_all(conn: sqlite3.Connection) -> list[Finding]:
         check_figure_span_bounds(conn),
         check_figure_span_overlap(conn),
         check_entity_evidence_offset(conn),
-        check_entity_orphan_job(conn),
-        check_relationship_orphan_job(conn),
+        _check_orphan(conn, "entity.orphan_job"),
+        _check_orphan(conn, "relationship.orphan_job"),
         check_json_columns(conn),
         check_figure_bbox_format(conn),
     ]

@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from pipeline.detection.textutil import unescape
 from pipeline.detection.tlds import looks_like_domain
 
 # ---------------------------------------------------------------------------
@@ -237,31 +238,8 @@ _YARA_ESCAPES: dict[str, str] = {
 
 
 def _unescape_literal(value: str) -> str:
-    """Decode one YARA text-string literal in a single left-to-right pass.
-
-    The single pass is what prevents a decoded backslash from being re-read as
-    the start of a new escape. Undefined escapes (``\\x41``) are preserved
-    verbatim, matching the previous behaviour.
-    """
-    if not isinstance(value, str):
-        return ""
-
-    parts: list[str] = []
-    i = 0
-    n = len(value)
-    while i < n:
-        if value[i] == "\\" and i + 1 < n:
-            nxt = value[i + 1]
-            if nxt in _YARA_ESCAPES:
-                parts.append(_YARA_ESCAPES[nxt])
-            else:
-                parts.append("\\")
-                parts.append(nxt)
-            i += 2
-        else:
-            parts.append(value[i])
-            i += 1
-    return "".join(parts)
+    """Decode one YARA text-string literal. See `textutil.unescape`."""
+    return unescape(value, _YARA_ESCAPES)
 
 
 def _parse_meta(body: str) -> dict[str, str]:

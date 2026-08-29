@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from api.db import _lock, get_conn, now_iso
+from api.routes._common import require_job
 from api.worker import re_run_final_stages
 
 _ROOT        = Path(__file__).parent.parent.parent
@@ -137,9 +138,7 @@ def finalize_job(job_id: str, quick: bool = False):
         Call via POST /api/jobs/{id}/finalize?quick=true
     """
     with get_conn() as conn:
-        row = conn.execute("SELECT id FROM jobs WHERE id=?", (job_id,)).fetchone()
-        if not row:
-            raise HTTPException(404, "Job not found")
+        require_job(conn, job_id)
 
     bundle_json = re_run_final_stages(job_id, skip_rescan=quick)
     if bundle_json is None:
@@ -187,9 +186,7 @@ def get_source_file(job_id: str):
     PDFs inline and download other formats correctly.
     """
     with get_conn() as conn:
-        row = conn.execute("SELECT id FROM jobs WHERE id=?", (job_id,)).fetchone()
-    if not row:
-        raise HTTPException(404, "Job not found")
+        require_job(conn, job_id)
 
     matches = list(_UPLOADS_DIR.glob(f"{job_id}.*"))
     if not matches:

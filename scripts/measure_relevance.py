@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pipeline.detection.coverage import job_technique_ids
 from pipeline.detection.observables import Observable, observables_from_entities
-from pipeline.detection.relevance import MATCHABLE, job_observable_rows
+from pipeline.detection.relevance import MATCHABLE, _parent, job_observable_rows
 from pipeline.detection.store import atom_hits, canonical_rule_ids_for_techniques
 
 WIDENED_EXTRA: dict[str, frozenset[str]] = {
@@ -34,13 +34,6 @@ WIDENED_EXTRA: dict[str, frozenset[str]] = {
     "user":     frozenset(),
     "port":     frozenset(),
 }
-
-
-def _parent(technique_id: str) -> str | None:
-    """Extrait l'identifiant parent d'une sous-technique ATT&CK."""
-    if "." in technique_id:
-        return technique_id.split(".", 1)[0]
-    return None
 
 
 def _technique_rule_ids(conn: sqlite3.Connection, job_id: str) -> set[str]:

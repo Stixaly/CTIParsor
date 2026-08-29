@@ -33,8 +33,9 @@ import re
 from pathlib import Path
 
 from models.schemas import EntityType, RawEntity
+from pipeline.env_flags import env_bool
 
-_SKIP_HEAVY = os.getenv("SKIP_HEAVY_MODELS") == "1"
+_SKIP_HEAVY = env_bool("SKIP_HEAVY_MODELS")
 
 # Initialize logging
 from api.logging_config import get_logger
@@ -53,7 +54,7 @@ logger = get_logger(__name__)
 # (malware families, threat actor groups) via zero-shot NER.
 # Set CYNER_ENABLED=false in .env to skip this stage and silence all warnings.
 _MODEL_ID      = os.getenv("CYNER_MODEL",   "PranavaKailash/CyNER-2.0-DeBERTa-v3-base")
-_CYNER_ENABLED = os.getenv("CYNER_ENABLED", "true").lower() not in ("false", "0", "no")
+_CYNER_ENABLED = env_bool("CYNER_ENABLED", default=True)
 
 # Sentinel file written to the project root the first time the model is detected
 # as inaccessible (private/removed).  Future subprocess invocations check for this
@@ -278,28 +279,3 @@ class CyNERStage(BaseExtractionStage):
 
     def extract(self, text: str) -> list[RawEntity]:
         return extract_cyner_entities(text)
-
-
-def _merge_cyner_into(
-    all_entities: list[RawEntity],
-    cyner_entities: list[RawEntity],
-) -> list[RawEntity]:
-    """
-    Merge CyNER results into an existing entity list.
-
-    Rules:
-      • Any (value, type) pair already present is skipped — the earlier source
-        (regex or gazetteer) already covers it, often with a more precise value.
-      • For THREAT_ACTOR entities specifically, CyNER is considered more
-        reliable than spaCy-derived actors but less reliable than the gazetteer.
-    """
-    existing_keys = {(e.value.lower(), e.entity_type) for e in all_entities}
-    added = list(all_entities)
-
-    for ce in cyner_entities:
-        key = (ce.value.lower(), ce.entity_type)
-        if key not in existing_keys:
-            added.append(ce)
-            existing_keys.add(key)
-
-    return added

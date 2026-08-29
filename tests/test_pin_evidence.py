@@ -5,7 +5,7 @@ from pipeline.stage4_stix_mapping import (
     _evidence_terms,
     _materialise_pinned_edges,
     _pair_is_grounded,
-    _split_sentences,
+    _split_evidence_sentences,
 )
 
 
@@ -80,18 +80,18 @@ def test_terms_for_object_without_type_is_empty():
     assert terms == []
 
 
-# --- _split_sentences ---
+# --- _split_evidence_sentences ---
 
-def test_split_sentences_basic():
+def test_split_evidence_sentences_basic():
     text = "A one. B two!\n\nC three?"
-    parts = _split_sentences(text)
+    parts = _split_evidence_sentences(text)
     assert len(parts) == 3
     assert all(p.strip() for p in parts)
 
 
-def test_split_sentences_empty_and_non_string():
-    assert _split_sentences("") == []
-    assert _split_sentences(None) == []
+def test_split_evidence_sentences_empty_and_non_string():
+    assert _split_evidence_sentences("") == []
+    assert _split_evidence_sentences(None) == []
 
 
 # --- _build_sentence_index ---

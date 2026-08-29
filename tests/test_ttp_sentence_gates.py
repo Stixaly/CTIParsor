@@ -18,7 +18,7 @@ from pipeline.stage2c_ttp_semantic import (
     _MAX_CANDIDATES,
     _has_ttp_keyword,
     _select_candidates,
-    _split_sentences,
+    _split_candidate_sentences,
     _unwrap_hard_linebreaks,
     sentence_gate_stats,
 )
@@ -126,7 +126,7 @@ def test_unwrap_guards_non_string():
         "Non-string input must be handled gracefully and return empty string"
     )
 
-def test_split_sentences_no_longer_fragments_wrapped_text(monkeypatch):
+def test_split_candidate_sentences_no_longer_fragments_wrapped_text(monkeypatch):
     # Construct a paragraph of 4 lines forming ONE sentence ending with a period
     wrapped_text = (
         "This is a very long sentence that is split across multiple lines \n"
@@ -136,18 +136,18 @@ def test_split_sentences_no_longer_fragments_wrapped_text(monkeypatch):
     )
 
     # Default: unwrap enabled
-    segments = _split_sentences(wrapped_text)
+    segments = _split_candidate_sentences(wrapped_text)
     assert len(segments) == 1
 
     # Disable unwrap
     monkeypatch.setenv("TTP_UNWRAP_LINES", "0")
-    segments_disabled = _split_sentences(wrapped_text)
+    segments_disabled = _split_candidate_sentences(wrapped_text)
     assert len(segments_disabled) == 4
 
 
-def test_split_sentences_guards_non_string():
-    assert _split_sentences(None) == []
-    assert _split_sentences(42) == []
+def test_split_candidate_sentences_guards_non_string():
+    assert _split_candidate_sentences(None) == []
+    assert _split_candidate_sentences(42) == []
 
 
 def test_keyword_gate_off_keeps_everything(monkeypatch):

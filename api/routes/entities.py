@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from api.db import _lock, get_conn
+from api.routes._common import require_job
 from models.schemas import EntityType
 
 router = APIRouter(prefix="/api/jobs/{job_id}/entities", tags=["entities"])
@@ -64,9 +65,7 @@ def create_entity(job_id: str, body: EntityCreate):
     if body.entity_type not in VALID_TYPES:
         raise HTTPException(400, f"Unknown entity_type '{body.entity_type}'")
     with get_conn() as conn:
-        job = conn.execute("SELECT id FROM jobs WHERE id=?", (job_id,)).fetchone()
-        if not job:
-            raise HTTPException(404, "Job not found")
+        require_job(conn, job_id)
 
     eid = str(uuid4())
     with _lock:
@@ -184,8 +183,7 @@ def bulk_update_entities(job_id: str, body: BulkPatch):
 
     # Verify the job exists
     with get_conn() as conn:
-        if not conn.execute("SELECT id FROM jobs WHERE id=?", (job_id,)).fetchone():
-            raise HTTPException(404, "Job not found")
+        require_job(conn, job_id)
 
     accepted_val = (
         1    if body.action == "accept" else

@@ -36,12 +36,12 @@ Design note — circular import avoidance:
 """
 from __future__ import annotations
 
-import json
-import math
 import os
 from typing import Callable
 
 from api.logging_config import get_logger
+from pipeline.env_flags import env_bool
+from pipeline.llm_parse import parse_numbered_claims
 
 logger = get_logger(__name__)
 
@@ -49,9 +49,7 @@ logger = get_logger(__name__)
 # Configuration
 # ---------------------------------------------------------------------------
 
-_VERIFY_ENABLED = os.getenv("ENABLE_TTP_VERIFICATION", "false").lower() in (
-    "true", "1", "yes",
-)
+_VERIFY_ENABLED = env_bool("ENABLE_TTP_VERIFICATION")
 _VERIFY_MIN = int(os.getenv("TTP_VERIFY_MIN", "1"))
 
 
@@ -175,7 +173,7 @@ def verify_ttps(
         logger.warning("TTP verification LLM call failed — keeping all TTPs")
         return result
 
-    verifications = _parse_verification_response(raw, len(to_verify))
+    verifications = parse_numbered_claims(raw, len(to_verify))
     if verifications is None:
         logger.warning("Could not parse TTP verification response — keeping all TTPs")
         return result
@@ -208,40 +206,3 @@ def verify_ttps(
 # Response parser  (shared shape with stage3d_verify)
 # ---------------------------------------------------------------------------
 
-def _parse_verification_response(raw: str, count: int) -> dict[int, dict] | None:
-    """
-    Parse the LLM verification response into {claim_num → verification_dict}.
-
-    Expected format — a JSON array:
-      [{"n": 1, "verified": true, "quote": "..."}, ...]
-
-    Returns None if no valid JSON array can be found in the response.
-    """
-    decoder = json.JSONDecoder()
-
-    for i, ch in enumerate(raw):
-        if ch == "[":
-            try:
-                arr, _ = decoder.raw_decode(raw, i)
-                if not isinstance(arr, list):
-                    continue
-
-                result: dict[int, dict] = {}
-                for item in arr:
-                    if not isinstance(item, dict):
-                        continue
-                    n = item.get("n")
-                    # Accept int or whole-number float; exclude bool and non-finite.
-                    if (isinstance(n, (int, float))
-                            and not isinstance(n, bool)
-                            and math.isfinite(n)
-                            and n == int(n)
-                            and 1 <= int(n) <= count):
-                        result[int(n)] = item
-
-                return result if result else None
-
-            except json.JSONDecodeError:
-                continue
-
-    return None

@@ -47,6 +47,7 @@ from typing import Iterator
 # Initialize logging
 from api.logging_config import get_logger
 from models.schemas import EntityType, RawEntity
+from pipeline.env_flags import env_bool
 
 logger = get_logger(__name__)
 
@@ -65,10 +66,10 @@ warnings.filterwarnings(
 # removed from HuggingFace (401/repo-not-found).  For a smaller/faster model:
 #   GLINER_MODEL=urchade/gliner_medium-v2.1
 # See .env.example for the full model option list.
-_SKIP_HEAVY        = os.getenv("SKIP_HEAVY_MODELS") == "1"
+_SKIP_HEAVY        = env_bool("SKIP_HEAVY_MODELS")
 _GLINER_MODEL_ID   = os.getenv("GLINER_MODEL",     "urchade/gliner_large-v2.1")
 _GLINER_THRESHOLD  = float(os.getenv("GLINER_THRESHOLD", "0.40"))
-_GLINER_ENABLED    = os.getenv("GLINER_ENABLED", "true").lower() not in ("false", "0", "no")
+_GLINER_ENABLED    = env_bool("GLINER_ENABLED", default=True)
 
 # ── Label → EntityType mapping ────────────────────────────────────────────────
 # Labels are natural-language descriptions — GLiNER reads them at inference time.

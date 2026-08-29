@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
+import { loadStringSet, saveStringSet, toggleInSet } from './sets'
+
 export interface PromotedRules {
   promoted: ReadonlySet<string>
   isPromoted: (id: string) => boolean
@@ -37,34 +39,14 @@ export function usePromotedRules(
       return
     }
 
-    const key = `coverage.promoted.${jobId}`
-    try {
-      const raw = localStorage.getItem(key)
-      if (raw) {
-        const parsed: unknown = JSON.parse(raw)
-        if (Array.isArray(parsed)) {
-          setPromoted(new Set(parsed.filter((x): x is string => typeof x === 'string')))
-          return
-        }
-      }
-    } catch {
-      // Invalid JSON or storage error — fall through to empty set
-    }
-    setPromoted(new Set())
+    setPromoted(loadStringSet(`coverage.promoted.${jobId}`))
   }, [jobId])
 
-  // Persisted by the MUTATORS, never by an effect on `promoted`. An effect
-  // fires on the mount pass too, and its closure still holds the initial empty
-  // set — it wrote `[]` over the stored value before React had committed the
-  // loaded one, and the promotion vanished on the next navigation. Writing
-  // where the change is made has no such race.
+  // Persisted by the MUTATORS, never by an effect on `promoted` — see the
+  // header of `hooks/sets.ts` for the race that rule prevents.
   const persist = useCallback((next: ReadonlySet<string>) => {
     if (jobId === undefined) return
-    try {
-      localStorage.setItem(`coverage.promoted.${jobId}`, JSON.stringify([...next]))
-    } catch {
-      // Quota exceeded or storage unavailable — ignore silently
-    }
+    saveStringSet(`coverage.promoted.${jobId}`, next)
   }, [jobId])
 
   const isPromoted = useCallback(
@@ -75,12 +57,7 @@ export function usePromotedRules(
   const toggle = useCallback(
     (id: string) => {
       setPromoted((prev) => {
-        const next = new Set(prev)
-        if (next.has(id)) {
-          next.delete(id)
-        } else {
-          next.add(id)
-        }
+        const next = toggleInSet(prev, id)
         persist(next)
         return next
       })

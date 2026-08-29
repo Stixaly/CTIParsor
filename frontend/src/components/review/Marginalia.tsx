@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import type { Entity } from '../../types'
 import { typeDot, typeLabel } from './tokens'
 import MarginaliaCard from './MarginaliaCard'
+import { toggleInSet } from '../../hooks/sets'
 
 type SortMode = 'position' | 'type'
 
@@ -27,11 +28,7 @@ export default function Marginalia({
   const [allCollapsed, setAllCollapsed] = useState(false)
 
   const toggleCard = (id: string) => {
-    setCollapsed(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id); else next.add(id)
-      return next
-    })
+    setCollapsed(prev => toggleInSet(prev, id))
   }
   const toggleAll = () => {
     if (allCollapsed) {
@@ -45,11 +42,7 @@ export default function Marginalia({
   const [hiddenGroups, setHiddenGroups] = useState<Set<string>>(new Set())
 
   const toggleGroupVisibility = (type: string) =>
-    setHiddenGroups(prev => {
-      const next = new Set(prev)
-      if (next.has(type)) next.delete(type); else next.add(type)
-      return next
-    })
+    setHiddenGroups(prev => toggleInSet(prev, type))
 
   // ── per-group quick bulk ───────────────────────────────────────────────
   const acceptGroup = (grpEntities: Entity[]) =>
@@ -61,11 +54,7 @@ export default function Marginalia({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
   const toggleSelect = (id: string) => {
-    setSelectedIds(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id); else next.add(id)
-      return next
-    })
+    setSelectedIds(prev => toggleInSet(prev, id))
   }
 
   const clearSelection = () => setSelectedIds(new Set())

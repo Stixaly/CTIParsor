@@ -13,6 +13,7 @@ from models.schemas import STIX_RELATIONSHIP_TYPES, EntityType, RawEntity
 from pipeline.aliases import alias_surface_forms, canonical_name
 from pipeline.stage3_llm import LLMEnrichmentResult
 from pipeline.stage4b_graph_completion import complete_graph
+from pipeline.stix_access import field as _field
 from pipeline.stix_rel_spec import rel_is_suggested
 
 logger = get_logger(__name__)
@@ -1294,13 +1295,6 @@ _PATTERN_STR_RE = re.compile(r"'((?:[^'\\]|\\.)*)'")
 _PATTERN_NUM_RE = re.compile(r"=\s*(\d+)\s*\]")
 
 
-def _field(obj: object, key: str) -> object | None:
-    """Read a field from a mapping or attribute-based object."""
-    if hasattr(obj, "get"):
-        return obj.get(key)  # type: ignore[union-attr]
-    return getattr(obj, key, None)
-
-
 def _evidence_terms(obj: object) -> list[str]:
     """Return strings that identify `obj` in report text; empty if unanchorable."""
     otype = _field(obj, "type")
@@ -1365,7 +1359,7 @@ def _evidence_terms(obj: object) -> list[str]:
     return result
 
 
-def _split_sentences(text: str) -> list[str]:
+def _split_evidence_sentences(text: str) -> list[str]:
     """Split text into sentences, discarding empty fragments."""
     if not isinstance(text, str) or not text:
         return []
@@ -1497,7 +1491,7 @@ def _materialise_pinned_edges(
             continue
         _type_to_objs.setdefault(_otype, []).append(_obj)
 
-    sentences = _split_sentences(report_text) if ev_mode == "cooccurrence" else []
+    sentences = _split_evidence_sentences(report_text) if ev_mode == "cooccurrence" else []
     ev_index = _build_sentence_index(stix_objects, sentences) if sentences else {}
     # No report text (the CLI path passes it optionally) means the gate cannot
     # judge anything, so it must not judge: every pair passes.

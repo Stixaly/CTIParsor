@@ -48,8 +48,9 @@ import re
 from pathlib import Path
 
 from models.schemas import EntityType, RawEntity
+from pipeline.env_flags import env_bool
 
-_SKIP_HEAVY = os.getenv("SKIP_HEAVY_MODELS") == "1"
+_SKIP_HEAVY = env_bool("SKIP_HEAVY_MODELS")
 
 # Initialize logging
 from api.logging_config import get_logger
@@ -242,8 +243,7 @@ def _unwrap_enabled() -> bool:
     Read on every call rather than at import so a benchmark run can price the
     unwrapping against the un-unwrapped baseline without reloading the module.
     """
-    return os.getenv("TTP_UNWRAP_LINES", "1").strip().lower() not in {
-        "0", "off", "false", "no"}
+    return env_bool("TTP_UNWRAP_LINES", default=True)
 
 
 def _keyword_gate_enabled() -> bool:
@@ -252,8 +252,7 @@ def _keyword_gate_enabled() -> bool:
     # which sentences are embedded at all and discards ~84% of them on real
     # reports, so its cost has to be priceable against a baseline rather than
     # assumed.  Production default is on.
-    return os.getenv("TTP_KEYWORD_GATE", "1").strip().lower() not in {
-        "0", "off", "false", "no"}
+    return env_bool("TTP_KEYWORD_GATE", default=True)
 
 
 def _has_ttp_keyword(sentence: str) -> bool:
@@ -270,7 +269,7 @@ def _has_ttp_keyword(sentence: str) -> bool:
     return any(kw in s for kw in _TTP_KEYWORDS)
 
 
-def _split_sentences(text: str) -> list[str]:
+def _split_candidate_sentences(text: str) -> list[str]:
     """
     Sentence splitter for the variety of CTI report formats.
 
@@ -309,7 +308,7 @@ def _apply_candidate_cap(candidates: list[str]) -> list[str]:
 def _select_candidates(text: str) -> list[str]:
     """The sentences Stage 2c will actually embed, after both recall gates."""
     return _apply_candidate_cap(
-        [s for s in _split_sentences(text) if _has_ttp_keyword(s)]
+        [s for s in _split_candidate_sentences(text) if _has_ttp_keyword(s)]
     )
 
 
@@ -322,7 +321,7 @@ def sentence_gate_stats(text: str) -> dict[str, int]:
     candidate cap drops none, so the two are not interchangeable and are reported
     separately.
     """
-    sentences = _split_sentences(text)
+    sentences = _split_candidate_sentences(text)
     kept = [s for s in sentences if _has_ttp_keyword(s)]
     scored = _apply_candidate_cap(kept)
     return {

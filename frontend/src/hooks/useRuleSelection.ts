@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
+import { loadStringSet, saveStringSet } from './sets'
+
 import type { DetectionFormat } from '../types'
 
 /** One selectable rule, flattened from the per-technique coverage groups.
@@ -55,12 +57,7 @@ export function useRuleSelection(
   // Load persisted exclusions whenever the job changes.
   useEffect(() => {
     if (jobId === undefined) return
-    try {
-      const raw = localStorage.getItem(`coverage.selection.${jobId}`)
-      setExcluded(raw ? new Set(JSON.parse(raw) as string[]) : new Set())
-    } catch {
-      setExcluded(new Set())
-    }
+    setExcluded(loadStringSet(`coverage.selection.${jobId}`))
   }, [jobId])
 
   // Persisted by the MUTATORS, never by an effect on `excluded` — the same rule
@@ -72,11 +69,7 @@ export function useRuleSelection(
   // Both were reproduced in useRuleSelection.test.ts before this changed.
   const persist = useCallback((next: ReadonlySet<string>) => {
     if (jobId === undefined) return
-    try {
-      localStorage.setItem(`coverage.selection.${jobId}`, JSON.stringify([...next]))
-    } catch {
-      // Quota exceeded — ignore silently.
-    }
+    saveStringSet(`coverage.selection.${jobId}`, next)
   }, [jobId])
 
   // Prune stale ids only after rules have loaded.

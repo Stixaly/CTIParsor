@@ -41,13 +41,13 @@ Design note — circular import avoidance:
 """
 from __future__ import annotations
 
-import json
-import math
 import os
 from typing import Callable
 
 # Initialize logging
 from api.logging_config import get_logger
+from pipeline.env_flags import env_bool
+from pipeline.llm_parse import parse_numbered_claims
 
 logger = get_logger(__name__)
 
@@ -55,9 +55,7 @@ logger = get_logger(__name__)
 # Configuration
 # ---------------------------------------------------------------------------
 
-_VERIFY_ENABLED = os.getenv("ENABLE_STIX_VERIFICATION", "false").lower() in (
-    "true", "1", "yes",
-)
+_VERIFY_ENABLED = env_bool("ENABLE_STIX_VERIFICATION")
 _VERIFY_MIN_RELS = int(os.getenv("STIX_VERIFY_MIN_RELS", "1"))
 
 
@@ -163,7 +161,7 @@ def verify_relationships(
         logger.warning("Verification LLM call failed — keeping all relationships")
         return result
 
-    verifications = _parse_verification_response(raw, len(rels))
+    verifications = parse_numbered_claims(raw, len(rels))
     if verifications is None:
         logger.warning("Could not parse verification response — keeping all relationships")
         return result
@@ -205,45 +203,3 @@ def verify_relationships(
 # Response parser
 # ---------------------------------------------------------------------------
 
-def _parse_verification_response(raw: str, count: int) -> dict[int, dict] | None:
-    """
-    Parse the LLM verification response into {claim_num → verification_dict}.
-
-    The expected format is a JSON array:
-      [{"n": 1, "verified": true, "quote": "..."}, ...]
-
-    Returns None if no valid JSON array can be found in the response.
-    """
-    decoder = json.JSONDecoder()
-
-    # Scan for the first valid JSON array in the response
-    for i, ch in enumerate(raw):
-        if ch == "[":
-            try:
-                arr, _ = decoder.raw_decode(raw, i)
-                if not isinstance(arr, list):
-                    continue
-
-                result: dict[int, dict] = {}
-                for item in arr:
-                    if not isinstance(item, dict):
-                        continue
-                    n = item.get("n")
-                    # Accept both int and float (e.g. 1.0) — LLMs occasionally
-                    # serialise integers as JSON floats.  Exclude bool (a subclass
-                    # of int) and non-finite floats: json's default decoder accepts
-                    # NaN/Infinity, and int(nan) would raise and crash the chunk.
-                    if (isinstance(n, (int, float))
-                            and not isinstance(n, bool)
-                            and math.isfinite(n)
-                            and n == int(n)
-                            and 1 <= int(n) <= count):
-                        result[int(n)] = item
-
-                # Return even if partial (some claims missing — handled by caller)
-                return result if result else None
-
-            except json.JSONDecodeError:
-                continue
-
-    return None

@@ -507,11 +507,15 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
                     sem_keys.add(key)
 
         # --- Stage 2d — CyNER cybersecurity NER ---
-        from pipeline.stage2d_cyner import _merge_cyner_into, cyner_available, extract_cyner_entities
+        from pipeline.base import BaseExtractionStage
+        from pipeline.stage2d_cyner import cyner_available, extract_cyner_entities
         cyner_entities: list[RawEntity] = []
         if cyner_available():
             cyner_entities = extract_cyner_entities(text)
-            all_entities = _merge_cyner_into(all_entities, cyner_entities)
+            # `_merge_cyner_into` was a byte-identical copy of the base helper the
+            # registry already uses — and the untested one, since the worker calls
+            # this path directly rather than through StageRegistry.run_all.
+            all_entities = BaseExtractionStage.merge_into(all_entities, cyner_entities)
 
         # --- Stage 2e — GLiNER zero-shot NER (novel/unnamed entities) ---
         # Discovers entity types CyNER and the gazetteer cannot: targeted sectors,
