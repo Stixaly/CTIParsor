@@ -657,6 +657,14 @@ All configuration lives in `.env`. Copy `.env.example` to get started:
 cp .env.example .env
 ```
 
+Every on/off flag below reads the same vocabulary, case- and whitespace-
+insensitive: `1`, `true`, `yes`, `on` enable; `0`, `false`, `no`, `off` disable.
+Anything else, including an empty value, leaves the flag at its documented
+default rather than being read as "on". (Each flag used to parse its own
+spelling — `ENABLE_CONSENSUS=1` did *not* enable consensus, while
+`ENABLE_STIX_VERIFICATION=1` did. `scripts/check_flag_equivalence.py` reports
+every value whose meaning differs between the old and current readings.)
+
 ### LLM provider
 
 Set `LLM_PROVIDER` to choose your backend.

@@ -69,6 +69,122 @@ sections group by theme rather than strict semver.
 
 ### Fixed
 
+#### Duplicated logic folded into shared helpers, 2026-08-29
+
+An AST clone scan over `pipeline/`, `api/` and `models/` (560 functions, 76
+files) found four groups of exact clones and four near-duplicate pairs. Seven
+were folded; the rest were left alone with a reason. Net **−258 / +70** lines
+across 22 files, plus four small shared modules and a behaviour-lock test file.
+
+- **One vocabulary for boolean environment flags** (`pipeline/env_flags.py`).
+  Seven call sites each parsed their flag differently — `== "1"`,
+  `in ("true","1","yes")`, `not in ("false","0","no")`, `!= "true"` — so
+  `ENABLE_CONSENSUS=1` left consensus **off** while `ENABLE_STIX_VERIFICATION=1`
+  turned verification **on**. Worse, `api/run_config.py` answered with a *third*
+  vocabulary and wrote that answer into the bundle's provenance block, so a run
+  could be recorded as `consensus: true` when stage 3e never ran — the exact
+  failure ADR-0024 Phase B added the run config to prevent. Those three entries
+  now call the stages' own predicates (`verify_enabled`, `consensus_enabled`),
+  the way the other four already did.
+
+  `scripts/check_flag_equivalence.py` compares the old and new semantics for all
+  eight flags across 32 values and reports every divergence. Verdict: **no
+  documented configuration changes behaviour**. Two undocumented spellings do —
+  `CYNER_ENABLED=off` and `GLINER_ENABLED=off` used to leave the stage *enabled*
+  and now disable it, which is what the operator asked for.
+
+- **The worker no longer merges Stage-2d entities with its own copy of the merge.**
+  `_merge_cyner_into` was byte-identical to `BaseExtractionStage.merge_into` —
+  the helper `pipeline/base.py` exists to stop stages reimplementing — and it was
+  the copy production ran, since the worker calls Stage 2d directly rather than
+  through `StageRegistry.run_all`. The two tests locking `merge_into`'s
+  intra-batch dedup fix covered only the unused one.
+
+- **`_parse_verification_response`** was duplicated between `stage3d_verify` and
+  `stage3f_ttp_verify`, identical bar one docstring line, and is now
+  `pipeline/llm_parse.parse_numbered_claims`.
+
+- **`_unescape_content` / `_unescape_literal`** shared a 25-line single-pass
+  decoder differing only in their escape table; both now call
+  `pipeline/detection/textutil.unescape`, keeping their names so
+  `tests/test_escape_unescaping.py` still locks the behaviour.
+
+- **The STIX dict-or-attribute accessor** existed four times across stage 4, 4b
+  and 4c (`_field`, `_otype`, `_type`, `_name`); one `pipeline/stix_access.field`
+  now backs all of them.
+
+- **The `404 Job not found` guard** was repeated verbatim in ten handlers across
+  four route modules, now `api/routes/_common.require_job`. It takes the caller's
+  open connection rather than being a FastAPI dependency, which would have added
+  a second SQLite connection per request.
+
+- **`usePref`** was copy-pasted into `ThemeContext.tsx` and `Review.tsx`; it is
+  now `frontend/src/hooks/usePref.ts`.
+
+A second pass then covered `scripts/`, which the first scan had skipped:
+
+- **`audit_store_invariants.py` held six copies of one invariant.**
+  `check_atoms_orphan`, `check_techniques_orphan`, `check_related_orphan`,
+  `check_rule_bytes_missing`, `check_entity_orphan_job` and
+  `check_relationship_orphan_job` were the same 21-line query shape — count the
+  rows of a child table whose foreign key resolves to nothing, sample three,
+  wrap in a `Finding` — differing only in table and column names. They are now
+  one `_check_orphan(conn, name)` driven by an `_ORPHAN_SPECS` table, 639 → 569
+  lines. `rule_bytes.missing` runs the relation the other way round (rules with
+  no bytes row) but is the same shape, so it moved into the table too. Table and
+  column names are interpolated into the SQL — SQLite cannot bind an
+  identifier — so each is checked against `^[A-Za-z_][A-Za-z0-9_]*$` first.
+
+  Verified by diffing the script's full output against the pre-refactor run:
+  identical, all 16 invariants, character for character.
+
+- **The two `_split_sentences` now have different names.** `stage2c` unwraps
+  PDF hard-wraps and drops segments of 20 characters or fewer; `stage4` splits
+  on a regex and keeps everything non-empty. One name for two incompatible
+  notions of "sentence", in the same pipeline, where the indices of one do not
+  address the segments of the other. They are now
+  `_split_candidate_sentences` and `_split_evidence_sentences`. Not a
+  deduplication — the opposite: making two things that were never the same stop
+  looking interchangeable.
+
+A third pass covered `frontend/src`, which no clone detector had ever seen — the
+Python one is an AST walker and stops at `.py`. An equivalent built on the
+TypeScript compiler API found the frontend far cleaner than the backend: four
+small exact-clone groups over 272 functions. Two were worth folding, into
+`frontend/src/hooks/sets.ts`:
+
+- **`persist` was duplicated between `usePromotedRules` and `useRuleSelection`**,
+  identical bar the storage key, and each carried its own comment describing the
+  same bug: persisting from a `useEffect` fires on the mount pass while the
+  closure still holds the initial empty set, so it wrote `[]` over the value
+  just loaded. Two copies of a fix whose justification had to be written twice.
+  Both now call `saveStringSet` / `loadStringSet`.
+
+  `useRuleSelection` also read its stored value with a bare
+  `JSON.parse(raw) as string[]`, where the sibling validated the shape. The
+  shared loader keeps the stricter guard, so a corrupt or hand-edited entry now
+  yields an empty set instead of a `Set` of non-strings.
+
+- **The "toggle an id in a `Set`" updater appeared three times in
+  `Marginalia.tsx`** and once more inside `usePromotedRules.toggle`, always the
+  same five lines. Now `toggleInSet`.
+
+**A test that did not lock what its comment claimed.** Making `saveStringSet` a
+no-op — removing persistence outright — left all three tests in
+`useRuleSelection.test.ts` green. All three assert that something is *never*
+written, so they pass trivially when nothing is written at all. A positive test
+was added (`writes the exclusion to this job's key when one is toggled`) and
+verified to fail against that mutant.
+
+Frontend: 69 tests pass (up from 56), `tsc --noEmit` clean, −77/+35 lines.
+
+Deliberately **not** merged: the three `_normalize` / `_add` atom extractors
+(their per-class rules have diverged, and unifying them silently changes what the
+atom index holds — it needs a measured before/after first); `store.py`'s two
+chunked technique queries (the `EXISTS`-vs-`JOIN` split is documented and
+measured); `_merge_gliner_into` (it has real high-precision-source logic on top);
+and `_strip_quotes` / `_unquote` (one strips `'` and `"`, the other only `"`).
+
 #### Bug hunt, 2026-08-28
 
 A sweep over the detection, evidence, STIX and UI paths, driven by real-store
