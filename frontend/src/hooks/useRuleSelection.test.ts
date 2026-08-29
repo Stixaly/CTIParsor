@@ -89,6 +89,24 @@ describe('useRuleSelection persistence', () => {
     expect(emptied).toEqual([])
   })
 
+  // The three tests around this one all assert that something is NEVER written,
+  // so every one of them passes when persistence is removed outright — verified
+  // by making `saveStringSet` a no-op, which they did not catch. This is the
+  // positive direction: a mutation must actually reach storage.
+  it('writes the exclusion to this job\'s key when one is toggled', () => {
+    const writes = recordWrites()
+
+    const { result } = renderHook(() => useRuleSelection('jobA', RULES_A))
+    act(() => {
+      result.current.toggleScope(['a1'])
+    })
+
+    const aWrites = writes.filter(([k]) => k === 'coverage.selection.jobA')
+    expect(aWrites.length).toBeGreaterThan(0)
+    const last = JSON.parse(aWrites[aWrites.length - 1][1]) as string[]
+    expect(last).toContain('a1')
+  })
+
   it('keeps the stored selection readable after a job switch and back', () => {
     localStorage.setItem('coverage.selection.jobB', JSON.stringify(['b1']))
 

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { usePref } from '../hooks/usePref'
 import { createPortal } from 'react-dom'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -40,15 +41,6 @@ type SortMode = 'position' | 'type'
 const AUTO_ACCEPT_THRESHOLD = 90   // percent
 
 // ── tiny localStorage hook ───────────────────────────────────────────────────
-function usePref<T>(key: string, init: T): [T, (v: T) => void] {
-  const [val, setVal] = useState<T>(() => {
-    try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : init }
-    catch { return init }
-  })
-  const set = (v: T) => { setVal(v); try { localStorage.setItem(key, JSON.stringify(v)) } catch {} }
-  return [val, set]
-}
-
 // ── ClientEntity extends Entity with local auto-accept flag ─────────────────
 interface ClientEntity extends Entity {
   autoAccepted?: boolean
