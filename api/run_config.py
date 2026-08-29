@@ -10,6 +10,8 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
+from pipeline.env_flags import env_bool
+
 # Allow-list, never a scan of os.environ: the process environment holds API
 # keys (ANTHROPIC_API_KEY, MISTRAL_API_KEY) and this dict is persisted to the
 # database and served over the API.  Adding a name here is a deliberate act.
@@ -21,11 +23,6 @@ _CAPTURED_ENV = (
     "CONSENSUS_PROVIDER", "LLM_PROVIDER", "LLM_PARALLELISM",
     "CYNER_ENABLED", "GLINER_MODEL", "SKIP_HEAVY_MODELS",
 )
-
-
-def _flag(name: str) -> bool:
-    """Check if an environment variable is set to a truthy flag value."""
-    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def build_run_config(policy: dict | None = None) -> dict:
@@ -78,7 +75,7 @@ def build_run_config(policy: dict | None = None) -> dict:
     # manifest), and `llm: False` when the LLM did run, because LLM_PROVIDER
     # defaults to "anthropic" when unset.  A run config that misattributes the
     # bundle defeats the point of recording one at all (ADR-0024 Phase B).
-    _skip_heavy = os.getenv("SKIP_HEAVY_MODELS") == "1"
+    _skip_heavy = env_bool("SKIP_HEAVY_MODELS")
 
     def _ask(module: str, predicate: str) -> bool | None:
         """Call a stage's availability predicate; None if it cannot be asked."""
@@ -94,9 +91,14 @@ def build_run_config(policy: dict | None = None) -> dict:
         "cyner": _ask("pipeline.stage2d_cyner", "cyner_available"),
         "gliner": _ask("pipeline.stage2e_gliner", "gliner_available"),
         "llm": _ask("pipeline.stage3_llm", "_provider_ready"),
-        "stix_verification": _flag("ENABLE_STIX_VERIFICATION"),
-        "ttp_verification": _flag("ENABLE_TTP_VERIFICATION"),
-        "consensus": _flag("ENABLE_CONSENSUS"),
+        # Same reasoning as the four predicates above: `_flag` answered from the
+        # environment with a *third* vocabulary, so `ENABLE_CONSENSUS=1` was
+        # recorded as consensus-on while stage 3e (which demanded the literal
+        # "true") had it off, and `_flag` could not see that consensus also
+        # needs CONSENSUS_PROVIDER != LLM_PROVIDER.
+        "stix_verification": _ask("pipeline.stage3d_verify", "verify_enabled"),
+        "ttp_verification": _ask("pipeline.stage3f_ttp_verify", "verify_enabled"),
+        "consensus": _ask("pipeline.stage3e_consensus", "consensus_enabled"),
         # Kept alongside so a run can still be read as "heavy models were off"
         # rather than "the cache was missing" — the predicates conflate them.
         "skip_heavy_models": _skip_heavy,

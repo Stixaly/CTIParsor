@@ -22,6 +22,7 @@ from typing import Callable, Optional
 from api.logging_config import get_logger
 from models.schemas import STIX_RELATIONSHIP_TYPES
 from pipeline.stage4b_graph_completion import InferredEdge
+from pipeline.stix_access import field
 
 logger = get_logger(__name__)
 
@@ -59,15 +60,11 @@ or
 
 
 def _name(obj) -> str:
-    if hasattr(obj, "get"):
-        return obj.get("name") or obj.get("value") or ""
-    return getattr(obj, "name", "") or getattr(obj, "value", "") or ""
+    return field(obj, "name") or field(obj, "value") or ""
 
 
 def _type(obj) -> str:
-    if hasattr(obj, "get"):
-        return obj.get("type") or ""
-    return getattr(obj, "type", "") or ""
+    return field(obj, "type") or ""
 
 
 def _parse(raw: str) -> Optional[dict]:

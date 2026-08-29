@@ -18,6 +18,7 @@ import os
 
 from api.logging_config import get_logger
 from models.schemas import EvidenceLabel
+from pipeline.env_flags import env_bool
 from pipeline.stage3_llm import LLMEnrichmentResult
 
 logger = get_logger(__name__)
@@ -29,7 +30,7 @@ _SINGLE_PENALTY = 0.20  # only the primary model proposed it
 
 def consensus_enabled() -> bool:
     """True when cross-model consensus is switched on and a 2nd provider is set."""
-    if os.getenv("ENABLE_CONSENSUS", "false").strip().lower() != "true":
+    if not env_bool("ENABLE_CONSENSUS"):
         return False
     second = os.getenv("CONSENSUS_PROVIDER", "").strip().lower()
     primary = os.getenv("LLM_PROVIDER", "anthropic").strip().lower()

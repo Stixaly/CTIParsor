@@ -1,10 +1,10 @@
-import os
 import re
 from urllib.parse import urlparse
 
 from models.schemas import EntityType, RawEntity
+from pipeline.env_flags import env_bool
 
-_SKIP_HEAVY = os.getenv("SKIP_HEAVY_MODELS") == "1"
+_SKIP_HEAVY = env_bool("SKIP_HEAVY_MODELS")
 
 try:
     import re2 as _re2_module

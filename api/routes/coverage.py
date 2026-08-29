@@ -15,6 +15,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from api.db import get_conn
+from api.routes._common import require_job
 from pipeline.detection.artifacts import coverage_with_phases
 from pipeline.detection.coverage import (
     compute_for_job,
@@ -31,8 +32,7 @@ router = APIRouter(prefix="/api", tags=["coverage"])
 @router.get("/jobs/{job_id}/coverage")
 def get_coverage(job_id: str):
     with get_conn() as conn:
-        if not conn.execute("SELECT id FROM jobs WHERE id=?", (job_id,)).fetchone():
-            raise HTTPException(404, "Job not found")
+        require_job(conn, job_id)
         return compute_for_job(conn, job_id)
 
 
@@ -44,8 +44,7 @@ def get_coverage_report_rules(job_id: str):
     so the literal `/rules` path wins. Metadata only — no rule bodies.
     """
     with get_conn() as conn:
-        if not conn.execute("SELECT id FROM jobs WHERE id=?", (job_id,)).fetchone():
-            raise HTTPException(404, "Job not found")
+        require_job(conn, job_id)
         return rules_for_job(conn, job_id)
 
 
@@ -61,8 +60,7 @@ def get_detection_proposals(job_id: str, limit: int = 200):
     """
     limit = max(1, min(limit, 1000))
     with get_conn() as conn:
-        if not conn.execute("SELECT id FROM jobs WHERE id=?", (job_id,)).fetchone():
-            raise HTTPException(404, "Job not found")
+        require_job(conn, job_id)
         return propose_for_job(conn, job_id, limit=limit)
 
 
@@ -81,8 +79,7 @@ def get_artifact_coverage(job_id: str):
     moving this route below it — every test still passed.
     """
     with get_conn() as conn:
-        if not conn.execute("SELECT id FROM jobs WHERE id=?", (job_id,)).fetchone():
-            raise HTTPException(404, "Job not found")
+        require_job(conn, job_id)
         return coverage_with_phases(conn, job_id)
 
 
@@ -90,8 +87,7 @@ def get_artifact_coverage(job_id: str):
 def get_coverage_rules(job_id: str, technique_id: str):
     """License-aware drill-down: which rules cover this technique. No raw bodies."""
     with get_conn() as conn:
-        if not conn.execute("SELECT id FROM jobs WHERE id=?", (job_id,)).fetchone():
-            raise HTTPException(404, "Job not found")
+        require_job(conn, job_id)
         return {"technique_id": technique_id.upper(), "rules": rules_for_technique(conn, technique_id)}
 
 

@@ -26,13 +26,13 @@ from __future__ import annotations
 
 import functools
 import json
-import os
 import re
 from pathlib import Path
 
 from models.schemas import EntityType, RawEntity
+from pipeline.env_flags import env_bool
 
-_SKIP_HEAVY = os.getenv("SKIP_HEAVY_MODELS") == "1"
+_SKIP_HEAVY = env_bool("SKIP_HEAVY_MODELS")
 
 # Initialize logging
 from api.logging_config import get_logger

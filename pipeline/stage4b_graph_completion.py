@@ -76,6 +76,7 @@ import stix2
 from api.logging_config import get_logger
 from models.schemas import STIX_RELATIONSHIP_TYPES
 from pipeline.aliases import mitre_id_for
+from pipeline.stix_access import field as stix_field
 from pipeline.stix_rel_spec import rel_is_suggested
 
 logger = get_logger(__name__)
@@ -161,9 +162,7 @@ class CompletionStats:
 
 # ── small STIX-object helpers ─────────────────────────────────────────────────
 def _otype(obj) -> str:
-    if hasattr(obj, "get"):
-        return obj.get("type") or ""
-    return getattr(obj, "type", "") or ""
+    return stix_field(obj, "type") or ""
 
 
 def _is_rel(obj) -> bool:

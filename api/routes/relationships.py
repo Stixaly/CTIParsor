@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from api.db import _lock, get_conn
+from api.routes._common import require_job
 from models.schemas import STIX_RELATIONSHIP_TYPES
 
 router = APIRouter(prefix="/api/jobs/{job_id}/relationships", tags=["relationships"])
@@ -75,8 +76,7 @@ def create_relationship(job_id: str, body: RelCreate):
         raise HTTPException(400, f"Unknown relationship_type '{body.relationship_type}'. "
                                  f"Valid types: {', '.join(VALID_REL_TYPES)}")
     with get_conn() as conn:
-        if not conn.execute("SELECT id FROM jobs WHERE id=?", (job_id,)).fetchone():
-            raise HTTPException(404, "Job not found")
+        require_job(conn, job_id)
     _label = body.evidence_label if body.evidence_label in _VALID_LABELS else "reported"
     rid = str(uuid4())
     with _lock:
