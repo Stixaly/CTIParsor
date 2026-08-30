@@ -98,16 +98,22 @@ async def upload_file(
         raise  # validation rejection — propagate as-is
     except Exception:
         # python-magic unavailable or raised an internal error — fall back to filetype.
-        kind = filetype.guess(first_chunk)
-        if kind is None:
-            raise HTTPException(400, "Could not determine file type. Please ensure the file is valid.")
-        allowed_mimes = SUPPORTED_MIME.get(suffix, [])
-        if allowed_mimes and kind.mime not in allowed_mimes:
-            raise HTTPException(
-                415,
-                f"File content appears to be '{kind.mime}' but extension is '{suffix}'. "
-                f"Expected: {', '.join(allowed_mimes)}"
-            )
+        if suffix in {".txt", ".md"}:
+            try:
+                first_chunk.decode("utf-8")
+            except UnicodeDecodeError:
+                raise HTTPException(400, "Text file is not valid UTF-8.")
+        else:
+            kind = filetype.guess(first_chunk)
+            if kind is None:
+                raise HTTPException(400, "Could not determine file type. Please ensure the file is valid.")
+            allowed_mimes = SUPPORTED_MIME.get(suffix, [])
+            if allowed_mimes and kind.mime not in allowed_mimes:
+                raise HTTPException(
+                    415,
+                    f"File content appears to be '{kind.mime}' but extension is '{suffix}'. "
+                    f"Expected: {', '.join(allowed_mimes)}"
+                )
 
     # Check total size after reading first chunk
     if len(first_chunk) > _MAX_BYTES:

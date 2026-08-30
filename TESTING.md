@@ -123,7 +123,7 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 
 ---
 
-## 3. Current coverage map (1059 tests, 65 modules)
+## 3. Current coverage map (1071 tests, 67 modules)
 
 `make test` executes `pytest tests/`. The counts below come from
 `pytest --collect-only` and therefore include `parametrize` expansion. A bare
@@ -147,6 +147,8 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 | **Aliases** | `test_aliases.py` | 6 | alias resolution, MITRE ID mapping, surface forms |
 | **Aliases** | `test_alias_disambiguation.py` | 11 | type-aware resolution, alias isolation, canonical name handling |
 | LLM enrich | `test_stage3.py` | 42 | LLM enrichment, JSON parsing, deduplication, prompt sanitization |
+| LLM enrich | `test_stage3_providers.py` | 5 | readiness gating for anthropic, gemini, mistral and the OpenAI-compatible local providers |
+| **CVE enrichment** | `test_cve_enrichment.py` | 7 | CVE id validation, the path-traversal guard before any URL, opt-in network flag, fetch cap, remembered misses |
 | Hallucination filter | `test_stage3b.py` | 11 | hallucination filtering, entity presence checks, allow-list bypass |
 | **TTP precision** | `test_ttp_precision.py` | 14 | threshold resolution, semantic confidence, subsumption, verification |
 | **TTP precision** | `test_ttp_volume_controls.py` | 16 | cross-source dedup, corroboration floors, taxonomy filtering |

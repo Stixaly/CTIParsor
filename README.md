@@ -711,12 +711,39 @@ LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-xxxxxxx
 ANTHROPIC_MODEL=claude-sonnet-4-6
 ```
+The system prompt is sent with `cache_control` so Anthropic caches it across
+chunks — it is identical on every call, which is what makes it cacheable at all.
+Whether the cache actually fires is worth checking rather than assuming: the
+minimum cacheable prefix is model-dependent (512–4096 tokens) and this prompt
+sits at roughly 1 170, so `usage.cache_read_input_tokens` is the only proof. The
+chunk text itself is never cached — it differs every call by construction.
+
+#### Google Gemini
+```env
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=xxxxxxxxxxxxxxxx
+GEMINI_MODEL=gemini-2.5-pro
+```
 
 #### Mistral AI
 ```env
 LLM_PROVIDER=mistral
 MISTRAL_API_KEY=xxxxxxxxxxxxxxxx
 MISTRAL_MODEL=mistral-small-latest
+```
+
+#### LM Studio (local)
+```env
+LLM_PROVIDER=lmstudio
+LMSTUDIO_BASE_URL=http://localhost:1234
+LMSTUDIO_MODEL=lmstudio-model
+```
+
+#### vLLM (local)
+```env
+LLM_PROVIDER=vllm
+VLLM_BASE_URL=http://localhost:8000
+VLLM_MODEL=vllm-model
 ```
 
 #### Ollama (local, free)
@@ -727,6 +754,7 @@ OLLAMA_MODEL=mistral
 ```
 Pull a model first: `ollama pull mistral`. Models smaller than ~13B may produce malformed JSON.
 If `OLLAMA_MODEL` is left unset the code falls back to `llama3.2`, not `mistral` — set it explicitly.
+
 
 #### Running without an LLM
 Leave `ANTHROPIC_API_KEY` unset. Stage 3 is skipped. The pipeline still produces a valid STIX bundle from the Stage 1, 2, 2b, 2c, 2d and 2e results (every offline stage).
