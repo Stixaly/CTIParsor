@@ -59,11 +59,11 @@ or
 {{"related": false, "source": null, "verb": null, "quote": null}}"""
 
 
-def _name(obj) -> str:
+def _name(obj: object) -> str:
     return field(obj, "name") or field(obj, "value") or ""
 
 
-def _type(obj) -> str:
+def _type(obj: object) -> str:
     return field(obj, "type") or ""
 
 

@@ -106,7 +106,7 @@ def _word_spans(normalised: str) -> list[tuple[int, int]]:
     Splits normalized text into words separated by single spaces.
     Returns list of (start, end) offsets for each word.
     """
-    spans = []
+    spans: list[tuple[int, int]] = []
     if not normalised:
         return spans
 

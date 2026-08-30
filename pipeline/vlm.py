@@ -14,7 +14,7 @@ from typing import Protocol
 try:
     import anthropic
 except ImportError:
-    anthropic = None
+    anthropic = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -235,7 +235,7 @@ class AnthropicVisionBackend:
         self.timeout = timeout
         self.max_concurrency = 4
         self._client = None
-        self._available = None
+        self._available: bool | None = None
 
     def _get_client(self):
         if self._client is None:
@@ -311,7 +311,7 @@ class OpenAICompatVisionBackend:
         self.api_key = api_key
         self.timeout = timeout
         self.max_concurrency = max_concurrency
-        self._available = None
+        self._available: bool | None = None
 
     def _headers(self) -> dict[str, str]:
         h = {"Content-Type": "application/json"}
@@ -414,8 +414,13 @@ class OpenAICompatVisionBackend:
             return _unread(self.name, self.model, elapsed, f"{type(e).__name__}: {e}")
 
 
-_UNSET = object()
-_backend_cache = _UNSET
+class _Unset:
+    """Sentinel: the backend has never been resolved, which is not the same
+    thing as having resolved to None."""
+
+
+_UNSET = _Unset()
+_backend_cache: VisionBackend | None | _Unset = _UNSET
 
 
 def _assume_capable() -> bool:
@@ -475,7 +480,10 @@ def _ollama_concurrency() -> int:
 def get_backend() -> VisionBackend | None:
     """Get or create the configured vision backend."""
     global _backend_cache
-    if _backend_cache is not _UNSET:
+    # isinstance, not `is not`: only a type test lets mypy narrow the union
+    # away from the sentinel. There is exactly one _Unset instance, so the
+    # two are equivalent at runtime.
+    if not isinstance(_backend_cache, _Unset):
         return _backend_cache
 
     provider = os.environ.get("VISION_PROVIDER", "none").strip().lower()

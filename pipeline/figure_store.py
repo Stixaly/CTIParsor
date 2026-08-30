@@ -73,10 +73,14 @@ def read_from_json(raw: str) -> FigureRead | None:
             model = ""
 
         elapsed_s_raw = data.get("elapsed_s")
-        try:
-            elapsed_s = float(elapsed_s_raw)
-        except (TypeError, ValueError):
-            elapsed_s = 0.0
+        elapsed_s = 0.0
+        if elapsed_s_raw is not None:
+            # The except still earns its place: a non-numeric string reaches
+            # here, and only float() can tell.
+            try:
+                elapsed_s = float(elapsed_s_raw)
+            except (TypeError, ValueError):
+                elapsed_s = 0.0
 
         input_tokens_raw = data.get("input_tokens")
         try:
