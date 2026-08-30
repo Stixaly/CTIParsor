@@ -123,30 +123,79 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 
 ---
 
-## 3. Current coverage map (571 tests)
+## 3. Current coverage map (1047 tests, 64 modules)
+
+`make test` executes `pytest tests/`. The counts below come from
+`pytest --collect-only` and therefore include `parametrize` expansion. A bare
+`pytest` from the repo root also collects 14 tests vendored under
+`corpora/sigmahq/tests/`, which are not this project's.
 
 | Layer | File | ~Tests | Covers |
 |---|---|---:|---|
-| Ingestion | `test_stage1.py` | 8 | parse, chunking, sliding-window overlap, bad input |
-| Extraction | `test_stage2.py` | 60 | regex IoCs, refang/defang matrix, IoC-appendix patterns, hyphen line-breaks |
-| LLM enrich | `test_stage3.py` | 40 | `enrich_chunk` happy/error/transient, `_merge_results`, dedup, prompt sanitiser, `_normalize_llm_json` |
-| Hallucination filter | `test_stage3b.py` | 12 | actor/malware/relationship presence checks, allow-list bypass |
-| **TTP precision** | `test_ttp_precision.py` | 19 | Stage 2c threshold resolution (per-model/manifest/env), medium-semantic-doesn't-override-LLM, parent/sub-technique subsumption, Stage 3f TTP verification (drop/keep/corroborate) |
-| **ATE + REL benchmarks** | `eval_pipeline.py` | — | regex/semantic ATE F1 + NER F1 fixtures, adversarial precision (high-conf FP = 0); REL edge-level completion precision; semantic cases auto-skip under `SKIP_HEAVY_MODELS=1` |
-| STIX mapping | `test_stage4.py` | 33 | SDO/SCO/SRO build, policy pins, IoC coverage, external-ref routing |
-| **TTP volume controls** | `test_ttp_volume_controls.py` | 16 | cross-source dedup + parent subsumption at persistence, Stage 3f corroboration floor (medium match must not waive verification), semantic-corpus taxonomy filter (CAPEC excluded by default, `all` restores) |
-| **Graph completion** | `test_stage4b_completion.py` | 17 | transitive composition + non-suggested skip, cap, alias merge/rewire, IOC guard, ATT&CK grounding (hit/miss/disabled), semantic alias (fake model + no-model), pins beat inference, end-to-end bundle |
-| **Long-distance** | `test_stage4c_long_distance.py` | 10 | quote required, direction swap, invalid verb/empty response rejected, island connection + `x_evidence_text`, provider/policy gating |
-| Validation/export | `test_stage5.py` | 8 | bundle validity, file write, nested dirs |
-| API | `test_api_routes.py` | 8 | health, jobs 404/list, upload filter, progress, policy |
-| **Evidence labels** | `test_evidence_consensus.py` | 4 | default label, normalize coercion, `x_evidence_label` in STIX, consensus reconcile |
-| **Provenance** | `test_provenance.py` | 5 | authoring Identity, TLP marking, `created_by_ref` on SDO/SRO, SCO marked-only, `STIX_TLP` switch |
-| **Persistence / worker** | `test_persistence.py` | 4 | migration idempotency, `_save_entities` write, finalize read→bundle, NULL-label default |
-| **Relationships API** | `test_relationships_api.py` | 4 | create/read/patch evidence_label, default + unknown-label coercion, PATCH 400 |
-| **Detection coverage** | `test_detection_coverage.py` | 36 | 0–3 scoring policy (fork-safe), parent→sub roll-up, per-format `by_format` split + owner attribution, drill-down key order and `bytes`, rule-id export (intersection, 400/404, shared archive layout), flat-sweep query-count and index-pinning locks |
-| **Rule dedup** | `test_detection_dedup.py` | 10 | `dedup_key` ignores metadata/field order, canonical election by corpus priority, `related:` provenance folding, independent rules kept |
-| **Rule relevance** | `test_detection_relevance.py` | 27 | atom extraction (field→class, wildcards, composite hashes, caps, malformed rules), IDF weighting, platform factor, tiering |
-| **Export filters** | `test_export_filters.py` | 13 | facet totals per axis, per-format extensions, format/licence/severity filtering, empty job is 200 not 404 |
+| Ingestion | `test_stage1.py` | 8 | text ingestion, chunking, overlap, unsupported formats |
+| Ingestion | `test_ingest_routes.py` | 26 | job creation, TLP validation, URL capture, HTML detection |
+| Ingestion | `test_web_capture.py` | 38 | URL sanitization, SSRF guards, PDF rendering, lazy loading |
+| **Figures** | `test_figure_triage.py` | 12 | size filtering, aspect guards, PDF source detection |
+| **Figures** | `test_stage1f_figures.py` | 29 | figure injection, verbatim rendering, edge rendering |
+| **Figures** | `test_figure_store.py` | 12 | JSON round-trip, cache management, span loading |
+| **Figures** | `test_figure_reading_order.py` | 5 | reading order, page ordering, span delimitation |
+| **Figures** | `test_vlm.py` | 18 | payload parsing, backend selection, figure reading, `VISION_CONCURRENCY` parsing and override |
+| Extraction | `test_stage2.py` | 75 | IoC extraction, refang/defang, hash recovery, filename handling |
+| NER | `test_stage2d_cyner.py` | 4 | CyNER label mapping, entity extraction, model fallback |
+| NER | `test_stage_registry.py` | 4 | registry merging, deduplication, case insensitivity |
+| **Aliases** | `test_aliases.py` | 6 | alias resolution, MITRE ID mapping, surface forms |
+| **Aliases** | `test_alias_disambiguation.py` | 11 | type-aware resolution, alias isolation, canonical name handling |
+| LLM enrich | `test_stage3.py` | 42 | LLM enrichment, JSON parsing, deduplication, prompt sanitization |
+| Hallucination filter | `test_stage3b.py` | 11 | hallucination filtering, entity presence checks, allow-list bypass |
+| **TTP precision** | `test_ttp_precision.py` | 14 | threshold resolution, semantic confidence, subsumption, verification |
+| **TTP precision** | `test_ttp_volume_controls.py` | 16 | cross-source dedup, corroboration floors, taxonomy filtering |
+| **TTP precision** | `test_ttp_sentence_gates.py` | 14 | sentence unwrapping, keyword gating, candidate selection |
+| **TTP precision** | `test_ttp_evidence_merge.py` | 11 | evidence preference, semantic fallback, label preservation |
+| **TTP precision** | `test_ate_scoring.py` | 13 | ATE scoring, partial credit, macro averaging, diagnostics |
+| **Evidence spans** | `test_evidence_span.py` | 19 | offset normalization, quote location, sentence bounds |
+| **Evidence spans** | `test_evidence_span_offsets.py` | 11 | index mapping, coverage calculation, quote matching |
+| **Evidence spans** | `test_merge_keeps_evidence.py` | 10 | evidence preservation, confidence ranking, deduplication |
+| **Evidence labels** | `test_evidence_consensus.py` | 4 | label normalization, STIX properties, consensus boosting |
+| STIX mapping | `test_stage4.py` | 38 | SDO/SCO/SRO build, alias merging, IoC coverage |
+| STIX mapping | `test_stix_self_edges.py` | 4 | self-edge prevention, endpoint validation, bundle integrity |
+| **Graph completion** | `test_stage4b_completion.py` | 18 | transitive completion, alias merging, grounding, pins |
+| **Graph completion** | `test_stage4c_long_distance.py` | 10 | long-distance inference, direction swap, evidence recording |
+| **Graph completion** | `test_grounding_by_label.py` | 8 | STIX display names, edge scoring, bundle validation |
+| Validation/export | `test_stage5.py` | 8 | bundle validation, file writing, nested directories |
+| **Provenance** | `test_provenance.py` | 5 | authoring identity, TLP marking, created_by_ref |
+| **Provenance** | `test_edge_provenance.py` | 10 | relationship properties, pinned edges, run config |
+| **Provenance** | `test_bundle_staleness.py` | 15 | `git_rev` extraction from malformed run configs, ancestry verdicts, an undecidable git result never marking a bundle stale (ADR-0035) |
+| **Relationship policy** | `test_pin_budget.py` | 16 | fair share allocation, edge key validation, materialization |
+| **Relationship policy** | `test_pin_evidence.py` | 27 | term extraction, sentence indexing, grounding gates |
+| **Relationship policy** | `test_policy_last_run.py` | 17 | stats extraction, database queries, bundle handling |
+| **Relationship policy** | `test_policy_rule_validation.py` | 15 | policy validation, API rejection, graph survival |
+| **Rule adapters** | `test_sigma_adapter.py` | 8 | rule parsing, tactic skipping, registry loading |
+| **Rule adapters** | `test_sigma_negation.py` | 15 | negation logic, selector expansion, condition parsing |
+| **Rule adapters** | `test_multiformat_atoms.py` | 47 | atom extraction, buffer handling, negation, metadata |
+| **Rule adapters** | `test_escape_unescaping.py` | 12 | YARA/Suricata unescaping, backslash handling, edge cases |
+| **Rule adapters** | `test_atom_normalisation.py` | 6 | basename stripping, lowercase enforcement, atom trimming |
+| **Rule dedup** | `test_detection_dedup.py` | 10 | dedup key logic, canonical election, provenance folding |
+| **Rule dedup** | `test_provenance_dedup.py` | 18 | dedup clustering, provenance folding, deterministic merging |
+| **Rule relevance** | `test_detection_relevance.py` | 29 | atom mapping, platform factors, IDF weighting, ranking |
+| **Rule relevance** | `test_technique_idf.py` | 21 | technique counting, IDF calculation, rule mapping |
+| **Rule relevance** | `test_relevance_corroboration.py` | 8 | corroboration scoring, match weighting, proposal flags |
+| **Rule relevance** | `test_control.py` | 17 | value discrimination, domain guards, host classification |
+| **Rule relevance** | `test_brands.py` | 12 | brand detection, domain themes, evidence preference |
+| **Rule relevance** | `test_observables_domain_guard.py` | 10 | domain validation, filename rejection, URL handling |
+| **Detection coverage** | `test_detection_coverage.py` | 48 | scoring policy, format splitting, export selection, evidence |
+| **Detection coverage** | `test_detection_artifacts.py` | 26 | artifact scoring, evidence capping, folding, vocabulary |
+| **Detection coverage** | `test_detection_phases.py` | 13 | tactic mapping, off-matrix handling, phase counting |
+| **Detection coverage** | `test_coverage_artifacts_api.py` | 5 | artifact coverage routes, payload shape, 404 handling |
+| **Export filters** | `test_export_filters.py` | 13 | facet totals, format filtering, license exclusion, manifest |
+| **Export filters** | `test_rule_lookup.py` | 8 | rule lookup, metadata retrieval, license handling |
+| **Rule synthesis** | `test_synth_sigma.py` | 47 | rule synthesis, value validation, path escaping, stability |
+| API | `test_api_routes.py` | 11 | health checks, job listing, upload validation, progress |
+| API | `test_relationships_api.py` | 4 | relationship creation, label coercion, patch validation |
+| API | `test_settings_api.py` | 5 | corpus listing, overlay management, rebuild ingestion |
+| Persistence | `test_persistence.py` | 7 | backup consistency, migration idempotency, label persistence |
+| Persistence | `test_db_transaction.py` | 6 | transaction rollback, commit, exception handling |
+| Shared helpers | `test_shared_helpers.py` | 27 | environment parsing, claim extraction, unescaping logic |
+| Benchmarks | `eval_pipeline.py` | 10 | NER F1, ATE precision, grounding metrics, adversarial tests |
 
 **Shared infra** (`conftest.py`): `sample_cti_text`, `sample_entities`,
 `mock_llm` / `mock_llm_empty` / `mock_llm_bad_json`, `storage`, `api_client`.
