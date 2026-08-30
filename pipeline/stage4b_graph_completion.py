@@ -161,7 +161,7 @@ class CompletionStats:
 
 
 # ── small STIX-object helpers ─────────────────────────────────────────────────
-def _otype(obj) -> str:
+def _otype(obj: object) -> str:
     return stix_field(obj, "type") or ""
 
 

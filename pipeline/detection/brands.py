@@ -131,7 +131,7 @@ def campaign_tokens(domains: Iterable[str]) -> dict[str, int]:
         return {}
 
     labels = {_label(d) for d in valid_domains}
-    counter = Counter()
+    counter: Counter[str] = Counter()
     for label in labels:
         for sub in _substrings(label):
             counter[sub] += 1

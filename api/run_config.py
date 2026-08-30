@@ -61,7 +61,7 @@ def build_run_config(policy: dict | None = None) -> dict:
     try:
         from pipeline.stage2c_ttp_semantic import _thresholds
         high, medium = _thresholds()
-        ttp_thresholds = {"high": high, "medium": medium}
+        ttp_thresholds: dict[str, float | None] = {"high": high, "medium": medium}
     except Exception:
         ttp_thresholds = {"high": None, "medium": None}
 

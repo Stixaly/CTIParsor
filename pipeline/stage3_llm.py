@@ -139,7 +139,7 @@ try:
     from openai import OpenAI as _OpenAIClient
     _OPENAI_SDK_AVAILABLE = True
 except ImportError:
-    _OpenAIClient = None          # type: ignore[assignment]
+    _OpenAIClient = None          # type: ignore[assignment,misc]
 
 
 def _get_anthropic_client():
@@ -161,7 +161,7 @@ def _get_mistral_client():
     if _mistral_client is None:
         _mistral_key = os.environ.get("MISTRAL_API_KEY", "").strip()
         _MISTRAL_MODEL = os.environ.get("MISTRAL_MODEL", "mistral-small-latest")
-        if _OPENAI_SDK_AVAILABLE and _mistral_key and _OpenAIClient:
+        if _OPENAI_SDK_AVAILABLE and _mistral_key and _OpenAIClient is not None:
             _mistral_client = _OpenAIClient(api_key=_mistral_key, base_url="https://api.mistral.ai/v1")
             return _mistral_client
         return None
@@ -174,7 +174,7 @@ def _get_ollama_client():
     if _ollama_client is None:
         _ollama_base = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
         _OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
-        if _OPENAI_SDK_AVAILABLE and _OpenAIClient:
+        if _OPENAI_SDK_AVAILABLE and _OpenAIClient is not None:
             _ollama_client = _OpenAIClient(api_key="ollama", base_url=f"{_ollama_base}/v1")
             return _ollama_client
         return None

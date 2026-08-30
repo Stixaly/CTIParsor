@@ -11,7 +11,14 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    # Type-only: the Stage 1f modules pull pdfplumber, and the worker has to
+    # start without it. A local variable annotation is never evaluated at
+    # runtime (PEP 526), so the name is only ever needed by the type checker.
+    from pipeline.stage1f_figures import FigureSpan
 
 # Ensure project root is on sys.path so pipeline imports work
 _ROOT = Path(__file__).parent.parent
@@ -256,7 +263,9 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "")
             e.mitre_id, None, source,
         ))
 
-    rows_llm = []
+    # Deliberately heterogeneous: ordinary rows carry 9 fields, TTP rows 13,
+    # and they are padded to a common width just before the insert below.
+    rows_llm: list[tuple] = []
     for name in llm_result.malware_families:
         rows_llm.append((str(uuid4()), job_id, name, "malware", "", 0.9, None, None, "llm"))
     for name in llm_result.threat_actors:
@@ -400,7 +409,10 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         # computed before it would point at the wrong characters.  Figure lines
         # are refanged on the same terms, then appended; only then are offsets
         # final.
-        figure_spans = []
+        figure_spans: list[FigureSpan] = []
+        # Captured where the spans are produced, so the write block below does
+        # not depend on `_vision`, which is only bound in another branch.
+        figure_provider = ""
         _figure_pdf = _figure_source_pdf(file_path)
         if _figure_pdf is not None:
             from pipeline.vlm import get_backend
@@ -418,6 +430,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
                     )
                     _reads = map_verbatim(_reads, refang)
                     text, figure_spans = inject_append(text, _reads)
+                    figure_provider = _vision.name
                     _kept = sum(1 for _, r, _ in _reads if r.kind != "unread")
                     logger.info(
                         f"[Stage 1f] {len(_reads)} figures, {_kept} read "
@@ -462,7 +475,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         # is worse than no row.
         if figure_spans:
             from pipeline.figure_store import save_spans
-            _n = save_spans(job_id, figure_spans, _vision.name)
+            _n = save_spans(job_id, figure_spans, figure_provider)
             logger.info(f"[Stage 1f] {_n} figure spans recorded")
 
         # --- Stage 2 — Regex IoC extraction ---
