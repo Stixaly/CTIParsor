@@ -501,3 +501,150 @@ captures, so the figure count there is an undercount for that subset.
 extracted by the prompt, carried through `figure_store`'s cache JSON, and then
 dropped, because `render_block` injects only `verbatim_text`. A schema's node
 labels therefore reach STIX as ordinary text, and its arrows do not.
+
+## Amendment (2026-08-30) — the first production run, and what `iocs` is for
+
+The numbers above came from a probe. This is the first time Stage 1f ran through
+`read_figures` with a configured backend (`VISION_PROVIDER=ollama`,
+`qwen3.8` on the local station), over two stored reports:
+`scripts/measure_figure_iocs.py`.
+
+### `iocs` is redundant, and that is the argument for not injecting it
+
+The schema requires four keys, and §3 above describes the fourth as
+"observables", which reads as though they were an extraction source. They are
+not: `render_block` injects `verbatim_text` and the rendered edges, never
+`read.iocs`.
+
+Measured over the 15 figures that carried content:
+
+```
+iocs total        39
+grounded          39   (present in the figure's own verbatim_text)
+ungrounded         0
+                 100.0%
+```
+
+Every value the model listed as an indicator was already in the text it had just
+transcribed. So injecting the list would add **nothing** — the values already
+reach Stage 2 through `report_text`, and are extracted by the same regexes, with
+the same defanging and the same deduplication, as any indicator in the body.
+
+That makes the decision cheap and settles it in the safe direction: an entry
+appearing in `iocs` but *not* in `verbatim_text` would be a claim the model
+cannot support from its own reading, and no later stage could check it —
+Stage 3b matches names against the source text, and figure `iocs` would have no
+source text to match against. **`iocs` is not an extraction path. It is a
+cross-check**: a value listed there and absent from the transcription is
+evidence of a transcription gap, worth a log line, never an entity.
+
+The 100% is one sample of 39 on two reports and is not a guarantee. It is enough
+to say that injecting buys no recall today, which is what the decision needed.
+
+### Half of what the triage passes, the model discards
+
+```
+figures cached    29
+  code-listing     9  }
+  table            5  }  15 carried content
+  screenshot       1  }
+  none             9  }  14 produced an empty block
+  logo             5  }
+errors             0
+```
+
+Tier 0 is doing what it was designed to do — be cheap and permissive — and the
+model is the real filter, rejecting 48% of what reaches it. One of the two
+reports had 8 candidates and **zero** kept figures, so a report can pay the
+latency and gain nothing. Every call returned; none of this is failure.
+
+### Cost, which §3 never stated
+
+652 s across the 15 figures that carried content, on the local 27B —
+**~43 s each**. The harness sums `elapsed_s` only over kept figures, so the six
+crops the model answered with `logo`/`none` cost real time that this figure does
+not include: the true wall clock for that report is higher, and the per-call
+cost is lower than 43 s. Order of magnitude either way, a 40-figure report — the
+cap — spends **tens of minutes** in Stage 1f.
+
+That is why `VISION_PROVIDER` defaults to `none`. The stage is opt-in on cost,
+not only on availability, and the cap is a time budget as much as a token one.
+
+### Correction to the 2026-08-28 amendment
+
+That amendment closed with "**Tier 2 remains unbuilt** … `render_block` injects
+only `verbatim_text` … its arrows do not [reach STIX]". That is no longer true.
+`render_block` calls `render_edges`, and the arrows of an `attack-chain` or
+`network-diagram` are rendered as `src -> dst` lines inside the figure's block,
+capped at `MAX_EDGES_PER_FIGURE = 24`.
+
+Neither report in this run contained either kind, so the arrow path contributed
+nothing here — its value remains the `silkparasite` measurement recorded in the
+CHANGELOG, not something this run reproduces.
+
+### Second report, and the failure mode the 100% did not show
+
+A second run over `aff898bc` (18 candidates, 11 with content) found the first
+ungrounded entry:
+
+```
+iocs 25   grounded 24   ungrounded 1      96.0%
+aggregate over both reports: 63 of 64      98.4%
+```
+
+The one that failed is worth quoting, because it is not a hallucinated
+indicator — it is a **mangled** one:
+
+```
+accounts.gooq e.com/A3/signin/?de=ntifier?op_params=K252F&dsh=...
+```
+
+A Google-lookalike phishing URL read off a screenshot, with a space inserted
+mid-domain, a doubled `?` separator and corrupted query characters. The model
+transcribed the same URL twice — once into `verbatim_text`, once into `iocs` —
+and the two do not agree, so the `iocs` copy matches nothing.
+
+This sharpens the decision rather than weakening it. Injecting `iocs` would not
+have added a missing indicator here; it would have added a **corrupted domain
+that does not exist** to the bundle as an Indicator, with no stage able to catch
+it — Stage 3b matches against source text, and this string is in none. The
+grounding check is therefore doing exactly the job the amendment above claimed:
+the 1.6% it rejects is transcription damage, not recall.
+
+Kinds across both runs, 47 cached reads:
+
+```
+none 16 · screenshot 10 · code-listing 9 · table 5 · logo 5 · attack-chain 2
+```
+
+`attack-chain` appears for the first time, so the arrow path does fire on this
+corpus — it simply had no input in the first run.
+
+### Concurrency: measured, and rejected
+
+ADR-0033 §5 set Ollama to `max_concurrency=1` against 4 for the API backends,
+on the grounds that there is one GPU and it is also the delegation target the
+project's workflow depends on. That reason is about *sharing* the box. This
+measurement asks the narrower question — whether concurrency would even pay for
+itself if the GPU were free — and finds it would not, so the two arguments agree.
+
+A synthetic benchmark argued for raising it: two 120-token text generations took
+7.4s concurrently against 17.5s sequentially, **2.34x**.
+
+On the real workload it does not hold. At 4:
+
+| | sequential | concurrency 4 |
+|---|---|---|
+| wall clock | 1053s / 29 calls | 737s / 18 calls |
+| **per call** | **36.3s** | **40.9s** |
+| overlap achieved | — | 1.89x |
+
+The pool genuinely overlaps — per-call times sum to 1392.7s inside 737s of wall
+clock — but each call inflates from ~43s to ~127s and per-figure throughput ends
+up slightly *worse*. A figure read ships a 600–2400 token image and generates
+hundreds of tokens back, so four in flight contend for memory bandwidth instead
+of filling an idle pipe. The station is bandwidth-bound here, not latency-bound,
+and the short-prompt benchmark measured the wrong thing.
+
+The default stays 1, now for a recorded reason, and becomes overridable through
+`VISION_CONCURRENCY` for hosts where the arithmetic differs.

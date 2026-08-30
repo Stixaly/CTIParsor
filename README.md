@@ -1,4 +1,4 @@
-# cti-to-stix
+# CTIParsor
 
 Converts unstructured CTI reports (PDF, DOCX, HTML, TXT, MD) into valid **STIX 2.1 bundles** consumable by OpenCTI, MISP, and SIEMs.
 
@@ -32,7 +32,7 @@ Two modes are available:
 
 ```bash
 # 1. Clone and enter the project
-git clone <repo-url> && cd cti-to-stix
+git clone <repo-url> && cd CTIParsor
 
 # 2. Full setup (venv, Python deps, MITRE data, Node build)
 bash setup.sh
@@ -98,6 +98,17 @@ uvicorn api.main:app --reload --app-dir .
 │  • Defanging   : hxxps://, [.], (.), [at], [@] → live form          │
 │  • Chunking    : paragraph-aware + 400-char sliding-window overlap   │
 │  • Adaptive    : larger chunks for large docs (3 000–5 000 chars)    │
+└─────────────────────────────┬────────────────────────────────────────┘
+                              │
+┌─────────────────────────────▼────────────────────────────────────────┐
+│  Stage 1f — FIGURE READING                       (opt-in — ADR-0032) │
+│  PDF-only · off by default (VISION_PROVIDER=none)                    │
+│  • Triage    : geometry discards 56.9% of images before any model    │
+│  • Crops     : 150 DPI crops, not pages (977 tokens vs 2 191/page)   │
+│  • Injection : transcription enters report_text in ⟦…⟧ sentinels     │
+│  • Relations : attack-chain / network-diagram arrows → src -> dst    │
+│  • Safety    : an unreadable figure is skipped, never costs the run  │
+│  Enable: VISION_PROVIDER=anthropic|ollama|mistral in .env            │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
@@ -325,6 +336,7 @@ A `Makefile` wraps the most common workflows. Requires `make` (standard on Linux
 | `make setup` | Full first-time setup (runs `setup.sh`) |
 | `make install` | Install / update Python packages only |
 | `make install-api` | Install / update API packages only (`requirements-api.txt`) |
+| `make install-capture` | Install Playwright + Chromium for URL capture (ADR-0029) |
 | `make download-mitre` | Download MITRE bundle files only (no index build) |
 | `make mitre` | Download MITRE bundle files + build all indexes |
 | `make build-indexes` | Build indexes from already-downloaded bundle files |
@@ -433,6 +445,30 @@ Custom **d3-force SVG graph** (not the OASIS stix-visualization iframe):
 | **Labels** | Toggle all labels; strategic nodes (tier 0–1) always show labels |
 | **Fit button** | Animate to fit all nodes in viewport |
 | **Download** | Download STIX bundle directly from the graph page |
+
+### Policy page
+
+Reached from the **Policy** entry in the sidebar (`/policy`) — a global setting,
+not a per-report one. It edits the relationship policy the pipeline applies at
+Stage 4: which `source → verb → target` triples are **pinned** (the analyst
+states the link, and the pin always wins over anything inference produces) and
+which are left on **auto**.
+
+- **Enforce my model / Full auto** — the `global` switch. On auto the rule list
+  is ignored entirely.
+- **Pinned links** — the rule table: add, filter by type or verb, enable or
+  disable each triple.
+- **Pin budget** — how `max_pinned_edges` is split between rules
+  (`fair-share` by default, `sequential` for the legacy behaviour).
+- **Evidence gate** — the `pin_evidence` window: how many sentences apart two
+  objects may be and still be pinned together.
+- **Completion** — the Stage 4b toggles (`alias`, `reference`, `transitive`,
+  `long_distance`, `fuzzy_alias`, `semantic_alias`, `max_new_edges`).
+
+Every field maps onto the payload documented under
+[Relationship policy](#relationship-policy); the page is a typed editor over it,
+and the last run's per-rule accounting is read back from
+`/api/relationship-policy/last-run`.
 
 ### Coverage page
 
@@ -725,6 +761,42 @@ GLINER_THRESHOLD=0.40
 GLINER_ENABLED=true
 ```
 
+### Vision (Stage 1f — figures)
+
+Stage 1f reads the figures in a PDF and injects their transcription into
+`report_text`. It is **off by default** — set a provider to turn it on.
+
+```env
+# Vision backend for Stage 1f, deliberately separate from LLM_PROVIDER:
+# none       (default) Stage 1f is off; figures are not read
+# anthropic  default model claude-haiku-4-5
+# ollama     default model qwen3.8 — needs a model with the `vision`
+#            capability; check with: curl -s $OLLAMA_BASE_URL/api/tags
+# mistral    VISION_MODEL is REQUIRED — no default is assumed, because no
+#            vision-capable Mistral model name was verified against a live
+#            account and a guessed one fails confusingly
+#
+# The model is probed for image support before any figure is sent. A model that
+# cannot see disables Stage 1f with a warning; it is never called anyway.
+VISION_PROVIDER=none
+VISION_MODEL=
+VISION_TIMEOUT_S=120
+
+# Figure reads kept in flight. Ollama sits at 1 — one GPU, shared with the Qwen
+# delegation workflow (ADR-0033 §5), and measured: raising it to 4 overlapped the
+# work (1.89x) but inflated each call ~43s -> ~127s, so per-figure throughput got
+# worse. Raise it for a hosted endpoint. anthropic and mistral use 4 regardless.
+# VISION_CONCURRENCY=1
+
+# Waives the capability probe above. Only set this when you KNOW your model
+# reads images and its provider does not publish a capability endpoint we can
+# read (Mistral). It logs a warning every time it fires.
+# VISION_ASSUME_CAPABLE=1
+```
+
+`python -m pipeline.vlm` reports what the current environment resolves to and
+why, without starting the pipeline.
+
 ### Advanced
 
 ```env
@@ -806,6 +878,29 @@ These files are not gitignored — commit them to your repo to avoid a per-clone
 ---
 
 ## Extraction quality layers
+
+### 0. What a figure read returns (Stage 1f)
+
+The model is constrained by a JSON schema and returns four fields.
+
+| Field | What it is | Where it goes |
+|---|---|---|
+| `figure_kind` | One of eight predefined categories | Determines the block header and controls whether arrows are rendered |
+| `verbatim_text` | Text lines transcribed directly from the image | Injected into `report_text`, making it visible to Stage 2 regex and all subsequent stages as if it were body text |
+| `edges` | `src → dst → label` triples extracted from diagrams | Rendered as `src -> dst` lines within the block, applicable only to `attack-chain` and `network-diagram` types |
+| `iocs` | Values identified by the model as indicators | **Not injected** — see the note below |
+
+The `figure_kind` field accepts one of eight values: `network-diagram`, `attack-chain`, `screenshot`, `code-listing`, `table`, `chart`, `logo`, and `none`. Three of these values—`logo`, `none`, and `unread` (which the pipeline assigns when reading fails)—result in an empty block. The figure retains its ordinal number regardless of the kind assigned; otherwise, numbering would shift based on model decisions, causing a `⟦figure 7⟧` reference to point to different images across runs.
+
+**Why `iocs` is not injected**
+
+Measured over two production runs — 26 figures carrying content — **63 of 64** listed IoCs were already in the transcription, so injecting the list buys almost no recall. The one that was not is a phishing URL the model transcribed twice and garbled differently each time, so injecting it would have added a domain that does not exist (ADR-0032, amendment of 2026-08-30). The reason not to inject it is what the exception would cost: an IoC present in the `iocs` list but absent from `verbatim_text` is a model assertion not grounded in its own transcription. Injecting such values would introduce data into the bundle that no stage can verify—precisely the class of hallucination that Stage 3b and Stage 3d are designed to prevent. Consequently, image-derived IoCs reach the pipeline through a single path: the model transcribes them into `verbatim_text`, which is injected into `report_text` before Stage 2 executes, allowing regex patterns to extract them exactly as they would from document body text.
+
+| Limit | Value | What happens at it |
+|---|---|---|
+| Figures read per PDF | 40 | Additional candidates are dropped, logged as a warning, with no indication in the bundle |
+| Arrows rendered per figure | 24 | Further edges from the same figure are not rendered |
+| Crop render resolution | 150 DPI | Only crops are processed, never whole pages |
 
 ### 1. Multi-layer NER (Stages 2b–2e)
 
@@ -891,12 +986,13 @@ Measured effect on a 4-report corpus: named-entity relationship hallucination
 ## Project structure
 
 ```
-cti-to-stix/
+CTIParsor/
 │
 ├── main.py                        # CLI entry point
 │
 ├── pipeline/
 │   ├── stage1_ingestion.py        # Parsing, defanging, chunking + overlap
+│   ├── stage1f_figures.py         # Figure triage, crop rendering and report_text injection (ADR-0032)
 │   ├── stage2_extraction.py       # Regex IoC extraction + spaCy fallback
 │   ├── stage2b_gazetteer.py       # Aho-Corasick gazetteer NER (1 114 entities)
 │   ├── stage2c_ttp_semantic.py    # Sentence-transformer TTP detection
@@ -913,7 +1009,18 @@ cti-to-stix/
 │   ├── stage4c_long_distance.py   # LLM long-distance relation inferer (opt-in)
 │   ├── stix_rel_spec.py           # STIX 2.1 suggested-relationship table (spec guard)
 │   ├── stage5_validation.py       # Bundle validation + export
+│   ├── bundle_revisions.py        # Which stored bundles predate an output fix (ADR-0035)
 │   ├── mitre_db.py                # Lazy-loaded MITRE index (techniques + tactics)
+│   ├── vlm.py                     # Provider-agnostic vision backends + capability probe (ADR-0033)
+│   ├── figure_store.py            # report_figures / figure_reads persistence + span lookup
+│   ├── web_capture.py             # Render an arbitrary web page to PDF, safely (ADR-0029)
+│   ├── aliases.py                 # Alias canonicalisation for named entities (ADR-0012)
+│   ├── evidence_span.py           # Locate LLM quotes in source text, return char offsets
+│   ├── llm_parse.py               # Parsing helpers for LLM responses shared by verification stages
+│   ├── stix_access.py             # Uniform field access for STIX objects (dict or stix2 instance)
+│   ├── registry.py                # Stage Registry — loads all Stage-2 extractors declaratively
+│   ├── base.py                    # ExtractionStage protocol + BaseExtractionStage
+│   ├── env_flags.py               # Single vocabulary for boolean environment flags
 │   ├── detection/                 # Detection-rule ingestion + coverage (ADR-0006)
 │   │   ├── base.py                # RuleCorpusAdapter (pluggable format seam)
 │   │   ├── sigma.py               # SigmaAdapter (YAML → DetectionRule)
@@ -933,7 +1040,10 @@ cti-to-stix/
 │   │   ├── synth_sigma.py         # Report-derived Sigma synthesis (ADR-0016)
 │   │   ├── tlds.py                # TLD table backing the hostname gate (ADR-0015)
 │   │   ├── sync.py                # Corpus clone/pull driver
-│   │   └── builder.py             # Rebuild the rule store from local clones
+│   │   ├── builder.py             # Rebuild the rule store from local clones
+│   │   ├── brands.py              # Brand token extraction from campaign domains (ADR-0031)
+│   │   ├── control.py             # Observable discrimination (ADR-0030)
+│   │   └── textutil.py            # Text primitives shared by the atom extractors
 │   └── data/
 │       ├── mitre_index.json       # Compact ATT&CK index (built by build_indexes.py)
 │       ├── gazetteer.json         # Named-entity dictionary
@@ -954,8 +1064,11 @@ cti-to-stix/
 │   ├── audit_bundle_invariants.py # Read-only: 16 invariants over every stored STIX bundle
 │   ├── measure_negated_atoms.py   # Before/after of the ADR-0034 negation fix on the store
 │   ├── check_stages.py            # Diagnostic: which stages are available (make check)
-│   └── check_doc_claims.py        # Doc drift guard: README numbers vs source (make check-docs)
-│
+│   ├── check_doc_claims.py        # Doc drift guard: README numbers vs source (make check-docs)
+│   ├── probe_vlm_figures.py       # Compare vision providers on a PDF's figures, no DB write
+│   ├── measure_image_surface.py   # How much of a corpus is images, and how many survive triage
+│   ├── measure_stage1f_tradeoffs.py # Crop vs whole page: tokens, latency, kind accuracy
+│   └── measure_figure_iocs.py     # Read-only: are the model's `iocs` grounded in its own transcription
 ├── models/
 │   ├── schemas.py                 # Pydantic: RawEntity, EntityType, EvidenceLabel
 │   ├── config.py                  # PipelineConfig (chunk size, model ids, env binding)
@@ -966,6 +1079,9 @@ cti-to-stix/
 │   ├── db.py                      # SQLite (WAL, thread-local connections)
 │   ├── worker.py                  # Background pipeline + SSE emitter
 │   │                              #   └─ _lexicon_rescan() on Finalize
+│   ├── run_config.py              # Capture a job's execution config so its bundle is reproducible (ADR-0024)
+│   ├── storage.py                 # Storage abstraction for pipeline job state
+│   ├── logging_config.py          # Centralized logging configuration
 │   └── routes/
 │       ├── upload.py              # POST /api/upload (50 MB limit, streamed)
 │       ├── ingest.py              # POST /api/ingest/{text,url} — paste + URL capture
@@ -975,7 +1091,8 @@ cti-to-stix/
 │       ├── progress.py            # GET /api/jobs/{id}/progress (SSE)
 │       ├── coverage.py            # GET /api/jobs/{id}/coverage + detection-corpora
 │       ├── settings.py            # Corpora management (ADR-0007)
-│       └── policy.py              # Relationship policy: pinned rules + completion block
+│       ├── policy.py              # Relationship policy: pinned rules + completion block
+│       └── _common.py             # Guards shared by the job-scoped route modules
 │
 ├── frontend/                      # React 18 + TypeScript + Vite 6
 │   ├── src/
@@ -984,12 +1101,13 @@ cti-to-stix/
 │   │   │   ├── Review.tsx         # Text / Preview / Source view + marginalia
 │   │   │   ├── Graph.tsx          # d3-force graph + relationship editor
 │   │   │   ├── Coverage.tsx       # Coverage matrix + granular rule selection
-│   │   │   └── Settings.tsx       # Corpus management panel
+│   │   │   ├── Settings.tsx       # Corpus management panel
+│   │   │   └── Policy.tsx         # Relationship policy editor (pin / auto, completion flags)
 │   │   ├── components/
 │   │   │   ├── MarkdownPreview.tsx # VS Code-like .md renderer (react-markdown)
 │   │   │   ├── SourceViewer.tsx    # Inline original-file view (PDF/HTML/TXT/MD)
 │   │   │   ├── PdfViewer.tsx       # pdf.js pages + entity-highlight overlay
-│   │   │   ├── ProgressModal.tsx   # 5-stage SSE progress display
+│   │   │   ├── ProgressModal.tsx   # 6-stage SSE progress display (1f included)
 │   │   │   ├── EntityPopover.tsx   # Entity type picker
 │   │   │   └── review/
 │   │   │       ├── DocumentReader.tsx  # Annotated text with entity marks
@@ -1017,7 +1135,7 @@ cti-to-stix/
 │       ├── stix-icons/            # 27 official OASIS STIX 2.1 White SVG icons
 │       └── mitre_index.json       # ATT&CK index served to the frontend
 │
-├── tests/                         # 31 modules, 571 tests — map in TESTING.md
+├── tests/                         # 63 modules, 1 030 tests — map in TESTING.md
 │   ├── test_stage1.py             # Ingestion, chunking, overlap, defanging
 │   ├── test_stage2.py             # IoC extraction, refanging, deduplication
 │   ├── test_stage4.py             # STIX mapping
@@ -1226,6 +1344,9 @@ data: {"status":"for_review"}
 | `GET` | `/api/jobs/{id}/coverage/rules` | Rules **backed by a value the report contains**, grouped by technique; rules carrying no ATT&CK tag (all YARA) arrive under `(untagged)`. Carries `tag_total` — what the unfiltered tag join would have returned (ADR-0030) |
 | `GET` | `/api/jobs/{id}/coverage/{technique}/rules` | License-aware drill-down: which rules cover a technique |
 | `GET` | `/api/jobs/{id}/detections/proposals` | Rules **ranked** on the report's observables + platform, with match evidence (ADR-0014) |
+| `GET` | `/api/jobs/{id}/coverage/artifacts` | Indexed coverage on evidence (ADR-0025), scoring the report's technical content (hashes, addresses, paths, tool/malware identities) by whether a rule actually holds that value, staged by Pyramid of Pain, with the ATT&CK band carried un-scored to locate the intrusion in the kill chain |
+| `GET` | `/api/jobs/{id}/detections/export` | Downloads the report's detection rules as a ZIP, filterable by repeatable `format`, `corpus`, `license`, `severity` query parameters (ADR-0020), where "detected" means canonical rules attachable to the report's accepted ATT&CK techniques, sharing the same archive constructor as the POST form |
+| `GET` | `/api/jobs/{id}/detections/export/facets` | Rule counts and byte volumes per axis for the filter UI (ADR-0020), allowing operators to see volume and license distribution before downloading (e.g., 18,196 rules / 268 MB, 1,642 all-rights-reserved), returning `total: 0` rather than 404 for jobs without rules |
 | `POST` | `/api/jobs/{id}/detections/export` | ZIP of exactly the rules in `{"rule_ids": [...]}` — the granular selection the axis filters cannot express (ADR-0022) |
 | `POST` | `/api/rules/lookup` | Metadata for arbitrary canonical rule ids, bodies on demand (`include_body`, ≤ 500 ids). Not job-scoped — the proposals panel shows rules outside the report's tag join by construction |
 | `GET` | `/api/detection-corpora` | Per-corpus rule counts in the store |
@@ -1278,11 +1399,12 @@ Manages the gitignored local overlay only — the committed registry is never ed
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/settings/corpora` | List configured corpora (committed + overlay) with rule counts |
-| `POST` | `/api/settings/corpora` | Add a Sigma corpus to the local overlay |
+| `GET` | `/api/settings/formats` | Lists known formats (union of compiled adapters and configured corpora) with `available`, corpus count, and rule count for each, ensuring corpora of uncompiled formats remain visible in the UI instead of disappearing |
+| `POST` | `/api/settings/corpora` | Add a corpus to the local overlay, accepting an `adapter` field (`sigma`, `suricata`, or `yara`); corpora with uncompiled adapters are accepted but marked `adapter_available: false` and contribute no rules until landed (ADR-0019) |
 | `DELETE` | `/api/settings/corpora/{name}` | Remove (or disable, if committed) a corpus |
+| `PATCH` | `/api/settings/corpora/{name}` | Enable or disable a corpus without losing its configuration (body: `{"enabled": bool}`), existing because deletion writes a disable for committed registry corpora with no UI reactivation path, as ADR-0015 delivered seven disabled corpora inaccessible without this endpoint; returns 404 if the corpus is unknown |
+| `POST` | `/api/settings/corpora/{name}/sync` | Clone/pull the git repository of a single public corpus and re-ingest the store, exposing the same network step as `scripts/sync_corpora.py` for the "Redownload" button, restricted to PUBLIC corpora so private git credentials never transit the application (ADR-0006), blocking until the git operation completes |
 | `POST` | `/api/settings/corpora/rebuild` | Re-ingest all enabled corpora from their local clones |
-
----
 
 ## Database schema
 
@@ -1296,6 +1418,8 @@ CREATE TABLE jobs (
     llm_result_json TEXT,           -- LLM result snapshot for finalize
     tlp_level       TEXT,           -- per-job TLP marking (clear|green|amber|red)
     pap_level       TEXT,           -- per-job PAP statement marking
+    run_config_json TEXT,           -- run-config snapshot (ADR-0024): a bundle
+                                    -- stays explainable after the policy changes
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
@@ -1311,6 +1435,15 @@ CREATE TABLE entities (
     accepted    INTEGER,            -- NULL=pending  1=accepted  0=rejected
     source      TEXT DEFAULT 'auto' -- ioc | gazetteer | semantic | cyner |
                                     -- gliner | llm | manual | report_lexicon
+    -- Entity evidence (ADR-0028), kept apart from `context`: over 280 stored
+    -- TTPs only 36.8% of `context` is findable in the report, against 79.4%
+    -- for verbatim quotes.  Both offsets are stored because normalisation
+    -- folds curly quotes and space runs, so the quote and the span differ in
+    -- LENGTH — 68 of 313 (21.7%) did not survive text[start:start+len(text)].
+    evidence_text TEXT,
+    evidence_label TEXT,
+    evidence_start INTEGER,
+    evidence_end INTEGER
 );
 
 CREATE TABLE relationships (
@@ -1387,9 +1520,43 @@ CREATE TABLE rule_techniques (
     technique_id TEXT NOT NULL,       -- ATT&CK id, indexed for coverage lookup
     PRIMARY KEY (rule_id, technique_id)
 );
-```
 
-Schema migrations run automatically on startup (`ALTER TABLE` wrapped in try/except).
+-- Where each figure landed in `report_text` (ADR-0032).  `char_start`/`char_end`
+-- delimit its sentinel-wrapped block, so an entity can be traced back to the
+-- figure it came from rather than to the page.
+CREATE TABLE report_figures (
+    id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL,
+    page INTEGER NOT NULL,
+    bbox TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    char_start INTEGER NOT NULL,
+    char_end INTEGER NOT NULL,
+    provider TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    sha256 TEXT NOT NULL DEFAULT '',
+    UNIQUE (job_id, ordinal),
+    FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
+);
+
+-- The figure-read cache (ADR-0033), keyed on the crop bytes rather than on the
+-- job: a re-run, or the same figure in another report, does not re-pay the model.
+CREATE TABLE figure_reads (
+    sha256 TEXT NOT NULL,
+    model TEXT NOT NULL,
+    prompt_version INTEGER NOT NULL,
+    read_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (sha256, model, prompt_version)
+);
+
+-- Full-text index over rule title+description (ADR-0031), 0.4 ms instead of
+-- 4.1 s.  Populated offline by scripts/build_rule_text.py; brand evidence is
+-- simply absent while the table is empty, exactly as proposals degrade while
+-- the atom index is unbuilt.  No corpus re-clone.
+CREATE VIRTUAL TABLE IF NOT EXISTS rule_text USING fts5(rule_id UNINDEXED, body)
+```
 
 ---
 
@@ -1441,6 +1608,7 @@ Schema migrations run automatically on startup (`ALTER TABLE` wrapped in try/exc
 | `PyYAML` | Sigma rule parsing + the detection-corpus registry |
 | `python-dotenv` | `.env` loading |
 | `spacy` | Optional NER fallback (no model downloaded by default) |
+| `tenacity` | Retry with backoff on transient LLM errors |
 
 ### Web API (`requirements-api.txt`)
 
@@ -1450,6 +1618,19 @@ Schema migrations run automatically on startup (`ALTER TABLE` wrapped in try/exc
 | `uvicorn[standard]` | ASGI server |
 | `python-multipart` | File upload (multipart/form-data) |
 | `aiofiles` | Async file I/O |
+| `slowapi` | Request rate limiting |
+| `python-magic` | Upload content-type sniffing (libmagic) |
+| `filetype` | Upload type detection fallback, pure Python |
+
+### Optional (requirements-optional.txt)
+
+| Package | Purpose |
+|---|---|
+| `playwright` | Headless Chromium for URL capture (ADR-0029) |
+| `re2` | Linear-time regex engine, guards catastrophic backtracking |
+| `spacy` | Optional NER fallback |
+
+Playwright and its Chromium install with `make install-capture`, and its system libraries require root via `sudo python -m playwright install-deps chromium` — otherwise `/api/ingest/url` responds 503.
 
 ### Frontend key packages
 
@@ -1462,8 +1643,6 @@ Schema migrations run automatically on startup (`ALTER TABLE` wrapped in try/exc
 | `lucide-react` | Icon library |
 | `react-markdown` + `remark-gfm` | Markdown preview (VS Code-like) |
 | `vite` + TypeScript | Build toolchain |
-
----
 
 ## Setup script
 

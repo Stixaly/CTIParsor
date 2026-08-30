@@ -64,6 +64,12 @@ cd frontend && npx tsc --noEmit   # frontend type-check
     measured 8.2s to read one integer for 10,372 rules, versus ~0.1s from a side
     table. Put per-rule scalars in their own table keyed by `rule_id`, as
     `rule_atoms`, `rule_techniques`, `rule_related` and `rule_bytes` do (ADR-0022).
+- **Output-affecting fixes get listed.** If a change makes Stage 4/5 emit
+  different objects for the same input, append its commit to the
+  bundle-affecting list read by `scripts/audit_bundle_invariants.py` (ADR-0035).
+  Stored bundles are not rebuilt automatically, so without that line a fixed
+  defect keeps riding in every artefact built before it — which is exactly how
+  six self-edges outlived their fix.
 - **Line length** is 120 (ruff). Keep imports sorted (`ruff --fix` handles `I001`).
 - **Commits** — branch off `main`; keep a change + its tests + doc update together.
 

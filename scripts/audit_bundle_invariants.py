@@ -10,6 +10,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+# The staleness section imports from `pipeline`, so the repo root has to be
+# importable however the script was invoked.
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
 # STIX 2.1 common relationship types, plus the ones this pipeline
 # emits.  Anything outside this set is not necessarily wrong -- STIX
 # allows custom types -- but it should be a deliberate choice, so it
@@ -611,6 +617,28 @@ def run_all(bundles: list[tuple[str, dict]]) -> list[Finding]:
     return [c(bundles) for c in checks]
 
 
+def _report_staleness(db_path: Path) -> None:
+    """Print which stored bundles predate a known output-affecting fix (ADR-0035)."""
+    from pipeline.bundle_revisions import audit_staleness
+
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        rows = audit_staleness(conn)
+    finally:
+        conn.close()
+
+    stale = [r for r in rows if r["stale"]]
+    unknown = [r for r in rows if r["unknown"]]
+
+    print()
+    print(f"bundle staleness (ADR-0035): {len(stale)} stale, {len(unknown)} without a recorded revision")
+    for r in stale:
+        fixes = ", ".join(e[0] for e in r["stale"])
+        print(f"  {r['job_id'][:8]}  built at {(r['git_rev'] or '')[:9]}  predates {fixes}")
+    if stale:
+        print("  rebuild with POST /api/jobs/{id}/finalize — Stages 4-5 only, no LLM call")
+
+
 def main(argv: list[str] | None = None) -> int:
     """Main entry point for the audit script."""
     parser = argparse.ArgumentParser(description="Audit STIX bundle invariants")
@@ -655,6 +683,12 @@ def main(argv: list[str] | None = None) -> int:
             f"{job_id:<8}  objects={stats['objects']}  rels={stats['rels']}  "
             f"indicators={stats['indicators']}  problems={problems}"
         )
+
+    # Staleness is reported, never repaired, and is deliberately NOT an
+    # invariant: a bundle built by an older pipeline is not malformed, it is
+    # awaiting a rebuild.  Counting it as a FAIL would make the exit code
+    # useless — every bundle is stale the moment a fix lands (ADR-0035).
+    _report_staleness(db_path)
 
     ok = sum(1 for f in findings if f.status == "OK")
     fail = sum(1 for f in findings if f.status == "FAIL")

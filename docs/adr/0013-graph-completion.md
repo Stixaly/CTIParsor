@@ -16,9 +16,9 @@ is high — and it is also why the graph is **sparse**:
   sentence get no edge.
 - Aliasing fragments the graph: "APT29", "Cozy Bear", and "the group" become
   separate nodes, so every verified edge attached to one alias is invisible to
-  the others. The [grounding baseline](../../memory) notes the residual ~12.5%
-  relationship error is *mostly coreference/alias, not invented facts* — the same
-  root cause as the sparsity.
+  the others. The grounding baseline (`tests/eval_pipeline.py -b grounding`)
+  measures the residual relationship error at ~12.5%, and it is *mostly
+  coreference/alias, not invented facts* — the same root cause as the sparsity.
 
 Loosening the extraction gate to add edges would directly cost accuracy. The CTI
 KG literature (CTINexus, arXiv:2410.21060; edge-propagation link prediction,
