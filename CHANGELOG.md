@@ -7,6 +7,36 @@ sections group by theme rather than strict semver.
 ## [Unreleased]
 
 ### Added
+
+- **A stored bundle now says which pipeline built it, and the audit says when
+  that is stale** (ADR-0035). The self-edge fix shipped on 2026-08-28, yet six
+  `source_ref == target_ref` relationships still ride in two delivered bundles,
+  because a bundle is never rebuilt on its own. `jobs.run_config_json` already
+  recorded the `git_rev` of every run and nothing read it;
+  `pipeline/bundle_revisions.py` now compares it against a hand-kept list of
+  output-affecting revisions, and `scripts/audit_bundle_invariants.py` reports
+  the result. All 13 stored bundles are flagged, across 5 distinct revisions.
+
+  Reported, never repaired automatically — a delivered artefact must not mutate
+  under an analyst who cited it. The repair is the existing
+  `POST /api/jobs/{id}/finalize`, which re-runs Stages 4–5 from the accepted
+  entities at **zero LLM cost**. Comparing against `HEAD` was rejected: it marks
+  every frontend commit as invalidating and so never returns to green.
+
+- **`VISION_CONCURRENCY`** — how many figure reads Stage 1f keeps in flight.
+  Ollama sits at 1 against 4 for the API backends. ADR-0033 §5 put it there
+  because the single GPU is also the delegation target the workflow depends on;
+  measurement now supplies an independent second reason and the value stays:
+  raising it to 4 did overlap the work (per-call times summing to 1392.7s inside
+  737s of wall clock, **1.89x**) but inflated each call from ~43s to ~127s, so
+  throughput per figure got *worse* — 40.9s against 36.3s. A figure read ships a
+  600–2400 token image and generates hundreds of tokens back, so four in flight
+  contend for memory bandwidth rather than filling an idle pipe. The override
+  exists for hosted endpoints, where the arithmetic differs.
+
+- **`scripts/measure_figure_iocs.py`** — read-only harness asking whether the
+  vision model's `iocs` are grounded in its own `verbatim_text`.
+
 - **Figures in CTI reports can be read, not just skipped** (ADR-0032, ADR-0033).
   A geometric triage keeps the 141 real figures out of 341 images across the
   corpus — **56.9% are icons and logos, discarded before any model is involved** —
@@ -68,6 +98,46 @@ sections group by theme rather than strict semver.
   construction.
 
 ### Fixed
+
+#### The frontend builds from Linux again, 2026-08-30
+
+`frontend/node_modules` had been installed from Windows, leaving
+`@rollup/rollup-win32-*` plus `.bin` shims that `exec node.exe`, so
+`npm run build` under WSL died with `exec: node.exe: not found`. The error reads
+like a PATH problem and is not: the shim's fallback tests `[ -x node ]`, a
+*file* test on a bare name that never consults PATH, so it falls through to
+`node.exe` and fails.
+
+Reinstalled with `npm ci` from WSL — Linux is the deployment target `setup.sh`
+supports, and the two platforms cannot share one `node_modules`. `npm run build`
+(tsc + vite, 33s) and `npm test` (9 files, 69 tests) are both green from WSL.
+
+#### `iocs` is a cross-check, not an extraction path (ADR-0032 amendment)
+
+§3 of ADR-0032 described the vision model as returning "observables", which
+reads as though they were extracted; `render_block` never injected them.
+Measured over two production runs — the first time Stage 1f ran through
+`read_figures` at all — **63 of 64** listed IoCs were already in the
+transcription, so injecting the list buys almost no recall.
+
+The one that was not is a phishing URL the model transcribed twice and garbled
+differently each time (`accounts.gooq e.com/A3/signin/?de=ntifier?...`), so
+injecting it would have added a domain that does not exist to the bundle as an
+Indicator, with no stage able to catch it. The same amendment corrects its
+predecessor: `render_block` *does* call `render_edges`, so diagram arrows have
+reached STIX since `a390bae`.
+
+#### Documentation caught up with the code, 2026-08-30
+
+Stage 1f was wired into `api/worker.py` and absent from the README, which
+mentioned "figure", "vision" and "VLM" zero times. Also added: six undocumented
+REST endpoints, three missing tables and five missing columns in the schema,
+seven undocumented dependencies including the `requirements-optional.txt` that
+carries Playwright for the URL capture the README already documented, and a test
+count stale by a factor of 1.8 (571 → 1047 across 64 modules). `pytest.ini`
+gained `testpaths = tests`, so a bare `pytest` no longer collects 14 tests
+vendored under `corpora/sigmahq/`.
+
 
 #### Duplicated logic folded into shared helpers, 2026-08-29
 

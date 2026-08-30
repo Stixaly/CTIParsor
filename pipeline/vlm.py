@@ -435,6 +435,43 @@ def _assume_capable() -> bool:
     )
 
 
+def _ollama_concurrency() -> int:
+    """How many figure reads to keep in flight against Ollama.
+
+    Stays at 1 where `anthropic` and `mistral` run 4. ADR-0033 §5 set it there
+    because the single GPU is also the delegation target the project's workflow
+    depends on; the numbers below are the independent second reason, measured
+    rather than assumed. On the reference station (27B Q4 on a DGX GB10),
+    raising it to 4 did overlap the work — the per-call times summed to 1392.7s
+    inside 737s of wall clock, so 1.89x of real concurrency — but each call
+    inflated from ~43s to ~127s, and throughput per figure came out slightly
+    WORSE: 40.9s against 36.3s sequential.
+
+    A synthetic benchmark says the opposite (2.34x on two 120-token text
+    generations) and is worth distrusting: a figure read ships a 600-2400 token
+    image and generates hundreds of tokens back, so four in flight contend for
+    memory bandwidth rather than filling an idle pipe. The station is
+    bandwidth-bound on this workload, not latency-bound.
+
+    Kept configurable because the right number is a property of the server, not
+    of this client — a hosted endpoint or a multi-GPU host will want more.
+    Beyond its own `OLLAMA_NUM_PARALLEL`, Ollama queues, and a queued request
+    still burns `VISION_TIMEOUT_S`.
+    """
+    raw = os.environ.get("VISION_CONCURRENCY", "").strip()
+    if not raw:
+        return 1
+    try:
+        n = int(raw)
+    except ValueError:
+        logger.warning("VISION_CONCURRENCY=%r is not an integer — using 1", raw)
+        return 1
+    if n < 1:
+        logger.warning("VISION_CONCURRENCY=%d is below 1 — using 1", n)
+        return 1
+    return n
+
+
 def get_backend() -> VisionBackend | None:
     """Get or create the configured vision backend."""
     global _backend_cache
@@ -475,7 +512,7 @@ def get_backend() -> VisionBackend | None:
         base = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
         backend = OpenAICompatVisionBackend(
             "ollama", f"{base}/v1", model,
-            api_key="ollama", timeout=timeout, max_concurrency=1,
+            api_key="ollama", timeout=timeout, max_concurrency=_ollama_concurrency(),
         )
     else: # mistral
         api_key = os.environ.get("MISTRAL_API_KEY", "")

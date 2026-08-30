@@ -10,6 +10,7 @@ from pipeline.vlm import (
     PROMPT,
     FigureEdge,
     OpenAICompatVisionBackend,
+    _ollama_concurrency,
     _parse_payload,
     _to_read,
     get_backend,
@@ -110,7 +111,37 @@ def test_get_backend_accepts_ollama_model_with_vision_capability(monkeypatch):
     b = get_backend()
     assert b is not None
     assert b.name == "ollama"
+    # Stays 1 where anthropic and mistral run 4. ADR-0033 §5 set it there (one
+    # GPU, shared with the delegation workflow); measurement agrees separately:
+    # raising it to 4 on the reference station overlapped the work (1.89x) but
+    # inflated each call from ~43s to ~127s, so throughput per figure got WORSE
+    # (40.9s against 36.3s). The station is bandwidth-bound on this workload.
     assert b.max_concurrency == 1
+
+
+def test_ollama_concurrency_is_configurable(monkeypatch):
+    """The right value is a property of the server, so it has to be overridable."""
+    monkeypatch.setenv("VISION_PROVIDER", "ollama")
+    monkeypatch.setenv("VISION_MODEL", "qwen3.8")
+    monkeypatch.setenv("VISION_CONCURRENCY", "4")
+
+    def fake_get(url, headers, timeout):
+        return {"models": [{"name": "qwen3.8:latest", "capabilities": ["completion", "vision"]}]}
+
+    monkeypatch.setattr("pipeline.vlm._http_get_json", fake_get)
+    reset_backend_cache()
+    b = get_backend()
+    assert b is not None
+    assert b.max_concurrency == 4
+
+
+def test_ollama_concurrency_rejects_nonsense(monkeypatch):
+    """A bad value must fall back, never crash the stage or yield 0 workers."""
+    monkeypatch.setenv("VISION_CONCURRENCY", "abc")
+    assert _ollama_concurrency() == 1
+    monkeypatch.setenv("VISION_CONCURRENCY", "0")
+    assert _ollama_concurrency() == 1
+
 
 def test_openai_compat_read_figure_returns_unread_on_http_error(monkeypatch):
     b = OpenAICompatVisionBackend("ollama", "http://x/v1", "qwen3.8", api_key="ollama")
