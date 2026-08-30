@@ -425,8 +425,13 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
                     read_figures,
                 )
                 try:
+                    # The head of the report is the Global-Context of
+                    # MM-AttacKG's ablation: title and opening paragraphs are
+                    # what tell a model which campaign a bare hostname on a
+                    # screenshot belongs to. Already refanged, like the rest.
                     _reads = read_figures(
-                        str(_figure_pdf), _vision, cache=SqliteReadCache()
+                        str(_figure_pdf), _vision, cache=SqliteReadCache(),
+                        global_context=text[:2000],
                     )
                     _reads = map_verbatim(_reads, refang)
                     text, figure_spans = inject_append(text, _reads)

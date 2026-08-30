@@ -10,7 +10,7 @@ from typing import Callable, Protocol
 
 import pdfplumber
 
-from pipeline.vlm import PROMPT_VERSION, FigureRead, VisionBackend
+from pipeline.vlm import PROMPT_VERSION, FigureRead, VisionBackend, prompt_with_context
 
 logger = logging.getLogger(__name__)
 
@@ -89,15 +89,17 @@ class FigureSpan:
 class ReadCache(Protocol):
     """Persistence for figure reads, keyed on the crop bytes.
 
-    Keyed on (sha256, model, prompt_version) rather than on the figure's
-    position: re-ingesting the same report, or A/B-ing two models, must not
-    pay for the same crop twice, and a stored read must never be served
-    against a contract it did not answer.
+    Keyed on (sha256, model, prompt_version, context_sha) rather than on the
+    figure's position: re-ingesting the same report, or A/B-ing two models, must
+    not pay for the same crop twice, and a stored read must never be served
+    against a contract it did not answer. `context_sha` extends that last point
+    to the surrounding text now carried in the prompt — the same crop read under
+    a different page's context is a different answer.
     """
-    def get(self, sha256: str, model: str,
-            prompt_version: int) -> FigureRead | None: ...
+    def get(self, sha256: str, model: str, prompt_version: int,
+            context_sha: str = "") -> FigureRead | None: ...
     def put(self, sha256: str, model: str, prompt_version: int,
-            read: FigureRead) -> None: ...
+            read: FigureRead, context_sha: str = "") -> None: ...
 
 
 def find_figures(pdf_path: Path | str) -> list[FigureCandidate]:
@@ -200,9 +202,54 @@ def render_crop(pdf_path: Path | str, cand: FigureCandidate,
         return buf.getvalue()
 
 
+#: How far above and below a figure to read for its context, in points.  Roughly
+#: a third of an A4 height: enough for a caption and the paragraph that
+#: introduces the figure, not so much that a second figure's prose bleeds in.
+CONTEXT_MARGIN_PT = 250.0
+
+
+def _context_bands(pdf_path: Path | str,
+                   candidates: list[FigureCandidate]) -> dict[int, str]:
+    """Text surrounding each candidate, keyed by its index in `candidates`.
+
+    A band around the figure, NOT the whole page.  Measured on a stored web
+    capture: page 1 holds 18 371 characters and 18 figures, so page-level text
+    hands every one of them the site's navigation menu instead of the prose that
+    introduces it.  Cropping to a band is what makes this Image-Aware-Context
+    rather than page-aware noise.
+
+    For prompt construction only.  Never returned to the caller, never injected
+    into `report_text` — failing to read it degrades the prompt and must not
+    cost the figure.
+    """
+    out: dict[int, str] = {}
+    if not candidates:
+        return out
+    by_page: dict[int, list[int]] = {}
+    for i, cand in enumerate(candidates):
+        by_page.setdefault(cand.page, []).append(i)
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            for page_idx, page in enumerate(pdf.pages, start=1):
+                for i in by_page.get(page_idx, []):
+                    _, top, _, bottom = candidates[i].bbox
+                    band = (0.0,
+                            max(0.0, top - CONTEXT_MARGIN_PT),
+                            float(page.width),
+                            min(float(page.height), bottom + CONTEXT_MARGIN_PT))
+                    try:
+                        out[i] = page.crop(band).extract_text() or ""
+                    except Exception:
+                        out[i] = ""
+    except Exception as exc:
+        logger.warning("Page text unavailable, reading figures without context: %s", exc)
+    return out
+
+
 def read_figures(pdf_path: Path | str, backend: VisionBackend,
                  max_figures: int = 40, dpi: int = RENDER_DPI,
                  cache: ReadCache | None = None,
+                 global_context: str = "",
                  ) -> list[tuple[FigureCandidate, FigureRead, str]]:
     """Read figures from a PDF using a vision backend."""
     candidates = find_figures(pdf_path)
@@ -210,8 +257,15 @@ def read_figures(pdf_path: Path | str, backend: VisionBackend,
         logger.warning("Truncating %d figures to %d", len(candidates), max_figures)
         candidates = candidates[:max_figures]
 
+    # Page text feeds the PROMPT and nothing else.  `inject_append` explains why
+    # pdfplumber text is not the ingestion source — it costs 18.2% of the
+    # characters on this corpus, hashes first.  Reading it as a context hint
+    # trades none of that: `report_text` still comes from markitdown.
+    context_band = _context_bands(pdf_path, candidates)
+
     results: list[tuple[FigureCandidate, FigureRead, str]] = []
-    pending: list[tuple[int, FigureCandidate, bytes, str]] = []
+    # (idx, candidate, png, crop sha, prompt, context sha)
+    pending: list[tuple[int, FigureCandidate, bytes, str, str, str]] = []
 
     for idx, cand in enumerate(candidates):
         try:
@@ -232,25 +286,31 @@ def read_figures(pdf_path: Path | str, backend: VisionBackend,
             results.append((cand, read, ""))
             continue
 
+        prompt = prompt_with_context(context_band.get(idx, ""), global_context)
+        # Hashed from the effective prompt, so a read cached under one page's
+        # context is never served for another's.  The crop sha stays untouched:
+        # it is the figure's identity, not a cache detail.
+        context_sha = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+
         if cache is not None:
-            cached = cache.get(sha256, backend.model, PROMPT_VERSION)
+            cached = cache.get(sha256, backend.model, PROMPT_VERSION, context_sha)
             if cached is not None:
                 results.append((cand, cached, sha256))
                 continue
 
-        pending.append((idx, cand, png, sha256))
+        pending.append((idx, cand, png, sha256, prompt, context_sha))
 
     if pending:
         with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, backend.max_concurrency)) as executor:
             futures = {
-                # Submit with one argument so the backend's own default prompt
-                # applies.  Passing None here sent a null where the API wants a
-                # string and every read came back 400.
-                executor.submit(backend.read_figure, png): (idx, cand, sha256)
-                for idx, cand, png, sha256 in pending
+                # `prompt_with_context` always returns a string — PROMPT itself
+                # when there is no context.  Never pass None here: a null where
+                # the API wants a string made every read come back 400.
+                executor.submit(backend.read_figure, png, prompt): (idx, cand, sha256, context_sha)
+                for idx, cand, png, sha256, prompt, context_sha in pending
             }
             for future in concurrent.futures.as_completed(futures):
-                idx, cand, sha256 = futures[future]
+                idx, cand, sha256, context_sha = futures[future]
                 try:
                     read = future.result()
                 except Exception as e:
@@ -267,7 +327,7 @@ def read_figures(pdf_path: Path | str, backend: VisionBackend,
                     )
 
                 if cache is not None and read.kind != "unread":
-                    cache.put(sha256, backend.model, PROMPT_VERSION, read)
+                    cache.put(sha256, backend.model, PROMPT_VERSION, read, context_sha)
 
                 results.append((cand, read, sha256))
 

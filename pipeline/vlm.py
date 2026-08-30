@@ -56,7 +56,8 @@ FIGURE_KINDS: frozenset[str] = frozenset(
 
 # Bumped whenever PROMPT or FIGURE_SCHEMA changes; part of the read cache key so
 # a stored read is never served against a contract it did not answer.
-PROMPT_VERSION = 1
+# 2: the prompt may now carry surrounding document text (see prompt_with_context).
+PROMPT_VERSION = 2
 
 PROMPT = """You are reading one figure cropped from a cyber threat intelligence report.
 
@@ -73,6 +74,49 @@ Transcribe what the image shows. Do not interpret, summarise or explain.
 
 If the image carries no figure - a logo, a page header or footer, boilerplate,
 a decorative banner - return figure_kind "none" or "logo" with empty lists."""
+
+#: How much surrounding text the prompt may carry. Bounded because input tokens
+#: are cheap next to generation here (~9.7 output tok/s measured) but not free.
+_MAX_PAGE_CONTEXT = 1200
+_MAX_GLOBAL_CONTEXT = 600
+
+
+def prompt_with_context(page_text: str = "", global_context: str = "") -> str:
+    """Return PROMPT, optionally followed by surrounding document text.
+
+    MM-AttacKG's ablation (arXiv:2506.16968, Table 3) measures this: removing
+    both context sources drops entity extraction F1 from 0.7716 to 0.7022. It
+    costs two strings in the prompt and no extra call.
+
+    With neither argument the result is `PROMPT` byte-for-byte, so a caller that
+    passes nothing gets exactly today's behaviour.
+
+    The warning block is the load-bearing part. Handing the model page text
+    invites it to transcribe that text as though it had been read off the image,
+    which would inject report prose back into `report_text` a second time,
+    wearing a figure block's clothes.
+    """
+    page_text = page_text.strip()
+    global_context = global_context.strip()
+    if not page_text and not global_context:
+        return PROMPT
+
+    def _clip(s: str, n: int) -> str:
+        return s if len(s) <= n else s[:n] + " […]"
+
+    parts = [
+        PROMPT,
+        "\n\n--- CONTEXT, FOR DISAMBIGUATION ONLY ---\n"
+        "The text below surrounds the figure in the source document. It is NOT\n"
+        "visible in the image. NEVER copy it into verbatim_text, iocs or edges.\n"
+        "Use it only to resolve what an abbreviation, a truncated label or an\n"
+        "ambiguous icon in the image refers to.\n",
+    ]
+    if page_text:
+        parts.append(f"\n[PAGE]\n{_clip(page_text, _MAX_PAGE_CONTEXT)}\n[/PAGE]\n")
+    if global_context:
+        parts.append(f"\n[REPORT]\n{_clip(global_context, _MAX_GLOBAL_CONTEXT)}\n[/REPORT]\n")
+    return "".join(parts)
 
 # Vision model defaults per provider.  `mistral` has NO default on purpose: the
 # vision-capable model names were not verified against a live account, and an

@@ -123,7 +123,7 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 
 ---
 
-## 3. Current coverage map (1047 tests, 64 modules)
+## 3. Current coverage map (1059 tests, 65 modules)
 
 `make test` executes `pytest tests/`. The counts below come from
 `pytest --collect-only` and therefore include `parametrize` expansion. A bare
@@ -140,6 +140,7 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 | **Figures** | `test_figure_store.py` | 12 | JSON round-trip, cache management, span loading |
 | **Figures** | `test_figure_reading_order.py` | 5 | reading order, page ordering, span delimitation |
 | **Figures** | `test_vlm.py` | 18 | payload parsing, backend selection, figure reading, `VISION_CONCURRENCY` parsing and override |
+| **Figures** | `test_figure_context.py` | 12 | prompt context blocks, the ban on copying context into `verbatim_text`, per-figure bands, cache-key separation |
 | Extraction | `test_stage2.py` | 75 | IoC extraction, refang/defang, hash recovery, filename handling |
 | NER | `test_stage2d_cyner.py` | 4 | CyNER label mapping, entity extraction, model fallback |
 | NER | `test_stage_registry.py` | 4 | registry merging, deduplication, case insensitivity |
