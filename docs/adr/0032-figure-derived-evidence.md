@@ -648,3 +648,70 @@ and the short-prompt benchmark measured the wrong thing.
 
 The default stays 1, now for a recorded reason, and becomes overridable through
 `VISION_CONCURRENCY` for hosts where the arithmetic differs.
+
+## Amendment (2026-08-30, second) — the figure gets its surrounding text
+
+MM-AttacKG's ablation (arXiv:2506.16968, Table 3) isolates what the prompt's
+context is worth. Removing both of its context sources costs:
+
+| | Entity F1 |
+|---|---|
+| full | 0.7716 |
+| without Global-Context | 0.7106 |
+| without Image-Aware-Context | 0.7221 |
+| **without both** | **0.7022** |
+
+About seven points, for two strings in the prompt and no extra call. Stage 1f
+sent the crop with a fixed prompt and nothing else, so it was giving that up.
+
+`prompt_with_context` now appends two blocks, and `read_figures` takes a
+`global_context`. With neither, it returns `PROMPT` byte-for-byte: a caller that
+passes nothing gets exactly the previous behaviour.
+
+### The context is a band around the figure, not its page
+
+The first implementation read the whole page, and real data refused it. On the
+stored capture `aff898bc`, page 1 holds **18 371 characters and 18 figures**, so
+every figure was handed the same first 1 200 characters — the site's navigation
+menu — and none received the prose that introduces it.
+
+Cropping to a band of ±250 pt around the figure's bbox fixes it:
+
+| | whole page | band |
+|---|---|---|
+| distinct contexts across 18 figures | 1 | **18** |
+| median context length | 1 200 (truncated) | 851 chars |
+
+The band is also what makes the 1 200-character cap almost never fire: measured
+medians are 851 and 715 characters on the two reports.
+
+`test_two_figures_on_one_page_get_different_context` locks it; reverting to a
+page-wide band fails it.
+
+### What this costs, and the one risk it creates
+
+The prompt grows from 837 to ~2 432 characters, roughly +400 input tokens.
+Latency here is dominated by generation (~9.7 output tok/s measured), so the
+input growth should be minor — that is an expectation, not a measurement.
+
+The real risk is not cost. Handing the model page text invites it to transcribe
+that text as though it had read it off the image, which would push report prose
+back into `report_text` a second time wearing a figure block's clothes. The
+context block therefore opens with an explicit prohibition naming
+`verbatim_text`, `iocs` and `edges`, and
+`test_context_block_forbids_copying_into_verbatim_text` keeps it there.
+
+### Cache
+
+`PROMPT_VERSION` goes to 2, so the 47 reads cached against the context-free
+prompt are not served against a contract they did not answer.
+
+The key gains a `context_sha` term, folded in by `figure_store._cache_key`. It
+had to: the same crop read under two different bands is two different answers,
+and the old key could not tell them apart. `report_figures.sha256` keeps holding
+the crop hash alone — that is the figure's identity, not a cache detail. An
+empty `context_sha` reproduces the old key exactly.
+
+This does weaken the cross-report reuse claimed in the 2026-08-30 amendment
+above: the same figure appearing in two reports now has two contexts, so it is
+read twice. Re-running one report still costs nothing.

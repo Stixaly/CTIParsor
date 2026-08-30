@@ -1,6 +1,7 @@
 # pipeline/figure_store.py
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import sqlite3
@@ -115,13 +116,28 @@ def read_from_json(raw: str) -> FigureRead | None:
         return None
 
 
+def _cache_key(sha256: str, context_sha: str) -> str:
+    """The cache key for one crop read under one prompt context.
+
+    Two reads of the SAME crop under different surrounding text are different
+    answers, so the context has to discriminate them. It cannot simply replace
+    the crop hash: `report_figures.sha256` is the figure's identity and must stay
+    the crop alone. An empty context reproduces the old key exactly.
+    """
+    if not context_sha:
+        return sha256
+    return hashlib.sha256((sha256 + ":" + context_sha).encode("utf-8")).hexdigest()
+
+
 class SqliteReadCache:
     """ReadCache backed by the `figure_reads` table."""
 
-    def get(self, sha256: str, model: str, prompt_version: int) -> FigureRead | None:
+    def get(self, sha256: str, model: str, prompt_version: int,
+            context_sha: str = "") -> FigureRead | None:
         """Retrieve a cached FigureRead."""
         if not sha256:
             return None
+        sha256 = _cache_key(sha256, context_sha)
         try:
             with get_conn() as conn:
                 cur = conn.execute(
@@ -136,10 +152,12 @@ class SqliteReadCache:
             logger.warning("Failed to get from cache", exc_info=True)
             return None
 
-    def put(self, sha256: str, model: str, prompt_version: int, read: FigureRead) -> None:
+    def put(self, sha256: str, model: str, prompt_version: int, read: FigureRead,
+            context_sha: str = "") -> None:
         """Store a FigureRead in the cache."""
         if not sha256 or read.kind == "unread":
             return
+        sha256 = _cache_key(sha256, context_sha)
         try:
             with get_conn() as conn:
                 conn.execute(

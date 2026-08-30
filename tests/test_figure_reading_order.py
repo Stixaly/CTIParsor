@@ -10,7 +10,7 @@ from pipeline.stage1f_figures import (
     inject_append,
     read_figures,
 )
-from pipeline.vlm import FigureRead
+from pipeline.vlm import PROMPT, FigureRead
 
 
 def _read(kind: str = "network-diagram", *lines: str) -> FigureRead:
@@ -36,7 +36,11 @@ class _Backend:
     def __init__(self, answers: dict[bytes, FigureRead]) -> None:
         self.answers = answers
 
-    def read_figure(self, png: bytes) -> FigureRead:
+    def read_figure(self, png: bytes, prompt: str = PROMPT) -> FigureRead:
+        # Mirrors the real signature. Accepting only `png` made read_figures'
+        # call raise, and the raise was swallowed into an `unread` result — the
+        # test then failed on the content rather than on the arity.
+        assert isinstance(prompt, str) and prompt, "prompt must be a non-empty str"
         return self.answers[png]
 
 
@@ -46,10 +50,12 @@ class _Cache:
     def __init__(self, hits: dict[str, FigureRead]) -> None:
         self.hits = hits
 
-    def get(self, sha256, model, prompt_version):
+    # `context_sha` defaults to "" so this double keys on the crop alone, which
+    # is what these ordering tests are about; the real cache folds it in.
+    def get(self, sha256, model, prompt_version, context_sha=""):
         return self.hits.get(sha256)
 
-    def put(self, sha256, model, prompt_version, read):
+    def put(self, sha256, model, prompt_version, read, context_sha=""):
         pass
 
 

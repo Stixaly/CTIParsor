@@ -16,7 +16,7 @@ from pipeline.stage1f_figures import (
     render_block,
     render_edges,
 )
-from pipeline.vlm import PROMPT, FigureEdge, FigureRead
+from pipeline.vlm import PROMPT, PROMPT_VERSION, FigureEdge, FigureRead
 
 
 def _read(kind: str = "screenshot", text: list[str] | None = None,
@@ -65,10 +65,13 @@ class _Cache:
         self.store = dict(seed or {})
         self.puts: list[tuple[str, str, int, FigureRead]] = []
 
-    def get(self, sha: str, model: str, pv: int) -> FigureRead | None:
+    # `context_sha` defaults to "" so these fixtures keep keying on the crop
+    # alone, which is what they are about; the real cache folds it in.
+    def get(self, sha: str, model: str, pv: int, context_sha: str = "") -> FigureRead | None:
         return self.store.get((sha, model, pv))
 
-    def put(self, sha: str, model: str, pv: int, read: FigureRead) -> None:
+    def put(self, sha: str, model: str, pv: int, read: FigureRead,
+            context_sha: str = "") -> None:
         self.puts.append((sha, model, pv, read))
 
 
@@ -177,7 +180,7 @@ def test_read_figures_serves_a_cached_read_without_calling_the_backend(
     png = b"png-1"
     sha = hashlib.sha256(png).hexdigest()
     cached_read = _read(kind="screenshot")
-    cache = _Cache(seed={(sha, "m", 1): cached_read})
+    cache = _Cache(seed={(sha, "m", PROMPT_VERSION): cached_read})
     backend = _Backend([])
 
     monkeypatch.setattr("pipeline.stage1f_figures.find_figures", lambda p: [cand])
