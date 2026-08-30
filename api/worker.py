@@ -792,6 +792,38 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
                     "tools":   _run_tools,   "relationships": _run_rels,
                 })
 
+                # Stream what this chunk found, so the graph draws as it fills.
+                # Preview only: these nodes carry no evidence and never reach the
+                # bundle — Stage 4 rebuilds them from the accepted entities.
+                _partial_nodes: list[dict] = []
+                for _a in res.threat_actors:
+                    _partial_nodes.append({"id": _a, "type": "threat_actor", "name": _a})
+                for _m in res.malware_families:
+                    _partial_nodes.append({"id": _m, "type": "malware", "name": _m})
+                for _t in res.tools:
+                    _partial_nodes.append({"id": _t, "type": "tool", "name": _t})
+                for _ttp in res.ttps:
+                    # TTPExtracted has `technique_name`, not `name` — `.name`
+                    # raised AttributeError on every chunk that found a TTP.
+                    _partial_nodes.append(
+                        {"id": _ttp.technique_name, "type": "ttp", "name": _ttp.technique_name}
+                    )
+                for _rel in res.relationships:
+                    # An endpoint may not have been extracted as an entity of its
+                    # own; without these the link would dangle in the preview.
+                    _partial_nodes.append({"id": _rel.source_value, "type": "unknown", "name": _rel.source_value})
+                    _partial_nodes.append({"id": _rel.target_value, "type": "unknown", "name": _rel.target_value})
+
+                _partial_links = [
+                    {"source": r.source_value, "target": r.target_value, "type": r.relationship_type}
+                    for r in res.relationships
+                ]
+
+                emit_progress(job_id, "partial_graph", {
+                    "nodes": _partial_nodes,
+                    "links": _partial_links
+                })
+
         # Clean up checkpoint — only reached on clean completion
         try:
             _ckpt_path.unlink(missing_ok=True)
@@ -880,11 +912,19 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         from pipeline.stage4c_long_distance import default_long_distance_inferer
         _ld_infer = default_long_distance_inferer(_policy_s4)
 
+        # EntityType is imported per-function in this module; _run_pipeline had
+        # no binding for it, so this line raised NameError on every job.
+        from models.schemas import EntityType as _EntityType
+        from pipeline.stage2f_cve_enrichment import enrich_cves
+        cve_ids = {e.value for e in all_entities if e.entity_type == _EntityType.CVE}
+        cve_meta = enrich_cves(cve_ids) if cve_ids else {}
+
         bundle = build_stix_bundle(
             all_entities, llm_result, report_name,
             report_text=text,
             original_filename=original_filename,
             source_hash=source_hash,
+            cve_metadata=cve_meta,
             relationship_policy=_policy_s4,
             tlp_level=_tlp_level,
             pap_level=_pap_level,
@@ -1483,11 +1523,16 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
     from pipeline.stage4c_long_distance import default_long_distance_inferer
     _ld_infer_fin = default_long_distance_inferer(_policy_fin)
 
+    from pipeline.stage2f_cve_enrichment import enrich_cves
+    cve_ids_fin = {e.value for e in raw_entities if e.entity_type == EntityType.CVE}
+    cve_meta_fin = enrich_cves(cve_ids_fin) if cve_ids_fin else {}
+
     bundle = build_stix_bundle(
         raw_entities, llm_result, report_name,
         report_text=report_text,
         original_filename=original_filename,
         source_hash=source_hash,
+        cve_metadata=cve_meta_fin,
         relationship_policy=_policy_fin,
         tlp_level=job["tlp_level"],
         pap_level=job["pap_level"],

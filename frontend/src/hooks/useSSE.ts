@@ -33,8 +33,17 @@ export function useSSE(jobId: string | null) {
       es.close()
     }
 
+    const handlePartialGraph = (e: MessageEvent) => {
+      errorCountRef.current = 0
+      try {
+        const payload = JSON.parse(e.data)
+        setEvents(prev => [...prev, { _type: "partial_graph", ...payload } as any])
+      } catch { /* ignore malformed data */ }
+    }
+
     es.addEventListener('stage', handleStage)
     es.addEventListener('done', handleDone)
+    es.addEventListener('partial_graph', handlePartialGraph)
 
     // Only close and mark done after repeated consecutive errors — a single
     // error is usually a transient network blip; EventSource will auto-reconnect.
@@ -49,11 +58,13 @@ export function useSSE(jobId: string | null) {
     return () => {
       es.removeEventListener('stage', handleStage)
       es.removeEventListener('done', handleDone)
+      es.removeEventListener('partial_graph', handlePartialGraph)
       es.close()
     }
   }, [jobId])
 
   const latestStage = events.filter(e => e.stage !== undefined).slice(-1)[0]
+  const partialGraphEvents = events.filter((e: any) => e._type === 'partial_graph')
 
-  return { events, done, latestStage }
+  return { events, done, latestStage, partialGraphEvents }
 }

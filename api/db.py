@@ -381,6 +381,17 @@ def init_db() -> None:
             " read_json TEXT NOT NULL,"
             " created_at TEXT NOT NULL,"
             " PRIMARY KEY (sha256, model, prompt_version))",
+            # CVE metadata fetched from CIRCL, cached here rather than in a second
+            # SQLite file: same shape as figure_reads above — a cache of external
+            # calls, keyed on the thing fetched, outliving the job that asked.
+            # A row whose description AND cvss_score are both NULL is a remembered
+            # miss, so an unknown CVE is not re-fetched on every run.
+            "CREATE TABLE IF NOT EXISTS cve_cache ("
+            " cve_id TEXT PRIMARY KEY,"
+            " description TEXT,"
+            " cvss_score REAL,"
+            " cvss_vector TEXT,"
+            " fetched_at TEXT NOT NULL)",
         ]
         for stmt in _migrations:
             try:

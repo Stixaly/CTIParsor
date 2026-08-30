@@ -208,7 +208,7 @@ def chunk_text(text: str, max_chars: int = 3000, overlap: int = 400) -> list[str
     else:
         # Monolithic blob — character slice only
         raw = [text[i:i + max_chars] for i in range(0, len(text), max_chars)]
-        return _apply_overlap(raw, overlap)
+        return _apply_overlap(raw, overlap, separator="")
 
     chunks: list[str] = []
     current: list[str] = []
@@ -244,10 +244,10 @@ def chunk_text(text: str, max_chars: int = 3000, overlap: int = 400) -> list[str
     if current:
         chunks.append(separator.join(current))
 
-    return _apply_overlap(chunks, overlap)
+    return _apply_overlap(chunks, overlap, separator=separator)
 
 
-def _apply_overlap(chunks: list[str], overlap: int) -> list[str]:
+def _apply_overlap(chunks: list[str], overlap: int, separator: str = "\n\n") -> list[str]:
     """
     Prepends the last `overlap` characters of chunk[i] to chunk[i+1].
     Tries to break at a natural newline boundary within the overlap window.
@@ -263,5 +263,5 @@ def _apply_overlap(chunks: list[str], overlap: int) -> list[str]:
         nl = tail.find("\n")
         if nl >= 0:
             tail = tail[nl + 1:]
-        result.append((tail + "\n\n" + chunks[i]) if tail else chunks[i])
+        result.append((tail + separator + chunks[i]) if tail else chunks[i])
     return result

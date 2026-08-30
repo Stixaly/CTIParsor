@@ -121,18 +121,30 @@ def _sanitize_text_for_prompt(text: str, max_length: int = 10000) -> str:
 # Provider selection — set LLM_PROVIDER in .env
 #
 #   anthropic  (default) — Claude via Anthropic API
+#   gemini               — Google Gemini via OpenAI compatible API
 #   mistral              — Mistral AI API  (OpenAI-compatible endpoint)
 #   ollama               — Self-hosted or remote Ollama (OpenAI-compatible)
+#   lmstudio             — Self-hosted LM Studio (OpenAI-compatible)
+#   vllm                 — Self-hosted vLLM (OpenAI-compatible)
 #
 # Each provider is independently configurable via env vars (see .env.example).
 # ---------------------------------------------------------------------------
 
 _PROVIDER = os.environ.get("LLM_PROVIDER", "anthropic").lower()
 
+#: One place for the Anthropic default, because it was three and they disagreed:
+#: the call site said `claude-3-5-sonnet-latest` while the log label and
+#: .env.example both said `claude-sonnet-4-6`, so the model actually used was not
+#: the one the logs reported. 3-5-sonnet is also several generations behind.
+_DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6"
+
 # --- Lazy client initialization ---
 _anthropic_client = None
 _mistral_client = None
 _ollama_client = None
+_gemini_client = None
+_lmstudio_client = None
+_vllm_client = None
 _OPENAI_SDK_AVAILABLE = False
 
 try:
@@ -147,7 +159,7 @@ def _get_anthropic_client():
     global _anthropic_client
     if _anthropic_client is None:
         _anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-        _ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+        _ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", _DEFAULT_ANTHROPIC_MODEL)
         if _anthropic_key:
             _anthropic_client = anthropic.Anthropic(api_key=_anthropic_key)
             return _anthropic_client
@@ -181,12 +193,57 @@ def _get_ollama_client():
     return _ollama_client
 
 
+def _get_gemini_client():
+    """Lazily initialize and return Gemini client via OpenAI compat layer."""
+    global _gemini_client
+    if _gemini_client is None:
+        _gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
+        if _OPENAI_SDK_AVAILABLE and _gemini_key and _OpenAIClient is not None:
+            _gemini_client = _OpenAIClient(api_key=_gemini_key, base_url="https://generativelanguage.googleapis.com/v1beta/openai/")
+            return _gemini_client
+        return None
+    return _gemini_client
+
+
+def _get_lmstudio_client():
+    """Lazily initialize and return LM Studio client."""
+    global _lmstudio_client
+    if _lmstudio_client is None:
+        _lmstudio_base = os.environ.get("LMSTUDIO_BASE_URL", "http://localhost:1234").rstrip("/")
+        if _OPENAI_SDK_AVAILABLE and _OpenAIClient is not None:
+            _lmstudio_client = _OpenAIClient(api_key="lmstudio", base_url=f"{_lmstudio_base}/v1")
+            return _lmstudio_client
+        return None
+    return _lmstudio_client
+
+
+def _get_vllm_client():
+    """Lazily initialize and return vLLM client."""
+    global _vllm_client
+    if _vllm_client is None:
+        _vllm_base = os.environ.get("VLLM_BASE_URL", "http://localhost:8000").rstrip("/")
+        if _OPENAI_SDK_AVAILABLE and _OpenAIClient is not None:
+            _vllm_client = _OpenAIClient(api_key="vllm", base_url=f"{_vllm_base}/v1")
+            return _vllm_client
+        return None
+    return _vllm_client
+
+
 def _get_provider_diagnostics():
     """Run startup diagnostics for provider configuration."""
     if _PROVIDER == "anthropic":
         _anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
         if not _anthropic_key:
             logger.warning("LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY not set — stage 3 will be skipped.")
+    elif _PROVIDER == "gemini":
+        _gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
+        if not _OPENAI_SDK_AVAILABLE:
+            logger.warning("LLM_PROVIDER=gemini requires the 'openai' package: pip install openai")
+        elif not _gemini_key:
+            logger.warning("LLM_PROVIDER=gemini but GEMINI_API_KEY not set — stage 3 will be skipped.")
+        else:
+            _GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-pro")
+            logger.info(f"LLM_PROVIDER=gemini — model: {_GEMINI_MODEL}")
     elif _PROVIDER == "mistral":
         _mistral_key = os.environ.get("MISTRAL_API_KEY", "").strip()
         if not _OPENAI_SDK_AVAILABLE:
@@ -203,8 +260,25 @@ def _get_provider_diagnostics():
             _ollama_base = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
             _OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
             logger.info(f"LLM_PROVIDER=ollama — endpoint: {_ollama_base} — model: {_OLLAMA_MODEL}")
+    elif _PROVIDER == "lmstudio":
+        if not _OPENAI_SDK_AVAILABLE:
+            logger.warning("LLM_PROVIDER=lmstudio requires the 'openai' package: pip install openai")
+        else:
+            _lmstudio_base = os.environ.get("LMSTUDIO_BASE_URL", "http://localhost:1234").rstrip("/")
+            _LMSTUDIO_MODEL = os.environ.get("LMSTUDIO_MODEL", "lmstudio-model")
+            logger.info(f"LLM_PROVIDER=lmstudio — endpoint: {_lmstudio_base} — model: {_LMSTUDIO_MODEL}")
+    elif _PROVIDER == "vllm":
+        if not _OPENAI_SDK_AVAILABLE:
+            logger.warning("LLM_PROVIDER=vllm requires the 'openai' package: pip install openai")
+        else:
+            _vllm_base = os.environ.get("VLLM_BASE_URL", "http://localhost:8000").rstrip("/")
+            _VLLM_MODEL = os.environ.get("VLLM_MODEL", "vllm-model")
+            logger.info(f"LLM_PROVIDER=vllm — endpoint: {_vllm_base} — model: {_VLLM_MODEL}")
     else:
-        logger.warning(f"Unknown LLM_PROVIDER='{_PROVIDER}'. Valid values: anthropic | mistral | ollama")
+        logger.warning(
+            f"Unknown LLM_PROVIDER='{_PROVIDER}'. Valid values: "
+            "anthropic | gemini | mistral | ollama | lmstudio | vllm"
+        )
 
 
 # Run diagnostics at module load time (keeps existing behavior)
@@ -460,11 +534,23 @@ def _call_anthropic_impl(system: str, user: str) -> str:
         return ""
     t0 = time.monotonic()
     try:
-        _ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+        _ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", _DEFAULT_ANTHROPIC_MODEL)
+        # The system prompt is a module constant, identical on every chunk, so it
+        # is the one part of the request worth caching.  No beta header: prompt
+        # caching is GA — `anthropic-beta: prompt-caching-2024-07-31` is a 2024
+        # artefact.  Whether the cache actually fires is worth checking against
+        # `usage.cache_read_input_tokens`; the minimum cacheable prefix is
+        # model-dependent (512-4096 tokens) and _SYSTEM_PROMPT sits at ~1170.
         response = client.messages.create(
             model=_ANTHROPIC_MODEL,
             max_tokens=_MAX_OUTPUT_TOKENS,
-            system=system,
+            system=[
+                {
+                    "type": "text",
+                    "text": system,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
             messages=[{"role": "user", "content": user}],
             timeout=_LLM_TIMEOUT,
         )
@@ -575,6 +661,10 @@ def _call_llm(system: str, user: str, provider: str | None = None) -> str:
     prov = (provider or _PROVIDER).lower()
     if prov == "anthropic":
         return _call_anthropic(system, sanitized_user)
+    elif prov == "gemini":
+        client = _get_gemini_client()
+        _GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-pro")
+        return _call_openai_compatible(client, _GEMINI_MODEL, system, sanitized_user, "Gemini")
     elif prov == "mistral":
         client = _get_mistral_client()
         _MISTRAL_MODEL = os.environ.get("MISTRAL_MODEL", "mistral-small-latest")
@@ -583,6 +673,14 @@ def _call_llm(system: str, user: str, provider: str | None = None) -> str:
         client = _get_ollama_client()
         _OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
         return _call_openai_compatible(client, _OLLAMA_MODEL, system, sanitized_user, "Ollama")
+    elif prov == "lmstudio":
+        client = _get_lmstudio_client()
+        _LMSTUDIO_MODEL = os.environ.get("LMSTUDIO_MODEL", "lmstudio-model")
+        return _call_openai_compatible(client, _LMSTUDIO_MODEL, system, sanitized_user, "LMStudio")
+    elif prov == "vllm":
+        client = _get_vllm_client()
+        _VLLM_MODEL = os.environ.get("VLLM_MODEL", "vllm-model")
+        return _call_openai_compatible(client, _VLLM_MODEL, system, sanitized_user, "vLLM")
     return ""
 
 
@@ -592,10 +690,13 @@ def _provider_ready(provider: str | None = None) -> bool:
     if prov == "anthropic":
         _anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
         return bool(_anthropic_key)
+    if prov == "gemini":
+        _gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
+        return _OPENAI_SDK_AVAILABLE and bool(_gemini_key)
     if prov == "mistral":
         _mistral_key = os.environ.get("MISTRAL_API_KEY", "").strip()
         return _OPENAI_SDK_AVAILABLE and bool(_mistral_key)
-    if prov == "ollama":
+    if prov in ("ollama", "lmstudio", "vllm"):
         return _OPENAI_SDK_AVAILABLE
     return False
 
@@ -985,9 +1086,12 @@ def enrich_chunk(
         return LLMEnrichmentResult()
 
     provider_label = {
-        "anthropic": f"Anthropic/{os.environ.get('ANTHROPIC_MODEL', 'claude-sonnet-4-6')}",
+        "anthropic": f"Anthropic/{os.environ.get('ANTHROPIC_MODEL', _DEFAULT_ANTHROPIC_MODEL)}",
+        "gemini":    f"Gemini/{os.environ.get('GEMINI_MODEL', 'gemini-2.5-pro')}",
         "mistral":   f"Mistral/{os.environ.get('MISTRAL_MODEL', 'mistral-small-latest')}",
         "ollama":    f"Ollama/{os.environ.get('OLLAMA_MODEL', 'llama3.2')}",
+        "lmstudio":  f"LMStudio/{os.environ.get('LMSTUDIO_MODEL', 'lmstudio-model')}",
+        "vllm":      f"vLLM/{os.environ.get('VLLM_MODEL', 'vllm-model')}",
     }.get(_PROVIDER, _PROVIDER)
     logger.debug(f"Calling {provider_label} ({len(prompt)} prompt chars)")
 

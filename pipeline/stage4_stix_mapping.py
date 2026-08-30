@@ -312,6 +312,7 @@ def build_stix_bundle(
     report_text: str = "",
     original_filename: str = "",
     source_hash: str | None = None,
+    cve_metadata: dict[str, dict] | None = None,
     relationship_policy: dict | None = None,
     tlp_level: str | None = None,
     pap_level: str | None = None,
@@ -548,6 +549,21 @@ def build_stix_bundle(
             if key in name_to_stix:
                 continue  # same CVE from a second source — don't create duplicate SDO
             vuln_id = _make_deterministic_id(entity.value, "vulnerability", "cti")
+            # `x_cvss_*`, not `x_mitre_cvss_*`: this comes from CIRCL/NVD, and the
+            # `x_mitre_` namespace would assert a MITRE provenance the value does
+            # not have.  The vector is only emitted when present — a null custom
+            # property is worse than an absent one for a consumer.
+            kwargs: dict = {}
+            if cve_metadata and entity.value in cve_metadata:
+                meta = cve_metadata[entity.value]
+                if meta.get("description"):
+                    kwargs["description"] = meta["description"]
+                if meta.get("cvss_score") is not None:
+                    custom: dict = {"x_cvss_v3_score": meta["cvss_score"]}
+                    if meta.get("cvss_vector"):
+                        custom["x_cvss_v3_vector"] = meta["cvss_vector"]
+                    kwargs["custom_properties"] = custom
+
             obj = stix2.Vulnerability(
                 name=entity.value,
                 external_references=[
@@ -558,6 +574,7 @@ def build_stix_bundle(
                     )
                 ],
                 id=vuln_id,
+                **kwargs
             )
             stix_objects.append(obj)
             name_to_stix[key] = obj
