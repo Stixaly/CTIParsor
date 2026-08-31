@@ -541,23 +541,33 @@ if [ ! -f ".env" ]; then
         cp .env.example .env
         ok ".env created from .env.example"
     else
+        # No inline copy of the template here, deliberately.  The previous
+        # fallback duplicated a handful of keys and then drifted: it knew
+        # nothing of gemini, lmstudio, vllm, the vision stage or CVE
+        # enrichment, and disagreed with the template on OLLAMA_MODEL.  A
+        # missing .env.example means a broken checkout, so say that instead of
+        # writing a config that looks complete and is not.
+        warn ".env.example is missing — this checkout is incomplete."
+        echo -e "  ${CYAN}git checkout .env.example${NC}   (or re-clone)"
         cat > .env << 'ENVEOF'
 LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxxxxxxxxx
-ANTHROPIC_MODEL=claude-sonnet-4-6
-MISTRAL_API_KEY=
-MISTRAL_MODEL=mistral-small-latest
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.2
 ENVEOF
-        ok ".env created with defaults"
+        warn ".env created with a minimal starter — restore .env.example for the rest"
     fi
     echo ""
-    echo -e "  ${RED}ACTION REQUIRED — set your LLM API key in .env:${NC}"
+    echo -e "  ${RED}ACTION REQUIRED — set your LLM provider and key in .env:${NC}"
     echo -e "     ${CYAN}nano .env${NC}"
     echo -e "     ${YELLOW}ANTHROPIC_API_KEY=sk-ant-...${NC}   ← Anthropic (default)"
+    echo -e "     ${YELLOW}GEMINI_API_KEY=...${NC}             ← or Google Gemini"
     echo -e "     ${YELLOW}MISTRAL_API_KEY=...${NC}            ← or Mistral"
     echo -e "     ${YELLOW}LLM_PROVIDER=ollama${NC}            ← or local Ollama"
+    echo -e "     ${YELLOW}LLM_PROVIDER=lmstudio${NC}          ← or local LM Studio"
+    echo -e "     ${YELLOW}LLM_PROVIDER=vllm${NC}              ← or local vLLM"
+    echo ""
+    echo -e "  ${CYAN}Optional, both off by default:${NC}"
+    echo -e "     ${YELLOW}VISION_PROVIDER=${NC}               ← read figures (Stage 1f)"
+    echo -e "     ${YELLOW}CVE_ENRICHMENT=1${NC}               ← CVSS scores from CIRCL"
 else
     ok ".env already present"
     if grep -qE "sk-ant-xxx|xxxx" .env 2>/dev/null; then
