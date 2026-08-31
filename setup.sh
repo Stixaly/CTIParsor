@@ -112,7 +112,13 @@ _yum_install() {
         curl wget git
 }
 
-if ! command -v python3 &>/dev/null || ! python3 -m venv --help &>/dev/null; then
+# `python3 -m venv --help` is NOT the right probe: the venv module lives in the
+# stdlib, so the help text prints fine on a Debian/Ubuntu box that cannot create
+# an environment.  What Debian packages separately, in python3.X-venv, is
+# `ensurepip` — so that is what has to be tested.  Probing the help text meant
+# _apt_install never ran on a fresh Ubuntu 26.04, and setup died two steps later
+# with "ensurepip is not available".
+if ! command -v python3 &>/dev/null || ! python3 -c "import ensurepip" &>/dev/null; then
     if   command -v apt-get &>/dev/null; then _apt_install
     elif command -v dnf     &>/dev/null; then _dnf_install
     elif command -v yum     &>/dev/null; then _yum_install
@@ -123,6 +129,23 @@ if ! command -v python3 &>/dev/null || ! python3 -m venv --help &>/dev/null; the
 fi
 
 ok "python3 $(python3 --version 2>&1)"
+
+# The floor is 3.10: module-level annotations like `X | None` are evaluated at
+# import time, so 3.9 raises TypeError before anything runs.  The ceiling is not
+# enforced — a newer Python usually works — but CI pins 3.12, and a distro that
+# ships ahead of the wheel ecosystem fails later, inside `pip install`, with an
+# error that points at a package rather than at the interpreter.
+PY_MINOR=$(python3 -c 'import sys; print(sys.version_info.minor)')
+PY_TESTED=12
+if [ "$PY_MINOR" -lt 10 ]; then
+    err "Python 3.${PY_MINOR} is too old — this project needs 3.10 or newer."
+    exit 1
+elif [ "$PY_MINOR" -gt "$PY_TESTED" ]; then
+    warn "Python 3.${PY_MINOR} is newer than the 3.${PY_TESTED} CI tests against."
+    echo "       If pip fails to build a package below, that is the likely cause:"
+    echo "       a dependency without a wheel for 3.${PY_MINOR} yet. Installing"
+    echo -e "       ${CYAN}python3.${PY_TESTED}${NC} and re-running with it is the quickest way out."
+fi
 
 # ── Always ensure tesseract + poppler are installed ─────────────────────────
 # These are optional tools used by pdf2image / pytesseract for scanned PDFs.
@@ -206,6 +229,18 @@ echo ""
 hdr "[2/6]  PYTHON VIRTUAL ENVIRONMENT"
 
 if [ ! -d ".venv" ]; then
+    # Checked again here: step [1/6] only installs packages when it decides it
+    # has to, and a --no-sudo run or a failed apt can still leave ensurepip
+    # missing.  Naming the exact versioned package beats letting `venv` fail
+    # with a message that guesses at the Python version.
+    if ! python3 -c "import ensurepip" &>/dev/null; then
+        PYVENV_PKG="python3.$(python3 -c 'import sys; print(sys.version_info.minor)')-venv"
+        err "python3 cannot create a virtualenv — ensurepip is missing."
+        echo   "       Debian and Ubuntu ship it in a separate package:"
+        echo -e "         ${CYAN}sudo apt-get install -y ${PYVENV_PKG}${NC}"
+        echo   "       Then run this script again."
+        exit 1
+    fi
     info "Creating .venv…"
     python3 -m venv .venv
     ok ".venv created"
@@ -269,6 +304,26 @@ echo ""
 info "Installing API packages (requirements-api.txt)…"
 echo "  fastapi, uvicorn[standard], python-multipart, aiofiles"
 pip install -r requirements-api.txt
+echo ""
+
+# re2 backs _compile_pattern in stage2_extraction: it guarantees linear-time
+# matching, so a crafted report cannot pin a CPU on catastrophic backtracking.
+# The code falls back to the standard `re` module without it, which is why this
+# is a soft install — the wheel needs the RE2 C++ library and a toolchain, and a
+# failure here must not stop a setup that otherwise works.
+info "Installing re2 (ReDoS protection for Stage 2 regexes)…"
+if python -c "import re2" 2>/dev/null; then
+    ok "re2 already installed"
+elif pip install -q "$(grep -E '^re2' requirements-optional.txt || echo re2)" 2>/dev/null \
+     && python -c "import re2" 2>/dev/null; then
+    ok "re2 installed — Stage 2 regexes run in guaranteed linear time"
+else
+    warn "re2 not installed — Stage 2 falls back to Python's own re module."
+    echo   "       Reports are attacker-influenced text, so this leaves regex"
+    echo   "       matching open to catastrophic backtracking. To fix it:"
+    echo -e "         ${CYAN}sudo apt-get install -y libre2-dev  # or: sudo dnf install re2-devel${NC}"
+    echo -e "         ${CYAN}.venv/bin/pip install -r requirements-optional.txt${NC}"
+fi
 echo ""
 ok "All Python packages installed"
 
@@ -698,7 +753,10 @@ else
             CAPTURE_WANTED=false
         else
             info "Installing Playwright…"
-            pip install -q playwright || { warn "pip install playwright failed."; CAPTURE_WANTED=false; }
+            # Version pinned in requirements-optional.txt, not bare, so the
+            # constraint that file carries is actually honoured.
+            pip install -q "$(grep -E '^playwright' requirements-optional.txt || echo playwright)" \
+                || { warn "pip install playwright failed."; CAPTURE_WANTED=false; }
         fi
     fi
 
