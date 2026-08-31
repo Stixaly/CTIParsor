@@ -928,15 +928,54 @@ fi
 # =============================================================================
 # FRONTEND BUILD
 # =============================================================================
+FRONTEND_OK=false
 if [ "$NODE_OK" = true ]; then
     echo ""
     hdr "FRONTEND BUILD"
-    info "Installing npm dependencies (including react-markdown for .md preview)…"
-    cd frontend && npm install --silent && cd ..
-    ok "npm packages installed"
-    info "Building frontend…"
-    cd frontend && npm run build && cd ..
-    ok "Frontend built → dist/"
+    FRONTEND_OK=true
+    info "Installing npm dependencies…"
+    # npm ci over npm install: the lockfile is tracked, and ci wipes
+    # node_modules first, which is what repairs a half-installed tree.
+    if [ -f "frontend/package-lock.json" ]; then
+        NPM_CMD="npm ci"
+    else
+        NPM_CMD="npm install"
+    fi
+    # A subshell so a failure cannot leave the rest of the script in frontend/,
+    # and no && chain: `set -e` does NOT fire mid-chain, so `a && b && c` used
+    # to print "OK" and exit 0 after npm had failed.
+    if ( cd frontend && $NPM_CMD ); then
+        ok "npm packages installed ($NPM_CMD)"
+    else
+        warn "$NPM_CMD failed — the web UI will not be available."
+        echo "     Fix it, then re-run:  cd frontend && npm ci && npm run build"
+        FRONTEND_OK=false
+    fi
+    # `npm run build` runs tsc, which lives in devDependencies. Check it is
+    # really there rather than discovering "sh: 1: tsc: not found" later.
+    if [ "$FRONTEND_OK" = true ] && [ ! -x "frontend/node_modules/.bin/tsc" ]; then
+        warn "node_modules is present but TypeScript is missing."
+        echo "     devDependencies were skipped — check that NODE_ENV is not set to"
+        echo "     'production' and that npm is not configured with --omit=dev:"
+        echo "       npm config get omit ; echo \"NODE_ENV=\$NODE_ENV\""
+        FRONTEND_OK=false
+    fi
+    if [ "$FRONTEND_OK" = true ]; then
+        info "Building frontend…"
+        if ( cd frontend && npm run build ); then
+            ok "Frontend built → frontend/dist/"
+        else
+            warn "Frontend build failed — the API will serve a placeholder page."
+            echo "     Re-run:  cd frontend && npm run build"
+            FRONTEND_OK=false
+        fi
+    fi
+else
+    echo ""
+    hdr "FRONTEND BUILD"
+    warn "Skipped — Node.js 18+ was not found."
+    echo "     The API still runs, but it serves a placeholder instead of the UI."
+    echo "     After installing Node.js, run:  cd frontend && npm ci && npm run build"
 fi
 
 # =============================================================================
@@ -1027,17 +1066,19 @@ echo ""
 echo -e "  ${YELLOW}5.${NC}  Launch the web UI  ${YELLOW}(not as root)${NC}:"
 echo      "       Chromium will not render URLs as root with its sandbox on,"
 echo      "       so /api/ingest/url returns 503. Leave any sudo shell first."
-if [ "$NODE_OK" = true ]; then
-    echo "       uvicorn api.main:app --reload --app-dir ."
+if [ "$FRONTEND_OK" = true ]; then
+    echo "       python run_api.py"
     if [ "$IS_WSL" = true ] && [ "$WSL_VERSION" = "WSL2" ]; then
         echo -e "       ${GREEN}→ http://localhost:8000${NC}  (open in your Windows browser)"
     else
         echo -e "       ${GREEN}→ http://localhost:8000${NC}"
     fi
+    echo      "       To let other machines reach it, set API_HOST=0.0.0.0 in .env"
+    echo      "       and read docs/deployment.md first — there is no authentication."
 else
-    echo "       Install Node.js first (see step [1b] above), then:"
-    echo "       cd frontend && npm install && npm run build && cd .."
-    echo "       uvicorn api.main:app --reload --app-dir ."
+    echo "       The UI is not built yet. Build it, then start the server:"
+    echo "       cd frontend && npm ci && npm run build && cd .."
+    echo "       python run_api.py"
 fi
 echo ""
 echo -e "  ${YELLOW}6.${NC}  Rebuild MITRE indexes (after updating bundle files):"

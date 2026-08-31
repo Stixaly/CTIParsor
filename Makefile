@@ -103,9 +103,9 @@ run-dir:
 
 # ── Web UI ───────────────────────────────────────────────────────────────────
 
-## Install npm dependencies
+## Install npm dependencies from the lockfile (wipes node_modules first)
 frontend-install:
-	cd frontend && npm install
+	cd frontend && npm ci
 
 ## Build the React frontend (output → frontend/dist/)
 frontend-build:

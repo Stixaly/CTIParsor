@@ -21,7 +21,7 @@ the test suite mocks the LLM, so **no key is needed to develop or test**.
 
 ```bash
 python main.py input/report.pdf            # CLI
-uvicorn api.main:app --reload --app-dir .  # Web UI → http://localhost:8000
+python run_api.py                         # Web UI → http://localhost:8000
 ```
 
 ## Tests, lint, types — the green-build checklist
