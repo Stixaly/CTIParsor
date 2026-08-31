@@ -38,9 +38,18 @@ def main() -> int:
         print("[build] run scripts/sync_corpora.py first to fetch the clones.")
         return 0
 
-    summary = rebuild_store(conn, args.config)
-    for name, n in summary["written"].items():
-        print(f"[build] {name}: {n} rules")
+    # Parsing ~14,000 rule files takes minutes. Reporting each corpus as it
+    # starts turns that into visible progress instead of a silent terminal that
+    # looks hung; flush because stdout is a pipe under setup.sh.
+    def _progress(name: str, count: int | None) -> None:
+        if name == "dedup":
+            print("[build] deduplicating across corpora…", flush=True)
+        elif count is None:
+            print(f"[build] parsing {name}…", end="", flush=True)
+        else:
+            print(f" {count} rules", flush=True)
+
+    summary = rebuild_store(conn, args.config, on_progress=_progress)
     if summary["skipped"]:
         print(f"[build] skipped (missing clone / unknown adapter): {', '.join(summary['skipped'])}")
 

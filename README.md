@@ -59,9 +59,14 @@ Supported input formats: `.pdf` `.docx` `.html` `.htm` `.txt` `.md`
 # After completing CLI quick start:
 
 # Start the server (API + pre-built frontend on one port)
-uvicorn api.main:app --reload --app-dir .
+python run_api.py
 # → http://localhost:8000
 ```
+
+> **To let other machines reach it**, set `API_HOST=0.0.0.0` in `.env` and
+> restart. Read [docs/deployment.md](docs/deployment.md) first: there is no
+> authentication, so everyone who can reach the port shares one workspace.
+> Running `uvicorn` directly ignores `.env` and always binds to loopback.
 
 > **Do not run the server as root.** URL ingestion (ADR-0029) renders the page in
 > a sandboxed Chromium, and Chromium refuses to run as root with its sandbox on —
