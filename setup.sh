@@ -29,6 +29,24 @@ hdr()  { sep; echo -e "${CYAN}  $*${NC}"; sep; }
 OPT_NO_TORCH=false
 OPT_NO_MITRE=false
 OPT_NO_SPACY=false
+# Ask a yes/no question, falling back to *default* when there is no terminal.
+#
+# `read` returns non-zero at EOF, and with `set -e` that kills the whole script
+# mid-run -- everything after the prompt silently never happens. Worse, when
+# setup.sh is itself piped into bash, `read` consumes the script's NEXT LINE as
+# the answer, so the reply becomes a stray line of shell and the step is
+# skipped. Both failures are silent, which is how a fresh install ended up with
+# no detection corpora.
+ask() {
+    local __var="$1" __default="$2" __reply=""
+    if [ -t 0 ]; then
+        read -r -p "  > " __reply || __reply=""
+    else
+        echo "  >  (no terminal — using the default: ${__default})"
+    fi
+    printf -v "$__var" '%s' "${__reply:-$__default}"
+}
+
 OPT_NO_CORPORA=false
 OPT_NO_CAPTURE=false
 
@@ -411,8 +429,7 @@ else
             echo "  You can download them automatically (requires internet, ~65 MB total):"
             echo ""
             echo -e "  ${YELLOW}Download all MITRE bundles? [Y/n]${NC} "
-            read -r -p "  > " DOWNLOAD_MITRE
-            DOWNLOAD_MITRE="${DOWNLOAD_MITRE:-Y}"
+            ask DOWNLOAD_MITRE Y
 
             if [[ "$DOWNLOAD_MITRE" =~ ^[Yy] ]]; then
                 mkdir -p data
@@ -510,8 +527,7 @@ else
     echo "  (~525 MB, shallow) and ingests them into the rule store."
     echo ""
     echo -e "  ${YELLOW}Clone & ingest detection corpora now? [Y/n]${NC}"
-    read -r -p "  > " DL_CORPORA
-    DL_CORPORA="${DL_CORPORA:-Y}"
+    ask DL_CORPORA Y
 
     if [[ "$DL_CORPORA" =~ ^[Yy] ]]; then
         info "Cloning corpora (scripts/sync_corpora.py)…"
@@ -592,8 +608,7 @@ else
         ok "spaCy model already installed"
     else
         echo -e "  ${YELLOW}Download en_core_web_sm (small model, ~12 MB)? [y/N]${NC}"
-        read -r -p "  > " DL_SPACY
-        DL_SPACY="${DL_SPACY:-N}"
+        ask DL_SPACY N
 
         if [[ "$DL_SPACY" =~ ^[Yy] ]]; then
             info "Downloading en_core_web_sm…"
@@ -677,8 +692,7 @@ else
         echo ""
         echo -e "  Model: ${CYAN}${CYNER_MODEL_ID}${NC}"
         echo -e "  ${YELLOW}Download it now? [Y/n]${NC}"
-        read -r -p "  > " DL_CYNER
-        DL_CYNER="${DL_CYNER:-Y}"
+        ask DL_CYNER Y
 
         if [[ "$DL_CYNER" =~ ^[Yy] ]]; then
             info "Downloading ${CYNER_MODEL_ID} (this may take a few minutes)…"
@@ -719,8 +733,7 @@ else
         echo ""
         echo -e "  Model: ${CYAN}${GLINER_MODEL_ID}${NC}"
         echo -e "  ${YELLOW}Download it now? [Y/n]${NC}"
-        read -r -p "  > " DL_GLINER
-        DL_GLINER="${DL_GLINER:-Y}"
+        ask DL_GLINER Y
 
         if [[ "$DL_GLINER" =~ ^[Yy] ]]; then
             info "Downloading ${GLINER_MODEL_ID} (this may take a few minutes)…"
@@ -765,8 +778,7 @@ else
         ok "Playwright Python package already installed"
     else
         echo -e "  ${YELLOW}Install Playwright and a headless Chromium (~170 MB)? [Y/n]${NC}"
-        read -r -p "  > " DL_CAPTURE
-        DL_CAPTURE="${DL_CAPTURE:-Y}"
+        ask DL_CAPTURE Y
 
         if [[ "$DL_CAPTURE" =~ ^[Nn] ]]; then
             info "Skipping Playwright install. The URL tab will return a 503."
@@ -904,8 +916,7 @@ else
     echo -e "     ${CYAN}  'cti-stix-visualization-master/public/stix-icons/White/normal/SVG'${NC}"
     echo ""
     echo -e "  ${YELLOW}Attempt automatic download now? [Y/n]${NC}"
-    read -r -p "  > " DOWNLOAD_ICONS
-    DOWNLOAD_ICONS="${DOWNLOAD_ICONS:-Y}"
+    ask DOWNLOAD_ICONS Y
 
     if [[ "$DOWNLOAD_ICONS" =~ ^[Yy] ]]; then
         mkdir -p "${STIX_ICONS_DIR}"
