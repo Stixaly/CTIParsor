@@ -83,7 +83,7 @@ python run_api.py
 > **Development mode** (live reload on both sides):
 > ```bash
 > # Terminal 1 — FastAPI backend
-> uvicorn api.main:app --reload --app-dir .
+> API_RELOAD=1 python run_api.py
 >
 > # Terminal 2 — Vite frontend with HMR
 > cd frontend && npm run dev
@@ -346,7 +346,7 @@ A `Makefile` wraps the most common workflows. Requires `make` (standard on Linux
 | `make mitre` | Download MITRE bundle files + build all indexes |
 | `make build-indexes` | Build indexes from already-downloaded bundle files |
 | `make model` | Download spaCy `en_core_web_sm` model |
-| `make frontend-install` | `npm install` only (no build) |
+| `make frontend-install` | `npm ci` only (no build) |
 | `make frontend-build` | Build frontend static assets only |
 | `make test` | Run all tests |
 | `make test-fast` | Run tests without LLM calls (no API key needed) |
@@ -1700,7 +1700,7 @@ Playwright and its Chromium install with `make install-capture`, and its system 
 [5]   spaCy model      — optional en_core_web_sm (~12 MB)
 [6]   API key          — creates .env from .env.example
       STIX icons       — checks/downloads 27 official OASIS SVG icons
-      Frontend build   — npm install + npm run build
+      Frontend build   — npm ci + npm run build
       Import check     — verifies all packages importable
 ```
 
@@ -1724,7 +1724,7 @@ bash setup.sh --no-corpora # skip the detection-rule corpora clone + ingest
 | `requirements-api.txt` | Same, for API-only packages | Rarely |
 | `requirements.lock.txt` | **Machine-generated** — exact pinned versions | Never by hand — run `make lock` |
 | `frontend/package.json` | npm semver ranges (`^`) | When you want to allow a new major version |
-| `frontend/package-lock.json` | npm lock file | Never by hand — run `npm install` |
+| `frontend/package-lock.json` | npm lock file | Never by hand — run `npm install` to update it |
 
 Fresh install for production (reproducible):
 ```bash
@@ -1735,7 +1735,7 @@ cd frontend && npm ci                  # uses package-lock.json
 Fresh install for development (picks up allowed updates):
 ```bash
 pip install -r requirements.txt -r requirements-api.txt
-cd frontend && npm install
+cd frontend && npm ci
 ```
 
 ### Quarterly maintenance workflow

@@ -143,8 +143,8 @@ else:
         <h2 style="color:#f8fafc">CTI → STIX API is running ✓</h2>
         <p>Frontend not built yet. Run:</p>
         <pre style="background:#1e293b;padding:1rem;border-radius:8px;color:#7dd3fc">
-cd frontend && npm install && npm run build && cd ..
-uvicorn api.main:app --reload --app-dir .</pre>
+cd frontend && npm ci && npm run build && cd ..
+python run_api.py</pre>
         <p>API docs: <a href="/docs" style="color:#60a5fa">/docs</a></p>
         </body></html>
         """, status_code=200)
