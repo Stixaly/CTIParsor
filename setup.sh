@@ -152,9 +152,19 @@ fi
 # They are checked separately so they get installed even when python3 already
 # exists (which skips the full _apt_install above).
 _install_if_missing_apt() {
-    local pkg="$1" bin="$2" label="$3"
+    # $4 is the version flag: pdftoppm has no --version and reads it as a
+    # filename, so the "installed" line printed
+    #   poppler (pdftoppm) I/O Error: Couldn't open file '--version'
+    local pkg="$1" bin="$2" label="$3" vflag="${4:---version}"
     if command -v "$bin" &>/dev/null; then
-        ok "$label $(${bin} --version 2>&1 | head -1)"
+        local ver
+        ver=$(${bin} "$vflag" 2>&1 | head -1)
+        # Any probe can still surprise us on another distro; print the version
+        # only when it looks like one.
+        case "$ver" in
+            *[Ee]rror*|*"No such file"*|"") ok "$label available" ;;
+            *) ok "$label $ver" ;;
+        esac
     else
         info "$label not found — attempting to install ${pkg}…"
         if sudo apt-get install -y -q "$pkg" 2>/dev/null; then
@@ -173,7 +183,7 @@ _install_if_missing_dnf() {
 
 if command -v apt-get &>/dev/null; then
     _install_if_missing_apt "tesseract-ocr" "tesseract" "tesseract"
-    _install_if_missing_apt "poppler-utils" "pdftoppm"  "poppler (pdftoppm)"
+    _install_if_missing_apt "poppler-utils" "pdftoppm"  "poppler (pdftoppm)" "-v"
 elif command -v dnf &>/dev/null; then
     command -v tesseract &>/dev/null || sudo dnf install -y -q tesseract 2>/dev/null || true
     command -v pdftoppm  &>/dev/null || sudo dnf install -y -q poppler-utils 2>/dev/null || true
@@ -227,6 +237,16 @@ fi
 # =============================================================================
 echo ""
 hdr "[2/6]  PYTHON VIRTUAL ENVIRONMENT"
+
+# A directory is not a virtualenv.  A run that dies at ensurepip leaves .venv/
+# behind with an interpreter and no bin/activate; the next run then reports
+# "reusing" and falls over at `source` with a message that looks nothing like
+# the real cause.  Treat an incomplete tree as the debris it is.
+if [ -d ".venv" ] && [ ! -f ".venv/bin/activate" ]; then
+    warn ".venv exists but has no bin/activate — debris from a failed run."
+    info "Removing it and starting over…"
+    rm -rf .venv
+fi
 
 if [ ! -d ".venv" ]; then
     # Checked again here: step [1/6] only installs packages when it decides it
