@@ -68,3 +68,46 @@ def test_extract_skips_organization_and_low_confidence(monkeypatch):
 def test_extract_returns_empty_when_model_unavailable(monkeypatch):
     monkeypatch.setattr(stage2d_cyner, "_load_pipeline", lambda: None)
     assert stage2d_cyner.extract_cyner_entities("some text") == []
+
+
+# ── 4. Loader failures must not escape ──────────────────────────────────────
+
+def test_load_pipeline_returns_none_when_the_loader_raises(monkeypatch, tmp_path):
+    """A loader error must degrade to None, never propagate.
+
+    transformers 5 rejects `local_files_only` as a pipeline() keyword, and the
+    handler here only caught (OSError, EnvironmentError, ValueError).  The
+    resulting TypeError escaped _load_pipeline(), travelled out through
+    cyner_available(), and aborted every job that reached Stage 2d -- while the
+    tests above stayed green, because they all replace _load_pipeline with a
+    stub and never execute it.
+    """
+    import sys
+    import types
+
+    def _boom(*args, **kwargs):
+        raise TypeError("_sanitize_parameters() got an unexpected keyword argument 'x'")
+
+    class _Auto:
+        from_pretrained = staticmethod(_boom)
+
+    fake = types.ModuleType("transformers")
+    fake.AutoModelForTokenClassification = _Auto        # type: ignore[attr-defined]
+    fake.AutoTokenizer = _Auto                          # type: ignore[attr-defined]
+    fake.pipeline = _boom                               # type: ignore[attr-defined]
+    fake.logging = types.SimpleNamespace(set_verbosity_error=lambda: None)  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "transformers", fake)
+
+    monkeypatch.setattr(stage2d_cyner, "_SKIP_HEAVY", False)
+    monkeypatch.setattr(stage2d_cyner, "_CYNER_ENABLED", True)
+    # Point the sentinel at a path that does not exist, so the early return
+    # cannot make this pass for the wrong reason.
+    monkeypatch.setattr(stage2d_cyner, "_SENTINEL_PATH", tmp_path / "absent")
+
+    stage2d_cyner._load_pipeline.cache_clear()
+    try:
+        assert stage2d_cyner._load_pipeline() is None
+        stage2d_cyner._load_pipeline.cache_clear()
+        assert stage2d_cyner.cyner_available() is False
+    finally:
+        stage2d_cyner._load_pipeline.cache_clear()
