@@ -63,6 +63,8 @@ pipeline still produces valid STIX. ML models are downloaded once and cached.
 ## What this is NOT
 - Not a multi-user / hosted service — there is no authn/authz.
 - Not hardened for internet exposure — keep it on localhost or behind your own auth proxy.
+  `API_HOST` in `.env` controls the bind address; see [docs/deployment.md](docs/deployment.md)
+  for the three supported postures (SSH tunnel, firewalled interface, nginx + TLS + basic auth).
 - Not a malware sandbox — it parses *documents and rule text*, it never executes samples.
 
 ## Reporting a vulnerability

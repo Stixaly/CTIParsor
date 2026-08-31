@@ -1,6 +1,5 @@
 PYTHON   = .venv/bin/python
 PIP      = .venv/bin/pip
-UVICORN  = .venv/bin/uvicorn
 
 .PHONY: setup install install-api install-capture download-mitre build-indexes \
         model test test-fast run run-dir \
@@ -112,13 +111,16 @@ frontend-install:
 frontend-build:
 	cd frontend && npm run build
 
-## Production: build frontend then start API (serves UI at /app)
+## Production: build the frontend, then serve both it and the API on one port.
+## Host and port come from .env (API_HOST / API_PORT); the default 127.0.0.1
+## is local-only.  To let other machines reach it, read docs/deployment.md
+## first -- there is no authentication.
 api: frontend-build
-	$(UVICORN) api.main:app --reload --app-dir .
+	$(PYTHON) run_api.py
 
 ## Development (hot-reload API only — run 'make frontend-dev' in a second terminal)
 api-dev:
-	$(UVICORN) api.main:app --reload --app-dir .
+	API_RELOAD=1 $(PYTHON) run_api.py
 
 ## Development (hot-reload frontend — run alongside 'make api-dev')
 frontend-dev:
