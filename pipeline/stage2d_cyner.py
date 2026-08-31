@@ -121,25 +121,40 @@ def _load_pipeline():
         return None
 
     try:
+        from transformers import AutoModelForTokenClassification, AutoTokenizer, pipeline
         from transformers import logging as hf_logging
-        from transformers import pipeline
         hf_logging.set_verbosity_error()  # suppress download-progress noise
     except ImportError:
         return None
 
     # ── Step 1: try local HuggingFace cache (zero network I/O) ──────────────
     try:
+        # The model and tokenizer are built here, rather than letting pipeline()
+        # fetch them from `_MODEL_ID`, because there is no working way to ask
+        # pipeline() for an offline load on transformers 5:
+        #   local_files_only=True      -> forwarded to the pipeline class, which
+        #                                 rejects it with a TypeError
+        #   model_kwargs={"local_...": True}
+        #                              -> collides with the value pipeline()
+        #                                 already passes to AutoConfig
+        # from_pretrained takes it directly, and passing objects to pipeline()
+        # does not depend on how it routes keywords internally.
+        _model = AutoModelForTokenClassification.from_pretrained(_MODEL_ID, local_files_only=True)
+        _tokenizer = AutoTokenizer.from_pretrained(_MODEL_ID, local_files_only=True)
         ner = pipeline(
             "ner",
-            model=_MODEL_ID,
+            model=_model,
+            tokenizer=_tokenizer,
             aggregation_strategy="simple",  # merges B-/I- tokens → full entity spans
             device=-1,                      # CPU; set device=0 to use GPU
-            local_files_only=True,
         )
         logger.info(f"CyNER model loaded from local cache: {_MODEL_ID}")
         return ner
-    except (OSError, EnvironmentError, ValueError):
-        pass  # Model not in local cache — try downloading below
+    except Exception as exc:
+        # Any failure here just means "not usable from cache" — fall through to
+        # the download below. Narrowing this tuple is what let a TypeError from
+        # an API change escape and abort every job that reached Stage 2d.
+        logger.debug(f"CyNER not loadable from local cache ({type(exc).__name__}: {exc})")
 
     # ── Step 2: attempt a one-time download from HuggingFace Hub ────────────
     logger.info(f"CyNER model '{_MODEL_ID}' not in local cache — attempting download…")
