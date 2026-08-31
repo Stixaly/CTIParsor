@@ -46,6 +46,14 @@ interface address, e.g. `API_HOST=10.0.5.12`, which is usually what you want.
 > Use `python run_api.py` (which is what `make api` runs), or pass `--host`
 > yourself. This is why `API_HOST` exists at all.
 
+Two details that matter once this runs as a service:
+
+- **`.env` is found next to `run_api.py`, not in the working directory.** You
+  can start it from anywhere and it still reads the repository's `.env`.
+- **An already-set environment variable wins over `.env`.** `.env` fills in what
+  the environment has not already said, so an `Environment=API_PORT=...` line in
+  a systemd unit silently overrides the file. Pick one place and stay there.
+
 On startup the launcher prints where it is listening, and prints a warning block
 if that address is reachable from other machines.
 
