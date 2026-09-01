@@ -102,15 +102,27 @@ urgency of pre-warming — depend on that number and on the host's RAM, neither 
 which is known. This ADR is therefore `Proposed`, with the measurement as its
 first action item.
 
-Time and memory have different causes, which is what separates the two levers:
+Time and memory have different causes, which is what separates the two levers.
+Measured with `scripts/measure_cold_start.py` on WSL (`/mnt/c`, 15.42 GB host):
 
 ```
-import sentence_transformers   109.6 s      714 MB   ← 82% of the TIME
-load MiniLM                     15.6 s      921 MB
-load GLiNER large                7.0 s    4 367 MB   ← 99% of the MEMORY
+import torch                    15.2 s      457 MB
+import sentence_transformers    79.4 s      245 MB   ← 72% of the TIME
+load embedding model             6.2 s      129 MB
+load GLiNER large                9.6 s    2 263 MB   ← 52% of the MEMORY
 ────────────────────────────────────────────────────
-                               133.5 s      4.4 GB
+                               110.4 s   peak 4 374 MB
 ```
+
+The **peak** confirms ADR-0037's Measurement 3 to within 7 MB, and that is the
+number pool sizing rests on. Its per-step attribution was looser: it credited
+GLiNER with the entire 4 367 MB, where GLiNER's own delta is 2 263 MB and the
+rest is torch plus the imports. This narrows the GLiNER-medium lever — it saves
+roughly 1.1 GB, not 2.2 GB, so it buys a pool of 3 rather than 4 on a 16 GB host.
+Still worth measuring, no longer the decisive move.
+
+Peak RSS does not depend on the filesystem, so this figure carries to the
+deployed host unchanged; only the times and the host's RAM differ there.
 
 ### Two traps the code already documents
 
@@ -313,11 +325,13 @@ anyway.
 
 ### Memory
 
-GLiNER large accounts for 4 367 of the 4 400 MB. `GLINER_MODEL` is already a
+GLiNER large is the single largest consumer at 2 263 MB of a 4 374 MB peak — not
+the whole of it, as ADR-0037 read. `GLINER_MODEL` is already a
 supported override and `urchade/gliner_medium-v2.1` is documented beside it
-(`pipeline/stage2e_gliner.py:67`), roughly halving RSS and so doubling the
-affordable pool size. It is an accuracy trade, not a free setting: adopt only with
-a before/after measurement on real reports.
+(`pipeline/stage2e_gliner.py:67`). Because the large model is half the peak
+rather than all of it, swapping it saves roughly 1.1 GB — one extra worker on a
+16 GB host, not a doubling. It is also an accuracy trade, not a free setting:
+adopt only with a before/after measurement on real reports.
 
 ## Trade-off Analysis
 
