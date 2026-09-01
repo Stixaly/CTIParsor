@@ -38,6 +38,8 @@ choice, and the consequences. They're append-only — supersede rather than rewr
 | [0033](0033-provider-agnostic-vision-calls.md) | One vision call, three providers — capability-gated, schema-constrained (amends 0032 §3: reusing `LLM_PROVIDER` is wrong because the Stage-3 defaults have no vision — `OLLAMA_MODEL=llama3.2` is not even pulled — and a text model handed an image invents rather than raising; Ollama's OpenAI route takes `image_url`, so Mistral and Ollama are one code path; `json_object` invented the key `first_2_text_lines` where `json_schema` returned `lines`, which deletes the repair code at `stage3_llm.py:673`) | Proposed |
 | [0034](0034-negated-selections-are-not-atoms.md) | A negated Sigma selection is not an atom (the index held what rules EXCLUDE: 14,037 atoms across 1,742 rules came only from a negated block — `svchost.exe` in 80 rules, `explorer.exe` in 75, `msmpeng.exe` in 62 — so a report naming `explorer.exe` pulled in the rules written to ignore it; the `filter*` naming convention is not usable, 10 rules use one positively and 72 negate a selection not named that way, so the `condition` is parsed instead; over-exclusion is the deliberate bias — it costs an atom where under-exclusion invents one) | Accepted |
 | [0035](0035-bundle-staleness-is-a-first-class-signal.md) | A stored bundle carries the pipeline that built it, and must say so (the self-edge fix shipped 2026-08-28 and all 13 stored bundles predate it, so 6 self-loops still ride in two delivered artefacts; `run_config_json.git_rev` already records which commit built each bundle and nothing reads it, while `re_run_final_stages` already rebuilds Stages 4–5 from accepted entities at zero LLM cost — the missing piece is a hand-kept list of output-affecting revisions, because comparing to HEAD marks every frontend commit as invalidating and so never returns to green) | Accepted |
+| [0036](0036-architecture-service-multi-utilisateur.md) | A layered rewrite is not what makes this multi-user (the reviewed proposal's diagnosis holds — `_run_pipeline` is 678 lines, SQL sits in 10 route files of 10, config is read 82 times — but it credits the boolean index with a 5 078 ms win that was 4 624 ms of filesystem, and the deployed Linux instance already answers coverage in 23 ms; `fork` is unavailable because Torch's OpenMP pool deadlocks after it, which rules out ARQ, RQ and default-prefork Celery; `INSERT OR IGNORE` is inert on `entities` because the PK is a fresh uuid4 and no UNIQUE exists; the pool is not a new decision but ADR-0002 accepted 2026-06-07 with all five action items still unticked; ordered by impact per unit of effort, so the few-line queue fix ships before the multi-week auth project) | Proposed |
+| [0037](0037-scaling-to-30-40-users.md) | Scaling to 30–40 concurrent users — measure the stack before rewriting it (a Rust + PostgreSQL + Elasticsearch rewrite targets the <1 ms slice of a 5 078 ms response; `mv` to native storage delivers the bulk of it for free, and the real ceiling is 4.4 GB of model RSS per job with a 133 s cold start, identical in every language; its Measurement 2 has since been invalidated — see 0036) | Proposed |
 
 **Numbering notes**
 - `0001` and `0003` are unused gaps (early informal decisions never filed).
@@ -45,6 +47,9 @@ choice, and the consequences. They're append-only — supersede rather than rewr
   filed; documented retroactively to match the implementation.
 - The coverage matrix is **0008** — earlier drafts (and ADR-0006/0007) called it
   "ADR-0005"; that number belongs to IoC/defang robustness. References were repointed.
+- The scaling study was drafted as "ADR-0013" and filed as **0037**: `0013` belongs
+  to STIX graph completion. Its draft also claimed ADR-0012 had never been filed —
+  it had; `0012` is hallucination measurement. Both were corrected before filing.
 
 ## Dependency sketch
 
@@ -193,4 +198,24 @@ choice, and the consequences. They're append-only — supersede rather than rewr
    not the pipeline: Playwright defaults chromium_sandbox to False and
    appends --no-sandbox itself, so the careful arg list read correct
    while the sandbox was off
+
+0002 concurrent ingestion (persistent worker pool, queue, no broker)
+   ▲   re-affirmed, re-measured and re-sequenced by
+   └── 0036: 0002 was accepted 2026-06-07 and none of its five action
+       items shipped -- `run_pipeline_async` still spawns one process per
+       upload.  0036 keeps its verdict (pool yes, Redis no), corrects its
+       memory estimate (~1 GB/worker -> 4.4 GB, GLiNER-dominated), adds
+       the `fork` constraint it left implicit, and puts the queue-full
+       data-loss fix ahead of the pool instead of inside it
+
+0037 scaling study (measure the stack before rewriting it)
+   ▲   sequenced by
+   └── 0036 multi-user service architecture: keeps 0037's measurements and
+       its verdicts on Rust/Elasticsearch, re-orders its action list by
+       impact per unit of effort, and adds what 0037 left implicit -- the
+       `fork` constraint that rules out ARQ/RQ/default-Celery, the inert
+       `INSERT OR IGNORE` that any retry would turn into duplicate
+       entities, and the fact that half of 0037's 715x is already banked
+       by the move to native storage.  Neither touches the pipeline: they
+       are about how the service is run, not what it extracts
 ```
