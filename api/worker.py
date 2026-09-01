@@ -41,6 +41,10 @@ from models.schemas import RawEntity
 _MAX_JOB_TIMEOUT = int(os.environ.get("WORKER_JOB_TIMEOUT", "1800"))  # 30 minutes
 # Maximum concurrent jobs (each runs in its own subprocess)
 _MAX_CONCURRENT_JOBS = int(os.environ.get("WORKER_MAX_CONCURRENT", "10"))
+# Maximum number of jobs allowed to sit in the queue (0 = unbounded).  Beyond
+# this the upload is refused with an explicit error instead of accepting work
+# the server has no intention of doing.
+_QUEUE_MAX_DEPTH = int(os.environ.get("API_QUEUE_MAX_DEPTH", "50"))
 
 # Note: WORKER_MAX_MEMORY_MB is no longer used.  RLIMIT_AS is not set because
 # it limits virtual address space (not physical RAM), which breaks dlopen() for
@@ -352,13 +356,9 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
     """
     Run the full pipeline for a job with timeout enforcement.
     """
-    global _job_counter
-
-    if not _try_acquire_job_slot():
-        set_job_status(job_id, "queued")
-        emit_progress(job_id, "done", {"status": "queued", "error": "Job queue full"})
-        return
-
+    # Slot acquisition belongs to the parent process (run_pipeline_async); this
+    # subprocess holds its own fresh copy of the counter, so checking here would
+    # always pass and the check that used to live here was dead code.
     start_time = time.monotonic()
 
     try:
@@ -1053,32 +1053,131 @@ def _subprocess_entry(job_id: str, file_path: str, original_filename: str) -> No
     _run_pipeline(job_id, file_path, original_filename)
 
 
-def run_pipeline_async(job_id: str, file_path: str, original_filename: str) -> None:
+def _count_queued() -> int:
+    try:
+        conn = get_conn()
+        cur = conn.execute("SELECT COUNT(*) FROM jobs WHERE status='queued'")
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
+    except Exception as exc:
+        logger.warning(f"Failed to count queued jobs: {exc}")
+        return 0
+
+
+def _upload_path_for(job_id: str) -> str | None:
+    try:
+        matches = sorted((_ROOT / "uploads").glob(f"{job_id}.*"))
+        if matches:
+            return str(matches[0])
+    except Exception as exc:
+        logger.warning(f"Failed to resolve upload path for {job_id}: {exc}")
+    return None
+
+
+def _claim_next_queued() -> tuple[str, str, str] | None:
+    _MAX_CLAIM_ATTEMPTS = 10
+    try:
+        for _ in range(_MAX_CLAIM_ATTEMPTS):
+            conn = get_conn()
+            cur = conn.execute(
+                "SELECT id, original_filename FROM jobs WHERE status='queued' ORDER BY created_at ASC LIMIT 1"
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+
+            job_id, original_filename = row[0], row[1]
+            update_cur = conn.execute(
+                "UPDATE jobs SET status='processing', updated_at=? WHERE id=? AND status='queued'",
+                (now_iso(), job_id),
+            )
+
+            if update_cur.rowcount != 1:
+                continue
+
+            file_path = _upload_path_for(job_id)
+            if file_path is None:
+                set_job_status(job_id, "failed")
+                emit_progress(job_id, "done", {"status": "failed", "error": "uploaded file is missing"})
+                continue
+
+            return (job_id, file_path, original_filename)
+
+        logger.warning("Failed to claim next queued job after 10 attempts")
+        return None
+    except Exception as exc:
+        logger.error(f"Exception in _claim_next_queued: {exc}")
+        return None
+
+
+def _dispatch_next() -> bool:
+    claimed = _claim_next_queued()
+    if claimed is None:
+        return False
+
+    job_id, file_path, original_filename = claimed
+    result = run_pipeline_async(job_id, file_path, original_filename)
+    return result == "started"
+
+
+def requeue_orphans() -> int:
+    try:
+        conn = get_conn()
+        cur = conn.execute(
+            "UPDATE jobs SET status='queued', updated_at=? WHERE status='processing'",
+            (now_iso(),),
+        )
+        count = cur.rowcount
+        if count > 0:
+            logger.info(f"Requeued {count} orphaned jobs")
+        return count
+    except Exception as exc:
+        logger.error(f"Exception in requeue_orphans: {exc}")
+        return 0
+
+
+def start_queued_jobs(max_starts: int = 0) -> int:
+    started = 0
+    # _MAX_CONCURRENT_JOBS == 0 means "unlimited", so it cannot be used as the
+    # loop bound there — the cap is only a guard against a claim/dispatch cycle
+    # spinning, not a concurrency limit (that is _try_acquire_job_slot's job).
+    max_iterations = _MAX_CONCURRENT_JOBS + 1 if _MAX_CONCURRENT_JOBS > 0 else 100
+    for _ in range(max_iterations):
+        if max_starts > 0 and started >= max_starts:
+            break
+        if _dispatch_next():
+            started += 1
+        else:
+            break
+    return started
+
+
+def run_pipeline_async(job_id: str, file_path: str, original_filename: str) -> str:
     """
-    Spawn an isolated subprocess for the pipeline and watch for crashes.
+    Asynchronously run the pipeline for a job in an isolated subprocess.
 
-    Previous design used threading.Thread.  The problem: when a C++ extension
-    (sentence-transformers, GLiNER, CyNER / XLM-RoBERTa) calls operator new and
-    the system is out of memory, the C++ runtime calls std::terminate() → abort().
-    abort() sends SIGABRT to the *whole process*, killing uvicorn — there is no
-    way to catch a C++ exception from Python's except clause.
-
-    Fix: run the pipeline in a separate process via multiprocessing.  SIGABRT only
-    kills that subprocess; uvicorn continues serving.  A lightweight watcher thread
-    in the parent detects the non-zero exit code and writes status=failed + emits a
-    progress event so the frontend does not hang indefinitely.
-
-    Why "spawn" not "fork":
-      fork inherits the parent's open file descriptors, thread state, and any
-      partially-initialised native libraries (e.g. torch's OpenMP pool).  This can
-      produce deadlocks.  spawn starts a clean interpreter — slightly slower to
-      start (~1-2 s on first import) but safe with all PyTorch/transformers builds.
+    Returns:
+        "started"  — the subprocess has started
+        "queued"   — no slot free, the job is waiting and will be picked up
+        "rejected" — the queue is full, the work is refused
     """
     if not _try_acquire_job_slot():
-        set_job_status(job_id, "queued")
-        emit_progress(job_id, "done", {"status": "queued", "error": "Job queue full"})
-        logger.warning(f"[Worker] Job {job_id} queued — job queue full")
-        return
+        if _QUEUE_MAX_DEPTH > 0 and _count_queued() >= _QUEUE_MAX_DEPTH:
+            set_job_status(job_id, "failed")
+            emit_progress(job_id, "done", {
+                "status": "failed",
+                "error": f"Queue is full ({_QUEUE_MAX_DEPTH} jobs waiting) — try again later"
+            })
+            logger.warning(f"[Worker] Job {job_id} rejected — queue full")
+            return "rejected"
+        else:
+            set_job_status(job_id, "queued")
+            emit_progress(job_id, "queued", {
+                "status": "queued",
+                "position": _count_queued()
+            })
+            logger.info(f"[Worker] Job {job_id} queued — job queue full")
+            return "queued"
 
     logger.info(f"[Worker] Spawning isolated subprocess for job {job_id}")
 
@@ -1099,40 +1198,38 @@ def run_pipeline_async(job_id: str, file_path: str, original_filename: str) -> N
     }
 
     def _watch(p: mp.Process, jid: str) -> None:
-        p.join()                         # blocks until the subprocess exits
-        _decrement_job_counter()         # parent-side counter; subprocess has its own copy
+        p.join()
+        _decrement_job_counter()
         code = p.exitcode
         if code == 0:
             logger.info(f"[Worker] Subprocess for job {jid} exited cleanly")
-            return
-        # `Process.exitcode` is `int | None` (None means "still running", which
-        # shouldn't happen after join() but mypy can't know that) — narrow it
-        # before using it as a dict key / format value.
-        reason = (
-            _SIGNAL_NAMES.get(code, f"exit code {code}")
-            if code is not None
-            else "unknown (process has no exit code)"
-        )
-        logger.error(f"[Worker] Subprocess for job {jid} crashed: {reason}")
-        try:
-            # The subprocess may have already written status=failed before dying,
-            # but if the crash happened inside a native extension (std::bad_alloc
-            # before Python gets control), it will not have done so.
-            # set_job_status is idempotent — calling it again is safe.
-            set_job_status(jid, "failed")
-            emit_progress(jid, "done", {
-                "status": "failed",
-                "error": (
-                    f"Pipeline worker process terminated unexpectedly ({reason}). "
-                    "The document may require more memory than is available. "
-                    "Try a smaller file, reduce WORKER_MAX_MEMORY_MB, or set "
-                    "SKIP_HEAVY_MODELS=1 to disable ML models and use regex-only extraction."
-                ),
-            })
-        except Exception as exc:
-            logger.error(
-                f"[Worker] Could not update job {jid} status after subprocess crash: {exc}"
+        else:
+            reason = (
+                _SIGNAL_NAMES.get(code, f"exit code {code}")
+                if code is not None
+                else "unknown (process has no exit code)"
             )
+            logger.error(f"[Worker] Subprocess for job {jid} crashed: {reason}")
+            try:
+                set_job_status(jid, "failed")
+                emit_progress(jid, "done", {
+                    "status": "failed",
+                    "error": (
+                        f"Pipeline worker process terminated unexpectedly ({reason}). "
+                        "The document may require more memory than is available. "
+                        "Try a smaller file, reduce WORKER_MAX_MEMORY_MB, or set "
+                        "SKIP_HEAVY_MODELS=1 to disable ML models and use regex-only extraction."
+                    ),
+                })
+            except Exception as exc:
+                logger.error(
+                    f"[Worker] Could not update job {jid} status after subprocess crash: {exc}"
+                )
+
+        try:
+            _dispatch_next()
+        except Exception as exc:
+            logger.error(f"[Worker] Dispatch error in watcher for {jid}: {exc}")
 
     watcher = threading.Thread(
         target=_watch,
@@ -1141,7 +1238,7 @@ def run_pipeline_async(job_id: str, file_path: str, original_filename: str) -> N
         name=f"watcher-{job_id}",
     )
     watcher.start()
-
+    return "started"
 
 def _lexicon_rescan(job_id: str, report_text: str) -> int:
     """

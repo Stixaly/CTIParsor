@@ -215,6 +215,35 @@ when you raise it.
 More workers do not help the common case anyway: each report already runs in its
 own subprocess, so the API process is not where the time goes.
 
+**Set `WORKER_MAX_CONCURRENT` from measured RAM, not from the default.** The
+default of 10 overcommits badly: each concurrent report holds roughly 4.4 GB
+resident, almost all of it the GLiNER weights, so ten in parallel ask for ~44 GB.
+Below about 48 GB of host RAM the OS OOM killer sets the real limit for you.
+`scripts/measure_cold_start.py` measures the figure on your host and suggests a
+value:
+
+```bash
+python scripts/measure_cold_start.py
+```
+
+It exits non-zero and declines to suggest anything if a step fails — a partial
+measurement understates the peak RSS and would recommend a pool several times
+too large.
+
+### What happens when every slot is busy
+
+A report submitted while all slots are taken is **queued, not dropped**. It sits
+at status `queued`, and the watcher thread of whichever report finishes next
+claims it and starts it. Nothing polls; there is no broker and no second daemon.
+
+`API_QUEUE_MAX_DEPTH` (default 50, `0` = unbounded) caps the wait. Past it, the
+upload is refused with HTTP 503 rather than accepted and quietly discarded — an
+analyst who gets a 503 knows to retry, where a report accepted and never run
+looks finished.
+
+Jobs left `processing` by a crash or a redeploy are returned to the queue when
+the API starts, so a restart mid-report costs the run, not the submission.
+
 ## 6. Before you expose it
 
 - [ ] `frontend/dist/` exists (`make frontend-build`)
