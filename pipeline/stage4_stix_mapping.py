@@ -1061,6 +1061,44 @@ def _map_iocs_to_scos(entities: list[RawEntity]) -> tuple[list, dict[str, object
     return scos, value_to_sco
 
 
+# STIX 2.1 forbids abbreviated hives in windows-registry-key.key: the schema
+# carries a "not" pattern on ^HKLM|HKCC|HKCR|HKCU|HKU (and lowercase). The
+# hive must be spelled out in full, so expand it at the STIX boundary.
+#
+# The expansion deliberately does NOT happen in Stage 2: entity values have to
+# stay findable in the displayed document text for click-to-locate to work, and
+# "HKEY_LOCAL_MACHINE\..." appears nowhere in a report that wrote "HKLM\...".
+_REGISTRY_HIVES = {
+    "HKLM": "HKEY_LOCAL_MACHINE",
+    "HKCU": "HKEY_CURRENT_USER",
+    "HKCR": "HKEY_CLASSES_ROOT",
+    "HKCC": "HKEY_CURRENT_CONFIG",
+    "HKU": "HKEY_USERS",
+}
+
+
+def _expand_registry_hive(key: str) -> str:
+    """
+    Expand an abbreviated registry hive to its full STIX-compliant name.
+
+    Only the hive is rewritten; the rest of the key is returned verbatim, case
+    preserved.  Keys that already carry a full HKEY_* hive, keys with no
+    backslash, and unknown hives are returned unchanged.
+    """
+    if not key:
+        return key
+
+    hive, sep, rest = key.partition("\\")
+    if not sep:
+        return key
+
+    full_hive = _REGISTRY_HIVES.get(hive.upper())
+    if full_hive:
+        return f"{full_hive}\\{rest}"
+
+    return key
+
+
 def _entity_to_sco(entity: RawEntity):
     """Converts a single RawEntity to a STIX 2.1 SCO, or returns None."""
     try:
@@ -1104,7 +1142,7 @@ def _entity_to_sco(entity: RawEntity):
 
         # ── System observables ───────────────────────────────────────────────
         if t == EntityType.REGISTRY_KEY:
-            return stix2.WindowsRegistryKey(key=v)
+            return stix2.WindowsRegistryKey(key=_expand_registry_hive(v))
         if t == EntityType.MUTEX:
             return stix2.Mutex(name=v)
         if t == EntityType.USER_ACCOUNT:
@@ -1187,7 +1225,9 @@ def _build_stix_pattern(ioc_value: str, sco) -> str | None:
         if num_str.isdigit():
             return f"[autonomous-system:number = {num_str}]"
     elif sco_type == "windows-registry-key":
-        return f"[windows-registry-key:key = '{esc}']"
+        # Expand before escaping so the pattern matches the SCO's own key.
+        expanded = _escape_stix_value(_expand_registry_hive(ioc_value))
+        return f"[windows-registry-key:key = '{expanded}']"
     elif sco_type == "mutex":
         return f"[mutex:name = '{esc}']"
     elif sco_type == "user-account":

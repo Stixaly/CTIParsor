@@ -47,6 +47,12 @@ async def lifespan(app: FastAPI):
     init_db()
     Path("uploads").mkdir(exist_ok=True)
     Path("output").mkdir(exist_ok=True)
+    # A job left `processing` at boot was orphaned by a restart: its subprocess
+    # is gone and nothing will ever finish it.  Put those back in the queue, then
+    # drain as much of the queue as the concurrency limit allows.
+    from api.worker import requeue_orphans, start_queued_jobs
+    requeue_orphans()
+    start_queued_jobs()
     yield
     # Shutdown: nothing to tear down.
 

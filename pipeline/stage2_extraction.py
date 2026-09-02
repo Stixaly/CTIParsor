@@ -586,15 +586,71 @@ def _extract_bare_filenames(text: str) -> list[RawEntity]:
     return results
 
 
+def _trim_trailing_prose(value: str) -> str:
+    """
+    Remove trailing prose from a registry key path.
+
+    _REG_KEY_PATTERN's segment class allows spaces — it has to, because real
+    keys contain them ("Windows NT", "Internet Settings") — so the last segment
+    runs to the end of the line and swallows the rest of the sentence.
+
+    Heuristic: registry key components are TitleCase, the English prose that
+    follows them is not.  Drop the last space-separated fragment while it does
+    not start with an upper-case letter or a digit.
+    """
+    while " " in value:
+        last_space_idx = value.rfind(" ")
+        fragment = value[last_space_idx + 1:]
+        if not fragment or (not fragment[0].isupper() and not fragment[0].isdigit()):
+            value = value[:last_space_idx]
+        else:
+            break
+    return value
+
+
+def _trim_trailing_drive_letter(value: str, next_char: str | None) -> str:
+    """
+    Remove a trailing single-letter drive indicator if followed by a colon.
+
+    "reg save HKLM\\SYSTEM C:\\temp\\sys.tmp" matches through the space and the
+    drive letter, stopping only at the colon.  A single letter before a colon is
+    a drive; anything longer is a key component:
+
+        "HKLM\\SYSTEM C"            + ":"  -> "C"  is a drive letter -> trimmed
+        "HKLM\\SOFTWARE\\Windows NT" + ":"  -> "NT" is a component    -> kept
+    """
+    if next_char == ":" and " " in value:
+        last_space_idx = value.rfind(" ")
+        fragment = value[last_space_idx + 1:]
+        if len(fragment) == 1 and fragment.isalpha():
+            return value[:last_space_idx]
+    return value
+
+
 def _extract_registry_keys(text: str) -> list[RawEntity]:
     """
     Extract Windows registry key paths starting with any recognised hive
     abbreviation or full name (HKLM, HKCU, HKEY_LOCAL_MACHINE, …).
+
+    Hive abbreviations are preserved here so the value stays findable in the
+    displayed document text; Stage 4 expands them at the STIX boundary, where
+    the spec forbids them.
     """
     results: list[RawEntity] = []
     seen: set[str] = set()
     for m in _REG_KEY_PATTERN.finditer(text):
         v = m.group().strip()
+        v = _trim_trailing_prose(v)
+
+        next_char = text[m.end()] if m.end() < len(text) else None
+        v = _trim_trailing_drive_letter(v, next_char)
+
+        v = v.rstrip(".,;:!?)]}\"' \\")
+
+        # Trimming can leave a bare hive, which is not a key path.
+        if "\\" not in v:
+            continue
+
         key = v.upper()
         if key not in seen:
             seen.add(key)

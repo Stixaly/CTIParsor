@@ -6,6 +6,37 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Registry keys no longer fail STIX validation, and no longer carry half a
+  sentence.** Three `[X]` errors on a delivered bundle, all
+  `windows-registry-key`: `HKLM\SYSTEM C`, `HKLM\SECURITY C`, `HKLM\SAM C`.
+  Two independent defects stacked on the `reg save` credential-dump triple
+  (T1003.002).
+
+  *Illegal hive.* The STIX 2.1 schema puts a `not` pattern on
+  `^HKLM|HKCC|HKCR|HKCU|HKU` — the hive must be spelled out — and Stage 4
+  handed the extracted value straight to `stix2.WindowsRegistryKey`. **Every**
+  report mentioning `HKLM\…` failed validation, not just this one. Now expanded
+  through `_expand_registry_hive` in both the SCO and the Indicator pattern, so
+  the two agree. Deliberately *not* expanded in Stage 2: entity values have to
+  stay findable in the displayed document text for click-to-locate, and
+  `HKEY_LOCAL_MACHINE\…` appears nowhere in a report that wrote `HKLM\…`.
+
+  *Swallowed text.* `_REG_KEY_PATTERN`'s segment class excludes `\`, `:`, `"`,
+  `|`, `<>` and control characters but not the space, so the last segment runs
+  to end-of-line. Measured on the real strings: `reg save HKLM\SYSTEM
+  C:\windows\temp\sys.tmp` yielded `HKLM\SYSTEM C`, and
+  `…\Winlogon was set.` yielded `…\Winlogon was set.` — the second case is the
+  common one and was missed on the first pass. Banning the space was rejected:
+  real keys contain them (`Windows NT`, `Windows Defender`). The regex is
+  unchanged; two post-processing passes trim instead — prose (a fragment not
+  starting upper-case or a digit) and a single-letter drive before a colon,
+  which is what separates `C:` from `NT:`.
+
+  Both defects are locked by re-introducing them: neutering the Stage 2 trims
+  fails 5 tests, neutering the hive expansion fails 7.
+
 ### Added
 
 - **A stored bundle now says which pipeline built it, and the audit says when
@@ -98,6 +129,46 @@ sections group by theme rather than strict semver.
   construction.
 
 ### Fixed
+
+#### A report submitted while the workers are busy is no longer thrown away, 2026-09-01
+
+When `WORKER_MAX_CONCURRENT` was reached, the job was marked `queued` and then
+handed a `done` progress event. The frontend reads `done` as "this report is
+finished", so the analyst saw a completed job that had never run, and nothing
+ever picked it up: `queued` was written in four places and **read nowhere in
+`api/`**. It was never a broken queue — it was a queue with no consumer.
+
+The bug was written twice, and only one copy could fire. The check in
+`_run_pipeline` runs inside the spawned subprocess, which holds its own fresh
+copy of `_job_counter` starting at zero, so it always passed; that copy is
+deleted. `run_pipeline_async` now emits a `queued` event, never `done`, and
+returns `"started"` / `"queued"` / `"rejected"`.
+
+The consumer is the watcher thread that already waits on each subprocess: after
+it releases the slot it claims the next waiting job, atomically, with
+`UPDATE jobs SET status='processing' WHERE id=? AND status='queued'` and a
+`rowcount` check — two watchers finishing together cannot take the same job. A
+job whose upload has vanished is failed rather than retried forever. On startup
+`requeue_orphans()` returns anything left `processing` by a restart to the
+queue, so a redeploy no longer strands work in a state nothing finishes.
+
+`API_QUEUE_MAX_DEPTH` (default 50, 0 = unbounded) bounds the wait: beyond it the
+upload is refused with HTTP 503 instead of being accepted and dropped. The
+`status` field of `/api/upload` and `/api/ingest/*` still reads `processing` for
+work that started; only the genuinely new case reports `queued`.
+
+Deliberately not adopted: Celery, RQ and ARQ. The first two default to `fork`,
+which deadlocks against Torch's OpenMP pool — the reason `spawn` was chosen here
+in the first place — and ARQ is asyncio, which does nothing for work bounded by
+CPU and 4.4 GB of resident weights. ADR-0002 reached the same conclusion in June
+and its action items are still open; ADR-0036 records why.
+
+`scripts/measure_cold_start.py` measures what a worker actually pays at startup
+(imports, model loads, peak RSS) and suggests a pool size from the host's RAM.
+It refuses to suggest one when any step fails, and exits non-zero: a partial run
+leaves the peak RSS at the cost of the bare imports, and the formula then
+recommends a pool several times too large — measured 16 on a 15 GB host where
+the answer is 2.
 
 #### The frontend builds from Linux again, 2026-08-30
 

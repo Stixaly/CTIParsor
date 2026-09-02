@@ -165,6 +165,11 @@ async def upload_file(
             )
             conn.commit()
 
-    run_pipeline_async(job_id, str(dest), file.filename or "unknown")
+    outcome = run_pipeline_async(job_id, str(dest), file.filename or "unknown")
+    if outcome == "rejected":
+        raise HTTPException(503, "The processing queue is full — try again in a few minutes.")
 
-    return {"job_id": job_id, "filename": file.filename, "status": "processing"}
+    # See the note in api/routes/ingest.py: "started" stays "processing" for the
+    # existing contract, "queued" is reported honestly.
+    status = "queued" if outcome == "queued" else "processing"
+    return {"job_id": job_id, "filename": file.filename, "status": status}

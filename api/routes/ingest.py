@@ -150,9 +150,16 @@ def _start_job(
             )
             conn.commit()
 
-    run_pipeline_async(job_id, str(dest), filename)
+    outcome = run_pipeline_async(job_id, str(dest), filename)
+    if outcome == "rejected":
+        raise HTTPException(503, "The processing queue is full — try again in a few minutes.")
 
-    return {"job_id": job_id, "filename": filename, "status": "processing"}
+    # "started" keeps reporting "processing" — the value this endpoint has always
+    # returned and the frontend switches on.  "queued" is reported as itself:
+    # answering "processing" for work that has not started is the lie this change
+    # exists to remove.
+    status = "queued" if outcome == "queued" else "processing"
+    return {"job_id": job_id, "filename": filename, "status": status}
 
 
 @router.post("/text")
