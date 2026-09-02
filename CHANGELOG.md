@@ -6,6 +6,74 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Security
+
+#### Seven npm advisories cleared by two major upgrades, 2026-09-02
+
+`npm audit` on `frontend/` reported **7 vulnerabilities — 1 critical, 1 high,
+5 moderate**. All seven came from two roots, and the dependency *tree* mattered
+more than the version numbers did.
+
+*The vite findings were not about our vite.* The top-level `vite` was already
+`6.4.3`, outside the advisory's `<=6.4.2` range. Every vite and esbuild finding
+— the high (path traversal in optimized-deps `.map` handling, `server.fs.deny`
+bypass on Windows alternate paths, launch-editor NTLMv2 hash disclosure) and
+the esbuild dev-server CORS moderate — came from the private `vite@5.4.21`
+subtree that `vitest@2.1.9` carried under `node_modules/vitest/node_modules/`.
+Reading the audit top-level would have suggested the wrong fix.
+
+`vitest` 2.1.9 → **4.1.11** (critical: arbitrary file read and execution while
+the Vitest UI server listens) collapses five of the seven findings at once. The
+two-major jump is a no-op for this suite: the config uses only `environment`,
+`globals`, `setupFiles` and `include`, none of them touched by the v3/v4
+removals, and the tests use only `vi.fn`, `vi.spyOn`, `mockImplementation` and
+`restoreAllMocks`. **69/69 tests still pass, no test file changed.** Vitest 4
+now shares the top-level `vite@6.4.3` rather than vendoring its own, so
+`vite-node` leaves the tree entirely and one `esbuild@0.25.12` remains.
+
+`react-router-dom` 6.30.6 → **7.18.3** clears the remaining two (CVE-2025-68470
+bypass: open redirect via backslash in `<Link>`/`useNavigate`; arbitrary
+constructor injection in `deserializeErrors()`). **Neither was reachable here**,
+and the entry says so rather than claiming a hole was closed: the app is a pure
+`BrowserRouter` SPA with no SSR hydration, and every navigation target is a
+literal-prefixed template (`/review/${jobId}`, `/graph/${jobId}`) or a bare
+literal — the backslash bypass needs a value that *begins* with `\`. The
+upgrade is worth taking on its own terms, not as an incident. The v7 API
+surface this app uses — `BrowserRouter`, `Routes`, `Route`, `Navigate`,
+`NavLink`, `Outlet`, `Link`, `useParams`, `useNavigate` — is unchanged, so
+`tsc && vite build` passed first try with no source edits.
+
+Cost: the main chunk grew 1,130.95 → 1,146.90 kB (gzip 336.68 → 342.24 kB).
+
+Two traps worth recording. `npm install --save-dev vitest --save react-router-dom`
+applies `--save-dev` to **both** packages: `react-router-dom` silently landed in
+`devDependencies`, where a runtime dependency would have survived every local
+check and broken a production install. Fixed with `--save-prod`. And the whole
+drift was invisible because **CI has no frontend job** — `ci.yml` builds and
+tests Python only, so `npm run build`, `npm test` and `npm audit` have never run
+there.
+
+`frontend/src/test/dependencyAudit.test.ts` locks the result: it walks *every*
+`node_modules` directory to a depth of 12, not just the top level, and fails on
+any copy of `esbuild`, `vite`, `vite-node`, `vitest`, `@vitest/mocker`,
+`react-router` or `react-router-dom` at or below its known-vulnerable version.
+It also asserts the watched packages are present at all, so an empty or moved
+tree fails loudly instead of passing vacuously.
+
+Verified by reintroducing the defect rather than by trusting the green run:
+reinstalling `vitest@2.1.9` makes it fail with all seven copies named, five of
+them nested two levels deep (`node_modules/vitest/node_modules/vite@5.4.21`,
+`node_modules/vite-node/node_modules/esbuild@0.21.5`, …) — precisely what a
+top-level check would have missed.
+
+Reading `node:fs` from a test needs `@types/node`, which the project had never
+had; without it `npm test` stayed green (Vitest transpiles without checking
+types) while `npm run build` failed on three `TS2307`s. Added at `^20` to match
+the Node 20 line `setup.sh` and CI target, rather than a major that would inject
+globals for a runtime nobody runs. It is type-only: the emitted bundle is
+byte-identical. Nothing else in `src/` broke, because every stored timer handle
+already used the portable `ReturnType<typeof setTimeout>` rather than `number`.
+
 ### Fixed
 
 - **Registry keys no longer fail STIX validation, and no longer carry half a
