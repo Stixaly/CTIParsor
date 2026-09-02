@@ -6,6 +6,37 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Registry keys no longer fail STIX validation, and no longer carry half a
+  sentence.** Three `[X]` errors on a delivered bundle, all
+  `windows-registry-key`: `HKLM\SYSTEM C`, `HKLM\SECURITY C`, `HKLM\SAM C`.
+  Two independent defects stacked on the `reg save` credential-dump triple
+  (T1003.002).
+
+  *Illegal hive.* The STIX 2.1 schema puts a `not` pattern on
+  `^HKLM|HKCC|HKCR|HKCU|HKU` — the hive must be spelled out — and Stage 4
+  handed the extracted value straight to `stix2.WindowsRegistryKey`. **Every**
+  report mentioning `HKLM\…` failed validation, not just this one. Now expanded
+  through `_expand_registry_hive` in both the SCO and the Indicator pattern, so
+  the two agree. Deliberately *not* expanded in Stage 2: entity values have to
+  stay findable in the displayed document text for click-to-locate, and
+  `HKEY_LOCAL_MACHINE\…` appears nowhere in a report that wrote `HKLM\…`.
+
+  *Swallowed text.* `_REG_KEY_PATTERN`'s segment class excludes `\`, `:`, `"`,
+  `|`, `<>` and control characters but not the space, so the last segment runs
+  to end-of-line. Measured on the real strings: `reg save HKLM\SYSTEM
+  C:\windows\temp\sys.tmp` yielded `HKLM\SYSTEM C`, and
+  `…\Winlogon was set.` yielded `…\Winlogon was set.` — the second case is the
+  common one and was missed on the first pass. Banning the space was rejected:
+  real keys contain them (`Windows NT`, `Windows Defender`). The regex is
+  unchanged; two post-processing passes trim instead — prose (a fragment not
+  starting upper-case or a digit) and a single-letter drive before a colon,
+  which is what separates `C:` from `NT:`.
+
+  Both defects are locked by re-introducing them: neutering the Stage 2 trims
+  fails 5 tests, neutering the hive expansion fails 7.
+
 ### Added
 
 - **A stored bundle now says which pipeline built it, and the audit says when
