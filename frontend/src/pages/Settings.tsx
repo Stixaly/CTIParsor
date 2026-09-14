@@ -339,7 +339,7 @@ export default function Settings() {
       </div>
 
       <p style={{ marginTop: 16, fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.6 }}>
-        Each corpus is cloned into a gitignored overlay directory; <span className="link">Redownload</span> re-fetches the
+        Each corpus is cloned (or, for tarball sources, downloaded and verified) into a gitignored directory; <span className="link">Redownload</span> re-fetches the
         remote without touching local edits. Bulk refresh is available via{' '}
         <code style={{ fontFamily: 'monospace', fontSize: 11 }}>scripts/sync_corpora.py</code>. Private corpora are
         managed through the CLI and cannot be added or removed from this panel. Formats marked{' '}

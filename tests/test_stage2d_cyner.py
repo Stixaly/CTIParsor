@@ -30,8 +30,14 @@ def test_label_map_uses_cyner2_labels():
 # ── 2. Parsing logic with a stubbed pipeline ────────────────────────────────
 
 def _fake_pipeline(predictions):
-    """Return a callable that mimics a HuggingFace NER pipeline."""
-    def _run(_text):
+    """Return a callable that mimics a HuggingFace NER pipeline.
+
+    The real pipeline is called with a *list* of chunks and a ``batch_size``
+    keyword and returns one prediction list per chunk; a flat list is what a
+    single-string call returns.  Returning the flat list for any input keeps
+    the older tests meaningful and exercises the single-chunk branch.
+    """
+    def _run(_inputs, **_kw):
         return predictions
     return _run
 
@@ -111,3 +117,50 @@ def test_load_pipeline_returns_none_when_the_loader_raises(monkeypatch, tmp_path
         assert stage2d_cyner.cyner_available() is False
     finally:
         stage2d_cyner._load_pipeline.cache_clear()
+
+
+# ── 5. The document is never handed to the model in one piece ───────────────
+#
+# Regression for the 2026-09-02/03 OOM kills: `extract_cyner_entities` used to
+# call the pipeline once with `text[:50_000]`.  DeBERTa-v3 does not truncate —
+# it runs, and attention memory grows with the square of the token count
+# (10.3 GB RSS on a 27 KB report, 15.5 GB on a 77 KB one).  This test fails
+# if any single input to the model exceeds the chunk window, or if a long
+# document produces only one call.
+
+def test_long_text_is_chunked_before_inference(monkeypatch):
+    calls: list[dict] = []
+
+    def _recording_pipeline(inputs, **kw):
+        calls.append({"inputs": inputs, "kw": kw})
+        # One prediction list per chunk, each naming the same malware so the
+        # overlap dedup is exercised as well.
+        return [[{"entity_group": "Malware", "score": 0.97, "word": "Emotet"}]
+                for _ in inputs]
+
+    monkeypatch.setattr(stage2d_cyner, "_load_pipeline", lambda: _recording_pipeline)
+
+    text = ("Emotet was observed dropping a second-stage loader on the host. " * 900)
+    assert len(text) > 50_000
+
+    results = stage2d_cyner.extract_cyner_entities(text)
+
+    assert calls, "pipeline was never called"
+    every_input = [c for call in calls for c in call["inputs"]]
+    assert len(every_input) > 1, "a 57 KB document reached the model as one input"
+    assert all(len(c) <= stage2d_cyner._CHUNK_CHARS for c in every_input), \
+        "a chunk exceeds the model window — the O(n²) attention path is back"
+    assert all(call["kw"].get("batch_size") == stage2d_cyner._BATCH_SIZE for call in calls)
+    # The same span re-reported from every overlapping chunk collapses to one entity.
+    assert [(r.value, r.entity_type) for r in results] == [("Emotet", EntityType.MALWARE)]
+
+
+def test_iter_chunks_covers_text_without_empty_or_oversized_pieces():
+    text = "word " * 2_000                      # 10 000 chars of plain prose
+    pieces = list(stage2d_cyner._iter_chunks(text))
+    assert pieces and all(p for p, _ in pieces)
+    assert all(len(p) <= stage2d_cyner._CHUNK_CHARS for p, _ in pieces)
+    assert pieces[0][1] == 0 and pieces[-1][1] + len(pieces[-1][0]) == len(text)
+    # An unbroken token longer than the window must still advance.
+    blob = "x" * (stage2d_cyner._CHUNK_CHARS * 3)
+    assert sum(len(p) for p, _ in stage2d_cyner._iter_chunks(blob)) >= len(blob)

@@ -1,6 +1,6 @@
 # ADR-0026: Per-rule budget allocation for policy pins, and a synthesis-stats channel
 
-**Status:** Proposed
+**Status:** Accepted (implemented)
 **Date:** 2026-08-23
 **Deciders:** maintainer
 
@@ -338,3 +338,7 @@ supplies the per-rule instrument its deferred Option 3 was waiting on. Uses the
 evidence vocabulary of ADR-0009 unchanged — a fair-share edge is still
 `assessed`. The stats channel mirrors ADR-0013's `CompletionStats`, and finally
 delivers it to a consumer.
+
+## Status review (2026-09-02)
+
+Implemented: `_fair_share` and `PinStats` in `pipeline/stage4_stix_mapping.py`, `x_synthesis_stats` on the Report SDO, `GET /api/relationship-policy/last-run`.

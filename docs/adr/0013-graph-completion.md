@@ -100,3 +100,18 @@ Stage 4, so the tool never contradicts an explicit human decision.
   prediction precision).
 - **Superseded/related:** builds on ADR-0009 (evidence labels, provenance) and
   ADR-0007 (policy panel). Does not touch the Stage 3 extraction gate.
+
+## Status review (2026-09-02)
+
+Three of the consequences above need qualifying against what runs:
+
+- Alias merge is **off by default**, so "the dominant coreference/alias error
+  is retired by the merge step" holds only through ADR-0012/0021
+  canonicalisation at SDO creation, not through Stage 4b.
+- `max_new_edges=200` is a single budget shared by reference grounding and
+  transitive inference; ADR-0024 measured a bundle that hit it exactly.
+- "Visually distinguishable" is not implemented: `frontend/src/pages/Graph.tsx`
+  does not read `x_evidence_label` or `x_inference_rule`; only the Review page
+  keys on the label (auto-promotion gate).
+
+The default-policy and cap questions are taken up by ADR-0038.

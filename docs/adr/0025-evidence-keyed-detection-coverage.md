@@ -1,6 +1,6 @@
 # ADR-0025: Evidence-Keyed Detection Coverage (artifacts score, TTPs locate)
 
-**Status:** Proposed
+**Status:** Accepted (implemented)
 **Date:** 2026-08-22
 **Deciders:** maintainer
 **Relates:** supersedes the scoring model of ADR-0008 (coverage matrix); generalises
@@ -426,3 +426,7 @@ route below it left all five tests passing: the second template carries a
 trailing `/rules` segment, so the two templates cannot compete at any ordering.
 The premise was wrong and the test verified nothing. It is now a payload contract
 test, which is what the frontend actually depends on.
+
+## Status review (2026-09-02)
+
+Implemented: `pipeline/detection/artifacts.py` (Pyramid-of-Pain tiers) and `pipeline/detection/phases.py` (tactic phase band).

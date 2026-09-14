@@ -1,6 +1,6 @@
 # ADR-0029: Pasted text and captured URLs as ingestion sources
 
-**Status:** Proposed
+**Status:** Accepted (implemented)
 **Date:** 2026-08-25
 **Deciders:** maintainer
 
@@ -378,3 +378,7 @@ tab, so opening or closing it never loses what was typed.
 4. Consider offering a JS retry from the UI when a capture is refused for
    rendering nothing — the error already names the cause, but the analyst has to
    tick the box and resubmit by hand.
+
+## Status review (2026-09-02)
+
+Implemented: `POST /api/ingest/text` and `POST /api/ingest/url` in `api/routes/ingest.py`, `pipeline/web_capture.py`.

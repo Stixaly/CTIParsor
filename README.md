@@ -34,7 +34,7 @@ Two modes are available:
 # 1. Clone and enter the project
 git clone <repo-url> && cd CTIParsor
 
-# 2. Full setup (venv, Python deps, MITRE data, Node build)
+# 2. Full setup (venv, Python deps, MITRE data, Node.js + web UI build, detection corpora)
 bash setup.sh
 
 # 3. Activate the venv
@@ -89,6 +89,40 @@ python run_api.py
 > cd frontend && npm run dev
 > # UI → http://localhost:5173
 > ```
+
+---
+
+## Offline (air-gapped) installation
+
+`setup.sh` normally fetches from twelve network sources: apt, NodeSource, PyPI,
+HuggingFace, GitHub (MITRE bundles, spaCy model, Ollama), the rule corpora,
+Playwright's CDN and npm. For a host that reaches none of them, build one
+self-contained bundle on a **connected twin of the target** (same distribution
+release, same Python major.minor) and replay it there (ADR-0040):
+
+```bash
+# On the connected machine, after a normal setup.sh:
+bash scripts/package_offline.sh --worktree      # ~13 GB, LLM included
+#   --no-llm / --llm-model NAME / --no-corpora / --no-browsers  to trim it
+# → dist/cti-parsor-offline-<rev>-<codename>-py<ver>.tar (+ .sha256)
+
+# Before transferring it, replay the install with no network and no root:
+bash scripts/check_offline_bundle.sh dist/cti-parsor-offline-*.tar
+
+# On the air-gapped host:
+tar xf cti-parsor-offline-*.tar && cd cti-parsor
+bash setup.sh --offline=offline
+```
+
+The bundle carries the source tree, every wheel, the full apt dependency
+closure (Node.js included), the three HuggingFace models, Chromium, the MITRE
+bundles, the rule corpora (ET Open with its `.sync.json`), the built web UI and
+an Ollama runtime with one pulled model. `setup.sh --offline` verifies the
+checksums and the Python/distro match before touching the host, then runs its
+ordinary steps with pip and HuggingFace pointed at the bundle. A fresh `.env`
+is set to the bundled Ollama model; `HF_HUB_OFFLINE=1` is written so nothing
+ever probes the Hub. Corpora and models are frozen at the bundle's build date
+(`offline/bundle.env`); rebuild and re-transfer to update them.
 
 ---
 
@@ -584,7 +618,7 @@ drill-in and export keep them distinct throughout (ADR-0015 / ADR-0022).
 
 | File | Tracked | Holds |
 |---|---|---|
-| `detection_corpora.yaml` | committed | public corpora (ships with SigmaHQ) |
+| `detection_corpora.yaml` | committed | public corpora — Sigma, YARA and Suricata, all enabled by default |
 | `detection_corpora.local.yaml` | gitignored | private corpora + local overrides |
 
 The overlay is merged over the committed file (override by `name`, append new).
@@ -594,7 +628,8 @@ and edit the YAML directly.
 ### Fetch + build
 
 ```bash
-python scripts/sync_corpora.py          # clone/pull each repo (public: no auth; private: SSH agent)
+python scripts/sync_corpora.py          # clone/pull each git repo (public: no auth; private: SSH agent);
+                                        # download + verify tarball corpora (ET Open)
 python scripts/build_detection_index.py # parse local clones → detection-rule store (in cti_stix.db)
 ```
 
@@ -1094,7 +1129,8 @@ CTIParsor/
 ├── scripts/
 │   ├── build_indexes.py           # Build all pipeline/data/ indexes
 │   ├── download_attack.py         # Download enterprise-attack.json
-│   ├── sync_corpora.py            # Clone/pull rule corpora (ambient git auth)
+│   ├── measure_corpus_ingest.py   # Ingest chosen corpora into a scratch DB, report per-format stats
+│   ├── sync_corpora.py            # Clone/pull rule corpora (ambient git auth) + tarball fetch (ET Open)
 │   ├── build_detection_index.py   # Parse clones → detection-rule store
 │   ├── build_rule_atoms.py        # Backfill rule_atoms from stored bodies (ADR-0014)
 │   ├── build_rule_text.py         # FTS5 index over rule title+description (ADR-0031)
@@ -1188,7 +1224,7 @@ CTIParsor/
 ├── uploads/                       # Web UI uploads (gitignored)
 ├── cti_stix.db                    # SQLite database (gitignored)
 │
-├── detection_corpora.yaml         # Public Sigma corpus registry (committed)
+├── detection_corpora.yaml         # Public corpus registry — Sigma, YARA, Suricata (committed)
 ├── detection_corpora.local.yaml.example  # Private corpus overlay template
 ├── docs/adr/                      # Architecture Decision Records (see docs/adr/README.md)
 ├── TESTING.md                     # Test strategy
@@ -1303,6 +1339,14 @@ Valid `relationship_type` values: `uses`, `attributed-to`, `targets`, `indicates
 
 - `global`: `"enforce"` (apply rules) · `"auto"` (ignore rules)
 - `mode`: `"pin"` (lock relationship type) · `"auto"` (allow free editing)
+
+**Factory default.** Until a policy is saved, `GET` returns
+`{"version": 1, "global": "enforce", "rules": []}` and Stage 4 runs with **no
+pinned rules** — only the LLM-extracted edges, the mapping helpers and Stage 4b
+completion. The 27-rule model the Policy page shows on first visit is a
+frontend template; it is not applied until you click Save. An `"auto"` rule
+never adds an edge either — it declares the pair, nothing more. ADR-0038 moves
+the default into the backend so what the page shows is what runs.
 
 **Pin budget** (ADR-0026). A `"pin"` rule materialises every pair of its two
 object types, so a single rule can generate thousands of edges;

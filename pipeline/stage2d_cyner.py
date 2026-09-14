@@ -66,6 +66,29 @@ _SENTINEL_PATH = Path(__file__).parent.parent / ".cyner_model_unavailable"
 _HIGH_THRESH   = 0.90
 _MEDIUM_THRESH = 0.70
 
+# ── Text chunking ─────────────────────────────────────────────────────────────
+# Same scheme as stage2e_gliner: ~1 600 chars ≈ 480–560 subword tokens, which is
+# the DeBERTa-v3 window.  Overlap catches spans cut at a boundary; the caller
+# dedups what the overlap re-reports.  The batch size only bounds how many
+# chunks one forward pass holds — memory is per chunk, not per document.
+_CHUNK_CHARS   = int(os.getenv("CYNER_CHUNK_CHARS", "1600"))
+_OVERLAP_CHARS = 200
+_BATCH_SIZE    = int(os.getenv("CYNER_BATCH_SIZE", "4"))
+
+
+def _iter_chunks(text: str):
+    """Yield (chunk_text, char_offset) pairs with overlap, never an empty chunk."""
+    start, length = 0, len(text)
+    while start < length:
+        end = min(start + _CHUNK_CHARS, length)
+        if end < length:
+            while end > start and not text[end].isspace():
+                end -= 1
+            if end <= start:                      # one unbroken token: force advance
+                end = min(start + _CHUNK_CHARS, length)
+        yield text[start:end], start
+        start = max(start + 1, end - _OVERLAP_CHARS) if end < length else length
+
 # CyNER 2.0 label → our EntityType.
 # Labels come from the model's config.json (entity_group after aggregation):
 #   Malware, Threat_group, Organization, Indicator, System, Vulnerability,
@@ -227,13 +250,29 @@ def extract_cyner_entities(text: str) -> list[RawEntity]:
     if ner_pipeline is None:
         return []
 
+    # Never hand the whole document to the model in one call.  DeBERTa-v3 uses
+    # relative positions, so a 50 000-character input does not raise — it runs,
+    # and its attention memory grows with the SQUARE of the token count.
+    # Measured 2026-09-02/03: a 27 KB report reached 10.3 GB RSS and a 77 KB
+    # report (capped to 50 K chars) reached 15.5 GB before the OOM killer took
+    # the worker, both a few seconds after "CyNER model loaded".  Chunks of
+    # ~1 600 characters (≈ 500 tokens, the model's window) with an overlap keep
+    # each forward pass bounded; the pipeline accepts a list and batches it.
+    chunks = [c for c, _ in _iter_chunks(text) if c.strip()]
+    if not chunks:
+        return []
     try:
-        predictions: list[dict] = ner_pipeline(text[:50_000])   # cap at 50K chars
+        per_chunk = ner_pipeline(chunks, batch_size=_BATCH_SIZE)
     except Exception as e:
         logger.error(f"CyNER inference error: {e}")
         return []
+    # A single-chunk call returns a flat list rather than a list of lists.
+    if per_chunk and isinstance(per_chunk[0], dict):
+        per_chunk = [per_chunk]
+    predictions: list[dict] = [p for preds in per_chunk for p in (preds or [])]
 
     results: list[RawEntity] = []
+    seen: set[tuple[str, EntityType]] = set()
 
     for pred in predictions:
         label    = pred.get("entity_group", "")
@@ -262,6 +301,14 @@ def extract_cyner_entities(text: str) -> list[RawEntity]:
                 "it", "our", "their", "us", "you", "all", "some", "new",
             }:
                 continue
+
+        # The overlap between chunks re-reports spans on the boundary; keep the
+        # first (highest-scoring predictions are not ordered, so this is a
+        # dedup by identity, not a ranking).
+        key = (value.lower(), etype)
+        if key in seen:
+            continue
+        seen.add(key)
 
         results.append(RawEntity(
             value=value,

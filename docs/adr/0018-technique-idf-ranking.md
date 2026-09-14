@@ -1,6 +1,6 @@
 # ADR-0018 — Technique-IDF ranking (breaking the score plateau)
 
-**Status:** Proposed
+**Status:** Accepted (implemented)
 **Date:** 2026-08-16
 **Extends:** [0014](0014-observable-driven-detection-proposals.md) (relevance scoring)
 **Depends on:** [0017](0017-provenance-based-rule-dedup.md) — the technique document frequency is meaningless against a store that counts the same rule twice
@@ -165,3 +165,7 @@ term collapsed to zero and flattened the entire ranking.
 `TECH_IDF_FLOOR = 0.15` puts a floor under the multiplier. It never binds on the
 real store — the commonest report technique, T1059 at 358 of 6,349 rules, scores
 0.330 — so it is purely a guard for small or freshly-seeded stores.
+
+## Status review (2026-09-02)
+
+Implemented: technique-IDF term in `pipeline/detection/relevance.py` (reuses ADR-0014's `idf()`).

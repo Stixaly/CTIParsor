@@ -1,6 +1,6 @@
 # ADR-0007: In-App Configuration Panel (LLM keys + detection corpora)
 
-**Status:** Proposed
+**Status:** Accepted (slice 1 implemented; slice 2 open)
 **Date:** 2026-06-19
 **Deciders:** maintainer
 
@@ -102,3 +102,11 @@ right answer only once CTIParsor is multi-user or hosted.
 3. [ ] `app_settings` table; `GET/PUT /api/settings/llm` (write-only key, masked read).
 4. [ ] Loopback-origin guard on settings mutations; `reload_llm_config()` to reset cached clients.
 5. [ ] "Test connection" action; keys panel UI.
+
+## Status review (2026-09-02)
+
+Slice 1 is in the tree: `GET/POST/DELETE /api/settings/corpora`,
+`POST /api/settings/corpora/{name}/sync`, `POST /api/settings/corpora/rebuild`
+(`api/routes/settings.py`) and `frontend/src/pages/Settings.tsx`. Slice 2 (LLM
+keys panel, `app_settings` table, loopback guard) has no code yet — keys are
+still `.env` only.

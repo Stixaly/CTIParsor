@@ -1,6 +1,6 @@
 # ADR-0021 — Type-aware alias resolution
 
-**Status:** Proposed
+**Status:** Accepted (implemented)
 **Date:** 2026-08-16
 **Fixes:** [0012](0012-hallucination-measurement-and-canonicalization.md) — canonicalisation collapses aliases that denote *different* objects
 **Affects:** [0013](0013-graph-completion.md) — ATT&CK reference grounding resolves report SDOs through the same index
@@ -131,3 +131,7 @@ returns only the name itself — never another object's alias set.
   passthrough — which is safe but silently loses the fix. `_load()` therefore
   keeps entries with a missing `entity_type` as untyped candidates rather than
   discarding them.
+
+## Status review (2026-09-02)
+
+Implemented: `pipeline/aliases.py::mitre_id_for(name, stix_type)` / `canonical_name(name, stix_type)` take the STIX type.

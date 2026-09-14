@@ -1,6 +1,6 @@
 # ADR-0015 — Multi-format detection matching (Suricata + YARA)
 
-**Status:** Proposed
+**Status:** Accepted (implemented)
 **Date:** 2026-08-16
 **Extends:** [0006](0006-multi-corpus-detection-ingestion.md) (adapter seam),
 [0010](0010-default-sigma-corpora-and-dedup.md) (dedup), [0014](0014-observable-driven-detection-proposals.md) (atom index, IDF relevance)
@@ -233,3 +233,45 @@ Beyond unit tests, this ADR is not done until, on the real store:
 2. Top-10 proposals per format on a real report are read by eye and judged
    plausible by an analyst's standard — the ADR-0014 bar.
 3. Endpoint latency is measured with the full 85,677-rule store, not the 11k one.
+
+## Status review (2026-09-02)
+
+Implemented: `pipeline/detection/suricata.py`, `yara.py`, `suricata_atoms.py`, `yara_atoms.py`; CHANGELOG entries reference this ADR.
+
+## Status review (2026-09-09)
+
+**The `tarball:` source (§5) landed**, and with it the last reason to keep
+the seven corpora disabled: all are `enabled: true` in the committed
+registry, so a fresh `setup.sh` builds the three-format store by default.
+
+`pipeline/detection/sync.py::fetch_tarball` downloads the archive, checks it
+against the `<url>.md5` sidecar ET publishes (a mismatch keeps the previous
+copy), extracts only regular files and directories that resolve inside the
+target — no links, no absolute names, no `..` — then swaps a staging
+directory into `path`. `<path>/.sync.json` records URL, sha256, md5, size and
+fetch time: the "URL and a content hash" promised above in place of a git
+revision. `scripts/sync_corpora.py` and the Settings *Redownload* button
+(`api/routes/settings.py`) both go through it.
+
+Measured the same day (`scripts/measure_corpus_ingest.py`, scratch store on
+the Linux filesystem — the main store on `/mnt/c` locked after 30 minutes of
+the Sigma parse, an environment fault, not a code one):
+
+| | |
+|---|---|
+| ET Open drop | 2026-09-08 · 5,604,389 bytes · 62 files · md5 verified |
+| Active Suricata rules in the drop | 52,196 (+19,488 commented-out, skipped) — 51,799 on 2026-08-16 |
+| Ingest of the 7 YARA/Suricata corpora | 75,943 rules in 25.2 s (et-open alone 11.1 s) |
+| YARA | 23,065 rules · 16,473 canonical · **0 tagged** · 51,529 atoms (hash 12,724, file 2,976) |
+| Suricata | 52,878 rules · 52,865 canonical · 27,643 tagged onto **45** techniques · 73,256 atoms (ip 24,586, url 13,510, domain 12,068) |
+| Store with the 11,464 Sigma rules | ≈ 87,400 rules, 7.6× — the projection above said 85,677 / 7.5× |
+
+Per corpus: yara-rules 12,871 (7,160 canonical — it mirrors the others),
+signature-base 5,890, elastic-artifacts 3,025, rl-yara 1,240, inquest-yara
+39, et-open 52,196, tbg-hunting 682. The "narrow, not sparse" finding holds
+exactly: Suricata's top three techniques are still T1071 (6,490), T1190
+(6,214) and T1568 (5,917), and YARA carries no ATT&CK tag at all.
+
+Not re-run here: validation items 1–3 above (Sigma score drift, per-format
+top-10 review, endpoint latency on the full store) need the full store on a
+Linux host; the Sigma half of the store is untouched by this change.

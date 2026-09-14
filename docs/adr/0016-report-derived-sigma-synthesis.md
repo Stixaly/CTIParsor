@@ -1,6 +1,6 @@
 # ADR-0016 — Report-derived Sigma rule synthesis
 
-**Status:** Proposed
+**Status:** Accepted (implemented)
 **Date:** 2026-08-16
 **Builds on:** [0014](0014-observable-driven-detection-proposals.md) (observables, atom index, IDF),
 [0015](0015-multi-format-detection-matching.md) (shared hostname test)
@@ -180,3 +180,7 @@ provenance) with their own field tables — a follow-up once this is validated.
    `psemhub.war`.
 3. On GREYVIBE, output is one rule or none — never a padded set.
 4. Re-running a job twice produces identical bytes.
+
+## Status review (2026-09-02)
+
+Implemented: `pipeline/detection/synth_sigma.py` (488 lines).

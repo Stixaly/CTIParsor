@@ -1,6 +1,6 @@
 # ADR-0031: Brand evidence from campaign domains, and a full-text rule index
 
-Status: Proposed
+Status: Accepted (implemented)
 Date: 2026-08-27
 Extends ADR-0030. Depends on ADR-0025's weak-evidence distinction.
 
@@ -254,3 +254,7 @@ Two gaps the Cisco SD-WAN report exposed once the panel was tight enough to read
   was breached. The tier separation bounds this to list position, but it is real.
 - **Only domains feed brand mining.** URLs, email addresses and rule titles could
   too; measure before extending.
+
+## Status review (2026-09-02)
+
+Implemented: `pipeline/detection/brands.py` and the FTS5 tables `rule_text*` in `cti_stix.db` (`scripts/build_rule_text.py`).

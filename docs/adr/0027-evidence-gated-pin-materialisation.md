@@ -1,6 +1,6 @@
 # ADR-0027: Evidence-gated pin materialisation, restricted to anchorable types
 
-**Status:** Proposed
+**Status:** Accepted (implemented)
 **Date:** 2026-08-23
 **Deciders:** maintainer
 
@@ -327,3 +327,7 @@ measured with, and takes up its deferred Option 4. Reuses the window measured in
 ADR-0024 Phase C and its argument against a sixth evidence label. Exempts the
 object types whose evidence comes from ADR-0011 / ADR-0023 extraction scoring
 rather than from the prose.
+
+## Status review (2026-09-02)
+
+Implemented: `_evidence_terms`, `_build_sentence_index`, `_pair_is_grounded` and the `pin_evidence` policy block in `pipeline/stage4_stix_mapping.py`; `x_pin_evidence` on every pinned edge.

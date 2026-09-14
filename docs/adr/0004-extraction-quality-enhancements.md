@@ -39,3 +39,12 @@ and offline-capable.
 ## Related
 Superseded numbering note: the **coverage matrix** is ADR-0008 (earlier drafts
 referenced it as "ADR-0005"; ADR-0005 is IoC/defang robustness — see the index).
+
+## Status review (2026-09-02)
+
+P1-A (`SecureBERT-Plus` over `all-MiniLM-L6-v2`) shipped as an **opt-in**, not
+as the default: `pipeline/stage2c_ttp_semantic.py` keeps
+`TTP_EMBEDDING_MODEL=all-MiniLM-L6-v2` unless overridden, and the thresholds
+ADR-0011 tuned and the ADR-0023 baselines were both measured on MiniLM. Read
+P1-A as "supported", not "in effect". The encoder question is re-opened by
+ADR-0023 Phase 5 (ATT&CK-BERT candidate), which is still open.

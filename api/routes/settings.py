@@ -167,7 +167,8 @@ def patch_corpus(name: str, body: CorpusPatch):
 
 @router.post("/corpora/{name}/sync")
 def sync_one_corpus(name: str):
-    """Clone/pull ONE public corpus's git remote, then re-ingest the store.
+    """Fetch ONE public corpus (git clone/pull, or tarball download — ADR-0015 §5),
+    then re-ingest the store.
 
     This is the same networked step as `scripts/sync_corpora.py`, exposed per-row
     for the Settings "Redownload" button. Restricted to PUBLIC corpora: private
@@ -178,15 +179,10 @@ def sync_one_corpus(name: str):
     if corpus is None:
         raise HTTPException(404, f"unknown corpus '{name}'")
 
-    if corpus.get("tarball"):
+    if not corpus.get("git") and not corpus.get("tarball"):
         raise HTTPException(
-            400,
-            f"'{name}' is a tarball source — fetching it is not implemented yet "
-            "(ADR-0019 leaves the tarball fetch to sync_corpora.py)",
+            400, f"'{name}' has no git remote or tarball URL — its path is managed manually"
         )
-
-    if not corpus.get("git"):
-        raise HTTPException(400, f"'{name}' has no git remote — its path is managed manually")
 
     if corpus.get("private"):
         raise HTTPException(
@@ -197,7 +193,7 @@ def sync_one_corpus(name: str):
 
     ok, detail = sync_corpus(corpus)
     if not ok:
-        raise HTTPException(502, f"git sync failed: {detail}")
+        raise HTTPException(502, f"sync failed: {detail}")
 
     with get_conn() as conn:
         rebuild_store(conn, _CONFIG)

@@ -1,6 +1,6 @@
 # ADR-0028: TTPs must quote, not describe
 
-**Status:** Proposed
+**Status:** Accepted (implemented)
 **Date:** 2026-08-23
 **Deciders:** maintainer
 
@@ -280,3 +280,7 @@ Unblocks the exemption ADR-0027 was forced to make. Applies the evidence
 vocabulary of ADR-0009 to the one extraction output that never carried it.
 Depends on nothing; every question about *rejecting* low-quality TTPs waits on a
 reviewed report, which is the ground truth ADR-0023 Phases 3-6 also wait on.
+
+## Status review (2026-09-02)
+
+Implemented: the Stage 3 prompt requires `evidence_text` copied verbatim for every TTP (`pipeline/stage3_llm.py`), stored as `entities.evidence_text/evidence_label` by `api/worker.py`.

@@ -1,6 +1,6 @@
 # ADR-0020 — Filtered, multi-format detection export
 
-**Status:** Proposed
+**Status:** Accepted (implemented)
 **Date:** 2026-08-16
 **Extends:** [0006](0006-multi-corpus-detection-ingestion.md) (licence travels with the export), [0008](0008-detection-coverage-matrix.md) (coverage semantics)
 **Caused by:** [0015](0015-multi-format-detection-matching.md) — the store is no longer Sigma-only
@@ -161,3 +161,7 @@ different artifact with different semantics, and its own ADR.
 4. An export excluding `license=none` contains **zero** rules from `mthcht`.
 5. Unfiltered behaviour is byte-comparable to today's, aside from layout and
    extension.
+
+## Status review (2026-09-02)
+
+Implemented: `POST /api/jobs/{job_id}/detections/export` in `api/routes/coverage.py`.

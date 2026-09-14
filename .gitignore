@@ -45,3 +45,6 @@ detection_corpora.local.yaml
 
 # Large local archives (a 278 MB CLAUDE.zip was sitting in the repo root)
 *.zip
+
+# Air-gap installation bundle (scripts/package_offline.sh, ADR-0040) -- large, rebuilt on demand.
+/offline/
