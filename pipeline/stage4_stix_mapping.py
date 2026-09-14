@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import re
@@ -6,11 +7,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 import stix2
+import yaml
 
 # Initialize logging
 from api.logging_config import get_logger
 from models.schemas import STIX_RELATIONSHIP_TYPES, EntityType, RawEntity
 from pipeline.aliases import alias_surface_forms, canonical_name
+from pipeline.detection.suricata_atoms import parse_options, rule_header
+from pipeline.detection.yara_atoms import split_rules
 from pipeline.stage3_llm import LLMEnrichmentResult
 from pipeline.stage4b_graph_completion import complete_graph
 from pipeline.stix_access import field as _field
@@ -304,6 +308,43 @@ def _is_spurious_observable_ttp_edge(source, target) -> bool:
     return "attack-pattern" in types and bool(types & _OBSERVABLE_SCO_TYPES)
 
 
+def _route_observables_through_indicators(source, target, sco_id_to_indicator: dict):
+    """
+    ADR-0041: when exactly one endpoint of a relationship is a raw observable
+    (SCO) and the other is a real SDO (malware, threat-actor, intrusion-set,
+    ...), the observable must never itself be the Relationship endpoint — its
+    Indicator (built from the same value, based-on an ObservedData wrapping
+    the SCO) stands in for it.
+
+    Left alone on purpose when both endpoints are observables, or neither is:
+    STIX 2.1 has no single correct Relationship-based answer for an
+    observable-to-observable fact (the spec's own mechanism for those is
+    embedded ref properties, which differ per SCO-type pair and are a
+    separate piece of work) — see ADR-0041.
+
+    Returns (source, target) unchanged when no redirect applies, the
+    redirected pair when it does, or (None, None) when a redirect was needed
+    but sco_id_to_indicator has no Indicator for that observable — the
+    caller must drop the edge rather than fall back to the raw SCO.
+    """
+    source_is_sco = getattr(source, "type", "") in _OBSERVABLE_SCO_TYPES
+    target_is_sco = getattr(target, "type", "") in _OBSERVABLE_SCO_TYPES
+
+    if source_is_sco == target_is_sco:
+        return source, target
+
+    if source_is_sco:
+        indicator = sco_id_to_indicator.get(getattr(source, "id", None))
+        if indicator is None:
+            return None, None
+        return indicator, target
+
+    indicator = sco_id_to_indicator.get(getattr(target, "id", None))
+    if indicator is None:
+        return None, None
+    return source, indicator
+
+
 def build_stix_bundle(
     raw_entities: list[RawEntity],
     llm_result: LLMEnrichmentResult,
@@ -312,6 +353,7 @@ def build_stix_bundle(
     report_text: str = "",
     original_filename: str = "",
     source_hash: str | None = None,
+    source_bytes: bytes | None = None,
     cve_metadata: dict[str, dict] | None = None,
     relationship_policy: dict | None = None,
     tlp_level: str | None = None,
@@ -329,9 +371,14 @@ def build_stix_bundle(
                           Used to determine the artifact MIME type and to
                           add a human-readable external reference.
       source_hash       — SHA-256 hex digest of the original uploaded file.
-                          Creates an artifact SCO (STIX 2.1 §4.4) that
-                          represents the source document with its hash —
-                          allowing consumers to verify or retrieve the file.
+                          Included on the artifact SCO (STIX 2.1 §4.4) for
+                          verification, alongside its embedded content.
+      source_bytes      — raw bytes of the original uploaded file (ADR-0043).
+                          Required to create the artifact SCO at all: STIX 2.1
+                          requires exactly one of payload_bin/url on an
+                          Artifact, so a hash alone is not valid STIX and
+                          produces no object. Base64-encoded internally into
+                          payload_bin, making the bundle self-contained.
 
     Mapping:
     - IP, domain, URL, hash  → SCO  (Cyber-observable Object)
@@ -768,6 +815,32 @@ def build_stix_bundle(
         except Exception:
             pass
 
+    # --- Indicator SDOs for detection rules embedded verbatim in the report (ADR-0042) ---
+    seen_embedded_rule_ids: set[str] = set()
+
+    for _rule in split_rules(report_text):
+        if _rule.is_private:
+            continue
+        _add_embedded_rule_indicator(
+            stix_objects, name_to_stix, seen_embedded_rule_ids,
+            pattern_type="yara", pattern=_rule.body, title=_rule.name,
+            llm_result=llm_result, pol_index=_pol_index, seen_rel_keys=seen_rel_keys,
+        )
+
+    for _ptype, _pattern, _title in _find_embedded_net_rules(report_text):
+        _add_embedded_rule_indicator(
+            stix_objects, name_to_stix, seen_embedded_rule_ids,
+            pattern_type=_ptype, pattern=_pattern, title=_title,
+            llm_result=llm_result, pol_index=_pol_index, seen_rel_keys=seen_rel_keys,
+        )
+
+    for _yaml_text, _doc in _find_embedded_sigma_rules(report_text):
+        _add_embedded_rule_indicator(
+            stix_objects, name_to_stix, seen_embedded_rule_ids,
+            pattern_type="sigma", pattern=_yaml_text, title=str(_doc.get("title", "")),
+            llm_result=llm_result, pol_index=_pol_index, seen_rel_keys=seen_rel_keys,
+        )
+
     # --- Targets SROs: threat actors → targets → locations and sectors ---
     for actor_name in llm_result.threat_actors:
         actor = name_to_stix.get(actor_name.lower())
@@ -785,6 +858,20 @@ def build_stix_bundle(
                 _add_relationship(stix_objects, actor, "targets", identity,
                                   pol_index=_pol_index, seen=seen_rel_keys,
                                   custom=_EV_REPORTED)
+
+    # Built once: sco.id -> its Indicator, for _route_observables_through_indicators
+    # below (ADR-0041). Derived from name_to_stix rather than re-walking
+    # stix_objects: every Indicator created above was registered under
+    # f"indicator:{value.lower()}", and the SCO it was built from under
+    # {value.lower()}, so pairing the two prefixes recovers the mapping in one
+    # pass over an existing dict.
+    sco_id_to_indicator: dict[str, object] = {}
+    for _key, _obj in name_to_stix.items():
+        if not (isinstance(_key, str) and _key.startswith("indicator:")):
+            continue
+        _sco = name_to_stix.get(_key[len("indicator:"):])
+        if _sco is not None and hasattr(_sco, "id"):
+            sco_id_to_indicator[_sco.id] = _obj
 
     # --- SROs — semantic relationships (deduplicated, spec-validated) ---
     # Reuses the shared seen_rel_keys set so a semantic edge that duplicates a
@@ -813,6 +900,14 @@ def build_stix_bundle(
         # (e.g. "domain communicates-with T1071.001") rather than emitting them
         # as a noisy `related-to`.  See _is_spurious_observable_ttp_edge.
         if _is_spurious_observable_ttp_edge(source, target):
+            continue
+
+        # ADR-0041: an observable never stands as a Relationship endpoint
+        # opposite a real SDO — its Indicator stands in, or the edge is dropped.
+        source, target = _route_observables_through_indicators(source, target, sco_id_to_indicator)
+        if source is None or target is None:
+            continue
+        if source.id == target.id:
             continue
 
         # Normalise and validate relationship type against the STIX 2.1 spec
@@ -857,22 +952,29 @@ def build_stix_bundle(
     # served: see _materialise_pinned_edges and ADR-0026.
     _pin_stats = _materialise_pinned_edges(
         stix_objects, relationship_policy, seen_rel_keys, report_text,
+        sco_id_to_indicator=sco_id_to_indicator,
     )
 
-    # --- Artifact SCO for the source document ---
+    # --- Artifact SCO for the source document (ADR-0043) ---
     # Represents the original ingested file (PDF, DOCX, …) as a STIX 2.1
-    # artifact object (§4.4).  We include the SHA-256 hash and MIME type
-    # so consumers can verify or retrieve the source document; we do NOT
-    # embed the binary content (payload_bin) to keep the bundle compact.
+    # artifact object (§4.4), embedding its content so the bundle is
+    # self-contained. Gated on source_bytes, not source_hash: STIX 2.1
+    # requires exactly one of payload_bin/url on an Artifact, so a hash alone
+    # (the previous behaviour) can never produce a valid object —
+    # stix2.Artifact(hashes=...) raises MutuallyExclusivePropertiesError,
+    # which the try/except below used to swallow silently on every job.
     artifact_obj = None
-    if source_hash:
+    if source_bytes:
         suffix = ("." + original_filename.rsplit(".", 1)[-1].lower()) if "." in original_filename else ""
         mime   = _MIME_TYPES.get(suffix, "application/octet-stream")
         try:
-            artifact_obj = stix2.Artifact(
-                mime_type=mime,
-                hashes={"SHA-256": source_hash},
-            )
+            artifact_kwargs: dict = {
+                "mime_type": mime,
+                "payload_bin": base64.b64encode(source_bytes).decode("ascii"),
+            }
+            if source_hash:
+                artifact_kwargs["hashes"] = {"SHA-256": source_hash}
+            artifact_obj = stix2.Artifact(**artifact_kwargs)
             stix_objects.append(artifact_obj)
         except Exception:
             artifact_obj = None
@@ -1232,6 +1334,12 @@ def _build_stix_pattern(ioc_value: str, sco) -> str | None:
         return f"[mutex:name = '{esc}']"
     elif sco_type == "user-account":
         return f"[user-account:user_id = '{esc}']"
+    elif sco_type == "software":
+        # NETWORK_TRAFFIC entities map to a placeholder Software SCO (see
+        # _entity_to_sco) rather than a full network-traffic object; giving it
+        # a pattern here is what makes ADR-0041's "route through the Indicator,
+        # or drop" rule not silently drop every network-traffic relationship.
+        return f"[software:name = '{esc}']"
     elif sco_type == "file":
         hashes = sco.get("hashes", {})
         if hashes:
@@ -1246,6 +1354,143 @@ def _build_stix_pattern(ioc_value: str, sco) -> str | None:
         if name:
             return f"[file:name = '{_escape_stix_value(name)}']"
     return None
+
+
+# ---------------------------------------------------------------------------
+# ADR-0042 — detection rules embedded verbatim in a report become Indicators
+# ---------------------------------------------------------------------------
+
+_NET_RULE_ACTIONS = ("alert", "drop", "reject", "pass", "log")
+_RE_SIGMA_TITLE = re.compile(r"(?m)^title\s*:\s*\S")
+
+
+def _add_embedded_rule_indicator(
+    stix_objects: list,
+    name_to_stix: dict,
+    seen_ids: set,
+    *,
+    pattern_type: str,
+    pattern: str,
+    title: str,
+    llm_result,
+    pol_index,
+    seen_rel_keys: set,
+) -> None:
+    """
+    Create an Indicator SDO for a detection rule found verbatim in the report
+    text, and link it to an already-extracted malware/tool whose name appears
+    inside the rule's own title (ADR-0042).
+
+    Shared by all four embedded-rule formats (yara, suricata, snort, sigma) so
+    the "create the Indicator, then auto-link it" logic exists once.
+    """
+    rule_id = _make_deterministic_id(f"{pattern_type}_rule_{pattern}", "indicator", "cti")
+    if rule_id in seen_ids:
+        return
+    seen_ids.add(rule_id)
+    try:
+        indicator = stix2.Indicator(
+            name=f"{pattern_type.capitalize()} rule: {title}",
+            pattern=pattern,
+            pattern_type=pattern_type,
+            valid_from=datetime.now(timezone.utc),
+            indicator_types=["malicious-activity"],
+            id=rule_id,
+        )
+        stix_objects.append(indicator)
+    except Exception:
+        return
+
+    # A minimum length guard keeps a short tool name (e.g. "RDP", "SMB") from
+    # matching a coincidental substring of an unrelated rule title.
+    for candidate_name in (*llm_result.malware_families, *llm_result.tools):
+        if len(candidate_name) < 4:
+            continue
+        if candidate_name.lower() not in title.lower():
+            continue
+        target = name_to_stix.get(candidate_name.lower())
+        if target is None:
+            continue
+        _add_relationship(
+            stix_objects, indicator, "indicates", target,
+            confidence=0.9, pol_index=pol_index, seen=seen_rel_keys,
+            custom=_EV_OBSERVED,
+        )
+
+
+def _find_embedded_net_rules(report_text: str) -> list[tuple[str, str, str]]:
+    """
+    Find Suricata/Snort rules embedded verbatim in report text (ADR-0042).
+
+    Suricata and Snort share the same one-line rule syntax; nothing in this
+    project can tell them apart without an explicit hint, so a rule is typed
+    "snort" only when that word appears in the 200 characters immediately
+    before it in the report, and "suricata" otherwise.
+
+    Returns a list of (pattern_type, rule_line, title) tuples. title comes
+    from the rule's own msg option, falling back to its sid, then a
+    truncated prefix of the line.
+    """
+    results: list[tuple[str, str, str]] = []
+    for line in report_text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.split(None, 1)[0].lower() not in _NET_RULE_ACTIONS:
+            continue
+        if not rule_header(stripped):
+            continue
+        first_open = stripped.find("(")
+        last_close = stripped.rfind(")")
+        if first_open == -1 or last_close == -1 or last_close <= first_open:
+            continue
+        opts = dict(parse_options(stripped[first_open + 1:last_close]))
+        msg = opts.get("msg", "").strip()
+        if len(msg) >= 2 and msg[0] == '"' and msg[-1] == '"':
+            msg = msg[1:-1]
+        sid = opts.get("sid", "").strip()
+        title = msg if msg else (f"sid {sid}" if sid else stripped[:60])
+        offset = report_text.find(stripped)
+        context_before = report_text[max(0, offset - 200):offset].lower() if offset != -1 else ""
+        pattern_type = "snort" if "snort" in context_before else "suricata"
+        results.append((pattern_type, stripped, title))
+    return results
+
+
+def _find_embedded_sigma_rules(report_text: str) -> list[tuple[str, dict]]:
+    """
+    Find Sigma rules embedded verbatim in report text (ADR-0042).
+
+    Best-effort: unlike YARA's braces or Suricata's one-line format, Sigma
+    (YAML) has no delimiter that survives being embedded in prose. A
+    candidate span is grown from each "title:" line to the next "title:" (a
+    second rule) or the end of the text, then shrunk from its end one line at
+    a time until it parses as YAML with the same title+detection shape
+    SigmaAdapter itself requires. A candidate that never parses that way
+    yields nothing, rather than a guess.
+
+    Returns a list of (yaml_text, parsed_doc) tuples.
+    """
+    results: list[tuple[str, dict]] = []
+    for m in _RE_SIGMA_TITLE.finditer(report_text):
+        lines = report_text[m.start():].split("\n")
+        end_idx = len(lines)
+        for i in range(1, len(lines)):
+            if re.match(r"^title\s*:", lines[i]):
+                end_idx = i
+                break
+        for shrink in range(min(end_idx, 60)):
+            candidate = "\n".join(lines[:end_idx - shrink]).strip()
+            if not candidate:
+                break
+            try:
+                doc = yaml.safe_load(candidate)
+            except yaml.YAMLError:
+                continue
+            if isinstance(doc, dict) and "title" in doc and "detection" in doc:
+                results.append((candidate, doc))
+                break
+    return results
 
 
 def _pin_edge_key(src_obj, verb: str, tgt_obj) -> tuple[str, str, str] | None:
@@ -1498,6 +1743,7 @@ def _materialise_pinned_edges(
     relationship_policy: dict | None,
     seen_rel_keys: set,
     report_text: str = "",
+    sco_id_to_indicator: dict | None = None,
 ) -> PinStats:
     """Materialise policy-pinned edges under a per-rule budget (ADR-0026).
 
@@ -1509,6 +1755,16 @@ def _materialise_pinned_edges(
     document made, so every edge carries x_evidence_label="assessed" (which
     fails the review-UI auto-accept gate) and x_policy_rule naming the rule —
     see ADR-0009 and ADR-0024.
+
+    sco_id_to_indicator: optional map from an observable SCO's id to the
+    Indicator built from it (ADR-0041). When given, a candidate pair with
+    exactly one observable endpoint is redirected to route through that
+    Indicator (dropped if none exists for it) before the edge key and evidence
+    gate are computed. `None` (the default) disables this step entirely, unlike
+    an empty dict, which would drop every such candidate — this file's own
+    direct unit tests (test_pin_evidence.py, test_pin_budget.py) call this
+    function without an Indicator graph behind their fake objects and must see
+    today's unchanged behaviour.
     """
     # Guard: no policy, or the whole model is paused.
     if not relationship_policy or relationship_policy.get("global") == "auto":
@@ -1582,6 +1838,12 @@ def _materialise_pinned_edges(
         blocked = 0
         for _s_obj in _type_to_objs.get(_src_type, []):
             for _t_obj in _type_to_objs.get(_tgt_type, []):
+                if sco_id_to_indicator is not None:
+                    _s_obj, _t_obj = _route_observables_through_indicators(
+                        _s_obj, _t_obj, sco_id_to_indicator
+                    )
+                    if _s_obj is None or _t_obj is None:
+                        continue
                 key = _pin_edge_key(_s_obj, _verb, _t_obj)
                 if key is None or key in seen_rel_keys or key in claimed:
                     continue

@@ -1,6 +1,6 @@
 # ADR-0030: Evidence-gated coverage, and corroboration scored on adversary-controlled values
 
-Status: Proposed
+Status: Accepted (implemented)
 Date: 2026-08-27
 Supersedes the *selection* rule of ADR-0008 / ADR-0022; extends ADR-0025.
 
@@ -311,3 +311,7 @@ keys.
 - **The discrimination table encodes judgement, not measurement.** Seven reports
   cannot estimate ubiquity. Replace with report-side document frequency once the
   corpus supports it; the table is the bootstrap.
+
+## Status review (2026-09-02)
+
+Implemented: evidence-gated selection and corroboration scoring in `pipeline/detection/coverage.py` (`score_techniques`) over `pipeline/detection/atoms.py`; the `strlit`/`pipe` reachability fix is in `pipeline/detection/yara_atoms.py`.

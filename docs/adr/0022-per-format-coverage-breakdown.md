@@ -1,6 +1,6 @@
 # ADR-0022 — Per-format coverage breakdown, and the drill-down query rewrite
 
-**Status:** Proposed
+**Status:** Accepted (implemented)
 **Date:** 2026-08-17
 **Extends:** [0008](0008-detection-coverage-matrix.md) (coverage semantics), [0006](0006-multi-corpus-detection-ingestion.md) (licence-aware drill-down)
 **Caused by:** [0015](0015-multi-format-detection-matching.md) — the store is no longer Sigma-only
@@ -266,3 +266,7 @@ overflows horizontally.
 drill-in to `3 of 123 rules selected · 3 KB`, and changes the export summary from
 `1290 all-rights-reserved — local use only` to `All selected rules are
 redistributable` — the restricted rules are all Sigma.
+
+## Status review (2026-09-02)
+
+Implemented: `GET /api/jobs/{job_id}/coverage/rules` in `api/routes/coverage.py`.

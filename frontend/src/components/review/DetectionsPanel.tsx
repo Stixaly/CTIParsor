@@ -8,7 +8,7 @@ import { usePromotedRules } from '../../hooks/usePromotedRules'
 import type { DetectionFormat, ProposalMatch } from '../../types'
 import { DETECTION_FORMATS } from '../../types'
 import RuleBodyDrawer from './RuleBodyDrawer'
-import { typeInk, typeSoft, FORMAT_STYLE, formatDot, formatInk } from './tokens'
+import { typeInk, typeSoft, FORMAT_STYLE, formatDot, formatInk, OBS_TYPE } from './tokens'
 
 /** Grid template shared by the header row and every proposal row — they must
  *  stay in step or the columns drift apart. */
@@ -32,6 +32,7 @@ export default function DetectionsPanel({ jobId }: { jobId: string }) {
   // coverage page's exclusion-based selection.
   const promoted = usePromotedRules(jobId)
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
+  const [openMatches, setOpenMatches] = useState<ProposalMatch[]>([])
 
   if (isLoading) return <Wrap><p style={dim}>Ranking detections…</p></Wrap>
   if (isError) return <Wrap><p style={{ ...dim, color: 'var(--no)' }}>Could not load detections.</p></Wrap>
@@ -197,7 +198,7 @@ export default function DetectionsPanel({ jobId }: { jobId: string }) {
               </span>
               <div style={{ minWidth: 0 }}>
                 <button
-                  onClick={() => setOpenRuleId(p.id)}
+                  onClick={() => { setOpenRuleId(p.id); setOpenMatches(p.matches) }}
                   title="Open the rule body — read it before trusting the rank"
                   style={{
                     overflow: 'hidden',
@@ -289,7 +290,7 @@ export default function DetectionsPanel({ jobId }: { jobId: string }) {
         </>
       )}
 
-      <RuleBodyDrawer ruleId={openRuleId} onClose={() => setOpenRuleId(null)} />
+      <RuleBodyDrawer ruleId={openRuleId} matches={openMatches} onClose={() => setOpenRuleId(null)} />
     </Wrap>
   )
 }
@@ -343,14 +344,6 @@ function FilterChip({
       </span>
     </button>
   )
-}
-
-/** Observable class → the entity type whose colour it borrows, so evidence
- *  chips read in the same palette as the document highlights. */
-const OBS_TYPE: Record<string, string> = {
-  hash: 'sha256', ip: 'ipv4', domain: 'domain', url: 'url',
-  file: 'file', image: 'file', registry: 'registry_key',
-  user: 'user_account', port: 'network_traffic', name: 'tool', cve: 'cve',
 }
 
 function EvidenceChip({ match: m }: { match: ProposalMatch }) {

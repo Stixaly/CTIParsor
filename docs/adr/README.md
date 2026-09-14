@@ -9,7 +9,7 @@ choice, and the consequences. They're append-only — supersede rather than rewr
 | [0004](0004-extraction-quality-enhancements.md) | Extraction quality enhancements (embeddings, GLiNER, doc-context, self-verify) | Accepted (retroactive) |
 | [0005](0005-ioc-extraction-defang-robustness.md) | IoC extraction & defang robustness | Accepted (retroactive) |
 | [0006](0006-multi-corpus-detection-ingestion.md) | Multi-corpus detection-rule ingestion | Accepted |
-| [0007](0007-in-app-configuration-panel.md) | In-app configuration panel (keys + corpora) | Proposed |
+| [0007](0007-in-app-configuration-panel.md) | In-app configuration panel (keys + corpora) | Accepted (slice 1 done) |
 | [0008](0008-detection-coverage-matrix.md) | Per-report detection-coverage matrix | Accepted |
 | [0009](0009-stix-trust-and-provenance.md) | STIX trust & provenance (evidence labels, consensus, markings) | Accepted |
 | [0010](0010-default-sigma-corpora-and-dedup.md) | Default multi-repo Sigma corpora + cross-corpus deduplication | Accepted |
@@ -17,29 +17,35 @@ choice, and the consequences. They're append-only — supersede rather than rewr
 | [0012](0012-hallucination-measurement-and-canonicalization.md) | Hallucination measurement, entity canonicalisation & relationship precision | Accepted |
 | [0013](0013-graph-completion.md) | STIX graph completion (alias fallback, ATT&CK grounding, transitive, long-distance) | Accepted |
 | [0014](0014-observable-driven-detection-proposals.md) | Observable-driven detection proposals (rule atom index, IDF relevance, platform) | Accepted |
-| [0015](0015-multi-format-detection-matching.md) | Multi-format detection matching (Suricata + YARA adapters, per-format IDF) | Proposed |
-| [0016](0016-report-derived-sigma-synthesis.md) | Report-derived Sigma rule synthesis (gated templates, deterministic ids) | Proposed |
-| [0017](0017-provenance-based-rule-dedup.md) | Provenance-based rule dedup (`related:` folding, technique union) | Proposed |
-| [0018](0018-technique-idf-ranking.md) | Technique-IDF ranking (breaks the ~1,400-rule score plateau) | Proposed |
-| [0019](0019-multi-format-corpus-management.md) | Multi-format corpus management (format discovery, enable/disable, subdir/tarball) | Proposed |
-| [0020](0020-filtered-multi-format-export.md) | Filtered multi-format export (facets, per-format extensions, licence gating) | Proposed |
-| [0021](0021-type-aware-alias-resolution.md) | Type-aware alias resolution (a surface form can denote two MITRE objects) | Proposed |
-| [0022](0022-per-format-coverage-breakdown.md) | Per-format coverage breakdown, granular multi-format selection + rule-id export (`/coverage/rules`: ~2.4 h → 5.4 s) | Proposed |
-| [0023](0023-ttp-extraction-measurement-and-retrieval.md) | TTP extraction: fix the ruler, then retrieve-then-validate (dual-granularity scoring, procedure corpus, BM25+dense candidates) | Proposed |
-| [0024](0024-edge-synthesis-provenance-and-run-config.md) | Edge-synthesis provenance & run config (label + cap policy-materialised edges, `jobs.run_config_json`, grounding by evidence label) | Proposed |
-| [0025](0025-evidence-keyed-detection-coverage.md) | Evidence-keyed detection coverage — artifacts score, TTPs locate (Pyramid-of-Pain tiers, unscored tactic phase band; 58 of 64 cells scored ≥2 had no matching rule) | Proposed |
-| [0026](0026-pin-budget-allocation-and-synthesis-stats.md) | Per-rule budget for policy pins + `x_synthesis_stats` (max-min fair share replaces rank-order starvation: 20 → 46 rules served across 4 bundles; 18,426 candidates for a budget of 200) | Proposed |
-| [0027](0027-evidence-gated-pin-materialisation.md) | Evidence-gated pin materialisation, anchorable types only (SCOs/malware/tool 91–100% verbatim; `attack-pattern` 24.3%, `indicator` 0% by name but 96.3% by pattern value — 47% of candidates fail open by design) | Proposed |
-| [0028](0028-ttp-evidence-contract.md) | TTPs must quote, not describe — `TTPExtracted` gains `evidence_text`/`evidence_label` (relationship quotes locate at 79.4%, TTP descriptions at 36.8%, same call; 99.4% of failures are paraphrase, not invention) | Proposed |
-| [0029](0029-pasted-text-and-captured-url-ingestion.md) | Pasted text and captured URLs as ingestion sources — Chromium renders the archive, the DOM text is what gets ingested (the PDF keeps 99.6% of characters but only 72.2% of observables: 9 of 12 hashes lost to a wrapped table column; JS off is both the security and the functional default — Unit 42 serves 0 chars to a JS-enabled headless browser) | Proposed |
-| [0030](0030-evidence-gated-coverage-and-corroboration-scoring.md) | Evidence-gated coverage + corroboration scored on discriminating values (the tag join proposes 86 453 rules across 7 reports, 908 of them — 1.05 % — hold anything the report contains; `strlit`/`pipe` were indexed and unreachable, hiding all 16 314 YARA rules; df keeps `certutil` at 15 and strips `api.telegram.org` at 60, so it cuts the wrong way) | Proposed |
-| [0031](0031-brand-evidence-from-campaign-domains.md) | Brand evidence mined from campaign domains + an FTS5 rule-text index (UNC6671's 79 domains were all freshly registered, so the gate served 0 — while 32 Okta rules sat in the store and `okta` appeared in 7 of those domains; recurrence across domains is the anti-noise filter, and FTS5 makes the lookup 0.4 ms instead of 4.1 s) | Proposed |
-| [0032](0032-figure-derived-evidence.md) | Figures are evidence, and they enter through `report_text` (141 figures in 200 pages and 56.9% of images are icons a free geometric filter kills; one FortiGate screenshot carries three techniques the text layer never states, one Ukrainian lure page carries a payload filename; the design question is the coordinate system, not the model — injection costs one side table, a separate evidence space costs six gates; whole-page input is not the slow option but the broken one — both ADR-0029 tall-sheet captures returned empty after 90 s) | Proposed |
-| [0033](0033-provider-agnostic-vision-calls.md) | One vision call, three providers — capability-gated, schema-constrained (amends 0032 §3: reusing `LLM_PROVIDER` is wrong because the Stage-3 defaults have no vision — `OLLAMA_MODEL=llama3.2` is not even pulled — and a text model handed an image invents rather than raising; Ollama's OpenAI route takes `image_url`, so Mistral and Ollama are one code path; `json_object` invented the key `first_2_text_lines` where `json_schema` returned `lines`, which deletes the repair code at `stage3_llm.py:673`) | Proposed |
+| [0015](0015-multi-format-detection-matching.md) | Multi-format detection matching (Suricata + YARA adapters, per-format IDF) | Accepted |
+| [0016](0016-report-derived-sigma-synthesis.md) | Report-derived Sigma rule synthesis (gated templates, deterministic ids) | Accepted |
+| [0017](0017-provenance-based-rule-dedup.md) | Provenance-based rule dedup (`related:` folding, technique union) | Accepted |
+| [0018](0018-technique-idf-ranking.md) | Technique-IDF ranking (breaks the ~1,400-rule score plateau) | Accepted |
+| [0019](0019-multi-format-corpus-management.md) | Multi-format corpus management (format discovery, enable/disable, subdir/tarball) | Accepted |
+| [0020](0020-filtered-multi-format-export.md) | Filtered multi-format export (facets, per-format extensions, licence gating) | Accepted |
+| [0021](0021-type-aware-alias-resolution.md) | Type-aware alias resolution (a surface form can denote two MITRE objects) | Accepted |
+| [0022](0022-per-format-coverage-breakdown.md) | Per-format coverage breakdown, granular multi-format selection + rule-id export (`/coverage/rules`: ~2.4 h → 5.4 s) | Accepted |
+| [0023](0023-ttp-extraction-measurement-and-retrieval.md) | TTP extraction: fix the ruler, then retrieve-then-validate (dual-granularity scoring, procedure corpus, BM25+dense candidates) | Accepted in part |
+| [0024](0024-edge-synthesis-provenance-and-run-config.md) | Edge-synthesis provenance & run config (label + cap policy-materialised edges, `jobs.run_config_json`, grounding by evidence label) | Accepted |
+| [0025](0025-evidence-keyed-detection-coverage.md) | Evidence-keyed detection coverage — artifacts score, TTPs locate (Pyramid-of-Pain tiers, unscored tactic phase band; 58 of 64 cells scored ≥2 had no matching rule) | Accepted |
+| [0026](0026-pin-budget-allocation-and-synthesis-stats.md) | Per-rule budget for policy pins + `x_synthesis_stats` (max-min fair share replaces rank-order starvation: 20 → 46 rules served across 4 bundles; 18,426 candidates for a budget of 200) | Accepted |
+| [0027](0027-evidence-gated-pin-materialisation.md) | Evidence-gated pin materialisation, anchorable types only (SCOs/malware/tool 91–100% verbatim; `attack-pattern` 24.3%, `indicator` 0% by name but 96.3% by pattern value — 47% of candidates fail open by design) | Accepted |
+| [0028](0028-ttp-evidence-contract.md) | TTPs must quote, not describe — `TTPExtracted` gains `evidence_text`/`evidence_label` (relationship quotes locate at 79.4%, TTP descriptions at 36.8%, same call; 99.4% of failures are paraphrase, not invention) | Accepted |
+| [0029](0029-pasted-text-and-captured-url-ingestion.md) | Pasted text and captured URLs as ingestion sources — Chromium renders the archive, the DOM text is what gets ingested (the PDF keeps 99.6% of characters but only 72.2% of observables: 9 of 12 hashes lost to a wrapped table column; JS off is both the security and the functional default — Unit 42 serves 0 chars to a JS-enabled headless browser) | Accepted |
+| [0030](0030-evidence-gated-coverage-and-corroboration-scoring.md) | Evidence-gated coverage + corroboration scored on discriminating values (the tag join proposes 86 453 rules across 7 reports, 908 of them — 1.05 % — hold anything the report contains; `strlit`/`pipe` were indexed and unreachable, hiding all 16 314 YARA rules; df keeps `certutil` at 15 and strips `api.telegram.org` at 60, so it cuts the wrong way) | Accepted |
+| [0031](0031-brand-evidence-from-campaign-domains.md) | Brand evidence mined from campaign domains + an FTS5 rule-text index (UNC6671's 79 domains were all freshly registered, so the gate served 0 — while 32 Okta rules sat in the store and `okta` appeared in 7 of those domains; recurrence across domains is the anti-noise filter, and FTS5 makes the lookup 0.4 ms instead of 4.1 s) | Accepted |
+| [0032](0032-figure-derived-evidence.md) | Figures are evidence, and they enter through `report_text` (141 figures in 200 pages and 56.9% of images are icons a free geometric filter kills; one FortiGate screenshot carries three techniques the text layer never states, one Ukrainian lure page carries a payload filename; the design question is the coordinate system, not the model — injection costs one side table, a separate evidence space costs six gates; whole-page input is not the slow option but the broken one — both ADR-0029 tall-sheet captures returned empty after 90 s) | Accepted |
+| [0033](0033-provider-agnostic-vision-calls.md) | One vision call, three providers — capability-gated, schema-constrained (amends 0032 §3: reusing `LLM_PROVIDER` is wrong because the Stage-3 defaults have no vision — `OLLAMA_MODEL=llama3.2` is not even pulled — and a text model handed an image invents rather than raising; Ollama's OpenAI route takes `image_url`, so Mistral and Ollama are one code path; `json_object` invented the key `first_2_text_lines` where `json_schema` returned `lines`, which deletes the repair code at `stage3_llm.py:673`) | Accepted |
 | [0034](0034-negated-selections-are-not-atoms.md) | A negated Sigma selection is not an atom (the index held what rules EXCLUDE: 14,037 atoms across 1,742 rules came only from a negated block — `svchost.exe` in 80 rules, `explorer.exe` in 75, `msmpeng.exe` in 62 — so a report naming `explorer.exe` pulled in the rules written to ignore it; the `filter*` naming convention is not usable, 10 rules use one positively and 72 negate a selection not named that way, so the `condition` is parsed instead; over-exclusion is the deliberate bias — it costs an atom where under-exclusion invents one) | Accepted |
 | [0035](0035-bundle-staleness-is-a-first-class-signal.md) | A stored bundle carries the pipeline that built it, and must say so (the self-edge fix shipped 2026-08-28 and all 13 stored bundles predate it, so 6 self-loops still ride in two delivered artefacts; `run_config_json.git_rev` already records which commit built each bundle and nothing reads it, while `re_run_final_stages` already rebuilds Stages 4–5 from accepted entities at zero LLM cost — the missing piece is a hand-kept list of output-affecting revisions, because comparing to HEAD marks every frontend commit as invalidating and so never returns to green) | Accepted |
 | [0036](0036-architecture-service-multi-utilisateur.md) | A layered rewrite is not what makes this multi-user (the reviewed proposal's diagnosis holds — `_run_pipeline` is 678 lines, SQL sits in 10 route files of 10, config is read 82 times — but it credits the boolean index with a 5 078 ms win that was 4 624 ms of filesystem, and the deployed Linux instance already answers coverage in 23 ms; `fork` is unavailable because Torch's OpenMP pool deadlocks after it, which rules out ARQ, RQ and default-prefork Celery; `INSERT OR IGNORE` is inert on `entities` because the PK is a fresh uuid4 and no UNIQUE exists; the pool is not a new decision but ADR-0002 accepted 2026-06-07 with all five action items still unticked; ordered by impact per unit of effort, so the few-line queue fix ships before the multi-week auth project) | Proposed |
-| [0037](0037-scaling-to-30-40-users.md) | Scaling to 30–40 concurrent users — measure the stack before rewriting it (a Rust + PostgreSQL + Elasticsearch rewrite targets the <1 ms slice of a 5 078 ms response; `mv` to native storage delivers the bulk of it for free, and the real ceiling is 4.4 GB of model RSS per job with a 133 s cold start, identical in every language; its Measurement 2 has since been invalidated — see 0036) | Proposed |
+| [0037](0037-scaling-to-30-40-users.md) | Scaling to 30–40 concurrent users — measure the stack before rewriting it (a Rust + PostgreSQL + Elasticsearch rewrite targets the <1 ms slice of a 5 078 ms response; `mv` to native storage delivers the bulk of it for free, and the real ceiling is 4.4 GB of model RSS per job with a 133 s cold start, identical in every language; its Measurement 2 has since been invalidated — see 0036) | Superseded in part by 0036 |
+| [0038](0038-link-density-under-policy.md) | Link density under policy — the factory policy has no rules while the Policy page shows 27 (nothing seeds the DB, so Stage 4 pins nothing on a fresh install); `gap` relationships are requested from the LLM and then deleted by Stage 3d; caps are one shared counter that ADR-0024 saw hit at exactly 200; decision: backend-owned default rule set, kept `gap` edges, alias-aware endpoint resolution behind a measurement gate, per-node fan-out caps, long-distance completion on the local model; the before/after run is recorded as a procedure because the WSL distro dies at the first Stage 3 LLM call on this workstation (7 attempts, both providers) | Proposed |
+| [0039](0039-per-stage-observability.md) | Per-stage observability — 18 stage modules, 6 report anything, and the ones that change the data most report least (3d deletes every unquotable relationship, 4b adds up to 200 edges, neither emits an event); 209 `logger` call sites carry no job id because the worker subprocess never sets the `request_id` ContextVar, so every pipeline line reads `[none]`; the traceback is computed then discarded in favour of `str(exc)`; a SIGKILLed job does not say which stage it died in (7 manual greps on 2026-09-02); the progress bar is `(stage / 5) * 100`, which hardcodes the count, weights a millisecond stage like a 4-minute one, and yields `NaN` for stage `"1f"`. Decision: a typed `job_stages` table written through one `stage_span` context manager that also sets the log context, times the stage, emits the event and attributes the exception | Proposed |
+| [0040](0040-offline-installation-bundle.md) | Offline (air-gapped) installation bundle — `setup.sh` reaches 12 network sources (452 `.deb`, 167 wheels / 3.1 GB, 2.6 GB of models, 684 MB of corpora, Chromium, Node, an LLM); one self-contained ~13 GB bundle built by `scripts/package_offline.sh` on a twin of the target, installed by `setup.sh --offline=<dir>` through env vars (`PIP_NO_INDEX`, `HF_HUB_OFFLINE`) and pre-staged files so each step's own "already present" branch fires; checksums verified before touching the host; Python/distro coupling accepted and enforced | Proposed |
+| [0041](0041-observables-route-through-indicators.md) | Observables route through their Indicator, never straight to a threat SDO — two paths still wire a raw SCO directly to malware/threat-actor/etc: the LLM relationships loop (only observable↔attack-pattern was guarded) and the policy pin engine (the *larger* source per ADR-0024, 872/1,140 edges on one report); measured 12/29 and 2/45 raw-SCO edges on stored bundles, mostly observable-to-observable (`file↔ipv4-addr`, out of scope — no single STIX answer exists for it); redirects the observable side to its Indicator only when the other endpoint is a real SDO, opt-in via a `sco_id_to_indicator` parameter so the pin engine's own budget/gating unit tests are untouched; also closes a silent gap where `NETWORK_TRAFFIC` observables never got an Indicator at all | Accepted |
+| [0043](0043-self-contained-bundle-embeds-source-pdf.md) | The STIX bundle embeds the source document (`payload_bin`) — the `Artifact` object `stage4_stix_mapping.py` has always tried to build (hash + MIME type only, no bytes, "to keep the bundle compact") has never actually existed: STIX 2.1 requires exactly one of `payload_bin`/`url`, so `stix2.Artifact(hashes=...)` alone raises `MutuallyExclusivePropertiesError` and the surrounding `except Exception: artifact_obj = None` has silently swallowed it on every job ever processed, found only by checking a real bundle instead of the docstring's claim; fix embeds the source file as base64 `payload_bin` (measured ≈347 KB added for a 260 KB PDF), making the bundle self-contained | Accepted |
+| [0042](0042-embedded-yara-rules-as-indicators.md) | Embedded detection rules (YARA, Suricata, Snort, Sigma) become Indicator SDOs — CTI reports routinely publish a literal rule inline (verified: 4 complete YARA rules in one real Google TIG report), and none of it survived past ingestion; STIX 2.1's `Indicator.pattern_type` already models all four natively, so the work is extraction — reuses `yara_atoms.split_rules` and `suricata_atoms.rule_header`/`parse_options` (ADR-0015's own corpus parsers, validated at ~20,000-rule scale) unchanged; Sigma gets a new grow-then-shrink YAML boundary heuristic since it has no self-delimiting rule-end marker, fail-closed (must parse as valid title+detection YAML) and unvalidated against any real report, unlike the other two; auto-links to an already-extracted malware/tool by name substring (`x_evidence_label: "observed"`) — measured wrong on the first check (raw Stage-3 output) and right on the second (the DB-merged entity list `build_stix_bundle` actually sees, where CyNER had already found all 4 names) | Accepted |
 
 **Numbering notes**
 - `0001` and `0003` are unused gaps (early informal decisions never filed).
@@ -218,4 +224,64 @@ choice, and the consequences. They're append-only — supersede rather than rewr
        entities, and the fact that half of 0037's 715x is already banked
        by the move to native storage.  Neither touches the pipeline: they
        are about how the service is run, not what it extracts
+
+0013 graph completion (reference grounding, transitive, long-distance)
+   ▲   defaults and cap re-decided by
+   └── 0038 link density under policy: the factory policy has NO rules
+       while the Policy page displays 27 (nothing seeds the DB), `gap`
+       relationships are asked for and then deleted by Stage 3d, and one
+       shared 200-edge counter serves both 4b engines.  Backend-owned
+       default rule set, `gap` edges kept under their label, alias-aware
+       endpoint resolution behind a measurement gate, per-node fan-out
+       caps, long-distance completion on the local model.  Also amends
+       0024 (fixed cap) and 0026/0027 (budget, gate); the before/after
+       run is a recorded procedure until it can be executed on the
+       Linux host
+
+0002 worker subprocess model + 0024 run_config (what a run was CONFIGURED with)
+   ▲   completed by
+   └── 0039 per-stage observability: 0024 records the configuration of a run
+       and nothing records its EXECUTION.  18 stage modules, 6 report; the
+       stages that delete and add the most data (3b, 3d, 3f, 4b) report
+       nothing, although 3d and 4b already compute the numbers and throw
+       them away.  A `job_stages` table written through one `stage_span`
+       context manager, which also sets the job id on the log context that
+       209 call sites currently render as `[none]`, and names the stage a
+       SIGKILLed job died in.  Supplies the per-stage timings 0036 Phase 0
+       and 0037 had to obtain with throwaway scripts, and the dropped-edge
+       count 0038 decision 2 changes on purpose
+
+0009 trust & provenance (observable → ObservedData → Indicator chain)
+   ▲   its LLM-relationship and pin-engine edges disciplined by
+0024 edge-synthesis provenance + 0027 evidence-gated pin materialisation
+   ▲   both are sources of a raw SCO reaching a threat SDO directly
+   └── 0041 observables route through their Indicator: the pin engine is
+       the LARGER of the two sources (872/1,140 edges on one report, per
+       0024), not the smaller one — only observable↔attack-pattern was ever
+       guarded (0012).  Scoped to observable↔non-observable-SDO pairs only:
+       12/29 and 2/45 raw-SCO edges measured on stored bundles turned out to
+       be mostly observable-to-observable (`file↔ipv4-addr`), which has no
+       single correct STIX answer and stays out of scope.  Opt-in via a
+       `sco_id_to_indicator` parameter so 0027's own budget/gating unit
+       tests, built on bare fakes with no Indicator behind them, are
+       untouched.  Also closes a silent gap where NETWORK_TRAFFIC
+       observables never got an Indicator at all
+
+0015 multi-format detection matching (names the gap: reports carry
+detection rules inline, nothing extracts them — never built)
+   ▲   built by
+   └── 0042 embedded detection rules become Indicator SDOs: STIX 2.1's
+       `pattern_type` (yara/suricata/snort/sigma) already models this, so
+       the work is extraction — reuses 0015's own `yara_atoms.split_rules`
+       and `suricata_atoms.rule_header`/`parse_options` unchanged (both
+       validated at ~20,000-rule corpus scale); Sigma alone needs new
+       logic, a grow-then-shrink YAML boundary heuristic, because YAML has
+       no self-delimiting rule end the way YARA's braces or Suricata's
+       one-line format do.  Verified against a real report with 4 embedded
+       YARA rules; Sigma has no real counter-example and stays fail-closed.
+       Auto-links to an already-extracted malware/tool by name substring —
+       wrong on the first check (raw Stage-3 output), right on the second
+       (the DB-merged entity list 0002/1359's `re_run_final_stages`
+       actually builds, where CyNER had already found all 4 names the LLM
+       had not)
 ```

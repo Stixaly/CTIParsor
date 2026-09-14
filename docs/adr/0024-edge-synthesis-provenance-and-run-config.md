@@ -1,6 +1,6 @@
 # ADR-0024: Edge-synthesis provenance and run configuration
 
-**Status:** Proposed
+**Status:** Accepted (implemented)
 **Date:** 2026-08-22
 **Deciders:** maintainer
 
@@ -314,3 +314,7 @@ Extends ADR-0009 (trust & provenance) to the one edge source it did not cover,
 and applies ADR-0013's own discipline — label every synthesised edge, name the
 rule, cap the output — to the mechanism that predates it. Unblocks ADR-0023
 Phase 3 by making a measured baseline attributable to a configuration.
+
+## Status review (2026-09-02)
+
+Implemented: `api/run_config.py` + `jobs.run_config_json`; policy pins carry `x_evidence_label="assessed"` and `x_policy_rule`; mapping helpers carry `reported`/`observed` (`_EV_REPORTED` in `pipeline/stage4_stix_mapping.py`).

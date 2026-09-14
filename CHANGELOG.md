@@ -6,6 +6,257 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Added
+
+- **The API warns at startup if Chromium isn't installed, instead of failing
+  on the first URL capture.** `pipeline/web_capture.py` already had a precise
+  diagnostic for this (`_launch_hint`, "Chromium is not installed for the
+  account running this API…") but it only fired reactively, the first time
+  an analyst tried the URL-ingestion tab — a service that had been running
+  for hours could still be missing the browser and nobody would know until
+  a request failed. `check_chromium_installed()` resolves Playwright's
+  expected executable path (via `sync_playwright().chromium.executable_path`)
+  and checks the filesystem, without launching a browser or touching the
+  network; `api/main.py`'s startup `lifespan` hook runs it once off-thread
+  (`asyncio.to_thread` — Playwright's sync API refuses to run on a thread
+  already driving an asyncio loop, which the hook's coroutine is) and logs a
+  warning if it's missing. A second, unrelated bug surfaced while building
+  this: `sync_playwright()`'s own connection teardown logs a spurious
+  `asyncio` "Task was destroyed but it is pending!" on every call, at a
+  GC-determined moment a `try/finally` cannot bracket — worked around by
+  raising the `asyncio` logger's level for the remainder of the process,
+  since this check runs exactly once, at boot, before any request is served.
+
+- **Proposed Detections highlights the report evidence inside the rule body.**
+  Opening a rule's detail previously showed its raw text with no connection
+  to *why* it was proposed — the evidence chip lived only in the row above.
+  The rule-body drawer now reuses `buildRanges` (the same whole-token,
+  defanged-IOC-aware, hash-line-wrap-tolerant matcher already driving the
+  report text viewer) to find and `<mark>` every matched value directly in
+  the rule text, colour-coded to match its observable type and titled with
+  the rule field it matched. Verified in-browser against a real report: the
+  drawer for `WEBSHELL_PHP_Dynamic_Big` correctly highlights `"backdoor"`
+  inside its `strings:` section.
+
+- **`setup.sh` installs Node.js instead of printing instructions.** A fresh
+  WSL2 run stopped at "Node.js not found — web UI build unavailable", left the
+  operator to paste a NodeSource one-liner, and the web UI never got built.
+  Step `[1b/6]` now asks *Install Node.js 24 from NodeSource now?* (default
+  yes, like every other step) and installs it through apt, dnf or yum;
+  `--no-node` skips it. Node 24 is the current Active LTS — Node 20, which the
+  old hint named, reached end-of-life on 2026-04-30. The NodeSource script is
+  downloaded to a file before it runs, because `curl | bash` with a failed
+  curl feeds bash an empty script that exits 0, and every step is checked
+  explicitly because `set -e` is off inside an `if`. Verified with a stub
+  harness (fake `sudo`, `curl`, `apt-get`) across seven scenarios: fresh
+  install, curl failure, apt failure, `--no-node`, answering no, Node already
+  present, and Node too old then upgraded.
+
+- **All three detection formats are enabled by default, and ET Open is
+  fetched.** `detection_corpora.yaml` shipped the five YARA and two Suricata
+  corpora of ADR-0015 as `enabled: false` ("until the adapter lands") long
+  after the adapters had landed, so a fresh clone built a Sigma-only store and
+  the only way to the other two formats was the Settings page, one corpus at
+  a time. Flipping the flag was not enough: ET Open is published only as a
+  tarball, and the `tarball:` registry source ADR-0015 §5 promised was never
+  implemented — `sync_corpora.py` skipped it as "managed manually" and the
+  Settings *Redownload* button answered 400.
+
+  `pipeline/detection/sync.py` gains `fetch_tarball`: download, verify
+  against the `.md5` sidecar ET publishes (a mismatch keeps the previous
+  copy), extract only regular files and directories that resolve inside the
+  target (no links, absolute names or `..`), swap a staging directory into
+  `path`, and record URL, sha256, md5, size and fetch time in
+  `<path>/.sync.json` — the "URL and content hash" the ADR asked for in place
+  of a git revision. The CLI and the Settings button share it. Eleven tests
+  cover it; two were mutation-checked (dropping the member filter, then the
+  checksum comparison, each fails its test).
+
+  Measured on 2026-09-09: the tarball came down as 5,604,389 bytes / 62
+  files, md5-verified, carrying 52,196 active rules (the ADR counted 51,799
+  on an earlier drop). Ingesting the seven corpora into a scratch store
+  (`scripts/measure_corpus_ingest.py`, new) took 25 s: YARA 23,065 rules
+  (16,473 canonical, 12,724 hash atoms, zero ATT&CK tags), Suricata 52,878
+  rules (27,643 tagged onto 45 techniques, 24,586 IP atoms). On top of the
+  11,464 Sigma rules that is ~87,400 rules, 7.6× the old default — within 2%
+  of the 85,677 ADR-0015 projected. `setup.sh`'s corpora step says so; the
+  README, `docs/detection-coverage.md` and ADR-0019 no longer describe the
+  tarball fetch as future work.
+
+- **Offline (air-gapped) installation bundle** (ADR-0040). `setup.sh` fetches
+  from twelve network sources — apt, NodeSource, PyPI, HuggingFace, GitHub
+  (MITRE, spaCy, Ollama), fourteen git remotes plus rules.emergingthreats.net,
+  Playwright's CDN and npm — and a SOC network that reaches none of them had
+  no install path. `scripts/package_offline.sh`, run on a connected twin of
+  the target (same release, same Python major.minor), fills `offline/` with
+  the wheelhouse, the full apt closure (Node.js included), the HuggingFace
+  models, Chromium, the MITRE bundles, the corpora, the built UI and an
+  Ollama runtime with the `.env` model pulled, writes `bundle.env` +
+  `SHA256SUMS`, and packs it with the source tree. `setup.sh
+  --offline=<dir>` verifies the checksums and the Python/distro match before
+  touching the host, installs the `.deb`s with `dpkg`, then runs its ordinary
+  steps with `PIP_NO_INDEX`/`PIP_FIND_LINKS` and `HF_HUB_OFFLINE` exported and
+  the bundle's files pre-staged, so each step's own "already present" branch
+  fires instead of the network (`scripts/offline_lib.sh`; twelve small hooks
+  in `setup.sh`). `scripts/check_offline_bundle.sh` replays an install from
+  the tarball in a scratch `HOME` with every proxy pointed at a closed port
+  and `sudo`/`dpkg` stubbed, then checks the venv, the model loads, the
+  indexes, the rule store, Chromium and Ollama. Size was explicitly not the
+  constraint: CUDA wheels and the LLM stay in.
+
+  Measured on 2026-09-09 (Ubuntu 26.04, Python 3.14): first build 30 min 51 s,
+  a 13.9 GB tarball — Ollama + `mistral` 5.5 GB, wheels 3.1 GB (torch and 15
+  `nvidia_*` wheels are 2.7 GB of it), models 2.6 GB, Chromium 655 MB, corpora
+  663 MB, 457 `.deb` 388 MB, `node_modules` 242 MB, MITRE 65 MB; 1,314
+  checksummed files. The replayed install took 713 s and passed 17 of 18
+  checks; the two failures were real and are fixed: GLiNER fetches its
+  encoder's tokenizer (`microsoft/deberta-v3-large`) from the Hub at load
+  time, so the packager now ships those files (2.4 MB) next to the model, and
+  `.env`'s bare `TTP_EMBEDDING_MODEL=all-MiniLM-L6-v2` gets the
+  `sentence-transformers/` prefix the runtime adds silently (the Hub answers
+  401 without it). The rule store built offline holds the same 87,407 rules
+  as the online path. Ollama served the staged `mistral` (7.2B Q4_K_M) from
+  the extracted runtime and found the workstation's GPU on its own. The
+  rebuilt bundle replayed at 18 of 18 checks in 706 s.
+
+### Added
+
+#### Detection rules embedded verbatim in a report become Indicator SDOs, 2026-09-14
+
+CTI vendor reports routinely publish a literal YARA, Suricata/Snort, or Sigma
+rule alongside their write-up — verified on a real Google Threat Intelligence
+Group report, which embeds 4 complete YARA rules — and none of it survived
+past ingestion as anything more than prose. STIX 2.1 already models this
+(`Indicator.pattern_type` = `"yara"`/`"suricata"`/`"snort"`/`"sigma"`,
+`pattern` holding the rule verbatim), so `build_stix_bundle` now extracts and
+represents them: YARA via `yara_atoms.split_rules` and Suricata/Snort via
+`suricata_atoms.rule_header`/`parse_options` (both existing, corpus-scale-
+validated ADR-0015 parsers, reused unchanged), Sigma via a new grow-then-
+shrink YAML boundary heuristic (fail-closed — a candidate that never parses
+as valid `title`+`detection` YAML yields nothing). Each rule auto-links to an
+already-extracted malware/tool whose name appears in its own title. Verified
+end to end on the real report (`re_run_final_stages`, zero LLM cost): all 4
+YARA rules became Indicators, correctly linked to their malware. One honest
+finding along the way: 2 of the 4 also linked to `backdoor`/`tunneler` —
+Stage 2d (CyNER) had mistagged those generic category words as malware names
+for this job, a pre-existing defect in a different stage that this feature
+surfaced rather than caused. See
+[ADR-0042](docs/adr/0042-embedded-yara-rules-as-indicators.md).
+
+### Fixed
+
+#### Observables reached malware/threat-actor SDOs directly, bypassing their Indicator, 2026-09-14
+
+Stage 4 already built the STIX 2.1 best-practice chain (`SCO ◄ ObservedData ◄
+Indicator`) for every accepted IoC, but nothing stopped the raw SCO itself
+from also becoming the direct endpoint of a `Relationship` to a threat SDO.
+Two independent paths did this: the LLM relationships loop (only
+observable↔attack-pattern was ever guarded) and the Relationship Policy's pin
+engine — the larger source, per ADR-0024's own measurement of 872/1,140 edges
+on one report. Re-running Stage 4+5 for a real stored job
+(`re_run_final_stages`, zero LLM cost) turned 2 raw `file --related-to-->
+malware` edges into 0, rerouted through 40 `indicator --indicates--> malware`
+edges instead. A related gap is closed in the same change: `NETWORK_TRAFFIC`
+entities got a placeholder `Software` SCO but silently never got an
+Indicator, which would have made every network-traffic relationship simply
+vanish under the new rule instead of being fixed by it.
+
+Scoped deliberately to observable↔non-observable-SDO pairs only —
+observable-to-observable edges (`file related-to ipv4-addr`, the majority of
+what was actually measured) are left alone, since STIX 2.1's real answer for
+those is per-SCO-type embedded ref properties, a separate piece of work. See
+[ADR-0041](docs/adr/0041-observables-route-through-indicators.md).
+
+#### Stage 2d fed whole documents to DeBERTa and the OOM killer took the worker, 2026-09-03
+
+`extract_cyner_entities` called the HuggingFace token-classification pipeline
+once with `text[:50_000]`. DeBERTa-v3 uses relative positions, so an input far
+beyond its 512-token window does not raise — it runs, and attention memory
+grows with the square of the token count. Measured: the worker reached
+10.3 GB resident on a 27 KB report and 15.5 GB on a 77 KB report
+(`CERT_Polska_Energy_Sector_Incident_Report_2025.pdf`, capped to 50 K chars),
+both a few seconds after "CyNER model loaded", and `dmesg` records the
+SIGKILL. The 50 K cap was the wrong knob: it bounds the input, not the square.
+
+Stage 2d now chunks like Stage 2e already did — ~1 600 characters with a
+200-character overlap (`CYNER_CHUNK_CHARS`, `CYNER_BATCH_SIZE`), one batched
+call, and a dedup of the spans the overlap re-reports. Two regression tests
+lock it: `test_long_text_is_chunked_before_inference` fails when the window is
+forced back to a single call (verified by running it with
+`CYNER_CHUNK_CHARS=100000000`), and the chunker is checked for coverage,
+empty pieces and unbroken tokens.
+
+### Architecture
+
+#### ADR-0039 — per-stage observability, 2026-09-02
+
+Filed `docs/adr/0039-per-stage-observability.md`. The pipeline has 18 stage
+modules and 6 of them report anything to the API; the stages that change the
+data most report least. Stage 3d deletes every relationship whose supporting
+sentence the model cannot quote and Stage 4b adds up to 200 edges, and neither
+emits a progress event — although both already compute the numbers (`removed
+N/M`, `CompletionStats`) and discard them. Measured alongside: all 209
+`logger.*` call sites render `[none]` as the request id, because the worker
+subprocess never calls `set_request_id`; `LOG_FILE` defaults to empty so a
+detached run keeps no record; `traceback.format_exc()` is computed and then
+only `str(exc)` is stored; a job killed by a signal does not say which stage
+it died in (establishing that four jobs died at the first Stage 3 LLM call took
+seven manual greps of stdout); and the dashboard progress bar is
+`(stage / 5) * 100`, which hardcodes the stage count, weights a millisecond
+stage the same as a four-minute one, and evaluates to `NaN` for the figures
+stage because its id is the string `"1f"`.
+
+Decision: a typed `job_stages` table written through a single `stage_span`
+context manager that sets the job id on the log context (fixing all 209 call
+sites without editing them), times the stage, writes the row, emits the
+progress event, and records the failing stage plus its full traceback. Plus
+`STAGE_PLAN` as one weighted source of truth for the progress bar,
+`GET /api/jobs/{id}/stages`, stage attribution for signal deaths, and
+retention for the two event tables, which have none today.
+
+Both ADRs were then confronted with external practice (OpenCTI rules engine
+and issue #174, GRID and ANCHOR 2026, AZERG 2025, txt2stix, Prefect run
+states, OpenTelemetry GenAI conventions, MLflow tracing) and each carries a
+dated confrontation section. Two amendments came out of it: ADR-0038 makes the
+`uses∘exploits → targets` composition opt-in, because it is the shape OpenCTI
+shipped and retracted as a bug; ADR-0039 adds a `crashed` status distinct from
+`failed` and names Stage 3 detail keys after the OTel GenAI attributes.
+
+#### ADR-0038 — link density under policy, and an ADR status refresh, 2026-09-02
+
+Filed `docs/adr/0038-link-density-under-policy.md`. It answers "how do we get
+more links between objects without loosening the evidence gate" by enumerating
+where every edge can come from and finding two accidents rather than
+decisions (the before/after run itself is recorded as a procedure: on this
+workstation the WSL distro terminates at the first Stage 3 LLM call, seven
+attempts across API, CLI and both providers — the numbers are to be produced
+on the Linux host): the factory relationship policy has **no rules** while the Policy
+page displays 27 (nothing seeds the database, so on a fresh install Stage 4
+materialises nothing from the model the page shows), and `gap`-labelled
+relationships are requested from the LLM and then deleted by Stage 3d. The
+decision moves the default rule set into the backend, keeps `gap` edges under
+their label, makes Stage 4 endpoint resolution alias-aware, replaces the
+shared "first 200 then stop" caps with per-node fan-out caps, and binds
+long-distance completion to a local model when one is configured.
+
+New instrument: `scripts/measure_graph_links.py` (stdlib, read-only) reports
+per bundle the node/edge counts, isolated nodes, connected components, edges
+by evidence label and by source tag, and the number of unlinked node pairs
+that share a sentence — the pool a policy rule can reach.
+
+**ADR status refresh.** Nineteen ADRs still said *Proposed* although their
+code has been on `main` for weeks (0015–0022, 0024–0033); each now carries
+`Accepted (implemented)` and a dated *Status review* section naming the
+module or route that implements it. 0007 is accepted for slice 1 only, 0023
+for Phases 1–2 only, 0037 is superseded in part by 0036, and 0002, 0004 and
+0013 keep their status but gain a review note where the text no longer
+matched the code (open pool items, the opt-in SecureBERT default, the Graph
+page that never learned to draw inferred edges). The README index follows.
+
+Also: `.claude/launch.json` gains an `api` entry so the server can be started
+from the preview tool; README documents the empty factory default.
+
+
 ### Security
 
 #### Seven npm advisories cleared by two major upgrades, 2026-09-02

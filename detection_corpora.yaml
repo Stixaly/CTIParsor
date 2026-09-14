@@ -98,12 +98,11 @@ corpora:
     enabled: true
 
   # ── YARA (ADR-0015) ────────────────────────────────────────────────────────
-  # DISABLED until the `yara` adapter lands — registry.iter_rules() skips an
-  # unknown adapter with a warning, so enabling these early only adds log noise.
-  # Clones are already present under ./corpora/. Licences VERIFIED from each repo
-  # (2026-08-16), not assumed: signature-base is DRL-1.1 — the same licence as
-  # SigmaHQ — NOT the CC BY-NC it is often reported to be.
-  # Rule counts measured by parsing the clones, not taken from upstream READMEs.
+  # Enabled by default since 2026-09-09 — the `yara` adapter landed with
+  # ADR-0015. Licences VERIFIED from each repo (2026-08-16), not assumed:
+  # signature-base is DRL-1.1 — the same licence as SigmaHQ — NOT the CC BY-NC
+  # it is often reported to be. Rule counts measured by parsing the clones, not
+  # taken from upstream READMEs.
 
   - name: yara-rules
     adapter: yara
@@ -112,7 +111,7 @@ corpora:
     license: GPL-2.0
     priority: 110            # 12,336 rules — the broadest public set
     private: false
-    enabled: false
+    enabled: true
 
   - name: signature-base
     adapter: yara
@@ -122,7 +121,7 @@ corpora:
     priority: 100            # 5,990 rules — highest signal/noise, so best dedup authority
     subdir: yara
     private: false
-    enabled: false
+    enabled: true
 
   - name: elastic-artifacts
     adapter: yara
@@ -132,7 +131,7 @@ corpora:
     priority: 120            # 2,877 rules; the only corpus carrying `os =` meta
     subdir: yara
     private: false
-    enabled: false
+    enabled: true
 
   - name: rl-yara
     adapter: yara
@@ -142,7 +141,7 @@ corpora:
     priority: 130            # 1,240 rules
     subdir: yara
     private: false
-    enabled: false
+    enabled: true
 
   - name: inquest-yara
     adapter: yara
@@ -151,11 +150,13 @@ corpora:
     license: MIT
     priority: 140            # 39 rules — small but high quality
     private: false
-    enabled: false
+    enabled: true
 
   # ── Suricata (ADR-0015) ────────────────────────────────────────────────────
-  # ET Open is published ONLY as a tarball, so it needs the `tarball:` source
-  # type ADR-0015 §5 adds to sync_corpora.py — `git:` cannot fetch it.
+  # ET Open is published ONLY as a tarball — `git:` cannot fetch it. The
+  # `tarball:` source (ADR-0015 §5) downloads it, checks it against the published
+  # .md5 sidecar, extracts it into `path` and records URL + content hash in
+  # <path>/.sync.json. Enabled by default since 2026-09-09.
   # 51,799 active rules (+19,479 shipped commented-out, which the adapter skips;
   # all 3,329 `ET DELETED` deprecated rules live in that commented block).
 
@@ -172,7 +173,7 @@ corpora:
     priority: 200            # largest corpus by far; low dedup authority
     subdir: rules
     private: false
-    enabled: false
+    enabled: true
 
   - name: tbg-hunting
     adapter: suricata
@@ -181,7 +182,7 @@ corpora:
     license: GPL-3.0
     priority: 210            # 682 rules — hunting-oriented, high false-positive rate by design
     private: false
-    enabled: false
+    enabled: true
 
   # NOT INGESTED — ptresearch/AttackDetection (~14k Suricata rules): the LICENSE
   # is a Positive Technologies proprietary EULA, not an open licence, and PT is a

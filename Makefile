@@ -6,13 +6,23 @@ PIP      = .venv/bin/pip
         api api-dev frontend-install frontend-build frontend-dev \
         check check-docs clean \
         corpora detection-index backfill-rules \
-        audit lock update-deps npm-outdated npm-update
+        audit lock update-deps npm-outdated npm-update \
+        package-offline setup-offline
 
 # ── Setup ────────────────────────────────────────────────────────────────────
 
 ## Full first-time setup (runs setup.sh)
 setup:
 	bash setup.sh
+
+## Build the air-gap bundle in offline/ and pack it into dist/ (ADR-0040).
+## Run on a CONNECTED machine with the same distro + Python as the target.
+package-offline:
+	bash scripts/package_offline.sh
+
+## Install from an extracted bundle, no network needed (ADR-0040)
+setup-offline:
+	bash setup.sh --offline=offline
 
 ## Install / update Python packages only (skip interactive prompts)
 install:

@@ -8,8 +8,11 @@
 #   bash setup.sh --no-torch   # skip sentence-transformers / CyNER (faster, minimal)
 #   bash setup.sh --no-mitre   # skip MITRE bundle download + index build
 #   bash setup.sh --no-spacy   # skip optional spaCy model download
-#   bash setup.sh --no-corpora # skip Sigma detection-corpora clone (~525 MB)
+#   bash setup.sh --no-corpora # skip the Sigma/Suricata/YARA corpora fetch (~600 MB)
 #   bash setup.sh --no-capture # skip Playwright + Chromium (disables URL ingestion)
+#   bash setup.sh --no-node    # skip the Node.js install (web UI build unavailable)
+#   bash setup.sh --offline=offline   # air-gap install from a bundle built by
+#                                     # scripts/package_offline.sh (ADR-0040)
 # =============================================================================
 
 set -e
@@ -49,6 +52,8 @@ ask() {
 
 OPT_NO_CORPORA=false
 OPT_NO_CAPTURE=false
+OPT_NO_NODE=false
+OFFLINE_DIR=""
 
 for arg in "$@"; do
   case $arg in
@@ -57,8 +62,31 @@ for arg in "$@"; do
     --no-spacy)   OPT_NO_SPACY=true ;;
     --no-corpora) OPT_NO_CORPORA=true ;;
     --no-capture) OPT_NO_CAPTURE=true ;;
+    --no-node)    OPT_NO_NODE=true ;;
+    --offline=*)  OFFLINE_DIR="${arg#--offline=}" ;;
   esac
 done
+
+# ── Offline bundle (ADR-0040) ───────────────────────────────────────────────
+# Validated before anything else touches the host: a corrupt or mismatched
+# bundle must fail here, not halfway through dpkg.  The bundle's files are
+# staged into place right away so every later step finds them "already
+# present" and takes its existing skip branch instead of the network.
+if [ -n "$OFFLINE_DIR" ]; then
+    [ -f scripts/offline_lib.sh ] || { err "scripts/offline_lib.sh missing — run from the project root"; exit 1; }
+    # shellcheck disable=SC1091
+    source scripts/offline_lib.sh
+    OFFLINE_DIR=$(cd "$OFFLINE_DIR" 2>/dev/null && pwd) || { err "--offline: directory not found: $OFFLINE_DIR"; exit 1; }
+    echo ""
+    hdr "OFFLINE BUNDLE  (air-gap install)"
+    offline_validate_bundle "$OFFLINE_DIR"
+    offline_export_env      "$OFFLINE_DIR"
+    offline_stage_models    "$OFFLINE_DIR"
+    offline_stage_browsers  "$OFFLINE_DIR"
+    offline_stage_data      "$OFFLINE_DIR"
+    offline_stage_corpora   "$OFFLINE_DIR"
+    offline_stage_frontend  "$OFFLINE_DIR" || true
+fi
 
 echo ""
 sep
@@ -136,6 +164,12 @@ _yum_install() {
 # `ensurepip` — so that is what has to be tested.  Probing the help text meant
 # _apt_install never ran on a fresh Ubuntu 26.04, and setup died two steps later
 # with "ensurepip is not available".
+if [ -n "$OFFLINE_DIR" ]; then
+    # dpkg installs the whole apt closure shipped in the bundle (Node.js included),
+    # so the online branches below find everything present and stay quiet.
+    offline_install_debs "$OFFLINE_DIR" || exit 1
+fi
+
 if ! command -v python3 &>/dev/null || ! python3 -c "import ensurepip" &>/dev/null; then
     if   command -v apt-get &>/dev/null; then _apt_install
     elif command -v dnf     &>/dev/null; then _dnf_install
@@ -226,28 +260,109 @@ fi
 echo ""
 hdr "[1b/6]  NODE.JS  (web UI)"
 
-NODE_OK=false
-if command -v node &>/dev/null; then
-    NODE_VER=$(node --version 2>&1)
-    NPM_VER=$(npm  --version 2>&1)
-    NODE_MAJOR=$(echo "$NODE_VER" | sed 's/v\([0-9]*\).*/\1/')
-    if [ "${NODE_MAJOR:-0}" -ge 18 ] 2>/dev/null; then
-        ok "node ${NODE_VER}   npm v${NPM_VER}"
-        NODE_OK=true
-    else
-        warn "node ${NODE_VER} is < 18 — frontend build may fail."
-    fi
-else
-    warn "Node.js not found — web UI build unavailable."
+NODE_TARGET_MAJOR=24     # Active LTS (EOL 2028-04-30); Node 20 reached end-of-life 2026-04-30
+NODE_MIN_MAJOR=18        # vite 6 / vitest 4 floor
+
+_node_manual_hint() {
     echo ""
-    echo "  Install Node.js 20:"
-    echo -e "    ${CYAN}curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -${NC}"
+    echo "  Install Node.js ${NODE_TARGET_MAJOR}:"
+    echo -e "    ${CYAN}curl -fsSL https://deb.nodesource.com/setup_${NODE_TARGET_MAJOR}.x | sudo -E bash -${NC}"
     echo -e "    ${CYAN}sudo apt-get install -y nodejs${NC}"
     echo ""
     echo "  Or use nvm (manages multiple versions):"
-    echo -e "    ${CYAN}curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash${NC}"
-    echo -e "    ${CYAN}source ~/.bashrc && nvm install 20${NC}"
+    echo -e "    ${CYAN}curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash${NC}"
+    echo -e "    ${CYAN}source ~/.bashrc && nvm install ${NODE_TARGET_MAJOR}${NC}"
     [ "$IS_WSL" = true ] && warn "Install Node.js INSIDE ${WSL_VERSION}, not on Windows."
+    return 0
+}
+
+_probe_node() {
+    NODE_OK=false
+    NODE_VER=""
+    NPM_VER=""
+    NODE_MAJOR=0
+
+    if ! command -v node &>/dev/null; then
+        return 1
+    fi
+
+    NODE_VER=$(node --version 2>&1)
+    NPM_VER=$(npm --version 2>&1)
+    NODE_MAJOR=$(echo "$NODE_VER" | sed 's/v\([0-9]*\).*/\1/')
+
+    if [ "${NODE_MAJOR:-0}" -ge "$NODE_MIN_MAJOR" ] 2>/dev/null; then
+        NODE_OK=true
+        return 0
+    fi
+
+    return 1
+}
+
+# NodeSource install.  The setup script is downloaded to a file first: with
+# `curl | bash` a failed curl feeds bash an empty script that exits 0.  And
+# because this runs inside an `if`, `set -e` is off here — every step is
+# checked explicitly.
+_install_node() {
+    local script
+    script=$(mktemp) || return 1
+
+    if command -v apt-get &>/dev/null; then
+        curl -fsSL -o "$script" "https://deb.nodesource.com/setup_${NODE_TARGET_MAJOR}.x" || { rm -f "$script"; return 1; }
+        sudo -E bash "$script" || { rm -f "$script"; return 1; }
+        sudo apt-get install -y -q nodejs || { rm -f "$script"; return 1; }
+    elif command -v dnf &>/dev/null; then
+        curl -fsSL -o "$script" "https://rpm.nodesource.com/setup_${NODE_TARGET_MAJOR}.x" || { rm -f "$script"; return 1; }
+        sudo bash "$script" || { rm -f "$script"; return 1; }
+        sudo dnf install -y -q nodejs || { rm -f "$script"; return 1; }
+    elif command -v yum &>/dev/null; then
+        curl -fsSL -o "$script" "https://rpm.nodesource.com/setup_${NODE_TARGET_MAJOR}.x" || { rm -f "$script"; return 1; }
+        sudo bash "$script" || { rm -f "$script"; return 1; }
+        sudo yum install -y -q nodejs || { rm -f "$script"; return 1; }
+    else
+        rm -f "$script"
+        return 1
+    fi
+
+    rm -f "$script"
+    hash -r
+    return 0
+}
+
+if _probe_node; then
+    ok "node ${NODE_VER}   npm v${NPM_VER}"
+else
+    if [ -n "$NODE_VER" ]; then
+        warn "node ${NODE_VER} is < ${NODE_MIN_MAJOR} — the web UI build needs a newer runtime."
+    else
+        warn "Node.js not found — needed to build the web UI."
+    fi
+
+    if [ "$OPT_NO_NODE" = true ]; then
+        info "--no-node: skipping the Node.js install."
+        _node_manual_hint
+    elif [ -n "$OFFLINE_DIR" ]; then
+        warn "offline: ${BUNDLE_NODE_DEB:-the Node.js .deb} was in the bundle but node is still missing."
+        info "  See $OFFLINE_DIR/dpkg-install.log — the web UI build is skipped (dist/ comes from the bundle)."
+    elif ! command -v apt-get &>/dev/null && ! command -v dnf &>/dev/null && ! command -v yum &>/dev/null; then
+        warn "Unknown package manager — cannot install Node.js automatically."
+        _node_manual_hint
+    else
+        echo ""
+        echo -e "  ${YELLOW}Install Node.js ${NODE_TARGET_MAJOR} from NodeSource now (needs sudo)? [Y/n]${NC}"
+        ask DL_NODE Y
+        if [[ "$DL_NODE" =~ ^[Yy] ]]; then
+            info "Installing Node.js ${NODE_TARGET_MAJOR} from NodeSource…"
+            if _install_node && _probe_node; then
+                ok "node ${NODE_VER}   npm v${NPM_VER}"
+            else
+                warn "Node.js install failed — web UI build unavailable."
+                _node_manual_hint
+            fi
+        else
+            info "Skipping. The web UI build needs Node.js >= ${NODE_MIN_MAJOR}:"
+            _node_manual_hint
+        fi
+    fi
 fi
 
 # =============================================================================
@@ -522,16 +637,21 @@ if [ "$OPT_NO_CORPORA" = true ]; then
     echo -e "     ${CYAN}python scripts/sync_corpora.py && python scripts/build_detection_index.py${NC}"
 else
     echo "  Coverage matches each report's MITRE TTPs against public rule corpora"
-    echo "  in three formats (Sigma .yml, Suricata .rules, YARA .yar)."
-    echo "  This clones the public repos in detection_corpora.yaml into ./corpora/"
-    echo "  (~525 MB, shallow) and ingests them into the rule store."
+    echo "  in three formats (Sigma .yml, Suricata .rules, YARA .yar) — all three"
+    echo "  are enabled by default in detection_corpora.yaml."
+    echo "  This clones the public repos into ./corpora/ (~600 MB, shallow),"
+    echo "  downloads the ET Open tarball, and ingests everything into the rule store."
     echo ""
     echo -e "  ${YELLOW}Clone & ingest detection corpora now? [Y/n]${NC}"
     ask DL_CORPORA Y
 
     if [[ "$DL_CORPORA" =~ ^[Yy] ]]; then
-        info "Cloning corpora (scripts/sync_corpora.py)…"
-        if python scripts/sync_corpora.py; then
+        if [ -n "$OFFLINE_DIR" ]; then
+            info "offline: corpora come from the bundle (built ${BUNDLE_BUILT_AT:-?}) — sync skipped"
+        else
+            info "Cloning corpora (scripts/sync_corpora.py)…"
+        fi
+        if [ -n "$OFFLINE_DIR" ] || python scripts/sync_corpora.py; then
             info "Ingesting rules (scripts/build_detection_index.py)…"
             if python scripts/build_detection_index.py; then
                 ok "Detection corpora cloned & ingested."
@@ -611,9 +731,13 @@ else
         ask DL_SPACY N
 
         if [[ "$DL_SPACY" =~ ^[Yy] ]]; then
-            info "Downloading en_core_web_sm…"
-            python -m spacy download en_core_web_sm
-            ok "en_core_web_sm installed"
+            if [ -n "$OFFLINE_DIR" ]; then
+                offline_install_spacy_model || true
+            else
+                info "Downloading en_core_web_sm…"
+                python -m spacy download en_core_web_sm
+                ok "en_core_web_sm installed"
+            fi
         else
             info "Skipping spaCy model. The pipeline will use CyNER + gazetteer instead."
         fi
@@ -626,7 +750,9 @@ fi
 echo ""
 hdr "[6/6]  API KEY CONFIGURATION"
 
+ENV_CREATED=false
 if [ ! -f ".env" ]; then
+    ENV_CREATED=true
     if [ -f ".env.example" ]; then
         cp .env.example .env
         ok ".env created from .env.example"
@@ -666,6 +792,9 @@ else
     else
         ok "API key configured"
     fi
+fi
+if [ -n "$OFFLINE_DIR" ]; then
+    offline_write_env_hints "$ENV_CREATED"
 fi
 
 # =============================================================================
@@ -798,7 +927,9 @@ else
     fi
 
     if [ "$CAPTURE_WANTED" = true ]; then
-        if sudo -n true 2>/dev/null; then
+        if [ -n "$OFFLINE_DIR" ]; then
+            info "offline: Chromium's system libraries came with the bundle's .debs — install-deps skipped"
+        elif sudo -n true 2>/dev/null; then
             info "Installing system dependencies for Chromium…"
             python -m playwright install-deps chromium || { warn "System dependency installation failed."; }
         else
@@ -826,6 +957,15 @@ PYEOF
             info "  Until then, the URL tab returns 503 — use the Paste tab."
         fi
     fi
+fi
+
+# =============================================================================
+# LOCAL LLM  (Ollama runtime + model from the offline bundle — ADR-0040)
+# =============================================================================
+if [ -n "$OFFLINE_DIR" ]; then
+    echo ""
+    hdr "LOCAL LLM  (Ollama, from the bundle)"
+    offline_install_ollama "$OFFLINE_DIR" || warn "Ollama not installed — see the hints above"
 fi
 
 # =============================================================================
@@ -940,7 +1080,12 @@ fi
 # FRONTEND BUILD
 # =============================================================================
 FRONTEND_OK=false
-if [ "$NODE_OK" = true ]; then
+if [ -n "$OFFLINE_DIR" ] && [ -f "frontend/dist/index.html" ]; then
+    echo ""
+    hdr "FRONTEND BUILD"
+    ok "offline: web UI staged from the bundle — npm ci / npm run build skipped"
+    FRONTEND_OK=true
+elif [ "$NODE_OK" = true ]; then
     echo ""
     hdr "FRONTEND BUILD"
     FRONTEND_OK=true
@@ -1106,5 +1251,8 @@ echo      "       Chromium is installed but cannot start without those libraries
 echo      "       it fails with 'error while loading shared libraries: libasound.so.2'."
 echo      "       Until then use the File or Paste tab — both work."
 echo ""
+fi
+if [ -n "$OFFLINE_DIR" ]; then
+    offline_summary
 fi
 sep

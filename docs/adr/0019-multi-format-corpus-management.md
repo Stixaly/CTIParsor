@@ -1,6 +1,6 @@
 # ADR-0019 — Multi-format corpus management in the settings UI
 
-**Status:** Proposed
+**Status:** Accepted (implemented)
 **Date:** 2026-08-16
 **Extends:** [0007](0007-in-app-configuration-panel.md) (settings panel), [0006](0006-multi-corpus-detection-ingestion.md) (registry + adapter seam)
 **Blocked-for-yield-by:** [0015](0015-multi-format-detection-matching.md) — the Suricata/YARA *adapters*
@@ -147,7 +147,9 @@ Private corpora remain CLI-only for sync so git credentials stay out of the app.
 
 **Not in scope:** the actual `tarball:` fetch in `sync_corpora.py`, and the
 Suricata/YARA adapters. This ADR makes them *configurable*; it does not make
-them *work*.
+them *work*. (Both landed afterwards: the adapters with ADR-0015's
+implementation, the tarball fetch on 2026-09-09 — see ADR-0015's status
+review.)
 
 ## Validation
 
@@ -159,3 +161,7 @@ them *work*.
 4. `subdir`/`tarball`/`priority` round-trip through the overlay YAML unchanged.
 5. `tsc --noEmit` clean; the committed `detection_corpora.yaml` is byte-identical
    after any UI mutation.
+
+## Status review (2026-09-02)
+
+Implemented: corpora routes in `api/routes/settings.py`, `pipeline/detection/sync.py`, format discovery in `pipeline/detection/registry.py`.

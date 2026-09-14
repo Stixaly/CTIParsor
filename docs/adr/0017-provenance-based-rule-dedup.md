@@ -1,6 +1,6 @@
 # ADR-0017 — Provenance-based rule deduplication
 
-**Status:** Proposed
+**Status:** Accepted (implemented)
 **Date:** 2026-08-16
 **Fixes:** [0010](0010-default-sigma-corpora-and-dedup.md) (cross-corpus dedup)
 **Affects:** [0008](0008-detection-coverage-matrix.md) (coverage counts), [0014](0014-observable-driven-detection-proposals.md) (IDF denominator)
@@ -192,3 +192,7 @@ Side effect worth naming: with the duplicates gone, the top of the list is now
 visibly dominated by `mthcht` auto-generated keyword rules tied at 0.300. That is
 not a regression — it is the ~2,000-way technique-tie plateau becoming legible
 now that it is no longer masked, and it is the subject of the next ADR.
+
+## Status review (2026-09-02)
+
+Implemented: `pipeline/detection/dedup.py` and the `rule_related` table in `cti_stix.db`.

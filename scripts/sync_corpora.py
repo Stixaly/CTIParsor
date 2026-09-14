@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Fetch/update local clones of detection-rule corpuses (ADR-0006).
+"""Fetch/update local copies of detection-rule corpuses (ADR-0006, ADR-0015 §5).
 
-For each corpus in detection_corpora.yaml that has a `git:` remote, clone it (if
-the local `path` is missing) or `git pull` it (if present). Uses your ambient git
-authentication (SSH agent / credential.helper) — no credentials are stored here.
+For each enabled corpus in detection_corpora.yaml: a `git:` remote is cloned (if
+the local `path` is missing) or pulled (if present); a `tarball:` URL is
+downloaded, checked against its `.md5` sidecar when published, and extracted
+into `path`. Uses your ambient git authentication (SSH agent /
+credential.helper) — no credentials are stored here.
 
 This is the ONLY networked step; build_detection_index.py is fully offline after.
 
@@ -22,7 +24,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from pipeline.detection.registry import load_corpora  # noqa: E402
-from pipeline.detection.sync import git_command  # noqa: E402
+from pipeline.detection.sync import fetch_tarball, git_command  # noqa: E402
 
 
 def _run(cmd: list[str]) -> bool:
@@ -49,9 +51,15 @@ def main() -> int:
     for corpus in corpora:
         name = corpus.get("name", "?")
         path = Path(corpus.get("path", ""))
+        if corpus.get("tarball"):
+            print(f"[sync] {name} → {path}  (tarball)")
+            ok_one, detail = fetch_tarball(corpus)
+            print(f"  {'✓' if ok_one else '!'} {detail}")
+            ok += int(ok_one)
+            continue
         cmd = git_command(corpus)
         if cmd is None:
-            print(f"[sync] {name}: no git remote — assuming '{path}' is managed manually — skipped")
+            print(f"[sync] {name}: no git remote or tarball URL — assuming '{path}' is managed manually — skipped")
             continue
         print(f"[sync] {name} → {path}")
         ok += int(_run(cmd))

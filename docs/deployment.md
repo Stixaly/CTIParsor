@@ -255,6 +255,50 @@ the API starts, so a restart mid-report costs the run, not the submission.
       reach the port is someone you would let delete any report
 - [ ] Backups: `cti_stix.db` holds every report and every bundle
 
+## 7. Air-gapped hosts
+
+Nothing above assumes internet access at run time — the pipeline only calls
+the LLM endpoint in `.env`, and the models, indexes and corpora are local
+files. What needs the network is the *install*, and ADR-0040 packages it:
+
+1. On a connected machine with the **same distribution release and Python
+   major.minor** as the target, run `bash scripts/package_offline.sh
+   --worktree`. It fills `offline/` (wheels, `.deb` closure, HuggingFace
+   models, Chromium, MITRE bundles, corpora, built UI, an Ollama runtime plus
+   the model named by `OLLAMA_MODEL` in `.env`) and packs
+   `dist/cti-parsor-offline-<rev>-<codename>-py<ver>.tar`.
+2. Replay it before you carry it over: `bash scripts/check_offline_bundle.sh
+   dist/cti-parsor-offline-*.tar` installs into a scratch `HOME` with every
+   proxy pointed at a closed port and `sudo`/`dpkg` stubbed, then checks the
+   venv, the model loads, the indexes, the rule store, Chromium and Ollama.
+3. On the target: `tar xf …`, `cd cti-parsor`, `bash setup.sh
+   --offline=offline`. Checksums and the Python/distro match are verified
+   before anything is installed; `dpkg -i` needs sudo once.
+4. Start the LLM as a service so the API's workers can reach it:
+
+```ini
+# /etc/systemd/system/ollama.service
+[Unit]
+Description=Ollama (local LLM for CTIParsor)
+After=network-online.target
+
+[Service]
+User=ctiparsor
+Environment=OLLAMA_HOST=127.0.0.1:11434
+Environment=OLLAMA_MODELS=/home/ctiparsor/.ollama/models
+ExecStart=/usr/local/bin/ollama serve
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Keep `ollama.service` on loopback: it has no authentication either. Size the
+host for the model you bundled (a 7B model wants ~6 GB of RAM on top of the
+worker budget in §5). Corpora, models and wheels are frozen at the bundle's
+build date — `offline/bundle.env` says when — so security updates mean a new
+bundle, not `pip install -U`.
+
 ## See also
 
 - [SECURITY.md](../SECURITY.md) — full security posture and threat model

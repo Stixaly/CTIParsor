@@ -34,7 +34,7 @@ Two modes are available:
 # 1. Clone and enter the project
 git clone <repo-url> && cd CTIParsor
 
-# 2. Full setup (venv, Python deps, MITRE data, Node build)
+# 2. Full setup (venv, Python deps, MITRE data, Node.js + web UI build, detection corpora)
 bash setup.sh
 
 # 3. Activate the venv
@@ -89,6 +89,40 @@ python run_api.py
 > cd frontend && npm run dev
 > # UI → http://localhost:5173
 > ```
+
+---
+
+## Offline (air-gapped) installation
+
+`setup.sh` normally fetches from twelve network sources: apt, NodeSource, PyPI,
+HuggingFace, GitHub (MITRE bundles, spaCy model, Ollama), the rule corpora,
+Playwright's CDN and npm. For a host that reaches none of them, build one
+self-contained bundle on a **connected twin of the target** (same distribution
+release, same Python major.minor) and replay it there (ADR-0040):
+
+```bash
+# On the connected machine, after a normal setup.sh:
+bash scripts/package_offline.sh --worktree      # ~13 GB, LLM included
+#   --no-llm / --llm-model NAME / --no-corpora / --no-browsers  to trim it
+# → dist/cti-parsor-offline-<rev>-<codename>-py<ver>.tar (+ .sha256)
+
+# Before transferring it, replay the install with no network and no root:
+bash scripts/check_offline_bundle.sh dist/cti-parsor-offline-*.tar
+
+# On the air-gapped host:
+tar xf cti-parsor-offline-*.tar && cd cti-parsor
+bash setup.sh --offline=offline
+```
+
+The bundle carries the source tree, every wheel, the full apt dependency
+closure (Node.js included), the three HuggingFace models, Chromium, the MITRE
+bundles, the rule corpora (ET Open with its `.sync.json`), the built web UI and
+an Ollama runtime with one pulled model. `setup.sh --offline` verifies the
+checksums and the Python/distro match before touching the host, then runs its
+ordinary steps with pip and HuggingFace pointed at the bundle. A fresh `.env`
+is set to the bundled Ollama model; `HF_HUB_OFFLINE=1` is written so nothing
+ever probes the Hub. Corpora and models are frozen at the bundle's build date
+(`offline/bundle.env`); rebuild and re-transfer to update them.
 
 ---
 
@@ -529,6 +563,9 @@ disable one, and **Rebuild index** to re-ingest the local clones. See
 | Remediation step | `course-of-action` SDO |
 | Any accepted IoC | `indicator` SDO (STIX pattern) + `based-on` SRO |
 | IoC linked to malware | extra `indicates` SRO Indicator → Malware |
+| Any relationship touching an observable (LLM-extracted or policy-pinned) | routed through that observable's `indicator`, never the raw SCO directly — STIX 2.1 has no relationship-object answer for an observable-to-SDO edge, only the indicator does (ADR-0041) |
+| Detection rule quoted verbatim in the report (YARA, Suricata, Snort, or Sigma) | `indicator` SDO with `pattern_type` set to the format and `pattern` holding the rule text as-is; auto-linked with `indicates` to a malware/tool whose name appears in the rule's own title (ADR-0042) |
+| Source document (PDF, DOCX, …) | `artifact` SCO — `payload_bin` (base64) + SHA-256 hash + MIME type, so the bundle carries the original file, not just a pointer to it (ADR-0043) |
 | Threat actor → country / sector | `targets` SRO |
 | Semantic relationship | `relationship` SRO (confidence score) |
 | Relationship evidence grade | `x_evidence_label` custom property on each `relationship` (`observed` / `reported` / `assessed` / `inferred` / `gap`) |
@@ -544,6 +581,30 @@ disable one, and **Rebuild index** to re-ingest the local clones. See
 user account or network-traffic entity — Stage 4 maps them so an analyst who adds
 one by hand in the Review page gets a correct SCO. Everything else in this table
 is produced by the pipeline itself.
+
+### Detection rules embedded in the report itself
+
+CTI reports — especially from Mandiant / Google Threat Intelligence Group —
+often publish a literal YARA, Suricata, Snort, or Sigma rule alongside their
+write-up, not just a description of the malware. These have nothing to do
+with your local rule corpora or the Detections tab's ranking (that's a
+separate feature, see [Rule proposals](#rule-proposals--ranked-on-the-report-not-on-its-tags)
+below) — a rule quoted in the report text is extracted and represented
+directly in the exported bundle as its own `indicator` SDO (`pattern_type`
+set to the matching format, `pattern` holding the rule text verbatim — STIX
+2.1's native mechanism for this, no workaround needed), auto-linked to any
+malware or tool already named elsewhere in the report whose name appears in
+the rule's own title.
+
+Verified on a real Google TIG report that embeds four YARA rules: all four
+came through as indicators, each linking correctly to a malware family the
+same report named elsewhere. YARA and Suricata/Snort extraction reuse this
+project's own corpus parsers unchanged (`pipeline/detection/yara_atoms.py`,
+`suricata_atoms.py`); Sigma needed new logic — a grow-then-shrink YAML
+boundary search, since YAML has no delimiter that survives being embedded in
+prose the way YARA's braces do — and is fail-closed: a candidate that doesn't
+parse as a valid rule yields nothing rather than a guess. Design:
+[ADR-0042](docs/adr/0042-embedded-yara-rules-as-indicators.md).
 
 ---
 
@@ -584,7 +645,7 @@ drill-in and export keep them distinct throughout (ADR-0015 / ADR-0022).
 
 | File | Tracked | Holds |
 |---|---|---|
-| `detection_corpora.yaml` | committed | public corpora (ships with SigmaHQ) |
+| `detection_corpora.yaml` | committed | public corpora — Sigma, YARA and Suricata, all enabled by default |
 | `detection_corpora.local.yaml` | gitignored | private corpora + local overrides |
 
 The overlay is merged over the committed file (override by `name`, append new).
@@ -594,7 +655,8 @@ and edit the YAML directly.
 ### Fetch + build
 
 ```bash
-python scripts/sync_corpora.py          # clone/pull each repo (public: no auth; private: SSH agent)
+python scripts/sync_corpora.py          # clone/pull each git repo (public: no auth; private: SSH agent);
+                                        # download + verify tarball corpora (ET Open)
 python scripts/build_detection_index.py # parse local clones → detection-rule store (in cti_stix.db)
 ```
 
@@ -677,6 +739,16 @@ python scripts/build_rule_text.py       # FTS5 index over rule titles, for brand
 
 Scoring is deterministic and offline — no model, no network (ADR-0008's constraint
 that the detection artifact stays trustworthy).
+
+Opening a rule's body (click its title) highlights every value that matched it
+directly in the rule text — the same whole-token, defanged-IOC-aware matcher
+that highlights entities in the report viewer, so the "why" behind a rank is
+never just a chip in the row above.
+
+This panel only ranks rules already in your local corpora — a report that
+quotes its own YARA/Suricata/Snort/Sigma rule verbatim is a different feature
+entirely; see **"Detection rules embedded in the report itself"** under
+[STIX objects produced](#stix-objects-produced).
 
 Walkthrough: [`docs/detection-coverage.md`](docs/detection-coverage.md). Design:
 ADR [0006](docs/adr/0006-multi-corpus-detection-ingestion.md) /
@@ -1016,10 +1088,18 @@ On **Finalize**, accepted named entities form a per-report domain lexicon. The f
 - **Drop spurious edges** — an observable ↔ attack-pattern relationship
   (e.g. `domain communicates-with T1071.001`) is a type error; it is dropped, not
   emitted as a noisy `related-to`.
+- **Route observables through their indicator** — any other relationship
+  touching a raw observable (LLM-extracted or policy-pinned) is re-anchored on
+  that observable's `indicator` rather than the SCO itself; STIX 2.1 has no
+  relationship-object answer for an observable-to-SDO edge otherwise. Scoped to
+  observable↔SDO pairs only — observable↔observable facts (`file related-to
+  ipv4-addr`) are left as-is, since the spec's real answer for those is
+  embedded ref properties, not a relationship object (ADR-0041).
 
 Measured effect on a 4-report corpus: named-entity relationship hallucination
 ≈ 11 % (the tractable target), entity hallucination ≈ 0. See
-[ADR-0012](docs/adr/0012-hallucination-measurement-and-canonicalization.md).
+[ADR-0012](docs/adr/0012-hallucination-measurement-and-canonicalization.md) /
+[ADR-0041](docs/adr/0041-observables-route-through-indicators.md).
 
 ---
 
@@ -1094,7 +1174,8 @@ CTIParsor/
 ├── scripts/
 │   ├── build_indexes.py           # Build all pipeline/data/ indexes
 │   ├── download_attack.py         # Download enterprise-attack.json
-│   ├── sync_corpora.py            # Clone/pull rule corpora (ambient git auth)
+│   ├── measure_corpus_ingest.py   # Ingest chosen corpora into a scratch DB, report per-format stats
+│   ├── sync_corpora.py            # Clone/pull rule corpora (ambient git auth) + tarball fetch (ET Open)
 │   ├── build_detection_index.py   # Parse clones → detection-rule store
 │   ├── build_rule_atoms.py        # Backfill rule_atoms from stored bodies (ADR-0014)
 │   ├── build_rule_text.py         # FTS5 index over rule title+description (ADR-0031)
@@ -1188,7 +1269,7 @@ CTIParsor/
 ├── uploads/                       # Web UI uploads (gitignored)
 ├── cti_stix.db                    # SQLite database (gitignored)
 │
-├── detection_corpora.yaml         # Public Sigma corpus registry (committed)
+├── detection_corpora.yaml         # Public corpus registry — Sigma, YARA, Suricata (committed)
 ├── detection_corpora.local.yaml.example  # Private corpus overlay template
 ├── docs/adr/                      # Architecture Decision Records (see docs/adr/README.md)
 ├── TESTING.md                     # Test strategy
@@ -1303,6 +1384,14 @@ Valid `relationship_type` values: `uses`, `attributed-to`, `targets`, `indicates
 
 - `global`: `"enforce"` (apply rules) · `"auto"` (ignore rules)
 - `mode`: `"pin"` (lock relationship type) · `"auto"` (allow free editing)
+
+**Factory default.** Until a policy is saved, `GET` returns
+`{"version": 1, "global": "enforce", "rules": []}` and Stage 4 runs with **no
+pinned rules** — only the LLM-extracted edges, the mapping helpers and Stage 4b
+completion. The 27-rule model the Policy page shows on first visit is a
+frontend template; it is not applied until you click Save. An `"auto"` rule
+never adds an edge either — it declares the pair, nothing more. ADR-0038 moves
+the default into the backend so what the page shows is what runs.
 
 **Pin budget** (ADR-0026). A `"pin"` rule materialises every pair of its two
 object types, so a single rule can generate thousands of edges;
@@ -1670,7 +1759,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS rule_text USING fts5(rule_id UNINDEXED, body)
 | `re2` | Linear-time regex engine, guards catastrophic backtracking |
 | `spacy` | Optional NER fallback |
 
-Playwright and its Chromium install with `make install-capture`, and its system libraries require root via `sudo python -m playwright install-deps chromium` — otherwise `/api/ingest/url` responds 503.
+Playwright and its Chromium install with `make install-capture`, and its system libraries require root via `sudo python -m playwright install-deps chromium` — otherwise `/api/ingest/url` responds 503. The API checks for a working Chromium install once at startup and logs a warning if it's missing, so a misconfigured server says so in its own logs instead of waiting for the first URL-capture request to fail.
 
 ### Frontend key packages
 

@@ -1,6 +1,6 @@
 # ADR-0023: TTP extraction — fix the ruler, then retrieve-then-validate
 
-**Status:** Proposed
+**Status:** Accepted in part (Phases 1–2 implemented; Phases 3–6 open)
 **Date:** 2026-08-22
 **Deciders:** maintainer
 
@@ -294,3 +294,11 @@ There Yet?* (Tables 4, 6, 7; §3.2, §3.3, §9) · Kim et al., *Multi-Step LLM P
 for Enhancing TTP Extraction in CTI*, IEEE Access 13 (2025) (§V, Table 9) · Zhang
 et al., *Retrieval-Constrained Policy Optimization for Attack Technique Extraction
 from CTI*, AWS (§4.1–4.6).
+
+## Status review (2026-09-02)
+
+Phases 1–2 are in the tree (`tests/eval_pipeline.py` dual-granularity scorer,
+`scripts/verify_ate_scorer.py`, `scripts/probe_ttp_recall_caps.py`). Phases 3–6
+are not: there is no BM25 code in `pipeline/`, no procedure-example embedding
+in `pipeline/stage2c_ttp_semantic.py`, and Stage 3f is still a post-hoc
+verifier. Keep this ADR open for those four items.

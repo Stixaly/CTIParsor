@@ -1,6 +1,6 @@
 # ADR-0033: One vision call, three providers — capability-gated, schema-constrained
 
-**Status:** Proposed
+**Status:** Accepted (implemented)
 **Date:** 2026-08-28
 **Deciders:** maintainer
 **Amends:** ADR-0032 §3, which said Stage 1f's model "comes from `LLM_PROVIDER`,
@@ -247,3 +247,7 @@ fails.
   of these numbers become a budget.
 - **`ANTHROPIC_MODEL` still defaults to `claude-sonnet-4-6` for Stage 3.** That is
   out of scope here, but it is an older default than the account can reach.
+
+## Status review (2026-09-02)
+
+Implemented: `pipeline/vlm.py`, `VISION_PROVIDER` / `VISION_MODEL` separate from `LLM_PROVIDER` (`.env.example`).

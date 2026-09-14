@@ -140,3 +140,17 @@ upgrade path to Option C if/when report volume outgrows one machine.
    latency improvement from skipping repeated model loads.
 5. [ ] Document the new pool-size / queue-depth tuning knobs alongside the existing
    `LLM_PARALLELISM` / `CHECKPOINT_EVERY` settings.
+
+## Status review (2026-09-02)
+
+Still accepted, and the checklist above no longer matches the code:
+
+| Item | State on 2026-09-02 | Evidence |
+|---|---|---|
+| 1 persistent pool | **open** | `api/worker.py:1185` still spawns `ctx.Process(...)` per job |
+| 2 job queue | done | `API_QUEUE_MAX_DEPTH` (`api/worker.py:47`), queued jobs are picked up since `da6ef9e` |
+| 3 per-job timeout | done (timeout); respawn is moot with one process per job | `WORKER_JOB_TIMEOUT` (`api/worker.py:41`) |
+| 4 load test 10–20 uploads | **open** | `scripts/measure_cold_start.py` measures one cold start, not a concurrent load |
+| 5 document the knobs | done | `docs/deployment.md` §"WORKER_MAX_CONCURRENT" |
+
+ADR-0036 re-plans items 1 and 4 and is the place to track them.

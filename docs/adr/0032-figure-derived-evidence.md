@@ -1,6 +1,6 @@
 # ADR-0032: Figures are evidence, and they enter through `report_text`
 
-**Status:** Proposed
+**Status:** Accepted (implemented)
 **Date:** 2026-08-27
 **Deciders:** maintainer
 
@@ -715,3 +715,7 @@ empty `context_sha` reproduces the old key exactly.
 This does weaken the cross-report reuse claimed in the 2026-08-30 amendment
 above: the same figure appearing in two reports now has two contexts, so it is
 read twice. Re-running one report still costs nothing.
+
+## Status review (2026-09-02)
+
+Implemented: `pipeline/stage1f_figures.py`, `pipeline/figure_store.py`, tables `report_figures` / `figure_reads`.

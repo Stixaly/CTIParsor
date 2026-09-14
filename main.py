@@ -37,8 +37,8 @@ def run_pipeline(input_file: str, output_file: str) -> bool:
     print("[1/5] Ingestion du document...")
     try:
         raw_text = ingest(input_file)
-    except (FileNotFoundError, ValueError) as e:
-        print(f"      [ERREUR] {e}")
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"      [ERREUR] {exc}")
         return False
 
     # Refang so entity values match between extraction and annotation
@@ -87,11 +87,17 @@ def run_pipeline(input_file: str, output_file: str) -> bool:
     except OSError:
         source_hash = None
 
+    try:
+        source_bytes: bytes | None = Path(input_file).read_bytes()
+    except OSError:
+        source_bytes = None
+
     bundle = build_stix_bundle(
         all_entities, llm_result, report_name,
         report_text=text,
         original_filename=Path(input_file).name,
         source_hash=source_hash,
+        source_bytes=source_bytes,
     )
 
     # Verify every regex/defang-extracted IoC became a STIX observable + Indicator

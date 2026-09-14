@@ -1,6 +1,6 @@
 # ADR-0037: Scaling to 30–40 concurrent users
 
-**Status:** Proposed
+**Status:** Superseded in part by ADR-0036
 **Date:** 2026-08-31
 **Deciders:** maintainer
 
@@ -352,3 +352,10 @@ Ordered by measured impact per unit of effort. Items 1–3 are prerequisites for
         page load.
 14. [ ] Raise `Dashboard.tsx:365`'s `refetchInterval` from 3 s, or drive the job
         list from the existing SSE stream.
+
+## Status review (2026-09-02)
+
+Measurement 1 (storage) is banked by the move to a Linux host; Measurement 2
+was invalidated on 2026-09-01 (see the note at the top). ADR-0036 carries the
+surviving evidence and the re-ordered plan; this ADR is kept for the
+rewrite-vs-measure argument and the workload table.
