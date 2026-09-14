@@ -97,6 +97,14 @@ def _sha256_file(path: str | Path) -> str | None:
         return None
 
 
+def _read_file_bytes(path: str | Path) -> bytes | None:
+    """Return a file's raw bytes, or None if it is missing/unreadable (ADR-0043)."""
+    try:
+        return Path(path).read_bytes()
+    except OSError:
+        return None
+
+
 def bundle_output_path(job_id: str, report_name: str) -> Path:
     """Per-job path for the exported STIX bundle file.
 
@@ -869,6 +877,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         from pipeline.stage4_stix_mapping import build_stix_bundle, verify_ioc_coverage
         report_name  = re.sub(r"[^\w\-]", "_", Path(original_filename).stem)
         source_hash  = _sha256_file(file_path)
+        source_bytes = _read_file_bytes(file_path)
 
         # Load the relationship policy from the DB (if one has been saved)
         _policy_s4: dict | None = None
@@ -924,6 +933,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
             report_text=text,
             original_filename=original_filename,
             source_hash=source_hash,
+            source_bytes=source_bytes,
             cve_metadata=cve_meta,
             relationship_policy=_policy_s4,
             tlp_level=_tlp_level,
@@ -1603,6 +1613,7 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
     # Locate the uploaded file to recompute its hash (stable — file never changes)
     upload_matches = list((_ROOT / "uploads").glob(f"{job_id}.*"))
     source_hash    = _sha256_file(upload_matches[0]) if upload_matches else None
+    source_bytes   = _read_file_bytes(upload_matches[0]) if upload_matches else None
 
     # Load the relationship policy for the finalize rebuild
     import json as _json_fin
@@ -1629,6 +1640,7 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
         report_text=report_text,
         original_filename=original_filename,
         source_hash=source_hash,
+        source_bytes=source_bytes,
         cve_metadata=cve_meta_fin,
         relationship_policy=_policy_fin,
         tlp_level=job["tlp_level"],

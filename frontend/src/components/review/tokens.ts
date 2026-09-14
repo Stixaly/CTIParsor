@@ -245,6 +245,15 @@ export function formatInk(f: DetectionFormat): string {
     : `oklch(0.32 0.10 ${FORMAT_STYLE[f].hue})`
 }
 
+/** Observable class (ADR-0014 proposal matches) → the entity type whose
+ *  colour it borrows, so evidence chips and rule-body highlights read in the
+ *  same palette as the document highlights. */
+export const OBS_TYPE: Record<string, string> = {
+  hash: 'sha256', ip: 'ipv4', domain: 'domain', url: 'url',
+  file: 'file', image: 'file', registry: 'registry_key',
+  user: 'user_account', port: 'network_traffic', name: 'tool', cve: 'cve',
+}
+
 /** Raw byte count → compact display ("824 B", "128 KB", "3.1 MB"). */
 export function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`

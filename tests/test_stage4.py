@@ -344,8 +344,11 @@ def test_ioc_coverage_all_observables_covered():
     assert cov["missing_indicator"] == []
 
 
-def test_ioc_coverage_flags_missing_indicator():
-    # network_traffic maps to a 'software' SCO with no STIX pattern → no Indicator.
+def test_ioc_coverage_network_traffic_gets_an_indicator():
+    # ADR-0041: network_traffic maps to a 'software' SCO, which now has a STIX
+    # pattern branch — it used to be silently dropped here (no Indicator),
+    # which would have made ADR-0041's "route through the Indicator, or drop"
+    # rule delete every network-traffic relationship instead of fixing it.
     entities = [
         RawEntity(value="8.8.8.8", entity_type=EntityType.IPV4),
         RawEntity(value="tcp/4444", entity_type=EntityType.NETWORK_TRAFFIC),
@@ -354,9 +357,9 @@ def test_ioc_coverage_flags_missing_indicator():
     cov = verify_ioc_coverage(entities, bundle)
     assert cov["total_iocs"] == 2
     assert cov["with_sco"] == 2           # both get an SCO
-    assert cov["with_indicator"] == 1     # only the IPv4 gets an Indicator
-    assert cov["ok"] is False
-    assert cov["missing_indicator"] == [{"value": "tcp/4444", "type": "network_traffic"}]
+    assert cov["with_indicator"] == 2     # both get an Indicator
+    assert cov["ok"] is True
+    assert cov["missing_indicator"] == []
 
 
 def test_ioc_coverage_ignores_non_observable_entities():
@@ -468,3 +471,257 @@ class TestExternalReferenceRouting:
         # external_references absent or empty
         refs = patterns[0].get("external_references") or []
         assert refs == []
+
+
+# ── ADR-0041: observables route through their Indicator ───────────────────────
+
+def test_observable_to_malware_relationship_routes_through_indicator():
+    """ADR-0041: a relationship from an observable SCO to an SDO must be
+    re-anchored on the SCO's Indicator rather than the raw SCO itself."""
+    entities = [RawEntity(value="evil.example.org", entity_type=EntityType.DOMAIN)]
+    llm = LLMEnrichmentResult(
+        malware_families=["WellMess"],
+        relationships=[
+            RelationshipExtracted(
+                source_value="evil.example.org",
+                relationship_type="hosts",
+                target_value="WellMess",
+                confidence=0.8,
+            )
+        ],
+    )
+    bundle = build_stix_bundle(entities, llm, "route_test")
+
+    domain = next(o for o in bundle.objects if o.get("type") == "domain-name")
+    malware = next(o for o in bundle.objects if o.get("type") == "malware")
+    relationships = [o for o in bundle.objects if o.get("type") == "relationship"]
+    indicators = {o.id for o in bundle.objects if o.get("type") == "indicator"}
+
+    assert relationships, "expected at least one relationship in the bundle"
+    for rel in relationships:
+        assert rel.source_ref != domain.id
+        assert rel.target_ref != domain.id
+
+    assert any(
+        rel.source_ref in indicators and rel.target_ref == malware.id
+        for rel in relationships
+    )
+
+
+def test_observable_to_observable_relationship_left_alone():
+    """ADR-0041 scope boundary: when both endpoints are observable SCOs the
+    edge is left as a direct SCO-to-SCO relationship (no redirect)."""
+    entities = [
+        RawEntity(value="evil.example.org", entity_type=EntityType.DOMAIN),
+        RawEntity(value="1.2.3.4", entity_type=EntityType.IPV4),
+    ]
+    llm = LLMEnrichmentResult(
+        relationships=[
+            RelationshipExtracted(
+                source_value="evil.example.org",
+                relationship_type="resolves-to",
+                target_value="1.2.3.4",
+                confidence=0.9,
+            )
+        ]
+    )
+    bundle = build_stix_bundle(entities, llm, "both_observable")
+
+    domain = next(o for o in bundle.objects if o.get("type") == "domain-name")
+    ip = next(o for o in bundle.objects if o.get("type") == "ipv4-addr")
+    relationships = [o for o in bundle.objects if o.get("type") == "relationship"]
+
+    assert any(
+        rel.source_ref == domain.id and rel.target_ref == ip.id
+        for rel in relationships
+    )
+
+
+def test_network_traffic_gets_an_indicator():
+    """ADR-0041: the new 'software' pattern branch means a NETWORK_TRAFFIC
+    entity (placeholder SCO type 'software') now yields an Indicator instead
+    of being silently dropped."""
+    entities = [
+        RawEntity(value="beacon to 10.0.0.1:443", entity_type=EntityType.NETWORK_TRAFFIC)
+    ]
+    bundle = build_stix_bundle(entities, LLMEnrichmentResult(), "nt_test")
+
+    types = {o.get("type") for o in bundle.objects}
+    assert "software" in types
+    assert "indicator" in types
+
+
+# ── ADR-0042: embedded detection rules become Indicator SDOs ──────────────────
+
+def test_embedded_yara_rule_becomes_indicator_and_links_to_malware():
+    report_text = """Some prose before.
+
+rule Detects_LOCKBIT_Variant
+{
+  meta:
+    author = "x"
+  strings:
+    $s1 = "foo"
+  condition:
+    $s1
+}
+
+More prose after.
+"""
+    bundle = build_stix_bundle([], LLMEnrichmentResult(malware_families=["LOCKBIT"]), "r", report_text=report_text)
+    indicators = [o for o in bundle.objects if o.get("type") == "indicator" and o.get("pattern_type") == "yara"]
+    assert len(indicators) == 1
+    indicator = indicators[0]
+    assert indicator.name == "Yara rule: Detects_LOCKBIT_Variant"
+    malware = next(o for o in bundle.objects if o.get("type") == "malware" and o.get("name") == "LOCKBIT")
+    rels = [
+        o for o in bundle.objects
+        if o.get("type") == "relationship"
+        and o.get("source_ref") == indicator.id
+        and o.get("target_ref") == malware.id
+    ]
+    assert len(rels) == 1
+
+
+def test_embedded_yara_private_rule_is_not_extracted():
+    report_text = """Some prose.
+
+private rule Helper_1 { condition: true }
+
+More prose."""
+    bundle = build_stix_bundle([], LLMEnrichmentResult(), "r", report_text=report_text)
+    assert not any(o.get("type") == "indicator" and o.get("pattern_type") == "yara" for o in bundle.objects)
+
+
+_SURICATA_LINE = (
+    'alert tcp $HOME_NET any -> $EXTERNAL_NET 443 '
+    '(msg:"ET TROJAN Sandworm C2 Checkin"; sid:2030001; rev:1;)'
+)
+
+
+def test_embedded_suricata_rule_becomes_indicator():
+    report_text = f"Some prose.\n\n{_SURICATA_LINE}\n\nMore prose."
+    bundle = build_stix_bundle([], LLMEnrichmentResult(), "r", report_text=report_text)
+    indicators = [o for o in bundle.objects if o.get("type") == "indicator" and o.get("pattern_type") == "suricata"]
+    assert len(indicators) == 1
+    indicator = indicators[0]
+    assert indicator.name == "Suricata rule: ET TROJAN Sandworm C2 Checkin"
+    assert indicator.pattern == _SURICATA_LINE
+
+
+def test_embedded_rule_is_typed_snort_via_context_word():
+    report_text = f"The following Snort rule detects this:\n\n{_SURICATA_LINE}"
+    bundle = build_stix_bundle([], LLMEnrichmentResult(), "r", report_text=report_text)
+    indicators = [o for o in bundle.objects if o.get("type") == "indicator" and o.get("pattern_type") == "snort"]
+    assert len(indicators) == 1
+
+
+def test_embedded_net_rule_ignores_non_rule_lines():
+    report_text = "Some prose.\n\nalert everyone: the deploy failed\n\nMore prose."
+    bundle = build_stix_bundle([], LLMEnrichmentResult(), "r", report_text=report_text)
+    assert not any(
+        o.get("type") == "indicator" and o.get("pattern_type") in ("suricata", "snort")
+        for o in bundle.objects
+    )
+
+
+def test_embedded_sigma_rule_becomes_indicator():
+    report_text = """Some prose.
+
+title: Suspicious PowerShell Download
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection:
+        CommandLine|contains: DownloadString
+    condition: selection
+level: high
+
+More prose after."""
+    bundle = build_stix_bundle([], LLMEnrichmentResult(), "r", report_text=report_text)
+    indicators = [o for o in bundle.objects if o.get("type") == "indicator" and o.get("pattern_type") == "sigma"]
+    assert len(indicators) == 1
+    indicator = indicators[0]
+    assert indicator.name == "Sigma rule: Suspicious PowerShell Download"
+    assert indicator.pattern == (
+        "title: Suspicious PowerShell Download\n"
+        "logsource:\n"
+        "    category: process_creation\n"
+        "    product: windows\n"
+        "detection:\n"
+        "    selection:\n"
+        "        CommandLine|contains: DownloadString\n"
+        "    condition: selection\n"
+        "level: high"
+    )
+
+
+def test_embedded_sigma_rule_without_detection_key_is_not_extracted():
+    report_text = """Some prose.
+
+title: Not Actually A Sigma Rule
+description: just a title and a description, no detection logic
+
+More prose after."""
+    bundle = build_stix_bundle([], LLMEnrichmentResult(), "r", report_text=report_text)
+    assert not any(o.get("type") == "indicator" and o.get("pattern_type") == "sigma" for o in bundle.objects)
+
+
+def test_embedded_rule_indicator_ids_are_stable_across_rebuilds():
+    report_text = """Some prose before.
+
+rule Detects_LOCKBIT_Variant
+{
+  meta:
+    author = "x"
+  strings:
+    $s1 = "foo"
+  condition:
+    $s1
+}
+
+More prose after.
+"""
+    bundle1 = build_stix_bundle([], LLMEnrichmentResult(malware_families=["LOCKBIT"]), "r", report_text=report_text)
+    bundle2 = build_stix_bundle([], LLMEnrichmentResult(malware_families=["LOCKBIT"]), "r", report_text=report_text)
+    ind1 = next(o for o in bundle1.objects if o.get("type") == "indicator" and o.get("pattern_type") == "yara")
+    ind2 = next(o for o in bundle2.objects if o.get("type") == "indicator" and o.get("pattern_type") == "yara")
+    assert ind1.id == ind2.id
+
+
+# ── ADR-0043: source document embedded as Artifact.payload_bin ────────────────
+
+def test_source_bytes_produce_a_self_contained_artifact():
+    """STIX 2.1 requires exactly one of payload_bin/url on an Artifact — a
+    hash alone (the pre-ADR-0043 behaviour) can never produce a valid object."""
+    import base64
+    import hashlib
+
+    data = b"%PDF-1.4 fake pdf bytes for testing"
+    real_hash = hashlib.sha256(data).hexdigest()
+    bundle = build_stix_bundle(
+        [], LLMEnrichmentResult(), "r",
+        original_filename="report.pdf", source_hash=real_hash, source_bytes=data,
+    )
+    artifact = next(o for o in bundle.objects if o.get("type") == "artifact")
+    assert artifact.mime_type == "application/pdf"
+    assert base64.b64decode(artifact.payload_bin) == data
+    assert artifact.hashes["SHA-256"] == real_hash
+    report = next(o for o in bundle.objects if o.get("type") == "report")
+    assert artifact.id in report.object_refs
+
+
+def test_no_artifact_without_source_bytes():
+    """A hash with no bytes behind it must not attempt (and silently fail) to
+    build an Artifact — this was the bug ADR-0043 fixes: source_hash alone
+    used to raise MutuallyExclusivePropertiesError, swallowed by a bare
+    except Exception, so the artifact silently never existed."""
+    import hashlib
+
+    real_hash = hashlib.sha256(b"anything").hexdigest()
+    bundle = build_stix_bundle(
+        [], LLMEnrichmentResult(), "r",
+        original_filename="report.pdf", source_hash=real_hash, source_bytes=None,
+    )
+    assert not any(o.get("type") == "artifact" for o in bundle.objects)

@@ -8,6 +8,36 @@ sections group by theme rather than strict semver.
 
 ### Added
 
+- **The API warns at startup if Chromium isn't installed, instead of failing
+  on the first URL capture.** `pipeline/web_capture.py` already had a precise
+  diagnostic for this (`_launch_hint`, "Chromium is not installed for the
+  account running this API…") but it only fired reactively, the first time
+  an analyst tried the URL-ingestion tab — a service that had been running
+  for hours could still be missing the browser and nobody would know until
+  a request failed. `check_chromium_installed()` resolves Playwright's
+  expected executable path (via `sync_playwright().chromium.executable_path`)
+  and checks the filesystem, without launching a browser or touching the
+  network; `api/main.py`'s startup `lifespan` hook runs it once off-thread
+  (`asyncio.to_thread` — Playwright's sync API refuses to run on a thread
+  already driving an asyncio loop, which the hook's coroutine is) and logs a
+  warning if it's missing. A second, unrelated bug surfaced while building
+  this: `sync_playwright()`'s own connection teardown logs a spurious
+  `asyncio` "Task was destroyed but it is pending!" on every call, at a
+  GC-determined moment a `try/finally` cannot bracket — worked around by
+  raising the `asyncio` logger's level for the remainder of the process,
+  since this check runs exactly once, at boot, before any request is served.
+
+- **Proposed Detections highlights the report evidence inside the rule body.**
+  Opening a rule's detail previously showed its raw text with no connection
+  to *why* it was proposed — the evidence chip lived only in the row above.
+  The rule-body drawer now reuses `buildRanges` (the same whole-token,
+  defanged-IOC-aware, hash-line-wrap-tolerant matcher already driving the
+  report text viewer) to find and `<mark>` every matched value directly in
+  the rule text, colour-coded to match its observable type and titled with
+  the rule field it matched. Verified in-browser against a real report: the
+  drawer for `WEBSHELL_PHP_Dynamic_Big` correctly highlights `"backdoor"`
+  inside its `strings:` section.
+
 - **`setup.sh` installs Node.js instead of printing instructions.** A fresh
   WSL2 run stopped at "Node.js not found — web UI build unavailable", left the
   operator to paste a NodeSource one-liner, and the web UI never got built.
@@ -89,7 +119,53 @@ sections group by theme rather than strict semver.
   the extracted runtime and found the workstation's GPU on its own. The
   rebuilt bundle replayed at 18 of 18 checks in 706 s.
 
+### Added
+
+#### Detection rules embedded verbatim in a report become Indicator SDOs, 2026-09-14
+
+CTI vendor reports routinely publish a literal YARA, Suricata/Snort, or Sigma
+rule alongside their write-up — verified on a real Google Threat Intelligence
+Group report, which embeds 4 complete YARA rules — and none of it survived
+past ingestion as anything more than prose. STIX 2.1 already models this
+(`Indicator.pattern_type` = `"yara"`/`"suricata"`/`"snort"`/`"sigma"`,
+`pattern` holding the rule verbatim), so `build_stix_bundle` now extracts and
+represents them: YARA via `yara_atoms.split_rules` and Suricata/Snort via
+`suricata_atoms.rule_header`/`parse_options` (both existing, corpus-scale-
+validated ADR-0015 parsers, reused unchanged), Sigma via a new grow-then-
+shrink YAML boundary heuristic (fail-closed — a candidate that never parses
+as valid `title`+`detection` YAML yields nothing). Each rule auto-links to an
+already-extracted malware/tool whose name appears in its own title. Verified
+end to end on the real report (`re_run_final_stages`, zero LLM cost): all 4
+YARA rules became Indicators, correctly linked to their malware. One honest
+finding along the way: 2 of the 4 also linked to `backdoor`/`tunneler` —
+Stage 2d (CyNER) had mistagged those generic category words as malware names
+for this job, a pre-existing defect in a different stage that this feature
+surfaced rather than caused. See
+[ADR-0042](docs/adr/0042-embedded-yara-rules-as-indicators.md).
+
 ### Fixed
+
+#### Observables reached malware/threat-actor SDOs directly, bypassing their Indicator, 2026-09-14
+
+Stage 4 already built the STIX 2.1 best-practice chain (`SCO ◄ ObservedData ◄
+Indicator`) for every accepted IoC, but nothing stopped the raw SCO itself
+from also becoming the direct endpoint of a `Relationship` to a threat SDO.
+Two independent paths did this: the LLM relationships loop (only
+observable↔attack-pattern was ever guarded) and the Relationship Policy's pin
+engine — the larger source, per ADR-0024's own measurement of 872/1,140 edges
+on one report. Re-running Stage 4+5 for a real stored job
+(`re_run_final_stages`, zero LLM cost) turned 2 raw `file --related-to-->
+malware` edges into 0, rerouted through 40 `indicator --indicates--> malware`
+edges instead. A related gap is closed in the same change: `NETWORK_TRAFFIC`
+entities got a placeholder `Software` SCO but silently never got an
+Indicator, which would have made every network-traffic relationship simply
+vanish under the new rule instead of being fixed by it.
+
+Scoped deliberately to observable↔non-observable-SDO pairs only —
+observable-to-observable edges (`file related-to ipv4-addr`, the majority of
+what was actually measured) are left alone, since STIX 2.1's real answer for
+those is per-SCO-type embedded ref properties, a separate piece of work. See
+[ADR-0041](docs/adr/0041-observables-route-through-indicators.md).
 
 #### Stage 2d fed whole documents to DeBERTa and the OOM killer took the worker, 2026-09-03
 

@@ -49,6 +49,9 @@ Two controls turn that list into something actionable:
 - **Clicking the rule title** opens its body, tags, source link and licence, so
   you can judge whether it actually fits the report before adopting it. Long
   bodies are truncated at 20,000 characters — some rules run past 800,000.
+  Every report value that matched is highlighted directly in the rule text
+  (hover a highlight for which field it matched), not just summarised in the
+  row's evidence chip.
 
 A licence of `none` means ALL RIGHTS RESERVED: use it for local coverage, do not
 redistribute it. The drawer says so on the rule itself, and the export manifest
@@ -60,7 +63,7 @@ Two registry files:
 
 | File | Tracked | Holds |
 |---|---|---|
-| `detection_corpora.yaml` | committed | public corpora (ships with SigmaHQ) |
+| `detection_corpora.yaml` | committed | public corpora — Sigma, YARA and Suricata, all enabled by default |
 | `detection_corpora.local.yaml` | gitignored | private corpora + local overrides |
 
 The local overlay is merged over the committed file: an entry with an existing
@@ -84,6 +87,13 @@ python scripts/sync_corpora.py
 Clones/pulls each repo with a `git:` remote using your **ambient git auth** —
 public repos need none; private repos use your SSH agent / credential helper.
 Clones land under `./corpora/` (gitignored). No credentials are stored.
+
+A corpus with a `tarball:` URL instead of `git:` (ET Open, which is not
+published as a git repository) is downloaded, checked against its published
+`.md5` sidecar, and extracted into its `path`. A tarball has no revision to
+pin, so the fetch records the URL and content hash in `<path>/.sync.json`
+(ADR-0015 §5). A failed download or checksum mismatch leaves the previous
+copy in place.
 
 ## 3. Build the rule store
 
@@ -279,7 +289,17 @@ adjusted for platform:
 
 Each proposal shows *why* it ranked: `Image ≡ meshagent64-v2.exe` (exact) or
 `cmdline ⊃ sshpass` (substring). Rules carrying **no ATT&CK tag** are reachable
-here even though the coverage matrix cannot see them.
+here even though the coverage matrix cannot see them. Open the rule body to
+see every one of those matches highlighted in place, not just the first one
+summarised in the row.
+
+This panel only ever ranks rules already in your local corpora (Sigma,
+Suricata, YARA). A rule the *report itself* quotes verbatim — a vendor
+publishing their own YARA/Suricata/Sigma alongside the write-up — is a
+different feature: it never goes through corpus matching at all, and instead
+lands directly in the exported STIX bundle as its own `indicator` object. See
+the README's "STIX objects produced" table and
+[ADR-0042](adr/0042-embedded-yara-rules-as-indicators.md).
 
 The list is one ranked table with **format as a column**, not one section per
 tool — the top of the list is the top of the list whichever tool the rule belongs

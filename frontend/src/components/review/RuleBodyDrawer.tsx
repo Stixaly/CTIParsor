@@ -4,10 +4,12 @@
  * weigh 219 MB on a real report). The license is displayed prominently
  * because a `none` license forbids redistribution.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { X, ExternalLink } from 'lucide-react'
 import { lookupRules } from '../../api/client'
+import { type ProposalMatch } from '../../types'
+import { buildRanges, OBS_TYPE, typeSoft, typeInk, type Range } from './tokens'
 
 /** Rule bodies are not all small: the mthcht corpus averages ~176 KB per rule,
  *  and one measured 825,817 characters. Rendering that in a single <pre> on
@@ -16,9 +18,11 @@ const BODY_PREVIEW_CHARS = 20000
 
 export default function RuleBodyDrawer({
   ruleId,
+  matches = [],
   onClose,
 }: {
   ruleId: string | null
+  matches?: ProposalMatch[]
   onClose: () => void
 }) {
   const [showFull, setShowFull] = useState(false)
@@ -29,6 +33,31 @@ export default function RuleBodyDrawer({
     queryFn: () => lookupRules(ruleId ? [ruleId] : [], true),
     enabled: !!ruleId,
   })
+
+  const rule = data?.rules?.[0]
+
+  const displayedText = rule
+    ? (showFull || rule.raw.length <= BODY_PREVIEW_CHARS
+        ? rule.raw
+        : rule.raw.slice(0, BODY_PREVIEW_CHARS))
+    : ''
+
+  // Evidence highlighting reuses the same range-finding logic as the report
+  // text viewer (whole-token boundaries, defanged-IOC variants, hash
+  // line-wrap tolerance) — each ProposalMatch is adapted into the shape
+  // buildRanges expects.
+  const ranges = useMemo(
+    () => buildRanges(
+      displayedText,
+      matches.map((m, i) => ({
+        id: String(i),
+        value: m.value,
+        entity_type: OBS_TYPE[m.obs_class] ?? 'file',
+        accepted: true,
+      })),
+    ),
+    [displayedText, matches],
+  )
 
   // Collapse again on every new rule, or the second rule opens expanded because
   // the first one was.
@@ -47,8 +76,6 @@ export default function RuleBodyDrawer({
   if (ruleId === null) {
     return null
   }
-
-  const rule = data?.rules?.[0]
 
   const metaSegments: string[] = []
   if (rule) {
@@ -222,6 +249,12 @@ export default function RuleBodyDrawer({
               ))}
             </div>
           )}
+
+          {rule && matches.length > 0 && (
+            <p style={{ margin: '10px 0 0', fontSize: 11, color: 'var(--ink-3)' }}>
+              Highlighted below: {matches.length} report value{matches.length === 1 ? '' : 's'} that matched this rule.
+            </p>
+          )}
         </div>
 
         <div style={{ flex: 1, overflow: 'auto' }}>
@@ -278,9 +311,7 @@ export default function RuleBodyDrawer({
                 background: 'var(--bg-soft)',
               }}
             >
-              {showFull || rule.raw.length <= BODY_PREVIEW_CHARS
-                ? rule.raw
-                : rule.raw.slice(0, BODY_PREVIEW_CHARS)}
+              {renderHighlighted(displayedText, ranges, matches)}
               {!showFull && rule.raw.length > BODY_PREVIEW_CHARS && (
                 <>
                   {'\n\n'}
@@ -304,4 +335,34 @@ export default function RuleBodyDrawer({
       </div>
     </>
   )
+}
+
+/** Renders `text` with each `ranges` span wrapped in a coloured <mark>,
+ *  keyed back to the ProposalMatch it came from for its tooltip and colour. */
+function renderHighlighted(text: string, ranges: Range[], matches: ProposalMatch[]): React.ReactNode {
+  if (ranges.length === 0) return text
+  const nodes: React.ReactNode[] = []
+  let cursor = 0
+  ranges.forEach((r, i) => {
+    if (r.start > cursor) nodes.push(text.slice(cursor, r.start))
+    const m = matches[Number(r.entityId)]
+    const t = OBS_TYPE[m.obs_class] ?? 'file'
+    nodes.push(
+      <mark
+        key={i}
+        title={`${m.exact ? 'Exact' : 'Partial'} match — rule field "${m.field}"`}
+        style={{
+          background: typeSoft(t),
+          color: typeInk(t),
+          borderRadius: 3,
+          padding: '0 1px',
+        }}
+      >
+        {text.slice(r.start, r.end)}
+      </mark>,
+    )
+    cursor = r.end
+  })
+  if (cursor < text.length) nodes.push(text.slice(cursor))
+  return nodes
 }

@@ -563,6 +563,9 @@ disable one, and **Rebuild index** to re-ingest the local clones. See
 | Remediation step | `course-of-action` SDO |
 | Any accepted IoC | `indicator` SDO (STIX pattern) + `based-on` SRO |
 | IoC linked to malware | extra `indicates` SRO Indicator → Malware |
+| Any relationship touching an observable (LLM-extracted or policy-pinned) | routed through that observable's `indicator`, never the raw SCO directly — STIX 2.1 has no relationship-object answer for an observable-to-SDO edge, only the indicator does (ADR-0041) |
+| Detection rule quoted verbatim in the report (YARA, Suricata, Snort, or Sigma) | `indicator` SDO with `pattern_type` set to the format and `pattern` holding the rule text as-is; auto-linked with `indicates` to a malware/tool whose name appears in the rule's own title (ADR-0042) |
+| Source document (PDF, DOCX, …) | `artifact` SCO — `payload_bin` (base64) + SHA-256 hash + MIME type, so the bundle carries the original file, not just a pointer to it (ADR-0043) |
 | Threat actor → country / sector | `targets` SRO |
 | Semantic relationship | `relationship` SRO (confidence score) |
 | Relationship evidence grade | `x_evidence_label` custom property on each `relationship` (`observed` / `reported` / `assessed` / `inferred` / `gap`) |
@@ -578,6 +581,30 @@ disable one, and **Rebuild index** to re-ingest the local clones. See
 user account or network-traffic entity — Stage 4 maps them so an analyst who adds
 one by hand in the Review page gets a correct SCO. Everything else in this table
 is produced by the pipeline itself.
+
+### Detection rules embedded in the report itself
+
+CTI reports — especially from Mandiant / Google Threat Intelligence Group —
+often publish a literal YARA, Suricata, Snort, or Sigma rule alongside their
+write-up, not just a description of the malware. These have nothing to do
+with your local rule corpora or the Detections tab's ranking (that's a
+separate feature, see [Rule proposals](#rule-proposals--ranked-on-the-report-not-on-its-tags)
+below) — a rule quoted in the report text is extracted and represented
+directly in the exported bundle as its own `indicator` SDO (`pattern_type`
+set to the matching format, `pattern` holding the rule text verbatim — STIX
+2.1's native mechanism for this, no workaround needed), auto-linked to any
+malware or tool already named elsewhere in the report whose name appears in
+the rule's own title.
+
+Verified on a real Google TIG report that embeds four YARA rules: all four
+came through as indicators, each linking correctly to a malware family the
+same report named elsewhere. YARA and Suricata/Snort extraction reuse this
+project's own corpus parsers unchanged (`pipeline/detection/yara_atoms.py`,
+`suricata_atoms.py`); Sigma needed new logic — a grow-then-shrink YAML
+boundary search, since YAML has no delimiter that survives being embedded in
+prose the way YARA's braces do — and is fail-closed: a candidate that doesn't
+parse as a valid rule yields nothing rather than a guess. Design:
+[ADR-0042](docs/adr/0042-embedded-yara-rules-as-indicators.md).
 
 ---
 
@@ -712,6 +739,16 @@ python scripts/build_rule_text.py       # FTS5 index over rule titles, for brand
 
 Scoring is deterministic and offline — no model, no network (ADR-0008's constraint
 that the detection artifact stays trustworthy).
+
+Opening a rule's body (click its title) highlights every value that matched it
+directly in the rule text — the same whole-token, defanged-IOC-aware matcher
+that highlights entities in the report viewer, so the "why" behind a rank is
+never just a chip in the row above.
+
+This panel only ranks rules already in your local corpora — a report that
+quotes its own YARA/Suricata/Snort/Sigma rule verbatim is a different feature
+entirely; see **"Detection rules embedded in the report itself"** under
+[STIX objects produced](#stix-objects-produced).
 
 Walkthrough: [`docs/detection-coverage.md`](docs/detection-coverage.md). Design:
 ADR [0006](docs/adr/0006-multi-corpus-detection-ingestion.md) /
@@ -1051,10 +1088,18 @@ On **Finalize**, accepted named entities form a per-report domain lexicon. The f
 - **Drop spurious edges** — an observable ↔ attack-pattern relationship
   (e.g. `domain communicates-with T1071.001`) is a type error; it is dropped, not
   emitted as a noisy `related-to`.
+- **Route observables through their indicator** — any other relationship
+  touching a raw observable (LLM-extracted or policy-pinned) is re-anchored on
+  that observable's `indicator` rather than the SCO itself; STIX 2.1 has no
+  relationship-object answer for an observable-to-SDO edge otherwise. Scoped to
+  observable↔SDO pairs only — observable↔observable facts (`file related-to
+  ipv4-addr`) are left as-is, since the spec's real answer for those is
+  embedded ref properties, not a relationship object (ADR-0041).
 
 Measured effect on a 4-report corpus: named-entity relationship hallucination
 ≈ 11 % (the tractable target), entity hallucination ≈ 0. See
-[ADR-0012](docs/adr/0012-hallucination-measurement-and-canonicalization.md).
+[ADR-0012](docs/adr/0012-hallucination-measurement-and-canonicalization.md) /
+[ADR-0041](docs/adr/0041-observables-route-through-indicators.md).
 
 ---
 
@@ -1714,7 +1759,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS rule_text USING fts5(rule_id UNINDEXED, body)
 | `re2` | Linear-time regex engine, guards catastrophic backtracking |
 | `spacy` | Optional NER fallback |
 
-Playwright and its Chromium install with `make install-capture`, and its system libraries require root via `sudo python -m playwright install-deps chromium` — otherwise `/api/ingest/url` responds 503.
+Playwright and its Chromium install with `make install-capture`, and its system libraries require root via `sudo python -m playwright install-deps chromium` — otherwise `/api/ingest/url` responds 503. The API checks for a working Chromium install once at startup and logs a warning if it's missing, so a misconfigured server says so in its own logs instead of waiting for the first URL-capture request to fail.
 
 ### Frontend key packages
 

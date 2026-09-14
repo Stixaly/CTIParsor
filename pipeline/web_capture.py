@@ -16,6 +16,7 @@ script attack surface and the beacons with it.  See ADR-0029.
 from __future__ import annotations
 
 import ipaddress
+import logging
 import os
 import re
 import socket
@@ -402,6 +403,16 @@ def _render_pdf(page: "Page", dest: Path) -> None:
     )
 
 
+# Shared with `check_chromium_installed`, which needs the same wording but has
+# no launch exception to append an "Underlying error" clause to.
+_CHROMIUM_MISSING_HINT = (
+    "Chromium is not installed for the account running this API "
+    "(browsers live under that account's HOME, so an install done as a "
+    "different user is invisible here). Run, as that account: "
+    "python -m playwright install chromium."
+)
+
+
 def _launch_hint(exc: Exception, *, sandboxed: bool) -> str:
     """
     Turn a Chromium launch failure into the one sentence that fixes it.
@@ -423,18 +434,45 @@ def _launch_hint(exc: Exception, *, sandboxed: bool) -> str:
             f"and accept that risk. Underlying error: {reason}"
         )
     if "Executable doesn't exist" in reason or "playwright install" in reason:
-        return (
-            "Chromium is not installed for the account running this API "
-            "(browsers live under that account's HOME, so an install done as a "
-            "different user is invisible here). Run, as that account: "
-            "python -m playwright install chromium. "
-            f"Underlying error: {reason}"
-        )
+        return f"{_CHROMIUM_MISSING_HINT} Underlying error: {reason}"
     return (
         "Chromium could not start. If this mentions a missing shared library, "
         "run: sudo python -m playwright install-deps chromium. "
         f"Underlying error: {reason}"
     )
+
+
+def check_chromium_installed() -> str | None:
+    """
+    Non-invasive startup probe, meant to be called once at process boot so a
+    missing browser is a log line at startup instead of a 500 on the first
+    capture request. Never launches a browser or touches the network — it
+    only resolves where Playwright expects Chromium to live and checks the
+    filesystem.
+    """
+    if not _PLAYWRIGHT_AVAILABLE:
+        return (
+            "Web capture is unavailable — Playwright is not installed. "
+            "Run: pip install playwright && python -m playwright install chromium"
+        )
+    # Opening and immediately closing the driver connection races its own
+    # background asyncio loop: garbage-collecting the dangling init task logs
+    # a "Task was destroyed but it is pending!" TargetClosedError on the
+    # `asyncio` logger, at a GC-determined moment that can land well after this
+    # function returns — a `finally` block cannot reliably bracket it. Since
+    # this probe runs exactly once, at process startup, before any request is
+    # served, raising the level here for the rest of the process (rather than
+    # restoring it) is what actually suppresses it; only `asyncio`'s own
+    # internal logger is affected, never the application's.
+    logging.getLogger("asyncio").setLevel(logging.CRITICAL)
+    try:
+        with sync_playwright() as p:
+            exe_path = p.chromium.executable_path
+    except Exception as exc:
+        return f"Could not verify the Chromium install: {type(exc).__name__}: {exc}"
+    if not Path(exe_path).exists():
+        return _CHROMIUM_MISSING_HINT
+    return None
 
 
 def _slugify(text: str, *, max_len: int = 80) -> str:

@@ -310,3 +310,89 @@ def test_to_dict_reports_blocked():
     assert [r["rule"] for r in d["rules"]] == ["a"]
     assert d["rules"][0]["blocked"] == 5
     assert d["total_blocked"] == 5
+
+
+# ── ADR-0041: sco_id_to_indicator routing inside _materialise_pinned_edges ─────
+
+def test_pin_rule_routes_sco_target_through_its_indicator():
+    """ADR-0041: a pinned edge whose target is an observable SCO is emitted
+    against that SCO's Indicator rather than the raw SCO."""
+    m1 = _Obj("malware", 1, name="ROOTSAW")
+    d1 = _Obj("domain-name", 1, name="evil.com")
+    ind1 = _Obj(
+        "indicator",
+        1,
+        name="Indicator: evil.com",
+        pattern="[domain-name:value = 'evil.com']",
+    )
+    stix_objects = [m1, d1, ind1]
+    sco_id_to_indicator = {d1.id: ind1}
+    policy = {
+        "max_pinned_edges": 100,
+        "pin_evidence": {"mode": "cartesian"},
+        "rules": [
+            {
+                "src": "malware",
+                "verb": "communicates-with",
+                "tgt": "domain-name",
+                "mode": "pin",
+                "enabled": True,
+            }
+        ],
+    }
+    _materialise_pinned_edges(
+        stix_objects, policy, set(), "", sco_id_to_indicator=sco_id_to_indicator
+    )
+
+    emitted = next(
+        (o for o in stix_objects if getattr(o, "source_ref", None) == m1.id),
+        None,
+    )
+    assert emitted is not None
+    assert emitted.target_ref == ind1.id
+
+
+def test_pin_rule_drops_candidate_with_no_indicator():
+    """ADR-0041: a candidate pair whose observable endpoint has no Indicator
+    is dropped before it is ever counted as a candidate."""
+    m1 = _Obj("malware", 1, name="ROOTSAW")
+    d1 = _Obj("domain-name", 1, name="evil.com")
+    policy = {
+        "max_pinned_edges": 100,
+        "pin_evidence": {"mode": "cartesian"},
+        "rules": [
+            {
+                "src": "malware",
+                "verb": "communicates-with",
+                "tgt": "domain-name",
+                "mode": "pin",
+                "enabled": True,
+            }
+        ],
+    }
+    stats = _materialise_pinned_edges(
+        [m1, d1], policy, set(), "", sco_id_to_indicator={}
+    )
+    assert stats.rules[0].candidates == 0
+
+
+def test_pin_rule_unaffected_when_indicator_map_not_given():
+    """ADR-0041: with no indicator map supplied the legacy behaviour is
+    preserved — the pair is pinned directly with no redirect attempted."""
+    m1 = _Obj("malware", 1, name="ROOTSAW")
+    d1 = _Obj("domain-name", 1, name="evil.com")
+    policy = {
+        "max_pinned_edges": 100,
+        "pin_evidence": {"mode": "cartesian"},
+        "rules": [
+            {
+                "src": "malware",
+                "verb": "communicates-with",
+                "tgt": "domain-name",
+                "mode": "pin",
+                "enabled": True,
+            }
+        ],
+    }
+    stats = _materialise_pinned_edges([m1, d1], policy, set(), "")
+    assert stats.rules[0].candidates == 1

@@ -7,6 +7,7 @@ from pipeline.stage4_stix_mapping import (
     _fair_share,
     _materialise_pinned_edges,
     _pin_edge_key,
+    _route_observables_through_indicators,
 )
 
 
@@ -219,6 +220,43 @@ def test_materialise_skips_non_spec_verb() -> None:
     assert stats.total_emitted == 0
     for r in stats.rules:
         assert r.candidates == 0
+
+
+# ── ADR-0041: _route_observables_through_indicators ────────────────────────────
+
+def test_route_leaves_both_observables_alone():
+    """ADR-0041: when both endpoints are observable SCOs the pair is returned
+    unchanged and the indicator map is not even consulted."""
+    src = _Obj("domain-name", 1)
+    tgt = _Obj("ipv4-addr", 2)
+    mapping = {}
+    assert _route_observables_through_indicators(src, tgt, mapping) == (src, tgt)
+
+
+def test_route_leaves_two_sdos_alone():
+    """ADR-0041: two SDO endpoints are returned unchanged."""
+    src = _Obj("malware", 1)
+    tgt = _Obj("threat-actor", 2)
+    mapping = {}
+    assert _route_observables_through_indicators(src, tgt, mapping) == (src, tgt)
+
+
+def test_route_redirects_the_observable_side():
+    """ADR-0041: exactly one observable endpoint is replaced by its Indicator."""
+    src = _Obj("malware", 1)
+    tgt = _Obj("domain-name", 2)
+    indicator = _Obj("indicator", 3)
+    mapping = {tgt.id: indicator}
+    assert _route_observables_through_indicators(src, tgt, mapping) == (src, indicator)
+
+
+def test_route_drops_when_no_indicator_exists():
+    """ADR-0041: a single observable endpoint with no Indicator resolves to
+    (None, None) so the caller can drop the edge."""
+    src = _Obj("malware", 1)
+    tgt = _Obj("domain-name", 2)
+    mapping = {}
+    assert _route_observables_through_indicators(src, tgt, mapping) == (None, None)
 
 
 def test_to_dict_sorts_by_candidates_desc_and_drops_empty_rules() -> None:

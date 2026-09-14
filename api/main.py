@@ -53,6 +53,17 @@ async def lifespan(app: FastAPI):
     from api.worker import requeue_orphans, start_queued_jobs
     requeue_orphans()
     start_queued_jobs()
+    # A filesystem check only, so a missing browser is a log line at boot
+    # instead of a 500 on the first URL capture a user tries. Run off-thread:
+    # Playwright's sync API refuses to run on a thread with a running asyncio
+    # loop, which this coroutine is on — it would otherwise always fail with
+    # "Sync API inside the asyncio loop" instead of the real answer.
+    import asyncio
+
+    from pipeline.web_capture import check_chromium_installed
+    chromium_hint = await asyncio.to_thread(check_chromium_installed)
+    if chromium_hint is not None:
+        logger.warning("[startup] %s", chromium_hint)
     yield
     # Shutdown: nothing to tear down.
 

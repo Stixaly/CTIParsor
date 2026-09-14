@@ -238,6 +238,70 @@ def test_launch_hint_always_carries_the_underlying_reason(monkeypatch):
     msg = web_capture._launch_hint(Exception("libasound.so.2: cannot open"), sandboxed=False)
     assert "libasound.so.2" in msg
     assert "install-deps" in msg
+
+
+def test_launch_hint_missing_browser_message_matches_the_startup_check(monkeypatch):
+    """Locks the two messages together so they cannot drift apart independently."""
+    monkeypatch.setattr(web_capture.os, "geteuid", lambda: 1000, raising=False)
+    msg = web_capture._launch_hint(Exception("Executable doesn't exist at /x"), sandboxed=True)
+    assert msg.startswith(web_capture._CHROMIUM_MISSING_HINT)
+
+
+def test_check_chromium_installed_reports_missing_playwright(monkeypatch):
+    monkeypatch.setattr(web_capture, "_PLAYWRIGHT_AVAILABLE", False)
+    result = web_capture.check_chromium_installed()
+    assert "Playwright is not installed" in result
+    assert "playwright install chromium" in result
+
+
+def test_check_chromium_installed_is_fine_when_binary_exists(monkeypatch, tmp_path):
+    binary_path = tmp_path / "chrome"
+    binary_path.write_text("x")
+
+    class _FakePlaywright:
+        def __init__(self):
+            self.chromium = self
+            self.executable_path = str(binary_path)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(web_capture, "_PLAYWRIGHT_AVAILABLE", True)
+    monkeypatch.setattr(web_capture, "sync_playwright", lambda: _FakePlaywright(), raising=False)
+    assert web_capture.check_chromium_installed() is None
+
+
+def test_check_chromium_installed_reports_missing_binary(monkeypatch, tmp_path):
+    missing_path = str(tmp_path / "does-not-exist")
+
+    class _FakePlaywright:
+        def __init__(self):
+            self.chromium = self
+            self.executable_path = missing_path
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(web_capture, "_PLAYWRIGHT_AVAILABLE", True)
+    monkeypatch.setattr(web_capture, "sync_playwright", lambda: _FakePlaywright(), raising=False)
+    assert web_capture.check_chromium_installed() == web_capture._CHROMIUM_MISSING_HINT
+
+
+def test_check_chromium_installed_reports_a_probe_failure(monkeypatch):
+    def _raise():
+        raise RuntimeError("Executable doesn't exist")
+
+    monkeypatch.setattr(web_capture, "_PLAYWRIGHT_AVAILABLE", True)
+    monkeypatch.setattr(web_capture, "sync_playwright", _raise, raising=False)
+    result = web_capture.check_chromium_installed()
+    assert "Could not verify" in result
+    assert "RuntimeError" in result
 class _FakePage:
     """Records what _render_pdf asks for, without a browser."""
 

@@ -43,6 +43,9 @@ choice, and the consequences. They're append-only — supersede rather than rewr
 | [0038](0038-link-density-under-policy.md) | Link density under policy — the factory policy has no rules while the Policy page shows 27 (nothing seeds the DB, so Stage 4 pins nothing on a fresh install); `gap` relationships are requested from the LLM and then deleted by Stage 3d; caps are one shared counter that ADR-0024 saw hit at exactly 200; decision: backend-owned default rule set, kept `gap` edges, alias-aware endpoint resolution behind a measurement gate, per-node fan-out caps, long-distance completion on the local model; the before/after run is recorded as a procedure because the WSL distro dies at the first Stage 3 LLM call on this workstation (7 attempts, both providers) | Proposed |
 | [0039](0039-per-stage-observability.md) | Per-stage observability — 18 stage modules, 6 report anything, and the ones that change the data most report least (3d deletes every unquotable relationship, 4b adds up to 200 edges, neither emits an event); 209 `logger` call sites carry no job id because the worker subprocess never sets the `request_id` ContextVar, so every pipeline line reads `[none]`; the traceback is computed then discarded in favour of `str(exc)`; a SIGKILLed job does not say which stage it died in (7 manual greps on 2026-09-02); the progress bar is `(stage / 5) * 100`, which hardcodes the count, weights a millisecond stage like a 4-minute one, and yields `NaN` for stage `"1f"`. Decision: a typed `job_stages` table written through one `stage_span` context manager that also sets the log context, times the stage, emits the event and attributes the exception | Proposed |
 | [0040](0040-offline-installation-bundle.md) | Offline (air-gapped) installation bundle — `setup.sh` reaches 12 network sources (452 `.deb`, 167 wheels / 3.1 GB, 2.6 GB of models, 684 MB of corpora, Chromium, Node, an LLM); one self-contained ~13 GB bundle built by `scripts/package_offline.sh` on a twin of the target, installed by `setup.sh --offline=<dir>` through env vars (`PIP_NO_INDEX`, `HF_HUB_OFFLINE`) and pre-staged files so each step's own "already present" branch fires; checksums verified before touching the host; Python/distro coupling accepted and enforced | Proposed |
+| [0041](0041-observables-route-through-indicators.md) | Observables route through their Indicator, never straight to a threat SDO — two paths still wire a raw SCO directly to malware/threat-actor/etc: the LLM relationships loop (only observable↔attack-pattern was guarded) and the policy pin engine (the *larger* source per ADR-0024, 872/1,140 edges on one report); measured 12/29 and 2/45 raw-SCO edges on stored bundles, mostly observable-to-observable (`file↔ipv4-addr`, out of scope — no single STIX answer exists for it); redirects the observable side to its Indicator only when the other endpoint is a real SDO, opt-in via a `sco_id_to_indicator` parameter so the pin engine's own budget/gating unit tests are untouched; also closes a silent gap where `NETWORK_TRAFFIC` observables never got an Indicator at all | Accepted |
+| [0043](0043-self-contained-bundle-embeds-source-pdf.md) | The STIX bundle embeds the source document (`payload_bin`) — the `Artifact` object `stage4_stix_mapping.py` has always tried to build (hash + MIME type only, no bytes, "to keep the bundle compact") has never actually existed: STIX 2.1 requires exactly one of `payload_bin`/`url`, so `stix2.Artifact(hashes=...)` alone raises `MutuallyExclusivePropertiesError` and the surrounding `except Exception: artifact_obj = None` has silently swallowed it on every job ever processed, found only by checking a real bundle instead of the docstring's claim; fix embeds the source file as base64 `payload_bin` (measured ≈347 KB added for a 260 KB PDF), making the bundle self-contained | Accepted |
+| [0042](0042-embedded-yara-rules-as-indicators.md) | Embedded detection rules (YARA, Suricata, Snort, Sigma) become Indicator SDOs — CTI reports routinely publish a literal rule inline (verified: 4 complete YARA rules in one real Google TIG report), and none of it survived past ingestion; STIX 2.1's `Indicator.pattern_type` already models all four natively, so the work is extraction — reuses `yara_atoms.split_rules` and `suricata_atoms.rule_header`/`parse_options` (ADR-0015's own corpus parsers, validated at ~20,000-rule scale) unchanged; Sigma gets a new grow-then-shrink YAML boundary heuristic since it has no self-delimiting rule-end marker, fail-closed (must parse as valid title+detection YAML) and unvalidated against any real report, unlike the other two; auto-links to an already-extracted malware/tool by name substring (`x_evidence_label: "observed"`) — measured wrong on the first check (raw Stage-3 output) and right on the second (the DB-merged entity list `build_stix_bundle` actually sees, where CyNER had already found all 4 names) | Accepted |
 
 **Numbering notes**
 - `0001` and `0003` are unused gaps (early informal decisions never filed).
@@ -247,4 +250,38 @@ choice, and the consequences. They're append-only — supersede rather than rewr
        SIGKILLed job died in.  Supplies the per-stage timings 0036 Phase 0
        and 0037 had to obtain with throwaway scripts, and the dropped-edge
        count 0038 decision 2 changes on purpose
+
+0009 trust & provenance (observable → ObservedData → Indicator chain)
+   ▲   its LLM-relationship and pin-engine edges disciplined by
+0024 edge-synthesis provenance + 0027 evidence-gated pin materialisation
+   ▲   both are sources of a raw SCO reaching a threat SDO directly
+   └── 0041 observables route through their Indicator: the pin engine is
+       the LARGER of the two sources (872/1,140 edges on one report, per
+       0024), not the smaller one — only observable↔attack-pattern was ever
+       guarded (0012).  Scoped to observable↔non-observable-SDO pairs only:
+       12/29 and 2/45 raw-SCO edges measured on stored bundles turned out to
+       be mostly observable-to-observable (`file↔ipv4-addr`), which has no
+       single correct STIX answer and stays out of scope.  Opt-in via a
+       `sco_id_to_indicator` parameter so 0027's own budget/gating unit
+       tests, built on bare fakes with no Indicator behind them, are
+       untouched.  Also closes a silent gap where NETWORK_TRAFFIC
+       observables never got an Indicator at all
+
+0015 multi-format detection matching (names the gap: reports carry
+detection rules inline, nothing extracts them — never built)
+   ▲   built by
+   └── 0042 embedded detection rules become Indicator SDOs: STIX 2.1's
+       `pattern_type` (yara/suricata/snort/sigma) already models this, so
+       the work is extraction — reuses 0015's own `yara_atoms.split_rules`
+       and `suricata_atoms.rule_header`/`parse_options` unchanged (both
+       validated at ~20,000-rule corpus scale); Sigma alone needs new
+       logic, a grow-then-shrink YAML boundary heuristic, because YAML has
+       no self-delimiting rule end the way YARA's braces or Suricata's
+       one-line format do.  Verified against a real report with 4 embedded
+       YARA rules; Sigma has no real counter-example and stays fail-closed.
+       Auto-links to an already-extracted malware/tool by name substring —
+       wrong on the first check (raw Stage-3 output), right on the second
+       (the DB-merged entity list 0002/1359's `re_run_final_stages`
+       actually builds, where CyNER had already found all 4 names the LLM
+       had not)
 ```
