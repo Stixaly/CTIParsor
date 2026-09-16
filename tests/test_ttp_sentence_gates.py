@@ -198,15 +198,18 @@ def test_sentence_gate_stats_accounting_is_closed():
     stats = sentence_gate_stats(text)
 
     assert stats["dropped_by_keyword"] == stats["sentences_total"] - stats["kept_by_keyword"]
-    assert stats["dropped_by_cap"] == stats["kept_by_keyword"] - stats["scored"]
-    assert stats["scored"] <= stats["kept_by_keyword"] <= stats["sentences_total"]
+    assert stats["dropped_by_advisory"] == stats["kept_by_keyword"] - stats["kept_by_advisory"]
+    assert stats["dropped_by_cap"] == stats["kept_by_advisory"] - stats["scored"]
+    assert stats["scored"] <= stats["kept_by_advisory"] <= stats["kept_by_keyword"] <= stats["sentences_total"]
 
     # Check all keys present
     expected_keys = {
         "sentences_total",
         "kept_by_keyword",
+        "kept_by_advisory",
         "scored",
         "dropped_by_keyword",
+        "dropped_by_advisory",
         "dropped_by_cap",
     }
     assert set(stats.keys()) == expected_keys
