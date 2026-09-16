@@ -16,7 +16,7 @@ This guide covers deploying CTIParsor using Docker Compose. It replaces the manu
   - `proxy`: TLS + password (`nginx-unprivileged`) in front of `app`; the only thing worth publishing on a network.
 - **Not in the image**: the models (2.6 GB) and corpora (0.7 GB) are downloaded once into `cti-cache` by `bootstrap`, so a code change rebuilds in minutes. `docs/` and `tests/` are left out too.
 
-Known limits: no GPU (torch is the CPU build); the optional `re2` ReDoS guard is absent because the pinned package does not build on Python 3.12 — the same state as any recent host install; `git` has no repository inside the container, so bundle-staleness checks (ADR-0035) answer "undecidable" and the revision recorded in each bundle comes from the `GIT_REV` build argument (`make docker-build` sets it, a bare `docker compose build` records nothing). Docker Desktop on Windows and docker-ce inside WSL2 both work; the repository may live on the Windows drive, the named volumes live in the Linux VM, which is what keeps SQLite fast.
+Known limits: no GPU (torch is the CPU build); `git` has no repository inside the container, so bundle-staleness checks (ADR-0035) answer "undecidable" and the revision recorded in each bundle comes from the `GIT_REV` build argument (`make docker-build` sets it, a bare `docker compose build` records nothing). Docker Desktop on Windows and docker-ce inside WSL2 both work; the repository may live on the Windows drive, the named volumes live in the Linux VM, which is what keeps SQLite fast.
 
 ```text
 analyst ──https──> [proxy 8443] ──> [app :8000, role api] ──┐
@@ -262,7 +262,7 @@ Not supported in the image (torch CPU only).
 
 ## Verifying an image
 
-`scripts/docker_smoke.sh` builds the image, starts `app`, and checks: compose validity, health, the web UI is served, uid 1001, read-only root, writable volumes, the symlinks, the Python imports, Chromium present and **launching sandboxed** (the check that proves the seccomp profile is applied). One warning is expected today: `re2 available`.
+`scripts/docker_smoke.sh` builds the image, starts `app`, and checks: compose validity, health, the web UI is served, uid 1001, read-only root, writable volumes, the symlinks, the Python imports, `google-re2` availability (ADR-0049 — most Stage 2 regexes run in guaranteed linear time; 7 of 19 sub-patterns use lookaround RE2 can't parse and stay on stdlib `re`, verified not exploitable), Chromium present and **launching sandboxed** (the check that proves the seccomp profile is applied).
 
 ```bash
 make docker-smoke                        # = bash scripts/docker_smoke.sh

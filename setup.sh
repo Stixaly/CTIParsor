@@ -459,22 +459,26 @@ echo "  fastapi, uvicorn[standard], python-multipart, aiofiles"
 pip install -r requirements-api.txt
 echo ""
 
-# re2 backs _compile_pattern in stage2_extraction: it guarantees linear-time
-# matching, so a crafted report cannot pin a CPU on catastrophic backtracking.
-# The code falls back to the standard `re` module without it, which is why this
-# is a soft install — the wheel needs the RE2 C++ library and a toolchain, and a
-# failure here must not stop a setup that otherwise works.
-info "Installing re2 (ReDoS protection for Stage 2 regexes)…"
+# google-re2 backs _compile_pattern in stage2_extraction (ADR-0049): most
+# Stage 2 patterns get RE2's linear-time guarantee. A handful use lookaround
+# RE2's syntax can't parse (e.g. `(?<!...)`) and stay on stdlib `re` even
+# when re2 is installed — verified in the ADR's validation record that those
+# specific patterns have no nested unbounded quantifiers, so they can't hit
+# catastrophic backtracking either way. Ships prebuilt wheels — no system
+# library, no toolchain — so this is a soft install only in the sense that a
+# platform with no wheel available must not stop a setup that otherwise
+# works. The PyPI package literally named "re2" is a different, abandoned
+# project that does not build on Python 3.12+; do not install it.
+info "Installing google-re2 (ReDoS protection for Stage 2 regexes)…"
 if python -c "import re2" 2>/dev/null; then
     ok "re2 already installed"
-elif pip install -q "$(grep -E '^re2' requirements-optional.txt || echo re2)" 2>/dev/null \
+elif pip install -q "$(grep -E '^google-re2' requirements-optional.txt || echo google-re2)" 2>/dev/null \
      && python -c "import re2" 2>/dev/null; then
-    ok "re2 installed — Stage 2 regexes run in guaranteed linear time"
+    ok "google-re2 installed — most Stage 2 regexes now run in guaranteed linear time"
 else
-    warn "re2 not installed — Stage 2 falls back to Python's own re module."
+    warn "google-re2 not installed — Stage 2 falls back to Python's own re module."
     echo   "       Reports are attacker-influenced text, so this leaves regex"
     echo   "       matching open to catastrophic backtracking. To fix it:"
-    echo -e "         ${CYAN}sudo apt-get install -y libre2-dev  # or: sudo dnf install re2-devel${NC}"
     echo -e "         ${CYAN}.venv/bin/pip install -r requirements-optional.txt${NC}"
 fi
 echo ""

@@ -12,7 +12,7 @@
 #   - state and cache volumes are writable
 #   - symlinks resolve into the volumes
 #   - Python imports (magic, playwright, sentence_transformers, transformers, gliner, stix2validator, fastapi)
-#   - re2 availability (warn if missing)
+#   - google-re2 availability (warn if missing; ADR-0049)
 #   - Chromium present
 #   - Chromium launches sandboxed (proves seccomp profile grants user namespaces)
 #   - optionally: sample report processed end-to-end (--job)
@@ -260,12 +260,12 @@ else
     fail "python imports"
 fi
 
-# ── Step 11: re2 available ────────────────────────────────────────────────────
+# ── Step 11: google-re2 available (ADR-0049) ──────────────────────────────────
 info "Checking re2..."
 if in_app python -c "import re2" 2>/dev/null; then
-    pass "re2 available"
+    pass "re2 available — most Stage 2 regexes run in guaranteed linear time"
 else
-    warn "re2 available (Stage 2 falls back to the stdlib re module)"
+    warn "re2 not available (Stage 2 falls back to the stdlib re module)"
 fi
 
 # ── Step 12: chromium present ─────────────────────────────────────────────────

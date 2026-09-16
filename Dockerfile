@@ -12,7 +12,7 @@ RUN npm run build
 FROM python:3.12-slim-bookworm AS builder
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential libxml2-dev libxslt1-dev libre2-dev pkg-config \
+        build-essential libxml2-dev libxslt1-dev pkg-config \
     && rm -rf /var/lib/apt/lists/*
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
@@ -26,11 +26,13 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --index-url https://download.pytorch.org/whl/cpu torch
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements.txt -r requirements-api.txt
-# re2 is optional upstream too (setup.sh treats it the same way).
+# google-re2 (ADR-0049) is optional upstream too (setup.sh treats it the same
+# way) — it ships a prebuilt wheel, so this should always succeed, but a
+# platform this project hasn't tested still must not fail the build over it.
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install "$(grep -E '^playwright' requirements-optional.txt)" && \
-    (pip install "$(grep -E '^re2' requirements-optional.txt)" || \
-     echo "WARNING: re2 did not build; Stage 2 regexes fall back to the stdlib re module")
+    (pip install "$(grep -E '^google-re2' requirements-optional.txt)" || \
+     echo "WARNING: google-re2 did not install; Stage 2 regexes fall back to the stdlib re module")
 
 # ── Stage 3: runtime image ────────────────────────────────────────────────────
 FROM python:3.12-slim-bookworm AS runtime
@@ -69,11 +71,13 @@ ENV PYTHONUNBUFFERED=1 \
 
 # git for the corpus sync (Settings page and bootstrap);
 # libmagic1 for python-magic (upload MIME check) — absent from slim images;
-# libre2-9 matches the re2 wheel built against bookworm;
+# no libre2 package needed: google-re2's wheel statically bundles the RE2
+# library — verified via ldd, it links only libstdc++/libgcc_s, both already
+# present in this base image (ADR-0049);
 # tini reaps the Chromium and pipeline subprocesses.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates git tini tesseract-ocr poppler-utils \
-        libxml2 libxslt1.1 libre2-9 libmagic1 \
+        libxml2 libxslt1.1 libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --gid "${APP_GID}" ctiparsor && \

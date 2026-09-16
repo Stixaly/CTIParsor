@@ -1869,7 +1869,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS rule_text USING fts5(rule_id UNINDEXED, body)
 | Package | Purpose |
 |---|---|
 | `playwright` | Headless Chromium for URL capture (ADR-0029) |
-| `re2` | Linear-time regex engine, guards catastrophic backtracking |
+| `google-re2` | Linear-time regex engine, guards catastrophic backtracking (ADR-0049; the plain `re2` package on PyPI is abandoned and does not build on Python 3.12+) |
 | `spacy` | Optional NER fallback |
 
 Playwright and its Chromium install with `make install-capture`, and its system libraries require root via `sudo python -m playwright install-deps chromium` — otherwise `/api/ingest/url` responds 503. The API checks for a working Chromium install once at startup and logs a warning if it's missing, so a misconfigured server says so in its own logs instead of waiting for the first URL-capture request to fail.

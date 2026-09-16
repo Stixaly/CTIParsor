@@ -420,6 +420,46 @@ from the preview tool; README documents the empty factory default.
 
 ### Security
 
+#### The ReDoS guard becomes real: `google-re2`, and actually called (ADR-0049), 2026-09-16
+
+A routine Docker build warning — the optional `re2>=0.2.20` package failing to
+compile its Cython wheel on Python 3.12 — led to a second, more serious
+finding: `pipeline/stage2_extraction.py::_compile_pattern`, the function
+`setup.sh` and this changelog's own earlier entries described as giving
+Stage 2 "guaranteed linear time," **was never called**. All 19 module-level
+compiled patterns went straight to `re.compile()`. A working `re2` install
+would have protected nothing — the gap was two bugs, not one, and nobody has
+had the guarantee since Python 3.12 became current, host installs included.
+
+Fixed both. Switched to `google-re2` (prebuilt wheels for cp312+, no C++
+toolchain, no `libre2-dev`/`libre2-9` — `ldd` confirmed it statically bundles
+RE2, so those apt packages came out of the Dockerfile too) and wired every
+pattern through `_compile_pattern`, which now maps the three `re` flags this
+codebase uses (`IGNORECASE`, `MULTILINE`, `DOTALL`) onto RE2's inline
+`(?ims)` prefix syntax — `google-re2`'s `compile()` rejects raw `re` flag
+integers.
+
+Checking which patterns actually ended up on RE2 (rather than assuming the
+flag mapping covered everything) found 7 of the 19 sub-patterns —
+`_HASH_BLOCK_PATTERN`, `_IPV4_PATTERN`, `_DOMAIN_PATTERN`,
+`_BARE_FILENAME_PATTERN`, `_UNIX_PATH_PATTERN`, and the `sha1`/`md5` entries
+of `_HASH_LABEL_PATTERNS` — use negative lookaround (`(?<!...)`, `(?!...)`),
+which no non-backtracking engine can parse, RE2 included. These 7 stay on
+stdlib `re` regardless of whether `google-re2` is installed. Stress-tested
+each against adversarial input (5,000–8,000 repeated ambiguous units) under
+plain stdlib backtracking: all completed in under 11 ms — none has the
+nested-unbounded-quantifier shape that makes backtracking actually
+exponential, so this is a checked, not assumed, residual gap.
+
+Validated against the 9 real reports already ingested into `cti_stix.db`
+(228,651 chars of `report_text`): `extract_entities()` returned the same 501
+entities and `refang()` the same output whether `_RE2_AVAILABLE` was true or
+patched false. `tests/test_re2_guard.py` (6 tests) locks the type of a
+compiled pattern, the flag mapping, and the re2-vs-fallback identity. Full
+suite: 1208 passed / 14 skipped on SQLite, 1216 passed / 6 skipped on
+PostgreSQL — 0 failures on either engine. See
+[ADR-0049](docs/adr/0049-redos-guard-actually-wired-in.md).
+
 #### Seven npm advisories cleared by two major upgrades, 2026-09-02
 
 `npm audit` on `frontend/` reported **7 vulnerabilities — 1 critical, 1 high,

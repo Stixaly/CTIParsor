@@ -50,7 +50,21 @@ All sensitive state is **gitignored**, never committed:
 Keys/DB are plaintext-at-rest on disk — adequate for a local workstation, **not**
 for shared/multi-user hosts (use OS-level disk encryption there).
 
-### 4. Detection-rule corpora
+### 4. Stage 2 regex extraction (ReDoS)
+Stage 2 (`pipeline/stage2_extraction.py`) runs ~19 regexes against
+attacker-influenced report text. Most route through `_compile_pattern`,
+which uses `google-re2` (guaranteed linear-time matching, no catastrophic
+backtracking) when it's installed, falling back to stdlib `re` when it
+isn't. Seven sub-patterns use negative lookaround (`(?<!...)`, `(?!...)`),
+syntax no non-backtracking engine — RE2 included — can parse; those stay on
+stdlib `re` unconditionally. They're checked, not just assumed, safe: none
+has the nested-unbounded-quantifier shape that makes backtracking
+exponential (see [ADR-0049](docs/adr/0049-redos-guard-actually-wired-in.md)'s
+validation record for the stress test). `google-re2` ships prebuilt wheels
+(cp312+, no toolchain); a platform without one just loses the guarantee on
+the other 12 patterns, silently — `setup.sh` warns at install time.
+
+### 5. Detection-rule corpora
 Public corpuses are committed (`detection_corpora.yaml`); private ones live only in
 the gitignored overlay. Fetching uses your **ambient git auth** (SSH agent /
 credential helper) via `scripts/sync_corpora.py` — CTIParsor never stores git
@@ -58,7 +72,7 @@ credentials. Rule parsing is pure (no execution of rule content). Per-corpus
 `license` travels with every rule so export/drill-down can respect redistribution
 terms (e.g. SigmaHQ Detection Rule License).
 
-### 5. Sharing controls
+### 6. Sharing controls
 Every emitted bundle carries a **TLP** marking (and optional **PAP**) plus an
 authoring `Identity`, so downstream OpenCTI/MISP can apply sharing policy. Set
 `STIX_TLP` (or per-job `tlp_level`) before exporting outside your team.
