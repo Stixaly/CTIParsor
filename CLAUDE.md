@@ -22,8 +22,10 @@ wsl -e bash -lc "cd /mnt/c/Users/parra/Documents/tools-NLP/CTIParsor && .venv/bi
 
 | Besoin | Commande |
 |---|---|
-| Tests | `SKIP_HEAVY_MODELS=1 .venv/bin/python -m pytest -q` (1030 tests, ~2 min) |
+| Tests | `SKIP_HEAVY_MODELS=1 .venv/bin/python -m pytest -q` (~1200 tests, ~2 min) |
+| Tests sur PostgreSQL | la même commande avec `CTIPARSOR_TEST_DATABASE_URL=postgresql://ctiparsor:ctitest@127.0.0.1:5433/ctiparsor` (conteneur `cti-pg-test`, `docker start cti-pg-test` via `wsl -u root`) — **obligatoire** pour tout changement qui touche `api/db.py`, `api/queue_loop.py` ou une requête SQL |
 | Tests ciblés | `... -m pytest tests/test_<module>.py -q` (quelques secondes) |
+| Conteneurs | `wsl -u root -e bash -c "cd /mnt/c/... && make docker-smoke"` — le socket Docker n'est accessible qu'à root dans WSL ; `bash scripts/docker_smoke.sh --no-build --job` pour un rapport de bout en bout |
 | Lint | `.venv/bin/python -m ruff check <chemins>` |
 | **Typecheck Python** | `.venv/bin/python -m mypy pipeline/ api/ models/ --ignore-missing-imports --no-error-summary` |
 | Typecheck front | `cd frontend && npm run build` **depuis WSL** (ou `node node_modules/typescript/bin/tsc --noEmit -p tsconfig.json`) |
@@ -42,6 +44,17 @@ arbre Linux. Un `npm install` lancé depuis Windows y laisse
 `@rollup/rollup-win32-*` et des shims qui font `exec node.exe`, et la
 construction WSL meurt sur `exec: node.exe: not found` — un message qui ressemble
 à un problème de PATH sans en être un. Correctif : `npm ci` depuis WSL.
+
+## Deux stores, trois rôles (ADR-0044/0045/0046)
+
+`api.db.get_conn()` est le **job store** (PostgreSQL si `DATABASE_URL`, sinon
+SQLite) ; `api.db.get_rule_conn()` est le **rule store** (toujours SQLite,
+FTS5). Sans `DATABASE_URL` c'est la même connexion — ce qui masque les
+erreurs : un test qui écrit des règles via `get_conn()` passe sur SQLite et
+échoue sur PostgreSQL. Toute fonction qui lit `entities` ET les tables de
+règles prend `jobs_conn=`. Le pipeline est réclamé dans la table `jobs` par
+`api/queue_loop.py` selon `CTIPARSOR_ROLE` (`all` = installation hôte, `api`
++ `worker` = conteneurs). Carte complète : `docs/architecture.md`.
 
 ## Répartition des rôles
 

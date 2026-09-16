@@ -198,3 +198,31 @@ clean:
 ## Remove virtual environment (full reinstall)
 clean-venv:
 	rm -rf .venv
+
+# ── Containers (ADR-0044) ────────────────────────────────────────────────────
+
+.PHONY: docker-build docker-up docker-bootstrap docker-smoke docker-logs docker-down
+
+## Build the container image (CPU-only torch, Chromium included)
+docker-build:
+	CTI_GIT_REV=$$(git rev-parse HEAD 2>/dev/null) docker compose build app
+
+## Start the API + web UI in the background (http://127.0.0.1:8000 by default)
+docker-up:
+	docker compose up -d app
+
+## One-shot: download the NLP models, clone the corpora, build the rule store
+docker-bootstrap:
+	docker compose --profile bootstrap run --rm bootstrap
+
+## Build, start, and verify the container (health, non-root, read-only, Chromium sandbox)
+docker-smoke:
+	bash scripts/docker_smoke.sh
+
+## Follow the API logs
+docker-logs:
+	docker compose logs -f app
+
+## Stop the stack (volumes are kept)
+docker-down:
+	docker compose down

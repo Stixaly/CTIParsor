@@ -13,7 +13,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from api.db import get_conn, init_db
+from api.db import get_rule_conn, init_db
 
 
 def main() -> int:
@@ -22,7 +22,7 @@ def main() -> int:
     args = parser.parse_args()
 
     init_db()
-    conn = get_conn()
+    conn = get_rule_conn()
 
     cur = conn.execute("SELECT COUNT(*) FROM detection_rules WHERE is_canonical=1")
     total = cur.fetchone()[0]
@@ -30,7 +30,7 @@ def main() -> int:
         print("[rule-text] the rule store is empty — run scripts/build_detection_index.py first.")
         return 0
 
-    # ONE transaction for the whole rebuild. `get_conn()` is in autocommit, so
+    # ONE transaction for the whole rebuild. `get_rule_conn()` is in autocommit, so
     # without this each batch commits separately and appends to the WAL — and
     # while the API server holds readers, SQLite can never auto-checkpoint, so
     # the WAL simply grows. Measured on the live store: 2.3 GB of WAL for a

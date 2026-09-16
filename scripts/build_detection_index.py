@@ -20,7 +20,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from api.db import get_conn, init_db  # noqa: E402
+from api.db import get_rule_conn, init_db  # noqa: E402
 from pipeline.detection.builder import rebuild_store  # noqa: E402
 from pipeline.detection.registry import load_corpora  # noqa: E402
 
@@ -31,7 +31,7 @@ def main() -> int:
     args = ap.parse_args()
 
     init_db()
-    conn = get_conn()
+    conn = get_rule_conn()
 
     if not load_corpora(args.config):
         print(f"[build] no enabled corpora in {args.config} (or its .local overlay) — nothing to do.")

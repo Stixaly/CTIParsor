@@ -269,6 +269,73 @@ def _has_ttp_keyword(sentence: str) -> bool:
     return any(kw in s for kw in _TTP_KEYWORDS)
 
 
+# _ADVISORY_VERBS contains base-form imperative verbs that open mitigation or
+# recommendation sentences in CTI reports.  Matching is exact-word, not a
+# stem or prefix match, and that is intentional and load-bearing: past-tense
+# narrative such as "deployed", "used", or "enforced" by the adversary must
+# NOT accidentally match, so only the bare base form is listed here.
+_ADVISORY_VERBS: frozenset[str] = frozenset({
+    "adopt", "allowlist", "apply", "audit", "avoid", "backup", "block",
+    "blocklist", "configure", "conduct", "consider", "deploy", "disable",
+    "disallow", "disconnect", "educate", "enable", "encrypt", "ensure",
+    "enforce", "establish", "harden", "implement", "investigate", "isolate",
+    "limit", "maintain", "mandate", "minimize", "monitor", "notify", "patch",
+    "perform", "prevent", "prohibit", "protect", "quarantine", "remediate",
+    "remove", "report", "require", "reset", "restrict", "review", "revoke",
+    "rotate", "secure", "segment", "train", "update", "upgrade", "use",
+    "utilize", "validate", "verify", "whitelist",
+})
+
+# Matches a PDF table caption dumped as flat text: the literal word "Table"
+# (capital T only, NOT case-insensitive -- a capital "Table N" is a caption,
+# but lowercase "table" can appear in genuine malware descriptions like "hash
+# table" or "routing table" and must not be excluded) followed by whitespace
+# and one or more digits, as a whole word.
+_TABLE_CAPTION_PATTERN = re.compile(r"\bTable\s+\d+\b")
+
+# Strips a run of non-letter characters from either end of a token (leading
+# punctuation like "(Enforce" or trailing punctuation like "Restrict," or
+# "Restrict:"), so the token can be compared to _ADVISORY_VERBS cleanly.
+_NON_LETTER_EDGE = re.compile(r"^[^a-zA-Z]+|[^a-zA-Z]+$")
+
+
+def _advisory_gate_enabled() -> bool:
+    """True unless TTP_ADVISORY_GATE disables the mitigation/table-caption exclusion gate."""
+    return env_bool("TTP_ADVISORY_GATE", default=True)
+
+
+def _is_advisory_noise(sentence: str) -> bool:
+    """True when *sentence* reads as mitigation/recommendation advice or a
+    table caption rather than observed adversary behaviour, and should be
+    EXCLUDED from Stage 2c candidates.
+
+    Returns False for every sentence when the gate is disabled, and False for a
+    non-str input (never excludes on bad input -- exclusion is a precision
+    optimisation, not a safety gate)."""
+    if not isinstance(sentence, str):
+        return False
+    if not _advisory_gate_enabled():
+        return False
+    if _TABLE_CAPTION_PATTERN.search(sentence):
+        return True
+    tokens = sentence.split()[:8]
+    for token in tokens:
+        stripped = _NON_LETTER_EDGE.sub("", token)
+        if not stripped:
+            continue
+        if stripped[0].isupper() and stripped.lower() in _ADVISORY_VERBS:
+            return True
+    # The check is limited to capitalised tokens in the first 8 words because
+    # that is what discriminates a genuine imperative mitigation clause
+    # ("Restrict administrative utilities...", including the case where a
+    # heading like "Active Directory & Credential Hardening" got concatenated
+    # onto the next line by the PDF line-unwrapper so the real verb is a few
+    # words in, not sentence-initial) from a lowercase verb appearing naturally
+    # inside past-tense adversary narrative ("The actor was able to enable RDP
+    # access using stolen credentials" must NOT be excluded).
+    return False
+
+
 def _split_candidate_sentences(text: str) -> list[str]:
     """
     Sentence splitter for the variety of CTI report formats.
@@ -306,30 +373,37 @@ def _apply_candidate_cap(candidates: list[str]) -> list[str]:
 
 
 def _select_candidates(text: str) -> list[str]:
-    """The sentences Stage 2c will actually embed, after both recall gates."""
+    """The sentences Stage 2c will actually embed, after all three recall gates."""
     return _apply_candidate_cap(
-        [s for s in _split_candidate_sentences(text) if _has_ttp_keyword(s)]
+        [
+            s
+            for s in _split_candidate_sentences(text)
+            if _has_ttp_keyword(s) and not _is_advisory_noise(s)
+        ]
     )
 
 
 def sentence_gate_stats(text: str) -> dict[str, int]:
     """Count how many sentences survive each Stage 2c gate. Loads no model.
 
-    Both gates discard sentences before a single embedding is computed, which
-    caps recall in a way no threshold or encoder change can recover.  Measured on
-    the project's real reports the keyword gate drops ~84% of sentences and the
-    candidate cap drops none, so the two are not interchangeable and are reported
-    separately.
+    All three gates discard sentences before a single embedding is computed,
+    which caps recall in a way no threshold or encoder change can recover.
+    Measured on the project's real reports the keyword gate drops ~84% of
+    sentences and the candidate cap drops none, so the three are not
+    interchangeable and are reported separately.
     """
     sentences = _split_candidate_sentences(text)
-    kept = [s for s in sentences if _has_ttp_keyword(s)]
-    scored = _apply_candidate_cap(kept)
+    kept_by_keyword = [s for s in sentences if _has_ttp_keyword(s)]
+    kept_by_advisory = [s for s in kept_by_keyword if not _is_advisory_noise(s)]
+    scored = _apply_candidate_cap(kept_by_advisory)
     return {
-        "sentences_total":    len(sentences),
-        "kept_by_keyword":    len(kept),
-        "scored":             len(scored),
-        "dropped_by_keyword": len(sentences) - len(kept),
-        "dropped_by_cap":     len(kept) - len(scored),
+        "sentences_total":     len(sentences),
+        "kept_by_keyword":     len(kept_by_keyword),
+        "kept_by_advisory":    len(kept_by_advisory),
+        "scored":              len(scored),
+        "dropped_by_keyword":  len(sentences) - len(kept_by_keyword),
+        "dropped_by_advisory": len(kept_by_keyword) - len(kept_by_advisory),
+        "dropped_by_cap":      len(kept_by_advisory) - len(scored),
     }
 
 

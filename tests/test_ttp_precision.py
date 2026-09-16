@@ -180,3 +180,214 @@ class TestTTPVerification:
         result = LLMEnrichmentResult(ttps=[TTPExtracted(technique_name="X", mitre_id="T1001")])
         out = v.verify_ttps("text", result, lambda s, u: "not json")
         assert len(out.ttps) == 1
+
+
+# ── Advisory/table-caption content gate ─────────────────────────────────────
+# Stage 2c's keyword gate lets mitigation-advice sentences ("Enforce phishing-
+# resistant MFA...") and PDF table captions ("Table 1: Indicators of
+# compromise...") through, because they legitimately contain TTP vocabulary --
+# they then get matched with high confidence to a technique despite never
+# describing observed adversary behaviour.  These are real cases produced by
+# the pipeline on real reports (Breeze Comet, UNC6671), not hypothetical.
+
+class TestAdvisoryContentGate:
+    def test_positive_mandate_mfa(self, monkeypatch):
+        import pipeline.stage2c_ttp_semantic as s2c
+        monkeypatch.delenv("TTP_ADVISORY_GATE", raising=False)
+        sentence = (
+            "Mandate phishing-resistant multifactor authentication (MFA) and "
+            "lockout controls across all remote access services."
+        )
+        assert s2c._is_advisory_noise(sentence) is True, f"Failed positive case 1: {sentence}"
+
+    def test_positive_block_egress(self, monkeypatch):
+        import pipeline.stage2c_ttp_semantic as s2c
+        monkeypatch.delenv("TTP_ADVISORY_GATE", raising=False)
+        sentence = (
+            "Block non-essential egress ports and protocols (e.g., outbound "
+            "Internet Control Message Protocol)."
+        )
+        assert s2c._is_advisory_noise(sentence) is True, f"Failed positive case 2: {sentence}"
+
+    def test_positive_enforce_mfa(self, monkeypatch):
+        import pipeline.stage2c_ttp_semantic as s2c
+        monkeypatch.delenv("TTP_ADVISORY_GATE", raising=False)
+        sentence = (
+            "Enforce Phishing-Resistant Multi-factor Authentication: Mandate "
+            "phishing-resistant authentication platforms."
+        )
+        assert s2c._is_advisory_noise(sentence) is True, f"Failed positive case 3: {sentence}"
+
+    def test_positive_utilize_token(self, monkeypatch):
+        import pipeline.stage2c_ttp_semantic as s2c
+        monkeypatch.delenv("TTP_ADVISORY_GATE", raising=False)
+        sentence = (
+            "Utilize token theft mitigations within authentication platforms "
+            "such as IP session binding."
+        )
+        assert s2c._is_advisory_noise(sentence) is True, f"Failed positive case 4: {sentence}"
+
+    def test_positive_deploy_endpoint(self, monkeypatch):
+        import pipeline.stage2c_ttp_semantic as s2c
+        monkeypatch.delenv("TTP_ADVISORY_GATE", raising=False)
+        sentence = (
+            "Deploy Endpoint and Browser Credential Guarding: Enable Google "
+            "Workspace Password Alert to detect credential reuse."
+        )
+        assert s2c._is_advisory_noise(sentence) is True, f"Failed positive case 5: {sentence}"
+
+    def test_positive_ad_restriction(self, monkeypatch):
+        import pipeline.stage2c_ttp_semantic as s2c
+        monkeypatch.delenv("TTP_ADVISORY_GATE", raising=False)
+        sentence = (
+            "Active Directory & Credential Hardening Restrict administrative "
+            "utilities such as PsExec and WMI."
+        )
+        assert s2c._is_advisory_noise(sentence) is True, f"Failed positive case 6: {sentence}"
+
+    def test_positive_table_caption_1(self, monkeypatch):
+        import pipeline.stage2c_ttp_semantic as s2c
+        monkeypatch.delenv("TTP_ADVISORY_GATE", raising=False)
+        sentence = (
+            "Table 1: Indicators of compromise Network Infrastructure and "
+            "Exfiltration Observables IP Address."
+        )
+        assert s2c._is_advisory_noise(sentence) is True, f"Failed positive case 7: {sentence}"
+
+    def test_positive_table_caption_2(self, monkeypatch):
+        import pipeline.stage2c_ttp_semantic as s2c
+        monkeypatch.delenv("TTP_ADVISORY_GATE", raising=False)
+        sentence = (
+            "AS19108 Optimum / Suddenlink (United States) Table 2: Network "
+            "infrastructure and exfiltration observables."
+        )
+        assert s2c._is_advisory_noise(sentence) is True, f"Failed positive case 8: {sentence}"
+
+    def test_positive_verb_starts_with_a_or_z(self, monkeypatch):
+        # Regression: an earlier implementation stripped edge characters with
+        # str.strip("^[a-zA-Z]|[a-zA-Z]$"), which treats its argument as a
+        # character SET, not a regex -- it strips a single leading/trailing
+        # 'a', 'A', 'z' or 'Z' literally.  "Adopt" -> "dopt" (lowercase-
+        # starting), so the capitalisation check silently failed.  This
+        # sentence only passes on a correct non-letter-stripping implementation.
+        import pipeline.stage2c_ttp_semantic as s2c
+        monkeypatch.delenv("TTP_ADVISORY_GATE", raising=False)
+        sentence = (
+            "Adopt a zero-trust architecture and avoid using shared "
+            "administrator credentials across systems."
+        )
+        assert s2c._is_advisory_noise(sentence) is True, f"Failed 'Adopt'-prefix case: {sentence}"
+
+    def test_positive_verb_with_trailing_punctuation(self, monkeypatch):
+        # Regression: the same buggy strip() left trailing punctuation like
+        # ":" attached ("Restrict:" != "restrict"), so a heading-style opener
+        # was silently missed.
+        import pipeline.stage2c_ttp_semantic as s2c
+        monkeypatch.delenv("TTP_ADVISORY_GATE", raising=False)
+        sentence = "Restrict: administrative utilities must not be exposed to the internet."
+        assert s2c._is_advisory_noise(sentence) is True, f"Failed trailing-punctuation case: {sentence}"
+
+    def test_negative_attacker_powershell(self, monkeypatch):
+        import pipeline.stage2c_ttp_semantic as s2c
+        monkeypatch.delenv("TTP_ADVISORY_GATE", raising=False)
+        sentence = (
+            "The attacker used PowerShell to download and execute a "
+            "malicious payload on the compromised host."
+        )
+        assert s2c._is_advisory_noise(sentence) is False, f"Failed negative case 1: {sentence}"
+
+    def test_negative_apt29_backdoor(self, monkeypatch):
+        import pipeline.stage2c_ttp_semantic as s2c
+        monkeypatch.delenv("TTP_ADVISORY_GATE", raising=False)
+        sentence = "APT29 deployed a custom backdoor to maintain persistence on the network."
+        assert s2c._is_advisory_noise(sentence) is False, f"Failed negative case 2: {sentence}"
+
+    def test_negative_exfiltrate_creds(self, monkeypatch):
+        import pipeline.stage2c_ttp_semantic as s2c
+        monkeypatch.delenv("TTP_ADVISORY_GATE", raising=False)
+        sentence = (
+            "The malware exfiltrated stolen credentials to a remote command "
+            "and control server over HTTPS."
+        )
+        assert s2c._is_advisory_noise(sentence) is False, f"Failed negative case 3: {sentence}"
+
+    def test_negative_actor_enable_rdp(self, monkeypatch):
+        import pipeline.stage2c_ttp_semantic as s2c
+        monkeypatch.delenv("TTP_ADVISORY_GATE", raising=False)
+        sentence = (
+            "The actor was able to enable remote desktop access using "
+            "stolen administrator credentials."
+        )
+        assert s2c._is_advisory_noise(sentence) is False, f"Failed negative case 4: {sentence}"
+
+    def test_negative_lookup_table(self, monkeypatch):
+        import pipeline.stage2c_ttp_semantic as s2c
+        monkeypatch.delenv("TTP_ADVISORY_GATE", raising=False)
+        sentence = (
+            "The threat actor built a lookup table to store the decryption "
+            "keys before encrypting the disk."
+        )
+        assert s2c._is_advisory_noise(sentence) is False, f"Failed negative case 5: {sentence}"
+
+    def test_negative_empty_string(self, monkeypatch):
+        import pipeline.stage2c_ttp_semantic as s2c
+        monkeypatch.delenv("TTP_ADVISORY_GATE", raising=False)
+        assert s2c._is_advisory_noise("") is False, "Failed negative case 6: empty string"
+
+    def test_negative_none_input(self, monkeypatch):
+        import pipeline.stage2c_ttp_semantic as s2c
+        monkeypatch.delenv("TTP_ADVISORY_GATE", raising=False)
+        assert s2c._is_advisory_noise(None) is False, "Failed negative case 7: None input"
+
+    def test_advisory_gate_disabled_via_env(self, monkeypatch):
+        import pipeline.stage2c_ttp_semantic as s2c
+        monkeypatch.setenv("TTP_ADVISORY_GATE", "off")
+        sentence = (
+            "Mandate phishing-resistant multifactor authentication (MFA) and "
+            "lockout controls across all remote access services."
+        )
+        assert s2c._is_advisory_noise(sentence) is False, "Gate disabled should let everything through"
+
+    def test_select_candidates_excludes_advisory_sentence_with_keyword(self, monkeypatch):
+        import pipeline.stage2c_ttp_semantic as s2c
+        monkeypatch.delenv("TTP_ADVISORY_GATE", raising=False)
+        adversary_sentence = (
+            "The attacker used PowerShell to download and execute a "
+            "malicious payload on the compromised host."
+        )
+        advisory_sentence = (
+            "Enforce credential hardening and mandate multi-factor "
+            "authentication for all privileged accounts."
+        )
+        text = adversary_sentence + " " + advisory_sentence
+        result = s2c._select_candidates(text)
+        assert adversary_sentence in result, "Adversary sentence should be present"
+        assert advisory_sentence not in result, "Advisory sentence should be excluded"
+
+    def test_sentence_gate_stats_matches_select_candidates(self, monkeypatch):
+        import pipeline.stage2c_ttp_semantic as s2c
+        monkeypatch.delenv("TTP_ADVISORY_GATE", raising=False)
+
+        # Test 1: Concatenated text
+        adversary_sentence = (
+            "The attacker used PowerShell to download and execute a "
+            "malicious payload on the compromised host."
+        )
+        advisory_sentence = (
+            "Enforce credential hardening and mandate multi-factor "
+            "authentication for all privileged accounts."
+        )
+        text1 = adversary_sentence + " " + advisory_sentence
+        stats1 = s2c.sentence_gate_stats(text1)
+        candidates1 = s2c._select_candidates(text1)
+        assert stats1["scored"] == len(candidates1), (
+            f"Stats mismatch for text1: {stats1['scored']} != {len(candidates1)}"
+        )
+
+        # Test 2: Plain text with no matches
+        text2 = "This is a plain text with no TTP keywords or advisory content."
+        stats2 = s2c.sentence_gate_stats(text2)
+        candidates2 = s2c._select_candidates(text2)
+        assert stats2["scored"] == len(candidates2), (
+            f"Stats mismatch for text2: {stats2['scored']} != {len(candidates2)}"
+        )

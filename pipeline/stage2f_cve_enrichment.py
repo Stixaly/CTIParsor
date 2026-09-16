@@ -153,17 +153,23 @@ def save_to_cache(cve_id: str, data: dict | None) -> None:
     """Store a lookup result. `data=None` records the miss, deliberately."""
     with get_conn() as conn:
         if data is None:
+            # Standard upsert, valid on SQLite 3.24+ and PostgreSQL (ADR-0045).
             conn.execute(
-                "INSERT OR REPLACE INTO cve_cache"
+                "INSERT INTO cve_cache"
                 " (cve_id, description, cvss_score, cvss_vector, fetched_at)"
-                " VALUES (?, NULL, NULL, NULL, ?)",
+                " VALUES (?, NULL, NULL, NULL, ?)"
+                " ON CONFLICT (cve_id) DO UPDATE SET description = NULL, cvss_score = NULL,"
+                " cvss_vector = NULL, fetched_at = excluded.fetched_at",
                 (cve_id, now_iso()),
             )
         else:
             conn.execute(
-                "INSERT OR REPLACE INTO cve_cache"
+                "INSERT INTO cve_cache"
                 " (cve_id, description, cvss_score, cvss_vector, fetched_at)"
-                " VALUES (?, ?, ?, ?, ?)",
+                " VALUES (?, ?, ?, ?, ?)"
+                " ON CONFLICT (cve_id) DO UPDATE SET description = excluded.description,"
+                " cvss_score = excluded.cvss_score, cvss_vector = excluded.cvss_vector,"
+                " fetched_at = excluded.fetched_at",
                 (
                     cve_id,
                     data.get("description"),

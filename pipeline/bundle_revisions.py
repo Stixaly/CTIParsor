@@ -1,8 +1,13 @@
 # pipeline/bundle_revisions.py
+from __future__ import annotations
+
 import json
-import sqlite3
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # the job-store connection type (ADR-0045); annotation only
+    from api.db_backend import DBConnection
 
 #: Revisions after which Stage 4/5 can emit different objects for the same input.
 #:
@@ -70,7 +75,7 @@ def stale_entries(rev: str | None, repo_root: Path | None = None) -> list[tuple[
     return stale
 
 
-def audit_staleness(conn: sqlite3.Connection, repo_root: Path | None = None) -> list[dict]:
+def audit_staleness(conn: DBConnection, repo_root: Path | None = None) -> list[dict]:
     """Audit all jobs for bundle staleness, returning a list of status dicts."""
     cursor = conn.execute("SELECT id, run_config_json FROM jobs ORDER BY id")
     results = []

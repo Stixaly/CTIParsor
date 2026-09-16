@@ -14,6 +14,10 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # the job-store connection type (ADR-0045); annotation only
+    from api.db_backend import DBConnection
 
 #: The detection formats the store can hold. A closed set of three, kept in step
 #: with `_EXPORT_EXTENSIONS` in api/routes/coverage.py — a format missing from
@@ -122,9 +126,12 @@ def _parent_technique(technique_id: str) -> str | None:
     return technique_id.split(".", 1)[0] if "." in technique_id else None
 
 
-def job_technique_ids(conn: sqlite3.Connection, job_id: str) -> list[str]:
+def job_technique_ids(conn: DBConnection, job_id: str) -> list[str]:
     """Distinct ATT&CK technique ids from a job's accepted (or pending) entities —
-    the report's technique set, shared by coverage scoring and the rules listing."""
+    the report's technique set, shared by coverage scoring and the rules listing.
+
+    `conn` is the JOB store (PostgreSQL or SQLite, ADR-0045) — the one place in
+    this module that reads `entities` rather than rule tables."""
     rows = conn.execute(
         "SELECT DISTINCT mitre_id FROM entities "
         "WHERE job_id=? AND mitre_id IS NOT NULL AND mitre_id != '' "
@@ -135,11 +142,17 @@ def job_technique_ids(conn: sqlite3.Connection, job_id: str) -> list[str]:
     return [r[0].upper() for r in rows if r[0]]
 
 
-def compute_for_job(conn: sqlite3.Connection, job_id: str) -> dict:
-    """Compute coverage for a job from its accepted technique entities."""
+def compute_for_job(
+    conn: sqlite3.Connection, job_id: str, *, jobs_conn: DBConnection | None = None
+) -> dict:
+    """Compute coverage for a job from its accepted technique entities.
+
+    `conn` is the rule store; `jobs_conn` the job store when the two differ
+    (DATABASE_URL set, ADR-0045).  None means "same connection", which is the
+    single-file layout and what the tests pass."""
     from pipeline.detection.store import rule_refs_for_techniques
 
-    technique_ids = job_technique_ids(conn, job_id)
+    technique_ids = job_technique_ids(jobs_conn or conn, job_id)
 
     # Sub-technique → parent roll-up.  A detection rule tagged with the parent
     # technique (e.g. T1059) also provides coverage for its sub-techniques
@@ -222,7 +235,9 @@ def _admits(evidence: list[dict]) -> bool:
     )
 
 
-def _evidence_for_job(conn: sqlite3.Connection, job_id: str) -> dict[str, list[dict]]:
+def _evidence_for_job(
+    conn: sqlite3.Connection, job_id: str, *, jobs_conn: DBConnection | None = None
+) -> dict[str, list[dict]]:
     """rule_id → one entry per DISTINCT report observable the rule holds verbatim.
 
     A rule appears here only if at least one hit survives the matchable filter —
@@ -236,7 +251,7 @@ def _evidence_for_job(conn: sqlite3.Connection, job_id: str) -> dict[str, list[d
     from pipeline.detection.relevance import job_observable_rows
     from pipeline.detection.store import atom_hits
 
-    observables = observables_from_entities(job_observable_rows(conn, job_id))
+    observables = observables_from_entities(job_observable_rows(jobs_conn or conn, job_id))
     if not observables:
         return {}
 
@@ -295,7 +310,8 @@ def _evidence_for_job(conn: sqlite3.Connection, job_id: str) -> dict[str, list[d
 
 
 def rules_for_job(
-    conn: sqlite3.Connection, job_id: str, *, evidence_only: bool = True
+    conn: sqlite3.Connection, job_id: str, *, evidence_only: bool = True,
+    jobs_conn: DBConnection | None = None,
 ) -> dict:
     """Detection rules for this report, grouped by the technique they cover.
 
@@ -320,8 +336,8 @@ def rules_for_job(
     """
     from pipeline.detection.store import _also_in_map, canonical_rule_ids_for_techniques
 
-    evidence = _evidence_for_job(conn, job_id)
-    technique_ids = job_technique_ids(conn, job_id)
+    evidence = _evidence_for_job(conn, job_id, jobs_conn=jobs_conn)
+    technique_ids = job_technique_ids(jobs_conn or conn, job_id)
 
     # Same parent→sub roll-up as compute_for_job: a parent-tagged rule covers a
     # report's sub-technique.
@@ -433,7 +449,8 @@ def rules_for_job(
 
 
 def rule_bodies_for_job(
-    conn: sqlite3.Connection, job_id: str, body_ids: set[str] | None = None
+    conn: sqlite3.Connection, job_id: str, body_ids: set[str] | None = None,
+    *, jobs_conn: DBConnection | None = None,
 ) -> list[dict]:
     """Raw bodies of every canonical detection rule linkable to this report.
 
@@ -457,7 +474,7 @@ def rule_bodies_for_job(
     # a report's sub-technique).
     query_ids: set[str] = set()
     covers: dict[str, set[str]] = {}
-    for t in job_technique_ids(conn, job_id):
+    for t in job_technique_ids(jobs_conn or conn, job_id):
         query_ids.add(t)
         covers.setdefault(t, set()).add(t)
         parent = _parent_technique(t)
@@ -477,7 +494,7 @@ def rule_bodies_for_job(
     # evidence alone (ADR-0030 `strlit`/YARA, ADR-0031 brand). They carry no
     # ATT&CK tag, so the tag join above cannot see them; `techniques` stays empty
     # for them, which is the truth and is what the manifest should say.
-    for rid, evs in _evidence_for_job(conn, job_id).items():
+    for rid, evs in _evidence_for_job(conn, job_id, jobs_conn=jobs_conn).items():
         if _admits(evs):
             tech_for_rule.setdefault(rid, set())
 
@@ -512,7 +529,9 @@ def rule_bodies_for_job(
     return out
 
 
-def rule_facets_for_job(conn: sqlite3.Connection, job_id: str) -> dict:
+def rule_facets_for_job(
+    conn: sqlite3.Connection, job_id: str, *, jobs_conn: DBConnection | None = None
+) -> dict:
     """Per-axis rule counts and byte sizes for the export filter UI (ADR-0020).
 
     Same technique selection as `rule_bodies_for_job`, but aggregated in SQL so the
@@ -524,7 +543,7 @@ def rule_facets_for_job(conn: sqlite3.Connection, job_id: str) -> dict:
     from pipeline.detection.store import canonical_rule_ids_for_techniques
 
     query_ids: set[str] = set()
-    for t in job_technique_ids(conn, job_id):
+    for t in job_technique_ids(jobs_conn or conn, job_id):
         query_ids.add(t)
         parent = _parent_technique(t)
         if parent:

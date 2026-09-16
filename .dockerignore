@@ -1,0 +1,48 @@
+# Secrets and local state - never in an image layer
+.env
+.env.*
+!.env.example
+*.db
+*.db-wal
+*.db-shm
+db_backups/
+uploads/
+output/
+input/
+detection_corpora.local.yaml
+docker/nginx/certs/
+docker/nginx/htpasswd
+.cyner_model_unavailable
+.stix2_schemas_missing
+
+# Large, re-fetchable trees: mounted as volumes at runtime
+corpora/
+offline/
+dist/
+data/
+
+# Toolchains and caches (rebuilt inside the image)
+.venv/
+frontend/node_modules/
+frontend/dist/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Not needed at runtime
+.git/
+.github/
+.claude/
+docs/
+tests/
+*.zip
+*.tar
+*.md
+CLAUDE.md
+Makefile
+setup.sh
+scripts/package_offline.sh
+scripts/check_offline_bundle.sh
+scripts/offline_lib.sh

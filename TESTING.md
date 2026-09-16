@@ -4,8 +4,10 @@ This document is the source of truth for how CTIParsor is tested: what each laye
 covers, how to run it, the coverage targets, and the open gaps. Update it whenever
 a feature lands so the gap list stays honest.
 
-_Last reviewed: 2026-06-18 — after the evidence-labels, cross-model consensus, and
-STIX provenance features landed, plus the P1-a/b/c persistence + route coverage._
+_Last reviewed: 2026-09-16 — after the container/PostgreSQL/worker-queue split
+(ADR-0044/0045/0046) added the two-engine test mode and the queue-loop suite;
+carries forward the 2026-06-18 review of evidence-labels, cross-model
+consensus, STIX provenance and the P1-a/b/c persistence + route coverage._
 
 ---
 
@@ -197,6 +199,15 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 | API | `test_settings_api.py` | 5 | corpus listing, overlay management, rebuild ingestion |
 | Persistence | `test_persistence.py` | 7 | backup consistency, migration idempotency, label persistence |
 | Persistence | `test_db_transaction.py` | 6 | transaction rollback, commit, exception handling |
+| Persistence | `test_container_env.py` | 8 | `CTIPARSOR_DB_PATH` / `CTIPARSOR_DB_BACKUP_DIR` overrides (unset, blank, `~`), `get_conn()` creating a missing parent directory, `CTIPARSOR_GIT_REV` fallback when `git` is absent or fails (ADR-0044) |
+| Queue | `test_job_queue.py` | 14 | the queue loop (ADR-0046): atomic claim under 8 threads, lease-based orphan requeue, heartbeat scoping, slot accounting with a fake spawn, `run_pipeline_async` under roles `api` and `all`, `--once`; runs on both engines |
+| Persistence | `test_db_backend.py` | 10 | the PostgreSQL adapter without a server: `?`→`%s` outside literals, `%`→`%%`, the `Row` type, `backend()` dispatch on `DATABASE_URL`, a fake psycopg connection proving `with` never closes and `transaction()` issues plain `BEGIN` (ADR-0045) |
+| Persistence | `test_db_postgres.py` | 10 | skipped unless `CTIPARSOR_TEST_DATABASE_URL` is set: round trips, SSE resume ids, upserts, cascade, the two-store coverage call, the API through `temp_db_client`, and the migration script end to end (ADR-0045) |
+
+Set `CTIPARSOR_TEST_DATABASE_URL=postgresql://user:pw@host/db` to run the **whole**
+suite with the job store on PostgreSQL: the `temp_db` fixture then creates a
+disposable schema per test instead of a temp SQLite file. CI does this in the
+`postgres-tests` job against a service container.
 | Shared helpers | `test_shared_helpers.py` | 27 | environment parsing, claim extraction, unescaping logic |
 | Benchmarks | `eval_pipeline.py` | 10 | NER F1, ATE precision, grounding metrics, adversarial tests |
 

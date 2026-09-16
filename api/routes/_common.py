@@ -1,12 +1,12 @@
 """Guards shared by the job-scoped route modules."""
 from __future__ import annotations
 
-import sqlite3
-
 from fastapi import HTTPException
 
+from api.db_backend import DBConnection
 
-def require_job(conn: sqlite3.Connection, job_id: str) -> None:
+
+def require_job(conn: DBConnection, job_id: str) -> None:
     """Raise 404 unless *job_id* names an existing job.
 
     Ten handlers across four route modules repeated this guard verbatim.  It

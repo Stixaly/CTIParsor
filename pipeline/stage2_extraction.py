@@ -19,24 +19,44 @@ except ImportError:
     _spacy_module = None  # type: ignore[assignment]
 
 
+# RE2 has no equivalent of re's integer flags — it takes them as an inline
+# prefix in the pattern itself ("(?i)", "(?m)", "(?s)", combinable "(?im)").
+# Only the three flags this module actually uses are mapped; anything else
+# (VERBOSE, ASCII, …) falls through to the stdlib path below rather than
+# being silently ignored.
+_RE2_INLINE_FLAGS: dict[int, str] = {
+    re.IGNORECASE: "i",
+    re.MULTILINE: "m",
+    re.DOTALL: "s",
+}
+_RE2_MAPPABLE_FLAGS = re.IGNORECASE | re.MULTILINE | re.DOTALL
+
+
 def _compile_pattern(pattern: str, flags: int = 0):
     """
     Compile a regex pattern, using re2 if available for ReDoS protection.
 
     re2 guarantees linear time matching and prevents catastrophic backtracking.
-    Falls back to standard re if re2 is not installed.
+    Falls back to standard re if re2 is not installed, if `flags` includes a
+    flag re2's inline syntax has no equivalent for, or if re2 rejects the
+    pattern itself (e.g. a backreference, which RE2's syntax does not support).
     """
     if _RE2_AVAILABLE:
-        try:
-            return _re2_module.compile(pattern, flags)
-        except Exception:
-            pass
+        if flags & ~_RE2_MAPPABLE_FLAGS == 0:
+            prefix_letters = "".join(
+                letter for flag, letter in _RE2_INLINE_FLAGS.items() if flags & flag
+            )
+            re2_pattern = f"(?{prefix_letters}){pattern}" if prefix_letters else pattern
+            try:
+                return _re2_module.compile(re2_pattern)
+            except Exception:
+                pass
     return re.compile(pattern, flags)
 
 # Regex to detect bare version numbers (e.g. "0.1.16", "1.167.71") that SpaCy
 # sometimes tags as PRODUCT or even ORG and would otherwise pollute entity lists.
 # fullmatch() is used so no anchors are needed in the pattern.
-_VERSION_PATTERN = re.compile(r"\d+[\.\d\-]*\d")
+_VERSION_PATTERN = _compile_pattern(r"\d+[\.\d\-]*\d")
 
 # Common tokens that SpaCy labels as PRODUCT but are clearly not malware families.
 # Kept intentionally conservative — only entries we're very confident about.
@@ -91,15 +111,15 @@ if _spacy_module is not None and not _SKIP_HEAVY:
 _CVE_DASH = "\\-‐-―−﹣－­"
 # Zero-width / invisible separators that can appear between CVE components.
 _CVE_ZW = "​‌‍⁠﻿"
-_CVE_PATTERN = re.compile(
+_CVE_PATTERN = _compile_pattern(
     rf"CVE[{_CVE_ZW}]*[{_CVE_DASH}][{_CVE_ZW}]*\d{{4}}[{_CVE_ZW}]*[{_CVE_DASH}][{_CVE_ZW}]*\d{{4,7}}",
     re.IGNORECASE,
 )
-_CVE_ZW_PATTERN = re.compile(f"[{_CVE_ZW}]")
-_CVE_DASH_PATTERN = re.compile(f"[{_CVE_DASH}]")
+_CVE_ZW_PATTERN = _compile_pattern(f"[{_CVE_ZW}]")
+_CVE_DASH_PATTERN = _compile_pattern(f"[{_CVE_DASH}]")
 
 # MITRE ATT&CK IDs — technique (T####[.###]) and tactic (TA####).
-_MITRE_TTP_PATTERN = re.compile(r"\bTA?\d{4}(?:\.\d{3})?\b")
+_MITRE_TTP_PATTERN = _compile_pattern(r"\bTA?\d{4}(?:\.\d{3})?\b")
 
 # Hash-block pattern — a run of hex fragments separated only by whitespace or
 # line breaks.  A plain contiguous-hex pattern can't read IOC tables, which wrap
@@ -112,7 +132,7 @@ _MITRE_TTP_PATTERN = re.compile(r"\bTA?\d{4}(?:\.\d{3})?\b")
 # non-hex text ("File Hash", filenames, descriptions) separates one table row
 # from the next.  (?<![...]) / (?![...]) keep us from slicing hex out of a
 # longer token.
-_HASH_BLOCK_PATTERN = re.compile(
+_HASH_BLOCK_PATTERN = _compile_pattern(
     r"(?<![0-9a-zA-Z])"
     r"[0-9a-fA-F]{2,}(?:\s+[0-9a-fA-F]{2,})*"
     r"(?![0-9a-zA-Z])"
@@ -124,7 +144,7 @@ _HASH_BLOCK_PATTERN = re.compile(
 # "192.168.1.1".  The guards are harmless to .fullmatch() — at the string
 # boundaries the negative lookarounds always succeed — so a real dotted quad
 # like "192.168.1.1" still validates.
-_IPV4_PATTERN = re.compile(
+_IPV4_PATTERN = _compile_pattern(
     r"(?<![\d.])"
     r"(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)"
     r"(?![\d.])"
@@ -132,7 +152,7 @@ _IPV4_PATTERN = re.compile(
 
 # Domaines : structure générique (sous-domaines + TLD ≥ 2 chars)
 # Exclut les extensions de fichiers courantes (.py, .js, .exe…) et les nombres purs
-_DOMAIN_PATTERN = re.compile(
+_DOMAIN_PATTERN = _compile_pattern(
     r"\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.){1,5}"
     r"(?!(?:py|js|ts|go|rb|php|sh|exe|dll|bin|elf|ps1|bat|vbs|zip|tar|gz|pdf|docx?|xlsx?|png|jpg|gif|svg|css|json|xml|yml|yaml|log|txt|md|cfg|ini|conf)\b)"
     r"[a-zA-Z]{2,12}\b",
@@ -140,22 +160,22 @@ _DOMAIN_PATTERN = re.compile(
 )
 
 # URLs complètes (http/https/ftp + domaine + chemin optionnel)
-_URL_PATTERN = re.compile(
+_URL_PATTERN = _compile_pattern(
     r"https?://[a-zA-Z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+",
     re.IGNORECASE,
 )
 
 # Emails
-_EMAIL_PATTERN = re.compile(
+_EMAIL_PATTERN = _compile_pattern(
     r"\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b"
 )
 
 # MAC addresses — colon or hyphen separated (00:1A:2B:3C:4D:5E / 00-1A-2B-3C-4D-5E)
 # Cisco dot notation (001A.2B3C.4D5E) included as a second alternative.
-_MAC_COLON_HYPHEN = re.compile(
+_MAC_COLON_HYPHEN = _compile_pattern(
     r"\b(?:[0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}\b"
 )
-_MAC_CISCO = re.compile(
+_MAC_CISCO = _compile_pattern(
     r"\b[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}\b"
 )
 
@@ -164,13 +184,13 @@ _MAC_CISCO = re.compile(
 # "as 2024 approached", "increased as 50 percent") generated a flood of bogus
 # AS numbers.  ASNs are conventionally written uppercase, so requiring "AS"/"ASN"
 # in caps removes the prose false positives while keeping every real format.
-_ASN_PATTERN = re.compile(r"\bAS(?:N\s*|\s*)(\d{1,10})\b")
+_ASN_PATTERN = _compile_pattern(r"\bAS(?:N\s*|\s*)(\d{1,10})\b")
 
 # Windows file paths — drive letter or UNC share, at least one path component,
 # and a file extension.  Spaces are excluded from path components so the match
 # stops at the end of the actual filename (avoids greedy over-matching).
 # Examples: C:\Windows\System32\cmd.exe  \\server\share\payload.dll
-_WIN_PATH_PATTERN = re.compile(
+_WIN_PATH_PATTERN = _compile_pattern(
     r"(?:[A-Za-z]:\\|\\\\[^\\\s]+\\[^\\\s]+\\)"   # drive root or UNC root
     r"(?:[^\\\s\n\r\t<>:\"|?*\x00-\x1F]+\\)*"      # zero or more directories (no spaces)
     r"[^\\\s\n\r\t<>:\"|?*\x00-\x1F]+\.[A-Za-z]{2,10}\b",  # filename.ext (no spaces)
@@ -187,7 +207,7 @@ _MALWARE_FILE_EXTS = (
     "ps1|psm1|psd1|bat|cmd|vbs|vbe|js|jse|wsf|wsh|hta|lnk|"
     "sh|bash|zsh|py|pyc|pyw|pl|rb|php|jar|war|apk|dmg|app|msi|iso|img"
 )
-_BARE_FILENAME_PATTERN = re.compile(
+_BARE_FILENAME_PATTERN = _compile_pattern(
     r"(?<![\w./\\-])"                          # not mid-word and not inside a path
     r"([A-Za-z0-9_][\w.-]*\.(?:" + _MALWARE_FILE_EXTS + r"))"
     r"(?![\w-])",                              # full extension, nothing trailing
@@ -197,7 +217,7 @@ _BARE_FILENAME_PATTERN = re.compile(
 # Unix / Linux file paths — must start with a recognised system root directory
 # to avoid false positives on prose fragments.
 # Examples: /tmp/backdoor.elf  /usr/bin/python3  /proc/self/exe
-_UNIX_PATH_PATTERN = re.compile(
+_UNIX_PATH_PATTERN = _compile_pattern(
     r"(?<!\w)"
     r"/(?:bin|boot|dev|etc|home|lib(?:64)?|opt|proc|root|run|sbin|srv|sys|tmp|usr|var)"
     r"(?:/[^\s\x00-\x1F<>\"'`|&;()\[\]{}\\]+)+",
@@ -206,7 +226,7 @@ _UNIX_PATH_PATTERN = re.compile(
 # Windows registry keys — all standard hive abbreviations and full names.
 # Examples: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
 #           HKEY_CURRENT_USER\Software\Classes\...
-_REG_KEY_PATTERN = re.compile(
+_REG_KEY_PATTERN = _compile_pattern(
     r"\b(?:HKEY_LOCAL_MACHINE|HKEY_CURRENT_USER|HKEY_CLASSES_ROOT"
     r"|HKEY_USERS|HKEY_CURRENT_CONFIG|HKLM|HKCU|HKCR|HKU|HKCC)"
     r"(?:\\[^\\\n\r\t<>:\"|\x00-\x1F]+)+",
@@ -218,7 +238,7 @@ _REG_KEY_PATTERN = re.compile(
 #
 # Combined into a single regex for O(1) matching passes over large documents.
 # ---------------------------------------------------------------------------
-_DEFANG_PATTERN = re.compile(
+_DEFANG_PATTERN = _compile_pattern(
     r"hxxps?://|h\[tt\]ps?://|https?\[s\]://|https?\[:\]://|meow://|fxx?p://|"
     r"\s+\[\.\]\s+|\s+\(\.\)\s+|\[\.\]|\(\.\)|\{\.\}|\[dot\]|\(dot\)|"
     r"\[:\]|\(:\)|"
@@ -300,9 +320,9 @@ _HASH_TYPE_BY_LEN = {64: EntityType.SHA256, 40: EntityType.SHA1, 32: EntityType.
 # "Hash (md5)", "SHA 1"…).  Used only to break genuinely ambiguous blocks, where
 # the fragments read equally well as one wrapped hash or as several stacked ones.
 _HASH_LABEL_PATTERNS = (
-    (64, re.compile(r"sha[\s\-_]*256", re.IGNORECASE)),
-    (40, re.compile(r"sha[\s\-_]*1(?!\d)", re.IGNORECASE)),
-    (32, re.compile(r"md[\s\-_]*5(?!\d)", re.IGNORECASE)),
+    (64, _compile_pattern(r"sha[\s\-_]*256", re.IGNORECASE)),
+    (40, _compile_pattern(r"sha[\s\-_]*1(?!\d)", re.IGNORECASE)),
+    (32, _compile_pattern(r"md[\s\-_]*5(?!\d)", re.IGNORECASE)),
 )
 # How far back to look for that label — one or two table rows.
 _HASH_LABEL_WINDOW = 200

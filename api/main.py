@@ -30,6 +30,7 @@ from api.routes import (
     jobs,
     policy,
     progress,
+    queue,
     relationships,
     settings,
     upload,
@@ -47,12 +48,22 @@ async def lifespan(app: FastAPI):
     init_db()
     Path("uploads").mkdir(exist_ok=True)
     Path("output").mkdir(exist_ok=True)
-    # A job left `processing` at boot was orphaned by a restart: its subprocess
-    # is gone and nothing will ever finish it.  Put those back in the queue, then
-    # drain as much of the queue as the concurrency limit allows.
-    from api.worker import requeue_orphans, start_queued_jobs
-    requeue_orphans()
-    start_queued_jobs()
+    # Who runs the pipeline depends on CTIPARSOR_ROLE (ADR-0046).  `all`, the
+    # host-install default: this process, through the queue loop in a background
+    # thread — and a job left `processing` at boot is an orphan of a restart,
+    # since nothing else could have been running it.  `api`: worker containers
+    # own the queue; this process only enqueues, and must NOT requeue, because
+    # a `processing` row is very likely a job a worker is running right now.
+    from api import queue_loop
+    _role = queue_loop.role()
+    if _role == "all":
+        queue_loop.requeue_orphans(unconditional=True)
+        queue_loop.start_embedded()
+    else:
+        if _role == "worker":
+            logger.warning("[startup] CTIPARSOR_ROLE=worker on the API process - treated as 'api'; "
+                           "run `python -m api.queue_loop` for the worker")
+        logger.info("[startup] CTIPARSOR_ROLE=%s - jobs are processed by worker containers", _role)
     # A filesystem check only, so a missing browser is a log line at boot
     # instead of a 500 on the first URL capture a user tries. Run off-thread:
     # Playwright's sync API refuses to run on a thread with a running asyncio
@@ -65,7 +76,11 @@ async def lifespan(app: FastAPI):
     if chromium_hint is not None:
         logger.warning("[startup] %s", chromium_hint)
     yield
-    # Shutdown: nothing to tear down.
+    # Shutdown: stop the embedded queue loop (a no-op unless role `all` started
+    # one); its running subprocesses are children of this process and end with
+    # it, and the lease requeues their jobs for the next start.
+    from api import queue_loop as _ql
+    _ql.stop_embedded()
 
 
 app = FastAPI(title="CTI to STIX", version="1.0.0", lifespan=lifespan)
@@ -120,6 +135,7 @@ app.include_router(progress.router)
 app.include_router(policy.router)
 app.include_router(coverage.router)
 app.include_router(settings.router)
+app.include_router(queue.router)
 
 
 @app.get("/api/health")

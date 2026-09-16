@@ -25,6 +25,42 @@ _CAPTURED_ENV = (
 )
 
 
+def _resolve_git_rev() -> str | None:
+    """Resolve the git revision for the run config.
+
+    Prefers the local git repository; falls back to the CTIPARSOR_GIT_REV
+    environment variable (set by the container build); returns None if neither
+    is available.
+    """
+    try:
+        project_root = Path(__file__).parent.parent
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd=project_root,
+        )
+        if result.returncode == 0:
+            rev = result.stdout.strip()
+            if rev:
+                return rev
+    except Exception:
+        pass
+
+    # A container image carries no .git directory, so the build stamps the
+    # revision into the environment instead (docker build --build-arg GIT_REV).
+    # git wins when it is available: a developer checkout must never be
+    # mislabelled by a stale variable.
+    env_rev = os.getenv("CTIPARSOR_GIT_REV")
+    if env_rev is not None:
+        env_rev = env_rev.strip()
+        if env_rev:
+            return env_rev
+
+    return None
+
+
 def build_run_config(policy: dict | None = None) -> dict:
     """Build a JSON-serializable dict capturing the run configuration.
 
@@ -39,20 +75,7 @@ def build_run_config(policy: dict | None = None) -> dict:
     recorded_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # git_rev
-    git_rev = None
-    try:
-        project_root = Path(__file__).parent.parent
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            cwd=project_root,
-        )
-        if result.returncode == 0:
-            git_rev = result.stdout.strip()
-    except Exception:
-        pass
+    git_rev = _resolve_git_rev()
 
     # embedding_model
     embedding_model = os.getenv("TTP_EMBEDDING_MODEL", "all-MiniLM-L6-v2")

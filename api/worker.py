@@ -9,6 +9,7 @@ import re
 import sys
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -51,38 +52,8 @@ _QUEUE_MAX_DEPTH = int(os.environ.get("API_QUEUE_MAX_DEPTH", "50"))
 # ML libraries that memory-map large .so files.  Physical memory protection is
 # provided by subprocess isolation + the OS OOM killer instead.
 
-# Global job counter and lock for concurrency control
-_job_counter = 0
-_job_counter_lock = threading.Lock()
-
-
-def _try_acquire_job_slot() -> bool:
-    """
-    Atomically check the concurrency limit and reserve a slot.
-
-    Combining the check and the increment under a single lock acquisition closes
-    a TOCTOU race: with a separate check-then-increment, two concurrent callers
-    could both pass the check before either incremented, letting the worker
-    exceed WORKER_MAX_CONCURRENT.
-
-    Returns True (and increments the counter) if a slot was reserved, False if the
-    limit is already reached.  Callers that get True MUST pair it with a later
-    _decrement_job_counter().
-    """
-    global _job_counter
-    with _job_counter_lock:
-        if _MAX_CONCURRENT_JOBS > 0 and _job_counter >= _MAX_CONCURRENT_JOBS:
-            logger.warning(f"Concurrent job limit reached: {_job_counter} >= {_MAX_CONCURRENT_JOBS}")
-            return False
-        _job_counter += 1
-        return True
-
-
-def _decrement_job_counter():
-    """Decrement the job counter."""
-    with _job_counter_lock:
-        global _job_counter
-        _job_counter = max(0, _job_counter - 1)
+# The concurrency cap (_MAX_CONCURRENT_JOBS) is enforced by the queue loop in
+# api/queue_loop.py, which counts the subprocesses it started (ADR-0046).
 
 
 def _sha256_file(path: str | Path) -> str | None:
@@ -343,18 +314,22 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "")
                 r if len(r) == 13 else (*r, None, None, None, None)
                 for r in rows_ioc + rows_llm
             ]
+            # ON CONFLICT DO NOTHING is the portable spelling of INSERT OR IGNORE
+            # (SQLite 3.24+ and PostgreSQL, ADR-0045).
             conn.executemany(
-                "INSERT OR IGNORE INTO entities "
+                "INSERT INTO entities "
                 "(id,job_id,value,entity_type,context,confidence,mitre_id,accepted,source,"
                 "evidence_text,evidence_label,evidence_start,evidence_end) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT (id) DO NOTHING",
                 _entity_rows,
             )
             conn.executemany(
-                "INSERT OR IGNORE INTO relationships "
+                "INSERT INTO relationships "
                 "(id,job_id,source_value,relationship_type,target_value,"
                 "confidence,accepted,evidence_text,evidence_label) "
-                "VALUES (?,?,?,?,?,?,?,?,?)",
+                "VALUES (?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT (id) DO NOTHING",
                 rows_rel,
             )
             conn.commit()
@@ -1030,10 +1005,8 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         emit_progress(job_id, "done", {"status": "failed", "error": str(exc)})
         logger.error(f"[Worker ERROR] job {job_id}: {error_msg}")
     finally:
-        # No need to reset RLIMIT_AS — this subprocess is about to exit.
-        # Counter management is handled by the parent process's watcher thread;
-        # the call here is a no-op (subprocess has its own copy of _job_counter).
-        _decrement_job_counter()
+        # No need to reset RLIMIT_AS — this subprocess is about to exit.  The
+        # parent's watcher thread reports the exit to the queue loop.
         logger.info(f"[Worker] Subprocess finished for job {job_id}")
 
 
@@ -1063,18 +1036,12 @@ def _subprocess_entry(job_id: str, file_path: str, original_filename: str) -> No
     _run_pipeline(job_id, file_path, original_filename)
 
 
-def _count_queued() -> int:
-    try:
-        conn = get_conn()
-        cur = conn.execute("SELECT COUNT(*) FROM jobs WHERE status='queued'")
-        row = cur.fetchone()
-        return int(row[0]) if row else 0
-    except Exception as exc:
-        logger.warning(f"Failed to count queued jobs: {exc}")
-        return 0
-
-
 def _upload_path_for(job_id: str) -> str | None:
+    """The uploaded file for a job: uploads/<job_id>.<ext>, or None if it is gone.
+
+    Looked up by id rather than passed around, so a worker container that only
+    shares the uploads volume with the API can find it (ADR-0046).
+    """
     try:
         matches = sorted((_ROOT / "uploads").glob(f"{job_id}.*"))
         if matches:
@@ -1084,111 +1051,16 @@ def _upload_path_for(job_id: str) -> str | None:
     return None
 
 
-def _claim_next_queued() -> tuple[str, str, str] | None:
-    _MAX_CLAIM_ATTEMPTS = 10
-    try:
-        for _ in range(_MAX_CLAIM_ATTEMPTS):
-            conn = get_conn()
-            cur = conn.execute(
-                "SELECT id, original_filename FROM jobs WHERE status='queued' ORDER BY created_at ASC LIMIT 1"
-            )
-            row = cur.fetchone()
-            if not row:
-                return None
+def _spawn_job(job_id: str, file_path: str, original_filename: str,
+               on_exit: Callable[[str], None]) -> mp.process.BaseProcess:
+    """Start the isolated pipeline subprocess for one job and watch it.
 
-            job_id, original_filename = row[0], row[1]
-            update_cur = conn.execute(
-                "UPDATE jobs SET status='processing', updated_at=? WHERE id=? AND status='queued'",
-                (now_iso(), job_id),
-            )
-
-            if update_cur.rowcount != 1:
-                continue
-
-            file_path = _upload_path_for(job_id)
-            if file_path is None:
-                set_job_status(job_id, "failed")
-                emit_progress(job_id, "done", {"status": "failed", "error": "uploaded file is missing"})
-                continue
-
-            return (job_id, file_path, original_filename)
-
-        logger.warning("Failed to claim next queued job after 10 attempts")
-        return None
-    except Exception as exc:
-        logger.error(f"Exception in _claim_next_queued: {exc}")
-        return None
-
-
-def _dispatch_next() -> bool:
-    claimed = _claim_next_queued()
-    if claimed is None:
-        return False
-
-    job_id, file_path, original_filename = claimed
-    result = run_pipeline_async(job_id, file_path, original_filename)
-    return result == "started"
-
-
-def requeue_orphans() -> int:
-    try:
-        conn = get_conn()
-        cur = conn.execute(
-            "UPDATE jobs SET status='queued', updated_at=? WHERE status='processing'",
-            (now_iso(),),
-        )
-        count = cur.rowcount
-        if count > 0:
-            logger.info(f"Requeued {count} orphaned jobs")
-        return count
-    except Exception as exc:
-        logger.error(f"Exception in requeue_orphans: {exc}")
-        return 0
-
-
-def start_queued_jobs(max_starts: int = 0) -> int:
-    started = 0
-    # _MAX_CONCURRENT_JOBS == 0 means "unlimited", so it cannot be used as the
-    # loop bound there — the cap is only a guard against a claim/dispatch cycle
-    # spinning, not a concurrency limit (that is _try_acquire_job_slot's job).
-    max_iterations = _MAX_CONCURRENT_JOBS + 1 if _MAX_CONCURRENT_JOBS > 0 else 100
-    for _ in range(max_iterations):
-        if max_starts > 0 and started >= max_starts:
-            break
-        if _dispatch_next():
-            started += 1
-        else:
-            break
-    return started
-
-
-def run_pipeline_async(job_id: str, file_path: str, original_filename: str) -> str:
+    The queue loop (api/queue_loop.py, ADR-0046) decides WHEN a job runs and
+    how many run at once; this function only knows HOW: a `spawn`-context
+    process — the memory and crash boundary of ADR-0002 — plus a watcher thread
+    that turns a crash into a `failed` status and, in every case, calls
+    `on_exit(job_id)` so the loop frees the slot and claims the next job.
     """
-    Asynchronously run the pipeline for a job in an isolated subprocess.
-
-    Returns:
-        "started"  — the subprocess has started
-        "queued"   — no slot free, the job is waiting and will be picked up
-        "rejected" — the queue is full, the work is refused
-    """
-    if not _try_acquire_job_slot():
-        if _QUEUE_MAX_DEPTH > 0 and _count_queued() >= _QUEUE_MAX_DEPTH:
-            set_job_status(job_id, "failed")
-            emit_progress(job_id, "done", {
-                "status": "failed",
-                "error": f"Queue is full ({_QUEUE_MAX_DEPTH} jobs waiting) — try again later"
-            })
-            logger.warning(f"[Worker] Job {job_id} rejected — queue full")
-            return "rejected"
-        else:
-            set_job_status(job_id, "queued")
-            emit_progress(job_id, "queued", {
-                "status": "queued",
-                "position": _count_queued()
-            })
-            logger.info(f"[Worker] Job {job_id} queued — job queue full")
-            return "queued"
-
     logger.info(f"[Worker] Spawning isolated subprocess for job {job_id}")
 
     ctx = mp.get_context("spawn")
@@ -1209,7 +1081,6 @@ def run_pipeline_async(job_id: str, file_path: str, original_filename: str) -> s
 
     def _watch(p: mp.Process, jid: str) -> None:
         p.join()
-        _decrement_job_counter()
         code = p.exitcode
         if code == 0:
             logger.info(f"[Worker] Subprocess for job {jid} exited cleanly")
@@ -1235,11 +1106,10 @@ def run_pipeline_async(job_id: str, file_path: str, original_filename: str) -> s
                 logger.error(
                     f"[Worker] Could not update job {jid} status after subprocess crash: {exc}"
                 )
-
         try:
-            _dispatch_next()
+            on_exit(jid)
         except Exception as exc:
-            logger.error(f"[Worker] Dispatch error in watcher for {jid}: {exc}")
+            logger.error(f"[Worker] on_exit hook failed for job {jid}: {exc}")
 
     watcher = threading.Thread(
         target=_watch,
@@ -1248,7 +1118,53 @@ def run_pipeline_async(job_id: str, file_path: str, original_filename: str) -> s
         name=f"watcher-{job_id}",
     )
     watcher.start()
-    return "started"
+    return proc
+
+
+def run_pipeline_async(job_id: str, file_path: str, original_filename: str) -> str:
+    """Queue a job, and start it right away when this process runs the pipeline.
+
+    Returns:
+        "started"  — role `all` and a slot was free: the subprocess is running
+        "queued"   — the job waits in the `jobs` table, for a worker process
+                     (role `api`) or for a free slot (role `all`)
+        "rejected" — the queue is deeper than API_QUEUE_MAX_DEPTH; the job is
+                     marked failed and the caller answers 503
+
+    `file_path` is kept for the callers' sake: the worker locates the upload
+    by job id under uploads/, which is the directory a worker container shares
+    with the API (ADR-0046).
+    """
+    from api import queue_loop
+
+    if _QUEUE_MAX_DEPTH > 0 and queue_loop.count_queued() >= _QUEUE_MAX_DEPTH:
+        set_job_status(job_id, "failed")
+        emit_progress(job_id, "done", {
+            "status": "failed",
+            "error": f"Queue is full ({_QUEUE_MAX_DEPTH} jobs waiting) — try again later"
+        })
+        logger.warning(f"[Worker] Job {job_id} rejected — queue full")
+        return "rejected"
+
+    set_job_status(job_id, "queued")
+    emit_progress(job_id, "queued", {
+        "status": "queued",
+        "position": queue_loop.count_queued()
+    })
+
+    if queue_loop.role() != "all":
+        logger.info(f"[Worker] Job {job_id} queued for a worker process")
+        return "queued"
+
+    # This process runs the pipeline: kick the loop so that a free slot starts
+    # the job before the response is written — the "processing" answer the UI
+    # already knows — instead of on the next poll.
+    try:
+        queue_loop.start_embedded().kick()
+    except Exception as exc:
+        logger.error(f"[Worker] Could not kick the queue loop: {exc}")
+    row = get_conn().execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
+    return "started" if row and row["status"] == "processing" else "queued"
 
 def _lexicon_rescan(job_id: str, report_text: str) -> int:
     """
@@ -1352,9 +1268,10 @@ def _lexicon_rescan(job_id: str, report_text: str) -> int:
 
             if to_insert:
                 conn.executemany(
-                    "INSERT OR IGNORE INTO entities "
+                    "INSERT INTO entities "
                     "(id,job_id,value,entity_type,context,confidence,mitre_id,accepted,source) "
-                    "VALUES (?,?,?,?,?,?,?,?,?)",
+                    "VALUES (?,?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT (id) DO NOTHING",
                     to_insert,
                 )
                 conn.commit()

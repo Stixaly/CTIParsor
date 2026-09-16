@@ -1,10 +1,12 @@
 # Optional dependencies that require system-level libraries or large model downloads.
 # Install these separately AFTER the relevant system package is available.
 #
-# re2 (ReDoS protection — linear-time regex engine):
-#   Linux:  apt install libre2-dev
-#   macOS:  brew install re2
-#   Then:   pip install re2
+# google-re2 (ReDoS protection — linear-time regex engine, ADR-0049):
+#   pip install google-re2
+#   No system library and no build toolchain needed — it ships prebuilt wheels.
+#   The PyPI package named plainly "re2" is abandoned and does not build on
+#   Python 3.12+ (its Cython source calls CPython internals removed in 3.12);
+#   this is the maintained replacement, importable the same way (`import re2`).
 #
 # spacy (legacy NER fallback used by Stage 2):
 #   After installing spacy, download the model:
@@ -14,7 +16,7 @@
 # Both packages are imported with try/except in the pipeline — the pipeline
 # runs correctly without them (regex + gazetteer + CyNER + GLiNER cover the gaps).
 
-re2>=0.2.20
+google-re2>=1.1
 spacy>=3.7.0,<4
 
 # playwright (ADR-0029 — URL → PDF ingestion, the "URL" tab):

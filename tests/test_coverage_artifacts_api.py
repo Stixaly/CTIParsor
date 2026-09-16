@@ -20,8 +20,9 @@ def _rule(corpus, key, techniques, *, atoms=(), title=""):
 
 
 def test_artifact_coverage_route_returns_artifacts_and_phases(temp_db, temp_db_client):
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "core", [
+    conn = temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store (ADR-0045)
+    replace_corpus_rules(rconn, "core", [
         _rule("core", "k1", ["T1190"], atoms=[("hash", THE_HASH)]),
     ])
     conn.execute(
@@ -89,8 +90,9 @@ def test_artifact_coverage_404_on_unknown_job(temp_db, temp_db_client):
 
 
 def test_excluded_artifacts_do_not_feed_the_phase_band(temp_db, temp_db_client):
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "core", [
+    conn = temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store (ADR-0045)
+    replace_corpus_rules(rconn, "core", [
         _rule("core", "k1", ["T1190"], atoms=[("hash", THE_HASH)]),
     ])
     conn.execute(

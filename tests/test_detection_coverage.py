@@ -62,24 +62,26 @@ def _rule(corpus, key, techniques, *, raw=None, license="proprietary"):
 
 
 def test_store_replace_and_query(temp_db):
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "core", [_rule("core", "k1", ["T1059", "T1027"])])
-    replace_corpus_rules(conn, "cloud", [_rule("cloud", "k2", ["T1059"])])
+    temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "core", [_rule("core", "k1", ["T1059", "T1027"])])
+    replace_corpus_rules(rconn, "cloud", [_rule("cloud", "k2", ["T1059"])])
 
-    refs = rule_refs_for_techniques(conn, ["T1059"])
+    refs = rule_refs_for_techniques(rconn, ["T1059"])
     assert {(c, k) for _t, c, k, _f in refs} == {("core", "k1"), ("cloud", "k2")}
-    assert {r["corpus"]: r["rules"] for r in corpus_counts(conn)} == {"core": 1, "cloud": 1}
+    assert {r["corpus"]: r["rules"] for r in corpus_counts(rconn)} == {"core": 1, "cloud": 1}
 
     # replace is idempotent — re-running one corpus doesn't duplicate
-    replace_corpus_rules(conn, "core", [_rule("core", "k1", ["T1059", "T1027"])])
-    assert {r["corpus"]: r["rules"] for r in corpus_counts(conn)}["core"] == 1
+    replace_corpus_rules(rconn, "core", [_rule("core", "k1", ["T1059", "T1027"])])
+    assert {r["corpus"]: r["rules"] for r in corpus_counts(rconn)}["core"] == 1
 
 
 def test_compute_for_job_scores_accepted_techniques(temp_db):
-    conn = temp_db.get_conn()
+    conn = temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
     # two independent corpora cover T1059; nothing covers T1003
-    replace_corpus_rules(conn, "core", [_rule("core", "k1", ["T1059"])])
-    replace_corpus_rules(conn, "cloud", [_rule("cloud", "k2", ["T1059"])])
+    replace_corpus_rules(rconn, "core", [_rule("core", "k1", ["T1059"])])
+    replace_corpus_rules(rconn, "cloud", [_rule("cloud", "k2", ["T1059"])])
 
     conn.execute(
         "INSERT INTO jobs (id, original_filename, status, created_at, updated_at) "
@@ -93,7 +95,7 @@ def test_compute_for_job_scores_accepted_techniques(temp_db):
         )
     conn.commit()
 
-    result = compute_for_job(conn, "j1")
+    result = compute_for_job(rconn, "j1", jobs_conn=conn)
     cells = {c["technique_id"]: c for c in result["cells"]}
     assert set(cells) == {"T1059", "T1003"}          # rejected T1110 excluded
     assert cells["T1059"]["score"] == 3               # corroborated
@@ -104,9 +106,10 @@ def test_compute_for_job_scores_accepted_techniques(temp_db):
 def test_parent_rule_covers_subtechnique(temp_db):
     """A rule tagged with the parent technique (T1059) must credit a report's
     sub-technique (T1059.001); a sibling sub-technique rule (T1059.003) must not."""
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "core", [_rule("core", "k1", ["T1059"])])         # parent rule
-    replace_corpus_rules(conn, "sibling", [_rule("sibling", "k2", ["T1059.003"])])  # sibling sub
+    conn = temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "core", [_rule("core", "k1", ["T1059"])])         # parent rule
+    replace_corpus_rules(rconn, "sibling", [_rule("sibling", "k2", ["T1059.003"])])  # sibling sub
 
     conn.execute(
         "INSERT INTO jobs (id, original_filename, status, created_at, updated_at) "
@@ -119,7 +122,7 @@ def test_parent_rule_covers_subtechnique(temp_db):
     )
     conn.commit()
 
-    cells = {c["technique_id"]: c for c in compute_for_job(conn, "jp")["cells"]}
+    cells = {c["technique_id"]: c for c in compute_for_job(rconn, "jp", jobs_conn=conn)["cells"]}
     assert set(cells) == {"T1059.001"}
     # Covered by the parent rule (score 2 — one corpus), NOT by the sibling sub.
     assert cells["T1059.001"]["score"] == 2
@@ -129,8 +132,9 @@ def test_parent_rule_covers_subtechnique(temp_db):
 # ── API ───────────────────────────────────────────────────────────────────────
 
 def test_coverage_api(temp_db, temp_db_client):
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "core", [_rule("core", "k1", ["T1059"])])
+    conn = temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "core", [_rule("core", "k1", ["T1059"])])
     conn.execute(
         "INSERT INTO jobs (id, original_filename, status, created_at, updated_at) "
         "VALUES ('j2','r.txt','reviewing',?,?)", (temp_db.now_iso(), temp_db.now_iso()),
@@ -169,11 +173,12 @@ def _job_with_technique(temp_db, job_id, mitre_id, *, accepted=1):
 
 
 def test_rule_bodies_for_job_returns_raw_and_techniques(temp_db):
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "core", [_rule("core", "k1", ["T1059"], raw="detection: powershell")])
+    conn = temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "core", [_rule("core", "k1", ["T1059"], raw="detection: powershell")])
     _job_with_technique(temp_db, "jb", "T1059")
 
-    bodies = rule_bodies_for_job(conn, "jb")
+    bodies = rule_bodies_for_job(rconn, "jb", jobs_conn=conn)
     assert len(bodies) == 1
     assert bodies[0]["raw"] == "detection: powershell"
     assert bodies[0]["techniques"] == ["T1059"]
@@ -181,8 +186,9 @@ def test_rule_bodies_for_job_returns_raw_and_techniques(temp_db):
 
 
 def test_export_detections_zip(temp_db, temp_db_client):
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "core", [
+    temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "core", [
         _rule("core", "k1", ["T1059"], raw="title: ps\ndetection: a", license="DRL-1.1"),
         _rule("core", "k2", ["T1059"], raw="title: cmd\ndetection: b", license="DRL-1.1"),
     ])
@@ -229,11 +235,12 @@ def _fmt_rule(corpus, key, techniques, fmt, *, dedup_key="", license="proprietar
 
 
 def test_rule_refs_carry_format(temp_db):
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "net", [_fmt_rule("net", "s1", ["T1190"], "suricata")])
-    replace_corpus_rules(conn, "sig", [_fmt_rule("sig", "g1", ["T1190"], "sigma")])
+    temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "net", [_fmt_rule("net", "s1", ["T1190"], "suricata")])
+    replace_corpus_rules(rconn, "sig", [_fmt_rule("sig", "g1", ["T1190"], "sigma")])
 
-    refs = rule_refs_for_techniques(conn, ["T1190"])
+    refs = rule_refs_for_techniques(rconn, ["T1190"])
     assert len(refs) == 2
     for ref in refs:
         assert len(ref) == 4
@@ -248,20 +255,22 @@ def test_blank_format_reads_back_as_sigma(temp_db):
     live store holds none. The fallback is therefore defensive, and matches the
     one `_load_rules` applies on the export path.
     """
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "sig", [_fmt_rule("sig", "g1", ["T1190"], "sigma")])
+    temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "sig", [_fmt_rule("sig", "g1", ["T1190"], "sigma")])
 
-    conn.execute("UPDATE detection_rules SET format = ''")
-    conn.commit()
-    assert rule_refs_for_techniques(conn, ["T1190"])[0][3] == "sigma"
-    assert rules_for_technique(conn, "T1190")[0]["format"] == "sigma"
+    rconn.execute("UPDATE detection_rules SET format = ''")
+    rconn.commit()
+    assert rule_refs_for_techniques(rconn, ["T1190"])[0][3] == "sigma"
+    assert rules_for_technique(rconn, "T1190")[0]["format"] == "sigma"
 
 
 def test_rules_for_technique_exposes_format_and_key_order(temp_db):
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "yarahq", [_fmt_rule("yarahq", "y1", ["T1486"], "yara")])
+    temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "yarahq", [_fmt_rule("yarahq", "y1", ["T1486"], "yara")])
 
-    rules = rules_for_technique(conn, "T1486")
+    rules = rules_for_technique(rconn, "T1486")
     assert rules[0]["format"] == "yara"
     # Key order is part of the contract — the frontend CoverageRule type mirrors it.
     assert list(rules[0].keys()) == [
@@ -271,29 +280,31 @@ def test_rules_for_technique_exposes_format_and_key_order(temp_db):
 
 
 def test_also_in_excludes_own_corpus_after_batching(temp_db):
-    conn = temp_db.get_conn()
+    temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
     for corpus in ("alpha", "beta", "gamma"):
         replace_corpus_rules(
-            conn, corpus,
+            rconn, corpus,
             [_fmt_rule(corpus, "r1", ["T1190"], "sigma", dedup_key="dk1")],
         )
-    conn.execute(
+    rconn.execute(
         "UPDATE detection_rules SET is_canonical = 0 WHERE corpus IN ('beta','gamma')"
     )
-    conn.commit()
+    rconn.commit()
 
-    rules = rules_for_technique(conn, "T1190")
+    rules = rules_for_technique(rconn, "T1190")
     assert len(rules) == 1
     assert rules[0]["also_in"] == ["beta", "gamma"]
     assert "alpha" not in rules[0]["also_in"]
 
 
 def test_also_in_empty_when_dedup_key_missing(temp_db):
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "alpha", [_fmt_rule("alpha", "r1", ["T1190"], "sigma")])
-    replace_corpus_rules(conn, "beta", [_fmt_rule("beta", "r2", ["T1190"], "sigma")])
+    temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "alpha", [_fmt_rule("alpha", "r1", ["T1190"], "sigma")])
+    replace_corpus_rules(rconn, "beta", [_fmt_rule("beta", "r2", ["T1190"], "sigma")])
 
-    rules = rules_for_technique(conn, "T1190")
+    rules = rules_for_technique(rconn, "T1190")
     assert len(rules) == 2
     for rule in rules:
         assert rule["also_in"] == []
@@ -308,16 +319,17 @@ def test_rules_for_technique_does_not_query_per_rule(temp_db):
     statement per 400 dedup keys, so 30 rules cost at most 2; the bound of 3
     leaves room for the outer query without admitting an N+1.
     """
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "core", [
+    temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "core", [
         _fmt_rule("core", f"k{i}", ["T1059"], "sigma", dedup_key=f"dk{i}")
         for i in range(30)
     ])
 
     stmts = []
-    conn.set_trace_callback(stmts.append)
-    out = rules_for_technique(conn, "T1059")
-    conn.set_trace_callback(None)
+    rconn.set_trace_callback(stmts.append)
+    out = rules_for_technique(rconn, "T1059")
+    rconn.set_trace_callback(None)
 
     assert len(out) == 30
     assert len(stmts) <= 3
@@ -333,15 +345,16 @@ def test_also_in_sweep_pins_the_dedup_index(temp_db):
     defect. Only the statement text distinguishes "pinned" from "happened to be
     chosen", and pinning is what holds at 86k rows (ADR-0022).
     """
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "core", [
+    temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "core", [
         _fmt_rule("core", "k1", ["T1059"], "sigma", dedup_key="dk1"),
     ])
 
     stmts: list[str] = []
-    conn.set_trace_callback(stmts.append)
-    rules_for_technique(conn, "T1059")
-    conn.set_trace_callback(None)
+    rconn.set_trace_callback(stmts.append)
+    rules_for_technique(rconn, "T1059")
+    rconn.set_trace_callback(None)
 
     sweep = [s for s in stmts if "dedup_key" in s and "is_canonical=0" in s]
     assert sweep, "the also_in sweep did not run"
@@ -428,7 +441,8 @@ def test_unknown_format_counts_in_total_but_no_bucket():
 
 
 def test_compute_for_job_emits_by_format(temp_db):
-    conn = temp_db.get_conn()
+    conn = temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
     conn.execute(
         "INSERT INTO jobs (id, original_filename, status, created_at, updated_at) "
         "VALUES ('jf','r.txt','reviewing',?,?)", (temp_db.now_iso(), temp_db.now_iso()),
@@ -440,13 +454,13 @@ def test_compute_for_job_emits_by_format(temp_db):
     )
     conn.commit()
 
-    replace_corpus_rules(conn, "sig", [_fmt_rule("sig", "g1", ["T1190"], "sigma")])
-    replace_corpus_rules(conn, "net", [
+    replace_corpus_rules(rconn, "sig", [_fmt_rule("sig", "g1", ["T1190"], "sigma")])
+    replace_corpus_rules(rconn, "net", [
         _fmt_rule("net", "s1", ["T1190"], "suricata"),
         _fmt_rule("net", "s2", ["T1190"], "suricata"),
     ])
 
-    cells = {c["technique_id"]: c for c in compute_for_job(conn, "jf")["cells"]}
+    cells = {c["technique_id"]: c for c in compute_for_job(rconn, "jf", jobs_conn=conn)["cells"]}
     cell = cells["T1190"]
     assert set(cell["by_format"]) == set(DETECTION_FORMATS)
     assert cell["by_format"]["sigma"]["rule_count"] == 1
@@ -457,12 +471,13 @@ def test_compute_for_job_emits_by_format(temp_db):
 # ── Rule-id export + byte sizes + proposal formats (ADR-0022, step 2) ─────────
 
 def test_export_selection_zip(temp_db, temp_db_client):
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "sig", [
+    temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "sig", [
         _fmt_rule("sig", "s1", ["T1059"], "sigma"),
         _fmt_rule("sig", "s2", ["T1059"], "sigma"),
     ])
-    replace_corpus_rules(conn, "net", [_fmt_rule("net", "n1", ["T1059"], "suricata")])
+    replace_corpus_rules(rconn, "net", [_fmt_rule("net", "n1", ["T1059"], "suricata")])
     _job_with_technique(temp_db, "js", "T1059")
 
     resp = temp_db_client.post(
@@ -493,8 +508,9 @@ def test_export_selection_zip(temp_db, temp_db_client):
 def test_export_selection_ignores_rules_outside_the_report(temp_db, temp_db_client):
     """Ids are intersected with the report's linkable set — the export must never
     become a generic store-dump endpoint keyed by arbitrary ids."""
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "sig", [
+    temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "sig", [
         _fmt_rule("sig", "s1", ["T1059"], "sigma"),
         _fmt_rule("sig", "zz", ["T1486"], "sigma"),   # technique NOT in the job
     ])
@@ -515,8 +531,9 @@ def test_export_selection_ignores_rules_outside_the_report(temp_db, temp_db_clie
 
 
 def test_export_selection_400_on_empty_ids(temp_db, temp_db_client):
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "sig", [_fmt_rule("sig", "s1", ["T1059"], "sigma")])
+    temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "sig", [_fmt_rule("sig", "s1", ["T1059"], "sigma")])
     _job_with_technique(temp_db, "je", "T1059")
 
     assert temp_db_client.post(
@@ -529,8 +546,9 @@ def test_export_selection_400_on_empty_ids(temp_db, temp_db_client):
 
 
 def test_export_selection_404_when_nothing_matches(temp_db, temp_db_client):
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "sig", [_fmt_rule("sig", "s1", ["T1059"], "sigma")])
+    temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "sig", [_fmt_rule("sig", "s1", ["T1059"], "sigma")])
     _job_with_technique(temp_db, "jm", "T1059")
 
     assert temp_db_client.post(
@@ -544,8 +562,9 @@ def test_export_selection_404_when_nothing_matches(temp_db, temp_db_client):
 def test_export_get_and_post_share_the_layout(temp_db, temp_db_client):
     """The two routes share `_zip_export`; this locks the invariant that they can
     never drift in archive layout."""
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "sig", [
+    temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "sig", [
         _fmt_rule("sig", "s1", ["T1059"], "sigma"),
         _fmt_rule("sig", "s2", ["T1059"], "sigma"),
     ])
@@ -569,10 +588,11 @@ def test_export_get_and_post_share_the_layout(temp_db, temp_db_client):
 
 
 def test_rules_for_technique_exposes_bytes(temp_db):
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "sig", [_fmt_rule("sig", "s1", ["T1190"], "sigma")])
+    temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "sig", [_fmt_rule("sig", "s1", ["T1190"], "sigma")])
 
-    result = rules_for_technique(conn, "T1190")
+    result = rules_for_technique(rconn, "T1190")
     assert len(result) == 1
     assert result[0]["bytes"] == len("title: rule s1\nlogsource: sig\n")
     assert list(result[0].keys()) == [
@@ -582,8 +602,9 @@ def test_rules_for_technique_exposes_bytes(temp_db):
 
 
 def test_proposals_carry_format(temp_db, temp_db_client):
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "net", [_fmt_rule("net", "n1", ["T1059"], "suricata")])
+    temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "net", [_fmt_rule("net", "n1", ["T1059"], "suricata")])
     _job_with_technique(temp_db, "jf2", "T1059")
 
     resp = temp_db_client.get("/api/jobs/jf2/detections/proposals")
@@ -615,16 +636,17 @@ def _job_with_techniques(temp_db, job_id, mitre_ids):
 def test_rules_for_job_flat_rewrite_keeps_parent_rollup(temp_db):
     """The flat sweep must reproduce the per-technique form exactly, including the
     parent→sub roll-up that credits a T1059-tagged rule to T1059.001."""
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "sig", [
+    conn = temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "sig", [
         _fmt_rule("sig", "s1", ["T1059"], "sigma"),
         _fmt_rule("sig", "s2", ["T1059"], "sigma"),
     ])
-    replace_corpus_rules(conn, "net", [_fmt_rule("net", "n1", ["T1059.001"], "suricata")])
-    replace_corpus_rules(conn, "yr", [_fmt_rule("yr", "y1", ["T1486"], "yara")])
+    replace_corpus_rules(rconn, "net", [_fmt_rule("net", "n1", ["T1059.001"], "suricata")])
+    replace_corpus_rules(rconn, "yr", [_fmt_rule("yr", "y1", ["T1486"], "yara")])
     _job_with_techniques(temp_db, "jflat", ["T1059", "T1059.001"])
 
-    out = rules_for_job(conn, "jflat", evidence_only=False)
+    out = rules_for_job(rconn, "jflat", evidence_only=False, jobs_conn=conn)
     groups = {g["technique_id"]: {r["id"] for r in g["rules"]} for g in out["techniques"]}
 
     assert set(groups) == {"T1059", "T1059.001"}
@@ -656,18 +678,19 @@ def test_rules_for_job_query_count_is_flat(temp_db):
     """The pre-rewrite form issued two statements per technique — 34 techniques
     cost 68+ round trips and 26.3 s. The flat sweep is one id query, one metadata
     batch per 400 ids and one also_in batch per 400 keys."""
-    conn = temp_db.get_conn()
+    conn = temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
     for i, tech in enumerate(("T1001", "T1002", "T1003")):
-        replace_corpus_rules(conn, f"c{i}", [
+        replace_corpus_rules(rconn, f"c{i}", [
             _fmt_rule(f"c{i}", f"k{i}_{k}", [tech], "sigma", dedup_key=f"d{i}_{k}")
             for k in range(10)
         ])
     _job_with_techniques(temp_db, "jcount", ["T1001", "T1002", "T1003"])
 
     stmts = []
-    conn.set_trace_callback(stmts.append)
-    out = rules_for_job(conn, "jcount", evidence_only=False)
-    conn.set_trace_callback(None)
+    rconn.set_trace_callback(stmts.append)
+    out = rules_for_job(rconn, "jcount", evidence_only=False, jobs_conn=conn)
+    rconn.set_trace_callback(None)
 
     assert len(out["techniques"]) == 3
     assert out["rule_total"] == 30
@@ -679,8 +702,9 @@ def test_export_selection_packages_only_the_selected_rules(temp_db, temp_db_clie
     `test_rule_bodies_for_job_body_ids_restricts_raw_only` — this archive looks
     identical whether or not the other bodies were read, so it cannot stand in
     for that check."""
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "sig", [
+    temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "sig", [
         _rule("sig", f"e{k}", ["T1059"], raw=f"body-{k}") for k in range(6)
     ])
     _job_with_technique(temp_db, "jbody", "T1059")
@@ -703,21 +727,22 @@ def test_export_selection_packages_only_the_selected_rules(temp_db, temp_db_clie
 
 
 def test_rule_bodies_for_job_body_ids_restricts_raw_only(temp_db):
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "sig", [
+    conn = temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "sig", [
         _rule("sig", "b1", ["T1059"], raw="raw-b1"),
         _rule("sig", "b2", ["T1059"], raw="raw-b2"),
     ])
     _job_with_technique(temp_db, "jraw", "T1059")
 
-    full = rule_bodies_for_job(conn, "jraw")
+    full = rule_bodies_for_job(rconn, "jraw", jobs_conn=conn)
     assert len(full) == 2 and all(r["raw"] for r in full)
 
-    none_loaded = rule_bodies_for_job(conn, "jraw", body_ids=set())
+    none_loaded = rule_bodies_for_job(rconn, "jraw", body_ids=set(), jobs_conn=conn)
     assert {r["id"] for r in none_loaded} == {"sig:b1", "sig:b2"}
     assert all(r["raw"] == "" for r in none_loaded)
 
-    partial = rule_bodies_for_job(conn, "jraw", body_ids={"sig:b1"})
+    partial = rule_bodies_for_job(rconn, "jraw", body_ids={"sig:b1"}, jobs_conn=conn)
     by_id = {r["id"]: r for r in partial}
     assert by_id["sig:b1"]["raw"] == "raw-b1"
     assert by_id["sig:b2"]["raw"] == ""
@@ -741,7 +766,7 @@ def _add_observable(temp_db, job_id, value, entity_type):
 def _add_atoms(temp_db, rows):
     """rows = liste de (rule_id, atom_class, value). Indexe les atomes d'une règle."""
     from pipeline.detection.store import replace_rule_atoms
-    replace_rule_atoms(temp_db.get_conn(), rows)
+    replace_rule_atoms(temp_db.get_rule_conn(), rows)
 
 
 def test_coverage_panel_serves_only_evidence_backed_rules(temp_db):
@@ -755,10 +780,10 @@ def test_coverage_panel_serves_only_evidence_backed_rules(temp_db):
         _fmt_rule("sig", "e2", ["T1059"], "sigma"),
         _fmt_rule("sig", "e3", ["T1059"], "sigma"),
     ]
-    replace_corpus_rules(temp_db.get_conn(), "sig", rules)
+    replace_corpus_rules(temp_db.get_rule_conn(), "sig", rules)
     _add_atoms(temp_db, [("sig:e2", "domain", "evil-campaign-c2.com")])
 
-    out = rules_for_job(temp_db.get_conn(), job_id, evidence_only=True)
+    out = rules_for_job(temp_db.get_rule_conn(), job_id, evidence_only=True, jobs_conn=temp_db.get_conn())
     assert out["tag_total"] == 3
     assert out["rule_total"] == 1
     assert out["evidence_total"] == 1
@@ -778,10 +803,10 @@ def test_evidence_only_false_restores_the_tag_join(temp_db):
         _fmt_rule("sig", "e2", ["T1059"], "sigma"),
         _fmt_rule("sig", "e3", ["T1059"], "sigma"),
     ]
-    replace_corpus_rules(temp_db.get_conn(), "sig", rules)
+    replace_corpus_rules(temp_db.get_rule_conn(), "sig", rules)
     _add_atoms(temp_db, [("sig:e2", "domain", "evil-campaign-c2.com")])
 
-    out = rules_for_job(temp_db.get_conn(), job_id, evidence_only=False)
+    out = rules_for_job(temp_db.get_rule_conn(), job_id, evidence_only=False, jobs_conn=temp_db.get_conn())
     assert out["evidence_only"] is False
     assert out["rule_total"] == 3
     group = next(g for g in out["techniques"] if g["technique_id"] == "T1059")
@@ -799,11 +824,11 @@ def test_an_untagged_rule_reaches_the_panel_through_evidence(temp_db):
         _fmt_rule("yr", "y1", [], "yara"),
         _fmt_rule("sig", "s1", ["T1059"], "sigma"),
     ]
-    replace_corpus_rules(temp_db.get_conn(), "yr", [rules[0]])
-    replace_corpus_rules(temp_db.get_conn(), "sig", [rules[1]])
+    replace_corpus_rules(temp_db.get_rule_conn(), "yr", [rules[0]])
+    replace_corpus_rules(temp_db.get_rule_conn(), "sig", [rules[1]])
     _add_atoms(temp_db, [("yr:y1", "strlit", "sandworm2024")])
 
-    out = rules_for_job(temp_db.get_conn(), job_id, evidence_only=True)
+    out = rules_for_job(temp_db.get_rule_conn(), job_id, evidence_only=True, jobs_conn=temp_db.get_conn())
     untagged = next(g for g in out["techniques"] if g["technique_id"] == "(untagged)")
     assert any(r["id"] == "yr:y1" for r in untagged["rules"])
     assert out["techniques"][-1]["technique_id"] == "(untagged)"
@@ -822,10 +847,10 @@ def test_a_ubiquitous_value_alone_does_not_admit_a_rule(temp_db):
     _add_observable(temp_db, job_id, "cmd.exe", "file")
 
     rules = [_fmt_rule("sig", "s1", ["T1059"], "sigma")]
-    replace_corpus_rules(temp_db.get_conn(), "sig", rules)
+    replace_corpus_rules(temp_db.get_rule_conn(), "sig", rules)
     _add_atoms(temp_db, [("sig:s1", "image", "cmd.exe")])
 
-    out = rules_for_job(temp_db.get_conn(), job_id, evidence_only=True)
+    out = rules_for_job(temp_db.get_rule_conn(), job_id, evidence_only=True, jobs_conn=temp_db.get_conn())
     assert out["rule_total"] == 0
     assert out["techniques"] == []
 
@@ -838,13 +863,13 @@ def test_a_ubiquitous_value_still_shows_as_support(temp_db):
     _add_observable(temp_db, job_id, "beacon-implant.exe", "file")
 
     rules = [_fmt_rule("sig", "s1", ["T1059"], "sigma")]
-    replace_corpus_rules(temp_db.get_conn(), "sig", rules)
+    replace_corpus_rules(temp_db.get_rule_conn(), "sig", rules)
     _add_atoms(temp_db, [
         ("sig:s1", "image", "cmd.exe"),
         ("sig:s1", "image", "beacon-implant.exe"),
     ])
 
-    out = rules_for_job(temp_db.get_conn(), job_id, evidence_only=True)
+    out = rules_for_job(temp_db.get_rule_conn(), job_id, evidence_only=True, jobs_conn=temp_db.get_conn())
     group = next(g for g in out["techniques"] if g["technique_id"] == "T1059")
     rule = next(r for r in group["rules"] if r["id"] == "sig:s1")
     # Admitted by the campaign binary, and only that one counts.
@@ -865,14 +890,14 @@ def test_rules_rank_by_discriminating_evidence_count(temp_db):
         _fmt_rule("sig", "one", ["T1059"], "sigma"),
         _fmt_rule("sig", "two", ["T1059"], "sigma"),
     ]
-    replace_corpus_rules(temp_db.get_conn(), "sig", rules)
+    replace_corpus_rules(temp_db.get_rule_conn(), "sig", rules)
     _add_atoms(temp_db, [
         ("sig:two", "domain", "alpha-c2.com"),
         ("sig:two", "domain", "beta-c2.com"),
         ("sig:one", "domain", "gamma-c2.com"),
     ])
 
-    out = rules_for_job(temp_db.get_conn(), job_id, evidence_only=True)
+    out = rules_for_job(temp_db.get_rule_conn(), job_id, evidence_only=True, jobs_conn=temp_db.get_conn())
     group = next(g for g in out["techniques"] if g["technique_id"] == "T1059")
     assert group["rules"][0]["id"] == "sig:two"
     assert group["rules"][0]["evidence_count"] == 2
@@ -887,9 +912,9 @@ def test_a_rule_with_no_atom_is_dropped_even_when_tagged(temp_db):
     _add_observable(temp_db, job_id, "evil-campaign-c2.com", "domain")
 
     rules = [_fmt_rule("sig", "s1", ["T1059"], "sigma")]
-    replace_corpus_rules(temp_db.get_conn(), "sig", rules)
+    replace_corpus_rules(temp_db.get_rule_conn(), "sig", rules)
 
-    out = rules_for_job(temp_db.get_conn(), job_id, evidence_only=True)
+    out = rules_for_job(temp_db.get_rule_conn(), job_id, evidence_only=True, jobs_conn=temp_db.get_conn())
     assert out["techniques"] == []
     assert out["rule_total"] == 0
     assert out["tag_total"] == 1
@@ -903,23 +928,23 @@ def test_a_rule_with_no_atom_is_dropped_even_when_tagged(temp_db):
 
 def _index_rule_text(temp_db, rows):
     """rows = list of (rule_id, body). Populate the ADR-0031 FTS5 index."""
-    conn = temp_db.get_conn()
-    conn.executemany("INSERT INTO rule_text (rule_id, body) VALUES (?,?)",
+    rconn = temp_db.get_rule_conn()
+    rconn.executemany("INSERT INTO rule_text (rule_id, body) VALUES (?,?)",
                      [(rid, body.lower()) for rid, body in rows])
-    conn.commit()
+    rconn.commit()
 
 
 def test_a_brand_from_campaign_domains_admits_a_rule(temp_db):
     """Locks in ADR-0031: recurring domain substrings admit rules without atoms."""
     job_id = str(uuid4())
     rules = [_fmt_rule("sig", "okta1", ["T1566"], "sigma")]
-    replace_corpus_rules(temp_db.get_conn(), "sig", rules)
+    replace_corpus_rules(temp_db.get_rule_conn(), "sig", rules)
     _job_with_techniques(temp_db, job_id, ["T1566"])
     _add_observable(temp_db, job_id, "oktaenroll.com", "domain")
     _add_observable(temp_db, job_id, "keyokta.com", "domain")
     _add_observable(temp_db, job_id, "myoktasso.com", "domain")
     _index_rule_text(temp_db, [("sig:okta1", "Okta FastPass Phishing Detection")])
-    out = rules_for_job(temp_db.get_conn(), job_id, evidence_only=True)
+    out = rules_for_job(temp_db.get_rule_conn(), job_id, evidence_only=True, jobs_conn=temp_db.get_conn())
     assert out["rule_total"] == 1
     rule_out = next(r for t in out["techniques"] for r in t["rules"] if r["id"] == "sig:okta1")
     assert len(rule_out["matches"]) == 1
@@ -933,13 +958,13 @@ def test_a_brand_never_corroborates(temp_db):
     """A brand is admitted evidence but never counts toward evidence_count."""
     job_id = str(uuid4())
     rules = [_fmt_rule("sig", "okta1", ["T1566"], "sigma")]
-    replace_corpus_rules(temp_db.get_conn(), "sig", rules)
+    replace_corpus_rules(temp_db.get_rule_conn(), "sig", rules)
     _job_with_techniques(temp_db, job_id, ["T1566"])
     _add_observable(temp_db, job_id, "oktaenroll.com", "domain")
     _add_observable(temp_db, job_id, "keyokta.com", "domain")
     _add_observable(temp_db, job_id, "myoktasso.com", "domain")
     _index_rule_text(temp_db, [("sig:okta1", "Okta FastPass Phishing Detection")])
-    out = rules_for_job(temp_db.get_conn(), job_id, evidence_only=True)
+    out = rules_for_job(temp_db.get_rule_conn(), job_id, evidence_only=True, jobs_conn=temp_db.get_conn())
     rule_out = next(r for t in out["techniques"] for r in t["rules"] if r["id"] == "sig:okta1")
     assert rule_out["evidence_count"] == 0
     assert rule_out["title_count"] == 1
@@ -949,12 +974,12 @@ def test_a_theme_in_only_two_domains_is_not_a_brand(temp_db):
     """Two domains are below the recurrence threshold; no brand is extracted."""
     job_id = str(uuid4())
     rules = [_fmt_rule("sig", "okta1", ["T1566"], "sigma")]
-    replace_corpus_rules(temp_db.get_conn(), "sig", rules)
+    replace_corpus_rules(temp_db.get_rule_conn(), "sig", rules)
     _job_with_techniques(temp_db, job_id, ["T1566"])
     _add_observable(temp_db, job_id, "oktaenroll.com", "domain")
     _add_observable(temp_db, job_id, "keyokta.com", "domain")
     _index_rule_text(temp_db, [("sig:okta1", "Okta FastPass Phishing Detection")])
-    out = rules_for_job(temp_db.get_conn(), job_id, evidence_only=True)
+    out = rules_for_job(temp_db.get_rule_conn(), job_id, evidence_only=True, jobs_conn=temp_db.get_conn())
     assert out["rule_total"] == 0
     assert out["techniques"] == []
 
@@ -963,7 +988,7 @@ def test_atom_evidence_sorts_before_brand_evidence(temp_db):
     """Atom matches must precede title matches within a rule's evidence list."""
     job_id = str(uuid4())
     rules = [_fmt_rule("sig", "both", ["T1566"], "sigma")]
-    replace_corpus_rules(temp_db.get_conn(), "sig", rules)
+    replace_corpus_rules(temp_db.get_rule_conn(), "sig", rules)
     _add_atoms(temp_db, [("sig:both", "domain", "evil-campaign-c2.com")])
     _job_with_techniques(temp_db, job_id, ["T1566"])
     _add_observable(temp_db, job_id, "oktaenroll.com", "domain")
@@ -971,7 +996,7 @@ def test_atom_evidence_sorts_before_brand_evidence(temp_db):
     _add_observable(temp_db, job_id, "myoktasso.com", "domain")
     _add_observable(temp_db, job_id, "evil-campaign-c2.com", "domain")
     _index_rule_text(temp_db, [("sig:both", "Okta FastPass Phishing Detection")])
-    out = rules_for_job(temp_db.get_conn(), job_id, evidence_only=True)
+    out = rules_for_job(temp_db.get_rule_conn(), job_id, evidence_only=True, jobs_conn=temp_db.get_conn())
     rule_out = next(r for t in out["techniques"] for r in t["rules"] if r["id"] == "sig:both")
     assert len(rule_out["matches"]) == 2
     assert rule_out["matches"][0]["kind"] == "atom"
@@ -988,14 +1013,15 @@ def test_an_evidence_reached_rule_is_exportable(temp_db):
     and then silently dropped from the ZIP. Measured before the fix: 582 of
     1,069 served rules, 54%.
     """
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "yr", [_fmt_rule("yr", "y1", [], "yara")])
+    conn = temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "yr", [_fmt_rule("yr", "y1", [], "yara")])
     _add_atoms(temp_db, [("yr:y1", "strlit", "sandworm2024")])
     _job_with_techniques(temp_db, "jexp", ["T1059"])
     _add_observable(temp_db, "jexp", "Sandworm2024", "malware")
 
-    served = {r["id"] for g in rules_for_job(conn, "jexp")["techniques"] for r in g["rules"]}
-    exportable = {r["id"] for r in rule_bodies_for_job(conn, "jexp")}
+    served = {r["id"] for g in rules_for_job(rconn, "jexp", jobs_conn=conn)["techniques"] for r in g["rules"]}
+    exportable = {r["id"] for r in rule_bodies_for_job(rconn, "jexp", jobs_conn=conn)}
 
     assert "yr:y1" in served
     assert served <= exportable, "the panel must never serve a rule the export cannot package"

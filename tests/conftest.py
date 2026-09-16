@@ -10,7 +10,9 @@ Provides:
 from __future__ import annotations
 
 import json
+import os
 from unittest.mock import patch
+from uuid import uuid4
 
 import pytest
 
@@ -141,23 +143,41 @@ def temp_db(tmp_path, monkeypatch):
     is actually used and the next test reconnects to the real DB_PATH (which
     monkeypatch restores). Lets worker/route tests write rows without touching
     the developer's cti_stix.db.
+
+    With CTIPARSOR_TEST_DATABASE_URL set (a postgresql:// URL) the JOB store is
+    created in a disposable PostgreSQL schema named `t_<12 hex>` and dropped
+    afterwards; the rule store stays in the temp SQLite file, exactly as in
+    production with DATABASE_URL.
     """
     import api.db as db
 
-    def _drop_conn():
-        conn = getattr(db._local, "conn", None)
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception:
-                pass
-            db._local.conn = None
-
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "test.db")
-    _drop_conn()
+    url = (os.getenv("CTIPARSOR_TEST_DATABASE_URL") or "").strip() or None
+
+    if url:
+        schema = "t_" + uuid4().hex[:12]
+        monkeypatch.setattr(db, "DATABASE_URL", url)
+        monkeypatch.setattr(db, "_PG_SCHEMA", schema)
+        import psycopg
+        admin = psycopg.connect(url, autocommit=True)
+        admin.execute(f'CREATE SCHEMA "{schema}"')
+        admin.close()
+    else:
+        monkeypatch.setattr(db, "DATABASE_URL", None)
+        monkeypatch.setattr(db, "_PG_SCHEMA", None)
+
+    db.reset_connections()
     db.init_db()
     yield db
-    _drop_conn()
+    db.reset_connections()
+
+    if url:
+        import psycopg
+        admin = psycopg.connect(url, autocommit=True)
+        try:
+            admin.execute(f'DROP SCHEMA "{schema}" CASCADE')
+        finally:
+            admin.close()
 
 
 @pytest.fixture()
@@ -167,7 +187,7 @@ def temp_db_client(temp_db):
 
     import api.main
 
-    with patch("api.main.init_db"):
+    with patch("api.main.init_db"), patch("api.queue_loop.start_embedded"):
         with TestClient(api.main.app, raise_server_exceptions=True) as client:
             yield client
 
@@ -181,11 +201,20 @@ def api_client():
 
     api.main must be imported before the patch so that `api.main` is present
     in sys.modules (mock.patch resolves the target lazily on __enter__).
+
+    Also mocks `api.queue_loop.start_embedded`: the lifespan hook starts it
+    unconditionally in role `all` (the default, and no test sets
+    CTIPARSOR_ROLE), which is a REAL background thread that polls the
+    database and claims/requeues `jobs` rows — including ones a test inserts
+    a moment later, racing its own assertions. `requeue_orphans` is left
+    real: it is a one-time synchronous call that completes, on whatever rows
+    exist *before* the TestClient's `__enter__` returns, before any test body
+    or fixture caller can insert anything — there is no window for it to race.
     """
     from fastapi.testclient import TestClient
 
     import api.main  # ensure module is loaded before patching its attribute
 
-    with patch("api.main.init_db"):
+    with patch("api.main.init_db"), patch("api.queue_loop.start_embedded"):
         with TestClient(api.main.app, raise_server_exceptions=True) as client:
             yield client

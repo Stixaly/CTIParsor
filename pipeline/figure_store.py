@@ -4,10 +4,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import sqlite3
 import uuid
 
-from api.db import get_conn, now_iso, transaction
+from api.db import DB_ERRORS, get_conn, now_iso, transaction
 from pipeline.stage1f_figures import FigureSpan
 from pipeline.vlm import FigureEdge, FigureRead
 
@@ -148,7 +147,7 @@ class SqliteReadCache:
                 if row is None:
                     return None
                 return read_from_json(row["read_json"])
-        except sqlite3.Error:
+        except DB_ERRORS:
             logger.warning("Failed to get from cache", exc_info=True)
             return None
 
@@ -161,12 +160,14 @@ class SqliteReadCache:
         try:
             with get_conn() as conn:
                 conn.execute(
-                    "INSERT OR REPLACE INTO figure_reads "
+                    "INSERT INTO figure_reads "
                     "(sha256, model, prompt_version, read_json, created_at) "
-                    "VALUES (?,?,?,?,?)",
+                    "VALUES (?,?,?,?,?) "
+                    "ON CONFLICT (sha256, model, prompt_version) DO UPDATE SET "
+                    "read_json = excluded.read_json, created_at = excluded.created_at",
                     (sha256, model, prompt_version, read_to_json(read), now_iso()),
                 )
-        except sqlite3.Error:
+        except DB_ERRORS:
             logger.warning("Failed to put to cache", exc_info=True)
 
 
@@ -201,7 +202,7 @@ def save_spans(job_id: str, spans: list[FigureSpan], provider: str) -> int:
                     ),
                 )
             return len(spans)
-    except sqlite3.Error:
+    except DB_ERRORS:
         logger.warning("Failed to save spans", exc_info=True)
         return 0
 
@@ -239,7 +240,7 @@ def load_spans(job_id: str) -> list[FigureSpan]:
                     )
                 )
             return spans
-    except sqlite3.Error:
+    except DB_ERRORS:
         logger.warning("Failed to load spans", exc_info=True)
         return []
 
@@ -276,6 +277,6 @@ def figure_at_offset(job_id: str, offset: int) -> FigureSpan | None:
                 model=row["model"],
                 sha256=row["sha256"],
             )
-    except sqlite3.Error:
+    except DB_ERRORS:
         logger.warning("Failed to find figure at offset", exc_info=True)
         return None

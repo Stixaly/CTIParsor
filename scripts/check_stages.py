@@ -14,6 +14,12 @@ import sqlite3
 import sys
 from pathlib import Path
 
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from api.db import DB_PATH  # noqa: E402
+
 GREEN = "\033[0;32m"
 YELLOW = "\033[1;33m"
 NC = "\033[0m"
@@ -28,7 +34,7 @@ def chk_import(name: str) -> bool:
 
 
 def chk_file(path: str) -> bool:
-    return Path(path).exists()
+    return (_ROOT / path).exists()
 
 
 def chk_browser() -> bool:
@@ -64,7 +70,10 @@ def detection_store() -> tuple[int, int] | None:
     size as 0 B in the coverage UI without failing anywhere (ADR-0022).
     """
     try:
-        conn = sqlite3.connect("file:cti_stix.db?mode=ro", uri=True)
+        db = Path(DB_PATH).resolve()
+        if not db.exists():
+            return None
+        conn = sqlite3.connect(f"{db.as_uri()}?mode=ro", uri=True)
         names = {
             r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
@@ -80,7 +89,7 @@ def detection_store() -> tuple[int, int] | None:
             "(SELECT 1 FROM rule_bytes b WHERE b.rule_id = d.id)"
         ).fetchone()[0]
         return total, unmeasured
-    except sqlite3.Error:
+    except (sqlite3.Error, OSError, ValueError):
         return None
 
 

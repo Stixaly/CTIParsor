@@ -45,10 +45,20 @@ class SQLiteJobStorage(JobStorage):
         from api import db
         conn = db.get_conn()
         with conn:
+            # Standard upsert, valid on SQLite 3.24+ and PostgreSQL (ADR-0045).  The
+            # DO UPDATE mirrors what INSERT OR REPLACE did: a re-saved entity starts
+            # over, evidence columns included (REPLACE deleted the old row).
             conn.executemany(
-                """INSERT OR REPLACE INTO entities
+                """INSERT INTO entities
                    (id, job_id, value, entity_type, context, confidence, mitre_id, accepted, source)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT (id) DO UPDATE SET
+                       job_id = excluded.job_id, value = excluded.value,
+                       entity_type = excluded.entity_type, context = excluded.context,
+                       confidence = excluded.confidence, mitre_id = excluded.mitre_id,
+                       accepted = excluded.accepted, source = excluded.source,
+                       evidence_text = NULL, evidence_label = NULL,
+                       evidence_start = NULL, evidence_end = NULL""",
                 [
                     (
                         f"{job_id}_{e.value}_{e.entity_type.value}",
