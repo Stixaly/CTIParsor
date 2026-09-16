@@ -106,6 +106,25 @@ def exposure_warning(host: str, port: int) -> list[str]:
     ]
 
 
+def role_banner() -> list[str]:
+    """Who runs the pipeline and where reports are stored (ADR-0044/0045/0046).
+
+    The container entrypoint prints the equivalent line for `docker compose
+    logs`; a host install gets it here, so `CTIPARSOR_ROLE=api` with no
+    worker process — a silent way to leave every report stuck `queued` — is
+    visible in the startup log instead of only in the symptom.
+    """
+    from api import queue_loop
+    from api.db import DATABASE_URL, backend
+
+    role = queue_loop.role()
+    store = f"{backend()}" + (f" ({DATABASE_URL.split('@')[-1]})" if DATABASE_URL else "")
+    line = f"  role={role}  job store={store}"
+    if role == "api":
+        line += "  — reports are queued here but run by a separate `worker` process"
+    return [line]
+
+
 def _worker_warning(workers: int) -> list[str]:
     if workers <= 1:
         return []
@@ -127,6 +146,8 @@ def main() -> int:
         workers = 1
         print("  NOTE: API_RELOAD is on, forcing API_WORKERS=1 (uvicorn cannot reload with multiple workers).")
     print(f"  CTIParsor API → http://{host}:{port}")
+    for line in role_banner():
+        print(line)
     for line in exposure_warning(host, port):
         print(line)
     for line in _worker_warning(workers):

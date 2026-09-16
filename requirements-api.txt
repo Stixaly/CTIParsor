@@ -5,6 +5,9 @@ aiofiles>=23.0.0
 slowapi>=0.1.8
 python-magic>=0.4.27
 filetype>=1.2.0
+# PostgreSQL driver for the job store, used only when DATABASE_URL is set (ADR-0045).
+# Upper bound: psycopg 4 is not released; bump deliberately after `make test-fast`.
+psycopg[binary]>=3.2,<4
 # re2 is an optional performance dep (ReDoS protection) that requires system headers.
 # Install manually after: apt install libre2-dev && pip install re2
 # The pipeline falls back to stdlib `re` if it is absent.

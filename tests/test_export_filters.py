@@ -22,7 +22,8 @@ def _seed(db, job_id: str) -> None:
     job_technique_ids — there is no ttp/job_ttp table. `db` is the api.db module
     fixture, which also supplies now_iso().
     """
-    conn = db.get_conn()
+    conn = db.get_conn()          # job store
+    rconn = db.get_rule_conn()    # rule store (ADR-0045): the same object without DATABASE_URL
     ts = db.now_iso()
     conn.execute(
         "INSERT INTO jobs (id, original_filename, status, created_at, updated_at) "
@@ -44,17 +45,18 @@ def _seed(db, job_id: str) -> None:
         ("r6", "sigma", "sigmahq", "DRL-1.1", "medium", "Rule 6", "raw6"),
     ]
     for rid, fmt, corpus, lic, sev, title, raw in rules:
-        conn.execute(
+        rconn.execute(
             "INSERT INTO detection_rules "
             "(id, corpus, native_key, title, license, source_ref, raw, format, severity, is_canonical) "
             "VALUES (?,?,?,?,?,?,?,?,?,1)",
             (rid, corpus, f"key_{rid}", title, lic, f"src_{rid}", raw, fmt, sev),
         )
-        conn.execute(
+        rconn.execute(
             "INSERT INTO rule_techniques (rule_id, technique_id) VALUES (?,?)",
             (rid, "T1059"),
         )
     conn.commit()
+    rconn.commit()
 
 
 def test_facets_reports_totals_and_axes(temp_db_client: TestClient, temp_db):

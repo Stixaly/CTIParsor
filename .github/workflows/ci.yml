@@ -95,3 +95,137 @@ jobs:
             --cov=api \
             --cov=models \
             --cov-report=term-missing
+
+  # ── Container image — build it and run the smoke test (ADR-0044) ─────────────
+  # Keeps the Dockerfile from rotting: a dependency that no longer installs on
+  # python:3.12-slim, or a hardening flag Chromium stops tolerating, fails here.
+  container-image:
+    name: Container image (build + smoke)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: ctiparsor:ci
+          build-args: |
+            GIT_REV=${{ github.sha }}
+
+      - name: Smoke test (health, UI, non-root, read-only root, Chromium sandbox, PostgreSQL job store)
+        env:
+          CTI_IMAGE: ctiparsor:ci
+        run: |
+          cp .env.example .env
+          echo "CTI_DB_PASSWORD=$(openssl rand -hex 24)" >> .env
+          bash scripts/docker_smoke.sh --no-build --clean
+
+  # ── Publish to GHCR (ADR-0047) ────────────────────────────────────────────────
+  # Only after the smoke test passes, and only on main: a PR (including from a
+  # fork) never has packages:write regardless — this `if` is defense in depth,
+  # not the only control. Rebuilds with docker/build-push-action, but
+  # cache-from: type=gha reuses the smoke-test job's layers, so this is a cheap
+  # re-tag-and-push, not a second full build.
+  publish-image:
+    name: Publish image to GHCR
+    needs: container-image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Lowercase the image name (GHCR requires it; the repo owner is not)
+        id: image
+        run: echo "name=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags (sha-<full sha>, latest, and semver if triggered by a v*.*.* tag)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=sha,format=long,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GIT_REV=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── Job store on PostgreSQL (ADR-0045) ───────────────────────────────────────
+  # The same suite, with the temp_db fixture creating a disposable schema per
+  # test in a real server: every route, the worker and the coverage code run
+  # against PostgreSQL through the qmark/Row adapter.
+  postgres-tests:
+    name: Unit tests against PostgreSQL
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ctiparsor
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ctiparsor
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ctiparsor -d ctiparsor"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install API dependencies (includes psycopg)
+        run: pip install -r requirements-api.txt
+
+      - name: Install core pipeline dependencies (no torch / transformers)
+        run: |
+          pip install \
+            pydantic stix2 stix2-validator iocextract python-dotenv tenacity \
+            rapidfuzz pyahocorasick anthropic \
+            pdfplumber python-docx beautifulsoup4
+
+      - name: Install test dependencies
+        run: pip install pytest httpx
+
+      - name: Run the suite with the job store on PostgreSQL
+        env:
+          SKIP_HEAVY_MODELS: "1"
+          ANTHROPIC_API_KEY: "test-key-not-used"
+          LLM_PROVIDER: "anthropic"
+          CTIPARSOR_TEST_DATABASE_URL: postgresql://ctiparsor:ci@127.0.0.1:5432/ctiparsor
+        run: pytest tests/ --ignore=tests/eval_pipeline.py -q

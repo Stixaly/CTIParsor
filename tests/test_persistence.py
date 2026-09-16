@@ -6,6 +6,8 @@ an isolated temp database (see the `temp_db` fixture in conftest).
 """
 import json
 
+import pytest
+
 from models.schemas import EvidenceLabel
 from pipeline.stage3_llm import LLMEnrichmentResult, RelationshipExtracted
 
@@ -45,6 +47,10 @@ def test_backup_db_produces_consistent_single_file(temp_db, tmp_path, monkeypatc
     self-contained .db file that already contains committed rows — no -wal/-shm
     sidecars required to read it back."""
     import sqlite3
+
+    if temp_db.backend() == "postgresql":
+        pytest.skip("SQLite-only: with DATABASE_URL the job rows live in PostgreSQL, "
+                    "and backup_db() copies only the SQLite rule store (ADR-0045)")
 
     backup_dir = tmp_path / "backups"
     monkeypatch.setattr(temp_db, "BACKUP_DIR", backup_dir)
@@ -112,6 +118,11 @@ def test_finalize_same_filename_jobs_do_not_collide(temp_db):
 def test_migration_is_idempotent_and_adds_evidence_label(temp_db):
     # temp_db already ran init_db once; running again must not raise.
     temp_db.init_db()
+    if temp_db.backend() == "postgresql":
+        # The idempotency claim holds there too (init_db just ran twice), but the
+        # column probe below is a SQLite PRAGMA; the PostgreSQL DDL is IF NOT
+        # EXISTS end to end and carries every column from the start (ADR-0045).
+        pytest.skip("SQLite-only column probe (PRAGMA table_info)")
     cols = [r[1] for r in temp_db.get_conn().execute("PRAGMA table_info(relationships)").fetchall()]
     assert "evidence_label" in cols
     assert "evidence_text" in cols

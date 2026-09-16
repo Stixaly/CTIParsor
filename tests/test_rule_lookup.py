@@ -10,7 +10,7 @@ def _rule(corpus, key, *, techniques=(), raw="detection:\n  sel: x\n", license="
     )
 
 def test_lookup_returns_metadata_without_body_by_default(temp_db, temp_db_client):
-    conn = temp_db.get_conn()
+    conn = temp_db.get_rule_conn()
     replace_corpus_rules(conn, "sig", [_rule("sig", "a")])
 
     resp = temp_db_client.post("/api/rules/lookup", json={"rule_ids": ["sig:a"]})
@@ -25,7 +25,7 @@ def test_lookup_returns_metadata_without_body_by_default(temp_db, temp_db_client
     assert rule["format"] == "sigma"
 
 def test_lookup_returns_the_body_when_asked(temp_db, temp_db_client):
-    conn = temp_db.get_conn()
+    conn = temp_db.get_rule_conn()
     replace_corpus_rules(conn, "sig", [_rule("sig", "a")])
 
     resp = temp_db_client.post("/api/rules/lookup", json={"rule_ids": ["sig:a"], "include_body": True})
@@ -35,7 +35,7 @@ def test_lookup_returns_the_body_when_asked(temp_db, temp_db_client):
     assert "detection:" in rule["raw"]
 
 def test_lookup_carries_the_technique_tags(temp_db, temp_db_client):
-    conn = temp_db.get_conn()
+    conn = temp_db.get_rule_conn()
     replace_corpus_rules(conn, "sig", [_rule("sig", "a", techniques=["T1059", "T1027"])])
 
     resp = temp_db_client.post("/api/rules/lookup", json={"rule_ids": ["sig:a"]})
@@ -45,7 +45,7 @@ def test_lookup_carries_the_technique_tags(temp_db, temp_db_client):
     assert rule["techniques"] == ["T1027", "T1059"]
 
 def test_an_unknown_id_is_absent_not_an_error(temp_db, temp_db_client):
-    conn = temp_db.get_conn()
+    conn = temp_db.get_rule_conn()
     replace_corpus_rules(conn, "sig", [_rule("sig", "a")])
 
     resp = temp_db_client.post("/api/rules/lookup", json={"rule_ids": ["sig:a", "sig:unknown"]})
@@ -55,7 +55,7 @@ def test_an_unknown_id_is_absent_not_an_error(temp_db, temp_db_client):
     assert data["rules"][0]["id"] == "sig:a"
 
 def test_duplicate_ids_yield_one_entry(temp_db, temp_db_client):
-    conn = temp_db.get_conn()
+    conn = temp_db.get_rule_conn()
     replace_corpus_rules(conn, "sig", [_rule("sig", "a")])
 
     resp = temp_db_client.post("/api/rules/lookup", json={"rule_ids": ["sig:a", "sig:a", "sig:a"]})
@@ -74,7 +74,7 @@ def test_too_many_ids_is_rejected(temp_db_client):
     assert resp.status_code == 413
 
 def test_license_travels_with_the_rule(temp_db, temp_db_client):
-    conn = temp_db.get_conn()
+    conn = temp_db.get_rule_conn()
     replace_corpus_rules(conn, "sig", [_rule("sig", "a", license="none")])
 
     resp = temp_db_client.post("/api/rules/lookup", json={"rule_ids": ["sig:a"]})

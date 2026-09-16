@@ -8,6 +8,167 @@ sections group by theme rather than strict semver.
 
 ### Added
 
+- **The image publishes to GHCR; a queue-status endpoint reports backlog and
+  worker liveness (ADR-0047, ADR-0048).** Two operational blind spots named
+  while documenting the container/PostgreSQL/worker work, closed the same
+  session they were found. Every push to `main` now builds, smoke-tests, and
+  — only if that passes — publishes `ghcr.io/stixaly/ctiparsor` tagged
+  `sha-<full sha>` and `latest`; `packages: write` is scoped to that one job,
+  never to the build/smoke job that also compiles PR code. A host that only
+  wants to run the stack sets `CTI_IMAGE` in `.env` and does
+  `docker compose pull && docker compose up -d`, no local build — verified
+  against the real `compose.yaml`, not assumed: a pre-existing local tag
+  made `up` skip the build step entirely (6.4 s to running containers).
+  Separately, `GET /api/queue/status` answers job counts by status, the
+  oldest queued report's age against `API_QUEUE_MAX_DEPTH`, and one row per
+  active worker with its heartbeat age and whether it has crossed
+  `WORKER_LEASE_TIMEOUT_S` (`stale: true`) — the lease ADR-0046 introduced,
+  made visible instead of only inferable from logs. No new dependency
+  either way: no registry account beyond the repo's own GitHub, no
+  Prometheus client — both were weighed and rejected as disproportionate to
+  what was actually missing. `tests/test_queue_status_api.py` (8 tests, both
+  engines) and validated against the live compose stack: a worker row
+  appeared 1.1 s after a real upload and the endpoint returned to empty the
+  moment the report reached `for_review`.
+
+### Documentation
+
+- **`docs/architecture.md`** maps the deployment model that ADR-0044, 0045
+  and 0046 built: the two shapes (host install, container stack), every
+  piece and what it owns, the life of a report from upload to bundle as a
+  sequence diagram, the configuration surface, the security controls and
+  their stated limits, the sizing table, the decisions with their rejected
+  alternatives, and what comes next. **`docs/upgrading.md`** is the runbook
+  for an existing install — host or the first compose stack — with the
+  required steps, the optional ones, and a rollback for each. `CLAUDE.md`
+  gains the PostgreSQL test mode and the two-store rule; the README lists
+  the `docs/` pages; the container guide's diagram now shows the worker and
+  the database.
+
+### Added
+
+- **The pipeline runs in its own container; the `jobs` table is the queue
+  (ADR-0046).** `CTIPARSOR_ROLE` decides who runs reports: `all` (default)
+  is the single-process host install, unchanged in behaviour; `api` makes the
+  API a stateless front that only queues; `worker` is `python -m api.queue_loop`
+  — the same image with `command: worker` in compose, scalable with
+  `docker compose up -d --scale worker=2`. The claim that already existed
+  (`UPDATE … WHERE id=? AND status='queued'` with a rowcount check) was
+  atomic on both engines; what several workers needed was a **lease**: two
+  columns on `jobs` (`worker_id`, `heartbeat_at`), a heartbeat every
+  `WORKER_HEARTBEAT_S` (30 s) on the rows a worker runs, and a requeue of
+  `processing` rows whose stamp is older than `WORKER_LEASE_TIMEOUT_S`
+  (180 s) — the old `requeue_orphans()` reset *every* `processing` row and
+  would have stolen jobs a second worker was running. The subprocess per
+  report (ADR-0002) and its crash-to-`failed` watcher are untouched; the
+  in-memory slot counter is gone, the loop counts the subprocesses it
+  started. A stopping worker drains for `WORKER_DRAIN_S` then requeues what
+  is left, which Stage 3 checkpoints make cheap. Liveness is a file on tmpfs
+  touched every poll, so the worker container has a healthcheck without a
+  port. `run_pipeline_async()` keeps its three answers; in role `all` it
+  kicks the loop synchronously so a free slot still answers `"processing"`.
+  Every compose service now declares CPU and memory limits and reservations
+  from measured figures (app 2 CPU / 3 GB, worker 4 CPU / 6 GB per report,
+  postgres 1 / 512 MB, proxy 0.5 / 128 MB, bootstrap 2 / 4 GB, ollama
+  8 / 12 GB), each overridable in `.env`. No broker: ADR-0002's and ADR-0036's
+  reasons still hold. Tests: `tests/test_job_queue.py` rewritten (14 tests,
+  both engines) — atomic claim under 8 threads, lease semantics, heartbeat
+  scoping, slot accounting with a fake spawn, the three answers under each
+  role, `--once`. The smoke test now asserts that the worker container is
+  healthy, that the API runs as `api`, and that the sample report was
+  processed by the worker and not by the API.
+
+- **The job store can run on PostgreSQL; the rule corpus stays in SQLite
+  (ADR-0045).** `DATABASE_URL=postgresql://…` moves the eight per-report
+  tables — `jobs`, `entities`, `relationships`, `progress_events`,
+  `relationship_policy`, `report_figures`, `figure_reads`, `cve_cache` — to
+  PostgreSQL; unset, nothing changes and every host install keeps its single
+  `cti_stix.db`. ADR-0037 had accepted exactly this split and deferred it to
+  the arrival of authentication; the maintainer brought it forward. What made
+  it a days-long change rather than a rewrite, measured before starting: of
+  213 SQL call sites only seven statements on the per-job tables were
+  SQLite-only (`INSERT OR REPLACE` / `OR IGNORE`, now the standard
+  `ON CONFLICT` form both engines accept), every row is read by column name,
+  and that SQL contains no `%` or `LIKE` — so a 165-line adapter
+  (`api/db_backend.py`: `?`→`%s` outside string literals, a `sqlite3.Row`-like
+  tuple as psycopg's row factory, a wrapper whose `with` block does **not**
+  close the per-thread connection the way psycopg's own does) replaces the
+  ORM ADR-0036 rejected. The FTS5 `rule_text` table and `store.py`'s planner
+  hints cannot move, so `api/db.py` now has two getters: `get_conn()` is the
+  job store, `get_rule_conn()` always the SQLite corpus; without
+  `DATABASE_URL` they are the same connection. The coverage code is the one
+  place both stores meet (`job_technique_ids`, `job_observable_rows` and
+  their eight callers) and takes a `jobs_conn` keyword the routes pass.
+  PostgreSQL DDL uses `IDENTITY` and `DOUBLE PRECISION` (its `REAL` is a
+  4-byte float that would round every confidence score).
+  `scripts/migrate_jobs_to_postgres.py` copies an existing store in one
+  transaction — ids preserved, `progress_events` sequence realigned so SSE
+  resume points survive, `--dry-run` rolls back, a guard refuses a non-empty
+  target without `--append`. The compose stack gains a `postgres:17-alpine`
+  service on the internal network only: non-root (`user: 70:70`), every
+  capability dropped, read-only root, `scram-sha-256` for local and host
+  connections, `pg_isready` healthcheck the app waits for, its own `pg-data`
+  volume; `CTI_DB_PASSWORD` in `.env` is required and travels as `PGPASSWORD`,
+  never inside a URL; the `backend` network it shares with the app is
+  `internal: true`, so the database has no route out of the host even if
+  compromised (Ollama, which must pull models, moved to its own `llm`
+  network for that reason). Tests: `tests/test_db_backend.py` (adapter, no server),
+  `tests/test_db_postgres.py` (skipped unless `CTIPARSOR_TEST_DATABASE_URL`
+  is set; CI runs it against a service container), and the whole existing
+  suite runs unchanged on SQLite and, through the same `temp_db` fixture
+  creating a disposable schema per test, on PostgreSQL. `psycopg[binary]` is a
+  new dependency in `requirements-api.txt`. Measured on 2026-09-16: 1198
+  tests green on SQLite, 1206 on PostgreSQL 17 (76 tests had encoded the
+  single-store assumption and were rewritten to ask for both connections);
+  inside the compose stack the pre-existing SQLite job store was migrated
+  (47 rows, one transaction) and a report went through the API to a
+  53-object bundle with the job store on PostgreSQL.
+
+- **Container install: one hardened image and a compose file (ADR-0044).**
+  `docker compose up -d` is now the third install path beside `setup.sh` and
+  the air-gap bundle. The request arrived as "one container for PostgreSQL,
+  one for the app", then "app / worker / Chromium / database"; checked
+  against the code, none of those seams exist — the store is a SQLite file
+  opened in-process (ADR-0037 defers PostgreSQL until authentication), the
+  worker is a subprocess spawned from inside the API with no broker
+  (ADR-0002), and Chromium is launched in-process by Playwright. So: a
+  three-stage `Dockerfile` (Node builds the UI, a builder makes the venv with
+  CPU-only torch — the PyPI wheel drags 2.2 GB of CUDA libraries the image
+  would never use — and a slim runtime), two named volumes (`cti-state` for
+  the database, uploads, outputs and backups; `cti-cache` for the 2.6 GB of
+  models and the corpora, rebuildable), and `compose.yaml` with three optional
+  profiles: `bootstrap` (one-shot model warm-up + corpus sync + rule store),
+  `ollama` (a local LLM with no published port) and `proxy`
+  (`nginx-unprivileged` with TLS + htpasswd, the container form of
+  docs/deployment.md option C). Measured: 4.48 GB image, 3 min 24 s cold
+  build, healthy 7 s after start, bootstrap 13 min (3 models, 14 corpora,
+  87,480 rules), and a real report through the API to a 63-object bundle in
+  5 min 42 s with the LLM stage on a LAN Ollama. Hardening, each verified by
+  `scripts/docker_smoke.sh`: non-root uid 1001, read-only root filesystem with
+  tmpfs scratch, every capability dropped, `no-new-privileges`, a pids limit,
+  the API published on 127.0.0.1 only, secrets passed by `env_file` and
+  excluded from every layer by `.dockerignore`. The Chromium sandbox stays
+  **on**: `docker/seccomp-chromium.json` is Docker's default profile plus user
+  namespaces — and plus `chroot`, because with all capabilities dropped
+  Playwright's stock profile still gated that syscall on `CAP_SYS_CHROOT` and
+  the zygote died with `Check failed: sys_chroot("/proc/self/fdinfo/")`; the
+  kernel enforces the capability inside the zygote's own namespace, so
+  allowing the syscall grants nothing to the container. Two smaller findings
+  from the build: `python-magic` needs `libmagic1`, which `python:*-slim`
+  does not ship (the upload MIME check was silently falling back to
+  `filetype`), and the optional `re2>=0.2.20` pin cannot build on Python 3.12
+  (`PyUnicode_AS_UNICODE`), so no current install actually has the ReDoS
+  guard it advertises — the image reports this as a warning, a follow-up
+  covers the `google-re2` shim. Code changes are three env overrides so the
+  store can live on a volume and a bundle still records its revision without
+  a `.git` directory: `CTIPARSOR_DB_PATH`, `CTIPARSOR_DB_BACKUP_DIR`
+  (`api/db.py`, which now creates the parent directory) and
+  `CTIPARSOR_GIT_REV` (`api/run_config.py`, git wins when present);
+  `scripts/check_stages.py` resolves its paths from the repository root.
+  New: `docs/docker.md`, `make docker-build|up|bootstrap|smoke|logs|down`, a
+  CI job that builds the image and runs the smoke test,
+  `tests/test_container_env.py`.
+
 - **The API warns at startup if Chromium isn't installed, instead of failing
   on the first URL capture.** `pipeline/web_capture.py` already had a precise
   diagnostic for this (`_launch_hint`, "Chromium is not installed for the

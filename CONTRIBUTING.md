@@ -38,6 +38,50 @@ cd frontend && npx tsc --noEmit   # frontend type-check
   the developer's `cti_stix.db`. Reuse them for any new worker/route test.
 - See [`TESTING.md`](TESTING.md) for the full strategy and the open coverage gaps.
 
+### Two stores — run DB and queue tests on both engines
+
+Since ADR-0044/0045/0046, `api.db.get_conn()` is the **job store** (SQLite by
+default, PostgreSQL when `DATABASE_URL` is set) and `api.db.get_rule_conn()`
+is the **rule store** (always SQLite — it's an FTS5 index). Without
+`DATABASE_URL` both return the same connection, which is exactly why a test
+that only exercises SQLite can pass while being wrong on PostgreSQL: 76 tests
+in this codebase did, because they wrote rule tables through the job-store
+connection.
+
+**If your change touches `api/db.py`, `api/db_backend.py`,
+`api/queue_loop.py`, or any raw SQL, run the suite against PostgreSQL before
+opening a PR:**
+
+```bash
+docker run -d --name ctiparsor-pg-dev -e POSTGRES_PASSWORD=devpass \
+  -e POSTGRES_USER=ctiparsor -e POSTGRES_DB=ctiparsor \
+  -p 127.0.0.1:5433:5432 postgres:17-alpine   # once
+
+CTIPARSOR_TEST_DATABASE_URL=postgresql://ctiparsor:devpass@127.0.0.1:5433/ctiparsor \
+  pytest tests/ -q
+```
+
+The `temp_db` fixture creates a disposable PostgreSQL schema per test when the
+variable is set, and a temp SQLite file otherwise — same tests, both engines.
+A function that reads `entities` (the job store) from inside `pipeline/detection`
+(the rule store) takes a `jobs_conn` keyword; see `docs/architecture.md` for
+the full picture. CI runs both automatically (`fast-tests` on SQLite,
+`postgres-tests` against a service container).
+
+### Container changes
+
+If your change touches `Dockerfile`, `compose.yaml`, `docker/`, or
+`scripts/docker_smoke.sh`, verify it builds and passes the smoke test before
+opening a PR:
+
+```bash
+make docker-smoke                          # build, start api+worker+postgres, verify
+bash scripts/docker_smoke.sh --no-build --job   # also process a sample report end to end
+```
+
+(On Windows with Docker only inside WSL, run `wsl -u root -e bash -c "cd
+/mnt/c/... && make docker-smoke"` — see `docs/docker.md`.)
+
 ## Where changes go (extension seams)
 
 | To add… | Touch |
@@ -48,6 +92,9 @@ cd frontend && npx tsc --noEmit   # frontend type-check
 | a detection-rule format | a new `RuleCorpusAdapter` in `pipeline/detection/` + register it in `registry.py` |
 | an API route | `api/routes/`, then `app.include_router(...)` in `api/main.py` |
 | a frontend page | `frontend/src/pages/` + a route in `App.tsx` (+ a nav link in `Layout.tsx`) |
+| a job-store table or column | the DDL/migration pair in `api/db.py` — **both** `_JOB_STORE_MIGRATIONS_SQLITE` and `_JOB_STORE_DDL_POSTGRES` (ADR-0045); document it in the README's Database schema section |
+| queue / worker behaviour | `api/queue_loop.py` (the claim, lease, heartbeat) — `api/worker.py` only owns spawning the subprocess (ADR-0046) |
+| a compose service or resource limit | `compose.yaml`, then `docs/docker.md`'s sizing table and `.env.example` |
 
 ## Conventions
 

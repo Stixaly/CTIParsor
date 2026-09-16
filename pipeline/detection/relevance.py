@@ -18,6 +18,7 @@ import math
 import sqlite3
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from pipeline.detection.control import is_ubiquitous
 from pipeline.detection.observables import Observable, observables_from_entities, report_platform
@@ -29,6 +30,9 @@ from pipeline.detection.store import (
     rule_details,
     techniques_for_rules,
 )
+
+if TYPE_CHECKING:  # the job-store connection type (ADR-0045); annotation only
+    from api.db_backend import DBConnection
 
 # ── Tunables — every weight in the ranking lives here ────────────────────────
 
@@ -503,11 +507,12 @@ def rank_rules(
     }
 
 
-def job_observable_rows(conn: sqlite3.Connection, job_id: str) -> list[dict]:
+def job_observable_rows(conn: DBConnection, job_id: str) -> list[dict]:
     """A job's accepted (or still-pending) entities, as plain mappings.
 
     Mirrors `coverage.job_technique_ids`' accept filter so the proposal list and
-    the coverage matrix always describe the same report.
+    the coverage matrix always describe the same report.  `conn` is the JOB
+    store (PostgreSQL or SQLite, ADR-0045), not the rule store.
     """
     rows = conn.execute(
         "SELECT value, entity_type FROM entities "
@@ -517,14 +522,20 @@ def job_observable_rows(conn: sqlite3.Connection, job_id: str) -> list[dict]:
     return [{"value": r[0], "entity_type": r[1]} for r in rows]
 
 
-def propose_for_job(conn: sqlite3.Connection, job_id: str, *, limit: int = 200) -> dict:
-    """Ranked, evidence-backed rule proposals for one report (ADR-0014)."""
+def propose_for_job(
+    conn: sqlite3.Connection, job_id: str, *, limit: int = 200,
+    jobs_conn: DBConnection | None = None,
+) -> dict:
+    """Ranked, evidence-backed rule proposals for one report (ADR-0014).
+
+    `conn` is the rule store; `jobs_conn` the job store when the two differ
+    (ADR-0045), None meaning "same connection"."""
     from pipeline.detection.coverage import job_technique_ids
 
     result = rank_rules(
         conn,
-        job_observable_rows(conn, job_id),
-        job_technique_ids(conn, job_id),
+        job_observable_rows(jobs_conn or conn, job_id),
+        job_technique_ids(jobs_conn or conn, job_id),
         limit=limit,
     )
     return {"job_id": job_id, **result}

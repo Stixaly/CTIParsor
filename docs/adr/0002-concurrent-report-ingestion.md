@@ -154,3 +154,20 @@ Still accepted, and the checklist above no longer matches the code:
 | 5 document the knobs | done | `docs/deployment.md` §"WORKER_MAX_CONCURRENT" |
 
 ADR-0036 re-plans items 1 and 4 and is the place to track them.
+
+## Status review (2026-09-16)
+
+Item 1 (persistent pool) is still **open** — still spawn-per-job, as ADR-0036
+also records. What did change: the dispatch and concurrency-limiting code
+this ADR describes moved out of `api/worker.py` into `api/queue_loop.py`
+(ADR-0046), and the mechanism changed shape.
+
+| Item | State on 2026-09-16 | Evidence |
+|---|---|---|
+| queue / dispatch | **moved**, not just "done" | the claim is now an atomic `UPDATE … WHERE status='queued'` in `queue_loop.claim_next_queued`, not the in-process `_dispatch_next` this ADR shipped |
+| the in-memory `_job_counter` this ADR added | **removed** | `WorkerLoop` counts the subprocesses it started instead; see ADR-0046 §"What building it changed" |
+| "one worker process" assumption | **no longer holds** | `CTIPARSOR_ROLE=worker` runs several worker *containers* against one job store, which is why the counter had to become a database-backed lease (`worker_id`, `heartbeat_at`) rather than a local variable |
+| subprocess-per-report, crash → `failed` | **unchanged** | `api/worker.py::_spawn_job`, still the memory and crash boundary this ADR designed |
+
+The persistent pool this ADR left open is unaffected by ADR-0046 and remains
+the next step (ADR-0044 §8 names it).

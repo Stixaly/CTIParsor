@@ -92,6 +92,48 @@ python run_api.py
 
 ---
 
+## Quick start — Docker
+
+One hardened image and a compose file (ADR-0044); nothing is installed on the
+host but Docker itself. Full guide: [docs/docker.md](docs/docker.md); the
+architecture with its data flow: [docs/architecture.md](docs/architecture.md);
+moving an existing install: [docs/upgrading.md](docs/upgrading.md).
+
+```bash
+cp .env.example .env            # set your LLM provider / key
+docker compose build            # or: make docker-build (stamps the git revision)
+docker compose up -d            # → http://127.0.0.1:8000
+docker compose --profile bootstrap run --rm bootstrap   # once, 10–20 min: models, corpora, rule store
+```
+
+What the image does, and does not, do:
+
+- runs as a non-root user on a **read-only root filesystem** with every Linux
+  capability dropped; the Chromium sandbox for the URL tab stays **on** via
+  the seccomp profile in `docker/` (the usual `--no-sandbox` shortcut is not
+  taken);
+- splits the API from the pipeline: `app` only queues reports, one or more
+  `worker` containers claim and run them from the PostgreSQL job store
+  (ADR-0046, `--scale worker=2`), each with its own measured CPU and memory
+  limit;
+- keeps uploads, outputs and the rule corpus on the `cti-state` volume, the
+  reports in the `postgres` service (ADR-0045), and the 2.6 GB of models plus
+  the corpora on the rebuildable `cti-cache` volume;
+- publishes the API on **127.0.0.1 only**, the same posture as `run_api.py`;
+  the `proxy` profile adds TLS and a password in front (`docker compose
+  --profile proxy up -d`), the `ollama` profile a local LLM with no published
+  port;
+- adds isolation, **not authentication** — [docs/deployment.md §2](docs/deployment.md#2-what-no-authentication-actually-means)
+  applies unchanged.
+
+There is no database container: the store is a SQLite file the API opens
+in-process (ADR-0037 defers PostgreSQL until authentication exists), and the
+per-report worker is a subprocess spawned inside the API, not a separate
+service. `bash scripts/docker_smoke.sh` builds, starts and verifies all of the
+above.
+
+---
+
 ## Offline (air-gapped) installation
 
 `setup.sh` normally fetches from twelve network sources: apt, NodeSource, PyPI,
@@ -391,6 +433,11 @@ A `Makefile` wraps the most common workflows. Requires `make` (standard on Linux
 | `make frontend-dev` | Start Vite dev server with HMR (dev frontend) |
 | `make check` | Diagnostic: list which pipeline stages are available |
 | `make check-docs` | Verify every number claimed in this README against the source of truth |
+| `make docker-build` | Build the container image, stamping the git revision (ADR-0044) |
+| `make docker-up` | Start the container stack on `http://127.0.0.1:8000` |
+| `make docker-bootstrap` | One-shot in the container: download models, clone corpora, build the rule store |
+| `make docker-smoke` | Build, start and verify the image (health, non-root, read-only root, Chromium sandbox) |
+| `make docker-logs` / `make docker-down` | Follow the API logs / stop the stack (volumes are kept) |
 | `make corpora` | Clone/pull the rule corpora (Sigma, Suricata, YARA) |
 | `make detection-index` | Parse the clones into the rule store (dedups, writes rule sizes) |
 | `make backfill-rules` | Backfill rule body sizes on a store built before ADR-0022 |
@@ -777,6 +824,32 @@ default rather than being read as "on". (Each flag used to parse its own
 spelling — `ENABLE_CONSENSUS=1` did *not* enable consensus, while
 `ENABLE_STIX_VERIFICATION=1` did. `scripts/check_flag_equivalence.py` reports
 every value whose meaning differs between the old and current readings.)
+
+### Job store — SQLite or PostgreSQL
+
+Two stores, one switch (ADR-0045). The **rule store** — the detection corpus,
+an FTS5 index rebuilt by `make detection-index` — is always the SQLite file
+`cti_stix.db`. The **job store** — jobs, entities, relationships, progress
+events, the relationship policy, figure provenance, the figure and CVE caches
+— is the same file by default, or PostgreSQL when `DATABASE_URL` is set:
+
+```dotenv
+DATABASE_URL=postgresql://ctiparsor@localhost:5432/ctiparsor
+PGPASSWORD=...          # read by the driver; keeps the password out of the URL
+```
+
+Nothing else changes: the same `?`-placeholder SQL runs on both engines
+through a small adapter (`api/db_backend.py`), rows are read by column name
+either way, and the seven per-job upserts use the standard `ON CONFLICT`
+syntax both engines accept. An existing install moves its rows once:
+
+```bash
+python scripts/migrate_jobs_to_postgres.py            # --dry-run first if you like
+```
+
+The compose stack runs PostgreSQL for you (`docker compose up` starts a
+hardened `postgres` service; set `CTI_DB_PASSWORD` in `.env`). `pg_dump` is
+the backup tool for that store; `cti_stix.db` still needs its own copy.
 
 ### LLM provider
 
@@ -1177,6 +1250,7 @@ CTIParsor/
 │   ├── measure_corpus_ingest.py   # Ingest chosen corpora into a scratch DB, report per-format stats
 │   ├── sync_corpora.py            # Clone/pull rule corpora (ambient git auth) + tarball fetch (ET Open)
 │   ├── build_detection_index.py   # Parse clones → detection-rule store
+│   ├── migrate_jobs_to_postgres.py # One-shot copy of an existing job store into PostgreSQL (ADR-0045)
 │   ├── build_rule_atoms.py        # Backfill rule_atoms from stored bodies (ADR-0014)
 │   ├── build_rule_text.py         # FTS5 index over rule title+description (ADR-0031)
 │   ├── backfill_rule_bytes.py     # Backfill rule_bytes on an older store (ADR-0022)
@@ -1197,9 +1271,11 @@ CTIParsor/
 │
 ├── api/
 │   ├── main.py                    # FastAPI app, CORS, SPA static serving
-│   ├── db.py                      # SQLite (WAL, thread-local connections)
-│   ├── worker.py                  # Background pipeline + SSE emitter
+│   ├── db.py                      # Two stores: job store (SQLite or PostgreSQL via DATABASE_URL), rule store (SQLite, FTS5) — ADR-0045
+│   ├── db_backend.py              # PostgreSQL adapter: `?`→`%s`, sqlite3.Row-like rows, non-closing `with`
+│   ├── worker.py                  # The pipeline subprocess: spawn, crash-to-`failed`, SSE emitter
 │   │                              #   └─ _lexicon_rescan() on Finalize
+│   ├── queue_loop.py              # Claims queued jobs, heartbeats, requeues orphans (ADR-0046)
 │   ├── run_config.py              # Capture a job's execution config so its bundle is reproducible (ADR-0024)
 │   ├── storage.py                 # Storage abstraction for pipeline job state
 │   ├── logging_config.py          # Centralized logging configuration
@@ -1211,6 +1287,7 @@ CTIParsor/
 │       ├── relationships.py       # CRUD /api/jobs/{id}/relationships
 │       ├── progress.py            # GET /api/jobs/{id}/progress (SSE)
 │       ├── coverage.py            # GET /api/jobs/{id}/coverage + detection-corpora
+│       ├── queue.py               # GET /api/queue/status — backlog + worker liveness (ADR-0048)
 │       ├── settings.py            # Corpora management (ADR-0007)
 │       ├── policy.py              # Relationship policy: pinned rules + completion block
 │       └── _common.py             # Guards shared by the job-scoped route modules
@@ -1271,13 +1348,23 @@ CTIParsor/
 │
 ├── detection_corpora.yaml         # Public corpus registry — Sigma, YARA, Suricata (committed)
 ├── detection_corpora.local.yaml.example  # Private corpus overlay template
-├── docs/adr/                      # Architecture Decision Records (see docs/adr/README.md)
+├── docs/
+│   ├── architecture.md            # Deployment architecture: processes, stores, data flow, sizing
+│   ├── docker.md                  # Running the container stack day to day
+│   ├── upgrading.md               # Runbook: moving an existing install to PostgreSQL / workers
+│   ├── deployment.md              # Host installs: bind address, exposure, systemd
+│   ├── detection-coverage.md      # The coverage matrix, walkthrough
+│   └── adr/                       # Architecture Decision Records (see docs/adr/README.md)
 ├── TESTING.md                     # Test strategy
 ├── .env                           # Secrets (gitignored)
 ├── .env.example                   # Configuration template
 ├── requirements.txt               # Pipeline dependencies
 ├── requirements-api.txt           # API server dependencies
-└── setup.sh                       # One-shot setup for Linux / WSL
+├── setup.sh                       # One-shot setup for Linux / WSL
+├── Dockerfile                     # 3-stage image: UI build, venv build, slim runtime (ADR-0044)
+├── compose.yaml                   # app + profiles bootstrap / ollama / proxy, hardened
+└── docker/                        # entrypoint, model warm-up, seccomp profile, nginx config
+```
 ```
 
 ---
@@ -1480,6 +1567,22 @@ data: {"status":"for_review"}
 | `POST` | `/api/rules/lookup` | Metadata for arbitrary canonical rule ids, bodies on demand (`include_body`, ≤ 500 ids). Not job-scoped — the proposals panel shows rules outside the report's tag join by construction |
 | `GET` | `/api/detection-corpora` | Per-corpus rule counts in the store |
 
+### Queue
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/queue/status` | Backlog and worker liveness (ADR-0048): job counts by status, oldest-queued age, and per-worker heartbeat freshness against `WORKER_LEASE_TIMEOUT_S`. Same shape on SQLite or PostgreSQL. Unauthenticated, like every other GET route (SECURITY.md). |
+
+```json
+// GET /api/queue/status
+{ "role": "api", "backend": "postgresql",
+  "counts": { "queued": 2, "processing": 1, "failed": 0, "for_review": 12, "completed": 40 },
+  "queue": { "depth": 2, "max_depth": 50,
+             "oldest_queued_job_id": "3f2a...", "oldest_queued_seconds": 42.5 },
+  "workers": [ { "worker_id": "worker-1:7:a1b2c3", "running_jobs": 1,
+                 "oldest_heartbeat_seconds_ago": 3.2, "stale": false } ] }
+```
+
 ```json
 // GET /api/jobs/{id}/coverage
 { "techniques_total": 12, "validated": false,
@@ -1537,6 +1640,13 @@ Manages the gitignored local overlay only — the committed registry is never ed
 
 ## Database schema
 
+The SQLite layout, which is the whole database on a host install. With
+`DATABASE_URL` set, the per-job tables below (`jobs` through `cve_cache`) live
+in PostgreSQL instead, from the twin DDL in `api/db.py`
+(`_JOB_STORE_DDL_POSTGRES`: `IDENTITY` for `AUTOINCREMENT`, `DOUBLE PRECISION`
+for `REAL`, same names, same columns); the detection-rule tables never move
+(ADR-0045).
+
 ```sql
 CREATE TABLE jobs (
     id              TEXT PRIMARY KEY,
@@ -1549,6 +1659,9 @@ CREATE TABLE jobs (
     pap_level       TEXT,           -- per-job PAP statement marking
     run_config_json TEXT,           -- run-config snapshot (ADR-0024): a bundle
                                     -- stays explainable after the policy changes
+    worker_id       TEXT,           -- which worker claimed this job (ADR-0046)
+    heartbeat_at    TEXT,           -- last time that worker reported alive;
+                                    -- stale past WORKER_LEASE_TIMEOUT_S -> requeued
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );

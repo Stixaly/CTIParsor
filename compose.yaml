@@ -1,0 +1,297 @@
+# CTIParsor — Docker Compose stack
+# See docs/docker.md and ADR-0044 for the full deployment model.
+#
+#   docker compose up -d                                   # API + web UI on http://127.0.0.1:8000
+#   docker compose --profile bootstrap run --rm bootstrap   # once: models, corpora, rule store
+#   docker compose --profile proxy --profile ollama up -d   # optional: TLS+password front, local LLM
+
+name: ctiparsor
+
+x-app-image: &app-image
+  image: ${CTI_IMAGE:-ctiparsor:local}
+  build:
+    context: .
+    dockerfile: Dockerfile
+    args:
+      GIT_REV: ${CTI_GIT_REV:-}
+      INSTALL_CAPTURE: ${CTI_INSTALL_CAPTURE:-true}
+
+# Where the app finds its job store (ADR-0045).  The password rides in
+# PGPASSWORD, which the driver reads, so it needs no percent-encoding and never
+# sits inside a URL that a log line could print.
+x-job-store: &job-store
+  DATABASE_URL: postgresql://${CTI_DB_USER:-ctiparsor}@postgres:5432/${CTI_DB_NAME:-ctiparsor}
+  PGPASSWORD: ${CTI_DB_PASSWORD:?Set CTI_DB_PASSWORD in .env (e.g. openssl rand -hex 24)}
+
+x-app-hardening: &app-hardening
+  read_only: true                      # the image is immutable at runtime; state lives on the volumes
+  tmpfs:
+    - /tmp:mode=1777                   # Chromium profiles, matplotlib, scratch files
+    - /home/ctiparsor:uid=1001,gid=1001,mode=0700
+  cap_drop:
+    - ALL                              # nothing in the pipeline needs a capability
+  security_opt:
+    - no-new-privileges:true           # no setuid escalation, even if a binary had the bit
+    - seccomp=./docker/seccomp-chromium.json   # Docker's default profile + user namespaces, so the Chromium sandbox stays ON
+  # The pids cap (a fork bomb from a hostile document stops there) lives in
+  # each service's deploy.resources.limits block: Compose maps pids_limit onto
+  # that key and refuses the two side by side.
+  logging:
+    driver: json-file
+    options:
+      max-size: "50m"
+      max-file: "5"
+
+services:
+  app:
+    <<: [*app-image, *app-hardening]
+    env_file: ${CTI_ENV_FILE:-.env}   # the same file that configures a host install
+    environment:
+      # Fixed on purpose: a value in .env must not be able to bind the API to
+      # loopback inside the container (unreachable) or turn on the reloader.
+      API_HOST: 0.0.0.0
+      API_PORT: "8000"
+      API_RELOAD: "0"
+      # The API only accepts and queues reports; the `worker` service runs
+      # them (ADR-0046).  This container therefore never loads a model.
+      CTIPARSOR_ROLE: api
+      <<: *job-store
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${CTI_BIND:-127.0.0.1}:${CTI_PORT:-8000}:8000"
+    volumes:
+      - cti-state:/app/state
+      - cti-cache:/app/cache
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # reach an Ollama / LM Studio / vLLM on the host
+    networks:
+      - frontend      # egress (LLM APIs, HuggingFace, corpora) and the proxy
+      - backend       # the database, internal only
+      - llm           # the optional ollama service
+    # Measured 130 MB idle; a Settings-page corpus rebuild parses 87k rules in
+    # this process and peaked at 2.2 GB, hence the headroom.
+    deploy:
+      resources:
+        limits:
+          cpus: "${CTI_APP_CPUS:-2}"
+          memory: ${CTI_APP_MEMORY:-3g}
+          pids: 4096
+        reservations:
+          memory: 512m
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  # The pipeline (ADR-0046): claims queued reports from the job store, runs
+  # each in an isolated subprocess, heartbeats the rows it owns.  Same image and
+  # hardening as `app`; no port; shares the two volumes (uploads in, outputs
+  # out) and reaches the LLM providers through `frontend`.  Scale it with
+  # `docker compose up -d --scale worker=2` — each replica takes its own memory
+  # limit, and the lease on `jobs` keeps them from running the same report.
+  worker:
+    <<: [*app-image, *app-hardening]
+    command: ["worker"]
+    env_file: ${CTI_ENV_FILE:-.env}
+    environment:
+      CTIPARSOR_ROLE: worker
+      WORKER_MAX_CONCURRENT: ${WORKER_MAX_CONCURRENT:-1}
+      <<: *job-store
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - cti-state:/app/state
+      - cti-cache:/app/cache
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - frontend
+      - backend
+      - llm
+    # The loop touches this file on every poll (WORKER_POLL_S, 2 s); two minutes
+    # without a touch means the supervisor is wedged, not merely busy.
+    healthcheck:
+      test: ["CMD-SHELL", "find /tmp/ctiparsor-worker.alive -mmin -2 | grep -q ."]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    # Each running report holds ~4.4 GB (ADR-0037); the limit is
+    # WORKER_MAX_CONCURRENT x 4.4 GB + 1 GB for the supervisor.  When it is hit
+    # the OOM killer takes the pipeline subprocess, and the job is marked
+    # failed; the supervisor survives.  OMP_NUM_THREADS=2 per subprocess, so
+    # 4 CPUs serve one report comfortably.
+    deploy:
+      resources:
+        limits:
+          cpus: "${CTI_WORKER_CPUS:-4}"
+          memory: ${CTI_WORKER_MEMORY:-6g}
+          pids: 4096
+        reservations:
+          memory: 4g
+    restart: unless-stopped
+    # WORKER_DRAIN_S (60 s) for running reports to finish, then they are
+    # requeued and resume from their Stage 3 checkpoint on the next worker.
+    stop_grace_period: 90s
+
+  # Same image and hardening, one-shot, no port.
+  bootstrap:
+    <<: [*app-image, *app-hardening]
+    profiles: [bootstrap]
+    command: ["bootstrap"]
+    env_file: ${CTI_ENV_FILE:-.env}
+    environment:
+      <<: *job-store
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - cti-state:/app/state
+      - cti-cache:/app/cache
+    networks:
+      - frontend      # bootstrap downloads models and clones corpora: it needs egress
+      - backend
+    # Model downloads plus the same 2.2 GB rule parse the API's rebuild does.
+    deploy:
+      resources:
+        limits:
+          cpus: "${CTI_BOOTSTRAP_CPUS:-2}"
+          memory: ${CTI_BOOTSTRAP_MEMORY:-4g}
+          pids: 4096
+    restart: "no"
+    healthcheck:
+      disable: true
+
+  # The job store (ADR-0045): jobs, entities, relationships, progress events,
+  # policy, figure and CVE caches.  The detection-rule corpus stays in the
+  # SQLite file on cti-state.  No published port: only the app reaches it.
+  # The official image runs as its `postgres` user (uid 70 on alpine) when told
+  # to; with the data directory on a named volume nothing needs root, so every
+  # capability is dropped and the root filesystem is read-only (the socket
+  # directory and /tmp are tmpfs).  Back it up with pg_dump (docs/docker.md).
+  postgres:
+    image: postgres:17-alpine
+    user: "70:70"
+    environment:
+      POSTGRES_USER: ${CTI_DB_USER:-ctiparsor}
+      POSTGRES_DB: ${CTI_DB_NAME:-ctiparsor}
+      POSTGRES_PASSWORD: ${CTI_DB_PASSWORD:?Set CTI_DB_PASSWORD in .env (e.g. openssl rand -hex 24)}
+      # scram-sha-256 for every connection, local socket included (the image's
+      # default only applies it to host connections).
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    tmpfs:
+      - /tmp
+      - /run/postgresql
+    read_only: true
+    shm_size: 256m                       # PostgreSQL's shared buffers; Docker's 64 MB default is short
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${CTI_DB_USER:-ctiparsor} -d ${CTI_DB_NAME:-ctiparsor}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    # The job store is a few MB per report; the default shared_buffers of
+    # 128 MB and a handful of connections fit comfortably in 512 MB.
+    deploy:
+      resources:
+        limits:
+          cpus: "${CTI_DB_CPUS:-1}"
+          memory: ${CTI_DB_MEMORY:-512m}
+        reservations:
+          memory: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    networks:
+      - backend
+    restart: unless-stopped
+
+  # No published port: only the app reaches it, at OLLAMA_BASE_URL=http://ollama:11434
+  # Pull a model once with: docker compose exec ollama ollama pull mistral
+  # GPU passthrough needs the NVIDIA container toolkit plus a deploy.resources.reservations.devices block:
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: all
+  #             capabilities: [gpu]
+  ollama:
+    profiles: [ollama]
+    image: ollama/ollama:0.34.1
+    volumes:
+      - ollama-models:/root/.ollama
+    networks:
+      - llm           # not `backend`: ollama needs egress to pull models, the database must not have any
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # Sized for a 7B model in Q4 on CPU (~5-6 GB resident plus context).  A
+    # 27B model needs ~18 GB and a GPU: raise CTI_OLLAMA_MEMORY and add the
+    # device reservation above.
+    deploy:
+      resources:
+        limits:
+          cpus: "${CTI_OLLAMA_CPUS:-8}"
+          memory: ${CTI_OLLAMA_MEMORY:-12g}
+    restart: unless-stopped
+
+  # TLS + HTTP basic auth in front of the app (docs/deployment.md option C).
+  # The app port stays on loopback, the proxy is the only thing published on the network.
+  # Certificate, key and htpasswd are created by the operator (see docs/docker.md).
+  proxy:
+    profiles: [proxy]
+    image: nginxinc/nginx-unprivileged:1.28-alpine
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "${CTI_TLS_BIND:-0.0.0.0}:${CTI_TLS_PORT:-8443}:8443"
+    volumes:
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./docker/nginx/certs:/etc/nginx/certs:ro
+      - ./docker/nginx/htpasswd:/etc/nginx/htpasswd:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - frontend
+    deploy:
+      resources:
+        limits:
+          cpus: "${CTI_PROXY_CPUS:-0.5}"
+          memory: ${CTI_PROXY_MEMORY:-128m}
+    restart: unless-stopped
+
+# Three networks, each with one job.  `backend` is internal: Docker gives it no
+# default route, so the database cannot reach the internet even if compromised —
+# the app still can, through `frontend`.  The proxy never sees the database or
+# the LLM; the LLM never sees the proxy or the database.
+networks:
+  frontend: {}
+  backend:
+    internal: true
+  llm: {}
+
+# cti-state and pg-data are what a backup must contain (uploads, outputs and
+# the rule store on the first; the job store on the second — pg_dump it);
+# cti-cache can be dropped and rebuilt with bootstrap.
+volumes:
+  cti-state: {}
+  cti-cache: {}
+  pg-data: {}
+  ollama-models: {}

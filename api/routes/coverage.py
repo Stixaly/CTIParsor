@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from api.db import get_conn
+from api.db import get_conn, get_rule_conn
 from api.routes._common import require_job
 from pipeline.detection.artifacts import coverage_with_phases
 from pipeline.detection.coverage import (
@@ -29,11 +29,17 @@ from pipeline.detection.store import corpus_counts, lookup_rules, rules_for_tech
 router = APIRouter(prefix="/api", tags=["coverage"])
 
 
+# Two stores meet in this module (ADR-0045): `get_conn()` is the job store
+# (PostgreSQL when DATABASE_URL is set), `get_rule_conn()` the SQLite rule
+# corpus.  Every coverage function takes the rule store first and the job
+# store as `jobs_conn`; without DATABASE_URL both are the same connection.
+
+
 @router.get("/jobs/{job_id}/coverage")
 def get_coverage(job_id: str):
-    with get_conn() as conn:
-        require_job(conn, job_id)
-        return compute_for_job(conn, job_id)
+    with get_conn() as jobs_conn:
+        require_job(jobs_conn, job_id)
+        return compute_for_job(get_rule_conn(), job_id, jobs_conn=jobs_conn)
 
 
 @router.get("/jobs/{job_id}/coverage/rules")
@@ -43,9 +49,9 @@ def get_coverage_report_rules(job_id: str):
     Backs the Review "Detections" tab. Declared before the `{technique_id}` route
     so the literal `/rules` path wins. Metadata only — no rule bodies.
     """
-    with get_conn() as conn:
-        require_job(conn, job_id)
-        return rules_for_job(conn, job_id)
+    with get_conn() as jobs_conn:
+        require_job(jobs_conn, job_id)
+        return rules_for_job(get_rule_conn(), job_id, jobs_conn=jobs_conn)
 
 
 @router.get("/jobs/{job_id}/detections/proposals")
@@ -59,9 +65,9 @@ def get_detection_proposals(job_id: str, limit: int = 200):
     rule bodies.
     """
     limit = max(1, min(limit, 1000))
-    with get_conn() as conn:
-        require_job(conn, job_id)
-        return propose_for_job(conn, job_id, limit=limit)
+    with get_conn() as jobs_conn:
+        require_job(jobs_conn, job_id)
+        return propose_for_job(get_rule_conn(), job_id, limit=limit, jobs_conn=jobs_conn)
 
 
 @router.get("/jobs/{job_id}/coverage/artifacts")
@@ -78,17 +84,18 @@ def get_artifact_coverage(job_id: str):
     segment, so `/coverage/artifacts` cannot match it either way. Verified by
     moving this route below it — every test still passed.
     """
-    with get_conn() as conn:
-        require_job(conn, job_id)
-        return coverage_with_phases(conn, job_id)
+    with get_conn() as jobs_conn:
+        require_job(jobs_conn, job_id)
+        return coverage_with_phases(get_rule_conn(), job_id, jobs_conn=jobs_conn)
 
 
 @router.get("/jobs/{job_id}/coverage/{technique_id}/rules")
 def get_coverage_rules(job_id: str, technique_id: str):
     """License-aware drill-down: which rules cover this technique. No raw bodies."""
-    with get_conn() as conn:
-        require_job(conn, job_id)
-        return {"technique_id": technique_id.upper(), "rules": rules_for_technique(conn, technique_id)}
+    with get_conn() as jobs_conn:
+        require_job(jobs_conn, job_id)
+        return {"technique_id": technique_id.upper(),
+                "rules": rules_for_technique(get_rule_conn(), technique_id)}
 
 
 #: File extension per format. A Suricata rule written as `.yml` loads in no tool;
@@ -110,8 +117,10 @@ def _safe_slug(text: str, fallback: str) -> str:
     return slug or fallback
 
 
-def _load_rules(conn, job_id: str, body_ids: set[str] | None = None) -> list[dict]:
+def _load_rules(conn, jobs_conn, job_id: str, body_ids: set[str] | None = None) -> list[dict]:
     """Technique-selected rules for a job, enriched with `format` and `severity`.
+
+    `conn` is the rule store, `jobs_conn` the job store (ADR-0045).
 
     `rule_bodies_for_job` predates the multi-format store and returns neither, so
     they are joined on here — in one query for the whole store rather than one per
@@ -121,7 +130,7 @@ def _load_rules(conn, job_id: str, body_ids: set[str] | None = None) -> list[dic
     `body_ids` is passed straight through: the rule-id export only needs the
     bodies it actually packages (ADR-0022).
     """
-    rules = rule_bodies_for_job(conn, job_id, body_ids=body_ids)
+    rules = rule_bodies_for_job(conn, job_id, body_ids=body_ids, jobs_conn=jobs_conn)
     if not rules:
         return []
     # Batched by the ids we already hold, not a scan of the whole store: the
@@ -200,13 +209,13 @@ def export_facets(job_id: str):
     A job with no matching rules returns `total: 0`, not 404 — the UI must be able
     to render "nothing to export".
     """
-    with get_conn() as conn:
-        row = conn.execute(
+    with get_conn() as jobs_conn:
+        row = jobs_conn.execute(
             "SELECT original_filename FROM jobs WHERE id=?", (job_id,)
         ).fetchone()
         if not row:
             raise HTTPException(404, "Job not found")
-        return rule_facets_for_job(conn, job_id)
+        return rule_facets_for_job(get_rule_conn(), job_id, jobs_conn=jobs_conn)
 
 
 class ExportSelection(BaseModel):
@@ -345,13 +354,13 @@ def export_detections(
     with the extension its format requires, plus MANIFEST.json and README carrying
     each rule's licence and source so provenance travels with the export (ADR-0006).
     """
-    with get_conn() as conn:
-        row = conn.execute(
+    with get_conn() as jobs_conn:
+        row = jobs_conn.execute(
             "SELECT original_filename FROM jobs WHERE id=?", (job_id,)
         ).fetchone()
         if not row:
             raise HTTPException(404, "Job not found")
-        all_rules = _load_rules(conn, job_id)
+        all_rules = _load_rules(get_rule_conn(), jobs_conn, job_id)
 
     if not all_rules:
         raise HTTPException(404, "No detection rules match this report's techniques")
@@ -384,8 +393,8 @@ def export_detections_selection(job_id: str, selection: ExportSelection):
     the report's technique set. Same archive layout, manifest and README as the
     GET.
     """
-    with get_conn() as conn:
-        row = conn.execute(
+    with get_conn() as jobs_conn:
+        row = jobs_conn.execute(
             "SELECT original_filename FROM jobs WHERE id=?", (job_id,)
         ).fetchone()
         if not row:
@@ -394,7 +403,7 @@ def export_detections_selection(job_id: str, selection: ExportSelection):
         wanted = {i.strip() for i in selection.rule_ids if i and i.strip()}
         if not wanted:
             raise HTTPException(400, "rule_ids must be a non-empty list")
-        all_rules = _load_rules(conn, job_id, body_ids=wanted)
+        all_rules = _load_rules(get_rule_conn(), jobs_conn, job_id, body_ids=wanted)
 
     if not all_rules:
         raise HTTPException(404, "No detection rules match this report's techniques")
@@ -459,7 +468,7 @@ def post_rule_lookup(lookup: RuleLookup):
     if len(wanted) > RULE_LOOKUP_MAX:
         raise HTTPException(413, f"at most {RULE_LOOKUP_MAX} rule ids per lookup")
 
-    with get_conn() as conn:
+    with get_rule_conn() as conn:
         return {
             "rules": lookup_rules(conn, wanted, include_body=lookup.include_body),
             "requested": len(wanted),
@@ -468,5 +477,5 @@ def post_rule_lookup(lookup: RuleLookup):
 
 @router.get("/detection-corpora")
 def get_detection_corpora():
-    with get_conn() as conn:
+    with get_rule_conn() as conn:
         return {"corpora": corpus_counts(conn)}

@@ -13,7 +13,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from api.db import get_conn
+from api.db import get_rule_conn
 from pipeline.detection.builder import rebuild_store
 from pipeline.detection.registry import _ADAPTERS, add_corpus, merged_corpora, remove_corpus
 from pipeline.detection.store import corpus_counts
@@ -55,7 +55,8 @@ class CorpusPatch(BaseModel):
 
 def _with_counts() -> list[dict]:
     items = merged_corpora(_CONFIG)
-    with get_conn() as conn:
+    # The rule store is always the SQLite corpus, whatever DATABASE_URL says (ADR-0045).
+    with get_rule_conn() as conn:
         counts = {c["corpus"]: c["rules"] for c in corpus_counts(conn)}
     for it in items:
         it["rules"] = counts.get(it.get("name"), 0)
@@ -195,7 +196,7 @@ def sync_one_corpus(name: str):
     if not ok:
         raise HTTPException(502, f"sync failed: {detail}")
 
-    with get_conn() as conn:
+    with get_rule_conn() as conn:
         rebuild_store(conn, _CONFIG)
     return {"ok": True, "detail": detail, "corpora": _with_counts()}
 
@@ -207,5 +208,5 @@ def rebuild_corpora():
     Fetching new clones is still the CLI step `python scripts/sync_corpora.py`
     (a background git-sync endpoint is Slice-2 work).
     """
-    with get_conn() as conn:
+    with get_rule_conn() as conn:
         return rebuild_store(conn, _CONFIG)

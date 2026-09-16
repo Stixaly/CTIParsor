@@ -449,3 +449,24 @@ cheap-and-urgent first, then the pool, then tenancy.
 15. [ ] Centralise configuration in `pydantic-settings` (82 call sites).
 16. [ ] Narrow `SELECT *` in `api/routes/jobs.py:84`; break up the 678-line
         `_run_pipeline`.
+
+## Status review (2026-09-16)
+
+The maintainer built parts of Phases 2–4 out of order, and out of the
+sequence this ADR argued for — worth recording precisely rather than marking
+items done that were solved a different way.
+
+| Item | State | Note |
+|---|---|---|
+| 1. Repository / no ORM | **done, differently** | not `JobRepository`/`EntityRepository` classes (item 14, still open) — a thinner adapter, `api/db_backend.py` (~165 lines: placeholder translation, a `sqlite3.Row`-like type), so the existing raw SQL in the route files runs unchanged on PostgreSQL. SQL is still in the route files (ADR-0045). |
+| 5–6. Persistent pool, timeout watchdog | **open** | still spawn-per-job; no `ProcessPoolExecutor`. ADR-0044 §8 names the persistent model process as the next step. |
+| 7. Delete `WORKER_MAX_CONCURRENT` and `_job_counter` | **half done** | `_job_counter` is gone — `WorkerLoop` counts its own subprocesses (ADR-0046). `WORKER_MAX_CONCURRENT` was **kept**, not deleted: it is now the per-worker-*container* limit, and capacity is added by running more containers rather than by one bigger pool. |
+| 3 (precondition). "any retry or multi-container topology" | **multi-container topology now exists** (ADR-0044/0046) | its own stated precondition, idempotent writes (item 8, `UNIQUE` constraint) and a relocatable checkpoint (item 9), is **still open** — the claim's `ON CONFLICT DO NOTHING` covers entity/relationship inserts, but the Stage 3 checkpoint stayed on local disk, shared only because workers mount the same volume. |
+| 4/10. Authentication before a multi-user topology | **reversed by the maintainer** | this ADR's explicit sequencing — auth gates multi-container, not the other way round — was not followed: ADR-0044 built the container split and ADR-0046 the multi-worker topology first, with no authentication. See ADR-0045's context section, which names this decision directly. Item 10 itself is untouched: still no `user_id`, no ownership check, `allow_origins=["*"]` (item 11) unchanged. |
+| 2. PostgreSQL "at the moment authentication is introduced" | **reversed, same decision** | ADR-0045 adopted PostgreSQL for the job store without authentication; its own text says so. |
+
+Net: the container and PostgreSQL work answered "can this run as several
+processes" without answering "who is allowed to use it" — which is still
+Phase 4, untouched, and now arguably more urgent than when this ADR was
+written, since a multi-container deployment is a better reason to expose
+the port than a single process ever was.

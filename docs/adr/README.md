@@ -45,6 +45,11 @@ choice, and the consequences. They're append-only — supersede rather than rewr
 | [0040](0040-offline-installation-bundle.md) | Offline (air-gapped) installation bundle — `setup.sh` reaches 12 network sources (452 `.deb`, 167 wheels / 3.1 GB, 2.6 GB of models, 684 MB of corpora, Chromium, Node, an LLM); one self-contained ~13 GB bundle built by `scripts/package_offline.sh` on a twin of the target, installed by `setup.sh --offline=<dir>` through env vars (`PIP_NO_INDEX`, `HF_HUB_OFFLINE`) and pre-staged files so each step's own "already present" branch fires; checksums verified before touching the host; Python/distro coupling accepted and enforced | Proposed |
 | [0041](0041-observables-route-through-indicators.md) | Observables route through their Indicator, never straight to a threat SDO — two paths still wire a raw SCO directly to malware/threat-actor/etc: the LLM relationships loop (only observable↔attack-pattern was guarded) and the policy pin engine (the *larger* source per ADR-0024, 872/1,140 edges on one report); measured 12/29 and 2/45 raw-SCO edges on stored bundles, mostly observable-to-observable (`file↔ipv4-addr`, out of scope — no single STIX answer exists for it); redirects the observable side to its Indicator only when the other endpoint is a real SDO, opt-in via a `sco_id_to_indicator` parameter so the pin engine's own budget/gating unit tests are untouched; also closes a silent gap where `NETWORK_TRAFFIC` observables never got an Indicator at all | Accepted |
 | [0043](0043-self-contained-bundle-embeds-source-pdf.md) | The STIX bundle embeds the source document (`payload_bin`) — the `Artifact` object `stage4_stix_mapping.py` has always tried to build (hash + MIME type only, no bytes, "to keep the bundle compact") has never actually existed: STIX 2.1 requires exactly one of `payload_bin`/`url`, so `stix2.Artifact(hashes=...)` alone raises `MutuallyExclusivePropertiesError` and the surrounding `except Exception: artifact_obj = None` has silently swallowed it on every job ever processed, found only by checking a real bundle instead of the docstring's claim; fix embeds the source file as base64 `payload_bin` (measured ≈347 KB added for a 260 KB PDF), making the bundle self-contained | Accepted |
+| [0048](0048-queue-status-endpoint.md) | A queue-status endpoint, not a metrics exporter — closes a blind spot named while documenting 0046: no purpose-built way to see backlog or worker liveness beyond `docker compose logs`. `GET /api/queue/status`, no new dependency, no auth (same posture as every other GET route); real `GROUP BY` counts (not an invented status vocabulary), oldest-queued age, and the lease made visible per worker (`heartbeat` freshness against `WORKER_LEASE_TIMEOUT_S`); rejected a Prometheus exporter as the first metrics dependency this codebase would carry, for a question one endpoint answers; validated against the live compose stack — a worker row appeared 1.1 s after upload and vanished the moment the report reached `for_review` | Accepted |
+| [0047](0047-publish-image-to-ghcr.md) | Publish the image to GHCR; tag by commit and `latest` — closes the other blind spot named alongside 0048: CI builds the image and stops (`push: false`), so a second host's only path to it was rebuilding from source. GHCR over Docker Hub (already on GitHub, zero new secret — the `GITHUB_TOKEN` the workflow already has); a second job, gated on the smoke test passing and on `main` only, `packages: write` scoped to that job alone; tags `sha-<full sha>` (pins) and `latest` (tracks main); named what it can't automate — a GHCR package is private by default regardless of repo visibility, one manual click required after the first push; verified the pull-then-up mechanic against the real compose file: a pre-existing local tag skipped the build entirely, 6.4 s to running containers | Accepted |
+| [0046](0046-worker-container.md) | The worker is a container of its own; the `jobs` table is the queue — `CTIPARSOR_ROLE` (`all` keeps the single-process host install, `api` only enqueues, `worker` runs `python -m api.queue_loop`); the existing conditional-UPDATE claim was already atomic on both engines, what was missing for several workers was a lease (`worker_id`, `heartbeat_at`, requeue after `WORKER_LEASE_TIMEOUT_S`) since the old `requeue_orphans` reset every `processing` row; same image, `command: worker`, scalable with `--scale worker=N`; every compose service now carries measured CPU/memory limits (worker 4.4 GB per report + 1 GB); no broker, `FOR UPDATE SKIP LOCKED` deferred as an optimisation; validated: 1206/1214 tests green on SQLite/PostgreSQL, a report processed by the worker container while the API spawned nothing | Accepted |
+| [0045](0045-postgresql-for-the-job-store.md) | PostgreSQL for the job store, SQLite kept for the rule corpus — the maintainer brought ADR-0037's Option C forward without waiting for authentication; measured: 213 SQL sites but only 7 SQLite-only statements on the per-job tables, every row read by name, no `%`/`LIKE` in that SQL, so a 165-line adapter (`?`→`%s`, a `sqlite3.Row`-like tuple, a wrapper whose `with` never closes) replaces an ORM; `DATABASE_URL` unset = today's single file, set = eight tables move; the FTS5 corpus cannot move (`MATCH`, `INDEXED BY`) and stays; the coverage code is the one place both stores meet and gains a `jobs_conn` parameter; a migration script copies an existing store in one transaction, ids preserved, sequence realigned; the compose stack gains a non-root, capability-less, read-only `postgres:17-alpine` on the internal network; validated: 1206 tests green on PostgreSQL, 1198 on SQLite, 47 rows migrated inside the container, a report processed through the API to a 53-object bundle | Accepted |
+| [0044](0044-container-images.md) | Container images: one hardened application image, not a database tier — the requested "PostgreSQL + app" split has nothing to hold on the DB side (SQLite is opened in-process, ADR-0037 defers PostgreSQL until authentication) and a separate worker needs a broker ADR-0002/0036 rejected; one 3-stage image (4.48 GB, 3 min 24 s cold build), two volumes (`cti-state` precious, `cti-cache` rebuildable), compose profiles `bootstrap` / `ollama` / `proxy`; runs as uid 1001 on a read-only root with every capability dropped — the Chromium sandbox stays ON through a seccomp profile that had to allow `chroot` unconditionally (Playwright's stock profile gates it on `CAP_SYS_CHROOT`; measured `Check failed: sys_chroot("/proc/self/fdinfo/")`); found `libmagic1` missing from slim images and the optional `re2` pin unbuildable on Python 3.12 | Accepted |
 | [0042](0042-embedded-yara-rules-as-indicators.md) | Embedded detection rules (YARA, Suricata, Snort, Sigma) become Indicator SDOs — CTI reports routinely publish a literal rule inline (verified: 4 complete YARA rules in one real Google TIG report), and none of it survived past ingestion; STIX 2.1's `Indicator.pattern_type` already models all four natively, so the work is extraction — reuses `yara_atoms.split_rules` and `suricata_atoms.rule_header`/`parse_options` (ADR-0015's own corpus parsers, validated at ~20,000-rule scale) unchanged; Sigma gets a new grow-then-shrink YAML boundary heuristic since it has no self-delimiting rule-end marker, fail-closed (must parse as valid title+detection YAML) and unvalidated against any real report, unlike the other two; auto-links to an already-extracted malware/tool by name substring (`x_evidence_label: "observed"`) — measured wrong on the first check (raw Stage-3 output) and right on the second (the DB-merged entity list `build_stix_bundle` actually sees, where CyNER had already found all 4 names) | Accepted |
 
 **Numbering notes**
@@ -284,4 +289,72 @@ detection rules inline, nothing extracts them — never built)
        (the DB-merged entity list 0002/1359's `re_run_final_stages`
        actually builds, where CyNER had already found all 4 names the LLM
        had not)
+
+0040 offline bundle (its Option C, "a container image", set aside)
+0002 in-process worker pool, no broker ──┐
+0037 SQLite stays, PostgreSQL deferred ──┤  the seams a container split would need
+0029 Chromium sandbox forced on ─────────┘  do not exist in the code
+   ▲   packaged, not re-architected, by
+   └── 0044 container images: ONE hardened application image (4.48 GB,
+       3 min 24 s cold build), two volumes (state to back up, cache to
+       rebuild), compose profiles bootstrap / ollama / proxy — the proxy
+       profile is deployment.md option C in container form.  The requested
+       "PostgreSQL + app" and "app / worker / Chromium / database" splits
+       were each checked against the code: the database is a file opened
+       in-process, the worker is spawned from inside the API, Chromium is
+       launched in-process — so a database container would serve nothing
+       and a worker container needs the broker 0002/0036 rejected.  Runs as
+       uid 1001 on a read-only root with every capability dropped; the
+       0029 sandbox stays ON through a seccomp profile that additionally
+       had to allow `chroot` (Playwright's stock profile gates it on
+       CAP_SYS_CHROOT, and the zygote chroots inside its own userns).
+       Found on the way: `libmagic1` absent from slim images, and the
+       optional `re2` pin unbuildable on Python 3.12 — nobody has had the
+       ReDoS guard for a while.  A dedicated Chromium container (Playwright
+       remote mode) is named as the next hardening step
+          ▲   its "no database tier" decision reversed by the maintainer in
+          └── 0045 PostgreSQL for the job store: 0037's Option C brought
+              forward without authentication.  Two stores behind one switch —
+              DATABASE_URL unset keeps today's single SQLite file, set moves
+              the eight per-job tables — because the per-job SQL was already
+              portable (7 SQLite-only upserts, rewritten to ON CONFLICT for
+              both engines) while the FTS5 rule corpus of 0031 is not and
+              stays put, as 0037 said.  No ORM (0036's verdict holds): a
+              165-line adapter translates `?` placeholders and gives psycopg
+              rows sqlite3.Row's access pattern.  The coverage code of 0008 /
+              0025 / 0030 is the one place both stores meet and takes a
+              `jobs_conn`; the compose stack of 0044 gains a hardened
+              postgres service and the operator gains a one-shot migration
+              script that keeps progress-event ids (the SSE resume point)
+                 ▲   is what lets a second writer exist without corrupting a
+                 │   job, which is exactly what
+                 └── 0046 needs: the worker becomes a container of its own.
+                     The claim (`UPDATE … WHERE status='queued'`) was already
+                     atomic on both engines; a lease (`worker_id`,
+                     `heartbeat_at`) is the piece PostgreSQL made safe to add,
+                     because SQLite's single-writer file could not have
+                     hosted a second process claiming jobs without risking
+                     the same row twice.  `CTIPARSOR_ROLE` (`all` / `api` /
+                     `worker`) is the switch; `all` is the exact behaviour a
+                     host install had before roles existed.  No broker
+                     (0002/0036's verdict holds): the `jobs` table is the
+                     queue.  Every compose service of 0044 now carries a
+                     measured CPU/memory limit
+                        ▲   named two blind spots, closed by
+                        ├── 0048 queue-status endpoint: nothing made the
+                        │   lease visible to an operator except log-watching
+                        │   or counting rows by hand.  One read-only
+                        │   endpoint, no Prometheus (this codebase's first
+                        │   metrics dependency would answer a question one
+                        │   endpoint already does); validated live — a
+                        │   worker row appeared 1.1s after upload, vanished
+                        │   the moment the report reached for_review
+                        └── 0047 publish the image to GHCR: 0044's CI builds
+                            and stops (push: false); a second host's only
+                            path to the image was rebuilding from source.
+                            GHCR, not Docker Hub — already on GitHub, zero
+                            new secret.  Verified the actual mechanic a
+                            "pull instead of build" workflow depends on: a
+                            pre-existing local tag made `up` skip the build
+                            entirely, not assumed
 ```

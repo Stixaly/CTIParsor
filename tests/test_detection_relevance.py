@@ -237,26 +237,28 @@ def _seed_job(db, job_id, entities):
 
 
 def test_store_round_trips_atoms_and_platform(temp_db):
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "core", [
+    temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "core", [
         _rule("core", "k1", ["T1059"], atoms=[("hash", _HASH), ("image", "pv")], platform="linux"),
     ])
-    assert atom_hits(conn, [_HASH]) == [("core:k1", "hash", _HASH)]
-    assert atom_document_frequency(conn, [_HASH]) == {_HASH: 1}
+    assert atom_hits(rconn, [_HASH]) == [("core:k1", "hash", _HASH)]
+    assert atom_document_frequency(rconn, [_HASH]) == {_HASH: 1}
 
     # re-ingesting the corpus replaces atoms rather than accumulating them
-    replace_corpus_rules(conn, "core", [_rule("core", "k1", ["T1059"], atoms=[("hash", _HASH)])])
-    assert len(atom_hits(conn, [_HASH, "pv"])) == 1
+    replace_corpus_rules(rconn, "core", [_rule("core", "k1", ["T1059"], atoms=[("hash", _HASH)])])
+    assert len(atom_hits(rconn, [_HASH, "pv"])) == 1
 
 
 def test_ioc_match_outranks_a_bare_technique_match(temp_db):
     """The whole point of ADR-0014: a rule that names the report's hash must beat
     the 500 rules that merely share its technique tag."""
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "ioc", [
+    conn = temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "ioc", [
         _rule("ioc", "hit", ["T1059"], atoms=[("hash", _HASH)]),
     ])
-    replace_corpus_rules(conn, "generic", [
+    replace_corpus_rules(rconn, "generic", [
         _rule("generic", f"g{i}", ["T1059"]) for i in range(20)
     ])
 
@@ -265,7 +267,7 @@ def test_ioc_match_outranks_a_bare_technique_match(temp_db):
         ("Command and Scripting Interpreter", "ttp", "T1059"),
     ])
 
-    result = propose_for_job(conn, "j1")
+    result = propose_for_job(rconn, "j1", jobs_conn=conn)
     top = result["proposals"][0]
     assert top["id"] == "ioc:hit"
     assert top["tier"] == "direct"
@@ -280,20 +282,22 @@ def test_ioc_match_outranks_a_bare_technique_match(temp_db):
 
 def test_untagged_rule_surfaces_through_an_observable(temp_db):
     """1049 rules in the real store carry no ATT&CK tag and were unreachable."""
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "ioc", [
+    conn = temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "ioc", [
         _rule("ioc", "untagged", [], atoms=[("domain", "azurenetfiles.net")]),
     ])
     _seed_job(temp_db, "j2", [("azurenetfiles.net", "domain", None)])
 
-    ids = [p["id"] for p in propose_for_job(conn, "j2")["proposals"]]
+    ids = [p["id"] for p in propose_for_job(rconn, "j2", jobs_conn=conn)["proposals"]]
     assert ids == ["ioc:untagged"]
 
 
 def test_off_platform_rule_is_demoted_not_dropped(temp_db):
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "win", [_rule("win", "w", ["T1059"], platform="windows")])
-    replace_corpus_rules(conn, "nix", [_rule("nix", "l", ["T1059"], platform="linux")])
+    conn = temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "win", [_rule("win", "w", ["T1059"], platform="windows")])
+    replace_corpus_rules(rconn, "nix", [_rule("nix", "l", ["T1059"], platform="linux")])
 
     _seed_job(temp_db, "j3", [
         ("/etc/cron.d/x", "file", None),
@@ -302,7 +306,7 @@ def test_off_platform_rule_is_demoted_not_dropped(temp_db):
         ("Unix Shell", "ttp", "T1059"),
     ])
 
-    result = propose_for_job(conn, "j3")
+    result = propose_for_job(rconn, "j3", jobs_conn=conn)
     assert result["platform"] == "linux"
     by_id = {p["id"]: p for p in result["proposals"]}
     assert by_id["nix:l"]["score"] > by_id["win:w"]["score"]
@@ -312,11 +316,12 @@ def test_off_platform_rule_is_demoted_not_dropped(temp_db):
 
 def test_generic_value_is_discounted_by_idf(temp_db):
     """A value present in most rules carries almost no signal."""
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "noise", [
+    conn = temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "noise", [
         _rule("noise", f"n{i}", [], atoms=[("image", "cmd.exe")]) for i in range(40)
     ])
-    replace_corpus_rules(conn, "rare", [
+    replace_corpus_rules(rconn, "rare", [
         _rule("rare", "r", [], atoms=[("image", "meshagent64-v2.exe")]),
     ])
     _seed_job(temp_db, "j4", [
@@ -324,7 +329,7 @@ def test_generic_value_is_discounted_by_idf(temp_db):
         ("meshagent64-v2.exe", "file", None),
     ])
 
-    proposals = propose_for_job(conn, "j4")["proposals"]
+    proposals = propose_for_job(rconn, "j4", jobs_conn=conn)["proposals"]
     assert proposals[0]["id"] == "rare:r"
     assert proposals[0]["score"] > 3 * proposals[-1]["score"]
 
@@ -333,25 +338,26 @@ def test_extension_fragments_do_not_count_as_matches(temp_db):
     """Rules hold bare fragments (".exe", "http"). Plain containment linked every
     campaign binary to any rule downloading *some* .exe, and — because the report
     value is itself in no rule — IDF handed that match a perfect weight."""
-    conn = temp_db.get_conn()
+    conn = temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
     # Both rules share the report's technique, so both are candidates and the
     # only thing separating them is the quality of their substring overlap.
-    replace_corpus_rules(conn, "browser", [
+    replace_corpus_rules(rconn, "browser", [
         _rule("browser", "dl", ["T1105"], atoms=[("cmdline", ".exe"), ("cmdline", "http")]),
     ])
-    replace_corpus_rules(conn, "tool", [
+    replace_corpus_rules(rconn, "tool", [
         _rule("tool", "mesh", ["T1105"], atoms=[("image", "meshagent64.exe")]),
     ])
     # IDF is relative to the store: in a two-rule corpus nothing is rare, so a
     # match would legitimately weigh 0. Fill it out to a realistic size.
-    replace_corpus_rules(conn, "filler", [_rule("filler", f"f{i}", []) for i in range(40)])
+    replace_corpus_rules(rconn, "filler", [_rule("filler", f"f{i}", []) for i in range(40)])
     _seed_job(temp_db, "jfrag", [
         ("meshagent", "tool", None),                 # inside "meshagent64.exe"
         ("meshagent64-v2.exe", "file", None),        # only shares ".exe" with the other rule
         ("Ingress Tool Transfer", "ttp", "T1105"),
     ])
 
-    by_id = {p["id"]: p for p in propose_for_job(conn, "jfrag")["proposals"]}
+    by_id = {p["id"]: p for p in propose_for_job(rconn, "jfrag", jobs_conn=conn)["proposals"]}
     assert by_id["browser:dl"]["matches"] == []          # ".exe" fragment rejected
     assert by_id["browser:dl"]["tier"] == "behavioural"  # technique only
     assert by_id["tool:mesh"]["tier"] == "direct"        # real overlap kept
@@ -362,8 +368,9 @@ def test_extension_fragments_do_not_count_as_matches(temp_db):
 def test_one_entity_scores_once_across_its_derived_observables(temp_db):
     """A path is emitted as `file` *and* `image` and may also hit a `cmdline`
     atom — counting all three let one artifact saturate the noisy-OR to 1.0."""
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "c", [
+    conn = temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "c", [
         _rule("c", "multi", [], atoms=[
             ("file", "/opt/x/agent64.exe"), ("image", "/opt/x/agent64.exe"),
             ("cmdline", "/opt/x/agent64.exe"),
@@ -371,13 +378,13 @@ def test_one_entity_scores_once_across_its_derived_observables(temp_db):
     ])
     _seed_job(temp_db, "jdup", [("/opt/x/agent64.exe", "file", None)])
 
-    top = propose_for_job(conn, "jdup")["proposals"][0]
+    top = propose_for_job(rconn, "jdup", jobs_conn=conn)["proposals"][0]
     assert len(top["matches"]) == 1
     assert top["score"] < 1.0
 
 
 def test_rank_rules_on_an_empty_store_is_harmless(temp_db):
-    result = rank_rules(temp_db.get_conn(), [], [])
+    result = rank_rules(temp_db.get_rule_conn(), [], [])
     assert result["proposals"] == []
     assert result["candidate_total"] == 0
     assert result["atom_index_built"] is False
@@ -386,8 +393,9 @@ def test_rank_rules_on_an_empty_store_is_harmless(temp_db):
 # ── API ──────────────────────────────────────────────────────────────────────
 
 def test_proposals_endpoint(temp_db, temp_db_client):
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "ioc", [
+    temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "ioc", [
         _rule("ioc", "hit", ["T1059"], atoms=[("domain", "azurenetfiles.net")]),
     ])
     _seed_job(temp_db, "japi", [("azurenetfiles.net", "domain", None)])
@@ -403,8 +411,9 @@ def test_proposals_endpoint(temp_db, temp_db_client):
 
 
 def test_proposals_endpoint_limit_is_bounded(temp_db, temp_db_client):
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "g", [_rule("g", f"k{i}", ["T1059"]) for i in range(30)])
+    temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "g", [_rule("g", f"k{i}", ["T1059"]) for i in range(30)])
     _seed_job(temp_db, "jlim", [("Shell", "ttp", "T1059")])
 
     body = temp_db_client.get("/api/jobs/jlim/detections/proposals?limit=5").json()

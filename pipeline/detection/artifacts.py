@@ -17,6 +17,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from pipeline.detection.coverage import job_technique_ids
 from pipeline.detection.observables import Observable, observables_from_entities
@@ -28,6 +29,9 @@ from pipeline.detection.store import (
     canonical_rule_count,
     rule_details,
 )
+
+if TYPE_CHECKING:  # the job-store connection type (ADR-0045); annotation only
+    from api.db_backend import DBConnection
 
 #: Pyramid of Pain tier per artifact class. A hash match and a tool-name match
 #: are not the same detection claim, and one averaged number hides the
@@ -569,9 +573,14 @@ def _summarize(
     }
 
 
-def coverage_for_job(conn: sqlite3.Connection, job_id: str) -> dict:
-    """Evidence-keyed detection coverage for one report (ADR-0025)."""
-    rows = job_observable_rows(conn, job_id)
+def coverage_for_job(
+    conn: sqlite3.Connection, job_id: str, *, jobs_conn: DBConnection | None = None
+) -> dict:
+    """Evidence-keyed detection coverage for one report (ADR-0025).
+
+    `conn` is the rule store; `jobs_conn` the job store when the two differ
+    (ADR-0045), None meaning "same connection"."""
+    rows = job_observable_rows(jobs_conn or conn, job_id)
     observables = observables_from_entities(rows)
     artifacts = score_artifacts(conn, observables)
 
@@ -581,9 +590,13 @@ def coverage_for_job(conn: sqlite3.Connection, job_id: str) -> dict:
     return _summarize(artifacts, vocab_threshold, total_rules, job_id)
 
 
-def coverage_with_phases(conn: sqlite3.Connection, job_id: str) -> dict:
-    """Evidence-keyed coverage plus the ATT&CK phase band (ADR-0025)."""
-    rows = job_observable_rows(conn, job_id)
+def coverage_with_phases(
+    conn: sqlite3.Connection, job_id: str, *, jobs_conn: DBConnection | None = None
+) -> dict:
+    """Evidence-keyed coverage plus the ATT&CK phase band (ADR-0025).
+
+    Same two-connection contract as `coverage_for_job`."""
+    rows = job_observable_rows(jobs_conn or conn, job_id)
     observables = observables_from_entities(rows)
     artifacts = score_artifacts(conn, observables)
 
@@ -600,7 +613,7 @@ def coverage_with_phases(conn: sqlite3.Connection, job_id: str) -> dict:
             for ev in a.evidence:
                 matched.add(ev.rule_id)
 
-    techniques = job_technique_ids(conn, job_id)
+    techniques = job_technique_ids(jobs_conn or conn, job_id)
     band = phase_band(conn, techniques, matched)
 
     base["phases"] = band

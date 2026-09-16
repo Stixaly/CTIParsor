@@ -205,7 +205,9 @@ async def put_policy(request: Request) -> dict:
     with _lock:
         with get_conn() as conn:
             conn.execute(
-                "INSERT OR REPLACE INTO relationship_policy (id, policy_json) VALUES (1, ?)",
+                # Standard upsert (SQLite 3.24+ and PostgreSQL), not INSERT OR REPLACE (ADR-0045).
+                "INSERT INTO relationship_policy (id, policy_json) VALUES (1, ?) "
+                "ON CONFLICT (id) DO UPDATE SET policy_json = excluded.policy_json",
                 (policy_json,),
             )
             conn.commit()

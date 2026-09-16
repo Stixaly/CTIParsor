@@ -7,6 +7,12 @@ Read [section 2](#2-what-no-authentication-actually-means) before you change the
 bind address. It is short, and it is the part that decides which of the three
 options below you should pick.
 
+> **Containers.** The same product ships as one hardened image with a compose
+> file — `docker compose up -d`, then an optional TLS + password proxy profile
+> that is option C below in container form. See [docs/docker.md](docker.md)
+> (ADR-0044). Section 2 applies to it unchanged: the image adds isolation, not
+> authentication.
+
 ## What you are actually deploying
 
 One process. `api/main.py` mounts the built React app at `/` and the API at
@@ -203,6 +209,34 @@ directory systemd hands it.
 
 ## 5. Workers and memory
 
+Since ADR-0046 the pipeline can run in a process of its own. `CTIPARSOR_ROLE`
+decides:
+
+| Role | Who runs the pipeline | Use |
+|---|---|---|
+| `all` (default) | the API process, through a queue loop in a background thread | one machine, one process — what `python run_api.py` has always done |
+| `api` | nobody in this process; the routes only queue the report | an API whose reports are processed by separate worker processes |
+| `worker` | this process, `python -m api.queue_loop`, in the foreground | one or more workers next to an `api`-role API, each with its own memory budget |
+
+The queue is the `jobs` table: a worker claims the oldest `queued` row with an
+atomic conditional update, stamps it with its id, and refreshes
+`heartbeat_at` every `WORKER_HEARTBEAT_S` (30 s) while the report runs. A
+`processing` row whose stamp is older than `WORKER_LEASE_TIMEOUT_S` (180 s)
+belonged to a worker that died and is requeued by whichever worker sees it
+first; Stage 3 checkpoints make the restart cheap. Several workers therefore
+share one PostgreSQL job store safely; with SQLite they must share the same
+file on the same host, which is why the compose stack uses PostgreSQL. All
+workers must see the same `uploads/` and `output/` directories as the API.
+
+A systemd unit for a worker is the API unit with a different `ExecStart`:
+
+```ini
+ExecStart=/opt/ctiparsor/.venv/bin/python -m api.queue_loop
+Environment=CTIPARSOR_ROLE=worker
+```
+
+and the API unit gains `Environment=CTIPARSOR_ROLE=api`.
+
 `API_WORKERS` defaults to `1`. **Leave it there unless you have measured the
 memory.**
 
@@ -233,8 +267,8 @@ too large.
 ### What happens when every slot is busy
 
 A report submitted while all slots are taken is **queued, not dropped**. It sits
-at status `queued`, and the watcher thread of whichever report finishes next
-claims it and starts it. Nothing polls; there is no broker and no second daemon.
+at status `queued`; the loop claims it when a report finishes or on its next
+poll (`WORKER_POLL_S`, 2 s). There is no broker: the table is the queue.
 
 `API_QUEUE_MAX_DEPTH` (default 50, `0` = unbounded) caps the wait. Past it, the
 upload is refused with HTTP 503 rather than accepted and quietly discarded — an
@@ -253,7 +287,10 @@ the API starts, so a restart mid-report costs the run, not the submission.
       and no amount of tuning recovers it
 - [ ] You have decided which of options A/B/C applies, and everyone who can
       reach the port is someone you would let delete any report
-- [ ] Backups: `cti_stix.db` holds every report and every bundle
+- [ ] Backups: `cti_stix.db` holds every report and every bundle — unless
+      `DATABASE_URL` points the job store at PostgreSQL, in which case
+      `pg_dump` covers the reports and `cti_stix.db` still holds the rule
+      corpus (ADR-0045)
 
 ## 7. Air-gapped hosts
 
@@ -298,6 +335,29 @@ host for the model you bundled (a 7B model wants ~6 GB of RAM on top of the
 worker budget in §5). Corpora, models and wheels are frozen at the bundle's
 build date — `offline/bundle.env` says when — so security updates mean a new
 bundle, not `pip install -U`.
+
+## 8. PostgreSQL for the job store
+
+By default everything is in `cti_stix.db`. A host install that wants the
+per-report tables in PostgreSQL — for a real database daemon to back up and
+monitor, or as the first step towards several instances sharing one store —
+sets two variables and copies its rows once (ADR-0045):
+
+```dotenv
+DATABASE_URL=postgresql://ctiparsor@db.example.internal:5432/ctiparsor
+PGPASSWORD=...
+```
+
+```bash
+.venv/bin/python scripts/migrate_jobs_to_postgres.py --dry-run   # counts only
+.venv/bin/python scripts/migrate_jobs_to_postgres.py             # one transaction, all or nothing
+```
+
+The rule corpus stays in `cti_stix.db` on the same host (it is an FTS5 index;
+`make detection-index` rebuilds it). Size the server's `max_connections` for
+uvicorn's thread pool plus one connection per running report; the default 100
+is ample for one instance. The compose stack does all of this for you with a
+hardened `postgres` service — see [docs/docker.md](docker.md).
 
 ## See also
 

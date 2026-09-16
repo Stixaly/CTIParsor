@@ -231,3 +231,17 @@ Two limits of this workstation, not of the design: `npm ci` fails with
 and `node_modules/` after warning; and `re2` has no wheel because
 `libre2-dev` is not installed here, so the replayed install falls back to
 Python's `re` exactly as the online install does on such a host.
+
+## Status review (2026-09-16)
+
+A container image was built (ADR-0044) — but **not** from this bundle. The
+"Easier" section above predicted "the same `offline/` tree is what a future
+container image … would be seeded from"; that did not happen.
+`Dockerfile`'s `builder` stage installs fresh from PyPI/npm/apt over the
+network, and `.dockerignore` excludes `offline/`, `dist/` and the packaging
+scripts from the build context entirely — the two mechanisms share no code
+and cannot feed each other today. They solve different problems: this ADR
+gets a host installed with no network at all; ADR-0044 gets a container
+built with network access to a registry, which an air-gapped site does not
+have either. A registry mirror seeded from this bundle's wheelhouse, so the
+container build could run offline too, is unbuilt.

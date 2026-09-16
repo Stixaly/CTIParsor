@@ -24,16 +24,24 @@ arbitrary entities that aren't grounded in its own text.
 The web UI serves on `localhost` with `CORS allow_origins=["*"]` and **no
 authentication**. This is acceptable for **local single-user** use of *read/non-secret*
 endpoints. It is **not** safe to expose CTIParsor on a shared host or the internet
-as-is. In particular, **no endpoint that writes a secret exists today** — the LLM
+as-is. (In the container stack the API process itself binds `0.0.0.0` — a
+container has no "localhost" of its own to bind — but the same guarantee is
+kept one layer out: compose publishes it on `127.0.0.1` on the *host* by
+default, so the reachability is identical, just enforced at a different
+point. See [docs/docker.md](docs/docker.md).) In particular, **no endpoint that writes a secret exists today** — the LLM
 API-keys settings panel is deliberately deferred (ADR-0007 Slice 2) until it ships
 with a loopback-origin guard, write-only/masked key storage, and the client-reload
 hook. Do not add secret-writing endpoints without that hardening.
 
 ### 3. Secrets & data at rest
 All sensitive state is **gitignored**, never committed:
-- `.env` — LLM API keys (bootstrap config).
+- `.env` — LLM API keys (bootstrap config), and the PostgreSQL password
+  (`CTI_DB_PASSWORD` / `PGPASSWORD`) when the job store runs there.
 - `cti_stix.db` — SQLite holding report text, generated bundles, and the
   detection-rule store. Treat as sensitive (it contains the CTI you processed).
+  With `DATABASE_URL` set (ADR-0045) the report data lives in PostgreSQL
+  instead — same sensitivity, and `scram-sha-256` authentication only; the
+  compose service publishes no port.
 - `uploads/`, `output/`, `input/*` — uploaded/produced report artifacts.
 - `corpora/` and `detection_corpora.local.yaml` — local rule clones and the
   **private** corpus registry (private repo URLs and anything derived from them
@@ -66,6 +74,11 @@ pipeline still produces valid STIX. ML models are downloaded once and cached.
   `API_HOST` in `.env` controls the bind address; see [docs/deployment.md](docs/deployment.md)
   for the three supported postures (SSH tunnel, firewalled interface, nginx + TLS + basic auth).
 - Not a malware sandbox — it parses *documents and rule text*, it never executes samples.
+- The container image ([docs/docker.md](docs/docker.md), ADR-0044) adds **isolation, not
+  authentication**: non-root, read-only root filesystem, all capabilities dropped, seccomp
+  profile that keeps the Chromium sandbox on, API published on loopback only. Everything
+  above still applies inside it; API keys reach the container through `env_file` and are
+  readable by whoever holds the Docker socket.
 
 ## Reporting a vulnerability
 Open a private security advisory on the repository, or contact the maintainer

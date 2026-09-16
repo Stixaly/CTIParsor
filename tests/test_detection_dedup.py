@@ -130,11 +130,12 @@ def test_dedup_key_differs_for_different_logic():
 # ── dedupe_store election ─────────────────────────────────────────────────────
 
 def test_dedupe_elects_canonical_by_priority(temp_db):
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "sigmahq", [_parse(_SIGMAHQ, "sigmahq")])
-    replace_corpus_rules(conn, "hayabusa", [_parse(_HAYABUSA_CONVERTED, "hayabusa")])
+    temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "sigmahq", [_parse(_SIGMAHQ, "sigmahq")])
+    replace_corpus_rules(rconn, "hayabusa", [_parse(_HAYABUSA_CONVERTED, "hayabusa")])
 
-    summary = dedupe_store(conn, {"sigmahq": 10, "hayabusa": 95})
+    summary = dedupe_store(rconn, {"sigmahq": 10, "hayabusa": 95})
     # Subset, not equality: ADR-0017 added provenance/propagation counters, and
     # pinning the whole dict makes every future field a false failure.
     assert {k: summary[k] for k in ("total", "clusters", "canonical", "duplicates")} == {
@@ -146,7 +147,7 @@ def test_dedupe_elects_canonical_by_priority(temp_db):
     assert summary["provenance_edges"] == 0
 
     # both rows survive (lossless) — only the flag differs; sigmahq wins (lower priority)
-    rows = dict(conn.execute(
+    rows = dict(rconn.execute(
         "SELECT corpus, is_canonical FROM detection_rules"
     ).fetchall())
     assert rows == {"sigmahq": 1, "hayabusa": 0}
@@ -159,36 +160,39 @@ def test_realistic_hayabusa_conversion_folds_only_via_provenance(temp_db):
     byte-identical to its source, so dedup looked healthy in tests while folding
     1 of hayabusa's 4,759 rules in production.
     """
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "sigmahq", [_parse(_SIGMAHQ, "sigmahq")])
-    replace_corpus_rules(conn, "hayabusa", [_parse(_HAYABUSA_REALISTIC, "hayabusa")])
+    temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "sigmahq", [_parse(_SIGMAHQ, "sigmahq")])
+    replace_corpus_rules(rconn, "hayabusa", [_parse(_HAYABUSA_REALISTIC, "hayabusa")])
 
     # The premise: the conversion genuinely changed the detection hash.
-    keys = [r[0] for r in conn.execute("SELECT dedup_key FROM detection_rules")]
+    keys = [r[0] for r in rconn.execute("SELECT dedup_key FROM detection_rules")]
     assert len(set(keys)) == 2, "fixture no longer models a real conversion"
 
-    summary = dedupe_store(conn, {"sigmahq": 10, "hayabusa": 95})
+    summary = dedupe_store(rconn, {"sigmahq": 10, "hayabusa": 95})
     assert summary["provenance_edges"] == 1
     assert summary["canonical"] == 1
-    assert dict(conn.execute("SELECT corpus, is_canonical FROM detection_rules")) == {
+    assert dict(rconn.execute("SELECT corpus, is_canonical FROM detection_rules")) == {
         "sigmahq": 1, "hayabusa": 0,
     }
 
 
 def test_dedupe_keeps_independent_rules(temp_db):
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "sigmahq", [_parse(_SIGMAHQ, "sigmahq")])
-    replace_corpus_rules(conn, "indie", [_parse(_INDEPENDENT, "indie")])
-    summary = dedupe_store(conn, {"sigmahq": 10, "indie": 50})
+    temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "sigmahq", [_parse(_SIGMAHQ, "sigmahq")])
+    replace_corpus_rules(rconn, "indie", [_parse(_INDEPENDENT, "indie")])
+    summary = dedupe_store(rconn, {"sigmahq": 10, "indie": 50})
     assert summary["canonical"] == 2 and summary["duplicates"] == 0
 
 
 def test_dedupe_no_priority_is_deterministic(temp_db):
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "zeta", [_parse(_SIGMAHQ, "zeta")])
-    replace_corpus_rules(conn, "alpha", [_parse(_HAYABUSA_CONVERTED, "alpha")])
-    dedupe_store(conn, {})  # no priorities → tie broken by corpus name
-    canon = conn.execute(
+    temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "zeta", [_parse(_SIGMAHQ, "zeta")])
+    replace_corpus_rules(rconn, "alpha", [_parse(_HAYABUSA_CONVERTED, "alpha")])
+    dedupe_store(rconn, {})  # no priorities → tie broken by corpus name
+    canon = rconn.execute(
         "SELECT corpus FROM detection_rules WHERE is_canonical=1"
     ).fetchone()[0]
     assert canon == "alpha"
@@ -210,48 +214,51 @@ def _job_with_technique(temp_db, conn, job_id, technique):
 
 
 def test_duplicate_corpus_does_not_raise_score(temp_db):
-    conn = temp_db.get_conn()
+    conn = temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
     # SigmaHQ alone covers T1059.001 → score 2 (single corpus)
-    replace_corpus_rules(conn, "sigmahq", [_parse(_SIGMAHQ, "sigmahq")])
-    dedupe_store(conn, {"sigmahq": 10})
+    replace_corpus_rules(rconn, "sigmahq", [_parse(_SIGMAHQ, "sigmahq")])
+    dedupe_store(rconn, {"sigmahq": 10})
     _job_with_technique(temp_db, conn, "j-dup", "T1059.001")
-    assert compute_for_job(conn, "j-dup")["cells"][0]["score"] == 2
+    assert compute_for_job(rconn, "j-dup", jobs_conn=conn)["cells"][0]["score"] == 2
 
     # Adding hayabusa's *copy* must not bump it to 3 — it's the same logical rule
-    replace_corpus_rules(conn, "hayabusa", [_parse(_HAYABUSA_CONVERTED, "hayabusa")])
-    dedupe_store(conn, {"sigmahq": 10, "hayabusa": 95})
-    cell = compute_for_job(conn, "j-dup")["cells"][0]
+    replace_corpus_rules(rconn, "hayabusa", [_parse(_HAYABUSA_CONVERTED, "hayabusa")])
+    dedupe_store(rconn, {"sigmahq": 10, "hayabusa": 95})
+    cell = compute_for_job(rconn, "j-dup", jobs_conn=conn)["cells"][0]
     assert cell["score"] == 2          # still single effective corpus
     assert cell["corpora"] == ["sigmahq"]
 
     # An independent rule, however, legitimately corroborates → score 3
-    replace_corpus_rules(conn, "indie", [_parse(_INDEPENDENT, "indie")])
-    dedupe_store(conn, {"sigmahq": 10, "hayabusa": 95, "indie": 50})
-    assert compute_for_job(conn, "j-dup")["cells"][0]["score"] == 3
+    replace_corpus_rules(rconn, "indie", [_parse(_INDEPENDENT, "indie")])
+    dedupe_store(rconn, {"sigmahq": 10, "hayabusa": 95, "indie": 50})
+    assert compute_for_job(rconn, "j-dup", jobs_conn=conn)["cells"][0]["score"] == 3
 
 
 def test_drilldown_preserves_duplicate_provenance(temp_db):
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "sigmahq", [_parse(_SIGMAHQ, "sigmahq")])
-    replace_corpus_rules(conn, "hayabusa", [_parse(_HAYABUSA_CONVERTED, "hayabusa")])
-    dedupe_store(conn, {"sigmahq": 10, "hayabusa": 95})
+    temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "sigmahq", [_parse(_SIGMAHQ, "sigmahq")])
+    replace_corpus_rules(rconn, "hayabusa", [_parse(_HAYABUSA_CONVERTED, "hayabusa")])
+    dedupe_store(rconn, {"sigmahq": 10, "hayabusa": 95})
 
-    rules = rules_for_technique(conn, "T1059.001")
+    rules = rules_for_technique(rconn, "T1059.001")
     assert len(rules) == 1                      # one canonical rule shown
     assert rules[0]["corpus"] == "sigmahq"
     assert rules[0]["also_in"] == ["hayabusa"]  # the folded copy is still credited
 
     # coverage refs are canonical-only
-    refs = rule_refs_for_techniques(conn, ["T1059.001"])
+    refs = rule_refs_for_techniques(rconn, ["T1059.001"])
     assert {c for _t, c, _k, _f in refs} == {"sigmahq"}
 
 
 def test_corpus_counts_reports_total_and_canonical(temp_db):
-    conn = temp_db.get_conn()
-    replace_corpus_rules(conn, "sigmahq", [_parse(_SIGMAHQ, "sigmahq")])
-    replace_corpus_rules(conn, "hayabusa", [_parse(_HAYABUSA_CONVERTED, "hayabusa")])
-    dedupe_store(conn, {"sigmahq": 10, "hayabusa": 95})
-    counts = {c["corpus"]: c for c in corpus_counts(conn)}
+    temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "sigmahq", [_parse(_SIGMAHQ, "sigmahq")])
+    replace_corpus_rules(rconn, "hayabusa", [_parse(_HAYABUSA_CONVERTED, "hayabusa")])
+    dedupe_store(rconn, {"sigmahq": 10, "hayabusa": 95})
+    counts = {c["corpus"]: c for c in corpus_counts(rconn)}
     assert counts["hayabusa"]["rules"] == 1 and counts["hayabusa"]["canonical"] == 0
     assert counts["sigmahq"]["rules"] == 1 and counts["sigmahq"]["canonical"] == 1
 
