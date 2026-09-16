@@ -187,7 +187,7 @@ def temp_db_client(temp_db):
 
     import api.main
 
-    with patch("api.main.init_db"):
+    with patch("api.main.init_db"), patch("api.queue_loop.start_embedded"):
         with TestClient(api.main.app, raise_server_exceptions=True) as client:
             yield client
 
@@ -201,11 +201,20 @@ def api_client():
 
     api.main must be imported before the patch so that `api.main` is present
     in sys.modules (mock.patch resolves the target lazily on __enter__).
+
+    Also mocks `api.queue_loop.start_embedded`: the lifespan hook starts it
+    unconditionally in role `all` (the default, and no test sets
+    CTIPARSOR_ROLE), which is a REAL background thread that polls the
+    database and claims/requeues `jobs` rows — including ones a test inserts
+    a moment later, racing its own assertions. `requeue_orphans` is left
+    real: it is a one-time synchronous call that completes, on whatever rows
+    exist *before* the TestClient's `__enter__` returns, before any test body
+    or fixture caller can insert anything — there is no window for it to race.
     """
     from fastapi.testclient import TestClient
 
     import api.main  # ensure module is loaded before patching its attribute
 
-    with patch("api.main.init_db"):
+    with patch("api.main.init_db"), patch("api.queue_loop.start_embedded"):
         with TestClient(api.main.app, raise_server_exceptions=True) as client:
             yield client
