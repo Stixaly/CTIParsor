@@ -118,8 +118,120 @@ _ORG_BLOCKLIST = frozenset({
     "researcher", "analyst", "government", "agency", "institute",
 })
 
+# Generic technical/operational vocabulary that describes a CATEGORY of
+# malware or threat activity rather than naming one. CyNER's Malware and
+# Threat_group labels fire on any span discussing malware or threat-actor
+# activity, not only on named entities, so a span built ENTIRELY out of this
+# vocabulary carries no identifying content and must be dropped. Enumerated
+# from real noise observed in production (a real CTI report processed
+# 2026-09-17): out of 212 raw "malware" and 64 raw "threat_actor" CyNER
+# predictions, more than half were spans made entirely of these words.
+_GENERIC_TOKENS: frozenset[str] = frozenset({
+    # malware/tool category nouns
+    "malware", "ransomware", "backdoor", "backdoors", "downloader", "downloaders",
+    "dropper", "droppers", "rootkit", "rootkits", "webshell", "webshells",
+    "wiper", "wipers", "payload", "payloads", "exploit", "exploits", "macro",
+    "macros", "framework", "frameworks", "rat", "trojan", "trojans", "trojanized",
+    "stealer", "stealers", "infostealer", "shellcode", "launcher", "launchers",
+    "variant", "variants", "module", "modules", "tool", "tools", "tooling",
+    "tunneler", "tunnelers", "utility", "utilities", "generator", "builder",
+    "installer", "installers", "loader", "loaders", "boot", "interpreter",
+    "binary", "software", "program", "code", "shell", "http", "apt",
+    # actor/operation category nouns
+    "actor", "actors", "operator", "operators", "operation", "operations",
+    "campaign", "campaigns", "cluster", "clusters", "espionage", "group",
+    "groups", "hacker", "hackers", "hack", "sponsor", "attacker", "attackers",
+    "unit", "units", "attack", "attacks", "cyber", "state", "government",
+    "agency", "army", "team", "teams", "threat", "threats", "cikr",
+    # adjectives / modifiers that never carry a name by themselves
+    "commodity", "custom", "destructive", "disruptive", "disruption",
+    "malicious", "modular", "lightweight", "embedded", "based", "stage",
+    "stager", "post", "exploitation", "only", "new", "serious", "primary",
+    "information", "wartime", "military", "linked", "backed", "sponsored",
+    "russian", "c++", "php", "python", "dll", "file", "family", "class",
+    "delivery",
+    # articles / pronoun fragments
+    "the", "a", "an", "this", "that", "we", "they", "he", "she", "it", "our",
+    "their", "us", "you", "all", "some", "s",
+})
+
+# Specific terms CyNER mislabels as MALWARE that are legitimate software
+# products, not generic language (so _GENERIC_TOKENS does not catch them) —
+# observed on a real report. Exact lowercase match against the whole fragment.
+_KNOWN_NON_MALWARE: frozenset[str] = frozenset({
+    "winrar", "microscada",
+})
+
+# Specific terms CyNER mislabels as THREAT_ACTOR that are countries/cities,
+# not actors — observed on a real report. Exact lowercase match against the
+# whole fragment.
+_KNOWN_NON_ACTORS: frozenset[str] = frozenset({
+    "russia", "moscow",
+})
+
+# A single leading article, stripped before further checks (CyNER sometimes
+# includes it in the span).
+_LEADING_ARTICLE_RE = re.compile(r"^(the|a|an)\s+", re.IGNORECASE)
+
+# A single trailing period, stripped before further checks.
+_TRAILING_PERIOD_RE = re.compile(r"\.$")
+
+# A single lowercase letter followed by a space at the very start of the
+# string: the leftover of a possessive ("APT44's Operations" truncated to
+# "s Operations" when the span starts mid-token).
+_FRAGMENT_RE = re.compile(r"^[a-z]\s")
+
 # Regex: bare version numbers ("1.2.3") — spaCy and some NER models label these
 _VERSION_RE = re.compile(r"^\d[\d.\-]*\d$")
+
+
+def _normalize_candidate(value: str) -> str:
+    """Strip one leading article and one trailing period. Never touches
+    interior text."""
+    value = _LEADING_ARTICLE_RE.sub("", value).strip()
+    value = _TRAILING_PERIOD_RE.sub("", value).strip()
+    return value
+
+
+def _has_boundary_artifact(value: str) -> bool:
+    """True if the span crossed a sentence boundary (a period followed by
+    whitespace -- a bare interior period, as in "BLACKENERGY.V2" or
+    "Guccifer 2.0", is a real name and must not be rejected), contains a
+    non-ASCII character (OCR or script-mixing garbage), or starts with a
+    truncated possessive fragment."""
+    if re.search(r"\.\s", value):
+        return True
+    if any(ord(ch) > 127 for ch in value):
+        return True
+    if _FRAGMENT_RE.match(value):
+        return True
+    return False
+
+
+def _is_generic_fragment(fragment: str, extra_denylist: frozenset[str] = frozenset()) -> bool:
+    """True if every token of length >= 3 (splitting on whitespace and
+    hyphens) is in _GENERIC_TOKENS or extra_denylist — i.e. the fragment
+    carries no name-like content at all. A fragment with at least one token
+    outside both sets is NOT generic, even if it also contains generic or
+    denylisted words: "XAKNET Cyber Army of Russia Reborn" survives despite
+    "Russia" being denylisted on its own, because "XAKNET" and "Reborn" are
+    not — one denylisted word must not veto an otherwise distinct name."""
+    tokens = re.split(r"[\s\-]+", fragment.lower())
+    named_tokens = [
+        t for t in tokens
+        if len(t) >= 3 and t not in _GENERIC_TOKENS and t not in extra_denylist
+    ]
+    return not named_tokens
+
+
+def _split_fragments(value: str) -> list[str]:
+    """Split a comma- or slash-separated list span into its parts (CyNER
+    sometimes merges several distinct malware names named in a list into one
+    span). A value with no such separator is returned unchanged as a
+    single-item list."""
+    parts = [p.strip() for p in re.split(r"[,/]", value)]
+    parts = [p for p in parts if p]
+    return parts if len(parts) > 1 else [value]
 
 
 # ── Lazy-loaded model ─────────────────────────────────────────────────────────
@@ -275,48 +387,56 @@ def extract_cyner_entities(text: str) -> list[RawEntity]:
     seen: set[tuple[str, EntityType]] = set()
 
     for pred in predictions:
-        label    = pred.get("entity_group", "")
-        score    = float(pred.get("score", 0.0))
-        value    = pred.get("word", "").strip()
+        label     = pred.get("entity_group", "")
+        score     = float(pred.get("score", 0.0))
+        raw_value = pred.get("word", "").strip()
 
         etype = _LABEL_MAP.get(label)
         if etype is None:
             continue                        # skip Indicator, System, Vulnerability
         if score < _MEDIUM_THRESH:
             continue
-        if not value or len(value) < 3:
+        if not raw_value or len(raw_value) < 3:
             continue
-        if _VERSION_RE.match(value):
+        if _VERSION_RE.match(raw_value):
             continue
-        if value.startswith("@"):           # npm scoped package scope-names
+        if raw_value.startswith("@"):        # npm scoped package scope-names
             continue
 
-        # Organization filter — only keep plausible threat-actor names
-        if etype == EntityType.THREAT_ACTOR:
-            if value.lower() in _ORG_BLOCKLIST:
+        # CyNER occasionally merges a comma-separated list of names into one
+        # span ("AZORULT, FORMBOOK, TRICKBOT") — split before filtering so
+        # each real name is evaluated (and can survive) on its own.
+        for fragment in _split_fragments(raw_value):
+            value = _normalize_candidate(fragment)
+            if not value or len(value) < 3:
                 continue
-            # Skip single common words
-            if len(value.split()) == 1 and value.lower() in {
-                "the", "a", "an", "this", "that", "we", "they", "he", "she",
-                "it", "our", "their", "us", "you", "all", "some", "new",
-            }:
+            if _has_boundary_artifact(value):
                 continue
 
-        # The overlap between chunks re-reports spans on the boundary; keep the
-        # first (highest-scoring predictions are not ordered, so this is a
-        # dedup by identity, not a ranking).
-        key = (value.lower(), etype)
-        if key in seen:
-            continue
-        seen.add(key)
+            if etype == EntityType.THREAT_ACTOR:
+                if value.lower() in _ORG_BLOCKLIST:
+                    continue
+                if _is_generic_fragment(value, _KNOWN_NON_ACTORS):
+                    continue
+            if etype == EntityType.MALWARE:
+                if _is_generic_fragment(value, _KNOWN_NON_MALWARE):
+                    continue
 
-        results.append(RawEntity(
-            value=value,
-            entity_type=etype,
-            context="",
-            confidence=round(score, 4),
-            source="cyner",
-        ))
+            # The overlap between chunks re-reports spans on the boundary;
+            # keep the first (highest-scoring predictions are not ordered,
+            # so this is a dedup by identity, not a ranking).
+            key = (value.lower(), etype)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            results.append(RawEntity(
+                value=value,
+                entity_type=etype,
+                context="",
+                confidence=round(score, 4),
+                source="cyner",
+            ))
 
     return results
 

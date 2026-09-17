@@ -6,6 +6,43 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Fixed
+
+#### CyNER's Malware/Threat_group labels tagged generic language as named entities (ADR-0050), 2026-09-18
+
+A user-reported real report (`apt44-unearthing-sandworm.pdf`) came back with
+far more `malware`/`threat_actor` entities than made sense to review.
+Pulling the job's actual extracted entities confirmed it: CyNER's labels
+fire on any span *discussing* malware or threat-actor activity, not only on
+spans that *name* one, and `extract_cyner_entities` accepted almost
+everything above a 0.70 confidence score. The result included pure category
+language at high confidence (`"malware"` 0.98, `"ransomware family"` 0.96,
+`"cyber espionage"` 0.86), a comma-separated list of six real malware names
+glued into one entity, spans crossing a sentence boundary or mixing script
+(OCR/translation artifacts), truncated possessive fragments, and countries
+mistagged as threat actors. The job's own review history already showed
+several of these — `"Russian state"`, `"campaign"`, `"backed threat
+groups"` — manually flipped from auto-accepted to rejected.
+
+Added list splitting (a joined span is evaluated part by part), a
+~150-word enumerated stoplist of malware/actor category vocabulary (a
+fragment survives if even one token isn't generic), and two small
+denylists for specific software/country false positives, folded into the
+same "any real content?" check so one denylisted word can't veto an
+otherwise distinct name — an earlier version of the fix used a separate
+blanket veto and wrongly dropped the real hacktivist-front name "XAKNET
+Cyber Army of Russia Reborn" for containing "Russia".
+
+Measured by replaying the job's actual captured CyNER output through the
+fix: 255 → 162 raw `malware`/`threat_actor` entities (−36.5%; malware
+−26.4%, threat_actor −67.7%), every removed entity manually verified as
+generic language, a list-join artifact, or script/OCR garbage. 17/17
+targeted tests pass, including 8 built from the real noisy strings; full
+suite 1227 passed / 15 skipped. Details, the enumerated stoplist rationale,
+and a known accepted loss (a spelled-out tool name that reads as pure
+generic language) are in
+[ADR-0050](docs/adr/0050-cyner-generic-language-filter.md).
+
 ### Added
 
 - **The image publishes to GHCR; a queue-status endpoint reports backlog and
