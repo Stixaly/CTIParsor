@@ -102,7 +102,7 @@ why" without starting the pipeline. Every refusal names its cause — a missing
 Ollama model prints the ones that *are* pulled:
 
 ```
-WARNING Ollama model llama3.2 not found at http://192.168.0.29:11434
+WARNING Ollama model llama3.2 not found at http://localhost:11434
         — pulled models: ['qwen3.8:latest']
 RESULT: no usable vision backend — Stage 1f would be skipped.
 ```
