@@ -278,7 +278,7 @@ they are.**
   feeling broken under concurrency.
 - Removing the per-job cold start makes report turnaround dominated by actual
   analysis rather than imports.
-- Staying on one language keeps the Qwen-delegation workflow in `CLAUDE.md` intact.
+- Staying on one language keeps the existing toolchain, tests and contributor workflow intact.
 
 **What becomes harder**
 - Deployment moves to a Linux host with native storage. The Windows/WSL

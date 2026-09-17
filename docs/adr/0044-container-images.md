@@ -203,10 +203,10 @@ socket — is documented in `docs/docker.md`, not hidden.
 | Sandboxed Chromium, `cap_drop ALL`, no profile | `sys_chroot` check fails (expected) |
 | `proxy` profile with a throwaway cert + htpasswd | 401 without credentials, 200 with; TLS 1.3, HTTP/2; nginx runs as uid 101 on a read-only root; the UI is served through it |
 | `docker compose run --rm app check` | 13 of 13 stages available inside the container, rule store visible through `CTIPARSOR_DB_PATH` |
-| `ollama` profile | `docker compose --profile ollama config` valid; not started (3 GB image pull, no model needed for this workstation, which has its own Ollama on the LAN) |
+| `ollama` profile | `docker compose --profile ollama config` valid; not started (3 GB image pull, not needed for this validation, which used an existing Ollama instance) |
 | Full test suite on the host (`SKIP_HEAVY_MODELS=1`) | 1188 passed, 2 skipped; ruff clean; mypy clean on `pipeline/ api/ models/` |
 | `bootstrap` (models + corpora + rule store), run against the live `app` | **13 min 3 s**, exit 0: 3 of 3 models cached (MiniLM, CyNER, GLiNER), 14 of 14 corpora synced, **87,480 rules** in the store, `check_stages` all green; volumes 3.6 GB afterwards |
-| `scripts/docker_smoke.sh --no-build --job` (Stage 3 on an Ollama `qwen3.8` reached over the LAN) | **0 failures**: `tests/fixtures/sample_report.txt` uploaded through the API, job reached `for_review`, bundle exported with **63 STIX objects**, no traceback in the logs; **5 min 42 s** wall clock for the whole script, model loads and the LLM stage included |
+| `scripts/docker_smoke.sh --no-build --job` (Stage 3 on an Ollama `qwen3.8` outside the compose stack) | **0 failures**: `tests/fixtures/sample_report.txt` uploaded through the API, job reached `for_review`, bundle exported with **63 STIX objects**, no traceback in the logs; **5 min 42 s** wall clock for the whole script, model loads and the LLM stage included |
 
 ## Files
 

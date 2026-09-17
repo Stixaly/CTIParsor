@@ -40,8 +40,7 @@ sections group by theme rather than strict semver.
   their stated limits, the sizing table, the decisions with their rejected
   alternatives, and what comes next. **`docs/upgrading.md`** is the runbook
   for an existing install — host or the first compose stack — with the
-  required steps, the optional ones, and a rollback for each. `CLAUDE.md`
-  gains the PostgreSQL test mode and the two-store rule; the README lists
+  required steps, the optional ones, and a rollback for each. The README lists
   the `docs/` pages; the container guide's diagram now shows the worker and
   the database.
 
@@ -414,8 +413,7 @@ for Phases 1–2 only, 0037 is superseded in part by 0036, and 0002, 0004 and
 matched the code (open pool items, the opt-in SecureBERT default, the Graph
 page that never learned to draw inferred edges). The README index follows.
 
-Also: `.claude/launch.json` gains an `api` entry so the server can be started
-from the preview tool; README documents the empty factory default.
+Also: README documents the empty factory default.
 
 
 ### Security
@@ -576,7 +574,7 @@ already used the portable `ReturnType<typeof setTimeout>` rather than `number`.
 
 - **`VISION_CONCURRENCY`** — how many figure reads Stage 1f keeps in flight.
   Ollama sits at 1 against 4 for the API backends. ADR-0033 §5 put it there
-  because the single GPU is also the delegation target the workflow depends on;
+  because the single GPU is shared with other local workloads;
   measurement now supplies an independent second reason and the value stays:
   raising it to 4 did overlap the work (per-call times summing to 1392.7s inside
   737s of wall clock, **1.89x**) but inflated each call from ~43s to ~127s, so

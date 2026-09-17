@@ -4,8 +4,8 @@ Standalone validation harness for the TTP advisory gate.
 
 Measures what the new gate actually drops on real reports and surfaces any
 advisory/table-caption sentence that still slipped through as a match, so a
-human can eyeball it (CLAUDE.md Step 8 discipline -- unit tests passing proves
-nothing about real-world quality).
+human can eyeball it (unit tests passing proves nothing about real-world
+quality).
 """
 
 import os

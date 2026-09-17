@@ -112,7 +112,7 @@ def test_get_backend_accepts_ollama_model_with_vision_capability(monkeypatch):
     assert b is not None
     assert b.name == "ollama"
     # Stays 1 where anthropic and mistral run 4. ADR-0033 §5 set it there (one
-    # GPU, shared with the delegation workflow); measurement agrees separately:
+    # GPU, shared with other local workloads); measurement agrees separately:
     # raising it to 4 on the reference station overlapped the work (1.89x) but
     # inflated each call from ~43s to ~127s, so throughput per figure got WORSE
     # (40.9s against 36.3s). The station is bandwidth-bound on this workload.

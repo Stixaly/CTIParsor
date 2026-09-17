@@ -181,7 +181,7 @@ and the keyword/candidate recall caps.
 a method the field measured at 7–9% precision is polishing the wrong surface.
 **Verdict:** necessary, insufficient. Mandatory prerequisite for everything else.
 
-### Option B — Reproduce TTP-R1 (retrieval + SFT + GRPO) on the GB10
+### Option B — Reproduce TTP-R1 (retrieval + SFT + GRPO) on the local GPU
 
 | Dimension | Assessment |
 |---|---|
@@ -280,7 +280,7 @@ therefore cost four passes; Phase 5's ranked candidate API removes that honestly
 - **Revisit:** ADR-0011's `TTP_TOP2_MARGIN` becomes live for the first time under
   Phase 5 (k>1). Its default was never calibrated against a working gate and must be
   swept, not inherited. If Phase 6 plateaus well below Multi-Step's 82.28%, Option B
-  (SFT on the GB10) becomes the next question, with retrieval already in place.
+  (SFT on the local GPU) becomes the next question, with retrieval already in place.
 
 ## Related
 
