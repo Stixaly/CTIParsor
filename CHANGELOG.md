@@ -142,7 +142,7 @@ sections group by theme rather than strict semver.
   docs/deployment.md option C). Measured: 4.48 GB image, 3 min 24 s cold
   build, healthy 7 s after start, bootstrap 13 min (3 models, 14 corpora,
   87,480 rules), and a real report through the API to a 63-object bundle in
-  5 min 42 s with the LLM stage on a LAN Ollama. Hardening, each verified by
+  5 min 42 s with the LLM stage on an external Ollama. Hardening, each verified by
   `scripts/docker_smoke.sh`: non-root uid 1001, read-only root filesystem with
   tmpfs scratch, every capability dropped, `no-new-privileges`, a pids limit,
   the API published on 127.0.0.1 only, secrets passed by `env_file` and
