@@ -382,3 +382,35 @@ tab, so opening or closing it never loses what was typed.
 ## Status review (2026-09-02)
 
 Implemented: `POST /api/ingest/text` and `POST /api/ingest/url` in `api/routes/ingest.py`, `pipeline/web_capture.py`.
+
+## Status review (2026-09-17) — the first boundary had a TOCTOU gap
+
+A code review found that boundary 1 (`validate_url`) proved a host resolves
+publicly only **at check time**. `page.goto()` then makes Chromium resolve the
+same hostname itself, independently and later — nothing tied the two
+resolutions together, `_route_filter`'s per-request re-check included, since it
+also only re-validates and never pins a connection. A nameserver answering a
+public address to the first query and a private one (loopback, cloud metadata,
+a sibling container) to a later query — ordinary DNS rebinding, no waiting
+required with a TTL of 0 — would have passed every check in this ADR while
+Chromium connected wherever the policy meant to block.
+
+Fixed in `pipeline/web_capture.py::_dns_pin_arg` / `capture_url_to_pdf`:
+Chromium is now launched with `--host-resolver-rules=MAP <host> <ip>`, pinning
+its resolver to the exact IPv4 address `validate_url` already validated for
+the navigated host, so no later query — from Chromium or anything else — can
+change what that hostname resolves to for this capture. A literal IP needs no
+pin (nothing to resolve); a host that only answers IPv6 is left unpinned
+rather than risk a malformed flag (Chromium's IPv6 support for this flag is
+inconsistent across versions) — `validate_url`'s public-address check still
+covers it, just without the connection-level pin.
+
+**Residual, not closed:** the pin covers only the hostname passed to this
+call. A redirect target or a subresource on a *different* host is still only
+re-validated by `_route_filter`, which has the same TOCTOU shape unpinned —
+narrower (it needs a second nameserver to also race) but not eliminated.
+Closing that fully means proxying every fetch through Python instead of
+letting Chromium resolve DNS at all, which is real work deferred rather than
+assumed unnecessary. Locked by `tests/test_web_capture.py`'s
+`test_capture_pins_chromium_dns_resolution_to_the_validated_address` and the
+`_dns_pin_arg` unit tests.

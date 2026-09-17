@@ -207,6 +207,199 @@ def test_blank_render_is_rejected_with_a_javascript_hint(monkeypatch, tmp_path):
     assert "pdf_written" not in captured
 
 
+def test_dns_pin_arg_is_none_for_a_literal_ip():
+    """A literal IP needs no resolution, so there is nothing to pin."""
+    assert web_capture._dns_pin_arg("93.184.216.34") is None
+
+
+def test_dns_pin_arg_is_none_for_a_literal_ipv6():
+    assert web_capture._dns_pin_arg("2001:db8::1") is None
+
+
+def test_dns_pin_arg_pins_the_resolved_ipv4_address(monkeypatch):
+    monkeypatch.setattr(web_capture, "_resolve_all", lambda host: ["93.184.216.34"])
+    assert web_capture._dns_pin_arg("example.com") == "MAP example.com 93.184.216.34"
+
+
+def test_dns_pin_arg_skips_ipv6_answers_to_find_an_ipv4_one(monkeypatch):
+    """A host answering IPv6 first and IPv4 second still gets pinned to the v4 address."""
+    monkeypatch.setattr(web_capture, "_resolve_all", lambda host: ["2001:db8::1", "93.184.216.34"])
+    assert web_capture._dns_pin_arg("example.com") == "MAP example.com 93.184.216.34"
+
+
+def test_dns_pin_arg_is_none_for_an_ipv6_only_answer(monkeypatch):
+    """
+    No IPv4 answer to pin to. Left unpinned rather than risk a malformed
+    --host-resolver-rules flag — Chromium's IPv6 support for that flag is
+    inconsistent across versions. `validate_url`'s public-address check still
+    applies; only the connection-level pin is skipped for this case.
+    """
+    monkeypatch.setattr(web_capture, "_resolve_all", lambda host: ["2001:db8::1"])
+    assert web_capture._dns_pin_arg("example.com") is None
+
+
+def test_capture_pins_chromium_dns_resolution_to_the_validated_address(monkeypatch, tmp_path):
+    """
+    Locks the DNS-rebinding fix: `validate_url` proves the host resolves
+    publicly at check time (via Python's own `socket.getaddrinfo`), but
+    Chromium performs its own, independent resolution when `page.goto()`
+    actually connects. Nothing tied those two resolutions together — an
+    attacker's nameserver can answer publicly to the first query and privately
+    (loopback, cloud metadata, a sibling container) to the second, and every
+    check upstream would have passed while Chromium connects somewhere the
+    policy meant to block. `capture_url_to_pdf` must launch Chromium with
+    `--host-resolver-rules` pinning the navigated host to the exact address
+    already validated, so this TOCTOU window cannot be used to reach a
+    private address the policy already rejected once.
+    """
+    captured: dict[str, object] = {}
+
+    class _FakeResponse:
+        def __init__(self, url):
+            self.url = url
+            self.status = 200
+
+    class _FakePage:
+        def goto(self, url, **kw):
+            return _FakeResponse(url)
+
+        def wait_for_load_state(self, *a, **kw):
+            return None
+
+        def emulate_media(self, **kw):
+            return None
+
+        def title(self):
+            return "Example"
+
+        def inner_text(self, selector):
+            return "x" * 500
+
+        def evaluate(self, script):
+            # _render_pdf's three preparation scripts all report "nothing to do";
+            # the height probe (none of the three markers) reports a normal page.
+            if "data-src" in script or "CODEISH" in script or "position" in script:
+                return 0
+            return 5000
+
+        def pdf(self, **kw):
+            Path(kw["path"]).write_bytes(b"%PDF-1.4 fake\n")
+
+    class _FakeContext:
+        def set_default_timeout(self, *a):
+            return None
+
+        def route(self, *a):
+            return None
+
+        def new_page(self):
+            return _FakePage()
+
+    class _FakeBrowser:
+        def new_context(self, **kw):
+            return _FakeContext()
+
+        def close(self):
+            return None
+
+    class _FakePlaywright:
+        def __init__(self):
+            self.chromium = self
+
+        def launch(self, **kw):
+            captured["launch_kwargs"] = kw
+            return _FakeBrowser()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(web_capture, "_PLAYWRIGHT_AVAILABLE", True)
+    monkeypatch.setattr(web_capture, "sync_playwright", lambda: _FakePlaywright(), raising=False)
+    monkeypatch.setattr(web_capture, "_resolve_all", lambda host: ["93.184.216.34"])
+
+    result = web_capture.capture_url_to_pdf("https://cert.example/article/1", tmp_path / "o.pdf")
+
+    launch_args = captured["launch_kwargs"]["args"]
+    assert "--host-resolver-rules=MAP cert.example 93.184.216.34" in launch_args
+    assert result.bytes_written > 0
+
+
+def test_capture_does_not_pin_dns_for_a_literal_ip_target(monkeypatch, tmp_path):
+    """No hostname was resolved, so no --host-resolver-rules flag should appear."""
+    captured: dict[str, object] = {}
+
+    class _FakeResponse:
+        def __init__(self, url):
+            self.url = url
+            self.status = 200
+
+    class _FakePage:
+        def goto(self, url, **kw):
+            return _FakeResponse(url)
+
+        def wait_for_load_state(self, *a, **kw):
+            return None
+
+        def emulate_media(self, **kw):
+            return None
+
+        def title(self):
+            return "Example"
+
+        def inner_text(self, selector):
+            return "x" * 500
+
+        def evaluate(self, script):
+            if "data-src" in script or "CODEISH" in script or "position" in script:
+                return 0
+            return 5000
+
+        def pdf(self, **kw):
+            Path(kw["path"]).write_bytes(b"%PDF-1.4 fake\n")
+
+    class _FakeContext:
+        def set_default_timeout(self, *a):
+            return None
+
+        def route(self, *a):
+            return None
+
+        def new_page(self):
+            return _FakePage()
+
+    class _FakeBrowser:
+        def new_context(self, **kw):
+            return _FakeContext()
+
+        def close(self):
+            return None
+
+    class _FakePlaywright:
+        def __init__(self):
+            self.chromium = self
+
+        def launch(self, **kw):
+            captured["launch_kwargs"] = kw
+            return _FakeBrowser()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(web_capture, "_PLAYWRIGHT_AVAILABLE", True)
+    monkeypatch.setattr(web_capture, "sync_playwright", lambda: _FakePlaywright(), raising=False)
+
+    web_capture.capture_url_to_pdf("http://93.184.216.34/article/1", tmp_path / "o.pdf")
+
+    launch_args = captured["launch_kwargs"]["args"]
+    assert not any(a.startswith("--host-resolver-rules") for a in launch_args)
+
+
 def test_launch_hint_names_the_root_sandbox_conflict(monkeypatch):
     """
     Running as root with the sandbox on is its own failure, and its own fix.
