@@ -553,6 +553,45 @@ def validate_url(raw_url: str) -> str:
     return urlunsplit((scheme, parsed.netloc, parsed.path or "/", parsed.query, ""))
 
 
+def _dns_pin_arg(host: str) -> str | None:
+    """
+    Build a `--host-resolver-rules` entry pinning *host* to the IPv4 address
+    `validate_url` already validated as public, or None if there is nothing to
+    pin (a literal IP needs no resolution; an IPv6-only answer is left
+    unpinned rather than risk a malformed flag — Chromium's IPv6 support for
+    this flag is inconsistent across versions).
+
+    Why this exists: `validate_url` resolves the host and checks the answer
+    with Python's `socket.getaddrinfo`, cached by `_resolve_all`. That proves
+    the host was public *at check time*, but `page.goto()` below makes
+    Chromium resolve the same hostname itself, independently and later — nothing
+    ties the two resolutions together. An attacker's nameserver can return a
+    public address to the first query and a private one (loopback, a cloud
+    metadata address, another container on this host) to the second — classic
+    DNS-rebinding TOCTOU — and every check in `validate_url` and the
+    `_route_filter` re-check below would have passed while Chromium connects
+    somewhere the policy meant to block. Pinning Chromium's resolver to the
+    exact address already validated closes that gap for the navigated host.
+
+    Residual gap, documented rather than silently assumed away: this pins only
+    the hostname passed in *this* call. A redirect target or a subresource on
+    a different host is still re-validated by `_route_filter` on every request,
+    but that re-check has the same TOCTOU shape — it is not itself pinned to a
+    connection. Narrower and harder to exploit than the unpinned entry point
+    (it requires the *second* host's nameserver to also race), but not closed.
+    """
+    try:
+        ipaddress.ip_address(host)
+        return None  # literal IP in the URL — nothing to resolve, nothing to pin
+    except ValueError:
+        pass
+    ips = _resolve_all(host)  # cached — the exact answer validate_url already checked
+    for ip in ips:
+        if ipaddress.ip_address(ip).version == 4:
+            return f"MAP {host} {ip}"
+    return None
+
+
 def capture_url_to_pdf(
     url: str,
     dest: Path,
@@ -570,6 +609,12 @@ def capture_url_to_pdf(
 
     safe_url = validate_url(url)
     dest.parent.mkdir(parents=True, exist_ok=True)
+
+    pin_host = urlsplit(safe_url).hostname or ""
+    dns_pin = _dns_pin_arg(pin_host)
+    chromium_args = list(_CHROMIUM_ARGS)
+    if dns_pin:
+        chromium_args.append(f"--host-resolver-rules={dns_pin}")
 
     blocked = [0]
 
@@ -619,7 +664,7 @@ def capture_url_to_pdf(
             browser = p.chromium.launch(
                 headless=True,
                 chromium_sandbox=sandboxed,
-                args=list(_CHROMIUM_ARGS),
+                args=chromium_args,
             )
         except PlaywrightError as exc:
             raise CaptureUnavailable(_launch_hint(exc, sandboxed=sandboxed)) from exc
