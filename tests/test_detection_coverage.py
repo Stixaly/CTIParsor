@@ -215,6 +215,37 @@ def test_export_detections_zip(temp_db, temp_db_client):
     assert zf.read(rule_files[0]).decode().startswith("title:")
 
 
+def test_export_slugs_a_corpus_name_that_looks_like_a_path(temp_db, temp_db_client):
+    """
+    Zip Slip guard: a zip entry name built from unsanitized input lets whoever
+    extracts the archive be written outside the target directory. `corpus` is
+    normally an operator-chosen name, not rule content, but the export writer
+    must not depend on that staying true — `title`/`native_key` already go
+    through `_safe_slug` because those DO come from rule content; `corpus` gets
+    the same treatment here.
+    """
+    temp_db.get_conn()
+    rconn = temp_db.get_rule_conn()
+    replace_corpus_rules(rconn, "../../../etc/evil", [
+        _rule("../../../etc/evil", "k1", ["T1059"], raw="title: ps\ndetection: a", license="DRL-1.1"),
+    ])
+    _job_with_technique(temp_db, "jslug", "T1059")
+
+    resp = temp_db_client.get("/api/jobs/jslug/detections/export")
+    assert resp.status_code == 200, resp.text
+
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    rule_files = [n for n in zf.namelist() if n.startswith("rules/")]
+    assert len(rule_files) == 1
+    # Every entry must resolve *under* rules/ — no ../ segment survived the slug.
+    assert ".." not in rule_files[0].split("/")
+    assert rule_files[0].startswith("rules/sigma/")
+    # The raw corpus name is still reported accurately in the manifest —
+    # only the on-disk path is sanitized, not the metadata.
+    manifest = json.loads(zf.read("MANIFEST.json"))
+    assert manifest["rules"][0]["corpus"] == "../../../etc/evil"
+
+
 def test_export_detections_404_when_no_rules(temp_db, temp_db_client):
     _job_with_technique(temp_db, "jn", "T1003")  # nothing covers T1003
     resp = temp_db_client.get("/api/jobs/jn/detections/export")

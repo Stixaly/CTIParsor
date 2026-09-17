@@ -8,6 +8,7 @@ secret-storage + loopback-guard work from ADR-0007.
 ADR-0019: Multi-format support (sigma/suricata/yara). Format availability is
 derived from the pipeline detection registry adapters (_ADAPTERS).
 """
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -23,6 +24,23 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 _ROOT = Path(__file__).resolve().parents[2]
 _CONFIG = _ROOT / "detection_corpora.yaml"
+# Every committed and example corpus lives under `./corpora/` (detection_corpora.yaml's
+# own header), and `sync_corpus`/`fetch_tarball` (pipeline/detection/sync.py) run
+# `git clone`/tarball-extract at whatever `path` a corpus carries with no
+# containment check of their own — they trust the registry the way this file
+# trusts a human editing YAML by hand. This endpoint accepts `path` over the
+# network instead, so it draws the boundary the registry never needed: a corpus
+# added here must resolve inside this directory, not wherever the caller says.
+_CORPORA_ROOT = (_ROOT / "corpora").resolve()
+
+# Guards against a `git`/`tarball` value shaped to be parsed as something other
+# than a location: a leading `-` lets `git clone` read it as an option
+# (`--upload-pack=<command>` is the documented argument-injection primitive —
+# GitHub Security Lab, "Wagging the Dog"), and a `scheme::` prefix (`ext::`,
+# `fd::`) asks git to run an arbitrary local command as the transport itself.
+# git blocks `ext::` by default today, but that is git's default to change, not
+# a guarantee this app controls — checked here too rather than assumed safe.
+_UNSAFE_REMOTE_RE = re.compile(r"^-|^\w+::")
 
 #: Formats this project recognises, independent of whether a parser is compiled in.
 #:
@@ -51,6 +69,48 @@ class CorpusIn(BaseModel):
 
 class CorpusPatch(BaseModel):
     enabled: bool
+
+
+def _inside_corpora_root(candidate: Path) -> bool:
+    return candidate.is_relative_to(_CORPORA_ROOT)
+
+
+def _validate_corpus_path(raw_path: str, subdir: str | None) -> None:
+    """Reject a `path` (or `path` + `subdir`) that would resolve outside `corpora/`.
+
+    `raw_path` reaches `git clone <remote> <path>` / tarball extraction
+    (pipeline/detection/sync.py) with no containment check of its own, so
+    `../../../etc/cron.d/evil` (or an absolute path) would otherwise let this
+    endpoint write files anywhere the API process can — not a secret, but a
+    write primitive SECURITY.md's "no endpoint writes a secret" doesn't cover.
+
+    `subdir` is checked too: `corpus_root()` (pipeline/detection/registry.py)
+    joins it onto `path` to pick what the adapter parses, so a `subdir` of
+    `../../../../etc` would read (and offer up as "detection rules") files
+    outside `corpora/` even with `path` itself contained.
+    """
+    candidate = (_ROOT / raw_path).resolve()
+    if not _inside_corpora_root(candidate):
+        raise HTTPException(
+            400,
+            f"'path' must resolve inside {_CORPORA_ROOT} (got {raw_path!r} -> {candidate})",
+        )
+    if subdir and subdir.strip():
+        scoped = (candidate / subdir.strip()).resolve()
+        if not _inside_corpora_root(scoped):
+            raise HTTPException(
+                400,
+                f"'subdir' must resolve inside {_CORPORA_ROOT} (got {subdir!r} -> {scoped})",
+            )
+
+
+def _validate_remote(value: str | None, field: str) -> None:
+    if value is not None and _UNSAFE_REMOTE_RE.match(value):
+        raise HTTPException(
+            400,
+            f"'{field}' must not start with '-' (parsed as a git option, not a URL) "
+            "or a 'scheme::' transport helper",
+        )
 
 
 def _with_counts() -> list[dict]:
@@ -111,6 +171,9 @@ def create_corpus(body: CorpusIn):
     if body.git and body.tarball:
         raise HTTPException(400, "provide either 'git' or 'tarball', not both")
 
+    _validate_remote(body.git, "git")
+    _validate_remote(body.tarball, "tarball")
+
     entry = body.model_dump()
     entry["name"] = name
     entry["adapter"] = adapter
@@ -121,6 +184,8 @@ def create_corpus(body: CorpusIn):
     # sourceless corpora would leave a git corpus with nowhere to land.
     if not entry.get("path"):
         entry["path"] = f"./corpora/{name}"
+
+    _validate_corpus_path(entry["path"], entry.get("subdir"))
 
     # Remove None values to avoid writing nulls to YAML
     entry = {k: v for k, v in entry.items() if v is not None}

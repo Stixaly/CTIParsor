@@ -10,11 +10,14 @@ Covers:
 """
 from __future__ import annotations
 
+import io
 import json
+import zipfile
 
 import stix2
 
 from models.schemas import EntityType, RawEntity
+from pipeline import stage5_validation
 from pipeline.stage3_llm import LLMEnrichmentResult, RelationshipExtracted, TTPExtracted
 from pipeline.stage4_stix_mapping import build_stix_bundle
 from pipeline.stage5_validation import print_bundle_summary, validate_and_export
@@ -119,3 +122,88 @@ class TestPrintBundleSummary:
         actor = stix2.ThreatActor(name="Test Actor", threat_actor_types=["unknown"])
         bundle = stix2.Bundle(objects=[actor])
         print_bundle_summary(bundle)
+
+
+# ── _try_restore_schemas (Zip Slip guard on the GitHub schema archive) ─────────
+
+def _fake_schema_zip(*entries: tuple[str, bytes]) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name, content in entries:
+            zf.writestr(name, content)
+    return buf.getvalue()
+
+
+class _FakeResponse:
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def read(self) -> bytes:
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class TestTryRestoreSchemas:
+    """
+    `_try_restore_schemas` downloads a GitHub archive and extracts only its
+    `schemas/` subtree — normal operation locked by the first test below. The
+    URL is fixed and trusted, but that is exactly why the extraction itself
+    must not trust archive *entry names*: `pipeline/detection/sync.py` already
+    learned this lesson for corpus tarballs (`_safe_members`), and this zip
+    path needs the identical containment check before any write.
+    """
+
+    def test_extracts_schema_files_under_the_prefix(self, tmp_path, monkeypatch):
+        dest = tmp_path / "schemas-2.1" / "schemas"
+        monkeypatch.setattr(stage5_validation, "_schema_dir", lambda: dest)
+        zip_bytes = _fake_schema_zip(
+            (stage5_validation._ZIP_SCHEMA_PREFIX + "common/core.json", b'{"a": 1}'),
+            (stage5_validation._ZIP_SCHEMA_PREFIX + "sdos/malware.json", b'{"b": 2}'),
+            ("cti-stix2-json-schemas-master/README.md", b"not a schema"),  # no prefix match
+        )
+        monkeypatch.setattr(
+            stage5_validation.urllib.request, "urlopen",
+            lambda *a, **kw: _FakeResponse(zip_bytes),
+        )
+
+        ok = stage5_validation._try_restore_schemas()
+
+        assert ok is True
+        assert (dest / "common" / "core.json").read_bytes() == b'{"a": 1}'
+        assert (dest / "sdos" / "malware.json").read_bytes() == b'{"b": 2}'
+        assert not (tmp_path / "README.md").exists()
+
+    def test_rejects_an_entry_that_escapes_the_schema_directory(self, tmp_path, monkeypatch):
+        """
+        Locks the Zip Slip fix: an archive entry named
+        `<prefix>../../../../tmp/evil.json` still starts with the prefix and
+        ends in `.json`, so both filters above the containment check pass it —
+        the containment check itself is what must stop it landing outside
+        `dest`.
+        """
+        dest = tmp_path / "install" / "schemas-2.1" / "schemas"
+        sentinel = tmp_path / "evil.json"
+        # `dest` sits 3 levels below tmp_path (install/schemas-2.1/schemas), so
+        # 3 `../` segments walk exactly back up to tmp_path, landing on `sentinel`.
+        traversal = "../" * 3 + "evil.json"
+
+        monkeypatch.setattr(stage5_validation, "_schema_dir", lambda: dest)
+        zip_bytes = _fake_schema_zip(
+            (stage5_validation._ZIP_SCHEMA_PREFIX + "common/core.json", b'{"legit": true}'),
+            (stage5_validation._ZIP_SCHEMA_PREFIX + traversal, b"pwned"),
+        )
+        monkeypatch.setattr(
+            stage5_validation.urllib.request, "urlopen",
+            lambda *a, **kw: _FakeResponse(zip_bytes),
+        )
+
+        ok = stage5_validation._try_restore_schemas()
+
+        assert ok is True                                       # the legit entry still lands
+        assert (dest / "common" / "core.json").exists()
+        assert not sentinel.exists()                             # the traversal entry does not

@@ -87,6 +87,7 @@ def _try_restore_schemas() -> bool:
             zip_bytes = resp.read()
 
         extracted = 0
+        dest_resolved = dest.resolve()
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
             for entry in zf.namelist():
                 if not entry.startswith(_ZIP_SCHEMA_PREFIX):
@@ -94,7 +95,19 @@ def _try_restore_schemas() -> bool:
                 rel = entry[len(_ZIP_SCHEMA_PREFIX):]   # e.g. "common/core.json"
                 if not rel or not rel.endswith(".json"):
                     continue
-                out = dest / rel
+                # `_SCHEMA_ZIP_URL` is a fixed, trusted GitHub archive URL — but a
+                # Zip Slip guard on the extract is what actually makes that true,
+                # not the URL being hardcoded today. `entry` is untrusted archive
+                # content the moment it is used to build a filesystem path: the
+                # prefix/suffix checks above accept `…/schemas/../../../etc/x.json`
+                # just as readily as a real schema file. `pipeline/detection/sync.py`
+                # (`_safe_members`) makes the same check for corpus tarballs; this
+                # path extracts a zip instead of a tar but needs the identical
+                # containment check before any write.
+                out = (dest / rel).resolve()
+                if not out.is_relative_to(dest_resolved):
+                    logger.warning(f"Skipping unsafe schema archive entry: {entry!r}")
+                    continue
                 out.parent.mkdir(parents=True, exist_ok=True)
                 # Atomic write: stage to a temp file in the same directory, then
                 # os.replace() into place.  Multiple worker subprocesses can hit
