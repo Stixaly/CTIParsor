@@ -42,7 +42,7 @@ graphics" — before any model could be pointed at a CTI report's images.
 ### What is actually inside them — measured, not assumed
 
 `scripts/probe_vlm_figures.py` renders the highest-figure-area page of a report
-at 150 DPI and asks the **already-resident** `qwen3.8` (27.3 B Q4_K_M, ships a
+at 150 DPI and asks a locally served `qwen3.8` (27.3 B Q4_K_M, ships a
 vision encoder) for JSON: figure kind, verbatim text, edges, observables.
 
 | page | fig_area | verdict | latency |
@@ -506,7 +506,7 @@ labels therefore reach STIX as ordinary text, and its arrows do not.
 
 The numbers above came from a probe. This is the first time Stage 1f ran through
 `read_figures` with a configured backend (`VISION_PROVIDER=ollama`,
-`qwen3.8` on the local station), over two stored reports:
+`qwen3.8` on a local Ollama), over two stored reports:
 `scripts/measure_figure_iocs.py`.
 
 ### `iocs` is redundant, and that is the argument for not injecting it
@@ -623,8 +623,8 @@ corpus — it simply had no input in the first run.
 ### Concurrency: measured, and rejected
 
 ADR-0033 §5 set Ollama to `max_concurrency=1` against 4 for the API backends,
-on the grounds that there is one GPU and it is also the delegation target the
-project's workflow depends on. That reason is about *sharing* the box. This
+on the grounds that there is one GPU and it is shared with other local
+workloads. That reason is about *sharing* the box. This
 measurement asks the narrower question — whether concurrency would even pay for
 itself if the GPU were free — and finds it would not, so the two arguments agree.
 

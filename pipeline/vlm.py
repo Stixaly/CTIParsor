@@ -488,11 +488,11 @@ def _ollama_concurrency() -> int:
     """How many figure reads to keep in flight against Ollama.
 
     Stays at 1 where `anthropic` and `mistral` run 4. ADR-0033 §5 set it there
-    because the single GPU is also the delegation target the project's workflow
-    depends on; the numbers below are the independent second reason, measured
-    rather than assumed. On the reference station (27B Q4 on a DGX GB10),
-    raising it to 4 did overlap the work — the per-call times summed to 1392.7s
-    inside 737s of wall clock, so 1.89x of real concurrency — but each call
+    because the single GPU is shared with other local workloads; the numbers
+    below are the independent second reason, measured rather than assumed. On
+    the reference station (a 27B Q4 model on one GPU), raising it to 4 did
+    overlap the work — the per-call times summed to 1392.7s inside 737s of
+    wall clock, so 1.89x of real concurrency — but each call
     inflated from ~43s to ~127s, and throughput per figure came out slightly
     WORSE: 40.9s against 36.3s sequential.
 

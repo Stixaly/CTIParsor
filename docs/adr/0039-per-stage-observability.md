@@ -215,12 +215,12 @@ Returns the rows for one job, ordered, with durations. Feeds a per-job detail pa
 ## Action items
 
 1. [ ] Measure before weighting: instrument `stage_span` first with logging only, run the four ADR-0038 reports on the Linux host, and set `STAGE_PLAN` weights from the observed durations. Same trip as ADR-0038 item 0.
-2. [ ] `job_stages` table + migration in `api/db.py`; `STAGE_PLAN` and `stage_span` in a new `api/observability.py` (Qwen: schema and helper are fully specified above; tests must cover ok / skipped / failed / exception-re-raised, and that the log ContextVar is set inside the span and cleared after).
-3. [ ] Wire the 14 spans in `api/worker.py::_run_pipeline`, starting with `3d`, `3f`, `3b`, `4` and `4b`, whose numbers already exist (Qwen, one spec per group of stages).
-4. [ ] Parent-watcher stage attribution on signal death (Qwen: `api/worker.py`; test with a subprocess that SIGKILLs itself mid-stage — verify the test bites by reverting the attribution).
-5. [ ] `GET /api/jobs/{job_id}/stages` and `GET /api/stage-plan` (Qwen: `api/routes/jobs.py`).
-6. [ ] Logging: `LOG_FILE` default, retention job for both event tables, `.env.example` and `docs/deployment.md` (Qwen).
-7. [ ] Frontend: weighted `ProgressRail`, `queued` listener, `ProgressEvent.stage` retyped to `string`, stage list on the job detail view (Qwen: `ActivityCard.tsx`, `useSSE.ts`, `types/index.ts`).
+2. [ ] `job_stages` table + migration in `api/db.py`; `STAGE_PLAN` and `stage_span` in a new `api/observability.py` (schema and helper are fully specified above; tests must cover ok / skipped / failed / exception-re-raised, and that the log ContextVar is set inside the span and cleared after).
+3. [ ] Wire the 14 spans in `api/worker.py::_run_pipeline`, starting with `3d`, `3f`, `3b`, `4` and `4b`, whose numbers already exist (one group of stages at a time).
+4. [ ] Parent-watcher stage attribution on signal death (`api/worker.py`; test with a subprocess that SIGKILLs itself mid-stage — verify the test bites by reverting the attribution).
+5. [ ] `GET /api/jobs/{job_id}/stages` and `GET /api/stage-plan` (`api/routes/jobs.py`).
+6. [ ] Logging: `LOG_FILE` default, retention job for both event tables, `.env.example` and `docs/deployment.md`.
+7. [ ] Frontend: weighted `ProgressRail`, `queued` listener, `ProgressEvent.stage` retyped to `string`, stage list on the job detail view (`ActivityCard.tsx`, `useSSE.ts`, `types/index.ts`).
 8. [ ] README observability section; CHANGELOG entry.
 
 ## Confrontation with external practice (2026-09-02)

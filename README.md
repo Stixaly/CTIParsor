@@ -960,8 +960,8 @@ VISION_PROVIDER=none
 VISION_MODEL=
 VISION_TIMEOUT_S=120
 
-# Figure reads kept in flight. Ollama sits at 1 — one GPU, shared with the Qwen
-# delegation workflow (ADR-0033 §5), and measured: raising it to 4 overlapped the
+# Figure reads kept in flight. Ollama sits at 1 — one GPU, shared with other
+# local workloads (ADR-0033 §5), and measured: raising it to 4 overlapped the
 # work (1.89x) but inflated each call ~43s -> ~127s, so per-figure throughput got
 # worse. Raise it for a hosted endpoint. anthropic and mistral use 4 regardless.
 # VISION_CONCURRENCY=1

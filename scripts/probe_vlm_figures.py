@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import sys
 import time
 import urllib.request
@@ -18,7 +19,10 @@ try:
 except ImportError:
     _ANTHROPIC_AVAILABLE = False
 
-OLLAMA_URL = "http://192.168.0.29:11434/api/generate"
+OLLAMA_URL = (
+    os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+    + "/api/generate"
+)
 DEFAULT_MODEL = "qwen3.8"
 ANTHROPIC_MODEL = "claude-opus-5"
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"

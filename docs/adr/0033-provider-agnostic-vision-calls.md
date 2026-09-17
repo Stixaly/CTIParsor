@@ -102,7 +102,7 @@ why" without starting the pipeline. Every refusal names its cause — a missing
 Ollama model prints the ones that *are* pulled:
 
 ```
-WARNING Ollama model llama3.2 not found at http://192.168.0.29:11434
+WARNING Ollama model llama3.2 not found at http://localhost:11434
         — pulled models: ['qwen3.8:latest']
 RESULT: no usable vision backend — Stage 1f would be skipped.
 ```
@@ -112,7 +112,7 @@ RESULT: no usable vision backend — Stage 1f would be skipped.
 and the credential are the same, only the model differs.
 
 **`mistral` has no default model on purpose.** The vision-capable Mistral model
-names were not verified against a live account, and CLAUDE.md's own lesson is
+names were not verified against a live account, and the project's own lesson is
 that an invented constant table produces perfect code doing the wrong thing.
 An unset `VISION_MODEL` under `mistral` fails with a message that says so,
 instead of a capability probe failing on a model name nobody chose.
@@ -172,8 +172,8 @@ to address it.
 
 ### 5. Concurrency belongs to the backend
 
-Ollama is `max_concurrency = 1`: one GPU, and that GPU is also the delegation
-target this project's whole workflow depends on. API backends get 4. The caller
+Ollama is `max_concurrency = 1`: one GPU, and that GPU is typically shared with
+other local workloads. API backends get 4. The caller
 reads the number off the backend rather than holding a policy of its own.
 
 ### 6. A read that fails is `kind="unread"`, and the job continues
@@ -192,8 +192,8 @@ one thing ADR-0032's whole design depends on not happening.
 `_to_read` validates every field: an unknown `figure_kind` becomes `none`,
 non-string entries are dropped from the string lists, a `verbatim_text` that
 is not a list becomes `[]`, an edge missing `src` or `dst` is discarded, a
-non-string `label` becomes `""`. This is the defect family CLAUDE.md lists first
-— *garde de type manquante sur entrée non fiable* — and the input here is a
+non-string `label` becomes `""`. This is the most common defect family in this
+codebase — a missing type guard on untrusted input — and the input here is a
 language model's JSON, which is exactly as untrusted as a YAML key.
 
 ## Consequences
@@ -210,8 +210,8 @@ language model's JSON, which is exactly as untrusted as a YAML key.
   `_parse_payload`'s fence-stripping, which is why that function stays.
 - **The `/v1` route ignores `think: false`.** A thinking model spends its token
   budget on reasoning before writing any JSON, so `_MAX_TOKENS` is 4000 rather
-  than the few hundred the schema needs. This is already in CLAUDE.md's
-  troubleshooting table; it is now also a documented constant.
+  than the few hundred the schema needs. This was a known troubleshooting
+  item; it is now also a documented constant.
 - **What gets harder.** Changing `PROMPT` or `FIGURE_SCHEMA` invalidates the read
   cache for every stored figure, and comparing two models now means comparing two
   cache generations. That is the correct behaviour and it is still a cost.

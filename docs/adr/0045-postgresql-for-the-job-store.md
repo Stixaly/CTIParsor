@@ -187,7 +187,7 @@ exercise an object production never uses.
 | mypy on `pipeline/ api/ models/` | clean |
 | Container: `docker compose up` with the `postgres` service | both healthy; `backend()` answers `postgresql`, `SELECT version()` round trip |
 | Container: migrating the pre-existing SQLite job store on `cti-state` | `--dry-run` then real run: 47 rows across the eight tables copied in one transaction, committed, exit 0; the API lists the migrated job |
-| Container: `scripts/docker_smoke.sh --no-build --job` with the job store on the `postgres` service | **0 failures**: health, UI, uid 1001, read-only root, `job store is PostgreSQL and answers`, sandboxed Chromium; `tests/fixtures/sample_report.txt` reached `for_review` with 32 entities and a **53-object bundle**, no traceback; 13 min 12 s wall clock, dominated by the LLM stage on the LAN Ollama |
+| Container: `scripts/docker_smoke.sh --no-build --job` with the job store on the `postgres` service | **0 failures**: health, UI, uid 1001, read-only root, `job store is PostgreSQL and answers`, sandboxed Chromium; `tests/fixtures/sample_report.txt` reached `for_review` with 32 entities and a **53-object bundle**, no traceback; 13 min 12 s wall clock, dominated by the LLM stage on an external Ollama |
 
 Two operational blind spots named after this landed — no image registry
 path, no way to see queue backlog short of log-watching — are closed by
