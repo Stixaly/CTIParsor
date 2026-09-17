@@ -89,6 +89,17 @@ docker compose --profile bootstrap run --rm bootstrap   # once, 10-20 min: model
 docker compose logs -f app
 ```
 
+`docker compose up -d` only starts `app`, `worker` and `postgres` — none of
+them fetch or index the detection-rule corpora. `postgres` being reachable is
+unrelated: it is the job store (ADR-0045), while Sigma/Suricata/YARA rules
+live in a SQLite file on `cti-state`. Skip the `bootstrap` line above and
+Settings → Detection Corpora will show 0 rules for every corpus. Bootstrap
+clones and indexes every corpus in one process; syncing corpora individually
+from Settings → Redownload instead works too, but only **one at a time** —
+each sync rebuilds the whole store, and two overlapping ones contend for the
+same SQLite write lock (5s `busy_timeout`) and one fails with `database is
+locked`.
+
 ## Configuration
 
 Configuration is managed via the `.env` file (passed to the container via `env_file`).
@@ -256,6 +267,7 @@ Not supported in the image (torch CPU only).
 | `WARNING: ANTHROPIC_API_KEY is unset` | Missing key in `.env` | Edit `.env`, `docker compose up -d` |
 | `Connection refused` on `localhost:11434` | `localhost` is the container | Use `host.docker.internal` or `ollama` profile |
 | First report very slow | Bootstrap not run | Run bootstrap profile; set `HF_TOKEN` |
+| Settings → Redownload fails, `database is locked` | Two corpus syncs ran concurrently; each fully rebuilds the SQLite rule store and `busy_timeout` is only 5s (`api/db.py`) | Sync corpora one at a time, or re-run all of them at once with `docker compose --profile bootstrap run --rm bootstrap` |
 | Report `failed`, subprocess killed | Out of Memory | Lower `WORKER_MAX_CONCURRENT`, increase Docker VM RAM |
 | `port is already allocated` | Port conflict | Change `CTI_PORT` |
 | Warning: `listening on 0.0.0.0:8000` | Normal in container | Ignore; `CTI_BIND` controls external exposure |

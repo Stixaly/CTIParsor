@@ -49,6 +49,16 @@ python main.py input/your_report.pdf
 # → output/your_report_bundle.json
 ```
 
+> **Step 2 downloads the detection-rule corpora too.** `setup.sh` prompts
+> *"Clone & ingest detection corpora now? [Y/n]"* (default yes) and, if
+> accepted, clones the public Sigma/Suricata/YARA repos into `./corpora/`
+> (~600 MB, shallow) and builds the rule store — this is what powers the
+> detection-coverage matrix. Say no, run with `--no-corpora`, or hit a
+> network failure, and the matrix stays empty until you do it yourself:
+> ```bash
+> python scripts/sync_corpora.py && python scripts/build_detection_index.py
+> ```
+
 Supported input formats: `.pdf` `.docx` `.html` `.htm` `.txt` `.md`
 
 ---
@@ -106,6 +116,17 @@ docker compose up -d            # → http://127.0.0.1:8000
 docker compose --profile bootstrap run --rm bootstrap   # once, 10–20 min: models, corpora, rule store
 ```
 
+> **`docker compose up -d` alone fetches no detection rules.** The
+> Sigma/Suricata/YARA corpora live in a SQLite file on the `cti-state`
+> volume, entirely separate from the `postgres` job store — Postgres being
+> reachable has no bearing on whether corpora get downloaded. Without the
+> `bootstrap` run above, `app` and `worker` start fine but Settings →
+> Detection Corpora shows 0 rules for every corpus. Bootstrap clones every
+> corpus and rebuilds the store in one process; if you instead sync corpora
+> one-by-one from Settings → Redownload, do them **one at a time** — each
+> sync rewrites the whole store and two overlapping ones race for the same
+> SQLite write lock (`database is locked`, `busy_timeout` is 5s).
+
 What the image does, and does not, do:
 
 - runs as a non-root user on a **read-only root filesystem** with every Linux
@@ -126,11 +147,12 @@ What the image does, and does not, do:
 - adds isolation, **not authentication** — [docs/deployment.md §2](docs/deployment.md#2-what-no-authentication-actually-means)
   applies unchanged.
 
-There is no database container: the store is a SQLite file the API opens
-in-process (ADR-0037 defers PostgreSQL until authentication exists), and the
-per-report worker is a subprocess spawned inside the API, not a separate
-service. `bash scripts/docker_smoke.sh` builds, starts and verifies all of the
-above.
+`postgres` is the job store (jobs, entities, relationships — ADR-0045); the
+detection-rule corpus, uploads and outputs stay in a SQLite file on the
+`cti-state` volume instead. `worker` is its own service, not a subprocess
+spawned inside the API: it claims queued reports from `postgres` and runs
+each in an isolated subprocess (ADR-0046). `bash scripts/docker_smoke.sh`
+builds, starts and verifies all of the above.
 
 ---
 
