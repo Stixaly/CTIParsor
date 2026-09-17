@@ -164,3 +164,153 @@ def test_iter_chunks_covers_text_without_empty_or_oversized_pieces():
     # An unbroken token longer than the window must still advance.
     blob = "x" * (stage2d_cyner._CHUNK_CHARS * 3)
     assert sum(len(p) for p, _ in stage2d_cyner._iter_chunks(blob)) >= len(blob)
+
+
+# ── 6. Generic-language filtering (real production noise) ──────────────────
+#
+# CyNER's Malware/Threat_group labels fire on any span discussing malware or
+# threat-actor activity, not only on named entities. These are real spans
+# extracted from a real report (apt44-unearthing-sandworm.pdf, 2026-09-17)
+# that must now be rejected, alongside the real named entities from the same
+# report that must still survive.
+
+def test_generic_malware_language_is_rejected(monkeypatch):
+    noise = [
+        "malware", "backdoor", "ransomware family", "disruptive tool",
+        "commodity malware", "wiper malware", "malicious macro dropper",
+        "shellcode payload", "trojanized software installers",
+        "post-exploitation framework", "PHP webshell", "tool HTTP-Shell",
+        "C++ based infostealer malware", "dropper, custom boot loader",
+    ]
+    preds = [{"entity_group": "Malware", "score": 0.90, "word": w} for w in noise]
+    monkeypatch.setattr(stage2d_cyner, "_load_pipeline", lambda: _fake_pipeline(preds))
+
+    results = stage2d_cyner.extract_cyner_entities("irrelevant text")
+    assert results == []
+
+
+def test_generic_threat_actor_language_is_rejected(monkeypatch):
+    noise = [
+        "threat actor", "actors", "cyber espionage", "hacker group",
+        "Russian government-backed cyber groups", "Russian state",
+        "Russian military-linked actors", "backed threat groups",
+        "campaign", "CIKR operators", "Wartime Cyber Operations",
+    ]
+    preds = [{"entity_group": "Threat_group", "score": 0.90, "word": w} for w in noise]
+    monkeypatch.setattr(stage2d_cyner, "_load_pipeline", lambda: _fake_pipeline(preds))
+
+    results = stage2d_cyner.extract_cyner_entities("irrelevant text")
+    # Every one of these is pure generic language and must be dropped.
+    assert results == []
+
+
+def test_real_named_entities_survive_the_generic_filter(monkeypatch):
+    real = [
+        ("Malware", "ARGUEPATCH"),
+        ("Malware", "ARGUEPATCH Launcher payload"),
+        ("Malware", "BLACKENERGY malware variants"),
+        ("Threat_group", "APT44"),
+        ("Threat_group", "the GRU"),
+        ("Threat_group", "Seashell Blizzard"),
+        ("Threat_group", "XakNet Team"),
+    ]
+    preds = [{"entity_group": g, "score": 0.92, "word": w} for g, w in real]
+    monkeypatch.setattr(stage2d_cyner, "_load_pipeline", lambda: _fake_pipeline(preds))
+
+    results = stage2d_cyner.extract_cyner_entities("irrelevant text")
+    values = {r.value for r in results}
+    assert "ARGUEPATCH" in values
+    assert "ARGUEPATCH Launcher payload" in values
+    assert "BLACKENERGY malware variants" in values
+    assert "APT44" in values
+    assert "GRU" in values          # the leading "the " is stripped
+    assert "Seashell Blizzard" in values
+    assert "XakNet Team" in values
+
+
+def test_comma_separated_list_is_split_into_separate_entities(monkeypatch):
+    preds = [{
+        "entity_group": "Malware", "score": 0.93,
+        "word": "AZORULT, FORMBOOK, REMCOS, URSNIF, SILENTNIGHT, TRICKBOT",
+    }]
+    monkeypatch.setattr(stage2d_cyner, "_load_pipeline", lambda: _fake_pipeline(preds))
+
+    results = stage2d_cyner.extract_cyner_entities("irrelevant text")
+    values = {r.value for r in results}
+    assert values == {"AZORULT", "FORMBOOK", "REMCOS", "URSNIF", "SILENTNIGHT", "TRICKBOT"}
+
+
+def test_list_split_drops_fragments_that_are_themselves_generic(monkeypatch):
+    preds = [{"entity_group": "Malware", "score": 0.81, "word": "SDELETE, WinRAR"}]
+    monkeypatch.setattr(stage2d_cyner, "_load_pipeline", lambda: _fake_pipeline(preds))
+
+    results = stage2d_cyner.extract_cyner_entities("irrelevant text")
+    values = {r.value for r in results}
+    # WinRAR is a known-non-malware product name, denylisted specifically.
+    assert values == {"SDELETE"}
+
+
+def test_sentence_boundary_and_script_garbage_is_rejected(monkeypatch):
+    preds = [
+        {"entity_group": "Threat_group", "score": 0.74, "word": "sponsor. CyberА"},
+        {"entity_group": "Threat_group", "score": 0.70, "word": "Народная group"},
+        {"entity_group": "Threat_group", "score": 0.71, "word": "s Information Operations"},
+        {"entity_group": "Threat_group", "score": 0.70, "word": "s Primary"},
+    ]
+    monkeypatch.setattr(stage2d_cyner, "_load_pipeline", lambda: _fake_pipeline(preds))
+
+    results = stage2d_cyner.extract_cyner_entities("irrelevant text")
+    assert results == []
+
+
+def test_known_non_malware_and_non_actor_denylists(monkeypatch):
+    preds = [
+        {"entity_group": "Malware", "score": 0.92, "word": "MicroSCADA binary"},
+        {"entity_group": "Threat_group", "score": 0.79, "word": "Russia"},
+        {"entity_group": "Threat_group", "score": 0.81, "word": "Moscow"},
+    ]
+    monkeypatch.setattr(stage2d_cyner, "_load_pipeline", lambda: _fake_pipeline(preds))
+
+    results = stage2d_cyner.extract_cyner_entities("irrelevant text")
+    assert results == []
+
+
+def test_denylisted_word_does_not_veto_a_larger_distinct_name(monkeypatch):
+    """A denylisted token (e.g. "Russia") must not sink a fragment that also
+    carries real identifying content -- regression for a fix that initially
+    rejected the real hacktivist-front name "XAKNET Cyber Army of Russia
+    Reborn" outright because it contains the word "Russia"."""
+    preds = [{
+        "entity_group": "Threat_group", "score": 0.75,
+        "word": "XAKNET Cyber Army of Russia Reborn",
+    }]
+    monkeypatch.setattr(stage2d_cyner, "_load_pipeline", lambda: _fake_pipeline(preds))
+
+    results = stage2d_cyner.extract_cyner_entities("irrelevant text")
+    values = {r.value for r in results}
+    assert values == {"XAKNET Cyber Army of Russia Reborn"}
+
+
+def test_dotted_names_are_not_mistaken_for_sentence_boundaries(monkeypatch):
+    """A bare interior period with no following whitespace is a real name
+    (a version-style suffix), not a sentence-boundary artifact."""
+    preds = [
+        {"entity_group": "Malware", "score": 0.76, "word": "BLACKENERGY.V2"},
+        {"entity_group": "Malware", "score": 0.72, "word": "REGEORG.NEO"},
+    ]
+    monkeypatch.setattr(stage2d_cyner, "_load_pipeline", lambda: _fake_pipeline(preds))
+
+    results = stage2d_cyner.extract_cyner_entities("irrelevant text")
+    values = {r.value for r in results}
+    assert values == {"BLACKENERGY.V2", "REGEORG.NEO"}
+
+
+def test_bare_apt_is_rejected_but_numbered_apt_group_survives(monkeypatch):
+    preds = [
+        {"entity_group": "Threat_group", "score": 0.86, "word": "APT"},
+        {"entity_group": "Threat_group", "score": 0.88, "word": "APT44"},
+    ]
+    monkeypatch.setattr(stage2d_cyner, "_load_pipeline", lambda: _fake_pipeline(preds))
+    results = stage2d_cyner.extract_cyner_entities("irrelevant text")
+    values = {r.value for r in results}
+    assert values == {"APT44"}
