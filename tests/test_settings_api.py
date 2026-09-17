@@ -1,4 +1,7 @@
 """Tests for the settings / corpora-management API (ADR-0007 Slice 1)."""
+import pytest
+from fastapi import HTTPException
+
 import api.routes.settings as settings_mod
 
 _RULE = """\
@@ -72,4 +75,91 @@ def test_rebuild_ingests_local_clone(temp_db, temp_db_client, tmp_path, monkeypa
 def test_add_rejects_non_sigma_adapter(temp_db, temp_db_client, tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch)
     r = temp_db_client.post("/api/settings/corpora", json={"name": "x", "adapter": "elastic"})
+    assert r.status_code == 400
+
+
+# ── path containment (a corpus's local clone must stay under corpora/) ────────
+#
+# `_validate_corpus_path`/`_validate_remote` are exercised directly rather than
+# through the API: `_CORPORA_ROOT` is resolved once at import time against the
+# real repository root, not against `_setup()`'s `tmp_path` registry, so the
+# meaningful boundary to test is the function's own logic, not a monkeypatched
+# app. `test_create_corpus_rejects_a_path_escaping_corpora` below still goes
+# through the API once, to lock that create_corpus actually calls it.
+
+def test_path_inside_corpora_root_is_accepted():
+    settings_mod._validate_corpus_path("./corpora/some-new-corpus", None)  # must not raise
+
+
+@pytest.mark.parametrize("bad_path", [
+    "../../../../etc/cron.d/evil",
+    "/etc/cron.d/evil",
+    "./corpora/../../etc/passwd",
+])
+def test_path_escaping_corpora_root_is_rejected(bad_path):
+    with pytest.raises(HTTPException) as exc:
+        settings_mod._validate_corpus_path(bad_path, None)
+    assert exc.value.status_code == 400
+    assert "path" in str(exc.value.detail)
+
+
+def test_subdir_escaping_corpora_root_is_rejected_even_with_a_contained_path():
+    """`corpus_root()` joins `path` and `subdir` — a contained `path` is not
+    enough if `subdir` walks back out of it."""
+    with pytest.raises(HTTPException) as exc:
+        settings_mod._validate_corpus_path("./corpora/demo", "../../../../etc")
+    assert exc.value.status_code == 400
+    assert "subdir" in str(exc.value.detail)
+
+
+def test_subdir_staying_inside_the_clone_is_accepted():
+    settings_mod._validate_corpus_path("./corpora/demo", "sigma")  # must not raise
+
+
+@pytest.mark.parametrize("bad_remote", [
+    "--upload-pack=touch /tmp/pwned",
+    "-oProxyCommand=touch /tmp/pwned",
+    "ext::sh -c touch /tmp/pwned",
+    "fd::0",
+])
+def test_remote_shaped_as_a_flag_or_transport_helper_is_rejected(bad_remote):
+    with pytest.raises(HTTPException) as exc:
+        settings_mod._validate_remote(bad_remote, "git")
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.parametrize("good_remote", [
+    "https://github.com/SigmaHQ/sigma.git",
+    "git@github.com:your-org/private-sigma.git",   # scp-shorthand, used for private corpora
+    "ssh://git@example.com/org/repo.git",
+])
+def test_ordinary_remotes_are_accepted(good_remote):
+    settings_mod._validate_remote(good_remote, "git")  # must not raise
+
+
+def test_create_corpus_rejects_a_path_escaping_corpora(temp_db, temp_db_client, tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+    r = temp_db_client.post("/api/settings/corpora", json={
+        "name": "evil", "git": "https://github.com/org/evil.git",
+        "path": "../../../../tmp/evil-corpus",
+    })
+    assert r.status_code == 400
+    assert "path" in r.json()["detail"]
+    # nothing was written to the overlay
+    names = [c["name"] for c in temp_db_client.get("/api/settings/corpora").json()["corpora"]]
+    assert "evil" not in names
+
+
+def test_create_corpus_rejects_an_upload_pack_flag_as_the_git_remote(temp_db, temp_db_client, tmp_path, monkeypatch):
+    """
+    Locks the argument-injection guard: `git clone <remote> <path>` runs the
+    attacker's `remote` as argv, not through a shell, but a value shaped like
+    `--upload-pack=<command>` is still parsed by git itself as an option
+    rather than a URL (GitHub Security Lab, "Wagging the Dog") — the app must
+    refuse it before it ever reaches `git_command()`.
+    """
+    _setup(tmp_path, monkeypatch)
+    r = temp_db_client.post("/api/settings/corpora", json={
+        "name": "evil", "git": "--upload-pack=touch /tmp/pwned",
+    })
     assert r.status_code == 400
