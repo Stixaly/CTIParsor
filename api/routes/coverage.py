@@ -248,7 +248,12 @@ def _zip_export(
             fmt = r.get("format") or "sigma"
             ext = _EXPORT_EXTENSIONS.get(fmt, _DEFAULT_EXTENSION)
             base = _safe_slug(r["title"] or r["native_key"] or r["id"], "rule")
-            corpus_val = r.get("corpus") or "unknown"
+            # Slugged for the same reason `base` is: an unsanitized value in a
+            # zip entry name is a Zip Slip primitive (`../../etc/x`) against
+            # whoever extracts this export. `corpus` is normally an operator-
+            # chosen name (api/routes/settings.py), not rule content, but this
+            # writer does not get to assume that stays true forever.
+            corpus_val = _safe_slug(r.get("corpus") or "", "unknown")
 
             path_base = f"rules/{fmt}/{corpus_val}__{base}"
             path = f"{path_base}.{ext}"
