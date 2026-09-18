@@ -76,6 +76,23 @@ def test_extract_returns_empty_when_model_unavailable(monkeypatch):
     assert stage2d_cyner.extract_cyner_entities("some text") == []
 
 
+# ── 3. Calibrated per-type cutoffs (ADR-0051) ──────────────────────────────
+
+def test_calibrated_cutoff_replaces_the_medium_threshold_per_type(monkeypatch):
+    preds = [
+        {"entity_group": "Malware",      "score": 0.80, "word": "Emotet"},   # below malware's 0.85
+        {"entity_group": "Threat_group", "score": 0.80, "word": "APT29"},    # threat_actor keeps 0.70
+    ]
+    monkeypatch.setattr(stage2d_cyner, "_load_pipeline", lambda: _fake_pipeline(preds))
+    monkeypatch.setattr(
+        stage2d_cyner, "get_threshold",
+        lambda source, etype, default: 0.85 if (source, etype) == ("cyner", "malware") else default,
+    )
+
+    results = stage2d_cyner.extract_cyner_entities("irrelevant text")
+    assert [(r.value, r.entity_type) for r in results] == [("APT29", EntityType.THREAT_ACTOR)]
+
+
 # ── 4. Loader failures must not escape ──────────────────────────────────────
 
 def test_load_pipeline_returns_none_when_the_loader_raises(monkeypatch, tmp_path):

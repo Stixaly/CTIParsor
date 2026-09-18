@@ -959,6 +959,12 @@ CYNER_ENABLED=true
 GLINER_MODEL=urchade/gliner_large-v2.1
 GLINER_THRESHOLD=0.40
 GLINER_ENABLED=true
+
+# ADR-0051 — per-(source, entity_type) cutoffs calibrated from the analysts'
+# accept/reject decisions override GLINER_THRESHOLD / CyNER's 0.70 once stored
+# (`python -m scripts.calibrate_thresholds --apply`, or POST /api/thresholds/
+# recalibrate).  false ignores every stored row.
+THRESHOLD_CALIBRATION_ENABLED=true
 ```
 
 ### Vision (Stage 1f — figures)
@@ -1659,6 +1665,10 @@ Manages the gitignored local overlay only — the committed registry is never ed
 | `PATCH` | `/api/settings/corpora/{name}` | Enable or disable a corpus without losing its configuration (body: `{"enabled": bool}`), existing because deletion writes a disable for committed registry corpora with no UI reactivation path, as ADR-0015 delivered seven disabled corpora inaccessible without this endpoint; returns 404 if the corpus is unknown |
 | `POST` | `/api/settings/corpora/{name}/sync` | Clone/pull the git repository of a single public corpus and re-ingest the store, exposing the same network step as `scripts/sync_corpora.py` for the "Redownload" button, restricted to PUBLIC corpora so private git credentials never transit the application (ADR-0006), blocking until the git operation completes |
 | `POST` | `/api/settings/corpora/rebuild` | Re-ingest all enabled corpora from their local clones |
+| `GET` | `/api/thresholds` | The NER confidence cutoffs in force (ADR-0051): each stage's default, the review UI's auto-accept level, and every stored per-(source, entity_type) override with its provenance |
+| `POST` | `/api/thresholds/recalibrate` | Fit P(accepted \| score) per (source, entity_type) from the analysts' decisions and propose the cutoff at which it reaches `target_precision` (default 0.90, needs `min_samples` = 200 decisions); a dry run unless `"apply": true` |
+| `PUT` | `/api/thresholds/{source}/{entity_type}` | Hand-set one cutoff (`origin: manual`) |
+| `DELETE` | `/api/thresholds/{source}/{entity_type}` | Remove an override; the stage default applies again |
 
 ## Database schema
 
@@ -1733,6 +1743,23 @@ CREATE TABLE progress_events (
 CREATE TABLE relationship_policy (
     id          INTEGER PRIMARY KEY,  -- always 1 (singleton row)
     policy_json TEXT NOT NULL         -- serialised policy object
+);
+
+-- NER confidence cutoffs calibrated from analyst decisions (ADR-0051).  A row
+-- overrides the stage default (GLINER_THRESHOLD, CyNER 0.70) for that one
+-- source + entity type; no row = the default.  Written by
+-- scripts/calibrate_thresholds.py --apply or POST /api/thresholds/recalibrate.
+CREATE TABLE model_thresholds (
+    source           TEXT NOT NULL,    -- cyner | gliner
+    entity_type      TEXT NOT NULL,
+    threshold        REAL NOT NULL,    -- discard below this raw score
+    sample_size      INTEGER NOT NULL, -- decisions the fit was made on
+    target_precision REAL,             -- what the cutoff was asked to reach
+    precision_at     REAL,             -- empirical precision at the cutoff
+    recall_retained  REAL,             -- share of accepted entities still shown
+    origin           TEXT NOT NULL,    -- calibrated | manual
+    updated_at       TEXT NOT NULL,
+    PRIMARY KEY (source, entity_type)
 );
 
 -- Detection-rule store (ADR-0006) — corpus-derived, not per-job.

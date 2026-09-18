@@ -6,6 +6,39 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Added
+
+#### NER confidence cutoffs calibrated from analyst decisions, per source and entity type (ADR-0051), 2026-09-18
+
+The discard cutoff Stage 2d (CyNER, 0.70) and Stage 2e (GLiNER,
+`GLINER_THRESHOLD` = 0.40) apply was one constant per stage across every
+label the stage emits, chosen once and never measured. The store already
+holds the measurement: every CyNER/GLiNER entity is saved with the model's
+raw score and, once reviewed, the analyst's accept/reject — a labelled
+sample of P(correct | score) per `(source, entity_type)`.
+
+`python -m scripts.calibrate_thresholds` (and `POST
+/api/thresholds/recalibrate`) fits an isotonic regression to that sample per
+pair and proposes the lowest score at which the *calibrated* accept rate
+reaches a target precision (0.90 by default), reported next to what the
+cutoff in force delivers today and the share of accepted entities the
+proposal would still show. Nothing is written without `--apply` /
+`"apply": true`; a written row (`model_thresholds`, both engines) overrides
+the stage default for that one pair and is read once per worker subprocess
+(`pipeline/thresholds.py`), a dictionary lookup in the stage —
+`THRESHOLD_CALIBRATION_ENABLED=false` ignores every row. `GET`/`PUT`/`DELETE
+/api/thresholds` read, hand-set and clear rows; every bundle's run config
+(ADR-0024) now records the cutoffs it was built under.
+
+Three things the data cannot honestly say are reported as a status instead
+of applied: too few decisions (< 200), no score band reaching the target
+(a content problem, not a cutoff problem — cf. ADR-0050), and a clean band
+that only starts at the review UI's own auto-accept tier (≥ 0.90), where
+"accepted" is mostly the model's verdict echoed back. A proposal also never
+goes below a score analysts have actually seen. GLiNER's library has a
+single threshold for all labels (checked), so the model is asked at the
+lowest cutoff in force and each prediction is held to its own type's.
+
 ### Fixed
 
 #### CyNER's Malware/Threat_group labels tagged generic language as named entities (ADR-0050), 2026-09-18

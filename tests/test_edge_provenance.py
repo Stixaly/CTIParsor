@@ -119,9 +119,18 @@ def test_build_run_config_shape():
 
     expected_keys = {
         "recorded_at", "git_rev", "policy", "embedding_model",
-        "ttp_thresholds", "stages", "env"
+        "ttp_thresholds", "ner_thresholds", "stages", "env"
     }
     assert set(config.keys()) == expected_keys
+
+    # ner_thresholds (ADR-0051) must name each calibrated stage's default as
+    # a real number and the overrides in force -- an empty dict on a store
+    # with no model_thresholds rows, never a missing key.
+    ner = config["ner_thresholds"]
+    assert isinstance(ner["calibration_enabled"], bool)
+    for source in ("cyner", "gliner"):
+        assert isinstance(ner[source]["default"], float), f"{source} default not a float: {ner[source]!r}"
+        assert isinstance(ner[source]["overrides"], dict)
 
     # policy should be identical to what was passed
     assert config["policy"] == policy

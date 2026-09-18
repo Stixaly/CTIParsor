@@ -34,6 +34,7 @@ from pathlib import Path
 
 from models.schemas import EntityType, RawEntity
 from pipeline.env_flags import env_bool
+from pipeline.thresholds import get_threshold
 
 _SKIP_HEAVY = env_bool("SKIP_HEAVY_MODELS")
 
@@ -62,7 +63,9 @@ _CYNER_ENABLED = env_bool("CYNER_ENABLED", default=True)
 # only ever appears once per server installation (not once per job).
 _SENTINEL_PATH = Path(__file__).parent.parent / ".cyner_model_unavailable"
 
-# Confidence thresholds
+# Confidence thresholds.  _MEDIUM_THRESH is the discard cutoff; a
+# `model_thresholds` row calibrated from analyst decisions overrides it per
+# entity type (ADR-0051, see pipeline/thresholds.py).
 _HIGH_THRESH   = 0.90
 _MEDIUM_THRESH = 0.70
 
@@ -383,6 +386,8 @@ def extract_cyner_entities(text: str) -> list[RawEntity]:
         per_chunk = [per_chunk]
     predictions: list[dict] = [p for preds in per_chunk for p in (preds or [])]
 
+    cutoff = {etype: get_threshold("cyner", etype.value, _MEDIUM_THRESH) for etype in _LABEL_MAP.values()}
+
     results: list[RawEntity] = []
     seen: set[tuple[str, EntityType]] = set()
 
@@ -394,7 +399,7 @@ def extract_cyner_entities(text: str) -> list[RawEntity]:
         etype = _LABEL_MAP.get(label)
         if etype is None:
             continue                        # skip Indicator, System, Vulnerability
-        if score < _MEDIUM_THRESH:
+        if score < cutoff[etype]:
             continue
         if not raw_value or len(raw_value) < 3:
             continue
