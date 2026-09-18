@@ -524,6 +524,22 @@ _JOB_STORE_MIGRATIONS_SQLITE = [
     " cvss_score REAL,"
     " cvss_vector TEXT,"
     " fetched_at TEXT NOT NULL)",
+    # ADR-0051 — per-(source, entity_type) NER confidence cutoffs calibrated
+    # from analyst accept/reject decisions.  A row overrides the env default
+    # (GLINER_THRESHOLD / CyNER's 0.70) for that one source+type; no row means
+    # the default applies.  Written by scripts/calibrate_thresholds.py or
+    # POST /api/thresholds/recalibrate, read once per worker subprocess.
+    "CREATE TABLE IF NOT EXISTS model_thresholds ("
+    " source TEXT NOT NULL,"
+    " entity_type TEXT NOT NULL,"
+    " threshold REAL NOT NULL,"
+    " sample_size INTEGER NOT NULL DEFAULT 0,"
+    " target_precision REAL,"
+    " precision_at REAL,"
+    " recall_retained REAL,"
+    " origin TEXT NOT NULL DEFAULT 'calibrated',"
+    " updated_at TEXT NOT NULL,"
+    " PRIMARY KEY (source, entity_type))",
 ]
 
 _JOB_STORE_DDL_POSTGRES = """
@@ -632,6 +648,20 @@ CREATE TABLE IF NOT EXISTS cve_cache (
     cvss_score DOUBLE PRECISION,
     cvss_vector TEXT,
     fetched_at TEXT NOT NULL
+);
+
+-- ADR-0051 - calibrated NER confidence cutoffs (see the SQLite twin).
+CREATE TABLE IF NOT EXISTS model_thresholds (
+    source TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    threshold DOUBLE PRECISION NOT NULL,
+    sample_size INTEGER NOT NULL DEFAULT 0,
+    target_precision DOUBLE PRECISION,
+    precision_at DOUBLE PRECISION,
+    recall_retained DOUBLE PRECISION,
+    origin TEXT NOT NULL DEFAULT 'calibrated',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (source, entity_type)
 );
 """
 

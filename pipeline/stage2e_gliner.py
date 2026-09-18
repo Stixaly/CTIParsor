@@ -48,6 +48,7 @@ from typing import Iterator
 from api.logging_config import get_logger
 from models.schemas import EntityType, RawEntity
 from pipeline.env_flags import env_bool
+from pipeline.thresholds import get_threshold
 
 logger = get_logger(__name__)
 
@@ -177,6 +178,14 @@ def extract_gliner_entities(text: str) -> list[RawEntity]:
     if model is None:
         return []
 
+    # ADR-0051 — one cutoff per entity type, calibrated from analyst decisions
+    # when a `model_thresholds` row exists, else GLINER_THRESHOLD.  GLiNER's
+    # predict_entities() takes a single threshold for every label, so the model
+    # is asked for the lowest of them and each prediction is then held to its
+    # own type's cutoff below.
+    cutoff = {etype: get_threshold("gliner", etype.value, _GLINER_THRESHOLD) for etype in _LABEL_MAP.values()}
+    model_threshold = min(_GLINER_THRESHOLD, *cutoff.values())
+
     # ── Batched inference ─────────────────────────────────────────────────────
     # Collect non-empty chunks, then call model.predict_entities() in batches
     # of _BATCH_SIZE.  When given a list, GLiNER returns list[list[dict]].
@@ -195,7 +204,7 @@ def extract_gliner_entities(text: str) -> list[RawEntity]:
             raw = model.predict_entities(
                 batch_texts,
                 _GLINER_LABELS,
-                threshold=_GLINER_THRESHOLD,
+                threshold=model_threshold,
                 flat_ner=True,
                 multi_label=False,
             )
@@ -219,7 +228,7 @@ def extract_gliner_entities(text: str) -> list[RawEntity]:
                 try:
                     batch_preds.append(model.predict_entities(
                         chunk_text, _GLINER_LABELS,
-                        threshold=_GLINER_THRESHOLD,
+                        threshold=model_threshold,
                         flat_ner=True, multi_label=False,
                     ))
                 except Exception as e2:
@@ -237,7 +246,7 @@ def extract_gliner_entities(text: str) -> list[RawEntity]:
                     continue
                 if not value or len(value) < 3:
                     continue
-                if score < _GLINER_THRESHOLD:
+                if score < cutoff[etype]:
                     continue
 
                 # Skip bare version strings ("0.1.16") and single-char spans

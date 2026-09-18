@@ -33,6 +33,7 @@ from api.routes import (
     queue,
     relationships,
     settings,
+    thresholds,
     upload,
 )
 
@@ -136,6 +137,7 @@ app.include_router(policy.router)
 app.include_router(coverage.router)
 app.include_router(settings.router)
 app.include_router(queue.router)
+app.include_router(thresholds.router)
 
 
 @app.get("/api/health")

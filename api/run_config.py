@@ -88,6 +88,23 @@ def build_run_config(policy: dict | None = None) -> dict:
     except Exception:
         ttp_thresholds = {"high": None, "medium": None}
 
+    # ner_thresholds (ADR-0051) — the per-type cutoffs Stage 2d/2e applied, so
+    # a bundle built under a calibrated cutoff stays explainable after the next
+    # recalibration moves it.  The stage default plus whatever rows overrode it.
+    ner_thresholds: dict | None
+    try:
+        from pipeline.calibration import stage_default
+        from pipeline.thresholds import calibration_enabled, overrides_for
+        ner_thresholds = {
+            "calibration_enabled": calibration_enabled(),
+            **{
+                source: {"default": stage_default(source), "overrides": overrides_for(source)}
+                for source in ("cyner", "gliner")
+            },
+        }
+    except Exception:
+        ner_thresholds = None
+
     # stages
     #
     # Ask each stage its OWN availability predicate — the same call the worker
@@ -140,6 +157,7 @@ def build_run_config(policy: dict | None = None) -> dict:
         "policy": policy,
         "embedding_model": embedding_model,
         "ttp_thresholds": ttp_thresholds,
+        "ner_thresholds": ner_thresholds,
         "stages": stages,
         "env": env,
     }
