@@ -295,6 +295,11 @@ export default function Review() {
   const updateRelMutation = useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: object }) => updateRelationship(jobId!, id, patch),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['relationships', jobId] }); markDirty() },
+    onError: (err: Error) => {
+      console.error('[updateRelationship] failed:', err.message)
+      alert(`Could not update relationship: ${err.message}`)
+      qc.invalidateQueries({ queryKey: ['relationships', jobId] })
+    },
   })
 
   // ── local-first entity mutations ─────────────────────────────────────────
@@ -368,6 +373,13 @@ export default function Review() {
     setLocalRels(rs => rs.map(r => r.id === id ? { ...r, relationship_type } : r))
     if (!localRelsRef.current.find(r => r.id === id)?._localOnly) {
       updateRelMutation.mutate({ id, patch: { relationship_type } })
+    }
+  }
+
+  const setRelDates = (id: string, start_time: string | null, stop_time: string | null) => {
+    setLocalRels(rs => rs.map(r => r.id === id ? { ...r, start_time, stop_time } : r))
+    if (!localRelsRef.current.find(r => r.id === id)?._localOnly) {
+      updateRelMutation.mutate({ id, patch: { start_time, stop_time } })
     }
   }
 
@@ -810,6 +822,7 @@ export default function Review() {
           onReset={id => setRelAccepted(id, null)}
           onJump={jumpToValue}
           onChangeType={setRelType}
+          onChangeDates={setRelDates}
           showInDoc={relInDoc}
           setShowInDoc={setRelInDoc}
           onNewRelationship={(x, y) => setRelCreator({ x, y })}

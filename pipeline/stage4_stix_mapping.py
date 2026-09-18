@@ -935,7 +935,7 @@ def build_stix_bundle(
             # property (x_ prefix is spec-legal; requires allow_custom=True).
             _label = getattr(rel, "evidence_label", "reported")
             _label = getattr(_label, "value", _label)  # EvidenceLabel enum → str
-            relationship = stix2.Relationship(
+            _rel_kwargs: dict = dict(
                 relationship_type=rel_type,
                 source_ref=source.id,
                 target_ref=target.id,
@@ -943,6 +943,20 @@ def build_stix_bundle(
                 allow_custom=True,
                 x_evidence_label=str(_label),
             )
+            # `description` IS a native STIX 2.1 SRO property (§5.1.2) — the
+            # verbatim quote the LLM copied to support the claim belongs
+            # there, not in a custom field.
+            if getattr(rel, "evidence_text", None):
+                _rel_kwargs["description"] = rel.evidence_text
+            # start_time/stop_time (§5.1.2, both optional) — only set when the
+            # source text gave an explicit date; _normalize_llm_json already
+            # guarantees stop_time is never <= start_time by this point, and
+            # stix2.Relationship enforces the same constraint again.
+            if getattr(rel, "start_time", None) is not None:
+                _rel_kwargs["start_time"] = rel.start_time
+            if getattr(rel, "stop_time", None) is not None:
+                _rel_kwargs["stop_time"] = rel.stop_time
+            relationship = stix2.Relationship(**_rel_kwargs)
             stix_objects.append(relationship)
         except Exception:
             pass
@@ -1277,12 +1291,14 @@ def _entity_to_sdo(entity: RawEntity):
             return stix2.IntrusionSet(name=v, id=intrusion_id)
         if t == EntityType.LOCATION:
             iso2 = _COUNTRY_ISO.get(v.strip().lower())
-            location_id = _make_deterministic_id(f"{v}_{iso2}" if iso2 else v, "location", "cti")
-            if iso2:
-                return stix2.Location(name=v, country=iso2, id=location_id)
-            # Fall back to name-only Location — region is optional in STIX 2.1
-            # and "unknown" is not a valid vocabulary value (raises InvalidValueError)
-            return stix2.Location(name=v, id=location_id)
+            if not iso2:
+                # STIX 2.1 requires a Location to carry 'region', 'country', or
+                # 'latitude'+'longitude' — a name-only Location always fails
+                # that constraint. Skip rather than build one, same as the
+                # targeted_countries loop above (~line 641) for the same reason.
+                return None
+            location_id = _make_deterministic_id(f"{v}_{iso2}", "location", "cti")
+            return stix2.Location(name=v, country=iso2, id=location_id)
         if t == EntityType.IDENTITY:
             identity_id = _make_deterministic_id(v, "identity", "cti")
             return stix2.Identity(name=v, identity_class="class", id=identity_id)

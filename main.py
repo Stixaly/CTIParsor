@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 from models.schemas import RawEntity
-from pipeline.stage1_ingestion import chunk_text, ingest
+from pipeline.stage1_ingestion import chunk_text, extract_reference_date, ingest
 from pipeline.stage2_extraction import extract_entities, refang
 from pipeline.stage3_llm import enrich_all_chunks
 from pipeline.stage4_stix_mapping import build_stix_bundle, verify_ioc_coverage
@@ -40,6 +40,9 @@ def run_pipeline(input_file: str, output_file: str) -> bool:
     except (FileNotFoundError, ValueError) as exc:
         print(f"      [ERREUR] {exc}")
         return False
+    # Best-effort document creation time, used by Stage 3 to resolve simple
+    # relative relationship dates — see enrich_chunk's reference_date docstring.
+    reference_date = extract_reference_date(input_file)
 
     # Refang so entity values match between extraction and annotation
     text = refang(raw_text)
@@ -69,7 +72,7 @@ def run_pipeline(input_file: str, output_file: str) -> bool:
 
     # Stage 3 — Enrichissement LLM
     print("\n[3/5] Enrichissement LLM (TTPs, relations, contexte)...")
-    llm_result = enrich_all_chunks(chunks, entities_per_chunk)
+    llm_result = enrich_all_chunks(chunks, entities_per_chunk, reference_date=reference_date)
     print(f"      Threat actors  : {len(llm_result.threat_actors)}")
     print(f"      Malwares       : {len(llm_result.malware_families)}")
     print(f"      TTPs           : {len(llm_result.ttps)}")

@@ -2,7 +2,11 @@ import stix2
 
 from models.schemas import EntityType, RawEntity
 from pipeline.stage3_llm import LLMEnrichmentResult, RelationshipExtracted, TTPExtracted
-from pipeline.stage4_stix_mapping import build_stix_bundle, verify_ioc_coverage
+from pipeline.stage4_stix_mapping import (
+    _entity_to_sdo,
+    build_stix_bundle,
+    verify_ioc_coverage,
+)
 
 
 def _make_minimal_llm_result() -> LLMEnrichmentResult:
@@ -55,6 +59,46 @@ def test_relationship_resolves_via_alias():
     rels = [o for o in bundle.objects if getattr(o, "type", "") == "relationship"]
     assert len(actors) == 1
     assert any(r.source_ref == actors[0].id for r in rels), "alias edge should resolve"
+
+
+def test_relationship_start_stop_time_and_description_propagate():
+    """STIX 2.1 §5.1.2: start_time/stop_time/description are native SRO
+    properties — an LLM relationship that carries them must produce a
+    stix2.Relationship with those same fields set, not just the x_evidence_label
+    custom property."""
+    from datetime import datetime, timezone
+
+    start = datetime(2022, 11, 4, tzinfo=timezone.utc)
+    stop = datetime(2023, 3, 1, tzinfo=timezone.utc)
+    llm = LLMEnrichmentResult(
+        threat_actors=["APT29"],
+        malware_families=["WellMess"],
+        relationships=[
+            RelationshipExtracted(
+                source_value="APT29",
+                relationship_type="uses",
+                target_value="WellMess",
+                confidence=0.9,
+                evidence_text="APT29 used WellMess between November 2022 and March 2023.",
+                start_time=start,
+                stop_time=stop,
+            )
+        ],
+    )
+    bundle = build_stix_bundle([], llm, "temporal")
+    rel = next(o for o in bundle.objects if getattr(o, "type", "") == "relationship")
+    assert rel.start_time == start
+    assert rel.stop_time == stop
+    assert rel.description == "APT29 used WellMess between November 2022 and March 2023."
+
+
+def test_relationship_without_dates_has_no_start_stop_time():
+    """No regression: a relationship with no extracted dates must not gain
+    start_time/stop_time (and must not error trying to set them to None)."""
+    bundle = build_stix_bundle([], _make_minimal_llm_result(), "no_dates")
+    rel = next(o for o in bundle.objects if getattr(o, "type", "") == "relationship")
+    assert "start_time" not in rel
+    assert "stop_time" not in rel
 
 
 def test_spurious_observable_to_ttp_edge_dropped():
@@ -204,6 +248,38 @@ def test_no_duplicate_location_identity_sdos():
     assert report is not None
     ref_counts = Counter(report.object_refs)
     assert all(c == 1 for c in ref_counts.values()), "duplicate entries in object_refs"
+
+
+# ── Location entities whose name isn't a known country ─────────────────────────
+# STIX 2.1 requires a Location to carry 'region', 'country', or 'latitude'+
+# 'longitude'. A name-only Location always fails that constraint, so a raw
+# LOCATION entity (city, region, ...) not in the hardcoded country table must
+# be skipped rather than produce a Location object that can never construct.
+
+def test_entity_to_sdo_skips_unmapped_location_name():
+    """A LOCATION entity whose value isn't a known country (e.g. a city or
+    region name) must return None instead of attempting a doomed Location()
+    construction that always raises and gets silently swallowed."""
+    entity = RawEntity(value="Kyiv", entity_type=EntityType.LOCATION)
+    assert _entity_to_sdo(entity) is None
+
+
+def test_entity_to_sdo_builds_location_for_known_country():
+    entity = RawEntity(value="Ukraine", entity_type=EntityType.LOCATION)
+    sdo = _entity_to_sdo(entity)
+    assert sdo is not None
+    assert sdo.type == "location"
+    assert sdo.country == "UA"
+
+
+def test_bundle_skips_unmapped_location_without_error():
+    """A report mentioning a city (not in the country table) must not crash
+    bundle generation, and must not produce a broken Location SDO."""
+    raw_entities = [RawEntity(value="Kyiv", entity_type=EntityType.LOCATION)]
+    llm = LLMEnrichmentResult(threat_actors=["APT29"])
+    bundle = build_stix_bundle(raw_entities, llm, "unmapped_location")
+    locations = [o for o in bundle.objects if o.get("type") == "location"]
+    assert locations == []
 
 
 # ── Relationship policy — enforce mode ──────────────────────────────────────────

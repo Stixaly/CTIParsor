@@ -980,6 +980,31 @@ html[data-theme="dark"] .rel-ev-hl {
   font-family: "JetBrains Mono", monospace; font-size: 10.5px; color: var(--ink-3);
 }
 .rel-actions { display: flex; gap: 3px; margin-left: auto; }
+.rel-dates {
+  font-family: "JetBrains Mono", monospace; font-size: 10.5px;
+  color: var(--ink-3); background: transparent; border: 1px dashed transparent;
+  padding: 2px 6px; border-radius: 4px; cursor: pointer; margin-top: 2px;
+  margin-left: 4px;
+}
+.rel-dates:hover {
+  background: var(--accent-soft);
+  border-color: color-mix(in oklab, var(--accent) 35%, transparent);
+  color: var(--ink);
+}
+.rel-dates-edit {
+  display: flex; align-items: center; gap: 5px;
+  margin-top: 4px; margin-left: 4px;
+}
+.rel-date-input {
+  font-family: "JetBrains Mono", monospace; font-size: 10.5px;
+  color: var(--ink); background: var(--bg-elev); border: 1px solid var(--rule);
+  border-radius: 4px; padding: 1px 4px;
+}
+.rel-dates-arrow { color: var(--ink-3); font-size: 11px; }
+.rel-dates-done {
+  font-size: 11px; color: var(--ok); background: transparent;
+  border: none; cursor: pointer; padding: 0 4px;
+}
 .rel-evidence {
   font-family: "Source Serif 4", Georgia, serif;
   font-style: italic; color: var(--ink-2); font-size: 13px;
