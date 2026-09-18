@@ -48,6 +48,10 @@ export interface Relationship {
   accepted: boolean | null
   evidence_text: string | null
   evidence_label?: EvidenceLabel
+  // STIX 2.1 Relationship SRO optional properties (spec Sec 5.1.2) — ISO 8601
+  // date strings, or null when the source text gave no explicit date.
+  start_time?: string | null
+  stop_time?: string | null
 }
 
 // ── Detection coverage (ADR-0006) ───────────────────────────────────────────

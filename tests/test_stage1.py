@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from pipeline.stage1_ingestion import chunk_text, ingest
+from pipeline.stage1_ingestion import _parse_pdf_date, chunk_text, extract_reference_date, ingest
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -60,6 +60,72 @@ def test_chunk_text_overlap_prepends_tail():
     for chunk in chunks_ov[1:]:
         assert len(chunk) > 500   # overlap makes it bigger than max_chars
         assert len(chunk) <= 500 + 100 + 5   # small tolerance for separator
+
+
+# ── extract_reference_date / _parse_pdf_date (TimeML/TIMEX3 DCT anchor) ───────────────
+
+class TestParsePdfDate:
+    def test_parses_full_timestamp_with_utc_designator(self):
+        from datetime import datetime, timezone
+        assert _parse_pdf_date("D:20230315120000Z00'00'") == \
+            datetime(2023, 3, 15, 12, 0, 0, tzinfo=timezone.utc)
+
+    def test_parses_full_timestamp_with_offset(self):
+        # The offset itself is ignored (see docstring) — only Y/M/D/H/M/S matter.
+        from datetime import datetime, timezone
+        assert _parse_pdf_date("D:20260913151556+00'00'") == \
+            datetime(2026, 9, 13, 15, 15, 56, tzinfo=timezone.utc)
+
+    def test_parses_date_only_no_time(self):
+        from datetime import datetime, timezone
+        assert _parse_pdf_date("D:20230315") == datetime(2023, 3, 15, tzinfo=timezone.utc)
+
+    def test_missing_d_prefix_still_parses(self):
+        """Non-compliant PDF producers sometimes omit the 'D:' prefix."""
+        from datetime import datetime, timezone
+        assert _parse_pdf_date("20230315120000") == \
+            datetime(2023, 3, 15, 12, 0, 0, tzinfo=timezone.utc)
+
+    def test_none_input_returns_none(self):
+        assert _parse_pdf_date(None) is None
+
+    def test_empty_string_returns_none(self):
+        assert _parse_pdf_date("") is None
+
+    def test_garbage_string_returns_none_not_raise(self):
+        assert _parse_pdf_date("not a date at all") is None
+
+    def test_implausible_year_returns_none(self):
+        assert _parse_pdf_date("D:18500101000000") is None
+
+
+class TestExtractReferenceDate:
+    def test_docx_uses_core_properties_created(self, tmp_path):
+        from datetime import datetime, timezone
+
+        import docx
+
+        path = tmp_path / "report.docx"
+        doc = docx.Document()
+        doc.add_paragraph("APT29 used WellMess.")
+        doc.core_properties.created = datetime(2023, 3, 15, tzinfo=timezone.utc)
+        doc.save(str(path))
+
+        result = extract_reference_date(str(path))
+        assert result == datetime(2023, 3, 15, tzinfo=timezone.utc)
+
+    def test_txt_has_no_metadata_returns_none(self, tmp_path):
+        path = tmp_path / "report.txt"
+        path.write_text("APT29 used WellMess.")
+        assert extract_reference_date(str(path)) is None
+
+    def test_html_has_no_metadata_returns_none(self, tmp_path):
+        path = tmp_path / "report.html"
+        path.write_text("<html><body>APT29 used WellMess.</body></html>")
+        assert extract_reference_date(str(path)) is None
+
+    def test_missing_file_returns_none_not_raise(self):
+        assert extract_reference_date("/nonexistent/path/report.pdf") is None
 
 
 def test_chunk_text_no_empty_chunks():

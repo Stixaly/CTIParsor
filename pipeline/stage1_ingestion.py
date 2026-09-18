@@ -1,5 +1,6 @@
 import logging
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 import docx
@@ -87,6 +88,80 @@ def ingest(file_path: str) -> str:
 
     # Rejoin tokens split by PDF soft-hyphen line wraps before chunking
     return _join_hyphen_linebreaks(raw)
+
+
+# PDF Info dictionary date string (ISO 32000-1:2008 7.9.4), e.g.
+# "D:20230315120000+00'00'" or "D:20230315203811Z00'00'". The "D:" prefix is
+# occasionally missing on non-compliant producers, so it is optional here;
+# everything after the seconds field (timezone offset) is ignored — a
+# reference anchor for resolving relative dates only needs day precision.
+_PDF_DATE_RE = re.compile(r"^(?:D:)?(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?")
+
+
+def _plausible_reference_year(dt: datetime) -> bool:
+    return 1990 <= dt.year <= datetime.now(timezone.utc).year + 1
+
+
+def _parse_pdf_date(raw: str | None) -> datetime | None:
+    """Parse a PDF Info dictionary CreationDate/ModDate string into a UTC
+    datetime, or None if absent/unparseable/implausible. Never raises."""
+    if not raw:
+        return None
+    m = _PDF_DATE_RE.match(raw.strip())
+    if not m:
+        return None
+    year, month, day, hour, minute, second = m.groups()
+    try:
+        dt = datetime(
+            int(year), int(month or "01"), int(day or "01"),
+            int(hour or "00"), int(minute or "00"), int(second or "00"),
+            tzinfo=timezone.utc,
+        )
+    except ValueError:
+        return None
+    return dt if _plausible_reference_year(dt) else None
+
+
+def extract_reference_date(file_path: str) -> datetime | None:
+    """
+    Best-effort "document creation time" for a report — the file's own
+    metadata timestamp, used by Stage 3 to anchor an LLM's resolution of
+    RELATIVE relationship dates ("since last month"). This mirrors the
+    standard TimeML/TIMEX3 practice of resolving relative expressions against
+    a document creation time (DCT) rather than leaving them unresolved.
+
+    Caveat, confirmed on real samples in this repo: file metadata reflects
+    when the FILE was produced, not necessarily when the underlying report
+    was first published — a web article "printed to PDF" carries the print
+    timestamp, which can be months or years after the article's own date.
+    This is why Stage 3's prompt treats the value as a best-effort anchor,
+    not ground truth, and stays conservative (omits the date) when resolving
+    against it would be a guess rather than a straightforward calculation.
+
+    Returns None for formats with no reliable creation-date metadata (HTML,
+    TXT, MD) or when extraction fails for any reason — Stage 3 already
+    degrades gracefully to "explicit dates only" in that case.
+    """
+    path = Path(file_path)
+    suffix = path.suffix.lower()
+    try:
+        if suffix == ".pdf":
+            with pdfplumber.open(path) as pdf:
+                meta = pdf.metadata or {}
+            return (
+                _parse_pdf_date(meta.get("CreationDate"))
+                or _parse_pdf_date(meta.get("ModDate"))
+            )
+        if suffix == ".docx":
+            created = docx.Document(str(path)).core_properties.created
+            if created is None:
+                return None
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            return created if _plausible_reference_year(created) else None
+    except Exception:
+        return None
+    return None
 
 
 def _is_scanned_pdf(path: Path) -> bool:

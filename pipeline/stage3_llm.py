@@ -2,6 +2,7 @@ import json
 import os
 import re
 import time
+from datetime import datetime, timezone
 from typing import cast
 
 import anthropic
@@ -354,6 +355,16 @@ class RelationshipExtracted(BaseModel):
     # How well the source supports this claim.  Defaults to "reported" so older
     # data / models that omit the field validate without error.
     evidence_label: EvidenceLabel = EvidenceLabel.REPORTED
+    # STIX 2.1 Relationship SRO optional properties (spec §5.1.2) — set only
+    # when the source text states an explicit date the relationship began/
+    # ended.  Always a real `datetime` (or None) by the time this model is
+    # constructed: `_normalize_llm_json` parses/validates the LLM's raw string
+    # and drops the pair rather than pass through anything that would make
+    # Pydantic (or stix2's own `stop_time > start_time` check) raise — see the
+    # `enrich_chunk` ValidationError handling, which discards the WHOLE chunk
+    # on any validation failure.
+    start_time: datetime | None = None
+    stop_time: datetime | None = None
 
 
 class IoCAssociation(BaseModel):
@@ -416,6 +427,21 @@ Rules:
 - When you cannot find explicit support for a relationship, still emit it with
   evidence_label "gap" and evidence_text "" — never fabricate a supporting quote.
   A missing answer expressed as "gap" is correct and useful; a fabricated answer is a failure.
+- For relationships, when the text explicitly states when it began and/or
+  ended (e.g. "used between March 2023 and June 2023", "observed since
+  2022-11-04", "active in 2021"), fill start_time and/or stop_time with that
+  date in ISO 8601 (YYYY-MM-DD, or YYYY-MM / YYYY if that is the precision the
+  text actually gives).
+  If a "Document reference date" is given below AND the text uses a SIMPLE
+  relative expression anchored to it (e.g. "since last month", "over the past
+  six months", "as of this report"), resolve it against that reference date
+  and fill in the resulting ISO 8601 date. Do NOT resolve a relative
+  expression when no reference date is given, when the reference date is
+  marked as uncertain, or when resolving it would require guessing (a vague
+  span like "recently" with no stated duration has no calculable date).
+  Omit both fields entirely when no date — explicit or cleanly resolvable
+  relative — is available. Never invent one just because a relationship
+  exists.
 - EVERY TTP carries the SAME two fields, under the SAME rules:
     description   = your summary, in your own words. Keep writing it.
     evidence_text = a sentence COPIED CHARACTER FOR CHARACTER from the text
@@ -460,6 +486,13 @@ Document-level context (key entities from the FULL report — use this to correc
 link IoCs in indicator/appendix sections to the malware or actor they belong to):
 {doc_context}
 
+Document reference date (the file's own metadata timestamp — NOT necessarily
+the report's true publication date, since a converted/printed file's metadata
+can postdate the original article by months or years; use ONLY to resolve a
+SIMPLE relative expression per the relationship date rule above, never as a
+fact to state on its own):
+{reference_date}
+
 Already detected entities (IoCs — from regex):
 {detected_ioc_entities}
 
@@ -496,7 +529,9 @@ related-to|...",
       "target_value": "exact target entity name (from any detected list)",
       "confidence": 0.0-1.0,
       "evidence_text": "verbatim sentence from the text supporting this relationship",
-      "evidence_label": "observed|reported|assessed|inferred|gap"
+      "evidence_label": "observed|reported|assessed|inferred|gap",
+      "start_time": "ISO 8601 date the relationship began, e.g. 2023-03-01 — omit if not explicitly stated in the text",
+      "stop_time": "ISO 8601 date the relationship ended — omit if not explicitly stated in the text"
     }}
   ],
   "ioc_associations": [
@@ -703,6 +738,41 @@ def _provider_ready(provider: str | None = None) -> bool:
 
 # --- LLM output normalisation ---
 
+_YEAR_ONLY_RE = re.compile(r"^\d{4}$")
+_YEAR_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
+
+
+def _parse_flexible_date(value) -> datetime | None:
+    """
+    Parse a relationship start_time/stop_time the LLM wrote as ISO 8601 (full
+    or the coarser YYYY-MM / YYYY precision the prompt allows) into a UTC
+    datetime. Never raises: anything that is not a non-empty string, or a
+    string that doesn't parse, or an implausible year, returns None — one bad
+    date must not cost the whole chunk (see enrich_chunk's ValidationError
+    handling, which discards everything on a Pydantic failure).
+    """
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if _YEAR_ONLY_RE.match(text):
+        text = f"{text}-01-01"
+    elif _YEAR_MONTH_RE.match(text):
+        text = f"{text}-01"
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    if not (1990 <= dt.year <= datetime.now(timezone.utc).year + 2):
+        return None
+    return dt
+
+
 def _normalize_llm_json(data: dict) -> dict:
     """
     Coerce common LLM schema-deviation patterns into the field names and types
@@ -818,6 +888,26 @@ def _normalize_llm_json(data: dict) -> dict:
             r["evidence_label"] = _lbl if _lbl in {
                 "observed", "reported", "assessed", "inferred", "gap"
             } else "reported"
+            # start_time/stop_time (STIX 2.1 SRO, both optional) — accept the
+            # aliases models reach for, then parse to a real datetime or drop.
+            if "start_time" not in r:
+                for k in ("start_date", "begin_time", "begin_date", "date_start", "from_date"):
+                    if isinstance(r.get(k), str) and r[k].strip():
+                        r["start_time"] = r.pop(k)
+                        break
+            if "stop_time" not in r:
+                for k in ("end_time", "end_date", "stop_date", "date_end", "to_date", "until"):
+                    if isinstance(r.get(k), str) and r[k].strip():
+                        r["stop_time"] = r.pop(k)
+                        break
+            _start_dt = _parse_flexible_date(r.get("start_time"))
+            _stop_dt = _parse_flexible_date(r.get("stop_time"))
+            if _start_dt and _stop_dt and _stop_dt <= _start_dt:
+                # STIX 2.1: stop_time MUST be later than start_time — drop both
+                # rather than reject the whole relationship over one bad pair.
+                _start_dt = _stop_dt = None
+            r["start_time"] = _start_dt
+            r["stop_time"] = _stop_dt
             # Only keep entries that have all three required fields
             if all(r.get(f) for f in ("source_value", "relationship_type", "target_value")):
                 norm_rels.append(r)
@@ -1001,6 +1091,7 @@ def enrich_chunk(
     doc_context: str | None = None,
     ner_allow_list: set[str] | None = None,
     provider: str | None = None,
+    reference_date: datetime | None = None,
 ) -> LLMEnrichmentResult:
     """
     Enrich a text chunk with LLM intelligence.
@@ -1014,6 +1105,13 @@ def enrich_chunk(
         doc_context:            Document-level entity summary (ADR-004 P2-B).
                                 Passed to every chunk so the LLM can link IoC
                                 appendix entries back to the correct malware/actor.
+        reference_date:         The report file's own metadata timestamp
+                                (pipeline.stage1_ingestion.extract_reference_date),
+                                used ONLY to let the LLM resolve a simple
+                                relative relationship date ("since last month")
+                                — see the date rule in _SYSTEM_PROMPT. None
+                                when unavailable; the prompt degrades to
+                                "explicit dates only" in that case.
     """
     if not _provider_ready(provider):
         return LLMEnrichmentResult()
@@ -1069,12 +1167,22 @@ def enrich_chunk(
     # Document context (P2-B): helps LLM link IoC appendix entries to malware/actor
     ctx_summary = doc_context.strip() if doc_context else "None"
 
+    # Reference date (TimeML/TIMEX3-style document creation time anchor) —
+    # a best-effort file-metadata timestamp, not a verified publication date,
+    # so the prompt carries that caveat inline rather than a bare date.
+    ref_date_summary = (
+        f"{reference_date.strftime('%Y-%m-%d')} "
+        "(from the file's own metadata — may be a conversion/print "
+        "timestamp rather than the report's true publication date)"
+    ) if reference_date else "unknown"
+
     prompt = _USER_PROMPT_TEMPLATE.format(
         text=text,
         doc_context=ctx_summary,
         detected_ioc_entities=ioc_summary,
         detected_gazetteer_entities=gaz_summary,
         detected_semantic_ttps=sem_summary,
+        reference_date=ref_date_summary,
     )
 
     # Validate prompt length
@@ -1207,6 +1315,7 @@ def enrich_all_chunks(
     semantic_ttp_entities: list[RawEntity] | None = None,
     doc_context: str | None = None,
     ner_allow_list: set[str] | None = None,
+    reference_date: datetime | None = None,
 ) -> LLMEnrichmentResult:
     """
     CLI-facing wrapper: calls enrich_chunk for each chunk with the same
@@ -1226,6 +1335,7 @@ def enrich_all_chunks(
             semantic_ttp_entities=semantic_ttp_entities,  # tells LLM which TTPs already found
             doc_context=doc_context,
             ner_allow_list=ner_allow_list,
+            reference_date=reference_date,
         )
         all_results.append(result)
 

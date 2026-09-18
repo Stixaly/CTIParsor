@@ -308,10 +308,12 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "")
             getattr(rel.evidence_label, "value", rel.evidence_label)
             if getattr(rel, "evidence_label", None) else "reported"
         )
+        _rel_start = rel.start_time.isoformat() if getattr(rel, "start_time", None) else None
+        _rel_stop = rel.stop_time.isoformat() if getattr(rel, "stop_time", None) else None
         rows_rel.append((
             str(uuid4()), job_id,
             rel.source_value, rel.relationship_type, rel.target_value,
-            rel.confidence, 1, rel.evidence_text, _label,
+            rel.confidence, 1, rel.evidence_text, _label, _rel_start, _rel_stop,
         ))
 
     with _lock:
@@ -335,8 +337,8 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "")
             conn.executemany(
                 "INSERT INTO relationships "
                 "(id,job_id,source_value,relationship_type,target_value,"
-                "confidence,accepted,evidence_text,evidence_label) "
-                "VALUES (?,?,?,?,?,?,?,?,?) "
+                "confidence,accepted,evidence_text,evidence_label,start_time,stop_time) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT (id) DO NOTHING",
                 rows_rel,
             )
@@ -383,11 +385,17 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
                 raise TimeoutError(f"Job timeout exceeded: {elapsed:.0f}s > {_MAX_JOB_TIMEOUT}s")
 
         # --- Stage 1 ---
-        from pipeline.stage1_ingestion import chunk_text, ingest
+        from pipeline.stage1_ingestion import chunk_text, extract_reference_date, ingest
         from pipeline.stage2_extraction import extract_entities, refang
 
         check_timeout()
         raw_text = ingest(file_path)
+        # Best-effort document creation time (TimeML/TIMEX3-style anchor) for
+        # Stage 3 to resolve simple relative relationship dates against —
+        # see enrich_chunk's reference_date docstring. None for HTML/TXT/MD
+        # or when the file carries no usable metadata; Stage 3 degrades to
+        # "explicit dates only" in that case.
+        reference_date = extract_reference_date(file_path)
 
         check_timeout()
         # Refang immediately so entity values (stored refanged) can be found in the
@@ -717,6 +725,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
                 semantic_ttp_entities=semantic_ttp_entities,  # tells LLM which TTPs already found
                 doc_context=doc_context or None,
                 ner_allow_list=ner_allow_list,
+                reference_date=reference_date,
             )
 
             # ── Stage 3e — cross-model consensus (opt-in) ───────────────────
@@ -732,6 +741,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
                     doc_context=doc_context or None,
                     ner_allow_list=ner_allow_list,
                     provider=consensus_provider(),
+                    reference_date=reference_date,
                 )
                 res = reconcile(res, second)
 
@@ -1499,6 +1509,18 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
         if s.lower().strip() not in rejected_identities
     ]
 
+    def _row_dt(row, col: str):
+        # start_time/stop_time were added via migration; guard old rows, and a
+        # malformed stored string must never crash the finalize rebuild.
+        from datetime import datetime as _dt
+        raw = row[col] if col in row.keys() else None
+        if not raw:
+            return None
+        try:
+            return _dt.fromisoformat(raw)
+        except ValueError:
+            return None
+
     db_relationships = [
         RelationshipExtracted(
             source_value=row["source_value"],
@@ -1511,6 +1533,8 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
                 if "evidence_label" in row.keys() and row["evidence_label"]
                 else "reported"
             ),
+            start_time=_row_dt(row, "start_time"),
+            stop_time=_row_dt(row, "stop_time"),
         )
         for row in rel_rows
     ]

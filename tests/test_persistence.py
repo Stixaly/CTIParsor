@@ -40,6 +40,24 @@ def _llm_result_with_label(label: EvidenceLabel) -> LLMEnrichmentResult:
     )
 
 
+def _llm_result_with_dates(start=None, stop=None) -> LLMEnrichmentResult:
+    return LLMEnrichmentResult(
+        threat_actors=["APT29"],
+        malware_families=["WellMess"],
+        relationships=[
+            RelationshipExtracted(
+                source_value="APT29",
+                relationship_type="uses",
+                target_value="WellMess",
+                confidence=0.9,
+                evidence_text="APT29 used WellMess.",
+                start_time=start,
+                stop_time=stop,
+            )
+        ],
+    )
+
+
 # ── Backup ───────────────────────────────────────────────────────────────────
 
 def test_backup_db_produces_consistent_single_file(temp_db, tmp_path, monkeypatch):
@@ -126,6 +144,8 @@ def test_migration_is_idempotent_and_adds_evidence_label(temp_db):
     cols = [r[1] for r in temp_db.get_conn().execute("PRAGMA table_info(relationships)").fetchall()]
     assert "evidence_label" in cols
     assert "evidence_text" in cols
+    assert "start_time" in cols
+    assert "stop_time" in cols
 
 
 # ── Write path: _save_entities ───────────────────────────────────────────────
@@ -176,3 +196,64 @@ def test_finalize_defaults_missing_label_to_reported(temp_db):
     bundle = json.loads(bundle_json)
     rels = [o for o in bundle["objects"] if o.get("type") == "relationship"]
     assert rels and all(r.get("x_evidence_label") == "reported" for r in rels)
+
+
+# ── start_time / stop_time (STIX 2.1 SRO Sec 5.1.2) round-trip ────────────────
+
+def test_save_entities_persists_start_stop_time(temp_db):
+    from datetime import datetime, timezone
+
+    from api import worker
+
+    job_id = _insert_job(temp_db, job_id="job-dates")
+    start = datetime(2022, 11, 4, tzinfo=timezone.utc)
+    stop = datetime(2023, 3, 1, tzinfo=timezone.utc)
+    worker._save_entities(job_id, [], _llm_result_with_dates(start, stop))
+
+    row = temp_db.get_conn().execute(
+        "SELECT start_time, stop_time FROM relationships WHERE job_id=?", (job_id,)
+    ).fetchone()
+    assert row is not None, "relationship was not written"
+    assert row["start_time"].startswith("2022-11-04")
+    assert row["stop_time"].startswith("2023-03-01")
+
+
+def test_finalize_carries_start_stop_time_into_bundle(temp_db):
+    """The DB round-trip through the analyst-review cycle must not silently
+    drop the relationship's temporal bounds — this is exactly the gap that
+    previously existed for evidence_text/evidence_label before their columns
+    were added."""
+    from datetime import datetime, timezone
+
+    from api import worker
+
+    job_id = _insert_job(temp_db, job_id="job-dates-finalize")
+    start = datetime(2022, 11, 4, tzinfo=timezone.utc)
+    stop = datetime(2023, 3, 1, tzinfo=timezone.utc)
+    worker._save_entities(job_id, [], _llm_result_with_dates(start, stop))
+
+    bundle_json = worker.re_run_final_stages(job_id, skip_rescan=True)
+    bundle = json.loads(bundle_json)
+    rels = [o for o in bundle["objects"] if o.get("type") == "relationship"]
+    assert rels, "no relationship object in the finalized bundle"
+    assert any(
+        r.get("start_time", "").startswith("2022-11-04")
+        and r.get("stop_time", "").startswith("2023-03-01")
+        for r in rels
+    ), "start_time/stop_time did not survive DB -> finalize -> STIX"
+
+
+def test_finalize_survives_malformed_stored_date(temp_db):
+    """A row with a corrupted start_time string (hand-edited DB, bad migration,
+    etc.) must not crash the finalize rebuild — it degrades to no date, same as
+    the rest of this pipeline's defensive parsing."""
+    from api import worker
+
+    job_id = _insert_job(temp_db, job_id="job-dates-bad")
+    worker._save_entities(job_id, [], _llm_result_with_dates())
+    with temp_db.get_conn() as conn:
+        conn.execute("UPDATE relationships SET start_time='not-a-date' WHERE job_id=?", (job_id,))
+        conn.commit()
+
+    bundle_json = worker.re_run_final_stages(job_id, skip_rescan=True)
+    assert bundle_json, "finalize must not raise on a malformed stored date"

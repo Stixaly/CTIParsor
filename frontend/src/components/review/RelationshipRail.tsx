@@ -9,6 +9,7 @@ interface Props {
   onReset: (id: string) => void
   onJump: (value: string) => void
   onChangeType: (id: string, type: string) => void
+  onChangeDates: (id: string, start_time: string | null, stop_time: string | null) => void
   showInDoc: boolean
   setShowInDoc: (v: boolean) => void
   onNewRelationship: (x: number, y: number) => void
@@ -17,18 +18,26 @@ interface Props {
   getEntityType?: (value: string) => string | undefined
 }
 
+/** ISO date string (or null) -> "YYYY-MM-DD" for a <input type="date"> value,
+ *  or the compact display form used on the collapsed badge. */
+function toDateInputValue(iso: string | null | undefined): string {
+  return iso ? iso.slice(0, 10) : ''
+}
+
 type Filter = 'pending' | 'all' | 'accepted' | 'rejected'
 
-function RelCard({ r, onAccept, onReject, onReset, onJump, onChangeType, getEntityType }: {
+function RelCard({ r, onAccept, onReject, onReset, onJump, onChangeType, onChangeDates, getEntityType }: {
   r: Relationship
   onAccept: (id: string) => void
   onReject: (id: string) => void
   onReset: (id: string) => void
   onJump: (v: string) => void
   onChangeType: (id: string, t: string) => void
+  onChangeDates: (id: string, start_time: string | null, stop_time: string | null) => void
   getEntityType?: (value: string) => string | undefined
 }) {
   const [editing, setEditing] = useState(false)
+  const [editingDates, setEditingDates] = useState(false)
 
   // Resolve entity types for constraint-aware verb filtering
   const srcType = getEntityType?.(r.source_value)
@@ -83,6 +92,34 @@ function RelCard({ r, onAccept, onReject, onReset, onJump, onChangeType, getEnti
           >✗</button>
         </div>
       </div>
+      {editingDates ? (
+        <div className="rel-dates-edit">
+          <input
+            type="date"
+            className="rel-date-input"
+            value={toDateInputValue(r.start_time)}
+            onChange={e => onChangeDates(r.id, e.target.value || null, r.stop_time ?? null)}
+          />
+          <span className="rel-dates-arrow">→</span>
+          <input
+            type="date"
+            className="rel-date-input"
+            value={toDateInputValue(r.stop_time)}
+            onChange={e => onChangeDates(r.id, r.start_time ?? null, e.target.value || null)}
+          />
+          <button className="rel-dates-done" onClick={() => setEditingDates(false)} title="Done">✓</button>
+        </div>
+      ) : (
+        <button
+          className="rel-dates"
+          onClick={() => setEditingDates(true)}
+          title="Click to set when this relationship was active (STIX start_time / stop_time)"
+        >
+          {r.start_time || r.stop_time
+            ? `${toDateInputValue(r.start_time) || '?'} → ${toDateInputValue(r.stop_time) || '?'}`
+            : '+ dates'}
+        </button>
+      )}
       {r.evidence_text && (
         <div className="rel-evidence">"{r.evidence_text}"</div>
       )}
@@ -91,7 +128,7 @@ function RelCard({ r, onAccept, onReject, onReset, onJump, onChangeType, getEnti
 }
 
 export default function RelationshipRail({
-  rels, onAccept, onReject, onReset, onJump, onChangeType,
+  rels, onAccept, onReject, onReset, onJump, onChangeType, onChangeDates,
   showInDoc, setShowInDoc, onNewRelationship, getEntityType,
 }: Props) {
   const [filter, setFilter] = useState<Filter>('pending')
@@ -220,6 +257,7 @@ export default function RelationshipRail({
               onReset={onReset}
               onJump={onJump}
               onChangeType={onChangeType}
+              onChangeDates={onChangeDates}
               getEntityType={getEntityType}
             />
           ))}

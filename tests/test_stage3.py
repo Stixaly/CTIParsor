@@ -383,3 +383,106 @@ class TestNormalizeLlmJson:
         assert result.relationships[0].source_value == "GREYVIBE"
         assert result.relationships[0].relationship_type == "uses"
         assert result.relationships[0].target_value == "LegionRelay"
+
+
+# ── relationship start_time / stop_time (STIX 2.1 SRO §5.1.2) ──────────────────
+
+class TestRelationshipTemporalBounds:
+    """
+    RelationshipExtracted.start_time/stop_time must only ever reach Pydantic as
+    a real datetime or None — never a raw LLM string that could fail
+    validation and, per enrich_chunk's ValidationError handling, wipe out the
+    entire chunk's results.
+    """
+
+    def _rel(self, **overrides):
+        base = {"source_value": "APT29", "relationship_type": "uses", "target_value": "SUNBURST"}
+        base.update(overrides)
+        return {"relationships": [base]}
+
+    def test_iso_dates_parsed(self):
+        out = _normalize_llm_json(self._rel(start_time="2022-11-04", stop_time="2023-03-01"))
+        rel = out["relationships"][0]
+        assert rel["start_time"].isoformat().startswith("2022-11-04")
+        assert rel["stop_time"].isoformat().startswith("2023-03-01")
+
+    def test_year_month_padded(self):
+        out = _normalize_llm_json(self._rel(start_time="2022-11"))
+        rel = out["relationships"][0]
+        assert rel["start_time"].isoformat().startswith("2022-11-01")
+
+    def test_year_only_padded(self):
+        out = _normalize_llm_json(self._rel(start_time="2022"))
+        rel = out["relationships"][0]
+        assert rel["start_time"].isoformat().startswith("2022-01-01")
+
+    def test_missing_dates_stay_none(self):
+        out = _normalize_llm_json(self._rel())
+        rel = out["relationships"][0]
+        assert rel["start_time"] is None
+        assert rel["stop_time"] is None
+
+    def test_garbage_date_dropped_not_raised(self):
+        """A hallucinated/unparseable date must never surface as a validation error."""
+        out = _normalize_llm_json(self._rel(start_time="sometime last spring"))
+        rel = out["relationships"][0]
+        assert rel["start_time"] is None
+        # The rest of the relationship must survive intact.
+        assert rel["source_value"] == "APT29"
+
+    def test_stop_before_start_drops_both(self):
+        """STIX 2.1: stop_time MUST be later than start_time — violations are
+        dropped, not passed through to raise inside stix2/Pydantic."""
+        out = _normalize_llm_json(self._rel(start_time="2023-06-01", stop_time="2023-01-01"))
+        rel = out["relationships"][0]
+        assert rel["start_time"] is None
+        assert rel["stop_time"] is None
+
+    def test_aliased_keys_renamed(self):
+        """Claude used start_date/end_date instead of start_time/stop_time."""
+        out = _normalize_llm_json(self._rel(start_date="2022-01-01", end_date="2022-06-01"))
+        rel = out["relationships"][0]
+        assert rel["start_time"].isoformat().startswith("2022-01-01")
+        assert rel["stop_time"].isoformat().startswith("2022-06-01")
+
+    def test_implausible_year_dropped(self):
+        out = _normalize_llm_json(self._rel(start_time="0001-01-01"))
+        rel = out["relationships"][0]
+        assert rel["start_time"] is None
+
+    def test_full_payload_survives_pydantic(self):
+        raw = self._rel(start_time="2022-11-04", stop_time="2023-03-01", confidence=0.9)
+        normalized = _normalize_llm_json(raw)
+        result = LLMEnrichmentResult.model_validate(normalized)
+        rel = result.relationships[0]
+        assert rel.start_time is not None
+        assert rel.stop_time is not None
+        assert rel.stop_time > rel.start_time
+
+
+# ── reference_date — Document Creation Time anchor for relative dates ────────────
+
+class TestReferenceDatePrompt:
+    """enrich_chunk must pass the reference_date through to the LLM prompt so
+    it can resolve a SIMPLE relative relationship date (§ stage1_ingestion.
+    extract_reference_date) — and must degrade to "unknown" (never invent a
+    date) when none is available."""
+
+    def test_reference_date_appears_in_prompt(self, mock_llm, sample_cti_text, sample_entities):
+        # _call_llm is also invoked by the downstream stage3d/3f verification
+        # sub-stages, so mock_llm.call_args (the LAST call) is not reliable —
+        # the main enrichment prompt is always the FIRST call.
+        from datetime import datetime, timezone
+        enrich_chunk(
+            sample_cti_text, sample_entities,
+            reference_date=datetime(2023, 3, 15, tzinfo=timezone.utc),
+        )
+        prompt = mock_llm.call_args_list[0].args[1]
+        assert "2023-03-15" in prompt
+        assert "may be a conversion/print" in prompt   # the caveat, not a bare date
+
+    def test_missing_reference_date_shows_unknown(self, mock_llm, sample_cti_text, sample_entities):
+        enrich_chunk(sample_cti_text, sample_entities)
+        prompt = mock_llm.call_args_list[0].args[1]
+        assert "Document reference date" in prompt
+        assert "unknown" in prompt

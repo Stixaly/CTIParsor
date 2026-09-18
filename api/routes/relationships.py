@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from api.db import _lock, get_conn
 from api.routes._common import require_job
 from models.schemas import STIX_RELATIONSHIP_TYPES
+from pipeline.stage3_llm import _parse_flexible_date
 
 router = APIRouter(prefix="/api/jobs/{job_id}/relationships", tags=["relationships"])
 
@@ -25,6 +26,10 @@ class RelPatch(BaseModel):
     target_value: str | None = None
     evidence_text: str | None = None
     evidence_label: str | None = None
+    # STIX 2.1 SRO optional properties (spec Sec 5.1.2) — ISO 8601 date string,
+    # or '' / null to clear.  Validated by _parse_date_field below.
+    start_time: str | None = None
+    stop_time: str | None = None
 
 
 class RelCreate(BaseModel):
@@ -34,6 +39,24 @@ class RelCreate(BaseModel):
     confidence: float = 0.8
     evidence_text: str | None = None
     evidence_label: str = "reported"
+    start_time: str | None = None
+    stop_time: str | None = None
+
+
+def _parse_date_field(raw: str | None, field: str) -> str | None:
+    """Parse one start_time/stop_time value for storage.
+
+    None or an empty string clears the bound. Raises HTTPException(400) on an
+    unparseable date — this is a direct analyst edit, so it gets an immediate,
+    actionable error instead of the silent-drop behaviour LLM extraction uses
+    (stage3_llm._normalize_llm_json, which can't ask a human to retry).
+    """
+    if raw is None or raw.strip() == "":
+        return None
+    dt = _parse_flexible_date(raw)
+    if dt is None:
+        raise HTTPException(400, f"Invalid {field}: '{raw}' is not a parseable date")
+    return dt.isoformat()
 
 
 def _row_to_dict(row) -> dict:
@@ -52,6 +75,9 @@ def _row_to_dict(row) -> dict:
             if "evidence_label" in row.keys() and row["evidence_label"]
             else "reported"
         ),
+        # start_time / stop_time were added via migration; guard old rows
+        "start_time": row["start_time"] if "start_time" in row.keys() else None,
+        "stop_time": row["stop_time"] if "stop_time" in row.keys() else None,
     }
 
 
@@ -78,19 +104,27 @@ def create_relationship(job_id: str, body: RelCreate):
     with get_conn() as conn:
         require_job(conn, job_id)
     _label = body.evidence_label if body.evidence_label in _VALID_LABELS else "reported"
+    _start = _parse_date_field(body.start_time, "start_time")
+    _stop = _parse_date_field(body.stop_time, "stop_time")
+    if _start and _stop and _stop <= _start:
+        raise HTTPException(400, "stop_time must be later than start_time")
     rid = str(uuid4())
     with _lock:
         with get_conn() as conn:
             conn.execute(
                 "INSERT INTO relationships "
                 "(id,job_id,source_value,relationship_type,target_value,"
-                "confidence,accepted,evidence_text,evidence_label) "
-                "VALUES (?,?,?,?,?,?,1,?,?)",
+                "confidence,accepted,evidence_text,evidence_label,start_time,stop_time) "
+                "VALUES (?,?,?,?,?,?,1,?,?,?,?)",
                 (rid, job_id, body.source_value.strip(), body.relationship_type,
-                 body.target_value.strip(), body.confidence, body.evidence_text, _label),
+                 body.target_value.strip(), body.confidence, body.evidence_text, _label,
+                 _start, _stop),
             )
             conn.commit()
-    return {"id": rid, "job_id": job_id, **body.model_dump(), "evidence_label": _label, "accepted": True}
+    return {
+        "id": rid, "job_id": job_id, **body.model_dump(), "evidence_label": _label,
+        "start_time": _start, "stop_time": _stop, "accepted": True,
+    }
 
 
 @router.patch("/{rel_id}")
@@ -124,6 +158,33 @@ def update_relationship(job_id: str, rel_id: str, patch: RelPatch):
                                      f"Valid: {', '.join(sorted(_VALID_LABELS))}")
         updates.append("evidence_label=?")
         values.append(patch.evidence_label)
+    if "start_time" in patch.model_fields_set or "stop_time" in patch.model_fields_set:
+        # Only one bound may be patched at a time — fetch the other so the
+        # STIX 2.1 stop_time > start_time constraint is checked against the
+        # value that will actually be stored, not just the one in this PATCH.
+        with get_conn() as conn:
+            existing = conn.execute(
+                "SELECT start_time, stop_time FROM relationships WHERE id=? AND job_id=?",
+                (rel_id, job_id),
+            ).fetchone()
+        if not existing:
+            raise HTTPException(404, "Relationship not found")
+        existing_start = existing["start_time"] if "start_time" in existing.keys() else None
+        existing_stop = existing["stop_time"] if "stop_time" in existing.keys() else None
+        new_start = (
+            _parse_date_field(patch.start_time, "start_time")
+            if "start_time" in patch.model_fields_set else existing_start
+        )
+        new_stop = (
+            _parse_date_field(patch.stop_time, "stop_time")
+            if "stop_time" in patch.model_fields_set else existing_stop
+        )
+        if new_start and new_stop and new_stop <= new_start:
+            raise HTTPException(400, "stop_time must be later than start_time")
+        updates.append("start_time=?")
+        values.append(new_start)
+        updates.append("stop_time=?")
+        values.append(new_stop)
 
     if not updates:
         with get_conn() as conn:
