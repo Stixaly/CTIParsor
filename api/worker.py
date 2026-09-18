@@ -248,14 +248,22 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "")
 
     # Deliberately heterogeneous: ordinary rows carry 9 fields, TTP rows 13,
     # and they are padded to a common width just before the insert below.
+    # The NER stages drop denied names at their own output (ADR-0052); the
+    # LLM's name lists are the one source that reaches the store without
+    # passing through a stage, so they are filtered here.
+    from pipeline.overrides import is_denied
+
     rows_llm: list[tuple] = []
     for name in llm_result.malware_families:
-        rows_llm.append((str(uuid4()), job_id, name, "malware", "", 0.9, None, None, "llm"))
+        if not is_denied(name, "malware"):
+            rows_llm.append((str(uuid4()), job_id, name, "malware", "", 0.9, None, None, "llm"))
     for name in llm_result.threat_actors:
-        rows_llm.append((str(uuid4()), job_id, name, "threat_actor", "", 0.9, None, None, "llm"))
+        if not is_denied(name, "threat_actor"):
+            rows_llm.append((str(uuid4()), job_id, name, "threat_actor", "", 0.9, None, None, "llm"))
     for name in llm_result.tools:
-        rows_llm.append((str(uuid4()), job_id, name, "tool", "", 0.9, None, None, "llm"))
-    if llm_result.campaign_name:
+        if not is_denied(name, "tool"):
+            rows_llm.append((str(uuid4()), job_id, name, "tool", "", 0.9, None, None, "llm"))
+    if llm_result.campaign_name and not is_denied(llm_result.campaign_name, "campaign"):
         rows_llm.append((str(uuid4()), job_id, llm_result.campaign_name, "campaign", "", 0.9, None, None, "llm"))
     # ADR-0028 — resolve each TTP quote to an offset in the report.
     from pipeline.evidence_span import locate

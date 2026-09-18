@@ -98,6 +98,24 @@ def test_a_stored_cutoff_reaches_the_stage_through_the_store(temp_db, monkeypatc
     assert [r.value for r in results] == ["Operation Dust"]
 
 
+def test_an_active_deny_row_drops_the_value_end_to_end(temp_db, monkeypatch):
+    """A `deny` row in the store removes the entity for its type only (ADR-0052)."""
+    import pipeline.overrides as ov
+    from pipeline import promotion as pm
+
+    pm.add_manual(temp_db.get_conn(), "healthcare", "identity", "deny", temp_db.now_iso())
+    ov.reload()
+    fake = _FakeGLiNER([
+        _pred("targeted sector", 0.8, "healthcare"),
+        _pred("malware family", 0.8, "Emotet"),
+    ])
+    monkeypatch.setattr(stage2e_gliner, "_load_gliner", lambda: fake)
+    monkeypatch.setattr(stage2e_gliner, "get_threshold", _default_cutoff)
+
+    results = stage2e_gliner.extract_gliner_entities("Emotet hit the healthcare sector.")
+    assert [(r.value, r.entity_type) for r in results] == [("Emotet", EntityType.MALWARE)]
+
+
 def test_returns_nothing_when_the_model_is_unavailable(monkeypatch):
     monkeypatch.setattr(stage2e_gliner, "_load_gliner", lambda: None)
     assert stage2e_gliner.extract_gliner_entities("some text") == []

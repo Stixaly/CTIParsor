@@ -31,6 +31,7 @@ from pathlib import Path
 
 from models.schemas import EntityType, RawEntity
 from pipeline.env_flags import env_bool
+from pipeline.overrides import drop_denied, promoted_entries
 
 _SKIP_HEAVY = env_bool("SKIP_HEAVY_MODELS")
 
@@ -59,17 +60,23 @@ except ImportError:
 @functools.lru_cache(maxsize=1)
 def _load() -> list[dict]:
     """
-    Loads the gazetteer index once and caches it.
-    Entries are pre-sorted longest-first so 'Lazarus Group' matches before 'Lazarus'.
+    Loads the gazetteer index once and caches it, plus every term the analysts
+    promoted (ADR-0052, `entity_overrides` rows with action=promote).
+    Entries are sorted longest-first so 'Lazarus Group' matches before 'Lazarus'.
     """
     if not _INDEX_PATH.exists():
         logger.warning("gazetteer.json not found — skipping gazetteer NER. Run: python scripts/build_indexes.py")
         return []
     try:
-        return json.loads(_INDEX_PATH.read_text(encoding="utf-8"))
+        entries = json.loads(_INDEX_PATH.read_text(encoding="utf-8"))
     except Exception as e:
         logger.error(f"Could not load gazetteer: {e}")
         return []
+    promoted = promoted_entries()
+    if promoted:
+        entries = entries + promoted
+        entries.sort(key=lambda e: -len(e["name"]))
+    return entries
 
 
 # ── Aho-Corasick automaton (built once, cached) ───────────────────────────────
@@ -126,8 +133,8 @@ def match_gazetteer(text: str) -> list[RawEntity]:
     """
     automaton = _build_automaton()
     if automaton is not None:
-        return _match_aho(text, automaton)
-    return _match_regex(text)
+        return drop_denied(_match_aho(text, automaton))
+    return drop_denied(_match_regex(text))
 
 
 def _is_word_char(ch: str) -> bool:

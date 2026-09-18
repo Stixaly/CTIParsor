@@ -965,6 +965,11 @@ GLINER_ENABLED=true
 # (`python -m scripts.calibrate_thresholds --apply`, or POST /api/thresholds/
 # recalibrate).  false ignores every stored row.
 THRESHOLD_CALIBRATION_ENABLED=true
+# ADR-0052 — deny / promote rows grown from the same decisions (a value the
+# analysts keep rejecting is dropped at every NER stage; a name they keep
+# accepting joins the gazetteer), proposed by `python -m
+# scripts.promote_overrides` and activated by a person.  false ignores them.
+ENTITY_OVERRIDES_ENABLED=true
 ```
 
 ### Vision (Stage 1f — figures)
@@ -1669,6 +1674,11 @@ Manages the gitignored local overlay only — the committed registry is never ed
 | `POST` | `/api/thresholds/recalibrate` | Fit P(accepted \| score) per (source, entity_type) from the analysts' decisions and propose the cutoff at which it reaches `target_precision` (default 0.90, needs `min_samples` = 200 decisions); a dry run unless `"apply": true` |
 | `PUT` | `/api/thresholds/{source}/{entity_type}` | Hand-set one cutoff (`origin: manual`) |
 | `DELETE` | `/api/thresholds/{source}/{entity_type}` | Remove an override; the stage default applies again |
+| `GET` | `/api/overrides` | The deny / promote rows grown from analyst decisions (ADR-0052), filterable by `status` (`candidate` \| `active` \| `ignored`) and `action` (`deny` \| `promote`); only `active` rows act |
+| `POST` | `/api/overrides/promote` | Propose rows from the decisions: `deny` for a value rejected ≥ `min_rejections` times in ≥ `min_jobs` reports in ≥ `share` of its reviews, `promote` for a gazetteer-type name accepted as often and unknown to the gazetteer; a dry run unless `"apply": true`, and even then stored as candidates — never activated |
+| `POST` | `/api/overrides` | A hand-written rule (`term`, `entity_type`, `action`, optional `display`/`note`), active at once |
+| `PATCH` | `/api/overrides/{id}` | Set a row's `status` — activate a candidate, or ignore it so the next promotion run leaves it alone |
+| `DELETE` | `/api/overrides/{id}` | Remove a row |
 
 ## Database schema
 
@@ -1760,6 +1770,28 @@ CREATE TABLE model_thresholds (
     origin           TEXT NOT NULL,    -- calibrated | manual
     updated_at       TEXT NOT NULL,
     PRIMARY KEY (source, entity_type)
+);
+
+-- Deny / promote lists grown from analyst decisions (ADR-0052).  Only rows
+-- with status='active' act: a deny row drops the exact (value, entity_type)
+-- from every NER stage's output, a promote row adds the term to the Stage 2b
+-- gazetteer.  Written as candidates by scripts/promote_overrides.py --apply or
+-- POST /api/overrides/promote; activated by a person.
+CREATE TABLE entity_overrides (
+    id             TEXT PRIMARY KEY,
+    term           TEXT NOT NULL,      -- exact value, case-folded and trimmed
+    entity_type    TEXT NOT NULL,
+    action         TEXT NOT NULL,      -- deny | promote
+    status         TEXT NOT NULL,      -- candidate | active | ignored
+    display        TEXT,               -- most common surface form (the gazetteer canonical)
+    accepted_count INTEGER NOT NULL,   -- the counts the rule was met with
+    rejected_count INTEGER NOT NULL,
+    job_count      INTEGER NOT NULL,   -- distinct reports behind them
+    origin         TEXT NOT NULL,      -- auto | manual
+    note           TEXT,
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL,
+    UNIQUE (term, entity_type, action)
 );
 
 -- Detection-rule store (ADR-0006) — corpus-derived, not per-job.

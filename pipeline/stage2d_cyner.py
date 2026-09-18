@@ -34,6 +34,7 @@ from pathlib import Path
 
 from models.schemas import EntityType, RawEntity
 from pipeline.env_flags import env_bool
+from pipeline.overrides import drop_denied
 from pipeline.thresholds import get_threshold
 
 _SKIP_HEAVY = env_bool("SKIP_HEAVY_MODELS")
@@ -443,7 +444,7 @@ def extract_cyner_entities(text: str) -> list[RawEntity]:
                 source="cyner",
             ))
 
-    return results
+    return drop_denied(results)
 
 
 # ---------------------------------------------------------------------------

@@ -119,9 +119,15 @@ def test_build_run_config_shape():
 
     expected_keys = {
         "recorded_at", "git_rev", "policy", "embedding_model",
-        "ttp_thresholds", "ner_thresholds", "stages", "env"
+        "ttp_thresholds", "ner_thresholds", "entity_overrides", "stages", "env"
     }
     assert set(config.keys()) == expected_keys
+
+    # entity_overrides (ADR-0052) must say whether the lists were on and how
+    # many rows acted -- zero on a store without rows, never a missing key.
+    ov = config["entity_overrides"]
+    assert isinstance(ov["enabled"], bool)
+    assert isinstance(ov["deny"], int) and isinstance(ov["promote"], int)
 
     # ner_thresholds (ADR-0051) must name each calibrated stage's default as
     # a real number and the overrides in force -- an empty dict on a store

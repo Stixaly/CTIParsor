@@ -48,6 +48,7 @@ from typing import Iterator
 from api.logging_config import get_logger
 from models.schemas import EntityType, RawEntity
 from pipeline.env_flags import env_bool
+from pipeline.overrides import drop_denied
 from pipeline.thresholds import get_threshold
 
 logger = get_logger(__name__)
@@ -280,7 +281,7 @@ def extract_gliner_entities(text: str) -> list[RawEntity]:
         ))
 
     results.sort(key=lambda x: x.confidence, reverse=True)
-    return results
+    return drop_denied(results)
 
 
 def _recover_casing(value_lower: str, context: str) -> str:

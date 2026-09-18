@@ -28,6 +28,7 @@ from api.routes import (
     entities,
     ingest,
     jobs,
+    overrides,
     policy,
     progress,
     queue,
@@ -138,6 +139,7 @@ app.include_router(coverage.router)
 app.include_router(settings.router)
 app.include_router(queue.router)
 app.include_router(thresholds.router)
+app.include_router(overrides.router)
 
 
 @app.get("/api/health")

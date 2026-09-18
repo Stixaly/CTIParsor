@@ -93,6 +93,25 @@ def test_calibrated_cutoff_replaces_the_medium_threshold_per_type(monkeypatch):
     assert [(r.value, r.entity_type) for r in results] == [("APT29", EntityType.THREAT_ACTOR)]
 
 
+# ── 4. Analyst deny rows (ADR-0052) ────────────────────────────────────────
+
+def test_an_active_deny_row_drops_the_value_end_to_end(temp_db, monkeypatch):
+    """A `deny` row in the store, not a patched lookup, removes the entity."""
+    import pipeline.overrides as ov
+    from pipeline import promotion as pm
+
+    pm.add_manual(temp_db.get_conn(), "Emotet", "malware", "deny", temp_db.now_iso())
+    ov.reload()
+    preds = [
+        {"entity_group": "Malware",      "score": 0.98, "word": "Emotet"},
+        {"entity_group": "Threat_group", "score": 0.95, "word": "APT29"},
+    ]
+    monkeypatch.setattr(stage2d_cyner, "_load_pipeline", lambda: _fake_pipeline(preds))
+
+    results = stage2d_cyner.extract_cyner_entities("irrelevant text")
+    assert [(r.value, r.entity_type) for r in results] == [("APT29", EntityType.THREAT_ACTOR)]
+
+
 # ── 4. Loader failures must not escape ──────────────────────────────────────
 
 def test_load_pipeline_returns_none_when_the_loader_raises(monkeypatch, tmp_path):
