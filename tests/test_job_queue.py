@@ -272,6 +272,24 @@ def test_run_once_touches_the_alive_file(setup_db, tmp_path: Path, monkeypatch: 
     assert (tmp_path / "alive").exists()
 
 
+def test_run_once_does_not_touch_alive_file_when_a_db_call_fails(
+    setup_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """The worker container's HEALTHCHECK watches this file's mtime -- it must
+    go stale (and the container report unhealthy) when the DB is actually
+    unreachable, not stay fresh forever because touch_alive() doesn't check
+    what the DB calls above it did."""
+    monkeypatch.setattr(queue_loop, "ALIVE_FILE", tmp_path / "alive")
+
+    def broken_requeue(*, unconditional: bool = False) -> int:
+        raise RuntimeError("DB unreachable")
+
+    monkeypatch.setattr(queue_loop, "requeue_orphans", broken_requeue)
+    loop = queue_loop.WorkerLoop(max_concurrent=1, spawn=FakeSpawn())
+    loop.run_once()
+    assert not (tmp_path / "alive").exists()
+
+
 def test_terminate_and_requeue(setup_db):
     _insert_job("j1", "queued", "2024-01-01T00:00:00Z")
     _touch_upload("j1")
@@ -374,3 +392,44 @@ def test_main_once_runs_a_single_pass(setup_db, monkeypatch: pytest.MonkeyPatch)
     conn = get_conn()
     row = conn.execute("SELECT status FROM jobs WHERE id='j1'").fetchone()
     assert row["status"] == "processing"
+
+
+def test_current_owner_reads_the_claimed_worker_id(setup_db):
+    _insert_job("j1", "processing", "2024-01-01T00:00:00Z", worker_id="w1")
+    _insert_job("j2", "queued", "2024-01-01T00:00:00Z")
+
+    assert worker._current_owner("j1") == "w1"
+    assert worker._current_owner("j2") is None
+    assert worker._current_owner("does-not-exist") is None
+
+
+def test_finalize_job_applies_unconditionally_when_owner_is_none(setup_db):
+    _insert_job("j1", "processing", "2024-01-01T00:00:00Z")
+
+    assert worker._finalize_job("j1", "for_review", None, bundle_json="{}") is True
+
+    row = get_conn().execute("SELECT status, bundle_json FROM jobs WHERE id='j1'").fetchone()
+    assert row["status"] == "for_review"
+    assert row["bundle_json"] == "{}"
+
+
+def test_finalize_job_applies_when_worker_id_still_matches(setup_db):
+    _insert_job("j1", "processing", "2024-01-01T00:00:00Z", worker_id="w1")
+
+    assert worker._finalize_job("j1", "failed", "w1") is True
+
+    row = get_conn().execute("SELECT status FROM jobs WHERE id='j1'").fetchone()
+    assert row["status"] == "failed"
+
+
+def test_finalize_job_is_a_noop_when_the_job_was_reclaimed(setup_db):
+    """The exact race api/worker.py's _finalize_job exists to close: a stale
+    subprocess (worker_id="w1") tries to finalize a job that the lease-based
+    requeue_orphans() has since handed to another worker ("w2")."""
+    _insert_job("j1", "processing", "2024-01-01T00:00:00Z", worker_id="w2")
+
+    assert worker._finalize_job("j1", "for_review", "w1", bundle_json='{"stale": true}') is False
+
+    row = get_conn().execute("SELECT status, bundle_json FROM jobs WHERE id='j1'").fetchone()
+    assert row["status"] == "processing"
+    assert row["bundle_json"] != '{"stale": true}'

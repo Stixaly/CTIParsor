@@ -35,6 +35,7 @@ from pathlib import Path
 from models.schemas import EntityType, RawEntity
 from pipeline.env_flags import env_bool
 from pipeline.overrides import drop_denied
+from pipeline.regex_safety import compile_pattern
 from pipeline.thresholds import get_threshold
 
 _SKIP_HEAVY = env_bool("SKIP_HEAVY_MODELS")
@@ -80,16 +81,29 @@ _OVERLAP_CHARS = 200
 _BATCH_SIZE    = int(os.getenv("CYNER_BATCH_SIZE", "4"))
 
 
+# A whitespace boundary closer than this to `start` makes a chunk not worth
+# the fixed cost of a batched CyNER forward pass -- and if sparse whitespace
+# (a large hash/IOC dump with only occasional short delimiters) keeps landing
+# here on every iteration, the loop degrades into a near single-character
+# crawl over the rest of the document. Below this floor a mid-token cut is
+# preferred over a tiny chunk, which keeps the chunk count bounded by
+# length / floor instead of unbounded in the worst case.
+_MIN_CHUNK_CHARS = _CHUNK_CHARS // 4
+
+
 def _iter_chunks(text: str):
     """Yield (chunk_text, char_offset) pairs with overlap, never an empty chunk."""
     start, length = 0, len(text)
     while start < length:
         end = min(start + _CHUNK_CHARS, length)
         if end < length:
-            while end > start and not text[end].isspace():
-                end -= 1
-            if end <= start:                      # one unbroken token: force advance
-                end = min(start + _CHUNK_CHARS, length)
+            boundary = end
+            while boundary > start and not text[boundary].isspace():
+                boundary -= 1
+            if boundary - start >= _MIN_CHUNK_CHARS:
+                end = boundary
+            # else: no boundary far enough from `start` -- keep the full-width,
+            # mid-token cut instead of shrinking further.
         yield text[start:end], start
         start = max(start + 1, end - _OVERLAP_CHARS) if end < length else length
 
@@ -175,15 +189,15 @@ _KNOWN_NON_ACTORS: frozenset[str] = frozenset({
 
 # A single leading article, stripped before further checks (CyNER sometimes
 # includes it in the span).
-_LEADING_ARTICLE_RE = re.compile(r"^(the|a|an)\s+", re.IGNORECASE)
+_LEADING_ARTICLE_RE = compile_pattern(r"^(the|a|an)\s+", re.IGNORECASE)
 
 # A single trailing period, stripped before further checks.
-_TRAILING_PERIOD_RE = re.compile(r"\.$")
+_TRAILING_PERIOD_RE = compile_pattern(r"\.$")
 
 # A single lowercase letter followed by a space at the very start of the
 # string: the leftover of a possessive ("APT44's Operations" truncated to
 # "s Operations" when the span starts mid-token).
-_FRAGMENT_RE = re.compile(r"^[a-z]\s")
+_FRAGMENT_RE = compile_pattern(r"^[a-z]\s")
 
 # Regex: bare version numbers ("1.2.3") — spaCy and some NER models label these
 _VERSION_RE = re.compile(r"^\d[\d.\-]*\d$")
@@ -197,13 +211,16 @@ def _normalize_candidate(value: str) -> str:
     return value
 
 
+_BOUNDARY_ARTIFACT_RE = compile_pattern(r"\.\s")
+
+
 def _has_boundary_artifact(value: str) -> bool:
     """True if the span crossed a sentence boundary (a period followed by
     whitespace -- a bare interior period, as in "BLACKENERGY.V2" or
     "Guccifer 2.0", is a real name and must not be rejected), contains a
     non-ASCII character (OCR or script-mixing garbage), or starts with a
     truncated possessive fragment."""
-    if re.search(r"\.\s", value):
+    if _BOUNDARY_ARTIFACT_RE.search(value):
         return True
     if any(ord(ch) > 127 for ch in value):
         return True

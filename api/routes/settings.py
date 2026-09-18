@@ -19,6 +19,8 @@ from pipeline.detection.builder import rebuild_store
 from pipeline.detection.registry import _ADAPTERS, add_corpus, merged_corpora, remove_corpus
 from pipeline.detection.store import corpus_counts
 from pipeline.detection.sync import sync_corpus
+from pipeline.security import is_contained
+from pipeline.web_capture import CaptureError, validate_url
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -71,10 +73,6 @@ class CorpusPatch(BaseModel):
     enabled: bool
 
 
-def _inside_corpora_root(candidate: Path) -> bool:
-    return candidate.is_relative_to(_CORPORA_ROOT)
-
-
 def _validate_corpus_path(raw_path: str, subdir: str | None) -> None:
     """Reject a `path` (or `path` + `subdir`) that would resolve outside `corpora/`.
 
@@ -89,18 +87,18 @@ def _validate_corpus_path(raw_path: str, subdir: str | None) -> None:
     `../../../../etc` would read (and offer up as "detection rules") files
     outside `corpora/` even with `path` itself contained.
     """
-    candidate = (_ROOT / raw_path).resolve()
-    if not _inside_corpora_root(candidate):
+    candidate = _ROOT / raw_path
+    if not is_contained(candidate, _CORPORA_ROOT):
         raise HTTPException(
             400,
-            f"'path' must resolve inside {_CORPORA_ROOT} (got {raw_path!r} -> {candidate})",
+            f"'path' must resolve inside {_CORPORA_ROOT} (got {raw_path!r} -> {candidate.resolve()})",
         )
     if subdir and subdir.strip():
-        scoped = (candidate / subdir.strip()).resolve()
-        if not _inside_corpora_root(scoped):
+        scoped = candidate.resolve() / subdir.strip()
+        if not is_contained(scoped, _CORPORA_ROOT):
             raise HTTPException(
                 400,
-                f"'subdir' must resolve inside {_CORPORA_ROOT} (got {subdir!r} -> {scoped})",
+                f"'subdir' must resolve inside {_CORPORA_ROOT} (got {subdir!r} -> {scoped.resolve()})",
             )
 
 
@@ -173,6 +171,18 @@ def create_corpus(body: CorpusIn):
 
     _validate_remote(body.git, "git")
     _validate_remote(body.tarball, "tarball")
+    if body.tarball:
+        # `_validate_remote` above only blocks git-argument-injection shapes;
+        # `sync_corpus`/`fetch_tarball` fetches this over the network with no
+        # scheme/host restriction of its own, so it needs the same SSRF policy
+        # web captures use (http/https only, no private/internal hosts).
+        # Checked again at fetch time in pipeline/detection/sync.py -- this
+        # copy only turns a bad URL into a 400 at creation time instead of a
+        # 502 on the first "Redownload" click.
+        try:
+            validate_url(body.tarball)
+        except CaptureError as e:
+            raise HTTPException(400, f"'tarball' is not a safe URL to fetch: {e}")
 
     entry = body.model_dump()
     entry["name"] = name

@@ -286,19 +286,32 @@ class WorkerLoop:
         return False
 
     def run_once(self) -> int:
+        # touch_alive() below is what the worker container's HEALTHCHECK
+        # watches (a stale file after WORKER_POLL_S x ~60 means "wedged"). It
+        # must not fire when a DB call above it failed -- e.g. a bad
+        # DATABASE_URL, a firewalled Postgres, or a schema that was never
+        # created -- or the container reports healthy forever while it can
+        # never actually claim or process a job.
+        db_ok = True
         try:
             requeue_orphans()
         except Exception as exc:
             logger.error(f"Exception in run_once requeue_orphans: {exc}")
+            db_ok = False
         n = 0
         try:
             n = self.kick()
         except Exception as exc:
             logger.error(f"Exception in run_once kick: {exc}")
+            db_ok = False
         try:
             self.heartbeat_if_due()
         except Exception as exc:
             logger.error(f"Exception in run_once heartbeat_if_due: {exc}")
+            db_ok = False
+        if not db_ok:
+            logger.warning("run_once: not touching the alive file -- a DB call failed this cycle")
+            return n
         try:
             touch_alive()
         except Exception as exc:

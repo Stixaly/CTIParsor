@@ -1,6 +1,7 @@
 # Secrets and local state - never in an image layer
 .env
 .env.*
+.secrets/
 !.env.example
 *.db
 *.db-wal

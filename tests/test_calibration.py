@@ -123,6 +123,26 @@ def test_a_proposal_never_goes_below_a_score_analysts_have_seen():
     assert p.proposed == 0.55 == p.min_score
 
 
+def test_a_cutoff_is_not_anchored_on_a_handful_of_high_scores():
+    # Mostly noise (20 % accepted, 40-79) plus a sparse high tail (three
+    # accepted decisions at 0.85 and nothing above -- below AUTO_ACCEPT_LEVEL
+    # so that branch doesn't shadow this one). The tail alone clears
+    # target_precision and the aggregate sample_size clears min_samples, but
+    # only 3 decisions exist AT OR ABOVE 0.85 -- too few to trust as the
+    # region a production cutoff now rests its precision on.
+    pts = _band(40, 80, 1, 4) + [(0.85, True)] * 3
+    p = cal.propose("cyner", "tool", 0.70, pts, target_precision=0.9, min_samples=50)
+    assert p.sample_size >= 50           # the aggregate gate alone would have allowed this
+    assert p.status == "target_unreachable"
+    assert p.proposed is None
+
+    # The same tail, now with enough decisions to back it, is proposed.
+    pts_supported = _band(40, 80, 1, 4) + [(0.85, True)] * 25
+    p2 = cal.propose("cyner", "tool", 0.70, pts_supported, target_precision=0.9, min_samples=50)
+    assert p2.status == "ok"
+    assert p2.proposed == 0.85
+
+
 def test_empty_sample_is_insufficient_and_metric_free():
     p = cal.propose("gliner", "identity", 0.40, [])
     assert p.status == "insufficient_samples"

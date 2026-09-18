@@ -568,8 +568,15 @@ def rule_facets_for_job(
     for i in range(0, len(ids), 400):   # SQLite caps a statement at 999 params
         batch = ids[i:i + 400]
         placeholders = ",".join("?" * len(batch))
+        # Bare LENGTH(raw) compiles with SQLite's OPFLAG_LENGTHARG optimisation
+        # (the byte length comes straight from the record header, no read of
+        # raw's overflow pages); wrapping it in COALESCE(raw, '') defeats that
+        # -- SQLite must materialise the whole TEXT payload first -- for a
+        # NULL-safety net `raw`'s schema-level `DEFAULT ''` already makes
+        # unnecessary in every current write path. `nbytes or 0` below still
+        # covers it at zero extra cost, in case that ever changes.
         for fmt, corpus, lic, sev, nbytes in conn.execute(
-            f"SELECT format, corpus, license, severity, LENGTH(COALESCE(raw, '')) "
+            f"SELECT format, corpus, license, severity, LENGTH(raw) "
             f"FROM detection_rules WHERE id IN ({placeholders})",
             batch,
         ):

@@ -7,6 +7,19 @@
 
 name: ctiparsor
 
+# Delivers CTI_DB_PASSWORD to containers as a bind-mounted file at
+# /run/secrets/db_password instead of a plain `environment:` value: the value
+# then never appears in `docker inspect`/`docker compose config` output or
+# /proc/<pid>/environ on any container that doesn't mount it. `make docker-up`
+# / `make docker-bootstrap` / `scripts/docker_smoke.sh` all materialize
+# .secrets/db_password from CTI_DB_PASSWORD before calling `docker compose up`
+# (see Makefile) -- Compose's own `secrets:` directive was tried first, but
+# its `environment:`-sourced form refuses to attach to a `read_only: true`
+# service ("`file` is the sole supported option"), which every service here
+# is; a plain bind mount has no such restriction. docker/entrypoint.sh reads
+# the file into PGPASSWORD for libpq/psycopg (which has no *_FILE convention
+# of its own); the official postgres image supports POSTGRES_PASSWORD_FILE
+# natively.
 x-app-image: &app-image
   image: ${CTI_IMAGE:-ctiparsor:local}
   build:
@@ -16,12 +29,13 @@ x-app-image: &app-image
       GIT_REV: ${CTI_GIT_REV:-}
       INSTALL_CAPTURE: ${CTI_INSTALL_CAPTURE:-true}
 
-# Where the app finds its job store (ADR-0045).  The password rides in
-# PGPASSWORD, which the driver reads, so it needs no percent-encoding and never
-# sits inside a URL that a log line could print.
+# Where the app finds its job store (ADR-0045).  The password itself is
+# delivered via the .secrets/db_password bind mount (see each service's
+# `volumes:`), not this block -- DATABASE_URL carries no password, so it
+# needs no percent-encoding and never sits inside a URL that a log line
+# could print.
 x-job-store: &job-store
   DATABASE_URL: postgresql://${CTI_DB_USER:-ctiparsor}@postgres:5432/${CTI_DB_NAME:-ctiparsor}
-  PGPASSWORD: ${CTI_DB_PASSWORD:?Set CTI_DB_PASSWORD in .env (e.g. openssl rand -hex 24)}
 
 x-app-hardening: &app-hardening
   read_only: true                      # the image is immutable at runtime; state lives on the volumes
@@ -63,6 +77,7 @@ services:
       - "${CTI_BIND:-127.0.0.1}:${CTI_PORT:-8000}:8000"
     volumes:
       - cti-state:/app/state
+      - ./.secrets/db_password:/run/secrets/db_password:ro
       - cti-cache:/app/cache
     extra_hosts:
       - "host.docker.internal:host-gateway"   # reach an Ollama / LM Studio / vLLM on the host
@@ -103,6 +118,7 @@ services:
     volumes:
       - cti-state:/app/state
       - cti-cache:/app/cache
+      - ./.secrets/db_password:/run/secrets/db_password:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
@@ -149,6 +165,7 @@ services:
     volumes:
       - cti-state:/app/state
       - cti-cache:/app/cache
+      - ./.secrets/db_password:/run/secrets/db_password:ro
     networks:
       - frontend      # bootstrap downloads models and clones corpora: it needs egress
       - backend
@@ -176,12 +193,13 @@ services:
     environment:
       POSTGRES_USER: ${CTI_DB_USER:-ctiparsor}
       POSTGRES_DB: ${CTI_DB_NAME:-ctiparsor}
-      POSTGRES_PASSWORD: ${CTI_DB_PASSWORD:?Set CTI_DB_PASSWORD in .env (e.g. openssl rand -hex 24)}
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
       # scram-sha-256 for every connection, local socket included (the image's
       # default only applies it to host connections).
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
     volumes:
       - pg-data:/var/lib/postgresql/data
+      - ./.secrets/db_password:/run/secrets/db_password:ro
     tmpfs:
       - /tmp
       - /run/postgresql

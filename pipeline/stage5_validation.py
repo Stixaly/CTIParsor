@@ -12,6 +12,7 @@ from stix2validator import ValidationOptions, print_results, validate_string
 
 # Initialize logging
 from api.logging_config import get_logger
+from pipeline.security import is_contained
 
 logger = get_logger(__name__)
 
@@ -87,7 +88,6 @@ def _try_restore_schemas() -> bool:
             zip_bytes = resp.read()
 
         extracted = 0
-        dest_resolved = dest.resolve()
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
             for entry in zf.namelist():
                 if not entry.startswith(_ZIP_SCHEMA_PREFIX):
@@ -100,12 +100,12 @@ def _try_restore_schemas() -> bool:
                 # not the URL being hardcoded today. `entry` is untrusted archive
                 # content the moment it is used to build a filesystem path: the
                 # prefix/suffix checks above accept `…/schemas/../../../etc/x.json`
-                # just as readily as a real schema file. `pipeline/detection/sync.py`
-                # (`_safe_members`) makes the same check for corpus tarballs; this
-                # path extracts a zip instead of a tar but needs the identical
-                # containment check before any write.
+                # just as readily as a real schema file. `is_contained`
+                # (pipeline/security.py) is the same check pipeline/detection/sync.py
+                # makes for corpus tarballs; this path extracts a zip instead of a
+                # tar but needs the identical containment check before any write.
                 out = (dest / rel).resolve()
-                if not out.is_relative_to(dest_resolved):
+                if not is_contained(out, dest):
                     logger.warning(f"Skipping unsafe schema archive entry: {entry!r}")
                     continue
                 out.parent.mkdir(parents=True, exist_ok=True)

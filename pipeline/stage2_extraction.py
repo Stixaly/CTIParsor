@@ -3,55 +3,14 @@ from urllib.parse import urlparse
 
 from models.schemas import EntityType, RawEntity
 from pipeline.env_flags import env_bool
+from pipeline.regex_safety import compile_pattern as _compile_pattern
 
 _SKIP_HEAVY = env_bool("SKIP_HEAVY_MODELS")
-
-try:
-    import re2 as _re2_module
-    _RE2_AVAILABLE = True
-except ImportError:
-    _re2_module = None
-    _RE2_AVAILABLE = False
 
 try:
     import spacy as _spacy_module
 except ImportError:
     _spacy_module = None  # type: ignore[assignment]
-
-
-# RE2 has no equivalent of re's integer flags — it takes them as an inline
-# prefix in the pattern itself ("(?i)", "(?m)", "(?s)", combinable "(?im)").
-# Only the three flags this module actually uses are mapped; anything else
-# (VERBOSE, ASCII, …) falls through to the stdlib path below rather than
-# being silently ignored.
-_RE2_INLINE_FLAGS: dict[int, str] = {
-    re.IGNORECASE: "i",
-    re.MULTILINE: "m",
-    re.DOTALL: "s",
-}
-_RE2_MAPPABLE_FLAGS = re.IGNORECASE | re.MULTILINE | re.DOTALL
-
-
-def _compile_pattern(pattern: str, flags: int = 0):
-    """
-    Compile a regex pattern, using re2 if available for ReDoS protection.
-
-    re2 guarantees linear time matching and prevents catastrophic backtracking.
-    Falls back to standard re if re2 is not installed, if `flags` includes a
-    flag re2's inline syntax has no equivalent for, or if re2 rejects the
-    pattern itself (e.g. a backreference, which RE2's syntax does not support).
-    """
-    if _RE2_AVAILABLE:
-        if flags & ~_RE2_MAPPABLE_FLAGS == 0:
-            prefix_letters = "".join(
-                letter for flag, letter in _RE2_INLINE_FLAGS.items() if flags & flag
-            )
-            re2_pattern = f"(?{prefix_letters}){pattern}" if prefix_letters else pattern
-            try:
-                return _re2_module.compile(re2_pattern)
-            except Exception:
-                pass
-    return re.compile(pattern, flags)
 
 # Regex to detect bare version numbers (e.g. "0.1.16", "1.167.71") that SpaCy
 # sometimes tags as PRODUCT or even ORG and would otherwise pollute entity lists.

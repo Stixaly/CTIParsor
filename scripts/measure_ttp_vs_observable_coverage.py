@@ -586,7 +586,15 @@ def main() -> int:
             "SELECT id, original_filename, status FROM jobs ORDER BY created_at"
         ).fetchall()
     except sqlite3.Error as exc:
-        print(f"ERROR: cannot read jobs table: {exc}")
+        # This tool assumes the historical single-file layout, where the rule
+        # store and the job store are the same SQLite file -- only true when
+        # DATABASE_URL is unset (ADR-0045). A Postgres-backed deployment's
+        # rule-store SQLite file has no `jobs` table at all.
+        print(
+            f"ERROR: cannot read jobs table: {exc} -- if this deployment's job "
+            "store is now PostgreSQL (ADR-0045, DATABASE_URL set), this "
+            "SQLite-only tool cannot read it."
+        )
         conn.close()
         return 1
 

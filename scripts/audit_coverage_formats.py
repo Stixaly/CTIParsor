@@ -35,6 +35,25 @@ def main() -> int:
     conn = sqlite3.connect(f"file:{args.db}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
 
+    # This tool assumes the historical single-file layout, where the rule
+    # store and the job store are the same SQLite file. Since ADR-0045 that is
+    # only true when DATABASE_URL is unset -- a Postgres-backed deployment's
+    # rule-store SQLite file has no `jobs`/`entities` tables at all, which
+    # otherwise fails confusingly deep inside job_technique_ids/compute_for_job.
+    _have = {r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('jobs','entities')"
+    )}
+    if {"jobs", "entities"} - _have:
+        print(
+            f"ERROR: {args.db} has no jobs/entities tables -- if this deployment's "
+            "job store is now PostgreSQL (ADR-0045, DATABASE_URL set), this "
+            "SQLite-only tool cannot read it. Point --db at a SQLite snapshot "
+            "that still has the job tables.",
+            file=sys.stderr,
+        )
+        conn.close()
+        return 2
+
     job_row = conn.execute(
         "SELECT original_filename FROM jobs WHERE id = ?", (args.job,)
     ).fetchone()
