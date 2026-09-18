@@ -126,6 +126,19 @@ def mock_llm_bad_json():
         yield mock
 
 
+@pytest.fixture(autouse=True)
+def _forget_store_backed_caches():
+    """pipeline.thresholds and pipeline.overrides read the job store once per
+    process and cache it (a worker subprocess lives for one job).  A test that
+    wrote rows through temp_db must not leave them cached for the next test,
+    which may run against a different temp store — or none at all."""
+    yield
+    from pipeline import overrides, thresholds
+
+    thresholds.reload()
+    overrides.reload()
+
+
 # ── Storage fixture ────────────────────────────────────────────────────────────
 
 @pytest.fixture()

@@ -8,6 +8,40 @@ sections group by theme rather than strict semver.
 
 ### Added
 
+#### Deny and promote lists grown from analyst decisions (ADR-0052), 2026-09-18
+
+ADR-0050 fixed CyNER's generic-language noise with three hand-kept lists in
+`pipeline/stage2d_cyner.py`, each entry added after someone read a real
+report's noise. The review UI records the same judgement one click at a
+time, in `entities.accepted` — on the very job ADR-0050 examined,
+`"Russian state"`, `"campaign"` and `"backed threat groups"` had each been
+flipped to rejected by hand. And the other direction had no mechanism at
+all: `ARGUEPATCH`, `AXETERROR`, `BRUSHPASS` — real codenames CyNER found and
+no gazetteer knows — depend on the model finding them again in every later
+report.
+
+`python -m scripts.promote_overrides` (and `POST /api/overrides/promote`)
+reads the decisions and proposes, per exact `(value, entity_type)`: a
+`deny` row when the value was rejected at least 3 times, in at least 2
+reports, in at least 80 % of its reviews; a `promote` row when a
+malware/threat-actor/tool name was accepted (or created by hand) at least 3
+times, in at least 2 reports, in 80 % of its reviews, is unknown to the
+gazetteer, at least 4 characters and not made of ADR-0050's generic
+vocabulary. The report is the product: `--apply` stores **candidates** and
+never changes the status of a row that exists, so a cron can run it while
+a person still decides — `PATCH /api/overrides/{id}` (or `--activate-all`)
+activates, `POST /api/overrides` writes a rule by hand, active at once.
+
+An active `deny` row drops the exact value from the output of the
+gazetteer, CyNER, GLiNER and the LLM's name lists (never a substring:
+`"Russia"` does not sink `"XAKNET Cyber Army of Russia Reborn"`); an
+active `promote` row is merged into the Stage 2b gazetteer and matched by
+the same Aho-Corasick automaton at canonical confidence before any model
+runs. `entity_overrides` exists on both engines; rows are read once per
+worker subprocess (`pipeline/overrides.py`), `ENTITY_OVERRIDES_ENABLED=false`
+ignores them all, and every bundle's run config records how many acted.
+Both CLIs now log to stderr so `--json` is a clean document on stdout.
+
 #### NER confidence cutoffs calibrated from analyst decisions, per source and entity type (ADR-0051), 2026-09-18
 
 The discard cutoff Stage 2d (CyNER, 0.70) and Stage 2e (GLiNER,

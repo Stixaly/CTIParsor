@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -31,6 +32,14 @@ from pipeline.calibration import (  # noqa: E402
     apply_proposals,
     calibrate,
 )
+
+
+def _logs_to_stderr() -> None:
+    """stdout is the report (a JSON document with --json); api.logging_config
+    logs to stdout by default, so its console handler is moved off it."""
+    for handler in logging.getLogger().handlers:
+        if isinstance(handler, logging.StreamHandler) and getattr(handler, "stream", None) is sys.stdout:
+            handler.setStream(sys.stderr)
 
 
 def _fmt(x: float | None) -> str:
@@ -67,6 +76,7 @@ def main() -> int:
     if args.min_samples < 1:
         parser.error("--min-samples must be a positive integer")
 
+    _logs_to_stderr()
     init_db()
     conn = get_conn()
     proposals = calibrate(conn, target_precision=args.target_precision, min_samples=args.min_samples)

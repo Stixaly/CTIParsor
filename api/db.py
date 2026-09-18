@@ -540,6 +540,27 @@ _JOB_STORE_MIGRATIONS_SQLITE = [
     " origin TEXT NOT NULL DEFAULT 'calibrated',"
     " updated_at TEXT NOT NULL,"
     " PRIMARY KEY (source, entity_type))",
+    # ADR-0052 — deny / promote lists grown from analyst decisions.  A `deny`
+    # row drops an exact (value, entity_type) from every NER stage's output; a
+    # `promote` row adds the term to the Stage 2b gazetteer.  Only `active`
+    # rows act; the promotion job writes `candidate` rows and never changes a
+    # status, so a cron can run it while a human still decides.
+    "CREATE TABLE IF NOT EXISTS entity_overrides ("
+    " id TEXT PRIMARY KEY,"
+    " term TEXT NOT NULL,"
+    " entity_type TEXT NOT NULL,"
+    " action TEXT NOT NULL,"
+    " status TEXT NOT NULL DEFAULT 'candidate',"
+    " display TEXT,"
+    " accepted_count INTEGER NOT NULL DEFAULT 0,"
+    " rejected_count INTEGER NOT NULL DEFAULT 0,"
+    " job_count INTEGER NOT NULL DEFAULT 0,"
+    " origin TEXT NOT NULL DEFAULT 'auto',"
+    " note TEXT,"
+    " created_at TEXT NOT NULL,"
+    " updated_at TEXT NOT NULL,"
+    " UNIQUE (term, entity_type, action))",
+    "CREATE INDEX IF NOT EXISTS idx_entity_overrides_status ON entity_overrides(status)",
 ]
 
 _JOB_STORE_DDL_POSTGRES = """
@@ -663,6 +684,25 @@ CREATE TABLE IF NOT EXISTS model_thresholds (
     updated_at TEXT NOT NULL,
     PRIMARY KEY (source, entity_type)
 );
+
+-- ADR-0052 - deny / promote lists grown from analyst decisions (see the SQLite twin).
+CREATE TABLE IF NOT EXISTS entity_overrides (
+    id TEXT PRIMARY KEY,
+    term TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    action TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'candidate',
+    display TEXT,
+    accepted_count INTEGER NOT NULL DEFAULT 0,
+    rejected_count INTEGER NOT NULL DEFAULT 0,
+    job_count INTEGER NOT NULL DEFAULT 0,
+    origin TEXT NOT NULL DEFAULT 'auto',
+    note TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (term, entity_type, action)
+);
+CREATE INDEX IF NOT EXISTS idx_entity_overrides_status ON entity_overrides(status);
 """
 
 

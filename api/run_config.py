@@ -105,6 +105,20 @@ def build_run_config(policy: dict | None = None) -> dict:
     except Exception:
         ner_thresholds = None
 
+    # entity_overrides (ADR-0052) — how many analyst-grown deny / promote rows
+    # were active for this run.  The rows themselves are in the store; the
+    # counts say whether any applied at all.
+    entity_overrides: dict | None
+    try:
+        from pipeline.overrides import denied_keys, overrides_enabled, promoted_entries
+        entity_overrides = {
+            "enabled": overrides_enabled(),
+            "deny": len(denied_keys()),
+            "promote": len(promoted_entries()),
+        }
+    except Exception:
+        entity_overrides = None
+
     # stages
     #
     # Ask each stage its OWN availability predicate — the same call the worker
@@ -158,6 +172,7 @@ def build_run_config(policy: dict | None = None) -> dict:
         "embedding_model": embedding_model,
         "ttp_thresholds": ttp_thresholds,
         "ner_thresholds": ner_thresholds,
+        "entity_overrides": entity_overrides,
         "stages": stages,
         "env": env,
     }
