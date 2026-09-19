@@ -11,7 +11,7 @@ Covers:
 """
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -126,6 +126,52 @@ class TestEnrichChunkTransientErrors:
         ):
             with pytest.raises(anthropic.APIConnectionError):
                 enrich_chunk(sample_cti_text, [])
+
+
+# ── _call_anthropic_impl — content block parsing ──────────────────────────────
+
+class _FakeBlock:
+    def __init__(self, type_: str, text: str = "") -> None:
+        self.type = type_
+        self.text = text
+
+
+class TestCallAnthropicContentBlocks:
+    """Extended thinking puts a ThinkingBlock (no .text) ahead of the TextBlock —
+    the response parser must skip it instead of assuming content[0] is text."""
+
+    def _mock_response(self, content):
+        response = MagicMock()
+        response.content = content
+        response.usage = MagicMock(output_tokens=10)
+        return response
+
+    def test_skips_leading_thinking_block(self):
+        from pipeline.stage3_llm import _call_anthropic_impl
+        content = [_FakeBlock("thinking"), _FakeBlock("text", '{"foo": "bar"}')]
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = self._mock_response(content)
+        with patch("pipeline.stage3_llm._get_anthropic_client", return_value=mock_client):
+            result = _call_anthropic_impl("system", "user")
+        assert result == '{"foo": "bar"}'
+
+    def test_text_only_response_still_works(self):
+        from pipeline.stage3_llm import _call_anthropic_impl
+        content = [_FakeBlock("text", '{"foo": "bar"}')]
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = self._mock_response(content)
+        with patch("pipeline.stage3_llm._get_anthropic_client", return_value=mock_client):
+            result = _call_anthropic_impl("system", "user")
+        assert result == '{"foo": "bar"}'
+
+    def test_only_thinking_blocks_returns_empty_not_crash(self):
+        from pipeline.stage3_llm import _call_anthropic_impl
+        content = [_FakeBlock("thinking")]
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = self._mock_response(content)
+        with patch("pipeline.stage3_llm._get_anthropic_client", return_value=mock_client):
+            result = _call_anthropic_impl("system", "user")
+        assert result == ""
 
 
 # ── _merge_results ─────────────────────────────────────────────────────────────
