@@ -6,8 +6,8 @@ Purpose
 Quantify how much of the current ATT&CK-technique-indexed detection coverage is
 actually backed by technical evidence (IoCs, malware, tools) found in the report.
 
-The script is strictly read-only: it opens the SQLite database in read-only
-mode, calls the project's detection APIs, and prints a plain-text report to
+The script is strictly read-only: it reads DATABASE_URL the same way the API
+does, calls the project's detection APIs, and prints a plain-text report to
 stdout. It never writes to the database or to any file.
 
 How to read the output
@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sqlite3
 import sys
 import time
 from collections import Counter
@@ -40,6 +39,8 @@ from typing import Any
 # Insert the repository root into sys.path before importing project modules.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from api.db import DB_ERRORS, get_conn, init_db
+from api.db_backend import DBConnection
 from pipeline.detection.coverage import (
     _parent_technique,
     compute_for_job,
@@ -112,14 +113,14 @@ def _load_attack_domains(data_dir: Path) -> dict[str, str]:
 
 
 def _report_rows(
-    conn: sqlite3.Connection, job_id: str
+    conn: DBConnection, job_id: str
 ) -> list[dict[str, Any]]:
     """Delegate to job_observable_rows."""
     return job_observable_rows(conn, job_id)
 
 
 def _technique_selection(
-    conn: sqlite3.Connection, technique_ids: list[str]
+    conn: DBConnection, technique_ids: list[str]
 ) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
     """Reproduce the technique-based rule selection from coverage.py.
 
@@ -150,7 +151,7 @@ def _technique_selection(
 
 
 def _observable_selection(
-    conn: sqlite3.Connection, observables: list[Any]
+    conn: DBConnection, observables: list[Any]
 ) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
     """Evidence-backed rule selection.
 
@@ -200,7 +201,7 @@ def _observable_selection(
 
 
 def _measure_job(
-    conn: sqlite3.Connection,
+    conn: DBConnection,
     job_id: str,
     filename: str,
     domains: dict[str, str],
@@ -560,47 +561,31 @@ def main() -> int:
         description="Measure TTP coverage vs observable-backed coverage."
     )
     parser.add_argument(
-        "--db",
-        default="cti_stix.db",
-        help="Path to the SQLite database (default: cti_stix.db)",
-    )
-    parser.add_argument(
         "--data-dir",
         default="data",
         help="Directory containing ATT&CK STIX bundles (default: data)",
     )
     args = parser.parse_args()
 
-    db_path = Path(args.db)
     data_dir = Path(args.data_dir)
 
     # Load ATT&CK domains
     domains = _load_attack_domains(data_dir)
 
-    # Open database in read-only mode
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
+    # Connect to the database (reads DATABASE_URL, like the API does)
+    init_db()
+    conn = get_conn()
 
     try:
         rows = conn.execute(
             "SELECT id, original_filename, status FROM jobs ORDER BY created_at"
         ).fetchall()
-    except sqlite3.Error as exc:
-        # This tool assumes the historical single-file layout, where the rule
-        # store and the job store are the same SQLite file -- only true when
-        # DATABASE_URL is unset (ADR-0045). A Postgres-backed deployment's
-        # rule-store SQLite file has no `jobs` table at all.
-        print(
-            f"ERROR: cannot read jobs table: {exc} -- if this deployment's job "
-            "store is now PostgreSQL (ADR-0045, DATABASE_URL set), this "
-            "SQLite-only tool cannot read it."
-        )
-        conn.close()
+    except DB_ERRORS as exc:
+        print(f"ERROR: cannot read jobs table: {exc}")
         return 1
 
     if not rows:
         print("No jobs found in the database.")
-        conn.close()
         return 1
 
     measures: list[dict[str, Any]] = []
@@ -623,8 +608,6 @@ def main() -> int:
 
         measures.append(m)
         _print_job(m)
-
-    conn.close()
 
     if measures:
         _print_global(measures)

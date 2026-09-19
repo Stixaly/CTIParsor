@@ -6,7 +6,8 @@ from data already stored in the database under a given relationship policy,
 then counts edges by label. It writes nothing: neither to the database nor
 to disk. It is a measurement, not a migration.
 
-The database is opened strictly read-only.
+This script reads DATABASE_URL the same way the API does; the connection it
+gets back is never written to.
 
 Usage:
     python scripts/rebuild_bundle_provenance.py --job JOB_ID
@@ -16,7 +17,6 @@ Usage:
 
 import argparse
 import json
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -24,12 +24,14 @@ _ROOT = Path(__file__).parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from api.db import get_conn, init_db  # noqa: E402
+from api.db_backend import DBConnection  # noqa: E402
 from models.schemas import EntityType, RawEntity  # noqa: E402
 from pipeline.stage3_llm import LLMEnrichmentResult  # noqa: E402
 from pipeline.stage4_stix_mapping import build_stix_bundle  # noqa: E402
 
 
-def _load_job(conn, job_id: str) -> tuple[list, object, str, str] | None:
+def _load_job(conn: DBConnection, job_id: str) -> tuple[list, object, str, str] | None:
     """Return (raw_entities, llm_result, report_text, filename) or None."""
     cur = conn.execute(
         "SELECT id, original_filename, report_text, llm_result_json "
@@ -123,7 +125,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Rebuild a STIX bundle in memory and audit edge provenance."
     )
-    parser.add_argument("--db", type=Path, default=Path("cti_stix.db"))
     parser.add_argument("--job", required=True)
     parser.add_argument("--pin", action="append", default=None)
     parser.add_argument("--max-pinned", type=int, default=200)
@@ -141,62 +142,55 @@ def main() -> None:
         "rules": rules,
     }
 
-    db_path = args.db
-    if not db_path.exists():
-        print(f"error: database not found: {db_path}", file=sys.stderr)
+    init_db()
+    conn = get_conn()
+    loaded = _load_job(conn, args.job)
+    if loaded is None:
+        print(
+            f"error: job {args.job!r} not found or not replayable",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    try:
-        loaded = _load_job(conn, args.job)
-        if loaded is None:
-            print(
-                f"error: job {args.job!r} not found or not replayable",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+    raw_entities, llm_result, report_text, filename = loaded
+    bundle = build_stix_bundle(
+        raw_entities,
+        llm_result,
+        filename,
+        report_text=report_text,
+        original_filename=filename,
+        relationship_policy=policy,
+    )
 
-        raw_entities, llm_result, report_text, filename = loaded
-        bundle = build_stix_bundle(
-            raw_entities,
-            llm_result,
-            filename,
-            report_text=report_text,
-            original_filename=filename,
-            relationship_policy=policy,
-        )
+    census = _label_census(bundle)
+    pinned = _pinned_count(bundle)
+    total = sum(census.values())
 
-        census = _label_census(bundle)
-        pinned = _pinned_count(bundle)
-        total = sum(census.values())
+    print(f"job        : {args.job}")
+    print(f"report     : {filename[:60]}")
+    print(f"entities   : {len(raw_entities)}")
+    print(
+        f"policy     : {len(rules)} pinned rule(s), "
+        f"max_pinned_edges={args.max_pinned}"
+    )
+    print()
+    print(f"{'label':<16} {'count':>8}")
+    print("-" * 26)
+    for label, n in sorted(census.items(), key=lambda kv: -kv[1]):
+        print(f"{label:<16} {n:>8}")
+    print("-" * 26)
+    print(f"{'total':<16} {total:>8}")
+    print()
+    print(f"edges carrying x_policy_rule : {pinned}")
+    cap_ok = pinned <= args.max_pinned
+    print(f"cap respected                : {'YES' if cap_ok else 'NO'}")
+    print()
 
-        print(f"job        : {args.job}")
-        print(f"report     : {filename[:60]}")
-        print(f"entities   : {len(raw_entities)}")
-        print(
-            f"policy     : {len(rules)} pinned rule(s), "
-            f"max_pinned_edges={args.max_pinned}"
-        )
-        print()
-        print(f"{'label':<16} {'count':>8}")
-        print("-" * 26)
-        for label, n in sorted(census.items(), key=lambda kv: -kv[1]):
-            print(f"{label:<16} {n:>8}")
-        print("-" * 26)
-        print(f"{'total':<16} {total:>8}")
-        print()
-        print(f"edges carrying x_policy_rule : {pinned}")
-        cap_ok = pinned <= args.max_pinned
-        print(f"cap respected                : {'YES' if cap_ok else 'NO'}")
-        print()
-
-        unlabelled = census.get("(unlabelled)", 0)
-        if unlabelled == 0:
-            print("Every shipped edge carries provenance.")
-        else:
-            print(f"{unlabelled} edge(s) still carry no x_evidence_label.")
-    finally:
-        conn.close()
+    unlabelled = census.get("(unlabelled)", 0)
+    if unlabelled == 0:
+        print("Every shipped edge carries provenance.")
+    else:
+        print(f"{unlabelled} edge(s) still carry no x_evidence_label.")
 
 
 if __name__ == "__main__":

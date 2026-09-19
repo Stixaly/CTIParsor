@@ -1,22 +1,29 @@
 # Running CTIParsor in containers
 
-This guide covers deploying CTIParsor using Docker Compose. It replaces the manual `setup.sh` installation for standard environments. It does **not** replace the offline installation bundle (ADR-0040), which remains the required path for air-gapped systems. See ADR-0044 for the architectural decisions behind this containerization.
+This guide covers installing, developing and deploying CTIParsor using
+Docker Compose — the only supported way to do any of the three (ADR-0054).
+`setup.sh` only prepares the environment (`.env`, secrets, a Docker check);
+everything here happens through `docker compose`. Air-gapped installs are
+also Docker-based now (ADR-0054 redesigned ADR-0040's bundle around
+`docker save`/`load` — see the [README's offline section](../README.md#offline-air-gapped-installation)
+and `scripts/package_offline_docker.sh`). See ADR-0044 for the architectural
+decisions behind the containerization itself.
 
 ## What you get
 
 - **Image**: `ctiparsor:local` (4.48 GB). Contains the React UI, Python 3.12 venv (torch CPU), and Chromium (optional).
 - **Volumes** (Compose prefixes them with the project name, so `docker volume ls` shows `ctiparsor_cti-state` and so on):
-  - `cti-state`: the SQLite rule store, uploads, outputs, backups — back it up.
-  - `pg-data`: the PostgreSQL job store (jobs, entities, relationships, progress, policy, figure and CVE caches) — back it up with `pg_dump`.
+  - `cti-state`: uploads, outputs, backups — back it up. No database file lives here any more (ADR-0053).
+  - `pg-data`: the PostgreSQL job store AND rule store (jobs, entities, relationships, progress, policy, figure and CVE caches, plus the detection-rule corpus since ADR-0053) — back it up with `pg_dump`.
   - `cti-cache`: HuggingFace models, Sigma/YARA/Suricata corpora — rebuildable with `bootstrap`.
   - `ollama-models`: (Only if using the `ollama` profile).
-- **Services**: `app`, `worker` and `postgres` always run. `app` only accepts and queues reports (`CTIPARSOR_ROLE=api`) and never loads a model; `worker` claims queued reports from the job store and runs each in an isolated subprocess, heartbeating the rows it owns so several workers can share the queue (ADR-0046) — scale it with `docker compose up -d --scale worker=2`; `postgres` is the job store (ADR-0045: PostgreSQL 17, on the internal network only, running as the image's `postgres` user with every capability dropped and a read-only root; `CTI_DB_PASSWORD` in `.env` is required). Three optional profiles:
+- **Services**: `app`, `worker` and `postgres` always run. `app` only accepts and queues reports (`CTIPARSOR_ROLE=api`) and never loads a model; `worker` claims queued reports from the job store and runs each in an isolated subprocess, heartbeating the rows it owns so several workers can share the queue (ADR-0046) — scale it with `docker compose up -d --scale worker=2`; `postgres` is both stores (ADR-0045, ADR-0053: PostgreSQL 17, on the internal network only, running as the image's `postgres` user with every capability dropped and a read-only root; `CTI_DB_PASSWORD` in `.env` is required). Three optional profiles:
   - `bootstrap`: one-shot initialisation (models, corpora, rule store), same image and hardening as `app`.
   - `ollama`: a local LLM with no published port, reachable by `app` at `http://ollama:11434`.
   - `proxy`: TLS + password (`nginx-unprivileged`) in front of `app`; the only thing worth publishing on a network.
 - **Not in the image**: the models (2.6 GB) and corpora (0.7 GB) are downloaded once into `cti-cache` by `bootstrap`, so a code change rebuilds in minutes. `docs/` and `tests/` are left out too.
 
-Known limits: no GPU (torch is the CPU build); `git` has no repository inside the container, so bundle-staleness checks (ADR-0035) answer "undecidable" and the revision recorded in each bundle comes from the `GIT_REV` build argument (`make docker-build` sets it, a bare `docker compose build` records nothing). Docker Desktop on Windows and docker-ce inside WSL2 both work; the repository may live on the Windows drive, the named volumes live in the Linux VM, which is what keeps SQLite fast.
+Known limits: no GPU (torch is the CPU build); `git` has no repository inside the container, so bundle-staleness checks (ADR-0035) answer "undecidable" and the revision recorded in each bundle comes from the `GIT_REV` build argument (`make docker-build` sets it, a bare `docker compose build` records nothing). Docker Desktop on Windows and docker-ce inside WSL2 both work; the repository may live on the Windows drive, the named volumes live in the Linux VM.
 
 ```text
 analyst ──https──> [proxy 8443] ──> [app :8000, role api] ──┐
@@ -82,23 +89,44 @@ does this for you.
 ## Quick start
 
 ```bash
-cp .env.example .env            # then set your LLM provider / key
+bash setup.sh                   # writes .env + secrets, checks Docker — builds/starts nothing
+nano .env                       # set your LLM provider / key
 docker compose build            # or: make docker-build (stamps the git revision)
 docker compose up -d            # http://127.0.0.1:8000
 docker compose --profile bootstrap run --rm bootstrap   # once, 10-20 min: models, corpora, rule store
 docker compose logs -f app
 ```
 
-`docker compose up -d` only starts `app`, `worker` and `postgres` — none of
-them fetch or index the detection-rule corpora. `postgres` being reachable is
-unrelated: it is the job store (ADR-0045), while Sigma/Suricata/YARA rules
-live in a SQLite file on `cti-state`. Skip the `bootstrap` line above and
-Settings → Detection Corpora will show 0 rules for every corpus. Bootstrap
-clones and indexes every corpus in one process; syncing corpora individually
-from Settings → Redownload instead works too, but only **one at a time** —
-each sync rebuilds the whole store, and two overlapping ones contend for the
-same SQLite write lock (5s `busy_timeout`) and one fails with `database is
-locked`.
+`docker compose up -d` only starts `app`, `worker` and `postgres` — starting
+it does not by itself fetch or index the detection-rule corpora, which live
+in the same PostgreSQL database as the job store now (ADR-0045, ADR-0053).
+Skip the `bootstrap` line above and Settings → Detection Corpora will show 0
+rules for every corpus. Bootstrap clones and indexes every corpus in one
+process; syncing corpora individually from Settings → Redownload instead
+works too, but only **one at a time** — each sync rebuilds the whole store
+(`replace_corpus_rules` per corpus, then a global dedup pass), and two
+overlapping ones contend for the same rows.
+
+## Development
+
+Two `profiles: [dev]` services replace the old venv-based dev loop (ADR-0054)
+— neither starts with a plain `docker compose up -d`:
+
+```bash
+docker compose run --rm dev pytest tests/ -v            # or: make docker-test
+docker compose run --rm dev cli input/report.pdf        # CLI, same as make run-dir
+docker compose --profile dev up frontend-dev             # Vite HMR -> http://localhost:5173
+```
+
+`dev` is the same image as `app`/`worker`, `read_only: false`, with the repo
+bind-mounted live over `/app` — edits on the host need no rebuild.
+`tests/` ships in this bind mount, not in the built image (`.dockerignore`
+excludes it from `app`/`worker` on purpose). Bind-mounting `.` over `/app`
+also replaces the image's `uploads`/`output`/`corpora` symlinks with this
+repo's own directories, so `docker compose run --rm dev cli` reads/writes
+those host paths directly. `frontend-dev` bind-mounts `frontend/` into a
+plain `node:24-bookworm-slim` container and proxies `/api` to the `app`
+service (`VITE_API_PROXY_TARGET=http://app:8000`, set in `compose.yaml`).
 
 ## Configuration
 
@@ -138,7 +166,7 @@ The app receives `DATABASE_URL=postgresql://<CTI_DB_USER>@postgres:5432/<CTI_DB_
 
 ## Data and backups
 
-Data persists in named volumes. Two of them hold what you cannot rebuild: `cti-state` (rule store, uploads, outputs) and `pg-data` (every report).
+Data persists in named volumes. Two of them hold what you cannot rebuild: `cti-state` (uploads, outputs) and `pg-data` (every report AND the detection-rule corpus, since ADR-0053).
 
 **Backup:**
 ```bash
@@ -146,15 +174,20 @@ docker run --rm -v ctiparsor_cti-state:/s -v "$PWD":/b alpine tar czf /b/cti-sta
 docker compose exec -T postgres pg_dump -U ctiparsor -d ctiparsor -Fc > ctiparsor-$(date +%F).dump
 ```
 
-**Restore the job store** (into a fresh, empty `postgres` service):
+**Restore both stores** (into a fresh, empty `postgres` service):
 ```bash
 docker compose exec -T postgres pg_restore -U ctiparsor -d ctiparsor --clean --if-exists < ctiparsor-YYYY-MM-DD.dump
 ```
 
-**Moving an existing SQLite job store into the container's PostgreSQL** (an install that ran before ADR-0045 keeps its reports in `cti_stix.db` on `cti-state`):
+**Moving an existing SQLite-based install onto PostgreSQL** (one that ran
+before ADR-0045/ADR-0053 keeps its reports and its rule corpus in
+`cti_stix.db` — this repo's historical single-file layout — on `cti-state`;
+run both migration scripts, in order, since they cover different tables):
 ```bash
 docker compose run --rm app python scripts/migrate_jobs_to_postgres.py --sqlite /app/state/cti_stix.db --dry-run
 docker compose run --rm app python scripts/migrate_jobs_to_postgres.py --sqlite /app/state/cti_stix.db
+docker compose run --rm app python scripts/migrate_rules_to_postgres.py --sqlite /app/state/cti_stix.db --dry-run
+docker compose run --rm app python scripts/migrate_rules_to_postgres.py --sqlite /app/state/cti_stix.db
 ```
 
 **Restore:**
@@ -272,7 +305,7 @@ Not supported in the image (torch CPU only).
 | `env file .env not found` | Missing `.env` | `cp .env.example .env` |
 | `required variable CTI_DB_PASSWORD is missing a value` | No database password | `echo "CTI_DB_PASSWORD=$(openssl rand -hex 24)" >> .env` |
 | `password authentication failed for user "ctiparsor"` | `CTI_DB_PASSWORD` changed after the `pg-data` volume was initialised | Restore the old value, or `docker compose down -v` to start a fresh database (deletes every report) |
-| Reports processed before the PostgreSQL move are gone from the list | They are still in `cti_stix.db` on `cti-state` | Run the migration command in *Data and backups* |
+| Reports (or detection rules) processed before the PostgreSQL move are gone from the list | They are still in `cti_stix.db` on `cti-state` | Run the migration commands in *Data and backups* |
 | `docker compose pull` reports `denied` | The GHCR package is still private and you are not authenticated, or the first publish hasn't landed yet | `docker login ghcr.io`, or build locally with `docker compose build` |
 | Backlog is unclear — is the queue actually backing up? | Watching logs is guesswork | `curl -s localhost:8000/api/queue/status \| python3 -m json.tool` — `queue.depth` against `queue.max_depth`, `queue.oldest_queued_seconds`, and each worker's `stale` flag (ADR-0048) |
 | A report stays `queued` forever | No worker container is running (`docker compose ps worker`), or every worker is at `WORKER_MAX_CONCURRENT` | `docker compose up -d worker`, or `--scale worker=2`; watch `docker compose logs -f worker` |
@@ -283,7 +316,7 @@ Not supported in the image (torch CPU only).
 | `WARNING: ANTHROPIC_API_KEY is unset` | Missing key in `.env` | Edit `.env`, `docker compose up -d` |
 | `Connection refused` on `localhost:11434` | `localhost` is the container | Use `host.docker.internal` or `ollama` profile |
 | First report very slow | Bootstrap not run | Run bootstrap profile; set `HF_TOKEN` |
-| Settings → Redownload fails, `database is locked` | Two corpus syncs ran concurrently; each fully rebuilds the SQLite rule store and `busy_timeout` is only 5s (`api/db.py`) | Sync corpora one at a time, or re-run all of them at once with `docker compose --profile bootstrap run --rm bootstrap` |
+| Settings → Redownload fails or produces an inconsistent corpus | Two corpus syncs ran concurrently, contending for the same rows during the rebuild | Sync corpora one at a time, or re-run all of them at once with `docker compose --profile bootstrap run --rm bootstrap` |
 | Report `failed`, subprocess killed | Out of Memory | Lower `WORKER_MAX_CONCURRENT`, increase Docker VM RAM |
 | `port is already allocated` | Port conflict | Change `CTI_PORT` |
 | Warning: `listening on 0.0.0.0:8000` | Normal in container | Ignore; `CTI_BIND` controls external exposure |
@@ -309,4 +342,5 @@ bash scripts/docker_smoke.sh --clean     # docker compose down -v afterwards (DE
 - [ADR-0044](adr/0044-container-images.md) — why one image and no database container; the hardening findings
 - [ADR-0047](adr/0047-publish-image-to-ghcr.md) — the GHCR publish pipeline
 - [ADR-0048](adr/0048-queue-status-endpoint.md) — the queue-status endpoint
-- [ADR-0040](adr/0040-offline-installation-bundle.md) — the air-gap bundle
+- [ADR-0054](adr/0054-full-docker-installation.md) — Docker-only install/dev/air-gap, and why `setup.sh` shrank
+- [ADR-0040](adr/0040-offline-installation-bundle.md) — the original (superseded) air-gap bundle mechanism

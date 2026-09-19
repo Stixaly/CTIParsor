@@ -9,11 +9,12 @@ Measured: okta 7 domains / 31 rules, polygon 13 / 22, ms365 3 / 8.
 
 from __future__ import annotations
 
-import sqlite3
 from collections import Counter
 from dataclasses import dataclass
 from typing import Iterable
 
+from api.db import DB_ERRORS
+from api.db_backend import DBConnection
 from pipeline.detection.control import is_ubiquitous
 
 
@@ -140,21 +141,21 @@ def campaign_tokens(domains: Iterable[str]) -> dict[str, int]:
     return _maximal(filtered)
 
 
-def rule_text_built(conn: sqlite3.Connection) -> bool:
-    """Return True if the rule_text FTS5 table exists and is non-empty."""
+def rule_text_built(conn: DBConnection) -> bool:
+    """Return True if the rule_text index exists and is non-empty.
+
+    init_db() always creates rule_text now (ADR-0053), so this only ever
+    guards "not yet populated" (scripts/build_rule_text.py hasn't run) rather
+    than "table absent" the way it did against an older SQLite database.
+    """
     try:
-        cur = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='rule_text'"
-        )
-        if cur.fetchone() is None:
-            return False
         cur = conn.execute("SELECT rule_id FROM rule_text LIMIT 1")
         return cur.fetchone() is not None
-    except sqlite3.Error:
+    except DB_ERRORS:
         return False
 
 
-def brand_tokens(conn: sqlite3.Connection, domains: Iterable[str]) -> list[BrandToken]:
+def brand_tokens(conn: DBConnection, domains: Iterable[str]) -> list[BrandToken]:
     """Find brand tokens that appear in a limited number of canonical rules."""
     counts = campaign_tokens(domains)
     if not counts:
@@ -172,13 +173,13 @@ def brand_tokens(conn: sqlite3.Connection, domains: Iterable[str]) -> list[Brand
 
     results: list[BrandToken] = []
     for tok in candidates:
-        param = '"' + tok.replace('"', '') + '"'
         try:
             cur = conn.execute(
-                "SELECT COUNT(*) FROM rule_text WHERE body MATCH ?", (param,)
+                "SELECT COUNT(*) FROM rule_text WHERE body_tsv @@ phraseto_tsquery('simple', ?)",
+                (tok,),
             )
             count = cur.fetchone()[0]
-        except sqlite3.Error:
+        except DB_ERRORS:
             continue
         if 1 <= count <= BRAND_MAX_TITLE_RULES:
             results.append(BrandToken(token=tok, domains=counts[tok], rules=count))
@@ -188,7 +189,7 @@ def brand_tokens(conn: sqlite3.Connection, domains: Iterable[str]) -> list[Brand
 
 
 def brand_evidence(
-    conn: sqlite3.Connection | None, tokens: list[BrandToken]
+    conn: DBConnection | None, tokens: list[BrandToken]
 ) -> dict[str, list[dict]]:
     """Return evidence dicts mapping rule_id to a list of brand matches."""
     if not tokens:
@@ -198,13 +199,13 @@ def brand_evidence(
 
     evidence: dict[str, list[dict]] = {}
     for tok in tokens:
-        param = '"' + tok.token.replace('"', '') + '"'
         try:
             cur = conn.execute(
-                "SELECT rule_id FROM rule_text WHERE body MATCH ?", (param,)
+                "SELECT rule_id FROM rule_text WHERE body_tsv @@ phraseto_tsquery('simple', ?)",
+                (tok.token,),
             )
             rows = cur.fetchall()
-        except sqlite3.Error:
+        except DB_ERRORS:
             continue
         for (rule_id,) in rows:
             # FTS5 indexes title and description in a single 'body' column,
@@ -226,7 +227,7 @@ def brand_evidence(
     return evidence
 
 
-def cve_evidence(conn: sqlite3.Connection, cves: Iterable[str]) -> dict[str, list[dict]]:
+def cve_evidence(conn: DBConnection, cves: Iterable[str]) -> dict[str, list[dict]]:
     """rule_id → title matches for the report's CVE ids (ADR-0031).
 
     Same FTS mechanism as `brand_evidence`, but with no recurrence test, no
@@ -245,12 +246,12 @@ def cve_evidence(conn: sqlite3.Connection, cves: Iterable[str]) -> dict[str, lis
 
     evidence: dict[str, list[dict]] = {}
     for cve in values:
-        param = '"' + cve.replace('"', "") + '"'
         try:
             rows = conn.execute(
-                "SELECT rule_id FROM rule_text WHERE body MATCH ?", (param,)
+                "SELECT rule_id FROM rule_text WHERE body_tsv @@ phraseto_tsquery('simple', ?)",
+                (cve,),
             ).fetchall()
-        except sqlite3.Error:
+        except DB_ERRORS:
             continue
         for (rule_id,) in rows:
             evidence.setdefault(rule_id, []).append({

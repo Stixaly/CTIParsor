@@ -22,9 +22,19 @@ class DBConnection(Protocol):
 
 
 def backend_from_url(url: str | None) -> str:
-    """Determine the backend type from the database URL."""
+    """Determine the backend type from the database URL.
+
+    CTIParsor no longer supports SQLite (ADR-0053): DATABASE_URL is mandatory
+    and must be a postgresql:// URL, for both the job store and the rule
+    store. An unset or malformed value fails loudly here rather than
+    silently falling back to a file that is no longer maintained.
+    """
     if url is None or not url.strip():
-        return "sqlite"
+        raise RuntimeError(
+            "DATABASE_URL is not set. CTIParsor requires PostgreSQL — "
+            "postgresql://user@host:5432/dbname — see ADR-0053; SQLite is no "
+            "longer supported."
+        )
     stripped = url.strip()
     if stripped.startswith("postgresql://") or stripped.startswith("postgres://"):
         return "postgresql"

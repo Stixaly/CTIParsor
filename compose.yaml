@@ -29,7 +29,8 @@ x-app-image: &app-image
       GIT_REV: ${CTI_GIT_REV:-}
       INSTALL_CAPTURE: ${CTI_INSTALL_CAPTURE:-true}
 
-# Where the app finds its job store (ADR-0045).  The password itself is
+# Where the app finds its job store AND its rule store (ADR-0045, ADR-0053
+# -- both stores are this one PostgreSQL database).  The password itself is
 # delivered via the .secrets/db_password bind mount (see each service's
 # `volumes:`), not this block -- DATABASE_URL carries no password, so it
 # needs no percent-encoding and never sits inside a URL that a log line
@@ -185,9 +186,9 @@ services:
     healthcheck:
       disable: true
 
-  # The job store (ADR-0045): jobs, entities, relationships, progress events,
-  # policy, figure and CVE caches.  The detection-rule corpus stays in the
-  # SQLite file on cti-state.  No published port: only the app reaches it.
+  # The job store (ADR-0045) AND the detection-rule corpus (ADR-0053: no
+  # more SQLite file on cti-state -- both stores are PostgreSQL now).  No
+  # published port: only the app and worker reach it.
   # The official image runs as its `postgres` user (uid 70 on alpine) when told
   # to; with the data directory on a named volume nothing needs root, so every
   # capability is dropped and the root filesystem is read-only (the socket
@@ -237,6 +238,82 @@ services:
     networks:
       - backend
     restart: unless-stopped
+
+  # Development/test runner (ADR-0054): the pipeline/API/tests run only in
+  # containers now, so this is what replaces the old venv workflow. Same
+  # image as `app`/`worker` (all Python packages already baked into
+  # /opt/venv), but with the repo bind-mounted live over /app instead of the
+  # image's baked-in COPY -- edits on the host are picked up with no rebuild.
+  # `tests/` is deliberately absent from the built image (.dockerignore) for
+  # exactly this reason: it was never meant to ship in `app`/`worker`, only
+  # to arrive via this bind mount.
+  #
+  # Not `*app-hardening`: needs to WRITE (.pytest_cache, __pycache__, edited
+  # source stays as edited), so `read_only` is off; cap_drop/no-new-
+  # privileges/the Chromium seccomp profile stay on as cheap defense in
+  # depth since this container runs the same pipeline code `worker` does.
+  # Bind-mounting `.` over `/app` also replaces the image's uploads/output/
+  # corpora symlinks with this repo's own `uploads/`/`output/`/`corpora/`
+  # directories -- which is why `docker compose run --rm dev cli
+  # input/report.pdf` (dispatched by entrypoint.sh like any other command)
+  # reads/writes those paths directly on the host, no extra bind mount
+  # needed the way the hardened `app` service would.
+  #
+  # Performance note (ADR-0037's WSL /mnt/ measurement, re-examined for
+  # ADR-0054): that finding was SQLite doing random-access reads against a
+  # 644 MB file (gone entirely -- Postgres runs in its own container,
+  # unaffected by host bind-mount performance) and Torch/HF imports reading
+  # ~2 GB of .so files from /mnt/ (avoided here because /opt/venv stays
+  # inside the image, never bind-mounted -- only the few hundred small .py
+  # files cross the bind mount, a completely different I/O profile).
+  dev:
+    <<: [*app-image, *app-hardening]
+    read_only: false
+    profiles: [dev]
+    env_file: ${CTI_ENV_FILE:-.env}
+    environment:
+      # Tests create a disposable PostgreSQL schema per run (temp_db in
+      # tests/conftest.py) against this same server -- safe to share with
+      # the real job/rule store, nothing touches the default schema.
+      CTIPARSOR_TEST_DATABASE_URL: postgresql://${CTI_DB_USER:-ctiparsor}@postgres:5432/${CTI_DB_NAME:-ctiparsor}
+      SKIP_HEAVY_MODELS: "1"
+      <<: *job-store
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - cti-cache:/app/cache
+      - ./.secrets/db_password:/run/secrets/db_password:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - frontend
+      - backend
+      - llm
+    command: ["pytest", "tests/", "-v"]
+
+  # Frontend hot-reload (ADR-0054) -- the docker-world equivalent of the old
+  # `cd frontend && npm run dev`. Same base image as the Dockerfile's own
+  # `ui` build stage (node:24-bookworm-slim), bind-mounts frontend/ instead
+  # of copying it, so edits show up through Vite's HMR with no rebuild.
+  # Talks to `app` over the published API port (same-origin API calls the
+  # built frontend already makes; see frontend/vite.config.ts for the dev
+  # proxy target) rather than joining the backend/llm networks -- it never
+  # needs to reach Postgres or an LLM provider directly.
+  frontend-dev:
+    image: node:24-bookworm-slim
+    profiles: [dev]
+    working_dir: /ui
+    environment:
+      VITE_API_PROXY_TARGET: http://app:8000
+    volumes:
+      - ./frontend:/ui
+    ports:
+      - "127.0.0.1:5173:5173"
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
+    networks:
+      - frontend
 
   # No published port: only the app reaches it, at OLLAMA_BASE_URL=http://ollama:11434
   # Pull a model once with: docker compose exec ollama ollama pull mistral
@@ -358,9 +435,10 @@ networks:
     internal: true
   llm: {}
 
-# cti-state and pg-data are what a backup must contain (uploads, outputs and
-# the rule store on the first; the job store on the second — pg_dump it);
-# cti-cache can be dropped and rebuilt with bootstrap.
+# cti-state and pg-data are what a backup must contain (uploads and outputs
+# on the first; both the job store and the rule store on the second, since
+# ADR-0053 — pg_dump it); cti-cache can be dropped and rebuilt with
+# bootstrap.
 volumes:
   cti-state: {}
   cti-cache: {}

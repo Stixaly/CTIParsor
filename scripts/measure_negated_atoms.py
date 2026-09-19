@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import collections
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -10,27 +9,28 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from api.db import get_conn, init_db
 from pipeline.detection.atoms import extract_atoms  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Measure before/after atom counts on the real Sigma store (read-only)."""
+    """Measure before/after atom counts on the real Sigma store (read-only).
+
+    Reads DATABASE_URL like the API does.
+    """
     parser = argparse.ArgumentParser(description="Measure negated-atom removal.")
-    parser.add_argument("db", nargs="?", default="cti_stix.db")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--examples", type=int, default=15)
     args = parser.parse_args(argv)
 
-    conn = sqlite3.connect(f"file:{args.db}?mode=ro", uri=True)
-    cur = conn.cursor()
+    init_db()
+    conn = get_conn()
     sql = "SELECT id, raw FROM detection_rules WHERE format='sigma'"
     params: list[object] = []
     if args.limit > 0:
         sql += " LIMIT ?"
         params.append(args.limit)
-    cur.execute(sql, params)
-    rows = cur.fetchall()
-    conn.close()
+    rows = conn.execute(sql, params).fetchall()
 
     rules_parsed = 0
     unparseable = 0

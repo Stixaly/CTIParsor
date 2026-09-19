@@ -6,8 +6,6 @@ an isolated temp database (see the `temp_db` fixture in conftest).
 """
 import json
 
-import pytest
-
 from models.schemas import EvidenceLabel
 from pipeline.stage3_llm import LLMEnrichmentResult, RelationshipExtracted
 
@@ -60,35 +58,13 @@ def _llm_result_with_dates(start=None, stop=None) -> LLMEnrichmentResult:
 
 # ── Backup ───────────────────────────────────────────────────────────────────
 
-def test_backup_db_produces_consistent_single_file(temp_db, tmp_path, monkeypatch):
-    """backup_db uses the SQLite online backup API: the result must be a single,
-    self-contained .db file that already contains committed rows — no -wal/-shm
-    sidecars required to read it back."""
-    import sqlite3
-
-    if temp_db.backend() == "postgresql":
-        pytest.skip("SQLite-only: with DATABASE_URL the job rows live in PostgreSQL, "
-                    "and backup_db() copies only the SQLite rule store (ADR-0045)")
-
-    backup_dir = tmp_path / "backups"
-    monkeypatch.setattr(temp_db, "BACKUP_DIR", backup_dir)
-
-    _insert_job(temp_db, job_id="job-backup")
-    temp_db.backup_db()
-
-    backups = list(backup_dir.glob("cti_stix_*.db"))
-    assert len(backups) == 1, "expected exactly one backup file"
-    # No sidecar files should be needed for a consistent read.
-    assert not list(backup_dir.glob("*.db-wal"))
-    assert not list(backup_dir.glob("*.db-shm"))
-
-    # Open the backup standalone and confirm the committed row is present.
-    conn = sqlite3.connect(str(backups[0]))
-    try:
-        row = conn.execute("SELECT id FROM jobs WHERE id=?", ("job-backup",)).fetchone()
-    finally:
-        conn.close()
-    assert row is not None, "backup did not capture the committed job row"
+def test_backup_db_logs_pg_dump_guidance(temp_db, caplog):
+    """Both stores are PostgreSQL now (ADR-0053): backup_db() no longer copies
+    a local file, it points the operator at pg_dump instead — confirm it runs
+    without error and says so, rather than silently doing nothing."""
+    with caplog.at_level("INFO"):
+        temp_db.backup_db()
+    assert "pg_dump" in caplog.text
 
 
 # ── Output bundle path is job-scoped (no cross-job collision) ─────────────────
@@ -134,14 +110,15 @@ def test_finalize_same_filename_jobs_do_not_collide(temp_db):
 # ── Migration ───────────────────────────────────────────────────────────────
 
 def test_migration_is_idempotent_and_adds_evidence_label(temp_db):
-    # temp_db already ran init_db once; running again must not raise.
+    # temp_db already ran init_db once; running again must not raise (the
+    # PostgreSQL DDL is IF NOT EXISTS end to end, ADR-0045/ADR-0053).
     temp_db.init_db()
-    if temp_db.backend() == "postgresql":
-        # The idempotency claim holds there too (init_db just ran twice), but the
-        # column probe below is a SQLite PRAGMA; the PostgreSQL DDL is IF NOT
-        # EXISTS end to end and carries every column from the start (ADR-0045).
-        pytest.skip("SQLite-only column probe (PRAGMA table_info)")
-    cols = [r[1] for r in temp_db.get_conn().execute("PRAGMA table_info(relationships)").fetchall()]
+    cols = [
+        r[0] for r in temp_db.get_conn().execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = 'relationships'"
+        ).fetchall()
+    ]
     assert "evidence_label" in cols
     assert "evidence_text" in cols
     assert "start_time" in cols

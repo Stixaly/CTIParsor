@@ -3,11 +3,12 @@
 Validation harness for artifact-based detection coverage.
 
 Usage:
-    python scripts/validate_artifact_coverage.py [--db cti_stix.db]
+    python scripts/validate_artifact_coverage.py
+
+Reads DATABASE_URL the same way the API does.
 """
 
 import argparse
-import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -16,17 +17,16 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+from api.db import get_conn, init_db
 from pipeline.detection.artifacts import coverage_for_job
 
 
 def main():
     parser = argparse.ArgumentParser(description="Validate artifact coverage")
-    parser.add_argument("--db", default="cti_stix.db", help="Path to SQLite database")
-    args = parser.parse_args()
+    parser.parse_args()
 
-    # Connect read-only
-    conn = sqlite3.connect(f"file:{args.db}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
+    init_db()
+    conn = get_conn()
 
     # Get all jobs
     cursor = conn.execute(
@@ -36,7 +36,6 @@ def main():
 
     if not jobs:
         print("No jobs found in database.")
-        conn.close()
         return
 
     # Aggregate stats
@@ -130,8 +129,6 @@ def main():
         covered = stats["covered"]
         pct = (covered / artifacts * 100) if artifacts > 0 else 0.0
         print(f"  Tier {tier}: {artifacts} artifacts, {covered} covered ({pct:.1f}%)")
-
-    conn.close()
 
 
 if __name__ == "__main__":

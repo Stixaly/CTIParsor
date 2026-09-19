@@ -149,48 +149,45 @@ def storage() -> InMemoryJobStorage:
 # ── Isolated SQLite database ────────────────────────────────────────────────────
 
 @pytest.fixture()
-def temp_db(tmp_path, monkeypatch):
-    """Point api.db at a throwaway SQLite file and run migrations.
+def temp_db(monkeypatch):
+    """Point api.db at a disposable PostgreSQL schema and run migrations.
 
-    Resets the thread-local connection cache before and after so the temp path
-    is actually used and the next test reconnects to the real DB_PATH (which
-    monkeypatch restores). Lets worker/route tests write rows without touching
-    the developer's cti_stix.db.
-
-    With CTIPARSOR_TEST_DATABASE_URL set (a postgresql:// URL) the JOB store is
-    created in a disposable PostgreSQL schema named `t_<12 hex>` and dropped
-    afterwards; the rule store stays in the temp SQLite file, exactly as in
-    production with DATABASE_URL.
+    ADR-0053: SQLite is gone, so this is now a single path rather than a
+    branch — CTIPARSOR_TEST_DATABASE_URL (a postgresql:// URL) is required.
+    A schema named `t_<12 hex>` holds BOTH the job store and the rule store
+    (they are the same database now — see api.db.get_conn/get_rule_conn),
+    created before the test and dropped after. Resets the thread-local
+    connection cache before and after so the schema is actually used and the
+    next test reconnects cleanly.
     """
     import api.db as db
 
-    monkeypatch.setattr(db, "DB_PATH", tmp_path / "test.db")
     url = (os.getenv("CTIPARSOR_TEST_DATABASE_URL") or "").strip() or None
+    if not url:
+        pytest.fail(
+            "CTIPARSOR_TEST_DATABASE_URL is required — CTIParsor no longer "
+            "supports SQLite (ADR-0053). Point it at a disposable PostgreSQL "
+            "server, e.g. postgresql://ctiparsor:ci@127.0.0.1:5432/ctiparsor"
+        )
 
-    if url:
-        schema = "t_" + uuid4().hex[:12]
-        monkeypatch.setattr(db, "DATABASE_URL", url)
-        monkeypatch.setattr(db, "_PG_SCHEMA", schema)
-        import psycopg
-        admin = psycopg.connect(url, autocommit=True)
-        admin.execute(f'CREATE SCHEMA "{schema}"')
-        admin.close()
-    else:
-        monkeypatch.setattr(db, "DATABASE_URL", None)
-        monkeypatch.setattr(db, "_PG_SCHEMA", None)
+    schema = "t_" + uuid4().hex[:12]
+    monkeypatch.setattr(db, "DATABASE_URL", url)
+    monkeypatch.setattr(db, "_PG_SCHEMA", schema)
+    import psycopg
+    admin = psycopg.connect(url, autocommit=True)
+    admin.execute(f'CREATE SCHEMA "{schema}"')
+    admin.close()
 
     db.reset_connections()
     db.init_db()
     yield db
     db.reset_connections()
 
-    if url:
-        import psycopg
-        admin = psycopg.connect(url, autocommit=True)
-        try:
-            admin.execute(f'DROP SCHEMA "{schema}" CASCADE')
-        finally:
-            admin.close()
+    admin = psycopg.connect(url, autocommit=True)
+    try:
+        admin.execute(f'DROP SCHEMA "{schema}" CASCADE')
+    finally:
+        admin.close()
 
 
 @pytest.fixture()

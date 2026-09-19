@@ -63,8 +63,6 @@ def _load_active() -> tuple[frozenset[tuple[str, str]], tuple[dict, ...]]:
     try:
         import api.db as db
 
-        if db.backend() == "sqlite" and not db.DB_PATH.exists():
-            return frozenset(), ()
         rows = db.get_conn().execute(
             "SELECT term, entity_type, action, display FROM entity_overrides WHERE status='active'"
         ).fetchall()

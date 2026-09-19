@@ -2,7 +2,7 @@
 """Propose — and with --apply, store — NER confidence cutoffs calibrated from
 the analysts' accept/reject decisions (ADR-0051).
 
-Reads the job store (`DATABASE_URL` or `CTIPARSOR_DB_PATH`, as the API does),
+Reads the job store (`DATABASE_URL`, as the API does),
 fits an isotonic curve of P(accepted | score) per (source, entity_type) and
 prints, for each, the cutoff at which the calibrated precision reaches the
 target, next to the cutoff in force today.  Nothing is written without

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sqlite3
 import types
 
 import pytest
@@ -49,9 +48,14 @@ def test_translate_placeholders_survives_psycopg_parsing():
 
 
 def test_backend_from_url():
-    assert backend_from_url(None) == "sqlite"
-    assert backend_from_url("") == "sqlite"
-    assert backend_from_url("   ") == "sqlite"
+    """ADR-0053: SQLite is no longer a valid backend — DATABASE_URL is
+    mandatory and must be postgresql://."""
+    with pytest.raises(RuntimeError):
+        backend_from_url(None)
+    with pytest.raises(RuntimeError):
+        backend_from_url("")
+    with pytest.raises(RuntimeError):
+        backend_from_url("   ")
     assert backend_from_url("postgresql://u:p@h/db") == "postgresql"
     assert backend_from_url("postgres://h/db") == "postgresql"
     assert backend_from_url("  postgresql://h/db  ") == "postgresql"
@@ -177,15 +181,22 @@ def test_wrapper_reconnects_when_dropped(monkeypatch):
     assert pg._conn is not fake
 
 
-def test_get_conn_dispatches_on_database_url(monkeypatch, tmp_path):
+def test_get_conn_requires_database_url(monkeypatch):
+    """ADR-0053: no more SQLite fallback — an unset DATABASE_URL fails loudly."""
     import api.db as db
 
-    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
     monkeypatch.setattr(db, "DATABASE_URL", None)
     db.reset_connections()
-    assert db.backend() == "sqlite"
-    assert db.get_conn() is db.get_rule_conn()
-    assert isinstance(db.get_conn(), sqlite3.Connection)
+    with pytest.raises(RuntimeError):
+        db.backend()
+    with pytest.raises(RuntimeError):
+        db.get_conn()
+
+
+def test_get_conn_and_get_rule_conn_share_the_postgres_backend(monkeypatch):
+    """get_conn() and get_rule_conn() are both PostgreSQL now (ADR-0053) — kept
+    as two accessors for a future split, not two engines today."""
+    import api.db as db
 
     class FakePg:
         def __init__(self, url, *, schema=None, application_name="ctiparsor"):
@@ -202,7 +213,7 @@ def test_get_conn_dispatches_on_database_url(monkeypatch, tmp_path):
     assert db.backend() == "postgresql"
     c = db.get_conn()
     assert isinstance(c, FakePg) and c.url.startswith("postgresql://")
-    assert isinstance(db.get_rule_conn(), sqlite3.Connection)
+    assert db.get_rule_conn() is c
     assert db.get_conn() is c
 
     monkeypatch.setattr(db, "_PG_SCHEMA", "t_abc")

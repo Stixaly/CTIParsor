@@ -16,9 +16,10 @@ def _ent(value: str, etype: EntityType, source: str = "cyner") -> RawEntity:
     return RawEntity(value=value, entity_type=etype, confidence=0.9, source=source)
 
 
-def test_nothing_acts_without_a_store_and_none_is_created(monkeypatch, tmp_path):
-    missing = tmp_path / "absent" / "cti_stix.db"
-    monkeypatch.setattr(db, "DB_PATH", missing)
+def test_nothing_acts_without_a_store_and_none_is_created(monkeypatch):
+    """ADR-0053: no DATABASE_URL means get_conn() raises, which _load_active's
+    broad except already treats as the normal CLI case (no store configured)
+    -- confirms that still fails soft rather than crashing the caller."""
     monkeypatch.setattr(db, "DATABASE_URL", None)
     db.reset_connections()
     ov.reload()
@@ -27,7 +28,6 @@ def test_nothing_acts_without_a_store_and_none_is_created(monkeypatch, tmp_path)
     assert ov.denied_keys() == frozenset()
     assert ov.promoted_entries() == []
     assert ov.drop_denied(ents) is ents          # the no-op path hands the list back untouched
-    assert not missing.exists()
 
 
 def test_nothing_acts_when_the_table_is_missing(temp_db):

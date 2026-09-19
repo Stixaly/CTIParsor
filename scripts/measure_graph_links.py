@@ -5,9 +5,14 @@ import bisect
 import collections
 import itertools
 import json
+import os
 import re
-import sqlite3
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from api.db import get_conn, init_db
+from api.db_backend import DBConnection
 
 SCO_TYPES = {
     "artifact",
@@ -51,7 +56,7 @@ def _display(obj: dict) -> str:
     return ""
 
 
-def _load_jobs(conn: sqlite3.Connection, job_filter: str | None) -> tuple[list[dict], list[str]]:
+def _load_jobs(conn: DBConnection, job_filter: str | None) -> tuple[list[dict], list[str]]:
     """Load jobs from the database, parsing bundle JSON."""
     cursor = conn.execute(
         "SELECT id, original_filename, status, report_text, bundle_json FROM jobs "
@@ -85,7 +90,7 @@ def _load_jobs(conn: sqlite3.Connection, job_filter: str | None) -> tuple[list[d
     return jobs, skipped
 
 
-def _extracted_count(conn: sqlite3.Connection, job_id: str) -> int:
+def _extracted_count(conn: DBConnection, job_id: str) -> int:
     """Count extracted relationships for a job."""
     cursor = conn.execute("SELECT count(*) FROM relationships WHERE job_id = ?", (job_id,))
     row = cursor.fetchone()
@@ -373,12 +378,12 @@ def _print_table(headers: list[str], rows: list[list[object]]) -> None:
 def main(argv: list[str] | None = None) -> int:
     """Main entry point."""
     parser = argparse.ArgumentParser(description="Measure STIX bundle connectivity")
-    parser.add_argument("--db", default="cti_stix.db")
     parser.add_argument("--job", default=None)
     parser.add_argument("--json", default=None)
     args = parser.parse_args(argv)
 
-    conn = sqlite3.connect(args.db)
+    init_db()
+    conn = get_conn()
     jobs, skipped = _load_jobs(conn, args.job)
 
     stats_list: list[dict] = []
@@ -539,7 +544,6 @@ def main(argv: list[str] | None = None) -> int:
         with open(args.json, "w") as f:
             json.dump(json_data, f, indent=2)
 
-    conn.close()
     return 0
 
 

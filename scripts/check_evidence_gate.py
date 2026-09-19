@@ -1,29 +1,23 @@
 #!/usr/bin/env python3
+"""Validate evidence gate (ADR-0030). Reads DATABASE_URL like the API does."""
 import argparse
 import os
-import sqlite3
 import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from api.db import get_conn, init_db
 from pipeline.detection.coverage import rules_for_job
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Validate evidence gate (ADR-0030)")
-    parser.add_argument("--db", default="cti_stix.db")
     parser.add_argument("--job", action="append", default=None)
     args = parser.parse_args()
 
-    if not os.path.exists(args.db):
-        print(args.db, file=sys.stderr)
-        sys.exit(1)
-
-    try:
-        conn = sqlite3.connect(f"file:{args.db}?mode=ro", uri=True)
-    except sqlite3.OperationalError:
-        conn = sqlite3.connect(args.db)
+    init_db()
+    conn = get_conn()
 
     if args.job:
         jobs = []
@@ -100,8 +94,6 @@ def main() -> None:
             displays = [e["display"] for e in rule["matches"][:3]]
             disp_str = ", ".join(displays)
             print(f"  {rule['evidence_count']} {rule['format']} {rule['corpus']} {title} :: {disp_str}")
-
-    conn.close()
 
 
 if __name__ == "__main__":

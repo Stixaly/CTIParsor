@@ -9,33 +9,27 @@ The script is READ-ONLY. It does not re-execute anything, does not modify
 anything, and does not call any model or API.
 
 Usage:
-    python scripts/audit_edge_provenance.py --db cti_stix.db
-    python scripts/audit_edge_provenance.py --db cti_stix.db --job 42 --show-unlabelled 5
+    python scripts/audit_edge_provenance.py
+    python scripts/audit_edge_provenance.py --job 42 --show-unlabelled 5
+
+Reads DATABASE_URL the same way the API does.
 """
 
 import argparse
 import json
-import sqlite3
 import sys
 from collections import Counter
-from pathlib import Path
+
+from api.db import get_conn, init_db
+from api.db_backend import DBConnection
 
 
-def _load_jobs(db_path: Path) -> list[tuple[str, str, dict | None, dict | None]]:
+def _load_jobs(conn: DBConnection) -> list[tuple[str, str, dict | None, dict | None]]:
     """Return (job_id, filename, bundle, run_config) for every job with a bundle."""
-    if not db_path.exists():
-        print(f"Error: database file not found: {db_path}", file=sys.stderr)
-        sys.exit(1)
-
-    conn = sqlite3.connect(db_path)
-    try:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT id, original_filename, bundle_json, run_config_json FROM jobs"
-        )
-        rows = cursor.fetchall()
-    finally:
-        conn.close()
+    cursor = conn.execute(
+        "SELECT id, original_filename, bundle_json, run_config_json FROM jobs"
+    )
+    rows = cursor.fetchall()
 
     jobs: list[tuple[str, str, dict | None, dict | None]] = []
     for row in rows:
@@ -247,12 +241,6 @@ def main() -> None:
         description="Audit edge provenance in STIX bundles (read-only)."
     )
     parser.add_argument(
-        "--db",
-        type=Path,
-        default=Path("cti_stix.db"),
-        help="Path to the SQLite database (default: cti_stix.db)",
-    )
-    parser.add_argument(
         "--job",
         type=str,
         default=None,
@@ -266,7 +254,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    jobs = _load_jobs(args.db)
+    init_db()
+    jobs = _load_jobs(get_conn())
 
     if args.job is not None:
         jobs = [j for j in jobs if j[0] == args.job]

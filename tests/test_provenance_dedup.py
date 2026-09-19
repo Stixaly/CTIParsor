@@ -209,18 +209,16 @@ def test_two_rules_same_native_key_both_merge() -> None:
     conn.close()
 
 
-def test_missing_rule_related_table_falls_back() -> None:
-    """Missing rule_related table does not raise; dedup_key logic still works."""
-    conn = sqlite3.connect(":memory:")
-    conn.execute(
-        """
-        CREATE TABLE detection_rules (
-            id TEXT PRIMARY KEY, corpus TEXT NOT NULL, native_key TEXT NOT NULL,
-            dedup_key TEXT DEFAULT '', content_hash TEXT DEFAULT '',
-            is_canonical INTEGER DEFAULT 1
-        )
-        """
-    )
+def test_empty_rule_related_table_falls_back() -> None:
+    """An empty rule_related table (no provenance edges) does not raise;
+    dedup_key logic still works on its own.
+
+    ADR-0053: init_db() always creates rule_related now, so the table can no
+    longer be *missing* the way it could against a SQLite database from
+    before ADR-0017's migration — the reachable case today is an empty one,
+    which is what this exercises via `_db()`'s standard three-table schema.
+    """
+    conn = _db()
     conn.execute("INSERT INTO detection_rules (id, corpus, native_key, dedup_key) VALUES ('r1', 'a', 'k1', 'shared')")
     conn.execute("INSERT INTO detection_rules (id, corpus, native_key, dedup_key) VALUES ('r2', 'b', 'k2', 'shared')")
     conn.commit()

@@ -3,12 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import sqlite3
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from api.db import DB_ERRORS, get_conn, init_db
+from api.db_backend import DBConnection
 from pipeline.regex_safety import compile_pattern
 
 
@@ -22,19 +23,29 @@ class Finding:
     status: str
 
 
-def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
-    """Check if a table or view exists in the database."""
+def _table_exists(conn: DBConnection, name: str) -> bool:
+    """Check if a table or view exists in the database.
+
+    `information_schema.tables` lists views as well as base tables in
+    PostgreSQL (distinguished by `table_type`), so one query covers what the
+    SQLite version needed `type IN ('table','view')` for.
+    """
     row = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=?",
+        "SELECT table_name FROM information_schema.tables "
+        "WHERE table_schema = current_schema() AND table_name = ?",
         (name,),
     ).fetchone()
     return row is not None
 
 
-def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+def _columns(conn: DBConnection, table: str) -> set[str]:
     """Return the set of column names for a table."""
-    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
-    return {r["name"] for r in rows}
+    rows = conn.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_schema = current_schema() AND table_name = ?",
+        (table,),
+    ).fetchall()
+    return {r["column_name"] for r in rows}
 
 
 def _sample(rows: list, n: int = 3) -> str:
@@ -48,7 +59,7 @@ def _sample(rows: list, n: int = 3) -> str:
     return ", ".join(parts)
 
 
-def _cluster_roots(conn: sqlite3.Connection) -> tuple[dict[str, str], dict[str, int]]:
+def _cluster_roots(conn: DBConnection) -> tuple[dict[str, str], dict[str, int]]:
     """Rebuild the dedup clusters exactly as `dedupe_store` elects them.
 
     Union-find over BOTH axes: `dedup_key` first, then the ADR-0017 provenance
@@ -107,7 +118,7 @@ def _cluster_roots(conn: sqlite3.Connection) -> tuple[dict[str, str], dict[str, 
     return {rid: find(rid) for rid in parent}, canon
 
 
-def check_dedup_cluster_canonical(conn: sqlite3.Connection) -> Finding:
+def check_dedup_cluster_canonical(conn: DBConnection) -> Finding:
     """Verify each dedup CLUSTER — not each dedup_key — has exactly one canonical."""
     try:
         if not _table_exists(conn, "detection_rules"):
@@ -131,7 +142,7 @@ def check_dedup_cluster_canonical(conn: sqlite3.Connection) -> Finding:
         examples = [r for r, n in per_cluster.items() if n != 1][:3]
         detail = f"zero={zero} multi={multi} e.g. {_sample(examples)}"
         return Finding("dedup.cluster_canonical", "error", count, total, detail[:160], "FAIL")
-    except sqlite3.Error as e:
+    except DB_ERRORS as e:
         return Finding("dedup.cluster_canonical", "error", 0, 0, str(e)[:160], "SKIP")
 
 
@@ -173,10 +184,10 @@ _ORPHAN_SPECS: dict[str, _OrphanSpec] = {
 
 _IDENT_RE = compile_pattern(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
-def _check_orphan(conn: sqlite3.Connection, name: str) -> Finding:
+def _check_orphan(conn: DBConnection, name: str) -> Finding:
     """Generic orphan check driven by _ORPHAN_SPECS."""
     spec = _ORPHAN_SPECS[name]
-    # SQLite does not support parameter binding for table/column names,
+    # SQL does not support parameter binding for table/column names,
     # so we must validate identifiers to prevent SQL injection.
     for ident in (spec.child, spec.fk, spec.parent, spec.key):
         if not _IDENT_RE.match(ident):
@@ -198,11 +209,11 @@ def _check_orphan(conn: sqlite3.Connection, name: str) -> Finding:
         """).fetchall()]
         detail = f"{spec.fail_label}: {_sample(examples)}"
         return Finding(name, spec.severity, count, total, detail[:160], "FAIL")
-    except sqlite3.Error as e:
+    except DB_ERRORS as e:
         return Finding(name, spec.severity, 0, 0, str(e)[:160], "SKIP")
 
 
-def check_rule_bytes_zero(conn: sqlite3.Connection) -> Finding:
+def check_rule_bytes_zero(conn: DBConnection) -> Finding:
     """Check for rule_bytes with bytes<=0 while raw is non-empty."""
     try:
         if not _table_exists(conn, "detection_rules") or not _table_exists(conn, "rule_bytes"):
@@ -226,11 +237,11 @@ def check_rule_bytes_zero(conn: sqlite3.Connection) -> Finding:
         """).fetchall()]
         detail = f"zero-byte rule_ids: {_sample(examples)}"
         return Finding("rule_bytes.zero", "warn", count, total, detail[:160], "FAIL")
-    except sqlite3.Error as e:
+    except DB_ERRORS as e:
         return Finding("rule_bytes.zero", "warn", 0, 0, str(e)[:160], "SKIP")
 
 
-def check_atom_value_normalised(conn: sqlite3.Connection) -> Finding:
+def check_atom_value_normalised(conn: DBConnection) -> Finding:
     """Verify rule_atoms.value is lowercase, trimmed, non-empty — and Sigma-wildcard-free.
 
     The "wildcard-free" half of the contract is a SIGMA rule: `atoms._normalize`
@@ -244,7 +255,7 @@ def check_atom_value_normalised(conn: sqlite3.Connection) -> Finding:
         if not _table_exists(conn, "rule_atoms"):
             return Finding("atoms.value_normalised", "error", 0, 0, "table missing", "SKIP")
         wildcard_expr = (
-            "(instr(value,'*')>0 OR instr(value,'?')>0) AND EXISTS ("
+            "(strpos(value,'*')>0 OR strpos(value,'?')>0) AND EXISTS ("
             " SELECT 1 FROM detection_rules dr"
             " WHERE dr.id = rule_atoms.rule_id AND dr.format='sigma')"
         )
@@ -272,11 +283,11 @@ def check_atom_value_normalised(conn: sqlite3.Connection) -> Finding:
             return Finding("atoms.value_normalised", "error", 0, total, "all values normalised", "OK")
         detail = f"upper={upper} wildcard={wildcard} untrimmed={untrimmed} empty={empty}"
         return Finding("atoms.value_normalised", "error", count, total, detail[:160], "FAIL")
-    except sqlite3.Error as e:
+    except DB_ERRORS as e:
         return Finding("atoms.value_normalised", "error", 0, 0, str(e)[:160], "SKIP")
 
 
-def check_atom_value_too_short(conn: sqlite3.Connection) -> Finding:
+def check_atom_value_too_short(conn: DBConnection) -> Finding:
     """Check for rule_atoms.value with length 1."""
     try:
         if not _table_exists(conn, "rule_atoms"):
@@ -290,11 +301,11 @@ def check_atom_value_too_short(conn: sqlite3.Connection) -> Finding:
         ).fetchall()]
         detail = f"single-char values: {_sample(examples)}"
         return Finding("atoms.value_too_short", "warn", count, total, detail[:160], "FAIL")
-    except sqlite3.Error as e:
+    except DB_ERRORS as e:
         return Finding("atoms.value_too_short", "warn", 0, 0, str(e)[:160], "SKIP")
 
 
-def check_dedup_key_absent(conn: sqlite3.Connection) -> Finding:
+def check_dedup_key_absent(conn: DBConnection) -> Finding:
     """Check for detection_rules with empty or NULL dedup_key."""
     try:
         if not _table_exists(conn, "detection_rules"):
@@ -313,11 +324,11 @@ def check_dedup_key_absent(conn: sqlite3.Connection) -> Finding:
         ).fetchall()]
         detail = f"missing dedup_key: {_sample(examples)}"
         return Finding("dedup.key_absent", "warn", count, total, detail[:160], "FAIL")
-    except sqlite3.Error as e:
+    except DB_ERRORS as e:
         return Finding("dedup.key_absent", "warn", 0, 0, str(e)[:160], "SKIP")
 
 
-def check_figure_span_bounds(conn: sqlite3.Connection) -> Finding:
+def check_figure_span_bounds(conn: DBConnection) -> Finding:
     """Verify report_figures char_start/char_end are within report_text bounds."""
     try:
         if not _table_exists(conn, "report_figures") or not _table_exists(conn, "jobs"):
@@ -347,11 +358,11 @@ def check_figure_span_bounds(conn: sqlite3.Connection) -> Finding:
             return Finding("figure.span_bounds", "error", 0, total, "all spans valid", "OK")
         detail = f"negative={negative} inverted={inverted} past_end={past_end}"
         return Finding("figure.span_bounds", "error", count, total, detail[:160], "FAIL")
-    except sqlite3.Error as e:
+    except DB_ERRORS as e:
         return Finding("figure.span_bounds", "error", 0, 0, str(e)[:160], "SKIP")
 
 
-def check_figure_span_overlap(conn: sqlite3.Connection) -> Finding:
+def check_figure_span_overlap(conn: DBConnection) -> Finding:
     """Check for overlapping figure spans within the same job."""
     try:
         if not _table_exists(conn, "report_figures"):
@@ -378,11 +389,11 @@ def check_figure_span_overlap(conn: sqlite3.Connection) -> Finding:
             return Finding("figure.span_overlap", "error", 0, total, "no overlaps", "OK")
         detail = f"overlapping spans: {_sample(examples)}"
         return Finding("figure.span_overlap", "error", count, total, detail[:160], "FAIL")
-    except sqlite3.Error as e:
+    except DB_ERRORS as e:
         return Finding("figure.span_overlap", "error", 0, 0, str(e)[:160], "SKIP")
 
 
-def check_entity_evidence_offset(conn: sqlite3.Connection) -> Finding:
+def check_entity_evidence_offset(conn: DBConnection) -> Finding:
     """Verify [evidence_start, evidence_end) is a valid span of the report text.
 
     Deliberately NOT `report_text[start:start + len(evidence_text)] == evidence_text`.
@@ -435,11 +446,11 @@ def check_entity_evidence_offset(conn: sqlite3.Connection) -> Finding:
                            f"all spans valid ({legacy} legacy rows without an end)", "OK")
         detail = f"invalid spans={count} legacy={legacy} e.g. {_sample(examples)}"
         return Finding("entity.evidence_offset", "error", count, total, detail[:160], "FAIL")
-    except sqlite3.Error as e:
+    except DB_ERRORS as e:
         return Finding("entity.evidence_offset", "error", 0, 0, str(e)[:160], "SKIP")
 
 
-def check_json_columns(conn: sqlite3.Connection) -> Finding:
+def check_json_columns(conn: DBConnection) -> Finding:
     """Verify JSON columns contain valid JSON when non-empty."""
     try:
         checks: list[tuple[str, str]] = [
@@ -473,11 +484,11 @@ def check_json_columns(conn: sqlite3.Connection) -> Finding:
         count = sum(int(x.split("=")[1]) for x in bad)
         detail = ", ".join(bad)
         return Finding("json.invalid", "error", count, 0, detail[:160], "FAIL")
-    except sqlite3.Error as e:
+    except DB_ERRORS as e:
         return Finding("json.invalid", "error", 0, 0, str(e)[:160], "SKIP")
 
 
-def check_figure_bbox_format(conn: sqlite3.Connection) -> Finding:
+def check_figure_bbox_format(conn: DBConnection) -> Finding:
     """Verify report_figures.bbox has exactly 4 comma-separated floats."""
     try:
         if not _table_exists(conn, "report_figures"):
@@ -507,11 +518,11 @@ def check_figure_bbox_format(conn: sqlite3.Connection) -> Finding:
             return Finding("figure.bbox_format", "error", 0, total, "all bboxes valid", "OK")
         detail = f"invalid bboxes: {_sample(examples)}"
         return Finding("figure.bbox_format", "error", count, total, detail[:160], "FAIL")
-    except sqlite3.Error as e:
+    except DB_ERRORS as e:
         return Finding("figure.bbox_format", "error", 0, 0, str(e)[:160], "SKIP")
 
 
-def run_all(conn: sqlite3.Connection) -> list[Finding]:
+def run_all(conn: DBConnection) -> list[Finding]:
     """Run all invariant checks and return findings."""
     return [
         check_dedup_cluster_canonical(conn),
@@ -534,23 +545,13 @@ def run_all(conn: sqlite3.Connection) -> list[Finding]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Entry point: parse args, open DB read-only, run checks, print table."""
+    """Entry point: parse args, connect to the database, run checks, print table."""
     parser = argparse.ArgumentParser(description="Audit store invariants (read-only).")
-    parser.add_argument("db", nargs="?", default="cti_stix.db", help="Path to SQLite database")
-    args = parser.parse_args(argv)
+    parser.parse_args(argv)
 
-    db_path = Path(args.db)
-    if not db_path.exists():
-        print(f"error: database file not found: {db_path}", file=sys.stderr)
-        return 2
-
-    uri = f"file:{db_path.resolve()}?mode=ro"
-    conn = sqlite3.connect(uri, uri=True)
-    conn.row_factory = sqlite3.Row
-    try:
-        findings = run_all(conn)
-    finally:
-        conn.close()
+    init_db()
+    conn = get_conn()
+    findings = run_all(conn)
 
     print(f"{'STATUS':<6} {'SEVERITY':<8} {'NAME':<30} {'COUNT/TOTAL':<14} DETAIL")
     for f in findings:

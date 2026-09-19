@@ -11,7 +11,6 @@ native_key, so it collapses to one corpus and never inflates the score.
 """
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -143,7 +142,7 @@ def job_technique_ids(conn: DBConnection, job_id: str) -> list[str]:
 
 
 def compute_for_job(
-    conn: sqlite3.Connection, job_id: str, *, jobs_conn: DBConnection | None = None
+    conn: DBConnection, job_id: str, *, jobs_conn: DBConnection | None = None
 ) -> dict:
     """Compute coverage for a job from its accepted technique entities.
 
@@ -236,7 +235,7 @@ def _admits(evidence: list[dict]) -> bool:
 
 
 def _evidence_for_job(
-    conn: sqlite3.Connection, job_id: str, *, jobs_conn: DBConnection | None = None
+    conn: DBConnection, job_id: str, *, jobs_conn: DBConnection | None = None
 ) -> dict[str, list[dict]]:
     """rule_id → one entry per DISTINCT report observable the rule holds verbatim.
 
@@ -310,7 +309,7 @@ def _evidence_for_job(
 
 
 def rules_for_job(
-    conn: sqlite3.Connection, job_id: str, *, evidence_only: bool = True,
+    conn: DBConnection, job_id: str, *, evidence_only: bool = True,
     jobs_conn: DBConnection | None = None,
 ) -> dict:
     """Detection rules for this report, grouped by the technique they cover.
@@ -449,7 +448,7 @@ def rules_for_job(
 
 
 def rule_bodies_for_job(
-    conn: sqlite3.Connection, job_id: str, body_ids: set[str] | None = None,
+    conn: DBConnection, job_id: str, body_ids: set[str] | None = None,
     *, jobs_conn: DBConnection | None = None,
 ) -> list[dict]:
     """Raw bodies of every canonical detection rule linkable to this report.
@@ -530,7 +529,7 @@ def rule_bodies_for_job(
 
 
 def rule_facets_for_job(
-    conn: sqlite3.Connection, job_id: str, *, jobs_conn: DBConnection | None = None
+    conn: DBConnection, job_id: str, *, jobs_conn: DBConnection | None = None
 ) -> dict:
     """Per-axis rule counts and byte sizes for the export filter UI (ADR-0020).
 

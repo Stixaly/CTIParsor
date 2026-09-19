@@ -101,9 +101,9 @@ copy in place.
 python scripts/build_detection_index.py
 ```
 Parses every enabled corpus's local clone into the `detection_rules` /
-`rule_techniques` / `rule_atoms` tables in `cti_stix.db`. Re-runnable and
-idempotent. The **Rebuild index** button on the Settings page does the same from
-already-cloned repos.
+`rule_techniques` / `rule_atoms` tables in PostgreSQL (`DATABASE_URL`,
+ADR-0053). Re-runnable and idempotent. The **Rebuild index** button on the
+Settings page does the same from already-cloned repos.
 
 If your store was built before ADR-0014, add the atom index in place — no
 re-clone needed, it re-derives everything from the stored rule bodies:

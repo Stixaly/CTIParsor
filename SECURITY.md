@@ -43,12 +43,12 @@ hook. Do not add secret-writing endpoints without that hardening.
 ### 3. Secrets & data at rest
 All sensitive state is **gitignored**, never committed:
 - `.env` — LLM API keys (bootstrap config), and the PostgreSQL password
-  (`CTI_DB_PASSWORD` / `PGPASSWORD`) when the job store runs there.
-- `cti_stix.db` — SQLite holding report text, generated bundles, and the
-  detection-rule store. Treat as sensitive (it contains the CTI you processed).
-  With `DATABASE_URL` set (ADR-0045) the report data lives in PostgreSQL
-  instead — same sensitivity, and `scram-sha-256` authentication only; the
-  compose service publishes no port.
+  (`CTI_DB_PASSWORD` / `PGPASSWORD`).
+- PostgreSQL (`DATABASE_URL`, mandatory — ADR-0045, ADR-0053) — report text,
+  generated bundles, and the detection-rule store all live there now; no
+  SQLite file exists any more. Treat as sensitive (it contains the CTI you
+  processed); `scram-sha-256` authentication only, and the compose service
+  publishes no port.
 - `uploads/`, `output/`, `input/*` — uploaded/produced report artifacts.
 - `corpora/` and `detection_corpora.local.yaml` — local rule clones and the
   **private** corpus registry (private repo URLs and anything derived from them

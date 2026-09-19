@@ -5,13 +5,14 @@ and points at the seams where most changes go.
 
 ## Environment
 
-CTIParsor is Linux-oriented (the setup script targets Ubuntu/Debian/WSL). On Windows,
-develop inside **WSL**.
+Docker is the only supported way to develop CTIParsor (ADR-0054) — nothing
+needs to be on the host but Docker itself, on Windows included (via Docker
+Desktop's WSL2 backend; you do not need to install anything *inside* WSL).
 
 ```bash
-bash setup.sh                      # venv, Python deps, MITRE data, frontend build
-source .venv/bin/activate
-cp .env.example .env               # add ANTHROPIC_API_KEY for the LLM stage (optional)
+bash setup.sh                      # writes .env + secrets, checks Docker — builds/starts nothing
+nano .env                          # add ANTHROPIC_API_KEY for the LLM stage (optional)
+docker compose build               # or: make docker-build
 ```
 
 The LLM stage is optional — without a key the pipeline still produces valid STIX, and
@@ -20,53 +21,47 @@ the test suite mocks the LLM, so **no key is needed to develop or test**.
 ## Run it
 
 ```bash
-python main.py input/report.pdf            # CLI
-python run_api.py                         # Web UI → http://localhost:8000
+docker compose run --rm dev cli input/report.pdf   # CLI
+docker compose up -d                                # Web UI → http://localhost:8000
 ```
 
 ## Tests, lint, types — the green-build checklist
 
+CTIParsor no longer supports SQLite (ADR-0053) — every check below needs a
+reachable PostgreSQL server, which the `dev` compose service already points
+at (`CTIPARSOR_TEST_DATABASE_URL`, set in `compose.yaml`):
+
 ```bash
-pytest tests/ -q -k "not llm"     # fast lane — deterministic, no API key (CI gate)
-pytest tests/ -q                  # full suite (adds retry/transient tests)
-ruff check pipeline/ api/ models/ tests/ scripts/ --select E,F,W,I
-cd frontend && npx tsc --noEmit   # frontend type-check
+docker compose run --rm dev pytest tests/ -q -k "not llm"     # fast lane (CI gate)
+docker compose run --rm dev pytest tests/ -q                  # full suite (adds retry/transient tests)
+docker compose run --rm dev ruff check pipeline/ api/ models/ tests/ scripts/ --select E,F,W,I
+docker compose run --rm dev sh -c "cd frontend && npx tsc --noEmit"   # frontend type-check
 ```
+
+`docker compose run --rm dev` bind-mounts the repo live over `/app` — edits
+on the host are picked up with no image rebuild. A single-test edit/run
+loop pays `docker compose run`'s startup cost each time; run `pytest tests/path/to/test_x.py -k name`
+the same way to keep it small.
 
 - LLM calls are mocked via `conftest.mock_llm`; tests run offline.
-- DB-touching tests use the isolated `temp_db` / `temp_db_client` fixtures — never
-  the developer's `cti_stix.db`. Reuse them for any new worker/route test.
+- DB-touching tests use the isolated `temp_db` / `temp_db_client` fixtures — a
+  disposable schema per test on the server above, never a developer's real
+  database. Reuse them for any new worker/route test; the fixture fails with
+  a clear message if `CTIPARSOR_TEST_DATABASE_URL` is unset, rather than
+  silently falling back to anything.
 - See [`TESTING.md`](TESTING.md) for the full strategy and the open coverage gaps.
 
-### Two stores — run DB and queue tests on both engines
+### One store — `api.db.get_conn()` and `get_rule_conn()`
 
-Since ADR-0044/0045/0046, `api.db.get_conn()` is the **job store** (SQLite by
-default, PostgreSQL when `DATABASE_URL` is set) and `api.db.get_rule_conn()`
-is the **rule store** (always SQLite — it's an FTS5 index). Without
-`DATABASE_URL` both return the same connection, which is exactly why a test
-that only exercises SQLite can pass while being wrong on PostgreSQL: 76 tests
-in this codebase did, because they wrote rule tables through the job-store
-connection.
-
-**If your change touches `api/db.py`, `api/db_backend.py`,
-`api/queue_loop.py`, or any raw SQL, run the suite against PostgreSQL before
-opening a PR:**
-
-```bash
-docker run -d --name ctiparsor-pg-dev -e POSTGRES_PASSWORD=devpass \
-  -e POSTGRES_USER=ctiparsor -e POSTGRES_DB=ctiparsor \
-  -p 127.0.0.1:5433:5432 postgres:17-alpine   # once
-
-CTIPARSOR_TEST_DATABASE_URL=postgresql://ctiparsor:devpass@127.0.0.1:5433/ctiparsor \
-  pytest tests/ -q
-```
-
-The `temp_db` fixture creates a disposable PostgreSQL schema per test when the
-variable is set, and a temp SQLite file otherwise — same tests, both engines.
-A function that reads `entities` (the job store) from inside `pipeline/detection`
-(the rule store) takes a `jobs_conn` keyword; see `docs/architecture.md` for
-the full picture. CI runs both automatically (`fast-tests` on SQLite,
-`postgres-tests` against a service container).
+Since ADR-0045/ADR-0053, `api.db.get_conn()` is the **job store** and
+`api.db.get_rule_conn()` is the **rule store** — both PostgreSQL, both the
+same connection today, kept as two accessors in case the rule corpus ever
+needs a database of its own. A function that reads `entities` (the job
+store) from inside `pipeline/detection` (the rule store) still takes a
+`jobs_conn` keyword for that reason; see `docs/architecture.md` for the full
+picture. `CTIPARSOR_TEST_DATABASE_URL` unset is not a fallback mode any
+more — it is a hard failure, by design, so a change cannot pass locally on a
+path that no longer exists in production.
 
 ### Container changes
 
@@ -92,7 +87,7 @@ bash scripts/docker_smoke.sh --no-build --job   # also process a sample report e
 | a detection-rule format | a new `RuleCorpusAdapter` in `pipeline/detection/` + register it in `registry.py` |
 | an API route | `api/routes/`, then `app.include_router(...)` in `api/main.py` |
 | a frontend page | `frontend/src/pages/` + a route in `App.tsx` (+ a nav link in `Layout.tsx`) |
-| a job-store table or column | the DDL/migration pair in `api/db.py` — **both** `_JOB_STORE_MIGRATIONS_SQLITE` and `_JOB_STORE_DDL_POSTGRES` (ADR-0045); document it in the README's Database schema section |
+| a job-store or rule-store table or column | `_JOB_STORE_DDL_POSTGRES` or `_RULE_STORE_DDL_POSTGRES` in `api/db.py` (ADR-0045, ADR-0053 — one PostgreSQL-only DDL tuple per store, `IF NOT EXISTS`/`ADD COLUMN IF NOT EXISTS` so it doubles as the migration); document it in the README's Database schema section |
 | queue / worker behaviour | `api/queue_loop.py` (the claim, lease, heartbeat) — `api/worker.py` only owns spawning the subprocess (ADR-0046) |
 | a compose service or resource limit | `compose.yaml`, then `docs/docker.md`'s sizing table and `.env.example` |
 
@@ -101,16 +96,21 @@ bash scripts/docker_smoke.sh --no-build --job   # also process a sample report e
 - **ADRs** — significant decisions get an Architecture Decision Record in
   [`docs/adr/`](docs/adr/). Copy an existing one; append, don't rewrite. Update the
   [ADR index](docs/adr/README.md).
-- **DB migrations** — additive `ALTER TABLE` / `CREATE TABLE IF NOT EXISTS`
-  appended to the `_migrations` list in `api/db.py` (wrapped in try/except; safe
-  to re-run). Document the new table or column in the README's
+- **DB migrations** — `CREATE TABLE IF NOT EXISTS` / `ADD COLUMN IF NOT
+  EXISTS` statements appended to `_JOB_STORE_DDL_POSTGRES` or
+  `_RULE_STORE_DDL_POSTGRES` in `api/db.py` (one statement per tuple entry,
+  applied through `_apply_postgres_ddl()`, which tolerates the
+  duplicate-object race of two processes both calling `init_db()` against a
+  fresh database). Document the new table or column in the README's
   [Database schema](README.md#database-schema) section.
-  - **Never add a bulk-read column to `detection_rules`.** `ALTER TABLE` appends
-    after `raw`, which holds multi-kilobyte rule bodies, so SQLite must walk each
-    record past the body (and its overflow pages) to reach the new field —
-    measured 8.2s to read one integer for 10,372 rules, versus ~0.1s from a side
-    table. Put per-rule scalars in their own table keyed by `rule_id`, as
-    `rule_atoms`, `rule_techniques`, `rule_related` and `rule_bytes` do (ADR-0022).
+  - **Avoid a bulk-read column on `detection_rules`.** Put per-rule scalars
+    in their own table keyed by `rule_id` instead, as `rule_atoms`,
+    `rule_techniques`, `rule_related` and `rule_bytes` do (ADR-0022) — the
+    original measurement (8.2s to read one integer for 10,372 rules via a
+    column added after the multi-kilobyte `raw` body, vs ~0.1s from a side
+    table) was against SQLite specifically; re-measure against PostgreSQL
+    before assuming it still holds at the same magnitude, but the side-table
+    pattern costs nothing extra either way.
 - **Output-affecting fixes get listed.** If a change makes Stage 4/5 emit
   different objects for the same input, append its commit to the
   bundle-affecting list read by `scripts/audit_bundle_invariants.py` (ADR-0035).

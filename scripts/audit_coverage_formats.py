@@ -11,11 +11,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import sqlite3
 import sys
 import time
 from collections import Counter
 
+from api.db import get_conn, init_db
 from pipeline.detection.coverage import (
     DETECTION_FORMATS,
     compute_for_job,
@@ -26,40 +26,37 @@ from pipeline.detection.store import rules_for_technique
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Audit the per-format coverage breakdown.")
-    parser.add_argument("--db", default="cti_stix.db")
     parser.add_argument("--job", required=True)
     parser.add_argument("--technique", action="append", default=None,
                         help="Time these technique ids instead of the job's first 5.")
     args = parser.parse_args()
 
-    conn = sqlite3.connect(f"file:{args.db}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
+    init_db()
+    conn = get_conn()
 
-    # This tool assumes the historical single-file layout, where the rule
-    # store and the job store are the same SQLite file. Since ADR-0045 that is
-    # only true when DATABASE_URL is unset -- a Postgres-backed deployment's
-    # rule-store SQLite file has no `jobs`/`entities` tables at all, which
-    # otherwise fails confusingly deep inside job_technique_ids/compute_for_job.
+    # This tool assumes the job store and the rule store are the same
+    # database (ADR-0053: both live on DATABASE_URL). A database that only
+    # ever had the rule corpus loaded into it -- and never had init_db() run
+    # against it -- would have no `jobs`/`entities` tables, which otherwise
+    # fails confusingly deep inside job_technique_ids/compute_for_job.
     _have = {r[0] for r in conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('jobs','entities')"
-    )}
+        "SELECT table_name FROM information_schema.tables "
+        "WHERE table_schema = current_schema() AND table_name IN ('jobs','entities')"
+    ).fetchall()}
     if {"jobs", "entities"} - _have:
         print(
-            f"ERROR: {args.db} has no jobs/entities tables -- if this deployment's "
-            "job store is now PostgreSQL (ADR-0045, DATABASE_URL set), this "
-            "SQLite-only tool cannot read it. Point --db at a SQLite snapshot "
-            "that still has the job tables.",
+            "ERROR: the database has no jobs/entities tables -- this tool "
+            "reads DATABASE_URL like the API does; run the API once (or call "
+            "api.db.init_db()) so the job-store schema exists.",
             file=sys.stderr,
         )
-        conn.close()
         return 2
 
     job_row = conn.execute(
         "SELECT original_filename FROM jobs WHERE id = ?", (args.job,)
     ).fetchone()
     if job_row is None:
-        print(f"ERROR: job '{args.job}' not found in {args.db}", file=sys.stderr)
-        conn.close()
+        print(f"ERROR: job '{args.job}' not found", file=sys.stderr)
         return 2
 
     tech_ids = job_technique_ids(conn, args.job)
@@ -158,7 +155,6 @@ def main() -> int:
         if spot_check_pass:
             print("PASS")
 
-    conn.close()
     return 0 if (all_pass and spot_check_pass) else 1
 
 

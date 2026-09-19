@@ -81,7 +81,8 @@ def _flush(conn, atom_rows: list[tuple[str, str, str]],
     """Write one buffered batch; returns the number of atom rows written."""
     if atom_rows:
         conn.executemany(
-            "INSERT OR IGNORE INTO rule_atoms (rule_id, atom_class, value) VALUES (?,?,?)",
+            "INSERT INTO rule_atoms (rule_id, atom_class, value) VALUES (?,?,?) "
+            "ON CONFLICT DO NOTHING",
             atom_rows,
         )
     if platform_rows:

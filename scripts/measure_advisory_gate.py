@@ -9,7 +9,6 @@ quality).
 """
 
 import os
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -18,16 +17,12 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 import pipeline.stage2c_ttp_semantic as s2c
+from api.db import get_conn, init_db
 
 
 def main():
-    db_path = project_root / "cti_stix.db"
-
-    if not db_path.exists():
-        print(f"Error: Database not found at {db_path}")
-        sys.exit(1)
-
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    init_db()
+    conn = get_conn()
     cursor = conn.cursor()
 
     query = """
@@ -67,8 +62,6 @@ def main():
         except Exception as e:
             print(f"{filename:<50} ERROR: {e}")
             continue
-
-    conn.close()
 
     print("-" * 110)
     print(f"Totals: {total_dropped_by_advisory} sentences dropped by advisory gate")

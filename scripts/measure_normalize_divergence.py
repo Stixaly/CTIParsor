@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import sqlite3
 import sys
 from collections import defaultdict
 from collections.abc import Callable
@@ -18,6 +17,8 @@ from dataclasses import dataclass
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from api.db import get_conn, init_db
+from api.db_backend import DBConnection
 from pipeline.detection.tlds import looks_like_domain  # noqa: E402
 
 
@@ -92,7 +93,7 @@ _PREDICATES: dict[str, Callable[[str], bool]] = {
 }
 
 
-def _load_atoms(conn: sqlite3.Connection) -> dict[tuple[str, str], list[str]]:
+def _load_atoms(conn: DBConnection) -> dict[tuple[str, str], list[str]]:
     """Load all atom values grouped by ``(format, atom_class)``.
 
     A single query is issued to avoid 30+ table scans over 363 166 rows.
@@ -178,25 +179,20 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Measure the impact of known normalizer divergences."
     )
-    parser.add_argument("--db", default="cti_stix.db", help="Path to the SQLite database")
     parser.add_argument("--examples", type=int, default=5, help="Max examples per divergence")
     args = parser.parse_args(argv)
 
-    conn: sqlite3.Connection | None = None
-    try:
-        conn = sqlite3.connect(f"file:{args.db}?mode=ro", uri=True)
-        atoms = _load_atoms(conn)
-        total_atoms = sum(len(v) for v in atoms.values())
+    init_db()
+    conn = get_conn()
+    atoms = _load_atoms(conn)
+    total_atoms = sum(len(v) for v in atoms.values())
 
-        results: list[tuple[_Divergence, int, int, list[str]]] = []
-        for div in _DIVERGENCES:
-            n_hits, n_total, examples = _measure(atoms, div, args.examples)
-            results.append((div, n_hits, n_total, examples))
+    results: list[tuple[_Divergence, int, int, list[str]]] = []
+    for div in _DIVERGENCES:
+        n_hits, n_total, examples = _measure(atoms, div, args.examples)
+        results.append((div, n_hits, n_total, examples))
 
-        _print_report(results, total_atoms)
-    finally:
-        if conn is not None:
-            conn.close()
+    _print_report(results, total_atoms)
 
     return 0
 

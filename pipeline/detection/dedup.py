@@ -26,8 +26,9 @@ store is built (and again after any single-corpus rebuild).
 """
 from __future__ import annotations
 
-import sqlite3
 from collections import defaultdict
+
+from api.db_backend import DBConnection
 
 #: The only `related:` types that mean "same detection logic".
 #:
@@ -71,19 +72,16 @@ def _union(parent: dict[str, str], a: str, b: str) -> None:
         parent[root_a] = root_b
 
 
-def _load_related_edges(conn: sqlite3.Connection) -> list[tuple[str, str]]:
+def _load_related_edges(conn: DBConnection) -> list[tuple[str, str]]:
     """Load provenance edges from rule_related table for folding.
 
     Returns pairs (rule_id, target_id) where both rules exist in detection_rules
     and the relationship type is in FOLDING_RELATIONS.
-    """
-    # Check if table exists
-    row = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='rule_related'"
-    ).fetchone()
-    if row is None:
-        return []
 
+    `rule_related` is always created by init_db() now (ADR-0053), so this no
+    longer needs an existence probe the way it did against a SQLite database
+    from before ADR-0017's migration landed.
+    """
     # Build index: native_key -> [rule_id, ...]
     native_key_index: dict[str, list[str]] = defaultdict(list)
     for native_key, rule_id in conn.execute("SELECT native_key, id FROM detection_rules"):
@@ -111,7 +109,7 @@ def _load_related_edges(conn: sqlite3.Connection) -> list[tuple[str, str]]:
 
 
 def _propagate_techniques(
-    conn: sqlite3.Connection, clusters: dict[str, list[tuple[str, str]]]
+    conn: DBConnection, clusters: dict[str, list[tuple[str, str]]]
 ) -> int:
     """Give each canonical rule the union of its cluster's ATT&CK techniques.
 
@@ -123,17 +121,12 @@ def _propagate_techniques(
     Measured on the real store, this was the difference between losing 2
     techniques and losing none.
 
-    Idempotent (INSERT OR IGNORE), and safe to re-run: `replace_corpus_rules`
+    Idempotent (ON CONFLICT DO NOTHING), and safe to re-run: `replace_corpus_rules`
     rewrites `rule_techniques` per corpus and `rebuild_store` calls dedup after,
     so propagated rows are regenerated rather than accumulated.
 
     Returns the number of technique rows added.
     """
-    if conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='rule_techniques'"
-    ).fetchone() is None:
-        return 0
-
     # Two full scans, not two queries per cluster: at ~6.3k clusters the
     # per-cluster form issued ~12k round-trips and dominated the rebuild.
     techs_by_rule: dict[str, set[str]] = defaultdict(set)
@@ -163,13 +156,14 @@ def _propagate_techniques(
 
     if rows:
         conn.executemany(
-            "INSERT OR IGNORE INTO rule_techniques (rule_id, technique_id) VALUES (?,?)",
+            "INSERT INTO rule_techniques (rule_id, technique_id) VALUES (?,?) "
+            "ON CONFLICT DO NOTHING",
             rows,
         )
     return len(rows)
 
 
-def dedupe_store(conn: sqlite3.Connection, priority: dict[str, int] | None = None) -> dict:
+def dedupe_store(conn: DBConnection, priority: dict[str, int] | None = None) -> dict:
     """Recompute `is_canonical` across the whole detection-rule store.
 
     Args:
@@ -237,17 +231,16 @@ def dedupe_store(conn: sqlite3.Connection, priority: dict[str, int] | None = Non
 
     # Write results inside ONE transaction.
     #
-    # `get_conn()` runs in autocommit, where a bare `with conn:` is not a
-    # transaction, so the demotion below used to commit on its own: between it
-    # and the re-election, every rule in the store was non-canonical, and
-    # coverage and drill-down both read canonical-only.  A crash or a killed
-    # rebuild in that window left the whole store reading as empty until dedup
-    # was run again.  BEGIN IMMEDIATE takes the write lock up front so a
-    # concurrent writer queues on busy_timeout instead of failing at COMMIT.
+    # `get_conn()`/`get_rule_conn()` run in autocommit, where a bare
+    # `with conn:` is not a transaction, so the demotion below used to commit
+    # on its own: between it and the re-election, every rule in the store was
+    # non-canonical, and coverage and drill-down both read canonical-only.  A
+    # crash or a killed rebuild in that window left the whole store reading
+    # as empty until dedup was run again.
     #
     # Written inline rather than with `api.db.transaction` to keep this module
-    # importable without the api package, as the rest of it already is.
-    conn.execute("BEGIN IMMEDIATE")
+    # importable without the rest of the api package.
+    conn.execute("BEGIN")
     try:
         conn.execute("UPDATE detection_rules SET is_canonical=0")
         conn.executemany(

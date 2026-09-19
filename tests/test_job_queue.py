@@ -21,11 +21,11 @@ from api.db import get_conn, now_iso
 def setup_db(temp_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Isolated database, plus an uploads/ root under tmp_path.
 
-    temp_db (tests/conftest.py) repoints api.db.DB_PATH at a throwaway
-    file and runs the real migrations, so the worker and these tests share one
-    schema.  A hand-written CREATE TABLE here would silently relax constraints
-    the real schema enforces -- jobs.updated_at is NOT NULL -- and, worse,
-    leave the test bodies talking to the developer's cti_stix.db.
+    temp_db (tests/conftest.py) points api.db at a disposable PostgreSQL
+    schema and runs the real migrations, so the worker and these tests share
+    one schema. A hand-written CREATE TABLE here would silently relax
+    constraints the real schema enforces -- jobs.updated_at is NOT NULL --
+    and, worse, leave the test bodies talking to a developer's real database.
     """
     monkeypatch.setattr(worker, "_ROOT", tmp_path)
     (tmp_path / "uploads").mkdir(exist_ok=True)

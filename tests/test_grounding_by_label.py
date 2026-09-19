@@ -1,6 +1,6 @@
 """Tests for ADR-0024 Phase C: grounding scoring by evidence label."""
 
-from pathlib import Path
+import json
 
 from tests.eval_pipeline import (
     _EVIDENTIAL_LABELS,
@@ -10,27 +10,24 @@ from tests.eval_pipeline import (
 )
 
 
-def _make_db(tmp_path: Path, report_text: str, objects: list) -> Path:
-    """Create a throwaway cti_stix.db-shaped database with one job."""
-    import json
-    import sqlite3
-
-    db = tmp_path / "test.db"
-    conn = sqlite3.connect(db)
+def _make_db(temp_db, report_text: str, objects: list) -> None:
+    """Insert one job into the real (disposable, PostgreSQL) job store."""
+    conn = temp_db.get_conn()
+    now = temp_db.now_iso()
     conn.execute(
-        "CREATE TABLE jobs (id TEXT, report_text TEXT, bundle_json TEXT)"
-    )
-    conn.execute(
-        "INSERT INTO jobs VALUES (?, ?, ?)",
+        "INSERT INTO jobs (id, original_filename, status, report_text, bundle_json, created_at, updated_at) "
+        "VALUES (?,?,?,?,?,?,?)",
         (
             "job-1234abcd",
+            "report.txt",
+            "for_review",
             report_text,
             json.dumps({"type": "bundle", "objects": objects}),
+            now,
+            now,
         ),
     )
     conn.commit()
-    conn.close()
-    return db
 
 
 def test_stix_display_name_prefers_name_then_value() -> None:
@@ -61,7 +58,7 @@ def test_stix_display_name_prefers_name_then_value() -> None:
     )
 
 
-def test_census_counts_every_label_including_unlabelled(tmp_path: Path) -> None:
+def test_census_counts_every_label_including_unlabelled(temp_db) -> None:
     """Census counts all relationship objects by their x_evidence_label."""
     objects = [
         {"id": "malware--1", "type": "malware", "name": "Malware A"},
@@ -78,8 +75,8 @@ def test_census_counts_every_label_including_unlabelled(tmp_path: Path) -> None:
         {"id": "rel--4", "type": "relationship", "relationship_type": "indicates",
          "source_ref": "indicator--1", "target_ref": "malware--1"},
     ]
-    db = _make_db(tmp_path, "some report text", objects)
-    samples, census = load_grounding_from_bundle(db, "all")
+    _make_db(temp_db, "some report text", objects)
+    samples, census = load_grounding_from_bundle("all")
     assert census == {
         "observed": 1,
         "assessed": 1,
@@ -88,7 +85,7 @@ def test_census_counts_every_label_including_unlabelled(tmp_path: Path) -> None:
     }, "census must count every label including unlabelled"
 
 
-def test_only_evidential_edges_are_scored(tmp_path: Path) -> None:
+def test_only_evidential_edges_are_scored(temp_db) -> None:
     """Only observed/reported edges appear in the sample's relationships."""
     objects = [
         {"id": "malware--1", "type": "malware", "name": "Malware A"},
@@ -105,8 +102,8 @@ def test_only_evidential_edges_are_scored(tmp_path: Path) -> None:
         {"id": "rel--4", "type": "relationship", "relationship_type": "indicates",
          "source_ref": "indicator--1", "target_ref": "malware--1"},
     ]
-    db = _make_db(tmp_path, "some report text", objects)
-    samples, _ = load_grounding_from_bundle(db, "all")
+    _make_db(temp_db, "some report text", objects)
+    samples, _ = load_grounding_from_bundle("all")
     assert len(samples) == 1, "exactly one sample expected"
     assert len(samples[0].relationships) == 1, (
         "assessed/inferred edges are assertions, not claims about the text "
@@ -117,7 +114,7 @@ def test_only_evidential_edges_are_scored(tmp_path: Path) -> None:
     )
 
 
-def test_rel_evidence_stays_aligned(tmp_path: Path) -> None:
+def test_rel_evidence_stays_aligned(temp_db) -> None:
     """rel_evidence list has the same length as relationships, with '' for missing."""
     objects = [
         {"id": "malware--1", "type": "malware", "name": "Malware A"},
@@ -129,8 +126,8 @@ def test_rel_evidence_stays_aligned(tmp_path: Path) -> None:
          "source_ref": "indicator--1", "target_ref": "malware--1",
          "x_evidence_label": "reported"},
     ]
-    db = _make_db(tmp_path, "some report text", objects)
-    samples, _ = load_grounding_from_bundle(db, "all")
+    _make_db(temp_db, "some report text", objects)
+    samples, _ = load_grounding_from_bundle("all")
     assert len(samples) == 1
     assert len(samples[0].rel_evidence) == len(samples[0].relationships), (
         "rel_evidence must be aligned index-by-index with relationships"
@@ -144,7 +141,7 @@ def test_rel_evidence_stays_aligned(tmp_path: Path) -> None:
 
 
 def test_edges_with_unresolvable_endpoints_are_skipped_but_counted(
-    tmp_path: Path,
+    temp_db,
 ) -> None:
     """Edges with unresolvable refs are excluded from scoring but counted in census."""
     objects = [
@@ -153,8 +150,8 @@ def test_edges_with_unresolvable_endpoints_are_skipped_but_counted(
          "source_ref": "indicator--1", "target_ref": "nonexistent--999",
          "x_evidence_label": "reported"},
     ]
-    db = _make_db(tmp_path, "some report text", objects)
-    samples, census = load_grounding_from_bundle(db, "all")
+    _make_db(temp_db, "some report text", objects)
+    samples, census = load_grounding_from_bundle("all")
     assert census.get("reported", 0) == 1, (
         "edge must be counted in census even if endpoint is unresolvable"
     )
@@ -164,45 +161,35 @@ def test_edges_with_unresolvable_endpoints_are_skipped_but_counted(
     )
 
 
-def test_malformed_bundle_json_is_skipped(tmp_path: Path) -> None:
+def test_malformed_bundle_json_is_skipped(temp_db) -> None:
     """Malformed bundle_json is skipped without raising."""
-    import sqlite3
-
-    db = tmp_path / "test.db"
-    conn = sqlite3.connect(db)
+    conn = temp_db.get_conn()
+    now = temp_db.now_iso()
     conn.execute(
-        "CREATE TABLE jobs (id TEXT, report_text TEXT, bundle_json TEXT)"
-    )
-    conn.execute(
-        "INSERT INTO jobs VALUES (?, ?, ?)",
-        ("job-1234abcd", "some report text", "{not valid json"),
+        "INSERT INTO jobs (id, original_filename, status, report_text, bundle_json, created_at, updated_at) "
+        "VALUES (?,?,?,?,?,?,?)",
+        ("job-1234abcd", "report.txt", "for_review", "some report text", "{not valid json", now, now),
     )
     conn.commit()
-    conn.close()
 
-    samples, census = load_grounding_from_bundle(db, "all")
+    samples, census = load_grounding_from_bundle("all")
     assert samples == [], "malformed bundle should yield no samples"
     assert census == {}, "malformed bundle should yield empty census"
 
 
-def test_bundle_without_objects_list_is_skipped(tmp_path: Path) -> None:
+def test_bundle_without_objects_list_is_skipped(temp_db) -> None:
     """Bundle without 'objects' key is skipped without raising."""
-    import json
-    import sqlite3
-
-    db = tmp_path / "test.db"
-    conn = sqlite3.connect(db)
+    conn = temp_db.get_conn()
+    now = temp_db.now_iso()
     conn.execute(
-        "CREATE TABLE jobs (id TEXT, report_text TEXT, bundle_json TEXT)"
-    )
-    conn.execute(
-        "INSERT INTO jobs VALUES (?, ?, ?)",
-        ("job-1234abcd", "some report text", json.dumps({"type": "bundle"})),
+        "INSERT INTO jobs (id, original_filename, status, report_text, bundle_json, created_at, updated_at) "
+        "VALUES (?,?,?,?,?,?,?)",
+        ("job-1234abcd", "report.txt", "for_review", "some report text",
+         json.dumps({"type": "bundle"}), now, now),
     )
     conn.commit()
-    conn.close()
 
-    samples, census = load_grounding_from_bundle(db, "all")
+    samples, census = load_grounding_from_bundle("all")
     assert samples == [], "bundle without objects should yield no samples"
     assert census == {}, "bundle without objects should yield empty census"
 

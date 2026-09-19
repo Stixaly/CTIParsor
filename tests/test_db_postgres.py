@@ -38,10 +38,12 @@ def _insert_job(db, job_id: str = "j1", **overrides) -> None:
         )
 
 
-def test_backend_is_postgresql_and_stores_are_distinct(temp_db):
+def test_backend_is_postgresql_and_stores_share_the_connection(temp_db):
+    """ADR-0053: the rule store moved onto PostgreSQL too, so get_conn() and
+    get_rule_conn() are the same connection to the same database now — kept
+    as two accessors for a future split, not two engines today."""
     assert temp_db.backend() == "postgresql"
-    assert temp_db.get_conn() is not temp_db.get_rule_conn()
-    assert isinstance(temp_db.get_rule_conn(), sqlite3.Connection)
+    assert temp_db.get_conn() is temp_db.get_rule_conn()
     assert type(temp_db.get_conn()).__name__ == "PgConnection"
 
 
@@ -193,11 +195,13 @@ def test_coverage_reads_entities_from_the_job_store(temp_db):
     assert result["cells"][0]["technique_id"] == "T1059"
     assert result["cells"][0]["rule_count"] >= 1
 
-    # The counter-proof: without jobs_conn the function reads entities from the
-    # rule store, which on PostgreSQL deployments has no such table - it must
-    # fail loudly rather than answer "no techniques".
-    with pytest.raises(sqlite3.OperationalError):
-        compute_for_job(temp_db.get_rule_conn(), "j1")
+    # ADR-0053: unlike the pre-migration split (where the rule store's SQLite
+    # file had no `entities` table and this had to fail loudly), the rule and
+    # job tables now live in the same PostgreSQL database, so the omitted
+    # jobs_conn falls back to `conn` and still finds them -- confirms the
+    # consolidation didn't silently start double-counting or erroring.
+    result_without_jobs_conn = compute_for_job(temp_db.get_rule_conn(), "j1")
+    assert result_without_jobs_conn == result
 
 
 def test_api_routes_answer_from_postgres(temp_db, temp_db_client):
@@ -219,50 +223,73 @@ def test_api_routes_answer_from_postgres(temp_db, temp_db_client):
     assert r.json()["techniques_total"] == 0
 
 
-def test_migration_script_copies_a_sqlite_job_store(temp_db, tmp_path, monkeypatch):
+def test_migration_script_copies_a_sqlite_job_store(temp_db, tmp_path):
+    """scripts/migrate_jobs_to_postgres.py is the one-shot tool an existing
+    installation runs to move off the pre-ADR-0045 single-SQLite-file layout
+    (ADR-0053 removed that layout from api.db itself, but the migration path
+    off of it must keep working) -- build a legacy source file by hand with
+    raw sqlite3, since api.db no longer knows how to create one.
+    """
     src_path = tmp_path / "src.db"
-
-    monkeypatch.setattr(temp_db, "DB_PATH", src_path)
-    monkeypatch.setattr(temp_db, "DATABASE_URL", None)
-    temp_db.reset_connections()
-    temp_db.init_db()
-
-    conn = temp_db.get_conn()
-    now = temp_db.now_iso()
-    conn.execute(
+    src = sqlite3.connect(str(src_path))
+    src.executescript("""
+        CREATE TABLE jobs (
+            id TEXT PRIMARY KEY, original_filename TEXT, status TEXT,
+            created_at TEXT, updated_at TEXT
+        );
+        CREATE TABLE entities (
+            id TEXT PRIMARY KEY, job_id TEXT, value TEXT, entity_type TEXT,
+            context TEXT, confidence REAL, mitre_id TEXT, accepted INTEGER,
+            source TEXT
+        );
+        CREATE TABLE relationships (
+            id TEXT PRIMARY KEY, job_id TEXT, source_value TEXT,
+            relationship_type TEXT, target_value TEXT, confidence REAL,
+            accepted INTEGER
+        );
+        CREATE TABLE progress_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT,
+            event_type TEXT, data TEXT, created_at TEXT
+        );
+        CREATE TABLE relationship_policy (
+            id INTEGER PRIMARY KEY, policy_json TEXT
+        );
+    """)
+    now = "2026-01-01T00:00:00+00:00"
+    src.execute(
         "INSERT INTO jobs (id, original_filename, status, created_at, updated_at) VALUES (?,?,?,?,?)",
         ("m1", "m.pdf", "uploaded", now, now),
     )
-    conn.execute(
+    src.execute(
         "INSERT INTO entities (id, job_id, value, entity_type, context, confidence, mitre_id, accepted, source) "
         "VALUES (?,?,?,?,?,?,?,?,?)",
         ("e1", "m1", "APT29", "threat_actor", "", 0.9, None, None, "auto"),
     )
-    conn.execute(
+    src.execute(
         "INSERT INTO entities (id, job_id, value, entity_type, context, confidence, mitre_id, accepted, source) "
         "VALUES (?,?,?,?,?,?,?,?,?)",
         ("e2", "m1", "T1059", "technique", "", 1.0, "T1059", 1, "auto"),
     )
-    conn.execute(
+    src.execute(
         "INSERT INTO relationships (id, job_id, source_value, relationship_type, target_value, confidence, accepted) "
         "VALUES (?,?,?,?,?,?,?)",
         ("r1", "m1", "APT29", "uses", "Cobalt Strike", 0.8, 1),
     )
-    temp_db.emit_progress("m1", "stage1", {"n": 1})
-    temp_db.emit_progress("m1", "stage2", {"n": 2})
-    temp_db.emit_progress("m1", "stage3", {"n": 3})
-    conn.execute(
-        "INSERT INTO relationship_policy (id, policy_json) VALUES (1, ?) "
-        "ON CONFLICT (id) DO UPDATE SET policy_json = excluded.policy_json",
+    for i in range(1, 4):
+        src.execute(
+            "INSERT INTO progress_events (job_id, event_type, data, created_at) VALUES (?,?,?,?)",
+            ("m1", f"stage{i}", json.dumps({"n": i}), now),
+        )
+    src.execute(
+        "INSERT INTO relationship_policy (id, policy_json) VALUES (1, ?)",
         ('{"a":1}',),
     )
+    src.commit()
+    src.close()
 
     url = os.getenv("CTIPARSOR_TEST_DATABASE_URL")
     schema = temp_db._PG_SCHEMA
     url_with_schema = url + ("&" if "?" in url else "?") + "options=-c%20search_path%3D" + schema
-
-    monkeypatch.setattr(temp_db, "DATABASE_URL", url)
-    temp_db.reset_connections()
 
     from scripts.migrate_jobs_to_postgres import main as migrate_main
 

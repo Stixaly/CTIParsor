@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import sqlite3
 import sys
 from collections import Counter
 from dataclasses import dataclass
@@ -15,6 +14,8 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
+from api.db import get_conn, init_db
+from api.db_backend import DBConnection
 from pipeline.regex_safety import compile_pattern
 
 # STIX 2.1 common relationship types, plus the ones this pipeline
@@ -58,7 +59,7 @@ def _objects(bundle: dict) -> list[dict]:
     return objs if isinstance(objs, list) else []
 
 
-def _load_bundles(conn: sqlite3.Connection) -> list[tuple[str, str]]:
+def _load_bundles(conn: DBConnection) -> list[tuple[str, str]]:
     """Load raw bundle JSON strings for all jobs with non-empty bundle_json."""
     cur = conn.execute("SELECT id, bundle_json FROM jobs WHERE bundle_json IS NOT NULL AND bundle_json != ''")
     return [(row[0], row[1]) for row in cur.fetchall()]
@@ -618,15 +619,11 @@ def run_all(bundles: list[tuple[str, dict]]) -> list[Finding]:
     return [c(bundles) for c in checks]
 
 
-def _report_staleness(db_path: Path) -> None:
+def _report_staleness(conn: DBConnection) -> None:
     """Print which stored bundles predate a known output-affecting fix (ADR-0035)."""
     from pipeline.bundle_revisions import audit_staleness
 
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    try:
-        rows = audit_staleness(conn)
-    finally:
-        conn.close()
+    rows = audit_staleness(conn)
 
     stale = [r for r in rows if r["stale"]]
     unknown = [r for r in rows if r["unknown"]]
@@ -643,24 +640,16 @@ def _report_staleness(db_path: Path) -> None:
 def main(argv: list[str] | None = None) -> int:
     """Main entry point for the audit script."""
     parser = argparse.ArgumentParser(description="Audit STIX bundle invariants")
-    parser.add_argument("db", nargs="?", default="cti_stix.db", help="Path to SQLite database")
     parser.add_argument("--job", action="append", default=[], help="Filter by job ID prefix (repeatable)")
     args = parser.parse_args(argv)
 
-    db_path = Path(args.db)
-    if not db_path.exists():
-        print(f"Database not found: {db_path}", file=sys.stderr)
-        return 2
-
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    try:
-        raw = _load_bundles(conn)
-        if args.job:
-            raw = [(jid, txt) for jid, txt in raw if any(jid.startswith(p) for p in args.job)]
-        finding_parse, bundles = check_bundle_parses(raw)
-        findings = [finding_parse] + run_all(bundles)
-    finally:
-        conn.close()
+    init_db()
+    conn = get_conn()
+    raw = _load_bundles(conn)
+    if args.job:
+        raw = [(jid, txt) for jid, txt in raw if any(jid.startswith(p) for p in args.job)]
+    finding_parse, bundles = check_bundle_parses(raw)
+    findings = [finding_parse] + run_all(bundles)
 
     print(f"{'STATUS':<6} {'SEVERITY':<8} {'NAME':<30} {'COUNT/TOTAL':<15} {'JOBS':<5} DETAIL")
     print("-" * 100)
@@ -689,7 +678,7 @@ def main(argv: list[str] | None = None) -> int:
     # invariant: a bundle built by an older pipeline is not malformed, it is
     # awaiting a rebuild.  Counting it as a FAIL would make the exit code
     # useless — every bundle is stale the moment a fix lands (ADR-0035).
-    _report_staleness(db_path)
+    _report_staleness(conn)
 
     ok = sum(1 for f in findings if f.status == "OK")
     fail = sum(1 for f in findings if f.status == "FAIL")

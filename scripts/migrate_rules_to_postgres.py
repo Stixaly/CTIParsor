@@ -1,25 +1,27 @@
 #!/usr/bin/env python3
 """
-Migrate the job store from an existing cti_stix.db into PostgreSQL (ADR-0045).
+Migrate the detection-rule corpus from an existing cti_stix.db into
+PostgreSQL (ADR-0053).
 
-This script copies the job store tables (jobs, entities, relationships,
-progress_events, relationship_policy, report_figures, figure_reads, cve_cache)
-from a SQLite database into a PostgreSQL database. It is intended to be run
-once when switching an existing installation to use DATABASE_URL for the job
-store.
+This script copies the rule-store tables (detection_rules, rule_bytes,
+rule_techniques, rule_atoms, rule_related, rule_text) from a SQLite database
+into a PostgreSQL database. It is the sibling of
+scripts/migrate_jobs_to_postgres.py (ADR-0045), which covers the job store —
+run that one too if this installation has never moved its job store either.
 
-The rule store (corpus of rules) is a separate table set migrated by the
-sibling script scripts/migrate_rules_to_postgres.py (ADR-0053), not this one.
 The source SQLite file is opened read-only and is never modified.
+`rule_text.body_tsv` is a PostgreSQL GENERATED column (a tsvector derived
+from `body`) and is never copied — it recomputes itself from the copied
+`body` on insert.
 
 Usage:
-    python scripts/migrate_jobs_to_postgres.py [--sqlite PATH] [--postgres URL]
-                                               [--dry-run] [--append] [--batch N]
+    python scripts/migrate_rules_to_postgres.py [--sqlite PATH] [--postgres URL]
+                                                 [--dry-run] [--append] [--batch N]
 
     --sqlite    source cti_stix.db (default: ./cti_stix.db)
     --postgres  target URL (default: $DATABASE_URL); required one way or the other
     --dry-run   do everything inside one transaction, print the counts, then ROLLBACK
-    --append    allow a target that already holds jobs (rows whose key exists are skipped)
+    --append    allow a target that already holds rules (rows whose key exists are skipped)
     --batch     rows per executemany (default 500)
 """
 
@@ -27,7 +29,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -36,7 +37,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from api.db import _JOB_STORE_DDL_POSTGRES  # noqa: E402
+from api.db import _RULE_STORE_DDL_POSTGRES  # noqa: E402
 from pipeline.regex_safety import compile_pattern
 
 # api.db no longer knows about SQLite (ADR-0053) -- this is the legacy,
@@ -44,24 +45,22 @@ from pipeline.regex_safety import compile_pattern
 # script's own default source path.
 _DEFAULT_SQLITE_PATH = _ROOT / "cti_stix.db"
 
+# FK order: rule_text references detection_rules(id); the others have no
+# declared FK but logically depend on a rule existing first.
 TABLES: tuple[str, ...] = (
-    "jobs",
-    "entities",
-    "relationships",
-    "progress_events",
-    "relationship_policy",
-    "report_figures",
-    "figure_reads",
-    "cve_cache",
-    "model_thresholds",   # ADR-0051 -- calibrated NER confidence cutoffs
-    "entity_overrides",   # ADR-0052 -- analyst-grown deny/promote lists
+    "detection_rules",
+    "rule_bytes",
+    "rule_techniques",
+    "rule_atoms",
+    "rule_related",
+    "rule_text",
 )
 
 _IDENT_RE = compile_pattern(r"^[a-z_][a-z0-9_]*$")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Migrate job store from SQLite to PostgreSQL")
+    parser = argparse.ArgumentParser(description="Migrate the detection-rule corpus from SQLite to PostgreSQL")
     parser.add_argument("--sqlite", type=str, default=None,
                          help="Source cti_stix.db path (default: ./cti_stix.db)")
     parser.add_argument("--postgres", type=str, default=None, help="Target PostgreSQL URL")
@@ -97,6 +96,7 @@ def target_columns(pg_cur, table: str) -> list[str]:
     cur = pg_cur.execute(
         "SELECT column_name FROM information_schema.columns "
         "WHERE table_schema = current_schema() AND table_name = %s "
+        "AND is_generated = 'NEVER' "
         "ORDER BY ordinal_position",
         (table,),
     )
@@ -133,16 +133,6 @@ def copy_table(src: sqlite3.Connection, pg_cur, table: str, *, batch: int) -> tu
     return (source_rows, inserted_rows)
 
 
-def realign_identity(pg_cur, table: str, column: str) -> None:
-    if not _IDENT_RE.match(table) or not _IDENT_RE.match(column):
-        raise RuntimeError("Invalid table or column name for realign_identity")
-    pg_cur.execute(
-        f"SELECT setval(pg_get_serial_sequence(%s, %s), "
-        f"COALESCE((SELECT MAX({column}) FROM {table}), 0) + 1, false)",
-        (table, column),
-    )
-
-
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
@@ -163,21 +153,20 @@ def main(argv: list[str] | None = None) -> int:
 
         pg = psycopg.connect(url, autocommit=False)
         cur = pg.cursor()
-        # _JOB_STORE_DDL_POSTGRES is a tuple of individual statements (api/db.py
-        # split it so init_db can isolate a failing statement instead of
-        # aborting the whole schema on one bad one) -- run each in turn rather
-        # than handing the tuple itself to execute(), which expects a query
-        # string, not a sequence of them. All still land in this one
-        # transaction, matching the --dry-run rollback contract below.
-        for _ddl_stmt in _JOB_STORE_DDL_POSTGRES:
+        # _RULE_STORE_DDL_POSTGRES is a tuple of individual statements, same
+        # reasoning as _JOB_STORE_DDL_POSTGRES in migrate_jobs_to_postgres.py:
+        # run each in turn so a duplicate-object race on one doesn't abort the
+        # rest. All still land in this one transaction, matching the
+        # --dry-run rollback contract below.
+        for _ddl_stmt in _RULE_STORE_DDL_POSTGRES:
             cur.execute(_ddl_stmt)
 
-        cur.execute("SELECT COUNT(*) FROM jobs")
-        existing_jobs = cur.fetchone()[0]
-        if existing_jobs > 0 and not args.append:
+        cur.execute("SELECT COUNT(*) FROM detection_rules")
+        existing_rules = cur.fetchone()[0]
+        if existing_rules > 0 and not args.append:
             print(
-                f"[migrate] target already holds {existing_jobs} jobs - use --append to add the "
-                "missing rows (existing keys are skipped)",
+                f"[migrate] target already holds {existing_rules} rules - use --append to add "
+                "the missing rows (existing keys are skipped)",
                 file=sys.stderr,
             )
             pg.rollback()
@@ -192,8 +181,6 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             source_rows, inserted = copy_table(src, cur, table, batch=args.batch)
             results.append((table, source_rows, inserted))
-
-        realign_identity(cur, "progress_events", "id")
 
         print(f"{'table':<20} {'source':>10} {'inserted':>10} {'target':>10}")
         print("-" * 52)
@@ -225,7 +212,7 @@ def main(argv: list[str] | None = None) -> int:
         if not ok:
             print(
                 "[migrate] WARNING: some target counts are below the source - "
-                "inspect before deleting the SQLite job rows",
+                "inspect before deleting the SQLite rule store",
                 file=sys.stderr,
             )
             return 1
