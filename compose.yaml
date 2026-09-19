@@ -36,7 +36,6 @@ x-app-image: &app-image
 # could print.
 x-job-store: &job-store
   DATABASE_URL: postgresql://${CTI_DB_USER:-ctiparsor}@postgres:5432/${CTI_DB_NAME:-ctiparsor}
-  REDIS_URL: redis://redis:6379/0
 
 x-app-hardening: &app-hardening
   read_only: true                      # the image is immutable at runtime; state lives on the volumes
@@ -193,16 +192,8 @@ services:
   # to; with the data directory on a named volume nothing needs root, so every
   # capability is dropped and the root filesystem is read-only (the socket
   # directory and /tmp are tmpfs).  Back it up with pg_dump (docs/docker.md).
-  redis:
-      image: redis:7-alpine
-      volumes:
-        - redisdata:/data
-      networks:
-        - backend
-      restart: unless-stopped
-  
   postgres:
-    image: pgvector/pgvector:pg17-alpine
+    image: postgres:17-alpine
     user: "70:70"
     environment:
       POSTGRES_USER: ${CTI_DB_USER:-ctiparsor}
@@ -375,4 +366,3 @@ volumes:
   cti-cache: {}
   pg-data: {}
   ollama-models: {}
-  redisdata: {}
