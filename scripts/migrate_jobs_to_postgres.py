@@ -155,7 +155,14 @@ def main(argv: list[str] | None = None) -> int:
 
         pg = psycopg.connect(url, autocommit=False)
         cur = pg.cursor()
-        cur.execute(_JOB_STORE_DDL_POSTGRES)
+        # _JOB_STORE_DDL_POSTGRES is a tuple of individual statements (api/db.py
+        # split it so init_db can isolate a failing statement instead of
+        # aborting the whole schema on one bad one) -- run each in turn rather
+        # than handing the tuple itself to execute(), which expects a query
+        # string, not a sequence of them. All still land in this one
+        # transaction, matching the --dry-run rollback contract below.
+        for _ddl_stmt in _JOB_STORE_DDL_POSTGRES:
+            cur.execute(_ddl_stmt)
 
         cur.execute("SELECT COUNT(*) FROM jobs")
         existing_jobs = cur.fetchone()[0]
