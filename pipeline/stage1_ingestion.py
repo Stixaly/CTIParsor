@@ -1,9 +1,9 @@
 import logging
-import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+import defusedxml.ElementTree as ET
 import docx
 import pdfplumber
 from bs4 import BeautifulSoup
@@ -215,25 +215,46 @@ def _is_scanned_pdf(path: Path) -> bool:
         return False
 
 
+# Pages rasterized per convert_from_path() call.  A single A4 page at 300 DPI
+# is ~25-30 MB uncompressed in RAM; converting a whole document in one call
+# (the previous behaviour) holds every page's image at once, so a 100-page
+# scanned report could spike to ~3 GB before Tesseract reads the first page.
+# Batching bounds peak RAM to roughly this many pages regardless of document
+# length, at the cost of one extra poppler invocation per batch.
+_OCR_BATCH_PAGES = 10
+
+
 def _read_pdf_ocr(path: Path) -> str:
-    """OCR path for scanned PDFs — converts each page to an image then runs Tesseract."""
+    """OCR path for scanned PDFs — rasterizes and OCRs in fixed-size page
+    batches so a large scan never holds every page as an image in RAM at once."""
     if not _OCR_AVAILABLE:
         logger.warning("OCR libraries not available. Install pdf2image and pytesseract.")
         logger.warning("On Linux: sudo apt install tesseract-ocr && pip install pdf2image pytesseract")
         return ""
 
     try:
-        images = convert_from_path(str(path), dpi=300)
+        with pdfplumber.open(path) as pdf:
+            num_pages = len(pdf.pages)
+    except Exception as e:
+        logger.warning(f"OCR failed: could not open {path.name}: {e}")
+        return ""
+
+    pages_text: list[str] = []
+    for start in range(1, num_pages + 1, _OCR_BATCH_PAGES):
+        end = min(start + _OCR_BATCH_PAGES - 1, num_pages)
         try:
-            pages_text = [pytesseract.image_to_string(img, lang="eng") for img in images]
-            return "\n".join(t for t in pages_text if t.strip())
+            images = convert_from_path(str(path), dpi=300, first_page=start, last_page=end)
+        except Exception as e:
+            logger.warning(f"OCR failed on pages {start}-{end} of {path.name}: {e}")
+            continue
+        try:
+            pages_text.extend(pytesseract.image_to_string(img, lang="eng") for img in images)
         finally:
-            # Close all PIL images to free resources
+            # Close all PIL images to free resources before the next batch
             for img in images:
                 img.close()
-    except Exception as e:
-        logger.warning(f"OCR failed: {e}")
-        return ""
+
+    return "\n".join(t for t in pages_text if t.strip())
 
 
 def _read_pdf(path: Path) -> str:
