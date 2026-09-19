@@ -290,7 +290,8 @@ def _recover_casing(value_lower: str, context: str) -> str:
     Falls back to the lower-cased value if not found.
     """
     # Case-insensitive search in context
-    pattern = re.compile(re.escape(value_lower), re.IGNORECASE)
+    from pipeline.regex_safety import compile_pattern
+    pattern = compile_pattern(re.escape(value_lower), re.IGNORECASE)
     m = pattern.search(context)
     if m:
         return m.group()

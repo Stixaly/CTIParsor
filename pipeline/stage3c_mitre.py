@@ -45,7 +45,7 @@ _MEDIUM_CONF = 70
 #   t           — all MITRE IDs start with T
 #   (a\d{4}     — tactic: TA + exactly 4 digits
 #    |\d{4}(\.\d{3})?)  — technique: T + 4 digits + optional sub-technique
-_MITRE_ID_RE = re.compile(r'^t(a\d{4}|\d{4}(\.\d{3})?)$')
+_MITRE_ID_RE = compile_pattern(r'^t(a\d{4}|\d{4}(\.\d{3})?)$')
 
 
 # ---------------------------------------------------------------------------

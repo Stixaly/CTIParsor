@@ -23,6 +23,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from pipeline.regex_safety import compile_pattern
+
 ROOT = Path(__file__).resolve().parent.parent
 README = ROOT / "README.md"
 
@@ -126,7 +129,7 @@ def _country_names() -> int | None:
 
     # The literal packs several pairs per physical line, so the pattern must not
     # be line-anchored — counting one match per line undercounts it by ~4x.
-    pattern = re.compile(r'"[^"]+"\s*:\s*"[A-Z]{2}"')
+    pattern = compile_pattern(r'"[^"]+"\s*:\s*"[A-Z]{2}"')
     return len(pattern.findall(block))
 
 
@@ -147,7 +150,7 @@ def _src_const(rel_path: str, name: str) -> float | None:
     # A trailing `# comment` is common on these constants, so it must be allowed
     # before the end of line — anchoring on the number alone makes every
     # commented constant silently unreadable (reported as SKIP, not FAIL).
-    pattern = re.compile(
+    pattern = compile_pattern(
         r"^\s*" + re.escape(name)
         + r"\s*(?::\s*[^=]+)?=\s*(\d+(?:\.\d+)?)\s*(?:#.*)?$",
         re.MULTILINE,

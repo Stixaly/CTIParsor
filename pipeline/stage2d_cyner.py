@@ -32,6 +32,8 @@ import os
 import re
 from pathlib import Path
 
+from pipeline.regex_safety import compile_pattern
+
 from models.schemas import EntityType, RawEntity
 from pipeline.env_flags import env_bool
 from pipeline.overrides import drop_denied
@@ -200,7 +202,7 @@ _TRAILING_PERIOD_RE = compile_pattern(r"\.$")
 _FRAGMENT_RE = compile_pattern(r"^[a-z]\s")
 
 # Regex: bare version numbers ("1.2.3") — spaCy and some NER models label these
-_VERSION_RE = re.compile(r"^\d[\d.\-]*\d$")
+_VERSION_RE = compile_pattern(r"^\d[\d.\-]*\d$")
 
 
 def _normalize_candidate(value: str) -> str:

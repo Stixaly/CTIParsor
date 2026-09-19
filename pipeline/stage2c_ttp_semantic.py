@@ -47,6 +47,8 @@ import os
 import re
 from pathlib import Path
 
+from pipeline.regex_safety import compile_pattern
+
 from models.schemas import EntityType, RawEntity
 from pipeline.env_flags import env_bool
 from pipeline.regex_safety import compile_pattern
@@ -199,7 +201,7 @@ def _etype_from_id(mitre_id: str) -> EntityType:
 
 # Hard-wrap unwrapping (ADR-0023 Phase 2).
 _BULLET_CHARS = ("-", "*", "\u2022", "\u2013", "\u2014")
-_LIST_NUMBER = re.compile(r"^\d+[.)]\s")
+_LIST_NUMBER = compile_pattern(r"^\d+[.)]\s")
 
 
 def _unwrap_hard_linebreaks(text: str) -> str:

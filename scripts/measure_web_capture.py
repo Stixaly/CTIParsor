@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 # script is run directly from the repo root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from pipeline.regex_safety import compile_pattern
 from pipeline.stage1_ingestion import chunk_text, ingest
 from pipeline.web_capture import _PLAYWRIGHT_AVAILABLE, _USER_AGENT, CaptureError, capture_url_to_pdf
 
@@ -42,7 +43,7 @@ _IOC_PATTERNS = (
     ("attack", r"\bT\d{4}(?:\.\d{3})?\b"),
 )
 
-_IOC_RE = tuple((name, re.compile(pattern)) for name, pattern in _IOC_PATTERNS)
+_IOC_RE = tuple((name, compile_pattern(pattern)) for name, pattern in _IOC_PATTERNS)
 
 
 @dataclass

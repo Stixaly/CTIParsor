@@ -1676,14 +1676,14 @@ _UNANCHORABLE_TYPES: frozenset[str] = frozenset({
 # Sentence terminators used to window the report text.  Deliberately crude:
 # the window is 3 sentences wide, so a missed split costs proximity, never
 # correctness.
-_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n{2,}")
+_SENTENCE_SPLIT_RE = compile_pattern(r"(?<=[.!?])\s+|\n{2,}")
 
 # Literals inside a STIX pattern: [domain-name:value = 'evil.com'] and
 # [autonomous-system:number = 1234].  An Indicator's `name` is
 # "Indicator: evil.com", which never appears in prose (0/136 measured), while
 # its pattern values do (131/136, 96.3%) — so the pattern is its anchor.
-_PATTERN_STR_RE = re.compile(r"'((?:[^'\\]|\\.)*)'")
-_PATTERN_NUM_RE = re.compile(r"=\s*(\d+)\s*\]")
+_PATTERN_STR_RE = compile_pattern(r"'((?:[^'\\]|\\.)*)'")
+_PATTERN_NUM_RE = compile_pattern(r"=\s*(\d+)\s*\]")
 
 
 def _evidence_terms(obj: object) -> list[str]:

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from models.detection import DetectionRule, Severity
 from pipeline.detection.base import RuleCorpusAdapter
+from pipeline.regex_safety import compile_pattern
 from pipeline.detection.suricata_atoms import (
     extract_atoms,
     parse_options,
@@ -36,7 +37,7 @@ _VOLATILE_OPTIONS = frozenset({"sid", "rev", "msg", "reference", "metadata", "cl
 #: Une règle commence par une de ces actions.
 _ACTIONS = ("alert", "drop", "reject", "pass", "log")
 
-_IP_RE = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
+_IP_RE = compile_pattern(r"^\d{1,3}(\.\d{1,3}){3}$")
 
 
 class SuricataAdapter(RuleCorpusAdapter):

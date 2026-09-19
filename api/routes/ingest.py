@@ -13,6 +13,8 @@ import re
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from pipeline.regex_safety import compile_pattern
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
@@ -57,7 +59,7 @@ _MARKDOWN_MIN_SIGNALS = 2
 _CAPTURE_DEADLINE_S = 45.0
 _CAPTURE_TIMEOUT_MS = 30_000
 
-_MARKDOWN_RE = tuple(re.compile(p, re.MULTILINE) for p in _MARKDOWN_PATTERNS)
+_MARKDOWN_RE = tuple(compile_pattern(p, re.MULTILINE) for p in _MARKDOWN_PATTERNS)
 
 
 class TextIngestRequest(BaseModel):
@@ -100,7 +102,7 @@ def _looks_like_markdown(text: str) -> bool:
 #
 # A document declaring itself is decisive on its own; anything else needs two
 # distinct tags, so prose that merely mentions "<script>" is not misfiled.
-_HTML_STRONG_RE = re.compile(r"<!DOCTYPE\s+html|<html[\s>]", re.IGNORECASE)
+_HTML_STRONG_RE = compile_pattern(r"<!DOCTYPE\s+html|<html[\s>]", re.IGNORECASE)
 
 _HTML_TAG_PATTERNS = (
     r"<body[\s>]",
@@ -117,7 +119,7 @@ _HTML_TAG_PATTERNS = (
     r"<img\s[^>]*src",
 )
 _HTML_MIN_SIGNALS = 2
-_HTML_TAG_RE = tuple(re.compile(p, re.IGNORECASE) for p in _HTML_TAG_PATTERNS)
+_HTML_TAG_RE = tuple(compile_pattern(p, re.IGNORECASE) for p in _HTML_TAG_PATTERNS)
 
 
 def _looks_like_html(text: str) -> bool:

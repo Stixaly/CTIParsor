@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
+from pipeline.regex_safety import compile_pattern
 
-_YEAR_ONLY_RE = re.compile(r"^\d{4}$")
-_YEAR_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
+_YEAR_ONLY_RE = compile_pattern(r"^\d{4}$")
+_YEAR_MONTH_RE = compile_pattern(r"^\d{4}-\d{2}$")
 
 
 def parse_flexible_date(value) -> datetime | None:

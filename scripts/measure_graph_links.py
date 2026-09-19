@@ -124,7 +124,7 @@ def _split_sentences(text: str) -> list[tuple[int, str]]:
     """Split text into sentences with absolute start offsets."""
     if not text:
         return []
-    pattern = re.compile(r"(?<=[.!?])\s+|\n{2,}")
+    pattern = compile_pattern(r"(?<=[.!?])\s+|\n{2,}")
     matches = list(pattern.finditer(text))
     sentences: list[tuple[int, str]] = []
     prev_end = 0
@@ -160,7 +160,7 @@ def _build_sentence_index(nodes: list[dict], text: str) -> dict[str, set[int]]:
         if name[-1].isalnum():
             pattern_str = pattern_str + r"\b"
         try:
-            regex = re.compile(pattern_str, re.IGNORECASE)
+            regex = compile_pattern(pattern_str, re.IGNORECASE)
         except re.error:
             continue
         found: set[int] = set()

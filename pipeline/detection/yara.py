@@ -14,6 +14,7 @@ from pipeline.detection.yara_atoms import (
     rule_platform,
     split_rules,
 )
+from pipeline.regex_safety import compile_pattern
 
 _YARA_GLOBS = ("*.yar", "*.yara", "*.rule")
 
@@ -24,7 +25,7 @@ _TECHNIQUE_META_KEYS = frozenset({
     "att&ck", "technique", "techniques",
 })
 
-_TECHNIQUE_RE = re.compile(r"\bT\d{4}(?:\.\d{3})?\b", re.IGNORECASE)
+_TECHNIQUE_RE = compile_pattern(r"\bT\d{4}(?:\.\d{3})?\b", re.IGNORECASE)
 
 
 class YaraAdapter(RuleCorpusAdapter):

@@ -19,9 +19,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from pipeline.regex_safety import compile_pattern
 from pipeline.detection.yara_atoms import _strip_comments, split_rules
 
-_RE_MULTI_PREFIX = re.compile(
+_RE_MULTI_PREFIX = compile_pattern(
     r"(?m)^[ \t]*((?:(?:private|global)[ \t]+){2,})rule[ \t]+(\w+)"
 )
 

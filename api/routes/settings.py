@@ -11,6 +11,8 @@ derived from the pipeline detection registry adapters (_ADAPTERS).
 import re
 from pathlib import Path
 
+from pipeline.regex_safety import compile_pattern
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -42,7 +44,7 @@ _CORPORA_ROOT = (_ROOT / "corpora").resolve()
 # `fd::`) asks git to run an arbitrary local command as the transport itself.
 # git blocks `ext::` by default today, but that is git's default to change, not
 # a guarantee this app controls — checked here too rather than assumed safe.
-_UNSAFE_REMOTE_RE = re.compile(r"^-|^\w+::")
+_UNSAFE_REMOTE_RE = compile_pattern(r"^-|^\w+::")
 
 #: Formats this project recognises, independent of whether a parser is compiled in.
 #:

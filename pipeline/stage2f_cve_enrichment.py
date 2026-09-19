@@ -8,6 +8,8 @@ import time
 import urllib.error
 import urllib.request
 
+from pipeline.regex_safety import compile_pattern
+
 from api.db import get_conn, now_iso
 from pipeline.env_flags import env_bool
 
@@ -15,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 _MAX_FETCH = 25
 _MAX_TOTAL_SECONDS = 30.0
-_CVE_PATTERN = re.compile(r"^CVE-\d{4}-\d{4,7}$")
+_CVE_PATTERN = compile_pattern(r"^CVE-\d{4}-\d{4,7}$")
 
 
 def is_valid_cve(cve_id: str) -> bool:

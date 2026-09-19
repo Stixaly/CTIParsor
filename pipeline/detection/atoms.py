@@ -11,6 +11,7 @@ malformed rule never raises — it just yields fewer atoms.
 from __future__ import annotations
 
 import re
+from pipeline.regex_safety import compile_pattern
 
 # ── Public constants ─────────────────────────────────────────────────────────
 
@@ -159,7 +160,7 @@ _SKIP_KEYS = frozenset({"condition", "timeframe"})
 
 #: Tokens of a Sigma `condition` expression.  Digits are their own token so
 #: `not 1 of filter_*` parses as three operands, not two.
-_COND_TOKEN = re.compile(r"[A-Za-z_][\w*.]*|\d+|\(|\)")
+_COND_TOKEN = compile_pattern(r"[A-Za-z_][\w*.]*|\d+|\(|\)")
 
 #: Condition words that are never a selection name.
 _COND_KEYWORDS: frozenset[str] = frozenset({"and", "or", "not", "of"})
@@ -167,7 +168,7 @@ _COND_KEYWORDS: frozenset[str] = frozenset({"and", "or", "not", "of"})
 #: Quantifiers that introduce an `<quantifier> of <pattern>` operand.
 _COND_QUANTIFIERS: frozenset[str] = frozenset({"all", "any"})
 
-_HASH_RE = re.compile(r"^[0-9a-f]{32,128}$")
+_HASH_RE = compile_pattern(r"^[0-9a-f]{32,128}$")
 
 
 # ── Internal helpers ─────────────────────────────────────────────────────────
@@ -181,7 +182,7 @@ def _expand_selector(pattern: str, keys: frozenset[str]) -> set[str]:
         # `re.escape(pattern).replace("\\*", ".*")`: re.escape stopped escaping
         # `*` in newer Pythons, which makes that replacement silently inert.
         regex = ".*".join(re.escape(p) for p in pattern.split("*"))
-        compiled = re.compile(f"^{regex}$")
+        compiled = compile_pattern(f"^{regex}$")
         return {k for k in keys if compiled.match(k)}
     return {pattern} & keys
 

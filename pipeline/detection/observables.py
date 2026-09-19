@@ -16,6 +16,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 from pipeline.detection.tlds import looks_like_domain
+from pipeline.regex_safety import compile_pattern
 
 OBS_CLASSES: frozenset[str] = frozenset({
     "hash", "ip", "domain", "url", "file", "image",
@@ -63,10 +64,10 @@ _PLATFORM_CLASSES = frozenset({"file", "image", "registry"})
 #: and IDF cannot catch it because they are rare *as whole field values*.
 _PSEUDO_FS = ("/dev/", "/proc/", "/sys/")
 
-_HASH_RE = re.compile(r"^[0-9a-f]{32,128}$")
-_CVE_RE = re.compile(r"^cve-\d{4}-\d{4,7}$")
-_DOT_RE = re.compile(r"\[\.\]|\(\.\)|\{\.\}|\s\[dot\]\s|\[dot\]", re.IGNORECASE)
-_AT_RE = re.compile(r"\[@\]|\[at\]", re.IGNORECASE)
+_HASH_RE = compile_pattern(r"^[0-9a-f]{32,128}$")
+_CVE_RE = compile_pattern(r"^cve-\d{4}-\d{4,7}$")
+_DOT_RE = compile_pattern(r"\[\.\]|\(\.\)|\{\.\}|\s\[dot\]\s|\[dot\]", re.IGNORECASE)
+_AT_RE = compile_pattern(r"\[@\]|\[at\]", re.IGNORECASE)
 
 
 @dataclass(frozen=True, slots=True)

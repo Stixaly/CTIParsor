@@ -3,6 +3,8 @@ import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from pipeline.regex_safety import compile_pattern
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -126,7 +128,7 @@ async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
     )
 
 # Request ID middleware for tracing
-_REQUEST_ID_RE = re.compile(r"^[a-zA-Z0-9\-_]{1,64}$")
+_REQUEST_ID_RE = compile_pattern(r"^[a-zA-Z0-9\-_]{1,64}$")
 
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
