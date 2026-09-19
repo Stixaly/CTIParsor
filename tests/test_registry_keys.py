@@ -6,6 +6,7 @@ from pipeline.stage4_stix_mapping import (
     _build_stix_pattern,
     _entity_to_sco,
     _expand_registry_hive,
+    _map_iocs_to_scos,
 )
 
 
@@ -20,6 +21,16 @@ def test_reg_save_does_not_swallow_the_destination_drive_letter():
     entities = _extract_registry_keys(text)
     assert len(entities) == 1
     assert entities[0].value == "HKLM\\SYSTEM"
+
+def test_prose_word_before_a_drive_letter_is_also_trimmed():
+    # The drive-letter check must run BEFORE the prose-trim loop: prose-trim
+    # stops at the first uppercase/digit fragment (the drive letter itself)
+    # and never looks further left, so a prose word sitting between the key
+    # and the drive letter used to survive.
+    text = "reg save HKLM\\SOFTWARE settings D:\\loot\\out.reg"
+    entities = _extract_registry_keys(text)
+    assert len(entities) == 1
+    assert entities[0].value == "HKLM\\SOFTWARE"
 
 def test_reg_save_sam_and_security_are_also_trimmed():
     text = "reg save HKLM\\SAM C:\\temp\\sam.hiv\nreg save HKLM\\SECURITY C:\\temp\\sec.hiv"
@@ -87,3 +98,16 @@ def test_stix_sco_and_pattern_use_the_full_hive():
     pattern = _build_stix_pattern("HKLM\\SYSTEM", sco)
     assert "HKEY_LOCAL_MACHINE" in pattern
     assert "'HKLM" not in pattern
+
+def test_two_hive_spellings_of_the_same_key_produce_one_sco():
+    # "HKLM\Software\Run" and "HKEY_LOCAL_MACHINE\Software\Run" are the same
+    # key under two different report surface forms -- both expand to the
+    # identical STIX-compliant key, and therefore the identical deterministic
+    # STIX id, at SCO-construction time. Deduping on the raw value alone
+    # missed this and let both through as "distinct," producing two SCOs
+    # sharing one id in the exported bundle.
+    short = RawEntity(value="HKLM\\Software\\Run", entity_type=EntityType.REGISTRY_KEY)
+    full = RawEntity(value="HKEY_LOCAL_MACHINE\\Software\\Run", entity_type=EntityType.REGISTRY_KEY)
+    scos, value_to_sco = _map_iocs_to_scos([short, full])
+    assert len(scos) == 1
+    assert value_to_sco[short.value.lower()] is value_to_sco[full.value.lower()]

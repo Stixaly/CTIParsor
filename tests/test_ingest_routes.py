@@ -21,7 +21,11 @@ def client(temp_db_client, tmp_path, monkeypatch):
 
     api.main.limiter.reset()
     monkeypatch.setattr("api.routes.ingest.UPLOADS_DIR", tmp_path)
-    with patch("api.routes.ingest.run_pipeline_async") as spawn:
+    # start_job() (api/routes/_common.py) imports run_pipeline_async from
+    # api.worker locally on each call, so that is the name that must be
+    # patched -- api.routes.ingest no longer holds a module-level reference
+    # to it since the job-start logic moved into the shared helper.
+    with patch("api.worker.run_pipeline_async") as spawn:
         temp_db_client.spawn = spawn        # type: ignore[attr-defined]
         yield temp_db_client
 

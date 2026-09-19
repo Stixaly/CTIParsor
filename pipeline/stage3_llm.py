@@ -2,7 +2,7 @@ import json
 import os
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import cast
 
 import anthropic
@@ -738,39 +738,7 @@ def _provider_ready(provider: str | None = None) -> bool:
 
 # --- LLM output normalisation ---
 
-_YEAR_ONLY_RE = re.compile(r"^\d{4}$")
-_YEAR_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
-
-
-def _parse_flexible_date(value) -> datetime | None:
-    """
-    Parse a relationship start_time/stop_time the LLM wrote as ISO 8601 (full
-    or the coarser YYYY-MM / YYYY precision the prompt allows) into a UTC
-    datetime. Never raises: anything that is not a non-empty string, or a
-    string that doesn't parse, or an implausible year, returns None — one bad
-    date must not cost the whole chunk (see enrich_chunk's ValidationError
-    handling, which discards everything on a Pydantic failure).
-    """
-    if not isinstance(value, str):
-        return None
-    text = value.strip()
-    if not text:
-        return None
-    if _YEAR_ONLY_RE.match(text):
-        text = f"{text}-01-01"
-    elif _YEAR_MONTH_RE.match(text):
-        text = f"{text}-01"
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    try:
-        dt = datetime.fromisoformat(text)
-    except ValueError:
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    if not (1990 <= dt.year <= datetime.now(timezone.utc).year + 2):
-        return None
-    return dt
+from pipeline.dates import parse_flexible_date as _parse_flexible_date  # noqa: E402
 
 
 def _normalize_llm_json(data: dict) -> dict:
@@ -906,6 +874,23 @@ def _normalize_llm_json(data: dict) -> dict:
                 # STIX 2.1: stop_time MUST be later than start_time — drop both
                 # rather than reject the whole relationship over one bad pair.
                 _start_dt = _stop_dt = None
+            # Unlike TTP evidence spans (pipeline/evidence_span.locate, which
+            # verifies the quote is actually in the report), a relationship
+            # date is trusted purely on the model's own ISO-8601 conversion --
+            # a DD/MM-vs-MM/DD misread of a source date produces a plausible
+            # but wrong value with no signal anywhere. Not rejected here (a
+            # date resolved from a relative expression via the document-time
+            # anchor legitimately never repeats the year in evidence_text), but
+            # logged so an unusually high rate of "unconfirmed" dates for one
+            # report is at least visible instead of perfectly silent.
+            _evidence_raw = r.get("evidence_text")
+            _evidence: str = _evidence_raw if isinstance(_evidence_raw, str) else ""
+            for _label, _dt in (("start_time", _start_dt), ("stop_time", _stop_dt)):
+                if _dt is not None and str(_dt.year) not in _evidence:
+                    logger.debug(
+                        f"[relationship date] {_label}={_dt.isoformat()} not "
+                        f"corroborated in evidence_text (year {_dt.year} not found)"
+                    )
             r["start_time"] = _start_dt
             r["stop_time"] = _stop_dt
             # Only keep entries that have all three required fields

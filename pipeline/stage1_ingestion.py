@@ -1,5 +1,7 @@
 import logging
 import re
+import xml.etree.ElementTree as ET
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -122,6 +124,36 @@ def _parse_pdf_date(raw: str | None) -> datetime | None:
     return dt if _plausible_reference_year(dt) else None
 
 
+_DOCX_CORE_NS = {"dcterms": "http://purl.org/dc/terms/"}
+
+
+def _docx_created_date(path: Path) -> datetime | None:
+    """Read docProps/core.xml's dcterms:created straight out of the .docx zip.
+
+    ingest() already constructs a full python-docx Document to read the body
+    text; doing that a second time here just to reach one metadata field
+    (python-docx's own core_properties.created reads this exact element)
+    doubles a non-trivial parse for every DOCX job. A .docx is a zip archive
+    with the creation timestamp in its own small XML part, independent of the
+    body -- reading that part directly avoids the second full parse.
+    """
+    with zipfile.ZipFile(path) as zf:
+        try:
+            data = zf.read("docProps/core.xml")
+        except KeyError:
+            return None
+    el = ET.fromstring(data).find("dcterms:created", _DOCX_CORE_NS)
+    if el is None or not el.text:
+        return None
+    text = el.text.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    dt = datetime.fromisoformat(text)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def extract_reference_date(file_path: str) -> datetime | None:
     """
     Best-effort "document creation time" for a report — the file's own
@@ -153,13 +185,15 @@ def extract_reference_date(file_path: str) -> datetime | None:
                 or _parse_pdf_date(meta.get("ModDate"))
             )
         if suffix == ".docx":
-            created = docx.Document(str(path)).core_properties.created
-            if created is None:
-                return None
-            if created.tzinfo is None:
-                created = created.replace(tzinfo=timezone.utc)
-            return created if _plausible_reference_year(created) else None
-    except Exception:
+            created = _docx_created_date(path)
+            return created if created and _plausible_reference_year(created) else None
+    except Exception as exc:
+        # Deliberately still returns None either way (see the docstring), but
+        # a systematic failure here (a pdfplumber/python-docx version bump
+        # breaking metadata access, a permissions error) should leave a trail
+        # -- every sibling broad-except added this month logs before
+        # swallowing; this one silently did not.
+        logger.debug(f"[reference date] {suffix} metadata extraction failed for {file_path}: {exc}")
         return None
     return None
 

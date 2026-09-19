@@ -919,6 +919,23 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
             cyner_entities=cyner_entities,
         )
 
+        # _finalize_job's ownership check (used below for the terminal
+        # bundle_json/status write) only guards that ONE write. _save_entities
+        # and the llm_result_json update are the first hard-to-undo writes
+        # this run makes -- Stage 3's LLM calls above are the single largest
+        # window in the whole pipeline for a lease to expire and be reclaimed
+        # -- so re-check ownership here too, before committing anything, and
+        # abandon the run entirely if it's stale rather than let a duplicate
+        # set of entities/relationships land under a job another worker now
+        # owns.
+        if _owner_worker_id is not None and _current_owner(job_id) != _owner_worker_id:
+            logger.warning(
+                f"[Worker] job {job_id} was reclaimed by another worker before "
+                f"Stage 3 results could be saved (worker_id={_owner_worker_id}) "
+                "- discarding this run"
+            )
+            return
+
         # Save entities and relationships
         _save_entities(job_id, all_entities, llm_result, report_text=text)
 
