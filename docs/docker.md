@@ -189,6 +189,21 @@ chmod 640 docker/nginx/certs/cti.key && sudo chown 0:101 docker/nginx/certs/cti.
 docker compose --profile proxy up -d       # https://<host>:8443
 ```
 
+Also set `FORWARDED_ALLOW_IPS=*` in `.env` when using this profile. `proxy` and
+`app` are separate containers on the `frontend` bridge network, so `app` sees
+`proxy`'s bridge IP as the TCP peer — not `127.0.0.1`. Uvicorn only trusts the
+`X-Forwarded-For` header nginx sets (`docker/nginx/default.conf`) from peers in
+`forwarded_allow_ips`, which defaults to `127.0.0.1`. Left unset here, every
+request looks like it came from the proxy container: the per-IP upload rate
+limit (`api/routes/upload.py`, `slowapi`) becomes one shared 10/minute quota
+for every analyst combined instead of 10 each, and any future per-client
+logic would misattribute the same way. `*` is safe in this specific topology
+because `app`'s own port never leaves loopback/the internal network — nothing
+but `proxy` (or a process already on the host) can ever present that header.
+The host-install nginx setup in `docs/deployment.md` Option C does not need
+this: there, nginx and the app share the same loopback interface, so the peer
+already is `127.0.0.1` and the default applies.
+
 ## Security model
 
 | Control | Prevents |
@@ -200,6 +215,7 @@ docker compose --profile proxy up -d       # https://<host>:8443
 | Seccomp profile (`docker/seccomp-chromium.json`) | Docker's default profile plus `clone`/`unshare`/`setns`/`chroot` without a capability requirement, so the Chromium **user-namespace sandbox stays on** instead of the usual `--no-sandbox` shortcut. Without it Chromium dies at launch (`Check failed: sys_chroot("/proc/self/fdinfo/")`) and the URL tab answers 503. The kernel still checks the capability in the caller's namespace: the container process has none, the sandbox zygote owns its own. |
 | `pids_limit: 4096` | Fork bombs from hostile documents are stopped |
 | Three networks, `backend` marked `internal` | The database has no route to the internet even if compromised; the proxy cannot reach the database or the LLM; the LLM cannot reach the database. Only `app` (and the one-shot `bootstrap`) sit on more than one network |
+| `capture-proxy` (Squid, `docker/squid/squid.conf`) | Chromium's own traffic for the URL-capture tab is forced through an egress filter that blocks private/loopback/link-local/reserved destination ranges — an independent, network-layer re-check of `pipeline/web_capture.py`'s SSRF policy that closes the DNS-rebinding gap `_dns_pin_arg`'s docstring documents (a subresource on another host, resolved a second, uncoordinated time by Chromium itself) |
 | Loopback bind by default | API reachable only from the host machine |
 | Secrets via `env_file` | Image pushed to registry contains no keys or reports |
 | Pinned base images, CPU-only torch | No `latest` tags, no unnecessary CUDA wheels |

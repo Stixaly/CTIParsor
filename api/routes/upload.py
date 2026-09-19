@@ -38,7 +38,7 @@ _MARKING_LEVELS = {"RED", "AMBER", "GREEN", "WHITE"}
 
 @router.post("/upload")
 @limiter.limit("10/minute")
-async def upload_file(
+def upload_file(
     request: Request,
     file: UploadFile = File(...),
     tlp_level: str | None = Form(None),
@@ -51,6 +51,12 @@ async def upload_file(
 
     tlp_level / pap_level — optional TLP/PAP markings ("RED"|"AMBER"|"GREEN"|"WHITE")
     applied to every object in the generated STIX bundle.
+
+    Declared as a plain `def`, not `async def`: the body does blocking disk I/O
+    (`dest.open("wb")`, `f.write`) and a synchronous SQLite insert (`start_job`).
+    FastAPI runs a sync path operation in a worker thread automatically, so
+    those calls never block the event loop the way they would inside an
+    `async def` that never awaits them.
     """
     if tlp_level is not None:
         tlp_level = tlp_level.strip().upper() or None
@@ -78,8 +84,10 @@ async def upload_file(
             f"File too large. Maximum allowed size is {_MAX_BYTES // (1024*1024)} MB."
         )
 
-    # Read first chunk to validate MIME type
-    first_chunk = await file.read(1024 * 1024)  # Read 1MB for MIME check
+    # Read first chunk to validate MIME type.  `file.file` is the underlying
+    # SpooledTemporaryFile — read synchronously since this route now runs in
+    # FastAPI's threadpool rather than on the event loop.
+    first_chunk = file.file.read(1024 * 1024)  # Read 1MB for MIME check
 
     # Validate MIME type using python-magic with filetype as fallback.
     # HTTPException is re-raised immediately so validation rejections always
@@ -130,7 +138,7 @@ async def upload_file(
     try:
         with dest.open("wb") as f:
             f.write(first_chunk)
-            while chunk := await file.read(1024 * 64):  # 64 KB chunks
+            while chunk := file.file.read(1024 * 64):  # 64 KB chunks
                 written += len(chunk)
                 if written > _MAX_BYTES:
                     dest.unlink(missing_ok=True)

@@ -121,7 +121,7 @@ RAM — not by the web framework, and not by the database.
   page load.
 - **There is no authentication, no session, and no job ownership anywhere in
   `api/`.** Every analyst sees, edits, finalises and deletes every other
-  analyst's reports. CORS is `allow_origins=["*"]`.
+  analyst's reports.
 
 That last point is the decisive one. **The application is not currently
 multi-user in any sense; it is a single-user tool exposed to several people.**
@@ -330,8 +330,9 @@ Ordered by measured impact per unit of effort. Items 1–3 are prerequisites for
        `api/routes/` by owner. Until this exists the app is single-tenant
        regardless of stack. File a separate ADR — this is a schema and
        authorisation decision, not a deployment detail.
-8. [ ] Replace `allow_origins=["*"]` with the deployed origin, and re-enable
-       `allow_credentials` once sessions exist.
+8. [x] `CORSMiddleware` removed outright — the app is served same-origin, so
+       there was no deployed origin to pin it to. `allow_credentials` still
+       needs its own decision once sessions exist, alongside item 7.
 9. [ ] Migrate `jobs` / `entities` / `relationships` / `progress_events` to
        PostgreSQL **as part of item 7**, leaving the detection corpus in SQLite.
 

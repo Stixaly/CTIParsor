@@ -129,6 +129,18 @@ _USER_AGENT = (
 # cannot grant them can set this variable, and gets a loud warning for it.
 _UNSANDBOXED_ENV = "CTIPARSOR_CAPTURE_UNSANDBOXED"
 
+# Forward proxy Chromium's own traffic through (e.g. http://capture-proxy:3128
+# in compose.yaml) -- an independent, network-layer re-check of the SSRF
+# policy below. See _dns_pin_arg's docstring for the gap this closes: a
+# subresource on a different host is re-validated by _route_filter, but
+# Chromium then resolves and connects to it entirely on its own, a second,
+# uncoordinated DNS lookup a hostile nameserver can answer differently
+# (rebinding). Routed through a proxy, the resolution that decides whether a
+# destination is reachable and the connection that uses it happen in the same
+# step, closing that window. Optional and unset by default: a host install
+# with no proxy in front of it captures exactly as before.
+_CAPTURE_PROXY_ENV = "CTIPARSOR_CAPTURE_PROXY"
+
 _DEFAULT_TIMEOUT_MS = 30_000
 _MAX_PDF_BYTES = 50 * 1024 * 1024
 _VIEWPORT: ViewportSize = {"width": 1280, "height": 1696}
@@ -578,7 +590,18 @@ def _dns_pin_arg(host: str) -> str | None:
     a different host is still re-validated by `_route_filter` on every request,
     but that re-check has the same TOCTOU shape — it is not itself pinned to a
     connection. Narrower and harder to exploit than the unpinned entry point
-    (it requires the *second* host's nameserver to also race), but not closed.
+    (it requires the *second* host's nameserver to also race), but not closed
+    by anything in this module.
+
+    Closed one layer out instead: CTIPARSOR_CAPTURE_PROXY (compose.yaml's
+    `capture-proxy`, docker/squid/squid.conf) routes Chromium's traffic
+    through a Squid instance that applies the same IP-range policy as
+    `_ip_is_public` and does its own resolution immediately before connecting
+    — the same coupling this function gives the navigated host, given for
+    free to every subresource and redirect target too, because Squid resolves
+    and connects in one step rather than two. Unset (a host install with no
+    proxy in front), a subresource/redirect DNS race is the one gap this
+    module does not close on its own.
     """
     try:
         ipaddress.ip_address(host)
@@ -660,12 +683,16 @@ def capture_url_to_pdf(
         # missing a system library.  Left unguarded it escapes as a 500 with an
         # ASGI traceback, which tells the analyst nothing — so it is converted
         # here into the same actionable message the 503 path already uses.
+        launch_kwargs: dict = dict(
+            headless=True,
+            chromium_sandbox=sandboxed,
+            args=chromium_args,
+        )
+        proxy_server = os.environ.get(_CAPTURE_PROXY_ENV, "").strip()
+        if proxy_server:
+            launch_kwargs["proxy"] = {"server": proxy_server}
         try:
-            browser = p.chromium.launch(
-                headless=True,
-                chromium_sandbox=sandboxed,
-                args=chromium_args,
-            )
+            browser = p.chromium.launch(**launch_kwargs)
         except PlaywrightError as exc:
             raise CaptureUnavailable(_launch_hint(exc, sandboxed=sandboxed)) from exc
         # Everything past the launch goes through this try/finally: a page that

@@ -739,15 +739,29 @@ def _apply_postgres_ddl(pg, statements: tuple[str, ...]) -> None:
 
 
 def _apply_sqlite_migrations(conn: sqlite3.Connection, statements: list[str]) -> None:
+    """Run each `ALTER TABLE`/`CREATE INDEX` migration once, tolerating only a
+    re-run against an already-migrated database.
+
+    SQLite raises the same `sqlite3.OperationalError` for "duplicate column
+    name" as it does for "database is locked", "no such table" and "disk I/O
+    error" -- a blanket `except OperationalError: pass` swallowed all of them
+    alike. A worker racing this at startup while another process holds the
+    write lock would have its `ALTER TABLE` silently skipped instead of
+    retried, leaving the schema permanently missing a column and the first
+    request that touches it a confusing 500 instead of a clear startup
+    failure. Matching the message is the only way sqlite3 exposes the
+    distinction — it has no dedicated exception subclass for it.
+    """
+    _BENIGN = ("duplicate column name", "already exists")
     for stmt in statements:
         try:
             conn.execute(stmt)
             conn.commit()
-        except sqlite3.OperationalError:
-            pass  # Column / index already exists — safe to skip
-        except Exception as exc:
-            # Unexpected migration error — log it but don't crash the server
-            logger.warning(f"[db] Migration warning ({stmt[:60]}...): {exc}")
+        except sqlite3.OperationalError as e:
+            if any(s in str(e).lower() for s in _BENIGN):
+                logger.debug(f"[db] Migration skipped (already applied): {stmt[:60]}... ({e})")
+            else:
+                raise
 
 
 def init_db() -> None:

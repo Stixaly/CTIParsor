@@ -428,8 +428,11 @@ cheap-and-urgent first, then the pool, then tenancy.
 
 **Phase 4 — tenancy (ownership is wider than the `jobs` table)**
 10. [ ] Authentication, `user_id` on `jobs`, and an ownership check on every route.
-11. [ ] Replace `allow_origins=["*"]` (`api/main.py:87`) with the deployed origin;
-        re-enable `allow_credentials` once sessions exist.
+11. [x] `CORSMiddleware` (`allow_origins=["*"]`) removed outright rather than pinned
+        to a deployed origin — the app is served same-origin (API + built SPA from
+        one uvicorn process) with no cross-origin caller to allow. Revisit once
+        sessions/tenancy land: a separate SPA origin or `allow_credentials` would
+        need an explicit origin list again, not a re-add of the wildcard.
 12. [ ] Segregate uploaded documents. `uploads/` is flat — `uploads/{job_id}{suffix}`
         (`api/routes/upload.py:19`, `api/routes/ingest.py:5`) — so any authenticated
         user who can guess or read a job id reaches another user's source report.

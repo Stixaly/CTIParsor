@@ -27,7 +27,7 @@ jobs:
           pip install \
             pydantic stix2 stix2-validator iocextract python-dotenv tenacity \
             rapidfuzz pyahocorasick anthropic \
-            pdfplumber python-docx beautifulsoup4
+            pdfplumber python-docx beautifulsoup4 defusedxml
 
       - name: Install test + lint dependencies
         run: pip install pytest pytest-cov httpx ruff mypy
@@ -217,7 +217,7 @@ jobs:
           pip install \
             pydantic stix2 stix2-validator iocextract python-dotenv tenacity \
             rapidfuzz pyahocorasick anthropic \
-            pdfplumber python-docx beautifulsoup4
+            pdfplumber python-docx beautifulsoup4 defusedxml
 
       - name: Install test dependencies
         run: pip install pytest httpx

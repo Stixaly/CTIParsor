@@ -21,10 +21,17 @@ cross-checked across two models (Stage 3e). A malicious document cannot inject
 arbitrary entities that aren't grounded in its own text.
 
 ### 2. Local web API (CORS + auth)
-The web UI serves on `localhost` with `CORS allow_origins=["*"]` and **no
-authentication**. This is acceptable for **local single-user** use of *read/non-secret*
-endpoints. It is **not** safe to expose CTIParsor on a shared host or the internet
-as-is. (In the container stack the API process itself binds `0.0.0.0` — a
+The web UI serves on `localhost` with **no authentication**. There is also no
+CORS middleware: one uvicorn process serves both the API and the built React
+UI, so the browser only ever calls this API from the same origin it loaded
+the page from, and the dev server proxies `/api` the same way (`frontend/vite.config.ts`)
+— nothing in this codebase needs a cross-origin browser call, so none is
+allowed. That closes the drive-by vector (a page on another site reading this
+API's responses in the analyst's browser) but changes nothing about direct
+access: this is acceptable for **local single-user** use of *read/non-secret*
+endpoints, not for a shared host or the internet — anyone who can reach the
+port at all (curl, another process on the same machine, a proxy) still has
+full access. (In the container stack the API process itself binds `0.0.0.0` — a
 container has no "localhost" of its own to bind — but the same guarantee is
 kept one layer out: compose publishes it on `127.0.0.1` on the *host* by
 default, so the reachability is identical, just enforced at a different

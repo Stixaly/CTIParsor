@@ -3,7 +3,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter
@@ -144,15 +143,18 @@ async def add_request_id(request: Request, call_next):
         clear_request_id()
         logger.debug(f"Request completed: {request.method} {request.url}")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    # allow_credentials must be False when allow_origins=["*"];
-    # the browser spec forbids credentials with a wildcard origin.
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# No CORSMiddleware: one uvicorn process serves both the API and the built
+# React UI (see the SPA mount below), so the browser only ever calls this API
+# from the same origin it loaded the page from -- there is no cross-origin
+# caller to allow. `frontend/vite.config.ts` proxies `/api` through the Vite
+# dev server for the same reason, so this holds in development too. Without
+# this middleware the browser's own same-origin policy is what it is
+# everywhere else: no `Access-Control-Allow-Origin` header means a page on
+# any OTHER origin cannot read this API's responses, even though the app has
+# no authentication of its own to stop the request from being sent. A
+# previous `allow_origins=["*"]` here defeated that protection for every
+# request with no offsetting benefit -- nothing in this codebase makes a
+# cross-origin browser call to this API.
 
 
 # API routes
