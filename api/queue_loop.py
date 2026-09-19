@@ -32,6 +32,10 @@ HEARTBEAT_S = int(os.getenv("WORKER_HEARTBEAT_S", "30"))
 LEASE_TIMEOUT_S = int(os.getenv("WORKER_LEASE_TIMEOUT_S", "180"))
 POLL_S = float(os.getenv("WORKER_POLL_S", "2"))
 DRAIN_S = int(os.getenv("WORKER_DRAIN_S", "60"))
+# How often to check for expired jobs (JOB_RETENTION_DAYS, api/routes/jobs.py).
+# A DB query on every ~2s poll tick would be wasteful for something that only
+# needs to run a few times a day; this is a separate, much coarser interval.
+RETENTION_SWEEP_S = int(os.getenv("JOB_RETENTION_SWEEP_S", str(3600)))
 ALIVE_FILE = Path(os.getenv("WORKER_ALIVE_FILE", "/tmp/ctiparsor-worker.alive"))
 WORKER_ID = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:6]}"
 _VALID_ROLES = ("all", "api", "worker")
@@ -237,6 +241,7 @@ class WorkerLoop:
         self._kick_lock = threading.Lock()
         self._stop = threading.Event()
         self._last_heartbeat = 0.0
+        self._last_sweep = 0.0
         self._spawn = spawn
 
     @property
@@ -302,6 +307,21 @@ class WorkerLoop:
             return True
         return False
 
+    def sweep_if_due(self, now: float | None = None) -> int:
+        """Run the job-retention sweep at most once per RETENTION_SWEEP_S.
+
+        A no-op call when JOB_RETENTION_DAYS=0 (the default) still costs the
+        monotonic-clock check but nothing else -- sweep_expired_jobs() returns
+        immediately without touching the DB.
+        """
+        now = now or time.monotonic()
+        if now - self._last_sweep < RETENTION_SWEEP_S:
+            return 0
+        self._last_sweep = now
+        from api.routes.jobs import sweep_expired_jobs
+
+        return sweep_expired_jobs()
+
     def run_once(self) -> int:
         # touch_alive() below is what the worker container's HEALTHCHECK
         # watches (a stale file after WORKER_POLL_S x ~60 means "wedged"). It
@@ -326,6 +346,13 @@ class WorkerLoop:
         except Exception as exc:
             logger.error(f"Exception in run_once heartbeat_if_due: {exc}")
             db_ok = False
+        # Housekeeping, not liveness: a sweep failure is logged (inside
+        # sweep_expired_jobs/sweep_if_due) but must not mark the worker
+        # unhealthy or skip touch_alive the way a claim/heartbeat failure does.
+        try:
+            self.sweep_if_due()
+        except Exception as exc:
+            logger.error(f"Exception in run_once sweep_if_due: {exc}")
         if not db_ok:
             logger.warning("run_once: not touching the alive file -- a DB call failed this cycle")
             return n

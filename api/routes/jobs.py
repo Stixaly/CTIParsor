@@ -1,6 +1,8 @@
 import json
 import mimetypes
+import os
 import re
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -8,13 +10,23 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from api.db import _lock, get_conn, now_iso
+from api.logging_config import get_logger
 from api.routes._common import require_job
 from api.worker import re_run_final_stages
+
+logger = get_logger(__name__)
 
 _ROOT        = Path(__file__).parent.parent.parent
 # Folder where uploaded files are kept (mirrors upload.py UPLOADS_DIR)
 _UPLOADS_DIR = _ROOT / "uploads"
 _OUTPUT_DIR  = _ROOT / "output"
+
+# Age (in days) past which a job's DB row and files are swept automatically.
+# 0 (default) disables the sweep entirely -- the previous behaviour, where only
+# an explicit DELETE removes a job. Uploaded reports and STIX bundles otherwise
+# accumulate on disk forever: nothing before this purged them, so an analyst
+# who never clicks delete slowly fills the disk.
+JOB_RETENTION_DAYS = int(os.getenv("JOB_RETENTION_DAYS", "0"))
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
@@ -147,8 +159,13 @@ def finalize_job(job_id: str, quick: bool = False):
     return {"status": "completed", "bundle_size": len(bundle_json)}
 
 
-@router.delete("/{job_id}")
-def delete_job(job_id: str):
+def _delete_job(job_id: str) -> bool:
+    """Delete one job's DB rows and files. Returns False if it did not exist.
+
+    Shared by the DELETE route and the retention sweep so both apply the exact
+    same cleanup — a second copy of this would drift the moment one of them
+    gained a new output file type.
+    """
     with _lock:
         with get_conn() as conn:
             # Fetch original_filename BEFORE deleting — needed to locate output files
@@ -156,7 +173,7 @@ def delete_job(job_id: str):
                 "SELECT original_filename FROM jobs WHERE id=?", (job_id,)
             ).fetchone()
             if not row:
-                raise HTTPException(404, "Job not found")
+                return False
             original_filename = row["original_filename"]
 
             # Delete children first so a crash mid-delete doesn't leave orphaned rows
@@ -171,8 +188,58 @@ def delete_job(job_id: str):
     # Delete associated files AFTER the DB transaction commits successfully.
     # If file deletion partially fails the DB is already clean — no orphaned rows.
     _delete_job_files(job_id, original_filename)
+    return True
 
+
+@router.delete("/{job_id}")
+def delete_job(job_id: str):
+    if not _delete_job(job_id):
+        raise HTTPException(404, "Job not found")
     return {"deleted": job_id}
+
+
+def sweep_expired_jobs(retention_days: int | None = None) -> int:
+    """Delete every job whose last update is older than the retention window.
+
+    Called periodically by the queue loop (api/queue_loop.py), never by a
+    request handler. `queued`/`processing` jobs are excluded regardless of
+    age — they are active work, not abandoned output — everything else
+    (`uploaded`, `for_review`, `completed`, `failed`) is eligible once stale,
+    since a row stuck at `uploaded` past the window is itself an anomaly worth
+    clearing rather than a job to protect.
+
+    Returns the number of jobs deleted. A no-op when retention is disabled
+    (the default: JOB_RETENTION_DAYS=0).
+    """
+    days = JOB_RETENTION_DAYS if retention_days is None else retention_days
+    if days <= 0:
+        return 0
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    try:
+        with get_conn() as conn:
+            ids = [
+                r[0] for r in conn.execute(
+                    "SELECT id FROM jobs WHERE status NOT IN ('queued','processing') "
+                    "AND updated_at < ?",
+                    (cutoff,),
+                ).fetchall()
+            ]
+    except Exception as exc:
+        logger.error(f"[retention] failed to list expired jobs: {exc}")
+        return 0
+
+    deleted = 0
+    for job_id in ids:
+        try:
+            if _delete_job(job_id):
+                deleted += 1
+        except Exception as exc:
+            logger.error(f"[retention] failed to delete job {job_id}: {exc}")
+
+    if deleted:
+        logger.info(f"[retention] swept {deleted} job(s) older than {days}d")
+    return deleted
 
 
 @router.get("/{job_id}/source")
