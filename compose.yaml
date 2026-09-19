@@ -36,6 +36,7 @@ x-app-image: &app-image
 # could print.
 x-job-store: &job-store
   DATABASE_URL: postgresql://${CTI_DB_USER:-ctiparsor}@postgres:5432/${CTI_DB_NAME:-ctiparsor}
+  REDIS_URL: redis://redis:6379/0
 
 x-app-hardening: &app-hardening
   read_only: true                      # the image is immutable at runtime; state lives on the volumes
@@ -69,10 +70,15 @@ services:
       # The API only accepts and queues reports; the `worker` service runs
       # them (ADR-0046).  This container therefore never loads a model.
       CTIPARSOR_ROLE: api
+      # Routes the URL-capture tab's Chromium through capture-proxy below —
+      # see that service's comment for why.
+      CTIPARSOR_CAPTURE_PROXY: http://capture-proxy:3128
       <<: *job-store
     depends_on:
       postgres:
         condition: service_healthy
+      capture-proxy:
+        condition: service_started
     ports:
       - "${CTI_BIND:-127.0.0.1}:${CTI_PORT:-8000}:8000"
     volumes:
@@ -187,8 +193,16 @@ services:
   # to; with the data directory on a named volume nothing needs root, so every
   # capability is dropped and the root filesystem is read-only (the socket
   # directory and /tmp are tmpfs).  Back it up with pg_dump (docs/docker.md).
+  redis:
+      image: redis:7-alpine
+      volumes:
+        - redisdata:/data
+      networks:
+        - backend
+      restart: unless-stopped
+  
   postgres:
-    image: postgres:17-alpine
+    image: pgvector/pgvector:pg17-alpine
     user: "70:70"
     environment:
       POSTGRES_USER: ${CTI_DB_USER:-ctiparsor}
@@ -295,6 +309,54 @@ services:
           memory: ${CTI_PROXY_MEMORY:-128m}
     restart: unless-stopped
 
+  # Egress filter for the URL-capture tab's Chromium (`app`, ADR-0029) — always
+  # on, not behind a profile. `validate_url`/`_dns_pin_arg` in
+  # pipeline/web_capture.py already check every URL and pin the navigated
+  # host's DNS answer, but a subresource on a *different* host (an `<img>` on
+  # an attacker's second domain) is re-checked in Python and then resolved a
+  # second, independent time by Chromium itself — a hostile nameserver can
+  # answer that second lookup with 169.254.169.254 or an RFC1918 address
+  # (classic DNS rebinding; see that docstring for the full analysis). Routing
+  # Chromium through this proxy closes it: Squid resolves and connects in the
+  # same step, so there is no window between "checked" and "connected" left
+  # for a second DNS answer to land in. docker/squid/squid.conf mirrors the
+  # exact ranges pipeline/web_capture.py::_ip_is_public blocks.
+  #
+  # Runs as the image's own `proxy` user (uid/gid 13) rather than root: with
+  # `cap_drop: [ALL]` the entrypoint's usual setuid/setgid privilege-drop has
+  # no capability to do it with and Squid aborts (measured) — starting
+  # already-unprivileged skips that step entirely. The ICMP pinger also loses
+  # its raw socket under `cap_drop: [ALL]` and logs a startup warning; harmless
+  # here, since nothing in this config defines a `cache_peer` for it to probe.
+  capture-proxy:
+    image: ubuntu/squid:latest
+    user: "13:13"
+    read_only: true
+    tmpfs:
+      - /run:uid=13,gid=13
+      - /var/spool/squid:uid=13,gid=13
+      - /var/log/squid:uid=13,gid=13
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ./docker/squid/squid.conf:/etc/squid/squid.conf:ro
+    networks:
+      - frontend
+    healthcheck:
+      test: ["CMD-SHELL", "echo > /dev/tcp/127.0.0.1/3128"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128m
+    restart: unless-stopped
+
 # Three networks, each with one job.  `backend` is internal: Docker gives it no
 # default route, so the database cannot reach the internet even if compromised —
 # the app still can, through `frontend`.  The proxy never sees the database or
@@ -313,3 +375,4 @@ volumes:
   cti-cache: {}
   pg-data: {}
   ollama-models: {}
+  redisdata: {}
