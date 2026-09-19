@@ -19,10 +19,10 @@ against all known technique/tactic names.  Three tiers:
 from __future__ import annotations
 
 import functools
-import re
 
 # Initialize logging
 from api.logging_config import get_logger
+from pipeline.regex_safety import compile_pattern
 from pipeline.stage3_llm import TTPExtracted
 
 logger = get_logger(__name__)
@@ -45,7 +45,7 @@ _MEDIUM_CONF = 70
 #   t           — all MITRE IDs start with T
 #   (a\d{4}     — tactic: TA + exactly 4 digits
 #    |\d{4}(\.\d{3})?)  — technique: T + 4 digits + optional sub-technique
-_MITRE_ID_RE = re.compile(r'^t(a\d{4}|\d{4}(\.\d{3})?)$')
+_MITRE_ID_RE = compile_pattern(r'^t(a\d{4}|\d{4}(\.\d{3})?)$')
 
 
 # ---------------------------------------------------------------------------

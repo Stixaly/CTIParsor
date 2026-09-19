@@ -17,15 +17,16 @@ import yaml
 from models.detection import DetectionRule, Severity
 from pipeline.detection.atoms import extract_atoms, rule_platform
 from pipeline.detection.base import RuleCorpusAdapter
+from pipeline.regex_safety import compile_pattern
 
 # Sigma technique tag → ATT&CK technique id, e.g. "attack.t1059.001" → "T1059.001"
-_TECHNIQUE_RE = re.compile(r"^attack\.t(\d{4}(?:\.\d{3})?)$", re.IGNORECASE)
+_TECHNIQUE_RE = compile_pattern(r"^attack\.t(\d{4}(?:\.\d{3})?)$", re.IGNORECASE)
 # attack.g0016 (group) / attack.s0002 (software) tags — not tactics
-_GROUP_SOFTWARE_RE = re.compile(r"^[gs]\d{4}$", re.IGNORECASE)
+_GROUP_SOFTWARE_RE = compile_pattern(r"^[gs]\d{4}$", re.IGNORECASE)
 # attack.ta0001 — a tactic *ID*.  tactic_shortnames holds kill-chain shortnames
 # like "defense_evasion", so the numeric ID form is skipped to avoid mixing the
 # two representations in one list.
-_TACTIC_ID_RE = re.compile(r"^ta\d{4}$", re.IGNORECASE)
+_TACTIC_ID_RE = compile_pattern(r"^ta\d{4}$", re.IGNORECASE)
 
 _LEVEL_MAP = {
     "informational": Severity.INFORMATIONAL,

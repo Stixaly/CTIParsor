@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -15,6 +14,7 @@ from pipeline.detection.suricata_atoms import (
     rule_metadata,
     technique_ids,
 )
+from pipeline.regex_safety import compile_pattern
 
 _SURICATA_GLOBS = ("*.rules",)
 
@@ -36,7 +36,7 @@ _VOLATILE_OPTIONS = frozenset({"sid", "rev", "msg", "reference", "metadata", "cl
 #: Une règle commence par une de ces actions.
 _ACTIONS = ("alert", "drop", "reject", "pass", "log")
 
-_IP_RE = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
+_IP_RE = compile_pattern(r"^\d{1,3}(\.\d{1,3}){3}$")
 
 
 class SuricataAdapter(RuleCorpusAdapter):

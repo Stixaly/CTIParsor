@@ -76,6 +76,7 @@ import stix2
 from api.logging_config import get_logger
 from models.schemas import STIX_RELATIONSHIP_TYPES
 from pipeline.aliases import mitre_id_for
+from pipeline.regex_safety import compile_pattern
 from pipeline.stix_access import field as stix_field
 from pipeline.stix_rel_spec import rel_is_suggested
 
@@ -113,7 +114,7 @@ _ALIASABLE_TYPES: frozenset[str] = frozenset(
 
 # Regexes for IOC-shaped names we must never merge even if they look similar
 # (CTINexus' "IOC protection": CVE-2023-23397 vs CVE-2023-23392 are distinct).
-_IOC_GUARD = re.compile(
+_IOC_GUARD = compile_pattern(
     r"(?i)\b(?:CVE-\d{4}-\d+|[0-9a-f]{32,64}|(?:\d{1,3}\.){3}\d{1,3})\b"
 )
 

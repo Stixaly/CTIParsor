@@ -36,6 +36,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from api.db import _JOB_STORE_DDL_POSTGRES, DB_PATH  # noqa: E402
+from pipeline.regex_safety import compile_pattern
 
 TABLES: tuple[str, ...] = (
     "jobs",
@@ -50,7 +51,7 @@ TABLES: tuple[str, ...] = (
     "entity_overrides",   # ADR-0052 -- analyst-grown deny/promote lists
 )
 
-_IDENT_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
+_IDENT_RE = compile_pattern(r"^[a-z_][a-z0-9_]*$")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

@@ -8,6 +8,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from pipeline.regex_safety import compile_pattern
+
 
 @dataclass
 class Finding:
@@ -168,7 +171,7 @@ _ORPHAN_SPECS: dict[str, _OrphanSpec] = {
         "no orphan relationships", "orphan job_ids"),
 }
 
-_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_IDENT_RE = compile_pattern(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 def _check_orphan(conn: sqlite3.Connection, name: str) -> Finding:
     """Generic orphan check driven by _ORPHAN_SPECS."""

@@ -189,7 +189,7 @@ _KNOWN_NON_ACTORS: frozenset[str] = frozenset({
 
 # A single leading article, stripped before further checks (CyNER sometimes
 # includes it in the span).
-_LEADING_ARTICLE_RE = compile_pattern(r"^(the|a|an)\s+", re.IGNORECASE)
+_LEADING_ARTICLE_RE = compile_pattern(r"^(the|a|an)\s+", flags=re.IGNORECASE)
 
 # A single trailing period, stripped before further checks.
 _TRAILING_PERIOD_RE = compile_pattern(r"\.$")
@@ -200,7 +200,11 @@ _TRAILING_PERIOD_RE = compile_pattern(r"\.$")
 _FRAGMENT_RE = compile_pattern(r"^[a-z]\s")
 
 # Regex: bare version numbers ("1.2.3") — spaCy and some NER models label these
-_VERSION_RE = re.compile(r"^\d[\d.\-]*\d$")
+_VERSION_RE = compile_pattern(r"^\d[\d.\-]*\d$")
+
+# Pre-compiled patterns for text splitting
+_WHITESPACE_HYPHEN_RE = compile_pattern(r"[\s\-]+")
+_COMMA_SLASH_RE = compile_pattern(r"[,/]")
 
 
 def _normalize_candidate(value: str) -> str:
@@ -237,7 +241,7 @@ def _is_generic_fragment(fragment: str, extra_denylist: frozenset[str] = frozens
     denylisted words: "XAKNET Cyber Army of Russia Reborn" survives despite
     "Russia" being denylisted on its own, because "XAKNET" and "Reborn" are
     not — one denylisted word must not veto an otherwise distinct name."""
-    tokens = re.split(r"[\s\-]+", fragment.lower())
+    tokens = _WHITESPACE_HYPHEN_RE.split(fragment.lower())
     named_tokens = [
         t for t in tokens
         if len(t) >= 3 and t not in _GENERIC_TOKENS and t not in extra_denylist
@@ -250,7 +254,7 @@ def _split_fragments(value: str) -> list[str]:
     sometimes merges several distinct malware names named in a list into one
     span). A value with no such separator is returned unchanged as a
     single-item list."""
-    parts = [p.strip() for p in re.split(r"[,/]", value)]
+    parts = [p.strip() for p in _COMMA_SLASH_RE.split(value)]
     parts = [p for p in parts if p]
     return parts if len(parts) > 1 else [value]
 

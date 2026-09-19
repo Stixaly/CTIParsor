@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import shutil
 import subprocess
 import tarfile
@@ -22,13 +21,14 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
+from pipeline.regex_safety import compile_pattern
 from pipeline.security import is_contained
 from pipeline.web_capture import CaptureError, validate_url
 
 MANIFEST_NAME = ".sync.json"     # written into `path` after a tarball fetch (ADR-0015 §5)
 _USER_AGENT = "cti-to-stix/1.0 (detection corpus sync)"
 _CHUNK = 1 << 20
-_MD5_RE = re.compile(r"^[0-9a-f]{32}$")
+_MD5_RE = compile_pattern(r"^[0-9a-f]{32}$")
 
 
 class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):

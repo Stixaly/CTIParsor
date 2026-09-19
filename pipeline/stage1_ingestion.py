@@ -1,5 +1,4 @@
 import logging
-import re
 import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime, timezone
@@ -11,6 +10,7 @@ from bs4 import BeautifulSoup
 
 # Initialize logging
 from api.logging_config import get_logger
+from pipeline.regex_safety import compile_pattern
 
 logger = get_logger(__name__)
 
@@ -23,7 +23,7 @@ logging.getLogger("pdfminer").setLevel(logging.ERROR)
 # break (single or double \n).  PDFs break long tokens — especially domain names
 # and paths — at column/page boundaries: "git-\n\ntanstack[.]com" must become
 # "git-tanstack[.]com" BEFORE defanging so the full domain is preserved.
-_HYPHEN_LINEBREAK = re.compile(r"([A-Za-z0-9])-[ \t]*\n\n?[ \t]*([A-Za-z0-9])")
+_HYPHEN_LINEBREAK = compile_pattern(r"([A-Za-z0-9])-[ \t]*\n\n?[ \t]*([A-Za-z0-9])")
 
 
 def _join_hyphen_linebreaks(text: str) -> str:
@@ -97,7 +97,7 @@ def ingest(file_path: str) -> str:
 # occasionally missing on non-compliant producers, so it is optional here;
 # everything after the seconds field (timezone offset) is ignored — a
 # reference anchor for resolving relative dates only needs day precision.
-_PDF_DATE_RE = re.compile(r"^(?:D:)?(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?")
+_PDF_DATE_RE = compile_pattern(r"^(?:D:)?(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?")
 
 
 def _plausible_reference_year(dt: datetime) -> bool:

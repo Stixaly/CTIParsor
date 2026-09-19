@@ -8,7 +8,6 @@ secret-storage + loopback-guard work from ADR-0007.
 ADR-0019: Multi-format support (sigma/suricata/yara). Format availability is
 derived from the pipeline detection registry adapters (_ADAPTERS).
 """
-import re
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -19,6 +18,7 @@ from pipeline.detection.builder import rebuild_store
 from pipeline.detection.registry import _ADAPTERS, add_corpus, merged_corpora, remove_corpus
 from pipeline.detection.store import corpus_counts
 from pipeline.detection.sync import sync_corpus
+from pipeline.regex_safety import compile_pattern
 from pipeline.security import is_contained
 from pipeline.web_capture import CaptureError, validate_url
 
@@ -42,7 +42,7 @@ _CORPORA_ROOT = (_ROOT / "corpora").resolve()
 # `fd::`) asks git to run an arbitrary local command as the transport itself.
 # git blocks `ext::` by default today, but that is git's default to change, not
 # a guarantee this app controls — checked here too rather than assumed safe.
-_UNSAFE_REMOTE_RE = re.compile(r"^-|^\w+::")
+_UNSAFE_REMOTE_RE = compile_pattern(r"^-|^\w+::")
 
 #: Formats this project recognises, independent of whether a parser is compiled in.
 #:

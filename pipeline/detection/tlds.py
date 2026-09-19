@@ -22,7 +22,7 @@ Pure and stdlib-only.
 """
 from __future__ import annotations
 
-import re
+from pipeline.regex_safety import compile_pattern
 
 #: Generic TLDs.  Any two-letter label is additionally accepted as a ccTLD, which
 #: covers .ru/.cn/.io/.co without enumerating ~250 entries.
@@ -41,7 +41,7 @@ GTLDS: frozenset[str] = frozenset({
     "onion",
 })
 
-_RE_DOMAIN = re.compile(
+_RE_DOMAIN = compile_pattern(
     r"^[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?"
     r"(\.[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?)+$"
 )

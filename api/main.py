@@ -1,5 +1,4 @@
 import os
-import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -14,6 +13,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # Initialize logging before importing other modules
 from api.logging_config import clear_request_id, get_logger, set_request_id, setup_logging
+from pipeline.regex_safety import compile_pattern
 
 setup_logging()
 logger = get_logger(__name__)
@@ -126,7 +126,7 @@ async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
     )
 
 # Request ID middleware for tracing
-_REQUEST_ID_RE = re.compile(r"^[a-zA-Z0-9\-_]{1,64}$")
+_REQUEST_ID_RE = compile_pattern(r"^[a-zA-Z0-9\-_]{1,64}$")
 
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
