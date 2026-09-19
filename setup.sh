@@ -418,7 +418,7 @@ echo ""
 
 echo -e "  Packages in ${YELLOW}requirements.txt${NC}:"
 echo "    pdfplumber, python-docx, beautifulsoup4, markitdown"
-echo "    pdf2image, pytesseract, iocextract"
+echo "    pdf2image, pytesseract, defusedxml, iocextract"
 echo "    pydantic, stix2, stix2-validator, python-dotenv"
 echo "    anthropic, openai, rapidfuzz"
 echo "    spacy  (optional NER fallback — no model auto-downloaded)"
@@ -988,6 +988,7 @@ checks = [
     ("markitdown",           "markitdown",              True),
     ("pdf2image",            "pdf2image",               True),
     ("pytesseract",          "pytesseract",             True),
+    ("defusedxml",           "defusedxml",              True),
     ("iocextract",           "iocextract",              True),
     ("pydantic",             "pydantic",                True),
     ("stix2",                "stix2",                   True),
