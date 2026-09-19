@@ -10,10 +10,12 @@ Usage:
   python scripts/probe_ttp_recall_caps.py
   python scripts/probe_ttp_recall_caps.py --dir corpora/reports --show-dropped 6
   python scripts/probe_ttp_recall_caps.py --gate-off
+
+Reads DATABASE_URL the same way the API does; pass --no-db to skip the
+database and only load reports from --dir.
 """
 import argparse
 import os
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -21,32 +23,29 @@ _ROOT = Path(__file__).parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from api.db import DB_ERRORS, get_conn, init_db  # noqa: E402
 from pipeline.stage2c_ttp_semantic import (  # noqa: E402
     _MAX_CANDIDATES,
     sentence_gate_stats,
 )
 
 
-def load_reports_from_db(db_path: Path) -> list[tuple[str, str]]:
-    """Load reports from SQLite database."""
+def load_reports_from_db() -> list[tuple[str, str]]:
+    """Load reports from the database (reads DATABASE_URL like the API does)."""
     reports = []
-    if not db_path.exists():
-        print(f"Warning: Database {db_path} not found.", file=sys.stderr)
-        return reports
-
     try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, original_filename, report_text FROM jobs")
-        rows = cursor.fetchall()
-        conn.close()
+        init_db()
+        conn = get_conn()
+        rows = conn.execute(
+            "SELECT id, original_filename, report_text FROM jobs"
+        ).fetchall()
 
         for row in rows:
             job_id, filename, report_text = row
             if isinstance(report_text, str) and report_text:
                 reports.append((filename or f"job_{job_id}", report_text))
 
-    except Exception as e:
+    except DB_ERRORS as e:
         print(f"Error reading database: {e}", file=sys.stderr)
 
     return reports
@@ -130,7 +129,7 @@ def print_table(reports: list[tuple[str, str]], show_dropped: int = 0):
 
 def main():
     parser = argparse.ArgumentParser(description="Probe TTP recall caps")
-    parser.add_argument("--db", type=str, default="cti_stix.db", help="Path to SQLite DB")
+    parser.add_argument("--no-db", action="store_true", help="Skip loading reports from the database")
     parser.add_argument("--dir", type=str, default=None, help="Directory with .txt/.md files")
     parser.add_argument("--show-dropped", type=int, default=0, help="Show N dropped sentences")
     parser.add_argument("--gate-off", action="store_true", help="Run with keyword gate off")
@@ -139,10 +138,9 @@ def main():
 
     reports = []
 
-    # Load from DB
-    if args.db != "none":
-        db_path = Path(args.db)
-        reports.extend(load_reports_from_db(db_path))
+    # Load from DB (reads DATABASE_URL, like the API does)
+    if not args.no_db:
+        reports.extend(load_reports_from_db())
 
     # Load from dir
     if args.dir:

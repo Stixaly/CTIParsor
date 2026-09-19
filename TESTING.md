@@ -40,15 +40,19 @@ provenance/grading integrity.
 
 ## 2. How to run
 
+Docker is the only supported way to run the suite (ADR-0054) — the `dev`
+compose service already has `CTIPARSOR_TEST_DATABASE_URL` pointed at a
+disposable PostgreSQL schema per run, no manual setup needed:
+
 ```bash
 # Fast lane — no API key, deterministic. This is the gate for every push.
-pytest tests/ -q -k "not llm"
+docker compose run --rm dev pytest tests/ -q -k "not llm"
 
 # Full suite (includes transient-error/retry tests marked "llm")
-pytest tests/ -q
+docker compose run --rm dev pytest tests/ -q
 
 # Frontend (type safety only, today)
-cd frontend && npx tsc --noEmit
+docker compose run --rm dev sh -c "cd frontend && npx tsc --noEmit"
 ```
 
 The `mock_llm` fixture patches `pipeline.stage3_llm._call_llm`, so Stage 3 tests
@@ -63,16 +67,16 @@ technique extraction (P/R/F1) against the GPT-4 baseline (F1 = 0.64):
 
 ```bash
 # Regex + semantic + Stage 3c subsumption (offline, no API key)
-python tests/eval_pipeline.py --benchmark ate --stage all --verbose
+docker compose run --rm dev python tests/eval_pipeline.py --benchmark ate --stage all --verbose
 
 # Semantic stage only (needs the embedding cache; tune thresholds here)
-python tests/eval_pipeline.py --benchmark ate --stage 2c --verbose
+docker compose run --rm dev python tests/eval_pipeline.py --benchmark ate --stage 2c --verbose
 
 # The full shipping path: regex + semantic + LLM + Stage 3c normalize (needs API key)
-python tests/eval_pipeline.py --benchmark ate --stage full
+docker compose run --rm dev python tests/eval_pipeline.py --benchmark ate --stage full
 
 # Against the public CTIBench ATE dataset (github.com/xashru/cti-bench)
-python tests/eval_pipeline.py --benchmark ate --stage full --dataset ctibench_ate.json
+docker compose run --rm dev python tests/eval_pipeline.py --benchmark ate --stage full --dataset ctibench_ate.json
 ```
 
 Use `--stage full` to calibrate per-model thresholds (e.g. the SecureBERT-Plus
@@ -87,10 +91,10 @@ it runs `complete_graph` and reports per-engine judged precision, recall, and F1
 
 ```bash
 # Built-in fixtures (offline, no API key)
-python tests/eval_pipeline.py --benchmark rel --verbose
+docker compose run --rm dev python tests/eval_pipeline.py --benchmark rel --verbose
 
 # Against your own annotated reports
-python tests/eval_pipeline.py --benchmark rel --dataset gold_edges.json
+docker compose run --rm dev python tests/eval_pipeline.py --benchmark rel --dataset gold_edges.json
 ```
 
 Dataset format (one object per sample):
@@ -199,15 +203,16 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 | API | `test_settings_api.py` | 5 | corpus listing, overlay management, rebuild ingestion |
 | Persistence | `test_persistence.py` | 7 | backup consistency, migration idempotency, label persistence |
 | Persistence | `test_db_transaction.py` | 6 | transaction rollback, commit, exception handling |
-| Persistence | `test_container_env.py` | 8 | `CTIPARSOR_DB_PATH` / `CTIPARSOR_DB_BACKUP_DIR` overrides (unset, blank, `~`), `get_conn()` creating a missing parent directory, `CTIPARSOR_GIT_REV` fallback when `git` is absent or fails (ADR-0044) |
-| Queue | `test_job_queue.py` | 14 | the queue loop (ADR-0046): atomic claim under 8 threads, lease-based orphan requeue, heartbeat scoping, slot accounting with a fake spawn, `run_pipeline_async` under roles `api` and `all`, `--once`; runs on both engines |
-| Persistence | `test_db_backend.py` | 10 | the PostgreSQL adapter without a server: `?`→`%s` outside literals, `%`→`%%`, the `Row` type, `backend()` dispatch on `DATABASE_URL`, a fake psycopg connection proving `with` never closes and `transaction()` issues plain `BEGIN` (ADR-0045) |
-| Persistence | `test_db_postgres.py` | 10 | skipped unless `CTIPARSOR_TEST_DATABASE_URL` is set: round trips, SSE resume ids, upserts, cascade, the two-store coverage call, the API through `temp_db_client`, and the migration script end to end (ADR-0045) |
+| Persistence | `test_container_env.py` | 4 | `CTIPARSOR_GIT_REV` fallback when `git` is absent or fails (ADR-0044) — `_path_from_env`/`BACKUP_DIR` and `CTIPARSOR_DB_PATH` were removed along with SQLite (ADR-0053) |
+| Queue | `test_job_queue.py` | 14 | the queue loop (ADR-0046): atomic claim under 8 threads, lease-based orphan requeue, heartbeat scoping, slot accounting with a fake spawn, `run_pipeline_async` under roles `api` and `all`, `--once` |
+| Persistence | `test_db_backend.py` | 12 | the PostgreSQL adapter without a server: `?`→`%s` outside literals, `%`→`%%`, the `Row` type, `backend()`/`get_conn()` requiring `DATABASE_URL` (ADR-0053), a fake psycopg connection proving `with` never closes and `transaction()` issues plain `BEGIN` (ADR-0045) |
+| Persistence | `test_db_postgres.py` | 10 | skipped unless `CTIPARSOR_TEST_DATABASE_URL` is set (every other DB-touching test needs it too, via `temp_db` — ADR-0053): round trips, SSE resume ids, upserts, cascade, the coverage call without `jobs_conn`, the API through `temp_db_client`, and both migration scripts end to end (ADR-0045, ADR-0053) |
 
-Set `CTIPARSOR_TEST_DATABASE_URL=postgresql://user:pw@host/db` to run the **whole**
-suite with the job store on PostgreSQL: the `temp_db` fixture then creates a
-disposable schema per test instead of a temp SQLite file. CI does this in the
-`postgres-tests` job against a service container.
+`CTIPARSOR_TEST_DATABASE_URL=postgresql://user:pw@host/db` is **required**,
+not optional (ADR-0053: CTIParsor has no SQLite fallback) — the `temp_db`
+fixture creates a disposable schema per test on that server and fails the
+test run with a clear message if the variable is unset. CI sets it in both
+`fast-tests` and `model-tests`.
 | Shared helpers | `test_shared_helpers.py` | 27 | environment parsing, claim extraction, unescaping logic |
 | Benchmarks | `eval_pipeline.py` | 10 | NER F1, ATE precision, grounding metrics, adversarial tests |
 
@@ -225,10 +230,12 @@ input validation, the transform's correctness on a known fixture, idempotency
 
 ### API routes (integration via `TestClient`)
 HTTP contract per endpoint: success shape, 404/400 boundaries, and validation
-rejections. DB is real SQLite but `init_db` is patched in `api_client`.
+rejections. `init_db` is patched in `api_client` (no real database — for tests
+that do need one, e.g. anything touching `/api/health`, use `temp_db_client`
+instead, which runs against a real disposable PostgreSQL schema).
 
 ### Persistence / worker (integration)
-The write→read round-trip through SQLite (`worker._save_entities` →
+The write→read round-trip through PostgreSQL (`worker._save_entities` →
 `re_run_final_stages`) and schema migrations. **Currently the weakest layer** (see §6).
 
 ### Frontend (type-check only)

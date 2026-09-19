@@ -7,17 +7,16 @@ in ``fair-share`` mode, and prints the per-rule allocation table plus the
 delta between the two modes.
 
 Usage:
-    python scripts/measure_pin_allocation.py [--db cti_stix.db] [--job JOB_ID]
+    python scripts/measure_pin_allocation.py [--job JOB_ID]
 
-The database is opened strictly read-only; neither the database nor the
-filesystem is modified.
+Reads DATABASE_URL the same way the API does; the connection it gets back is
+never written to by this script.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -25,17 +24,14 @@ _ROOT = Path(__file__).parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from api.db import get_conn, init_db  # noqa: E402
+from api.db_backend import DBConnection  # noqa: E402
 from models.schemas import EntityType, RawEntity  # noqa: E402
 from pipeline.stage3_llm import LLMEnrichmentResult  # noqa: E402
 from pipeline.stage4_stix_mapping import build_stix_bundle  # noqa: E402
 
 
-def _open_ro(db_path: str) -> sqlite3.Connection:
-    """Open the SQLite database strictly in read-only mode via a URI."""
-    return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-
-
-def _load_policy(conn: sqlite3.Connection) -> dict:
+def _load_policy(conn: DBConnection) -> dict:
     """Load the relationship policy from the database.
 
     Returns the parsed policy dict, or a safe default if the row is absent
@@ -55,7 +51,7 @@ def _load_policy(conn: sqlite3.Connection) -> dict:
     return {"version": 1, "global": "enforce", "rules": []}
 
 
-def _job_ids(conn: sqlite3.Connection) -> list[str]:
+def _job_ids(conn: DBConnection) -> list[str]:
     """Return job ids that have a stored LLM result, ordered by creation time."""
     rows = conn.execute(
         "SELECT id FROM jobs WHERE llm_result_json IS NOT NULL ORDER BY created_at"
@@ -64,7 +60,7 @@ def _job_ids(conn: sqlite3.Connection) -> list[str]:
 
 
 def _rebuild(
-    conn: sqlite3.Connection, job_id: str, policy: dict
+    conn: DBConnection, job_id: str, policy: dict
 ) -> tuple[object, str] | None:
     """Rebuild the STIX bundle for a job under the given policy.
 
@@ -159,67 +155,63 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Measure pin-edge allocation under sequential vs fair-share."
     )
-    parser.add_argument("--db", default="cti_stix.db",
-                        help="Path to the SQLite database (default: cti_stix.db)")
     parser.add_argument("--job", default=None,
                         help="Restrict measurement to a single job id")
     args = parser.parse_args()
 
-    conn = _open_ro(args.db)
-    try:
-        policy = _load_policy(conn)
-        if args.job is not None:
-            job_ids = [args.job]
-        else:
-            job_ids = _job_ids(conn)
+    init_db()
+    conn = get_conn()
+    policy = _load_policy(conn)
+    if args.job is not None:
+        job_ids = [args.job]
+    else:
+        job_ids = _job_ids(conn)
 
-        for job_id in job_ids:
-            print(f"=== job {job_id} ===")
+    for job_id in job_ids:
+        print(f"=== job {job_id} ===")
 
-            # Sequential mode
-            pol_seq = dict(policy)
-            pol_seq["pin_budget_mode"] = "sequential"
-            result_seq = _rebuild(conn, job_id, pol_seq)
-            if result_seq is None:
-                print(f"  WARNING: could not replay job {job_id}; skipping.")
-                continue
-            bundle_seq, _ = result_seq
-            stats_seq = _pin_stats_of(bundle_seq)
-            if stats_seq is None:
-                print(f"  WARNING: no pin stats for job {job_id} (sequential).")
-                continue
-            _print_table("SEQUENTIAL", stats_seq)
+        # Sequential mode
+        pol_seq = dict(policy)
+        pol_seq["pin_budget_mode"] = "sequential"
+        result_seq = _rebuild(conn, job_id, pol_seq)
+        if result_seq is None:
+            print(f"  WARNING: could not replay job {job_id}; skipping.")
+            continue
+        bundle_seq, _ = result_seq
+        stats_seq = _pin_stats_of(bundle_seq)
+        if stats_seq is None:
+            print(f"  WARNING: no pin stats for job {job_id} (sequential).")
+            continue
+        _print_table("SEQUENTIAL", stats_seq)
 
-            # Fair-share mode
-            pol_fs = dict(policy)
-            pol_fs["pin_budget_mode"] = "fair-share"
-            result_fs = _rebuild(conn, job_id, pol_fs)
-            if result_fs is None:
-                print(f"  WARNING: could not replay job {job_id}; skipping.")
-                continue
-            bundle_fs, _ = result_fs
-            stats_fs = _pin_stats_of(bundle_fs)
-            if stats_fs is None:
-                print(f"  WARNING: no pin stats for job {job_id} (fair-share).")
-                continue
-            _print_table("FAIR-SHARE", stats_fs)
+        # Fair-share mode
+        pol_fs = dict(policy)
+        pol_fs["pin_budget_mode"] = "fair-share"
+        result_fs = _rebuild(conn, job_id, pol_fs)
+        if result_fs is None:
+            print(f"  WARNING: could not replay job {job_id}; skipping.")
+            continue
+        bundle_fs, _ = result_fs
+        stats_fs = _pin_stats_of(bundle_fs)
+        if stats_fs is None:
+            print(f"  WARNING: no pin stats for job {job_id} (fair-share).")
+            continue
+        _print_table("FAIR-SHARE", stats_fs)
 
-            # Delta: count rules that go from 0 emitted to >0 emitted
-            seq_rules = {r.get("rule"): r.get("emitted", 0)
-                         for r in stats_seq.get("rules", [])}
-            fs_rules = {r.get("rule"): r.get("emitted", 0)
-                        for r in stats_fs.get("rules", [])}
-            seq_served = sum(1 for v in seq_rules.values() if v > 0)
-            fs_served = sum(1 for v in fs_rules.values() if v > 0)
-            newly_served = sum(
-                1 for rule, v in fs_rules.items()
-                if v > 0 and seq_rules.get(rule, 0) == 0
-            )
-            print(f"DELTA  regles servies: sequential={seq_served} "
-                  f"fair-share={fs_served} (+{newly_served} sorties du silence)")
-            print()
-    finally:
-        conn.close()
+        # Delta: count rules that go from 0 emitted to >0 emitted
+        seq_rules = {r.get("rule"): r.get("emitted", 0)
+                     for r in stats_seq.get("rules", [])}
+        fs_rules = {r.get("rule"): r.get("emitted", 0)
+                    for r in stats_fs.get("rules", [])}
+        seq_served = sum(1 for v in seq_rules.values() if v > 0)
+        fs_served = sum(1 for v in fs_rules.values() if v > 0)
+        newly_served = sum(
+            1 for rule, v in fs_rules.items()
+            if v > 0 and seq_rules.get(rule, 0) == 0
+        )
+        print(f"DELTA  regles servies: sequential={seq_served} "
+              f"fair-share={fs_served} (+{newly_served} sorties du silence)")
+        print()
 
     return 0
 

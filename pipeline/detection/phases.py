@@ -24,9 +24,11 @@ Deterministic, offline, no ML models.
 
 from __future__ import annotations
 
-import sqlite3
 from functools import lru_cache
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable
+
+if TYPE_CHECKING:  # the rule-store connection type (ADR-0053); annotation only
+    from api.db_backend import DBConnection
 
 from pipeline.detection.store import techniques_for_rules
 from pipeline.mitre_db import get_techniques
@@ -193,7 +195,7 @@ def report_phases(technique_ids: Iterable[str]) -> dict:
     }
 
 
-def covered_phases(conn: sqlite3.Connection, rule_ids: Iterable[str]) -> dict:
+def covered_phases(conn: DBConnection, rule_ids: Iterable[str]) -> dict:
     """
     Row 2 -- where the rules that actually matched an artifact sit.
     """
@@ -273,7 +275,7 @@ def covered_phases(conn: sqlite3.Connection, rule_ids: Iterable[str]) -> dict:
     }
 
 
-def phase_band(conn: sqlite3.Connection, technique_ids: Iterable[str],
+def phase_band(conn: DBConnection, technique_ids: Iterable[str],
                matched_rule_ids: Iterable[str]) -> dict:
     """
     Both rows plus their gap, ready to serialize (ADR-0025).

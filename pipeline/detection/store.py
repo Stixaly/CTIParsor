@@ -1,4 +1,4 @@
-"""SQLite persistence for the detection-rule store (ADR-0006).
+"""PostgreSQL persistence for the detection-rule store (ADR-0006, ADR-0053).
 
 Functions take an explicit connection so they're usable from both the build
 script and the API, and testable against an isolated temp database.
@@ -6,9 +6,10 @@ script and the API, and testable against an isolated temp database.
 from __future__ import annotations
 
 import json
-import sqlite3
 from collections.abc import Iterable
 
+from api.db import DB_ERRORS
+from api.db_backend import DBConnection
 from models.detection import DetectionRule
 
 
@@ -17,7 +18,7 @@ def _native_key(rule_id: str) -> str:
     return rule_id.split(":", 1)[1] if ":" in rule_id else rule_id
 
 
-def replace_corpus_rules(conn: sqlite3.Connection, corpus: str, rules: Iterable[DetectionRule]) -> int:
+def replace_corpus_rules(conn: DBConnection, corpus: str, rules: Iterable[DetectionRule]) -> int:
     """Idempotently replace all rules for one corpus. Returns rules written."""
     old = [r[0] for r in conn.execute(
         "SELECT id FROM detection_rules WHERE corpus=?", (corpus,)
@@ -48,26 +49,37 @@ def replace_corpus_rules(conn: sqlite3.Connection, corpus: str, rules: Iterable[
     # is_canonical defaults to 1; the ADR-0010 dedup pass (dedupe_store) runs after
     # the full rebuild and demotes duplicates. Newly-inserted rows start canonical.
     conn.executemany(
-        "INSERT OR REPLACE INTO detection_rules "
+        "INSERT INTO detection_rules "
         "(id,corpus,native_key,format,title,description,severity,license,"
         "source_ref,content_hash,dedup_key,data_sources,platform,raw,is_canonical) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)",
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1) "
+        "ON CONFLICT (id) DO UPDATE SET "
+        "corpus=EXCLUDED.corpus, native_key=EXCLUDED.native_key, format=EXCLUDED.format, "
+        "title=EXCLUDED.title, description=EXCLUDED.description, severity=EXCLUDED.severity, "
+        "license=EXCLUDED.license, source_ref=EXCLUDED.source_ref, "
+        "content_hash=EXCLUDED.content_hash, dedup_key=EXCLUDED.dedup_key, "
+        "data_sources=EXCLUDED.data_sources, platform=EXCLUDED.platform, raw=EXCLUDED.raw, "
+        "is_canonical=EXCLUDED.is_canonical",
         rule_rows,
     )
     conn.executemany(
-        "INSERT OR REPLACE INTO rule_bytes (rule_id, bytes) VALUES (?,?)",
+        "INSERT INTO rule_bytes (rule_id, bytes) VALUES (?,?) "
+        "ON CONFLICT (rule_id) DO UPDATE SET bytes=EXCLUDED.bytes",
         byte_rows,
     )
     conn.executemany(
-        "INSERT OR IGNORE INTO rule_techniques (rule_id, technique_id) VALUES (?,?)",
+        "INSERT INTO rule_techniques (rule_id, technique_id) VALUES (?,?) "
+        "ON CONFLICT DO NOTHING",
         tech_rows,
     )
     conn.executemany(
-        "INSERT OR IGNORE INTO rule_atoms (rule_id, atom_class, value) VALUES (?,?,?)",
+        "INSERT INTO rule_atoms (rule_id, atom_class, value) VALUES (?,?,?) "
+        "ON CONFLICT DO NOTHING",
         atom_rows,
     )
     conn.executemany(
-        "INSERT OR IGNORE INTO rule_related (rule_id, related_key, rel_type) VALUES (?,?,?)",
+        "INSERT INTO rule_related (rule_id, related_key, rel_type) VALUES (?,?,?) "
+        "ON CONFLICT DO NOTHING",
         related_rows,
     )
     conn.commit()
@@ -76,7 +88,7 @@ def replace_corpus_rules(conn: sqlite3.Connection, corpus: str, rules: Iterable[
 
 # ── Atom index queries (ADR-0014) ────────────────────────────────────────────
 
-def replace_rule_atoms(conn: sqlite3.Connection, rows: Iterable[tuple[str, str, str]]) -> int:
+def replace_rule_atoms(conn: DBConnection, rows: Iterable[tuple[str, str, str]]) -> int:
     """Insert (rule_id, atom_class, value) atoms, replacing each rule's existing set.
 
     Used by the offline backfill (scripts/build_rule_atoms.py), which re-derives
@@ -91,7 +103,8 @@ def replace_rule_atoms(conn: sqlite3.Connection, rows: Iterable[tuple[str, str, 
         [(rid,) for rid in dict.fromkeys(r[0] for r in rows)],
     )
     conn.executemany(
-        "INSERT OR IGNORE INTO rule_atoms (rule_id, atom_class, value) VALUES (?,?,?)",
+        "INSERT INTO rule_atoms (rule_id, atom_class, value) VALUES (?,?,?) "
+        "ON CONFLICT DO NOTHING",
         rows,
     )
     conn.commit()
@@ -99,13 +112,14 @@ def replace_rule_atoms(conn: sqlite3.Connection, rows: Iterable[tuple[str, str, 
 
 
 def atom_hits(
-    conn: sqlite3.Connection, values: Iterable[str], *, chunk: int = 400
+    conn: DBConnection, values: Iterable[str], *, chunk: int = 400
 ) -> list[tuple[str, str, str]]:
     """(rule_id, atom_class, value) for every *canonical* rule holding one of
     these exact atom values.
 
-    Values are chunked: a report can carry hundreds of observables and SQLite
-    caps a statement at 999 bound parameters.
+    Values are chunked: a report can carry hundreds of observables, and a
+    fixed batch size keeps each query's cost predictable regardless of report
+    size.
 
     The canonical filter is an EXISTS, not a JOIN, on purpose: given a JOIN the
     planner drives from `idx_detection_canon` — a near-constant column, so it
@@ -129,7 +143,7 @@ def atom_hits(
 
 
 def atom_document_frequency(
-    conn: sqlite3.Connection, values: Iterable[str], *, chunk: int = 400
+    conn: DBConnection, values: Iterable[str], *, chunk: int = 400
 ) -> dict[str, int]:
     """How many canonical rules hold each value — the `df` of the IDF weight.
 
@@ -155,7 +169,7 @@ def atom_document_frequency(
 
 
 def technique_document_frequency(
-    conn: sqlite3.Connection, technique_ids: Iterable[str], *, chunk: int = 400
+    conn: DBConnection, technique_ids: Iterable[str], *, chunk: int = 400
 ) -> dict[str, int]:
     """How many *canonical* rules carry each technique — the technique's DF (ADR-0018).
 
@@ -167,7 +181,7 @@ def technique_document_frequency(
     Args:
         conn:          open store connection.
         technique_ids: technique ids, already upper-cased by the caller.
-        chunk:         batch size — SQLite caps a statement at 999 bound params.
+        chunk:         batch size, kept fixed so each query's cost stays predictable.
 
     Returns:
         technique_id → count. A technique carried by no canonical rule is absent
@@ -192,7 +206,7 @@ def technique_document_frequency(
 
 
 def technique_counts_for_rules(
-    conn: sqlite3.Connection, rule_ids: Iterable[str], *, chunk: int = 400
+    conn: DBConnection, rule_ids: Iterable[str], *, chunk: int = 400
 ) -> dict[str, int]:
     """How many techniques each rule carries — its breadth (ADR-0018).
 
@@ -223,14 +237,14 @@ def technique_counts_for_rules(
     return out
 
 
-def canonical_rule_count(conn: sqlite3.Connection) -> int:
+def canonical_rule_count(conn: DBConnection) -> int:
     """Total canonical rules in the store — the `N` of the IDF weight."""
     return int(conn.execute(
         "SELECT COUNT(*) FROM detection_rules WHERE is_canonical=1"
     ).fetchone()[0])
 
 
-def atom_index_built(conn: sqlite3.Connection) -> bool:
+def atom_index_built(conn: DBConnection) -> bool:
     """Whether the atom index holds anything (False = proposals degrade to
     technique-only ranking).
 
@@ -240,11 +254,11 @@ def atom_index_built(conn: sqlite3.Connection) -> bool:
     """
     try:
         return conn.execute("SELECT 1 FROM rule_atoms LIMIT 1").fetchone() is not None
-    except sqlite3.OperationalError:
-        return False   # table absent on a database older than the ADR-0014 migration
+    except DB_ERRORS:
+        return False
 
 
-def rule_details(conn: sqlite3.Connection, rule_ids: Iterable[str]) -> dict[str, dict]:
+def rule_details(conn: DBConnection, rule_ids: Iterable[str]) -> dict[str, dict]:
     """Metadata for the given rules, keyed by id (no raw bodies).
 
     One flat query — the proposal ranking touches hundreds of rules and cannot
@@ -276,7 +290,7 @@ def rule_details(conn: sqlite3.Connection, rule_ids: Iterable[str]) -> dict[str,
     return out
 
 
-def techniques_for_rules(conn: sqlite3.Connection, rule_ids: Iterable[str]) -> dict[str, list[str]]:
+def techniques_for_rules(conn: DBConnection, rule_ids: Iterable[str]) -> dict[str, list[str]]:
     """ATT&CK technique tags per rule id, for the given rules."""
     ids = sorted({i for i in rule_ids if i})
     if not ids:
@@ -295,7 +309,7 @@ def techniques_for_rules(conn: sqlite3.Connection, rule_ids: Iterable[str]) -> d
 
 
 def rule_refs_for_techniques(
-    conn: sqlite3.Connection, technique_ids: Iterable[str]
+    conn: DBConnection, technique_ids: Iterable[str]
 ) -> list[tuple[str, str, str, str]]:
     """Return (technique_id, corpus, native_key, format) for every *canonical* rule
     covering the given techniques. Duplicates folded by the ADR-0010 dedup pass are
@@ -326,15 +340,17 @@ def rule_refs_for_techniques(
     return [(r[0], r[1], r[2], r[3] or "sigma") for r in rows]
 
 
-def _also_in_map(conn: sqlite3.Connection, dedup_keys: Iterable[str]) -> dict[str, set[str]]:
+def _also_in_map(conn: DBConnection, dedup_keys: Iterable[str]) -> dict[str, set[str]]:
     """Map dedup_key → the corpora of the non-canonical rules folded into it.
 
-    One sweep for the whole batch, not one query per rule. `INDEXED BY` is
-    required, not decorative: left to itself the planner enters through
-    `idx_detection_canon` and scans ~43k rows per key — measured 871-1227 ms per
-    rule, which is what made the drill-down endpoint take hours on a real report.
-    Driven off `idx_detection_dedup` the same lookup is 0.4 ms, and batched it is
-    0.14 ms per key (ADR-0022).
+    One sweep for the whole batch, not one query per rule. On SQLite this
+    query needed an `INDEXED BY idx_detection_dedup` hint: left to itself the
+    planner entered through `idx_detection_canon` and scanned ~43k rows per
+    key — measured 871-1227 ms per rule (ADR-0022). PostgreSQL has no
+    `INDEXED BY` syntax and its cost-based planner does not share that
+    failure mode (no `idx_detection_canon`-style over-trust of a low-
+    cardinality index) — verified with `EXPLAIN ANALYZE` that it drives off
+    `idx_detection_dedup` on its own for this exact query (ADR-0053).
 
     Returns the raw corpus set per key; the caller subtracts the rule's own
     corpus, since this helper does not know which rule a key was fetched for.
@@ -343,13 +359,12 @@ def _also_in_map(conn: sqlite3.Connection, dedup_keys: Iterable[str]) -> dict[st
     if not keys:
         return {}
     out: dict[str, set[str]] = {}
-    # 400 per statement — SQLite caps a statement at 999 bound parameters, and
-    # this is the batch size `rule_facets_for_job` already uses.
+    # 400 per statement, matching the batch size `rule_facets_for_job` uses.
     for i in range(0, len(keys), 400):
         batch = keys[i:i + 400]
         placeholders = ",".join("?" * len(batch))
         for key, corpus in conn.execute(
-            f"SELECT dedup_key, corpus FROM detection_rules INDEXED BY idx_detection_dedup "
+            f"SELECT dedup_key, corpus FROM detection_rules "
             f"WHERE dedup_key IN ({placeholders}) AND is_canonical=0",
             batch,
         ):
@@ -357,7 +372,7 @@ def _also_in_map(conn: sqlite3.Connection, dedup_keys: Iterable[str]) -> dict[st
     return out
 
 
-def rules_for_technique(conn: sqlite3.Connection, technique_id: str) -> list[dict]:
+def rules_for_technique(conn: DBConnection, technique_id: str) -> list[dict]:
     """Drill-down: canonical rule metadata covering one technique (no raw body).
 
     Each canonical rule carries `also_in` — the other corpora that shipped a
@@ -392,7 +407,7 @@ def rules_for_technique(conn: sqlite3.Connection, technique_id: str) -> list[dic
 
 
 def canonical_rule_ids_for_techniques(
-    conn: sqlite3.Connection, technique_ids: Iterable[str]
+    conn: DBConnection, technique_ids: Iterable[str]
 ) -> list[tuple[str, str]]:
     """(technique_id, rule_id) for every *canonical* rule covering the given
     techniques, in a single indexed query.
@@ -417,7 +432,7 @@ def canonical_rule_ids_for_techniques(
     return [(r[0], r[1]) for r in rows]
 
 
-def canonical_rule_bodies(conn: sqlite3.Connection, rule_ids: Iterable[str]) -> dict[str, dict]:
+def canonical_rule_bodies(conn: DBConnection, rule_ids: Iterable[str]) -> dict[str, dict]:
     """Return raw rule bodies + provenance for the given canonical rule ids.
 
     Keyed by rule id: {corpus, native_key, title, license, source_ref, raw}.
@@ -443,7 +458,7 @@ def canonical_rule_bodies(conn: sqlite3.Connection, rule_ids: Iterable[str]) -> 
 
 
 def lookup_rules(
-    conn: sqlite3.Connection,
+    conn: DBConnection,
     rule_ids: Iterable[str],
     *,
     include_body: bool = False,
@@ -506,7 +521,7 @@ def lookup_rules(
     return results
 
 
-def corpus_counts(conn: sqlite3.Connection) -> list[dict]:
+def corpus_counts(conn: DBConnection) -> list[dict]:
     """Per-corpus rule counts — for the /api/detection-corpora endpoint.
 
     `rules` is the total ingested; `canonical` is what survives dedup (the rest

@@ -8,6 +8,86 @@ sections group by theme rather than strict semver.
 
 ### Added
 
+#### Full-Docker installation: `setup.sh` becomes environment prep only (ADR-0054), 2026-09-19
+
+Docker is now the only supported way to install, develop and run CTIParsor —
+the developer loop and the air-gapped install included, not just deployment.
+`setup.sh` drops from 1298 lines to ~250: it checks Docker/Compose are
+present and the daemon is reachable, writes `.env` and generates
+`CTI_DB_PASSWORD`/`.secrets/db_password`, then prints the next commands — it
+no longer builds, downloads or starts anything itself. Everything that used
+to happen on the host (system packages, the Python venv, Node, NLP models,
+MITRE data, the detection corpora, the frontend build) is now either baked
+into the image or done by `docker compose --profile bootstrap run --rm
+bootstrap`.
+
+Two new `profiles: [dev]` compose services replace the venv-based dev
+workflow: `dev` bind-mounts the repo live over `/app` (the same image as
+`app`/`worker`, `read_only: false`) so `docker compose run --rm dev pytest`
+or `... cli input/report.pdf` need no rebuild on edit — `tests/` is
+`.dockerignore`d from the built image specifically so this bind mount is
+what supplies it; `frontend-dev` bind-mounts `frontend/` into a plain
+`node:24-bookworm-slim` container for Vite HMR at `http://localhost:5173`.
+Re-examined ADR-0037's WSL `/mnt/` bind-mount warning against this new
+bind mount and found it doesn't recur: that measurement was SQLite random
+access (gone since ADR-0053) and Torch/HF `.so` reads from `/opt/venv`,
+which stays baked inside the image and is never bind-mounted.
+
+The air-gapped install (ADR-0040) is redesigned around Docker:
+`scripts/package_offline_docker.sh` builds the image, `docker save`s every
+image the stack needs, runs `bootstrap` locally, and exports the NLP-model/
+corpus cache (a volume tar) and the job/rule store (`pg_dump -Fc`, not a raw
+`pg-data` tar — binary PostgreSQL data directories aren't reliably portable
+even same-version) into one checksummed bundle.
+`scripts/check_offline_bundle_docker.sh` verifies a bundle restores and the
+stack actually works, reusing the existing `scripts/docker_smoke.sh` for
+that check after confirming it never itself invokes `bootstrap`.
+`setup.sh --offline=DIR` loads the images and restores both volumes, leaving
+`docker compose up -d` as the only remaining step. The three old venv-based
+offline scripts (`package_offline.sh`, `check_offline_bundle.sh`,
+`offline_lib.sh`) are removed, not kept dormant.
+
+`README.md`, `CONTRIBUTING.md`, `TESTING.md`, `docs/docker.md`,
+`docs/deployment.md` and `docs/upgrading.md` updated throughout; the
+`Makefile` drops every venv-relative target in favor of `docker compose run
+--rm dev` for anything that touches Python/Node.
+
+#### PostgreSQL only: the detection-rule corpus moves off SQLite, and SQLite is removed entirely (ADR-0053), 2026-09-19
+
+ADR-0045 moved the per-report tables to PostgreSQL and deliberately left the
+detection-rule corpus (87k+ rules) on SQLite, reasoning that FTS5's
+`rule_text` index and the `INDEXED BY idx_detection_dedup` planner hint in
+`pipeline/detection/store.py` "do not port." Revisited: every `MATCH` call
+site (`pipeline/detection/brands.py`) is a quoted-phrase lookup — brand
+tokens, CVE ids — never free-text ranking, so `to_tsvector('simple', ...)` +
+`phraseto_tsquery` gives the same word-boundary, non-substring semantics
+FTS5 was chosen for (ADR-0031's founding case: a substring match on `reat`
+used to fire inside `threat`/`great`). The `INDEXED BY` hint defeated a
+SQLite-specific no-`ANALYZE` planner quirk that PostgreSQL's cost-based
+planner does not share, so it is dropped, not translated.
+
+`DATABASE_URL` is now mandatory everywhere — the API, the worker, and the
+test suite all refuse to start without a reachable PostgreSQL server, with a
+clear message rather than a silent SQLite fallback (`main.py`'s batch CLI is
+unaffected — it touches neither store). `rule_text` becomes a plain table
+with a `GENERATED ALWAYS AS` `tsvector` column instead of an FTS5 virtual
+one; six upserts across `pipeline/detection/store.py` and `dedup.py`
+rewritten to `ON CONFLICT`, the same treatment ADR-0045 already gave the job
+store; a new `scripts/migrate_rules_to_postgres.py` sibling to
+`migrate_jobs_to_postgres.py`; roughly twenty peripheral audit/measurement
+scripts that bypassed `api.db` and opened `cti_stix.db` directly converted,
+catching a few already-latent bugs along the way (a hardcoded `instr()` call
+with no PostgreSQL equivalent, `rowid`-based ordering that doesn't exist on
+PostgreSQL, a `.cursor()` call that skipped placeholder translation).
+
+Validated: 1377 tests green against a live PostgreSQL server, 0 failed,
+including new coverage for the two cases most at risk in the FTS5→tsvector
+swap — the `reat`-inside-`threat`/`great` regression and a hyphenated CVE id
+— both previously untested because a bare fixture table with no real
+`rule_text` made the existing brand/CVE tests pass vacuously. CI's
+`postgres-tests` job, now byte-for-byte redundant with `fast-tests` once
+every job requires PostgreSQL regardless, is retired.
+
 #### Deny and promote lists grown from analyst decisions (ADR-0052), 2026-09-18
 
 ADR-0050 fixed CyNER's generic-language noise with three hand-kept lists in

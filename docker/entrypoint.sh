@@ -64,7 +64,9 @@ EOF
 }
 
 banner() {
-    echo "CTIParsor container - uid $(id -u) - state=$STATE_DIR - cache=$CACHE_DIR - db=${CTIPARSOR_DB_PATH:-?} - rev=${CTIPARSOR_GIT_REV:-unknown}"
+    # DATABASE_URL carries no password (PGPASSWORD delivers that separately,
+    # see compose.yaml), so it is safe to print as-is.
+    echo "CTIParsor container - uid $(id -u) - state=$STATE_DIR - cache=$CACHE_DIR - db=${DATABASE_URL:-UNSET} - rev=${CTIPARSOR_GIT_REV:-unknown}"
 }
 
 warn_env() {

@@ -10,7 +10,6 @@ Exit code 0 when every stage is available, 1 when something needs setup.
 """
 from __future__ import annotations
 
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -18,7 +17,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from api.db import DB_PATH  # noqa: E402
+from api.db import DB_ERRORS, get_rule_conn  # noqa: E402
 
 GREEN = "\033[0;32m"
 YELLOW = "\033[1;33m"
@@ -64,32 +63,22 @@ def chk_browser() -> bool:
 def detection_store() -> tuple[int, int] | None:
     """(rule count, rules with no recorded body size), or None if not built.
 
-    The detection store is optional and lives in the database rather than on
-    disk, so report what is actually in it — "the file exists" would say
-    nothing, and a store that was ingested but never backfilled renders every
-    size as 0 B in the coverage UI without failing anywhere (ADR-0022).
+    The detection store lives in PostgreSQL (ADR-0053), so "reachable and has
+    rows" is what's checked, not "the file exists" — a store that was
+    ingested but never backfilled renders every size as 0 B in the coverage
+    UI without failing anywhere (ADR-0022).
     """
     try:
-        db = Path(DB_PATH).resolve()
-        if not db.exists():
-            return None
-        conn = sqlite3.connect(f"{db.as_uri()}?mode=ro", uri=True)
-        names = {
-            r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        }
-        if "detection_rules" not in names:
-            return None
+        conn = get_rule_conn()
         total = conn.execute("SELECT COUNT(*) FROM detection_rules").fetchone()[0]
         if not total:
             return None
-        if "rule_bytes" not in names:
-            return total, total
         unmeasured = conn.execute(
             "SELECT COUNT(*) FROM detection_rules d WHERE NOT EXISTS "
             "(SELECT 1 FROM rule_bytes b WHERE b.rule_id = d.id)"
         ).fetchone()[0]
         return total, unmeasured
-    except (sqlite3.Error, OSError, ValueError):
+    except (*DB_ERRORS, RuntimeError, OSError, ValueError):
         return None
 
 

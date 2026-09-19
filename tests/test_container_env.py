@@ -1,79 +1,18 @@
 """Tests for container environment variable overrides.
 
-These tests lock down the behavior of the CTIPARSOR_DB_PATH,
-CTIPARSOR_DB_BACKUP_DIR, and CTIPARSOR_GIT_REV environment variables,
-ensuring that the application correctly falls back to defaults when
-variables are unset or blank, and that git revision resolution prefers
-the local repository over environment variables when available.
+These tests lock down CTIPARSOR_GIT_REV resolution: git revision resolution
+prefers the local repository over the environment variable when available,
+falling back to it otherwise. `api.db._path_from_env`/`BACKUP_DIR`, and the
+`CTIPARSOR_DB_PATH` variable it used to also serve, were removed with SQLite
+(ADR-0053) — `CTIPARSOR_DB_BACKUP_DIR` no longer has anything to configure
+now that `backup_db()` just logs a `pg_dump` reminder rather than copying a
+local file.
 """
 from __future__ import annotations
 
 import types
-from pathlib import Path
 
-import api.db as db
 import api.run_config as run_config
-
-
-def test_path_from_env_unset_returns_default(monkeypatch, tmp_path):
-    """CTIPARSOR_DB_PATH unset -> default path."""
-    monkeypatch.delenv("CTIPARSOR_DB_PATH", raising=False)
-    default = Path("default.db")
-    result = db._path_from_env("CTIPARSOR_DB_PATH", default)
-    assert result == default
-
-
-def test_path_from_env_blank_returns_default(monkeypatch, tmp_path):
-    """CTIPARSOR_DB_PATH empty or whitespace -> default path."""
-    default = Path("default.db")
-
-    monkeypatch.setenv("CTIPARSOR_DB_PATH", "")
-    result = db._path_from_env("CTIPARSOR_DB_PATH", default)
-    assert result == default
-
-    monkeypatch.setenv("CTIPARSOR_DB_PATH", "   ")
-    result = db._path_from_env("CTIPARSOR_DB_PATH", default)
-    assert result == default
-
-
-def test_path_from_env_value_is_stripped_and_expanded(monkeypatch, tmp_path):
-    """CTIPARSOR_DB_PATH value is stripped and ~ is expanded."""
-    # Test stripping
-    monkeypatch.setenv("CTIPARSOR_DB_PATH", "  /some/where/x.db  ")
-    result = db._path_from_env("CTIPARSOR_DB_PATH", Path("default.db"))
-    assert result == Path("/some/where/x.db")
-
-    # Test expansion
-    monkeypatch.setenv("CTIPARSOR_DB_PATH", "~/x.db")
-    result = db._path_from_env("CTIPARSOR_DB_PATH", Path("default.db"))
-    assert result == Path("~/x.db").expanduser()
-
-
-def test_get_conn_creates_missing_parent_directory(monkeypatch, tmp_path):
-    """get_conn() creates the parent directory if it doesn't exist."""
-    # Set up a nested path that doesn't exist
-    target_dir = tmp_path / "state" / "nested"
-    target_db = target_dir / "t.db"
-
-    # Monkeypatch DB_PATH
-    monkeypatch.setattr(db, "DB_PATH", target_db)
-
-    # Drop the thread-local connection before
-    conn = getattr(db._local, "conn", None)
-    if conn:
-        conn.close()
-        db._local.conn = None
-
-    # Call get_conn
-    conn = db.get_conn()
-
-    # Verify directory was created
-    assert target_dir.is_dir()
-
-    # Drop the thread-local connection after
-    if conn:
-        conn.close()
-        db._local.conn = None
 
 
 def test_git_rev_prefers_git_when_available(monkeypatch):

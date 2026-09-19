@@ -118,11 +118,28 @@ def role_banner() -> list[str]:
     from api.db import DATABASE_URL, backend
 
     role = queue_loop.role()
-    store = f"{backend()}" + (f" ({DATABASE_URL.split('@')[-1]})" if DATABASE_URL else "")
+    store = f"{backend()} ({DATABASE_URL.split('@')[-1]})"  # type: ignore[union-attr]
     line = f"  role={role}  job store={store}"
     if role == "api":
         line += "  — reports are queued here but run by a separate `worker` process"
     return [line]
+
+
+def _require_database_url() -> None:
+    """Fail fast with a clear message, not a traceback from inside uvicorn.
+
+    ADR-0053: CTIParsor no longer supports SQLite. DATABASE_URL is mandatory
+    for both stores; api.db.backend() would raise the same RuntimeError
+    lazily on first connection, deep inside the app — checking it here, before
+    role_banner() or uvicorn ever start, keeps the failure at the same place
+    every other misconfiguration (bad API_PORT, bad API_WORKERS) is reported.
+    """
+    if not (os.getenv("DATABASE_URL") or "").strip():
+        raise SystemExit(
+            "DATABASE_URL is not set. CTIParsor requires PostgreSQL — "
+            "postgresql://user@host:5432/dbname — see ADR-0053; SQLite is no "
+            "longer supported."
+        )
 
 
 def _worker_warning(workers: int) -> list[str]:
@@ -138,6 +155,7 @@ def _worker_warning(workers: int) -> list[str]:
 def main() -> int:
     """Load `.env`, resolve settings, print warnings, and start uvicorn."""
     load_dotenv()
+    _require_database_url()
     host = _resolve_host()
     port = _resolve_port()
     workers = _resolve_workers()

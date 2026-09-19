@@ -16,31 +16,15 @@ from pipeline.vlm import FigureEdge, FigureRead
 
 
 @pytest.fixture(autouse=True)
-def temp_db(tmp_path, monkeypatch):
-    """Point api.db at a throwaway database, for real, for this test only.
-
-    `get_conn()` caches its connection in thread-local storage, so patching
-    DB_PATH alone does nothing once anything has already connected: the first
-    version of this fixture ran every test against the project's real
-    `cti_stix.db`, which is why `jobs.id` collided on the second insert.  The
-    cached handle has to be dropped on the way in AND on the way out.
-    """
-    import api.db as db
-
-    def _drop_cached_conn() -> None:
-        conn = getattr(db._local, "conn", None)
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception:
-                pass
-            del db._local.conn
-
-    _drop_cached_conn()
-    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
-    db.init_db()
+def _use_temp_db(temp_db):
+    """Apply conftest's disposable-PostgreSQL-schema `temp_db` fixture to
+    every test in this file automatically, without changing each test's
+    signature (ADR-0053 replaced this file's own SQLite-file isolation,
+    which caught the same `jobs.id` collision this fixture used to guard
+    against by dropping the thread-local connection cache on the way in and
+    out — `temp_db` already does both, per-test, on a real disposable
+    schema)."""
     yield
-    _drop_cached_conn()
 
 
 def _read(

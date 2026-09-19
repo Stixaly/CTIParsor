@@ -1312,8 +1312,9 @@ def test_stage2_ttp_no_false_positives_on_clean_text():
 #   python tests/eval_pipeline.py -b grounding --from-db <job_id>
 #   python tests/eval_pipeline.py -b grounding --dataset out.json --verbose
 #
-# --from-db reads cti_stix.db (report_text + emitted entities + relationships),
-# so it scores the hallucination rate on reports you have ALREADY processed —
+# --from-db reads the job store via DATABASE_URL (report_text + emitted
+# entities + relationships), so it scores the hallucination rate on reports
+# you have ALREADY processed —
 # no API key, no re-run.  Filter to LLM-origin entities with --llm-only to
 # isolate the stage that actually hallucinates.
 # ===========================================================================
@@ -1750,22 +1751,21 @@ def load_grounding_dataset(path: Path) -> list[GroundingSample]:
 
 
 def load_grounding_from_db(
-    db_path: Path,
     job_id: str = "all",
     llm_only: bool = False,
 ) -> list[GroundingSample]:
     """
-    Build grounding samples from a real cti_stix.db: report_text + the entities
-    and relationships the pipeline emitted for each job.  Fully offline — scores
-    the hallucination rate on reports you have already processed.
+    Build grounding samples from the real job store (DATABASE_URL, ADR-0053):
+    report_text + the entities and relationships the pipeline emitted for each
+    job.  Fully offline — scores the hallucination rate on reports you have
+    already processed.
 
     llm_only=True restricts entities to source='llm' (the stage that actually
     invents names); relationships are LLM-derived regardless of the flag.
     """
-    import sqlite3
+    from api.db import get_conn
 
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
+    conn = get_conn()
 
     if job_id == "all":
         jobs = conn.execute(
@@ -1800,7 +1800,6 @@ def load_grounding_from_db(
             rel_evidence=rel_ev, description=f"job {job['id'][:8]}",
         ))
 
-    conn.close()
     return samples
 
 
@@ -1847,7 +1846,6 @@ def _stix_display_name(obj: dict) -> str:
 
 
 def load_grounding_from_bundle(
-    db_path: Path,
     job_id: str = "all",
 ) -> tuple[list[GroundingSample], dict[str, int]]:
     """Load grounding samples from the shipped STIX bundle.
@@ -1855,10 +1853,9 @@ def load_grounding_from_bundle(
     Reads ``jobs.bundle_json`` — what is actually delivered — instead of the
     ``relationships`` table, which contains only 3.3% of the edges.
     """
-    import sqlite3
+    from api.db import get_conn
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    conn = get_conn()
 
     query = (
         "SELECT id, report_text, bundle_json FROM jobs "
@@ -1871,7 +1868,6 @@ def load_grounding_from_bundle(
         params.append(job_id)
 
     rows = conn.execute(query, params).fetchall()
-    conn.close()
 
     samples: list[GroundingSample] = []
     census: dict[str, int] = {}
@@ -2369,17 +2365,13 @@ def main() -> None:
     parser.add_argument(
         "--from-db", dest="from_db", default=None,
         help=(
-            "[grounding mode] Score real processed reports from cti_stix.db.\n"
+            "[grounding mode] Score real processed reports from the job store (DATABASE_URL).\n"
             "  'all' for every job, or a specific job_id."
         ),
     )
     parser.add_argument(
         "--llm-only", dest="llm_only", action="store_true",
         help="[grounding mode, --from-db] Restrict entities to source='llm'.",
-    )
-    parser.add_argument(
-        "--db-path", dest="db_path", type=Path, default=Path("cti_stix.db"),
-        help="[grounding mode] Path to the SQLite DB (default: cti_stix.db).",
     )
     parser.add_argument(
         "--from-bundle", dest="from_bundle", default=None,
@@ -2470,8 +2462,7 @@ def main() -> None:
     if args.benchmark == "grounding":
         if args.from_bundle:
             print(f"Loading grounding samples from bundle_json (job={args.from_bundle})")
-            samples, census = load_grounding_from_bundle(
-                args.db_path, args.from_bundle)
+            samples, census = load_grounding_from_bundle(args.from_bundle)
             print_label_census(census)
             if not samples:
                 print()
@@ -2492,12 +2483,9 @@ def main() -> None:
             )
             return
         if args.from_db:
-            if not args.db_path.exists():
-                print(f"  ERROR: DB not found: {args.db_path}")
-                return
-            print(f"Loading grounding samples from {args.db_path} (job={args.from_db}, "
+            print(f"Loading grounding samples from DATABASE_URL (job={args.from_db}, "
                   f"llm_only={args.llm_only})")
-            samples = load_grounding_from_db(args.db_path, args.from_db, args.llm_only)
+            samples = load_grounding_from_db(args.from_db, args.llm_only)
         elif args.dataset:
             print(f"Loading emitted pipeline output: {args.dataset}")
             samples = load_grounding_dataset(args.dataset)

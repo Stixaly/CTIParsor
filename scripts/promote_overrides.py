@@ -2,7 +2,7 @@
 """Propose — and with --apply, store — deny / promote rules grown from the
 analysts' accept/reject decisions (ADR-0052).
 
-Reads the job store (`DATABASE_URL` or `CTIPARSOR_DB_PATH`, as the API does)
+Reads the job store (`DATABASE_URL`, as the API does)
 and lists every (value, entity_type) the analysts keep rejecting (a `deny`
 candidate: the stages stop proposing it) or keep accepting / typed in by
 hand while no gazetteer knows it (a `promote` candidate: the Stage 2b

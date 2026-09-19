@@ -1,7 +1,7 @@
 """
 READ-ONLY replay harness for ADR-0013 Stage 4b graph completion.
 
-This script opens the SQLite database in read-only mode and replays the
+This script reads DATABASE_URL the same way the API does, and replays the
 graph-completion inference engines over STIX bundles that were already
 stored for real jobs.  The reconstructed graph is approximate: it is
 rebuilt from the entities and relationships tables, not from the
@@ -9,13 +9,13 @@ original STIX bundle.  The script never writes to the database.
 """
 
 import argparse
-import sqlite3
 import sys
 from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from api.db import get_conn, init_db
 from pipeline.stage4b_graph_completion import complete_graph
 
 _TYPE_MAP = {
@@ -213,16 +213,18 @@ def added_edges(before: list, after: list) -> list[dict]:
 def main() -> int:
     """Replay graph completion over stored jobs and report added edges."""
     parser = argparse.ArgumentParser(description="Read-only replay harness for ADR-0013 Stage 4b graph completion.")
-    parser.add_argument("--db", default="cti_stix.db", help="Path to SQLite database")
     parser.add_argument("--limit", default=6, type=int, help="Number of jobs to replay")
     parser.add_argument("--show", default=10, type=int, help="Added edges to print per job")
     args = parser.parse_args()
 
-    conn = sqlite3.connect(f"file:{args.db}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
+    init_db()
+    conn = get_conn()
 
+    # `rowid` was SQLite's implicit insertion-order column; `jobs.id` is not
+    # an autoincrement surrogate, so `created_at` is the closest equivalent
+    # for "most recently created jobs first".
     cur = conn.execute(
-        "SELECT id, original_filename FROM jobs ORDER BY rowid DESC LIMIT ?",
+        "SELECT id, original_filename FROM jobs ORDER BY created_at DESC LIMIT ?",
         (args.limit,),
     )
     jobs = cur.fetchall()
@@ -314,7 +316,6 @@ def main() -> int:
     else:
         print("  (none)")
 
-    conn.close()
     return 0
 
 

@@ -5,17 +5,20 @@ ingest logic lives in one place.
 """
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pipeline.detection.dedup import dedupe_store
 from pipeline.detection.registry import _ADAPTERS, corpus_root, load_corpora
 from pipeline.detection.store import corpus_counts, replace_corpus_rules
 
+if TYPE_CHECKING:  # the rule-store connection type (ADR-0053); annotation only
+    from api.db_backend import DBConnection
+
 
 def rebuild_store(
-    conn: sqlite3.Connection,
+    conn: DBConnection,
     config_path: str | Path,
     on_progress: Callable[[str, int | None], None] | None = None,
 ) -> dict:

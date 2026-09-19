@@ -19,15 +19,14 @@ def _fresh_cache():
     thresholds.reload()
 
 
-def test_default_when_there_is_no_store_and_none_is_created(monkeypatch, tmp_path):
-    missing = tmp_path / "absent" / "cti_stix.db"
-    monkeypatch.setattr(db, "DB_PATH", missing)
+def test_default_when_there_is_no_store_and_none_is_created(monkeypatch):
+    """ADR-0053: no DATABASE_URL means get_conn() raises, which _load_all's
+    broad except already treats as the normal CLI case (no store configured)."""
     monkeypatch.setattr(db, "DATABASE_URL", None)
     db.reset_connections()
 
     assert thresholds.get_threshold("gliner", "malware", 0.40) == 0.40
     assert thresholds.overrides_for("gliner") == {}
-    assert not missing.exists(), "a CLI run asking for a cutoff must not create a job store"
 
 
 def test_default_when_the_table_is_missing(temp_db):

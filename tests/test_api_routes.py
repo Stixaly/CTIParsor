@@ -47,12 +47,19 @@ class TestRequestIdIsolation:
 # ── Health endpoint ────────────────────────────────────────────────────────────
 
 class TestHealthEndpoint:
-    def test_health_returns_200(self, api_client):
-        response = api_client.get("/api/health")
+    """Needs a real store (temp_db_client), not the bare api_client: the
+    health check now genuinely tries get_conn() (ADR-0053 removed the
+    SQLite fallback that made this trivially reachable without one), and
+    correctly reports 503 "degraded" rather than "ok" when there is none —
+    which is exactly what api_client's mocked-out DB would exercise instead
+    of the happy path these two tests are for."""
+
+    def test_health_returns_200(self, temp_db_client):
+        response = temp_db_client.get("/api/health")
         assert response.status_code == 200
 
-    def test_health_returns_ok_status(self, api_client):
-        response = api_client.get("/api/health")
+    def test_health_returns_ok_status(self, temp_db_client):
+        response = temp_db_client.get("/api/health")
         assert response.json() == {"status": "ok"}
 
 

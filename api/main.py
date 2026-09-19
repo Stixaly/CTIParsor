@@ -1,4 +1,3 @@
-import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -17,7 +16,7 @@ from pipeline.regex_safety import compile_pattern
 setup_logging()
 logger = get_logger(__name__)
 
-from api.db import backend, get_conn, init_db
+from api.db import get_conn, init_db
 
 # Rate limiter must be defined before routes are imported because
 # api/routes/upload.py does `from api.main import limiter` at module level.
@@ -59,34 +58,16 @@ async def lifespan(app: FastAPI):
     from api import queue_loop
     _role = queue_loop.role()
     if _role == "all":
-        # Unconditional is only safe when this is the ONE process that could
-        # have left a job `processing` -- true for the historical single
-        # host-install process on SQLite, false the moment either condition
-        # below fails:
-        #   - API_WORKERS>1 (run_api.py) spawns N sibling uvicorn processes
-        #     that each run this same startup path; one restarting must not
-        #     steal jobs a still-running sibling owns.
-        #   - the job store is PostgreSQL (ADR-0045): that backend exists
-        #     specifically so multiple independent `role=all` replicas can
-        #     share one DATABASE_URL, each with its own API_WORKERS<=1 -- the
-        #     env var describes THIS process's own workers, not how many
-        #     other replicas point at the same database, so it cannot rule
-        #     out a sibling on its own. SQLite has no such topology: the file
-        #     is local to one host, so "no other process" only needs the
-        #     single-host check.
-        # Either way, it falls back to the lease-based requeue (only touches a
-        # row whose heartbeat has actually expired) -- the same requeue a
-        # `worker`-role container's own startup would use. An unparseable
-        # API_WORKERS is treated as "more than one" (the safer assumption)
-        # rather than raising here, since run_api.py is what validates it and
-        # exits on a bad value before this ever runs.
-        _workers_raw = (os.getenv("API_WORKERS") or "1").strip()
-        try:
-            _single_process = int(_workers_raw) <= 1
-        except ValueError:
-            _single_process = False
-        _unconditional = _single_process and backend() == "sqlite"
-        queue_loop.requeue_orphans(unconditional=_unconditional)
+        # Unconditional requeue (touch every `processing` row, not just ones
+        # whose lease expired) would only be safe if this were provably the
+        # ONE process that could have left a job `processing`. PostgreSQL
+        # (ADR-0045, ADR-0053) exists specifically so multiple independent
+        # `role=all` replicas can share one DATABASE_URL -- this process can
+        # never rule out a sibling still running a job on its own, so it
+        # always falls back to the lease-based requeue (only touches a row
+        # whose heartbeat has actually expired), the same requeue a
+        # `worker`-role container's own startup uses.
+        queue_loop.requeue_orphans()
         queue_loop.start_embedded()
     else:
         if _role == "worker":

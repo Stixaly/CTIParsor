@@ -1,10 +1,10 @@
 # Deployment architecture
 
-How CTIParsor runs after ADR-0044, ADR-0045 and ADR-0046 (September 2026):
-what the processes are, where the data lives, how a report travels from
-upload to bundle, and which of it applies to a plain host install versus the
-container stack. The three ADRs hold the measurements and the alternatives
-that were rejected; this page is the map.
+How CTIParsor runs after ADR-0044, ADR-0045, ADR-0046 and ADR-0053
+(September 2026): what the processes are, where the data lives, how a report
+travels from upload to bundle, and which of it applies to a plain host
+install versus the container stack. Those ADRs hold the measurements and the
+alternatives that were rejected; this page is the map.
 
 ## 1. The two shapes it runs in
 
@@ -14,14 +14,18 @@ code path that exists only for containers.
 | | Host install (`bash setup.sh`, `python run_api.py`) | Container stack (`docker compose up -d`) |
 |---|---|---|
 | Processes | one: the API, with the pipeline loop in a background thread | four always on: `app`, `worker` (×N), `postgres`, plus optional `proxy` and `ollama` |
-| Job store (reports) | `cti_stix.db` | PostgreSQL 17, service `postgres` |
-| Rule store (detection corpus) | `cti_stix.db` | `cti_stix.db` on the `cti-state` volume |
+| Job store (reports) | PostgreSQL (`DATABASE_URL`, mandatory — ADR-0053) | PostgreSQL 17, service `postgres` |
+| Rule store (detection corpus) | the same PostgreSQL database (ADR-0053) | the same `postgres` service |
 | Who runs the pipeline | the API process (`CTIPARSOR_ROLE=all`) | the `worker` containers (`CTIPARSOR_ROLE=worker`); the API only queues (`api`) |
 | Exposure | loopback by default (`API_HOST`) | loopback by default (`CTI_BIND`); `proxy` profile for TLS + password |
 
-Everything in the right column is opt-in on the left: a host install may set
-`DATABASE_URL` and run `python -m api.queue_loop` as a service, and gets the
-same split without containers.
+The container stack's four-process split is opt-in on the left: a host
+install may run `python -m api.queue_loop` as a service and get the same
+split without containers. `DATABASE_URL` itself is not opt-in on either side
+any more — CTIParsor has no SQLite fallback (ADR-0053), so a host install
+needs a reachable PostgreSQL server just as the container stack does; the
+lightest way to get one for a single-analyst host install is `docker compose
+up -d postgres` from this repo without starting anything else.
 
 ## 2. The pieces
 
@@ -34,7 +38,7 @@ flowchart LR
         bootstrap["bootstrap (profile)\none-shot: models, corpora, rule store"]
     end
     subgraph backend [network backend - internal, no route out]
-        pg[("postgres\njob store")]
+        pg[("postgres\njob store + rule store")]
     end
     subgraph llm [network llm]
         ollama["ollama (profile)\nlocal LLM :11434"]
@@ -48,7 +52,7 @@ flowchart LR
     worker --> ollama
     worker -->|LLM APIs, HuggingFace| internet((internet))
     app -->|CVE lookups, URL capture| internet
-    state[("volume cti-state\nrule store, uploads, output, backups")]
+    state[("volume cti-state\nuploads, output, backups")]
     cache[("volume cti-cache\nHF models, corpora")]
     pgdata[("volume pg-data")]
     app --- state
@@ -63,22 +67,27 @@ flowchart LR
 |---|---|---|---|
 | `app` | `ctiparsor` (this repo's `Dockerfile`) | serves the API and the built web UI on one port; accepts uploads, pasted text and URLs; queues them; serves progress (SSE), review, coverage, export; runs the corpus rebuild from the Settings page | nothing persistent of its own |
 | `worker` | same image, `command: worker` | claims queued reports, runs each in an isolated subprocess (models loaded there), writes entities, relationships, the bundle and progress events | its lease on the jobs it runs |
-| `postgres` | `postgres:17-alpine` | the **job store**: `jobs`, `entities`, `relationships`, `progress_events`, `relationship_policy`, `report_figures`, `figure_reads`, `cve_cache` | volume `pg-data` |
-| `cti-state` volume | — | the **rule store** (`cti_stix.db`: 87 k detection rules, FTS5), `uploads/`, `output/`, `backups/`, the private corpus overlay | back it up together with `pg-data` |
+| `postgres` | `postgres:17-alpine` | **both stores**: the job store (`jobs`, `entities`, `relationships`, `progress_events`, `relationship_policy`, `report_figures`, `figure_reads`, `cve_cache`) and, since ADR-0053, the detection-rule corpus (`detection_rules`, `rule_bytes`, `rule_techniques`, `rule_atoms`, `rule_related`, `rule_text`) | volume `pg-data` |
+| `cti-state` volume | — | `uploads/`, `output/`, `backups/`, the private corpus overlay — no database file lives here any more | back it up alongside `pg-data` |
 | `cti-cache` volume | — | 2.6 GB of HuggingFace models, 0.7 GB of corpus clones | rebuildable with `bootstrap` |
 | `proxy` (profile) | `nginxinc/nginx-unprivileged` | TLS termination and HTTP basic auth, the only thing meant to be published on a network | certs and htpasswd you provide |
 | `ollama` (profile) | `ollama/ollama` | a local LLM for Stage 3 and Stage 1f, reachable only from `app` and `worker` | volume `ollama-models` |
 | `bootstrap` (profile) | same image, `command: bootstrap` | one shot: creates the schema, downloads the models, clones the corpora, builds the rule store | — |
 
-**Why two stores.** The per-report tables are ordinary relational data and
-moved to PostgreSQL so that several processes can write them, a real
-database can be backed up and monitored, and the API can be stateless. The
-detection corpus is an FTS5 full-text index with planner hints that
-PostgreSQL has no equivalent for; it is batch-built, read-mostly, and stays a
-SQLite file (ADR-0045). In code this is `api.db.get_conn()` for the job store
-and `api.db.get_rule_conn()` for the rule store; without `DATABASE_URL` both
-return the same connection, which is what keeps the host install and the
-test suite on one file.
+**Why one store now.** ADR-0045 moved the per-report tables to PostgreSQL so
+several processes could write them and the API could be stateless, while
+keeping the detection corpus on SQLite: it was an FTS5 full-text index with
+planner hints PostgreSQL had no equivalent for. ADR-0053 revisited that:
+FTS5's word-boundary matching has a direct `tsvector`/`GIN` equivalent (the
+corpus's `MATCH` queries are all quoted-phrase lookups, not free-text
+ranking), and the one SQLite planner hint the corpus code relied on was
+defeating a SQLite-specific query-planner gap that PostgreSQL's cost-based
+planner does not share. **CTIParsor no longer supports SQLite at all** —
+`DATABASE_URL` is mandatory, for the host install, the container stack and
+the test suite alike. In code this is `api.db.get_conn()` for the job store
+and `api.db.get_rule_conn()` for the rule store; both resolve to the same
+PostgreSQL connection today, kept as two accessors in case the corpus ever
+needs a database of its own.
 
 ## 3. The life of a report
 
@@ -86,7 +95,7 @@ test suite on one file.
 sequenceDiagram
     participant U as analyst / UI
     participant A as app (api)
-    participant DB as postgres (jobs)
+    participant DB as postgres (jobs + rules)
     participant W as worker
     participant P as pipeline subprocess
     U->>A: POST /api/upload
@@ -105,8 +114,7 @@ sequenceDiagram
     P->>DB: bundle_json, status=for_review
     P-->>W: exit 0 (watcher frees the slot)
     U->>A: review, finalize, coverage, export
-    A->>DB: read jobs / entities
-    A->>A: read the rule store on cti-state
+    A->>DB: read jobs / entities / detection_rules
 ```
 
 Three properties fall out of this:
@@ -134,7 +142,7 @@ flags, the database password and the resource limits live together.
 
 | Variable | Host install | Container stack |
 |---|---|---|
-| `DATABASE_URL`, `PGPASSWORD` | optional, points the job store at PostgreSQL | set by compose to the `postgres` service |
+| `DATABASE_URL`, `PGPASSWORD` | **required** (ADR-0053: no SQLite fallback) — points both stores at PostgreSQL | set by compose to the `postgres` service |
 | `CTI_DB_PASSWORD`, `CTI_DB_USER`, `CTI_DB_NAME` | unused | required password; user and database created on first start |
 | `CTIPARSOR_ROLE` | `all` (default), or `api` / `worker` for a split install | set by compose per service |
 | `WORKER_MAX_CONCURRENT` | reports in flight in the API process | reports in flight **per worker container** |
@@ -174,15 +182,16 @@ Measured on this codebase; adjust in `.env`.
 |---|---|---|---|---|
 | `app` | 2 | 3 GB | 512 MB | 130 MB idle; a Settings-page corpus rebuild peaked at 2.2 GB |
 | `worker` | 4 | 6 GB | 4 GB | 4.4 GB per report plus the supervisor; add 4.4 GB per extra `WORKER_MAX_CONCURRENT` |
-| `postgres` | 1 | 512 MB | 128 MB | a few MB per report |
+| `postgres` | 1 | 512 MB | 128 MB | a few MB per report, plus the detection-rule corpus since ADR-0053 (87 k rows, a GIN index per rule for `tsvector` search) — re-measure `shared_buffers`/the memory limit against the real corpus size rather than assuming the pre-ADR-0053 figure still holds |
 | `proxy` | 0.5 | 128 MB | — | nginx |
 | `bootstrap` | 2 | 4 GB | — | downloads plus the rule parse |
 | `ollama` | 8 | 12 GB | — | a 7B model in Q4 on CPU; 27B needs ~18 GB and a GPU |
 
 Throughput scales by adding workers (`docker compose up -d --scale
 worker=2`), each with the limit above, on one host; several hosts would need
-the uploads and the rule store on shared or object storage, which is not
-done.
+the uploads on shared or object storage, which is not done — the rule store
+no longer needs it, ADR-0053 already centralised it in PostgreSQL, reachable
+from any host with `DATABASE_URL`.
 
 ## 7. Decisions, and what was rejected
 
@@ -195,6 +204,7 @@ done.
 | Chromium stays in the app image, sandboxed by seccomp | 0044 | a browser container (deferred; the next hardening step) |
 | publish the image to GHCR, gated on the smoke test | 0047 | Docker Hub (a second account and secret for no new capability); publishing every PR |
 | one read-only status endpoint for backlog and worker liveness | 0048 | a Prometheus exporter (this codebase's first metrics dependency, for a question one endpoint answers); a frontend dashboard panel (deferred, not rejected) |
+| the detection-rule corpus moves onto PostgreSQL too (`tsvector`/GIN replaces FTS5, the `INDEXED BY` hint is dropped, not translated); SQLite removed entirely, `DATABASE_URL` mandatory | 0053 | keeping SQLite as a fallback (rejected: the whole point was one engine, not a second dialect path nobody exercises); PostgreSQL-only for the corpus while keeping a SQLite job-store fallback (inconsistent — the corpus was the harder half to move) |
 
 ## 8. Operating it: image delivery and backlog visibility
 
@@ -229,4 +239,4 @@ names as the missing piece.
 - [SECURITY.md](../SECURITY.md) — threat model
 - ADRs [0044](adr/0044-container-images.md), [0045](adr/0045-postgresql-for-the-job-store.md),
   [0046](adr/0046-worker-container.md), [0047](adr/0047-publish-image-to-ghcr.md),
-  [0048](adr/0048-queue-status-endpoint.md)
+  [0048](adr/0048-queue-status-endpoint.md), [0053](adr/0053-postgresql-only-sqlite-removed.md)

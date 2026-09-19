@@ -40,8 +40,6 @@ def _load_all() -> dict[tuple[str, str], float]:
     try:
         import api.db as db
 
-        if db.backend() == "sqlite" and not db.DB_PATH.exists():
-            return {}
         conn = db.get_conn()
         rows = conn.execute(
             "SELECT source, entity_type, threshold FROM model_thresholds"

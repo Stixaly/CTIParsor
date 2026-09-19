@@ -1,7 +1,7 @@
 """Mesure de la pertinence des règles de détection sur les rapports réels.
 
-Ce script compare, pour chaque rapport de la base `cti_stix.db`, les règles
-proposées par la couverture ATT&CK (jointure par tag) aux règles réellement
+Ce script compare, pour chaque rapport de la base (DATABASE_URL, comme
+l'API), les règles proposées par la couverture ATT&CK (jointure par tag) aux règles réellement
 adossées à une preuve technique du rapport. Il évalue également l'impact
 d'un élargissement de la table `MATCHABLE` pour inclure les classes
 `strlit` et `pipe`, actuellement indexées mais jamais interrogées.
@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import argparse
 import os
-import sqlite3
 import sys
 from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from api.db import get_conn, init_db
+from api.db_backend import DBConnection
 from pipeline.detection.coverage import job_technique_ids
 from pipeline.detection.observables import Observable, observables_from_entities
 from pipeline.detection.relevance import MATCHABLE, _parent, job_observable_rows
@@ -36,7 +37,7 @@ WIDENED_EXTRA: dict[str, frozenset[str]] = {
 }
 
 
-def _technique_rule_ids(conn: sqlite3.Connection, job_id: str) -> set[str]:
+def _technique_rule_ids(conn: DBConnection, job_id: str) -> set[str]:
     """Récupère les ids des règles canoniques jointes par tag ATT&CK."""
     technique_ids = job_technique_ids(conn, job_id)
     if not technique_ids:
@@ -51,7 +52,7 @@ def _technique_rule_ids(conn: sqlite3.Connection, job_id: str) -> set[str]:
 
 
 def _evidence_by_rule(
-    conn: sqlite3.Connection,
+    conn: DBConnection,
     observables: list[Observable],
     matchable: dict[str, frozenset[str]],
 ) -> dict[str, set[str]]:
@@ -75,7 +76,7 @@ def _evidence_by_rule(
     return result
 
 
-def _rule_formats(conn: sqlite3.Connection, rule_ids: set[str]) -> dict[str, str]:
+def _rule_formats(conn: DBConnection, rule_ids: set[str]) -> dict[str, str]:
     """Récupère le format de chaque règle par lots de 400 ids."""
     if not rule_ids:
         return {}
@@ -106,33 +107,26 @@ def _widened(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Mesure de pertinence des règles")
-    parser.add_argument("--db", default="cti_stix.db")
     parser.add_argument("--job", action="append", default=None)
     args = parser.parse_args()
 
-    if not os.path.exists(args.db):
-        print(args.db, file=sys.stderr)
-        sys.exit(1)
+    init_db()
+    conn = get_conn()
 
-    try:
-        conn = sqlite3.connect(f"file:{args.db}?mode=ro", uri=True)
-    except sqlite3.OperationalError:
-        conn = sqlite3.connect(args.db)
-
-    # This tool assumes the historical single-file layout, where the rule
-    # store and the job store are the same SQLite file. Since ADR-0045 that is
-    # only true when DATABASE_URL is unset -- a Postgres-backed deployment's
-    # rule-store SQLite file has no `jobs`/`entities` tables at all, which
-    # otherwise fails confusingly deep inside job_technique_ids/job_observable_rows.
+    # This tool assumes the job store and the rule store are the same
+    # database (ADR-0053: both live on DATABASE_URL). A database that only
+    # ever had the rule corpus loaded into it -- and never had init_db() run
+    # against it -- would have no `jobs`/`entities` tables, which otherwise
+    # fails confusingly deep inside job_technique_ids/job_observable_rows.
     _have = {r[0] for r in conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('jobs','entities')"
-    )}
+        "SELECT table_name FROM information_schema.tables "
+        "WHERE table_schema = current_schema() AND table_name IN ('jobs','entities')"
+    ).fetchall()}
     if {"jobs", "entities"} - _have:
         print(
-            f"ERROR: {args.db} has no jobs/entities tables -- if this deployment's "
-            "job store is now PostgreSQL (ADR-0045, DATABASE_URL set), this "
-            "SQLite-only tool cannot read it. Point --db at a SQLite snapshot "
-            "that still has the job tables.",
+            "ERROR: the database has no jobs/entities tables -- this tool "
+            "reads DATABASE_URL like the API does; run the API once (or call "
+            "api.db.init_db()) so the job-store schema exists.",
             file=sys.stderr,
         )
         sys.exit(2)
@@ -264,8 +258,6 @@ def main() -> None:
             title = all_rule_titles.get(rid, "")[:52]
             top3 = ", ".join(sorted(displays)[:3])
             print(f"{n} {fmt} {corpus} {title} :: {top3}")
-
-    conn.close()
 
 
 if __name__ == "__main__":

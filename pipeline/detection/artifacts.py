@@ -14,7 +14,6 @@ Deterministic and offline: no models, no network, no randomness.
 
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -165,7 +164,7 @@ def vocabulary_threshold(total_rules: int) -> int:
 
 
 def _exact_evidence(
-    conn: sqlite3.Connection,
+    conn: DBConnection,
     observables: Iterable[Observable],
 ) -> dict[tuple[str, str], list[tuple[str, str]]]:
     """
@@ -214,7 +213,7 @@ def _exact_evidence(
 
 
 def _title_evidence(
-    conn: sqlite3.Connection,
+    conn: DBConnection,
     observables: Iterable[Observable],
 ) -> dict[tuple[str, str], list[ArtifactEvidence]]:
     """
@@ -355,7 +354,7 @@ def _score_from(corpora: list[str], has_weak: bool) -> int:
 
 
 def score_artifacts(
-    conn: sqlite3.Connection, observables: Iterable[Observable]
+    conn: DBConnection, observables: Iterable[Observable]
 ) -> list[Artifact]:
     """Score every report observable on the evidence that a rule fires on it."""
     # 1. Deduplicate observables on (obs_class, value), keeping the FIRST seen
@@ -574,7 +573,7 @@ def _summarize(
 
 
 def coverage_for_job(
-    conn: sqlite3.Connection, job_id: str, *, jobs_conn: DBConnection | None = None
+    conn: DBConnection, job_id: str, *, jobs_conn: DBConnection | None = None
 ) -> dict:
     """Evidence-keyed detection coverage for one report (ADR-0025).
 
@@ -591,7 +590,7 @@ def coverage_for_job(
 
 
 def coverage_with_phases(
-    conn: sqlite3.Connection, job_id: str, *, jobs_conn: DBConnection | None = None
+    conn: DBConnection, job_id: str, *, jobs_conn: DBConnection | None = None
 ) -> dict:
     """Evidence-keyed coverage plus the ATT&CK phase band (ADR-0025).
 

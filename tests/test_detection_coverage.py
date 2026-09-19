@@ -2,6 +2,7 @@
 import io
 import json
 import zipfile
+from contextlib import contextmanager
 from uuid import uuid4
 
 from models.detection import DetectionRule, Severity
@@ -18,6 +19,28 @@ from pipeline.detection.store import (
     rule_refs_for_techniques,
     rules_for_technique,
 )
+
+
+@contextmanager
+def _trace_statements(conn):
+    """Record every SQL statement `conn.execute()` runs for the duration of
+    the block. ADR-0053: sqlite3.Connection.set_trace_callback has no
+    PostgreSQL equivalent, so this wraps the connection's own `execute`
+    instead — engine-agnostic, and it captures exactly the query-count
+    contract these tests assert on (one N+1 regression check, one index-
+    selection check), not SQLite-specific tracing."""
+    stmts: list[str] = []
+    original = conn.execute
+
+    def _recording_execute(sql, *args, **kwargs):
+        stmts.append(sql)
+        return original(sql, *args, **kwargs)
+
+    conn.execute = _recording_execute
+    try:
+        yield stmts
+    finally:
+        del conn.execute  # restore the bound method from the class
 
 # ── Scoring policy (pure) ─────────────────────────────────────────────────────
 
@@ -357,24 +380,29 @@ def test_rules_for_technique_does_not_query_per_rule(temp_db):
         for i in range(30)
     ])
 
-    stmts = []
-    rconn.set_trace_callback(stmts.append)
-    out = rules_for_technique(rconn, "T1059")
-    rconn.set_trace_callback(None)
+    with _trace_statements(rconn) as stmts:
+        out = rules_for_technique(rconn, "T1059")
 
     assert len(out) == 30
     assert len(stmts) <= 3
 
 
 def test_also_in_sweep_pins_the_dedup_index(temp_db):
-    """The sweep must pin `idx_detection_dedup` via INDEXED BY.
+    """The sweep must be one batched statement, not one query per rule, and
+    the outer query must avoid `idx_detection_canon`.
 
-    Asserting on the *executed statement* rather than on EXPLAIN QUERY PLAN is
-    deliberate. A plan assertion passes for the wrong reason here: on a fixture
-    holding a handful of rows SQLite picks the dedup index anyway, so the test
-    stayed green with the directive deleted — verified by re-introducing the
-    defect. Only the statement text distinguishes "pinned" from "happened to be
-    chosen", and pinning is what holds at 86k rows (ADR-0022).
+    On SQLite this also asserted an `INDEXED BY idx_detection_dedup` hint in
+    the executed statement text. PostgreSQL has no such syntax — ADR-0053
+    dropped the hint entirely, reasoning that the SQLite planner quirk it
+    worked around (no `ANALYZE`, a misleading boolean-column index) does not
+    apply to PostgreSQL's cost-based planner. That reasoning is verified
+    operationally against the real ~87k-row corpus with `EXPLAIN ANALYZE`
+    (see docs/adr, the ADR-0053 validation record), not with an assertion
+    here: on a fixture this small (one row), the planner correctly prefers
+    `idx_detection_canon` over `idx_detection_dedup` — verified by trying —
+    because at this scale that choice is actually cheaper, which is the
+    planner working as intended, not a regression. A plan assertion on a
+    tiny fixture would therefore test the wrong thing.
     """
     temp_db.get_conn()          # job store
     rconn = temp_db.get_rule_conn()    # rule store
@@ -382,14 +410,12 @@ def test_also_in_sweep_pins_the_dedup_index(temp_db):
         _fmt_rule("core", "k1", ["T1059"], "sigma", dedup_key="dk1"),
     ])
 
-    stmts: list[str] = []
-    rconn.set_trace_callback(stmts.append)
-    rules_for_technique(rconn, "T1059")
-    rconn.set_trace_callback(None)
+    with _trace_statements(rconn) as stmts:
+        rules_for_technique(rconn, "T1059")
 
     sweep = [s for s in stmts if "dedup_key" in s and "is_canonical=0" in s]
     assert sweep, "the also_in sweep did not run"
-    assert all("INDEXED BY idx_detection_dedup" in s for s in sweep)
+    assert len(sweep) == 1, "the also_in lookup must be one batched sweep, not one query per rule"
 
     # And the outer query must not be the JOIN form that enters via idx_detection_canon.
     outer = [s for s in stmts if "rule_techniques" in s]
@@ -718,10 +744,8 @@ def test_rules_for_job_query_count_is_flat(temp_db):
         ])
     _job_with_techniques(temp_db, "jcount", ["T1001", "T1002", "T1003"])
 
-    stmts = []
-    rconn.set_trace_callback(stmts.append)
-    out = rules_for_job(rconn, "jcount", evidence_only=False, jobs_conn=conn)
-    rconn.set_trace_callback(None)
+    with _trace_statements(rconn) as stmts:
+        out = rules_for_job(rconn, "jcount", evidence_only=False, jobs_conn=conn)
 
     assert len(out["techniques"]) == 3
     assert out["rule_total"] == 30

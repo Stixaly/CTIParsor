@@ -15,7 +15,6 @@ constraint on the detection artifact).
 from __future__ import annotations
 
 import math
-import sqlite3
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -237,7 +236,7 @@ def _parent(technique_id: str) -> str | None:
 # ── Matching ─────────────────────────────────────────────────────────────────
 
 def _exact_matches(
-    conn: sqlite3.Connection, observables: list[Observable]
+    conn: DBConnection, observables: list[Observable]
 ) -> dict[str, list[tuple[Observable, str, str]]]:
     """Rules holding a report observable verbatim.
 
@@ -275,7 +274,7 @@ def _substring_ok(needle: str, hay: str) -> bool:
 
 
 def _partial_matches(
-    conn: sqlite3.Connection,
+    conn: DBConnection,
     observables: list[Observable],
     candidates: set[str],
 ) -> dict[str, list[tuple[Observable, str, str]]]:
@@ -345,7 +344,7 @@ def _text_matches(
 # ── Entry point ──────────────────────────────────────────────────────────────
 
 def rank_rules(
-    conn: sqlite3.Connection,
+    conn: DBConnection,
     entity_rows: Iterable[dict],
     technique_ids: Iterable[str],
     *,
@@ -523,7 +522,7 @@ def job_observable_rows(conn: DBConnection, job_id: str) -> list[dict]:
 
 
 def propose_for_job(
-    conn: sqlite3.Connection, job_id: str, *, limit: int = 200,
+    conn: DBConnection, job_id: str, *, limit: int = 200,
     jobs_conn: DBConnection | None = None,
 ) -> dict:
     """Ranked, evidence-backed rule proposals for one report (ADR-0014).

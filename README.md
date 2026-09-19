@@ -28,104 +28,66 @@ Two modes are available:
 
 ---
 
-## Quick start — CLI
+## Quick start
+
+Docker is the only supported way to install, develop and run CTIParsor
+(ADR-0054) — nothing needs to be on the host but Docker itself. Full guide:
+[docs/docker.md](docs/docker.md); the architecture with its data flow:
+[docs/architecture.md](docs/architecture.md); moving an existing install:
+[docs/upgrading.md](docs/upgrading.md).
 
 ```bash
-# 1. Clone and enter the project
 git clone <repo-url> && cd CTIParsor
+bash setup.sh                    # writes .env + secrets, checks Docker — builds/starts nothing
+nano .env                        # set ANTHROPIC_API_KEY=sk-ant-...  (or another LLM_PROVIDER)
 
-# 2. Full setup (venv, Python deps, MITRE data, Node.js + web UI build, detection corpora)
-bash setup.sh
-
-# 3. Activate the venv
-source .venv/bin/activate
-
-# 4. Add your LLM API key
-cp .env.example .env
-nano .env   # set ANTHROPIC_API_KEY=sk-ant-...
-
-# 5. Process a report
-python main.py input/your_report.pdf
-# → output/your_report_bundle.json
-```
-
-> **Step 2 downloads the detection-rule corpora too.** `setup.sh` prompts
-> *"Clone & ingest detection corpora now? [Y/n]"* (default yes) and, if
-> accepted, clones the public Sigma/Suricata/YARA repos into `./corpora/`
-> (~600 MB, shallow) and builds the rule store — this is what powers the
-> detection-coverage matrix. Say no, run with `--no-corpora`, or hit a
-> network failure, and the matrix stays empty until you do it yourself:
-> ```bash
-> python scripts/sync_corpora.py && python scripts/build_detection_index.py
-> ```
-
-Supported input formats: `.pdf` `.docx` `.html` `.htm` `.txt` `.md`
-
----
-
-## Quick start — Web UI
-
-```bash
-# After completing CLI quick start:
-
-# Start the server (API + pre-built frontend on one port)
-python run_api.py
-# → http://localhost:8000
-```
-
-> **To let other machines reach it**, set `API_HOST=0.0.0.0` in `.env` and
-> restart. Read [docs/deployment.md](docs/deployment.md) first: there is no
-> authentication, so everyone who can reach the port shares one workspace.
-> Running `uvicorn` directly ignores `.env` and always binds to loopback.
-
-> **Do not run the server as root.** URL ingestion (ADR-0029) renders the page in
-> a sandboxed Chromium, and Chromium refuses to run as root with its sandbox on —
-> so `/api/ingest/url` answers 503 there. The sandbox is what keeps a renderer
-> exploit on a hostile page from becoming code execution on the host, so the fix
-> is to drop root, not to disable it. If you are in a `sudo su` shell, `exit`
-> first.
->
-> A container that genuinely cannot grant unprivileged user namespaces can set
-> `CTIPARSOR_CAPTURE_UNSANDBOXED=1`, which renders without the sandbox and logs a
-> warning naming the risk on every capture. Nothing else in the pipeline needs
-> root.
-
-> **Development mode** (live reload on both sides):
-> ```bash
-> # Terminal 1 — FastAPI backend
-> API_RELOAD=1 python run_api.py
->
-> # Terminal 2 — Vite frontend with HMR
-> cd frontend && npm run dev
-> # UI → http://localhost:5173
-> ```
-
----
-
-## Quick start — Docker
-
-One hardened image and a compose file (ADR-0044); nothing is installed on the
-host but Docker itself. Full guide: [docs/docker.md](docs/docker.md); the
-architecture with its data flow: [docs/architecture.md](docs/architecture.md);
-moving an existing install: [docs/upgrading.md](docs/upgrading.md).
-
-```bash
-cp .env.example .env            # set your LLM provider / key
-docker compose build            # or: make docker-build (stamps the git revision)
-docker compose up -d            # → http://127.0.0.1:8000
+docker compose build             # or: make docker-build (stamps the git revision)
+docker compose up -d             # → http://127.0.0.1:8000
 docker compose --profile bootstrap run --rm bootstrap   # once, 10–20 min: models, corpora, rule store
 ```
 
 > **`docker compose up -d` alone fetches no detection rules.** The
-> Sigma/Suricata/YARA corpora live in a SQLite file on the `cti-state`
-> volume, entirely separate from the `postgres` job store — Postgres being
-> reachable has no bearing on whether corpora get downloaded. Without the
-> `bootstrap` run above, `app` and `worker` start fine but Settings →
-> Detection Corpora shows 0 rules for every corpus. Bootstrap clones every
-> corpus and rebuilds the store in one process; if you instead sync corpora
-> one-by-one from Settings → Redownload, do them **one at a time** — each
-> sync rewrites the whole store and two overlapping ones race for the same
-> SQLite write lock (`database is locked`, `busy_timeout` is 5s).
+> Sigma/Suricata/YARA corpora live in the same `postgres` database as the job
+> store (ADR-0053) — Postgres being reachable has no bearing on whether
+> corpora get downloaded, that only happens once something parses and
+> ingests them. Without the `bootstrap` run above, `app` and `worker` start
+> fine but Settings → Detection Corpora shows 0 rules for every corpus.
+> Bootstrap clones every corpus and rebuilds the store in one process; if you
+> instead sync corpora one-by-one from Settings → Redownload, do them **one
+> at a time** — each sync rewrites the whole store, and two overlapping ones
+> contend for the same rows.
+
+Supported input formats: `.pdf` `.docx` `.html` `.htm` `.txt` `.md`
+
+**CLI**, instead of the web UI — `docker compose run --rm dev` runs the same
+image as `app`/`worker` with the repo bind-mounted live (ADR-0054):
+
+```bash
+docker compose run --rm dev cli input/your_report.pdf --output output/your_report.json
+# or, for everything already dropped in input/:
+make run-dir
+```
+
+**Development mode** (live reload, no host Python/Node install):
+
+```bash
+docker compose run --rm dev pytest tests/ -v          # or: make docker-test
+docker compose --profile dev up frontend-dev           # Vite HMR → http://localhost:5173
+```
+
+`dev` bind-mounts the repo over `/app` (edits need no rebuild); `frontend-dev`
+bind-mounts `frontend/` into a plain `node:24` container and proxies `/api`
+to the `app` service. Both are `profiles: [dev]`, so a plain
+`docker compose up -d` never starts them.
+
+> **Do not run the API/worker containers as root**, and don't set
+> `CTIPARSOR_ROLE=all` under `sudo`. URL ingestion (ADR-0029) renders the
+> page in a sandboxed Chromium, and Chromium refuses to run as root with its
+> sandbox on — the images already run as a non-root user (uid 1001) for
+> exactly this reason. A container runtime that genuinely cannot grant
+> unprivileged user namespaces can set `CTIPARSOR_CAPTURE_UNSANDBOXED=1`,
+> which renders without the sandbox and logs a warning naming the risk on
+> every capture.
 
 What the image does, and does not, do:
 
@@ -137,9 +99,10 @@ What the image does, and does not, do:
   `worker` containers claim and run them from the PostgreSQL job store
   (ADR-0046, `--scale worker=2`), each with its own measured CPU and memory
   limit;
-- keeps uploads, outputs and the rule corpus on the `cti-state` volume, the
-  reports in the `postgres` service (ADR-0045), and the 2.6 GB of models plus
-  the corpora on the rebuildable `cti-cache` volume;
+- keeps uploads and outputs on the `cti-state` volume, both the reports and
+  the rule corpus in the `postgres` service (ADR-0045, ADR-0053), and the
+  2.6 GB of models plus the corpora source clones on the rebuildable
+  `cti-cache` volume;
 - publishes the API on **127.0.0.1 only**, the same posture as `run_api.py`;
   the `proxy` profile adds TLS and a password in front (`docker compose
   --profile proxy up -d`), the `ollama` profile a local LLM with no published
@@ -147,9 +110,9 @@ What the image does, and does not, do:
 - adds isolation, **not authentication** — [docs/deployment.md §2](docs/deployment.md#2-what-no-authentication-actually-means)
   applies unchanged.
 
-`postgres` is the job store (jobs, entities, relationships — ADR-0045); the
-detection-rule corpus, uploads and outputs stay in a SQLite file on the
-`cti-state` volume instead. `worker` is its own service, not a subprocess
+`postgres` is both the job store (jobs, entities, relationships — ADR-0045)
+and the detection-rule corpus (ADR-0053); uploads and outputs stay on the
+`cti-state` volume. `worker` is its own service, not a subprocess
 spawned inside the API: it claims queued reports from `postgres` and runs
 each in an isolated subprocess (ADR-0046). `bash scripts/docker_smoke.sh`
 builds, starts and verifies all of the above.
@@ -158,35 +121,38 @@ builds, starts and verifies all of the above.
 
 ## Offline (air-gapped) installation
 
-`setup.sh` normally fetches from twelve network sources: apt, NodeSource, PyPI,
-HuggingFace, GitHub (MITRE bundles, spaCy model, Ollama), the rule corpora,
-Playwright's CDN and npm. For a host that reaches none of them, build one
-self-contained bundle on a **connected twin of the target** (same distribution
-release, same Python major.minor) and replay it there (ADR-0040):
+Docker itself is the only thing that has to already be on the air-gapped
+host (ADR-0054, supersedes ADR-0040's wheel/deb bundle). Build a bundle on a
+**connected machine with Docker, the same CPU architecture as the target**
+— Docker images are architecture-specific:
 
 ```bash
-# On the connected machine, after a normal setup.sh:
-bash scripts/package_offline.sh --worktree      # ~13 GB, LLM included
-#   --no-llm / --llm-model NAME / --no-corpora / --no-browsers  to trim it
-# → dist/cti-parsor-offline-<rev>-<codename>-py<ver>.tar (+ .sha256)
+# On the connected machine, after a normal `bash setup.sh`:
+bash scripts/package_offline_docker.sh              # add --with-llm[=MODEL] for a local Ollama model
+# → dist/cti-parsor-offline-docker-<rev>-<arch>.tar (+ .sha256)
 
-# Before transferring it, replay the install with no network and no root:
-bash scripts/check_offline_bundle.sh dist/cti-parsor-offline-*.tar
+# Before transferring it, verify it restores and the stack actually works
+# (run this on a machine you're willing to cut network access to):
+tar xf dist/cti-parsor-offline-docker-*.tar
+bash scripts/check_offline_bundle_docker.sh offline
 
 # On the air-gapped host:
-tar xf cti-parsor-offline-*.tar && cd cti-parsor
+tar xf cti-parsor-offline-docker-*.tar
 bash setup.sh --offline=offline
+docker compose up -d
 ```
 
-The bundle carries the source tree, every wheel, the full apt dependency
-closure (Node.js included), the three HuggingFace models, Chromium, the MITRE
-bundles, the rule corpora (ET Open with its `.sync.json`), the built web UI and
-an Ollama runtime with one pulled model. `setup.sh --offline` verifies the
-checksums and the Python/distro match before touching the host, then runs its
-ordinary steps with pip and HuggingFace pointed at the bundle. A fresh `.env`
-is set to the bundled Ollama model; `HF_HUB_OFFLINE=1` is written so nothing
-ever probes the Hub. Corpora and models are frozen at the bundle's build date
-(`offline/bundle.env`); rebuild and re-transfer to update them.
+The bundle carries a saved copy of every image the stack needs (`app`,
+`postgres`, `capture-proxy`, and `ollama` if `--with-llm` was used), a tar of
+the `cti-cache` volume (NLP models + corpus clones), and a `pg_dump` export
+of the job/rule store — everything `docker compose --profile bootstrap run
+--rm bootstrap` would otherwise fetch over the network. `setup.sh --offline`
+verifies the bundle's checksums and architecture before touching anything,
+`docker load`s the images, restores the volumes and database, and leaves
+`docker compose up -d` as the only remaining step — no `bootstrap` run
+needed, the data is already there. Corpora and models are frozen at the
+bundle's build date (`offline/bundle.env`); rebuild and re-transfer to
+update them.
 
 ---
 
@@ -378,10 +344,10 @@ On Finalize (web UI):
 ```
 
 **This diagram describes the web/API path** (`api/worker.py`), which is the full
-pipeline. The `python main.py` CLI is a thinner subset — it runs Stage 2 regex
+pipeline. The `main.py` CLI is a thinner subset — it runs Stage 2 regex
 extraction only (no gazetteer, semantic TTP, CyNER or GLiNER), uses a fixed
 3 000-char chunk size instead of the adaptive one, and has no consensus or
-lexicon re-scan. Use the web UI, or `make api`, to exercise every stage.
+lexicon re-scan. Use the web UI (`docker compose up -d`) to exercise every stage.
 
 Stage order note: 3b, 3d, 3f and 3e run **per chunk**; 3c runs **once per
 document**, after every chunk has been merged. The boxes are drawn in that
@@ -393,21 +359,24 @@ execution order.
 
 ### CLI — single file
 ```bash
-python main.py input/report.pdf
-python main.py input/report.pdf --output output/apt29.json
+docker compose run --rm dev cli input/report.pdf
+docker compose run --rm dev cli input/report.pdf --output output/apt29.json
 ```
 
 ### CLI — batch folder
 ```bash
-python main.py --input-dir input/
-python main.py --input-dir input/ --output-dir output/
+docker compose run --rm dev cli --input-dir input/
+docker compose run --rm dev cli --input-dir input/ --output-dir output/
 ```
 
 ### Run tests
 ```bash
-pytest tests/ -v               # all tests
-pytest tests/ -v -k "not llm"  # skip LLM tests (no key needed)
+docker compose run --rm dev pytest tests/ -v               # all tests
+docker compose run --rm dev pytest tests/ -v -k "not llm"  # skip LLM tests (no key needed)
 ```
+
+`CTIPARSOR_TEST_DATABASE_URL` is already set for the `dev` service in
+`compose.yaml` (ADR-0054) — no manual export needed.
 
 ### Measure extraction quality (offline)
 
@@ -415,15 +384,15 @@ Three benchmarks live in `tests/eval_pipeline.py` — recall (`ner`, `ate`) and 
 **hallucination-rate** benchmark (`grounding`) that scores how much emitted output
 is *not* supported by the source text (ADR-0012). It reuses the pipeline's own
 grounding primitive, runs fully offline, and can score reports you have already
-processed straight from `cti_stix.db`:
+processed straight from the job store (`DATABASE_URL`):
 
 ```bash
 # Hallucination rate on your real processed reports, segmented + alias/technique-aware
-python tests/eval_pipeline.py -b grounding --from-db all \
+docker compose run --rm dev python tests/eval_pipeline.py -b grounding --from-db all \
     --rel-window 1 --alias-aware --rel-proximity 200
 
 # ATT&CK Technique Extraction recall vs the GPT-4 baseline
-python tests/eval_pipeline.py -b ate --stage all
+docker compose run --rm dev python tests/eval_pipeline.py -b ate --stage all
 ```
 
 Relationships are reported in two segments — **named-entity** vs **IoC/technical**
@@ -432,44 +401,37 @@ validate any extraction change before/after.
 
 ### make shortcuts
 
-A `Makefile` wraps the most common workflows. Requires `make` (standard on Linux/macOS/WSL).
+A `Makefile` wraps the most common workflows — every target that touches
+Python/Node routes through `docker compose run --rm dev` (ADR-0054), so
+`make` itself is the only thing that needs to be on the host besides Docker.
 
 | Command | Description |
 |---|---|
-| `make setup` | Full first-time setup (runs `setup.sh`) |
-| `make install` | Install / update Python packages only |
-| `make install-api` | Install / update API packages only (`requirements-api.txt`) |
-| `make install-capture` | Install Playwright + Chromium for URL capture (ADR-0029) |
-| `make download-mitre` | Download MITRE bundle files only (no index build) |
-| `make mitre` | Download MITRE bundle files + build all indexes |
-| `make build-indexes` | Build indexes from already-downloaded bundle files |
-| `make model` | Download spaCy `en_core_web_sm` model |
-| `make frontend-install` | `npm ci` only (no build) |
-| `make frontend-build` | Build frontend static assets only |
-| `make test` | Run all tests |
+| `make setup` | Prepare `.env` + the DB-password secret, check Docker (runs `setup.sh`) |
+| `make package-offline` | Build the air-gap bundle in `offline/`, pack it into `dist/` (ADR-0054) |
+| `make setup-offline` | Install from an extracted air-gap bundle, no network needed |
+| `make corpora` | Clone/pull the rule corpora (Sigma, Suricata, YARA) |
+| `make detection-index` | Parse the clones into the rule store (dedups, writes rule sizes) |
+| `make backfill-rules` | Backfill rule body sizes on a store built before ADR-0022 |
+| `make test` | Run all tests, in the `dev` container |
 | `make test-fast` | Run tests without LLM calls (no API key needed) |
 | `make run` | Run pipeline on `tests/fixtures/sample_report.txt` |
 | `make run-dir` | Run pipeline on every file in `input/` |
-| `make api` | Build frontend, then start API (production) |
-| `make api-dev` | Start API with hot-reload (dev backend) |
-| `make frontend-dev` | Start Vite dev server with HMR (dev frontend) |
 | `make check` | Diagnostic: list which pipeline stages are available |
 | `make check-docs` | Verify every number claimed in this README against the source of truth |
+| `make audit` | Scan Python + npm deps for known CVEs (`pip-audit` + `npm audit`), no image build needed |
+| `make lock` | Freeze the image's exact installed versions → `requirements.lock.txt` |
+| `make update-deps` | Rebuild with no layer cache, run tests, re-lock |
+| `make npm-outdated` | Show which npm packages have newer versions available |
+| `make npm-update` | Upgrade npm packages within semver ranges, verify TypeScript |
+| `make clean` | Remove generated bundle JSONs and `__pycache__` (host-side only) |
 | `make docker-build` | Build the container image, stamping the git revision (ADR-0044) |
 | `make docker-up` | Start the container stack on `http://127.0.0.1:8000` |
 | `make docker-bootstrap` | One-shot in the container: download models, clone corpora, build the rule store |
 | `make docker-smoke` | Build, start and verify the image (health, non-root, read-only root, Chromium sandbox) |
 | `make docker-logs` / `make docker-down` | Follow the API logs / stop the stack (volumes are kept) |
-| `make corpora` | Clone/pull the rule corpora (Sigma, Suricata, YARA) |
-| `make detection-index` | Parse the clones into the rule store (dedups, writes rule sizes) |
-| `make backfill-rules` | Backfill rule body sizes on a store built before ADR-0022 |
-| `make audit` | Scan Python + npm deps for known CVEs (`pip-audit` + `npm audit`) |
-| `make lock` | Freeze exact installed versions → `requirements.lock.txt` |
-| `make update-deps` | Upgrade Python packages, run tests, re-lock |
-| `make npm-outdated` | Show which npm packages have newer versions available |
-| `make npm-update` | Upgrade npm packages within semver ranges, verify TypeScript |
-| `make clean` | Remove generated bundle JSONs and `__pycache__` |
-| `make clean-venv` | Remove `.venv` for a full reinstall |
+| `make docker-test` | Run the full test suite in the `dev` container (alias for `make test`) |
+| `make docker-frontend-dev` | Start the Vite dev server with HMR, in a container — `http://localhost:5173` |
 
 ---
 
@@ -724,9 +686,10 @@ and edit the YAML directly.
 ### Fetch + build
 
 ```bash
-python scripts/sync_corpora.py          # clone/pull each git repo (public: no auth; private: SSH agent);
-                                        # download + verify tarball corpora (ET Open)
-python scripts/build_detection_index.py # parse local clones → detection-rule store (in cti_stix.db)
+docker compose run --rm dev python scripts/sync_corpora.py          # clone/pull each git repo (public: no auth; private: SSH agent);
+                                                                       # download + verify tarball corpora (ET Open)
+docker compose run --rm dev python scripts/build_detection_index.py # parse local clones → detection-rule store (PostgreSQL, ADR-0053)
+# or: make corpora && make detection-index
 ```
 
 Then open `/coverage/:jobId` for any report. The **Rebuild index** button on the
@@ -769,7 +732,8 @@ If your store predates this feature, rule sizes read `0 B` until you backfill
 them — no corpus re-clone needed:
 
 ```bash
-python -m scripts.backfill_rule_bytes    # fills the rule_bytes side table
+docker compose run --rm dev python -m scripts.backfill_rule_bytes    # fills the rule_bytes side table
+# or: make backfill-rules
 ```
 
 ### Rule proposals — ranked on the report, not on its tags
@@ -802,8 +766,8 @@ of 11 396 in the default corpora) become reachable this way for the first time.
 If your store predates this feature, build the atom index without re-cloning:
 
 ```bash
-python scripts/build_rule_atoms.py      # re-derives atoms from the stored rule bodies
-python scripts/build_rule_text.py       # FTS5 index over rule titles, for brand evidence (ADR-0031)
+docker compose run --rm dev python scripts/build_rule_atoms.py      # re-derives atoms from the stored rule bodies
+docker compose run --rm dev python scripts/build_rule_text.py       # tsvector index over rule titles, for brand evidence (ADR-0031/0053)
 ```
 
 Scoring is deterministic and offline — no model, no network (ADR-0008's constraint
@@ -847,31 +811,36 @@ spelling — `ENABLE_CONSENSUS=1` did *not* enable consensus, while
 `ENABLE_STIX_VERIFICATION=1` did. `scripts/check_flag_equivalence.py` reports
 every value whose meaning differs between the old and current readings.)
 
-### Job store — SQLite or PostgreSQL
+### Database — PostgreSQL, required
 
-Two stores, one switch (ADR-0045). The **rule store** — the detection corpus,
-an FTS5 index rebuilt by `make detection-index` — is always the SQLite file
-`cti_stix.db`. The **job store** — jobs, entities, relationships, progress
-events, the relationship policy, figure provenance, the figure and CVE caches
-— is the same file by default, or PostgreSQL when `DATABASE_URL` is set:
+One store, PostgreSQL only (ADR-0045, ADR-0053 — CTIParsor no longer
+supports SQLite at all). The **rule store** — the detection corpus, a
+`tsvector`/GIN full-text index rebuilt by `make detection-index` — and the
+**job store** — jobs, entities, relationships, progress events, the
+relationship policy, figure provenance, the figure and CVE caches — are the
+same PostgreSQL database:
 
 ```dotenv
 DATABASE_URL=postgresql://ctiparsor@localhost:5432/ctiparsor
 PGPASSWORD=...          # read by the driver; keeps the password out of the URL
 ```
 
-Nothing else changes: the same `?`-placeholder SQL runs on both engines
-through a small adapter (`api/db_backend.py`), rows are read by column name
-either way, and the seven per-job upserts use the standard `ON CONFLICT`
-syntax both engines accept. An existing install moves its rows once:
+`DATABASE_URL` is mandatory: the API/worker and `pytest` both fail fast
+with a clear message if it is unset — already set for you by `compose.yaml`
+for every service, `dev` included (ADR-0054). Rows are read by column name
+through a small adapter (`api/db_backend.py`) that translates `?`
+placeholders to `%s`, and every upsert uses the standard `ON CONFLICT`
+syntax. An install still on the pre-ADR-0053 single-SQLite-file layout
+moves its rows once, with both scripts (they cover different tables):
 
 ```bash
-python scripts/migrate_jobs_to_postgres.py            # --dry-run first if you like
+docker compose run --rm dev python scripts/migrate_jobs_to_postgres.py   # --dry-run first if you like
+docker compose run --rm dev python scripts/migrate_rules_to_postgres.py  # --dry-run first if you like
 ```
 
 The compose stack runs PostgreSQL for you (`docker compose up` starts a
 hardened `postgres` service; set `CTI_DB_PASSWORD` in `.env`). `pg_dump` is
-the backup tool for that store; `cti_stix.db` still needs its own copy.
+the backup tool for both stores now.
 
 ### LLM provider
 
@@ -937,7 +906,7 @@ Leave `ANTHROPIC_API_KEY` unset. Stage 3 is skipped. The pipeline still produces
 # Stage 2c — Semantic TTP embedding model
 # Default: all-MiniLM-L6-v2 (80 MB, fast)
 # Upgrade: ehsanaghaei/SecureBERT-Plus (500 MB, +8-12% F1 on CTI text)
-# After changing: python scripts/build_indexes.py --only embeddings
+# After changing: docker compose run --rm dev python scripts/build_indexes.py --only embeddings
 TTP_EMBEDDING_MODEL=all-MiniLM-L6-v2
 
 # Stage 2c — semantic precision tuning (ADR-0011 Phase A). Thresholds are
@@ -962,13 +931,13 @@ GLINER_ENABLED=true
 
 # ADR-0051 — per-(source, entity_type) cutoffs calibrated from the analysts'
 # accept/reject decisions override GLINER_THRESHOLD / CyNER's 0.70 once stored
-# (`python -m scripts.calibrate_thresholds --apply`, or POST /api/thresholds/
-# recalibrate).  false ignores every stored row.
+# (`docker compose run --rm dev python -m scripts.calibrate_thresholds --apply`,
+# or POST /api/thresholds/recalibrate).  false ignores every stored row.
 THRESHOLD_CALIBRATION_ENABLED=true
 # ADR-0052 — deny / promote rows grown from the same decisions (a value the
 # analysts keep rejecting is dropped at every NER stage; a name they keep
-# accepting joins the gazetteer), proposed by `python -m
-# scripts.promote_overrides` and activated by a person.  false ignores them.
+# accepting joins the gazetteer), proposed by `docker compose run --rm dev
+# python -m scripts.promote_overrides` and activated by a person.  false ignores them.
 ENTITY_OVERRIDES_ENABLED=true
 ```
 
@@ -1005,8 +974,8 @@ VISION_TIMEOUT_S=120
 # VISION_ASSUME_CAPABLE=1
 ```
 
-`python -m pipeline.vlm` reports what the current environment resolves to and
-why, without starting the pipeline.
+`docker compose run --rm dev python -m pipeline.vlm` reports what the current
+environment resolves to and why, without starting the pipeline.
 
 ### Advanced
 
@@ -1061,14 +1030,15 @@ Stages 2b, 2c, 3c, and 4b use pre-built local indexes in `pipeline/data/`.
 ### Build the indexes
 
 ```bash
-# Download MITRE bundle files first (done automatically by setup.sh)
-python scripts/build_indexes.py
+# pipeline/data/*.json/*.npy ship pre-built and committed to git — this is only
+# needed to rebuild them after a MITRE ATT&CK release update.
+docker compose run --rm dev python scripts/build_indexes.py
 
 # Or build only specific indexes
-python scripts/build_indexes.py --only mitre         # mitre_index.json
-python scripts/build_indexes.py --only gazetteer     # gazetteer.json
-python scripts/build_indexes.py --only embeddings    # mitre_embeddings.npy
-python scripts/build_indexes.py --only relationships # attack_relationships.json
+docker compose run --rm dev python scripts/build_indexes.py --only mitre         # mitre_index.json
+docker compose run --rm dev python scripts/build_indexes.py --only gazetteer     # gazetteer.json
+docker compose run --rm dev python scripts/build_indexes.py --only embeddings    # mitre_embeddings.npy
+docker compose run --rm dev python scripts/build_indexes.py --only relationships # attack_relationships.json
 ```
 
 The script auto-discovers bundle files in `data/`, `~/Downloads/`, and `~/Documents/`. Accepts `--enterprise`, `--mobile`, `--ics`, `--capec` flags for explicit paths.
@@ -1304,7 +1274,7 @@ CTIParsor/
 │
 ├── api/
 │   ├── main.py                    # FastAPI app, SPA static serving
-│   ├── db.py                      # Two stores: job store (SQLite or PostgreSQL via DATABASE_URL), rule store (SQLite, FTS5) — ADR-0045
+│   ├── db.py                      # Job store + rule store, both PostgreSQL via DATABASE_URL — ADR-0045, ADR-0053
 │   ├── db_backend.py              # PostgreSQL adapter: `?`→`%s`, sqlite3.Row-like rows, non-closing `with`
 │   ├── worker.py                  # The pipeline subprocess: spawn, crash-to-`failed`, SSE emitter
 │   │                              #   └─ _lexicon_rescan() on Finalize
@@ -1377,7 +1347,6 @@ CTIParsor/
 ├── input/                         # Drop CTI reports here (gitignored)
 ├── output/                        # Generated STIX bundles (gitignored)
 ├── uploads/                       # Web UI uploads (gitignored)
-├── cti_stix.db                    # SQLite database (gitignored)
 │
 ├── detection_corpora.yaml         # Public corpus registry — Sigma, YARA, Suricata (committed)
 ├── detection_corpora.local.yaml.example  # Private corpus overlay template
@@ -1604,7 +1573,7 @@ data: {"status":"for_review"}
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/queue/status` | Backlog and worker liveness (ADR-0048): job counts by status, oldest-queued age, and per-worker heartbeat freshness against `WORKER_LEASE_TIMEOUT_S`. Same shape on SQLite or PostgreSQL. Unauthenticated, like every other GET route (SECURITY.md). |
+| `GET` | `/api/queue/status` | Backlog and worker liveness (ADR-0048): job counts by status, oldest-queued age, and per-worker heartbeat freshness against `WORKER_LEASE_TIMEOUT_S`. Unauthenticated, like every other GET route (SECURITY.md). |
 
 ```json
 // GET /api/queue/status
@@ -1682,12 +1651,13 @@ Manages the gitignored local overlay only — the committed registry is never ed
 
 ## Database schema
 
-The SQLite layout, which is the whole database on a host install. With
-`DATABASE_URL` set, the per-job tables below (`jobs` through `cve_cache`) live
-in PostgreSQL instead, from the twin DDL in `api/db.py`
-(`_JOB_STORE_DDL_POSTGRES`: `IDENTITY` for `AUTOINCREMENT`, `DOUBLE PRECISION`
-for `REAL`, same names, same columns); the detection-rule tables never move
-(ADR-0045).
+PostgreSQL only (ADR-0045, ADR-0053) — `DATABASE_URL` is mandatory, and both
+the per-job tables (`jobs` through `cve_cache`) and the detection-rule tables
+below live in the same database, from `_JOB_STORE_DDL_POSTGRES` and
+`_RULE_STORE_DDL_POSTGRES` in `api/db.py`. Shown here close to plain SQL for
+readability; the actual DDL uses `GENERATED BY DEFAULT AS IDENTITY` where
+this shows `AUTOINCREMENT` and `DOUBLE PRECISION` where this shows `REAL` —
+same names, same columns otherwise.
 
 ```sql
 CREATE TABLE jobs (
@@ -1811,9 +1781,11 @@ CREATE TABLE detection_rules (
 );
 
 -- Rule body sizes (ADR-0022) — a side table, deliberately NOT a column on
--- detection_rules: ALTER TABLE appends after `raw`, so SQLite would have to walk
--- each record past a multi-kilobyte body to read one integer (8.2s for 10k rules
--- vs ~0.1s here). Written on ingest; backfill an older store with
+-- detection_rules: a column added after `raw` (a multi-kilobyte body) forces
+-- a walk past it to read one integer on SQLite (8.2s for 10k rules vs
+-- ~0.1s here, the original measurement this table's shape is based on;
+-- unmeasured on PostgreSQL specifically, ADR-0053, but the side table costs
+-- nothing extra either way). Written on ingest; backfill an older store with
 -- scripts/backfill_rule_bytes.py.
 CREATE TABLE rule_bytes (
     rule_id TEXT PRIMARY KEY,
@@ -1877,8 +1849,16 @@ CREATE TABLE figure_reads (
 -- Full-text index over rule title+description (ADR-0031), 0.4 ms instead of
 -- 4.1 s.  Populated offline by scripts/build_rule_text.py; brand evidence is
 -- simply absent while the table is empty, exactly as proposals degrade while
--- the atom index is unbuilt.  No corpus re-clone.
-CREATE VIRTUAL TABLE IF NOT EXISTS rule_text USING fts5(rule_id UNINDEXED, body)
+-- the atom index is unbuilt.  No corpus re-clone.  A plain table since
+-- ADR-0053, not a SQLite FTS5 virtual one: body_tsv is a GENERATED column,
+-- so it can never drift out of sync with body the way a separately-built
+-- FTS5 index could.
+CREATE TABLE rule_text (
+    rule_id  TEXT PRIMARY KEY REFERENCES detection_rules(id) ON DELETE CASCADE,
+    body     TEXT NOT NULL,
+    body_tsv tsvector GENERATED ALWAYS AS (to_tsvector('simple', body)) STORED
+);
+CREATE INDEX idx_rule_text_tsv ON rule_text USING GIN (body_tsv);
 ```
 
 ---
@@ -1953,7 +1933,11 @@ CREATE VIRTUAL TABLE IF NOT EXISTS rule_text USING fts5(rule_id UNINDEXED, body)
 | `google-re2` | Linear-time regex engine, guards catastrophic backtracking (ADR-0049; the plain `re2` package on PyPI is abandoned and does not build on Python 3.12+) |
 | `spacy` | Optional NER fallback |
 
-Playwright and its Chromium install with `make install-capture`, and its system libraries require root via `sudo python -m playwright install-deps chromium` — otherwise `/api/ingest/url` responds 503. The API checks for a working Chromium install once at startup and logs a warning if it's missing, so a misconfigured server says so in its own logs instead of waiting for the first URL-capture request to fail.
+Playwright and Chromium are already installed in the image, system libraries
+included (`Dockerfile`) — nothing to do. The API checks for a working
+Chromium install once at startup and logs a warning if it's missing, so a
+misconfigured server says so in its own logs instead of waiting for the
+first URL-capture request to fail; `/api/ingest/url` responds 503 until then.
 
 ### Frontend key packages
 
@@ -1969,30 +1953,28 @@ Playwright and its Chromium install with `make install-capture`, and its system 
 
 ## Setup script
 
-`setup.sh` runs on Ubuntu, Debian, AlmaLinux, RHEL, Fedora, and WSL (WSL1 + WSL2):
+Docker is the only supported way to install, develop and run CTIParsor
+(ADR-0054) — `setup.sh` only prepares the environment, it builds, downloads
+and starts nothing itself:
 
 ```
-[1]   System packages  — python3, tesseract-ocr, poppler-utils, build tools
-[1b]  Node.js check    — prints install instructions if missing
-[2]   Python venv      — creates .venv/
-[3]   Python packages  — pip install requirements.txt + requirements-api.txt
-[4]   MITRE data       — downloads bundle files + runs build_indexes.py
-[4b]  Detection corpora — clones the Sigma/Suricata/YARA repos (~525 MB) and
-                          ingests them; on an existing store it also applies
-                          pending schema migrations and backfills rule sizes
-[5]   spaCy model      — optional en_core_web_sm (~12 MB)
-[6]   API key          — creates .env from .env.example
-      STIX icons       — checks/downloads 27 official OASIS SVG icons
-      Frontend build   — npm ci + npm run build
-      Import check     — verifies all packages importable
+[1]   Docker            — checks docker + docker compose (or docker-compose v1)
+                           are on PATH and the daemon is reachable
+[2]   .env              — creates it from .env.example if missing; generates
+                           CTI_DB_PASSWORD if not already set
+[3]   DB password secret — writes .secrets/db_password from CTI_DB_PASSWORD
+                           (compose.yaml bind-mounts it into every service)
 ```
+
+Everything the old host install did — system packages, the Python/Node
+toolchains, NLP models, MITRE data, the detection corpora, the frontend
+build — is now either baked into the image (`Dockerfile`) or done by
+`docker compose --profile bootstrap run --rm bootstrap`.
 
 ```bash
-bash setup.sh              # full setup
-bash setup.sh --no-torch   # skip sentence-transformers / GLiNER (faster, minimal)
-bash setup.sh --no-mitre   # skip MITRE bundle download
-bash setup.sh --no-spacy   # skip spaCy model download
-bash setup.sh --no-corpora # skip the detection-rule corpora clone + ingest
+bash setup.sh                     # prepare the environment
+bash setup.sh --offline=DIR       # air-gapped install from a bundle built by
+                                   # scripts/package_offline_docker.sh (ADR-0054)
 ```
 
 ---
@@ -2007,19 +1989,14 @@ bash setup.sh --no-corpora # skip the detection-rule corpora clone + ingest
 | `requirements-api.txt` | Same, for API-only packages | Rarely |
 | `requirements.lock.txt` | **Machine-generated** — exact pinned versions | Never by hand — run `make lock` |
 | `frontend/package.json` | npm semver ranges (`^`) | When you want to allow a new major version |
-| `frontend/package-lock.json` | npm lock file | Never by hand — run `npm install` to update it |
+| `frontend/package-lock.json` | npm lock file | Never by hand — run `make npm-update` to update it |
 
-Fresh install for production (reproducible):
-```bash
-pip install -r requirements.lock.txt   # exact versions, no surprises
-cd frontend && npm ci                  # uses package-lock.json
-```
-
-Fresh install for development (picks up allowed updates):
-```bash
-pip install -r requirements.txt -r requirements-api.txt
-cd frontend && npm ci
-```
+Both are installed inside the image at build time (`Dockerfile`), not on the
+host — `docker compose build` is what "fresh install" means now, resolving
+`requirements.txt`/`requirements-api.txt`'s semver ranges and
+`package-lock.json` fresh each time. `requirements.lock.txt` is a
+machine-generated record of what actually got resolved (`make lock`), not
+something the build reads — use it to diff what changed after an upgrade.
 
 ### Quarterly maintenance workflow
 
@@ -2102,5 +2079,5 @@ GLINER_MODEL=urchade/gliner_small-v2.1   # fastest, less accurate (~120 MB)
 # .env
 TTP_EMBEDDING_MODEL=ehsanaghaei/SecureBERT-Plus
 # Then rebuild the embedding cache:
-python scripts/build_indexes.py --only embeddings
+docker compose run --rm dev python scripts/build_indexes.py --only embeddings
 ```
