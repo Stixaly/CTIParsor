@@ -1303,7 +1303,7 @@ CTIParsor/
 │   └── detection.py               # Pydantic: DetectionRule, Severity
 │
 ├── api/
-│   ├── main.py                    # FastAPI app, CORS, SPA static serving
+│   ├── main.py                    # FastAPI app, SPA static serving
 │   ├── db.py                      # Two stores: job store (SQLite or PostgreSQL via DATABASE_URL), rule store (SQLite, FTS5) — ADR-0045
 │   ├── db_backend.py              # PostgreSQL adapter: `?`→`%s`, sqlite3.Row-like rows, non-closing `with`
 │   ├── worker.py                  # The pipeline subprocess: spawn, crash-to-`failed`, SSE emitter
