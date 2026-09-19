@@ -605,7 +605,11 @@ def _call_anthropic_impl(system: str, user: str) -> str:
         if not response.content:
             logger.error("Anthropic returned an empty content list (possible content filter)")
             return ""
-        return response.content[0].text.strip()
+        text = "".join(b.text for b in response.content if b.type == "text")
+        if not text:
+            logger.error("Anthropic returned no text block (only thinking?)")
+            return ""
+        return text.strip()
     except anthropic.APITimeoutError:
         logger.error(f"Anthropic timed out after {_LLM_TIMEOUT}s — raise LLM_TIMEOUT in .env if your model is slow")
         raise
