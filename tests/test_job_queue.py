@@ -192,6 +192,43 @@ def test_requeue_orphans_honours_the_lease(setup_db):
     assert row3["status"] == "queued"
 
 
+def test_requeue_orphans_emits_progress_for_each_requeued_job(setup_db):
+    _insert_job("j1", "processing", "2024-01-01T00:00:00Z", worker_id="w1")
+    _insert_job("j2", "for_review", "2024-01-01T00:00:01Z")
+
+    count = queue_loop.requeue_orphans(unconditional=True)
+    assert count == 1
+
+    conn = get_conn()
+    events = conn.execute(
+        "SELECT event_type, data FROM progress_events WHERE job_id='j1'"
+    ).fetchall()
+    assert any(e["event_type"] == "stage" for e in events), (
+        "a requeued job's SSE stream must see an event, not just go quiet"
+    )
+    # j2 was never touched (not 'processing'), so it gets no requeue event.
+    assert conn.execute(
+        "SELECT COUNT(*) AS n FROM progress_events WHERE job_id='j2'"
+    ).fetchone()["n"] == 0
+
+
+def test_claim_next_queued_emits_progress_on_dequeue(setup_db):
+    _insert_job("j1", "queued", "2024-01-01T00:00:00Z")
+    _touch_upload("j1")
+
+    claimed = queue_loop.claim_next_queued("w1")
+    assert claimed is not None
+
+    conn = get_conn()
+    events = conn.execute(
+        "SELECT event_type FROM progress_events WHERE job_id='j1'"
+    ).fetchall()
+    assert any(e["event_type"] == "stage" for e in events), (
+        "a client watching the queue wait end must see an event, not just "
+        "silence until the subprocess's own first stage event"
+    )
+
+
 def test_heartbeat_touches_only_own_processing_rows(setup_db):
     _insert_job("j1", "processing", "2024-01-01T00:00:00Z", worker_id="w")
     _insert_job("j2", "processing", "2024-01-01T00:00:01Z", worker_id="other")

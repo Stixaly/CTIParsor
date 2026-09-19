@@ -698,6 +698,11 @@ def build_stix_bundle(
     # based-on, targets, and the semantic relationships loop).  Keyed by
     # (source_id, rel_type, target_id) so a repeated logical edge is emitted once.
     seen_rel_keys: set[tuple] = set()
+    # rel_key -> its index in stix_objects, populated by the LLM-relationships
+    # loop below only (the only place start_time/stop_time get set) so a later
+    # duplicate carrying dates can upgrade an earlier, date-less entry for the
+    # same key instead of being silently discarded.
+    _rel_key_to_index: dict[tuple, int] = {}
 
     # ObservedData wrapping for IoC indicators.  STIX 2.1 best-practice chain is
     #   SCO  ◄─(object_refs)─  observed-data  ◄─(based-on)─  indicator
@@ -925,9 +930,6 @@ def build_stix_bundle(
             rel_type = "related-to"
 
         rel_key = (source.id, rel_type, target.id)
-        if rel_key in seen_rel_keys:
-            continue
-        seen_rel_keys.add(rel_key)
 
         try:
             # Evidence label has no native STIX 2.1 field — carry it as a custom
@@ -956,9 +958,31 @@ def build_stix_bundle(
             if getattr(rel, "stop_time", None) is not None:
                 _rel_kwargs["stop_time"] = rel.stop_time
             relationship = stix2.Relationship(**_rel_kwargs)
-            stix_objects.append(relationship)
         except Exception:
-            pass
+            continue
+
+        if rel_key in seen_rel_keys:
+            # A duplicate (source, type, target) triple -- normally just noise
+            # (two chunks reporting the same edge), but can also be two DB rows
+            # for the same relationship left behind by a reclaimed job (see
+            # _finalize_job / _current_owner in api/worker.py). Either way,
+            # picking whichever copy carries start_time/stop_time is strictly
+            # better than the arbitrary first-wins this used to be: it never
+            # discards temporal data in favour of a copy that has none.
+            _existing_idx = _rel_key_to_index.get(rel_key)
+            _existing = stix_objects[_existing_idx] if _existing_idx is not None else None
+            _existing_has_time = _existing is not None and (
+                getattr(_existing, "start_time", None) is not None
+                or getattr(_existing, "stop_time", None) is not None
+            )
+            _new_has_time = "start_time" in _rel_kwargs or "stop_time" in _rel_kwargs
+            if _existing_idx is not None and not _existing_has_time and _new_has_time:
+                stix_objects[_existing_idx] = relationship
+            continue
+
+        seen_rel_keys.add(rel_key)
+        _rel_key_to_index[rel_key] = len(stix_objects)
+        stix_objects.append(relationship)
 
     # --- Policy-forced relationships (enforce mode, "pin" rules) ---
     # Budget is split across rules by max-min fair share, not first-come-first-
@@ -1159,6 +1183,20 @@ def _map_iocs_to_scos(entities: list[RawEntity]) -> tuple[list, dict[str, object
     """
     scos = []
     value_to_sco: dict[str, object] = {}
+    # Tracks the value as it will actually appear in the STIX output --
+    # hive-expanded for a registry key (_expand_registry_hive is a no-op for
+    # every other entity type), lowercased -- mapped to the SCO already built
+    # for it. Deduping on the raw value alone let two different report
+    # surface forms of the same key ("HKLM\Software\Run" and
+    # "HKEY_LOCAL_MACHINE\Software\Run", both realistic in one report) both
+    # through as "distinct," and both expand to the identical key at
+    # STIX-object-construction time -- producing two SCOs sharing one
+    # deterministic STIX id in the exported bundle. This is checked
+    # separately from `value_to_sco` (which stays keyed by the raw value, as
+    # every other caller of this function's return value expects) so a raw
+    # form that turns out to be a duplicate under its canonical form still
+    # resolves to the one real SCO instead of silently resolving to nothing.
+    canonical_to_sco: dict[str, object] = {}
 
     for entity in entities:
         key = entity.value.lower()
@@ -1168,10 +1206,15 @@ def _map_iocs_to_scos(entities: list[RawEntity]) -> tuple[list, dict[str, object
         # identical deterministic id into the bundle and Report.object_refs.
         if key in value_to_sco:
             continue
+        canonical_key = _expand_registry_hive(entity.value).lower()
+        if canonical_key in canonical_to_sco:
+            value_to_sco[key] = canonical_to_sco[canonical_key]
+            continue
         sco = _entity_to_sco(entity)
         if sco is not None:
             scos.append(sco)
             value_to_sco[key] = sco
+            canonical_to_sco[canonical_key] = sco
 
     return scos, value_to_sco
 

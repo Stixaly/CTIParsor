@@ -5,9 +5,8 @@ import filetype
 import magic
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
-from api.db import _lock, get_conn, now_iso
 from api.main import limiter
-from api.worker import run_pipeline_async
+from api.routes._common import start_job
 
 # Explicit annotation needed: this module is part of an import cycle
 # (api.main -> api.routes.upload -> api.main, for the `limiter` import),
@@ -155,21 +154,4 @@ async def upload_file(
         dest.unlink(missing_ok=True)
         raise HTTPException(500, "File upload failed — empty file")
 
-    ts = now_iso()
-    with _lock:
-        with get_conn() as conn:
-            conn.execute(
-                "INSERT INTO jobs (id, original_filename, status, tlp_level, pap_level, created_at, updated_at) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (job_id, file.filename, "uploaded", tlp_level, pap_level, ts, ts),
-            )
-            conn.commit()
-
-    outcome = run_pipeline_async(job_id, str(dest), file.filename or "unknown")
-    if outcome == "rejected":
-        raise HTTPException(503, "The processing queue is full — try again in a few minutes.")
-
-    # See the note in api/routes/ingest.py: "started" stays "processing" for the
-    # existing contract, "queued" is reported honestly.
-    status = "queued" if outcome == "queued" else "processing"
-    return {"job_id": job_id, "filename": file.filename, "status": status}
+    return start_job(job_id, dest, file.filename or "unknown", tlp_level, pap_level)

@@ -155,8 +155,18 @@ def main() -> int:
             print("derived from it would overcommit the host.  Fix the failures and")
             print("re-run before sizing anything.")
         elif peak_rss_gb > 0:
-            suggested = max(1, int(math.floor((result["host_ram_gb"] - 4) / peak_rss_gb)))
+            raw_pool_size = (result["host_ram_gb"] - 4) / peak_rss_gb
+            suggested = max(1, int(math.floor(raw_pool_size)))
             print(f"suggested pool size = floor((RAM_GB - 4) / peak_RSS_GB) = {suggested}")
+            if raw_pool_size < 1:
+                # The formula's raw result is below 1: this host does not have
+                # 4 GB of headroom left over one worker's peak RSS. Clamping to
+                # 1 without saying so reads as "1 worker is safe" when the
+                # honest answer is "this host is under-provisioned even for 1."
+                print("WARNING: raw result is below 1 -- this host does not have")
+                print("4 GB of headroom beyond a single worker's peak RSS. A pool")
+                print("size of 1 is the floor of this formula, not a confirmed-safe")
+                print("recommendation; consider more RAM before sizing a pool here.")
         else:
             print("NO POOL SIZE SUGGESTED — peak RSS could not be read (non-Linux host?).")
 

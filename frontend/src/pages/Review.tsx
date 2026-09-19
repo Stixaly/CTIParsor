@@ -13,6 +13,7 @@ import {
   createRelationship, updateRelationship,
   finalizeJob, finalizeJobQuick, sourceUrl, bulkUpdateEntities,
   fetchCoverageReportRules, detectionsExportUrl,
+  errorDetail,
 } from '../api/client'
 import { downloadBundle } from '../stix/downloadBundle'
 import type { Entity, Relationship } from '../types'
@@ -283,7 +284,7 @@ export default function Review() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['entities', jobId] }); markDirty() },
     onError: (err: Error) => {
       console.error('[createEntity] failed:', err.message)
-      alert(`Could not create entity: ${err.message}`)
+      alert(`Could not create entity: ${errorDetail(err)}`)
     },
   })
 
@@ -297,7 +298,7 @@ export default function Review() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['relationships', jobId] }); markDirty() },
     onError: (err: Error) => {
       console.error('[updateRelationship] failed:', err.message)
-      alert(`Could not update relationship: ${err.message}`)
+      alert(`Could not update relationship: ${errorDetail(err)}`)
       qc.invalidateQueries({ queryKey: ['relationships', jobId] })
     },
   })

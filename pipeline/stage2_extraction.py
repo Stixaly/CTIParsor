@@ -619,10 +619,19 @@ def _extract_registry_keys(text: str) -> list[RawEntity]:
     seen: set[str] = set()
     for m in _REG_KEY_PATTERN.finditer(text):
         v = m.group().strip()
-        v = _trim_trailing_prose(v)
 
+        # Drive-letter check runs FIRST: it is the unambiguous signal (a
+        # single letter immediately before a colon), so stripping it before
+        # the prose heuristic runs means the prose word that preceded the
+        # drive letter (e.g. "...settings D:\...") gets its own turn at
+        # _trim_trailing_prose instead of being hidden behind an uppercase
+        # single-letter fragment the prose loop stops at and never looks
+        # past. Doing it in the other order was the bug: _trim_trailing_prose
+        # broke on the drive letter first and never re-examined the prose
+        # word to its left.
         next_char = text[m.end()] if m.end() < len(text) else None
         v = _trim_trailing_drive_letter(v, next_char)
+        v = _trim_trailing_prose(v)
 
         v = v.rstrip(".,;:!?)]}\"' \\")
 

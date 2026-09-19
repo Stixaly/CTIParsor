@@ -11,17 +11,15 @@ from __future__ import annotations
 import asyncio
 import re
 from datetime import datetime, timezone
-from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from api.db import _lock, get_conn, now_iso
 from api.logging_config import get_logger
 from api.main import limiter
+from api.routes._common import start_job
 from api.routes.upload import _MARKING_LEVELS, UPLOADS_DIR
-from api.worker import run_pipeline_async
 from pipeline import web_capture
 from pipeline.stage1_ingestion import html_to_text
 
@@ -136,32 +134,6 @@ def _timestamp_slug() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
 
-def _start_job(
-    job_id: str, dest: Path, filename: str, tlp: str | None, pap: str | None
-) -> dict[str, object]:
-    """Insert the jobs row and hand the file to the pipeline, as /upload does."""
-    ts = now_iso()
-    with _lock:
-        with get_conn() as conn:
-            conn.execute(
-                "INSERT INTO jobs (id, original_filename, status, tlp_level, pap_level, created_at, updated_at) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (job_id, filename, "uploaded", tlp, pap, ts, ts),
-            )
-            conn.commit()
-
-    outcome = run_pipeline_async(job_id, str(dest), filename)
-    if outcome == "rejected":
-        raise HTTPException(503, "The processing queue is full — try again in a few minutes.")
-
-    # "started" keeps reporting "processing" — the value this endpoint has always
-    # returned and the frontend switches on.  "queued" is reported as itself:
-    # answering "processing" for work that has not started is the lie this change
-    # exists to remove.
-    status = "queued" if outcome == "queued" else "processing"
-    return {"job_id": job_id, "filename": filename, "status": status}
-
-
 @router.post("/text")
 @limiter.limit("20/minute")
 async def ingest_text(request: Request, body: TextIngestRequest):
@@ -218,7 +190,7 @@ async def ingest_text(request: Request, body: TextIngestRequest):
         job_id, suffix, len(text),
     )
 
-    return _start_job(job_id, dest, filename, tlp, pap)
+    return start_job(job_id, dest, filename, tlp, pap)
 
 
 @router.post("/url")
@@ -312,7 +284,7 @@ async def ingest_url(request: Request, body: UrlIngestRequest):
         result.blocked_requests, result.js_enabled,
     )
 
-    response = _start_job(job_id, text_dest, filename, tlp, pap)
+    response = start_job(job_id, text_dest, filename, tlp, pap)
     response["source_url"] = result.final_url
     response["blocked_requests"] = result.blocked_requests
     response["rendered_chars"] = result.rendered_chars

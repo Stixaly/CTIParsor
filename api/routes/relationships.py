@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
@@ -6,7 +7,7 @@ from pydantic import BaseModel
 from api.db import _lock, get_conn
 from api.routes._common import require_job
 from models.schemas import STIX_RELATIONSHIP_TYPES
-from pipeline.stage3_llm import _parse_flexible_date
+from pipeline.dates import parse_flexible_date
 
 router = APIRouter(prefix="/api/jobs/{job_id}/relationships", tags=["relationships"])
 
@@ -47,16 +48,31 @@ def _parse_date_field(raw: str | None, field: str) -> str | None:
     """Parse one start_time/stop_time value for storage.
 
     None or an empty string clears the bound. Raises HTTPException(400) on an
-    unparseable date — this is a direct analyst edit, so it gets an immediate,
+    unparseable date -- this is a direct analyst edit, so it gets an immediate,
     actionable error instead of the silent-drop behaviour LLM extraction uses
-    (stage3_llm._normalize_llm_json, which can't ask a human to retry).
+    (stage3_llm._normalize_llm_json, which cannot ask a human to retry).
     """
     if raw is None or raw.strip() == "":
         return None
-    dt = _parse_flexible_date(raw)
+    dt = parse_flexible_date(raw)
     if dt is None:
-        raise HTTPException(400, f"Invalid {field}: '{raw}' is not a parseable date")
+        raise HTTPException(400, f"Invalid {field}: {raw!r} is not a parseable date")
     return dt.isoformat()
+
+
+def _out_of_order(start: str | None, stop: str | None) -> bool:
+    """True if stop is not strictly after start.
+
+    Both are ISO-8601 strings that may carry different UTC offsets (whatever
+    offset the caller supplied is preserved verbatim by _parse_date_field, not
+    normalised) -- comparing them as strings is a bug, not a simplification:
+    2023-06-02T20:00:00+00:00 <= 2023-06-02T23:00:00+05:00 lexicographically,
+    even though the first instant (20:00 UTC) is actually AFTER the second
+    (18:00 UTC). Parse back to real, comparable instants first.
+    """
+    if not start or not stop:
+        return False
+    return datetime.fromisoformat(stop) <= datetime.fromisoformat(start)
 
 
 def _row_to_dict(row) -> dict:
@@ -106,7 +122,7 @@ def create_relationship(job_id: str, body: RelCreate):
     _label = body.evidence_label if body.evidence_label in _VALID_LABELS else "reported"
     _start = _parse_date_field(body.start_time, "start_time")
     _stop = _parse_date_field(body.stop_time, "stop_time")
-    if _start and _stop and _stop <= _start:
+    if _out_of_order(_start, _stop):
         raise HTTPException(400, "stop_time must be later than start_time")
     rid = str(uuid4())
     with _lock:
@@ -158,35 +174,11 @@ def update_relationship(job_id: str, rel_id: str, patch: RelPatch):
                                      f"Valid: {', '.join(sorted(_VALID_LABELS))}")
         updates.append("evidence_label=?")
         values.append(patch.evidence_label)
-    if "start_time" in patch.model_fields_set or "stop_time" in patch.model_fields_set:
-        # Only one bound may be patched at a time — fetch the other so the
-        # STIX 2.1 stop_time > start_time constraint is checked against the
-        # value that will actually be stored, not just the one in this PATCH.
-        with get_conn() as conn:
-            existing = conn.execute(
-                "SELECT start_time, stop_time FROM relationships WHERE id=? AND job_id=?",
-                (rel_id, job_id),
-            ).fetchone()
-        if not existing:
-            raise HTTPException(404, "Relationship not found")
-        existing_start = existing["start_time"] if "start_time" in existing.keys() else None
-        existing_stop = existing["stop_time"] if "stop_time" in existing.keys() else None
-        new_start = (
-            _parse_date_field(patch.start_time, "start_time")
-            if "start_time" in patch.model_fields_set else existing_start
-        )
-        new_stop = (
-            _parse_date_field(patch.stop_time, "stop_time")
-            if "stop_time" in patch.model_fields_set else existing_stop
-        )
-        if new_start and new_stop and new_stop <= new_start:
-            raise HTTPException(400, "stop_time must be later than start_time")
-        updates.append("start_time=?")
-        values.append(new_start)
-        updates.append("stop_time=?")
-        values.append(new_stop)
+    _wants_date_update = (
+        "start_time" in patch.model_fields_set or "stop_time" in patch.model_fields_set
+    )
 
-    if not updates:
+    if not updates and not _wants_date_update:
         with get_conn() as conn:
             row = conn.execute(
                 "SELECT * FROM relationships WHERE id=? AND job_id=?", (rel_id, job_id)
@@ -195,9 +187,43 @@ def update_relationship(job_id: str, rel_id: str, patch: RelPatch):
                 raise HTTPException(404, "Relationship not found")
         return _row_to_dict(row)
 
-    values.extend([rel_id, job_id])
     with _lock:
         with get_conn() as conn:
+            if _wants_date_update:
+                # Only one bound may be patched at a time -- fetch the other so
+                # the STIX 2.1 stop_time > start_time constraint is checked
+                # against the value that will actually be stored, not just
+                # the one in this PATCH. Read and validated inside the same
+                # lock as the write below, not before acquiring it: two
+                # concurrent single-field PATCHes on the same relationship
+                # could otherwise each read the same pre-write row, each
+                # validate cleanly against now-stale data, and jointly commit
+                # an invalid stored range that neither request alone would
+                # have been allowed to write.
+                existing = conn.execute(
+                    "SELECT start_time, stop_time FROM relationships WHERE id=? AND job_id=?",
+                    (rel_id, job_id),
+                ).fetchone()
+                if not existing:
+                    raise HTTPException(404, "Relationship not found")
+                existing_start = existing["start_time"] if "start_time" in existing.keys() else None
+                existing_stop = existing["stop_time"] if "stop_time" in existing.keys() else None
+                new_start = (
+                    _parse_date_field(patch.start_time, "start_time")
+                    if "start_time" in patch.model_fields_set else existing_start
+                )
+                new_stop = (
+                    _parse_date_field(patch.stop_time, "stop_time")
+                    if "stop_time" in patch.model_fields_set else existing_stop
+                )
+                if _out_of_order(new_start, new_stop):
+                    raise HTTPException(400, "stop_time must be later than start_time")
+                updates.append("start_time=?")
+                values.append(new_start)
+                updates.append("stop_time=?")
+                values.append(new_stop)
+
+            values.extend([rel_id, job_id])
             result = conn.execute(
                 f"UPDATE relationships SET {', '.join(updates)} WHERE id=? AND job_id=?",
                 values,

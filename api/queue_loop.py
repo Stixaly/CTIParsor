@@ -112,6 +112,15 @@ def claim_next_queued(worker_id: str = WORKER_ID) -> tuple[str, str, str] | None
                 emit_progress(job_id, "done", {"status": "failed", "error": "uploaded file is missing"})
                 continue
 
+            # Every other status transition in this module pairs a DB write
+            # with an emit_progress call; this one didn't, so a client polling
+            # the SSE stream saw the queue wait end with no event -- the UI
+            # kept showing stale "queued, position N" until the subprocess's
+            # own first stage event arrived, which can be tens of seconds
+            # away during a model cold start. No `stage` number: this isn't
+            # one of the 5 pipeline stages, and ProgressModal.tsx uses a
+            # present `stage` key to drive its 1-5 stage tracker.
+            emit_progress(job_id, "stage", {"label": "Processing started"})
             return (job_id, file_path, original_filename)
 
         logger.warning("Failed to claim next queued job after 10 attempts")
@@ -133,26 +142,34 @@ def requeue_orphans(*, unconditional: bool = False) -> int:
         conn = get_conn()
         now = now_iso()
         if unconditional:
-            cur = conn.execute(
-                "UPDATE jobs SET status='queued', worker_id=NULL, heartbeat_at=NULL, updated_at=? "
-                "WHERE status='processing'",
-                (now,),
-            )
-            count = cur.rowcount
-            if count > 0:
-                logger.info(f"Requeued {count} orphaned job(s) (unconditional)")
-            return count
+            where = "status='processing'"
+            params: tuple = ()
         else:
             cutoff = lease_cutoff()
-            cur = conn.execute(
-                "UPDATE jobs SET status='queued', worker_id=NULL, heartbeat_at=NULL, updated_at=? "
-                "WHERE status='processing' AND (heartbeat_at IS NULL OR heartbeat_at < ?)",
-                (now, cutoff),
+            where = "status='processing' AND (heartbeat_at IS NULL OR heartbeat_at < ?)"
+            params = (cutoff,)
+
+        # Read the affected ids first so each can get its own emit_progress
+        # below -- every other status transition in this module pairs a DB
+        # write with one, and without it a client polling a requeued job's
+        # SSE stream sees it simply stop producing events across a restart
+        # instead of an explicit signal that it is back in the queue.
+        ids = [r[0] for r in conn.execute(f"SELECT id FROM jobs WHERE {where}", params).fetchall()]
+
+        cur = conn.execute(
+            f"UPDATE jobs SET status='queued', worker_id=NULL, heartbeat_at=NULL, updated_at=? "
+            f"WHERE {where}",
+            (now, *params),
+        )
+        count = cur.rowcount
+        if count > 0:
+            logger.info(
+                f"Requeued {count} orphaned job(s) "
+                f"({'unconditional' if unconditional else 'lease expired'})"
             )
-            count = cur.rowcount
-            if count > 0:
-                logger.info(f"Requeued {count} orphaned job(s) (lease expired)")
-            return count
+            for jid in ids:
+                emit_progress(jid, "stage", {"label": "Requeued after a restart"})
+        return count
     except Exception as exc:
         logger.error(f"Exception in requeue_orphans: {exc}")
         return 0

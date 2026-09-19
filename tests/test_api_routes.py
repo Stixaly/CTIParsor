@@ -101,10 +101,11 @@ class TestUploadEndpoint:
 
     def test_upload_rejects_executable(self, api_client):
         """Executables must be rejected with 4xx."""
-        # api.routes.upload also imports `get_conn` directly — patch it there
-        # (rejection happens on extension check, before any DB access, so this
-        # patch is mostly a safety net against accidentally hitting the real DB).
-        with patch("api.routes.upload.get_conn"):
+        # The job-row insert (api.routes._common.start_job) is the only DB
+        # access on this path now -- patch it there as a safety net against
+        # accidentally hitting the real DB (rejection happens on extension
+        # check, before start_job is ever called).
+        with patch("api.routes._common.get_conn"):
             response = self._upload(api_client, "evil.exe", b"MZ\x90\x00", "application/octet-stream")
         assert response.status_code in (400, 415, 422, 500)
 
