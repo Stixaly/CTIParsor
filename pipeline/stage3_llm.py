@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import cast
 
 import anthropic
+from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from pydantic import BaseModel, ValidationError
 from tenacity import RetryError, retry, retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -88,8 +89,17 @@ def _sanitize_text_for_prompt(text: str, max_length: int = 10000) -> str:
     # plain message body, not into JSON or a code context, so escaping has no
     # security value here — only corruption.
 
-    # Remove XML/HTML tags that could be used for injection
-    text = re.sub(r'<[^>]+>', '', text)
+    # Remove XML/HTML tags that could be used for injection (a fake <system>
+    # or <|im_start|>-style wrapper meant to look like conversation markup to
+    # the model).  A blind `re.sub(r'<[^>]+>', '', text)` used to do this, but
+    # it also ate anything else shaped like `<...>` -- a real CTI report
+    # describing a command (`cmd < input.txt > output.txt`) or a generic type
+    # (`vector<int>`) silently lost the bracketed span.  BeautifulSoup only
+    # recognises `<` immediately followed by a tag-name character as an
+    # opening tag, so shell redirection and comparisons with surrounding
+    # spaces (`< input.txt >`, `x < 5`) survive; a tight `<tagname>` still
+    # parses as a tag and is removed either way, same as before.
+    text = BeautifulSoup(text, "html.parser").get_text()
 
     # Remove sequences that look like genuine instruction-injection attempts.
     # These target instruction *reassignment*, not security vocabulary.  The old
