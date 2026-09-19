@@ -20,6 +20,16 @@ offline_validate_bundle() {
         offline_die "not an offline bundle: $DIR (bundle.env or SHA256SUMS missing)"
     fi
 
+    # Integrity FIRST, before trusting anything the bundle carries -- including
+    # bundle.env itself. Sourcing a file runs it as shell, so checking it after
+    # sourcing would let a bundle tampered with in transit (exactly what this
+    # checksum exists to catch) run arbitrary code before the mismatch is ever
+    # reported.
+    info "Verifying checksums…"
+    if ! ( cd "$DIR" && sha256sum --quiet -c SHA256SUMS ); then
+        offline_die "checksum mismatch — the bundle is corrupt or was modified in transit"
+    fi
+
     # shellcheck disable=SC1090
     . "$DIR/bundle.env" || offline_die "failed to source $DIR/bundle.env"
 
@@ -48,11 +58,6 @@ offline_validate_bundle() {
         offline_die "architecture mismatch: bundle=$BUNDLE_ARCH, host=$arch"
     fi
 
-    info "Verifying checksums…"
-    if ! ( cd "$DIR" && sha256sum --quiet -c SHA256SUMS ); then
-        offline_die "checksum mismatch — the bundle is corrupt or was modified in transit"
-    fi
-
     ok "bundle ${BUNDLE_GIT_REV} built ${BUNDLE_BUILT_AT} for Python ${BUNDLE_PYTHON} / ${BUNDLE_CODENAME} ${BUNDLE_ARCH}"
     if [ -n "${BUNDLE_OLLAMA_MODEL:-}" ]; then
         ok "local LLM: ${BUNDLE_OLLAMA_MODEL} (Ollama ${BUNDLE_OLLAMA_TAG:-?})"
@@ -60,6 +65,28 @@ offline_validate_bundle() {
         warn "no local LLM in this bundle — Stage 3 needs LLM_PROVIDER to point at a reachable server"
     fi
 
+    return 0
+}
+
+# Reject a tar archive that contains an absolute member path or a ".." path
+# segment before it is ever extracted -- the same Zip-Slip guard
+# pipeline/detection/sync.py and pipeline/stage5_validation.py apply on the
+# Python side (both share pipeline/security.py::is_contained). A bundle's
+# SHA256SUMS entry only proves the tar's bytes weren't altered in transit; it
+# says nothing about whether the tar's own content is safe to extract, so this
+# is a separate check, run right before every extraction below. Extra args
+# (e.g. --use-compress-program=unzstd) are forwarded to the listing step so it
+# decodes the archive the same way the real extraction will.
+offline_check_tar_safe() {
+    local archive="$1"
+    shift
+    local unsafe
+    unsafe=$(tar -tf "$archive" "$@" 2>/dev/null | grep -E '(^|/)\.\.(/|$)|^/') || true
+    if [ -n "$unsafe" ]; then
+        err "refusing to extract $archive: unsafe member path(s):"
+        printf '%s\n' "$unsafe" >&2
+        return 1
+    fi
     return 0
 }
 
@@ -192,6 +219,10 @@ offline_stage_corpora() {
         return 0
     fi
 
+    if ! offline_check_tar_safe "$DIR/corpora.tar"; then
+        return 1
+    fi
+
     if ! tar -xf "$DIR/corpora.tar"; then
         err "failed to extract corpora.tar"
         return 1
@@ -207,6 +238,9 @@ offline_stage_frontend() {
     local DIR="$1"
 
     if [ -f "$DIR/frontend-dist.tar" ]; then
+        if ! offline_check_tar_safe "$DIR/frontend-dist.tar"; then
+            return 1
+        fi
         mkdir -p frontend || { warn "failed to create frontend/"; return 1; }
         if ! tar -xf "$DIR/frontend-dist.tar" -C frontend; then
             warn "failed to extract frontend-dist.tar"
@@ -214,6 +248,9 @@ offline_stage_frontend() {
     fi
 
     if [ -f "$DIR/node_modules.tar" ] && [ ! -d frontend/node_modules ]; then
+        if ! offline_check_tar_safe "$DIR/node_modules.tar"; then
+            return 1
+        fi
         if ! tar -xf "$DIR/node_modules.tar" -C frontend; then
             warn "failed to extract node_modules.tar"
         fi
@@ -254,6 +291,9 @@ offline_install_ollama() {
     else
         if ! command -v unzstd >/dev/null 2>&1; then
             warn "zstd missing — install it from the bundle's debs, then: sudo tar --use-compress-program=unzstd -C /usr/local -xf $DIR/ollama/$asset"
+            return 1
+        fi
+        if ! offline_check_tar_safe "$DIR/ollama/$asset" --use-compress-program=unzstd; then
             return 1
         fi
         info "Extracting Ollama to /usr/local (sudo)…"

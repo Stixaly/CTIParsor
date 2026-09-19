@@ -22,10 +22,41 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
+from pipeline.security import is_contained
+from pipeline.web_capture import CaptureError, validate_url
+
 MANIFEST_NAME = ".sync.json"     # written into `path` after a tarball fetch (ADR-0015 §5)
 _USER_AGENT = "cti-to-stix/1.0 (detection corpus sync)"
 _CHUNK = 1 << 20
 _MD5_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Re-validates every redirect target through validate_url before
+    following it.
+
+    validate_url() only ever sees the URL fetch_tarball was called with;
+    urllib's default redirect handling then trusts whatever Location header
+    the remote server sends for every hop after that with no further check.
+    A server that legitimately passes the scheme/host/public-IP check on the
+    first request can still redirect to file://, localhost, or an internal
+    address on the next one. This closes that gap by applying the same check
+    to every redirect target. DNS rebinding between validation and connection
+    (the remaining gap pipeline/web_capture.py closes for its own fetches via
+    Chromium's --host-resolver-rules) is not closed here -- it needs control
+    of the domain's authoritative DNS, a narrower and higher-effort attack
+    than an open redirect.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        try:
+            validate_url(newurl)
+        except CaptureError as e:
+            raise urllib.error.URLError(f"redirect to an unsafe URL blocked: {e}") from e
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_SAFE_OPENER = urllib.request.build_opener(_SafeRedirectHandler)
 
 
 def git_command(corpus: dict) -> list[str] | None:
@@ -46,7 +77,7 @@ def _download(url: str, dest: Path, *, timeout: int) -> int:
     """Stream `url` into `dest` in _CHUNK-sized blocks; returns the bytes written.
     Raises URLError/OSError — the caller decides what a failure means."""
     req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with _SAFE_OPENER.open(req, timeout=timeout) as resp:
         total = 0
         with open(dest, "wb") as f:
             while True:
@@ -62,7 +93,7 @@ def _fetch_text(url: str, *, timeout: int) -> str | None:
     """Fetch a small text sidecar (the .md5 next to a tarball). None on any failure."""
     req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _SAFE_OPENER.open(req, timeout=timeout) as resp:
             data = resp.read(4096)
         return data.decode("utf-8", errors="replace")
     except (urllib.error.URLError, OSError, TimeoutError, ValueError):
@@ -89,7 +120,6 @@ def _safe_members(tar: tarfile.TarFile, dest: Path) -> tuple[list[tarfile.TarInf
     and the resolved target must stay inside `dest`."""
     safe: list[tarfile.TarInfo] = []
     skipped = 0
-    dest_resolved = dest.resolve()
     for member in tar.getmembers():
         if member.name in ("", "."):
             continue
@@ -100,8 +130,7 @@ def _safe_members(tar: tarfile.TarFile, dest: Path) -> tuple[list[tarfile.TarInf
         if p.is_absolute() or ".." in p.parts:
             skipped += 1
             continue
-        target = (dest / member.name).resolve()
-        if not target.is_relative_to(dest_resolved):
+        if not is_contained(dest / member.name, dest):
             skipped += 1
             continue
         safe.append(member)
@@ -122,6 +151,21 @@ def fetch_tarball(corpus: dict, *, timeout: int = 900) -> tuple[bool, str]:
     path = Path(str(corpus.get("path") or ""))
     if str(path) in ("", "."):
         return False, "no path configured"
+    # `_validate_remote` in api/routes/settings.py only rejects git-argument-
+    # injection shapes (a leading '-', a 'scheme::' transport helper) -- it says
+    # nothing about scheme or host, so an operator-supplied tarball URL still
+    # needs the same SSRF policy as any other server-side fetch of an
+    # attacker-influenced URL. `validate_url` is the one place that policy is
+    # defined (see pipeline/web_capture.py): http(s) only, no credentials, no
+    # localhost/link-local/metadata hosts, and only publicly-routable resolved
+    # IPs. A `file://`/`ftp://` scheme or an internal host is rejected here,
+    # before anything is downloaded. The original `url` string (not the
+    # normalized return value) is kept, so a `.md5` sidecar built from it below
+    # still matches exactly what the registry configured.
+    try:
+        validate_url(url)
+    except CaptureError as e:
+        return False, f"invalid tarball URL: {e}"
 
     path.parent.mkdir(parents=True, exist_ok=True)
     staging = path.parent / f".{path.name}.staging"

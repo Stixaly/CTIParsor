@@ -70,12 +70,20 @@ def recalibrate(body: RecalibrateIn) -> dict:
     if body.min_samples < 1:
         raise HTTPException(400, "'min_samples' must be a positive integer")
 
-    with _lock:
-        with get_conn() as conn:
-            proposals = calibrate(
-                conn, target_precision=body.target_precision, min_samples=body.min_samples,
-            )
-            written = apply_proposals(conn, proposals, now_iso()) if body.apply else 0
+    # _lock only needs to guard the actual write below: calibrate() is a
+    # read-only, unindexed full scan of `entities` whose cost grows with the
+    # whole analyst corpus, and holding the process-wide write lock for its
+    # duration would block every job-status update/progress-emit in this
+    # process for that long. Readers don't need this lock on either backend
+    # (SQLite's WAL mode and Postgres both support concurrent reads).
+    with get_conn() as conn:
+        proposals = calibrate(
+            conn, target_precision=body.target_precision, min_samples=body.min_samples,
+        )
+        written = 0
+        if body.apply:
+            with _lock:
+                written = apply_proposals(conn, proposals, now_iso())
     if written:
         thresholds.reload()
     return {

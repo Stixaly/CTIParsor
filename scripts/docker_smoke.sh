@@ -74,6 +74,24 @@ done
 command -v curl >/dev/null 2>&1 || { echo "ERROR: curl is required on the host"; exit 1; }
 command -v python3 >/dev/null 2>&1 || { echo "ERROR: python3 is required on the host"; exit 1; }
 
+# compose.yaml bind-mounts .secrets/db_password into every service at
+# /run/secrets/db_password (see its top-of-file comment) so CTI_DB_PASSWORD
+# never appears in `docker inspect`/`docker compose config` output. This
+# script drives `docker compose` directly rather than through the Makefile
+# (whose `docker-up`/`docker-bootstrap` targets do this via a file
+# prerequisite), so it materializes the same file itself.
+CTI_ENV_FILE="${CTI_ENV_FILE:-.env}"
+mkdir -p .secrets
+case "$CTI_ENV_FILE" in
+    /*) . "$CTI_ENV_FILE" ;;
+    *)  . "./$CTI_ENV_FILE" ;;
+esac
+: "${CTI_DB_PASSWORD:?Set CTI_DB_PASSWORD in $CTI_ENV_FILE (e.g. openssl rand -hex 24)}"
+printf '%s' "$CTI_DB_PASSWORD" > .secrets/db_password
+# World-readable, not owner-only: app/worker read it as uid 1001 and postgres
+# as uid 70, none of which is the host user that just created the file.
+chmod 644 .secrets/db_password
+
 # ── Variables ─────────────────────────────────────────────────────────────────
 DOCKER_BIN="${DOCKER_BIN:-docker}"
 COMPOSE="$DOCKER_BIN compose"

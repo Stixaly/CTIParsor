@@ -56,3 +56,7 @@ detection_corpora.local.yaml
 # Reverse-proxy secrets for the compose `proxy` profile (docs/docker.md)
 docker/nginx/certs/
 docker/nginx/htpasswd
+
+# DB password materialized from .env for compose.yaml's bind-mounted secret
+# (Makefile's docker-up/docker-bootstrap, scripts/docker_smoke.sh)
+.secrets/

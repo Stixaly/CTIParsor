@@ -264,8 +264,13 @@ def main() -> int:
     formats = {s.strip() for s in args.formats.split(",") if s.strip()}
     names = {s.strip() for s in args.corpora.split(",") if s.strip()}
 
-    # Set DB_PATH before any dbmod call
+    # Set DB_PATH before any dbmod call. DATABASE_URL is cleared too: this
+    # script's whole point is an isolated, disposable SQLite file so a measurement
+    # run never contends with the production store -- an inherited DATABASE_URL
+    # env var would otherwise make get_conn() silently route to PostgreSQL
+    # instead of the file just configured above.
     dbmod.DB_PATH = Path(args.db)
+    dbmod.DATABASE_URL = None
 
     # Clean up old database files unless --keep
     if not args.keep:

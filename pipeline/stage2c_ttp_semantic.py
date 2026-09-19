@@ -49,6 +49,7 @@ from pathlib import Path
 
 from models.schemas import EntityType, RawEntity
 from pipeline.env_flags import env_bool
+from pipeline.regex_safety import compile_pattern
 
 _SKIP_HEAVY = env_bool("SKIP_HEAVY_MODELS")
 
@@ -291,12 +292,12 @@ _ADVISORY_VERBS: frozenset[str] = frozenset({
 # but lowercase "table" can appear in genuine malware descriptions like "hash
 # table" or "routing table" and must not be excluded) followed by whitespace
 # and one or more digits, as a whole word.
-_TABLE_CAPTION_PATTERN = re.compile(r"\bTable\s+\d+\b")
+_TABLE_CAPTION_PATTERN = compile_pattern(r"\bTable\s+\d+\b")
 
 # Strips a run of non-letter characters from either end of a token (leading
 # punctuation like "(Enforce" or trailing punctuation like "Restrict," or
 # "Restrict:"), so the token can be compared to _ADVISORY_VERBS cleanly.
-_NON_LETTER_EDGE = re.compile(r"^[^a-zA-Z]+|[^a-zA-Z]+$")
+_NON_LETTER_EDGE = compile_pattern(r"^[^a-zA-Z]+|[^a-zA-Z]+$")
 
 
 def _advisory_gate_enabled() -> bool:

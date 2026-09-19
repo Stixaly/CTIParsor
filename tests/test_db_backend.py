@@ -11,13 +11,41 @@ from api.db_backend import PgConnection, backend_from_url, pg_row_factory, row_c
 def test_translate_placeholders_table():
     cases = [
         ("SELECT ? FROM t WHERE a=? AND b='x?y'", "SELECT %s FROM t WHERE a=%s AND b='x?y'"),
-        ("c LIKE '%z' AND d=?", "c LIKE '%z' AND d=%s"),
+        # A literal '%' inside a quoted string must be doubled too: psycopg's
+        # placeholder scanner is a plain text scan, not quote-aware (see
+        # test_translate_placeholders_survives_psycopg_parsing below).
+        ("c LIKE '%z' AND d=?", "c LIKE '%%z' AND d=%s"),
         ('e = 100 % ? AND f="q?"', "e = 100 %% %s AND f=\"q?\""),
         ("a='it''s ?' AND b=?", "a='it''s ?' AND b=%s"),
         ("SELECT 1", "SELECT 1"),
     ]
     for sql, expected in cases:
         assert translate_placeholders(sql) == expected
+
+
+def test_translate_placeholders_survives_psycopg_parsing():
+    """Every translated query must actually parse as psycopg3 sees it.
+
+    A prior version of `translate_placeholders` only doubled '%' outside
+    quotes, which round-tripped fine through this module's own logic but
+    raised `psycopg.errors.ProgrammingError` the moment a real psycopg
+    connection tried to parse a query with a LIKE-style '%' wildcard hardcoded
+    in a quoted string next to a '?' placeholder. Asserting against
+    `_split_query` (the actual scanner) rather than a hand-picked expected
+    string is what would have caught that regression.
+    """
+    from psycopg._queries import _split_query
+
+    queries_with_params = [
+        "SELECT ? FROM t WHERE a=? AND b='x?y'",
+        "SELECT * FROM t WHERE name LIKE '%foo%' AND id = ?",
+        "SELECT * FROM t WHERE a=? AND b LIKE '%x' AND c=?",
+        'e = 100 % ? AND f="q?"',
+        "a='it''s ?' AND b=?",
+    ]
+    for sql in queries_with_params:
+        translated = translate_placeholders(sql)
+        _split_query(translated.encode())  # raises psycopg.errors.ProgrammingError if malformed
 
 
 def test_backend_from_url():

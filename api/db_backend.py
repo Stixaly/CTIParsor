@@ -33,7 +33,17 @@ def backend_from_url(url: str | None) -> str:
 
 @lru_cache(maxsize=1024)
 def translate_placeholders(sql: str) -> str:
-    """Convert sqlite3 qmark placeholders to psycopg format placeholders."""
+    """Convert sqlite3 qmark placeholders to psycopg format placeholders.
+
+    psycopg's placeholder scanner is a plain text scan for '%s'/'%b'/'%t' (see
+    psycopg._queries._split_query) -- it is NOT aware of SQL string quoting, so
+    a literal '%' must be doubled to '%%' everywhere in the query text,
+    including inside a quoted string literal (e.g. `LIKE '%foo%'`), or psycopg
+    raises "only '%s', '%b', '%t' are allowed as placeholders". Quote tracking
+    below is only needed to decide whether a '?' is a real placeholder (outside
+    quotes) or a literal question mark (inside one) -- '%' escaping applies
+    unconditionally.
+    """
     result = []
     in_single = False
     in_double = False
@@ -44,13 +54,10 @@ def translate_placeholders(sql: str) -> str:
         elif char == '"' and not in_single:
             in_double = not in_double
             result.append(char)
-        elif not in_single and not in_double:
-            if char == "?":
-                result.append("%s")
-            elif char == "%":
-                result.append("%%")
-            else:
-                result.append(char)
+        elif char == "%":
+            result.append("%%")
+        elif char == "?" and not in_single and not in_double:
+            result.append("%s")
         else:
             result.append(char)
     return "".join(result)

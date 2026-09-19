@@ -38,6 +38,10 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 
+from api.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 # Sources whose scores are calibrated.  Gazetteer/IoC/LLM rows carry fixed
 # nominal confidences (0.92, 1.0, 0.9), not a model score to threshold.
 CALIBRATED_SOURCES: tuple[str, ...] = ("cyner", "gliner")
@@ -48,6 +52,15 @@ AUTO_ACCEPT_LEVEL = 0.90
 
 DEFAULT_TARGET_PRECISION = 0.90
 DEFAULT_MIN_SAMPLES = 200
+
+# Floor on a SINGLE isotonic block's own sample count before its rate is
+# trusted as the cutoff. min_samples above only gates the pair's aggregate
+# decision count; PAVA can still isolate one lucky (or unlucky) decision into
+# its own tiny block that happens to already be locally non-decreasing, which
+# min_samples alone does not catch. The blocks' rates are non-decreasing by
+# construction, so skipping an under-sized block and continuing to the next
+# one never picks a worse cutoff than the aggregate check already allowed.
+DEFAULT_MIN_BLOCK_SAMPLES = 20
 
 
 @dataclass(frozen=True)
@@ -139,6 +152,7 @@ def propose(
     *,
     target_precision: float = DEFAULT_TARGET_PRECISION,
     min_samples: int = DEFAULT_MIN_SAMPLES,
+    min_block_samples: int = DEFAULT_MIN_BLOCK_SAMPLES,
     auto_accept_level: float = AUTO_ACCEPT_LEVEL,
 ) -> Proposal:
     """One (source, entity_type)'s proposal from its decided (score, accepted) pairs."""
@@ -163,6 +177,20 @@ def propose(
     # too, so the first such block's lower edge is the lowest safe cutoff.
     first_ok = next((b for b in blocks if b.rate >= target_precision), None)
     if first_ok is None:
+        p.status = "target_unreachable"
+        return p
+
+    # min_samples above only gates the pair's AGGREGATE decision count, not
+    # how much of it actually falls at or above this specific cutoff. PAVA
+    # can isolate a single lucky decision into its own already-monotone block
+    # (no violation to pool it with a neighbour), so first_ok.n alone is not
+    # a reliable guard -- a legitimate, well-supported cutoff is routinely
+    # made of many such small blocks in a row. What has to be large enough is
+    # the SAME support _precision_recall(points, cutoff) below counts: every
+    # decision at or above the proposed cutoff, which is the population this
+    # cutoff's precision actually rests on going forward.
+    support = sum(1 for s, _ in points if s >= first_ok.lo)
+    if support < min_block_samples:
         p.status = "target_unreachable"
         return p
 
@@ -253,10 +281,25 @@ _UPSERT = (
 
 def apply_proposals(conn, proposals: list[Proposal], now: str) -> int:
     """Store every proposal that carries a cutoff; the guarded statuses leave
-    whatever row exists untouched.  Returns the number of rows written."""
+    whatever row exists untouched.  Returns the number of rows written.
+
+    p.proposed is a raw score off entities.confidence -- a column with no
+    CHECK constraint and no clamp in either NER stage -- so it is range-
+    checked here the same way api/routes/thresholds.py's manual PUT already
+    validates a hand-set threshold. Persisting a value outside [0, 1] would
+    make get_threshold's `score < cutoff` comparison silently always-reject
+    (or always-accept) every future prediction for that (source, entity_type),
+    with no error anywhere in the write path to catch it.
+    """
     written = 0
     for p in proposals:
         if p.proposed is None:
+            continue
+        if not 0.0 <= p.proposed <= 1.0:
+            logger.warning(
+                f"[calibration] skipping out-of-range proposed threshold "
+                f"{p.proposed!r} for ({p.source}, {p.entity_type})"
+            )
             continue
         conn.execute(_UPSERT, (
             p.source, p.entity_type, p.proposed, p.sample_size, p.target_precision,

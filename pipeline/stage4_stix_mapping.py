@@ -15,6 +15,7 @@ from models.schemas import STIX_RELATIONSHIP_TYPES, EntityType, RawEntity
 from pipeline.aliases import alias_surface_forms, canonical_name
 from pipeline.detection.suricata_atoms import parse_options, rule_header
 from pipeline.detection.yara_atoms import split_rules
+from pipeline.regex_safety import compile_pattern
 from pipeline.stage3_llm import LLMEnrichmentResult
 from pipeline.stage4b_graph_completion import complete_graph
 from pipeline.stix_access import field as _field
@@ -730,6 +731,14 @@ def build_stix_bundle(
     # Each ioc_association becomes: Indicator (pattern) --indicates--> Malware
     seen_indicators: set[str] = set()
 
+    # sco.id -> its Indicator, for _route_observables_through_indicators below
+    # (ADR-0041). Populated directly at each Indicator's creation, below --
+    # NOT by re-deriving it later from name_to_stix's f"indicator:{key}" /
+    # {key} prefix pairing, which silently picks the wrong SCO whenever an
+    # IOC value and some other entity name normalize to the same lowercase
+    # key.
+    sco_id_to_indicator: dict[str, object] = {}
+
     for assoc in llm_result.ioc_associations:
         if not assoc.ioc_value or not assoc.malware_name:
             continue
@@ -768,6 +777,8 @@ def build_stix_bundle(
             stix_objects.append(indicator)
             name_to_stix[f"indicator:{ioc_key}"] = indicator
             seen_indicators.add(ioc_key)
+            if hasattr(sco, "id"):
+                sco_id_to_indicator[sco.id] = indicator
 
             _add_relationship(stix_objects, indicator, "indicates", malware, confidence=0.8,
                               pol_index=_pol_index, seen=seen_rel_keys,
@@ -806,6 +817,8 @@ def build_stix_bundle(
             stix_objects.append(indicator)
             name_to_stix[f"indicator:{ioc_key}"] = indicator
             seen_indicators.add(ioc_key)
+            if hasattr(sco, "id"):
+                sco_id_to_indicator[sco.id] = indicator
             # Indicator --based-on--> ObservedData --(object_refs)--> SCO
             obs = _observed_data_for(sco)
             if obs is not None:
@@ -858,20 +871,6 @@ def build_stix_bundle(
                 _add_relationship(stix_objects, actor, "targets", identity,
                                   pol_index=_pol_index, seen=seen_rel_keys,
                                   custom=_EV_REPORTED)
-
-    # Built once: sco.id -> its Indicator, for _route_observables_through_indicators
-    # below (ADR-0041). Derived from name_to_stix rather than re-walking
-    # stix_objects: every Indicator created above was registered under
-    # f"indicator:{value.lower()}", and the SCO it was built from under
-    # {value.lower()}, so pairing the two prefixes recovers the mapping in one
-    # pass over an existing dict.
-    sco_id_to_indicator: dict[str, object] = {}
-    for _key, _obj in name_to_stix.items():
-        if not (isinstance(_key, str) and _key.startswith("indicator:")):
-            continue
-        _sco = name_to_stix.get(_key[len("indicator:"):])
-        if _sco is not None and hasattr(_sco, "id"):
-            sco_id_to_indicator[_sco.id] = _obj
 
     # --- SROs — semantic relationships (deduplicated, spec-validated) ---
     # Reuses the shared seen_rel_keys set so a semantic edge that duplicates a
@@ -1377,7 +1376,8 @@ def _build_stix_pattern(ioc_value: str, sco) -> str | None:
 # ---------------------------------------------------------------------------
 
 _NET_RULE_ACTIONS = ("alert", "drop", "reject", "pass", "log")
-_RE_SIGMA_TITLE = re.compile(r"(?m)^title\s*:\s*\S")
+_RE_SIGMA_TITLE = compile_pattern(r"(?m)^title\s*:\s*\S")
+_RE_SIGMA_NEXT_TITLE = compile_pattern(r"^title\s*:")
 
 
 def _add_embedded_rule_indicator(
@@ -1448,6 +1448,13 @@ def _find_embedded_net_rules(report_text: str) -> list[tuple[str, str, str]]:
     truncated prefix of the line.
     """
     results: list[tuple[str, str, str]] = []
+    # Tracks how far into report_text the scan has already consumed, so
+    # `find()` locates THIS line's occurrence and not always the first one --
+    # a report that embeds the same rule text twice (e.g. once under a
+    # "Snort rules" heading and again under "Suricata rules") used to have
+    # every duplicate silently inherit the first occurrence's 200-char
+    # context, and therefore its dialect label.
+    cursor = 0
     for line in report_text.splitlines():
         stripped = line.strip()
         if not stripped:
@@ -1466,7 +1473,9 @@ def _find_embedded_net_rules(report_text: str) -> list[tuple[str, str, str]]:
             msg = msg[1:-1]
         sid = opts.get("sid", "").strip()
         title = msg if msg else (f"sid {sid}" if sid else stripped[:60])
-        offset = report_text.find(stripped)
+        offset = report_text.find(stripped, cursor)
+        if offset != -1:
+            cursor = offset + len(stripped)
         context_before = report_text[max(0, offset - 200):offset].lower() if offset != -1 else ""
         pattern_type = "snort" if "snort" in context_before else "suricata"
         results.append((pattern_type, stripped, title))
@@ -1488,13 +1497,34 @@ def _find_embedded_sigma_rules(report_text: str) -> list[tuple[str, dict]]:
     Returns a list of (yaml_text, parsed_doc) tuples.
     """
     results: list[tuple[str, dict]] = []
+    # Bounding how far a candidate can extend keeps this O(matches x cap)
+    # instead of O(matches x document length): slicing report_text[m.start():]
+    # to the END of the document on every match, before even looking for the
+    # next "title:" line, made a report with many short "title:" lines (a
+    # multi-hundred-KB text file is enough) cost O(n^2) -- a self-inflicted
+    # CPU-exhaustion DoS independent of any regex backtracking. The cap is a
+    # constant, not a fraction of document length, so raising it doesn't
+    # reintroduce the quadratic blowup -- it only lowers how often a genuinely
+    # oversized rule (a long file-hash/path allowlist) gets caught by the
+    # guard below instead of parsed.
+    _MAX_CANDIDATE_CHARS = 200_000
     for m in _RE_SIGMA_TITLE.finditer(report_text):
-        lines = report_text[m.start():].split("\n")
+        window_end = min(m.start() + _MAX_CANDIDATE_CHARS, len(report_text))
+        lines = report_text[m.start():window_end].split("\n")
         end_idx = len(lines)
+        found_boundary = False
         for i in range(1, len(lines)):
-            if re.match(r"^title\s*:", lines[i]):
+            if _RE_SIGMA_NEXT_TITLE.match(lines[i]):
                 end_idx = i
+                found_boundary = True
                 break
+        if window_end < len(report_text) and not found_boundary:
+            # The window ran out before finding either the next rule or the
+            # document's end: where this rule actually stops is unknown, and
+            # parsing a truncated prefix risks exporting a corrupted,
+            # incomplete rule as if it were complete. Best-effort, per this
+            # function's own contract -- skip rather than guess.
+            continue
         for shrink in range(min(end_idx, 60)):
             candidate = "\n".join(lines[:end_idx - shrink]).strip()
             if not candidate:

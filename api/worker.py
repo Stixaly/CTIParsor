@@ -76,6 +76,70 @@ def _read_file_bytes(path: str | Path) -> bytes | None:
         return None
 
 
+def _current_owner(job_id: str) -> str | None:
+    """The `worker_id` this job's row carries right now, or None.
+
+    Read once at the start of `_run_pipeline` so the terminal write can later
+    confirm nothing reclaimed the job in between (see `_finalize_job`)."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT worker_id FROM jobs WHERE id=?", (job_id,)).fetchone()
+    return row["worker_id"] if row else None
+
+
+def _finalize_job(
+    job_id: str, status: str, owner_worker_id: str | None, *, bundle_json: str | None = None,
+) -> bool:
+    """Set a job's terminal status, but only if `owner_worker_id` still owns it.
+
+    A job's lease can be reclaimed by another worker (api/queue_loop.py's
+    lease-based requeue_orphans) while this subprocess is still running --
+    CPU starvation on a loaded host can delay the parent's heartbeat past
+    WORKER_LEASE_TIMEOUT_S even though this subprocess is alive and about to
+    finish. Without this check, a stale subprocess's result could silently
+    overwrite whatever the worker that now owns the job writes. Returns False
+    (and leaves the row untouched) when the row's worker_id no longer matches
+    -- the caller should treat its own result as discarded, not applied.
+
+    `owner_worker_id=None` means no lease was recorded when this run started
+    (e.g. a job run outside the queue loop, as most tests do) -- the update
+    always applies in that case, matching the historical unconditional write.
+    """
+    with _lock:
+        with get_conn() as conn:
+            if owner_worker_id is None:
+                if bundle_json is not None:
+                    conn.execute(
+                        "UPDATE jobs SET bundle_json=?, status=?, updated_at=? WHERE id=?",
+                        (bundle_json, status, now_iso(), job_id),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE jobs SET status=?, updated_at=? WHERE id=?",
+                        (status, now_iso(), job_id),
+                    )
+                conn.commit()
+                return True
+            if bundle_json is not None:
+                cur = conn.execute(
+                    "UPDATE jobs SET bundle_json=?, status=?, updated_at=? WHERE id=? AND worker_id=?",
+                    (bundle_json, status, now_iso(), job_id, owner_worker_id),
+                )
+            else:
+                cur = conn.execute(
+                    "UPDATE jobs SET status=?, updated_at=? WHERE id=? AND worker_id=?",
+                    (status, now_iso(), job_id, owner_worker_id),
+                )
+            conn.commit()
+            updated = (cur.rowcount or 0) > 0
+    if not updated:
+        logger.warning(
+            f"[Worker] job {job_id} was reclaimed by another worker before this "
+            f"subprocess (worker_id={owner_worker_id}) could finalize "
+            f"status={status!r} - discarding this result"
+        )
+    return updated
+
+
 def bundle_output_path(job_id: str, report_name: str) -> Path:
     """Per-job path for the exported STIX bundle file.
 
@@ -353,6 +417,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
     # subprocess holds its own fresh copy of the counter, so checking here would
     # always pass and the check that used to live here was dead code.
     start_time = time.monotonic()
+    _owner_worker_id: str | None = None
 
     try:
         # RLIMIT_AS (virtual address space) is intentionally NOT set here.
@@ -377,6 +442,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         # rather than RLIMIT_AS inside Python.
 
         set_job_status(job_id, "processing")
+        _owner_worker_id = _current_owner(job_id)
 
         # Check elapsed time periodically
         def check_timeout():
@@ -994,13 +1060,8 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
             "stage": 5, "label": "Validation", "valid": valid,
         })
 
-        with _lock:
-            with get_conn() as conn:
-                conn.execute(
-                    "UPDATE jobs SET bundle_json=?, status=?, updated_at=? WHERE id=?",
-                    (bundle_json, "for_review", now_iso(), job_id),
-                )
-                conn.commit()
+        if not _finalize_job(job_id, "for_review", _owner_worker_id, bundle_json=bundle_json):
+            return
 
         emit_progress(job_id, "done", {"status": "for_review"})
 
@@ -1013,14 +1074,14 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
 
     except TimeoutError as exc:
         error_msg = str(exc)
-        set_job_status(job_id, "failed")
-        emit_progress(job_id, "done", {"status": "failed", "error": error_msg})
+        if _finalize_job(job_id, "failed", _owner_worker_id):
+            emit_progress(job_id, "done", {"status": "failed", "error": error_msg})
         logger.error(f"[Worker TIMEOUT] job {job_id}: {error_msg}")
     except Exception as exc:
         import traceback
         error_msg = traceback.format_exc()
-        set_job_status(job_id, "failed")
-        emit_progress(job_id, "done", {"status": "failed", "error": str(exc)})
+        if _finalize_job(job_id, "failed", _owner_worker_id):
+            emit_progress(job_id, "done", {"status": "failed", "error": str(exc)})
         logger.error(f"[Worker ERROR] job {job_id}: {error_msg}")
     finally:
         # No need to reset RLIMIT_AS — this subprocess is about to exit.  The
@@ -1081,6 +1142,15 @@ def _spawn_job(job_id: str, file_path: str, original_filename: str,
     """
     logger.info(f"[Worker] Spawning isolated subprocess for job {job_id}")
 
+    # Captured now, right after the queue loop's claim (api/queue_loop.py's
+    # claim_next_queued already set worker_id on this row before calling us),
+    # so the crash-path finalization below can use the same ownership check
+    # _run_pipeline uses -- without this, a crash-triggered write is the most
+    # realistic way to hit the exact race that check exists to close: a lease
+    # can expire and be reclaimed by another worker while THIS subprocess is
+    # still alive and CPU/memory-starved, then get OOM-killed.
+    owner_worker_id = _current_owner(job_id)
+
     ctx = mp.get_context("spawn")
     proc = ctx.Process(
         target=_subprocess_entry,
@@ -1110,16 +1180,16 @@ def _spawn_job(job_id: str, file_path: str, original_filename: str,
             )
             logger.error(f"[Worker] Subprocess for job {jid} crashed: {reason}")
             try:
-                set_job_status(jid, "failed")
-                emit_progress(jid, "done", {
-                    "status": "failed",
-                    "error": (
-                        f"Pipeline worker process terminated unexpectedly ({reason}). "
-                        "The document may require more memory than is available. "
-                        "Try a smaller file, reduce WORKER_MAX_MEMORY_MB, or set "
-                        "SKIP_HEAVY_MODELS=1 to disable ML models and use regex-only extraction."
-                    ),
-                })
+                if _finalize_job(jid, "failed", owner_worker_id):
+                    emit_progress(jid, "done", {
+                        "status": "failed",
+                        "error": (
+                            f"Pipeline worker process terminated unexpectedly ({reason}). "
+                            "The document may require more memory than is available. "
+                            "Try a smaller file, reduce WORKER_MAX_MEMORY_MB, or set "
+                            "SKIP_HEAVY_MODELS=1 to disable ML models and use regex-only extraction."
+                        ),
+                    })
             except Exception as exc:
                 logger.error(
                     f"[Worker] Could not update job {jid} status after subprocess crash: {exc}"

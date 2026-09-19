@@ -741,8 +741,34 @@ def init_db() -> None:
     _apply_sqlite_migrations(rule_conn, _RULE_STORE_MIGRATIONS)
 
     if backend() == "postgresql":
+        import psycopg.errors as _pg_errors
+
         pg = _postgres_conn()
-        pg.execute_script(_JOB_STORE_DDL_POSTGRES)
+        try:
+            pg.execute_script(_JOB_STORE_DDL_POSTGRES)
+        except (
+            _pg_errors.DuplicateTable,
+            _pg_errors.DuplicateObject,
+            _pg_errors.DuplicateColumn,
+            _pg_errors.DuplicateFunction,
+            _pg_errors.DuplicateSchema,
+        ) as exc:
+            # All of _JOB_STORE_DDL_POSTGRES is `IF NOT EXISTS`, so this
+            # specific family of error is expected, not just tolerated, the
+            # moment more than one process runs init_db() concurrently
+            # (API_WORKERS>1, or a `bootstrap` run overlapping an `app`
+            # replica): PostgreSQL's IF-NOT-EXISTS is not race-free, and the
+            # losing process's "duplicate object" error must not crash
+            # startup when the object it lost the race for is the one this
+            # process needed anyway. Each is a distinct sibling class under
+            # ProgrammingError, not one shared base, hence the tuple.
+            #
+            # Anything else (auth failure, a dropped connection, a real typo
+            # in future DDL) is a genuine schema-application failure and is
+            # left to propagate -- swallowing it here would turn a loud,
+            # diagnosable startup crash into a confusing "relation does not
+            # exist" the first time a request touches the missing table.
+            logger.warning(f"[db] PostgreSQL schema init: benign duplicate-object race: {exc}")
         return
 
     job_conn = get_rule_conn()

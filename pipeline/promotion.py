@@ -32,6 +32,7 @@ from collections import Counter
 from dataclasses import asdict, dataclass, field
 from uuid import uuid4
 
+from api.db import transaction
 from pipeline.overrides import GAZETTEER_TYPES, NAMED_TYPES, normalise
 
 DEFAULT_MIN_REJECTIONS = 3
@@ -203,13 +204,18 @@ _UPSERT_CANDIDATE = (
 def apply_candidates(conn, candidates: list[Candidate], now: str) -> int:
     """Store every candidate as `candidate`; an existing row of the same key
     keeps its status (active stays active, ignored stays ignored) and only its
-    counts are refreshed.  Returns the number of rows written."""
-    for c in candidates:
-        conn.execute(_UPSERT_CANDIDATE, (
-            str(uuid4()), c.term, c.entity_type, c.action, c.display,
-            c.accepted_count, c.rejected_count, c.job_count, now, now,
-        ))
-    conn.commit()
+    counts are refreshed.  Returns the number of rows written.
+
+    Wrapped in one transaction: `conn` runs in autocommit mode on both
+    backends (see api.db.transaction's docstring), so without this a process
+    killed partway through the loop would leave earlier candidates durably
+    committed and later ones silently dropped, with no rollback."""
+    with transaction(conn):
+        for c in candidates:
+            conn.execute(_UPSERT_CANDIDATE, (
+                str(uuid4()), c.term, c.entity_type, c.action, c.display,
+                c.accepted_count, c.rejected_count, c.job_count, now, now,
+            ))
     return len(candidates)
 
 
@@ -231,10 +237,40 @@ def activate_all_candidates(conn, now: str) -> int:
     return cur.rowcount
 
 
+def validate_promote_term(term: str) -> str | None:
+    """None if `term` is safe to promote to the Stage 2b gazetteer; otherwise
+    the reason it isn't.
+
+    Applies the same bar compute_candidates holds auto-generated candidates
+    to (ADR-0052, see the `promote` branch above): a manually created
+    'promote' override has exactly the same power to pollute every future
+    report with a false-positive gazetteer match -- there is no analyst
+    review step for a manual override the way there is for a candidate --
+    so it must clear the same length / not-generic-vocabulary bar.
+    """
+    from pipeline.stage2d_cyner import _is_generic_fragment
+
+    stripped = normalise(term)
+    if len(stripped) < _MIN_TERM_LEN:
+        return f"'term' must be at least {_MIN_TERM_LEN} characters for a 'promote' rule"
+    if _is_generic_fragment(stripped):
+        return "'term' reads as generic CTI vocabulary, not a specific name, and would match too broadly if promoted"
+    return None
+
+
 def add_manual(conn, term: str, entity_type: str, action: str, now: str, *,
                display: str | None = None, note: str | None = None) -> dict:
     """A hand-written rule, active at once.  An existing row of the same key is
-    switched to active and marked manual rather than duplicated."""
+    switched to active and marked manual rather than duplicated.
+
+    Raises ValueError for a 'promote' term that fails validate_promote_term --
+    a 'deny' rule carries no equivalent risk (it can only suppress a match,
+    never manufacture one), so the gate applies to 'promote' only.
+    """
+    if action == "promote":
+        reason = validate_promote_term(term)
+        if reason:
+            raise ValueError(reason)
     key = normalise(term)
     conn.execute(
         "INSERT INTO entity_overrides (id, term, entity_type, action, status, display, origin, note, "

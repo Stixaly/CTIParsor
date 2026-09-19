@@ -46,6 +46,8 @@ TABLES: tuple[str, ...] = (
     "report_figures",
     "figure_reads",
     "cve_cache",
+    "model_thresholds",   # ADR-0051 -- calibrated NER confidence cutoffs
+    "entity_overrides",   # ADR-0052 -- analyst-grown deny/promote lists
 )
 
 _IDENT_RE = re.compile(r"^[a-z_][a-z0-9_]*$")

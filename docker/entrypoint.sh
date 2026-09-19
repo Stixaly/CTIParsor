@@ -18,6 +18,33 @@ set -euo pipefail
 STATE_DIR=/app/state
 CACHE_DIR=/app/cache
 
+# If the DB password is delivered as a Docker secret (compose.yaml's
+# `secrets: db_password`, mounted read-only at /run/secrets/db_password)
+# rather than a plain `environment:` value, load it now. libpq (and hence
+# psycopg, which every command below eventually needs) has no equivalent of
+# Postgres's own *_FILE convention -- it only reads PGPASSWORD from the
+# environment or a .pgpass file. `export` alone covers this script's own exec
+# chain (serve/worker/bootstrap/cli), but NOT a process attached later via
+# `docker exec`/`docker compose exec` -- that gets a fresh shell built from
+# the container's static image-level env, never this script's runtime
+# `export`. ~/.pgpass is also written for exactly that case: libpq reads it
+# for any process running as this user, entrypoint or not. Field-wildcarded
+# (`*`) since this container only ever talks to the one postgres compose
+# wires it to. A deployment that still sets PGPASSWORD directly via .env
+# keeps working unchanged: this only overrides it when the secret file is
+# present.
+load_db_password_secret() {
+    if [ -r /run/secrets/db_password ]; then
+        PGPASSWORD="$(cat /run/secrets/db_password)"
+        export PGPASSWORD
+        if [ -n "${HOME:-}" ] && [ -d "$HOME" ]; then
+            printf '*:*:*:*:%s\n' "$PGPASSWORD" > "$HOME/.pgpass"
+            chmod 600 "$HOME/.pgpass"
+        fi
+    fi
+}
+load_db_password_secret
+
 ensure_dirs() {
     mkdir -p "$STATE_DIR/uploads" "$STATE_DIR/output" "$STATE_DIR/backups" \
              "$CACHE_DIR/hf" "$CACHE_DIR/corpora" "$HOME" /tmp/matplotlib /tmp/cache || true

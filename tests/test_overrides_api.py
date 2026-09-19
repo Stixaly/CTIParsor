@@ -70,6 +70,31 @@ def test_promote_validates_its_parameters(temp_db, temp_db_client):
     assert temp_db_client.post("/api/overrides/promote", json={"min_jobs": 0}).status_code == 400
 
 
+def test_manual_promote_is_held_to_the_same_quality_gate_as_auto_candidates(temp_db, temp_db_client):
+    """A manual 'promote' override skips analyst review entirely (it's active
+    on write) -- so it must clear the same bar compute_candidates holds
+    auto-generated candidates to, or anyone reachable (this app has no
+    authentication) could make a generic word like 'loader' match as malware
+    fleet-wide."""
+    too_short = temp_db_client.post("/api/overrides", json={
+        "term": "rat", "entity_type": "malware", "action": "promote",
+    })
+    assert too_short.status_code == 400
+
+    generic = temp_db_client.post("/api/overrides", json={
+        "term": "loader", "entity_type": "malware", "action": "promote",
+    })
+    assert generic.status_code == 400
+    assert ov.promoted_entries() == []
+
+    # A 'deny' rule carries no such risk (it can only suppress a match, never
+    # manufacture one) and is not held to this gate.
+    deny_generic = temp_db_client.post("/api/overrides", json={
+        "term": "rat", "entity_type": "malware", "action": "deny",
+    })
+    assert deny_generic.status_code == 200
+
+
 def test_a_hand_written_rule_is_active_at_once(temp_db, temp_db_client):
     resp = temp_db_client.post("/api/overrides", json={
         "term": "ArguePatch", "entity_type": "malware", "action": "promote",

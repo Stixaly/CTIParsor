@@ -203,20 +203,41 @@ clean-venv:
 
 .PHONY: docker-build docker-up docker-bootstrap docker-smoke docker-logs docker-down
 
+CTI_ENV_FILE ?= .env
+
 ## Build the container image (CPU-only torch, Chromium included)
 docker-build:
 	CTI_GIT_REV=$$(git rev-parse HEAD 2>/dev/null) docker compose build app
 
-## Start the API + web UI in the background (http://127.0.0.1:8000 by default)
-docker-up:
-	docker compose up -d app
+# Materializes CTI_DB_PASSWORD (from .env) into a file compose.yaml
+# bind-mounts into every service at /run/secrets/db_password, so the value
+# never appears in `docker inspect`/`docker compose config` output the way a
+# plain `environment:` entry would. Re-run whenever .env changes; scripts/
+# docker_smoke.sh does the same for its own standalone `docker compose up`.
+# World-readable (644, not 600): app/worker/bootstrap read it as uid 1001 and
+# postgres as uid 70 -- none of them is the host user that creates the file,
+# so an owner-only mode makes every container fail to read it. It stays out
+# of the image (.dockerignore) and out of git (.gitignore); the same host
+# access that could read this file could already read .env itself.
+.secrets/db_password: $(CTI_ENV_FILE)
+	mkdir -p .secrets
+	set -a; case "$(CTI_ENV_FILE)" in /*) . "$(CTI_ENV_FILE)" ;; *) . "./$(CTI_ENV_FILE)" ;; esac; set +a; \
+	: "$${CTI_DB_PASSWORD:?Set CTI_DB_PASSWORD in $(CTI_ENV_FILE) (e.g. openssl rand -hex 24)}"; \
+	printf '%s' "$$CTI_DB_PASSWORD" > .secrets/db_password
+	chmod 644 .secrets/db_password
+
+## Start the full stack -- API, worker, and Postgres -- in the background
+## (http://127.0.0.1:8000 by default). `app` alone would leave every upload
+## stuck `queued` forever with nothing to process it (ADR-0046).
+docker-up: .secrets/db_password
+	docker compose up -d
 
 ## One-shot: download the NLP models, clone the corpora, build the rule store
-docker-bootstrap:
+docker-bootstrap: .secrets/db_password
 	docker compose --profile bootstrap run --rm bootstrap
 
 ## Build, start, and verify the container (health, non-root, read-only, Chromium sandbox)
-docker-smoke:
+docker-smoke: .secrets/db_password
 	bash scripts/docker_smoke.sh
 
 ## Follow the API logs

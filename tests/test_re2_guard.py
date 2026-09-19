@@ -60,7 +60,9 @@ def test_extract_entities_same_result_with_and_without_re2(monkeypatch):
         "T1059.001"
     )
     result_with_re2 = extract_entities(text)
-    monkeypatch.setattr("pipeline.stage2_extraction._RE2_AVAILABLE", False)
+    # The flag now lives in pipeline.regex_safety (stage2_extraction imports
+    # its compile_pattern rather than defining its own copy).
+    monkeypatch.setattr("pipeline.regex_safety._RE2_AVAILABLE", False)
     result_without_re2 = extract_entities(text)
 
     assert len(result_with_re2) == len(result_without_re2)
@@ -72,6 +74,6 @@ def test_extract_entities_same_result_with_and_without_re2(monkeypatch):
 def test_refang_same_result_with_and_without_re2(monkeypatch):
     text = "see hxxps://evil[.]com and foo[at]bar(dot)com and normal text[.]here"
     result_with_re2 = refang(text)
-    monkeypatch.setattr("pipeline.stage2_extraction._RE2_AVAILABLE", False)
+    monkeypatch.setattr("pipeline.regex_safety._RE2_AVAILABLE", False)
     result_without_re2 = refang(text)
     assert result_with_re2 == result_without_re2
