@@ -71,13 +71,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from pipeline.regex_safety import compile_pattern
-
 import stix2
 
 from api.logging_config import get_logger
 from models.schemas import STIX_RELATIONSHIP_TYPES
 from pipeline.aliases import mitre_id_for
+from pipeline.regex_safety import compile_pattern
 from pipeline.stix_access import field as stix_field
 from pipeline.stix_rel_spec import rel_is_suggested
 

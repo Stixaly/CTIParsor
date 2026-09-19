@@ -11,6 +11,7 @@ malformed rule never raises — it just yields fewer atoms.
 from __future__ import annotations
 
 import re
+
 from pipeline.regex_safety import compile_pattern
 
 # ── Public constants ─────────────────────────────────────────────────────────

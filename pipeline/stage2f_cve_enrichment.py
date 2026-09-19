@@ -3,15 +3,13 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import time
 import urllib.error
 import urllib.request
 
-from pipeline.regex_safety import compile_pattern
-
 from api.db import get_conn, now_iso
 from pipeline.env_flags import env_bool
+from pipeline.regex_safety import compile_pattern
 
 logger = logging.getLogger(__name__)
 

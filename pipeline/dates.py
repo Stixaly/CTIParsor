@@ -10,8 +10,8 @@ api/worker.py). This module has no dependency beyond the standard library.
 """
 from __future__ import annotations
 
-import re
 from datetime import datetime, timezone
+
 from pipeline.regex_safety import compile_pattern
 
 _YEAR_ONLY_RE = compile_pattern(r"^\d{4}$")

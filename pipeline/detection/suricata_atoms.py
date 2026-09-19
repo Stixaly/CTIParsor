@@ -12,8 +12,6 @@ See ADR-0015 for the atom model.
 
 from __future__ import annotations
 
-import re
-
 from pipeline.detection.textutil import unescape
 from pipeline.detection.tlds import looks_like_domain
 from pipeline.regex_safety import compile_pattern

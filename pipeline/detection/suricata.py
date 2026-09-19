@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from collections.abc import Iterable
 from pathlib import Path
 
 from models.detection import DetectionRule, Severity
 from pipeline.detection.base import RuleCorpusAdapter
-from pipeline.regex_safety import compile_pattern
 from pipeline.detection.suricata_atoms import (
     extract_atoms,
     parse_options,
@@ -16,6 +14,7 @@ from pipeline.detection.suricata_atoms import (
     rule_metadata,
     technique_ids,
 )
+from pipeline.regex_safety import compile_pattern
 
 _SURICATA_GLOBS = ("*.rules",)
 

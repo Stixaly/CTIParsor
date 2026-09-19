@@ -1,9 +1,6 @@
 import os
-import re
 from contextlib import asynccontextmanager
 from pathlib import Path
-
-from pipeline.regex_safety import compile_pattern
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +13,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # Initialize logging before importing other modules
 from api.logging_config import clear_request_id, get_logger, set_request_id, setup_logging
+from pipeline.regex_safety import compile_pattern
 
 setup_logging()
 logger = get_logger(__name__)

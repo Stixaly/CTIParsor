@@ -13,8 +13,6 @@ import re
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from pipeline.regex_safety import compile_pattern
-
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
@@ -23,6 +21,7 @@ from api.main import limiter
 from api.routes._common import start_job
 from api.routes.upload import _MARKING_LEVELS, UPLOADS_DIR
 from pipeline import web_capture
+from pipeline.regex_safety import compile_pattern
 from pipeline.stage1_ingestion import html_to_text
 
 logger = get_logger(__name__)

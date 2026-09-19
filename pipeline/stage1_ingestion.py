@@ -1,11 +1,8 @@
 import logging
-import re
 import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
-
-from pipeline.regex_safety import compile_pattern
 
 import docx
 import pdfplumber
@@ -13,6 +10,7 @@ from bs4 import BeautifulSoup
 
 # Initialize logging
 from api.logging_config import get_logger
+from pipeline.regex_safety import compile_pattern
 
 logger = get_logger(__name__)
 

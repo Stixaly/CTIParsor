@@ -44,10 +44,7 @@ from __future__ import annotations
 import functools
 import json
 import os
-import re
 from pathlib import Path
-
-from pipeline.regex_safety import compile_pattern
 
 from models.schemas import EntityType, RawEntity
 from pipeline.env_flags import env_bool
@@ -203,6 +200,11 @@ def _etype_from_id(mitre_id: str) -> EntityType:
 _BULLET_CHARS = ("-", "*", "\u2022", "\u2013", "\u2014")
 _LIST_NUMBER = compile_pattern(r"^\d+[.)]\s")
 
+# Pre-compiled patterns for text processing
+_CRLF_RE = compile_pattern(r"\r\n|\r")
+_NEWLINES_RE = compile_pattern(r"\n+")
+_SENTENCE_SPLIT_RE = compile_pattern(r'(?<=[.!?])\s+|\n{1,}|;\s+')
+
 
 def _unwrap_hard_linebreaks(text: str) -> str:
     """Join hard line breaks from PDF extraction before sentence splitting.
@@ -212,8 +214,8 @@ def _unwrap_hard_linebreaks(text: str) -> str:
     """
     if not isinstance(text, str):
         return ""
-    text = re.sub(r"\r\n|\r", "\n", text)
-    parts = re.split(r"\n+", text)
+    text = _CRLF_RE.sub("\n", text)
+    parts = _NEWLINES_RE.split(text)
     if not parts:
         return text
     out: list[str] = [parts[0]]
@@ -355,9 +357,9 @@ def _split_candidate_sentences(text: str) -> list[str]:
     if _unwrap_enabled():
         text = _unwrap_hard_linebreaks(text)
     else:
-        text = re.sub(r'\r\n|\r', '\n', text)
+        text = _CRLF_RE.sub('\n', text)
 
-    raw = re.split(r'(?<=[.!?])\s+|\n{1,}|;\s+', text)
+    raw = _SENTENCE_SPLIT_RE.split(text)
     return [s.strip() for s in raw if len(s.strip()) > 20]
 
 

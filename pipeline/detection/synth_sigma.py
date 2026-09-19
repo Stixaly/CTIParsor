@@ -7,7 +7,6 @@ objects, each carrying a hand-serialized YAML Sigma rule.
 
 from __future__ import annotations
 
-import re
 import uuid
 from collections.abc import Container, Iterable
 from dataclasses import dataclass

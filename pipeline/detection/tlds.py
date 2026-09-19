@@ -22,7 +22,6 @@ Pure and stdlib-only.
 """
 from __future__ import annotations
 
-import re
 from pipeline.regex_safety import compile_pattern
 
 #: Generic TLDs.  Any two-letter label is additionally accepted as a ccTLD, which

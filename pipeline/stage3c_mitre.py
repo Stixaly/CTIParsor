@@ -19,10 +19,10 @@ against all known technique/tactic names.  Three tiers:
 from __future__ import annotations
 
 import functools
-import re
 
 # Initialize logging
 from api.logging_config import get_logger
+from pipeline.regex_safety import compile_pattern
 from pipeline.stage3_llm import TTPExtracted
 
 logger = get_logger(__name__)

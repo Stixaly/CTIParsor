@@ -8,10 +8,7 @@ secret-storage + loopback-guard work from ADR-0007.
 ADR-0019: Multi-format support (sigma/suricata/yara). Format availability is
 derived from the pipeline detection registry adapters (_ADAPTERS).
 """
-import re
 from pathlib import Path
-
-from pipeline.regex_safety import compile_pattern
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -21,6 +18,7 @@ from pipeline.detection.builder import rebuild_store
 from pipeline.detection.registry import _ADAPTERS, add_corpus, merged_corpora, remove_corpus
 from pipeline.detection.store import corpus_counts
 from pipeline.detection.sync import sync_corpus
+from pipeline.regex_safety import compile_pattern
 from pipeline.security import is_contained
 from pipeline.web_capture import CaptureError, validate_url
 

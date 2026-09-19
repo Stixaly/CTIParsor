@@ -1,7 +1,6 @@
 import base64
 import json
 import os
-import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
