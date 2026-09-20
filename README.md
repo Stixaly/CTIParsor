@@ -1179,6 +1179,125 @@ Measured effect on a 4-report corpus: named-entity relationship hallucination
 
 ---
 
+## Architecture
+
+High-level component map — ingress/API, the CTI pipeline stages, persistence,
+the analyst UI, and the detection-coverage subsystem, with how they talk to
+each other and to external services (LLM provider, web sources, rule
+corpora). For the file-by-file layout see [Project structure](#project-structure)
+below; for deployment topology (processes, stores, sizing) see
+[docs/architecture.md](docs/architecture.md).
+
+```mermaid
+flowchart TD
+
+subgraph group_ingress["Ingress &amp; API"]
+  node_api_gateway["FastAPI API<br/>[main.py]"]
+  node_web_capture["Web Capture<br/>[web_capture.py]"]
+  node_worker["Pipeline Worker<br/>[worker.py]"]
+end
+
+subgraph group_pipeline["CTI Pipeline"]
+  node_cli_runner["CLI Runner<br/>[main.py]"]
+  node_document_ingestion["Document Ingestion"]
+  node_entity_extraction["Entity Extraction"]
+  node_llm_enrichment["LLM Enrichment<br/>[stage3_llm.py]"]
+  node_claim_verification["Claim Verification<br/>[stage3d_verify.py]"]
+  node_mitre_normalization["MITRE Normalization<br/>[stage3c_mitre.py]"]
+  node_stix_builder["STIX Builder"]
+  node_bundle_validation["Bundle Validation"]
+end
+
+subgraph group_persistence["State &amp; Storage"]
+  node_job_queue["Job Queue<br/>[queue_loop.py]"]
+  node_job_store[("Job Store<br/>[db.py]")]
+end
+
+subgraph group_ui["Analyst UI"]
+  node_review_ui["Review Workspace<br/>[Review.tsx]"]
+  node_graph_ui["STIX Graph<br/>[Graph.tsx]"]
+  node_policy_ui["Policy Settings<br/>[Policy.tsx]"]
+end
+
+subgraph group_coverage["Detection Coverage"]
+  node_coverage_ui["Coverage Matrix<br/>[Coverage.tsx]"]
+  node_settings_ui["Corpus Settings<br/>[Settings.tsx]"]
+  node_coverage_engine["Coverage Engine<br/>[coverage.py]"]
+  node_rule_store[("Rule Corpus Store<br/>[store.py]")]
+end
+
+node_analyst(("Analyst"))
+node_web_source(("Web Source"))
+node_llm_provider(("LLM Provider"))
+node_corpus_sources(("Rule Sources"))
+
+node_analyst -->|"submits report"| node_api_gateway
+node_web_source -.->|"serves page"| node_web_capture
+node_api_gateway -.->|"captures URL"| node_web_capture
+node_web_capture -.->|"returns content"| node_api_gateway
+node_api_gateway -->|"creates job"| node_job_store
+node_api_gateway -->|"queues job"| node_job_queue
+node_job_queue -->|"dispatches job"| node_worker
+node_worker -->|"runs pipeline"| node_document_ingestion
+node_cli_runner -->|"reads report"| node_document_ingestion
+node_document_ingestion -->|"passes text"| node_entity_extraction
+node_entity_extraction -->|"passes entities"| node_llm_enrichment
+node_llm_enrichment -.->|"requests enrichment"| node_llm_provider
+node_llm_enrichment -->|"passes claims"| node_claim_verification
+node_claim_verification -->|"passes claims"| node_mitre_normalization
+node_mitre_normalization -->|"maps techniques"| node_stix_builder
+node_stix_builder -->|"passes bundle"| node_bundle_validation
+node_bundle_validation -->|"saves result"| node_job_store
+node_worker -->|"updates progress"| node_job_store
+node_review_ui -->|"edits review"| node_api_gateway
+node_api_gateway -->|"serves entities"| node_review_ui
+node_graph_ui -->|"reads bundle"| node_api_gateway
+node_api_gateway -->|"returns relationships"| node_graph_ui
+node_policy_ui -->|"updates policy"| node_api_gateway
+node_settings_ui -->|"manages corpora"| node_api_gateway
+node_coverage_ui -->|"requests coverage"| node_api_gateway
+node_api_gateway -->|"computes coverage"| node_coverage_engine
+node_coverage_engine -->|"reads rules"| node_rule_store
+node_corpus_sources -.->|"syncs rules"| node_rule_store
+node_coverage_ui -->|"exports rules"| node_api_gateway
+
+click node_api_gateway "https://github.com/stixaly/ctiparsor/blob/main/api/main.py"
+click node_web_capture "https://github.com/stixaly/ctiparsor/blob/main/pipeline/web_capture.py"
+click node_job_queue "https://github.com/stixaly/ctiparsor/blob/main/api/queue_loop.py"
+click node_job_store "https://github.com/stixaly/ctiparsor/blob/main/api/db.py"
+click node_worker "https://github.com/stixaly/ctiparsor/blob/main/api/worker.py"
+click node_cli_runner "https://github.com/stixaly/ctiparsor/blob/main/main.py"
+click node_document_ingestion "https://github.com/stixaly/ctiparsor/blob/main/pipeline/stage1_ingestion.py"
+click node_entity_extraction "https://github.com/stixaly/ctiparsor/blob/main/pipeline/stage2_extraction.py"
+click node_llm_enrichment "https://github.com/stixaly/ctiparsor/blob/main/pipeline/stage3_llm.py"
+click node_claim_verification "https://github.com/stixaly/ctiparsor/blob/main/pipeline/stage3d_verify.py"
+click node_mitre_normalization "https://github.com/stixaly/ctiparsor/blob/main/pipeline/stage3c_mitre.py"
+click node_stix_builder "https://github.com/stixaly/ctiparsor/blob/main/pipeline/stage4_stix_mapping.py"
+click node_bundle_validation "https://github.com/stixaly/ctiparsor/blob/main/pipeline/stage5_validation.py"
+click node_review_ui "https://github.com/stixaly/ctiparsor/blob/main/frontend/src/pages/Review.tsx"
+click node_graph_ui "https://github.com/stixaly/ctiparsor/blob/main/frontend/src/pages/Graph.tsx"
+click node_policy_ui "https://github.com/stixaly/ctiparsor/blob/main/frontend/src/pages/Policy.tsx"
+click node_coverage_ui "https://github.com/stixaly/ctiparsor/blob/main/frontend/src/pages/Coverage.tsx"
+click node_settings_ui "https://github.com/stixaly/ctiparsor/blob/main/frontend/src/pages/Settings.tsx"
+click node_coverage_engine "https://github.com/stixaly/ctiparsor/blob/main/pipeline/detection/coverage.py"
+click node_rule_store "https://github.com/stixaly/ctiparsor/blob/main/pipeline/detection/store.py"
+
+classDef toneNeutral fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a
+classDef toneBlue fill:#dbeafe,stroke:#2563eb,stroke-width:1.5px,color:#172554
+classDef toneAmber fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#78350f
+classDef toneMint fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#14532d
+classDef toneRose fill:#ffe4e6,stroke:#e11d48,stroke-width:1.5px,color:#881337
+classDef toneIndigo fill:#e0e7ff,stroke:#4f46e5,stroke-width:1.5px,color:#312e81
+classDef toneTeal fill:#ccfbf1,stroke:#0f766e,stroke-width:1.5px,color:#134e4a
+class node_api_gateway,node_web_capture,node_worker toneBlue
+class node_cli_runner,node_document_ingestion,node_entity_extraction,node_llm_enrichment,node_claim_verification,node_mitre_normalization,node_stix_builder,node_bundle_validation toneAmber
+class node_job_queue,node_job_store toneMint
+class node_review_ui,node_graph_ui,node_policy_ui toneRose
+class node_coverage_ui,node_settings_ui,node_coverage_engine,node_rule_store,node_analyst,node_web_source,node_llm_provider,node_corpus_sources toneIndigo
+```
+
+---
+
 ## Project structure
 
 ```
