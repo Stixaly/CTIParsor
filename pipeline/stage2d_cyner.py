@@ -215,6 +215,22 @@ def _normalize_candidate(value: str) -> str:
     return value
 
 
+def _collapse_repeated_token(value: str) -> str:
+    """Collapse an immediately-repeated token ("COLDWELL COLDWELL Dropper" ->
+    "COLDWELL Dropper") — an aggregation artifact seen on a real report
+    (2026-09-20) where the token-classification pipeline emitted the same
+    subword-merged token twice in a row. A real name never repeats its own
+    token back-to-back, so any adjacent case-insensitive repeat is dropped;
+    only the first occurrence is kept."""
+    tokens = value.split(" ")
+    collapsed: list[str] = []
+    for tok in tokens:
+        if collapsed and collapsed[-1].lower() == tok.lower():
+            continue
+        collapsed.append(tok)
+    return " ".join(collapsed)
+
+
 _BOUNDARY_ARTIFACT_RE = compile_pattern(r"\.\s")
 
 
@@ -435,6 +451,7 @@ def extract_cyner_entities(text: str) -> list[RawEntity]:
         # each real name is evaluated (and can survive) on its own.
         for fragment in _split_fragments(raw_value):
             value = _normalize_candidate(fragment)
+            value = _collapse_repeated_token(value)
             if not value or len(value) < 3:
                 continue
             if _has_boundary_artifact(value):

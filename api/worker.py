@@ -610,9 +610,25 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
             gliner_entities = extract_gliner_entities(text)
             all_entities = _merge_gliner_into(all_entities, gliner_entities)
 
+        # --- Stage 2g — Alias-list extraction (regex, deterministic) ---
+        # Catches "X (aka Y, Z, W)" / "X, also known as Y and Z" constructs
+        # that the dictionary/model stages above miss because each treats the
+        # sentence as prose around whichever single name it already knows.
+        from pipeline.stage2g_alias_list import extract_alias_list_entities
+        alias_list_entities = extract_alias_list_entities(text)
+        all_entities = BaseExtractionStage.merge_into(all_entities, alias_list_entities)
+
+        # Reconcile any same-value-different-type disagreement between stages
+        # (e.g. gazetteer's `tool` vs CyNER's `malware` for the same name,
+        # since merge_into's (value, type) key never considered them equal in
+        # the first place, so both survived independently until now).
+        from pipeline.base import resolve_type_conflicts
+        all_entities = resolve_type_conflicts(all_entities)
+
         logger.info(f"[Stage 2] Extracted {len(all_entities)} entities "
                    f"(gazetteer={len(gazetteer_entities)}, semantic_ttp={len(semantic_ttp_entities)}, "
-                   f"cyner={len(cyner_entities)}, gliner={len(gliner_entities)})")
+                   f"cyner={len(cyner_entities)}, gliner={len(gliner_entities)}, "
+                   f"alias_list={len(alias_list_entities)})")
         emit_progress(job_id, "stage", {
             "stage": 2, "label": "Extraction",
             "entities": len(all_entities),
@@ -620,6 +636,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
             "semantic_ttps": len(semantic_ttp_entities),
             "cyner": len(cyner_entities),
             "gliner": len(gliner_entities),
+            "alias_list": len(alias_list_entities),
         })
 
         # --- Stage 3 — LLM enrichment (relationships, novel entities, campaign) ---
@@ -910,6 +927,36 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
             f"[Stage 3] totals: {_run_malware} malware, {_run_actors} actors, "
             f"{_run_tools} tools, {_run_rels} relationships"
         )
+
+        # --- Stage 3 document-level relation pass (ADR-0057, opt-in) ────────
+        # Per-chunk extraction cannot connect a fact stated in one chunk to a
+        # fact stated in a distant one. This single extra call reads the whole
+        # report and adds relationships only, using the fullest entity list
+        # available (Stage 2 NER + every name the chunked LLM pass itself just
+        # found). Its result is just another LLMEnrichmentResult appended to
+        # the same list _merge_results already dedups — no new merge logic.
+        from pipeline.stage3_llm import document_level_relations_enabled, enrich_document_relations
+        if document_level_relations_enabled():
+            from models.schemas import EntityType
+            _known_entities = list(all_entities)
+            _known_keys = {(e.value.lower(), e.entity_type) for e in _known_entities}
+            for _r in all_results:
+                for _name, _etype in (
+                    [(n, EntityType.THREAT_ACTOR) for n in _r.threat_actors]
+                    + [(n, EntityType.MALWARE) for n in _r.malware_families]
+                    + [(n, EntityType.TOOL) for n in _r.tools]
+                ):
+                    _key = (_name.lower(), _etype)
+                    if _key not in _known_keys:
+                        _known_entities.append(RawEntity(value=_name, entity_type=_etype, source="llm"))
+                        _known_keys.add(_key)
+
+            logger.info(f"[Stage 3 doc-relations] {len(_known_entities)} known entities, "
+                        f"{len(text)} chars of report text")
+            _doc_rel_result = enrich_document_relations(text, _known_entities)
+            logger.info(f"[Stage 3 doc-relations] {len(_doc_rel_result.relationships)} "
+                        "relationships found")
+            all_results.append(_doc_rel_result)
 
         from pipeline.stage3_llm import _merge_results
         llm_result = _merge_results(
