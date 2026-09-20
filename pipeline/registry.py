@@ -16,7 +16,7 @@ import logging
 
 from models.config import PipelineConfig
 from models.schemas import RawEntity
-from pipeline.base import BaseExtractionStage
+from pipeline.base import BaseExtractionStage, resolve_type_conflicts
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,7 @@ _STAGE_CANDIDATES: list[tuple[str, str]] = [
     ("pipeline.stage2c_ttp_semantic","SemanticTTPStage"),
     ("pipeline.stage2d_cyner",       "CyNERStage"),
     ("pipeline.stage2e_gliner",      "GLiNERStage"),
+    ("pipeline.stage2g_alias_list",  "AliasListStage"),
 ]
 
 
@@ -81,7 +82,11 @@ class StageRegistry:
                     "Stage %s raised %s: %s — skipping",
                     stage.name, type(exc).__name__, exc,
                 )
-        return all_entities
+        # Reconcile any same-value-different-type disagreement between stages
+        # (e.g. gazetteer's `tool` vs CyNER's `malware` for the same name) —
+        # merge_into's (value, type) key lets both through since it never
+        # considered them equal in the first place.
+        return resolve_type_conflicts(all_entities)
 
     @property
     def active_stages(self) -> list[str]:

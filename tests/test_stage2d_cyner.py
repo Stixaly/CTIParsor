@@ -76,6 +76,27 @@ def test_extract_returns_empty_when_model_unavailable(monkeypatch):
     assert stage2d_cyner.extract_cyner_entities("some text") == []
 
 
+# ── 2b. Repeated-token collapse (real artifact, 2026-09-20) ────────────────
+
+def test_collapse_repeated_token_drops_an_immediate_duplicate():
+    assert stage2d_cyner._collapse_repeated_token("COLDWELL COLDWELL Dropper") == "COLDWELL Dropper"
+
+
+def test_collapse_repeated_token_is_case_insensitive():
+    assert stage2d_cyner._collapse_repeated_token("Foo foo Bar") == "Foo Bar"
+
+
+def test_collapse_repeated_token_leaves_a_clean_name_untouched():
+    assert stage2d_cyner._collapse_repeated_token("BLACKENERGY Dropper") == "BLACKENERGY Dropper"
+
+
+def test_extract_collapses_repeated_token_end_to_end(monkeypatch):
+    preds = [{"entity_group": "Malware", "score": 0.95, "word": "COLDWELL COLDWELL Dropper"}]
+    monkeypatch.setattr(stage2d_cyner, "_load_pipeline", lambda: _fake_pipeline(preds))
+    [r] = stage2d_cyner.extract_cyner_entities("irrelevant text")
+    assert r.value == "COLDWELL Dropper"
+
+
 # ── 3. Calibrated per-type cutoffs (ADR-0051) ──────────────────────────────
 
 def test_calibrated_cutoff_replaces_the_medium_threshold_per_type(monkeypatch):

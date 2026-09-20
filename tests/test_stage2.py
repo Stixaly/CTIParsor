@@ -492,6 +492,88 @@ class TestBareFilenames:
         assert _extract_bare_filenames(text) == []
 
 
+class TestDomainFileTypeAmbiguity:
+    """ADR-0056 — a bare string must not be typed both `domain` and `file`.
+
+    Found on a real 12-report corpus (2026-09-20): _DOMAIN_PATTERN's TLD-
+    exclusion list had drifted out of sync with _MALWARE_FILE_EXTS (missing
+    .msi/.pl/.sys/.cmd/.app), and ".com" is inherently ambiguous (the most
+    common TLD in the world, but also a legitimate legacy DOS executable
+    extension) — together these produced 137 same-string domain+file
+    contradictions across the corpus, 126 of them ".com".
+    """
+
+    def test_extensions_missing_from_the_old_domain_exclusion_list_are_file_only(self):
+        # cert.pl, pagefile.sys, RAMMap.msi, mvnvmuyj.cmd, dosportal.app: real
+        # strings from the corpus that used to ALSO match _DOMAIN_PATTERN.
+        text = (
+            "The report references cert.pl and pagefile.sys. "
+            "RAMMap.msi and smokymo.msi were dropped, alongside mvnvmuyj.cmd. "
+            "A malicious dosportal.app was installed."
+        )
+        entities = extract_entities(text)
+        by_value = {e.value.lower(): e.entity_type for e in entities}
+        for name in ("cert.pl", "pagefile.sys", "rammap.msi", "smokymo.msi",
+                     "mvnvmuyj.cmd", "dosportal.app"):
+            assert by_value[name] == EntityType.FILE, name
+        # And never typed DOMAIN too — the exact contradiction this fixes.
+        values_typed_domain = {e.value.lower() for e in entities if e.entity_type == EntityType.DOMAIN}
+        assert values_typed_domain.isdisjoint(
+            {"cert.pl", "pagefile.sys", "rammap.msi", "smokymo.msi", "mvnvmuyj.cmd", "dosportal.app"}
+        )
+
+    def test_bare_dot_com_strings_are_domain_only_not_file(self):
+        # Real phishing/C2/service domains from the corpus that used to ALSO
+        # match _BARE_FILENAME_PATTERN because ".com" was in _MALWARE_FILE_EXTS.
+        text = (
+            "Data was posted to hooks.slack.com and pastebin.com by the "
+            "attacker. The victim visited cloud.google.com and curity.com."
+        )
+        entities = extract_entities(text)
+        by_value = {e.value.lower(): e.entity_type for e in entities}
+        for name in ("hooks.slack.com", "pastebin.com", "cloud.google.com", "curity.com"):
+            assert by_value[name] == EntityType.DOMAIN, name
+        values_typed_file = {e.value.lower() for e in entities if e.entity_type == EntityType.FILE}
+        assert values_typed_file.isdisjoint(
+            {"hooks.slack.com", "pastebin.com", "cloud.google.com", "curity.com"}
+        )
+
+    def test_a_dot_com_file_with_a_real_path_is_still_caught_as_file(self):
+        # The bare-filename ".com" exclusion must not regress the unambiguous
+        # full-path case, which _WIN_PATH_PATTERN handles independently and
+        # never consulted _MALWARE_FILE_EXTS's ".com" entry in the first place.
+        text = r"C:\Windows\Temp\update.com was written to disk by the malware."
+        entities = extract_entities(text)
+        paths = {e.value for e in entities if e.entity_type == EntityType.FILE}
+        assert r"C:\Windows\Temp\update.com" in paths
+
+    def test_a_bare_dot_com_with_no_path_defaults_to_domain_not_file(self):
+        # The one genuinely ambiguous case (a bare ".com" executable name with
+        # no path, e.g. a historical DOS-masquerade technique): defaults to
+        # DOMAIN only. Documented, deliberate trade-off — see ADR-0056; every
+        # real bare ".com" string in the source corpus was a domain, not a file.
+        entities = extract_entities("The dropped payload communicated with svchost.com.")
+        by_value = {e.value.lower(): e.entity_type for e in entities}
+        assert by_value["svchost.com"] == EntityType.DOMAIN
+        assert not any(e.value.lower() == "svchost.com" and e.entity_type == EntityType.FILE
+                       for e in entities)
+
+    def test_no_domain_file_contradiction_anywhere_in_a_realistic_mixed_report(self):
+        """End-to-end: no (value) should ever carry both DOMAIN and FILE."""
+        text = (
+            "cert.pl reported the incident. Data was exfiltrated to hooks.slack.com "
+            "and pastebin.com. The dropper RAMMap.msi wrote pagefile.sys and was "
+            "later staged at C:\\Windows\\Temp\\update.com. See report.pdf for details."
+        )
+        entities = extract_entities(text)
+        by_value: dict[str, set[EntityType]] = {}
+        for e in entities:
+            by_value.setdefault(e.value.lower(), set()).add(e.entity_type)
+        contradictions = {v: t for v, t in by_value.items()
+                           if EntityType.DOMAIN in t and EntityType.FILE in t}
+        assert contradictions == {}
+
+
 # ── Bracketed-host URLs (regression) ─────────────────────────────────────────
 # Found by ingesting a real Mandiant report: it contained the redaction
 # placeholder `http://[actor-controlled-ip]/…`, and since Python 3.11 urlsplit

@@ -109,11 +109,56 @@ _IPV4_PATTERN = _compile_pattern(
     r"(?![\d.])"
 )
 
+# Bare filenames (no path) — only when the extension is executable / script /
+# installer-like, so we capture malware artefacts (payload.exe, _fanout.sh,
+# meshctrl.js) without flooding on prose like "report.pdf" or "figure.png".
+# Defined here, before _DOMAIN_PATTERN below, so the domain matcher's TLD-
+# exclusion list can be *derived* from it (ADR-0056) instead of hand-
+# duplicating it — the two lists drifted apart in practice: .msi/.pl/.sys/
+# .cmd/.app were in this list but missing from the domain exclusion, so bare
+# filenames like "cert.pl" and "pagefile.sys" also matched _DOMAIN_PATTERN
+# and produced a contradictory domain+file pair for the same string on a
+# real report (measured 2026-09-20: 11 of 137 domain/file conflicts on a
+# 12-report corpus).
+#
+# ".com" is deliberately NOT in this list, even though old-style DOS .com
+# executables are a real (if rare) technique: a bare ".com" string with no
+# path prefix is overwhelmingly a domain in CTI report text — measured on
+# the same corpus, all 113 distinct bare ".com" strings that matched both
+# patterns were domains (0 were malware filenames; that was 126 of the 137
+# conflicts, by far the largest share). The ambiguity cannot be resolved by
+# excluding ".com" from _DOMAIN_PATTERN instead, since .com is the single
+# most common TLD in the world. A ".com" file mentioned WITH a path (e.g.
+# "C:\Windows\Temp\update.com") is unaffected — _WIN_PATH_PATTERN below
+# does not consult this list, so the path form is still caught.
+_MALWARE_FILE_EXTS = (
+    "exe|dll|sys|drv|scr|cpl|ocx|bin|elf|so|ko|"
+    "ps1|psm1|psd1|bat|cmd|vbs|vbe|js|jse|wsf|wsh|hta|lnk|"
+    "sh|bash|zsh|py|pyc|pyw|pl|rb|php|jar|war|apk|dmg|app|msi|iso|img"
+)
+
+# Extensions _DOMAIN_PATTERN must also reject that are not malware-adjacent
+# (so don't belong in _MALWARE_FILE_EXTS itself) — common document/media/
+# data/code file types a domain-shaped string could otherwise be mistaken
+# for ("report.pdf" is not a domain).
+_DOMAIN_EXTRA_NON_TLD_EXTS = (
+    "ts", "go", "zip", "tar", "gz", "pdf", "docx?", "xlsx?", "png", "jpg",
+    "gif", "svg", "css", "json", "xml", "yml", "yaml", "log", "txt", "md",
+    "cfg", "ini", "conf",
+)
+
 # Domaines : structure générique (sous-domaines + TLD ≥ 2 chars)
-# Exclut les extensions de fichiers courantes (.py, .js, .exe…) et les nombres purs
+# Exclut les extensions de fichiers courantes (.py, .js, .exe…) et les nombres purs.
+# The exclusion set is built from _MALWARE_FILE_EXTS + the extras above,
+# rather than hand-typed a second time, precisely so it cannot drift out of
+# sync with _MALWARE_FILE_EXTS again the way it already had (see comment
+# above _MALWARE_FILE_EXTS).
+_DOMAIN_NON_TLD_EXTS = "|".join(sorted(
+    set(_MALWARE_FILE_EXTS.split("|")) | set(_DOMAIN_EXTRA_NON_TLD_EXTS)
+))
 _DOMAIN_PATTERN = _compile_pattern(
     r"\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.){1,5}"
-    r"(?!(?:py|js|ts|go|rb|php|sh|exe|dll|bin|elf|ps1|bat|vbs|zip|tar|gz|pdf|docx?|xlsx?|png|jpg|gif|svg|css|json|xml|yml|yaml|log|txt|md|cfg|ini|conf)\b)"
+    rf"(?!(?:{_DOMAIN_NON_TLD_EXTS})\b)"
     r"[a-zA-Z]{2,12}\b",
     re.IGNORECASE,
 )
@@ -156,16 +201,10 @@ _WIN_PATH_PATTERN = _compile_pattern(
     re.IGNORECASE,
 )
 
-# Bare filenames (no path) — only when the extension is executable / script /
-# installer-like, so we capture malware artefacts (payload.exe, _fanout.sh,
-# meshctrl.js) without flooding on prose like "report.pdf" or "figure.png".
-# The lookbehind skips filenames that are already part of a captured path
-# (preceded by "/" or "\") so we don't double-extract them.
-_MALWARE_FILE_EXTS = (
-    "exe|dll|sys|drv|scr|com|cpl|ocx|bin|elf|so|ko|"
-    "ps1|psm1|psd1|bat|cmd|vbs|vbe|js|jse|wsf|wsh|hta|lnk|"
-    "sh|bash|zsh|py|pyc|pyw|pl|rb|php|jar|war|apk|dmg|app|msi|iso|img"
-)
+# Bare filenames (no path) — _MALWARE_FILE_EXTS is defined earlier (next to
+# _DOMAIN_PATTERN, which derives its own exclusion list from it — see the
+# comment there). The lookbehind skips filenames that are already part of a
+# captured path (preceded by "/" or "\") so we don't double-extract them.
 _BARE_FILENAME_PATTERN = _compile_pattern(
     r"(?<![\w./\\-])"                          # not mid-word and not inside a path
     r"([A-Za-z0-9_][\w.-]*\.(?:" + _MALWARE_FILE_EXTS + r"))"

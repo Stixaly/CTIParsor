@@ -11,6 +11,7 @@ Covers:
 """
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -532,3 +533,134 @@ class TestReferenceDatePrompt:
         prompt = mock_llm.call_args_list[0].args[1]
         assert "Document reference date" in prompt
         assert "unknown" in prompt
+
+
+# ── enrich_document_relations — Stage 3 document-level relation pass (ADR-0057) ──
+
+from pipeline.stage3_llm import (  # noqa: E402
+    document_level_relations_enabled,
+    enrich_document_relations,
+)
+
+
+class TestDocumentLevelRelationsFlag:
+    def test_off_by_default(self, monkeypatch):
+        monkeypatch.delenv("ENABLE_DOCUMENT_LEVEL_RELATIONS", raising=False)
+        assert document_level_relations_enabled() is False
+
+    def test_can_be_enabled(self, monkeypatch):
+        monkeypatch.setenv("ENABLE_DOCUMENT_LEVEL_RELATIONS", "true")
+        assert document_level_relations_enabled() is True
+
+
+class TestEnrichDocumentRelationsHappyPath:
+    def test_returns_llm_enrichment_result(self, mock_llm, sample_cti_text, sample_entities):
+        result = enrich_document_relations(sample_cti_text, sample_entities)
+        assert isinstance(result, LLMEnrichmentResult)
+
+    def test_relationship_survives_with_evidence(self, mock_llm, sample_cti_text, sample_entities):
+        # mock_llm_response's relationship quote is a verbatim substring of
+        # sample_cti_text, so Stage 3b's hallucination filter must keep it.
+        result = enrich_document_relations(sample_cti_text, sample_entities)
+        rel = next((r for r in result.relationships
+                    if r.source_value.lower() == "apt29" and r.target_value.lower() == "sunburst"), None)
+        assert rel is not None
+        assert rel.evidence_text
+
+    def test_strips_every_field_except_relationships(self, mock_llm, sample_cti_text, sample_entities):
+        # mock_llm_response also carries threat_actors/malware_families/ttps/
+        # campaign_name/etc — this pass must discard all of it, even though
+        # the mock (standing in for a non-compliant model) returned it.
+        result = enrich_document_relations(sample_cti_text, sample_entities)
+        assert result.threat_actors == []
+        assert result.malware_families == []
+        assert result.tools == []
+        assert result.ttps == []
+        assert result.ioc_associations == []
+        assert result.targeted_sectors == []
+        assert result.targeted_countries == []
+        assert result.campaign_name is None
+        assert result.course_of_action == []
+
+    def test_llm_called_with_full_text_not_truncated(self, mock_llm, sample_entities):
+        long_text = "APT29 deployed SUNBURST malware. " * 50  # well under the doc ceiling
+        enrich_document_relations(long_text, sample_entities)
+        prompt = mock_llm.call_args_list[0].args[1]
+        assert long_text in prompt
+
+    def test_known_entities_listed_in_prompt(self, mock_llm, sample_cti_text, sample_entities):
+        enrich_document_relations(sample_cti_text, sample_entities)
+        prompt = mock_llm.call_args_list[0].args[1]
+        assert "APT29" in prompt
+        assert "SUNBURST" in prompt
+
+    def test_uses_the_dedicated_document_system_prompt(self, mock_llm, sample_cti_text, sample_entities):
+        from pipeline.stage3_llm import _DOC_RELATIONS_SYSTEM_PROMPT
+        enrich_document_relations(sample_cti_text, sample_entities)
+        system_arg = mock_llm.call_args_list[0].args[0]
+        assert system_arg == _DOC_RELATIONS_SYSTEM_PROMPT
+
+
+class TestEnrichDocumentRelationsGuards:
+    def test_no_known_entities_returns_empty_without_calling_llm(self, mock_llm, sample_cti_text):
+        result = enrich_document_relations(sample_cti_text, [])
+        assert result.relationships == []
+        mock_llm.assert_not_called()
+
+    def test_provider_not_ready_returns_empty(self, sample_cti_text, sample_entities):
+        with patch("pipeline.stage3_llm._provider_ready", return_value=False):
+            result = enrich_document_relations(sample_cti_text, sample_entities)
+        assert result.relationships == []
+
+    def test_malformed_json_returns_empty_result(self, mock_llm_bad_json, sample_cti_text, sample_entities):
+        result = enrich_document_relations(sample_cti_text, sample_entities)
+        assert result.relationships == []
+
+    def test_empty_llm_response_returns_empty(self, mock_llm_empty, sample_cti_text, sample_entities):
+        result = enrich_document_relations(sample_cti_text, sample_entities)
+        assert result.relationships == []
+
+    def test_oversized_text_is_truncated_not_raised(self, mock_llm, sample_entities, monkeypatch):
+        # Use a small ceiling so the test doesn't need a real 300k-char string.
+        monkeypatch.setattr("pipeline.stage3_llm._DOC_MAX_PROMPT_LENGTH", 200)
+        huge_text = "APT29 deployed SUNBURST malware against SolarWinds targets. " * 100
+        result = enrich_document_relations(huge_text, sample_entities)
+        assert isinstance(result, LLMEnrichmentResult)
+        prompt = mock_llm.call_args_list[0].args[1]
+        assert len(prompt) <= 200
+
+
+class TestEnrichDocumentRelationsMergeIntegration:
+    """The design claim: appending this pass's result to the per-chunk results
+    list needs no new merge logic — _merge_results' existing (source, verb,
+    target) dedup and better-evidence-wins tie-break must apply unchanged."""
+
+    def test_merges_cleanly_alongside_chunk_results(self, mock_llm, sample_cti_text, sample_entities):
+        chunk_result = enrich_chunk(sample_cti_text, sample_entities)
+        doc_result = enrich_document_relations(sample_cti_text, sample_entities)
+
+        merged = _merge_results([chunk_result, doc_result])
+
+        # The duplicate APT29-uses-SUNBURST claim collapses to one relationship,
+        # not two, via the existing (source, verb, target) dedup key.
+        matches = [r for r in merged.relationships
+                   if r.source_value.lower() == "apt29" and r.target_value.lower() == "sunburst"]
+        assert len(matches) == 1
+
+    def test_doc_pass_contributes_a_relationship_chunks_never_saw(self, mock_llm_response, sample_entities):
+        # A relationship whose two facts are far apart: no single chunk could
+        # find it, but the whole-document pass (which sees everything) can.
+        distant_text = (
+            "SUNBURST malware was recovered from the compromised SolarWinds "
+            "build server. " + ("Unrelated filler paragraph. " * 20) +
+            "APT29 was later confirmed as the operator behind the intrusion."
+        )
+        with patch("pipeline.stage3_llm._call_llm", return_value=json.dumps(mock_llm_response)):
+            chunk_result = LLMEnrichmentResult()  # simulates a chunk that found nothing
+            doc_result = enrich_document_relations(distant_text, sample_entities)
+
+        merged = _merge_results([chunk_result, doc_result])
+        assert any(
+            r.source_value.lower() == "apt29" and r.target_value.lower() == "sunburst"
+            for r in merged.relationships
+        )

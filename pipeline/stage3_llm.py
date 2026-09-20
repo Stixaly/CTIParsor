@@ -13,7 +13,7 @@ from tenacity import RetryError, retry, retry_if_exception_type, stop_after_atte
 
 # Initialize logging
 from api.logging_config import get_logger
-from models.schemas import EvidenceLabel, RawEntity
+from models.schemas import EntityType, EvidenceLabel, RawEntity
 
 logger = get_logger(__name__)
 
@@ -41,6 +41,17 @@ _RETRY_EXCEPTIONS = (
 # ---------------------------------------------------------------------------
 # Maximum prompt length (characters) to prevent overly large requests
 _MAX_PROMPT_LENGTH = int(os.environ.get("LLM_MAX_PROMPT_LENGTH", "32000"))
+# Separate, much larger ceiling for the document-level relation pass (ADR-0057)
+# — that call reads the WHOLE report, not a ~3000-char chunk, and 32000 chars
+# would truncate away most of a typical report before the model even sees the
+# entity list at the end of the prompt. 300000 chars (~75-100k tokens with
+# headroom for the system prompt, entity list and output) comfortably covers
+# every report seen in this corpus (largest so far: ~110k chars) while staying
+# well inside Claude's context window. A provider with a much smaller context
+# (a local Ollama model, say) should lower this via LLM_DOC_MAX_PROMPT_LENGTH
+# rather than rely on the default — this feature was validated against
+# Anthropic only.
+_DOC_MAX_PROMPT_LENGTH = int(os.environ.get("LLM_DOC_MAX_PROMPT_LENGTH", "300000"))
 # Maximum response length (characters) to prevent overly large responses.
 #
 # This cap TRUNCATES the string, so a value below what the token ceiling allows
@@ -558,6 +569,100 @@ related-to|...",
 }}"""
 
 
+# --- Document-level relation extraction (ADR-0057) ------------------------
+#
+# enrich_chunk() above is precise but structurally blind to a relationship
+# whose two facts are stated far apart in the document: a chunk call only
+# ever sees ~3000 characters, so "malware X is a variant of malware Y" in
+# paragraph 2 and "Y is attributed to actor Z" in paragraph 40 can never be
+# connected by any single chunk call, no matter how good the model is.
+# Measured on this project's own corpus (2026-09-20): a single full-document
+# LLM read found roughly 3x the relationships the chunked pipeline did on the
+# same reports, and completion (ADR-0013/0055's long_distance engine) already
+# recovers much of that gap cheaply for reports that already have SOME base
+# relationships — but does nothing for a report Stage 3 extracted zero
+# relationships from in the first place, since it only bridges existing
+# components.
+#
+# This prompt deliberately asks for RELATIONSHIPS ONLY. It does NOT ask the
+# model to (re)discover entities, TTPs, campaign names, sectors, or IoC
+# associations — a full-document entity read was measured to be WORSE than
+# the existing chunked+NER pipeline for those (~25% recall of what the mix
+# pipeline finds), so re-running that here would add lower-quality duplicate
+# proposals rather than value. Entity discovery keeps working exactly as it
+# already does; only the relation-finding gets a wider window.
+_DOC_RELATIONS_SYSTEM_PROMPT = """You are a Cyber Threat Intelligence (CTI) expert.
+You are given an ENTIRE CTI report — not an excerpt — specifically so you can
+connect facts that are stated far apart in the document: one paragraph may
+name a malware family, and a much later paragraph may attribute that malware
+to an actor. A reader who only saw one paragraph at a time would miss this
+connection; you have the whole report, so you should not.
+
+Your ONLY job is to find relationships between the entities in the list below.
+The list already contains EVERY kind of entity this report has — malware,
+threat actors, tools, TTPs, campaigns, sectors, countries, IPs, domains,
+hashes, files, CVEs, and everything else — found by an earlier, separate
+process. You are NOT asked to find more entities of any kind, only the
+relationships BETWEEN the ones already listed. This means every entity in
+the list, regardless of its type, is a valid relationship endpoint — do not
+skip an entity just because it looks like a TTP, an indicator, or a sector
+rather than a named actor or malware family; a relationship like
+"malware uses TTP" or "malware communicates-with domain" is exactly the kind
+of fact this pass exists to find.
+
+Rules (identical to the standard extraction contract):
+- Never invent a value. Only use source_value/target_value strings that
+  appear verbatim in the entity list below — never a name, IP, domain, or
+  any other value that is not in that list.
+- For every relationship, attach an evidence_label describing how well the
+  source text supports it (do NOT upgrade the label — when support is weak,
+  use a weaker one):
+    observed = directly shown in telemetry/sample/log/screenshot/source artifact
+    reported = the source states it (assertion-level)
+    assessed = the source's analytical judgment
+    inferred = your conclusion combining multiple facts across sentences —
+               this is expected to be common here, since connecting distant
+               facts is exactly what this pass is for
+    gap      = you believe it is implied but cannot find explicit support
+- evidence_text must be a sentence (or, for an inferred relationship
+  combining two facts, the two supporting sentences) COPIED CHARACTER FOR
+  CHARACTER from the text. Not a paraphrase. If you cannot find supporting
+  text, use evidence_label "gap" and evidence_text "" — never fabricate a quote.
+- Valid STIX 2.1 relationship types (use ONLY these):
+  uses, attributed-to, targets, indicates, mitigates, remediates,
+  delivers, drops, downloads, exploits, originates-from, compromises,
+  communicates-with, beacons-to, exfiltrates-to, controls, has, hosts,
+  owns, authored-by, impersonates, based-on, consists-of, analysis-of,
+  static-analysis-of, dynamic-analysis-of, characterizes, investigates,
+  located-at, resolves-to, belongs-to, variant-of,
+  duplicate-of, derived-from, related-to.
+- Return ONLY valid JSON, no surrounding text."""
+
+_DOC_RELATIONS_USER_PROMPT_TEMPLATE = """Full CTI report text:
+
+---
+{text}
+---
+
+Known entities in this report — use ONLY these exact values as source_value
+or target_value (do not invent a name not in this list):
+{entity_list}
+
+Return ONLY this JSON shape:
+{{
+  "relationships": [
+    {{
+      "source_value": "exact entity name from the list above",
+      "relationship_type": "one of the verbs listed in the rules",
+      "target_value": "exact entity name from the list above",
+      "confidence": 0.0-1.0,
+      "evidence_text": "verbatim sentence(s) from the text supporting this relationship",
+      "evidence_label": "observed|reported|assessed|inferred|gap"
+    }}
+  ]
+}}"""
+
+
 # --- LLM call implementations ---
 
 # Per-request timeout in seconds.  Prevents the pipeline from hanging forever
@@ -1055,6 +1160,64 @@ def _try_extract_complete_items(text: str) -> dict | None:
 
 # --- Public API ---
 
+def _parse_llm_response(raw_text: str) -> LLMEnrichmentResult | None:
+    """
+    Turn a raw LLM text response into an LLMEnrichmentResult, or None if
+    nothing usable could be recovered.
+
+    Factored out of enrich_chunk so enrich_document_relations (ADR-0057) can
+    reuse the exact same truncation-repair and normalise-then-validate path
+    instead of a second, drifting copy of it.
+    """
+    # Use raw_decode() to find the first syntactically valid JSON object in
+    # the LLM output, ignoring any surrounding prose or markdown fences.
+    decoder = json.JSONDecoder()
+    parsed_json: dict | None = None
+    for i, ch in enumerate(raw_text):
+        if ch == "{":
+            try:
+                obj, _ = decoder.raw_decode(raw_text, i)
+                if isinstance(obj, dict):
+                    parsed_json = obj
+                    break
+            except json.JSONDecodeError:
+                continue
+
+    # Response was likely cut off by max_tokens — try to repair the dangling
+    # structure before giving up entirely.
+    if parsed_json is None:
+        completed = _try_complete_truncated_json(raw_text)
+        if completed is not None:
+            try:
+                parsed_json = json.loads(completed)
+                logger.warning("LLM response was truncated — recovered by closing dangling structures")
+            except json.JSONDecodeError:
+                parsed_json = None
+
+    # Still nothing — salvage whatever complete array items survived the cut.
+    if parsed_json is None:
+        parsed_json = _try_extract_complete_items(raw_text)
+        if parsed_json is not None:
+            logger.warning("LLM response was truncated — salvaged partial results from complete array items")
+
+    if parsed_json is None:
+        logger.warning(f"LLM returned no valid JSON (raw preview: {raw_text[:120]!r})")
+        return None
+
+    # Normalise field names/types before Pydantic validation.
+    # Claude sometimes returns richer objects than the schema expects —
+    # e.g. {"name": "GREYVIBE", "aliases": []} where a plain string is required,
+    # or {"id": "T1587.003", "name": "..."} where "mitre_id"/"technique_name" are
+    # expected.  Discarding the whole result on a field-name mismatch would lose
+    # all real intelligence from the chunk.  Normalise instead, then validate.
+    normalized_json = _normalize_llm_json(parsed_json)
+    try:
+        return LLMEnrichmentResult.model_validate(normalized_json)
+    except ValidationError as e:
+        logger.warning(f"JSON schema validation failed after normalization: {e}")
+        return None
+
+
 def corroborated_ttp_ids(semantic_ttp_entities) -> set[str]:
     """MITRE IDs a semantic match corroborates strongly enough to waive Stage 3f.
 
@@ -1212,52 +1375,8 @@ def enrich_chunk(
         logger.warning(f"Response too long ({len(raw_text)} chars > {_MAX_RESPONSE_LENGTH} max) — truncating")
         raw_text = raw_text[:_MAX_RESPONSE_LENGTH]
 
-    # Use raw_decode() to find the first syntactically valid JSON object in
-    # the LLM output, ignoring any surrounding prose or markdown fences.
-    decoder = json.JSONDecoder()
-    parsed_json: dict | None = None
-    for i, ch in enumerate(raw_text):
-        if ch == "{":
-            try:
-                obj, _ = decoder.raw_decode(raw_text, i)
-                if isinstance(obj, dict):
-                    parsed_json = obj
-                    break
-            except json.JSONDecodeError:
-                continue
-
-    # Response was likely cut off by max_tokens — try to repair the dangling
-    # structure before giving up on the whole chunk.
-    if parsed_json is None:
-        completed = _try_complete_truncated_json(raw_text)
-        if completed is not None:
-            try:
-                parsed_json = json.loads(completed)
-                logger.warning("LLM response was truncated — recovered by closing dangling structures")
-            except json.JSONDecodeError:
-                parsed_json = None
-
-    # Still nothing — salvage whatever complete array items survived the cut.
-    if parsed_json is None:
-        parsed_json = _try_extract_complete_items(raw_text)
-        if parsed_json is not None:
-            logger.warning("LLM response was truncated — salvaged partial results from complete array items")
-
-    if parsed_json is None:
-        logger.warning(f"LLM returned no valid JSON (raw preview: {raw_text[:120]!r})")
-        return LLMEnrichmentResult()
-
-    # Normalise field names/types before Pydantic validation.
-    # Claude sometimes returns richer objects than the schema expects —
-    # e.g. {"name": "GREYVIBE", "aliases": []} where a plain string is required,
-    # or {"id": "T1587.003", "name": "..."} where "mitre_id"/"technique_name" are
-    # expected.  Discarding the whole result on a field-name mismatch would lose
-    # all real intelligence from the chunk.  Normalise instead, then validate.
-    normalized_json = _normalize_llm_json(parsed_json)
-    try:
-        result = LLMEnrichmentResult.model_validate(normalized_json)
-    except ValidationError as e:
-        logger.warning(f"JSON schema validation failed after normalization: {e}")
+    result = _parse_llm_response(raw_text)
+    if result is None:
         return LLMEnrichmentResult()
 
     # Stage 3b — remove hallucinated entity names not present in the source text.
@@ -1338,12 +1457,136 @@ def enrich_all_chunks(
         )
         all_results.append(result)
 
+    # Stage 3 document-level relation pass (ADR-0057, opt-in) — CLI parity
+    # with the API worker's wiring of the same capability.
+    if document_level_relations_enabled():
+        known_entities: list[RawEntity] = list(gazetteer_entities or []) + list(cyner_entities or [])
+        known_keys = {(e.value.lower(), e.entity_type) for e in known_entities}
+        for entities in entities_per_chunk:
+            for e in entities:
+                key = (e.value.lower(), e.entity_type)
+                if key not in known_keys:
+                    known_entities.append(e)
+                    known_keys.add(key)
+        for r in all_results:
+            for name, etype in (
+                [(n, EntityType.THREAT_ACTOR) for n in r.threat_actors]
+                + [(n, EntityType.MALWARE) for n in r.malware_families]
+                + [(n, EntityType.TOOL) for n in r.tools]
+            ):
+                key = (name.lower(), etype)
+                if key not in known_keys:
+                    known_entities.append(RawEntity(value=name, entity_type=etype, source="llm"))
+                    known_keys.add(key)
+
+        full_text = "\n\n".join(chunks)
+        logger.info(f"[Stage 3 doc-relations] {len(known_entities)} known entities, "
+                    f"{len(full_text)} chars of report text")
+        doc_rel_result = enrich_document_relations(full_text, known_entities)
+        logger.info(f"[Stage 3 doc-relations] {len(doc_rel_result.relationships)} relationships found")
+        all_results.append(doc_rel_result)
+
     return _merge_results(
         all_results,
         gazetteer_entities=gazetteer_entities,
         semantic_ttp_entities=semantic_ttp_entities,
         cyner_entities=cyner_entities,
     )
+
+
+def document_level_relations_enabled() -> bool:
+    """True when the Stage 3 document-level relation pass (ADR-0057) should
+    run. Off by default, same convention as Stage 3d/3e/completion.long_distance
+    — a new capability ships opt-in until measured on real jobs."""
+    from pipeline.env_flags import env_bool
+    return env_bool("ENABLE_DOCUMENT_LEVEL_RELATIONS", default=False)
+
+
+def enrich_document_relations(
+    full_text: str,
+    known_entities: list[RawEntity],
+    provider: str | None = None,
+) -> LLMEnrichmentResult:
+    """
+    Stage 3 document-level relation pass (ADR-0057) — opt-in via
+    ENABLE_DOCUMENT_LEVEL_RELATIONS=true (see document_level_relations_enabled()).
+
+    Sends the WHOLE report (not a chunk) plus the full known-entity list and
+    asks for relationships only. Intended to be appended to the list of
+    per-chunk LLMEnrichmentResults passed to _merge_results() — its output is
+    just another LLMEnrichmentResult with every field but `relationships`
+    left at its default, so it needs no dedicated merge logic: the existing
+    (source, verb, target) dedup in _merge_results, including its
+    better-evidence-wins tie-break, applies to it exactly as it does to any
+    chunk's result.
+
+    Returns LLMEnrichmentResult() (empty) when the provider is not ready, no
+    entities are known yet, or the call/parse fails — a caller can always
+    append the result unconditionally without checking first.
+    """
+    if not _provider_ready(provider):
+        return LLMEnrichmentResult()
+    if not known_entities:
+        return LLMEnrichmentResult()
+
+    entity_list = "\n".join(
+        f"- [{e.entity_type.value}] {e.value}" for e in known_entities
+    )
+
+    prompt = _DOC_RELATIONS_USER_PROMPT_TEMPLATE.format(
+        text=full_text,
+        entity_list=entity_list,
+    )
+
+    if len(prompt) > _DOC_MAX_PROMPT_LENGTH:
+        logger.warning(
+            f"[Stage 3 doc-relations] Prompt too long ({len(prompt)} chars > "
+            f"{_DOC_MAX_PROMPT_LENGTH} max) — truncating. Raise "
+            "LLM_DOC_MAX_PROMPT_LENGTH if this report should fit whole."
+        )
+        prompt = prompt[:_DOC_MAX_PROMPT_LENGTH]
+
+    logger.info(f"[Stage 3 doc-relations] Calling LLM ({len(prompt)} prompt chars, "
+                f"{len(known_entities)} known entities)")
+
+    raw_text = _call_llm(_DOC_RELATIONS_SYSTEM_PROMPT, prompt, provider=provider)
+    if not raw_text:
+        logger.warning("[Stage 3 doc-relations] LLM returned empty response")
+        return LLMEnrichmentResult()
+
+    if len(raw_text) > _MAX_RESPONSE_LENGTH:
+        logger.warning(f"[Stage 3 doc-relations] Response too long ({len(raw_text)} "
+                        f"chars > {_MAX_RESPONSE_LENGTH} max) — truncating")
+        raw_text = raw_text[:_MAX_RESPONSE_LENGTH]
+
+    result = _parse_llm_response(raw_text)
+    if result is None:
+        return LLMEnrichmentResult()
+
+    # Defense in depth: the prompt says "relationships only", but nothing
+    # forces the model to comply. Strip anything else it returned rather than
+    # trust the instruction — this pass must never become a second, lower-
+    # quality source of entities/TTPs/campaign data.
+    result = LLMEnrichmentResult(relationships=result.relationships)
+
+    # Stage 3b — remove hallucinated relationship endpoints not present in
+    # the source text. `full_text` IS the whole document here (not a 3000-
+    # char slice), so this check is at its most meaningful: no tier-2
+    # doc_context fallback is needed the way chunk-level extraction needs it.
+    from pipeline.stage3b_validate import validate_llm_result
+    result = validate_llm_result(result, full_text)
+
+    # Stage 3d — self-verification of relationship claims (ADR-004 P3-A),
+    # against the full document text so a claim connecting two distant
+    # sentences can still be verified.
+    if result.relationships:
+        from pipeline.stage3d_verify import verify_enabled, verify_relationships
+        if verify_enabled():
+            def _verify_call(s, u):
+                return _call_llm(s, u, provider=provider)
+            result = cast(LLMEnrichmentResult, verify_relationships(full_text, result, _verify_call))
+
+    return result
 
 
 def _dedup_names(names: list[str], blacklist: set[str] | None = None) -> list[str]:
