@@ -117,9 +117,26 @@ _CHROMIUM_ARGS = (
     "--mute-audio",
 )
 
+# Fallback only.  The UA actually sent is built from the launched browser's own
+# version by _user_agent_for(): bot filters in front of sites like sophos.com
+# compare the version the UA claims against the TLS/HTTP-2 fingerprint and the
+# Sec-CH-UA hints Chromium sends, and a hard-coded "Chrome/125" on a newer
+# Chromium is a mismatch they answer by resetting the stream
+# (net::ERR_HTTP2_PROTOCOL_ERROR) or stalling the response until timeout.
 _USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/125.0.0.0 Safari/537.36"
+)
+
+# Network errors that, on a host that otherwise answers, mean the site's bot
+# protection refused the headless browser rather than the site being down.
+_REFUSAL_ERRORS = (
+    "ERR_HTTP2_PROTOCOL_ERROR",
+    "ERR_CONNECTION_RESET",
+    "ERR_CONNECTION_CLOSED",
+    "ERR_EMPTY_RESPONSE",
+    "ERR_HTTP2_PING_FAILED",
+    "Timeout",
 )
 
 # Playwright's launch() defaults `chromium_sandbox` to False — it appends
@@ -615,6 +632,34 @@ def _dns_pin_arg(host: str) -> str | None:
     return None
 
 
+def _user_agent_for(browser_version: str) -> str:
+    """
+    A desktop Chrome UA claiming the launched browser's real major version,
+    reduced the way Chrome itself reports it ("141.0.0.0"), and without the
+    "HeadlessChrome" token.  Falls back to _USER_AGENT if the version is unparsable.
+    """
+    major = (browser_version or "").split(".", 1)[0]
+    if not major.isdigit():
+        return _USER_AGENT
+    return (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+        f"Chrome/{major}.0.0.0 Safari/537.36"
+    )
+
+
+def _load_error_message(url: str, exc: Exception) -> str:
+    """The navigation error, plus what to do about it when the site refused us."""
+    msg = f"Could not load {url}: {exc}"
+    if any(marker in str(exc) for marker in _REFUSAL_ERRORS):
+        msg += (
+            " — the site dropped the connection, which usually means its bot "
+            "protection refused the automated browser. Open the page in your own "
+            "browser, save it as PDF (Print > Save as PDF) and upload that file, "
+            "or paste the report text."
+        )
+    return msg
+
+
 def capture_url_to_pdf(
     url: str,
     dest: Path,
@@ -705,7 +750,7 @@ def capture_url_to_pdf(
                 ignore_https_errors=False,
                 bypass_csp=False,
                 service_workers="block",
-                user_agent=_USER_AGENT,
+                user_agent=_user_agent_for(getattr(browser, "version", "")),
                 viewport=_VIEWPORT,
                 locale="en-US",
                 extra_http_headers={"Accept-Language": "en-US,en;q=0.9"},
@@ -718,7 +763,7 @@ def capture_url_to_pdf(
             try:
                 response = page.goto(safe_url, wait_until="domcontentloaded", timeout=timeout_ms)
             except PlaywrightError as exc:
-                raise CaptureError(f"Could not load {safe_url}: {exc}") from exc
+                raise CaptureError(_load_error_message(safe_url, exc)) from exc
 
             if response is None:
                 raise CaptureError(f"No response from {safe_url}")
