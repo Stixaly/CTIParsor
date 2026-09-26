@@ -8,6 +8,23 @@ sections group by theme rather than strict semver.
 
 ### Added
 
+#### vLLM: a thinking switch and a `vllm` vision provider, 2026-09-27
+
+`VLLM_ENABLE_THINKING` (default `false`) sends
+`chat_template_kwargs.enable_thinking` with every vLLM request, Stage 3 and
+Stage 1f alike. Qwen3-family models think unless told not to. Measured on
+Qwen3.8-27B served by vLLM 0.27, the Stage 3 extraction prompt spent the whole
+8192-token output budget reasoning and returned no JSON after 431 s, so the
+chunk came back empty. With thinking off, the same chunk went through
+extraction, Stage 3d and Stage 3f in 106 s. The value is recorded in each
+bundle's run config.
+
+`VISION_PROVIDER=vllm` reads figures on the Stage 3 server (`VLLM_BASE_URL`),
+with `VLLM_MODEL` as the default model. vLLM publishes no capability flag, so
+the probe first checks the name against `/v1/models` (the served id carries
+its organisation prefix, and a bare name 404s), then sends one 64 px image. A
+text-only model refuses it, and Stage 1f is disabled with the server's reason.
+
 #### Full-Docker installation: `setup.sh` becomes environment prep only (ADR-0054), 2026-09-19
 
 Docker is now the only supported way to install, develop and run CTIParsor —

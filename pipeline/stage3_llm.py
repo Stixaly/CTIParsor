@@ -14,6 +14,7 @@ from tenacity import RetryError, retry, retry_if_exception_type, stop_after_atte
 # Initialize logging
 from api.logging_config import get_logger
 from models.schemas import EntityType, EvidenceLabel, RawEntity
+from pipeline.vllm_options import vllm_extra_body
 
 logger = get_logger(__name__)
 
@@ -295,7 +296,9 @@ def _get_provider_diagnostics():
         else:
             _vllm_base = os.environ.get("VLLM_BASE_URL", "http://localhost:8000").rstrip("/")
             _VLLM_MODEL = os.environ.get("VLLM_MODEL", "vllm-model")
-            logger.info(f"LLM_PROVIDER=vllm — endpoint: {_vllm_base} — model: {_VLLM_MODEL}")
+            _thinking = vllm_extra_body()["chat_template_kwargs"]["enable_thinking"]
+            logger.info(f"LLM_PROVIDER=vllm — endpoint: {_vllm_base} — model: {_VLLM_MODEL} "
+                        f"— thinking: {'on' if _thinking else 'off'}")
     else:
         logger.warning(
             f"Unknown LLM_PROVIDER='{_PROVIDER}'. Valid values: "
@@ -747,8 +750,13 @@ def _call_anthropic(system: str, user: str) -> str:
     wait=_RETRY_WAIT,
     reraise=True
 )
-def _call_openai_compatible_impl(client_param, model: str, system: str, user: str, label: str) -> str:
-    """Internal implementation of OpenAI-compatible call with retry."""
+def _call_openai_compatible_impl(client_param, model: str, system: str, user: str, label: str,
+                                 extra_body: dict | None = None) -> str:
+    """Internal implementation of OpenAI-compatible call with retry.
+
+    `extra_body` carries server-specific fields the OpenAI SDK has no parameter
+    for — vLLM's `chat_template_kwargs` (see pipeline.vllm_options).
+    """
     if not client_param:
         return ""
     t0 = time.monotonic()
@@ -761,6 +769,7 @@ def _call_openai_compatible_impl(client_param, model: str, system: str, user: st
                 {"role": "user", "content": user},
             ],
             timeout=_LLM_TIMEOUT,
+            extra_body=extra_body,
         )
         elapsed = time.monotonic() - t0
         usage  = getattr(response, "usage", None)
@@ -783,10 +792,11 @@ def _call_openai_compatible_impl(client_param, model: str, system: str, user: st
         raise
 
 
-def _call_openai_compatible(client_param, model: str, system: str, user: str, label: str) -> str:
+def _call_openai_compatible(client_param, model: str, system: str, user: str, label: str,
+                            extra_body: dict | None = None) -> str:
     """Shared call logic for OpenAI-compatible endpoints (Mistral, Ollama) with retry."""
     try:
-        return _call_openai_compatible_impl(client_param, model, system, user, label)
+        return _call_openai_compatible_impl(client_param, model, system, user, label, extra_body)
     except RetryError as e:
         logger.error(f"{label} failed after {_MAX_RETRIES} retries: {e}")
         return ""
@@ -834,7 +844,8 @@ def _call_llm(system: str, user: str, provider: str | None = None) -> str:
     elif prov == "vllm":
         client = _get_vllm_client()
         _VLLM_MODEL = os.environ.get("VLLM_MODEL", "vllm-model")
-        return _call_openai_compatible(client, _VLLM_MODEL, system, sanitized_user, "vLLM")
+        return _call_openai_compatible(client, _VLLM_MODEL, system, sanitized_user, "vLLM",
+                                       extra_body=vllm_extra_body())
     return ""
 
 
