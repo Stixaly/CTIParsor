@@ -177,7 +177,7 @@ update them.
 │  • Injection : transcription enters report_text in ⟦…⟧ sentinels     │
 │  • Relations : attack-chain / network-diagram arrows → src -> dst    │
 │  • Safety    : an unreadable figure is skipped, never costs the run  │
-│  Enable: VISION_PROVIDER=anthropic|ollama|mistral in .env            │
+│  Enable: VISION_PROVIDER=anthropic|ollama|mistral|vllm in .env       │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
@@ -885,7 +885,13 @@ LMSTUDIO_MODEL=lmstudio-model
 LLM_PROVIDER=vllm
 VLLM_BASE_URL=http://localhost:8000
 VLLM_MODEL=vllm-model
+VLLM_ENABLE_THINKING=false
 ```
+`VLLM_MODEL` must match the id the server lists at `/v1/models`, organisation
+prefix included (e.g. `Inferact/Qwen3.8-27B-NVFP4`); a wrong name 404s and
+Stage 3 comes back empty. `VLLM_ENABLE_THINKING=false` (the default) turns off
+Qwen3-style thinking, which on the Stage 3 prompt used the whole output budget
+without returning JSON. The same server can read figures: `VISION_PROVIDER=vllm`.
 
 #### Ollama (local, free)
 ```env
@@ -955,6 +961,8 @@ Stage 1f reads the figures in a PDF and injects their transcription into
 # mistral    VISION_MODEL is REQUIRED — no default is assumed, because no
 #            vision-capable Mistral model name was verified against a live
 #            account and a guessed one fails confusingly
+# vllm       default model VLLM_MODEL, on VLLM_BASE_URL — must be a multimodal
+#            model; the probe checks the name is served, then sends one image
 #
 # The model is probed for image support before any figure is sent. A model that
 # cannot see disables Stage 1f with a warning; it is never called anyway.

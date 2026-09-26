@@ -25,17 +25,18 @@ from typing import Any
 
 from api.db import emit_progress, get_conn, now_iso, set_job_status
 from api.logging_config import get_logger, setup_logging
+from pipeline.env_flags import env_float, env_int
 
 logger = get_logger(__name__)
 
-HEARTBEAT_S = int(os.getenv("WORKER_HEARTBEAT_S", "30"))
-LEASE_TIMEOUT_S = int(os.getenv("WORKER_LEASE_TIMEOUT_S", "180"))
-POLL_S = float(os.getenv("WORKER_POLL_S", "2"))
-DRAIN_S = int(os.getenv("WORKER_DRAIN_S", "60"))
+HEARTBEAT_S = env_int("WORKER_HEARTBEAT_S", default=30)
+LEASE_TIMEOUT_S = env_int("WORKER_LEASE_TIMEOUT_S", default=180)
+POLL_S = env_float("WORKER_POLL_S", default=2.0)
+DRAIN_S = env_int("WORKER_DRAIN_S", default=60)
 # How often to check for expired jobs (JOB_RETENTION_DAYS, api/routes/jobs.py).
 # A DB query on every ~2s poll tick would be wasteful for something that only
 # needs to run a few times a day; this is a separate, much coarser interval.
-RETENTION_SWEEP_S = int(os.getenv("JOB_RETENTION_SWEEP_S", str(3600)))
+RETENTION_SWEEP_S = env_int("JOB_RETENTION_SWEEP_S", default=3600)
 ALIVE_FILE = Path(os.getenv("WORKER_ALIVE_FILE", "/tmp/ctiparsor-worker.alive"))
 WORKER_ID = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:6]}"
 _VALID_ROLES = ("all", "api", "worker")

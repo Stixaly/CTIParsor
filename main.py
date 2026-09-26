@@ -15,6 +15,15 @@ import hashlib
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+# Before any project import.  api.logging_config reads LOG_LEVEL, LOG_FORMAT,
+# LOG_FILE, MAX_LOG_SIZE and LOG_BACKUP_COUNT at import time, and the only
+# load_dotenv() on this path used to be the one inside stage3_llm, which runs
+# later: those five were ignored by this CLI when set in .env.  A variable
+# already set in the environment still wins (override=False).
+load_dotenv(Path(__file__).resolve().parent / ".env")
+
 from models.schemas import RawEntity
 from pipeline.stage1_ingestion import chunk_text, extract_reference_date, ingest
 from pipeline.stage2_extraction import extract_entities, refang

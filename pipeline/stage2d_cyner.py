@@ -33,7 +33,7 @@ import re
 from pathlib import Path
 
 from models.schemas import EntityType, RawEntity
-from pipeline.env_flags import env_bool
+from pipeline.env_flags import env_bool, env_int
 from pipeline.overrides import drop_denied
 from pipeline.regex_safety import compile_pattern
 from pipeline.thresholds import get_threshold
@@ -76,9 +76,9 @@ _MEDIUM_THRESH = 0.70
 # the DeBERTa-v3 window.  Overlap catches spans cut at a boundary; the caller
 # dedups what the overlap re-reports.  The batch size only bounds how many
 # chunks one forward pass holds — memory is per chunk, not per document.
-_CHUNK_CHARS   = int(os.getenv("CYNER_CHUNK_CHARS", "1600"))
+_CHUNK_CHARS   = env_int("CYNER_CHUNK_CHARS", default=1600)
 _OVERLAP_CHARS = 200
-_BATCH_SIZE    = int(os.getenv("CYNER_BATCH_SIZE", "4"))
+_BATCH_SIZE    = env_int("CYNER_BATCH_SIZE", default=4)
 
 
 # A whitespace boundary closer than this to `start` makes a chunk not worth

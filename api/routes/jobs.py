@@ -1,6 +1,5 @@
 import json
 import mimetypes
-import os
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -13,6 +12,7 @@ from api.db import _lock, get_conn, now_iso
 from api.logging_config import get_logger
 from api.routes._common import require_job
 from api.worker import re_run_final_stages
+from pipeline.env_flags import env_int
 
 logger = get_logger(__name__)
 
@@ -26,7 +26,7 @@ _OUTPUT_DIR  = _ROOT / "output"
 # an explicit DELETE removes a job. Uploaded reports and STIX bundles otherwise
 # accumulate on disk forever: nothing before this purged them, so an analyst
 # who never clicks delete slowly fills the disk.
-JOB_RETENTION_DAYS = int(os.getenv("JOB_RETENTION_DAYS", "0"))
+JOB_RETENTION_DAYS = env_int("JOB_RETENTION_DAYS", default=0)
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 

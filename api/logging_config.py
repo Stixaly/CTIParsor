@@ -25,6 +25,8 @@ from contextvars import ContextVar
 from datetime import datetime
 from typing import Any, Dict, Optional
 
+from pipeline.env_flags import env_int
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -33,8 +35,8 @@ from typing import Any, Dict, Optional
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 LOG_FORMAT = os.environ.get("LOG_FORMAT", "text")  # "text" or "json"
 LOG_FILE = os.environ.get("LOG_FILE", "")  # Empty = no file logging
-MAX_LOG_SIZE = int(os.environ.get("MAX_LOG_SIZE", "10485760"))  # 10MB
-LOG_BACKUP_COUNT = int(os.environ.get("LOG_BACKUP_COUNT", "5"))
+MAX_LOG_SIZE = env_int("MAX_LOG_SIZE", default=10485760)  # 10MB
+LOG_BACKUP_COUNT = env_int("LOG_BACKUP_COUNT", default=5)
 
 # Context-local storage for request IDs.
 #
