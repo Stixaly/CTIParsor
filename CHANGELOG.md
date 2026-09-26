@@ -234,6 +234,22 @@ generic language) are in
 
 ### Documentation
 
+- **`.env.example` reorganised for a configuration pass**, 2026-09-27. It now
+  opens with how to use the file: the conventions (active vs commented lines,
+  the boolean vocabulary), the minimum settings needed to run, and a table of
+  contents. The body is fourteen numbered sections in pipeline order, with one
+  variable per line. No value changes: the same 38 keys are active, with the
+  same values. Five variables the code reads were missing and are now
+  documented: `TTP_ADVISORY_GATE`, `CYNER_BATCH_SIZE`, `CYNER_CHUNK_CHARS`,
+  `CTI_GIT_REV` and `ENV`. The six `CTI_*_MEMORY` limits get their own line;
+  each shared a line with its CPU counterpart, so uncommenting it produced one
+  broken value.
+
+  Three corrections. The compose worker defaults to
+  `WORKER_MAX_CONCURRENT=1`, not 10. The CVE cache lives in the database, not
+  `cti_stix.db`. `CHUNK_MAX_CHARS`, `CHUNK_OVERLAP` and `LLM_MAX_RETRIES` are
+  now marked as having no effect: they feed a config object that nothing
+  reads.
 - **`docs/architecture.md`** maps the deployment model that ADR-0044, 0045
   and 0046 built: the two shapes (host install, container stack), every
   piece and what it owns, the life of a report from upload to bundle as a
