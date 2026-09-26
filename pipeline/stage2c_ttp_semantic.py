@@ -47,7 +47,7 @@ import os
 from pathlib import Path
 
 from models.schemas import EntityType, RawEntity
-from pipeline.env_flags import env_bool
+from pipeline.env_flags import env_bool, env_float, env_int
 from pipeline.regex_safety import compile_pattern
 
 _SKIP_HEAVY = env_bool("SKIP_HEAVY_MODELS")
@@ -89,7 +89,7 @@ _DEFAULT_THRESHOLDS = (0.62, 0.48)
 # when the two are within this cosine margin of each other.  Beyond the margin
 # the 2nd match is a weaker neighbour dragged in by the embedding and is dropped
 # — this is the single biggest semantic false-positive source (ADR precision §2).
-_TOP2_MARGIN = float(os.getenv("TTP_TOP2_MARGIN", "0.05"))
+_TOP2_MARGIN = env_float("TTP_TOP2_MARGIN", default=0.05)
 
 
 def _thresholds() -> tuple[float, float]:
@@ -161,7 +161,7 @@ def _enabled_domains() -> set[str] | None:
 # minimal recall loss (the marginal 201st candidate scores below threshold).
 # Strided sampling (every Kth sentence) ensures coverage across the full doc.
 # Override via TTP_MAX_CANDIDATES= in .env.
-_MAX_CANDIDATES = int(os.getenv("TTP_MAX_CANDIDATES", "200"))
+_MAX_CANDIDATES = env_int("TTP_MAX_CANDIDATES", default=200)
 
 # Sentences must contain at least one of these tokens to be considered
 # TTP candidates — avoids embedding every sentence in the document.

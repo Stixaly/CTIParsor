@@ -14,6 +14,7 @@ from tenacity import RetryError, retry, retry_if_exception_type, stop_after_atte
 # Initialize logging
 from api.logging_config import get_logger
 from models.schemas import EntityType, EvidenceLabel, RawEntity
+from pipeline.env_flags import env_int
 from pipeline.vllm_options import vllm_extra_body
 
 logger = get_logger(__name__)
@@ -41,7 +42,7 @@ _RETRY_EXCEPTIONS = (
 # Input/Output length limits for LLM calls
 # ---------------------------------------------------------------------------
 # Maximum prompt length (characters) to prevent overly large requests
-_MAX_PROMPT_LENGTH = int(os.environ.get("LLM_MAX_PROMPT_LENGTH", "32000"))
+_MAX_PROMPT_LENGTH = env_int("LLM_MAX_PROMPT_LENGTH", default=32000)
 # Separate, much larger ceiling for the document-level relation pass (ADR-0057)
 # — that call reads the WHOLE report, not a ~3000-char chunk, and 32000 chars
 # would truncate away most of a typical report before the model even sees the
@@ -52,7 +53,7 @@ _MAX_PROMPT_LENGTH = int(os.environ.get("LLM_MAX_PROMPT_LENGTH", "32000"))
 # (a local Ollama model, say) should lower this via LLM_DOC_MAX_PROMPT_LENGTH
 # rather than rely on the default — this feature was validated against
 # Anthropic only.
-_DOC_MAX_PROMPT_LENGTH = int(os.environ.get("LLM_DOC_MAX_PROMPT_LENGTH", "300000"))
+_DOC_MAX_PROMPT_LENGTH = env_int("LLM_DOC_MAX_PROMPT_LENGTH", default=300000)
 # Maximum response length (characters) to prevent overly large responses.
 #
 # This cap TRUNCATES the string, so a value below what the token ceiling allows
@@ -61,14 +62,14 @@ _DOC_MAX_PROMPT_LENGTH = int(os.environ.get("LLM_DOC_MAX_PROMPT_LENGTH", "300000
 # valid characters and this guard cut them to 16,000.  It must therefore stay
 # above `_MAX_OUTPUT_TOKENS` x ~4 characters per token; the two are raised
 # together or not at all.
-_MAX_RESPONSE_LENGTH = int(os.environ.get("LLM_MAX_RESPONSE_LENGTH", "48000"))
+_MAX_RESPONSE_LENGTH = env_int("LLM_MAX_RESPONSE_LENGTH", default=48000)
 # Output token ceiling.  ADR-0028 gave every TTP a verbatim `evidence_text`
 # sentence, which roughly doubles the size of a TTP-heavy response: measured on
 # GREYVIBE, the reply hit the previous 4096 ceiling at 14,812 characters and was
 # cut off mid-object, losing the WHOLE chunk — TTPs, relationships and malware
 # families alike, because a truncated JSON body salvages poorly.  Raised in
 # proportion to the payload the new contract adds.
-_MAX_OUTPUT_TOKENS = int(os.environ.get("LLM_MAX_OUTPUT_TOKENS", "8192"))
+_MAX_OUTPUT_TOKENS = env_int("LLM_MAX_OUTPUT_TOKENS", default=8192)
 
 # Minimum prompt length to ensure meaningful input
 _MIN_PROMPT_LENGTH = 100
@@ -671,7 +672,7 @@ Return ONLY this JSON shape:
 # Per-request timeout in seconds.  Prevents the pipeline from hanging forever
 # if the LLM server stops responding.  Override with LLM_TIMEOUT= in .env.
 # Ollama users on slower hardware may need to raise this (e.g. LLM_TIMEOUT=300).
-_LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "120"))
+_LLM_TIMEOUT = env_int("LLM_TIMEOUT", default=120)
 
 
 @retry(

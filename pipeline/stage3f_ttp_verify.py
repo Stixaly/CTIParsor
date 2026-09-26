@@ -36,11 +36,10 @@ Design note — circular import avoidance:
 """
 from __future__ import annotations
 
-import os
 from typing import Callable
 
 from api.logging_config import get_logger
-from pipeline.env_flags import env_bool
+from pipeline.env_flags import env_bool, env_int
 from pipeline.llm_parse import parse_numbered_claims
 
 logger = get_logger(__name__)
@@ -50,7 +49,7 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 _VERIFY_ENABLED = env_bool("ENABLE_TTP_VERIFICATION")
-_VERIFY_MIN = int(os.getenv("TTP_VERIFY_MIN", "1"))
+_VERIFY_MIN = env_int("TTP_VERIFY_MIN", default=1)
 
 
 def verify_enabled() -> bool:

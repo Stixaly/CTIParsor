@@ -47,7 +47,7 @@ from typing import Iterator
 # Initialize logging
 from api.logging_config import get_logger
 from models.schemas import EntityType, RawEntity
-from pipeline.env_flags import env_bool
+from pipeline.env_flags import env_bool, env_float, env_int
 from pipeline.overrides import drop_denied
 from pipeline.thresholds import get_threshold
 
@@ -70,7 +70,7 @@ warnings.filterwarnings(
 # See .env.example for the full model option list.
 _SKIP_HEAVY        = env_bool("SKIP_HEAVY_MODELS")
 _GLINER_MODEL_ID   = os.getenv("GLINER_MODEL",     "urchade/gliner_large-v2.1")
-_GLINER_THRESHOLD  = float(os.getenv("GLINER_THRESHOLD", "0.40"))
+_GLINER_THRESHOLD  = env_float("GLINER_THRESHOLD", default=0.40)
 _GLINER_ENABLED    = env_bool("GLINER_ENABLED", default=True)
 
 # ── Label → EntityType mapping ────────────────────────────────────────────────
@@ -95,7 +95,7 @@ _GLINER_LABELS = list(_LABEL_MAP.keys())
 # Net effect: ~halves the number of GLiNER model passes compared to 800 chars.
 #
 # Configurable via GLINER_CHUNK_CHARS env var if you need to tune.
-_CHUNK_CHARS    = int(os.getenv("GLINER_CHUNK_CHARS", "1600"))
+_CHUNK_CHARS    = env_int("GLINER_CHUNK_CHARS", default=1600)
 _OVERLAP_CHARS  = 200   # proportionally wider to avoid missing cross-boundary spans
 
 # ── Batched inference ─────────────────────────────────────────────────────────
@@ -103,7 +103,7 @@ _OVERLAP_CHARS  = 200   # proportionally wider to avoid missing cross-boundary s
 # Processing N chunks as one batch amortises the Python→model transfer cost
 # and leverages ONNX/PyTorch batch efficiency.
 # Set GLINER_BATCH_SIZE=1 to disable batching (useful for debugging).
-_BATCH_SIZE = int(os.getenv("GLINER_BATCH_SIZE", "4"))
+_BATCH_SIZE = env_int("GLINER_BATCH_SIZE", default=4)
 
 
 def _iter_chunks(text: str) -> Iterator[tuple[str, int]]:

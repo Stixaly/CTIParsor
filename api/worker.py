@@ -33,19 +33,20 @@ logger = get_logger(__name__)
 
 from api.db import _lock, backup_db, emit_progress, get_conn, now_iso, set_job_status
 from models.schemas import RawEntity
+from pipeline.env_flags import env_int
 
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Worker concurrency and timeout limits
 # ---------------------------------------------------------------------------
 # Maximum execution time per job in seconds (0 = unlimited)
-_MAX_JOB_TIMEOUT = int(os.environ.get("WORKER_JOB_TIMEOUT", "1800"))  # 30 minutes
+_MAX_JOB_TIMEOUT = env_int("WORKER_JOB_TIMEOUT", default=1800)  # 30 minutes
 # Maximum concurrent jobs (each runs in its own subprocess)
-_MAX_CONCURRENT_JOBS = int(os.environ.get("WORKER_MAX_CONCURRENT", "10"))
+_MAX_CONCURRENT_JOBS = env_int("WORKER_MAX_CONCURRENT", default=10)
 # Maximum number of jobs allowed to sit in the queue (0 = unbounded).  Beyond
 # this the upload is refused with an explicit error instead of accepting work
 # the server has no intention of doing.
-_QUEUE_MAX_DEPTH = int(os.environ.get("API_QUEUE_MAX_DEPTH", "50"))
+_QUEUE_MAX_DEPTH = env_int("API_QUEUE_MAX_DEPTH", default=50)
 
 # Note: WORKER_MAX_MEMORY_MB is no longer used.  RLIMIT_AS is not set because
 # it limits virtual address space (not physical RAM), which breaks dlopen() for
@@ -703,8 +704,8 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         #     A lingering file always means the previous run crashed mid-stage.
         #   • File location: output/{job_id}_stage3.ckpt.json
 
-        _PARALLELISM      = int(os.getenv("LLM_PARALLELISM",   "3"))
-        _CHECKPOINT_EVERY = int(os.getenv("CHECKPOINT_EVERY",  "5"))
+        _PARALLELISM      = env_int("LLM_PARALLELISM", default=3)
+        _CHECKPOINT_EVERY = env_int("CHECKPOINT_EVERY", default=5)
 
         from pipeline.stage3_llm import LLMEnrichmentResult as _LLMResult
         from pipeline.stage3_llm import enrich_chunk

@@ -41,12 +41,11 @@ Design note — circular import avoidance:
 """
 from __future__ import annotations
 
-import os
 from typing import Callable
 
 # Initialize logging
 from api.logging_config import get_logger
-from pipeline.env_flags import env_bool
+from pipeline.env_flags import env_bool, env_int
 from pipeline.llm_parse import parse_numbered_claims
 
 logger = get_logger(__name__)
@@ -56,7 +55,7 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 _VERIFY_ENABLED = env_bool("ENABLE_STIX_VERIFICATION")
-_VERIFY_MIN_RELS = int(os.getenv("STIX_VERIFY_MIN_RELS", "1"))
+_VERIFY_MIN_RELS = env_int("STIX_VERIFY_MIN_RELS", default=1)
 
 
 def verify_enabled() -> bool:

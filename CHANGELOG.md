@@ -172,6 +172,22 @@ lowest cutoff in force and each prediction is held to its own type's.
 
 ### Fixed
 
+#### A malformed number in `.env` no longer stops the process; the CLI reads `.env` first, 2026-09-27
+
+28 numeric settings were read with a bare `int(os.getenv(...))` or
+`float(...)`, most of them at import time, so a typo such as
+`WORKER_MAX_CONCURRENT=abc` or `LLM_TIMEOUT=2 minutes` raised a ValueError that
+stopped the API, the worker or the CLI. They now go through `env_int` /
+`env_float` in `pipeline/env_flags.py`, beside `env_bool`. Unset or blank gives
+the default silently; a value that does not parse gives the default and a
+warning naming the variable.
+
+`python main.py` loaded `.env` only through the `load_dotenv()` inside
+`stage3_llm`. That ran after `api.logging_config` had read `LOG_LEVEL`,
+`LOG_FORMAT`, `LOG_FILE`, `MAX_LOG_SIZE` and `LOG_BACKUP_COUNT`, so the CLI
+ignored those five when they were set in `.env`. It now loads the `.env` beside
+it before any project import; a real environment variable still wins.
+
 #### CyNER's Malware/Threat_group labels tagged generic language as named entities (ADR-0050), 2026-09-18
 
 A user-reported real report (`apt44-unearthing-sandworm.pdf`) came back with

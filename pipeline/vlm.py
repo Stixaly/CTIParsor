@@ -13,6 +13,7 @@ import zlib
 from dataclasses import dataclass
 from typing import Protocol
 
+from pipeline.env_flags import env_float
 from pipeline.vllm_options import vllm_extra_body
 
 try:
@@ -629,10 +630,7 @@ def get_backend() -> VisionBackend | None:
             _backend_cache = None
             return None
 
-    try:
-        timeout = float(os.environ.get("VISION_TIMEOUT_S", "120.0"))
-    except ValueError:
-        timeout = 120.0
+    timeout = env_float("VISION_TIMEOUT_S", default=120.0)
 
     if provider == "anthropic":
         backend: VisionBackend = AnthropicVisionBackend(model, timeout)
