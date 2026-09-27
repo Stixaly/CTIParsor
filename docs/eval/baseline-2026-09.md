@@ -85,8 +85,35 @@ within 0.01).
 gain of the decision rule — and the document bootstrap nearly calls it
 significant**, because it resamples reports, not the LLM's sampling. Until the
 sampling is fixed, a comparison needs repeated runs on each side, and a gain
-below ~0.04 is not a result. Two runs at `LLM_TEMPERATURE=0 LLM_SEED=13` are
-queued to measure whether fixing the sampling closes that gap.
+below ~0.04 is not a result.
+
+### With the sampling fixed (`LLM_TEMPERATURE=0 LLM_SEED=13`)
+
+| | Precision | Recall | F1 |
+|---|---|---|---|
+| t0, run 1 | 0.277 | 0.434 | 0.338 |
+| t0, run 2 | 0.277 | 0.434 | 0.338 |
+| t0 − baseline run 1 | −0.001 [−0.030, +0.028] | 0.000 [−0.059, +0.054] | −0.001 [−0.040, +0.036] |
+
+* **The two runs are identical, report for report** (difference 0.0000): with
+  temperature 0 and a seed, this vLLM server returns the same answers, so one
+  run per configuration is enough and the noise floor for comparisons is zero.
+  Measured with `LLM_PARALLELISM=1`; concurrent batching could reintroduce
+  small differences.
+* **Quality does not move**: F1 0.338 against 0.339 (default sampling, run 1)
+  and 0.367 (run 2) — within the old spread.
+* Stage 3 health: 68/68 extraction calls usable; 3d 61 usable / 1 unparseable,
+  3f 57 / 1; no provider failure. 321 s per report.
+
+**Consequence for the protocol**: evaluation runs set `LLM_TEMPERATURE=0
+LLM_SEED=13` from now on. The Stage 2c ablation above was made at the default
+sampling; its effect (+0.12 to +0.15) is far above the old spread, so it
+stands, but a re-run at temperature 0 would give its exact size.
+
+**For production** (operator's choice, `.env`): temperature 0 gives the same
+quality on dev and makes a report's extraction reproducible — the same file
+gives the same entities and techniques, which the review and the audit trail
+can rely on.
 
 ## First ablation: Stage 2c off
 
