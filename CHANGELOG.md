@@ -8,6 +8,116 @@ sections group by theme rather than strict semver.
 
 ### Added
 
+#### Fixes from a review of phases 0–2, 2026-09-27
+
+- **Stage 3 checkpoint**: the fingerprint now covers every setting and input
+  that changes Stage 3's output; turning 3d/3f verification on, or changing
+  the consensus model, no longer resumes results from the other setting.
+- **Unusable LLM answers**: an empty answer or one that never parses no longer
+  counts as a successful Stage 3 — each extraction call is classed (ok,
+  failed request, empty, unparseable), as are the 3d/3f verifications, and a
+  Stage 3 with no usable answer is `failed`.
+- **Control sample**: a reset to pending is no longer counted as a decided
+  (rejected) row in the auto-accept precision.
+- **Decision journal**: deleting a report keeps its `review_decisions` rows
+  (the cascade contradicted "never deleted").
+- **CLI and worker**: the CLI applies the saved relationship policy like the
+  worker (`--policy`); the equivalence test compares whole bundles, edges by
+  their endpoints, under a non-default policy.
+- **Ablations**: 3d, 3f, 4b and 4c are stage ids that can be turned off.
+- **Lock file**: documented that it pins versions, not hashes, and why.
+
+#### Evaluation protocol (ADR-0060), 2026-09-27
+
+`python -m evaluation` scores the application's pipeline on document-level
+gold data. **AnnoCTR** (120 vendor reports with ATT&CK techniques, explicit and
+implicit; official temporal split 70/16/34; data kept in `data/`, CC-BY-SA)
+with a per-report registry of the annotated layers, an ATT&CK id mapping that
+follows `revoked-by` on gold AND predictions (T1562 → T1685), and a
+near-duplicate check across splits. An **in-house set** format and annotation
+guide (docs/eval/annotation-guide.md) for our own reports, scored from the
+original file: IoCs, relationships, negative cases (negated behaviours,
+recommendations, generic examples), agreement between two annotators.
+Metrics: parent-level TTP P/R/F1 (primary), per-document averages, recall of
+explicit vs implicit techniques, strict and lenient entities, evidence split
+into "quote exists", "quote on the annotated passage" and a human-judged
+sample for "quote supports the claim"; **paired bootstrap** between two runs on
+the same documents; Stage 2c candidate recall at several k. Decision rule fixed
+before any test comparison (docs/eval/README.md).
+
+Two changes in the pipeline came out of the first runs:
+
+- **Stage 3 counts provider calls and failures.** The first baseline found
+  every Stage 3 call answered 404 — the `.env` model name lacked the
+  `Inferact/` prefix the vLLM server serves — while Stage 3 reported success
+  and bundles came out without any LLM content. Stage 3 is now `failed` when
+  all its calls fail (and reports partial failures), so the benchmark stops and
+  the job's stage report says so.
+- **`LLM_TEMPERATURE` / `LLM_SEED`** (unset = unchanged: the provider's own
+  sampling). Recorded in the run manifest and the checkpoint fingerprint.
+
+#### Measurement, ingestion and CI fixes, 2026-09-27
+
+- **NER score.** A partial match ("Cobalt" for gold "Cobalt Strike") added 0.5
+  to TP and nothing to FP or FN, so it scored P = R = F1 = 1.0; predictions were
+  matched greedily in input order, and the per-type table let two predictions
+  both match one gold entity. The score is now strict by default (a partial
+  pair is a FP and a FN) over a one-to-one matching, with a separate lenient
+  line and a `partial` column. `scripts/verify_ner_scorer.py` replays the old
+  scorer to prove every new test would have failed against it.
+- **DOCX tables** are read, in reading order, one row per line — a hash in a
+  cell used to never reach Stage 2. Merged cells are read once, nested tables
+  flattened into their cell.
+- **OCR is decided page by page.** A page is a scan when it has almost no text
+  and an image covers half of it; a mixed PDF keeps its text pages and OCRs the
+  scans in place (before: the first three pages decided for the whole file, so
+  a scan after text pages was lost). `OCR_LANG` (default `eng`) sets the
+  Tesseract languages.
+- **`requirements.lock.txt` is what gets installed.** `make lock` resolves the
+  three requirements files for Python 3.12 with CPU-only torch (uv, every
+  platform); the Dockerfile installs from it and CI installs under
+  `-c requirements.lock.txt`, so CI tests the image's versions. It used to be a
+  `pip freeze` record the build never read, and was not committed.
+  `requirements-dev.txt` pins ruff, mypy and pytest-cov.
+- **CI.** New `frontend-tests` job (`tsc --noEmit`, vitest); the GHCR image is
+  published only after `fast-tests`, `frontend-tests` and the container smoke
+  test pass (it used to depend on the smoke test alone); mypy is blocking — the
+  tree has no errors left.
+
+#### One pipeline for the worker, the CLI and the benchmark (ADR-0059), 2026-09-27
+
+`pipeline/orchestrator.py` runs Stages 1 to 5 for every entry point. The CLI
+used to skip the gazetteer, the semantic TTP stage, CyNER, GLiNER, the alias
+lists and type-conflict resolution; the ATE `--stage full` benchmark sent the
+whole text as one chunk and, without an LLM provider, quietly scored regex +
+semantic. Each run now reports every stage as ran, skipped or failed, with the
+reason; the CLI prints it and the worker stores it in the job's run config
+(`stage_report`), next to a new `manifest` (LLM model, prompt hash, NER models,
+data-file hashes, package versions). `--stage full` stops when the LLM cannot
+run unless `--allow-degraded`. The CLI gains `--disable-stage`,
+`--require-stage` and `--no-llm`; `PIPELINE_DISABLED_STAGES` does the same for
+the API. The Stage 3 checkpoint used to resume any run with the same number of
+chunks; it now needs the same text, model and prompts. A CVE-cache failure
+(no database, as with the CLI) no longer fails the run.
+`api/worker.py`: 1,777 → 1,077 lines.
+
+#### Decision provenance: who accepted what (ADR-0058), 2026-09-27
+
+Every write of `accepted` now records its origin — `human`, `human_bulk`,
+`auto_policy`, `default`, `propagated` or `legacy` — and appends a line to a
+new insert-only `review_decisions` journal. Opening the review page used to
+write `accepted = true` for every entity at or above 90 % through the same
+PATCH an analyst's click used; the worker applies auto-accept now, and the page
+writes nothing on load. Calibration (ADR-0051) reads only one-at-a-time
+analyst decisions by default, and promotion (ADR-0052) counts only analyst
+accepts: the LLM's name lists, stored at 0.9, had all been auto-accepted and
+were counting toward promoting the LLM's own guesses into the gazetteer.
+Decisions made before this change become `legacy` and are left out of both
+unless asked (`include_legacy`). A control sample
+(`REVIEW_CONTROL_SAMPLE_RATE`, default 10 %) of the would-be auto-accepts
+stays pending, flagged `confirm`; `GET /api/thresholds` reports the share
+analysts confirm (`auto_accept_audit`).
+
 #### vLLM: a thinking switch and a `vllm` vision provider, 2026-09-27
 
 `VLLM_ENABLE_THINKING` (default `false`) sends

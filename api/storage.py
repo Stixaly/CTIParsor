@@ -58,7 +58,9 @@ class SQLiteJobStorage(JobStorage):
                        confidence = excluded.confidence, mitre_id = excluded.mitre_id,
                        accepted = excluded.accepted, source = excluded.source,
                        evidence_text = NULL, evidence_label = NULL,
-                       evidence_start = NULL, evidence_end = NULL""",
+                       evidence_start = NULL, evidence_end = NULL,
+                       decision_origin = NULL, decided_at = NULL,
+                       policy_version = NULL, control_sample = 0""",
                 [
                     (
                         f"{job_id}_{e.value}_{e.entity_type.value}",

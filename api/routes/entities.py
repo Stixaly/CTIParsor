@@ -4,9 +4,10 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from api.db import _lock, get_conn
+from api.db import _lock, get_conn, now_iso, transaction
 from api.routes._common import require_job
 from models.schemas import EntityType
+from pipeline import decisions
 
 router = APIRouter(prefix="/api/jobs/{job_id}/entities", tags=["entities"])
 
@@ -20,6 +21,9 @@ class EntityPatch(BaseModel):
     entity_type: str | None = None
     value: str | None = None
     mitre_id: str | None = None
+    # ADR-0058 — 'human' (one card) or 'human_bulk' (a group or selection
+    # decided in one click).  Automatic origins are the server's to write.
+    decision_origin: str = decisions.HUMAN
 
 
 class EntityCreate(BaseModel):
@@ -47,7 +51,16 @@ def _row_to_dict(row) -> dict:
         "mitre_id": row["mitre_id"],
         "accepted": None if row["accepted"] is None else bool(row["accepted"]),
         "source": row["source"],
+        "decision_origin": row["decision_origin"],
+        "control_sample": bool(row["control_sample"]),
     }
+
+
+def _check_origin(origin: str) -> None:
+    if origin not in decisions.CLIENT_ORIGINS:
+        raise HTTPException(
+            400, f"decision_origin must be one of: {', '.join(sorted(decisions.CLIENT_ORIGINS))}",
+        )
 
 
 @router.get("")
@@ -78,11 +91,12 @@ def create_entity(job_id: str, body: EntityCreate):
             conn.commit()
     return {"id": eid, "job_id": job_id, "value": body.value, "entity_type": body.entity_type,
             "context": body.context, "confidence": body.confidence, "mitre_id": body.mitre_id,
-            "accepted": None, "source": "manual"}
+            "accepted": None, "source": "manual", "decision_origin": None, "control_sample": False}
 
 
 @router.patch("/{entity_id}")
 def update_entity(job_id: str, entity_id: str, patch: EntityPatch):
+    _check_origin(patch.decision_origin)
     with get_conn() as conn:
         row = conn.execute(
             "SELECT * FROM entities WHERE id=? AND job_id=?", (entity_id, job_id)
@@ -91,18 +105,14 @@ def update_entity(job_id: str, entity_id: str, patch: EntityPatch):
             raise HTTPException(404, "Entity not found")
 
     updates: list[str] = []
-    # SQL parameter values are heterogeneous (int flags, strings, None for
-    # NULL-clearing) — mypy would otherwise infer `list[int]` from the first
-    # `.append(1 if ... else 0)` and flag every later append as incompatible.
+    # SQL parameter values are heterogeneous (strings, None for NULL-clearing).
     values: list[Any] = []
 
-    if patch.accepted is not None:
-        updates.append("accepted=?")
-        values.append(1 if patch.accepted else 0)
-    elif patch.accepted is None and "accepted" in patch.model_fields_set:
-        # explicitly set to null (reset to pending) — use parameterized value
-        updates.append("accepted=?")
-        values.append(None)
+    # `accepted` is a decision (ADR-0058): written through decisions.record so
+    # the row carries its origin and the journal gets a line.  An explicit
+    # null resets to pending, and still counts as the analyst's decision —
+    # which is what keeps auto-accept from re-accepting it.
+    decide = "accepted" in patch.model_fields_set
 
     if patch.entity_type is not None:
         if patch.entity_type not in VALID_TYPES:
@@ -118,19 +128,27 @@ def update_entity(job_id: str, entity_id: str, patch: EntityPatch):
         updates.append("mitre_id=?")
         values.append(patch.mitre_id)  # can be None to clear it
 
-    if not updates:
+    if not updates and not decide:
         return _row_to_dict(row)
 
     values.extend([entity_id, job_id])
     with _lock:
         with get_conn() as conn:
-            result = conn.execute(
-                f"UPDATE entities SET {', '.join(updates)} WHERE id=? AND job_id=?",
-                values,
-            )
-            conn.commit()
-            if result.rowcount == 0:
-                raise HTTPException(404, "Entity not found or was deleted")
+            with transaction(conn):
+                if updates:
+                    result = conn.execute(
+                        f"UPDATE entities SET {', '.join(updates)} WHERE id=? AND job_id=?",
+                        values,
+                    )
+                    if result.rowcount == 0:
+                        raise HTTPException(404, "Entity not found or was deleted")
+                if decide:
+                    decided = decisions.record(
+                        conn, "entity", "id=? AND job_id=?", (entity_id, job_id),
+                        accepted=patch.accepted, origin=patch.decision_origin, decided_at=now_iso(),
+                    )
+                    if decided == 0:
+                        raise HTTPException(404, "Entity not found or was deleted")
             updated = conn.execute(
                 "SELECT * FROM entities WHERE id=? AND job_id=?", (entity_id, job_id)
             ).fetchone()
@@ -144,12 +162,11 @@ def accept_all_pending(job_id: str):
     """Accept all entities whose accepted field is NULL (unreviewed) in one query."""
     with _lock:
         with get_conn() as conn:
-            result = conn.execute(
-                "UPDATE entities SET accepted=1 WHERE job_id=? AND accepted IS NULL",
-                (job_id,),
+            accepted = decisions.record(
+                conn, "entity", "job_id=? AND accepted IS NULL", (job_id,),
+                accepted=True, origin=decisions.HUMAN_BULK, decided_at=now_iso(),
             )
-            conn.commit()
-    return {"accepted": result.rowcount}
+    return {"accepted": accepted}
 
 
 @router.post("/bulk")
@@ -186,9 +203,9 @@ def bulk_update_entities(job_id: str, body: BulkPatch):
         require_job(conn, job_id)
 
     accepted_val = (
-        1    if body.action == "accept" else
-        0    if body.action == "reject" else
-        None     # reset
+        True  if body.action == "accept" else
+        False if body.action == "reject" else
+        None      # reset
     )
 
     # Only touch pending rows unless the caller explicitly asked for "all"
@@ -196,15 +213,14 @@ def bulk_update_entities(job_id: str, body: BulkPatch):
 
     with _lock:
         with get_conn() as conn:
-            result = conn.execute(
-                f"UPDATE entities SET accepted=? "
-                f"WHERE job_id=? AND entity_type=? {scope_clause}",
-                (accepted_val, job_id, body.entity_type),
+            updated = decisions.record(
+                conn, "entity", f"job_id=? AND entity_type=? {scope_clause}",
+                (job_id, body.entity_type),
+                accepted=accepted_val, origin=decisions.HUMAN_BULK, decided_at=now_iso(),
             )
-            conn.commit()
 
     return {
-        "updated":     result.rowcount,
+        "updated":     updated,
         "entity_type": body.entity_type,
         "action":      body.action,
         "scope":       body.scope,

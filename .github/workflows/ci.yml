@@ -40,25 +40,28 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      # Every install is constrained by requirements.lock.txt: the versions
+      # tested here are the versions the image ships (`make lock`).
       - name: Install API dependencies (includes psycopg)
-        run: pip install -r requirements-api.txt
+        run: pip install -c requirements.lock.txt -r requirements-api.txt
 
       - name: Install core pipeline dependencies (no torch / transformers)
         run: |
-          pip install \
+          pip install -c requirements.lock.txt \
             pydantic stix2 stix2-validator iocextract python-dotenv tenacity \
             rapidfuzz pyahocorasick anthropic \
             pdfplumber python-docx beautifulsoup4 defusedxml
 
       - name: Install test + lint dependencies
-        run: pip install pytest pytest-cov httpx ruff mypy
+        run: pip install -c requirements.lock.txt pytest httpx -r requirements-dev.txt
 
       - name: Lint (ruff)
-        run: ruff check pipeline/ api/ models/ tests/ --select E,F,W,I
+        run: ruff check pipeline/ api/ models/ evaluation/ tests/ main.py --select E,F,W,I
 
+      # Blocking since the tree reached zero errors (2026-09-27); mypy is pinned
+      # in requirements-dev.txt so a new release cannot fail this on its own.
       - name: Type check (mypy)
-        run: mypy pipeline/ api/ models/ --ignore-missing-imports --no-error-summary
-        continue-on-error: true   # type-check failures are advisory, not blocking
+        run: mypy pipeline/ api/ models/ evaluation/ --ignore-missing-imports
 
       - name: Run unit tests
         env:
@@ -82,6 +85,32 @@ jobs:
         with:
           files: coverage.xml
           fail_ci_if_error: false
+
+  # ── Frontend — type check + unit tests (vitest) ────────────────────────────
+  frontend-tests:
+    name: Frontend (type check + unit tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install (package-lock.json, exact)
+        run: npm ci --no-audit --no-fund
+
+      - name: Type check (tsc)
+        run: npx tsc --noEmit
+
+      - name: Unit tests (vitest)
+        run: npm test
 
   # ── Model tests — runs only on pushes to main (expensive: ~800 MB downloads) ──
   model-tests:
@@ -113,11 +142,11 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install all dependencies
-        run: pip install -r requirements.txt -r requirements-api.txt
+      - name: Install all dependencies (the image's exact versions)
+        run: pip install -r requirements.lock.txt
 
       - name: Install test dependencies
-        run: pip install pytest pytest-cov httpx
+        run: pip install -c requirements.lock.txt pytest httpx -r requirements-dev.txt
 
       - name: Run full test suite (with model inference)
         env:
@@ -164,14 +193,15 @@ jobs:
           bash scripts/docker_smoke.sh --no-build --clean
 
   # ── Publish to GHCR (ADR-0047) ────────────────────────────────────────────────
-  # Only after the smoke test passes, and only on main: a PR (including from a
+  # Only after the backend tests, the frontend tests and the smoke test pass
+  # (an image whose code failed its own tests is never published), and only on main: a PR (including from a
   # fork) never has packages:write regardless — this `if` is defense in depth,
   # not the only control. Rebuilds with docker/build-push-action, but
   # cache-from: type=gha reuses the smoke-test job's layers, so this is a cheap
   # re-tag-and-push, not a second full build.
   publish-image:
     name: Publish image to GHCR
-    needs: container-image
+    needs: [fast-tests, frontend-tests, container-image]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

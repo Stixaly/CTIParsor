@@ -25,11 +25,17 @@ Three guards, each reported as a status rather than silently applied:
   would not fix the label, it needs a content filter (as ADR-0050 found for
   CyNER's generic-language spans) or a better label wording.
 * `above_auto_accept` — the only band that reaches the target starts at or
-  above the tier the review UI accepts on its own (`Review.tsx`,
-  AUTO_ACCEPT_THRESHOLD = 90 %).  Accepts up there are mostly implicit — the
-  analyst had to *undo* them to reject — so the sample is biased in the
-  model's favour and a cutoff resting on it is not the analyst's verdict.
-  Left to a human, via the `unclamped` value the report carries.
+  above the tier the worker accepts on its own (`pipeline.decisions`,
+  AUTO_ACCEPT_LEVEL).  A cutoff up there would hide everything auto-accept
+  exists to let through, so it is left to a human, via the `unclamped` value
+  the report carries.
+
+Only analyst decisions are read (ADR-0058): `decision_origin = 'human'` by
+default, one card at a time.  Auto-accepted rows are the model grading itself,
+bulk decisions are one click over many rows, and `legacy` rows — decided
+before origins were recorded — mix both with the analyst's.  Above
+AUTO_ACCEPT_LEVEL the only human labels are the control sample's, which is
+what makes that band unbiased now.
 
 Nothing here touches the model: it is a threshold on scores the stages already
 compute, read back by `pipeline.thresholds` in the next worker subprocess.
@@ -39,16 +45,13 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 
 from api.logging_config import get_logger
+from pipeline.decisions import AUTO_ACCEPT_LEVEL, HUMAN, HUMAN_BULK, LEGACY
 
 logger = get_logger(__name__)
 
 # Sources whose scores are calibrated.  Gazetteer/IoC/LLM rows carry fixed
 # nominal confidences (0.92, 1.0, 0.9), not a model score to threshold.
 CALIBRATED_SOURCES: tuple[str, ...] = ("cyner", "gliner")
-
-# The review UI accepts anything at or above this on load (Review.tsx,
-# AUTO_ACCEPT_THRESHOLD = 90 %).  Kept as the ceiling for a proposed cutoff.
-AUTO_ACCEPT_LEVEL = 0.90
 
 DEFAULT_TARGET_PRECISION = 0.90
 DEFAULT_MIN_SAMPLES = 200
@@ -219,15 +222,29 @@ def stage_default(source: str) -> float:
     raise ValueError(f"no calibrated stage for source {source!r}")
 
 
+def decision_origins(*, include_bulk: bool = False, include_legacy: bool = False) -> tuple[str, ...]:
+    """The `decision_origin` values calibration reads (see the module docstring)."""
+    origins = [HUMAN]
+    if include_bulk:
+        origins.append(HUMAN_BULK)
+    if include_legacy:
+        origins.append(LEGACY)
+    return tuple(origins)
+
+
 def load_decisions(
-    conn, sources: tuple[str, ...] = CALIBRATED_SOURCES,
+    conn,
+    sources: tuple[str, ...] = CALIBRATED_SOURCES,
+    origins: tuple[str, ...] = (HUMAN,),
 ) -> dict[tuple[str, str], list[tuple[float, bool]]]:
     """Every analyst-decided row of the calibrated sources, grouped by (source, entity_type)."""
     marks = ",".join("?" for _ in sources)
+    origin_marks = ",".join("?" for _ in origins)
     rows = conn.execute(
         "SELECT source, entity_type, confidence, accepted FROM entities "
-        f"WHERE accepted IS NOT NULL AND confidence IS NOT NULL AND source IN ({marks})",
-        tuple(sources),
+        f"WHERE accepted IS NOT NULL AND confidence IS NOT NULL AND source IN ({marks}) "
+        f"AND decision_origin IN ({origin_marks})",
+        (*sources, *origins),
     ).fetchall()
     grouped: dict[tuple[str, str], list[tuple[float, bool]]] = {}
     for r in rows:
@@ -235,6 +252,23 @@ def load_decisions(
             (float(r["confidence"]), bool(r["accepted"]))
         )
     return grouped
+
+
+def excluded_decisions(
+    conn,
+    sources: tuple[str, ...] = CALIBRATED_SOURCES,
+    origins: tuple[str, ...] = (HUMAN,),
+) -> dict[str, int]:
+    """Decided rows of the calibrated sources that calibration did NOT read, per
+    origin — so a report built on few decisions says how many it set aside."""
+    marks = ",".join("?" for _ in sources)
+    rows = conn.execute(
+        "SELECT COALESCE(decision_origin, 'none') AS origin, COUNT(*) AS n FROM entities "
+        f"WHERE accepted IS NOT NULL AND confidence IS NOT NULL AND source IN ({marks}) "
+        "GROUP BY COALESCE(decision_origin, 'none')",
+        tuple(sources),
+    ).fetchall()
+    return {r["origin"]: int(r["n"]) for r in rows if r["origin"] not in origins}
 
 
 def list_overrides(conn) -> list[dict]:
@@ -251,6 +285,7 @@ def calibrate(
     target_precision: float = DEFAULT_TARGET_PRECISION,
     min_samples: int = DEFAULT_MIN_SAMPLES,
     sources: tuple[str, ...] = CALIBRATED_SOURCES,
+    origins: tuple[str, ...] = (HUMAN,),
 ) -> list[Proposal]:
     """A proposal per (source, entity_type) that has any decided rows.
 
@@ -258,7 +293,7 @@ def calibrate(
     one, else the stage default — so the before/after in the report is real.
     """
     overrides = {(o["source"], o["entity_type"]): float(o["threshold"]) for o in list_overrides(conn)}
-    decisions = load_decisions(conn, sources)
+    decisions = load_decisions(conn, sources, origins)
     proposals = []
     for (source, entity_type), points in sorted(decisions.items()):
         current = overrides.get((source, entity_type), stage_default(source))

@@ -16,7 +16,7 @@ from pipeline.detection.suricata_atoms import parse_options, rule_header
 from pipeline.detection.yara_atoms import split_rules
 from pipeline.regex_safety import compile_pattern
 from pipeline.stage3_llm import LLMEnrichmentResult
-from pipeline.stage4b_graph_completion import complete_graph
+from pipeline.stage4b_graph_completion import CompletionStats, complete_graph
 from pipeline.stix_access import field as _field
 from pipeline.stix_rel_spec import rel_is_suggested
 
@@ -359,6 +359,7 @@ def build_stix_bundle(
     tlp_level: str | None = None,
     pap_level: str | None = None,
     long_distance_infer=None,
+    graph_completion: bool = True,
 ) -> stix2.Bundle:
     """
     Converts all extracted entities to STIX 2.1 objects and returns a Bundle.
@@ -1020,12 +1021,17 @@ def build_stix_bundle(
     # stamping, so any edges it adds are included in the report and stamped like
     # every other object.  Append-only + spec-guarded: see stage4b_graph_completion
     # and ADR-0013.  Governed by the policy "completion" block; pinned rules win.
-    _completion_stats = complete_graph(
-        stix_objects,
-        policy=relationship_policy,
-        report_text=report_text,
-        long_distance_infer=long_distance_infer,
-    )
+    if graph_completion:
+        _completion_stats = complete_graph(
+            stix_objects,
+            policy=relationship_policy,
+            report_text=report_text,
+            long_distance_infer=long_distance_infer,
+        )
+    else:
+        # Turned off for this run (an ablation, ADR-0059): nothing added.
+        _completion_stats = CompletionStats()
+        _completion_stats.notes.append("graph completion disabled for this run")
 
     # --- Report SDO wrapping all objects ---
     # description : full extracted text so STIX consumers see the narrative

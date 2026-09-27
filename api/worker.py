@@ -1,7 +1,8 @@
 """
-Background worker — runs the 5-stage pipeline and emits progress events to SQLite.
+Background worker — runs a job through pipeline/orchestrator.py (ADR-0059) in
+its own subprocess, with the hooks that tie it to the job store: progress
+events, the lease, persistence and Stage 3 crash-resume.
 """
-import hashlib
 import json
 import multiprocessing as mp
 import os
@@ -10,16 +11,8 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import TYPE_CHECKING
 from uuid import uuid4
-
-if TYPE_CHECKING:
-    # Type-only: the Stage 1f modules pull pdfplumber, and the worker has to
-    # start without it. A local variable annotation is never evaluated at
-    # runtime (PEP 526), so the name is only ever needed by the type checker.
-    from pipeline.stage1f_figures import FigureSpan
 
 # Ensure project root is on sys.path so pipeline imports work
 _ROOT = Path(__file__).parent.parent
@@ -32,8 +25,18 @@ from api.logging_config import get_logger
 logger = get_logger(__name__)
 
 from api.db import _lock, backup_db, emit_progress, get_conn, now_iso, set_job_status
-from models.schemas import RawEntity
 from pipeline.env_flags import env_int
+from pipeline.orchestrator import (
+    Document,
+    FileCheckpoint,
+    Hooks,
+    RunAborted,
+    RunOptions,
+    build_bundle,
+    load_file_bytes,
+    lookup_cves,
+    run_document,
+)
 
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
@@ -55,26 +58,6 @@ _QUEUE_MAX_DEPTH = env_int("API_QUEUE_MAX_DEPTH", default=50)
 
 # The concurrency cap (_MAX_CONCURRENT_JOBS) is enforced by the queue loop in
 # api/queue_loop.py, which counts the subprocesses it started (ADR-0046).
-
-
-def _sha256_file(path: str | Path) -> str | None:
-    """Return the SHA-256 hex digest of a file, or None if the file is missing."""
-    try:
-        h = hashlib.sha256()
-        with open(path, "rb") as f:
-            for chunk in iter(lambda: f.read(65536), b""):
-                h.update(chunk)
-        return h.hexdigest()
-    except OSError:
-        return None
-
-
-def _read_file_bytes(path: str | Path) -> bytes | None:
-    """Return a file's raw bytes, or None if it is missing/unreadable (ADR-0043)."""
-    try:
-        return Path(path).read_bytes()
-    except OSError:
-        return None
 
 
 def _current_owner(job_id: str) -> str | None:
@@ -153,84 +136,6 @@ def bundle_output_path(job_id: str, report_name: str) -> Path:
     return _ROOT / "output" / f"{report_name}_{job_id}_bundle.json"
 
 
-# ---------------------------------------------------------------------------
-# Document-level context builder — ADR-004 P2-B
-# ---------------------------------------------------------------------------
-
-def _build_doc_context(
-    gazetteer_entities: list,
-    cyner_entities:     list,
-    gliner_entities:    list,
-    semantic_ttp_entities: list,
-) -> str:
-    """
-    Build a concise document-level entity summary to pass to each LLM chunk call.
-
-    Solves the "IoC appendix" problem (CyNER/Fujii 2024): threat-intel reports
-    often list IoCs in a separate appendix section that has no local context.
-    Without this summary, the LLM sees only raw IPs/hashes in those chunks and
-    cannot create `ioc_associations` linking them to the correct malware family.
-
-    By passing the full-document entity summary to EVERY chunk, the LLM can
-    correctly link "185.220.101.45 → Cobalt Strike" even when the two appear in
-    different chunks.
-    """
-    from models.schemas import EntityType
-
-    lines: list[str] = []
-
-    # --- Malware families (from gazetteer + CyNER) ---
-    malware_names = sorted({
-        e.value for e in (gazetteer_entities + cyner_entities)
-        if e.entity_type == EntityType.MALWARE
-    })
-    if malware_names:
-        lines.append(f"Malware in this report: {', '.join(malware_names)}")
-
-    # --- Threat actors ---
-    actor_names = sorted({
-        e.value for e in (gazetteer_entities + cyner_entities)
-        if e.entity_type == EntityType.THREAT_ACTOR
-    })
-    if actor_names:
-        lines.append(f"Threat actors: {', '.join(actor_names)}")
-
-    # --- Top TTPs (highest confidence, with MITRE IDs) ---
-    top_ttps = sorted(
-        [e for e in semantic_ttp_entities if e.mitre_id and e.confidence >= 0.55],
-        key=lambda x: x.confidence,
-        reverse=True,
-    )[:5]
-    if top_ttps:
-        ttp_strs = [f"{e.value} ({e.mitre_id})" for e in top_ttps]
-        lines.append(f"Key techniques: {', '.join(ttp_strs)}")
-
-    # --- GLiNER-specific entities (sectors, countries, campaigns) ---
-    sectors = sorted({
-        e.value for e in gliner_entities if e.entity_type == EntityType.IDENTITY
-    })
-    countries = sorted({
-        e.value for e in gliner_entities if e.entity_type == EntityType.LOCATION
-    })
-    campaigns = sorted({
-        e.value for e in gliner_entities if e.entity_type == EntityType.CAMPAIGN
-    })
-    infra = sorted({
-        e.value for e in gliner_entities if e.entity_type == EntityType.INFRASTRUCTURE
-    })
-
-    if sectors:
-        lines.append(f"Targeted sectors: {', '.join(sectors)}")
-    if countries:
-        lines.append(f"Targeted countries: {', '.join(countries)}")
-    if campaigns:
-        lines.append(f"Campaign name(s): {', '.join(campaigns)}")
-    if infra:
-        lines.append(f"Attack infrastructure: {', '.join(infra)}")
-
-    return "\n".join(lines)
-
-
 def _ttp_ids_covered(llm_result) -> tuple[set[str], set[str]]:
     """Return (ids, parents) already covered by the normalized LLM TTP set.
 
@@ -251,33 +156,6 @@ def _ttp_ids_covered(llm_result) -> tuple[set[str], set[str]]:
     }
     parents = {i.split(".")[0] for i in ids if "." in i}
     return ids, parents
-
-
-def _figure_source_pdf(file_path: str | Path) -> Path | None:
-    """The PDF whose figures belong to this job, or None when there is none.
-
-    An upload is its own source.  A URL capture is not, and gating Stage 1f on
-    the *ingested* file's suffix skipped every one of them.  ADR-0029
-    deliberately feeds the pipeline `{job_id}.txt`, the rendered DOM, because
-    the PDF's text layer wraps a 64-character hash into column fragments and
-    loses 28% of the observables — on the COLDRIVER report, 9 of 12 SHA-256
-    hashes.  But the capture also writes `{job_id}.pdf` beside it as the
-    archive, and the archive is where the figures are.  So the text keeps coming
-    from the DOM and the figures now come from the PDF, which is what both ADRs
-    wanted separately.
-
-    Offsets are unaffected: `inject_append` appends figure blocks *after* the
-    document text, so the spans it records are relative to the final
-    `report_text` whichever document the crops came from.
-
-    `.pdf.part` is never returned — that is a capture which timed out
-    mid-render, and `/jobs/{id}/source` already refuses to serve it.
-    """
-    path = Path(file_path)
-    if path.suffix.lower() == ".pdf":
-        return path if path.is_file() else None
-    sibling = path.with_suffix(".pdf")
-    return sibling if sibling.is_file() else None
 
 
 def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "") -> None:
@@ -375,10 +253,13 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "")
         )
         _rel_start = rel.start_time.isoformat() if getattr(rel, "start_time", None) else None
         _rel_stop = rel.stop_time.isoformat() if getattr(rel, "stop_time", None) else None
+        # Stored accepted, as they always were — but as the pipeline's
+        # default, not anyone's decision (ADR-0058).
         rows_rel.append((
             str(uuid4()), job_id,
             rel.source_value, rel.relationship_type, rel.target_value,
             rel.confidence, 1, rel.evidence_text, _label, _rel_start, _rel_stop,
+            "default",
         ))
 
     with _lock:
@@ -402,17 +283,143 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "")
             conn.executemany(
                 "INSERT INTO relationships "
                 "(id,job_id,source_value,relationship_type,target_value,"
-                "confidence,accepted,evidence_text,evidence_label,start_time,stop_time) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?) "
+                "confidence,accepted,evidence_text,evidence_label,start_time,stop_time,"
+                "decision_origin) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT (id) DO NOTHING",
                 rows_rel,
             )
             conn.commit()
 
 
+def _apply_auto_accept(job_id: str) -> None:
+    """Accept the job's high-confidence entities server-side (ADR-0058).
+
+    This used to happen in the browser, the first time anyone opened the
+    review page, through the same PATCH an analyst's click used — so the
+    store could not tell the two apart.  A failure here leaves the rows
+    pending, which is safe: it must never fail the job.
+    """
+    from pipeline.decisions import apply_auto_accept
+
+    try:
+        with _lock:
+            with get_conn() as conn:
+                counts = apply_auto_accept(conn, job_id, now_iso())
+        logger.info(
+            f"[Worker] auto-accept: {counts['accepted']} entities accepted, "
+            f"{counts['control_sample']} left pending as control sample"
+        )
+    except Exception as exc:
+        logger.warning(f"[Worker] auto-accept skipped: {exc}")
+
+
+def _load_policy() -> dict | None:
+    """The saved relationship policy, or None when none has been saved (or the
+    row cannot be read — a job never fails over its policy)."""
+    from api.db import load_relationship_policy
+    try:
+        return load_relationship_policy()
+    except Exception as exc:
+        logger.warning(f"[Worker] relationship policy not read, building without one: {exc}")
+        return None
+
+
+class _WorkerHooks(Hooks):
+    """The worker's side of a run (pipeline/orchestrator.py): the job row in
+    PostgreSQL, progress events, the lease, the timeout, Stage 3 crash-resume."""
+
+    def __init__(self, job_id: str, owner_worker_id: str | None, started: float):
+        self.job_id = job_id
+        self.owner = owner_worker_id
+        self.started = started
+        # output/{job_id}_stage3.ckpt.json — a lingering file always means the
+        # previous run crashed mid-Stage 3.
+        self.checkpoint = FileCheckpoint(_ROOT / "output" / f"{job_id}_stage3.ckpt.json", job_id)
+
+    def progress(self, event: str, data: dict) -> None:
+        emit_progress(self.job_id, event, data)
+
+    def check_timeout(self) -> None:
+        elapsed = time.monotonic() - self.started
+        if _MAX_JOB_TIMEOUT > 0 and elapsed > _MAX_JOB_TIMEOUT:
+            raise TimeoutError(f"Job timeout exceeded: {elapsed:.0f}s > {_MAX_JOB_TIMEOUT}s")
+
+    def text_ready(self, text: str, figure_spans: list, figure_provider: str) -> None:
+        with _lock:
+            with get_conn() as conn:
+                conn.execute("UPDATE jobs SET report_text=?, updated_at=? WHERE id=?",
+                             (text, now_iso(), self.job_id))
+                conn.commit()
+        # Figure provenance is written only after report_text is stored: the
+        # spans index into it, and a row pointing at text that was never saved
+        # is worse than no row.
+        if figure_spans:
+            from pipeline.figure_store import save_spans
+            n = save_spans(self.job_id, figure_spans, figure_provider)
+            logger.info(f"[Stage 1f] {n} figure spans recorded")
+
+    def extraction_ready(self, entities, llm_result, text: str) -> None:
+        # _finalize_job's ownership check only guards the terminal write.
+        # Saving entities and the LLM result are the first hard-to-undo writes
+        # of the run -- and Stage 3's LLM calls are the largest window for a
+        # lease to expire and be reclaimed -- so re-check ownership here and
+        # abandon the run rather than land a duplicate set of entities under a
+        # job another worker now owns.
+        if self.owner is not None and _current_owner(self.job_id) != self.owner:
+            logger.warning(
+                f"[Worker] job {self.job_id} was reclaimed by another worker before "
+                f"Stage 3 results could be saved (worker_id={self.owner}) - discarding this run"
+            )
+            raise RunAborted
+        _save_entities(self.job_id, entities, llm_result, report_text=text)
+        _apply_auto_accept(self.job_id)
+        # Persist the LLM result for finalize.
+        with _lock:
+            with get_conn() as conn:
+                conn.execute("UPDATE jobs SET llm_result_json=?, updated_at=? WHERE id=?",
+                             (llm_result.model_dump_json(), now_iso(), self.job_id))
+                conn.commit()
+
+    def policy(self) -> dict | None:
+        return _load_policy()
+
+    def policy_used(self, policy: dict | None) -> None:
+        # Record the configuration this bundle was built under (ADR-0024),
+        # stamped right after the policy is read, so the snapshot is the policy
+        # actually applied rather than whatever the row holds when someone asks.
+        try:
+            from api.run_config import build_run_config
+            rc = json.dumps(build_run_config(policy))
+            with _lock:
+                with get_conn() as conn:
+                    conn.execute("UPDATE jobs SET run_config_json=?, updated_at=? WHERE id=?",
+                                 (rc, now_iso(), self.job_id))
+                    conn.commit()
+        except Exception as exc:
+            logger.warning(f"[run-config] not recorded for job {self.job_id}: {exc}")
+
+
+def _record_stage_report(job_id: str, stages: list[dict]) -> None:
+    """Add which stages ran, were skipped or failed to the job's run config
+    (ADR-0059), so a bundle says what produced it."""
+    try:
+        with _lock:
+            with get_conn() as conn:
+                row = conn.execute("SELECT run_config_json FROM jobs WHERE id=?", (job_id,)).fetchone()
+                rc = json.loads(row["run_config_json"]) if row and row["run_config_json"] else {}
+                # "stages" is already taken: the models each stage could load.
+                rc["stage_report"] = stages
+                conn.execute("UPDATE jobs SET run_config_json=? WHERE id=?", (json.dumps(rc), job_id))
+                conn.commit()
+    except Exception as exc:
+        logger.warning(f"[run-config] stage report not recorded for job {job_id}: {exc}")
+
+
 def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
     """
-    Run the full pipeline for a job with timeout enforcement.
+    Run the full pipeline for a job (pipeline/orchestrator.py, ADR-0059) with
+    the worker's hooks: timeout, lease, persistence, progress, crash-resume.
     """
     # Slot acquisition belongs to the parent process (run_pipeline_async); this
     # subprocess holds its own fresh copy of the counter, so checking here would
@@ -435,8 +442,8 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         #      OOM killer → SIGKILL) only terminates the worker subprocess.  The
         #      parent's watcher thread detects exit code ≠ 0 and writes
         #      status=failed so the frontend updates immediately.
-        #   2. WORKER_JOB_TIMEOUT — jobs that run too long are cancelled via the
-        #      check_timeout() function below.
+        #   2. WORKER_JOB_TIMEOUT — jobs that run too long are cancelled via
+        #      _WorkerHooks.check_timeout.
         #
         # If you still need a hard memory cap (e.g. on a shared server), use
         # systemd's MemoryMax= or Docker's --memory flag at the container level
@@ -445,686 +452,24 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         set_job_status(job_id, "processing")
         _owner_worker_id = _current_owner(job_id)
 
-        # Check elapsed time periodically
-        def check_timeout():
-            elapsed = time.monotonic() - start_time
-            if _MAX_JOB_TIMEOUT > 0 and elapsed > _MAX_JOB_TIMEOUT:
-                raise TimeoutError(f"Job timeout exceeded: {elapsed:.0f}s > {_MAX_JOB_TIMEOUT}s")
-
-        # --- Stage 1 ---
-        from pipeline.stage1_ingestion import chunk_text, extract_reference_date, ingest
-        from pipeline.stage2_extraction import extract_entities, refang
-
-        check_timeout()
-        raw_text = ingest(file_path)
-        # Best-effort document creation time (TimeML/TIMEX3-style anchor) for
-        # Stage 3 to resolve simple relative relationship dates against —
-        # see enrich_chunk's reference_date docstring. None for HTML/TXT/MD
-        # or when the file carries no usable metadata; Stage 3 degrades to
-        # "explicit dates only" in that case.
-        reference_date = extract_reference_date(file_path)
-
-        check_timeout()
-        # Refang immediately so entity values (stored refanged) can be found in the
-        # displayed document text.  "keepassxc[.]us[.]org" → "keepassxc.us.org"
-        text = refang(raw_text)
-
-        # --- Stage 1f — figures (ADR-0032, ADR-0033) ---
-        # Runs after refang and before chunking, and that order is load-bearing:
-        # refang rewrites "[.]" to "." and so shortens the text, so a span
-        # computed before it would point at the wrong characters.  Figure lines
-        # are refanged on the same terms, then appended; only then are offsets
-        # final.
-        figure_spans: list[FigureSpan] = []
-        # Captured where the spans are produced, so the write block below does
-        # not depend on `_vision`, which is only bound in another branch.
-        figure_provider = ""
-        _figure_pdf = _figure_source_pdf(file_path)
-        if _figure_pdf is not None:
-            from pipeline.vlm import get_backend
-            _vision = get_backend()
-            if _vision is not None:
-                from pipeline.figure_store import SqliteReadCache
-                from pipeline.stage1f_figures import (
-                    inject_append,
-                    map_verbatim,
-                    read_figures,
-                )
-                try:
-                    # The head of the report is the Global-Context of
-                    # MM-AttacKG's ablation: title and opening paragraphs are
-                    # what tell a model which campaign a bare hostname on a
-                    # screenshot belongs to. Already refanged, like the rest.
-                    _reads = read_figures(
-                        str(_figure_pdf), _vision, cache=SqliteReadCache(),
-                        global_context=text[:2000],
-                    )
-                    _reads = map_verbatim(_reads, refang)
-                    text, figure_spans = inject_append(text, _reads)
-                    figure_provider = _vision.name
-                    _kept = sum(1 for _, r, _ in _reads if r.kind != "unread")
-                    logger.info(
-                        f"[Stage 1f] {len(_reads)} figures, {_kept} read "
-                        f"via {_vision.name}/{_vision.model}"
-                    )
-                    emit_progress(job_id, "stage", {
-                        "stage": "1f", "label": "Figures",
-                        "figures": len(_reads), "read": _kept,
-                    })
-                except Exception as exc:
-                    # A figure that cannot be read must never cost the report.
-                    logger.warning(f"[Stage 1f] skipped: {exc}")
-                    figure_spans = []
-
-        # Adaptive chunk size — larger chunks for large documents so the total
-        # number of LLM calls stays manageable.  Each extra 1 500 chars saves
-        # ~1 LLM call per 30 000 chars of document (~33% fewer calls at 4 500).
-        _doc_len = len(text)
-        if _doc_len > 60_000:
-            _max_chars = 5000   # very large (>60k chars) — minimize LLM calls
-        elif _doc_len > 30_000:
-            _max_chars = 4000   # large (30–60k chars)
-        else:
-            _max_chars = 3000   # standard
-
-        chunks = chunk_text(text, max_chars=_max_chars)
-        logger.info(f"[Stage 1] {_doc_len:,} chars — {len(chunks)} chunks (max_chars={_max_chars})")
-        emit_progress(job_id, "stage", {
-            "stage": 1, "label": "Ingestion",
-            "chars": len(text), "chunks": len(chunks),
-        })
-
-        # Save refanged text once
-        with _lock:
-            with get_conn() as conn:
-                conn.execute("UPDATE jobs SET report_text=?, updated_at=? WHERE id=?",
-                             (text, now_iso(), job_id))
-                conn.commit()
-
-        # Figure provenance is written only after report_text is stored: the
-        # spans index into it, and a row pointing at text that was never saved
-        # is worse than no row.
-        if figure_spans:
-            from pipeline.figure_store import save_spans
-            _n = save_spans(job_id, figure_spans, figure_provider)
-            logger.info(f"[Stage 1f] {_n} figure spans recorded")
-
-        # --- Stage 2 — Regex IoC extraction ---
-        entities_per_chunk = [extract_entities(chunk) for chunk in chunks]
-        # Dedup by (value, type) keeping the highest-confidence occurrence
-        _best: dict[tuple, RawEntity] = {}
-        for chunk_ents in entities_per_chunk:
-            for e in chunk_ents:
-                key = (e.value.lower(), e.entity_type)
-                if key not in _best or e.confidence > _best[key].confidence:
-                    _best[key] = e
-        regex_entities = list(_best.values())
-
-        # --- Stage 2b — Gazetteer NER (malware / tool / APT group names) ---
-        from pipeline.stage2b_gazetteer import available as gaz_available
-        from pipeline.stage2b_gazetteer import match_gazetteer
-        gazetteer_entities: list[RawEntity] = []
-        if gaz_available():
-            gazetteer_entities = match_gazetteer(text)
-            # Merge into regex entities — skip any already found by regex at
-            # equal or higher confidence (regex is more precise for exact values)
-            regex_keys = {(e.value.lower(), e.entity_type) for e in regex_entities}
-            for ge in gazetteer_entities:
-                key = (ge.value.lower(), ge.entity_type)
-                if key not in regex_keys:
-                    _best[key] = ge
-                    regex_keys.add(key)
-
-        all_entities = list(_best.values())
-
-        # --- Stage 2c — Semantic TTP detection ---
-        from pipeline.stage2c_ttp_semantic import detect_ttps_semantic, semantic_available
-        semantic_ttp_entities: list[RawEntity] = []
-        if semantic_available():
-            semantic_ttp_entities = detect_ttps_semantic(text)
-            # Merge into all_entities (dedup by mitre_id — keep highest confidence)
-            sem_keys = {(e.value.lower(), e.entity_type) for e in all_entities}
-            for se in semantic_ttp_entities:
-                key = (se.value.lower(), se.entity_type)
-                if key not in sem_keys:
-                    all_entities.append(se)
-                    sem_keys.add(key)
-
-        # --- Stage 2d — CyNER cybersecurity NER ---
-        from pipeline.base import BaseExtractionStage
-        from pipeline.stage2d_cyner import cyner_available, extract_cyner_entities
-        cyner_entities: list[RawEntity] = []
-        if cyner_available():
-            cyner_entities = extract_cyner_entities(text)
-            # `_merge_cyner_into` was a byte-identical copy of the base helper the
-            # registry already uses — and the untested one, since the worker calls
-            # this path directly rather than through StageRegistry.run_all.
-            all_entities = BaseExtractionStage.merge_into(all_entities, cyner_entities)
-
-        # --- Stage 2e — GLiNER zero-shot NER (novel/unnamed entities) ---
-        # Discovers entity types CyNER and the gazetteer cannot: targeted sectors,
-        # campaign names, attack infrastructure, novel actors & malware.
-        # Paper: "0-CTI" — CY4GATE (2025) — ADR-004 P2-A
-        from pipeline.stage2e_gliner import _merge_gliner_into, extract_gliner_entities, gliner_available
-        gliner_entities: list[RawEntity] = []
-        if gliner_available():
-            gliner_entities = extract_gliner_entities(text)
-            all_entities = _merge_gliner_into(all_entities, gliner_entities)
-
-        # --- Stage 2g — Alias-list extraction (regex, deterministic) ---
-        # Catches "X (aka Y, Z, W)" / "X, also known as Y and Z" constructs
-        # that the dictionary/model stages above miss because each treats the
-        # sentence as prose around whichever single name it already knows.
-        from pipeline.stage2g_alias_list import extract_alias_list_entities
-        alias_list_entities = extract_alias_list_entities(text)
-        all_entities = BaseExtractionStage.merge_into(all_entities, alias_list_entities)
-
-        # Reconcile any same-value-different-type disagreement between stages
-        # (e.g. gazetteer's `tool` vs CyNER's `malware` for the same name,
-        # since merge_into's (value, type) key never considered them equal in
-        # the first place, so both survived independently until now).
-        from pipeline.base import resolve_type_conflicts
-        all_entities = resolve_type_conflicts(all_entities)
-
-        logger.info(f"[Stage 2] Extracted {len(all_entities)} entities "
-                   f"(gazetteer={len(gazetteer_entities)}, semantic_ttp={len(semantic_ttp_entities)}, "
-                   f"cyner={len(cyner_entities)}, gliner={len(gliner_entities)}, "
-                   f"alias_list={len(alias_list_entities)})")
-        emit_progress(job_id, "stage", {
-            "stage": 2, "label": "Extraction",
-            "entities": len(all_entities),
-            "gazetteer": len(gazetteer_entities),
-            "semantic_ttps": len(semantic_ttp_entities),
-            "cyner": len(cyner_entities),
-            "gliner": len(gliner_entities),
-            "alias_list": len(alias_list_entities),
-        })
-
-        # --- Stage 3 — LLM enrichment (relationships, novel entities, campaign) ---
-
-        # Build a set of entity values found globally (all NER stages)
-        # so we can check whether a chunk that has zero IoCs still *mentions* a known entity.
-        global_entity_values: set[str] = set()
-        for e in gazetteer_entities + cyner_entities + semantic_ttp_entities + gliner_entities:
-            global_entity_values.add(e.value.lower())
-
-        # --- Document-level context for LLM (ADR-004 P2-B) ---
-        # Solves the "IoC appendix" problem (CyNER/Fujii 2024):
-        # IoCs listed at the end of a report have no local context in their chunk.
-        # Passing the document-level entity summary to EVERY chunk call lets the LLM
-        # correctly link appendix IoCs to the malware/actor from the narrative.
-        doc_context = _build_doc_context(
-            gazetteer_entities, cyner_entities, gliner_entities, semantic_ttp_entities
-        )
-
-        def _chunk_has_signals(chunk_text: str, chunk_ents: list) -> bool:
-            """Return True if this chunk is worth sending to the LLM.
-
-            A chunk is skipped when:
-            - It is shorter than 200 chars (heading, page number, footer), OR
-            - It has no IoC entities detected by regex AND none of the globally-
-              detected entity names appear in it.
-
-            This filters cover pages, table-of-contents, bibliography sections,
-            and other boilerplate that carries zero threat intel.
-            """
-            # Hard minimum: very short chunks are always boilerplate
-            if len(chunk_text.strip()) < 200:
-                return False
-            if chunk_ents:
-                return True
-            chunk_lower = chunk_text.lower()
-            return any(ev in chunk_lower for ev in global_entity_values)
-
-        # Per-document NER allow-list — all entity values found by high-precision
-        # NER stages (gazetteer, CyNER, GLiNER, semantic TTP).  Passed to the
-        # hallucination filter so it can skip the O(n) fuzzy scan for names it
-        # already knows are real.  Lookup is O(1) via set membership.
-        ner_allow_list: set[str] = {
-            e.value.lower()
-            for e in (
-                gazetteer_entities
-                + cyner_entities
-                + gliner_entities
-                + semantic_ttp_entities
-            )
-        }
-
-        # ── Stage 3 — parallel LLM enrichment with crash-resume ─────────────
-        #
-        # Crash-resume design:
-        #   • A checkpoint file is written atomically (via a .tmp rename) every
-        #     CHECKPOINT_EVERY completions so a restart loses at most that many
-        #     LLM calls.
-        #   • On startup the worker looks for an existing checkpoint whose
-        #     total_chunks matches the current document.  Matching chunks are
-        #     loaded and their indices removed from llm_work so they are not
-        #     re-sent to the LLM.
-        #   • The checkpoint file is deleted when Stage 3 finishes cleanly.
-        #     A lingering file always means the previous run crashed mid-stage.
-        #   • File location: output/{job_id}_stage3.ckpt.json
-
-        _PARALLELISM      = env_int("LLM_PARALLELISM", default=3)
-        _CHECKPOINT_EVERY = env_int("CHECKPOINT_EVERY", default=5)
-
-        from pipeline.stage3_llm import LLMEnrichmentResult as _LLMResult
-        from pipeline.stage3_llm import enrich_chunk
-
-        total      = len(chunks)
-        skipped    = 0
-        _ckpt_path = _ROOT / "output" / f"{job_id}_stage3.ckpt.json"
-        _ckpt_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # ── Checkpoint helpers ──────────────────────────────────────────────
-
-        def _ckpt_save(results: dict) -> None:
-            """Write checkpoint atomically (tmp → rename) to avoid partial files."""
-            data = {
-                "job_id":       job_id,
-                "total_chunks": total,
-                "saved_at":     now_iso(),
-                "chunks": {
-                    str(k): v.model_dump_json()
-                    for k, v in results.items()
-                },
-            }
-            tmp = _ckpt_path.with_suffix(".tmp")
-            try:
-                tmp.write_text(json.dumps(data), encoding="utf-8")
-                tmp.rename(_ckpt_path)
-                logger.debug(f"[Stage 3] Checkpoint saved ({len(results)}/{total} chunks)")
-            except Exception as _e:
-                logger.warning(f"[Stage 3] Checkpoint save failed: {_e}")
-
-        def _ckpt_load() -> tuple[dict, str]:
-            """
-            Load a prior checkpoint if it exists and belongs to this job/document.
-            Returns (dict[int → LLMResult], saved_at_str) — empty dict if no valid checkpoint.
-            """
-            if not _ckpt_path.exists():
-                return {}, ""
-            try:
-                data = json.loads(_ckpt_path.read_text(encoding="utf-8"))
-                if data.get("total_chunks") != total:
-                    logger.warning(f"[Stage 3] Checkpoint chunk count mismatch "
-                                  f"({data.get('total_chunks')} ≠ {total}) — ignoring")
-                    return {}, ""
-                loaded: dict = {}
-                for k_str, v_json in data.get("chunks", {}).items():
-                    loaded[int(k_str)] = _LLMResult.model_validate_json(v_json)
-                return loaded, data.get("saved_at", "")
-            except Exception as _e:
-                logger.warning(f"[Stage 3] Could not load checkpoint ({_e}) — starting fresh")
-                return {}, ""
-
-        # ── Attempt checkpoint resume ───────────────────────────────────────
-
-        chunk_results, _ckpt_saved_at = _ckpt_load()
-        if chunk_results:
-            logger.info(
-                f"[Stage 3] Resuming from checkpoint — {len(chunk_results)}/{total} "
-                f"chunks already done (saved {_ckpt_saved_at})"
-            )
-
-        # Reconstruct running totals from any already-loaded results
-        _run_malware = sum(len(r.malware_families) for r in chunk_results.values())
-        _run_actors  = sum(len(r.threat_actors)    for r in chunk_results.values())
-        _run_tools   = sum(len(r.tools)            for r in chunk_results.values())
-        _run_rels    = sum(len(r.relationships)    for r in chunk_results.values())
-
-        # ── Build work list (exclude checkpoint hits and signal-free chunks) ─
-
-        llm_work: list[tuple[int, str, list]] = []
-        for i, (chunk, ents) in enumerate(zip(chunks, entities_per_chunk), 1):
-            if i in chunk_results:
-                continue          # already processed in a previous run
-            if not _chunk_has_signals(chunk, ents):
-                skipped += 1
-                logger.debug(f"[Stage 3] chunk {i}/{total} — skipped (no CTI signals)")
-            else:
-                llm_work.append((i, chunk, ents))
-
-        n_llm      = len(llm_work)
-        _stage3_t0 = time.monotonic()
-        logger.info(
-            f"[Stage 3] {n_llm} chunks → LLM ({skipped} skipped, "
-            f"{len(chunk_results)} from checkpoint, parallelism={_PARALLELISM})"
-        )
-
-        # ── Parallel processing ─────────────────────────────────────────────
-
-        _log_lock = threading.Lock()
-
-        def _process_chunk(idx: int, chunk: str, ents: list) -> tuple[int, _LLMResult]:
-            with _log_lock:
-                logger.info(
-                    f"[Stage 3] chunk {idx}/{total} — {len(chunk)} chars "
-                    f"[elapsed {time.monotonic()-_stage3_t0:.0f}s]"
-                )
-            _t  = time.monotonic()
-            res = enrich_chunk(
-                chunk, ents,
-                gazetteer_entities=gazetteer_entities,
-                cyner_entities=cyner_entities,
-                semantic_ttp_entities=semantic_ttp_entities,  # tells LLM which TTPs already found
-                doc_context=doc_context or None,
-                ner_allow_list=ner_allow_list,
-                reference_date=reference_date,
-            )
-
-            # ── Stage 3e — cross-model consensus (opt-in) ───────────────────
-            # Only double-run chunks that produced relationships (the highest
-            # hallucination-risk output), to keep the extra cost bounded.
-            from pipeline.stage3e_consensus import consensus_enabled, consensus_provider, reconcile
-            if res.relationships and consensus_enabled():
-                second = enrich_chunk(
-                    chunk, ents,
-                    gazetteer_entities=gazetteer_entities,
-                    cyner_entities=cyner_entities,
-                    semantic_ttp_entities=semantic_ttp_entities,
-                    doc_context=doc_context or None,
-                    ner_allow_list=ner_allow_list,
-                    provider=consensus_provider(),
-                    reference_date=reference_date,
-                )
-                res = reconcile(res, second)
-
-            elapsed = time.monotonic() - _t
-            m, a, t_c, r = (len(res.malware_families), len(res.threat_actors),
-                             len(res.tools),            len(res.relationships))
-            parts = [f"{x} {n}" for x, n in
-                     ((m,"malware"),(a,"actors"),(t_c,"tools"),(r,"rels")) if x]
-            with _log_lock:
-                logger.info(
-                    f"[Stage 3] chunk {idx}/{total} ✓ {elapsed:.1f}s — "
-                    f"{', '.join(parts) or 'nothing extracted'}"
-                )
-            return idx, res
-
-        with ThreadPoolExecutor(max_workers=_PARALLELISM) as executor:
-            futures = {
-                executor.submit(_process_chunk, i, chunk, ents): i
-                for i, chunk, ents in llm_work
-            }
-            completed           = 0
-            _since_last_ckpt    = 0
-
-            for future in as_completed(futures):
-                # Check timeout before processing result
-                check_timeout()
-
-                idx, res = future.result()
-                chunk_results[idx] = res
-                completed        += 1
-                _since_last_ckpt += 1
-
-                # Accumulate running totals (main thread — no lock needed)
-                _run_malware += len(res.malware_families)
-                _run_actors  += len(res.threat_actors)
-                _run_tools   += len(res.tools)
-                _run_rels    += len(res.relationships)
-
-                # Persist checkpoint every CHECKPOINT_EVERY completions
-                if _since_last_ckpt >= _CHECKPOINT_EVERY:
-                    _ckpt_save(chunk_results)
-                    _since_last_ckpt = 0
-                    logger.debug(f"[Stage 3] Checkpoint saved ({len(chunk_results)}/{total} chunks)")
-
-                emit_progress(job_id, "stage", {
-                    "stage": 3, "label": "LLM enrichment",
-                    "chunk": completed, "total": n_llm,
-                    "malware": _run_malware, "actors": _run_actors,
-                    "tools":   _run_tools,   "relationships": _run_rels,
-                })
-
-                # Stream what this chunk found, so the graph draws as it fills.
-                # Preview only: these nodes carry no evidence and never reach the
-                # bundle — Stage 4 rebuilds them from the accepted entities.
-                _partial_nodes: list[dict] = []
-                for _a in res.threat_actors:
-                    _partial_nodes.append({"id": _a, "type": "threat_actor", "name": _a})
-                for _m in res.malware_families:
-                    _partial_nodes.append({"id": _m, "type": "malware", "name": _m})
-                for _t in res.tools:
-                    _partial_nodes.append({"id": _t, "type": "tool", "name": _t})
-                for _ttp in res.ttps:
-                    # TTPExtracted has `technique_name`, not `name` — `.name`
-                    # raised AttributeError on every chunk that found a TTP.
-                    _partial_nodes.append(
-                        {"id": _ttp.technique_name, "type": "ttp", "name": _ttp.technique_name}
-                    )
-                for _rel in res.relationships:
-                    # An endpoint may not have been extracted as an entity of its
-                    # own; without these the link would dangle in the preview.
-                    _partial_nodes.append({"id": _rel.source_value, "type": "unknown", "name": _rel.source_value})
-                    _partial_nodes.append({"id": _rel.target_value, "type": "unknown", "name": _rel.target_value})
-
-                _partial_links = [
-                    {"source": r.source_value, "target": r.target_value, "type": r.relationship_type}
-                    for r in res.relationships
-                ]
-
-                emit_progress(job_id, "partial_graph", {
-                    "nodes": _partial_nodes,
-                    "links": _partial_links
-                })
-
-        # Clean up checkpoint — only reached on clean completion
-        try:
-            _ckpt_path.unlink(missing_ok=True)
-        except Exception:
-            pass
-
-        # Rebuild results in original chunk order
-        all_results: list[_LLMResult] = [
-            chunk_results.get(i, _LLMResult()) for i in range(1, total + 1)
-        ]
-
-        logger.info(
-            f"[Stage 3] done — {n_llm} LLM calls, {skipped} skipped, "
-            f"total elapsed {time.monotonic()-_stage3_t0:.0f}s"
-        )
-        logger.info(
-            f"[Stage 3] totals: {_run_malware} malware, {_run_actors} actors, "
-            f"{_run_tools} tools, {_run_rels} relationships"
-        )
-
-        # --- Stage 3 document-level relation pass (ADR-0057, opt-in) ────────
-        # Per-chunk extraction cannot connect a fact stated in one chunk to a
-        # fact stated in a distant one. This single extra call reads the whole
-        # report and adds relationships only, using the fullest entity list
-        # available (Stage 2 NER + every name the chunked LLM pass itself just
-        # found). Its result is just another LLMEnrichmentResult appended to
-        # the same list _merge_results already dedups — no new merge logic.
-        from pipeline.stage3_llm import document_level_relations_enabled, enrich_document_relations
-        if document_level_relations_enabled():
-            from models.schemas import EntityType
-            _known_entities = list(all_entities)
-            _known_keys = {(e.value.lower(), e.entity_type) for e in _known_entities}
-            for _r in all_results:
-                for _name, _etype in (
-                    [(n, EntityType.THREAT_ACTOR) for n in _r.threat_actors]
-                    + [(n, EntityType.MALWARE) for n in _r.malware_families]
-                    + [(n, EntityType.TOOL) for n in _r.tools]
-                ):
-                    _key = (_name.lower(), _etype)
-                    if _key not in _known_keys:
-                        _known_entities.append(RawEntity(value=_name, entity_type=_etype, source="llm"))
-                        _known_keys.add(_key)
-
-            logger.info(f"[Stage 3 doc-relations] {len(_known_entities)} known entities, "
-                        f"{len(text)} chars of report text")
-            _doc_rel_result = enrich_document_relations(text, _known_entities)
-            logger.info(f"[Stage 3 doc-relations] {len(_doc_rel_result.relationships)} "
-                        "relationships found")
-            all_results.append(_doc_rel_result)
-
-        from pipeline.stage3_llm import _merge_results
-        llm_result = _merge_results(
-            all_results,
-            gazetteer_entities=gazetteer_entities,
-            semantic_ttp_entities=semantic_ttp_entities,
-            cyner_entities=cyner_entities,
-        )
-
-        # _finalize_job's ownership check (used below for the terminal
-        # bundle_json/status write) only guards that ONE write. _save_entities
-        # and the llm_result_json update are the first hard-to-undo writes
-        # this run makes -- Stage 3's LLM calls above are the single largest
-        # window in the whole pipeline for a lease to expire and be reclaimed
-        # -- so re-check ownership here too, before committing anything, and
-        # abandon the run entirely if it's stale rather than let a duplicate
-        # set of entities/relationships land under a job another worker now
-        # owns.
-        if _owner_worker_id is not None and _current_owner(job_id) != _owner_worker_id:
-            logger.warning(
-                f"[Worker] job {job_id} was reclaimed by another worker before "
-                f"Stage 3 results could be saved (worker_id={_owner_worker_id}) "
-                "- discarding this run"
-            )
-            return
-
-        # Save entities and relationships
-        _save_entities(job_id, all_entities, llm_result, report_text=text)
-
-        # Persist LLM result JSON for finalize
-        llm_json = llm_result.model_dump_json()
-        with _lock:
-            with get_conn() as conn:
-                conn.execute("UPDATE jobs SET llm_result_json=?, updated_at=? WHERE id=?",
-                             (llm_json, now_iso(), job_id))
-                conn.commit()
-
-        # --- Stage 4 ---
-        import json as _json_s4
-
-        from pipeline.stage4_stix_mapping import build_stix_bundle, verify_ioc_coverage
-        report_name  = re.sub(r"[^\w\-]", "_", Path(original_filename).stem)
-        source_hash  = _sha256_file(file_path)
-        source_bytes = _read_file_bytes(file_path)
-
-        # Load the relationship policy from the DB (if one has been saved)
-        _policy_s4: dict | None = None
-        try:
-            with get_conn() as _pc:
-                _prow = _pc.execute(
-                    "SELECT policy_json FROM relationship_policy WHERE id=1"
-                ).fetchone()
-            if _prow and _prow["policy_json"] not in ("", "{}"):
-                _policy_s4 = _json_s4.loads(_prow["policy_json"])
-        except Exception:
-            pass
-
-        # Record the configuration this bundle was built under (ADR-0024).
-        # Stamped here, immediately after the policy is read, so the snapshot is
-        # the policy actually passed to build_stix_bundle rather than whatever
-        # the mutable relationship_policy row holds when someone later asks.
-        try:
-            from api.run_config import build_run_config
-            _rc = _json_s4.dumps(build_run_config(_policy_s4))
-            with _lock:
-                with get_conn() as _rcc:
-                    _rcc.execute(
-                        "UPDATE jobs SET run_config_json=?, updated_at=? WHERE id=?",
-                        (_rc, now_iso(), job_id),
-                    )
-                    _rcc.commit()
-        except Exception as _rc_exc:
-            logger.warning(f"[run-config] not recorded for job {job_id}: {_rc_exc}")
-
-        # TLP / PAP markings selected by the user at upload time
-        with get_conn() as _mc:
-            _mrow = _mc.execute(
-                "SELECT tlp_level, pap_level FROM jobs WHERE id=?", (job_id,)
-            ).fetchone()
-        _tlp_level = _mrow["tlp_level"] if _mrow else None
-        _pap_level = _mrow["pap_level"] if _mrow else None
-
-        # Stage 4b long-distance prediction — only built when the policy enables
-        # completion.long_distance AND the LLM provider is ready (else None).
-        from pipeline.stage4c_long_distance import default_long_distance_inferer
-        _ld_infer = default_long_distance_inferer(_policy_s4)
-
-        # EntityType is imported per-function in this module; _run_pipeline had
-        # no binding for it, so this line raised NameError on every job.
-        from models.schemas import EntityType as _EntityType
-        from pipeline.stage2f_cve_enrichment import enrich_cves
-        cve_ids = {e.value for e in all_entities if e.entity_type == _EntityType.CVE}
-        cve_meta = enrich_cves(cve_ids) if cve_ids else {}
-
-        bundle = build_stix_bundle(
-            all_entities, llm_result, report_name,
-            report_text=text,
+        # TLP / PAP markings selected at upload time.
+        with get_conn() as conn:
+            row = conn.execute("SELECT tlp_level, pap_level FROM jobs WHERE id=?", (job_id,)).fetchone()
+        document = Document(
+            file_path=file_path,
             original_filename=original_filename,
-            source_hash=source_hash,
-            source_bytes=source_bytes,
-            cve_metadata=cve_meta,
-            relationship_policy=_policy_s4,
-            tlp_level=_tlp_level,
-            pap_level=_pap_level,
-            long_distance_infer=_ld_infer,
+            tlp_level=row["tlp_level"] if row else None,
+            pap_level=row["pap_level"] if row else None,
         )
-        logger.info(f"[Stage 4] STIX mapping complete — {len(list(bundle.objects))} objects")
+        document.output_path = str(bundle_output_path(job_id, document.report_name))
 
-        # Verify every regex/defang-extracted IoC became an SCO + Indicator.
-        _cov = verify_ioc_coverage(all_entities, bundle)
-        if _cov["ok"]:
-            logger.info(
-                f"[Stage 4] IoC coverage OK — all {_cov['total_iocs']} regex/defang "
-                f"IoCs have a STIX observable + Indicator"
-            )
-        else:
-            logger.warning(
-                f"[Stage 4] IoC coverage gaps — "
-                f"{len(_cov['missing_indicator'])}/{_cov['total_iocs']} IoCs without an Indicator, "
-                f"{len(_cov['missing_sco'])} without an SCO"
-            )
-            for _m in _cov["missing_indicator"][:10]:
-                logger.warning(f"    no indicator: [{_m['type']}] {_m['value']}")
+        result = run_document(document, RunOptions.from_env(),
+                              _WorkerHooks(job_id, _owner_worker_id, start_time))
+        _record_stage_report(job_id, result.stage_report())
+        if result.bundle is None:
+            raise RuntimeError("the run produced no bundle (Stage 4 did not run)")
 
-        # Per-rule synthesis accounting (ADR-0026).  Read back off the Report SDO
-        # so the live progress channel consumes the same record that ships inside
-        # the bundle, rather than running as a parallel path that could disagree.
-        # Absent on bundles built before ADR-0026 — treat as optional.
-        _synth: dict | None = None
-        for _o in bundle.objects:
-            _otype = _o.get("type") if hasattr(_o, "get") else getattr(_o, "type", None)
-            if _otype == "report":
-                _synth = (
-                    _o.get("x_synthesis_stats") if hasattr(_o, "get")
-                    else getattr(_o, "x_synthesis_stats", None)
-                )
-                break
-        _pin = (_synth or {}).get("pin") or {}
-        if _pin.get("rules"):
-            logger.info(
-                "[Stage 4] policy pins — %d of %d candidate edges emitted across "
-                "%d rules (budget %d, mode %s)",
-                _pin.get("total_emitted", 0), _pin.get("total_candidates", 0),
-                len(_pin["rules"]), _pin.get("budget", 0), _pin.get("mode", ""),
-            )
-
-        emit_progress(job_id, "stage", {
-            "stage": 4, "label": "STIX mapping", "objects": len(list(bundle.objects)),
-            "ioc_coverage": {
-                "total": _cov["total_iocs"],
-                "with_indicator": _cov["with_indicator"],
-                "ok": _cov["ok"],
-            },
-            "synthesis": _synth,
-        })
-
-        # --- Stage 5 ---
-        from pipeline.stage5_validation import validate_and_export
-        out_path = str(bundle_output_path(job_id, report_name))
-        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-        valid = validate_and_export(bundle, out_path)
-        bundle_json = bundle.serialize(pretty=True)
-        logger.info(f"[Stage 5] Validation complete — valid={valid}")
-        emit_progress(job_id, "stage", {
-            "stage": 5, "label": "Validation", "valid": valid,
-        })
-
+        bundle_json = result.bundle.serialize(pretty=True)
         if not _finalize_job(job_id, "for_review", _owner_worker_id, bundle_json=bundle_json):
             return
 
@@ -1137,6 +482,8 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         except Exception as e:
             logger.error(f"[Worker] Database backup failed: {e}")
 
+    except RunAborted:
+        return
     except TimeoutError as exc:
         error_msg = str(exc)
         if _finalize_job(job_id, "failed", _owner_worker_id):
@@ -1417,13 +764,15 @@ def _lexicon_rescan(job_id: str, report_text: str) -> int:
                     context, row["confidence"], row["mitre_id"],
                     1,                  # accepted=True (reviewer already validated the label)
                     "report_lexicon",   # source tag — distinguishable from pipeline sources
+                    "propagated",       # ADR-0058: a copy of that decision, not a new one
                 ))
 
             if to_insert:
                 conn.executemany(
                     "INSERT INTO entities "
-                    "(id,job_id,value,entity_type,context,confidence,mitre_id,accepted,source) "
-                    "VALUES (?,?,?,?,?,?,?,?,?) "
+                    "(id,job_id,value,entity_type,context,confidence,mitre_id,accepted,source,"
+                    "decision_origin) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?) "
                     "ON CONFLICT (id) DO NOTHING",
                     to_insert,
                 )
@@ -1466,7 +815,6 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
 
     from models.schemas import EntityType, RawEntity
     from pipeline.stage3_llm import LLMEnrichmentResult, RelationshipExtracted
-    from pipeline.stage4_stix_mapping import build_stix_bundle
     from pipeline.stage5_validation import validate_and_export
 
     with _lock:
@@ -1696,40 +1044,20 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
 
     # Locate the uploaded file to recompute its hash (stable — file never changes)
     upload_matches = list((_ROOT / "uploads").glob(f"{job_id}.*"))
-    source_hash    = _sha256_file(upload_matches[0]) if upload_matches else None
-    source_bytes   = _read_file_bytes(upload_matches[0]) if upload_matches else None
+    source_hash, source_bytes = load_file_bytes(upload_matches[0] if upload_matches else None)
 
-    # Load the relationship policy for the finalize rebuild
-    import json as _json_fin
-    _policy_fin: dict | None = None
-    try:
-        with get_conn() as _pconn:
-            _prow2 = _pconn.execute(
-                "SELECT policy_json FROM relationship_policy WHERE id=1"
-            ).fetchone()
-        if _prow2 and _prow2["policy_json"] not in ("", "{}"):
-            _policy_fin = _json_fin.loads(_prow2["policy_json"])
-    except Exception:
-        pass
-
-    from pipeline.stage4c_long_distance import default_long_distance_inferer
-    _ld_infer_fin = default_long_distance_inferer(_policy_fin)
-
-    from pipeline.stage2f_cve_enrichment import enrich_cves
-    cve_ids_fin = {e.value for e in raw_entities if e.entity_type == EntityType.CVE}
-    cve_meta_fin = enrich_cves(cve_ids_fin) if cve_ids_fin else {}
-
-    bundle = build_stix_bundle(
-        raw_entities, llm_result, report_name,
+    # Stage 4 through the same function a pipeline run uses (ADR-0059).
+    bundle = build_bundle(
+        raw_entities, llm_result,
+        report_name=report_name,
         report_text=report_text,
         original_filename=original_filename,
         source_hash=source_hash,
         source_bytes=source_bytes,
-        cve_metadata=cve_meta_fin,
-        relationship_policy=_policy_fin,
+        policy=_load_policy(),
         tlp_level=job["tlp_level"],
         pap_level=job["pap_level"],
-        long_distance_infer=_ld_infer_fin,
+        cve_metadata=lookup_cves(raw_entities),
     )
     bundle_json = bundle.serialize(pretty=True)
 

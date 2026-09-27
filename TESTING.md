@@ -291,8 +291,10 @@ logic is untested (see §6, P1-d).
 
 ### P3 — longer horizon
 
-- **i. Full-pipeline integration test** (`worker._run_pipeline` or `main.py` CLI on
-  a fixture with mocked LLM) producing a bundle with provenance + labels end-to-end.
+- **i. Full-pipeline integration test** — done (ADR-0059):
+  `tests/test_orchestrator.py::test_worker_and_cli_run_the_same_pipeline` runs
+  `worker._run_pipeline` and the `main.py` CLI on one fixture with the LLM mocked
+  and checks both build the same bundle.
 - **j. Frontend interaction tests** for the relationship rail / graph editor.
 
 ---

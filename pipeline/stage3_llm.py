@@ -707,6 +707,7 @@ def _call_anthropic_impl(system: str, user: str) -> str:
             ],
             messages=[{"role": "user", "content": user}],
             timeout=_LLM_TIMEOUT,
+            **sampling_options(seed_ok=False),
         )
         elapsed = time.monotonic() - t0
         tokens_out = getattr(getattr(response, "usage", None), "output_tokens", "?")
@@ -733,15 +734,29 @@ def _call_anthropic_impl(system: str, user: str) -> str:
         raise
 
 
+# Every provider call ends in one of the two wrappers below, which log a
+# failure and return "" so one bad chunk never fails a report.  The price was
+# that a run where EVERY call failed (a wrong model name: 404 on each request)
+# looked like a run where the model found nothing.  pipeline/llm_stats counts
+# them so the orchestrator can tell the two apart (ADR-0060).
+from pipeline import llm_stats  # noqa: E402
+
+_record_call = llm_stats.record_call
+
+
 def _call_anthropic(system: str, user: str) -> str:
     """Call Anthropic with retry logic."""
     try:
-        return _call_anthropic_impl(system, user)
+        out = _call_anthropic_impl(system, user)
+        _record_call()
+        return out
     except RetryError as e:
         logger.error(f"Anthropic failed after {_MAX_RETRIES} retries: {e}")
+        _record_call(f"Anthropic failed after {_MAX_RETRIES} retries: {e}")
         return ""
     except Exception as e:
         logger.error(f"Anthropic call failed: {e}")
+        _record_call(f"Anthropic: {e}")
         return ""
 
 
@@ -752,7 +767,7 @@ def _call_anthropic(system: str, user: str) -> str:
     reraise=True
 )
 def _call_openai_compatible_impl(client_param, model: str, system: str, user: str, label: str,
-                                 extra_body: dict | None = None) -> str:
+                                 extra_body: dict | None = None, sampling: dict | None = None) -> str:
     """Internal implementation of OpenAI-compatible call with retry.
 
     `extra_body` carries server-specific fields the OpenAI SDK has no parameter
@@ -771,6 +786,7 @@ def _call_openai_compatible_impl(client_param, model: str, system: str, user: st
             ],
             timeout=_LLM_TIMEOUT,
             extra_body=extra_body,
+            **(sampling or {}),
         )
         elapsed = time.monotonic() - t0
         usage  = getattr(response, "usage", None)
@@ -794,15 +810,20 @@ def _call_openai_compatible_impl(client_param, model: str, system: str, user: st
 
 
 def _call_openai_compatible(client_param, model: str, system: str, user: str, label: str,
-                            extra_body: dict | None = None) -> str:
+                            extra_body: dict | None = None, sampling: dict | None = None) -> str:
     """Shared call logic for OpenAI-compatible endpoints (Mistral, Ollama) with retry."""
     try:
-        return _call_openai_compatible_impl(client_param, model, system, user, label, extra_body)
+        out = _call_openai_compatible_impl(client_param, model, system, user, label, extra_body,
+                                           sampling)
+        _record_call()
+        return out
     except RetryError as e:
         logger.error(f"{label} failed after {_MAX_RETRIES} retries: {e}")
+        _record_call(f"{label} failed after {_MAX_RETRIES} retries: {e}")
         return ""
     except Exception as e:
         logger.error(f"{label} call failed: {e}")
+        _record_call(f"{label}: {e}")
         return ""
 
 
@@ -824,30 +845,108 @@ def _call_llm(system: str, user: str, provider: str | None = None) -> str:
     sanitized_user = _sanitize_text_for_prompt(user, max_length=_MAX_PROMPT_LENGTH)
 
     prov = (provider or _PROVIDER).lower()
+    # The seed is a standard parameter on these servers only; Mistral names it
+    # differently and Gemini's compatibility layer does not document it.
+    sampling = sampling_options(seed_ok=prov in ("vllm", "ollama", "lmstudio"))
     if prov == "anthropic":
         return _call_anthropic(system, sanitized_user)
     elif prov == "gemini":
         client = _get_gemini_client()
         _GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-pro")
-        return _call_openai_compatible(client, _GEMINI_MODEL, system, sanitized_user, "Gemini")
+        return _call_openai_compatible(client, _GEMINI_MODEL, system, sanitized_user, "Gemini",
+                                       sampling=sampling)
     elif prov == "mistral":
         client = _get_mistral_client()
         _MISTRAL_MODEL = os.environ.get("MISTRAL_MODEL", "mistral-small-latest")
-        return _call_openai_compatible(client, _MISTRAL_MODEL, system, sanitized_user, "Mistral")
+        return _call_openai_compatible(client, _MISTRAL_MODEL, system, sanitized_user, "Mistral",
+                                       sampling=sampling)
     elif prov == "ollama":
         client = _get_ollama_client()
         _OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
-        return _call_openai_compatible(client, _OLLAMA_MODEL, system, sanitized_user, "Ollama")
+        return _call_openai_compatible(client, _OLLAMA_MODEL, system, sanitized_user, "Ollama",
+                                       sampling=sampling)
     elif prov == "lmstudio":
         client = _get_lmstudio_client()
         _LMSTUDIO_MODEL = os.environ.get("LMSTUDIO_MODEL", "lmstudio-model")
-        return _call_openai_compatible(client, _LMSTUDIO_MODEL, system, sanitized_user, "LMStudio")
+        return _call_openai_compatible(client, _LMSTUDIO_MODEL, system, sanitized_user, "LMStudio",
+                                       sampling=sampling)
     elif prov == "vllm":
         client = _get_vllm_client()
         _VLLM_MODEL = os.environ.get("VLLM_MODEL", "vllm-model")
         return _call_openai_compatible(client, _VLLM_MODEL, system, sanitized_user, "vLLM",
-                                       extra_body=vllm_extra_body())
+                                       extra_body=vllm_extra_body(), sampling=sampling)
     return ""
+
+
+def sampling_options(seed_ok: bool = True) -> dict:
+    """LLM_TEMPERATURE and LLM_SEED, when set; {} otherwise.
+
+    Unset (the default) keeps the provider's own sampling — for vLLM the
+    model's generation_config (Qwen: temperature 0.7), for Anthropic 1.0 — so
+    two runs of one report can differ.  An evaluation that compares two
+    configurations needs them fixed, or has to measure that spread.
+    """
+    from pipeline.env_flags import env_float, env_int
+
+    opts: dict = {}
+    if os.getenv("LLM_TEMPERATURE", "").strip():
+        opts["temperature"] = env_float("LLM_TEMPERATURE", default=0.0)
+    if seed_ok and os.getenv("LLM_SEED", "").strip():
+        opts["seed"] = env_int("LLM_SEED", default=0)
+    return opts
+
+
+def provider_label(provider: str | None = None) -> str:
+    """'Provider/model' for the given (or global) provider — what a run used."""
+    prov = (provider or _PROVIDER).lower()
+    return {
+        "anthropic": f"Anthropic/{os.environ.get('ANTHROPIC_MODEL', _DEFAULT_ANTHROPIC_MODEL)}",
+        "gemini":    f"Gemini/{os.environ.get('GEMINI_MODEL', 'gemini-2.5-pro')}",
+        "mistral":   f"Mistral/{os.environ.get('MISTRAL_MODEL', 'mistral-small-latest')}",
+        "ollama":    f"Ollama/{os.environ.get('OLLAMA_MODEL', 'llama3.2')}",
+        "lmstudio":  f"LMStudio/{os.environ.get('LMSTUDIO_MODEL', 'lmstudio-model')}",
+        "vllm":      f"vLLM/{os.environ.get('VLLM_MODEL', 'vllm-model')}",
+    }.get(prov, prov)
+
+
+def prompt_fingerprint() -> str:
+    """Short hash of the Stage 3 extraction prompts — changes whenever their wording does."""
+    import hashlib
+    digest = hashlib.sha256((_SYSTEM_PROMPT + "\x00" + _USER_PROMPT_TEMPLATE).encode("utf-8"))
+    return digest.hexdigest()[:16]
+
+
+def all_prompts_fingerprint() -> str:
+    """Hash of every Stage 3 prompt: extraction, document-level relations, and
+    the 3d / 3f verification prompts."""
+    import hashlib
+
+    from pipeline import stage3d_verify, stage3f_ttp_verify
+    parts = [_SYSTEM_PROMPT, _USER_PROMPT_TEMPLATE,
+             _DOC_RELATIONS_SYSTEM_PROMPT, _DOC_RELATIONS_USER_PROMPT_TEMPLATE,
+             stage3d_verify._VERIFY_SYSTEM, stage3d_verify._VERIFY_USER_TEMPLATE,
+             stage3f_ttp_verify._VERIFY_SYSTEM, stage3f_ttp_verify._VERIFY_USER_TEMPLATE]
+    return hashlib.sha256("\x00".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
+def stage3_settings(*, consensus: bool, verify_rels: bool, verify_ttps: bool) -> dict:
+    """Every setting that changes what Stage 3 returns for a given input — the
+    Stage 3 checkpoint must not resume across a change in any of them."""
+    from pipeline.stage3e_consensus import consensus_provider
+    from pipeline.vllm_options import vllm_extra_body
+
+    second = consensus_provider() if consensus else ""
+    return {
+        "model": provider_label(),
+        "consensus_model": provider_label(second) if second else "",
+        "prompts": all_prompts_fingerprint(),
+        "sampling": sampling_options(),
+        "vllm": vllm_extra_body() if _PROVIDER == "vllm" else {},
+        "verify_relationships": verify_rels,
+        "verify_ttps": verify_ttps,
+        "max_output_tokens": _MAX_OUTPUT_TOKENS,
+        "max_prompt_length": _MAX_PROMPT_LENGTH,
+    }
 
 
 def _provider_ready(provider: str | None = None) -> bool:
@@ -1266,9 +1365,14 @@ def enrich_chunk(
     ner_allow_list: set[str] | None = None,
     provider: str | None = None,
     reference_date: datetime | None = None,
+    verify_rels: bool | None = None,
+    verify_ttps_on: bool | None = None,
 ) -> LLMEnrichmentResult:
     """
     Enrich a text chunk with LLM intelligence.
+
+    `verify_rels` / `verify_ttps_on` switch Stages 3d / 3f for this call;
+    None follows ENABLE_STIX_VERIFICATION / ENABLE_TTP_VERIFICATION.
 
     Args:
         text:                   The raw CTI text chunk.
@@ -1367,19 +1471,18 @@ def enrich_chunk(
         logger.warning(f"Prompt too short ({len(prompt)} chars < {_MIN_PROMPT_LENGTH} min) — skipping chunk")
         return LLMEnrichmentResult()
 
-    provider_label = {
-        "anthropic": f"Anthropic/{os.environ.get('ANTHROPIC_MODEL', _DEFAULT_ANTHROPIC_MODEL)}",
-        "gemini":    f"Gemini/{os.environ.get('GEMINI_MODEL', 'gemini-2.5-pro')}",
-        "mistral":   f"Mistral/{os.environ.get('MISTRAL_MODEL', 'mistral-small-latest')}",
-        "ollama":    f"Ollama/{os.environ.get('OLLAMA_MODEL', 'llama3.2')}",
-        "lmstudio":  f"LMStudio/{os.environ.get('LMSTUDIO_MODEL', 'lmstudio-model')}",
-        "vllm":      f"vLLM/{os.environ.get('VLLM_MODEL', 'vllm-model')}",
-    }.get(_PROVIDER, _PROVIDER)
-    logger.debug(f"Calling {provider_label} ({len(prompt)} prompt chars)")
+    logger.debug(f"Calling {provider_label()} ({len(prompt)} prompt chars)")
 
+    llm_stats.reset_last_call()
     raw_text = _call_llm(_SYSTEM_PROMPT, prompt, provider=provider)
     if not raw_text:
-        logger.warning("LLM returned empty response — skipping chunk")
+        # Three different things return "": a failed request, an answer with no
+        # content, a blocked prompt.  Counted apart (ADR-0060), still skipped.
+        if llm_stats.last_call_failed():
+            llm_stats.bump("extraction_provider_failed")
+        else:
+            llm_stats.bump("extraction_empty")
+            logger.warning("LLM returned empty response — skipping chunk")
         return LLMEnrichmentResult()
 
     # Validate response length
@@ -1389,7 +1492,9 @@ def enrich_chunk(
 
     result = _parse_llm_response(raw_text)
     if result is None:
+        llm_stats.bump("extraction_invalid")
         return LLMEnrichmentResult()
+    llm_stats.bump("extraction_ok")
 
     # Stage 3b — remove hallucinated entity names not present in the source text.
     # Pass doc_context and ner_allow_list so the filter can short-circuit the
@@ -1407,14 +1512,15 @@ def enrich_chunk(
     # Only runs when ENABLE_STIX_VERIFICATION=true in .env (default: false).
     if result.relationships:
         from pipeline.stage3d_verify import verify_enabled, verify_relationships
-        if verify_enabled():
+        if verify_enabled() if verify_rels is None else verify_rels:
             # verify_relationships() returns `object` to avoid a circular
             # import with LLMEnrichmentResult (defined in this module); it's
             # always an LLMEnrichmentResult at runtime.  Bind the same provider
             # override so verification runs on the model that produced the claims.
             def _verify_call(s, u):
                 return _call_llm(s, u, provider=provider)
-            result = cast(LLMEnrichmentResult, verify_relationships(text, result, _verify_call))
+            result = cast(LLMEnrichmentResult,
+                          verify_relationships(text, result, _verify_call, enabled=True))
 
     # Stage 3f — self-verification of TTP claims (ADR precision §3)
     # Mirrors Stage 3d for techniques: each LLM-extracted TTP must be supported by
@@ -1424,14 +1530,14 @@ def enrich_chunk(
     if result.ttps:
         from pipeline.stage3f_ttp_verify import verify_enabled as ttp_verify_enabled
         from pipeline.stage3f_ttp_verify import verify_ttps
-        if ttp_verify_enabled():
+        if ttp_verify_enabled() if verify_ttps_on is None else verify_ttps_on:
             corroborated_ids = corroborated_ttp_ids(semantic_ttp_entities)
 
             def _ttp_verify_call(s, u):
                 return _call_llm(s, u, provider=provider)
             result = cast(
                 LLMEnrichmentResult,
-                verify_ttps(text, result, _ttp_verify_call, corroborated_ids),
+                verify_ttps(text, result, _ttp_verify_call, corroborated_ids, enabled=True),
             )
 
     return result

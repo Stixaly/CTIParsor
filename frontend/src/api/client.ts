@@ -1,4 +1,4 @@
-import type { Job, Entity, Relationship, StixBundle, CoverageResult, CoverageRule, CoverageReportRules, DetectionProposals, DetectionCorpus, CorpusConfig, FormatInfo, ExportFacets, ExportSelection, ExportAxis, LastRun, RuleLookupResult } from '../types'
+import type { Job, Entity, Relationship, StixBundle, CoverageResult, CoverageRule, CoverageReportRules, DetectionProposals, DetectionCorpus, CorpusConfig, FormatInfo, ExportFacets, ExportSelection, ExportAxis, LastRun, RuleLookupResult, ThresholdsInfo } from '../types'
 
 const BASE = '/api'
 
@@ -49,6 +49,9 @@ export async function uploadFile(file: File, options?: UploadOptions): Promise<{
   if (!res.ok) throw new Error(`Upload failed: ${res.statusText}`)
   return res.json()
 }
+
+// NER cutoffs and the server's auto-accept level (ADR-0051, ADR-0058)
+export const fetchThresholds = () => req<ThresholdsInfo>('/thresholds')
 
 // Entities
 export const fetchEntities = (jobId: string) =>

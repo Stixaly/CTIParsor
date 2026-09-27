@@ -17,22 +17,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 WORKDIR /build
-COPY requirements.txt requirements-api.txt requirements-optional.txt ./
-# CPU-only build first, so that sentence-transformers below finds torch already
-# satisfied and does not pull the CUDA build (about 2.2 GB of nvidia_* wheels
-# that this CPU image would never use).
+# The exact versions CI tested (`make lock`): requirements*.txt hold the ranges,
+# requirements.lock.txt the resolution of all three, playwright and google-re2
+# included.  It names the PyTorch CPU index itself and pins torch to its +cpu
+# build, so no CUDA wheel (about 2.2 GB of nvidia_* packages this CPU image
+# would never use) is ever pulled in.
+COPY requirements.lock.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip && \
-    pip install --index-url https://download.pytorch.org/whl/cpu torch
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -r requirements.txt -r requirements-api.txt
-# google-re2 (ADR-0049) is optional upstream too (setup.sh treats it the same
-# way) — it ships a prebuilt wheel, so this should always succeed, but a
-# platform this project hasn't tested still must not fail the build over it.
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install "$(grep -E '^playwright' requirements-optional.txt)" && \
-    (pip install "$(grep -E '^google-re2' requirements-optional.txt)" || \
-     echo "WARNING: google-re2 did not install; Stage 2 regexes fall back to the stdlib re module")
+    pip install -r requirements.lock.txt
 
 # ── Stage 3: runtime image ────────────────────────────────────────────────────
 FROM python:3.12-slim-bookworm AS runtime

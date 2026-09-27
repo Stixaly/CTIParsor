@@ -22,9 +22,9 @@ def _seed_rejections(db, value: str, etype: str, jobs: int) -> None:
             (job, "r.pdf", "for_review", now, now),
         )
         conn.execute(
-            "INSERT INTO entities (id, job_id, value, entity_type, context, confidence, accepted, source) "
-            "VALUES (?,?,?,?,?,?,?,?)",
-            (str(uuid4()), job, value, etype, "", 0.9, 0, "cyner"),
+            "INSERT INTO entities (id, job_id, value, entity_type, context, confidence, accepted, source, "
+            "decision_origin) VALUES (?,?,?,?,?,?,?,?,?)",
+            (str(uuid4()), job, value, etype, "", 0.9, 0, "cyner", "human"),
         )
     conn.commit()
 

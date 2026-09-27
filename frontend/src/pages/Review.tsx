@@ -13,10 +13,10 @@ import {
   createRelationship, updateRelationship,
   finalizeJob, finalizeJobQuick, sourceUrl, bulkUpdateEntities,
   fetchCoverageReportRules, detectionsExportUrl,
-  errorDetail,
+  errorDetail, fetchThresholds,
 } from '../api/client'
 import { downloadBundle } from '../stix/downloadBundle'
-import type { Entity, Relationship } from '../types'
+import type { ClientDecisionOrigin, Entity, Relationship } from '../types'
 import { useAppTheme } from '../context/ThemeContext'
 
 import TopChrome from '../components/review/TopChrome'
@@ -31,15 +31,13 @@ import RelationshipRail from '../components/review/RelationshipRail'
 import RelationshipCreator from '../components/review/RelationshipCreator'
 import DragRubberBand from '../components/review/DragRubberBand'
 import KeyboardHelp from '../components/review/KeyboardHelp'
-import { typeDot, typeLabel, confPct } from '../components/review/tokens'
+import { typeDot, typeLabel } from '../components/review/tokens'
 import EntityPopover from '../components/EntityPopover'
 import { usePromotedRules } from '../hooks/usePromotedRules'
 
 // ── Review-specific types ─────────────────────────────────────────────────────
 // Theme type is re-exported from ThemeContext; imported via useAppTheme()
 type SortMode = 'position' | 'type'
-
-const AUTO_ACCEPT_THRESHOLD = 90   // percent
 
 // ── tiny localStorage hook ───────────────────────────────────────────────────
 // ── ClientEntity extends Entity with local auto-accept flag ─────────────────
@@ -131,27 +129,30 @@ export default function Review() {
     enabled: !!jobId,
   })
 
-  // ── local entity state — overlay auto-accept on top of server state ─────
+  // The auto-accept level is the server's (pipeline/decisions.py) — shown in
+  // the banner only; nothing on this page accepts anything by itself.
+  const { data: thresholdsInfo } = useQuery({
+    queryKey: ['thresholds'],
+    queryFn: fetchThresholds,
+    staleTime: 5 * 60_000,
+  })
+  const autoAcceptPct = Math.round((thresholdsInfo?.auto_accept_level ?? 0.9) * 100)
+
+  // ── local entity state ───────────────────────────────────────────────────
+  // ADR-0058: opening this page used to write accepted=true for every entity
+  // at or above 90 %, through the same PATCH an analyst's click uses, so the
+  // store could not tell the two apart.  The worker applies auto-accept now
+  // and stamps it `auto_policy`; the page only reads it.
   const [localEntities, setLocalEntities] = useState<ClientEntity[]>([])
   const bootstrappedRef = useRef(false)
 
   useEffect(() => {
     if (!remoteEntities.length || bootstrappedRef.current) return
     bootstrappedRef.current = true
-    const autoAcceptIds: string[] = []
-    setLocalEntities(remoteEntities.map(e => {
-      const pct = confPct(e.confidence)
-      const autoAccepted = pct >= AUTO_ACCEPT_THRESHOLD && e.accepted === null
-      if (autoAccepted) autoAcceptIds.push(e.id)
-      return { ...e, accepted: autoAccepted ? true : e.accepted, autoAccepted }
-    }))
-    // Persist entity auto-accepts to DB so the STIX bundle includes them.
-    // Without this the server retains accepted=null and may exclude them at finalize.
-    if (autoAcceptIds.length > 0) {
-      Promise.all(autoAcceptIds.map(id => updateEntity(jobId!, id, { accepted: true })))
-        .then(() => qc.invalidateQueries({ queryKey: ['entities', jobId] }))
-        .catch(() => { /* non-blocking — local state is already correct */ })
-    }
+    setLocalEntities(remoteEntities.map(e => ({
+      ...e,
+      autoAccepted: e.decision_origin === 'auto_policy' && e.accepted === true,
+    })))
   }, [remoteEntities])
 
   // Merge server updates while preserving local accepted/autoAccepted
@@ -171,34 +172,15 @@ export default function Review() {
   const localRelsRef = useRef<ClientRelationship[]>([])
   useEffect(() => { localRelsRef.current = localRels }, [localRels])
 
-  // Guards the one-time bootstrap (auto-accept pass) for relationships —
-  // mirrors the same pattern used for entities above.
+  // Guards the one-time bootstrap for relationships — mirrors the entities
+  // above.  No auto-accept pass: the pipeline stores its relationships
+  // accepted (`default`), so the old pass never found a pending row to act on.
   const bootstrappedRelsRef = useRef(false)
 
-  // Initial bootstrap: run the auto-accept pass exactly once on first load.
   useEffect(() => {
     if (!remoteRels.length || bootstrappedRelsRef.current) return
     bootstrappedRelsRef.current = true
-    const autoAcceptIds: string[] = []
-    setLocalRels(remoteRels.map(r => {
-      const pct = confPct(r.confidence)
-      // Promotion threshold (evidence-graded): "observed" claims auto-accept;
-      // otherwise require high confidence AND a label that isn't a weak one.
-      // "inferred"/"gap" never auto-promote — they always wait for a reviewer.
-      const label = r.evidence_label ?? 'reported'
-      const shouldAutoAccept =
-        r.accepted === null &&
-        (label === 'observed' ||
-          (pct >= 90 && label !== 'gap' && label !== 'inferred'))
-      if (shouldAutoAccept) autoAcceptIds.push(r.id)
-      return { ...r, accepted: shouldAutoAccept ? true : r.accepted }
-    }))
-    // Persist relationship auto-accepts so the STIX bundle includes them
-    if (autoAcceptIds.length > 0) {
-      Promise.all(autoAcceptIds.map(id => updateRelationship(jobId!, id, { accepted: true })))
-        .then(() => qc.invalidateQueries({ queryKey: ['relationships', jobId] }))
-        .catch(() => { /* non-blocking — server may re-read on finalize */ })
-    }
+    setLocalRels(remoteRels)
   }, [remoteRels])
 
   // Subsequent updates: merge server state while preserving the locally-set
@@ -304,12 +286,17 @@ export default function Review() {
   })
 
   // ── local-first entity mutations ─────────────────────────────────────────
-  const setAccepted = (id: string, val: boolean | null) => {
-    setLocalEntities(es => es.map(e => e.id === id ? { ...e, accepted: val, autoAccepted: false } : e))
-    updateMutation.mutate({ id, patch: { accepted: val } })
+  // `bulk` marks a decision taken over many cards in one click (a group, a
+  // selection) — stored as `human_bulk`, which calibration does not read.
+  const setAccepted = (id: string, val: boolean | null, bulk = false) => {
+    const decision_origin: ClientDecisionOrigin = bulk ? 'human_bulk' : 'human'
+    setLocalEntities(es => es.map(e => e.id === id
+      ? { ...e, accepted: val, autoAccepted: false, decision_origin }
+      : e))
+    updateMutation.mutate({ id, patch: { accepted: val, decision_origin } })
   }
-  const accept      = useCallback((id: string) => setAccepted(id, true), [])
-  const reject      = useCallback((id: string) => setAccepted(id, false), [])
+  const accept      = useCallback((id: string, bulk?: boolean) => setAccepted(id, true, bulk), [])
+  const reject      = useCallback((id: string, bulk?: boolean) => setAccepted(id, false, bulk), [])
   const reset       = useCallback((id: string) => setAccepted(id, null), [])
 
   const changeType = (id: string, entity_type: string) => {
@@ -321,11 +308,16 @@ export default function Review() {
     // Collect which entities need to be reset BEFORE updating local state so
     // the list is captured at call-time and not affected by the setState call.
     const toReset = localEntities.filter(e => e.autoAccepted)
-    setLocalEntities(es => es.map(e => e.autoAccepted ? { ...e, accepted: null, autoAccepted: false } : e))
+    setLocalEntities(es => es.map(e => e.autoAccepted
+      ? { ...e, accepted: null, autoAccepted: false, decision_origin: 'human_bulk' }
+      : e))
     // Persist to the server — without these PATCH calls the entities remain
     // accepted=true in the DB and will re-appear as accepted on next page load.
+    // One click over many rows: `human_bulk`, and — being a decision — it also
+    // keeps auto-accept from ever re-accepting them.
     if (toReset.length > 0) {
-      Promise.all(toReset.map(e => updateEntity(jobId!, e.id, { accepted: null })))
+      Promise.all(toReset.map(e =>
+        updateEntity(jobId!, e.id, { accepted: null, decision_origin: 'human_bulk' })))
         .then(() => qc.invalidateQueries({ queryKey: ['entities', jobId] }))
         .catch(() => { /* non-blocking — local state is already correct */ })
     }
@@ -688,7 +680,7 @@ export default function Review() {
       {/* ── auto-accept banner ── */}
       <AutoAcceptBanner
         count={autoAcceptedCount}
-        threshold={AUTO_ACCEPT_THRESHOLD}
+        threshold={autoAcceptPct}
         onUndo={undoAutoAccept}
       />
 

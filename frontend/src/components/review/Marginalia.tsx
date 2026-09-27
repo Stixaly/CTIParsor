@@ -10,8 +10,9 @@ interface Props {
   entities: Entity[]
   focusedId: string | null
   setFocusedId: (id: string) => void
-  onAccept: (id: string) => void
-  onReject: (id: string) => void
+  /** `bulk` = decided with others in one click (group or selection). */
+  onAccept: (id: string, bulk?: boolean) => void
+  onReject: (id: string, bulk?: boolean) => void
   onReset: (id: string) => void
   onChangeType: (id: string, t: string) => void
   sortMode: SortMode
@@ -46,9 +47,9 @@ export default function Marginalia({
 
   // ── per-group quick bulk ───────────────────────────────────────────────
   const acceptGroup = (grpEntities: Entity[]) =>
-    grpEntities.filter(e => e.accepted !== true).forEach(e => onAccept(e.id))
+    grpEntities.filter(e => e.accepted !== true).forEach(e => onAccept(e.id, true))
   const rejectGroup = (grpEntities: Entity[]) =>
-    grpEntities.filter(e => e.accepted !== false).forEach(e => onReject(e.id))
+    grpEntities.filter(e => e.accepted !== false).forEach(e => onReject(e.id, true))
 
   // ── checkbox selection ─────────────────────────────────────────────────
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -78,12 +79,12 @@ export default function Marginalia({
   }
 
   const bulkAcceptSelected = () => {
-    selectedIds.forEach(id => onAccept(id))
+    selectedIds.forEach(id => onAccept(id, true))
     clearSelection()
   }
 
   const bulkRejectSelected = () => {
-    selectedIds.forEach(id => onReject(id))
+    selectedIds.forEach(id => onReject(id, true))
     clearSelection()
   }
 

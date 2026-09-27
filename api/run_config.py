@@ -5,6 +5,8 @@ This module records the policy, environment flags, and model settings that
 influenced a specific run. It NEVER captures secrets (API keys, tokens, etc.).
 """
 
+import functools
+import hashlib
 import os
 import subprocess
 from datetime import datetime, timezone
@@ -22,8 +24,87 @@ _CAPTURED_ENV = (
     "ENABLE_STIX_VERIFICATION", "ENABLE_TTP_VERIFICATION", "ENABLE_CONSENSUS",
     "CONSENSUS_PROVIDER", "LLM_PROVIDER", "LLM_PARALLELISM",
     "CYNER_ENABLED", "GLINER_MODEL", "SKIP_HEAVY_MODELS",
-    "VLLM_ENABLE_THINKING",
+    "VLLM_ENABLE_THINKING", "REVIEW_CONTROL_SAMPLE_RATE", "PIPELINE_DISABLED_STAGES",
+    "ENABLE_DOCUMENT_LEVEL_RELATIONS", "CVE_ENRICHMENT", "OCR_LANG",
+    "LLM_TEMPERATURE", "LLM_SEED",
 )
+
+# The data files whose content decides what Stages 2b, 2c and 3c emit.
+_DATA_DIR = Path(__file__).parent.parent / "pipeline" / "data"
+_DATA_FILES = (
+    "mitre_index.json", "attack_relationships.json", "gazetteer.json",
+    "mitre_embeddings.npy", "mitre_embeddings_meta.json",
+)
+
+# Distributions whose version can change an extraction or a bundle.
+_PACKAGES = (
+    "stix2", "pydantic", "pdfplumber", "markitdown", "python-docx", "iocextract",
+    "sentence-transformers", "transformers", "torch", "gliner",
+    "anthropic", "openai", "google-re2",
+)
+
+
+@functools.lru_cache(maxsize=32)
+def _sha256_of(path: str, mtime_ns: int, size: int) -> str:
+    """Content hash, cached on (path, mtime, size): the embeddings file is
+    megabytes and a worker records a manifest for every job."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _file_fingerprint(path: Path) -> str | None:
+    try:
+        st = path.stat()
+        return _sha256_of(str(path), st.st_mtime_ns, st.st_size)[:16]
+    except OSError:
+        return None
+
+
+def build_manifest() -> dict:
+    """What a rerun needs to be the same run (ADR-0059): the exact LLM and NER
+    models, a hash of the Stage 3 prompts, the content of the ATT&CK and
+    gazetteer data, and the package versions.  git_rev pins the code; this
+    pins what the code loaded."""
+    from importlib import metadata
+
+    def _version(dist: str) -> str | None:
+        try:
+            return metadata.version(dist)
+        except metadata.PackageNotFoundError:
+            return None
+
+    llm: dict = {"model": None, "prompt_fingerprint": None, "sampling": None}
+    try:
+        from pipeline.stage3_llm import prompt_fingerprint, provider_label, sampling_options
+        llm = {"model": provider_label(), "prompt_fingerprint": prompt_fingerprint(),
+               "sampling": sampling_options() or "provider default"}
+    except Exception:
+        pass
+
+    models: dict[str, str | None] = {
+        "embedding": os.getenv("TTP_EMBEDDING_MODEL", "all-MiniLM-L6-v2"),
+        "cyner": None, "gliner": None,
+    }
+    try:
+        from pipeline.stage2d_cyner import _MODEL_ID as _cyner_model
+        models["cyner"] = _cyner_model
+    except Exception:
+        pass
+    try:
+        from pipeline.stage2e_gliner import _GLINER_MODEL_ID as _gliner_model
+        models["gliner"] = _gliner_model
+    except Exception:
+        pass
+
+    return {
+        "llm": llm,
+        "models": models,
+        "data": {name: _file_fingerprint(_DATA_DIR / name) for name in _DATA_FILES},
+        "packages": {dist: _version(dist) for dist in _PACKAGES},
+    }
 
 
 def _resolve_git_rev() -> str | None:
@@ -70,7 +151,8 @@ def build_run_config(policy: dict | None = None) -> dict:
 
     Returns:
         A dict with keys: recorded_at, git_rev, policy, embedding_model,
-        ttp_thresholds, stages, env.
+        ttp_thresholds, ner_thresholds, entity_overrides, stages, env,
+        manifest.  The worker adds stage_report once the run is over.
     """
     # recorded_at
     recorded_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -176,4 +258,5 @@ def build_run_config(policy: dict | None = None) -> dict:
         "entity_overrides": entity_overrides,
         "stages": stages,
         "env": env,
+        "manifest": build_manifest(),
     }

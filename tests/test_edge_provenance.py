@@ -119,7 +119,8 @@ def test_build_run_config_shape():
 
     expected_keys = {
         "recorded_at", "git_rev", "policy", "embedding_model",
-        "ttp_thresholds", "ner_thresholds", "entity_overrides", "stages", "env"
+        "ttp_thresholds", "ner_thresholds", "entity_overrides", "stages", "env",
+        "manifest",
     }
     assert set(config.keys()) == expected_keys
 

@@ -685,6 +685,16 @@ mark.tok-accepted::after {
   font-family: "JetBrains Mono", monospace;
   font-size: 10px; color: var(--accent); font-weight: 600;
 }
+/* Decision provenance chips (ADR-0058) */
+.marg-origin {
+  font-size: 9.5px; letter-spacing: 0.03em; font-weight: 600;
+  padding: 1px 5px; border-radius: 3px;
+  color: var(--ink-3); background: var(--bg-soft);
+}
+.marg-origin-control {
+  color: var(--warn);
+  background: color-mix(in oklab, var(--warn) 12%, var(--bg-elev));
+}
 .marg-conf {
   margin-left: auto;
   font-family: "JetBrains Mono", monospace;
