@@ -343,11 +343,13 @@ On Finalize (web UI):
     Source tagged "report_lexicon". Zero ML cost, pure string matching.
 ```
 
-**This diagram describes the web/API path** (`api/worker.py`), which is the full
-pipeline. The `main.py` CLI is a thinner subset — it runs Stage 2 regex
-extraction only (no gazetteer, semantic TTP, CyNER or GLiNER), uses a fixed
-3 000-char chunk size instead of the adaptive one, and has no consensus or
-lexicon re-scan. Use the web UI (`docker compose up -d`) to exercise every stage.
+**The API worker, the `main.py` CLI and the `--stage full` benchmark run the
+same sequence of stages** (`pipeline/orchestrator.py`, ADR-0059); they differ
+only in what happens around it (job store, progress events, crash-resume).
+Every run records which stages ran, were skipped (disabled, model missing, no
+LLM provider) or failed — the CLI prints it, the worker stores it in the job's
+run config (`stage_report`). The lexicon re-scan runs on Finalize, so it stays
+web-only.
 
 Stage order note: 3b, 3d, 3f and 3e run **per chunk**; 3c runs **once per
 document**, after every chunk has been merged. The boxes are drawn in that
@@ -368,6 +370,19 @@ docker compose run --rm dev cli input/report.pdf --output output/apt29.json
 docker compose run --rm dev cli --input-dir input/
 docker compose run --rm dev cli --input-dir input/ --output-dir output/
 ```
+
+### CLI — choosing stages
+```bash
+docker compose run --rm dev cli input/report.pdf --no-llm                 # no LLM call
+docker compose run --rm dev cli input/report.pdf --disable-stage 2d,2e    # ablation
+docker compose run --rm dev cli input/report.pdf --require-stage 3        # fail if the LLM cannot run
+```
+
+Stage ids: `1 1f 2 2b 2c 2d 2e 2g 3 3d 3f 3e 3doc 2f 4 4b 4c 5`.
+`PIPELINE_DISABLED_STAGES` (comma-separated) does the same for every run of a
+process, the API worker included. The CLI applies the relationship policy
+saved in the job store, like the worker (`--policy db`, the default), or
+`--policy none` / `--policy file.json`.
 
 ### Run tests
 ```bash
@@ -393,7 +408,21 @@ docker compose run --rm dev python tests/eval_pipeline.py -b grounding --from-db
 
 # ATT&CK Technique Extraction recall vs the GPT-4 baseline
 docker compose run --rm dev python tests/eval_pipeline.py -b ate --stage all
+
+# The same, through the application's pipeline (LLM required; ADR-0059)
+docker compose run --rm dev python tests/eval_pipeline.py -b ate --stage full
 ```
+
+`--stage full` stops with an error when no LLM provider is configured instead of
+quietly scoring regex + semantic; `--allow-degraded` scores it anyway and lists
+the stages that did not run.
+
+**Document-level evaluation (ADR-0060).** `python -m evaluation` scores the
+application's pipeline on AnnoCTR (120 annotated vendor reports, official
+temporal split) and on an in-house set annotated from the original files
+(IoCs, relationships, negative cases), compares configurations with a paired
+bootstrap on the same documents, and measures Stage 2c's candidate recall.
+Protocol, commands and the decision rule: [docs/eval/README.md](docs/eval/README.md).
 
 Relationships are reported in two segments — **named-entity** vs **IoC/technical**
 — because a single global number blends two very different regimes. Use this to
@@ -420,8 +449,8 @@ Python/Node routes through `docker compose run --rm dev` (ADR-0054), so
 | `make check` | Diagnostic: list which pipeline stages are available |
 | `make check-docs` | Verify every number claimed in this README against the source of truth |
 | `make audit` | Scan Python + npm deps for known CVEs (`pip-audit` + `npm audit`), no image build needed |
-| `make lock` | Freeze the image's exact installed versions → `requirements.lock.txt` |
-| `make update-deps` | Rebuild with no layer cache, run tests, re-lock |
+| `make lock` | Resolve `requirements*.txt` into `requirements.lock.txt` — the exact versions the image and CI install |
+| `make update-deps` | Re-resolve to the newest versions the ranges allow, rebuild the image from the new lock, run tests |
 | `make npm-outdated` | Show which npm packages have newer versions available |
 | `make npm-update` | Upgrade npm packages within semver ranges, verify TypeScript |
 | `make clean` | Remove generated bundle JSONs and `__pycache__` (host-side only) |
@@ -1312,6 +1341,7 @@ class node_coverage_ui,node_settings_ui,node_coverage_engine,node_rule_store,nod
 CTIParsor/
 │
 ├── main.py                        # CLI entry point
+├── evaluation/                    # Evaluation protocol: AnnoCTR, in-house set, paired comparisons (ADR-0060)
 │
 ├── pipeline/
 │   ├── stage1_ingestion.py        # Parsing, defanging, chunking + overlap
@@ -1341,7 +1371,9 @@ CTIParsor/
 │   ├── evidence_span.py           # Locate LLM quotes in source text, return char offsets
 │   ├── llm_parse.py               # Parsing helpers for LLM responses shared by verification stages
 │   ├── stix_access.py             # Uniform field access for STIX objects (dict or stix2 instance)
-│   ├── registry.py                # Stage Registry — loads all Stage-2 extractors declaratively
+│   ├── orchestrator.py            # The one pipeline (Stages 1-5) for worker, CLI and benchmark (ADR-0059)
+│   ├── decisions.py               # Who decided each accept/reject; server-side auto-accept (ADR-0058)
+│   ├── registry.py                # Stage Registry — unused since ADR-0059 (orchestrator.py owns Stage 2)
 │   ├── base.py                    # ExtractionStage protocol + BaseExtractionStage
 │   ├── env_flags.py               # Single vocabulary for boolean environment flags
 │   ├── detection/                 # Detection-rule ingestion + coverage (ADR-0006)
@@ -2114,16 +2146,24 @@ bash setup.sh --offline=DIR       # air-gapped install from a bundle built by
 |---|---|---|
 | `requirements.txt` | **Human-managed** — lower bounds + major-version caps | When you want to allow a new major version |
 | `requirements-api.txt` | Same, for API-only packages | Rarely |
-| `requirements.lock.txt` | **Machine-generated** — exact pinned versions | Never by hand — run `make lock` |
+| `requirements.lock.txt` | **Machine-generated** — exact versions of all three files above, resolved for Python 3.12 with CPU-only torch; what the image and CI install | Never by hand — run `make lock` |
+| `requirements-dev.txt` | Pinned test / lint / type-check tools for CI | When you upgrade ruff, mypy or pytest-cov on purpose |
 | `frontend/package.json` | npm semver ranges (`^`) | When you want to allow a new major version |
 | `frontend/package-lock.json` | npm lock file | Never by hand — run `make npm-update` to update it |
 
-Both are installed inside the image at build time (`Dockerfile`), not on the
-host — `docker compose build` is what "fresh install" means now, resolving
-`requirements.txt`/`requirements-api.txt`'s semver ranges and
-`package-lock.json` fresh each time. `requirements.lock.txt` is a
-machine-generated record of what actually got resolved (`make lock`), not
-something the build reads — use it to diff what changed after an upgrade.
+Both lock files are what gets installed: the `Dockerfile` runs
+`pip install -r requirements.lock.txt` and `npm ci`, and CI installs every
+Python package under `-c requirements.lock.txt`, so the versions CI tested are
+the versions the image ships. A rebuild never re-resolves on its own; only
+`make lock` (keeps the pins that still fit the ranges) or `make update-deps`
+(`--upgrade`) moves a version. The lock names the PyTorch CPU index itself,
+which is what keeps the ~2.2 GB of CUDA wheels out of the image.
+
+The lock pins versions, **not file hashes**. torch's `+cpu` wheels live on a
+second index that also mirrors common packages; under `--require-hashes` pip
+may pick the mirror's file for a version and reject it against PyPI's hash.
+Hashing would need torch installed alone from its index first, then the rest
+from PyPI only, each with its own hashed lock — not done yet.
 
 ### Quarterly maintenance workflow
 

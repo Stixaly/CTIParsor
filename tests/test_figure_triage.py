@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import types
 
-from api.worker import _figure_source_pdf
+from pipeline.orchestrator import figure_source_pdf as _figure_source_pdf
 from pipeline.stage1f_figures import (
     MIN_FIGURE_AREA_PT2,
     find_figures,

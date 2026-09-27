@@ -163,12 +163,14 @@ def auto_accept_audit(conn) -> list[dict]:
 
     `precision` is the share of control-sample rows an analyst accepted, among
     those an analyst has decided one at a time — the estimate of how often an
-    auto-accepted row of that kind is right.
+    auto-accepted row of that kind is right.  A row the analyst reset to
+    pending carries `human` but no verdict (accepted IS NULL) and is not
+    counted as decided.
     """
     rows = conn.execute(
         "SELECT source, entity_type, "
         "COUNT(*) AS sampled, "
-        "SUM(CASE WHEN decision_origin=? THEN 1 ELSE 0 END) AS decided, "
+        "SUM(CASE WHEN decision_origin=? AND accepted IS NOT NULL THEN 1 ELSE 0 END) AS decided, "
         "SUM(CASE WHEN decision_origin=? AND accepted=1 THEN 1 ELSE 0 END) AS confirmed "
         "FROM entities WHERE control_sample=1 GROUP BY source, entity_type "
         "ORDER BY source, entity_type",

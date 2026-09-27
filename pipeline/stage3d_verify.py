@@ -154,16 +154,21 @@ def verify_relationships(
         claims=claims_str,
     )
 
+    from pipeline import llm_stats
+
     raw = llm_fn(_VERIFY_SYSTEM, prompt)
     if not raw:
         # LLM call failed — keep all relationships (safe fallback)
         logger.warning("Verification LLM call failed — keeping all relationships")
+        llm_stats.bump("rel_verification_failed")
         return result
 
     verifications = parse_numbered_claims(raw, len(rels))
     if verifications is None:
         logger.warning("Could not parse verification response — keeping all relationships")
+        llm_stats.bump("rel_verification_unparsed")
         return result
+    llm_stats.bump("rel_verification_ok")
 
     # ── Apply verification results ────────────────────────────────────────────
     verified_rels = []

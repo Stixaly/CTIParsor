@@ -1,4 +1,5 @@
 import logging
+import os
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -248,7 +249,7 @@ def _read_pdf_ocr(path: Path) -> str:
             logger.warning(f"OCR failed on pages {start}-{end} of {path.name}: {e}")
             continue
         try:
-            pages_text.extend(pytesseract.image_to_string(img, lang="eng") for img in images)
+            pages_text.extend(pytesseract.image_to_string(img, lang=ocr_lang()) for img in images)
         finally:
             # Close all PIL images to free resources before the next batch
             for img in images:
@@ -257,11 +258,87 @@ def _read_pdf_ocr(path: Path) -> str:
     return "\n".join(t for t in pages_text if t.strip())
 
 
+def ocr_lang() -> str:
+    """Tesseract language(s), e.g. "eng" or "eng+fra" (OCR_LANG; default eng)."""
+    return (os.getenv("OCR_LANG") or "eng").strip() or "eng"
+
+
+# A page is read as a scan when it carries almost no text and an image covers
+# at least this share of it.  The image test is what keeps a blank page, a
+# sparse cover or a divider out of OCR.
+_SCAN_IMAGE_COVERAGE = 0.5
+
+
+def _page_is_scanned(page) -> bool:
+    # Glyph count rather than extract_text(): the detection runs on every page
+    # of every PDF, and text-layout grouping is the expensive part.
+    if sum(1 for c in page.chars if not c["text"].isspace()) >= _MIN_CHARS_PER_PAGE:
+        return False
+    area = float(page.width * page.height) or 1.0
+    covered = sum(
+        max(0.0, float(img["x1"]) - float(img["x0"])) * max(0.0, float(img["bottom"]) - float(img["top"]))
+        for img in page.images
+    )
+    return covered / area >= _SCAN_IMAGE_COVERAGE
+
+
+def _ocr_page(path: Path, page_number: int) -> str:
+    """OCR one page (1-based); "" when OCR is unavailable or fails."""
+    if not _OCR_AVAILABLE:
+        return ""
+    try:
+        images = convert_from_path(str(path), dpi=300, first_page=page_number, last_page=page_number)
+    except Exception as e:
+        logger.warning(f"OCR failed on page {page_number} of {path.name}: {e}")
+        return ""
+    try:
+        return "\n".join(pytesseract.image_to_string(img, lang=ocr_lang()) for img in images)
+    except Exception as e:
+        logger.warning(f"OCR failed on page {page_number} of {path.name}: {e}")
+        return ""
+    finally:
+        for img in images:
+            img.close()
+
+
 def _read_pdf(path: Path) -> str:
-    if _is_scanned_pdf(path):
+    """Text of a PDF, with OCR decided page by page.
+
+    The decision used to be made once, on the first few pages: a report whose
+    first pages carried text and whose later pages were scans lost those pages
+    entirely, and one that opened with a scanned cover was OCR'd throughout,
+    text layer and all.
+    """
+    try:
+        with pdfplumber.open(path) as pdf:
+            n_pages = len(pdf.pages)
+            scanned = [i for i, page in enumerate(pdf.pages) if _page_is_scanned(page)]
+            # Page-by-page text is only needed for a mixed document.
+            page_texts = ([page.extract_text() or "" for page in pdf.pages]
+                          if 0 < len(scanned) < n_pages else [])
+    except Exception as exc:
+        logger.warning(f"Could not read {path.name} page by page ({exc}); using the "
+                       "whole-document heuristic")
+        if _is_scanned_pdf(path):
+            logger.info("Scanned PDF detected — using OCR")
+            return _read_pdf_ocr(path)
+        return _read_pdf_text(path)
+
+    if n_pages and len(scanned) == n_pages:
         logger.info("Scanned PDF detected — using OCR")
         return _read_pdf_ocr(path)
+    if scanned:
+        # Mixed document: keep each page in place, OCR only the scanned ones.
+        logger.info(f"{len(scanned)} of {n_pages} pages are scans — OCR on those pages "
+                    f"(lang={ocr_lang()})")
+        for i in scanned:
+            page_texts[i] = _ocr_page(path, i + 1) or page_texts[i]
+        return "\n".join(t for t in page_texts if t.strip())
+    return _read_pdf_text(path)
 
+
+def _read_pdf_text(path: Path) -> str:
+    """A PDF with a text layer on every page."""
     # Text-based PDF: markitdown preserves headers, tables, and lists
     if _MARKITDOWN_AVAILABLE:
         try:
@@ -283,8 +360,46 @@ def _read_pdf(path: Path) -> str:
 
 
 def _read_docx(path: Path) -> str:
+    """Body text of a Word document — paragraphs AND tables, in reading order.
+
+    `doc.paragraphs` alone skips every table, and CTI reports keep their IoCs in
+    tables: a hash in a cell never reached Stage 2.  A table row becomes one
+    line, its cells joined by " | "; a table nested in a cell is flattened into
+    that cell's text.
+    """
     doc = docx.Document(str(path))
-    return "\n".join(para.text for para in doc.paragraphs if para.text.strip())
+    lines: list[str] = []
+    _docx_blocks(doc.element.body, doc, lines)
+    return "\n".join(line for line in lines if line.strip())
+
+
+def _docx_blocks(parent_el, parent, lines: list[str]) -> None:
+    """Append the text of every paragraph and table under `parent_el`, in order."""
+    from docx.oxml.ns import qn
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
+    for child in parent_el.iterchildren():
+        if child.tag == qn("w:p"):
+            lines.append(Paragraph(child, parent).text)
+        elif child.tag == qn("w:tbl"):
+            _docx_table(Table(child, parent), lines)
+
+
+def _docx_table(table, lines: list[str]) -> None:
+    for row in table.rows:
+        cells: list[str] = []
+        seen: list = []
+        for cell in row.cells:
+            # A cell spanning several grid columns is returned once per column.
+            if any(cell._tc is tc for tc in seen):
+                continue
+            seen.append(cell._tc)
+            inner: list[str] = []
+            _docx_blocks(cell._tc, cell, inner)
+            cells.append(" ".join(t.strip() for t in inner if t.strip()))
+        if any(cells):
+            lines.append(" | ".join(cells))
 
 
 def html_to_text(html: str) -> str:

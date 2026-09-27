@@ -59,7 +59,13 @@ become `legacy` (the migration runs at every start and is a no-op afterwards).
 
 **2. A journal.** `review_decisions` gets one row per change of `accepted`:
 previous value, new value, origin, actor (NULL until there is an identity,
-ADR-0036), policy version, time. It is only ever inserted into.
+ADR-0036), policy version, time. It is only ever inserted into, and it has
+**no foreign key to `jobs`**: deleting a report deletes its entities but keeps
+who decided what on it. The rows hold ids, origins and times, not report
+content. (A first version cascaded on job deletion, which contradicted "never
+deleted"; a store created with it has the constraint dropped at start-up.)
+Purging old journal rows is not implemented — a retention period, if one is
+wanted, is an explicit operation to add.
 `decisions.record()` writes the rows and the journal in **one** statement
 (`WITH old … FOR UPDATE, upd AS (UPDATE … RETURNING …) INSERT … SELECT`), so
 they cannot disagree.
@@ -107,5 +113,8 @@ precision of auto-accept.
 * The control sample adds about one pending card in ten among high-confidence
   entities. `REVIEW_CONTROL_SAMPLE_RATE=0` disables it; the value is recorded in
   each run config.
+* A reset to pending is recorded as `human` with `accepted` NULL. The control
+  sample's precision counts only verdicts (`accepted` NOT NULL), so a reset is
+  not read as a rejection.
 * `actor` stays NULL: the application has no identity (docs/deployment.md
   §2). The column is where ADR-0036's identity will land.

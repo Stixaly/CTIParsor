@@ -96,18 +96,27 @@ audit:
 	docker run --rm -v "$$(pwd)/frontend":/ui -w /ui node:24-bookworm-slim \
 	    sh -c "npm audit --audit-level=moderate || true"
 
-## Freeze the image's exact installed versions -> requirements.lock.txt
-## Commit this file so CI and production always install the exact same versions.
-lock: .secrets/db_password
-	$(DEV_RUN) pip freeze > requirements.lock.txt
-	@echo "Locked $$(wc -l < requirements.lock.txt | tr -d ' ') packages -> requirements.lock.txt"
+## Resolve requirements*.txt -> requirements.lock.txt, the exact versions the
+## image and CI install (Python 3.12, CPU-only torch, every platform).
+## Keeps the current pins that still fit the ranges; LOCK_FLAGS=--upgrade
+## re-resolves everything to the newest allowed versions.
+LOCK_FLAGS ?=
+lock:
+	docker run --rm --user "$$(id -u):$$(id -g)" -e HOME=/tmp -v "$$(pwd)":/w -w /w python:3.12-slim \
+	    sh -c "pip install --quiet --target /tmp/uv uv && /tmp/uv/bin/uv pip compile \
+	        requirements.txt requirements-api.txt requirements-optional.txt \
+	        --universal --python-version 3.12 \
+	        --extra-index-url https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match \
+	        --emit-index-url --annotation-style line --custom-compile-command 'make lock' \
+	        $(LOCK_FLAGS) -o requirements.lock.txt"
+	@echo "Locked $$(grep -c '==' requirements.lock.txt) packages -> requirements.lock.txt"
 
-## Rebuild with no layer cache (forces pip to re-resolve against the current
-## requirements.txt constraints), run the fast test suite, then re-lock.
+## Re-resolve to the newest versions the ranges allow, rebuild the image from
+## the new lock, run the fast test suite.
 update-deps:
-	docker compose build --no-cache app
+	$(MAKE) lock LOCK_FLAGS=--upgrade
+	docker compose build app
 	$(MAKE) test-fast
-	$(MAKE) lock
 	@echo ""
 	@echo "Done. Review 'git diff requirements.lock.txt' then commit if tests passed."
 

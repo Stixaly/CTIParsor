@@ -167,15 +167,20 @@ def verify_ttps(
 
     prompt = _VERIFY_USER_TEMPLATE.format(text=text[:3_500], claims=claims_str)
 
+    from pipeline import llm_stats
+
     raw = llm_fn(_VERIFY_SYSTEM, prompt)
     if not raw:
         logger.warning("TTP verification LLM call failed — keeping all TTPs")
+        llm_stats.bump("ttp_verification_failed")
         return result
 
     verifications = parse_numbered_claims(raw, len(to_verify))
     if verifications is None:
         logger.warning("Could not parse TTP verification response — keeping all TTPs")
+        llm_stats.bump("ttp_verification_unparsed")
         return result
+    llm_stats.bump("ttp_verification_ok")
 
     kept_verified: list = []
     removed = 0

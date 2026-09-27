@@ -91,11 +91,17 @@ class MatchResult:
 
 @dataclass
 class StageScore:
-    """Aggregated NER scores for one entity type."""
+    """Aggregated NER counts for one entity type.
+
+    tp + fp is always the number of predictions and tp + fn the number of gold
+    entities: every prediction and every gold entity is counted exactly once
+    (see score_sample).  `partial` says how many of them were substring pairs.
+    """
     entity_type: str
     tp: float = 0.0
     fp: float = 0.0
     fn: float = 0.0
+    partial: int = 0
 
     @property
     def precision(self) -> float:
@@ -136,64 +142,89 @@ def _match_score(pred_value: str, pred_type: EntityType,
     return 0.0
 
 
+def _match_pairs(
+    predicted: list[RawEntity],
+    expected: list[tuple[str, EntityType]],
+) -> tuple[list[tuple[int, int, float]], set[int], set[int]]:
+    """One-to-one matching of predictions to gold entities.
+
+    Every candidate pair is ranked — exact before partial, then input order —
+    and taken if neither side is taken yet, so a gold entity is matched at most
+    once and an exact match is never lost to a partial one that came first
+    (predictions "Cobalt" then "Cobalt Strike" against gold "Cobalt Strike":
+    the exact pair wins, "Cobalt" is a false positive).
+
+    Returns (pairs as (pred_idx, gold_idx, score), unmatched pred idx,
+    unmatched gold idx).
+    """
+    candidates = [
+        (-s, pi, gi, s)
+        for pi, pe in enumerate(predicted)
+        for gi, (gv, gt) in enumerate(expected)
+        if (s := _match_score(pe.value, pe.entity_type, gv, gt)) > 0
+    ]
+    candidates.sort()
+    pairs: list[tuple[int, int, float]] = []
+    used_pred: set[int] = set()
+    used_gold: set[int] = set()
+    for _, pi, gi, s in candidates:
+        if pi in used_pred or gi in used_gold:
+            continue
+        pairs.append((pi, gi, s))
+        used_pred.add(pi)
+        used_gold.add(gi)
+    return (pairs,
+            set(range(len(predicted))) - used_pred,
+            set(range(len(expected))) - used_gold)
+
+
 def score_sample(
     predicted: list[RawEntity],
     expected: list[tuple[str, EntityType]],
-    partial_credit: bool = True,
+    partial_credit: bool = False,
 ) -> tuple[float, float, float]:
     """
     Score predicted entities against expected entities for a single sample.
 
-    Returns (tp, fp, fn) as floats (partial matches contribute 0.5).
+    Returns (tp, fp, fn); tp + fp == len(predicted), tp + fn == len(expected).
+
+    Strict (default): a partial pair ("Cobalt" for gold "Cobalt Strike") is a
+    false positive AND a false negative — the analyst still has to fix it.
+    partial_credit=True: a partial pair counts as a match, whole.  It used to
+    count 0.5 towards tp and nothing towards fp or fn, so half of it vanished
+    from the accounting and the example above scored P = R = F1 = 1.0.
     """
-    gold = list(expected)   # mutable copy
-    pred = list(predicted)
-
-    tp: float = 0.0
-    matched_gold: set[int] = set()
-
-    for pe in pred:
-        best_score = 0.0
-        best_gold_idx = -1
-        for gi, (gv, gt) in enumerate(gold):
-            if gi in matched_gold:
-                continue
-            s = _match_score(pe.value, pe.entity_type, gv, gt)
-            if s > best_score:
-                best_score = s
-                best_gold_idx = gi
-
-        if best_gold_idx >= 0 and best_score > 0:
-            if partial_credit:
-                tp += best_score
-            else:
-                tp += 1.0 if best_score == 1.0 else 0.0
-            matched_gold.add(best_gold_idx)
-
-    fp = len(pred) - len(matched_gold)
-    fn = len(gold) - len(matched_gold)
-
-    return max(0.0, tp), max(0.0, float(fp)), max(0.0, float(fn))
+    pairs, unmatched_pred, unmatched_gold = _match_pairs(predicted, expected)
+    exact = sum(1 for _, _, s in pairs if s == 1.0)
+    partial = len(pairs) - exact
+    if partial_credit:
+        return float(exact + partial), float(len(unmatched_pred)), float(len(unmatched_gold))
+    return (float(exact), float(len(unmatched_pred) + partial),
+            float(len(unmatched_gold) + partial))
 
 
 def score_dataset(
     samples: list[NERSample],
     stage_fn=None,
-    partial_credit: bool = True,
+    partial_credit: bool = False,
     verbose: bool = False,
     filter_types: set[EntityType] | None = None,
 ) -> dict[str, StageScore]:
     """
     Evaluate *stage_fn* (or the default Stage 2 regex extractor) over all samples.
 
-    Returns a dict of entity_type_name → StageScore.
-    Also returns an "overall" key with macro-averaged scores.
+    Returns a dict of entity_type_name → StageScore, plus an "overall" key
+    (micro-average: the per-type counts summed).  Per-type counts come from
+    the same one-to-one matching as score_sample, so the types add up to the
+    overall and a pair is never counted under two types.
     """
     if stage_fn is None:
         stage_fn = extract_entities
 
-    # Aggregate per entity type
     scores: dict[str, StageScore] = {}
+
+    def _s(key: str) -> StageScore:
+        return scores.setdefault(key, StageScore(entity_type=key))
 
     for sample in samples:
         predicted = stage_fn(sample.text)
@@ -205,53 +236,33 @@ def score_dataset(
         else:
             expected = sample.expected
 
-        tp, fp, fn = score_sample(predicted, expected, partial_credit=partial_credit)
-
-        # Break down by type
-        for pe in predicted:
-            key = pe.entity_type.value
-            if key not in scores:
-                scores[key] = StageScore(entity_type=key)
-
-        for _, et in expected:
-            key = et.value
-            if key not in scores:
-                scores[key] = StageScore(entity_type=key)
-
-        # Per-type TP/FP/FN
-        for pe in predicted:
-            key = pe.entity_type.value
-            type_gold = [(v, t) for v, t in expected if t == pe.entity_type]
-            # Did this prediction match anything in gold of this type?
-            best = max(
-                (_match_score(pe.value, pe.entity_type, gv, gt) for gv, gt in type_gold),
-                default=0.0,
-            )
-            if best > 0:
-                scores[key].tp += best if partial_credit else (1.0 if best == 1.0 else 0.0)
+        pairs, unmatched_pred, unmatched_gold = _match_pairs(predicted, expected)
+        for pi, _gi, s in pairs:
+            row = _s(predicted[pi].entity_type.value)   # same type as the gold side
+            if s == 1.0:
+                row.tp += 1.0
             else:
-                scores[key].fp += 1.0
-
-        for gv, gt in expected:
-            key = gt.value
-            type_pred = [pe for pe in predicted if pe.entity_type == gt]
-            best = max(
-                (_match_score(pe.value, pe.entity_type, gv, gt) for pe in type_pred),
-                default=0.0,
-            )
-            if best == 0:
-                scores[key].fn += 1.0
+                row.partial += 1
+                if partial_credit:
+                    row.tp += 1.0
+                else:
+                    row.fp += 1.0
+                    row.fn += 1.0
+        for pi in unmatched_pred:
+            _s(predicted[pi].entity_type.value).fp += 1.0
+        for gi in unmatched_gold:
+            _s(expected[gi][1].value).fn += 1.0
 
         if verbose:
             _print_sample_diff(sample, predicted, expected)
 
-    # Overall (macro average across types)
     if scores:
         overall = StageScore(entity_type="overall")
         for s in scores.values():
             overall.tp += s.tp
             overall.fp += s.fp
             overall.fn += s.fn
+            overall.partial += s.partial
         scores["overall"] = overall
 
     return scores
@@ -275,25 +286,27 @@ def _print_sample_diff(
 
 
 def print_scores(scores: dict[str, StageScore]) -> None:
-    """Print a formatted score table."""
+    """Print a formatted score table (`partial` = substring pairs among them)."""
     overall = scores.pop("overall", None)
 
-    print(f"\n{'Entity Type':<22}  {'Prec':>6}  {'Rec':>6}  {'F1':>6}  {'TP':>6}  {'FP':>6}  {'FN':>6}")
-    print("-" * 70)
+    header = (f"\n{'Entity Type':<22}  {'Prec':>6}  {'Rec':>6}  {'F1':>6}  "
+              f"{'TP':>5}  {'FP':>5}  {'FN':>5}  {'partial':>7}")
+    print(header)
+    print("-" * 78)
 
     for key in sorted(scores):
         s = scores[key]
         print(
             f"{key:<22}  {s.precision:>6.3f}  {s.recall:>6.3f}  {s.f1:>6.3f}"
-            f"  {s.tp:>6.1f}  {s.fp:>6.1f}  {s.fn:>6.1f}"
+            f"  {s.tp:>5.0f}  {s.fp:>5.0f}  {s.fn:>5.0f}  {s.partial:>7d}"
         )
 
     if overall:
-        print("-" * 70)
+        print("-" * 78)
         print(
-            f"{'OVERALL (macro)':<22}  {overall.precision:>6.3f}  "
+            f"{'OVERALL (micro)':<22}  {overall.precision:>6.3f}  "
             f"{overall.recall:>6.3f}  {overall.f1:>6.3f}"
-            f"  {overall.tp:>6.1f}  {overall.fp:>6.1f}  {overall.fn:>6.1f}"
+            f"  {overall.tp:>5.0f}  {overall.fp:>5.0f}  {overall.fn:>5.0f}  {overall.partial:>7d}"
         )
 
     scores["overall"] = overall  # restore
@@ -459,7 +472,7 @@ def test_stage2_ner_f1_on_fixtures():
         EntityType.CVE, EntityType.TTP,
     }
     samples = _load_fixture_samples()
-    scores = score_dataset(samples, partial_credit=True, filter_types=ioc_types)
+    scores = score_dataset(samples, filter_types=ioc_types)   # strict
     overall = scores.get("overall")
     assert overall is not None, "No scores computed"
     assert overall.f1 >= 0.70, (
@@ -727,39 +740,45 @@ def _subsume_ids(ids: set[str]) -> set[str]:
     return {i for i in upper if i not in parents}
 
 
+# Set by --allow-degraded: score a `full` run even when a stage it needs was
+# skipped.  The skipped stages are collected here and printed with the score.
+_ALLOW_DEGRADED = False
+_DEGRADED_STAGES: dict[str, str] = {}
+
+_TECHNIQUE_ID = re.compile(r"^T\d{4}(?:\.\d{3})?$")
+
+
 def _ate_stage_full(text: str) -> set[str]:
     """
-    Full TTP path: regex + semantic + LLM enrichment + Stage 3c normalize.
+    Full TTP path, through the pipeline the application runs (ADR-0059):
+    chunked the way the worker chunks, every Stage 2 extractor that is
+    available, the LLM (Stage 3, with 3e/3doc as configured) and Stage 3c.
 
-    This is the ONLY stage that measures what the pipeline actually emits to the
-    DB — it includes the LLM and the merge/normalize/subsumption logic where the
-    Phase A–C precision rules live.  Requires a configured LLM provider; without
-    one it degrades to regex + semantic so the harness still runs offline.
+    This is the ONLY stage that measures what the pipeline actually emits —
+    it includes the LLM and the merge/normalize/subsumption logic where the
+    Phase A–C precision rules live.  It requires the LLM: a run where Stage 3
+    did not happen raises StageRequired rather than scoring a different
+    pipeline, unless --allow-degraded (and then the report says so).
     """
     from models.schemas import EntityType
-    from pipeline.stage2_extraction import extract_entities
-    from pipeline.stage3_llm import _provider_ready, enrich_all_chunks
+    from pipeline.orchestrator import Document, RunOptions, run_document
 
-    regex_ents = extract_entities(text)
+    result = run_document(
+        Document(text=text, original_filename="ate-sample.txt"),
+        RunOptions.from_env(disabled={"1f", "4", "5"},
+                            required=set() if _ALLOW_DEGRADED else {"3"}),
+    )
+    for o in result.not_run():
+        if o.stage not in ("1f", "4", "5", "2f"):
+            _DEGRADED_STAGES.setdefault(o.stage, o.reason)
 
-    semantic_ents: list = []
-    try:
-        from pipeline.stage2c_ttp_semantic import detect_ttps_semantic, semantic_available
-        if semantic_available():
-            semantic_ents = detect_ttps_semantic(text)
-    except Exception:
-        pass
-
-    ids = {e.value.upper() for e in regex_ents if e.entity_type == EntityType.TTP}
-    ids |= {e.mitre_id.upper() for e in semantic_ents if e.mitre_id}
-
-    if _provider_ready():
-        result = enrich_all_chunks(
-            [text], [regex_ents], semantic_ttp_entities=semantic_ents,
-        )
-        ids |= {t.mitre_id.upper() for t in result.ttps if t.mitre_id}
-
-    return _subsume_ids(ids)
+    ids = {
+        (e.mitre_id or e.value).upper()
+        for e in result.entities if e.entity_type == EntityType.TTP
+    }
+    if result.llm_result is not None:
+        ids |= {t.mitre_id.upper() for t in result.llm_result.ttps if t.mitre_id}
+    return _subsume_ids({i for i in ids if _TECHNIQUE_ID.match(i)})
 
 
 _ATE_STAGE_FNS: dict[str, object] = {
@@ -2419,7 +2438,15 @@ def main() -> None:
             "  2    = regex (explicit T-IDs)\n"
             "  2c   = semantic only\n"
             "  all  = regex + semantic + subsumption (offline)\n"
-            "  full = regex + semantic + LLM + Stage 3c normalize (needs API key)"
+            "  full = the application's pipeline (pipeline/orchestrator.py): every\n"
+            "         available extractor + LLM + Stage 3c; needs an LLM provider"
+        ),
+    )
+    parser.add_argument(
+        "--allow-degraded", dest="allow_degraded", action="store_true",
+        help=(
+            "[ATE mode, --stage full] Score the run even if the LLM (Stage 3) did not\n"
+            "  run; the report then lists every stage that was skipped."
         ),
     )
     parser.add_argument(
@@ -2437,7 +2464,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--no-partial", action="store_true",
-        help="[NER mode] Disable partial-match scoring (strict exact match only).",
+        help=("[NER mode] Do not print the lenient line (substring pairs counted as\n"
+              "  matches).  The main table is always strict."),
     )
     parser.add_argument(
         "--verbose", "-v", action="store_true",
@@ -2533,8 +2561,24 @@ def main() -> None:
             except ImportError:
                 pass
 
-        score = run_ate_benchmark(samples, stage=args.stage, verbose=args.verbose)
+        global _ALLOW_DEGRADED
+        _ALLOW_DEGRADED = args.allow_degraded
+        try:
+            score = run_ate_benchmark(samples, stage=args.stage, verbose=args.verbose)
+        except Exception as exc:
+            from pipeline.orchestrator import StageRequired
+            if not isinstance(exc, StageRequired):
+                raise
+            print(f"\n  ERROR: {exc}\n"
+                  "  `--stage full` scores the application's pipeline, LLM included.\n"
+                  "  Configure LLM_PROVIDER, or pass --allow-degraded to score without it.")
+            sys.exit(2)
         print_ate_scores(score, stage=args.stage)
+        if args.stage == "full" and _DEGRADED_STAGES:
+            print("  DEGRADED RUN — these stages did not run, so this is not the\n"
+                  "  application's score:")
+            for sid, reason in sorted(_DEGRADED_STAGES.items()):
+                print(f"    {sid:<5} {reason}")
 
         if args.stage in ("2c", "all", "full"):
             print_gate_stats(samples)
@@ -2580,12 +2624,12 @@ def main() -> None:
             except ValueError:
                 print(f"  WARNING: unknown entity type '{t}' — skipping")
 
-    partial = not args.no_partial
-    print(f"\nScoring Stage 2 (regex IoC extraction) — partial_credit={partial}")
+    print("\nScoring Stage 2 (regex IoC extraction) — strict: exact matches only, "
+          "one prediction per gold entity")
     scores = score_dataset(
         samples,
         stage_fn=extract_entities,
-        partial_credit=partial,
+        partial_credit=False,
         verbose=args.verbose,
         filter_types=filter_types,
     )
@@ -2594,7 +2638,13 @@ def main() -> None:
 
     overall = scores.get("overall")
     if overall:
-        print(f"\nSummary: P={overall.precision:.3f}  R={overall.recall:.3f}  F1={overall.f1:.3f}")
+        print(f"\nSummary (strict): P={overall.precision:.3f}  R={overall.recall:.3f}  "
+              f"F1={overall.f1:.3f}")
+    if overall and overall.partial and not args.no_partial:
+        lenient = score_dataset(samples, stage_fn=extract_entities, partial_credit=True,
+                                filter_types=filter_types)["overall"]
+        print(f"Lenient (the {overall.partial} substring pairs counted as matches): "
+              f"P={lenient.precision:.3f}  R={lenient.recall:.3f}  F1={lenient.f1:.3f}")
 
 
 if __name__ == "__main__":

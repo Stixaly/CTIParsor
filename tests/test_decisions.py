@@ -339,3 +339,29 @@ def test_worker_auto_accept_hook_never_fails_the_job(temp_db, monkeypatch):
 
     monkeypatch.setattr("pipeline.decisions.apply_auto_accept", boom)
     worker._apply_auto_accept("no-such-job")   # logs, does not raise
+
+
+def test_a_reset_to_pending_is_not_a_verdict_in_the_audit(temp_db, temp_db_client):
+    """Accept one control row, reset another to pending: the only verdict is
+    positive, so precision is 1.0 over 1 decided row, not 0.5 over 2."""
+    job = _job(temp_db)
+    a = _entity(temp_db, job, value="m1", conf=0.95, source="cyner")
+    b = _entity(temp_db, job, value="m2", conf=0.95, source="cyner")
+    decisions.apply_auto_accept(temp_db.get_conn(), job, temp_db.now_iso(), rate=1.0)
+    temp_db_client.patch(f"/api/jobs/{job}/entities/{a}", json={"accepted": True})
+    temp_db_client.patch(f"/api/jobs/{job}/entities/{b}", json={"accepted": True})
+    temp_db_client.patch(f"/api/jobs/{job}/entities/{b}", json={"accepted": None})
+
+    [row] = decisions.auto_accept_audit(temp_db.get_conn())
+    assert (row["sampled"], row["decided"], row["confirmed"], row["precision"]) == (2, 1, 1, 1.0)
+
+
+def test_deleting_a_report_keeps_its_decision_journal(temp_db, temp_db_client):
+    job = _job(temp_db)
+    eid = _entity(temp_db, job)
+    temp_db_client.patch(f"/api/jobs/{job}/entities/{eid}", json={"accepted": True})
+    with temp_db.get_conn() as conn:
+        conn.execute("DELETE FROM jobs WHERE id=?", (job,))
+        conn.commit()
+    assert _row(temp_db, eid) is None                  # the entity went with the job
+    assert [line["origin"] for line in _journal(temp_db, eid)] == ["human"]   # its history did not
