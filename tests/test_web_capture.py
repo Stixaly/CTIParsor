@@ -627,3 +627,32 @@ def test_render_pdf_prints_even_if_an_image_never_completes(tmp_path):
     web_capture._render_pdf(page, tmp_path / "o.pdf")
     assert page.pdf_kwargs is not None
     assert page.pdf_kwargs["height"] == "5000px"
+
+
+def test_user_agent_claims_the_launched_browsers_real_version():
+    """
+    A hard-coded Chrome/125 UA on a newer Chromium is a fingerprint mismatch
+    that sophos.com's bot filter answers with net::ERR_HTTP2_PROTOCOL_ERROR.
+    """
+    ua = web_capture._user_agent_for("141.0.7390.37")
+    assert "Chrome/141.0.0.0" in ua
+    assert "Headless" not in ua
+
+
+def test_user_agent_falls_back_when_the_version_is_unknown():
+    assert web_capture._user_agent_for("") == web_capture._USER_AGENT
+    assert web_capture._user_agent_for("weird") == web_capture._USER_AGENT
+
+
+def test_load_error_explains_a_bot_protection_refusal():
+    exc = Exception("Page.goto: net::ERR_HTTP2_PROTOCOL_ERROR at https://www.sophos.com/x")
+    msg = web_capture._load_error_message("https://www.sophos.com/x", exc)
+    assert "ERR_HTTP2_PROTOCOL_ERROR" in msg
+    assert "bot protection" in msg
+    assert "Save as PDF" in msg
+
+
+def test_load_error_leaves_other_failures_unannotated():
+    exc = Exception("Page.goto: net::ERR_NAME_NOT_RESOLVED at https://nope.example/")
+    msg = web_capture._load_error_message("https://nope.example/", exc)
+    assert msg == f"Could not load https://nope.example/: {exc}"
