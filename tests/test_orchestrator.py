@@ -389,7 +389,10 @@ def test_a_partly_unusable_stage3_runs_and_says_how_much(mock_llm, mock_llm_resp
     assert (stage3.counts["extraction_ok"], stage3.counts["extraction_invalid"]) == (1, 1)
 
 
-def test_verification_and_completion_stages_can_be_turned_off(mock_llm, sample_cti_text):
+def test_verification_and_completion_stages_can_be_turned_off(mock_llm, sample_cti_text, monkeypatch):
+    # The environment says off (as in CI); the run options say on — the options win.
+    monkeypatch.setattr("pipeline.stage3d_verify._VERIFY_ENABLED", False)
+    monkeypatch.setattr("pipeline.stage3f_ttp_verify._VERIFY_ENABLED", False)
     result = run_document(
         Document(text=sample_cti_text),
         _opts(disabled={"2f", "4b", "4c"}, verify_relationships=True, verify_ttps=True),

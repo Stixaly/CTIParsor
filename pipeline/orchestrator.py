@@ -855,6 +855,8 @@ class _Run:
                                     d.get(f"{prefix}_failed", 0))
             if not on:
                 self.record(sid, SKIPPED, "disabled")
+            elif ok + unparsed + failed == 0:
+                self.record(sid, RAN, "nothing to verify", 0.0, ok=0, unparsed=0, failed=0)
             elif ok == 0 and unparsed + failed:
                 # A verification that never answers keeps every claim — the
                 # stage was requested and did nothing.

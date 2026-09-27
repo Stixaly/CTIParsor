@@ -110,9 +110,14 @@ def verify_ttps(
     result,                          # LLMEnrichmentResult — avoid import cycle
     llm_fn: Callable[[str, str], str],
     corroborated_ids: set[str] | None = None,
+    *,
+    enabled: bool | None = None,
 ) -> object:
     """
     Run a self-verification pass on the TTPs in *result*.
+
+    `enabled` is the caller's decision (the orchestrator's 3f switch); None
+    falls back to ENABLE_TTP_VERIFICATION.
 
     Args:
         text:             The source CTI text chunk fed to enrich_chunk().
@@ -131,7 +136,7 @@ def verify_ttps(
     Falls back to returning the original result unchanged when verification is
     disabled, there is nothing to verify, or the LLM response cannot be parsed.
     """
-    if not _VERIFY_ENABLED:
+    if not (_VERIFY_ENABLED if enabled is None else enabled):
         return result
 
     ttps = list(result.ttps)

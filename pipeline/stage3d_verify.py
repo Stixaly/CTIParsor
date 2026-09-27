@@ -111,9 +111,15 @@ def verify_relationships(
     text: str,
     result,                          # LLMEnrichmentResult — avoid import cycle
     llm_fn: Callable[[str, str], str],
+    *,
+    enabled: bool | None = None,
 ) -> object:
     """
     Run a self-verification pass on the relationships in *result*.
+
+    `enabled` is the caller's decision (the orchestrator's 3d switch); None
+    falls back to ENABLE_STIX_VERIFICATION.  It used to be the environment
+    only, so a run that asked for 3d with the variable unset silently got none.
 
     Args:
         text:    The source CTI text chunk that was fed to enrich_chunk().
@@ -133,7 +139,7 @@ def verify_relationships(
         - The LLM returns no valid response
         - The response cannot be parsed as valid JSON
     """
-    if not _VERIFY_ENABLED:
+    if not (_VERIFY_ENABLED if enabled is None else enabled):
         return result
 
     rels = result.relationships

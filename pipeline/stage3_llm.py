@@ -1519,7 +1519,8 @@ def enrich_chunk(
             # override so verification runs on the model that produced the claims.
             def _verify_call(s, u):
                 return _call_llm(s, u, provider=provider)
-            result = cast(LLMEnrichmentResult, verify_relationships(text, result, _verify_call))
+            result = cast(LLMEnrichmentResult,
+                          verify_relationships(text, result, _verify_call, enabled=True))
 
     # Stage 3f — self-verification of TTP claims (ADR precision §3)
     # Mirrors Stage 3d for techniques: each LLM-extracted TTP must be supported by
@@ -1536,7 +1537,7 @@ def enrich_chunk(
                 return _call_llm(s, u, provider=provider)
             result = cast(
                 LLMEnrichmentResult,
-                verify_ttps(text, result, _ttp_verify_call, corroborated_ids),
+                verify_ttps(text, result, _ttp_verify_call, corroborated_ids, enabled=True),
             )
 
     return result
