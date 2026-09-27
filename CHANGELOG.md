@@ -8,6 +8,23 @@ sections group by theme rather than strict semver.
 
 ### Added
 
+#### vLLM: a thinking switch and a `vllm` vision provider, 2026-09-27
+
+`VLLM_ENABLE_THINKING` (default `false`) sends
+`chat_template_kwargs.enable_thinking` with every vLLM request, Stage 3 and
+Stage 1f alike. Qwen3-family models think unless told not to. Measured on
+Qwen3.8-27B served by vLLM 0.27, the Stage 3 extraction prompt spent the whole
+8192-token output budget reasoning and returned no JSON after 431 s, so the
+chunk came back empty. With thinking off, the same chunk went through
+extraction, Stage 3d and Stage 3f in 106 s. The value is recorded in each
+bundle's run config.
+
+`VISION_PROVIDER=vllm` reads figures on the Stage 3 server (`VLLM_BASE_URL`),
+with `VLLM_MODEL` as the default model. vLLM publishes no capability flag, so
+the probe first checks the name against `/v1/models` (the served id carries
+its organisation prefix, and a bare name 404s), then sends one 64 px image. A
+text-only model refuses it, and Stage 1f is disabled with the server's reason.
+
 #### Full-Docker installation: `setup.sh` becomes environment prep only (ADR-0054), 2026-09-19
 
 Docker is now the only supported way to install, develop and run CTIParsor —
@@ -155,6 +172,22 @@ lowest cutoff in force and each prediction is held to its own type's.
 
 ### Fixed
 
+#### A malformed number in `.env` no longer stops the process; the CLI reads `.env` first, 2026-09-27
+
+28 numeric settings were read with a bare `int(os.getenv(...))` or
+`float(...)`, most of them at import time, so a typo such as
+`WORKER_MAX_CONCURRENT=abc` or `LLM_TIMEOUT=2 minutes` raised a ValueError that
+stopped the API, the worker or the CLI. They now go through `env_int` /
+`env_float` in `pipeline/env_flags.py`, beside `env_bool`. Unset or blank gives
+the default silently; a value that does not parse gives the default and a
+warning naming the variable.
+
+`python main.py` loaded `.env` only through the `load_dotenv()` inside
+`stage3_llm`. That ran after `api.logging_config` had read `LOG_LEVEL`,
+`LOG_FORMAT`, `LOG_FILE`, `MAX_LOG_SIZE` and `LOG_BACKUP_COUNT`, so the CLI
+ignored those five when they were set in `.env`. It now loads the `.env` beside
+it before any project import; a real environment variable still wins.
+
 #### CyNER's Malware/Threat_group labels tagged generic language as named entities (ADR-0050), 2026-09-18
 
 A user-reported real report (`apt44-unearthing-sandworm.pdf`) came back with
@@ -217,6 +250,22 @@ generic language) are in
 
 ### Documentation
 
+- **`.env.example` reorganised for a configuration pass**, 2026-09-27. It now
+  opens with how to use the file: the conventions (active vs commented lines,
+  the boolean vocabulary), the minimum settings needed to run, and a table of
+  contents. The body is fourteen numbered sections in pipeline order, with one
+  variable per line. No value changes: the same 38 keys are active, with the
+  same values. Five variables the code reads were missing and are now
+  documented: `TTP_ADVISORY_GATE`, `CYNER_BATCH_SIZE`, `CYNER_CHUNK_CHARS`,
+  `CTI_GIT_REV` and `ENV`. The six `CTI_*_MEMORY` limits get their own line;
+  each shared a line with its CPU counterpart, so uncommenting it produced one
+  broken value.
+
+  Three corrections. The compose worker defaults to
+  `WORKER_MAX_CONCURRENT=1`, not 10. The CVE cache lives in the database, not
+  `cti_stix.db`. `CHUNK_MAX_CHARS`, `CHUNK_OVERLAP` and `LLM_MAX_RETRIES` are
+  now marked as having no effect: they feed a config object that nothing
+  reads.
 - **`docs/architecture.md`** maps the deployment model that ADR-0044, 0045
   and 0046 built: the two shapes (host install, container stack), every
   piece and what it owns, the life of a report from upload to bundle as a

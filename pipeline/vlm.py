@@ -5,11 +5,16 @@ import base64
 import json
 import logging
 import os
+import struct
 import time
 import urllib.error
 import urllib.request
+import zlib
 from dataclasses import dataclass
 from typing import Protocol
+
+from pipeline.env_flags import env_float
+from pipeline.vllm_options import vllm_extra_body
 
 try:
     import anthropic
@@ -121,11 +126,44 @@ def prompt_with_context(page_text: str = "", global_context: str = "") -> str:
 # Vision model defaults per provider.  `mistral` has NO default on purpose: the
 # vision-capable model names were not verified against a live account, and an
 # invented default would fail the capability probe with a confusing message
-# instead of an actionable one.
+# instead of an actionable one.  `vllm` defaults to VLLM_MODEL (see
+# _default_model), which is a name the operator configured, not a guess.
 _DEFAULT_MODEL: dict[str, str] = {
     "anthropic": "claude-haiku-4-5",
     "ollama": "qwen3.8",
 }
+
+
+def _default_model(provider: str) -> str:
+    """The model to use when VISION_MODEL is unset.
+
+    A vLLM server serves the model it was started with, and Stage 3 already
+    names it in VLLM_MODEL, so figures go to that same model by default.
+    """
+    if provider == "vllm":
+        return os.environ.get("VLLM_MODEL", "").strip()
+    return _DEFAULT_MODEL.get(provider, "")
+
+
+def _blank_png(side: int = 64) -> bytes:
+    """A white square PNG, built without an imaging library.
+
+    The vLLM probe's image.  64 px, not 1 px: Qwen-VL image processors refuse
+    an image smaller than their 28 px patch, which would read as "this model
+    cannot see" when it can.
+    """
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        crc = zlib.crc32(tag + data) & 0xFFFFFFFF
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", crc)
+
+    rows = b"".join(b"\x00" + b"\xff" * (side * 3) for _ in range(side))
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", side, side, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(rows))
+        + chunk(b"IEND", b"")
+    )
+
 
 _MISTRAL_BASE = "https://api.mistral.ai/v1"
 
@@ -348,13 +386,16 @@ class AnthropicVisionBackend:
 class OpenAICompatVisionBackend:
     def __init__(self, name: str, base_url: str, model: str,
                  api_key: str | None = None, timeout: float = 120.0,
-                 max_concurrency: int = 1):
+                 max_concurrency: int = 1, extra_body: dict | None = None):
         self.name = name
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.api_key = api_key
         self.timeout = timeout
         self.max_concurrency = max_concurrency
+        # Server-specific request fields, merged into every chat request —
+        # vLLM's `chat_template_kwargs` (see pipeline.vllm_options).
+        self.extra_body = dict(extra_body or {})
         self._available: bool | None = None
 
     def _headers(self) -> dict[str, str]:
@@ -406,6 +447,37 @@ class OpenAICompatVisionBackend:
                         "Ollama model %s has no `vision` capability (has: %s)",
                         self.model, entry.get("capabilities"),
                     )
+            elif self.name == "vllm":
+                # vLLM publishes no capability flag, so the probe asks twice.
+                # First the served ids: vLLM matches the name exactly — the
+                # reference server serves `Inferact/Qwen3.8-27B-NVFP4`, and the
+                # bare `Qwen3.8-27B-NVFP4` 404s on every read.
+                data = _http_get_json(f"{self.base_url}/models", self._headers(), self.timeout)
+                served = [m.get("id") for m in data.get("data", []) if isinstance(m, dict)]
+                if self.model not in served:
+                    logger.warning(
+                        "vLLM at %s does not serve %s — served: %s",
+                        self.base_url, self.model, served,
+                    )
+                    self._available = False
+                    return False
+                # Then one real image, one output token.  vLLM refuses image
+                # input to a text-only model with an HTTP 400 instead of
+                # answering, so a refusal lands in the except below.
+                probe = {
+                    "model": self.model,
+                    "max_tokens": 1,
+                    "messages": [{"role": "user", "content": [
+                        {"type": "text", "text": "Describe the image."},
+                        {"type": "image_url", "image_url": {
+                            "url": "data:image/png;base64,"
+                                   + base64.b64encode(_blank_png()).decode("ascii"),
+                        }},
+                    ]}],
+                    **self.extra_body,
+                }
+                _http_json(f"{self.base_url}/chat/completions", probe, self._headers(), self.timeout)
+                ok = True
             else:
                 if not self.api_key:
                     logger.warning("%s vision backend needs an API key", self.name)
@@ -444,6 +516,7 @@ class OpenAICompatVisionBackend:
                         "strict": True,
                     },
                 },
+                **self.extra_body,
             }
             out = _http_json(f"{self.base_url}/chat/completions", payload, self._headers(), self.timeout)
             text = out["choices"][0]["message"]["content"]
@@ -485,7 +558,11 @@ def _assume_capable() -> bool:
 
 
 def _ollama_concurrency() -> int:
-    """How many figure reads to keep in flight against Ollama.
+    """How many figure reads to keep in flight against Ollama or vLLM.
+
+    vLLM shares this knob and its default of 1 because the measurement below
+    was taken on Ollama only; vLLM batches concurrent requests differently, so
+    VISION_CONCURRENCY is the place to raise it once measured there.
 
     Stays at 1 where `anthropic` and `mistral` run 4. ADR-0033 §5 set it there
     because the single GPU is shared with other local workloads; the numbers
@@ -536,7 +613,7 @@ def get_backend() -> VisionBackend | None:
         _backend_cache = None
         return None
 
-    valid_providers = ["anthropic", "mistral", "ollama"]
+    valid_providers = ["anthropic", "mistral", "ollama", "vllm"]
     if provider not in valid_providers:
         logger.warning("Unknown VISION_PROVIDER %s. Valid: %s", provider, valid_providers)
         _backend_cache = None
@@ -544,7 +621,7 @@ def get_backend() -> VisionBackend | None:
 
     model = os.environ.get("VISION_MODEL", "").strip()
     if not model:
-        model = _DEFAULT_MODEL.get(provider, "")
+        model = _default_model(provider)
         if not model:
             logger.warning(
                 "VISION_PROVIDER=%s requires VISION_MODEL to be set — no default "
@@ -553,10 +630,7 @@ def get_backend() -> VisionBackend | None:
             _backend_cache = None
             return None
 
-    try:
-        timeout = float(os.environ.get("VISION_TIMEOUT_S", "120.0"))
-    except ValueError:
-        timeout = 120.0
+    timeout = env_float("VISION_TIMEOUT_S", default=120.0)
 
     if provider == "anthropic":
         backend: VisionBackend = AnthropicVisionBackend(model, timeout)
@@ -565,6 +639,13 @@ def get_backend() -> VisionBackend | None:
         backend = OpenAICompatVisionBackend(
             "ollama", f"{base}/v1", model,
             api_key="ollama", timeout=timeout, max_concurrency=_ollama_concurrency(),
+        )
+    elif provider == "vllm":
+        base = os.environ.get("VLLM_BASE_URL", "http://localhost:8000").rstrip("/")
+        backend = OpenAICompatVisionBackend(
+            "vllm", f"{base}/v1", model,
+            timeout=timeout, max_concurrency=_ollama_concurrency(),
+            extra_body=vllm_extra_body(),
         )
     else: # mistral
         api_key = os.environ.get("MISTRAL_API_KEY", "")
@@ -601,7 +682,7 @@ def _main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
 
     provider = os.environ.get("VISION_PROVIDER", "none").strip().lower() or "none"
-    model = os.environ.get("VISION_MODEL", "").strip() or _DEFAULT_MODEL.get(provider, "")
+    model = os.environ.get("VISION_MODEL", "").strip() or _default_model(provider)
     print(f"VISION_PROVIDER = {provider}")
     print(f"VISION_MODEL    = {model or '(unset, no default for this provider)'}")
     print(f"probe waived    = {_assume_capable()}")
