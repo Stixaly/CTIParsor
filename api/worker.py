@@ -375,10 +375,13 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "")
         )
         _rel_start = rel.start_time.isoformat() if getattr(rel, "start_time", None) else None
         _rel_stop = rel.stop_time.isoformat() if getattr(rel, "stop_time", None) else None
+        # Stored accepted, as they always were — but as the pipeline's
+        # default, not anyone's decision (ADR-0058).
         rows_rel.append((
             str(uuid4()), job_id,
             rel.source_value, rel.relationship_type, rel.target_value,
             rel.confidence, 1, rel.evidence_text, _label, _rel_start, _rel_stop,
+            "default",
         ))
 
     with _lock:
@@ -402,12 +405,35 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "")
             conn.executemany(
                 "INSERT INTO relationships "
                 "(id,job_id,source_value,relationship_type,target_value,"
-                "confidence,accepted,evidence_text,evidence_label,start_time,stop_time) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?) "
+                "confidence,accepted,evidence_text,evidence_label,start_time,stop_time,"
+                "decision_origin) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT (id) DO NOTHING",
                 rows_rel,
             )
             conn.commit()
+
+
+def _apply_auto_accept(job_id: str) -> None:
+    """Accept the job's high-confidence entities server-side (ADR-0058).
+
+    This used to happen in the browser, the first time anyone opened the
+    review page, through the same PATCH an analyst's click used — so the
+    store could not tell the two apart.  A failure here leaves the rows
+    pending, which is safe: it must never fail the job.
+    """
+    from pipeline.decisions import apply_auto_accept
+
+    try:
+        with _lock:
+            with get_conn() as conn:
+                counts = apply_auto_accept(conn, job_id, now_iso())
+        logger.info(
+            f"[Worker] auto-accept: {counts['accepted']} entities accepted, "
+            f"{counts['control_sample']} left pending as control sample"
+        )
+    except Exception as exc:
+        logger.warning(f"[Worker] auto-accept skipped: {exc}")
 
 
 def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
@@ -986,6 +1012,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
 
         # Save entities and relationships
         _save_entities(job_id, all_entities, llm_result, report_text=text)
+        _apply_auto_accept(job_id)
 
         # Persist LLM result JSON for finalize
         llm_json = llm_result.model_dump_json()
@@ -1417,13 +1444,15 @@ def _lexicon_rescan(job_id: str, report_text: str) -> int:
                     context, row["confidence"], row["mitre_id"],
                     1,                  # accepted=True (reviewer already validated the label)
                     "report_lexicon",   # source tag — distinguishable from pipeline sources
+                    "propagated",       # ADR-0058: a copy of that decision, not a new one
                 ))
 
             if to_insert:
                 conn.executemany(
                     "INSERT INTO entities "
-                    "(id,job_id,value,entity_type,context,confidence,mitre_id,accepted,source) "
-                    "VALUES (?,?,?,?,?,?,?,?,?) "
+                    "(id,job_id,value,entity_type,context,confidence,mitre_id,accepted,source,"
+                    "decision_origin) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?) "
                     "ON CONFLICT (id) DO NOTHING",
                     to_insert,
                 )

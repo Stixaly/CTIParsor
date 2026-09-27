@@ -493,7 +493,7 @@ Four view modes toggled at the top of the document pane:
 - **Accepted** ✓ — explicitly confirmed, included
 - **Rejected** ✗ — excluded from bundle
 
-**Auto-accept:** Entities with confidence ≥ 90% are auto-accepted on load. A banner shows the count with an Undo option.
+**Auto-accept:** when a job finishes, the worker accepts its entities with confidence ≥ 90% and records them as `auto_policy` (ADR-0058); opening the page writes nothing. A banner shows the count with an Undo option, and each card carries an `auto` chip. About one in ten of those entities (`REVIEW_CONTROL_SAMPLE_RATE`, default 0.10) is left pending with a `confirm` chip: your verdict on it measures how often auto-accept is right (`GET /api/thresholds` → `auto_accept_audit`).
 
 **Drag-to-relate:** Drag from one entity mark to another → opens relationship creator pre-filled with source and target.
 
@@ -1766,8 +1766,8 @@ Manages the gitignored local overlay only — the committed registry is never ed
 | `PATCH` | `/api/settings/corpora/{name}` | Enable or disable a corpus without losing its configuration (body: `{"enabled": bool}`), existing because deletion writes a disable for committed registry corpora with no UI reactivation path, as ADR-0015 delivered seven disabled corpora inaccessible without this endpoint; returns 404 if the corpus is unknown |
 | `POST` | `/api/settings/corpora/{name}/sync` | Clone/pull the git repository of a single public corpus and re-ingest the store, exposing the same network step as `scripts/sync_corpora.py` for the "Redownload" button, restricted to PUBLIC corpora so private git credentials never transit the application (ADR-0006), blocking until the git operation completes |
 | `POST` | `/api/settings/corpora/rebuild` | Re-ingest all enabled corpora from their local clones |
-| `GET` | `/api/thresholds` | The NER confidence cutoffs in force (ADR-0051): each stage's default, the review UI's auto-accept level, and every stored per-(source, entity_type) override with its provenance |
-| `POST` | `/api/thresholds/recalibrate` | Fit P(accepted \| score) per (source, entity_type) from the analysts' decisions and propose the cutoff at which it reaches `target_precision` (default 0.90, needs `min_samples` = 200 decisions); a dry run unless `"apply": true` |
+| `GET` | `/api/thresholds` | The NER confidence cutoffs in force (ADR-0051): each stage's default, the worker's auto-accept level and control-sample rate, `auto_accept_audit` (per source and type, the share of control-sample entities analysts confirmed — ADR-0058), and every stored per-(source, entity_type) override with its provenance |
+| `POST` | `/api/thresholds/recalibrate` | Fit P(accepted \| score) per (source, entity_type) from the analysts' decisions and propose the cutoff at which it reaches `target_precision` (default 0.90, needs `min_samples` = 200 decisions); a dry run unless `"apply": true`. Reads only one-at-a-time analyst decisions unless `include_bulk` / `include_legacy` (ADR-0058), and returns `excluded_by_origin` |
 | `PUT` | `/api/thresholds/{source}/{entity_type}` | Hand-set one cutoff (`origin: manual`) |
 | `DELETE` | `/api/thresholds/{source}/{entity_type}` | Remove an override; the stage default applies again |
 | `GET` | `/api/overrides` | The deny / promote rows grown from analyst decisions (ADR-0052), filterable by `status` (`candidate` \| `active` \| `ignored`) and `action` (`deny` \| `promote`); only `active` rows act |

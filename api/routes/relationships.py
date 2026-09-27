@@ -4,9 +4,10 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from api.db import _lock, get_conn
+from api.db import _lock, get_conn, now_iso, transaction
 from api.routes._common import require_job
 from models.schemas import STIX_RELATIONSHIP_TYPES
+from pipeline import decisions
 from pipeline.dates import parse_flexible_date
 
 router = APIRouter(prefix="/api/jobs/{job_id}/relationships", tags=["relationships"])
@@ -31,6 +32,8 @@ class RelPatch(BaseModel):
     # or '' / null to clear.  Validated by _parse_date_field below.
     start_time: str | None = None
     stop_time: str | None = None
+    # ADR-0058 — see EntityPatch.decision_origin.
+    decision_origin: str = decisions.HUMAN
 
 
 class RelCreate(BaseModel):
@@ -94,6 +97,7 @@ def _row_to_dict(row) -> dict:
         # start_time / stop_time were added via migration; guard old rows
         "start_time": row["start_time"] if "start_time" in row.keys() else None,
         "stop_time": row["stop_time"] if "stop_time" in row.keys() else None,
+        "decision_origin": row["decision_origin"],
     }
 
 
@@ -125,21 +129,31 @@ def create_relationship(job_id: str, body: RelCreate):
     if _out_of_order(_start, _stop):
         raise HTTPException(400, "stop_time must be later than start_time")
     rid = str(uuid4())
+    now = now_iso()
     with _lock:
         with get_conn() as conn:
-            conn.execute(
-                "INSERT INTO relationships "
-                "(id,job_id,source_value,relationship_type,target_value,"
-                "confidence,accepted,evidence_text,evidence_label,start_time,stop_time) "
-                "VALUES (?,?,?,?,?,?,1,?,?,?,?)",
-                (rid, job_id, body.source_value.strip(), body.relationship_type,
-                 body.target_value.strip(), body.confidence, body.evidence_text, _label,
-                 _start, _stop),
-            )
-            conn.commit()
+            with transaction(conn):
+                # An analyst drew this edge: accepted, and their decision.
+                conn.execute(
+                    "INSERT INTO relationships "
+                    "(id,job_id,source_value,relationship_type,target_value,"
+                    "confidence,accepted,evidence_text,evidence_label,start_time,stop_time,"
+                    "decision_origin,decided_at) "
+                    "VALUES (?,?,?,?,?,?,1,?,?,?,?,?,?)",
+                    (rid, job_id, body.source_value.strip(), body.relationship_type,
+                     body.target_value.strip(), body.confidence, body.evidence_text, _label,
+                     _start, _stop, decisions.HUMAN, now),
+                )
+                conn.execute(
+                    "INSERT INTO review_decisions "
+                    "(job_id, target_kind, target_id, previous, accepted, origin, created_at) "
+                    "VALUES (?,?,?,?,?,?,?)",
+                    (job_id, "relationship", rid, None, 1, decisions.HUMAN, now),
+                )
     return {
         "id": rid, "job_id": job_id, **body.model_dump(), "evidence_label": _label,
         "start_time": _start, "stop_time": _stop, "accepted": True,
+        "decision_origin": decisions.HUMAN,
     }
 
 
@@ -147,6 +161,10 @@ def create_relationship(job_id: str, body: RelCreate):
 def update_relationship(job_id: str, rel_id: str, patch: RelPatch):
     if patch.relationship_type and patch.relationship_type not in VALID_REL_TYPES:
         raise HTTPException(400, f"Unknown relationship_type '{patch.relationship_type}'")
+    if patch.decision_origin not in decisions.CLIENT_ORIGINS:
+        raise HTTPException(
+            400, f"decision_origin must be one of: {', '.join(sorted(decisions.CLIENT_ORIGINS))}",
+        )
 
     # Build dynamic SET clause from whichever fields were sent
     updates: list[str] = []
@@ -161,10 +179,8 @@ def update_relationship(job_id: str, rel_id: str, patch: RelPatch):
     if "target_value" in patch.model_fields_set and patch.target_value is not None:
         updates.append("target_value=?")
         values.append(patch.target_value.strip())
-    if "accepted" in patch.model_fields_set:
-        accepted_val = 1 if patch.accepted is True else (0 if patch.accepted is False else None)
-        updates.append("accepted=?")
-        values.append(accepted_val)
+    # `accepted` is a decision (ADR-0058), written through decisions.record below.
+    decide = "accepted" in patch.model_fields_set
     if "evidence_text" in patch.model_fields_set:
         updates.append("evidence_text=?")
         values.append(patch.evidence_text)
@@ -178,7 +194,7 @@ def update_relationship(job_id: str, rel_id: str, patch: RelPatch):
         "start_time" in patch.model_fields_set or "stop_time" in patch.model_fields_set
     )
 
-    if not updates and not _wants_date_update:
+    if not updates and not _wants_date_update and not decide:
         with get_conn() as conn:
             row = conn.execute(
                 "SELECT * FROM relationships WHERE id=? AND job_id=?", (rel_id, job_id)
@@ -224,13 +240,22 @@ def update_relationship(job_id: str, rel_id: str, patch: RelPatch):
                 values.append(new_stop)
 
             values.extend([rel_id, job_id])
-            result = conn.execute(
-                f"UPDATE relationships SET {', '.join(updates)} WHERE id=? AND job_id=?",
-                values,
-            )
-            conn.commit()
-            if result.rowcount == 0:
-                raise HTTPException(404, "Relationship not found")
+            with transaction(conn):
+                if updates:
+                    result = conn.execute(
+                        f"UPDATE relationships SET {', '.join(updates)} WHERE id=? AND job_id=?",
+                        values,
+                    )
+                    if result.rowcount == 0:
+                        raise HTTPException(404, "Relationship not found")
+                if decide:
+                    decided = decisions.record(
+                        conn, "relationship", "id=? AND job_id=?", (rel_id, job_id),
+                        accepted=patch.accepted, origin=patch.decision_origin,
+                        decided_at=now_iso(),
+                    )
+                    if decided == 0:
+                        raise HTTPException(404, "Relationship not found")
             updated = conn.execute(
                 "SELECT * FROM relationships WHERE id=?", (rel_id,)
             ).fetchone()

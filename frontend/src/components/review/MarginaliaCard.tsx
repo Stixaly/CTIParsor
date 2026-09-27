@@ -112,6 +112,21 @@ export default function MarginaliaCard({
               {typeLabel(e.entity_type)}
             </span>
             {e.mitre_id && <span className="marg-mitre">{e.mitre_id}</span>}
+            {/* ADR-0058 — who decided: the worker's auto-accept, or a control
+                row it left for an analyst so auto-accept can be measured. */}
+            {e.control_sample && e.accepted === null && (
+              <span
+                className="marg-origin marg-origin-control"
+                title="Control sample: auto-accept left this one for you. Your verdict measures how often auto-accept is right."
+              >
+                confirm
+              </span>
+            )}
+            {e.decision_origin === 'auto_policy' && e.accepted === true && (
+              <span className="marg-origin" title="Accepted automatically (high confidence), not by an analyst">
+                auto
+              </span>
+            )}
             <span className="marg-conf">{confPct(e.confidence)}</span>
             <span className="marg-collapse-ind">{collapsed ? '›' : '˅'}</span>
           </div>

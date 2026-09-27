@@ -24,10 +24,13 @@ from pipeline.calibration import (
     apply_proposals,
     calibrate,
     clear_override,
+    decision_origins,
+    excluded_decisions,
     list_overrides,
     set_override,
     stage_default,
 )
+from pipeline.decisions import auto_accept_audit, control_sample_rate
 
 router = APIRouter(prefix="/api/thresholds", tags=["thresholds"])
 
@@ -38,6 +41,9 @@ class RecalibrateIn(BaseModel):
     target_precision: float = DEFAULT_TARGET_PRECISION
     min_samples: int = DEFAULT_MIN_SAMPLES
     apply: bool = False
+    # ADR-0058 — by default only one-at-a-time analyst decisions are read.
+    include_bulk: bool = False
+    include_legacy: bool = False
 
 
 class OverrideIn(BaseModel):
@@ -55,9 +61,14 @@ def _check_key(source: str, entity_type: str) -> None:
 def get_thresholds() -> dict:
     with get_conn() as conn:
         rows = list_overrides(conn)
+        audit = auto_accept_audit(conn)
     return {
         "enabled": thresholds.calibration_enabled(),
         "auto_accept_level": AUTO_ACCEPT_LEVEL,
+        "control_sample_rate": control_sample_rate(),
+        # ADR-0058 — how often an auto-accepted row is right, per kind, from
+        # the control-sample rows analysts have since decided one by one.
+        "auto_accept_audit": audit,
         "defaults": {source: stage_default(source) for source in CALIBRATED_SOURCES},
         "rows": rows,
     }
@@ -76,10 +87,13 @@ def recalibrate(body: RecalibrateIn) -> dict:
     # duration would block every job-status update/progress-emit in this
     # process for that long. Readers don't need this lock on either backend
     # (SQLite's WAL mode and Postgres both support concurrent reads).
+    origins = decision_origins(include_bulk=body.include_bulk, include_legacy=body.include_legacy)
     with get_conn() as conn:
         proposals = calibrate(
             conn, target_precision=body.target_precision, min_samples=body.min_samples,
+            origins=origins,
         )
+        excluded = excluded_decisions(conn, origins=origins)
         written = 0
         if body.apply:
             with _lock:
@@ -89,6 +103,8 @@ def recalibrate(body: RecalibrateIn) -> dict:
     return {
         "applied": body.apply,
         "written": written,
+        "origins": list(origins),
+        "excluded_by_origin": excluded,
         "proposals": [p.as_dict() for p in proposals],
     }
 

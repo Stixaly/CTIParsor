@@ -34,9 +34,10 @@ def _seed_split(db, job_id: str = "job-1") -> None:
     for s in range(60, 90):
         rows += [(s / 100, 1)] * 19 + [(s / 100, 0)]
     conn.executemany(
-        "INSERT INTO entities (id, job_id, value, entity_type, context, confidence, accepted, source) "
-        "VALUES (?,?,?,?,?,?,?,?)",
-        [(str(uuid4()), job_id, f"e{i}", "malware", "", conf, acc, "gliner") for i, (conf, acc) in enumerate(rows)],
+        "INSERT INTO entities (id, job_id, value, entity_type, context, confidence, accepted, source, "
+        "decision_origin) VALUES (?,?,?,?,?,?,?,?,?)",
+        [(str(uuid4()), job_id, f"e{i}", "malware", "", conf, acc, "gliner", "human")
+         for i, (conf, acc) in enumerate(rows)],
     )
     conn.commit()
 

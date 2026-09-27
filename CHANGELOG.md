@@ -8,6 +8,23 @@ sections group by theme rather than strict semver.
 
 ### Added
 
+#### Decision provenance: who accepted what (ADR-0058), 2026-09-27
+
+Every write of `accepted` now records its origin — `human`, `human_bulk`,
+`auto_policy`, `default`, `propagated` or `legacy` — and appends a line to a
+new insert-only `review_decisions` journal. Opening the review page used to
+write `accepted = true` for every entity at or above 90 % through the same
+PATCH an analyst's click used; the worker applies auto-accept now, and the page
+writes nothing on load. Calibration (ADR-0051) reads only one-at-a-time
+analyst decisions by default, and promotion (ADR-0052) counts only analyst
+accepts: the LLM's name lists, stored at 0.9, had all been auto-accepted and
+were counting toward promoting the LLM's own guesses into the gazetteer.
+Decisions made before this change become `legacy` and are left out of both
+unless asked (`include_legacy`). A control sample
+(`REVIEW_CONTROL_SAMPLE_RATE`, default 10 %) of the would-be auto-accepts
+stays pending, flagged `confirm`; `GET /api/thresholds` reports the share
+analysts confirm (`auto_accept_audit`).
+
 #### vLLM: a thinking switch and a `vllm` vision provider, 2026-09-27
 
 `VLLM_ENABLE_THINKING` (default `false`) sends

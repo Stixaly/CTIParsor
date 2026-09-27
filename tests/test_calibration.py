@@ -166,9 +166,9 @@ def _seed(db, job_id: str, rows: list[tuple[str, str, float, int | None]]) -> No
         (job_id, f"{job_id}.pdf", "for_review", now, now),
     )
     conn.executemany(
-        "INSERT INTO entities (id, job_id, value, entity_type, context, confidence, accepted, source) "
-        "VALUES (?,?,?,?,?,?,?,?)",
-        [(str(uuid4()), job_id, f"e{i}", etype, "", conf, acc, source)
+        "INSERT INTO entities (id, job_id, value, entity_type, context, confidence, accepted, source, "
+        "decision_origin) VALUES (?,?,?,?,?,?,?,?,?)",
+        [(str(uuid4()), job_id, f"e{i}", etype, "", conf, acc, source, None if acc is None else "human")
          for i, (source, etype, conf, acc) in enumerate(rows)],
     )
     conn.commit()

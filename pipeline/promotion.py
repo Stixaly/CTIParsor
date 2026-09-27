@@ -33,6 +33,7 @@ from dataclasses import asdict, dataclass, field
 from uuid import uuid4
 
 from api.db import transaction
+from pipeline.decisions import HUMAN_ORIGINS, LEGACY
 from pipeline.overrides import GAZETTEER_TYPES, NAMED_TYPES, normalise
 
 DEFAULT_MIN_REJECTIONS = 3
@@ -73,13 +74,23 @@ class _Tally:
 
 
 def load_decisions(conn) -> list[tuple[str, str, str, int | None, str]]:
-    """(value, entity_type, source, accepted, job_id) for every reviewed row of a
-    named type, plus every hand-created one (reviewed or not)."""
+    """(value, entity_type, source, accepted, job_id) for every analyst-reviewed
+    row of a named type, plus every hand-created one (reviewed or not).
+
+    ADR-0058: an accept counts only when an analyst made it.  The review page
+    used to accept every row at or above 90 % on load — the LLM's own name
+    lists, stored at 0.9, included — and those accepts would otherwise promote
+    the LLM's guesses into the gazetteer.  A `legacy` reject still counts:
+    the page never rejected anything, so every stored reject was an analyst's.
+    """
     marks = ",".join("?" for _ in NAMED_TYPES)
+    human = ",".join("?" for _ in HUMAN_ORIGINS)
     rows = conn.execute(
         "SELECT value, entity_type, source, accepted, job_id FROM entities "
-        f"WHERE entity_type IN ({marks}) AND (accepted IS NOT NULL OR source = 'manual')",
-        tuple(sorted(NAMED_TYPES)),
+        f"WHERE entity_type IN ({marks}) AND (source = 'manual' "
+        f"OR (accepted = 1 AND decision_origin IN ({human})) "
+        f"OR (accepted = 0 AND decision_origin IN ({human},?)))",
+        (*sorted(NAMED_TYPES), *HUMAN_ORIGINS, *HUMAN_ORIGINS, LEGACY),
     ).fetchall()
     return [(r["value"], r["entity_type"], r["source"], r["accepted"], r["job_id"]) for r in rows]
 

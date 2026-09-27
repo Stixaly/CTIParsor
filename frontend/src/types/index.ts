@@ -34,6 +34,23 @@ export interface Entity {
   mitre_id: string | null
   accepted: boolean | null
   source: string
+  /** Who decided `accepted` (ADR-0058): 'human' | 'human_bulk' | 'auto_policy'
+   *  | 'default' | 'propagated' | 'legacy', or null while nobody has. */
+  decision_origin?: DecisionOrigin | null
+  /** Left pending by auto-accept so an analyst's verdict can measure it. */
+  control_sample?: boolean
+}
+
+export type DecisionOrigin =
+  'human' | 'human_bulk' | 'auto_policy' | 'default' | 'propagated' | 'legacy'
+
+/** The origins the client may send with a decision; the rest are the server's. */
+export type ClientDecisionOrigin = 'human' | 'human_bulk'
+
+export interface ThresholdsInfo {
+  enabled: boolean
+  auto_accept_level: number
+  control_sample_rate: number
 }
 
 export type EvidenceLabel = 'observed' | 'reported' | 'assessed' | 'inferred' | 'gap'
@@ -52,6 +69,7 @@ export interface Relationship {
   // date strings, or null when the source text gave no explicit date.
   start_time?: string | null
   stop_time?: string | null
+  decision_origin?: DecisionOrigin | null
 }
 
 // ── Detection coverage (ADR-0006) ───────────────────────────────────────────
