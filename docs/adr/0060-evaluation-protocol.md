@@ -75,8 +75,13 @@ protocol adopts:
 * **Run-to-run noise exceeds the minimum useful gain.** Two identical dev runs
   with the provider's default sampling differ by +0.028 technique F1 (paired
   bootstrap P(not better) 0.044): a document bootstrap does not capture LLM
-  sampling. Comparisons need repeated runs until the sampling is fixed;
-  temperature-0 runs are measured next.
+  sampling. With `LLM_TEMPERATURE=0 LLM_SEED=13` two runs were identical and
+  quality did not move (F1 0.338 against 0.339), so evaluation runs use fixed
+  sampling and one run per configuration.
+* **Stage 2c as configured is a net loss on dev.** Turning it off raises
+  technique F1 from 0.339–0.367 to 0.488 (paired 95% interval of the gain
+  +0.05 to +0.22 against either baseline run): precision 0.28–0.30 → 0.52,
+  recall unchanged. Test split not yet run; Phase 4 decides what 2c becomes.
 * **Stage 2c's candidate recall is low as configured:** on dev, one candidate
   per sentence (production) reaches 22.5% of gold techniques (14 candidates
   per report); k = 5 → 57.4% (47), k = 20 → 80.6% (121). Any retrieve-then-

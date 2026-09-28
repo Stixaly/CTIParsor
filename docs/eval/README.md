@@ -52,14 +52,17 @@ python -m evaluation prepare               # layer registry, ATT&CK mapping, nea
 ## Running and scoring
 
 ```bash
-# the application's pipeline (Stages 1-3, LLM required) on the dev split
-python -m evaluation run --split dev --name baseline-dev
-python -m evaluation score --name baseline-dev
+# fixed sampling: two runs of the same configuration then give the same result
+export LLM_TEMPERATURE=0 LLM_SEED=13
 
-# a variant: stages off, another temperature, another model...
-LLM_TEMPERATURE=0 LLM_SEED=13 python -m evaluation run --split dev --name t0-dev
-python -m evaluation compare --a baseline-dev --b t0-dev            # paired bootstrap, TTPs
-python -m evaluation compare --a baseline-dev --b t0-dev --task malware
+# the application's pipeline (Stages 1-3, LLM required) on the dev split
+python -m evaluation run --split dev --name t0-dev
+python -m evaluation score --name t0-dev
+
+# a variant: a stage off, another model...
+python -m evaluation run --split dev --name t0-no2c-dev --disable 2c
+python -m evaluation compare --a t0-dev --b t0-no2c-dev              # paired bootstrap, TTPs
+python -m evaluation compare --a t0-dev --b t0-no2c-dev --task malware
 
 # Stage 2c's candidate recall (the ceiling of any retrieval-based TTP step)
 python -m evaluation retrieval --split dev --k 1,3,5,10,20
@@ -85,13 +88,13 @@ serve (Stage 3 is then `failed`, not an empty success).
 
 ## Ablations
 
-One stage off at a time, on **dev only** (about 2 h per run with the local
+One stage off at a time, on **dev only**, fixed sampling (about 1 h 30 per run with the local
 Qwen server — see ADR-0060 for the budget):
 
 ```bash
-for s in 2b 2c 2d 2e 2g 3e 3doc; do
+for s in 2b 2c 2d 2e 2g 3d 3f; do   # 3e and 3doc are off unless enabled
   python -m evaluation run --split dev --name abl-$s-dev --disable $s
-  python -m evaluation compare --a baseline-dev --b abl-$s-dev
+  python -m evaluation compare --a t0-dev --b abl-$s-dev
 done
 ```
 
@@ -108,10 +111,11 @@ A change to the TTP path is adopted when, on **dev**:
 2. precision does not drop by more than **0.02** (a recall gain paid for in
    false positives is analyst time);
 3. the gain is larger than the run-to-run spread of the baseline (two runs of
-   the same configuration, see below). Measured on 2026-09-27 with the
-   provider's default sampling, that spread was **+0.028 F1** — larger than
-   rule 1's +0.02 — so until the sampling is fixed each side needs repeated
-   runs and gains under ~0.04 are not results (docs/eval/baseline-2026-09.md);
+   the same configuration, see below). With the provider's default sampling
+   that spread was **+0.028 F1** — larger than rule 1's +0.02. With
+   `LLM_TEMPERATURE=0 LLM_SEED=13` two runs were identical (spread 0), so
+   **evaluation runs use those settings** and one run per configuration is
+   enough (docs/eval/baseline-2026-09.md);
 4. seconds per report grow by at most **25%**, or the cost is accepted
    explicitly.
 
@@ -123,9 +127,10 @@ number is reported, never tuned against. These thresholds are proposals
 
 Stage 3 sends no temperature unless `LLM_TEMPERATURE` is set, so the provider's
 own sampling applies (vLLM: the model's generation config) and two runs of one
-report can differ. Before reading a small difference, run the baseline twice
-(`--name baseline-dev-r2`) and `compare` the two: the interval of that
-comparison is the noise floor.
+report can differ — by 0.028 F1 on dev. **Run evaluations with
+`LLM_TEMPERATURE=0 LLM_SEED=13`**: two such runs were identical. With another
+provider or model, check it once — run the baseline twice (`--name
+baseline-dev-r2`) and `compare` the two; the interval is the noise floor.
 
 ## Deferred (second tier)
 
