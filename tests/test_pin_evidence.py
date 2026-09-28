@@ -314,9 +314,19 @@ def test_to_dict_reports_blocked():
 
 # ── ADR-0041: sco_id_to_indicator routing inside _materialise_pinned_edges ─────
 
+def _sco_rule_policy(verb: str) -> dict:
+    return {
+        "max_pinned_edges": 100,
+        "pin_evidence": {"mode": "cartesian"},
+        "rules": [{"src": "malware", "verb": verb, "tgt": "domain-name",
+                   "mode": "pin", "enabled": True}],
+    }
+
+
 def test_pin_rule_routes_sco_target_through_its_indicator():
     """ADR-0041: a pinned edge whose target is an observable SCO is emitted
-    against that SCO's Indicator rather than the raw SCO."""
+    against that SCO's Indicator rather than the raw SCO — for a verb STIX does
+    not list for the direct pair (ADR-0062)."""
     m1 = _Obj("malware", 1, name="ROOTSAW")
     d1 = _Obj("domain-name", 1, name="evil.com")
     ind1 = _Obj(
@@ -327,21 +337,9 @@ def test_pin_rule_routes_sco_target_through_its_indicator():
     )
     stix_objects = [m1, d1, ind1]
     sco_id_to_indicator = {d1.id: ind1}
-    policy = {
-        "max_pinned_edges": 100,
-        "pin_evidence": {"mode": "cartesian"},
-        "rules": [
-            {
-                "src": "malware",
-                "verb": "communicates-with",
-                "tgt": "domain-name",
-                "mode": "pin",
-                "enabled": True,
-            }
-        ],
-    }
     _materialise_pinned_edges(
-        stix_objects, policy, set(), "", sco_id_to_indicator=sco_id_to_indicator
+        stix_objects, _sco_rule_policy("related-to"), set(), "",
+        sco_id_to_indicator=sco_id_to_indicator,
     )
 
     emitted = next(
@@ -352,26 +350,35 @@ def test_pin_rule_routes_sco_target_through_its_indicator():
     assert emitted.target_ref == ind1.id
 
 
+def test_pin_rule_with_a_listed_verb_stays_on_the_observable():
+    """ADR-0062: `malware communicates-with domain-name` is the spec's own
+    relationship.  Routed, it shipped as `malware related-to indicator` under a
+    rule label that named communicates-with; it is pinned on the domain, and
+    needs no Indicator to exist."""
+    m1 = _Obj("malware", 1, name="ROOTSAW")
+    d1 = _Obj("domain-name", 1, name="evil.com")
+    ind1 = _Obj("indicator", 1, name="Indicator: evil.com",
+                pattern="[domain-name:value = 'evil.com']")
+    for mapping in ({d1.id: ind1}, {}):
+        stix_objects = [m1, d1, ind1]
+        stats = _materialise_pinned_edges(
+            stix_objects, _sco_rule_policy("communicates-with"), set(), "",
+            sco_id_to_indicator=mapping,
+        )
+        assert stats.rules[0].candidates == 1
+        emitted = [o for o in stix_objects if getattr(o, "source_ref", None) == m1.id]
+        assert [(o.relationship_type, o.target_ref) for o in emitted] == [
+            ("communicates-with", d1.id)]
+        assert emitted[0].x_policy_rule == "malware communicates-with domain-name"
+
+
 def test_pin_rule_drops_candidate_with_no_indicator():
     """ADR-0041: a candidate pair whose observable endpoint has no Indicator
     is dropped before it is ever counted as a candidate."""
     m1 = _Obj("malware", 1, name="ROOTSAW")
     d1 = _Obj("domain-name", 1, name="evil.com")
-    policy = {
-        "max_pinned_edges": 100,
-        "pin_evidence": {"mode": "cartesian"},
-        "rules": [
-            {
-                "src": "malware",
-                "verb": "communicates-with",
-                "tgt": "domain-name",
-                "mode": "pin",
-                "enabled": True,
-            }
-        ],
-    }
     stats = _materialise_pinned_edges(
-        [m1, d1], policy, set(), "", sco_id_to_indicator={}
+        [m1, d1], _sco_rule_policy("related-to"), set(), "", sco_id_to_indicator={}
     )
     assert stats.rules[0].candidates == 0
 

@@ -9,7 +9,7 @@
  * value→entityId map; edges whose endpoints don't resolve are skipped and
  * counted in `unmatchedCount`.
  */
-import type { Entity, Relationship } from '../../types'
+import type { BundleLedger, Entity, LedgerRelationship, Relationship } from '../../types'
 import type { GraphNode, GraphEdge } from './graphLayout'
 
 export interface GraphData {
@@ -20,12 +20,30 @@ export interface GraphData {
   adj: Record<string, Set<string>>
   typeCounts: Record<string, number>
   unmatchedCount: number
+  /** Review graph with a ledger: what the stored bundle did with each
+   *  relationship row, by row id (ADR-0061).  Absent rows were not in the
+   *  build (added since, or no ledger). */
+  fate?: Map<string, LedgerRelationship>
 }
+
+const relKey = (s: string, v: string, t: string) =>
+  `${s.trim().toLowerCase()}\u0000${v.trim().toLowerCase()}\u0000${t.trim().toLowerCase()}`
 
 export function buildGraphData(
   rawEntities: Entity[],
   rawRelations: Relationship[],
+  ledger?: BundleLedger | null,
 ): GraphData {
+  // Ledger entries by row value, so each drawn row can say whether it ships.
+  // Several entries can share a key (duplicate rows); one that shipped wins.
+  const ledgerByKey = new Map<string, LedgerRelationship>()
+  for (const l of ledger?.relationships ?? []) {
+    const k = relKey(l.source_value, l.relationship_type, l.target_value)
+    const prev = ledgerByKey.get(k)
+    if (!prev || (prev.outcome === 'dropped' && l.outcome !== 'dropped')) ledgerByKey.set(k, l)
+  }
+  const fate = ledger ? new Map<string, LedgerRelationship>() : undefined
+
   // Show only non-rejected entities.
   const visible = rawEntities.filter(e => e.accepted !== false)
 
@@ -58,12 +76,16 @@ export function buildGraphData(
     const srcId = valueToId.get(r.source_value.toLowerCase())
     const tgtId = valueToId.get(r.target_value.toLowerCase())
     if (!srcId || !tgtId) { unmatchedCount++; return }
+    const l = ledgerByKey.get(relKey(r.source_value, r.relationship_type, r.target_value))
+    if (l && fate) fate.set(r.id, l)
     edges.push({
       id: r.id, source: srcId, target: tgtId,
       rel: r.relationship_type,
       confidence: r.confidence,
       accepted: r.accepted,
       evidence: r.evidence_text ?? '',
+      ...(l?.outcome === 'dropped' ? { kind: 'dropped' as const } : {}),
+      ...(l && l.outcome !== 'dropped' && l.changes.length > 0 ? { changed: true } : {}),
     })
     if (r.accepted === false) return
     deg[srcId] = (deg[srcId] || 0) + 1
@@ -76,5 +98,5 @@ export function buildGraphData(
   const typeCounts: Record<string, number> = {}
   nodes.forEach(n => { typeCounts[n.type] = (typeCounts[n.type] || 0) + 1 })
 
-  return { nodes, edges, byId, deg, adj, typeCounts, unmatchedCount }
+  return { nodes, edges, byId, deg, adj, typeCounts, unmatchedCount, fate }
 }

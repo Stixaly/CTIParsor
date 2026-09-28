@@ -1,4 +1,4 @@
-import type { Job, Entity, Relationship, StixBundle, CoverageResult, CoverageRule, CoverageReportRules, DetectionProposals, DetectionCorpus, CorpusConfig, FormatInfo, ExportFacets, ExportSelection, ExportAxis, LastRun, RuleLookupResult, ThresholdsInfo } from '../types'
+import type { Job, Entity, Relationship, StixBundle, BundleLedger, CoverageResult, CoverageRule, CoverageReportRules, DetectionProposals, DetectionCorpus, CorpusConfig, FormatInfo, ExportFacets, ExportSelection, ExportAxis, LastRun, RuleLookupResult, ThresholdsInfo } from '../types'
 
 const BASE = '/api'
 
@@ -31,6 +31,16 @@ export const finalizeJobQuick = (id: string) =>
 export const deleteJob = (id: string) =>
   req<{ deleted: string }>(`/jobs/${id}`, { method: 'DELETE' })
 export const fetchBundle = (id: string) => req<StixBundle>(`/jobs/${id}/bundle`)
+/** What Stage 4 did with each review row (ADR-0061).  Resolves to null when the
+ *  stored bundle has no ledger (built before it existed) or there is no bundle. */
+export const fetchBundleLedger = async (id: string): Promise<BundleLedger | null> => {
+  try {
+    return await req<BundleLedger>(`/jobs/${id}/bundle/ledger`)
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith('404')) return null
+    throw e
+  }
+}
 /** Returns the URL to stream the original uploaded file (PDF, DOCX, …). */
 export const sourceUrl  = (id: string) => `/api/jobs/${id}/source`
 

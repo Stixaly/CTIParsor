@@ -1,6 +1,7 @@
 # ADR-0041: Observables route through their Indicator, never straight to a threat SDO
 
-**Status:** Accepted
+**Status:** Accepted — amended by [ADR-0062](0062-observables-keep-their-listed-relationships.md)
+(a verb STIX 2.1 lists for the direct SDO↔observable pair keeps the observable)
 **Date:** 2026-09-14
 **Deciders:** maintainer
 **Relates to:** extends ADR-0009 (STIX trust & provenance) and the observable→ObservedData→Indicator

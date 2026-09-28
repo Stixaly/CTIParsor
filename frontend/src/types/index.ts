@@ -283,6 +283,80 @@ export interface StixBundle {
   objects: StixObject[]
 }
 
+// ── Mapping ledger (ADR-0061) ────────────────────────────────────────────────
+// What Stage 4 did with each review row when it built the stored bundle.
+// Served by GET /api/jobs/{id}/bundle/ledger; see pipeline/bundle_ledger.py.
+
+/** emitted: the row produced this object/edge; merged: it resolved to one that
+ *  already existed; dropped: it is not in the bundle (`reason` says why). */
+export type LedgerOutcome = 'emitted' | 'merged' | 'dropped'
+
+export interface LedgerChange {
+  kind: 'verb' | 'reroute'
+  from: string
+  to: string
+  /** verb: 'not_suggested' | 'policy_pin' | 'unknown_verb' */
+  reason?: string
+  /** reroute: which end was replaced by the observable's Indicator */
+  end?: 'source' | 'target'
+}
+
+export interface LedgerRelationship {
+  source_value: string
+  relationship_type: string
+  target_value: string
+  outcome: LedgerOutcome
+  stix_id?: string
+  final_type?: string
+  source_ref?: string
+  target_ref?: string
+  changes: LedgerChange[]
+  reason?: string
+  merged_with?: string
+  /** self_loop: the one object both ends resolved to */
+  stix_ref?: string
+  detail?: string
+}
+
+export interface LedgerEntity {
+  value: string
+  entity_type: string
+  outcome: LedgerOutcome
+  stix_id?: string
+  stix_type?: string
+  stix_name?: string
+  reason?: string
+  /** Set when the input was an LLM list, not an entity row:
+   *  'targeted_country' | 'targeted_sector' */
+  input?: string
+  mitre_id?: string
+}
+
+export interface LedgerObjectInfo {
+  /** Why the object or SRO exists: 'entity', 'extracted', 'ioc_indicator',
+   *  'ioc_based_on', 'ioc_association', 'targeted_location', 'policy_pin',
+   *  'completion_reference', 'completion_transitive', … */
+  origin: string
+  [key: string]: unknown
+}
+
+export interface LedgerRemoval {
+  stix_id: string
+  kind: 'object' | 'relationship'
+  reason: string
+  replaced_by?: string | null
+  /** An absorbed object's name (it is no longer in the bundle to look up). */
+  name?: string
+}
+
+export interface BundleLedger {
+  version: number
+  objects: Record<string, LedgerObjectInfo>
+  entities: LedgerEntity[]
+  relationships: LedgerRelationship[]
+  removed: LedgerRemoval[]
+}
+
 // STIX 2.1 object type → brand color (used in STIX graph nodes and badges).
 // Covers all 18 SDOs, 18 SCOs, 2 SROs, and pipeline-internal names.
 export const STIX_COLORS: Record<string, string> = {

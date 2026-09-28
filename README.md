@@ -294,7 +294,7 @@ update them.
 │  Location → SDO (targeted country, ISO 3166-1 lookup, 80+ nations)  │
 │  Identity → SDO (targeted sector, identity_class=class)             │
 │  CourseOfAction → SDO (recommended remediations)                    │
-│  All accepted IoCs → Indicator → based-on → ObservedData → SCO       │
+│  All accepted IoCs → Indicator → based-on → SCO   (ADR-0061)        │
 │  IoC linked to malware → indicates SRO                              │
 │  Threat actor → targets → Location / Identity SROs                 │
 │  Semantic relations → Relationship SRO (deduplicated, spec-valid)    │
@@ -543,7 +543,10 @@ Custom **d3-force SVG graph** (not the OASIS stix-visualization iframe):
 | **Relationship editor** | Accept / Reject / Reset / Delete relationships in the side panel; Add new relationships with evidence text |
 | **Labels** | Toggle all labels; strategic nodes (tier 0–1) always show labels |
 | **Fit button** | Animate to fit all nodes in viewport |
-| **Download** | Download STIX bundle directly from the graph page |
+| **Download** | Download STIX bundle directly from the graph page (a pending rebuild runs first) |
+| **Bundle view** (default) | The bundle that ships (ADR-0061): links coloured by why they exist — from the report, Stage 4 mapping, policy rule, ATT&CK reference, inferred — rows Stage 4 rewrote in amber, rows and entities it dropped drawn as hollow dashed ghosts with the reason, and a **Differences** panel listing everything dropped, rewritten, merged, or not yet rebuilt |
+| **Review view** | The stored rows the analyst edits, each marked with its fate in the bundle; a link's panel jumps to it in the bundle view |
+| **Auto-rebuild** | Every link edit schedules a quick finalize (4 s debounce), as on the Review page |
 
 ### Policy page
 
@@ -623,7 +626,7 @@ disable one, and **Rebuild index** to re-ingest the local clones. See
 | Remediation step | `course-of-action` SDO |
 | Any accepted IoC | `indicator` SDO (STIX pattern) + `based-on` SRO |
 | IoC linked to malware | extra `indicates` SRO Indicator → Malware |
-| Any relationship touching an observable (LLM-extracted or policy-pinned) | routed through that observable's `indicator`, never the raw SCO directly — STIX 2.1 has no relationship-object answer for an observable-to-SDO edge, only the indicator does (ADR-0041) |
+| Relationship between an SDO and an observable (LLM-extracted or policy-pinned) | kept on the observable when STIX 2.1 defines that verb for the pair (`malware communicates-with domain-name`, `malware drops`/`downloads file`, `infrastructure consists-of <any observable>`); every other claim — `related-to` included — goes through the observable's `indicator` (ADR-0041, ADR-0062) |
 | Detection rule quoted verbatim in the report (YARA, Suricata, Snort, or Sigma) | `indicator` SDO with `pattern_type` set to the format and `pattern` holding the rule text as-is; auto-linked with `indicates` to a malware/tool whose name appears in the rule's own title (ADR-0042) |
 | Source document (PDF, DOCX, …) | `artifact` SCO — `payload_bin` (base64) + SHA-256 hash + MIME type, so the bundle carries the original file, not just a pointer to it (ADR-0043) |
 | Threat actor → country / sector | `targets` SRO |
@@ -1203,16 +1206,20 @@ On **Finalize**, accepted named entities form a per-report domain lexicon. The f
   emitted as a noisy `related-to`.
 - **Route observables through their indicator** — any other relationship
   touching a raw observable (LLM-extracted or policy-pinned) is re-anchored on
-  that observable's `indicator` rather than the SCO itself; STIX 2.1 has no
-  relationship-object answer for an observable-to-SDO edge otherwise. Scoped to
-  observable↔SDO pairs only — observable↔observable facts (`file related-to
-  ipv4-addr`) are left as-is, since the spec's real answer for those is
-  embedded ref properties, not a relationship object (ADR-0041).
+  that observable's `indicator` rather than the SCO itself (ADR-0041), unless
+  STIX 2.1 defines the verb for the observable itself: `malware
+  communicates-with domain-name`, `malware drops file` or `infrastructure
+  consists-of ipv4-addr` stay on the observable, since through the indicator
+  they could only ship as `related-to` (ADR-0062). Scoped to observable↔SDO
+  pairs only — observable↔observable facts (`file related-to ipv4-addr`) are
+  left as-is, since the spec's real answer for those is embedded ref
+  properties, not a relationship object.
 
 Measured effect on a 4-report corpus: named-entity relationship hallucination
 ≈ 11 % (the tractable target), entity hallucination ≈ 0. See
 [ADR-0012](docs/adr/0012-hallucination-measurement-and-canonicalization.md) /
-[ADR-0041](docs/adr/0041-observables-route-through-indicators.md).
+[ADR-0041](docs/adr/0041-observables-route-through-indicators.md) /
+[ADR-0062](docs/adr/0062-observables-keep-their-listed-relationships.md).
 
 ---
 

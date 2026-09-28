@@ -300,3 +300,29 @@ def get_bundle(job_id: str):
         return json.loads(row["bundle_json"])
     except Exception:
         raise HTTPException(500, "Bundle JSON is corrupted")
+
+
+@router.get("/{job_id}/bundle/ledger")
+def get_bundle_ledger(job_id: str):
+    """What Stage 4 did with each entity and relationship row when it built the
+    stored bundle (ADR-0061): what each became, what was rewritten, what was
+    dropped and why, and why each generated object and edge exists.
+
+    404 when the bundle predates the ledger (or was written without one); a
+    rebuild (POST /finalize?quick=true) produces it.
+    """
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT bundle_json, bundle_ledger_json FROM jobs WHERE id=?", (job_id,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Job not found")
+        if not row["bundle_json"]:
+            raise HTTPException(404, "Bundle not yet available")
+        if not row["bundle_ledger_json"]:
+            raise HTTPException(404, "No ledger for this bundle — rebuild it to get one")
+
+    try:
+        return json.loads(row["bundle_ledger_json"])
+    except Exception:
+        raise HTTPException(500, "Bundle ledger JSON is corrupted")

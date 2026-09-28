@@ -8,6 +8,30 @@ sections group by theme rather than strict semver.
 
 ### Fixed
 
+#### An observable keeps the relationships STIX 2.1 defines for it (ADR-0062), 2026-09-28
+
+ADR-0041 routed every observable opposite an SDO through its Indicator
+before checking the verb. `malware communicates-with domain-name`, `malware
+drops file`, `infrastructure consists-of ipv4-addr`, all relationships the
+spec defines on the observable itself, therefore shipped as `related-to` an
+Indicator. The mapping ledger showed it on the seeded Industroyer2 report.
+
+- The routing now applies only when the verb is not *listed* for the direct
+  pair (`stix_rel_spec.rel_is_listed`). `related-to` is valid between any two
+  objects, so it still goes through the Indicator, as ADR-0041 intended.
+- The verb judged is the one the direct edge would carry: the row's, or the
+  policy's pin for that pair of types. A pinned `malware>domain-name` rule
+  reaches extracted rows again; since ADR-0041 its lookup ran on the rerouted
+  `malware>indicator` pair.
+- The pin engine applies the same rule with the rule's own verb. A rule
+  labelled `malware communicates-with domain-name` now emits exactly that
+  edge, and no longer needs the domain to have an Indicator.
+- Measured on 7 real reports re-extracted into a throwaway database: 3 of 150
+  extracted rows no longer lose their verb. Under the Policy page's template,
+  304 of 1,245 pinned edges (24 %) had shipped as `related-to` an Indicator,
+  and none do now. Rows whose verb is listed for no form of the pair (12,
+  e.g. `malware targets ipv4-addr`) still go through the Indicator.
+
 #### Further graphic defects found by a page sweep (N1–N10), 2026-09-28
 
 Found by loading every page at 1024–1440 px, light and dark, with long file
@@ -105,6 +129,36 @@ names, hashes and URLs; the app targets 15″–38″ desktop screens.
   and keeps its actions on screen.
 
 ### Added
+
+#### The graph shows the bundle that ships (ADR-0061), 2026-09-28
+
+The Graph page drew the review rows, never the bundle: on the stored bundles
+80–100 % of the edges had no row behind them, and rows were rewritten or
+dropped with no trace.
+
+- **Mapping ledger.** Stage 4 records what it did with each entity and
+  relationship row — the object or edge it became, what it was merged into,
+  each rewrite (verb downgraded to `related-to`, verb set by a pinned rule,
+  observable replaced by its Indicator), or why it was dropped (unresolved
+  endpoint, alias self-loop, observable ↔ technique, no ISO country, named
+  entity the LLM did not list) — plus why every generated object and edge
+  exists and what the Stage 4b alias merge removed. Stored beside the bundle
+  in `jobs.bundle_ledger_json` (same write), served at
+  `GET /api/jobs/{id}/bundle/ledger`. The bundle is unchanged by it.
+- **Bundle view** (the Graph page default, remembered per viewer): the
+  bundle's objects and links, each link coloured by origin with a toggleable
+  legend; rewritten rows in amber; dropped rows and entities drawn as hollow
+  dashed ghosts with their reason; a **Differences** panel; clickable edges
+  with their provenance (rule, premises, quoted evidence, the rows behind
+  them). The review view marks each row with its fate in the bundle.
+- **Graph-page edits rebuild the bundle** (4 s debounce, as on the Review
+  page); Download runs a pending rebuild first. Before, the Graph page's
+  Download served a bundle that ignored its own edits.
+- **Changed — `indicator --based-on--> <observable>` directly**: the
+  ObservedData wrapper is gone — it stated a sighting at the build time that
+  nobody made. Documented as the one project extension to the STIX suggested
+  pairs (`stix_rel_spec.rel_is_allowed`); the default validator run passes,
+  strict mode reports `{202}`.
 
 #### Fixes from a review of phases 0–2, 2026-09-27
 

@@ -165,7 +165,9 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 | **Evidence spans** | `test_evidence_span_offsets.py` | 11 | index mapping, coverage calculation, quote matching |
 | **Evidence spans** | `test_merge_keeps_evidence.py` | 10 | evidence preservation, confidence ranking, deduplication |
 | **Evidence labels** | `test_evidence_consensus.py` | 4 | label normalization, STIX properties, consensus boosting |
-| STIX mapping | `test_stage4.py` | 38 | SDO/SCO/SRO build, alias merging, IoC coverage |
+| STIX mapping | `test_stage4.py` | 66 | SDO/SCO/SRO build, alias merging, IoC coverage, observable routing (ADR-0041, ADR-0062) |
+| STIX mapping | `test_stix_rel_spec.py` | 4 | listed vs allowed relationships: common verbs, unknown types, direction |
+| STIX mapping | `test_bundle_ledger.py` | 20 | mapping ledger: every row outcome and change, origins, 4b alias merge, API round-trip (ADR-0061) |
 | STIX mapping | `test_stix_self_edges.py` | 4 | self-edge prevention, endpoint validation, bundle integrity |
 | **Graph completion** | `test_stage4b_completion.py` | 18 | transitive completion, alias merging, grounding, pins |
 | **Graph completion** | `test_stage4c_long_distance.py` | 10 | long-distance inference, direction swap, evidence recording |
@@ -174,8 +176,8 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 | **Provenance** | `test_provenance.py` | 5 | authoring identity, TLP marking, created_by_ref |
 | **Provenance** | `test_edge_provenance.py` | 10 | relationship properties, pinned edges, run config |
 | **Provenance** | `test_bundle_staleness.py` | 15 | `git_rev` extraction from malformed run configs, ancestry verdicts, an undecidable git result never marking a bundle stale (ADR-0035) |
-| **Relationship policy** | `test_pin_budget.py` | 16 | fair share allocation, edge key validation, materialization |
-| **Relationship policy** | `test_pin_evidence.py` | 27 | term extraction, sentence indexing, grounding gates |
+| **Relationship policy** | `test_pin_budget.py` | 23 | fair share allocation, edge key validation, materialization, observable routing |
+| **Relationship policy** | `test_pin_evidence.py` | 31 | term extraction, sentence indexing, grounding gates, pins on listed observable pairs |
 | **Relationship policy** | `test_policy_last_run.py` | 17 | stats extraction, database queries, bundle handling |
 | **Relationship policy** | `test_policy_rule_validation.py` | 15 | policy validation, API rejection, graph survival |
 | **Rule adapters** | `test_sigma_adapter.py` | 8 | rule parsing, tactic skipping, registry loading |

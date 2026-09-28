@@ -1,13 +1,20 @@
 /**
- * Graph.tsx — native d3-force STIX relationship graph.
+ * Graph.tsx — native d3-force STIX relationship graph, in two views.
  *
- * Data source: fetchEntities + fetchRelationships (not the bundle).
- * That source carries `accepted`, supports editing, and reflects edits
- * immediately on cache-invalidate — no "Rebuild & reload" round-trip needed.
+ * Bundle view (default, ADR-0061): the STIX bundle as it ships, each link
+ * classified by why it exists (a report row, Stage 4 mapping, a policy pin,
+ * ATT&CK, inference), plus every review row the bundle does NOT ship as
+ * drawn — dropped rows as hollow/dashed ghosts, rewritten ones in amber, and
+ * the full list under "Differences".  Built from the stored bundle and the
+ * ledger Stage 4 wrote beside it.
  *
- * Relationships reference entities by VALUE (source_value / target_value),
- * not by id.  We build a value→entityId map and skip edges whose endpoints
- * don't resolve.
+ * Review view: fetchEntities + fetchRelationships — the rows the analyst
+ * edits.  Relationships reference entities by VALUE (source_value /
+ * target_value), not by id: we build a value→entityId map and skip edges whose
+ * endpoints don't resolve.  With a ledger, each row also says what the bundle
+ * made of it.
+ *
+ * Link edits in either view schedule a quick bundle rebuild.
  */
 
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
@@ -16,19 +23,26 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, Download, Eye, Link2, X, Search, RotateCcw,
   Maximize2, Tag, Network, AlignCenter, CircleDot, Check, Trash2,
-  Plus, ChevronRight, ChevronLeft,
+  Plus, ChevronRight, ChevronLeft, GitCompare, RefreshCw,
 } from 'lucide-react'
 
 import {
-  fetchJob, fetchEntities, fetchRelationships,
+  fetchJob, fetchEntities, fetchRelationships, fetchBundle, fetchBundleLedger,
   createRelationship, updateRelationship, deleteRelationship,
   createEntity,
 } from '../api/client'
 import { downloadBundle } from '../stix/downloadBundle'
+import { useDebouncedFinalize } from '../stix/useDebouncedFinalize'
+import type { LedgerRelationship } from '../types'
 import { typeDot, typeSoft, typeInk, typeLabel, REL_TYPES, suggestRelType, confPct, TYPE_GROUPS, verbsForPair } from '../components/review/tokens'
 import GraphCanvas, { type GraphCanvasHandle } from '../components/graph/GraphCanvas'
-import { type GraphNode, type GraphEdge, getTier } from '../components/graph/graphLayout'
-import { buildGraphData } from '../components/graph/buildGraphData'
+import { type GraphNode, type GraphEdge, type EdgeKind, getTier } from '../components/graph/graphLayout'
+import { buildGraphData, type GraphData } from '../components/graph/buildGraphData'
+import { buildBundleGraph } from '../components/graph/buildBundleGraph'
+import {
+  BundleMeta, BundleNodeDetail, DiffPanel, EdgeDetail, FateChip, ProvenanceLegend,
+  ReviewEdgeDetail, makeLabelOf,
+} from '../components/graph/BundlePanels'
 
 // ── Deduped relationship-type list for <select> ───────────────────────────────
 const REL_TYPES_UNIQ = [...new Set(REL_TYPES)]
@@ -188,13 +202,17 @@ function ConfBar({ value }: { value: number }) {
 // ── Detail Panel ──────────────────────────────────────────────────────────────
 
 function DetailPanel({
-  node, edges, byId, onClose, onPick,
+  node, edges, byId, onClose, onPick, onPickEdge, fate, labelOf,
 }: {
   node: GraphNode
   edges: GraphEdge[]
   byId: Map<string, GraphNode>
   onClose: () => void
   onPick: (id: string) => void
+  onPickEdge: (id: string) => void
+  /** What the stored bundle did with each row (absent without a ledger). */
+  fate?: Map<string, LedgerRelationship>
+  labelOf: (id: string) => string
 }) {
   const incident = edges.filter(e => e.source === node.id || e.target === node.id)
 
@@ -263,7 +281,9 @@ function DetailPanel({
               const other = byId.get(out ? e.target : e.source)
               if (!other) return null
               return (
-                <button key={e.id} onClick={() => onPick(other.id)}
+                <button key={e.id} onClick={() => onPickEdge(e.id)}
+                  onDoubleClick={() => onPick(other.id)}
+                  title="Click: this link · double-click: go to the other end"
                   style={{
                     display: 'flex', alignItems: 'center', gap: 6,
                     padding: '5px 7px', borderRadius: 6, border: 'none',
@@ -286,6 +306,7 @@ function DetailPanel({
                   {e.accepted === null && (
                     <span style={{ fontSize: 9, color: 'var(--warn)', ...MONO, flexShrink: 0 }}>pending</span>
                   )}
+                  <FateChip fate={fate?.get(e.id)} hasLedger={!!fate} rejected={e.accepted === false} labelOf={labelOf} />
                 </button>
               )
             })}
@@ -299,13 +320,15 @@ function DetailPanel({
 // ── Relationship Editor ───────────────────────────────────────────────────────
 
 function RelEditor({
-  jobId, nodes, edges, byId, onClose, onPick,
+  jobId, nodes, edges, byId, fate, labelOf, onClose, onPick,
   onAccept, onReject, onReset, onDelete, onCreate, onAddEntity,
 }: {
   jobId: string
   nodes: GraphNode[]
   edges: GraphEdge[]
   byId: Map<string, GraphNode>
+  fate?: Map<string, LedgerRelationship>
+  labelOf: (id: string) => string
   onClose: () => void
   onPick: (id: string) => void
   onAccept: (id: string) => void
@@ -414,9 +437,11 @@ function RelEditor({
                     {tgt.name.length > 18 ? tgt.name.slice(0, 16) + '…' : tgt.name}
                   </button>
                 </div>
-                {/* Footer: confidence + actions */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                {/* Footer: confidence, fate in the bundle, actions */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
                   <ConfBar value={e.confidence} />
+                  <FateChip fate={fate?.get(e.id)} hasLedger={!!fate} rejected={rej} labelOf={labelOf} />
+                  <span style={{ flex: 1 }} />
                   <div style={{ display: 'flex', gap: 3 }}>
                     {pend && (
                       <>
@@ -772,6 +797,19 @@ function AddRelForm({
 // ─────────────────────────────────────────────────────────────────────────────
 
 type LayoutMode = 'force' | 'hierarchical' | 'radial'
+/** review: the stored rows the analyst edits.  bundle: the STIX bundle that
+ *  ships, with every row it does not ship as drawn (ADR-0061). */
+type ViewMode = 'review' | 'bundle'
+
+const MODE_KEY = 'ctiparsor.graph.mode'
+
+function readMode(): ViewMode {
+  try {
+    return localStorage.getItem(MODE_KEY) === 'review' ? 'review' : 'bundle'
+  } catch {
+    return 'bundle'
+  }
+}
 
 export default function Graph() {
   const { jobId }  = useParams<{ jobId: string }>()
@@ -784,33 +822,65 @@ export default function Graph() {
   const { data: job }           = useQuery({ queryKey: ['job', jobId],           queryFn: () => fetchJob(jobId!),           enabled: !!jobId })
   const { data: rawEntities  = [], isLoading: entLoading  } = useQuery({ queryKey: ['entities',      jobId], queryFn: () => fetchEntities(jobId!),      enabled: !!jobId })
   const { data: rawRelations = [], isLoading: relLoading  } = useQuery({ queryKey: ['relationships', jobId], queryFn: () => fetchRelationships(jobId!),  enabled: !!jobId })
+  // A missing bundle is a state to show, not an error to retry.
+  const { data: bundle = null, isLoading: bundleLoading } = useQuery({
+    queryKey: ['bundle', jobId], enabled: !!jobId, retry: false,
+    queryFn: () => fetchBundle(jobId!).catch(() => null),
+  })
+  const { data: ledger = null } = useQuery({
+    queryKey: ['bundle-ledger', jobId], enabled: !!jobId, retry: false,
+    queryFn: () => fetchBundleLedger(jobId!),
+  })
 
   // ── Derive graph data ──────────────────────────────────────────────────────
-  // Relationships reference entities by VALUE (source_value / target_value).
-  // We build a value→entityId map; edges whose endpoints don't resolve are
-  // skipped in v1 (the README recommends this for simplicity).
+  // The review data always exists: the link editor works on the stored rows in
+  // both views.  The bundle view is derived from the bundle + its ledger.
 
-  const { nodes, edges, byId, deg, adj, typeCounts, unmatchedCount } = useMemo(
-    () => buildGraphData(rawEntities, rawRelations),
-    [rawEntities, rawRelations],
+  const [mode, setModeState] = useState<ViewMode>(readMode)
+  const review = useMemo(
+    () => buildGraphData(rawEntities, rawRelations, ledger),
+    [rawEntities, rawRelations, ledger],
   )
+  const bundleData = useMemo(
+    () => mode === 'bundle' ? buildBundleGraph(bundle, ledger, rawEntities, rawRelations) : null,
+    [mode, bundle, ledger, rawEntities, rawRelations],
+  )
+  const view: GraphData = bundleData ?? review
+  const { nodes, edges, byId, deg, adj, typeCounts, unmatchedCount } = view
 
   // ── UI state ───────────────────────────────────────────────────────────────
 
   const [selectedId,   setSelectedId]   = useState<string | null>(null)
+  const [selectedEdge, setSelectedEdge] = useState<string | null>(null)
   const [hoverId,      setHoverId]       = useState<string | null>(null)
   const [layout,       setLayout]        = useState<LayoutMode>('force')
   // Types switched off in the legend.  Empty = all shown; hiding the last one
   // shows none (a "visible" set used empty for "all" re-showed everything).
   const [hiddenTypes,  setHiddenTypes]   = useState<Set<string>>(new Set())
+  const [hiddenKinds,  setHiddenKinds]   = useState<Set<EdgeKind>>(new Set())
   const [editMode,     setEditMode]      = useState(false)
+  const [diffOpen,     setDiffOpen]      = useState(false)
   const [showLabels,   setShowLabels]    = useState(false)
   const [focusSignal,  setFocusSignal]   = useState<{ id: string; seq: number } | null>(null)
   const focusSeq = useRef(0)
 
-  // Right panel: detail shows on select; editor shows in editMode
-  const rightPanel = editMode ? 'editor' : selectedId ? 'detail' : null
+  // Ids differ between the views (entity ids vs STIX ids): a switch drops the
+  // selection.  The choice is remembered per viewer, written here rather than
+  // from an effect on `mode` (see memory note on localStorage persistence).
+  const setMode = useCallback((m: ViewMode) => {
+    setModeState(m)
+    setSelectedId(null)
+    setSelectedEdge(null)
+    setHiddenTypes(new Set())
+    try { localStorage.setItem(MODE_KEY, m) } catch { /* private mode: not remembered */ }
+  }, [])
+
+  // Right panel: an explicit panel (editor, differences) wins over selection.
+  const rightPanel = editMode ? 'editor' : diffOpen ? 'diff' : selectedEdge ? 'edge' : selectedId ? 'detail' : null
   const selectedNode = selectedId ? byId.get(selectedId) ?? null : null
+  const selectedEdgeObj = selectedEdge ? edges.find(e => e.id === selectedEdge) ?? null : null
+
+  const labelOf = useMemo(() => makeLabelOf(byId, bundle?.objects ?? []), [byId, bundle])
 
   // ── Legend toggle helpers ──────────────────────────────────────────────────
 
@@ -828,42 +898,88 @@ export default function Graph() {
 
   const resetTypes = useCallback(() => setHiddenTypes(new Set()), [])
 
-  // ── Focus a searched node ──────────────────────────────────────────────────
+  const toggleKind = useCallback((k: EdgeKind) => {
+    setHiddenKinds(prev => {
+      const next = new Set(prev)
+      if (next.has(k)) next.delete(k); else next.add(k)
+      return next
+    })
+  }, [])
+
+  // ── Focus a searched node / pick an edge ───────────────────────────────────
 
   const focusNode = useCallback((id: string) => {
+    setSelectedEdge(null)
+    setDiffOpen(false)
     setSelectedId(id)
     focusSeq.current++
     setFocusSignal({ id, seq: focusSeq.current })
   }, [])
 
+  const pickEdge = useCallback((id: string) => {
+    const e = edges.find(x => x.id === id)
+    if (!e) return
+    setEditMode(false)
+    setDiffOpen(false)
+    setSelectedId(null)
+    setSelectedEdge(id)
+    focusSeq.current++
+    setFocusSignal({ id: e.source, seq: focusSeq.current })
+  }, [edges])
+
+  // The link editor works on review rows: in the bundle view, an entity id is
+  // shown as the object it became, or as its ghost.
+  const pickEntity = useCallback((entityId: string) => {
+    if (!bundleData) { focusNode(entityId); return }
+    for (const [id, info] of bundleData.nodeInfo) {
+      if (info.rows.some(r => r.entity.id === entityId)) { focusNode(id); return }
+    }
+    if (bundleData.byId.has(`ghost:entity:${entityId}`)) focusNode(`ghost:entity:${entityId}`)
+  }, [bundleData, focusNode])
+
+  const showInBundle = useCallback((stixId: string) => {
+    setMode('bundle')
+    setSelectedEdge(stixId)
+  }, [setMode])
+
+  // ── Bundle rebuild after edits ─────────────────────────────────────────────
+  // Every relationship change schedules a quick finalize, like the Review page:
+  // the bundle view and Download must not serve a bundle that ignores them.
+
+  const finalize = useDebouncedFinalize(jobId)
+
   // ── Relationship mutations ─────────────────────────────────────────────────
 
-  const invalidateRels = () => qc.invalidateQueries({ queryKey: ['relationships', jobId] })
+  const onRowsChanged = () => {
+    qc.invalidateQueries({ queryKey: ['relationships', jobId] })
+    finalize.markDirty()
+  }
 
   const updateRelMut = useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: object }) =>
       updateRelationship(jobId!, id, patch),
-    onSuccess: invalidateRels,
+    onSuccess: onRowsChanged,
   })
   const deleteRelMut = useMutation({
     mutationFn: (id: string) => deleteRelationship(jobId!, id),
-    onSuccess: invalidateRels,
+    onSuccess: onRowsChanged,
   })
   const createRelMut = useMutation({
     mutationFn: (body: Parameters<typeof createRelationship>[1]) =>
       createRelationship(jobId!, body),
-    onSuccess: invalidateRels,
+    onSuccess: onRowsChanged,
   })
 
   // ── Download STIX bundle ───────────────────────────────────────────────────
 
   const handleDownload = async () => {
     try {
+      await finalize.flush()   // an edit still waiting for its rebuild goes in first
       await downloadBundle(jobId!, job?.original_filename)
     } catch { alert('Bundle not yet available') }
   }
 
-  // ── Clear stale selectedId when its node is removed from the graph ────────
+  // ── Clear stale selections when their node or edge leaves the graph ───────
   // If the user accepts/rejects entities in the Review page and then opens the
   // Graph, previously-selected nodes may no longer exist in `byId`.  Without
   // this guard the right panel renders empty (selectedNode = null) with no
@@ -872,10 +988,19 @@ export default function Graph() {
   useEffect(() => {
     if (selectedId && !byId.has(selectedId)) setSelectedId(null)
   }, [byId, selectedId])
+  useEffect(() => {
+    if (selectedEdge && !edges.some(e => e.id === selectedEdge)) setSelectedEdge(null)
+  }, [edges, selectedEdge])
 
   // ── Loading state ──────────────────────────────────────────────────────────
 
-  const isLoading = entLoading || relLoading
+  const isLoading = entLoading || relLoading || (mode === 'bundle' && bundleLoading)
+  const staleCount   = bundleData ? bundleData.diff.filter(d => d.kind === 'stale').length : 0
+  const diffCount    = bundleData ? bundleData.diff.filter(d => d.kind !== 'stale').length : 0
+  const ghostCount   = nodes.filter(n => n.ghost).length
+  const droppedCount = edges.filter(e => e.kind === 'dropped').length
+  const changedCount = edges.filter(e => e.changed && e.kind !== 'dropped').length
+  const noBundle     = mode === 'bundle' && !bundleLoading && !bundle
 
   // ─────────────────────────────────────────────────────────────────────────
   // Render
@@ -885,7 +1010,7 @@ export default function Graph() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg)' }}>
 
       {/* ── Top chrome ────────────────────────────────────────────────── */}
-      <div className="top-chrome">
+      <div className="top-chrome graph-chrome">
         <button onClick={() => navigate('/dashboard')} className="back" title="Back">
           <ArrowLeft size={15} />
         </button>
@@ -893,19 +1018,48 @@ export default function Graph() {
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {job?.original_filename ?? `Job ${jobId}`}
           </div>
-          <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>STIX 2.1 relationship graph</div>
+          <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>
+            {mode === 'bundle' ? 'The STIX 2.1 bundle as it ships' : 'Review rows — what the analyst edits'}
+            {' · '}
+            <BundleState running={finalize.running} pending={finalize.pending} failed={finalize.failed} stale={staleCount} />
+          </div>
         </div>
-        <button onClick={() => navigate(`/review/${jobId}`)} className="btn-ghost">
-          <Eye size={13} /> Review
+        {/* View switch */}
+        <div role="group" aria-label="Graph view" style={{ display: 'flex', borderRadius: 7, overflow: 'hidden', border: '1px solid var(--rule)', flexShrink: 0 }}>
+          {([
+            { id: 'bundle', label: 'STIX bundle', title: 'The bundle that ships, with what Stage 4 added, rewrote and dropped' },
+            { id: 'review', label: 'Review rows', title: 'The stored entities and relationships the analyst edits' },
+          ] as const).map(opt => (
+            <button key={opt.id} onClick={() => setMode(opt.id)} title={opt.title} aria-pressed={mode === opt.id}
+              style={{
+                padding: '5px 10px', fontSize: 11.5, border: 'none', cursor: 'pointer',
+                background: mode === opt.id ? 'var(--accent)' : 'transparent',
+                color: mode === opt.id ? 'var(--on-fill)' : 'var(--ink-3)',
+              }}>
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        {mode === 'bundle' && bundleData?.hasLedger && (
+          <button onClick={() => { setDiffOpen(v => !v); setEditMode(false) }}
+            className={diffOpen ? 'btn-primary' : 'btn-ghost'}
+            title="Everything Stage 4 dropped, rewrote or merged on the way from the review rows to the bundle">
+            <GitCompare size={13} /> <span className="gc-label">Differences</span>
+            {diffCount + staleCount > 0 ? ` ${diffCount + staleCount}` : ''}
+          </button>
+        )}
+        <button onClick={() => navigate(`/review/${jobId}`)} className="btn-ghost" title="Review">
+          <Eye size={13} /> <span className="gc-label">Review</span>
         </button>
         <button
-          onClick={() => { setEditMode(v => !v); if (selectedId) setSelectedId(null) }}
+          onClick={() => { setEditMode(v => !v); setDiffOpen(false); if (selectedId) setSelectedId(null); setSelectedEdge(null) }}
           className={editMode ? 'btn-primary' : 'btn-ghost'}
+          title="Edit links"
         >
-          <Link2 size={13} /> Edit links
+          <Link2 size={13} /> <span className="gc-label">Edit links</span>
         </button>
-        <button onClick={handleDownload} className="btn-ghost">
-          <Download size={13} /> Download STIX
+        <button onClick={handleDownload} className="btn-ghost" title="Download STIX">
+          <Download size={13} /> <span className="gc-label">Download STIX</span>
         </button>
       </div>
 
@@ -928,8 +1082,8 @@ export default function Graph() {
           {/* Stats */}
           <div style={{ display: 'flex', gap: 6 }}>
             {[
-              { n: nodes.length,  label: 'nodes' },
-              { n: edges.length,  label: 'edges' },
+              { n: nodes.length - ghostCount, label: mode === 'bundle' ? 'objects' : 'nodes' },
+              { n: edges.length - droppedCount, label: mode === 'bundle' ? 'links' : 'edges' },
             ].map(({ n, label }) => (
               <div key={label} style={{
                 flex: 1, background: 'var(--bg-soft)', borderRadius: 7,
@@ -941,10 +1095,51 @@ export default function Graph() {
             ))}
           </div>
 
+          {mode === 'bundle' && bundle && !bundleData?.hasLedger && (
+            <RailNote tone="warn">
+              This bundle was built before provenance tracking: links are classified from their own
+              properties only, and nothing the build dropped can be shown.
+              <button onClick={() => void finalize.rebuild()} disabled={finalize.running} className="btn-ghost" style={{ marginTop: 6, fontSize: 11 }}>
+                <RefreshCw size={11} /> Rebuild the bundle
+              </button>
+            </RailNote>
+          )}
+          {mode === 'bundle' && staleCount > 0 && !finalize.running && (
+            <RailNote tone="warn">
+              The stored bundle predates {staleCount} review change{staleCount > 1 ? 's' : ''}.
+              <button onClick={() => void finalize.rebuild()} className="btn-ghost" style={{ marginTop: 6, fontSize: 11 }}>
+                <RefreshCw size={11} /> Rebuild now
+              </button>
+            </RailNote>
+          )}
+          {mode === 'bundle' && ghostCount + droppedCount > 0 && (
+            <RailNote tone="no">
+              Drawn hollow and dashed:{' '}
+              {[ghostCount > 0 && `${ghostCount} entit${ghostCount > 1 ? 'ies' : 'y'}`,
+                droppedCount > 0 && `${droppedCount} link${droppedCount > 1 ? 's' : ''}`]
+                .filter(Boolean).join(' and ')}
+              {' '}from the review that the bundle does not contain.
+            </RailNote>
+          )}
+          {mode === 'review' && review.fate && (
+            <RailNote tone="info">
+              Red dashed links are not in the bundle; amber ones ship rewritten. Select one to see why.
+            </RailNote>
+          )}
+
           {unmatchedCount > 0 && (
             <div style={{ fontSize: 10, color: 'var(--warn)', background: 'color-mix(in oklab, var(--warn) 8%, transparent)', borderRadius: 5, padding: '4px 7px' }}>
-              {unmatchedCount} link{unmatchedCount > 1 ? 's' : ''} reference unknown entities
+              {unmatchedCount} link{unmatchedCount > 1 ? 's' : ''} reference {mode === 'bundle' ? 'objects not drawn' : 'unknown entities'}
             </div>
+          )}
+
+          {bundleData && (
+            <ProvenanceLegend
+              kindCounts={bundleData.kindCounts}
+              hiddenKinds={hiddenKinds}
+              onToggle={toggleKind}
+              changedCount={changedCount}
+            />
           )}
 
           <TypeLegend
@@ -954,6 +1149,8 @@ export default function Graph() {
             onSolo={soloType}
             onReset={resetTypes}
           />
+
+          {bundleData && <BundleMeta meta={bundleData.meta} />}
         </div>
 
         {/* ── Canvas area (flex-1) ──────────────────────────────────────── */}
@@ -965,6 +1162,14 @@ export default function Graph() {
                 <path d="M21 12a9 9 0 11-6.2-8.6" />
               </svg>
               Loading graph…
+            </div>
+          ) : noBundle ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--ink-4)', gap: 8 }}>
+              <Network size={40} style={{ opacity: 0.3 }} />
+              <p style={{ margin: 0, fontSize: 13 }}>No STIX bundle has been built for this report yet</p>
+              <button onClick={() => void finalize.rebuild()} disabled={finalize.running} className="btn-primary" style={{ fontSize: 12 }}>
+                <RefreshCw size={12} /> {finalize.running ? 'Building…' : 'Build it now'}
+              </button>
             </div>
           ) : nodes.length === 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--ink-4)', gap: 8 }}>
@@ -982,13 +1187,17 @@ export default function Graph() {
               adj={adj}
               layout={layout}
               hiddenTypes={hiddenTypes}
+              hiddenKinds={hiddenKinds}
               selectedId={selectedId}
+              selectedEdgeId={selectedEdge}
               hoverId={hoverId}
               showLabels={showLabels}
               onSelect={id => {
                 setSelectedId(id)
-                if (id && editMode) setEditMode(false)
+                setSelectedEdge(null)
+                if (id) { setEditMode(false); setDiffOpen(false) }
               }}
+              onSelectEdge={pickEdge}
               onHover={setHoverId}
               focusSignal={focusSignal}
             />
@@ -1056,23 +1265,68 @@ export default function Graph() {
             display: 'flex', flexDirection: 'column',
             overflow: 'hidden',
           }}>
-            {rightPanel === 'detail' && selectedNode && (
+            {rightPanel === 'detail' && selectedNode && (bundleData ? (
+              <BundleNodeDetail
+                node={selectedNode}
+                info={bundleData.nodeInfo.get(selectedNode.id)}
+                edges={edges}
+                byId={byId}
+                onClose={() => setSelectedId(null)}
+                onPickEdge={pickEdge}
+              />
+            ) : (
               <DetailPanel
                 node={selectedNode}
                 edges={edges}
                 byId={byId}
                 onClose={() => setSelectedId(null)}
                 onPick={focusNode}
+                onPickEdge={pickEdge}
+                fate={review.fate}
+                labelOf={labelOf}
+              />
+            ))}
+            {rightPanel === 'edge' && selectedEdgeObj && (bundleData ? (
+              <EdgeDetail
+                edge={selectedEdgeObj}
+                info={bundleData.edgeInfo.get(selectedEdgeObj.id)}
+                byId={byId}
+                onClose={() => setSelectedEdge(null)}
+                onPick={focusNode}
+                onPickEdge={pickEdge}
+                labelOf={labelOf}
+              />
+            ) : (
+              <ReviewEdgeDetail
+                edge={selectedEdgeObj}
+                fate={review.fate?.get(selectedEdgeObj.id)}
+                hasLedger={!!ledger}
+                byId={byId}
+                onClose={() => setSelectedEdge(null)}
+                onPick={focusNode}
+                onShowInBundle={showInBundle}
+                labelOf={labelOf}
+              />
+            ))}
+            {rightPanel === 'diff' && bundleData && (
+              <DiffPanel
+                diff={bundleData.diff}
+                onClose={() => setDiffOpen(false)}
+                onPickNode={id => { focusNode(id) }}
+                onPickEdge={pickEdge}
+                labelOf={labelOf}
               />
             )}
             {rightPanel === 'editor' && (
               <RelEditor
                 jobId={jobId!}
-                nodes={nodes}
-                edges={edges}
-                byId={byId}
+                nodes={review.nodes}
+                edges={review.edges}
+                byId={review.byId}
+                fate={review.fate}
+                labelOf={labelOf}
                 onClose={() => setEditMode(false)}
-                onPick={focusNode}
+                onPick={pickEntity}
                 onAccept={id => updateRelMut.mutate({ id, patch: { accepted: true } })}
                 onReject={id => updateRelMut.mutate({ id, patch: { accepted: false } })}
                 onReset={id  => updateRelMut.mutate({ id, patch: { accepted: null } })}
@@ -1091,9 +1345,10 @@ export default function Graph() {
                   // display the correct source badge instead of a blank/undefined.
                   await createEntity(jobId!, { value, entity_type, confidence: 1.0, source: 'manual', context: '' })
                   // Invalidate both entity + relationship queries so the graph
-                  // redraws with the new node
+                  // redraws with the new node, and rebuild the bundle.
                   qc.invalidateQueries({ queryKey: ['entities',      jobId] })
                   qc.invalidateQueries({ queryKey: ['relationships', jobId] })
+                  finalize.markDirty()
                 }}
               />
             )}
@@ -1118,4 +1373,27 @@ export default function Graph() {
       </div>
     </div>
   )
+}
+
+function RailNote({ tone, children }: { tone: 'warn' | 'no' | 'info'; children: React.ReactNode }) {
+  const c = tone === 'info' ? 'var(--frost)' : `var(--${tone})`
+  return (
+    <div style={{
+      fontSize: 10.5, color: 'var(--ink-2)', lineHeight: 1.45,
+      background: `color-mix(in oklab, ${c} 8%, transparent)`,
+      borderLeft: `2px solid ${c}`, borderRadius: 4, padding: '6px 8px',
+      display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
+    }}>{children}</div>
+  )
+}
+
+/** One line on whether the stored bundle matches the review rows. */
+function BundleState({ running, pending, failed, stale }: {
+  running: boolean; pending: boolean; failed: boolean; stale: number
+}) {
+  if (running) return <span style={{ color: 'var(--ink-3)' }}>rebuilding the bundle…</span>
+  if (failed)  return <span style={{ color: 'var(--no)' }}>bundle rebuild failed — it is out of date</span>
+  if (pending) return <span style={{ color: 'var(--warn)' }}>bundle rebuild scheduled</span>
+  if (stale)   return <span style={{ color: 'var(--warn)' }}>bundle out of date</span>
+  return <span style={{ color: 'var(--ok)' }}>bundle current</span>
 }

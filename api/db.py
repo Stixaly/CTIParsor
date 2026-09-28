@@ -254,6 +254,8 @@ _JOB_STORE_DDL_POSTGRES: tuple[str, ...] = (
     # ADR-0046 lease columns for a store created before them; no-ops on a fresh one.
     "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS worker_id TEXT",
     "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS heartbeat_at TEXT",
+    # ADR-0061 - what Stage 4 did with each row, written with every bundle.
+    "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS bundle_ledger_json TEXT",
     """CREATE TABLE IF NOT EXISTS entities (
     id TEXT PRIMARY KEY,
     job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,

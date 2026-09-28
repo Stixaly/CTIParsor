@@ -155,6 +155,13 @@ class CompletionStats:
     skipped_not_suggested: int = 0
     capped: bool = False
     notes: list[str] = field(default_factory=list)
+    # What the alias merge destroyed, for the mapping ledger (ADR-0061):
+    # absorbed object id -> canonical id; SROs dropped because the merge turned
+    # them into self-loops or duplicates; SROs whose endpoints it rewrote.
+    merged_ids: dict[str, str] = field(default_factory=dict)
+    merged_names: dict[str, str] = field(default_factory=dict)   # absorbed id -> its name
+    removed_relationships: list[dict] = field(default_factory=list)
+    remapped_relationships: dict[str, tuple[str, str]] = field(default_factory=dict)
 
     @property
     def total_added(self) -> int:
@@ -332,6 +339,7 @@ def _merge_aliases(stix_objects: list, cfg: dict, stats: CompletionStats) -> Non
             if m.id == canonical.id:
                 continue
             remap[m.id] = canonical.id
+            stats.merged_names[m.id] = m.get("name", "")
             merged_aliases.add(m.get("name", ""))
             merged_aliases.update(m.get("aliases", []) or [])
             stats.aliases_merged += 1
@@ -346,7 +354,8 @@ def _merge_aliases(stix_objects: list, cfg: dict, stats: CompletionStats) -> Non
 
     # Drop merged duplicate SDOs and rewrite every relationship endpoint.
     _drop_ids(stix_objects, set(remap))
-    _rewrite_refs(stix_objects, remap)
+    stats.merged_ids.update(remap)
+    _rewrite_refs(stix_objects, remap, stats)
 
 
 def _semantic_alias_pass(sdos: list, union: Callable[[str, str], None],
@@ -402,10 +411,12 @@ def _drop_ids(stix_objects: list, ids: set[str]) -> None:
     stix_objects[:] = [o for o in stix_objects if getattr(o, "id", None) not in ids]
 
 
-def _rewrite_refs(stix_objects: list, remap: dict[str, str]) -> None:
+def _rewrite_refs(stix_objects: list, remap: dict[str, str],
+                  stats: Optional[CompletionStats] = None) -> None:
     """Point every relationship's source/target at the canonical id; drop the
-    resulting self-loops and exact duplicates."""
-    seen: set[tuple[str, str, str]] = set()
+    resulting self-loops and exact duplicates.  With `stats`, record each drop
+    and rewrite (the mapping ledger reports them, ADR-0061)."""
+    seen: dict[tuple[str, str, str], str] = {}
     out: list = []
     for o in stix_objects:
         if not _is_rel(o):
@@ -414,13 +425,22 @@ def _rewrite_refs(stix_objects: list, remap: dict[str, str]) -> None:
         src = remap.get(o.get("source_ref"), o.get("source_ref"))
         tgt = remap.get(o.get("target_ref"), o.get("target_ref"))
         if src == tgt:
-            continue   # self-loop created by the merge
+            # self-loop created by the merge
+            if stats is not None:
+                stats.removed_relationships.append(
+                    {"id": o.id, "reason": "self_loop_after_alias_merge"})
+            continue
         key = (src, o.get("relationship_type"), tgt)
         if key in seen:
+            if stats is not None:
+                stats.removed_relationships.append(
+                    {"id": o.id, "reason": "duplicate_after_alias_merge", "kept": seen[key]})
             continue
-        seen.add(key)
+        seen[key] = o.id
         if src != o.get("source_ref") or tgt != o.get("target_ref"):
             o = _clone_with(o, source_ref=src, target_ref=tgt)
+            if stats is not None:
+                stats.remapped_relationships[o.id] = (src, tgt)
         out.append(o)
     stix_objects[:] = out
 

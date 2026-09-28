@@ -230,7 +230,7 @@ def test_route_leaves_both_observables_alone():
     src = _Obj("domain-name", 1)
     tgt = _Obj("ipv4-addr", 2)
     mapping = {}
-    assert _route_observables_through_indicators(src, tgt, mapping) == (src, tgt)
+    assert _route_observables_through_indicators(src, "related-to", tgt, mapping) == (src, tgt)
 
 
 def test_route_leaves_two_sdos_alone():
@@ -238,7 +238,7 @@ def test_route_leaves_two_sdos_alone():
     src = _Obj("malware", 1)
     tgt = _Obj("threat-actor", 2)
     mapping = {}
-    assert _route_observables_through_indicators(src, tgt, mapping) == (src, tgt)
+    assert _route_observables_through_indicators(src, "related-to", tgt, mapping) == (src, tgt)
 
 
 def test_route_redirects_the_observable_side():
@@ -247,7 +247,15 @@ def test_route_redirects_the_observable_side():
     tgt = _Obj("domain-name", 2)
     indicator = _Obj("indicator", 3)
     mapping = {tgt.id: indicator}
-    assert _route_observables_through_indicators(src, tgt, mapping) == (src, indicator)
+    assert _route_observables_through_indicators(src, "related-to", tgt, mapping) == (src, indicator)
+
+
+def test_route_redirects_an_observable_source():
+    src = _Obj("domain-name", 1)
+    tgt = _Obj("malware", 2)
+    indicator = _Obj("indicator", 3)
+    mapping = {src.id: indicator}
+    assert _route_observables_through_indicators(src, "indicates", tgt, mapping) == (indicator, tgt)
 
 
 def test_route_drops_when_no_indicator_exists():
@@ -256,7 +264,35 @@ def test_route_drops_when_no_indicator_exists():
     src = _Obj("malware", 1)
     tgt = _Obj("domain-name", 2)
     mapping = {}
-    assert _route_observables_through_indicators(src, tgt, mapping) == (None, None)
+    assert _route_observables_through_indicators(src, "related-to", tgt, mapping) == (None, None)
+
+
+def test_route_keeps_a_listed_pair_on_the_observable():
+    """ADR-0062: a verb STIX lists for the direct pair keeps the observable,
+    and needs no Indicator — the map is not consulted."""
+    cases = [("malware", "communicates-with", "ipv4-addr"),
+             ("malware", "drops", "file"),
+             ("malware", "downloads", "file"),
+             ("infrastructure", "consists-of", "mutex"),       # the spec's <any SCO>
+             ("infrastructure", "communicates-with", "url"),
+             ("indicator", "based-on", "domain-name")]         # project extension
+    for n, (s, verb, t) in enumerate(cases):
+        src, tgt = _Obj(s, n), _Obj(t, 100 + n)
+        assert _route_observables_through_indicators(src, verb, tgt, {}) == (src, tgt), verb
+
+
+def test_route_judges_the_verb_for_this_pair_and_direction():
+    """ADR-0062: listed for another pair, or in the other direction, is not
+    listed here; `related-to` (valid anywhere) names nothing about the pair."""
+    indicator = _Obj("indicator", 9)
+    for s, verb, t in [("domain-name", "communicates-with", "malware"),   # reversed
+                       ("malware", "communicates-with", "file"),          # wrong SCO
+                       ("threat-actor", "drops", "file"),                 # wrong SDO
+                       ("malware", "related-to", "domain-name")]:
+        src, tgt = _Obj(s, 1), _Obj(t, 2)
+        sco = src if s in ("domain-name", "file") else tgt
+        routed = _route_observables_through_indicators(src, verb, tgt, {sco.id: indicator})
+        assert indicator in routed, (s, verb, t)
 
 
 def test_to_dict_sorts_by_candidates_desc_and_drops_empty_rules() -> None:

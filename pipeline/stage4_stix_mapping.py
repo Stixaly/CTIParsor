@@ -12,13 +12,14 @@ import yaml
 from api.logging_config import get_logger
 from models.schemas import STIX_RELATIONSHIP_TYPES, EntityType, RawEntity
 from pipeline.aliases import alias_surface_forms, canonical_name
+from pipeline.bundle_ledger import ORIGIN_EXTRACTED, MappingLedger
 from pipeline.detection.suricata_atoms import parse_options, rule_header
 from pipeline.detection.yara_atoms import split_rules
 from pipeline.regex_safety import compile_pattern
 from pipeline.stage3_llm import LLMEnrichmentResult
 from pipeline.stage4b_graph_completion import CompletionStats, complete_graph
 from pipeline.stix_access import field as _field
-from pipeline.stix_rel_spec import rel_is_suggested
+from pipeline.stix_rel_spec import rel_is_allowed, rel_is_listed
 
 logger = get_logger(__name__)
 
@@ -308,13 +309,18 @@ def _is_spurious_observable_ttp_edge(source, target) -> bool:
     return "attack-pattern" in types and bool(types & _OBSERVABLE_SCO_TYPES)
 
 
-def _route_observables_through_indicators(source, target, sco_id_to_indicator: dict):
+def _route_observables_through_indicators(source, verb: str, target, sco_id_to_indicator: dict):
     """
-    ADR-0041: when exactly one endpoint of a relationship is a raw observable
-    (SCO) and the other is a real SDO (malware, threat-actor, intrusion-set,
-    ...), the observable must never itself be the Relationship endpoint — its
-    Indicator (built from the same value, based-on an ObservedData wrapping
-    the SCO) stands in for it.
+    ADR-0041, amended by ADR-0062: when exactly one endpoint of a relationship
+    is a raw observable (SCO) and the other is an SDO (malware, threat-actor,
+    intrusion-set, ...), the observable's Indicator (built from the same value,
+    based-on the SCO) stands in for it — unless STIX 2.1 lists `verb` for the
+    direct pair.  `malware communicates-with domain-name`, `malware drops file`
+    and `infrastructure consists-of <SCO>` are relationships the spec defines
+    on the observable itself; routed through the Indicator they lose their verb
+    (no table lists `malware communicates-with indicator`), so they stay direct.
+    `related-to` is valid between any two objects and names nothing about the
+    pair: it is routed (see stix_rel_spec.rel_is_listed).
 
     Left alone on purpose when both endpoints are observables, or neither is:
     STIX 2.1 has no single correct Relationship-based answer for an
@@ -331,6 +337,9 @@ def _route_observables_through_indicators(source, target, sco_id_to_indicator: d
     target_is_sco = getattr(target, "type", "") in _OBSERVABLE_SCO_TYPES
 
     if source_is_sco == target_is_sco:
+        return source, target
+
+    if rel_is_listed(getattr(source, "type", ""), verb, getattr(target, "type", "")):
         return source, target
 
     if source_is_sco:
@@ -360,6 +369,7 @@ def build_stix_bundle(
     pap_level: str | None = None,
     long_distance_infer=None,
     graph_completion: bool = True,
+    ledger: MappingLedger | None = None,
 ) -> stix2.Bundle:
     """
     Converts all extracted entities to STIX 2.1 objects and returns a Bundle.
@@ -414,8 +424,14 @@ def build_stix_bundle(
       stage4c_long_distance.default_long_distance_inferer(policy) so it is only
       active when the policy enables completion.long_distance AND the LLM
       provider is ready.
+
+    ledger — optional MappingLedger (ADR-0061) filled with what became of each
+      input entity and relationship (emitted, merged into another object or
+      edge, or dropped and why), why each generated object and edge exists, and
+      what Stage 4b removed.  The bundle itself is identical with or without it.
     """
     stix_objects: list = []
+    led = ledger if ledger is not None else MappingLedger()
 
     # ── Pre-compute policy rule index ────────────────────────────────────────
     # Keyed by "src_stix_type>tgt_stix_type" → rule dict.
@@ -436,7 +452,7 @@ def build_stix_bundle(
     name_to_stix: dict[str, object] = {}
 
     # --- SCOs from technical IoCs ---
-    scos, value_to_sco = _map_iocs_to_scos(raw_entities)
+    scos, value_to_sco = _map_iocs_to_scos(raw_entities, ledger=led)
     stix_objects.extend(scos)
     name_to_stix.update(value_to_sco)
 
@@ -454,11 +470,21 @@ def build_stix_bundle(
             continue
         key = entity.value.lower()
         if key in name_to_stix:
+            led.entity(entity.value, entity.entity_type.value, "merged",
+                       obj=name_to_stix[key], reason="same_value")
             continue
         sdo = _entity_to_sdo(entity)
         if sdo is not None:
             stix_objects.append(sdo)
             name_to_stix[key] = sdo
+            led.entity(entity.value, entity.entity_type.value, "emitted", obj=sdo)
+            led.object(sdo, "entity")
+        else:
+            # A Location needs an ISO country (STIX 2.1 forbids a name-only
+            # one); every other type here only fails on invalid input.
+            led.entity(entity.value, entity.entity_type.value, "dropped",
+                       reason="no_iso_country" if entity.entity_type == EntityType.LOCATION
+                       else "not_representable")
 
     # --- SDOs from LLM results ---
     # Deduplicate case-insensitively AND canonicalise MITRE aliases before
@@ -472,7 +498,7 @@ def build_stix_bundle(
     # benchmark surfaced — ADR-0012).
     _named_seen_ids: dict[str, object] = {}
 
-    def _register_named(name: str, stix_type: str, factory):
+    def _register_named(name: str, stix_type: str, factory, entity_type: str):
         # The STIX type is passed to both lookups (ADR-0021): 23 gazetteer
         # surface forms denote two different MITRE objects — "snake" is both the
         # Turla group and the Uroburos malware — and resolving them type-blind
@@ -485,6 +511,14 @@ def build_stix_bundle(
             obj = factory(canon, det_id)
             stix_objects.append(obj)
             _named_seen_ids[det_id] = obj
+            led.entity(name, entity_type, "emitted", obj=obj,
+                       reason="alias_canonical" if canon.lower() != name.lower() else None)
+            led.object(obj, "entity")
+        else:
+            # Same name twice, or two aliases of one MITRE object.
+            led.entity(name, entity_type, "merged", obj=obj,
+                       reason="same_value" if str(_field(obj, "name")).lower() == name.lower()
+                       else "alias_canonical")
         # Resolve this entity by the emitted name, its canonical, and every alias.
         name_to_stix[name.lower()] = obj
         name_to_stix.setdefault(canon.lower(), obj)
@@ -496,19 +530,42 @@ def build_stix_bundle(
         _register_named(
             actor_name, "threat-actor",
             lambda n, i: stix2.ThreatActor(name=n, id=i),
+            EntityType.THREAT_ACTOR.value,
         )
 
     for malware_name in llm_result.malware_families:
         _register_named(
             malware_name, "malware",
             lambda n, i: stix2.Malware(name=n, is_family=True, id=i),
+            EntityType.MALWARE.value,
         )
 
     for tool_name in llm_result.tools:
         _register_named(
             tool_name, "tool",
             lambda n, i: stix2.Tool(name=n, id=i),
+            EntityType.TOOL.value,
         )
+
+    # Named entities reach this function through the LLM's lists only.  A
+    # pipeline run also passes the NER/gazetteer ones as raw entities, and
+    # nothing here maps those: one the LLM did not echo is not in this bundle
+    # (finalize routes every stored row into the lists, so a rebuild has it).
+    # Say so instead of letting it vanish (ADR-0061).
+    _named_stix_type = {EntityType.MALWARE: "malware", EntityType.THREAT_ACTOR: "threat-actor",
+                        EntityType.TOOL: "tool"}
+    for entity in raw_entities:
+        _want = _named_stix_type.get(entity.entity_type)
+        if _want is None:
+            continue
+        _hit = name_to_stix.get(entity.value.lower())
+        if _hit is not None and _field(_hit, "type") == _want:
+            led.entity(entity.value, entity.entity_type.value, "merged", obj=_hit,
+                       reason="same_value" if str(_field(_hit, "name")).lower() == entity.value.lower()
+                       else "alias_canonical")
+        else:
+            led.entity(entity.value, entity.entity_type.value, "dropped",
+                       reason="not_in_llm_lists")
 
     for ttp in llm_result.ttps:
         external_refs = []
@@ -553,6 +610,9 @@ def build_stix_bundle(
         name_to_stix[ttp.technique_name.lower()] = obj
         if ttp.mitre_id:
             name_to_stix[ttp.mitre_id.lower()] = obj
+        led.entity(ttp.technique_name, EntityType.TTP.value, "emitted", obj=obj,
+                   mitre_id=ttp.mitre_id)
+        led.object(obj, "entity")
 
     # Manually annotated technique / tactic / procedure / ttp entities → AttackPattern SDOs.
     # Guard: skip if an AttackPattern with the same name or MITRE ID was already created
@@ -563,7 +623,12 @@ def build_stix_bundle(
             key = entity.value.lower()
             id_key = entity.mitre_id.lower() if entity.mitre_id else None
             if key in name_to_stix or (id_key and id_key in name_to_stix):
-                continue   # already created from llm_result.ttps
+                # already created from llm_result.ttps
+                existing = name_to_stix.get(key) or name_to_stix.get(id_key or "")
+                led.entity(entity.value, entity.entity_type.value, "merged", obj=existing,
+                           reason="same_value" if key in name_to_stix else "same_technique",
+                           mitre_id=entity.mitre_id)
+                continue
             ext_refs = []
             if entity.mitre_id:
                 mid = entity.mitre_id
@@ -590,12 +655,18 @@ def build_stix_bundle(
             name_to_stix[key] = obj
             if id_key:
                 name_to_stix[id_key] = obj
+            led.entity(entity.value, entity.entity_type.value, "emitted", obj=obj,
+                       mitre_id=entity.mitre_id)
+            led.object(obj, "entity")
 
     for entity in raw_entities:
         if entity.entity_type == EntityType.CVE:
             key = entity.value.lower()
             if key in name_to_stix:
-                continue  # same CVE from a second source — don't create duplicate SDO
+                # same CVE from a second source — don't create duplicate SDO
+                led.entity(entity.value, EntityType.CVE.value, "merged",
+                           obj=name_to_stix[key], reason="same_value")
+                continue
             vuln_id = _make_deterministic_id(entity.value, "vulnerability", "cti")
             # `x_cvss_*`, not `x_mitre_cvss_*`: this comes from CIRCL/NVD, and the
             # `x_mitre_` namespace would assert a MITRE provenance the value does
@@ -626,6 +697,8 @@ def build_stix_bundle(
             )
             stix_objects.append(obj)
             name_to_stix[key] = obj
+            led.entity(entity.value, EntityType.CVE.value, "emitted", obj=obj)
+            led.object(obj, "entity")
 
     if llm_result.campaign_name:
         _camp_key = llm_result.campaign_name.lower()
@@ -634,9 +707,16 @@ def build_stix_bundle(
             obj = stix2.Campaign(name=llm_result.campaign_name, id=campaign_id)
             stix_objects.append(obj)
             name_to_stix[_camp_key] = obj
+            led.entity(llm_result.campaign_name, EntityType.CAMPAIGN.value, "emitted", obj=obj)
+            led.object(obj, "entity")
+        else:
+            led.entity(llm_result.campaign_name, EntityType.CAMPAIGN.value, "merged",
+                       obj=name_to_stix[_camp_key], reason="same_value")
 
     # --- Location SDOs (targeted countries) ---
-    # One stix2.Location per country; linked via targets SRO from threat actors later
+    # One stix2.Location per country; linked via targets SRO from threat actors later.
+    # These come from the LLM's targeted_countries list, not from entity rows:
+    # the ledger records them with input="targeted_country" (ADR-0061).
     for country in llm_result.targeted_countries:
         try:
             iso2 = _COUNTRY_ISO.get(country.strip().lower())
@@ -644,6 +724,8 @@ def build_stix_bundle(
                 # Skip countries we can't map to a valid ISO code; using
                 # region="unknown" is not in the STIX 2.1 vocabulary and would
                 # fail strict validation.
+                led.entity(country, EntityType.LOCATION.value, "dropped",
+                           reason="no_iso_country", input="targeted_country")
                 continue
             # Dedup: a Location for this country may already exist — from a
             # pipeline LOCATION RawEntity (stored under the bare value key) or
@@ -656,13 +738,19 @@ def build_stix_bundle(
                         or name_to_stix.get(country.lower()))
             if existing is not None and getattr(existing, "type", "") == "location":
                 name_to_stix.setdefault(f"location:{country.lower()}", existing)
+                led.entity(country, EntityType.LOCATION.value, "merged", obj=existing,
+                           reason="same_value", input="targeted_country")
                 continue
             location_id = _make_deterministic_id(f"{country}_{iso2}", "location", "cti")
             obj = stix2.Location(name=country, country=iso2, id=location_id)
             stix_objects.append(obj)
             name_to_stix[f"location:{country.lower()}"] = obj
+            led.entity(country, EntityType.LOCATION.value, "emitted", obj=obj,
+                       input="targeted_country")
+            led.object(obj, "targeted_country")
         except Exception:
-            pass
+            led.entity(country, EntityType.LOCATION.value, "dropped",
+                       reason="not_representable", input="targeted_country")
 
     # --- Identity SDOs (targeted sectors) ---
     # Represents a class of organisations in that sector
@@ -676,13 +764,19 @@ def build_stix_bundle(
                         or name_to_stix.get(sector.lower()))
             if existing is not None and getattr(existing, "type", "") == "identity":
                 name_to_stix.setdefault(f"identity:{sector.lower()}", existing)
+                led.entity(sector, EntityType.IDENTITY.value, "merged", obj=existing,
+                           reason="same_value", input="targeted_sector")
                 continue
             identity_id = _make_deterministic_id(sector, "identity", "cti")
             obj = stix2.Identity(name=sector, identity_class="class", id=identity_id)
             stix_objects.append(obj)
             name_to_stix[f"identity:{sector.lower()}"] = obj
+            led.entity(sector, EntityType.IDENTITY.value, "emitted", obj=obj,
+                       input="targeted_sector")
+            led.object(obj, "targeted_sector")
         except Exception:
-            pass
+            led.entity(sector, EntityType.IDENTITY.value, "dropped",
+                       reason="not_representable", input="targeted_sector")
 
     # --- CourseOfAction SDOs (recommended mitigations) ---
     for coa in llm_result.course_of_action:
@@ -691,6 +785,7 @@ def build_stix_bundle(
             obj = stix2.CourseOfAction(name=coa, id=coa_id)
             stix_objects.append(obj)
             name_to_stix[f"coa:{coa.lower()}"] = obj
+            led.object(obj, "course_of_action")
         except Exception:
             pass
 
@@ -704,33 +799,19 @@ def build_stix_bundle(
     # same key instead of being silently discarded.
     _rel_key_to_index: dict[tuple, int] = {}
 
-    # ObservedData wrapping for IoC indicators.  STIX 2.1 best-practice chain is
-    #   SCO  ◄─(object_refs)─  observed-data  ◄─(based-on)─  indicator
-    # Linking an indicator --based-on--> directly to a SCO is permitted but raises
-    # a {202} best-practice warning; observed-data is the suggested target.
-    # Cached per SCO id so indicators sharing an observable share one ObservedData.
-    _observed_data_by_sco: dict[str, object] = {}
-
-    def _observed_data_for(sco):
-        """Create (once) an ObservedData SDO referencing one SCO; return it or None."""
-        if sco is None or not hasattr(sco, "id"):
-            return None
-        if sco.id in _observed_data_by_sco:
-            return _observed_data_by_sco[sco.id]
-        try:
-            _now = datetime.now(timezone.utc)
-            od = stix2.ObservedData(
-                id=_make_deterministic_id(sco.id, "observed-data", "cti"),
-                first_observed=_now,
-                last_observed=_now,
-                number_observed=1,
-                object_refs=[sco.id],
-            )
-            stix_objects.append(od)
-            _observed_data_by_sco[sco.id] = od
-            return od
-        except Exception:
-            return None
+    # Indicator ─based-on→ SCO, directly (ADR-0061).  This used to go through an
+    # ObservedData wrapper (SCO ◄─object_refs─ observed-data ◄─based-on─
+    # indicator), the chain STIX 2.1 suggests.  That ObservedData asserted a
+    # sighting nobody made — first/last_observed were the build time — and hid
+    # the observable the analyst extracted behind an object they never saw.
+    # The direct edge is spec-legal; only the strict best-practice check ({202})
+    # reports it.  No policy override: this edge is the Indicator's derivation,
+    # not a claim a pinned rule may rewrite.
+    def _based_on(indicator, sco) -> None:
+        rel = _add_relationship(stix_objects, indicator, "based-on", sco, confidence=0.9,
+                                pol_index=None, seen=seen_rel_keys, custom=_EV_OBSERVED)
+        if rel is not None:
+            led.object(rel, "ioc_based_on")
 
     # --- Indicator SDOs for IoCs linked to malware ---
     # Each ioc_association becomes: Indicator (pattern) --indicates--> Malware
@@ -758,11 +839,14 @@ def build_stix_bundle(
             # Indicator already created for this IoC — just add another indicates rel if needed
             existing_indicator = name_to_stix.get(f"indicator:{ioc_key}")
             if existing_indicator:
-                _add_relationship(
+                rel = _add_relationship(
                     stix_objects, existing_indicator, "indicates", malware,
                     confidence=0.8, pol_index=_pol_index, seen=seen_rel_keys,
                     custom=_EV_REPORTED,
                 )
+                if rel is not None:
+                    led.object(rel, "ioc_association", ioc_value=assoc.ioc_value,
+                               malware_name=assoc.malware_name)
             continue
 
         pattern = _build_stix_pattern(assoc.ioc_value, sco)
@@ -784,16 +868,16 @@ def build_stix_bundle(
             seen_indicators.add(ioc_key)
             if hasattr(sco, "id"):
                 sco_id_to_indicator[sco.id] = indicator
+            led.object(indicator, "ioc_indicator", ioc_value=assoc.ioc_value,
+                       sco_id=getattr(sco, "id", None))
 
-            _add_relationship(stix_objects, indicator, "indicates", malware, confidence=0.8,
-                              pol_index=_pol_index, seen=seen_rel_keys,
-                              custom=_EV_REPORTED)
-            # Indicator --based-on--> ObservedData --(object_refs)--> SCO
-            obs = _observed_data_for(sco)
-            if obs is not None:
-                _add_relationship(stix_objects, indicator, "based-on", obs, confidence=0.9,
-                                  pol_index=_pol_index, seen=seen_rel_keys,
-                                  custom=_EV_OBSERVED)
+            rel = _add_relationship(stix_objects, indicator, "indicates", malware, confidence=0.8,
+                                    pol_index=_pol_index, seen=seen_rel_keys,
+                                    custom=_EV_REPORTED)
+            if rel is not None:
+                led.object(rel, "ioc_association", ioc_value=assoc.ioc_value,
+                           malware_name=assoc.malware_name)
+            _based_on(indicator, sco)
         except Exception:
             pass
 
@@ -808,6 +892,7 @@ def build_stix_bundle(
             continue
         pattern = _build_stix_pattern(entity.value, sco)
         if not pattern:
+            led.annotate(_field(sco, "id"), no_indicator="no_pattern")
             continue
         try:
             indicator_id = _make_deterministic_id(f"ioc_{entity.value}", "indicator", "cti")
@@ -824,12 +909,8 @@ def build_stix_bundle(
             seen_indicators.add(ioc_key)
             if hasattr(sco, "id"):
                 sco_id_to_indicator[sco.id] = indicator
-            # Indicator --based-on--> ObservedData --(object_refs)--> SCO
-            obs = _observed_data_for(sco)
-            if obs is not None:
-                _add_relationship(stix_objects, indicator, "based-on", obs, confidence=0.9,
-                                  pol_index=_pol_index, seen=seen_rel_keys,
-                                  custom=_EV_OBSERVED)
+            led.object(indicator, "ioc_indicator", ioc_value=entity.value, sco_id=_field(sco, "id"))
+            _based_on(indicator, sco)
         except Exception:
             pass
 
@@ -843,6 +924,7 @@ def build_stix_bundle(
             stix_objects, name_to_stix, seen_embedded_rule_ids,
             pattern_type="yara", pattern=_rule.body, title=_rule.name,
             llm_result=llm_result, pol_index=_pol_index, seen_rel_keys=seen_rel_keys,
+            ledger=led,
         )
 
     for _ptype, _pattern, _title in _find_embedded_net_rules(report_text):
@@ -850,6 +932,7 @@ def build_stix_bundle(
             stix_objects, name_to_stix, seen_embedded_rule_ids,
             pattern_type=_ptype, pattern=_pattern, title=_title,
             llm_result=llm_result, pol_index=_pol_index, seen_rel_keys=seen_rel_keys,
+            ledger=led,
         )
 
     for _yaml_text, _doc in _find_embedded_sigma_rules(report_text):
@@ -857,9 +940,13 @@ def build_stix_bundle(
             stix_objects, name_to_stix, seen_embedded_rule_ids,
             pattern_type="sigma", pattern=_yaml_text, title=str(_doc.get("title", "")),
             llm_result=llm_result, pol_index=_pol_index, seen_rel_keys=seen_rel_keys,
+            ledger=led,
         )
 
     # --- Targets SROs: threat actors → targets → locations and sectors ---
+    # Every actor × every targeted country/sector: the LLM's lists say what the
+    # report targets, not which actor targets it, so this is a product, and the
+    # ledger says so (origin "targeted_location", ADR-0061).
     for actor_name in llm_result.threat_actors:
         actor = name_to_stix.get(actor_name.lower())
         if not actor:
@@ -867,26 +954,46 @@ def build_stix_bundle(
         for country in llm_result.targeted_countries:
             location = name_to_stix.get(f"location:{country.lower()}")
             if location:
-                _add_relationship(stix_objects, actor, "targets", location,
-                                  pol_index=_pol_index, seen=seen_rel_keys,
-                                  custom=_EV_REPORTED)
+                rel = _add_relationship(stix_objects, actor, "targets", location,
+                                        pol_index=_pol_index, seen=seen_rel_keys,
+                                        custom=_EV_REPORTED)
+                if rel is not None:
+                    led.object(rel, "targeted_location", actor=actor_name, target=country)
         for sector in llm_result.targeted_sectors:
             identity = name_to_stix.get(f"identity:{sector.lower()}")
             if identity:
-                _add_relationship(stix_objects, actor, "targets", identity,
-                                  pol_index=_pol_index, seen=seen_rel_keys,
-                                  custom=_EV_REPORTED)
+                rel = _add_relationship(stix_objects, actor, "targets", identity,
+                                        pol_index=_pol_index, seen=seen_rel_keys,
+                                        custom=_EV_REPORTED)
+                if rel is not None:
+                    led.object(rel, "targeted_location", actor=actor_name, target=sector)
 
     # --- SROs — semantic relationships (deduplicated, spec-validated) ---
     # Reuses the shared seen_rel_keys set so a semantic edge that duplicates a
     # targets/indicates edge created above is also collapsed.
+    #
+    # These are the job store's relationship rows.  Each one's fate — the SRO it
+    # became and what was rewritten on the way, the edge it duplicates, or why
+    # it is not in the bundle — goes to the ledger (ADR-0061): the review graph
+    # draws the rows, and must be able to say which of them ship as drawn.
+    def _existing_rel_id(key: tuple) -> str | None:
+        for o in reversed(stix_objects):
+            if _field(o, "type") == "relationship" and (
+                o.source_ref, o.relationship_type, o.target_ref
+            ) == key:
+                return o.id
+        return None
+
     for rel in llm_result.relationships:
         source = name_to_stix.get(rel.source_value.lower())
         target = name_to_stix.get(rel.target_value.lower())
 
-        if not source or not target:
-            continue
-        if not hasattr(source, "id") or not hasattr(target, "id"):
+        if not source or not target or not hasattr(source, "id") or not hasattr(target, "id"):
+            led.relationship(
+                rel, "dropped",
+                reason="unresolved_both" if not source and not target
+                else "unresolved_source" if not source else "unresolved_target",
+            )
             continue
 
         # An edge from an object to itself says nothing.  It is not the LLM
@@ -898,35 +1005,65 @@ def build_stix_bundle(
         # repeat.  `_pin_edge_key` and `_rewrite_refs` already refuse self-pairs;
         # this is the path that did not.
         if source.id == target.id:
+            led.relationship(rel, "dropped", reason="self_loop", stix_ref=source.id)
             continue
 
         # Precision guard: drop spurious observable-SCO ↔ attack-pattern edges
         # (e.g. "domain communicates-with T1071.001") rather than emitting them
         # as a noisy `related-to`.  See _is_spurious_observable_ttp_edge.
         if _is_spurious_observable_ttp_edge(source, target):
+            led.relationship(rel, "dropped", reason="observable_to_attack_pattern",
+                             source_ref=source.id, target_ref=target.id)
             continue
 
-        # ADR-0041: an observable never stands as a Relationship endpoint
-        # opposite a real SDO — its Indicator stands in, or the edge is dropped.
-        source, target = _route_observables_through_indicators(source, target, sco_id_to_indicator)
-        if source is None or target is None:
-            continue
-        if source.id == target.id:
-            continue
+        changes: list[dict] = []
 
         # Normalise and validate relationship type against the STIX 2.1 spec
-        rel_type = rel.relationship_type.strip().lower()
+        asked = rel.relationship_type.strip().lower()
+        rel_type = asked
         if rel_type not in VALID_REL_TYPES:
             rel_type = "related-to"   # safe fallback for any LLM hallucination
+            changes.append({"kind": "verb", "from": asked, "to": rel_type,
+                            "reason": "unknown_verb"})
+
+        # ADR-0041, amended by ADR-0062: an observable opposite an SDO is
+        # replaced by its Indicator (or the edge is dropped) unless STIX lists
+        # the verb for the direct pair.  The verb judged is the one the direct
+        # edge would carry: the row's, or the policy's pin for that pair of
+        # types.  A routed edge then takes the policy of the pair it lands on.
+        orig_source, orig_target = source, target
+        source, target = _route_observables_through_indicators(
+            source, _apply_policy(rel_type, source, target, _pol_index), target,
+            sco_id_to_indicator,
+        )
+        if source is None or target is None:
+            led.relationship(rel, "dropped", reason="no_indicator",
+                             source_ref=orig_source.id, target_ref=orig_target.id)
+            continue
+        if source.id == target.id:
+            led.relationship(rel, "dropped", reason="self_loop", stix_ref=source.id)
+            continue
+        if source.id != orig_source.id:
+            changes.append({"kind": "reroute", "end": "source",
+                            "from": orig_source.id, "to": source.id})
+        if target.id != orig_target.id:
+            changes.append({"kind": "reroute", "end": "target",
+                            "from": orig_target.id, "to": target.id})
 
         # Apply relationship policy (may override the inferred verb)
         if _pol_index:
+            before = rel_type
             rel_type = _apply_policy(rel_type, source, target, _pol_index)
+            if rel_type != before:
+                changes.append({"kind": "verb", "from": before, "to": rel_type,
+                                "reason": "policy_pin"})
 
         # STIX 2.1 best-practice: if the verb is not a *suggested* relationship
         # for this (source-type → target-type) pair, fall back to the universal
         # 'related-to' so the bundle stays within the spec's relationship model.
-        if not rel_is_suggested(getattr(source, "type", ""), rel_type, getattr(target, "type", "")):
+        if not rel_is_allowed(getattr(source, "type", ""), rel_type, getattr(target, "type", "")):
+            changes.append({"kind": "verb", "from": rel_type, "to": "related-to",
+                            "reason": "not_suggested"})
             rel_type = "related-to"
 
         rel_key = (source.id, rel_type, target.id)
@@ -958,7 +1095,9 @@ def build_stix_bundle(
             if getattr(rel, "stop_time", None) is not None:
                 _rel_kwargs["stop_time"] = rel.stop_time
             relationship = stix2.Relationship(**_rel_kwargs)
-        except Exception:
+        except Exception as exc:
+            led.relationship(rel, "dropped", reason="invalid", detail=str(exc)[:200],
+                             source_ref=source.id, target_ref=target.id)
             continue
 
         if rel_key in seen_rel_keys:
@@ -976,13 +1115,25 @@ def build_stix_bundle(
                 or getattr(_existing, "stop_time", None) is not None
             )
             _new_has_time = "start_time" in _rel_kwargs or "stop_time" in _rel_kwargs
-            if _existing_idx is not None and not _existing_has_time and _new_has_time:
+            if _existing_idx is not None and _existing is not None \
+                    and not _existing_has_time and _new_has_time:
                 stix_objects[_existing_idx] = relationship
+                led.replace_relationship(_existing.id, relationship)
+                led.relationship(rel, "emitted", stix_id=relationship.id, final_type=rel_type,
+                                 source_ref=source.id, target_ref=target.id, changes=changes)
+            else:
+                existing_id = _existing.id if _existing is not None else _existing_rel_id(rel_key)
+                led.relationship(rel, "merged", stix_id=existing_id, merged_with=existing_id,
+                                 final_type=rel_type, source_ref=source.id,
+                                 target_ref=target.id, changes=changes)
             continue
 
         seen_rel_keys.add(rel_key)
         _rel_key_to_index[rel_key] = len(stix_objects)
         stix_objects.append(relationship)
+        led.object(relationship, ORIGIN_EXTRACTED)
+        led.relationship(rel, "emitted", stix_id=relationship.id, final_type=rel_type,
+                         source_ref=source.id, target_ref=target.id, changes=changes)
 
     # --- Policy-forced relationships (enforce mode, "pin" rules) ---
     # Budget is split across rules by max-min fair share, not first-come-first-
@@ -1013,6 +1164,7 @@ def build_stix_bundle(
                 artifact_kwargs["hashes"] = {"SHA-256": source_hash}
             artifact_obj = stix2.Artifact(**artifact_kwargs)
             stix_objects.append(artifact_obj)
+            led.object(artifact_obj, "source_artifact")
         except Exception:
             artifact_obj = None
 
@@ -1032,6 +1184,12 @@ def build_stix_bundle(
         # Turned off for this run (an ablation, ADR-0059): nothing added.
         _completion_stats = CompletionStats()
         _completion_stats.notes.append("graph completion disabled for this run")
+    # The alias merge is the one destructive completion step: carry what it
+    # absorbed, dropped and rewired into the ledger.
+    led.apply_alias_merge(_completion_stats.merged_ids,
+                          _completion_stats.removed_relationships,
+                          _completion_stats.remapped_relationships,
+                          _completion_stats.merged_names)
 
     # --- Report SDO wrapping all objects ---
     # description : full extracted text so STIX consumers see the narrative
@@ -1079,6 +1237,7 @@ def build_stix_bundle(
         try:
             report = stix2.Report(**report_kwargs)
             stix_objects.append(report)
+            led.object(report, "report")
         except Exception:
             # Fallback without optional fields if stix2 rejects them
             report = stix2.Report(
@@ -1109,6 +1268,10 @@ def build_stix_bundle(
         marking_refs.append(pap_marking.id)
 
     stamped = _stamp_objects(stix_objects, author.id, marking_refs)
+    led.object(author, "author_identity")
+    for _m in marking_defs:
+        led.object(_m, "marking")
+    led.finalize(stix_objects)
 
     # allow_custom so Relationship x_evidence_label (and any x_ props) pass
     # through Bundle construction + serialization without rejection.
@@ -1181,10 +1344,15 @@ def verify_ioc_coverage(raw_entities: list[RawEntity], bundle: stix2.Bundle) -> 
     }
 
 
-def _map_iocs_to_scos(entities: list[RawEntity]) -> tuple[list, dict[str, object]]:
+def _map_iocs_to_scos(
+    entities: list[RawEntity], ledger: MappingLedger | None = None,
+) -> tuple[list, dict[str, object]]:
     """
     Creates SCO objects and returns both the list and a value→SCO index.
     Each entity is mapped to its SCO exactly once.
+
+    ledger: when given, each observable entity's outcome is recorded — the SCO
+    it became, the SCO it duplicates, or why none could be built (ADR-0061).
     """
     scos = []
     value_to_sco: dict[str, object] = {}
@@ -1203,6 +1371,10 @@ def _map_iocs_to_scos(entities: list[RawEntity]) -> tuple[list, dict[str, object
     # resolves to the one real SCO instead of silently resolving to nothing.
     canonical_to_sco: dict[str, object] = {}
 
+    def _record(entity: RawEntity, outcome: str, obj=None, reason: str | None = None) -> None:
+        if ledger is not None and entity.entity_type in _OBSERVABLE_IOC_TYPES:
+            ledger.entity(entity.value, entity.entity_type.value, outcome, obj=obj, reason=reason)
+
     for entity in entities:
         key = entity.value.lower()
         # Skip values already mapped — a caller that passes duplicate entities
@@ -1210,16 +1382,23 @@ def _map_iocs_to_scos(entities: list[RawEntity]) -> tuple[list, dict[str, object
         # otherwise append the same SCO twice, putting two objects with an
         # identical deterministic id into the bundle and Report.object_refs.
         if key in value_to_sco:
+            _record(entity, "merged", value_to_sco[key], "same_value")
             continue
         canonical_key = _expand_registry_hive(entity.value).lower()
         if canonical_key in canonical_to_sco:
             value_to_sco[key] = canonical_to_sco[canonical_key]
+            _record(entity, "merged", canonical_to_sco[canonical_key], "same_observable")
             continue
         sco = _entity_to_sco(entity)
         if sco is not None:
             scos.append(sco)
             value_to_sco[key] = sco
             canonical_to_sco[canonical_key] = sco
+            _record(entity, "emitted", sco)
+            if ledger is not None:
+                ledger.object(sco, "entity")
+        else:
+            _record(entity, "dropped", reason="not_representable")
 
     return scos, value_to_sco
 
@@ -1439,6 +1618,7 @@ def _add_embedded_rule_indicator(
     llm_result,
     pol_index,
     seen_rel_keys: set,
+    ledger: MappingLedger | None = None,
 ) -> None:
     """
     Create an Indicator SDO for a detection rule found verbatim in the report
@@ -1464,6 +1644,8 @@ def _add_embedded_rule_indicator(
         stix_objects.append(indicator)
     except Exception:
         return
+    if ledger is not None:
+        ledger.object(indicator, "embedded_rule", pattern_type=pattern_type, title=title)
 
     # A minimum length guard keeps a short tool name (e.g. "RDP", "SMB") from
     # matching a coincidental substring of an unrelated rule title.
@@ -1475,11 +1657,13 @@ def _add_embedded_rule_indicator(
         target = name_to_stix.get(candidate_name.lower())
         if target is None:
             continue
-        _add_relationship(
+        rel = _add_relationship(
             stix_objects, indicator, "indicates", target,
             confidence=0.9, pol_index=pol_index, seen=seen_rel_keys,
             custom=_EV_OBSERVED,
         )
+        if rel is not None and ledger is not None:
+            ledger.object(rel, "embedded_rule_title", title=title, name=candidate_name)
 
 
 def _find_embedded_net_rules(report_text: str) -> list[tuple[str, str, str]]:
@@ -1608,7 +1792,7 @@ def _pin_edge_key(src_obj, verb: str, tgt_obj) -> tuple[str, str, str] | None:
         return None
 
     final_verb = verb if verb in VALID_REL_TYPES else "related-to"
-    if not rel_is_suggested(
+    if not rel_is_allowed(
         getattr(src_obj, "type", ""), final_verb, getattr(tgt_obj, "type", "")
     ):
         final_verb = "related-to"
@@ -1854,7 +2038,10 @@ def _materialise_pinned_edges(
     Indicator built from it (ADR-0041). When given, a candidate pair with
     exactly one observable endpoint is redirected to route through that
     Indicator (dropped if none exists for it) before the edge key and evidence
-    gate are computed. `None` (the default) disables this step entirely, unlike
+    gate are computed — unless the rule's verb is one STIX lists for the direct
+    pair (`malware communicates-with domain-name`, `malware drops file`,
+    `infrastructure consists-of <SCO>`), which is pinned on the observable
+    itself (ADR-0062). `None` (the default) disables this step entirely, unlike
     an empty dict, which would drop every such candidate — this file's own
     direct unit tests (test_pin_evidence.py, test_pin_budget.py) call this
     function without an Indicator graph behind their fake objects and must see
@@ -1934,7 +2121,7 @@ def _materialise_pinned_edges(
             for _t_obj in _type_to_objs.get(_tgt_type, []):
                 if sco_id_to_indicator is not None:
                     _s_obj, _t_obj = _route_observables_through_indicators(
-                        _s_obj, _t_obj, sco_id_to_indicator
+                        _s_obj, _verb, _t_obj, sco_id_to_indicator
                     )
                     if _s_obj is None or _t_obj is None:
                         continue
@@ -2043,8 +2230,9 @@ def _add_relationship(
     pol_index: dict | None = None,
     seen: set | None = None,
     custom: dict | None = None,
-) -> None:
-    """Appends a Relationship SRO if source and target have ids.
+):
+    """Appends a Relationship SRO if source and target have ids, and returns it
+    (None when nothing was appended: no ids, a self-pair, a duplicate key).
 
     pol_index: optional policy rule index (pre-computed in build_stix_bundle).
     When provided, a pinned rule for the (source.type, target.type) pair
@@ -2060,13 +2248,13 @@ def _add_relationship(
     the object byte-identical to before, so existing edges are unaffected.
     """
     if not hasattr(source, "id") or not hasattr(target, "id"):
-        return
+        return None
 
     # Same self-pair refusal as `_pin_edge_key`, which mirrors this function:
     # without it the two drift, and the counting pass rejects a pinned edge the
     # emitting pass then writes.
     if source.id == target.id:
-        return
+        return None
 
     # Apply policy override if available
     if pol_index:
@@ -2076,14 +2264,15 @@ def _add_relationship(
 
     # STIX 2.1 best-practice: downgrade a verb that is not *suggested* for this
     # (source-type → target-type) pair to the universal 'related-to'.  Applies to
-    # the targets/indicates/based-on helpers and to policy-forced edges alike.
-    if not rel_is_suggested(getattr(source, "type", ""), rel_type, getattr(target, "type", "")):
+    # the targets/indicates/based-on helpers and to policy-forced edges alike;
+    # `indicator based-on <SCO>` is the one documented exception (ADR-0061).
+    if not rel_is_allowed(getattr(source, "type", ""), rel_type, getattr(target, "type", "")):
         rel_type = "related-to"
 
     if seen is not None:
         key = (source.id, rel_type, target.id)
         if key in seen:
-            return
+            return None
         seen.add(key)
 
     try:
@@ -2097,6 +2286,8 @@ def _add_relationship(
         if isinstance(custom, dict) and custom:
             kwargs.update(custom)
             kwargs["allow_custom"] = True
-        stix_objects.append(stix2.Relationship(**kwargs))
+        rel = stix2.Relationship(**kwargs)
     except Exception:
-        pass
+        return None
+    stix_objects.append(rel)
+    return rel
