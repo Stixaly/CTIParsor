@@ -25,6 +25,9 @@ const STYLES = `
     font-size: 15px;
     line-height: 1.72;
     color: var(--ink-2);
+    /* Long hashes / URLs / encoded strings break instead of overflowing
+       (code blocks keep white-space: pre and scroll). */
+    overflow-wrap: break-word;
   }
 
   /* ── Headings ─────────────────────────────────────────────────────── */

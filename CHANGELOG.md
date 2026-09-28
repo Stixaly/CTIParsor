@@ -8,6 +8,47 @@ sections group by theme rather than strict semver.
 
 ### Fixed
 
+#### Graphic defects from the interface audit (G01–G27), 2026-09-28
+
+- **Policy**: the "Auto" / "Full auto" colour (`--frost`) was never defined,
+  so its buttons, badges and legend lost their fill (white text on nothing);
+  it is now a steel blue in every theme. Below 1100 px the editor and the
+  preview stack instead of squeezing the editor to 230 px, and the JSON
+  dialog fits a low window and scrolls.
+- **Graph**: arrow heads end on the target's rim instead of under it;
+  parallel and reciprocal links bow apart instead of sharing one line; a
+  single node (or one row of nodes) is framed at once and by Fit (it sat in
+  the top-left corner). Hiding the last type in the legend hides it — it
+  used to show everything again. A rejected link no longer pulls, sizes or
+  highlights its nodes. Zooming or panning cancels the automatic fits that
+  snapped the view back; accepting a link no longer reshuffles the layout;
+  positions of removed entities no longer skew Fit. The canvas re-frames when
+  resized, and below 960 px the detail / link panel floats over it.
+- **PDF source**: opens fitted to the width, with a "Fit to width" button;
+  a page wider than the column (zoomed, landscape) scrolls sideways instead
+  of being cut on both edges. Highlights are placed from pdf.js's text layer
+  (real glyph widths) instead of an even split per character, which drifted
+  by ~20 px in proportional fonts. Picking an entity scrolls to it when it is
+  off screen, and the page indicator no longer names the page below the one
+  on screen.
+- **Source (PDF, TXT/MD)**: accepted entities are underlined solid (✓ in
+  TXT/MD), pending ones dashed — they looked the same. Rejected entities stay
+  unhighlighted, and selecting one no longer says it is "not found verbatim".
+- **Review**: long hashes, URLs and encoded strings wrap in the Text and
+  Preview views instead of running under the margin. The Relationships rail
+  is capped to the window on every resize (a rail sized on a tall window
+  covered a smaller one) and restores its height when the window grows. The
+  "Change type" menu is placed from its measured height and scrolls, and the
+  "Add as entity" popover never outgrows the window.
+- **Settings and Coverage**: corpus actions wrap inside their column; long
+  corpus names and licences break instead of squeezing Source to 0 px; the
+  technique band wraps into rows instead of leaving its card past ~100
+  techniques; the export table's header scrolls with its rows so a classic
+  scrollbar no longer shifts the columns; rule metadata wraps.
+- **Processing dialog**: Close stays in the header whatever the width, and
+  below 760 px the live graph goes under the stage list.
+- **Focus**: the Graph and Policy search / filter fields show a focus ring.
+
 #### Review and Dashboard interface, 2026-09-28
 
 - **Narrow windows**: below 1180 px the entity margin, and below 900 px the

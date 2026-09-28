@@ -53,6 +53,19 @@ describe('buildGraphData', () => {
     expect(unmatchedCount).toBe(1)
   })
 
+  it('keeps a rejected link listed but out of degree and adjacency', () => {
+    const a = entity('APT29', 'threat_actor')
+    const m = entity('WellMess', 'malware')
+    const t = entity('Mimikatz', 'tool')
+    const { edges, deg, adj } = buildGraphData([a, m, t], [rel('APT29', 'WellMess', false), rel('APT29', 'Mimikatz')])
+    expect(edges.map(e => e.accepted)).toEqual([false, true])
+    expect(deg[a.id]).toBe(1)
+    expect(deg[m.id]).toBe(0)
+    expect(adj[a.id].has(m.id)).toBe(false)
+    expect(adj[m.id].size).toBe(0)
+    expect(adj[a.id].has(t.id)).toBe(true)
+  })
+
   it('returns empty structures for empty input', () => {
     const g = buildGraphData([], [])
     expect(g.nodes).toEqual([])

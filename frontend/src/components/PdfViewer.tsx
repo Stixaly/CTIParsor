@@ -10,15 +10,16 @@
 
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
-import type { PageProps, TextContent, TextItem } from 'react-pdf'
+import type { DocumentProps, TextContent } from 'react-pdf'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
 import {
-  ChevronLeft, ChevronRight, ZoomIn, ZoomOut, RotateCw,
+  ChevronLeft, ChevronRight, ZoomIn, ZoomOut, RotateCw, MoveHorizontal,
   Loader2, AlertTriangle,
 } from 'lucide-react'
 import { useAppTheme } from '../context/ThemeContext'
-import { buildRanges, typeDot, typeSoft } from './review/tokens'
+import { typeDot, typeSoft } from './review/tokens'
+import { itemMarks, anchorMarkup, mostVisiblePage, fitWidthScale } from './pdfGeometry'
 import type { Entity } from '../types'
 
 // pdf.js needs its worker bundle — load it from the package via Vite's
@@ -32,14 +33,13 @@ const MONO = "'JetBrains Mono', ui-monospace, monospace"
 
 const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3]
 
-// react-pdf doesn't export `PageCallback` directly — derive it from the
-// `onLoadSuccess` prop type instead (it's `PDFPageProxy & { width, height, ... }`).
-type PageCallback = Parameters<NonNullable<PageProps['onLoadSuccess']>>[0]
+type DocumentCallback = Parameters<NonNullable<DocumentProps['onLoadSuccess']>>[0]
 
-function ToolbarButton({ onClick, disabled, title, children }: {
+function ToolbarButton({ onClick, disabled, title, active, children }: {
   onClick: () => void
   disabled?: boolean
   title: string
+  active?: boolean
   children: React.ReactNode
 }) {
   return (
@@ -47,11 +47,13 @@ function ToolbarButton({ onClick, disabled, title, children }: {
       onClick={onClick}
       disabled={disabled}
       title={title}
+      aria-pressed={active}
       style={{
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         width: 28, height: 28, padding: 0,
-        border: '1px solid var(--rule)', borderRadius: 6,
-        background: 'var(--bg)', color: disabled ? 'var(--ink-4)' : 'var(--ink-2)',
+        border: `1px solid ${active ? 'var(--accent)' : 'var(--rule)'}`, borderRadius: 6,
+        background: active ? 'var(--accent-soft)' : 'var(--bg)',
+        color: disabled ? 'var(--ink-4)' : active ? 'var(--accent)' : 'var(--ink-2)',
         cursor: disabled ? 'default' : 'pointer',
         opacity: disabled ? 0.5 : 1,
       }}
@@ -69,83 +71,6 @@ interface PdfHighlight {
   width: number
   height: number
   entityId: string
-  entityType: string
-  accepted: boolean | null
-  label: string
-}
-
-/**
- * Map entity occurrences found in the page's extracted text onto viewport
- * pixel rectangles, by walking pdf.js's per-run TextItems.
- *
- * Matching reuses `buildRanges` (same algorithm as the Text-view highlights,
- * including defanged-IOC variants), so a token highlighted in one view is
- * highlighted in the other whenever the PDF's own text extraction agrees
- * with the report's extracted text.  Each match is split across every
- * TextItem it overlaps, with the sub-rectangle within an item approximated
- * by linear interpolation over `item.width` (uniform character width).
- */
-function buildPdfHighlights(
-  textContent: TextContent | null,
-  page: PageCallback | null,
-  scale: number,
-  rotation: number,
-  entities: Entity[],
-): PdfHighlight[] {
-  if (!textContent || !page) return []
-  const items = textContent.items.filter((it): it is TextItem => 'str' in it)
-  if (!items.length) return []
-
-  let pageText = ''
-  const itemRanges: Array<{ start: number; end: number; item: TextItem }> = []
-  for (const item of items) {
-    const start = pageText.length
-    pageText += item.str
-    itemRanges.push({ start, end: pageText.length, item })
-    if (item.hasEOL) pageText += '\n'
-  }
-  if (!pageText.trim()) return []
-
-  const ranges = buildRanges(pageText, entities)
-  if (!ranges.length) return []
-
-  const byId = new Map(entities.map(e => [e.id, e]))
-  const viewport = page.getViewport({ scale, rotation })
-  const highlights: PdfHighlight[] = []
-
-  for (const range of ranges) {
-    const entity = byId.get(range.entityId)
-    if (!entity) continue
-    for (const ir of itemRanges) {
-      const ovStart = Math.max(range.start, ir.start)
-      const ovEnd = Math.min(range.end, ir.end)
-      if (ovEnd <= ovStart) continue
-      const { item } = ir
-      const len = item.str.length
-      if (len === 0 || !item.width) continue
-
-      const fracStart = (ovStart - ir.start) / len
-      const fracEnd = (ovEnd - ir.start) / len
-      const x = item.transform[4]
-      const y = item.transform[5]
-      const x0 = x + fracStart * item.width
-      const x1 = x + fracEnd * item.width
-      const y1 = y + (item.height || 0)
-
-      const rect = viewport.convertToViewportRectangle([x0, y, x1, y1])
-      highlights.push({
-        left: Math.min(rect[0], rect[2]),
-        top: Math.min(rect[1], rect[3]),
-        width: Math.abs(rect[2] - rect[0]),
-        height: Math.abs(rect[3] - rect[1]),
-        entityId: entity.id,
-        entityType: entity.entity_type,
-        accepted: entity.accepted,
-        label: entity.value,
-      })
-    }
-  }
-  return highlights
 }
 
 // ── single page + its highlight overlay ────────────────────────────────────
@@ -158,23 +83,57 @@ interface PdfPageViewProps {
   entities: Entity[]
   focusedId?: string | null
   onFocusEntity?: (id: string) => void
+  onHighlightsMeasured: () => void
   registerRef: (pageNumber: number, el: HTMLDivElement | null) => void
 }
 
 function PdfPageView({
-  pageNumber, scale, rotation, pageFilter, entities, focusedId, onFocusEntity, registerRef,
+  pageNumber, scale, rotation, pageFilter, entities, focusedId, onFocusEntity,
+  onHighlightsMeasured, registerRef,
 }: PdfPageViewProps) {
-  const [pdfPage, setPdfPage] = useState<PageCallback | null>(null)
+  const wrapRef = useRef<HTMLDivElement | null>(null)
   const [textContent, setTextContent] = useState<TextContent | null>(null)
+  const [boxes, setBoxes] = useState<PdfHighlight[]>([])
 
-  const highlights = useMemo(
-    () => buildPdfHighlights(textContent, pdfPage, scale, rotation, entities),
-    [textContent, pdfPage, scale, rotation, entities],
+  const byId  = useMemo(() => new Map(entities.map(e => [e.id, e])), [entities])
+  const marks = useMemo(() => itemMarks(textContent?.items, entities), [textContent, entities])
+
+  // Anchor each occurrence inside pdf.js's own text layer…
+  const renderText = useCallback(
+    ({ str, itemIndex }: { str: string; itemIndex: number }) => anchorMarkup(str, marks.get(itemIndex)),
+    [marks],
   )
+
+  // …then measure the anchors once it is laid out: the boxes follow the real
+  // glyph widths and the run's rotation.
+  const measure = useCallback(() => {
+    requestAnimationFrame(() => {
+      const wrap = wrapRef.current
+      if (!wrap) return
+      const origin = wrap.getBoundingClientRect()
+      const out: PdfHighlight[] = []
+      wrap.querySelectorAll<HTMLElement>('mark.pdf-anchor').forEach(m => {
+        for (const r of Array.from(m.getClientRects())) {
+          if (!r.width || !r.height) continue
+          out.push({
+            left: r.left - origin.left, top: r.top - origin.top,
+            width: r.width, height: r.height,
+            entityId: m.dataset.eid ?? '',
+          })
+        }
+      })
+      setBoxes(out)
+      onHighlightsMeasured()
+    })
+  }, [onHighlightsMeasured])
+
+  // Boxes measured at another zoom, rotation or entity set would be misplaced
+  // until the text layer re-renders and is measured again.
+  useEffect(() => { setBoxes([]) }, [scale, rotation, marks])
 
   return (
     <div
-      ref={el => registerRef(pageNumber, el)}
+      ref={el => { wrapRef.current = el; registerRef(pageNumber, el) }}
       data-page-number={pageNumber}
       style={{ position: 'relative', alignSelf: 'center', marginBottom: 16 }}
     >
@@ -185,33 +144,41 @@ function PdfPageView({
           rotate={rotation}
           renderAnnotationLayer
           renderTextLayer
-          onLoadSuccess={setPdfPage}
+          customTextRenderer={renderText}
           onGetTextSuccess={setTextContent}
+          onRenderTextLayerSuccess={measure}
         />
       </div>
 
-      {/* Entity highlight overlay — positioned in viewport pixels,
-          independent of the dark-mode invert filter above. */}
-      {highlights.length > 0 && (
+      {/* Entity highlight overlay — positioned in page pixels, outside the
+          dark-mode invert filter above.  Accepted: solid underline; pending:
+          dashed and lighter.  Rejected entities are not highlighted. */}
+      {boxes.length > 0 && (
         <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-          {highlights.map((h, i) => (
-            <div
-              key={`${h.entityId}-${i}`}
-              title={h.label}
-              onClick={() => onFocusEntity?.(h.entityId)}
-              style={{
-                position: 'absolute',
-                left: h.left, top: h.top, width: h.width, height: h.height,
-                background: typeSoft(h.entityType),
-                borderBottom: `2px solid ${typeDot(h.entityType)}`,
-                opacity: h.accepted === true ? 0.55 : 0.4,
-                boxShadow: focusedId === h.entityId ? '0 0 0 2px var(--accent)' : undefined,
-                borderRadius: 2,
-                cursor: onFocusEntity ? 'pointer' : 'default',
-                pointerEvents: 'auto',
-              }}
-            />
-          ))}
+          {boxes.map((h, i) => {
+            const e = byId.get(h.entityId)
+            if (!e) return null
+            const accepted = e.accepted === true
+            return (
+              <div
+                key={`${h.entityId}-${i}`}
+                data-hl={h.entityId}
+                title={`${e.value} — ${accepted ? 'accepted' : 'pending review'}`}
+                onClick={() => onFocusEntity?.(h.entityId)}
+                style={{
+                  position: 'absolute',
+                  left: h.left, top: h.top, width: h.width, height: h.height,
+                  background: typeSoft(e.entity_type),
+                  borderBottom: `2px ${accepted ? 'solid' : 'dashed'} ${typeDot(e.entity_type)}`,
+                  opacity: accepted ? 0.6 : 0.45,
+                  boxShadow: focusedId === h.entityId ? '0 0 0 2px var(--accent)' : undefined,
+                  borderRadius: 2,
+                  cursor: onFocusEntity ? 'pointer' : 'default',
+                  pointerEvents: 'auto',
+                }}
+              />
+            )
+          })}
         </div>
       )}
     </div>
@@ -223,7 +190,7 @@ interface PdfViewerProps {
   filename?: string
   /** Entities to highlight on the rendered pages (same set as the Text view). */
   entities?: Entity[]
-  /** Currently focused entity — gets an accent outline on the PDF too. */
+  /** Currently focused entity — outlined, and scrolled into view when off screen. */
   focusedId?: string | null
   /** Called when a highlight is clicked — typically `setFocusedId`. */
   onFocusEntity?: (id: string) => void
@@ -233,18 +200,35 @@ export default function PdfViewer({ url, filename, entities, focusedId, onFocusE
   const { isDark } = useAppTheme()
   const [numPages, setNumPages] = useState<number | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
-  const [zoomIdx, setZoomIdx] = useState(2) // 1.0
+  // null = fit the page to the available width (the default): a landscape
+  // page, or any page zoomed in, used to overflow both sides of the column.
+  const [zoomIdx, setZoomIdx] = useState<number | null>(null)
   const [rotation, setRotation] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [baseSize, setBaseSize] = useState<{ w: number; h: number } | null>(null)
+  const [available, setAvailable] = useState(0)
+  const [measureTick, setMeasureTick] = useState(0)
 
-  const scale = ZOOM_STEPS[zoomIdx]
   const containerRef = useRef<HTMLDivElement | null>(null)
   const pageRefs = useRef(new Map<number, HTMLDivElement>())
 
-  const onDocLoadSuccess = useCallback(({ numPages: n }: { numPages: number }) => {
-    setNumPages(n)
-    setCurrentPage(1)
+  const fitScale = fitWidthScale(available, baseSize, rotation)
+  const scale = zoomIdx == null ? fitScale : ZOOM_STEPS[zoomIdx]
+  const nextUp   = ZOOM_STEPS.findIndex(s => s > scale + 0.005)
+  const nextDown = ZOOM_STEPS.map((s, i) => (s < scale - 0.005 ? i : -1)).filter(i => i >= 0).pop() ?? -1
+
+  // Wait for page 1's size before rendering, so a fit-to-width opening does
+  // not render every page at 100 % first.
+  const onDocLoadSuccess = useCallback((pdf: DocumentCallback) => {
     setError(null)
+    setCurrentPage(1)
+    pdf.getPage(1)
+      .then(p => {
+        const v = p.getViewport({ scale: 1 })
+        setBaseSize({ w: v.width, h: v.height })
+      })
+      .catch(() => setBaseSize(null))
+      .finally(() => setNumPages(pdf.numPages))
   }, [])
 
   const onLoadError = useCallback((err: Error) => {
@@ -260,32 +244,91 @@ export default function PdfViewer({ url, filename, entities, focusedId, onFocusE
     pageRefs.current.get(page)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [])
 
+  const onHighlightsMeasured = useCallback(() => setMeasureTick(t => t + 1), [])
+
+  // Width the pages can use, for fit-to-width.  Debounced: each change
+  // re-renders every page.
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const read = () => setAvailable(Math.max(0, el.clientWidth - 2))
+    read()
+    if (typeof ResizeObserver === 'undefined') return
+    let t: ReturnType<typeof setTimeout> | null = null
+    const ro = new ResizeObserver(() => {
+      if (t) clearTimeout(t)
+      t = setTimeout(read, 150)
+    })
+    ro.observe(el)
+    return () => { ro.disconnect(); if (t) clearTimeout(t) }
+  }, [])
+
   // Track whichever page is most visible in the scroll container, so the
   // toolbar's "X / Y" indicator and Previous/Next reflect actual scroll
   // position instead of a separately-tracked "current page".
   //
-  // The page surface itself doesn't scroll — `.stage-wrapper` (Review.tsx's
-  // layout container) is the actual scroll container, same as Marginalia's
-  // position-sort effect relies on.
+  // Every page's visible height is measured on each scroll or resize (one
+  // frame at most).  An IntersectionObserver only reported the pages that
+  // crossed a ratio threshold: a page that grew while fully on screen (its
+  // canvas loading) was never re-reported, and the indicator named the page
+  // below it.
+  //
+  // The page surface itself doesn't scroll vertically — `.stage-wrapper`
+  // (Review.tsx's layout container) is the actual scroll container, same as
+  // Marginalia's position-sort effect relies on.
   useEffect(() => {
     if (!numPages) return
-    const root = containerRef.current?.closest<HTMLElement>('.stage-wrapper') ?? null
-    const observer = new IntersectionObserver(
-      entries => {
-        let best: { page: number; ratio: number } | null = null
-        for (const entry of entries) {
-          const page = Number((entry.target as HTMLElement).dataset.pageNumber)
-          if (entry.isIntersecting && entry.intersectionRatio > (best?.ratio ?? 0)) {
-            best = { page, ratio: entry.intersectionRatio }
-          }
-        }
-        if (best) setCurrentPage(best.page)
-      },
-      { root, threshold: [0.1, 0.25, 0.5, 0.75, 1] },
-    )
-    for (const el of pageRefs.current.values()) observer.observe(el)
-    return () => observer.disconnect()
-  }, [numPages, scale, rotation])
+    const surface = containerRef.current
+    const root = surface?.closest<HTMLElement>('.stage-wrapper') ?? null
+    const target: HTMLElement | Window = root ?? window
+    let frame = 0
+    const update = () => {
+      frame = 0
+      const view = root ? root.getBoundingClientRect() : { top: 0, bottom: window.innerHeight }
+      const visible = new Map<number, number>()
+      pageRefs.current.forEach((el, page) => {
+        const r = el.getBoundingClientRect()
+        visible.set(page, Math.max(0, Math.min(r.bottom, view.bottom) - Math.max(r.top, view.top)))
+      })
+      const best = mostVisiblePage(visible)
+      if (best != null) setCurrentPage(best)
+    }
+    const schedule = () => { if (!frame) frame = requestAnimationFrame(update) }
+    target.addEventListener('scroll', schedule, { passive: true })
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(schedule) : null
+    if (ro) {
+      if (surface) ro.observe(surface)
+      if (root) ro.observe(root)
+    }
+    schedule()
+    return () => {
+      target.removeEventListener('scroll', schedule)
+      ro?.disconnect()
+      if (frame) cancelAnimationFrame(frame)
+    }
+  }, [numPages])
+
+  // Bring the focused entity on screen when none of its highlights is — a
+  // pick in the margin used to outline an occurrence pages away and leave the
+  // view where it was.  Retried as pages finish measuring, once per focus.
+  const focusHandled = useRef<string | null>(null)
+  useEffect(() => { focusHandled.current = null }, [focusedId])
+  useEffect(() => {
+    if (!focusedId || focusHandled.current === focusedId) return
+    const surface = containerRef.current
+    if (!surface) return
+    const hits = Array.from(surface.querySelectorAll<HTMLElement>('[data-hl]'))
+      .filter(el => el.dataset.hl === focusedId)
+    if (!hits.length) return
+    focusHandled.current = focusedId
+    const root = surface.closest<HTMLElement>('.stage-wrapper')
+    const view = root ? root.getBoundingClientRect() : { top: 0, bottom: window.innerHeight }
+    const onScreen = hits.some(el => {
+      const r = el.getBoundingClientRect()
+      return r.bottom > view.top && r.top < view.bottom
+    })
+    if (!onScreen) hits[0].scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+  }, [focusedId, measureTick])
 
   // Dark theme: invert the rendered page so white PDF pages don't glow
   // against the dark UI — same trick OpenCTI applies to its PDF canvas.
@@ -299,7 +342,7 @@ export default function PdfViewer({ url, filename, entities, focusedId, onFocusE
   return (
     // Match the sibling tabs (.doc / MarkdownPreview): sit on the app background
     // with the same horizontal padding, rather than in a distinct gray "stage".
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: '80vh', padding: '12px 36px 40px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: '80vh', padding: '12px 36px 40px' }}>
       {/* Toolbar — sticky so page/zoom controls stay reachable while scrolling */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8,
@@ -332,23 +375,34 @@ export default function PdfViewer({ url, filename, entities, focusedId, onFocusE
         <div style={{ width: 1, height: 18, background: 'var(--rule)', margin: '0 4px' }} />
 
         <ToolbarButton
-          onClick={() => setZoomIdx(i => Math.max(0, i - 1))}
-          disabled={zoomIdx <= 0}
+          onClick={() => setZoomIdx(nextDown)}
+          disabled={nextDown < 0}
           title="Zoom out"
         >
           <ZoomOut size={14} />
         </ToolbarButton>
 
-        <span style={{ fontSize: 12, fontFamily: MONO, color: 'var(--ink-2)', minWidth: 44, textAlign: 'center' }}>
+        <span
+          style={{ fontSize: 12, fontFamily: MONO, color: 'var(--ink-2)', minWidth: 44, textAlign: 'center' }}
+          title={zoomIdx == null ? 'Fitted to the width' : undefined}
+        >
           {Math.round(scale * 100)}%
         </span>
 
         <ToolbarButton
-          onClick={() => setZoomIdx(i => Math.min(ZOOM_STEPS.length - 1, i + 1))}
-          disabled={zoomIdx >= ZOOM_STEPS.length - 1}
+          onClick={() => setZoomIdx(nextUp)}
+          disabled={nextUp < 0}
           title="Zoom in"
         >
           <ZoomIn size={14} />
+        </ToolbarButton>
+
+        <ToolbarButton
+          onClick={() => setZoomIdx(null)}
+          active={zoomIdx == null}
+          title="Fit to width"
+        >
+          <MoveHorizontal size={14} />
         </ToolbarButton>
 
         <ToolbarButton
@@ -370,12 +424,15 @@ export default function PdfViewer({ url, filename, entities, focusedId, onFocusE
       </div>
 
       {/* Page surface — all pages stacked in a single column; `.stage-wrapper`
-          (Review.tsx's layout container) is what actually scrolls. */}
+          (Review.tsx's layout container) is what scrolls vertically.  Pages
+          wider than the column scroll sideways here (see .pdf-doc) instead of
+          overflowing both edges, where the left one could not be reached. */}
       <div
         ref={containerRef}
         style={{
           flex: 1,
-          display: 'flex', flexDirection: 'column', alignItems: 'center',
+          minWidth: 0,
+          overflowX: 'auto',
           padding: '20px 0 0',
           // Transparent so the pages read against the app background, like the
           // Text/Preview tabs — no distinct gray panel behind them.
@@ -392,6 +449,7 @@ export default function PdfViewer({ url, filename, entities, focusedId, onFocusE
           </div>
         ) : (
           <Document
+            className="pdf-doc"
             file={url}
             onLoadSuccess={onDocLoadSuccess}
             onLoadError={onLoadError}
@@ -415,6 +473,7 @@ export default function PdfViewer({ url, filename, entities, focusedId, onFocusE
                 entities={entities ?? []}
                 focusedId={focusedId}
                 onFocusEntity={onFocusEntity}
+                onHighlightsMeasured={onHighlightsMeasured}
                 registerRef={registerPageRef}
               />
             ))}

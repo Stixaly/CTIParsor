@@ -51,16 +51,21 @@ function highlightText(
     const seg = text.slice(r.start, r.end)
     const isFirst = !seen.has(r.entityId)
     seen.add(r.entityId)
+    // Accepted and pending used to look the same here.  Same cues as the Text
+    // view: accepted = solid underline + ✓ (tok-accepted), pending = dashed.
+    // Rejected entities are not highlighted at all (buildRanges skips them).
+    const accepted = e?.accepted === true
     nodes.push(
       <mark
         key={i}
         ref={isFirst ? (el => registerMark(r.entityId, el)) : undefined}
         data-eid={r.entityId}
-        title={e?.value}
+        className={accepted ? 'tok-accepted' : undefined}
+        title={e ? `${e.value} — ${accepted ? 'accepted' : 'pending review'}` : undefined}
         onClick={() => onFocusEntity(r.entityId)}
         style={{
           background: e ? typeSoft(e.entity_type) : 'var(--accent-soft)',
-          borderBottom: `2px solid ${e ? typeDot(e.entity_type) : 'var(--accent)'}`,
+          borderBottom: `2px ${accepted ? 'solid' : 'dashed'} ${e ? typeDot(e.entity_type) : 'var(--accent)'}`,
           borderRadius: 2,
           color: 'inherit',
           cursor: 'pointer',
@@ -114,9 +119,12 @@ function TextSource({ url, filename, entities, focusedId, onFocusEntity, onEntit
   useEffect(() => {
     if (!focusedId || text == null) return
     const node = markRefs.current[focusedId]
-    if (node) node.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    else onEntityNotInText?.(focusedId)
-  }, [focusedId, text, onEntityNotInText])
+    if (node) { node.scrollIntoView({ behavior: 'smooth', block: 'center' }); return }
+    // A rejected entity is in the text, just not highlighted: saying it was
+    // "not found verbatim" was wrong.
+    if (entities.find(e => e.id === focusedId)?.accepted === false) return
+    onEntityNotInText?.(focusedId)
+  }, [focusedId, text, entities, onEntityNotInText])
 
   const body = useMemo(
     () => (text != null ? highlightText(text, entities, focusedId, onFocusEntity, registerMark) : null),
@@ -147,7 +155,7 @@ function TextSource({ url, filename, entities, focusedId, onFocusEntity, onEntit
           padding: '18px 20px',
           margin: 0,
           whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
+          overflowWrap: 'anywhere',
         }}
       >
         {body}

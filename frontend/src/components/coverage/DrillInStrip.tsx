@@ -126,15 +126,18 @@ export default function DrillInStrip({ tech, selection, rulesById, evidence }: {
                             <TriCheckbox sel={on ? 1 : 0} total={1} size={14} onToggle={() => selection.toggleScope([id])} />
                           </div>
                           <div style={{ minWidth: 0, flex: 1 }}>
-                            <div style={{ fontSize: 11.5, lineHeight: 1.3, color: on ? 'var(--ink)' : 'var(--ink-3)' }}>
+                            <div style={{ fontSize: 11.5, lineHeight: 1.3, color: on ? 'var(--ink)' : 'var(--ink-3)', overflowWrap: 'anywhere' }}>
                               {r.title}
                             </div>
-                            <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 3 }}>
-                              <span style={{ fontFamily: '"JetBrains Mono",monospace', fontSize: 10, color: 'var(--ink-3)' }}>{r.corpus}</span>
+                            {/* Wraps: a long corpus or licence name used to push the
+                                row past its column. */}
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 6px', alignItems: 'center', marginTop: 3 }}>
+                              <span style={{ fontFamily: '"JetBrains Mono",monospace', fontSize: 10, color: 'var(--ink-3)', overflowWrap: 'anywhere', minWidth: 0 }}>{r.corpus}</span>
                               <span style={{ fontFamily: '"JetBrains Mono",monospace', fontSize: 10, color: 'var(--ink-3)' }}>{r.severity}</span>
                               <span style={{
                                 fontFamily: '"JetBrains Mono",monospace', fontSize: 10,
                                 color: r.license === 'none' ? 'var(--warn)' : 'var(--ink-3)',
+                                overflowWrap: 'anywhere', minWidth: 0,
                               }}>{r.license}</span>
                               <span style={{ fontFamily: '"JetBrains Mono",monospace', fontSize: 10, color: 'var(--ink-4)', marginLeft: 'auto' }}>
                                 {FORMAT_STYLE[f].ext}

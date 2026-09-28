@@ -13,6 +13,7 @@ const inp: React.CSSProperties = {
 }
 
 const btn: React.CSSProperties = {
+  whiteSpace: 'nowrap',
   padding: '5px 10px',
   border: '1px solid var(--rule)',
   borderRadius: 4,
@@ -109,9 +110,14 @@ export default function Settings() {
     return { format: f.format, available: f.available, items, totalRules: items.reduce((s, c) => s + c.rules, 0) }
   })
 
+  // minmax(0, …): a long corpus name or licence used to widen its track by its
+  // unbreakable length and squeeze Source to 0 px; they now wrap in place
+  // (overflowWrap below).  Each row is its own grid, so the actions column
+  // stays a fixed width to keep the rows aligned; its buttons wrap inside it.
   const gridCols: React.CSSProperties = {
     display: 'grid',
-    gridTemplateColumns: '1.5fr 2fr 0.9fr 0.4fr 0.5fr 190px',
+    gridTemplateColumns:
+      'minmax(0, 1.5fr) minmax(0, 2fr) minmax(0, 0.9fr) minmax(0, 0.4fr) minmax(0, 0.5fr) 200px',
     gap: '8px',
     alignItems: 'center',
     padding: '8px 0',
@@ -178,8 +184,8 @@ export default function Settings() {
           </div>
           {g.items.map((c) => (
             <div key={c.name} style={{ ...gridCols, opacity: c.enabled ? 1 : 0.5 }}>
-              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
-                <strong style={{ color: 'var(--ink)', fontSize: 13 }}>{c.name}</strong>
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                <strong style={{ color: 'var(--ink)', fontSize: 13, overflowWrap: 'anywhere', minWidth: 0 }}>{c.name}</strong>
                 {c.private && (
                   <span style={{ fontSize: 10, color: 'var(--warn)', border: '1px solid var(--warn)', borderRadius: 3, padding: '1px 4px' }}>
                     private
@@ -196,7 +202,7 @@ export default function Settings() {
                   </span>
                 )}
                 {c.subdir && (
-                  <span style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'monospace' }}>/
+                  <span style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'monospace', overflowWrap: 'anywhere', minWidth: 0 }}>/
                     {c.subdir}
                   </span>
                 )}
@@ -216,10 +222,12 @@ export default function Settings() {
                 )}
                 {c.git ?? c.tarball ?? c.path ?? '—'}
               </div>
-              <span style={{ fontSize: 12, color: 'var(--ink-2)' }}>{c.license}</span>
+              <span style={{ fontSize: 12, color: 'var(--ink-2)', overflowWrap: 'anywhere', minWidth: 0 }}>{c.license}</span>
               <span style={{ fontSize: 12, color: 'var(--ink-2)' }}>{c.priority ?? '—'}</span>
               <span style={{ fontSize: 12, color: 'var(--ink-2)' }}>{c.rules}</span>
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              {/* Three buttons (and "Downloading…") are wider than the column:
+                  they wrap onto a second line instead of running past the grid. */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 6, alignItems: 'center' }}>
                 <button
                   type="button"
                   style={btn}

@@ -47,8 +47,13 @@ export function buildGraphData(
   nodes.forEach(n => { deg[n.id] = 0 })
 
   // Resolve edges by value → id; skip + count unresolved endpoints.
+  // Rejected edges stay in `edges` (the link editor lists them, so they can be
+  // reset) but not in `deg` / `adj`: those size the nodes, drive the layouts
+  // and the neighbour highlight, and a link that is no longer drawn must not.
   let unmatchedCount = 0
   const edges: GraphEdge[] = []
+  const adj: Record<string, Set<string>> = {}
+  nodes.forEach(n => { adj[n.id] = new Set() })
   rawRelations.forEach(r => {
     const srcId = valueToId.get(r.source_value.toLowerCase())
     const tgtId = valueToId.get(r.target_value.toLowerCase())
@@ -60,14 +65,12 @@ export function buildGraphData(
       accepted: r.accepted,
       evidence: r.evidence_text ?? '',
     })
+    if (r.accepted === false) return
     deg[srcId] = (deg[srcId] || 0) + 1
     deg[tgtId] = (deg[tgtId] || 0) + 1
+    adj[srcId]?.add(tgtId)
+    adj[tgtId]?.add(srcId)
   })
-
-  // Adjacency (undirected) for layout algorithms.
-  const adj: Record<string, Set<string>> = {}
-  nodes.forEach(n => { adj[n.id] = new Set() })
-  edges.forEach(e => { adj[e.source]?.add(e.target); adj[e.target]?.add(e.source) })
 
   // Per-type node counts for the legend.
   const typeCounts: Record<string, number> = {}

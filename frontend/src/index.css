@@ -28,6 +28,12 @@
      themes, whose fills are dark; the dark theme's fills are light, where
      white fell to 2.2:1 (ok) and 2.9:1 (no). */
   --on-fill:     #FFFFFF;
+  /* Policy: rules left to the pipeline ("Auto", "Full auto").  Used since the
+     Policy page existed but never defined — its fills and swatches vanished.
+     A steel blue apart from the accents; ≥ 4.9:1 as text on every light
+     background, 6.5:1 under --on-fill, 5.2:1 on --frost-soft. */
+  --frost:       #35627F;
+  --frost-soft:  #DCE7EE;
   --shadow-card: 0 1px 2px rgba(43,30,20,.05), 0 8px 24px -8px rgba(43,30,20,.08);
   --shadow-pop:  0 12px 32px -8px rgba(31,19,10,.18), 0 1px 0 rgba(0,0,0,.04);
 }
@@ -105,6 +111,8 @@ html[data-theme="dark"] {
   --no:          #E97373;
   --warn:        #E0BE6A;
   --on-fill:     #14110C;   /* 8.6:1 on --ok, 6.4:1 on --no, 7.3:1 on --accent */
+  --frost:       #8DBAD6;   /* ≥ 8:1 on the backgrounds, 9.1:1 under --on-fill */
+  --frost-soft:  #1B2932;
   --shadow-card: 0 1px 0 rgba(255,255,255,0.02) inset, 0 8px 24px -10px rgba(0,0,0,0.5);
   --shadow-pop:  0 12px 32px -8px rgba(0,0,0,.6);
   --logo-filter: invert(1) brightness(0.92);
@@ -469,6 +477,9 @@ html[data-density="spacious"] .doc { padding: 44px 52px 100px; }
   font-size: 15.5px; line-height: 1.58;
   margin: 0 0 0.85em; color: var(--ink);
   text-wrap: pretty; hyphens: auto;
+  /* Hashes, URLs and encoded blobs have no break point: they ran past the
+     column and under the margin.  Broken only where a line overflows. */
+  overflow-wrap: break-word;
 }
 html[data-font="sans"] .doc-title,
 html[data-font="sans"] .doc-para {
@@ -1486,6 +1497,14 @@ html[data-theme="dark"] .rel-ev-hl {
 .dash-delete-btn:hover { color: var(--no) !important; }
 .hover-no:hover { color: var(--no) !important; }
 
+/* Focus ring for text fields that drop the browser outline (outline: none
+   inline) — on the field itself or on the wrapper that draws its border.
+   !important only on the colour: it has to beat the inline `border`. */
+.field-ring:focus-within {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 30%, transparent);
+}
+
 /* ===========================================================
    THEME SWITCHER  (sidebar compact palette picker)
    =========================================================== */
@@ -1530,6 +1549,80 @@ html[data-theme="dark"] .rel-ev-hl {
 
 /* Spinner for the loading state (inline SVG path animation) */
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ===========================================================
+   PROCESSING DIALOG (ProgressModal)
+   Stage list beside the live graph; stacked below 760 px, where the list's
+   420 px left the graph (and its Close button, then inside it) no room.
+   =========================================================== */
+.pm-body { display: flex; flex: 1; min-height: 0; }
+.pm-progress { flex: 1; min-width: 0; }
+.pm-body.has-graph .pm-progress {
+  flex: 0 0 420px; border-right: 1px solid var(--rule);
+}
+.pm-graph {
+  flex: 1; min-width: 0; min-height: 400px;
+  position: relative; background: var(--bg);
+}
+@media (max-width: 760px) {
+  .pm-body { flex-direction: column; overflow-y: auto; }
+  .pm-body.has-graph .pm-progress {
+    flex: 0 0 auto; border-right: 0; border-bottom: 1px solid var(--rule);
+  }
+  .pm-graph { flex: 0 0 280px; min-height: 280px; }
+}
+
+/* ===========================================================
+   PDF SOURCE (PdfViewer)
+   =========================================================== */
+/* Pages centred while they fit; wider ones (zoomed, landscape) start at the
+   left edge of the horizontally scrolling surface instead of overflowing
+   both sides of the column. */
+.pdf-doc {
+  display: flex; flex-direction: column; align-items: center;
+  width: max-content; min-width: 100%;
+}
+/* Entity anchors inside pdf.js's text layer: never painted, only measured
+   to place the highlight boxes. */
+.textLayer mark.pdf-anchor {
+  background: transparent; color: transparent; padding: 0; margin: 0;
+}
+
+/* ===========================================================
+   POLICY
+   =========================================================== */
+/* Editor beside the live preview.  The preview keeps 360 px, so beside the
+   210 px sidebar an 800 px window left the editor 230 px: below 1100 px the
+   two stack and the page body scrolls instead of each column. */
+.policy-body {
+  flex: 1; min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(360px, 1fr);
+  overflow: hidden;
+}
+@media (max-width: 1100px) {
+  .policy-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: auto;
+    overflow-y: auto;
+  }
+  .policy-body > * { border-right: 0 !important; }
+  .policy-preview { border-top: 1px solid var(--rule); }
+}
+
+/* Legend rail and detail / link-editor panel beside the canvas. */
+.graph-legend { width: 200px; flex-shrink: 0; }
+.graph-panel  { width: 300px; flex-shrink: 0; }
+@media (max-width: 960px) {
+  /* The panel floats over the canvas instead of taking 300 px from it: with
+     the legend, an 800 px window left the graph 300 px wide. */
+  .graph-legend { width: 168px; }
+  .graph-panel {
+    position: absolute; top: 0; right: 0; bottom: 0; z-index: 20;
+    width: min(300px, calc(100% - 48px));
+    box-shadow: var(--shadow-pop);
+  }
+}
 
 /* Node label paint-order: stroke punches through background for legibility */
 .gv-label {
