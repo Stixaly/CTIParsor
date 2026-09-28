@@ -376,3 +376,73 @@ export function layoutRadial(
   })
   return pos
 }
+
+// ── Edge geometry ─────────────────────────────────────────────────────────────
+
+/**
+ * Side offset of each edge from the straight line between its two nodes.
+ *
+ * Every relationship of a pair used to share one segment, so two verbs, or
+ * A→B and B→A, drew as a single line.  A lone edge stays straight (0); the
+ * edges of a pair spread symmetrically around it, `spacing` px apart.  The
+ * sign is taken in the pair's own frame (endpoints sorted by id) — see
+ * `edgePath` — so opposite directions bow to opposite sides.
+ */
+export function parallelOffsets(
+  edges: Array<Pick<GraphEdge, 'id' | 'source' | 'target'>>,
+  spacing = 22,
+): Record<string, number> {
+  const groups = new Map<string, string[]>()
+  for (const e of edges) {
+    const key = e.source < e.target ? `${e.source}\u0000${e.target}` : `${e.target}\u0000${e.source}`
+    const g = groups.get(key)
+    if (g) g.push(e.id); else groups.set(key, [e.id])
+  }
+  const out: Record<string, number> = {}
+  groups.forEach(ids => {
+    ids.forEach((id, i) => { out[id] = (i - (ids.length - 1) / 2) * spacing })
+  })
+  return out
+}
+
+/**
+ * SVG path for one edge: from the rim of the source node to just short of the
+ * rim of the target node, so the arrow head at its end is not painted over by
+ * the target disc.  `offset` (from `parallelOffsets`) bows the edge into a
+ * quadratic curve whose apex sits `offset` px off the straight line.
+ *
+ * Nodes too close to fit the trimmed edge between them keep the untrimmed
+ * centre-to-centre line rather than a reversed one.
+ */
+export function edgePath(
+  a: Pos, b: Pos,
+  sourceId: string, targetId: string,
+  rSource: number, rTarget: number,
+  offset = 0,
+  gap = 1.5,
+): string {
+  const dx = b.x - a.x, dy = b.y - a.y
+  const dist = Math.hypot(dx, dy)
+  if (dist < 1e-6) return `M ${a.x} ${a.y} L ${b.x} ${b.y}`
+  // Perpendicular in the pair's frame: the same side whichever way the edge runs.
+  const flip = sourceId > targetId ? -1 : 1
+  const nx = (-dy / dist) * flip, ny = (dx / dist) * flip
+  // A quadratic's apex lies halfway to its control point.
+  const cx = (a.x + b.x) / 2 + nx * offset * 2
+  const cy = (a.y + b.y) / 2 + ny * offset * 2
+  const unit = (fx: number, fy: number, tx: number, ty: number) => {
+    const l = Math.hypot(tx - fx, ty - fy) || 1
+    return { x: (tx - fx) / l, y: (ty - fy) / l }
+  }
+  const u0 = unit(a.x, a.y, cx, cy)
+  const u1 = unit(b.x, b.y, cx, cy)
+  const endGap = rTarget + gap
+  if (dist <= rSource + endGap + 2) {
+    return offset ? `M ${a.x} ${a.y} Q ${cx} ${cy} ${b.x} ${b.y}` : `M ${a.x} ${a.y} L ${b.x} ${b.y}`
+  }
+  const x0 = a.x + u0.x * rSource, y0 = a.y + u0.y * rSource
+  const x1 = b.x + u1.x * endGap,  y1 = b.y + u1.y * endGap
+  return offset
+    ? `M ${x0} ${y0} Q ${cx} ${cy} ${x1} ${y1}`
+    : `M ${x0} ${y0} L ${x1} ${y1}`
+}

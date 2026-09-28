@@ -56,7 +56,7 @@ function GraphSearch({ nodes, onPick }: { nodes: GraphNode[]; onPick: (id: strin
 
   return (
     <div style={{ position: 'relative' }}>
-      <div style={{
+      <div className="field-ring" style={{
         display: 'flex', alignItems: 'center', gap: 6,
         background: 'var(--bg-soft)', border: '1px solid var(--rule)',
         borderRadius: 7, padding: '5px 8px',
@@ -112,10 +112,10 @@ function GraphSearch({ nodes, onPick }: { nodes: GraphNode[]; onPick: (id: strin
 // ── Type Legend ───────────────────────────────────────────────────────────────
 
 function TypeLegend({
-  typeCounts, visibleTypes, onToggle, onSolo, onReset,
+  typeCounts, hiddenTypes, onToggle, onSolo, onReset,
 }: {
   typeCounts: Record<string, number>
-  visibleTypes: Set<string>
+  hiddenTypes: Set<string>
   onToggle: (t: string) => void
   onSolo: (t: string) => void
   onReset: () => void
@@ -129,7 +129,7 @@ function TypeLegend({
         <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
           Types
         </span>
-        {visibleTypes.size > 0 && (
+        {hiddenTypes.size > 0 && (
           <button onClick={onReset}
             style={{ fontSize: 10, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
             Reset
@@ -138,7 +138,7 @@ function TypeLegend({
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
         {types.map(t => {
-          const on  = visibleTypes.size === 0 || visibleTypes.has(t)
+          const on  = !hiddenTypes.has(t)
           const dot = typeDot(t)
           return (
             <button
@@ -351,7 +351,7 @@ function RelEditor({
         padding: '8px 12px', borderBottom: '1px solid var(--rule-soft)',
         display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0,
       }}>
-        <div style={{
+        <div className="field-ring" style={{
           display: 'flex', alignItems: 'center', gap: 5, flex: 1,
           background: 'var(--bg-soft)', border: '1px solid var(--rule)',
           borderRadius: 6, padding: '4px 8px',
@@ -539,6 +539,7 @@ function GraphNodePicker({
         <>
           <input
             value={query}
+            className="field-ring"
             style={inputStyle}
             placeholder="Search entities…"
             onChange={e => { setQuery(e.target.value); setOpen(true); setShowForm(false) }}
@@ -799,7 +800,9 @@ export default function Graph() {
   const [selectedId,   setSelectedId]   = useState<string | null>(null)
   const [hoverId,      setHoverId]       = useState<string | null>(null)
   const [layout,       setLayout]        = useState<LayoutMode>('force')
-  const [visibleTypes, setVisibleTypes]  = useState<Set<string>>(new Set())  // empty = show all
+  // Types switched off in the legend.  Empty = all shown; hiding the last one
+  // shows none (a "visible" set used empty for "all" re-showed everything).
+  const [hiddenTypes,  setHiddenTypes]   = useState<Set<string>>(new Set())
   const [editMode,     setEditMode]      = useState(false)
   const [showLabels,   setShowLabels]    = useState(false)
   const [focusSignal,  setFocusSignal]   = useState<{ id: string; seq: number } | null>(null)
@@ -812,20 +815,18 @@ export default function Graph() {
   // ── Legend toggle helpers ──────────────────────────────────────────────────
 
   const toggleType = useCallback((t: string) => {
-    setVisibleTypes(prev => {
-      // If currently "show all" (empty set), start from all types
-      const base = prev.size === 0 ? new Set(Object.keys(typeCounts)) : new Set(prev)
-      if (base.has(t)) base.delete(t); else base.add(t)
-      // If all types visible again, collapse back to empty-set convention
-      return base.size === Object.keys(typeCounts).length ? new Set() : base
+    setHiddenTypes(prev => {
+      const next = new Set(prev)
+      if (next.has(t)) next.delete(t); else next.add(t)
+      return next
     })
-  }, [typeCounts])
-
-  const soloType = useCallback((t: string) => {
-    setVisibleTypes(new Set([t]))
   }, [])
 
-  const resetTypes = useCallback(() => setVisibleTypes(new Set()), [])
+  const soloType = useCallback((t: string) => {
+    setHiddenTypes(new Set(Object.keys(typeCounts).filter(x => x !== t)))
+  }, [typeCounts])
+
+  const resetTypes = useCallback(() => setHiddenTypes(new Set()), [])
 
   // ── Focus a searched node ──────────────────────────────────────────────────
 
@@ -915,8 +916,7 @@ export default function Graph() {
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
 
         {/* ── Left legend rail ─────────────────────────────────────────── */}
-        <div style={{
-          width: 200, flexShrink: 0,
+        <div className="graph-legend" style={{
           borderRight: '1px solid var(--rule)',
           background: 'var(--bg)',
           display: 'flex', flexDirection: 'column',
@@ -949,7 +949,7 @@ export default function Graph() {
 
           <TypeLegend
             typeCounts={typeCounts}
-            visibleTypes={visibleTypes}
+            hiddenTypes={hiddenTypes}
             onToggle={toggleType}
             onSolo={soloType}
             onReset={resetTypes}
@@ -981,7 +981,7 @@ export default function Graph() {
               deg={deg}
               adj={adj}
               layout={layout}
-              visibleTypes={visibleTypes}
+              hiddenTypes={hiddenTypes}
               selectedId={selectedId}
               hoverId={hoverId}
               showLabels={showLabels}
@@ -1050,8 +1050,7 @@ export default function Graph() {
 
         {/* ── Right panel ──────────────────────────────────────────────── */}
         {rightPanel && (
-          <div style={{
-            width: 300, flexShrink: 0,
+          <div className="graph-panel" style={{
             borderLeft: '1px solid var(--rule)',
             background: 'var(--bg-elev)',
             display: 'flex', flexDirection: 'column',

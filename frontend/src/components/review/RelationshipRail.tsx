@@ -127,18 +127,35 @@ function RelCard({ r, onAccept, onReject, onReset, onJump, onChangeType, onChang
   )
 }
 
+// Tallest the rail may be: the window minus the chrome above the document
+// (~140 px) and ~100 px of document left readable.  Applied to the default,
+// to a drag and to every window resize — it used to be applied only while
+// dragging, so a rail sized on a tall window covered a smaller one entirely.
+const RAIL_MIN = 56
+const railMax = () => Math.max(RAIL_MIN, window.innerHeight - 240)
+const clampRail = (h: number) => Math.max(RAIL_MIN, Math.min(railMax(), h))
+
 export default function RelationshipRail({
   rels, onAccept, onReject, onReset, onJump, onChangeType, onChangeDates,
   showInDoc, setShowInDoc, onNewRelationship, getEntityType,
 }: Props) {
   const [filter, setFilter] = useState<Filter>('pending')
   const [collapsed, setCollapsed] = useState(false)
+  // The height asked for (default or dragged); what is shown is that height
+  // clamped to the current window, so it comes back when the window grows.
   const [height, setHeight] = useState(300)
+  const [, setViewportH] = useState(() => window.innerHeight)
   const [dragging, setDragging] = useState(false)
   const startRef = useRef({ y: 0, h: 0 })
   // Tracks the active drag listeners so we can remove them if the component
   // unmounts during a resize (prevents setState-after-unmount and listener leaks).
   const activeResizeRef = useRef<{ move: (ev: PointerEvent) => void; up: () => void } | null>(null)
+
+  useEffect(() => {
+    const onResize = () => setViewportH(window.innerHeight)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   useEffect(() => () => {
     if (activeResizeRef.current) {
@@ -149,11 +166,10 @@ export default function RelationshipRail({
 
   const onResizeDown = (e: React.PointerEvent) => {
     setDragging(true)
-    startRef.current = { y: e.clientY, h: height }
+    startRef.current = { y: e.clientY, h: clampRail(height) }
     const move = (ev: PointerEvent) => {
       const dy = startRef.current.y - ev.clientY
-      const nh = Math.max(56, Math.min(window.innerHeight - 140, startRef.current.h + dy))
-      setHeight(nh)
+      setHeight(clampRail(startRef.current.h + dy))
     }
     const up = () => {
       setDragging(false)
@@ -181,7 +197,7 @@ export default function RelationshipRail({
     return true
   })
 
-  const actualHeight = collapsed ? 42 : height
+  const actualHeight = collapsed ? 42 : clampRail(height)
 
   return (
     <section

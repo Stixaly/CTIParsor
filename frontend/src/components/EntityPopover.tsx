@@ -203,7 +203,13 @@ export default function EntityPopover({
 
   // ── position (clamped to viewport) ────────────────────────────────────────
 
-  const approxH = state.mode === 'create' ? APPROX_H_CREATE : APPROX_H_EDIT
+  // Never more than the window: the popover is capped at its height (the type
+  // list scrolls), where it used to reach ~480 px and lose its end below a
+  // low window.
+  const approxH = Math.min(
+    state.mode === 'create' ? APPROX_H_CREATE : APPROX_H_EDIT,
+    window.innerHeight - 16,
+  )
   const left    = Math.max(8, Math.min(state.x - POP_W / 2, window.innerWidth  - POP_W - 8))
   const top     = Math.max(8, Math.min(state.y + 12,        window.innerHeight - approxH - 8))
 
@@ -234,6 +240,9 @@ export default function EntityPopover({
         aria-modal="true"
         style={{
           position: 'fixed', left, top, width: POP_W, zIndex: 99999,
+          maxHeight: 'calc(100vh - 16px)',
+          // Column: only the type list (a scroll container) gives up height.
+          display: 'flex', flexDirection: 'column',
           background: 'var(--bg-elev)',
           border: '1px solid var(--rule)',
           borderRadius: 14,

@@ -291,7 +291,7 @@ function ModeToggle({ mode, onChange }: { mode: 'pin' | 'auto'; onChange: (m: 'p
             background: mode === m
               ? m === 'pin' ? 'var(--accent)' : 'var(--frost)'
               : 'transparent',
-            color: mode === m ? '#fff' : 'var(--ink-3)',
+            color: mode === m ? 'var(--on-fill)' : 'var(--ink-3)',
             transition: 'background .1s, color .1s',
           }}
         >
@@ -689,7 +689,7 @@ function PreviewPanel({ rules, globalMode }: { rules: PolicyRule[]; globalMode: 
               <span style={{
                 fontFamily: MONO, fontSize: 10.5, fontWeight: 600, padding: '2px 8px',
                 borderRadius: 6, background: r.kind === 'pinned' ? 'var(--accent)' : 'var(--frost)',
-                color: '#fff',
+                color: 'var(--on-fill)',
               }}>
                 {r.verb}
               </span>
@@ -806,15 +806,21 @@ function IOModal({ rules, globalMode, onClose, onImport }: {
       position: 'fixed', inset: 0, zIndex: 1000,
       background: 'rgba(0,0,0,.4)', backdropFilter: 'blur(4px)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 16,
     }} onClick={e => e.target === e.currentTarget && onClose()}>
+      {/* Never taller or wider than the window: the head and the actions stay
+          on screen and the JSON area scrolls (it used to run off both edges
+          of a low window, with nothing to scroll). */}
       <div style={{
-        width: 560, background: 'var(--bg-elev)',
+        width: 'min(560px, 100%)', maxHeight: '100%', boxSizing: 'border-box',
+        display: 'flex', flexDirection: 'column',
+        background: 'var(--bg-elev)',
         border: '1px solid var(--rule)', borderRadius: 16,
         boxShadow: '0 12px 32px -8px rgba(31,19,10,.18)',
         overflow: 'hidden',
       }}>
         {/* Head */}
-        <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--rule)',
+        <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--rule)', flexShrink: 0,
                       display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
           <div>
             <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 700, color: 'var(--ink)' }}>
@@ -828,7 +834,7 @@ function IOModal({ rules, globalMode, onClose, onImport }: {
         </div>
 
         {/* Tabs */}
-        <div style={{ display: 'flex', borderBottom: '1px solid var(--rule)' }}>
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--rule)', flexShrink: 0 }}>
           {(['export', 'import'] as const).map(t => (
             <button key={t} onClick={() => { setTab(t); setMsg(null) }}
               style={{
@@ -844,7 +850,7 @@ function IOModal({ rules, globalMode, onClose, onImport }: {
         </div>
 
         {/* Textarea */}
-        <div style={{ padding: '14px 18px' }}>
+        <div style={{ padding: '14px 18px', flex: '1 1 auto', minHeight: 0, overflowY: 'auto' }}>
           <textarea
             readOnly={tab === 'export'}
             value={tab === 'export' ? exportText : draft}
@@ -864,7 +870,7 @@ function IOModal({ rules, globalMode, onClose, onImport }: {
         {/* Footer */}
         <div style={{
           padding: '10px 18px 16px', display: 'flex', alignItems: 'center',
-          gap: 8, justifyContent: 'flex-end',
+          gap: 8, justifyContent: 'flex-end', flexShrink: 0,
         }}>
           {msg && (
             <span style={{ flex: 1, fontSize: 12,
@@ -900,7 +906,7 @@ const primaryBtn = (enabled: boolean): CSSProperties => ({
   padding: '6px 14px', border: 'none', borderRadius: 7,
   background: enabled ? 'var(--accent)' : 'var(--rule)',
   cursor: enabled ? 'pointer' : 'not-allowed',
-  fontSize: 12, fontWeight: 600, color: enabled ? '#fff' : 'var(--ink-4)',
+  fontSize: 12, fontWeight: 600, color: enabled ? 'var(--on-fill)' : 'var(--ink-4)',
 })
 
 // ── Main page ─────────────────────────────────────────────────────────────────
@@ -1177,12 +1183,8 @@ export default function Policy() {
         </div>
       </div>
 
-      {/* ── Body (two-column) ─────────────────────────────────────────────── */}
-      <div style={{
-        flex: 1, display: 'grid',
-        gridTemplateColumns: 'minmax(0, 1.45fr) minmax(360px, 1fr)',
-        overflow: 'hidden',
-      }}>
+      {/* ── Body (two columns; stacked below 1100 px — see .policy-body) ──── */}
+      <div className="policy-body">
         {/* Left: editor */}
         <div style={{
           display: 'flex', flexDirection: 'column',
@@ -1199,7 +1201,7 @@ export default function Policy() {
               Default relationships
             </span>
             {/* Filter search */}
-            <div style={{
+            <div className="field-ring" style={{
               display: 'flex', alignItems: 'center', gap: 6,
               background: 'var(--bg-soft)', border: '1px solid var(--rule)',
               borderRadius: 7, padding: '4px 9px', flex: 1, maxWidth: 280,
@@ -1261,7 +1263,7 @@ export default function Policy() {
         </div>
 
         {/* Right: preview */}
-        <div style={{ background: 'var(--bg-soft)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <div className="policy-preview" style={{ background: 'var(--bg-soft)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           <PreviewPanel rules={rules} globalMode={globalMode} />
         </div>
       </div>

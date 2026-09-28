@@ -17,7 +17,7 @@ import { typeDot } from '../review/tokens'
 import {
   type GraphNode, type GraphEdge, type PosMap,
   nodeRadius, getTier, layoutHierarchical, layoutRadial,
-  typeStixIcon, typeIconPath,
+  typeStixIcon, typeIconPath, parallelOffsets, edgePath,
 } from './graphLayout'
 
 // ── Simulation node / link shapes (minimal — only what d3 mutates) ──────────
@@ -126,7 +126,9 @@ interface Props {
   deg:          Record<string, number>
   adj:          Record<string, Set<string>>
   layout:       'force' | 'hierarchical' | 'radial'
-  visibleTypes: Set<string>
+  /** Types switched off in the legend — dimmed.  Empty = every type shown;
+   *  every type in it = none shown (an empty "visible" set used to mean both). */
+  hiddenTypes:  Set<string>
   selectedId:   string | null
   hoverId:      string | null
   showLabels:   boolean
@@ -138,7 +140,7 @@ interface Props {
 // ── Component ──────────────────────────────────────────────────────────────
 
 const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
-  { nodes, edges, byId, deg, adj, layout, visibleTypes, selectedId, hoverId,
+  { nodes, edges, byId, deg, adj, layout, hiddenTypes, selectedId, hoverId,
     showLabels, onSelect, onHover, focusSignal },
   ref,
 ) {
@@ -148,6 +150,13 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   const posRef    = useRef<PosMap>({})
   const [tick, setTick] = useState(0)
   const view      = useRef({ x: 0, y: 0, k: 1 })
+  // Set once the user pans, zooms, drags a node or picks a search result:
+  // automatic fits (the settle-in fits, a resize, a data refresh) then leave
+  // the view alone.  Cleared by a layout change and by the Fit button.
+  const userMoved = useRef(false)
+  // Bumped to cancel a running view animation when the user takes over.
+  const animSeq   = useRef(0)
+  const lastLayout = useRef<Props['layout'] | null>(null)
 
   const repaint   = useCallback(() => setTick(t => t + 1), [])
 
@@ -164,10 +173,15 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   const fit = useCallback((animate = true) => {
     const svg = svgRef.current; if (!svg) return
     const b = bounds(posRef.current)
-    if (!isFinite(b.w) || !isFinite(b.h) || b.w < 1) return
+    if (!isFinite(b.minX) || !isFinite(b.minY)) return
     const rect = svg.getBoundingClientRect()
-    const pad  = 80
-    const kRaw = Math.min((rect.width - pad * 2) / b.w, (rect.height - pad * 2) / b.h, 1.4)
+    if (rect.width <= 0 || rect.height <= 0) return
+    // A lone node, or nodes in one row or column, has no extent on an axis —
+    // it used to abort the fit and leave the node in the top-left corner.
+    // Give each axis a node's worth so the scale stays finite and centred.
+    const w    = Math.max(b.w, 60), h = Math.max(b.h, 60)
+    const pad  = Math.min(80, rect.width / 6, rect.height / 6)
+    const kRaw = Math.min((rect.width - pad * 2) / w, (rect.height - pad * 2) / h, 1.4)
     const kk   = Math.max(0.15, Math.min(kRaw, 1.4))
     const cx   = (b.minX + b.maxX) / 2
     const cy   = (b.minY + b.maxY) / 2
@@ -176,10 +190,12 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
       y: rect.height / 2 - cy * kk,
       k: kk,
     }
+    const seq = ++animSeq.current
     if (!animate) { view.current = target; applyView(); repaint(); return }
     const start = { ...view.current }, t0 = performance.now(), dur = 420
     const ease  = (t: number) => 1 - Math.pow(1 - t, 3)
     const step  = (now: number) => {
+      if (seq !== animSeq.current) return
       const t = Math.min(1, (now - t0) / dur), e = ease(t)
       view.current = {
         x: start.x + (target.x - start.x) * e,
@@ -192,24 +208,47 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     requestAnimationFrame(step)
   }, [applyView, repaint])
 
-  useImperativeHandle(ref, () => ({ fit }), [fit])
+  // An explicit Fit hands the view back to the automatic fits.
+  useImperativeHandle(ref, () => ({
+    fit: (animate = true) => { userMoved.current = false; fit(animate) },
+  }), [fit])
+
+  // Edges the graph actually draws, and that the layout pulls on: resolved
+  // endpoints, not rejected.  A rejected link used to keep pulling its nodes
+  // together (and count towards their size) after it was no longer drawn.
+  const activeEdges = useMemo(
+    () => edges.filter(e => byId.has(e.source) && byId.has(e.target) && e.accepted !== false),
+    [edges, byId],
+  )
 
   // ── (Re)build layout / simulation when nodes, edges, or mode change ────
 
   useEffect(() => {
     if (simRef.current) { simRef.current.stop(); simRef.current = null }
 
+    // A layout change is a request for a fresh view; a data refresh (an
+    // accepted or rejected link refetches everything) is not.
+    if (lastLayout.current !== layout) { userMoved.current = false; lastLayout.current = layout }
+    const autoFit = (animate: boolean) => { if (!userMoved.current) fit(animate) }
+
+    // Keep only the current nodes' positions: removed entities used to stay
+    // in posRef and pull Fit towards where they had been.
+    const prevPos = posRef.current
+    const kept: PosMap = {}
+    for (const n of nodes) if (prevPos[n.id]) kept[n.id] = prevPos[n.id]
+    posRef.current = kept
+
     if (nodes.length === 0) return
 
     if (layout === 'force') {
       // Seed positions on a phyllotaxis spiral
-      const prevPos = posRef.current
+      const allSeeded = nodes.every(n => kept[n.id])
       const sNodes: SimNode[] = nodes.map((n, i) => {
-        const seed = prevPos[n.id] ?? phyllotaxis(i)
+        const seed = kept[n.id] ?? phyllotaxis(i)
         return { id: n.id, x: seed.x, y: seed.y }
       })
       const nodeById = new Map(sNodes.map(n => [n.id, n]))
-      const sLinks: SimLink[] = edges
+      const sLinks: SimLink[] = activeEdges
         .filter(e => nodeById.has(e.source) && nodeById.has(e.target))
         .map(e => ({
           source: e.source as unknown as SimNode,
@@ -231,26 +270,55 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
 
       simRef.current = sim
 
-      // Light pre-spread so the opening frame isn't a clump
-      sim.tick(60)
+      // Light pre-spread so the opening frame isn't a clump.  When every node
+      // already has a place (a refresh), only nudge them: a full restart
+      // reshuffled the whole graph after each accepted or rejected link.
+      if (!allSeeded) sim.tick(60)
       sNodes.forEach(d => { posRef.current[d.id] = { x: d.x ?? 0, y: d.y ?? 0 } })
       repaint()
-      sim.alpha(0.9).restart()
+      sim.alpha(allSeeded ? 0.3 : 0.9).restart()
 
-      const f1 = setTimeout(() => fit(true),  900)
-      const f2 = setTimeout(() => fit(true), 1900)
+      // Frame the opening layout at once (it used to sit around the canvas's
+      // top-left corner until the first fit), then follow it as it settles.
+      autoFit(false)
+      const f1 = setTimeout(() => autoFit(true),  900)
+      const f2 = setTimeout(() => autoFit(true), 1900)
       return () => { clearTimeout(f1); clearTimeout(f2); sim.stop() }
     } else {
       // Static layout
       posRef.current = layout === 'hierarchical'
-        ? layoutHierarchical(nodes, edges, deg, adj)
-        : layoutRadial(nodes, edges, deg, adj)
+        ? layoutHierarchical(nodes, activeEdges, deg, adj)
+        : layoutRadial(nodes, activeEdges, deg, adj)
       repaint()
-      const t = setTimeout(() => fit(false), 60)
+      const t = setTimeout(() => autoFit(false), 60)
       return () => clearTimeout(t)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layout, nodes, edges])
+  }, [layout, nodes, activeEdges])
+
+  // ── Keep the content framed when the canvas is resized ─────────────────
+  // (window resize, a side panel opening).  If the user has placed the view,
+  // keep what was at the centre at the centre instead of refitting.
+
+  useEffect(() => {
+    const svg = svgRef.current
+    if (!svg || typeof ResizeObserver === 'undefined') return
+    let last = { w: svg.clientWidth, h: svg.clientHeight }
+    const ro = new ResizeObserver(() => {
+      const w = svg.clientWidth, h = svg.clientHeight
+      if (w === last.w && h === last.h) return
+      if (userMoved.current) {
+        view.current.x += (w - last.w) / 2
+        view.current.y += (h - last.h) / 2
+        applyView()
+      } else {
+        fit(false)
+      }
+      last = { w, h }
+    })
+    ro.observe(svg)
+    return () => ro.disconnect()
+  }, [fit, applyView])
 
   // ── Animate to a focused node on search pick ────────────────────────────
 
@@ -259,12 +327,15 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     const p   = posRef.current[focusSignal.id]
     const svg = svgRef.current
     if (!p || !svg) return
+    userMoved.current = true
+    const seq    = ++animSeq.current
     const rect   = svg.getBoundingClientRect()
     const k      = Math.max(view.current.k, 0.9)
     const target = { x: rect.width / 2 - p.x * k, y: rect.height / 2 - p.y * k, k }
     const start  = { ...view.current }, t0 = performance.now(), dur = 480
     const ease   = (t: number) => 1 - Math.pow(1 - t, 3)
     const step   = (now: number) => {
+      if (seq !== animSeq.current) return
       const t = Math.min(1, (now - t0) / dur), e = ease(t)
       view.current = {
         x: start.x + (target.x - start.x) * e,
@@ -281,8 +352,12 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
 
   useEffect(() => {
     const svg = svgRef.current; if (!svg) return
+    // Any hands-on move of the view cancels the pending automatic fits and
+    // any animation still running — they used to snap the view back.
+    const takeOver = () => { userMoved.current = true; animSeq.current++ }
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
+      takeOver()
       const rect   = svg.getBoundingClientRect()
       const px = e.clientX - rect.left, py = e.clientY - rect.top
       const v  = view.current
@@ -302,6 +377,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     }
     const onMove = (e: PointerEvent) => {
       if (!drag) return
+      if (e.clientX !== drag.x || e.clientY !== drag.y) takeOver()
       view.current.x += e.clientX - drag.x
       view.current.y += e.clientY - drag.y
       drag.x = e.clientX; drag.y = e.clientY
@@ -341,6 +417,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     const move = (ev: PointerEvent) => {
       const w2 = screenToWorld(ev.clientX, ev.clientY)
       const nx = w2.x + di.dx, ny = w2.y + di.dy
+      if (!di.moved) { userMoved.current = true; animSeq.current++ }
       di.moved = true
       posRef.current[id] = { x: nx, y: ny }
       const sim = simRef.current
@@ -378,10 +455,11 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
 
   const pos = posRef.current
 
-  const validEdges = useMemo(
-    () => edges.filter(e => byId.has(e.source) && byId.has(e.target) && e.accepted !== false),
-    [edges, byId],
-  )
+  const offsets = useMemo(() => parallelOffsets(activeEdges), [activeEdges])
+  const radiusOf = (id: string) => {
+    const n = byId.get(id)
+    return n ? nodeRadius(n.type, deg[id] || 0) : 12
+  }
 
   return (
     <svg
@@ -413,21 +491,31 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
 
       <g ref={gRef}>
         {/* ── Edges ────────────────────────────────────────────────── */}
-        {validEdges.map(e => {
+        {activeEdges.map(e => {
           const a = pos[e.source], b = pos[e.target]
           if (!a || !b) return null
           const hot     = !!neighborSet && (e.source === focusId || e.target === focusId)
           const dim     = !!neighborSet && !hot
           const pending = e.accepted === null
-          const hidden  = visibleTypes.size > 0 && (
-            !visibleTypes.has(byId.get(e.source)?.type ?? '') ||
-            !visibleTypes.has(byId.get(e.target)?.type ?? '')
-          )
+          const hidden  = hiddenTypes.has(byId.get(e.source)?.type ?? '')
+                       || hiddenTypes.has(byId.get(e.target)?.type ?? '')
           if (hidden) return null
+          // Ends on the target's rim (outside its selection ring, r + 7, when
+          // selected) so the arrow head shows; parallel and reciprocal links
+          // bow apart.  The marker scales with the stroke and its tip overhangs
+          // the path's end by 1/10 of its size (≤ 1.4 px): hence the margin.
+          const d = edgePath(
+            a, b, e.source, e.target,
+            radiusOf(e.source), radiusOf(e.target),
+            offsets[e.id] ?? 0,
+            e.target === selectedId ? 9 : 2.5,
+          )
           return (
-            <line
+            <path
               key={e.id}
-              x1={a.x} y1={a.y} x2={b.x} y2={b.y}
+              data-edge={e.id}
+              d={d}
+              fill="none"
               stroke={hot ? 'var(--accent)' : dim ? 'var(--rule-soft)' : 'var(--rule)'}
               strokeWidth={hot ? 2 : 1.2}
               strokeDasharray={pending ? '5 4' : undefined}
@@ -442,7 +530,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
           const p = pos[n.id]; if (!p) return null
           const r     = nodeRadius(n.type, deg[n.id] || 0)
           const fill  = typeDot(n.type)
-          const dim   = (visibleTypes.size > 0 && !visibleTypes.has(n.type))
+          const dim   = hiddenTypes.has(n.type)
                      || (!!neighborSet && !neighborSet.has(n.id))
           const sel   = n.id === selectedId
           const hov   = n.id === hoverId

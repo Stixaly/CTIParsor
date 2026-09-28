@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import type { Entity } from '../../types'
 import { typeDot, typeLabel, typeSoft, typeInk, confPct, SOURCE_LABEL, TYPE_GROUPS } from './tokens'
 
@@ -29,7 +29,9 @@ export default function MarginaliaCard({
   const accepted = e.accepted === true
   const rejected = e.accepted === false
   const [menuOpen, setMenuOpen] = useState(false)
-  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null)
+  // The "⋯" button's box when the menu opened; the menu is placed from it.
+  const [anchor, setAnchor] = useState<DOMRect | null>(null)
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number; maxHeight: number } | null>(null)
   const btnRef    = useRef<HTMLButtonElement>(null)
   const popupRef  = useRef<HTMLDivElement>(null)
   const src = SOURCE_LABEL[e.source] ?? { label: e.source, hint: '' }
@@ -37,18 +39,30 @@ export default function MarginaliaCard({
   const openMenu = (ev: React.MouseEvent) => {
     ev.stopPropagation()
     if (menuOpen) { setMenuOpen(false); return }
-    if (btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect()
-      const MENU_H = 340
-      const top = window.innerHeight - r.bottom > MENU_H
-        ? r.bottom + 4
-        : r.top - MENU_H - 4
-      // Clamp both axes: top away from the top edge, right away from the left edge
-      // (a negative right value would push the popup off-screen on narrow viewports).
-      setMenuPos({ top: Math.max(8, top), right: Math.max(0, window.innerWidth - r.right) })
-    }
+    if (!btnRef.current) return
+    setAnchor(btnRef.current.getBoundingClientRect())
+    setMenuPos(null)
     setMenuOpen(true)
   }
+
+  // Placed from the menu's measured height, before paint.  It used to assume
+  // 340 px while the CSS allows 360, so opening downward with 340–360 px left
+  // ran off the bottom, and a window under ~370 px cut it at both ends.  It
+  // now opens toward the larger space and scrolls within it.
+  useLayoutEffect(() => {
+    if (!menuOpen || !anchor || !popupRef.current) return
+    const EDGE = 8
+    const needed = popupRef.current.scrollHeight
+    const below = window.innerHeight - anchor.bottom - 4 - EDGE
+    const above = anchor.top - 4 - EDGE
+    const down = needed <= below || below >= above
+    const maxHeight = Math.max(80, Math.min(360, down ? below : above))
+    const height = Math.min(needed, maxHeight)
+    const top = down ? anchor.bottom + 4 : anchor.top - 4 - height
+    // right: kept ≥ 0 — a negative value would push the popup off-screen on
+    // narrow viewports.
+    setMenuPos({ top: Math.max(EDGE, top), right: Math.max(0, window.innerWidth - anchor.right), maxHeight })
+  }, [menuOpen, anchor])
 
   useEffect(() => {
     if (!menuOpen) return
@@ -173,11 +187,14 @@ export default function MarginaliaCard({
       </div>
 
       {/* ── Type-picker popup ─────────────────────────────────────────── */}
-      {menuOpen && menuPos && (
+      {menuOpen && (
         <div
           ref={popupRef}
           className="type-picker-popup"
-          style={{ top: menuPos.top, right: menuPos.right }}
+          style={menuPos
+            ? { top: menuPos.top, right: menuPos.right, maxHeight: menuPos.maxHeight }
+            // First layout pass: measured, not shown.
+            : { top: 0, right: 0, visibility: 'hidden' }}
           onClick={ev => ev.stopPropagation()}
         >
           <div className="type-picker-title">Change type</div>

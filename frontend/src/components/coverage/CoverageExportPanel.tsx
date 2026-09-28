@@ -405,9 +405,15 @@ export default function CoverageExportPanel({
             archive preview stacks underneath it below 1180px. */}
         <div style={{ flex: 1, minWidth: 0, alignSelf: 'stretch' }}>
           <div style={{ minWidth: 0, overflowX: 'auto' }}>
+            {/* The header scrolls with the rows (sticky) so a classic scrollbar
+                narrows both alike — outside, it kept the full width and its
+                fr columns drifted from the rows' by ~10 px. */}
+            <div style={{ maxHeight: 520, overflowY: 'auto' }}>
             <div
               style={{
                 ...GRID,
+                position: 'sticky', top: 0, zIndex: 1,
+                background: 'var(--bg-elev)',
                 fontSize: 10.5,
                 fontWeight: 600,
                 textTransform: 'uppercase',
@@ -424,7 +430,6 @@ export default function CoverageExportPanel({
               <span style={{ textAlign: 'right' }}>Size</span>
               <span>{view === 'tactic' ? 'Corpora / license flags' : 'License'}</span>
             </div>
-            <div style={{ maxHeight: 520, overflowY: 'auto' }}>
               {view === 'tactic'
                 ? columns.map((col) => {
                     const ids = Array.from(new Set(col.techs.flatMap((t) => t.ruleIds)))

@@ -5,6 +5,9 @@ import GraphCanvas, { type GraphCanvasHandle } from './graph/GraphCanvas'
 import { buildGraphData } from './graph/buildGraphData'
 import type { GraphNode, GraphEdge } from './graph/graphLayout'
 
+// The live graph shows every type it streams.
+const NO_HIDDEN_TYPES = new Set<string>()
+
 const STAGES = [
   { n: 1, label: 'Ingestion' },
   { n: 2, label: 'Extraction' },
@@ -141,40 +144,43 @@ export default function ProgressModal({ jobId, filename, onClose }: Props) {
         width: '100%',
         maxWidth: hasGraph ? 1000 : 420,
         display: 'flex',
-        flexDirection: 'row',
+        flexDirection: 'column',
         overflow: 'hidden',
         maxHeight: '90vh',
         transition: 'max-width 0.3s ease',
       }}>
-        {/* Left side: Progress */}
+        {/* Header — spans the dialog, so Close stays in its corner whatever
+            the width.  It used to move into the graph pane once the graph
+            appeared, and a narrow window pushed that pane (and the button)
+            out of the clipped dialog. */}
         <div style={{
-          width: hasGraph ? 420 : '100%',
-          padding: '24px 24px 20px',
+          display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12,
+          padding: '24px 24px 0', flexShrink: 0,
+        }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)' }}>Processing report</div>
+            <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 3, maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {filename}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="back"
+            style={{ width: 28, height: 28, flexShrink: 0 }}
+            title={done ? 'Close' : 'Dismiss — pipeline continues in background'}
+          >
+            <X size={15} />
+          </button>
+        </div>
+
+        {/* Progress beside the live graph; stacked below 760 px (.pm-body). */}
+        <div className={`pm-body ${hasGraph ? 'has-graph' : ''}`}>
+        {/* Left side: Progress */}
+        <div className="pm-progress" style={{
+          padding: '20px 24px 20px',
           display: 'flex',
           flexDirection: 'column',
-          flexShrink: 0,
-          borderRight: hasGraph ? '1px solid var(--rule)' : 'none',
         }}>
-          {/* Header */}
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 }}>
-            <div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)' }}>Processing report</div>
-              <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 3, maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {filename}
-              </div>
-            </div>
-            {/* Always visible */}
-            {!hasGraph && (
-              <button
-                onClick={onClose}
-                className="back"
-                style={{ width: 28, height: 28, flexShrink: 0 }}
-                title={done ? 'Close' : 'Dismiss — pipeline continues in background'}
-              >
-                <X size={15} />
-              </button>
-            )}
-          </div>
 
           {/* Stage list */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, overflowY: 'auto' }}>
@@ -246,15 +252,7 @@ export default function ProgressModal({ jobId, filename, onClose }: Props) {
         
         {/* Right side: Graph Stream */}
         {hasGraph && (
-          <div style={{ flex: 1, position: 'relative', background: 'var(--canvas)', minHeight: 400 }}>
-             <button
-              onClick={onClose}
-              className="back"
-              style={{ position: 'absolute', top: 16, right: 16, zIndex: 10, width: 28, height: 28, flexShrink: 0, background: 'var(--bg)', border: '1px solid var(--rule)', borderRadius: '50%' }}
-              title={done ? 'Close' : 'Dismiss — pipeline continues in background'}
-            >
-              <X size={15} />
-            </button>
+          <div className="pm-graph">
             <div style={{ position: 'absolute', top: 16, left: 16, zIndex: 10, display: 'flex', gap: 8, alignItems: 'center', background: 'var(--bg)', border: '1px solid var(--rule)', padding: '4px 10px', borderRadius: 16, fontSize: 12, fontWeight: 500 }}>
               <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', animation: 'pulse 2s infinite' }} />
               Live Extractor
@@ -267,7 +265,7 @@ export default function ProgressModal({ jobId, filename, onClose }: Props) {
               deg={deg}
               adj={adj}
               layout="force"
-              visibleTypes={new Set(['threat_actor', 'malware', 'tool', 'ttp', 'unknown'])}
+              hiddenTypes={NO_HIDDEN_TYPES}
               selectedId={null}
               hoverId={null}
               showLabels={true}
@@ -277,6 +275,7 @@ export default function ProgressModal({ jobId, filename, onClose }: Props) {
             />
           </div>
         )}
+        </div>
       </div>
     </div>
   )

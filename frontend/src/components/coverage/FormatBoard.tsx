@@ -67,7 +67,14 @@ export default function FormatBoard({ techs, rules, selection }: {
               }}>{fmtBytes(selection.bytesOf(ids))}</span>
             </div>
 
-            <div style={{ display: 'flex', gap: 2, marginTop: 9 }}>
+            {/* One tick per technique, in rows: a single flex row had an
+                incompressible 4 px per tick (borders + gap) and ran out of
+                the card past ~100 techniques.  auto-fit keeps a short band
+                stretched across the full width, as before. */}
+            <div style={{
+              display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(6px, 1fr))',
+              gap: 2, marginTop: 9,
+            }}>
               {techs.map(t => {
                 const has = t.byFormat[f].length > 0
                 const anySel = has && selection.selectedOf(t.byFormat[f]) > 0
@@ -76,7 +83,7 @@ export default function FormatBoard({ techs, rules, selection }: {
                     key={t.id}
                     title={has ? `${t.id} — ${t.byFormat[f].length} rule(s)` : `${t.id} — no rule`}
                     style={{
-                      flex: 1, height: 8, borderRadius: 2,
+                      height: 8, borderRadius: 2,
                       background: anySel ? formatLine(f) : has ? formatSoft(f) : 'var(--rule-soft)',
                       border: '1px solid ' + (has ? formatLine(f) : 'var(--rule)'),
                     }}
