@@ -1676,6 +1676,11 @@ html[data-theme="dark"] .rel-ev-hl {
 
 /* Legend rail and detail / link-editor panel beside the canvas. */
 .graph-legend { width: 200px; flex-shrink: 0; }
+/* The graph's top bar carries the view switch and five actions: below 1000 px
+   the actions keep their icon (and title) so the report name keeps its room. */
+@media (max-width: 1000px) {
+  .graph-chrome .gc-label { display: none; }
+}
 .graph-panel  { width: 300px; flex-shrink: 0; }
 @media (max-width: 960px) {
   /* The panel floats over the canvas instead of taking 300 px from it: with

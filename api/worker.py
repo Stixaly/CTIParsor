@@ -72,6 +72,7 @@ def _current_owner(job_id: str) -> str | None:
 
 def _finalize_job(
     job_id: str, status: str, owner_worker_id: str | None, *, bundle_json: str | None = None,
+    ledger_json: str | None = None,
 ) -> bool:
     """Set a job's terminal status, but only if `owner_worker_id` still owns it.
 
@@ -87,14 +88,18 @@ def _finalize_job(
     `owner_worker_id=None` means no lease was recorded when this run started
     (e.g. a job run outside the queue loop, as most tests do) -- the update
     always applies in that case, matching the historical unconditional write.
+
+    `ledger_json` is written with the bundle it describes (ADR-0061), never
+    on its own: a ledger left over from an earlier build would misreport this one.
     """
     with _lock:
         with get_conn() as conn:
             if owner_worker_id is None:
                 if bundle_json is not None:
                     conn.execute(
-                        "UPDATE jobs SET bundle_json=?, status=?, updated_at=? WHERE id=?",
-                        (bundle_json, status, now_iso(), job_id),
+                        "UPDATE jobs SET bundle_json=?, bundle_ledger_json=?, status=?, "
+                        "updated_at=? WHERE id=?",
+                        (bundle_json, ledger_json, status, now_iso(), job_id),
                     )
                 else:
                     conn.execute(
@@ -105,8 +110,9 @@ def _finalize_job(
                 return True
             if bundle_json is not None:
                 cur = conn.execute(
-                    "UPDATE jobs SET bundle_json=?, status=?, updated_at=? WHERE id=? AND worker_id=?",
-                    (bundle_json, status, now_iso(), job_id, owner_worker_id),
+                    "UPDATE jobs SET bundle_json=?, bundle_ledger_json=?, status=?, updated_at=? "
+                    "WHERE id=? AND worker_id=?",
+                    (bundle_json, ledger_json, status, now_iso(), job_id, owner_worker_id),
                 )
             else:
                 cur = conn.execute(
@@ -470,7 +476,9 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
             raise RuntimeError("the run produced no bundle (Stage 4 did not run)")
 
         bundle_json = result.bundle.serialize(pretty=True)
-        if not _finalize_job(job_id, "for_review", _owner_worker_id, bundle_json=bundle_json):
+        ledger_json = json.dumps(result.ledger) if result.ledger is not None else None
+        if not _finalize_job(job_id, "for_review", _owner_worker_id,
+                             bundle_json=bundle_json, ledger_json=ledger_json):
             return
 
         emit_progress(job_id, "done", {"status": "for_review"})
@@ -1051,6 +1059,8 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
     source_hash, source_bytes = load_file_bytes(upload_matches[0] if upload_matches else None)
 
     # Stage 4 through the same function a pipeline run uses (ADR-0059).
+    from pipeline.bundle_ledger import MappingLedger
+    ledger = MappingLedger()
     bundle = build_bundle(
         raw_entities, llm_result,
         report_name=report_name,
@@ -1062,8 +1072,10 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
         tlp_level=job["tlp_level"],
         pap_level=job["pap_level"],
         cve_metadata=lookup_cves(raw_entities),
+        ledger=ledger,
     )
     bundle_json = bundle.serialize(pretty=True)
+    ledger_json = json.dumps(ledger.to_dict())
 
     out_path = str(bundle_output_path(job_id, report_name))
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
@@ -1073,13 +1085,14 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
         with get_conn() as conn:
             if skip_rescan:
                 conn.execute(
-                    "UPDATE jobs SET bundle_json=?, updated_at=? WHERE id=?",
-                    (bundle_json, now_iso(), job_id),
+                    "UPDATE jobs SET bundle_json=?, bundle_ledger_json=?, updated_at=? WHERE id=?",
+                    (bundle_json, ledger_json, now_iso(), job_id),
                 )
             else:
                 conn.execute(
-                    "UPDATE jobs SET bundle_json=?, status='completed', updated_at=? WHERE id=?",
-                    (bundle_json, now_iso(), job_id),
+                    "UPDATE jobs SET bundle_json=?, bundle_ledger_json=?, status='completed', "
+                    "updated_at=? WHERE id=?",
+                    (bundle_json, ledger_json, now_iso(), job_id),
                 )
             conn.commit()
 

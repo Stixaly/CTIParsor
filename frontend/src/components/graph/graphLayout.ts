@@ -8,14 +8,28 @@
 
 export interface GraphNode {
   id:         string
-  type:       string   // pipeline underscore name (e.g. "threat_actor", "ipv4")
+  type:       string   // pipeline underscore name (e.g. "threat_actor", "ipv4"), or a STIX type in bundle view
   name:       string   // entity value
   confidence: number   // 0–1
   source:     string
   mitre_id:   string | null
   context:    string
   accepted:   boolean | null
+  /** Bundle view: a review row that is NOT in the bundle, drawn so it is not
+   *  silently missing (ADR-0061). */
+  ghost?:     boolean
 }
+
+/** Why an edge is drawn — see provenance.ts for labels and styles. */
+export type EdgeKind =
+  | 'extracted'   // a review row (LLM or analyst) that ships
+  | 'mapping'     // made by Stage 4 from the IoCs / LLM lists (based-on, indicates, targets)
+  | 'policy'      // a pinned policy rule
+  | 'reference'   // ATT&CK-curated (Stage 4b)
+  | 'inferred'    // transitive / long-distance (Stage 4b/4c)
+  | 'embedded'    // an object's own *_ref property, not an SRO
+  | 'dropped'     // a review row that is not in the bundle
+  | 'unknown'
 
 export interface GraphEdge {
   id:         string
@@ -25,6 +39,10 @@ export interface GraphEdge {
   confidence: number   // 0–1
   accepted:   boolean | null
   evidence:   string
+  /** Unset in the review graph unless the bundle dropped the row. */
+  kind?:      EdgeKind
+  /** Stage 4 rewrote it on the way to the bundle (verb, or an endpoint). */
+  changed?:   boolean
 }
 
 export interface Pos { x: number; y: number }
@@ -403,6 +421,20 @@ export function parallelOffsets(
     ids.forEach((id, i) => { out[id] = (i - (ids.length - 1) / 2) * spacing })
   })
   return out
+}
+
+/**
+ * The point an edge label sits on: the midpoint of the straight edge, or the
+ * apex of a bowed one (same frame as `edgePath`).
+ */
+export function edgeMid(
+  a: Pos, b: Pos, sourceId: string, targetId: string, offset = 0,
+): Pos {
+  const dx = b.x - a.x, dy = b.y - a.y
+  const dist = Math.hypot(dx, dy) || 1
+  const flip = sourceId > targetId ? -1 : 1
+  const nx = (-dy / dist) * flip, ny = (dx / dist) * flip
+  return { x: (a.x + b.x) / 2 + nx * offset, y: (a.y + b.y) / 2 + ny * offset }
 }
 
 /**

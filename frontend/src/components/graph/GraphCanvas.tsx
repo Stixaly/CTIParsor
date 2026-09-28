@@ -15,10 +15,25 @@ import { useRef, useState, useEffect, useCallback, useMemo, useImperativeHandle,
 import * as d3f from 'd3-force' // runtime import — types accessed via makeSimulation()
 import { typeDot } from '../review/tokens'
 import {
-  type GraphNode, type GraphEdge, type PosMap,
+  type GraphNode, type GraphEdge, type PosMap, type EdgeKind,
   nodeRadius, getTier, layoutHierarchical, layoutRadial,
-  typeStixIcon, typeIconPath, parallelOffsets, edgePath,
+  typeStixIcon, typeIconPath, parallelOffsets, edgePath, edgeMid,
 } from './graphLayout'
+import { EDGE_KIND_STYLE } from './provenance'
+
+// One arrow marker per stroke colour: a marker's fill cannot follow the path.
+const MARKER_COLORS: Record<string, string> = {
+  'gv-arrow':       'var(--rule)',
+  'gv-arrow-hot':   'var(--accent)',
+  'gv-arrow-dim':   'var(--rule-soft)',
+  'gv-arrow-ink':   'var(--ink-3)',
+  'gv-arrow-frost': 'var(--frost)',
+  'gv-arrow-no':    'var(--no)',
+  'gv-arrow-warn':  'var(--warn)',
+  'gv-arrow-muted': 'var(--ink-4)',
+}
+const markerFor = (stroke: string) =>
+  Object.entries(MARKER_COLORS).find(([, c]) => c === stroke)?.[0] ?? 'gv-arrow'
 
 // ── Simulation node / link shapes (minimal — only what d3 mutates) ──────────
 
@@ -135,13 +150,18 @@ interface Props {
   onSelect:     (id: string | null) => void
   onHover:      (id: string | null) => void
   focusSignal:  { id: string; seq: number } | null
+  /** Edge kinds switched off in the provenance legend (bundle view). */
+  hiddenKinds?:    Set<EdgeKind>
+  selectedEdgeId?: string | null
+  /** Makes edges clickable. */
+  onSelectEdge?:   (id: string) => void
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
 
 const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   { nodes, edges, byId, deg, adj, layout, hiddenTypes, selectedId, hoverId,
-    showLabels, onSelect, onHover, focusSignal },
+    showLabels, onSelect, onHover, focusSignal, hiddenKinds, selectedEdgeId, onSelectEdge },
   ref,
 ) {
   const svgRef    = useRef<SVGSVGElement>(null)
@@ -237,6 +257,10 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     const kept: PosMap = {}
     for (const n of nodes) if (prevPos[n.id]) kept[n.id] = prevPos[n.id]
     posRef.current = kept
+    // Not one node in common (the page switched between the review and the
+    // bundle view): a new graph, so a fresh view — a pan made on the old one
+    // must not leave the new one off-screen.
+    if (Object.keys(prevPos).length > 0 && Object.keys(kept).length === 0) userMoved.current = false
 
     if (nodes.length === 0) return
 
@@ -370,7 +394,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     }
     let drag: { x: number; y: number } | null = null
     const onDown = (e: PointerEvent) => {
-      if ((e.target as Element).closest('[data-node]')) return
+      if ((e.target as Element).closest('[data-node], [data-edge-hit]')) return
       drag = { x: e.clientX, y: e.clientY }
       svg.style.cursor = 'grabbing'
       onSelect(null)
@@ -467,18 +491,15 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
       style={{ display: 'block', width: '100%', height: '100%', cursor: 'grab', touchAction: 'none' }}
     >
       <defs>
-        <marker id="gv-arrow" viewBox="0 0 10 10" refX="9" refY="5"
-          markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-          <path d="M0 0 L10 5 L0 10 z" fill="var(--rule)" />
-        </marker>
-        <marker id="gv-arrow-hot" viewBox="0 0 10 10" refX="9" refY="5"
-          markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-          <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)" />
-        </marker>
-        <marker id="gv-arrow-dim" viewBox="0 0 10 10" refX="9" refY="5"
-          markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-          <path d="M0 0 L10 5 L0 10 z" fill="var(--rule-soft)" />
-        </marker>
+        {Object.entries(MARKER_COLORS).map(([id, color]) => {
+          const size = id === 'gv-arrow-hot' ? 7 : id === 'gv-arrow-dim' ? 5 : 6
+          return (
+            <marker key={id} id={id} viewBox="0 0 10 10" refX="9" refY="5"
+              markerWidth={size} markerHeight={size} orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill={color} />
+            </marker>
+          )
+        })}
       </defs>
 
       {/* Dotted grid background */}
@@ -494,12 +515,24 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
         {activeEdges.map(e => {
           const a = pos[e.source], b = pos[e.target]
           if (!a || !b) return null
-          const hot     = !!neighborSet && (e.source === focusId || e.target === focusId)
-          const dim     = !!neighborSet && !hot
-          const pending = e.accepted === null
           const hidden  = hiddenTypes.has(byId.get(e.source)?.type ?? '')
                        || hiddenTypes.has(byId.get(e.target)?.type ?? '')
+                       || (!!e.kind && !!hiddenKinds?.has(e.kind))
           if (hidden) return null
+          const sel     = e.id === selectedEdgeId
+          const hot     = sel || (!!neighborSet && (e.source === focusId || e.target === focusId))
+          const dim     = !hot && !!neighborSet
+          const pending = e.accepted === null
+          const style   = e.kind ? EDGE_KIND_STYLE[e.kind] : null
+          // A row the bundle dropped keeps the refusal colour; one Stage 4
+          // rewrote (verb or endpoint) wears the warning colour, whatever its
+          // origin — both must read differently from an edge that ships as is.
+          const base    = e.kind === 'dropped' ? EDGE_KIND_STYLE.dropped.stroke
+                        : e.changed ? 'var(--warn)'
+                        : style?.stroke ?? 'var(--rule)'
+          const stroke  = hot ? 'var(--accent)' : dim ? 'var(--rule-soft)' : base
+          const dash    = style?.dash ?? (pending ? '5 4' : undefined)
+          const offset  = offsets[e.id] ?? 0
           // Ends on the target's rim (outside its selection ring, r + 7, when
           // selected) so the arrow head shows; parallel and reciprocal links
           // bow apart.  The marker scales with the stroke and its tip overhangs
@@ -507,21 +540,50 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
           const d = edgePath(
             a, b, e.source, e.target,
             radiusOf(e.source), radiusOf(e.target),
-            offsets[e.id] ?? 0,
+            offset,
             e.target === selectedId ? 9 : 2.5,
           )
+          const mid = hot ? edgeMid(a, b, e.source, e.target, offset) : null
           return (
-            <path
-              key={e.id}
-              data-edge={e.id}
-              d={d}
-              fill="none"
-              stroke={hot ? 'var(--accent)' : dim ? 'var(--rule-soft)' : 'var(--rule)'}
-              strokeWidth={hot ? 2 : 1.2}
-              strokeDasharray={pending ? '5 4' : undefined}
-              strokeOpacity={dim ? 0.25 : 1}
-              markerEnd={hot ? 'url(#gv-arrow-hot)' : dim ? 'url(#gv-arrow-dim)' : 'url(#gv-arrow)'}
-            />
+            <g key={e.id} style={{ opacity: e.kind === 'dropped' && !hot ? 0.8 : 1 }}>
+              <path
+                data-edge={e.id}
+                d={d}
+                fill="none"
+                stroke={stroke}
+                strokeWidth={sel ? 2.6 : hot ? 2 : 1.2}
+                strokeDasharray={dash}
+                strokeOpacity={dim ? 0.25 : 1}
+                markerEnd={`url(#${hot ? 'gv-arrow-hot' : dim ? 'gv-arrow-dim' : markerFor(base)})`}
+              />
+              {/* A wide invisible twin takes the clicks a 1 px line would miss. */}
+              {onSelectEdge && (
+                <path
+                  data-edge-hit={e.id}
+                  d={d}
+                  fill="none"
+                  stroke="transparent"
+                  strokeWidth={10}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => onSelectEdge(e.id)}
+                />
+              )}
+              {/* The verb, on the focused node's edges only: every label at
+                  once is unreadable past a few dozen edges. */}
+              {mid && (
+                <text
+                  x={mid.x} y={mid.y - 4}
+                  textAnchor="middle"
+                  fill={e.kind === 'dropped' ? 'var(--no)' : e.changed ? 'var(--warn)' : 'var(--ink-2)'}
+                  style={{ fontSize: 9.5, pointerEvents: 'none',
+                           fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+                           paintOrder: 'stroke', stroke: 'var(--bg)', strokeWidth: 3,
+                           textDecoration: e.kind === 'dropped' ? 'line-through' : undefined }}
+                >
+                  {e.rel}
+                </text>
+              )}
+            </g>
           )
         })}
 
@@ -533,6 +595,10 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
           const dim   = hiddenTypes.has(n.type)
                      || (!!neighborSet && !neighborSet.has(n.id))
           const sel   = n.id === selectedId
+          // A ghost is a review row the bundle does not contain: hollow,
+          // dashed, and its glyph in the type colour instead of on it.
+          const ghost = !!n.ghost
+          const glyph = ghost ? fill : 'rgba(255,255,255,0.90)'
           const hov   = n.id === hoverId
           const tier  = getTier(n.type)
           const showLbl = showLabels || tier <= 1 || sel || hov
@@ -557,9 +623,10 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
               {/* Node circle */}
               <circle
                 r={r}
-                fill={fill}
-                stroke={sel ? 'var(--accent)' : hov ? 'var(--ink-3)' : 'rgba(0,0,0,0.12)'}
-                strokeWidth={sel ? 2.5 : 1.2}
+                fill={ghost ? 'var(--bg-elev)' : fill}
+                stroke={sel ? 'var(--accent)' : ghost ? 'var(--no)' : hov ? 'var(--ink-3)' : 'rgba(0,0,0,0.12)'}
+                strokeWidth={sel ? 2.5 : ghost ? 1.5 : 1.2}
+                strokeDasharray={ghost ? '3 2' : undefined}
               />
               {/* ── STIX type icon ─────────────────────────────────────────
                   Priority order:
@@ -587,7 +654,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
                         <path
                           key={i}
                           d={d}
-                          fill="rgba(255,255,255,0.90)"
+                          fill={glyph}
                           fillRule={stixIcon.evenodd ? 'evenodd' : 'nonzero'}
                         />
                       ))}
@@ -605,7 +672,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
                     <path
                       d={iconPath}
                       fill="none"
-                      stroke="rgba(255,255,255,0.88)"
+                      stroke={glyph}
                       strokeWidth={sw}
                       strokeLinecap="round"
                       strokeLinejoin="round"
@@ -620,7 +687,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
                   return (
                     <text
                       textAnchor="middle" dominantBaseline="central"
-                      fill="rgba(255,255,255,0.90)"
+                      fill={glyph}
                       style={{ fontSize: Math.round(r * 0.72), fontWeight: 700,
                                pointerEvents: 'none',
                                fontFamily: "'Source Serif 4', Georgia, serif" }}
@@ -636,8 +703,9 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
                 <text
                   y={r + 11}
                   textAnchor="middle"
-                  fill={sel ? 'var(--accent)' : 'var(--ink-2)'}
+                  fill={sel ? 'var(--accent)' : ghost ? 'var(--no)' : 'var(--ink-2)'}
                   style={{ fontSize: 10.5, pointerEvents: 'none',
+                           fontStyle: ghost ? 'italic' : undefined,
                            fontFamily: 'Inter, system-ui, sans-serif',
                            paintOrder: 'stroke',
                            stroke: 'var(--bg)', strokeWidth: 3 }}

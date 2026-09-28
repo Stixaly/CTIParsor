@@ -375,19 +375,32 @@ def test_suggested_verb_preserved():
     assert rel is not None and rel.relationship_type == "uses"
 
 
-def test_indicator_based_on_observed_data_chain():
-    # Spec-pure chain: SCO ◄ observed-data ◄ indicator --based-on-->.
+def test_indicator_based_on_its_observable():
+    # ADR-0061: indicator --based-on--> the SCO itself.  No ObservedData: it
+    # asserted a sighting at build time that nobody made.
     entities = [RawEntity(value="9.9.9.9", entity_type=EntityType.IPV4)]
     bundle = build_stix_bundle(entities, LLMEnrichmentResult(), "r")
     types = [o.get("type") for o in bundle.objects]
-    assert "observed-data" in types
-    # indicator --based-on--> observed-data
-    rel = _find_rel(bundle, "indicator", "observed-data")
+    assert "observed-data" not in types
+    rel = _find_rel(bundle, "indicator", "ipv4-addr")
     assert rel is not None and rel.relationship_type == "based-on"
-    # observed-data references the SCO via object_refs
-    od = next(o for o in bundle.objects if o.get("type") == "observed-data")
     sco = next(o for o in bundle.objects if o.get("type") == "ipv4-addr")
-    assert sco.id in od.object_refs
+    assert rel.target_ref == sco.id
+    assert rel.x_evidence_label == "observed"
+
+
+def test_indicator_based_on_survives_a_pinned_rule_for_the_pair():
+    # A policy rule for indicator>domain-name must not rewrite the Indicator's
+    # derivation edge: based-on is structural, not a claim to override.
+    pol = {"version": 1, "global": "enforce",
+           "rules": [{"src": "indicator", "verb": "related-to", "tgt": "domain-name",
+                      "mode": "pin", "enabled": True}]}
+    entities = [RawEntity(value="evil.example", entity_type=EntityType.DOMAIN)]
+    bundle = build_stix_bundle(entities, LLMEnrichmentResult(), "r", relationship_policy=pol)
+    verbs = {r.relationship_type for r in bundle.objects
+             if r.get("type") == "relationship"
+             and r.target_ref.startswith("domain-name--")}
+    assert "based-on" in verbs
 
 
 def test_forced_edge_for_non_suggested_pair_is_downgraded():
@@ -575,6 +588,10 @@ def test_observable_to_malware_relationship_routes_through_indicator():
 
     assert relationships, "expected at least one relationship in the bundle"
     for rel in relationships:
+        # The Indicator's own derivation edge targets the SCO by design
+        # (ADR-0061); every other edge must stay off the raw observable.
+        if rel.relationship_type == "based-on" and rel.source_ref in indicators:
+            continue
         assert rel.source_ref != domain.id
         assert rel.target_ref != domain.id
 

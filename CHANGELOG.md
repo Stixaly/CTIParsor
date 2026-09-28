@@ -106,6 +106,36 @@ names, hashes and URLs; the app targets 15″–38″ desktop screens.
 
 ### Added
 
+#### The graph shows the bundle that ships (ADR-0061), 2026-09-28
+
+The Graph page drew the review rows, never the bundle: on the stored bundles
+80–100 % of the edges had no row behind them, and rows were rewritten or
+dropped with no trace.
+
+- **Mapping ledger.** Stage 4 records what it did with each entity and
+  relationship row — the object or edge it became, what it was merged into,
+  each rewrite (verb downgraded to `related-to`, verb set by a pinned rule,
+  observable replaced by its Indicator), or why it was dropped (unresolved
+  endpoint, alias self-loop, observable ↔ technique, no ISO country, named
+  entity the LLM did not list) — plus why every generated object and edge
+  exists and what the Stage 4b alias merge removed. Stored beside the bundle
+  in `jobs.bundle_ledger_json` (same write), served at
+  `GET /api/jobs/{id}/bundle/ledger`. The bundle is unchanged by it.
+- **Bundle view** (the Graph page default, remembered per viewer): the
+  bundle's objects and links, each link coloured by origin with a toggleable
+  legend; rewritten rows in amber; dropped rows and entities drawn as hollow
+  dashed ghosts with their reason; a **Differences** panel; clickable edges
+  with their provenance (rule, premises, quoted evidence, the rows behind
+  them). The review view marks each row with its fate in the bundle.
+- **Graph-page edits rebuild the bundle** (4 s debounce, as on the Review
+  page); Download runs a pending rebuild first. Before, the Graph page's
+  Download served a bundle that ignored its own edits.
+- **Changed — `indicator --based-on--> <observable>` directly**: the
+  ObservedData wrapper is gone — it stated a sighting at the build time that
+  nobody made. Documented as the one project extension to the STIX suggested
+  pairs (`stix_rel_spec.rel_is_allowed`); the default validator run passes,
+  strict mode reports `{202}`.
+
 #### Fixes from a review of phases 0–2, 2026-09-27
 
 - **Stage 3 checkpoint**: the fingerprint now covers every setting and input

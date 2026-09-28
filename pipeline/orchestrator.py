@@ -211,6 +211,8 @@ class RunResult:
     llm_result: LLMEnrichmentResult | None = None
     policy: dict | None = None
     bundle: Any = None
+    # What Stage 4 did with each entity and relationship (ADR-0061), as a dict.
+    ledger: dict | None = None
     ioc_coverage: dict | None = None
     synthesis: dict | None = None
     valid: bool | None = None
@@ -426,9 +428,11 @@ def build_bundle(
     cve_metadata: dict | None = None,
     graph_completion: bool = True,
     long_distance: bool = True,
+    ledger=None,
 ):
     """Stage 4 (with the Stage 4c long-distance inferer it needs) — shared by
-    a pipeline run and by finalize.  `cve_metadata` comes from lookup_cves()."""
+    a pipeline run and by finalize.  `cve_metadata` comes from lookup_cves().
+    `ledger` is an optional MappingLedger Stage 4 fills (ADR-0061)."""
     from pipeline.stage4_stix_mapping import build_stix_bundle
     from pipeline.stage4c_long_distance import default_long_distance_inferer
 
@@ -444,6 +448,7 @@ def build_bundle(
         pap_level=pap_level,
         long_distance_infer=default_long_distance_inferer(policy) if long_distance else None,
         graph_completion=graph_completion,
+        ledger=ledger,
     )
 
 
@@ -931,6 +936,8 @@ class _Run:
         t0 = time.monotonic()
         source_hash, source_bytes = load_file_bytes(self.doc.file_path)
         assert r.llm_result is not None   # enrich() always sets it
+        from pipeline.bundle_ledger import MappingLedger
+        ledger = MappingLedger()
         r.bundle = build_bundle(
             r.entities, r.llm_result,
             report_name=self.doc.report_name,
@@ -944,7 +951,9 @@ class _Run:
             cve_metadata=cve_meta,
             graph_completion="4b" not in self.opts.disabled,
             long_distance="4c" not in self.opts.disabled,
+            ledger=ledger,
         )
+        r.ledger = ledger.to_dict()
         n_objects = len(list(r.bundle.objects))
         logger.info(f"[Stage 4] STIX mapping complete — {n_objects} objects")
 

@@ -59,6 +59,7 @@ export const TYPE_STYLE: Record<string, TypeStyle> = {
   'course-of-action':        { hue: 172, label: 'Course of action' },
   'malware-analysis':        { hue:  22, label: 'Malware analysis' },
   'observed-data':           { hue: 155, label: 'Observed data' },
+  'indicator':               { hue: 122, label: 'Indicator' },
   'grouping':                { hue: 250, label: 'Grouping' },
   'note':                    { hue: 230, label: 'Note' },
   'opinion':                 { hue: 260, label: 'Opinion' },

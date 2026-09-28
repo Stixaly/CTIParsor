@@ -294,7 +294,7 @@ update them.
 │  Location → SDO (targeted country, ISO 3166-1 lookup, 80+ nations)  │
 │  Identity → SDO (targeted sector, identity_class=class)             │
 │  CourseOfAction → SDO (recommended remediations)                    │
-│  All accepted IoCs → Indicator → based-on → ObservedData → SCO       │
+│  All accepted IoCs → Indicator → based-on → SCO   (ADR-0061)        │
 │  IoC linked to malware → indicates SRO                              │
 │  Threat actor → targets → Location / Identity SROs                 │
 │  Semantic relations → Relationship SRO (deduplicated, spec-valid)    │
@@ -543,7 +543,10 @@ Custom **d3-force SVG graph** (not the OASIS stix-visualization iframe):
 | **Relationship editor** | Accept / Reject / Reset / Delete relationships in the side panel; Add new relationships with evidence text |
 | **Labels** | Toggle all labels; strategic nodes (tier 0–1) always show labels |
 | **Fit button** | Animate to fit all nodes in viewport |
-| **Download** | Download STIX bundle directly from the graph page |
+| **Download** | Download STIX bundle directly from the graph page (a pending rebuild runs first) |
+| **Bundle view** (default) | The bundle that ships (ADR-0061): links coloured by why they exist — from the report, Stage 4 mapping, policy rule, ATT&CK reference, inferred — rows Stage 4 rewrote in amber, rows and entities it dropped drawn as hollow dashed ghosts with the reason, and a **Differences** panel listing everything dropped, rewritten, merged, or not yet rebuilt |
+| **Review view** | The stored rows the analyst edits, each marked with its fate in the bundle; a link's panel jumps to it in the bundle view |
+| **Auto-rebuild** | Every link edit schedules a quick finalize (4 s debounce), as on the Review page |
 
 ### Policy page
 
