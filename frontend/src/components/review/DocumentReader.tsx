@@ -4,7 +4,7 @@ import { typeColor, buildRanges } from './tokens'
 import RelationshipOverlay from './RelationshipOverlay'
 import type { Relationship } from '../../types'
 
-interface HoverTarget { id: string; x: number; y: number }
+interface HoverTarget { id: string; x: number; y: number; bottom?: number }
 
 interface Props {
   text: string
@@ -183,7 +183,7 @@ export default function DocumentReader({
         style={style}
         onMouseEnter={ev => {
           const rect = (ev.currentTarget as HTMLElement).getBoundingClientRect()
-          setHoverEntity({ id: entity.id, x: rect.left + rect.width / 2, y: rect.top })
+          setHoverEntity({ id: entity.id, x: rect.left + rect.width / 2, y: rect.top, bottom: rect.bottom })
         }}
         onMouseLeave={() => setHoverEntity(null)}
         onPointerDown={ev => {

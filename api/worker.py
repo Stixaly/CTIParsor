@@ -793,6 +793,10 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
     skip_rescan=True  — used by the auto-finalize (background debounce) to
                         skip the lexicon re-scan for speed.  The manual Finalize
                         button always passes skip_rescan=False (full re-scan).
+                        It also leaves the job's status alone: the
+                        auto-finalize runs 4 s after every review edit, and it
+                        used to mark the report completed, so a report left
+                        "Reviewing" after its analyst's first click.
 
     Entity sources stored during the pipeline:
       ioc       – regex-extracted IoC (Stage 2)
@@ -1067,10 +1071,16 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
 
     with _lock:
         with get_conn() as conn:
-            conn.execute(
-                "UPDATE jobs SET bundle_json=?, status='completed', updated_at=? WHERE id=?",
-                (bundle_json, now_iso(), job_id),
-            )
+            if skip_rescan:
+                conn.execute(
+                    "UPDATE jobs SET bundle_json=?, updated_at=? WHERE id=?",
+                    (bundle_json, now_iso(), job_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE jobs SET bundle_json=?, status='completed', updated_at=? WHERE id=?",
+                    (bundle_json, now_iso(), job_id),
+                )
             conn.commit()
 
     return bundle_json

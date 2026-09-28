@@ -7,7 +7,7 @@
 
 import {
   useAppTheme,
-  THEME_LABELS, THEME_PREVIEW, ACCENT_PALETTES, ACCENT_KEYS,
+  THEME_LABELS, THEME_PREVIEW, ACCENT_PALETTES, ACCENT_KEYS, accentName,
   type Theme,
 } from '../context/ThemeContext'
 
@@ -49,7 +49,7 @@ export default function ThemeSwitcher() {
           return (
             <button
               key={k}
-              title={k.charAt(0).toUpperCase() + k.slice(1)}
+              title={accentName(k, isDark).charAt(0).toUpperCase() + accentName(k, isDark).slice(1)}
               onClick={() => setAccent(k)}
               className={`tsw-dot ${active ? 'tsw-dot--active' : ''}`}
               style={{

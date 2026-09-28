@@ -1,10 +1,14 @@
 import { ArrowLeft, GitGraph, ShieldCheck, Download, FileCode, Loader2 } from 'lucide-react'
+import { useAppTheme, themeLabel, THEME_LABELS } from '../../context/ThemeContext'
+import { JOB_STATUS_LABEL } from '../jobStatus'
+import type { JobStatus } from '../../types'
 
 interface Props {
   title: string
+  /** The report's status, as the Dashboard shows it; unknown → "Reports". */
+  status?: JobStatus
   pendingCount: number
   finalizing: boolean
-  theme: string
   onBack: () => void
   onGraph: () => void
   onCoverage: () => void
@@ -20,7 +24,6 @@ interface Props {
   /** True after a successful finalize, until the next mutation. When true the
    *  primary button is "Download STIX"; otherwise it is "Complete Review". */
   reviewCompleted: boolean
-  onThemeToggle: () => void
   /** True while any entity/relationship mutation has fired but the bundle
    *  has not yet been regenerated. */
   bundleStale: boolean
@@ -29,12 +32,14 @@ interface Props {
 }
 
 export default function TopChrome({
-  title, pendingCount, finalizing, theme,
+  title, status, pendingCount, finalizing,
   onBack, onGraph, onCoverage, onFinalize, onDownload, onDownloadSigma,
-  sigmaRuleCount, sigmaDownloading, reviewCompleted, onThemeToggle,
+  sigmaRuleCount, sigmaDownloading, reviewCompleted,
   bundleStale, autoFinalizing,
 }: Props) {
-  const isDark = theme === 'dark'
+  // The label says what is applied — it used to know only "dark" and
+  // "everything else", so Cool + indigo read "Warm · oxblood".
+  const { theme, accentKey, isDark, lightTheme, toggleDark } = useAppTheme()
 
   return (
     <header className="top-chrome">
@@ -42,13 +47,13 @@ export default function TopChrome({
         <ArrowLeft size={16} />
       </button>
 
-      <div className="breadcrumb">
-        <span className="crumb-dim">Dashboard</span>
+      <nav className="breadcrumb" aria-label="Breadcrumb">
+        <button type="button" className="crumb-dim crumb-link" onClick={onBack}>Dashboard</button>
         <span className="crumb-sep">›</span>
-        <span className="crumb-dim">For review</span>
+        <span className="crumb-dim">{status ? JOB_STATUS_LABEL[status] : 'Reports'}</span>
         <span className="crumb-sep">›</span>
         <span className="crumb-strong">{title}</span>
-      </div>
+      </nav>
 
       <div className="top-actions">
         <span className="kbd-hint">
@@ -57,8 +62,8 @@ export default function TopChrome({
 
         <button
           className="theme-toggle"
-          onClick={onThemeToggle}
-          title={isDark ? 'Switch to warm' : 'Switch to dark'}
+          onClick={toggleDark}
+          title={isDark ? `Switch to ${THEME_LABELS[lightTheme]}` : 'Switch to Dark'}
           aria-label="Toggle theme"
         >
           <span className={`theme-knob ${isDark ? 'dark' : 'warm'}`}>
@@ -73,7 +78,7 @@ export default function TopChrome({
               </svg>
             )}
           </span>
-          <span className="theme-toggle-label">{isDark ? 'Dark · amber' : 'Warm · oxblood'}</span>
+          <span className="theme-toggle-label">{themeLabel(theme, accentKey)}</span>
         </button>
 
         <button className="btn-ghost" onClick={onGraph}>

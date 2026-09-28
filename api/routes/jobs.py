@@ -146,7 +146,9 @@ def finalize_job(job_id: str, quick: bool = False):
 
     quick=true — fast finalize: skips the lexicon re-scan.  Used by the
         debounced auto-finalize triggered after every entity/relationship change
-        so the bundle stays current without user action.
+        so the bundle stays current without user action.  It rebuilds the
+        bundle only: the report keeps its status (completing it is the
+        reviewer's click).
         Call via POST /api/jobs/{id}/finalize?quick=true
     """
     with get_conn() as conn:
@@ -156,7 +158,9 @@ def finalize_job(job_id: str, quick: bool = False):
     if bundle_json is None:
         raise HTTPException(500, "Finalize failed — check server logs")
 
-    return {"status": "completed", "bundle_size": len(bundle_json)}
+    with get_conn() as conn:
+        row = conn.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
+    return {"status": row["status"] if row else "completed", "bundle_size": len(bundle_json)}
 
 
 def _delete_job(job_id: str) -> bool:

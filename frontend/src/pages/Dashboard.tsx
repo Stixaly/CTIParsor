@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Loader2 } from 'lucide-react'
-import { fetchJobs, updateJobStatus, deleteJob, fetchBundle } from '../api/client'
+import { Plus, Loader2, AlertTriangle, RotateCw } from 'lucide-react'
+import { fetchJobs, updateJobStatus, deleteJob, fetchBundle, errorDetail } from '../api/client'
 import type { Job, JobStatus } from '../types'
+import { JOB_STATUS_LABEL } from '../components/jobStatus'
 import ProgressModal from '../components/ProgressModal'
 import NewReportModal from '../components/NewReportModal'
 import KanbanCard from '../components/dashboard/KanbanCard'
@@ -17,10 +18,14 @@ const MONO  = "'JetBrains Mono', ui-monospace, monospace"
 // ── Column definitions ────────────────────────────────────────────────────────
 
 const KANBAN_COLS: { id: JobStatus; label: string; accent: string }[] = [
-  { id: 'for_review', label: 'For review', accent: 'var(--warn)' },
-  { id: 'reviewing',  label: 'Reviewing',  accent: 'var(--accent)' },
-  { id: 'completed',  label: 'Completed',  accent: 'var(--ok)' },
+  { id: 'for_review', label: JOB_STATUS_LABEL.for_review, accent: 'var(--warn)' },
+  { id: 'reviewing',  label: JOB_STATUS_LABEL.reviewing,  accent: 'var(--accent)' },
+  { id: 'completed',  label: JOB_STATUS_LABEL.completed,  accent: 'var(--ok)' },
 ]
+
+/** "14:32" — when the list on screen was last fetched. */
+const clockTime = (ms: number) =>
+  new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -88,6 +93,29 @@ function StatTile({ n, label, sub, tone, borderLeft }: {
   )
 }
 
+// ── Notice (a failure the page carries on through) ────────────────────────────
+
+function Notice({ tone, children, actions }: {
+  tone: string
+  children: React.ReactNode
+  actions?: React.ReactNode
+}) {
+  return (
+    <div role="alert" style={{
+      display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+      padding: '9px 12px', borderRadius: 10, fontSize: 12.5, color: 'var(--ink-2)',
+      background: `color-mix(in oklab, ${tone} 8%, var(--bg-elev))`,
+      border: `1px solid color-mix(in oklab, ${tone} 30%, var(--rule))`,
+    }}>
+      <AlertTriangle size={14} style={{ color: tone, flexShrink: 0 }} />
+      <span style={{ flex: 1, minWidth: 220 }}>{children}</span>
+      {actions && <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>{actions}</div>}
+    </div>
+  )
+}
+
+const noticeBtn: React.CSSProperties = { padding: '4px 10px', fontSize: 11.5 }
+
 // ── Dashboard page ────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
@@ -104,14 +132,25 @@ export default function Dashboard() {
   const [modalOpen, setModalOpen]           = useState(false)
   const [pendingFile, setPendingFile]       = useState<File | null>(null)
   const [pageDrag, setPageDrag]             = useState(false)
+  // The report being moved to Reviewing before it opens, and the last failure.
+  const [openingId, setOpeningId]           = useState<string | null>(null)
+  const [openError, setOpenError]           = useState<{ job: Job; message: string } | null>(null)
 
   // ── Queries & mutations ──────────────────────────────────────────────────
 
-  const { data: jobs = [], isLoading } = useQuery({
+  // A failed fetch must not read as "no reports": with `jobs = []` as the
+  // only fallback, a server that did not answer showed zero counters and
+  // "Nothing here" in every column.
+  const {
+    data, isLoading, isError, error, refetch, isFetching, dataUpdatedAt,
+  } = useQuery({
     queryKey: ['jobs'],
     queryFn: fetchJobs,
     refetchInterval: 3000,
   })
+  const jobs = data ?? []
+  const loadFailed    = isError && data === undefined   // never loaded
+  const refreshFailed = isError && data !== undefined   // showing an older list
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => deleteJob(id),
@@ -168,11 +207,26 @@ export default function Dashboard() {
     if (f) openModal(f)
   }
 
+  // A report "for review" is moved to Reviewing before it opens.  That update
+  // used to be awaited with nothing to catch it: when it failed the page just
+  // stayed put, and the button looked dead.  Now the failure is said, with a
+  // retry and a way to read the report anyway (its status is only a label).
   const handleAnalyse = async (job: Job) => {
-    if (job.status === 'for_review') {
-      await updateJobStatus(job.id, 'reviewing')
-      qc.invalidateQueries({ queryKey: ['jobs'] })
+    setOpenError(null)
+    if (job.status !== 'for_review') {
+      navigate(`/review/${job.id}`)
+      return
     }
+    setOpeningId(job.id)
+    try {
+      await updateJobStatus(job.id, 'reviewing')
+    } catch (err) {
+      setOpenError({ job, message: errorDetail(err) })
+      return
+    } finally {
+      setOpeningId(null)
+    }
+    qc.invalidateQueries({ queryKey: ['jobs'] })
     navigate(`/review/${job.id}`)
   }
 
@@ -323,24 +377,24 @@ export default function Dashboard() {
         {/* Stat ribbon ────────────────────────────────────────────────────── */}
         <div style={s.ribbon}>
           <StatTile
-            n={awaitingCount}
+            n={loadFailed ? '—' : awaitingCount}
             label="Awaiting review"
             tone="var(--warn)"
           />
           <StatTile
-            n={inProgressCount}
+            n={loadFailed ? '—' : inProgressCount}
             label="In progress"
             tone="var(--accent)"
             borderLeft
           />
           <StatTile
-            n={completedCount}
+            n={loadFailed ? '—' : completedCount}
             label="Completed"
             tone="var(--ok)"
             borderLeft
           />
           <StatTile
-            n={totalEntities.toLocaleString()}
+            n={loadFailed ? '—' : totalEntities.toLocaleString()}
             label="Entities extracted"
             borderLeft
           />
@@ -372,7 +426,7 @@ export default function Dashboard() {
             New report
           </button>
           <span style={{ fontSize: 11, fontFamily: MONO, color: 'var(--ink-3)' }}>
-            {jobs.length} reports
+            {loadFailed ? 'reports unavailable' : `${jobs.length} reports`}
           </span>
         </div>
 
@@ -407,6 +461,44 @@ export default function Dashboard() {
           </div>
         )}
 
+        {openError && (
+          <Notice
+            tone="var(--no)"
+            actions={<>
+              <button className="btn-ghost" style={noticeBtn} onClick={() => handleAnalyse(openError.job)}>
+                Retry
+              </button>
+              <button
+                className="btn-ghost"
+                style={noticeBtn}
+                onClick={() => { setOpenError(null); navigate(`/review/${openError.job.id}`) }}
+              >
+                Open anyway
+              </button>
+              <button className="btn-ghost" style={noticeBtn} onClick={() => setOpenError(null)}>
+                Dismiss
+              </button>
+            </>}
+          >
+            Could not open “{openError.job.original_filename}”: moving it to Reviewing
+            failed ({openError.message}).
+          </Notice>
+        )}
+
+        {refreshFailed && (
+          <Notice
+            tone="var(--warn)"
+            actions={
+              <button className="btn-ghost" style={noticeBtn} onClick={() => refetch()} disabled={isFetching}>
+                {isFetching ? 'Retrying…' : 'Retry'}
+              </button>
+            }
+          >
+            Could not refresh the reports ({errorDetail(error)}) — this is the list
+            as of {clockTime(dataUpdatedAt)}.
+          </Notice>
+        )}
+
         {/* Kanban board ───────────────────────────────────────────────────── */}
         {isLoading ? (
           <div style={{
@@ -415,6 +507,30 @@ export default function Dashboard() {
           }}>
             <Loader2 size={18} className="animate-spin" />
             Loading…
+          </div>
+        ) : loadFailed ? (
+          <div role="alert" style={{
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
+            padding: '40px 24px', textAlign: 'center',
+            background: 'var(--bg-elev)', border: '1px solid var(--rule)', borderRadius: 12,
+          }}>
+            <AlertTriangle size={22} style={{ color: 'var(--no)' }} />
+            <div style={{ fontFamily: SERIF, fontSize: 18, fontWeight: 600, color: 'var(--ink)' }}>
+              Could not load the reports
+            </div>
+            <div style={{ fontSize: 12.5, color: 'var(--ink-3)', maxWidth: 520, lineHeight: 1.5 }}>
+              The server did not answer ({errorDetail(error)}). This is not an empty
+              list: the reports could not be fetched.
+            </div>
+            <button
+              className="btn-primary"
+              style={{ marginTop: 8 }}
+              onClick={() => refetch()}
+              disabled={isFetching}
+            >
+              {isFetching ? <Loader2 size={13} className="animate-spin" /> : <RotateCw size={13} />}
+              {isFetching ? 'Retrying…' : 'Retry'}
+            </button>
           </div>
         ) : (
           <div style={s.kanbanGrid}>
@@ -471,6 +587,7 @@ export default function Dashboard() {
                             setSelectedId(prev => prev === job.id ? null : job.id)
                           }
                           onAnalyse={() => handleAnalyse(job)}
+                          opening={openingId === job.id}
                           onDelete={() => deleteMutation.mutate(job.id)}
                           onDownload={() => handleDownload(job)}
                           onGraph={() => navigate(`/graph/${job.id}`)}

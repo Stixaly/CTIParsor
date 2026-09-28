@@ -251,7 +251,8 @@ export function errorDetail(err: unknown): string {
   } catch {
     // Not JSON — fall through to raw body
   }
-  return body.length > 0 ? body : err.message
+  // An empty body (the dev proxy's answer when the API is down) left "500: ".
+  return body.trim().length > 0 ? body : `HTTP ${err.message.slice(0, idx)}`
 }
 
 /** Metadata for arbitrary canonical rule ids — and their bodies on demand.

@@ -6,6 +6,35 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Fixed
+
+#### Review and Dashboard interface, 2026-09-28
+
+- **Narrow windows**: below 1180 px the entity margin, and below 900 px the
+  type filters, used to disappear with no way back — an active filter stayed
+  applied with its only control off screen. They now open as drawers
+  ("Filters", "Entities"), and an active filter is always shown above the
+  document ("Showing 2 of 9 · Malware · Clear filter").
+- **A server that does not answer is not an empty list**: the Dashboard said
+  "Nothing here" with zero counters, and Review showed a report with no
+  entities. Both now say the load failed, with Retry; a failed refresh keeps
+  the last list and says when it dates from.
+- **Opening a report**: when moving it to Reviewing failed, the button did
+  nothing. The failure is shown, with Retry and "Open anyway".
+- **Status**: the breadcrumb said "For review" whatever the report's status,
+  and the background auto-finalize (4 s after each review edit) marked the
+  report completed; only "Complete Review" does now.
+- **Theme**: the toggle's label names the theme and accent applied (it knew
+  only "Dark · amber" and "Warm · oxblood"), and dark → light returns to the
+  last light theme instead of Warm.
+- **Dark theme contrast**: text on green/red/accent fills is dark there
+  (8.6:1 and 6.4:1, was 2.2:1 and 2.9:1 in white).
+- **Windows that ran off screen**: the "New relationship" card fits the
+  window's width and height (scrolling when needed); the hover actions stay
+  inside the window and "Change type" opens toward the larger space with a
+  scroll; the shortcut help scrolls; the "New report" dialog scrolls its body
+  and keeps its actions on screen.
+
 ### Added
 
 #### Fixes from a review of phases 0–2, 2026-09-27
