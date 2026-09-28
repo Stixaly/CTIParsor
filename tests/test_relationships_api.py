@@ -177,3 +177,90 @@ def test_patch_sets_and_clears_dates(temp_db, temp_db_client):
     assert cleared.status_code == 200, cleared.text
     assert cleared.json()["start_time"] is None
     assert cleared.json()["stop_time"] is None
+
+
+# ── ADR-0063 — the analyst's precision is kept ───────────────────────────────
+
+def test_an_analyst_month_stays_a_month(temp_db, temp_db_client):
+    job_id = _make_job(temp_db, job_id="job-rel-month")
+    body = temp_db_client.post(
+        f"/api/jobs/{job_id}/relationships",
+        json={"source_value": "A", "relationship_type": "uses", "target_value": "B",
+              "start_time": "March 2023", "stop_time": "2023"},
+    ).json()
+    assert (body["start_time"], body["stop_time"]) == ("2023-03", "2023")
+    listed = temp_db_client.get(f"/api/jobs/{job_id}/relationships").json()[0]
+    assert [(t["role"], t["value"], t["precision"], t["origin"], t["status"])
+            for t in listed["times"]] == [("start", "2023-03", "month", "analyst", "verified"),
+                                          ("end", "2023", "year", "analyst", "verified")]
+
+
+def test_an_ambiguous_analyst_date_is_refused(temp_db, temp_db_client):
+    job_id = _make_job(temp_db, job_id="job-rel-ambiguous")
+    resp = temp_db_client.post(
+        f"/api/jobs/{job_id}/relationships",
+        json={"source_value": "A", "relationship_type": "uses", "target_value": "B",
+              "start_time": "03/04/2023"},
+    )
+    assert resp.status_code == 400
+    assert "numeric_order" in resp.text
+
+
+def test_order_is_judged_on_windows_not_strings(temp_db, temp_db_client):
+    """A start in June and an end in March contradict; a start and an end
+    both in 2023 do not; two equal instants do (STIX stop > start)."""
+    job_id = _make_job(temp_db, job_id="job-rel-windows")
+    url = f"/api/jobs/{job_id}/relationships"
+    base = {"source_value": "A", "relationship_type": "uses", "target_value": "B"}
+    assert temp_db_client.post(url, json={**base, "start_time": "2023-06",
+                                          "stop_time": "2023-03"}).status_code == 400
+    assert temp_db_client.post(url, json={**base, "start_time": "2023",
+                                          "stop_time": "2023"}).status_code == 200
+    same = "2023-06-01T10:00:00Z"
+    assert temp_db_client.post(url, json={**base, "start_time": same,
+                                          "stop_time": same}).status_code == 400
+
+
+def test_an_analyst_bound_replaces_the_models_and_keeps_its_windows(temp_db, temp_db_client):
+    """Setting a start replaces the start assertions; the model's `within`
+    dates stay."""
+    from pipeline.temporal import TemporalAssertion, times_to_json
+    job_id = _make_job(temp_db, job_id="job-rel-replace")
+    rid = temp_db_client.post(
+        f"/api/jobs/{job_id}/relationships",
+        json={"source_value": "A", "relationship_type": "uses", "target_value": "B"},
+    ).json()["id"]
+    llm_times = [TemporalAssertion(role="start", time_text="since 2021", value="2021",
+                                   precision="year", status="verified"),
+                 TemporalAssertion(role="within", time_text="in 2022", value="2022",
+                                   precision="year", status="verified")]
+    with temp_db.get_conn() as conn:
+        conn.execute("UPDATE relationships SET times_json=? WHERE id=?",
+                     (times_to_json(llm_times), rid))
+        conn.commit()
+    patched = temp_db_client.patch(f"/api/jobs/{job_id}/relationships/{rid}",
+                                   json={"start_time": "2021-05"}).json()
+    assert [(t["role"], t["value"], t["origin"]) for t in patched["times"]] == [
+        ("within", "2022", "llm"), ("start", "2021-05", "analyst")]
+
+
+def test_patching_a_legacy_row_folds_its_columns_into_assertions(temp_db, temp_db_client):
+    job_id = _make_job(temp_db, job_id="job-rel-legacy")
+    rid = temp_db_client.post(
+        f"/api/jobs/{job_id}/relationships",
+        json={"source_value": "A", "relationship_type": "uses", "target_value": "B"},
+    ).json()["id"]
+    with temp_db.get_conn() as conn:
+        conn.execute("UPDATE relationships SET times_json=NULL, "
+                     "stop_time='2023-01-01T00:00:00+00:00' WHERE id=?", (rid,))
+        conn.commit()
+    listed = temp_db_client.get(f"/api/jobs/{job_id}/relationships").json()[0]
+    assert [(t["role"], t["origin"], t["status"]) for t in listed["times"]] == [
+        ("end", "legacy", "unresolved")]
+    patched = temp_db_client.patch(f"/api/jobs/{job_id}/relationships/{rid}",
+                                   json={"start_time": "2022"}).json()
+    assert [(t["role"], t["origin"]) for t in patched["times"]] == [
+        ("end", "legacy"), ("start", "analyst")]
+    row = temp_db.get_conn().execute(
+        "SELECT start_time, stop_time FROM relationships WHERE id=?", (rid,)).fetchone()
+    assert (row["start_time"], row["stop_time"]) == (None, None)

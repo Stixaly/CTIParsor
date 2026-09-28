@@ -20,8 +20,36 @@ from pipeline.stage3_llm import LLMEnrichmentResult
 from pipeline.stage4b_graph_completion import CompletionStats, complete_graph
 from pipeline.stix_access import field as _field
 from pipeline.stix_rel_spec import rel_is_allowed, rel_is_listed
+from pipeline.temporal import export_mode, export_plan, merge_times, temporal_identity
 
 logger = get_logger(__name__)
+
+
+def _source_published(anchor) -> dict | None:
+    """The Report's `x_source_published`: a publication-grade document anchor
+    (an Anchor or its dict), or None."""
+    if anchor is None:
+        return None
+    data = anchor.model_dump(mode="json") if hasattr(anchor, "model_dump") else anchor
+    if not isinstance(data, dict) or not data.get("value") or data.get("source") == "file_metadata":
+        return None
+    return {k: data[k] for k in ("value", "source", "detail") if data.get(k)}
+
+
+def _with_temporal(sro, plan):
+    """The same SRO (same id, same properties) carrying a relationship's dates
+    (ADR-0063 §7): every assertion in `x_temporal_assertions`, and only the
+    native bounds `plan` allows."""
+    data = json.loads(sro.serialize())
+    for key in ("start_time", "stop_time", "x_temporal_assertions"):
+        data.pop(key, None)
+    if plan.start_time is not None:
+        data["start_time"] = plan.start_time
+    if plan.stop_time is not None:
+        data["stop_time"] = plan.stop_time
+    if plan.assertions:
+        data["x_temporal_assertions"] = plan.assertions
+    return stix2.Relationship(allow_custom=True, **data)
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +398,7 @@ def build_stix_bundle(
     long_distance_infer=None,
     graph_completion: bool = True,
     ledger: MappingLedger | None = None,
+    document_anchor=None,
 ) -> stix2.Bundle:
     """
     Converts all extracted entities to STIX 2.1 objects and returns a Bundle.
@@ -429,6 +458,16 @@ def build_stix_bundle(
       input entity and relationship (emitted, merged into another object or
       edge, or dropped and why), why each generated object and edge exists, and
       what Stage 4b removed.  The bundle itself is identical with or without it.
+
+    document_anchor — the report's publication date and its source
+      (pipeline.temporal.Anchor, ADR-0063 §4).  A publication-grade anchor is
+      carried on the Report as `x_source_published`; `published` stays the
+      build time, the Report being CTIParsor's product.
+
+    Relationship dates (ADR-0063 §7): each SRO carries every assertion in
+    `x_temporal_assertions`; `start_time` / `stop_time` are set only where the
+    policy's `temporal_export.mode` allows (`faithful` by default: a verified
+    instant; `day`: also a verified day, projected and labelled as such).
     """
     stix_objects: list = []
     led = ledger if ledger is not None else MappingLedger()
@@ -793,11 +832,13 @@ def build_stix_bundle(
     # based-on, targets, and the semantic relationships loop).  Keyed by
     # (source_id, rel_type, target_id) so a repeated logical edge is emitted once.
     seen_rel_keys: set[tuple] = set()
-    # rel_key -> its index in stix_objects, populated by the LLM-relationships
-    # loop below only (the only place start_time/stop_time get set) so a later
-    # duplicate carrying dates can upgrade an earlier, date-less entry for the
-    # same key instead of being silently discarded.
-    _rel_key_to_index: dict[tuple, int] = {}
+    # rel_key -> the dates every row landing on that edge carried (ADR-0063 §6):
+    # the SRO's index, the union of their assertions, and each row's ledger
+    # entry with its own assertions.  Applied once, after the loop, so an edge
+    # a later duplicate merges into keeps every date — including an edge Stage
+    # 4 generated (a `targets` from the targeted-country lists) that an LLM row
+    # with dates repeats.
+    _time_state: dict[tuple, dict] = {}
 
     # Indicator ─based-on→ SCO, directly (ADR-0061).  This used to go through an
     # ObservedData wrapper (SCO ◄─object_refs─ observed-data ◄─based-on─
@@ -1086,54 +1127,69 @@ def build_stix_bundle(
             # there, not in a custom field.
             if getattr(rel, "evidence_text", None):
                 _rel_kwargs["description"] = rel.evidence_text
-            # start_time/stop_time (§5.1.2, both optional) — only set when the
-            # source text gave an explicit date; _normalize_llm_json already
-            # guarantees stop_time is never <= start_time by this point, and
-            # stix2.Relationship enforces the same constraint again.
-            if getattr(rel, "start_time", None) is not None:
-                _rel_kwargs["start_time"] = rel.start_time
-            if getattr(rel, "stop_time", None) is not None:
-                _rel_kwargs["stop_time"] = rel.stop_time
+            # start_time / stop_time and x_temporal_assertions are set after
+            # the loop, from the union of every row on this edge (ADR-0063).
             relationship = stix2.Relationship(**_rel_kwargs)
         except Exception as exc:
             led.relationship(rel, "dropped", reason="invalid", detail=str(exc)[:200],
                              source_ref=source.id, target_ref=target.id)
             continue
 
+        _row_times = list(getattr(rel, "times", None) or [])
         if rel_key in seen_rel_keys:
             # A duplicate (source, type, target) triple -- normally just noise
             # (two chunks reporting the same edge), but can also be two DB rows
             # for the same relationship left behind by a reclaimed job (see
-            # _finalize_job / _current_owner in api/worker.py). Either way,
-            # picking whichever copy carries start_time/stop_time is strictly
-            # better than the arbitrary first-wins this used to be: it never
-            # discards temporal data in favour of a copy that has none.
-            _existing_idx = _rel_key_to_index.get(rel_key)
-            _existing = stix_objects[_existing_idx] if _existing_idx is not None else None
-            _existing_has_time = _existing is not None and (
-                getattr(_existing, "start_time", None) is not None
-                or getattr(_existing, "stop_time", None) is not None
-            )
-            _new_has_time = "start_time" in _rel_kwargs or "stop_time" in _rel_kwargs
-            if _existing_idx is not None and _existing is not None \
-                    and not _existing_has_time and _new_has_time:
-                stix_objects[_existing_idx] = relationship
-                led.replace_relationship(_existing.id, relationship)
-                led.relationship(rel, "emitted", stix_id=relationship.id, final_type=rel_type,
-                                 source_ref=source.id, target_ref=target.id, changes=changes)
-            else:
-                existing_id = _existing.id if _existing is not None else _existing_rel_id(rel_key)
-                led.relationship(rel, "merged", stix_id=existing_id, merged_with=existing_id,
-                                 final_type=rel_type, source_ref=source.id,
-                                 target_ref=target.id, changes=changes)
+            # _finalize_job / _current_owner in api/worker.py).  The first SRO
+            # stays; this row's dates join it (ADR-0063 §6) instead of the
+            # copy that carried dates replacing the one that did not.
+            existing_id = _existing_rel_id(rel_key)
+            entry = led.relationship(rel, "merged", stix_id=existing_id, merged_with=existing_id,
+                                     final_type=rel_type, source_ref=source.id,
+                                     target_ref=target.id, changes=changes)
+            if _row_times:
+                state = _time_state.get(rel_key)
+                if state is None:
+                    idx = next((i for i in range(len(stix_objects) - 1, -1, -1)
+                                if getattr(stix_objects[i], "id", None) == existing_id), None)
+                    state = _time_state[rel_key] = {"idx": idx, "times": [], "entries": []}
+                state["times"] = merge_times(state["times"], _row_times)
+                state["entries"].append((entry, _row_times))
             continue
 
         seen_rel_keys.add(rel_key)
-        _rel_key_to_index[rel_key] = len(stix_objects)
+        if _row_times:
+            _time_state[rel_key] = {"idx": len(stix_objects), "times": merge_times([], _row_times),
+                                    "entries": []}
         stix_objects.append(relationship)
         led.object(relationship, ORIGIN_EXTRACTED)
-        led.relationship(rel, "emitted", stix_id=relationship.id, final_type=rel_type,
-                         source_ref=source.id, target_ref=target.id, changes=changes)
+        entry = led.relationship(rel, "emitted", stix_id=relationship.id, final_type=rel_type,
+                                 source_ref=source.id, target_ref=target.id, changes=changes)
+        if _row_times:
+            _time_state[rel_key]["entries"].append((entry, _row_times))
+
+    # --- Relationship dates (ADR-0063 §7) ---
+    # Each edge's assertions go on the SRO; the native bounds only where the
+    # policy's mode allows; every decision to the ledger row it came from.
+    _mode = export_mode(relationship_policy)
+    for _state in _time_state.values():
+        _idx = _state["idx"]
+        if _idx is None or not _state["times"]:
+            continue
+        _plan = export_plan(_state["times"], _mode)
+        try:
+            stix_objects[_idx] = _with_temporal(stix_objects[_idx], _plan)
+        except Exception as exc:   # a date must never cost the edge
+            logger.warning(f"[Stage 4] relationship dates not applied: {exc}")
+            continue
+        # Beside `changes`, not in it: the Graph page reads any change as a
+        # rewrite of the row (ADR-0061), and a withheld date rewrites nothing.
+        _by_identity = {temporal_identity(a): d for a, d in zip(_state["times"], _plan.decisions)}
+        for _entry, _own in _state["entries"]:
+            for a in _own:
+                decision = _by_identity.get(temporal_identity(a))
+                if decision is not None:
+                    _entry.setdefault("times", []).append(decision)
 
     # --- Policy-forced relationships (enforce mode, "pin" rules) ---
     # Budget is split across rules by max-min fair share, not first-come-first-
@@ -1233,6 +1289,13 @@ def build_stix_bundle(
                 "notes":                 list(_completion_stats.notes),
             },
         }
+        # The source's own publication date (ADR-0063 §7).  `published` above
+        # stays the build time: the Report is CTIParsor's product, and its
+        # created_by_ref says so.  A file's print timestamp is not a
+        # publication date and is not carried.
+        _src_pub = _source_published(document_anchor)
+        if _src_pub:
+            report_kwargs["x_source_published"] = _src_pub
 
         try:
             report = stix2.Report(**report_kwargs)

@@ -8,13 +8,24 @@ from typing import cast
 import anthropic
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 from tenacity import RetryError, retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 # Initialize logging
 from api.logging_config import get_logger
 from models.schemas import EntityType, EvidenceLabel, RawEntity
 from pipeline.env_flags import env_int
+from pipeline.temporal import (
+    ROLES as _TIME_ROLES,
+)
+from pipeline.temporal import (
+    Anchor,
+    DocumentTime,
+    TemporalAssertion,
+    check_assertions,
+    merge_times,
+    status_counts,
+)
 from pipeline.vllm_options import vllm_extra_body
 
 logger = get_logger(__name__)
@@ -380,16 +391,11 @@ class RelationshipExtracted(BaseModel):
     # How well the source supports this claim.  Defaults to "reported" so older
     # data / models that omit the field validate without error.
     evidence_label: EvidenceLabel = EvidenceLabel.REPORTED
-    # STIX 2.1 Relationship SRO optional properties (spec §5.1.2) — set only
-    # when the source text states an explicit date the relationship began/
-    # ended.  Always a real `datetime` (or None) by the time this model is
-    # constructed: `_normalize_llm_json` parses/validates the LLM's raw string
-    # and drops the pair rather than pass through anything that would make
-    # Pydantic (or stix2's own `stop_time > start_time` check) raise — see the
-    # `enrich_chunk` ValidationError handling, which discards the WHOLE chunk
-    # on any validation failure.
-    start_time: datetime | None = None
-    stop_time: datetime | None = None
+    # Every date the source attaches to this relationship, as the source states
+    # it (ADR-0063): the quote, the role, the unpadded value, the status the
+    # pipeline computed.  Stage 4 decides which of them may fill the SRO's
+    # start_time / stop_time (`pipeline.temporal.export_plan`).
+    times: list[TemporalAssertion] = Field(default_factory=list)
 
 
 class IoCAssociation(BaseModel):
@@ -413,6 +419,32 @@ class LLMEnrichmentResult(BaseModel):
 
 
 # --- Prompts ---
+
+# ADR-0063 — the model NAMES and PLACES a date; the code reads, resolves and
+# judges it (pipeline/temporal.py).  Shared by the chunk and the document-level
+# prompts so the two passes return the same shape.
+_TIMES_RULE = """- Dates of a relationship go in its "times" list, one item per date the
+  text attaches to THAT relationship:
+    role      = "start"      it began then ("since March 2023", "began in 2021")
+                "end"        it ended then ("until June 2023", "stopped in 2024")
+                "within"     it happened at some point in that period, bounds
+                             unstated ("used in 2021", "active in 2021",
+                             "in mid-2025")
+                "throughout" it held over the whole period ("active throughout 2022")
+                "observed"   the source observed or detected it then ("observed in
+                             March 2023"); add "first": true for "first seen/observed"
+    time_text = the date expression COPIED CHARACTER FOR CHARACTER from the
+                text, with its preposition ("since March 2023", "between January
+                and April 2026", "last month"). Never reformat it, never compute it.
+    value     = optional — your reading as YYYY, YYYY-MM or YYYY-MM-DD. Omit it
+                for a relative expression ("last month", "three weeks ago"): do
+                not calculate dates, the pipeline does.
+  "active in 2021" is "within", not a start and an end. "no activity observed
+  since March" is NOT a start. A date that belongs to something else in the
+  sentence (the publication, a CVE number, another relationship) is not this
+  relationship's. Omit "times" when the text gives no date for the
+  relationship — never invent one because a relationship exists.
+"""
 
 _SYSTEM_PROMPT = """You are a Cyber Threat Intelligence (CTI) expert.
 You analyze security report excerpts and extract structured threat intelligence.
@@ -452,22 +484,7 @@ Rules:
 - When you cannot find explicit support for a relationship, still emit it with
   evidence_label "gap" and evidence_text "" — never fabricate a supporting quote.
   A missing answer expressed as "gap" is correct and useful; a fabricated answer is a failure.
-- For relationships, when the text explicitly states when it began and/or
-  ended (e.g. "used between March 2023 and June 2023", "observed since
-  2022-11-04", "active in 2021"), fill start_time and/or stop_time with that
-  date in ISO 8601 (YYYY-MM-DD, or YYYY-MM / YYYY if that is the precision the
-  text actually gives).
-  If a "Document reference date" is given below AND the text uses a SIMPLE
-  relative expression anchored to it (e.g. "since last month", "over the past
-  six months", "as of this report"), resolve it against that reference date
-  and fill in the resulting ISO 8601 date. Do NOT resolve a relative
-  expression when no reference date is given, when the reference date is
-  marked as uncertain, or when resolving it would require guessing (a vague
-  span like "recently" with no stated duration has no calculable date).
-  Omit both fields entirely when no date — explicit or cleanly resolvable
-  relative — is available. Never invent one just because a relationship
-  exists.
-- EVERY TTP carries the SAME two fields, under the SAME rules:
+""" + _TIMES_RULE + """- EVERY TTP carries the SAME two fields, under the SAME rules:
     description   = your summary, in your own words. Keep writing it.
     evidence_text = a sentence COPIED CHARACTER FOR CHARACTER from the text
                     above. Not a paraphrase, not a merge of two sentences, not
@@ -511,13 +528,6 @@ Document-level context (key entities from the FULL report — use this to correc
 link IoCs in indicator/appendix sections to the malware or actor they belong to):
 {doc_context}
 
-Document reference date (the file's own metadata timestamp — NOT necessarily
-the report's true publication date, since a converted/printed file's metadata
-can postdate the original article by months or years; use ONLY to resolve a
-SIMPLE relative expression per the relationship date rule above, never as a
-fact to state on its own):
-{reference_date}
-
 Already detected entities (IoCs — from regex):
 {detected_ioc_entities}
 
@@ -555,8 +565,11 @@ related-to|...",
       "confidence": 0.0-1.0,
       "evidence_text": "verbatim sentence from the text supporting this relationship",
       "evidence_label": "observed|reported|assessed|inferred|gap",
-      "start_time": "ISO 8601 date the relationship began, e.g. 2023-03-01 — omit if not explicitly stated in the text",
-      "stop_time": "ISO 8601 date the relationship ended — omit if not explicitly stated in the text"
+      "times": [
+        {{"role": "start|end|within|throughout|observed",
+          "time_text": "the date expression copied verbatim from the text",
+          "value": "YYYY, YYYY-MM or YYYY-MM-DD — optional, omit for relative expressions"}}
+      ]
     }}
   ],
   "ioc_associations": [
@@ -632,7 +645,7 @@ Rules (identical to the standard extraction contract):
   combining two facts, the two supporting sentences) COPIED CHARACTER FOR
   CHARACTER from the text. Not a paraphrase. If you cannot find supporting
   text, use evidence_label "gap" and evidence_text "" — never fabricate a quote.
-- Valid STIX 2.1 relationship types (use ONLY these):
+""" + _TIMES_RULE + """- Valid STIX 2.1 relationship types (use ONLY these):
   uses, attributed-to, targets, indicates, mitigates, remediates,
   delivers, drops, downloads, exploits, originates-from, compromises,
   communicates-with, beacons-to, exfiltrates-to, controls, has, hosts,
@@ -661,7 +674,12 @@ Return ONLY this JSON shape:
       "target_value": "exact entity name from the list above",
       "confidence": 0.0-1.0,
       "evidence_text": "verbatim sentence(s) from the text supporting this relationship",
-      "evidence_label": "observed|reported|assessed|inferred|gap"
+      "evidence_label": "observed|reported|assessed|inferred|gap",
+      "times": [
+        {{"role": "start|end|within|throughout|observed",
+          "time_text": "the date expression copied verbatim from the text",
+          "value": "YYYY, YYYY-MM or YYYY-MM-DD — optional, omit for relative expressions"}}
+      ]
     }}
   ]
 }}"""
@@ -968,7 +986,84 @@ def _provider_ready(provider: str | None = None) -> bool:
 
 # --- LLM output normalisation ---
 
-from pipeline.dates import parse_flexible_date as _parse_flexible_date  # noqa: E402
+_TIME_LIST_KEYS = ("times", "dates", "temporal", "time", "time_assertions", "temporal_assertions")
+_TIME_TEXT_KEYS = ("time_text", "text", "quote", "expression", "time_expression", "date_text",
+                   "evidence")
+_TIME_VALUE_KEYS = ("value", "iso", "normalized", "normalised", "date", "iso_date")
+_TIME_ROLE_ALIASES = {
+    "begin": "start", "began": "start", "since": "start", "first_activity": "start",
+    "stop": "end", "ended": "end", "until": "end", "last_activity": "end",
+    "during": "within", "in": "within", "active": "within", "date": "within",
+    "over": "throughout", "covering": "throughout",
+    "seen": "observed", "observation": "observed", "detected": "observed",
+    "first_seen": "observed", "last_seen": "observed",
+}
+# The keys an older prompt (or a model's habit) uses for a bare date.  A value
+# with no quote cannot be located, so it becomes an assertion with no
+# time_text: kept for the analyst, never verified, never exported.
+_LEGACY_TIME_KEYS = (
+    ("start", ("start_time", "start_date", "begin_time", "begin_date", "date_start", "from_date")),
+    ("end", ("stop_time", "end_time", "end_date", "stop_date", "date_end", "to_date", "until")),
+)
+
+
+def _normalize_times(r: dict) -> list[dict]:
+    """The model's dates for one relationship, as TemporalAssertion fields.
+
+    Its reading goes to `model_value`, never to `value`: `value` is what the
+    code reads from the quote (pipeline/temporal.check_assertions).
+    """
+    raw: list = next((r.pop(k) for k in _TIME_LIST_KEYS if isinstance(r.get(k), list)), [])
+    items: list[dict] = []
+    for item in raw:
+        if isinstance(item, str) and item.strip():
+            item = {"role": "within", "time_text": item}
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or item.get("type") or item.get("kind") or "").lower().strip()
+        role = _TIME_ROLE_ALIASES.get(role, role)
+        if role not in _TIME_ROLES:
+            continue
+        text = next((item[k] for k in _TIME_TEXT_KEYS if isinstance(item.get(k), str)), "")
+        value = next((item[k] for k in _TIME_VALUE_KEYS if isinstance(item.get(k), str)), None)
+        if not text.strip() and not (value or "").strip():
+            continue
+        first = item.get("first") is True or str(item.get("first_last", "")).lower() == "first"
+        last = item.get("last") is True or str(item.get("first_last", "")).lower() == "last"
+        items.append({
+            "role": role, "time_text": text.strip(),
+            "model_value": value.strip() if value and value.strip() else None,
+            "first_last": "first" if first else "last" if last else None,
+        })
+    for role, keys in _LEGACY_TIME_KEYS:
+        for k in keys:
+            v = r.pop(k, None)
+            if isinstance(v, str) and v.strip() and not any(
+                    i["role"] == role and i["model_value"] == v.strip() for i in items):
+                items.append({"role": role, "time_text": "", "model_value": v.strip(),
+                              "first_last": None})
+    return items
+
+
+def check_relationship_times(result: "LLMEnrichmentResult", text: str,
+                             document: DocumentTime | None) -> "LLMEnrichmentResult":
+    """ADR-0063 §3 — locate, read and judge every relationship date of one
+    result against the text it came from (a chunk, or the whole document for
+    the ADR-0057 pass).  Counts each status in llm_stats."""
+    if not any(rel.times for rel in result.relationships):
+        return result
+    checked: list[RelationshipExtracted] = []
+    for rel in result.relationships:
+        if not rel.times:
+            checked.append(rel)
+            continue
+        times = check_assertions(rel.times, text, document=document,
+                                 evidence_text=rel.evidence_text, rel_label=rel.evidence_label)
+        for status, n in status_counts(times).items():
+            llm_stats.bump(f"temporal_{status}", n)
+        checked.append(rel.model_copy(update={"times": times}))
+    return result.model_copy(update={"relationships": checked})
+
 
 
 def _normalize_llm_json(data: dict) -> dict:
@@ -1086,43 +1181,10 @@ def _normalize_llm_json(data: dict) -> dict:
             r["evidence_label"] = _lbl if _lbl in {
                 "observed", "reported", "assessed", "inferred", "gap"
             } else "reported"
-            # start_time/stop_time (STIX 2.1 SRO, both optional) — accept the
-            # aliases models reach for, then parse to a real datetime or drop.
-            if "start_time" not in r:
-                for k in ("start_date", "begin_time", "begin_date", "date_start", "from_date"):
-                    if isinstance(r.get(k), str) and r[k].strip():
-                        r["start_time"] = r.pop(k)
-                        break
-            if "stop_time" not in r:
-                for k in ("end_time", "end_date", "stop_date", "date_end", "to_date", "until"):
-                    if isinstance(r.get(k), str) and r[k].strip():
-                        r["stop_time"] = r.pop(k)
-                        break
-            _start_dt = _parse_flexible_date(r.get("start_time"))
-            _stop_dt = _parse_flexible_date(r.get("stop_time"))
-            if _start_dt and _stop_dt and _stop_dt <= _start_dt:
-                # STIX 2.1: stop_time MUST be later than start_time — drop both
-                # rather than reject the whole relationship over one bad pair.
-                _start_dt = _stop_dt = None
-            # Unlike TTP evidence spans (pipeline/evidence_span.locate, which
-            # verifies the quote is actually in the report), a relationship
-            # date is trusted purely on the model's own ISO-8601 conversion --
-            # a DD/MM-vs-MM/DD misread of a source date produces a plausible
-            # but wrong value with no signal anywhere. Not rejected here (a
-            # date resolved from a relative expression via the document-time
-            # anchor legitimately never repeats the year in evidence_text), but
-            # logged so an unusually high rate of "unconfirmed" dates for one
-            # report is at least visible instead of perfectly silent.
-            _evidence_raw = r.get("evidence_text")
-            _evidence: str = _evidence_raw if isinstance(_evidence_raw, str) else ""
-            for _label, _dt in (("start_time", _start_dt), ("stop_time", _stop_dt)):
-                if _dt is not None and str(_dt.year) not in _evidence:
-                    logger.debug(
-                        f"[relationship date] {_label}={_dt.isoformat()} not "
-                        f"corroborated in evidence_text (year {_dt.year} not found)"
-                    )
-            r["start_time"] = _start_dt
-            r["stop_time"] = _stop_dt
+            # Dates (ADR-0063): the model's `times` list, shaped for
+            # TemporalAssertion.  Nothing is parsed or judged here — the check
+            # needs the chunk, and runs in enrich_chunk.
+            r["times"] = _normalize_times(r)
             # Only keep entries that have all three required fields
             if all(r.get(f) for f in ("source_value", "relationship_type", "target_value")):
                 norm_rels.append(r)
@@ -1367,6 +1429,7 @@ def enrich_chunk(
     reference_date: datetime | None = None,
     verify_rels: bool | None = None,
     verify_ttps_on: bool | None = None,
+    document_time: DocumentTime | None = None,
 ) -> LLMEnrichmentResult:
     """
     Enrich a text chunk with LLM intelligence.
@@ -1383,14 +1446,18 @@ def enrich_chunk(
         doc_context:            Document-level entity summary (ADR-004 P2-B).
                                 Passed to every chunk so the LLM can link IoC
                                 appendix entries back to the correct malware/actor.
-        reference_date:         The report file's own metadata timestamp
-                                (pipeline.stage1_ingestion.extract_reference_date),
-                                used ONLY to let the LLM resolve a simple
-                                relative relationship date ("since last month")
-                                — see the date rule in _SYSTEM_PROMPT. None
-                                when unavailable; the prompt degrades to
-                                "explicit dates only" in that case.
+        document_time:          The document anchor and folded text the
+                                relationship dates are checked against
+                                (ADR-0063, pipeline.temporal).  The model no
+                                longer sees a reference date: it copies a
+                                relative expression, the code resolves it.
+        reference_date:         Deprecated — a file metadata timestamp, used
+                                only when `document_time` is not given, as a
+                                weak anchor (it never resolves "last month").
     """
+    if document_time is None and reference_date is not None:
+        document_time = DocumentTime(anchor=Anchor(
+            value=reference_date.date().isoformat(), source="file_metadata"))
     if not _provider_ready(provider):
         return LLMEnrichmentResult()
 
@@ -1445,22 +1512,12 @@ def enrich_chunk(
     # Document context (P2-B): helps LLM link IoC appendix entries to malware/actor
     ctx_summary = doc_context.strip() if doc_context else "None"
 
-    # Reference date (TimeML/TIMEX3-style document creation time anchor) —
-    # a best-effort file-metadata timestamp, not a verified publication date,
-    # so the prompt carries that caveat inline rather than a bare date.
-    ref_date_summary = (
-        f"{reference_date.strftime('%Y-%m-%d')} "
-        "(from the file's own metadata — may be a conversion/print "
-        "timestamp rather than the report's true publication date)"
-    ) if reference_date else "unknown"
-
     prompt = _USER_PROMPT_TEMPLATE.format(
         text=text,
         doc_context=ctx_summary,
         detected_ioc_entities=ioc_summary,
         detected_gazetteer_entities=gaz_summary,
         detected_semantic_ttps=sem_summary,
-        reference_date=ref_date_summary,
     )
 
     # Validate prompt length
@@ -1505,6 +1562,11 @@ def enrich_chunk(
         doc_context=doc_context or "",
         ner_allow_list=ner_allow_list,
     )
+
+    # ADR-0063 — the relationship dates, checked against this chunk BEFORE
+    # Stage 3d, which may replace evidence_text (the check uses it to pick the
+    # right occurrence) but never touches `times`.
+    result = check_relationship_times(result, text, document_time)
 
     # Stage 3d — self-verification of relationship claims (ADR-004 P3-A)
     # Sends a second LLM call to find the supporting sentence for each relationship.
@@ -1552,6 +1614,7 @@ def enrich_all_chunks(
     doc_context: str | None = None,
     ner_allow_list: set[str] | None = None,
     reference_date: datetime | None = None,
+    document_time: DocumentTime | None = None,
 ) -> LLMEnrichmentResult:
     """
     CLI-facing wrapper: calls enrich_chunk for each chunk with the same
@@ -1572,6 +1635,7 @@ def enrich_all_chunks(
             doc_context=doc_context,
             ner_allow_list=ner_allow_list,
             reference_date=reference_date,
+            document_time=document_time,
         )
         all_results.append(result)
 
@@ -1600,7 +1664,8 @@ def enrich_all_chunks(
         full_text = "\n\n".join(chunks)
         logger.info(f"[Stage 3 doc-relations] {len(known_entities)} known entities, "
                     f"{len(full_text)} chars of report text")
-        doc_rel_result = enrich_document_relations(full_text, known_entities)
+        doc_rel_result = enrich_document_relations(full_text, known_entities,
+                                                   document_time=document_time)
         logger.info(f"[Stage 3 doc-relations] {len(doc_rel_result.relationships)} relationships found")
         all_results.append(doc_rel_result)
 
@@ -1624,6 +1689,7 @@ def enrich_document_relations(
     full_text: str,
     known_entities: list[RawEntity],
     provider: str | None = None,
+    document_time: DocumentTime | None = None,
 ) -> LLMEnrichmentResult:
     """
     Stage 3 document-level relation pass (ADR-0057) — opt-in via
@@ -1693,6 +1759,10 @@ def enrich_document_relations(
     # doc_context fallback is needed the way chunk-level extraction needs it.
     from pipeline.stage3b_validate import validate_llm_result
     result = validate_llm_result(result, full_text)
+
+    # ADR-0063 — dates checked against the whole document, the text this
+    # pass quoted from.
+    result = check_relationship_times(result, full_text, document_time)
 
     # Stage 3d — self-verification of relationship claims (ADR-004 P3-A),
     # against the full document text so a claim connecting two distant
@@ -1835,8 +1905,15 @@ def _merge_results(
     for r in results:
         for rel in r.relationships:
             key = (rel.source_value.lower(), rel.relationship_type, rel.target_value.lower())
-            # Better-evidenced wins, not last-seen.
-            rel_map[key] = _prefer(rel_map.get(key), rel)
+            # Better-evidenced wins, not last-seen — for the claim.  Its dates
+            # are the union of every copy's (ADR-0063 §6): "in 2021" in one
+            # chunk and "in 2024" in another are two assertions, and the same
+            # occurrence read through two overlapping chunks is one.
+            incumbent = rel_map.get(key)
+            chosen = _prefer(incumbent, rel)
+            if incumbent is not None and (incumbent.times or rel.times):
+                chosen = chosen.model_copy(update={"times": merge_times(incumbent.times, rel.times)})
+            rel_map[key] = chosen
 
     ioc_map: dict[tuple, IoCAssociation] = {}
     for r in results:

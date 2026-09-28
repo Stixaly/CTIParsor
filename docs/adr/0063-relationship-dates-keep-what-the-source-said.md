@@ -1,6 +1,6 @@
 # ADR-0063 — A relationship date keeps what the source said: partial values, their own quote, a status the pipeline computes, and native STIX bounds only where the source fixes them
 
-**Status:** Proposed
+**Status:** Accepted — Phases 0–3 implemented 2026-09-29 (see "Implementation"); Phase 4 open
 **Date:** 2026-09-28
 **Deciders:** maintainer
 **Relates to:** ADR-0009 (evidence labels), ADR-0028 (quote, don't describe),
@@ -460,8 +460,121 @@ assertions.
 4. **Measured options:** `day` as the default, temporal claims in 3d, entity
    dates and Sightings.
 
+## Implementation (2026-09-29)
+
+### Phase 0 — what the store held
+
+The job store's PostgreSQL rejected the credentials available to the census.
+Two other sources were read instead.
+
+**The measurement database** (`ctiparsor_measure`, 7 real reports
+re-extracted on 2026-09-28 with the pre-ADR prompt, 150 relationships):
+
+- 39 relationships (26 %) have a start, and 14 an end.
+- 23 of the 53 dated bounds (43 %) fall on the 1st of a month, and 4 on
+  1 January. The padding is visible: "during the associated April and June
+  2026 compromises" became `2026-04-01 → 2026-06-01`, which cuts June off.
+- Only 30 of the 53 bounds (57 %) have their year in the relationship's own
+  quote. Examples: "Sandworm used several destructive malware families …"
+  carries the date of an event from the report's timeline, and an
+  `attributed-to` starts on the date of the 2016 attack it is about.
+  Defect 3 in practice.
+- No stored pair had `stop <= start`: the guard's drops leave no trace, so
+  their count is unknown.
+
+**The 13 bundles in `output/`** (6 distinct reports, 425 relationships) held
+one dated relationship, from a test fixture. They are not representative: as
+ADR-0060 recorded, some were built while every Stage 3 call returned 404.
+Their texts still show where dates sit. 65 sentences contain a date; 4 name
+both ends of a shipped relationship. Two texts state their publication date
+in the header ("Posted … on Monday, 25 April 2022", "September 1, 2026").
+
+### What was built
+
+`pipeline/temporal.py`, plus:
+
+- Stage 3: `times` in both prompts (chunk and ADR-0057), shaped by
+  `_normalize_times`, checked by `check_relationship_times` after 3b and
+  before 3d. Both passes run the same check.
+- The union of dates at the Stage 3 merge and at Stage 4's duplicates.
+- Stage 4: `export_plan` per edge, `x_temporal_assertions` on every dated
+  SRO, `x_source_published` on the Report, `temporal_export` in the policy.
+- Stage 1: `extract_anchor`, fed by the URL capture's page metadata, an
+  uploaded HTML file's `<meta>`, the text header, and the file timestamp.
+- The worker and the finalize reload, the relationships API and the review
+  rail (a date typed at any precision, only the changed bound sent, every
+  date listed with its status). The Graph page shows the ledger decisions.
+- `pipeline/dates.py` is deleted: it was the padding.
+
+### Where the implementation departs from the proposal
+
+- **Storage is a `times_json` column on the row, not a side table.** It
+  answers both reasons §1 gives: the finalize reload never runs
+  `fromisoformat` on it, and it holds several assertions. It also needs no
+  join, and the API and finalize already read the row.
+- **An occurrence is placed by locating its context in the folded document
+  text, not by giving chunks offsets.** `chunk_text` rebuilds chunks from
+  stripped paragraphs, so offsets would have had to be re-derived anyway.
+  Folding (whitespace, typography) makes the chunk and document forms match.
+  A12 holds: the same quote read through two overlapping chunks gets one
+  offset.
+- **The ledger keeps date decisions under `times`, beside `changes`.** The
+  Graph page reads any `changes` entry as a rewrite of the row: it paints
+  the edge amber and lists it under "Rewritten". A withheld date rewrites
+  nothing.
+- **The normaliser uses rules only; dateparser was not needed.** The
+  plausible-year window for *reading* is 1900–2100. A 1970–2028 window
+  refused dates AnnoCTR annotates, and judging a date's relevance is the
+  check's job, not the reader's.
+- **A day or month without a year gets a candidate year.** It is the most
+  recent such date not after a publication-grade anchor. The candidate goes
+  in `alternatives`, and the status stays `unresolved`.
+- **"the past year" is a 12-month window ending at the anchor**, not the
+  previous calendar year. AnnoCTR annotates it the second way; the
+  disagreement is deliberate and accounts for most of the misreadings below.
+
+### Measured
+
+**The normaliser on AnnoCTR's TimeML layer** (`python -m evaluation.annoctr_time`,
+DCT as a publication-grade anchor, shifted gold spans repaired by ±1
+character). It was tuned on train+dev, and test was read once, on the
+frozen rules:
+
+| Split | Expressions | Read | Exact | Right when read | Relative right | Year candidates right |
+|---|---|---|---|---|---|---|
+| train+dev | 857 | 88.9 % | 87.4 % | 98.3 % | 23 of 31 | 89.0 % of 82 |
+| test | 272 | 87.9 % | 87.1 % | 99.2 % | 10 of 10 | 96.0 % of 25 |
+
+What is not read is mostly the year-from-context case (82 and 25 cases). It
+is left unresolved on purpose: the candidate is wrong about one time in ten
+on train+dev.
+
+**The model, live, on one real passage.** Qwen via vLLM, 13 relationships
+extracted from the Breeze Comet passage. Three carry dates ("In mid-2025",
+"In 2025"): all quoted verbatim, all with role `within`, all verified by
+the check. None fills a native bound, which is correct: they are windows.
+The stored bundle of the same report, from the old prompt, had no date.
+This is one chunk, not a measurement: the B cases need the in-house set.
+
+**Tests.** `tests/test_temporal.py` (105 contract tests: A1–A19, the
+anchor, storage, export), and Stage 3 / Stage 4 / persistence / API /
+ledger tests rewritten for the new contract. The full suite passed: 1 689
+tests, 5 skipped. The frontend passed 129 tests (the rail and
+`describeTime` included); `tsc`, `ruff` and `mypy` are clean.
+
+### Not done
+
+- The B cases need the in-house set's `times` layer, and no in-house gold
+  exists yet (ADR-0060).
+- An OpenCTI import, to decide whether `day` should become the default.
+- The analyst cannot yet enter a document anchor; it is recomputed from the
+  stored file and text.
+- Bundles built before this change are stale, and are listed in
+  `pipeline/bundle_revisions.py`.
+
 ## Validation
 
-Not implemented. The code facts were checked at `8bde0a2` on 2026-09-28. The
-AnnoCTR counts were recounted per tag, not per line. OpenCTI's behaviour was
-read from its source and issues and has not been tested by an import.
+The code facts were checked at `8bde0a2` on 2026-09-28. The AnnoCTR counts
+were recounted per tag, not per line. OpenCTI's behaviour was read from its
+source and issues and has not been tested by an import. The implementation
+was validated as described above.

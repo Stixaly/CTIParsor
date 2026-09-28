@@ -333,6 +333,30 @@ export function buildBundleGraph(
                   title: `${l.source_value} ${l.relationship_type} ${l.target_value}`,
                   edgeId: l.outcome !== 'dropped' && l.stix_id && edgeInfo.has(l.stix_id) ? l.stix_id : undefined })
     }
+    // A date set, changed or cleared since the build (ADR-0063): the ledger
+    // recorded a decision for every date the rows had, so the two lists of
+    // (role, value) differ.
+    const sig = (xs: Array<{ role: string; value?: string | null }>) =>
+      xs.map(x => `${x.role}|${x.value ?? ''}`).sort().join('\n')
+    const rowDates = new Map<string, Array<{ role: string; value?: string | null }>>()
+    for (const r of rawRelations) {
+      if (r.accepted === false) continue
+      const k = relKey(r.source_value, r.relationship_type, r.target_value)
+      rowDates.set(k, [...(rowDates.get(k) ?? []), ...(r.times ?? [])])
+    }
+    const builtDates = new Map<string, Array<{ role: string; value?: string | null }>>()
+    for (const l of ledger?.relationships ?? []) {
+      const k = relKey(l.source_value, l.relationship_type, l.target_value)
+      builtDates.set(k, [...(builtDates.get(k) ?? []), ...(l.times ?? [])])
+    }
+    for (const [k, dates] of rowDates) {
+      if (!ledgerKeys.has(k) || sig(dates) === sig(builtDates.get(k) ?? [])) continue
+      const l = (ledger?.relationships ?? []).find(x =>
+        relKey(x.source_value, x.relationship_type, x.target_value) === k)
+      diff.push({ kind: 'stale', subject: 'relationship', reason: 'dates_changed_since_build', ledgerRel: l,
+                  title: l ? `${l.source_value} ${l.relationship_type} ${l.target_value}` : k,
+                  edgeId: l && l.outcome !== 'dropped' && l.stix_id && edgeInfo.has(l.stix_id) ? l.stix_id : undefined })
+    }
   }
 
   // ── Degree, adjacency, counts ────────────────────────────────────────────

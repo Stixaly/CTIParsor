@@ -1,4 +1,3 @@
-from datetime import datetime
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
@@ -8,7 +7,16 @@ from api.db import _lock, get_conn, now_iso, transaction
 from api.routes._common import require_job
 from models.schemas import STIX_RELATIONSHIP_TYPES
 from pipeline import decisions
-from pipeline.dates import parse_flexible_date
+from pipeline.temporal import (
+    TemporalAssertion,
+    analyst_assertion,
+    display_bounds,
+    legacy_assertions,
+    mark_conflicts,
+    times_from_json,
+    times_to_json,
+    window,
+)
 
 router = APIRouter(prefix="/api/jobs/{job_id}/relationships", tags=["relationships"])
 
@@ -28,8 +36,9 @@ class RelPatch(BaseModel):
     target_value: str | None = None
     evidence_text: str | None = None
     evidence_label: str | None = None
-    # STIX 2.1 SRO optional properties (spec Sec 5.1.2) — ISO 8601 date string,
-    # or '' / null to clear.  Validated by _parse_date_field below.
+    # The analyst's start / end of the relationship (ADR-0063 §9), at the
+    # precision they typed: "2023", "2023-03", "2023-03-12", "March 2023", a
+    # timestamp with its offset — or '' / null to clear that bound.
     start_time: str | None = None
     stop_time: str | None = None
     # ADR-0058 — see EntityPatch.decision_origin.
@@ -47,38 +56,64 @@ class RelCreate(BaseModel):
     stop_time: str | None = None
 
 
-def _parse_date_field(raw: str | None, field: str) -> str | None:
-    """Parse one start_time/stop_time value for storage.
+def _parse_date_field(raw: str | None, field: str) -> TemporalAssertion | None:
+    """One analyst bound, at the precision typed (ADR-0063 §9).
 
     None or an empty string clears the bound. Raises HTTPException(400) on an
-    unparseable date -- this is a direct analyst edit, so it gets an immediate,
-    actionable error instead of the silent-drop behaviour LLM extraction uses
-    (stage3_llm._normalize_llm_json, which cannot ask a human to retry).
+    entry that is not a date, or is ambiguous ("03/04/2023") -- this is a
+    direct analyst edit, so it gets an immediate, actionable error instead of
+    a date nobody can export.
     """
     if raw is None or raw.strip() == "":
         return None
-    dt = parse_flexible_date(raw)
-    if dt is None:
-        raise HTTPException(400, f"Invalid {field}: {raw!r} is not a parseable date")
-    return dt.isoformat()
+    role = "start" if field == "start_time" else "end"
+    try:
+        return analyst_assertion(role, raw)
+    except ValueError as exc:
+        raise HTTPException(400, f"Invalid {field}: {exc}") from exc
 
 
-def _out_of_order(start: str | None, stop: str | None) -> bool:
-    """True if stop is not strictly after start.
+def _out_of_order(start: TemporalAssertion | None, stop: TemporalAssertion | None) -> bool:
+    """True when the end cannot come after the start.
 
-    Both are ISO-8601 strings that may carry different UTC offsets (whatever
-    offset the caller supplied is preserved verbatim by _parse_date_field, not
-    normalised) -- comparing them as strings is a bug, not a simplification:
-    2023-06-02T20:00:00+00:00 <= 2023-06-02T23:00:00+05:00 lexicographically,
-    even though the first instant (20:00 UTC) is actually AFTER the second
-    (18:00 UTC). Parse back to real, comparable instants first.
+    Compared as windows, not strings: a start in June 2023 and an end in March
+    2023 contradict each other; a start and an end both in 2023 do not.  Two
+    equal instants do (STIX requires stop_time > start_time).  Offsets are
+    honoured -- 2023-06-02T20:00:00+00:00 is after 2023-06-02T23:00:00+05:00.
     """
-    if not start or not stop:
+    if start is None or stop is None:
         return False
-    return datetime.fromisoformat(stop) <= datetime.fromisoformat(start)
+    ws, we = window(start.value), window(stop.value)
+    if ws is None or we is None:
+        return False
+    if start.precision == "instant" and stop.precision == "instant":
+        return we[0] <= ws[0]
+    return ws[0] >= we[1]
+
+
+def _stored_times(row) -> list[TemporalAssertion]:
+    """The row's dates: its assertions, or -- for a row written before
+    ADR-0063 -- its start/stop timestamps as legacy dates."""
+    keys = row.keys()
+    times = times_from_json(row["times_json"] if "times_json" in keys else None)
+    if times:
+        return times
+    return legacy_assertions(row["start_time"] if "start_time" in keys else None,
+                             row["stop_time"] if "stop_time" in keys else None)
+
+
+def _with_bound(times: list[TemporalAssertion], role: str,
+                new: TemporalAssertion | None) -> list[TemporalAssertion]:
+    """An analyst setting a bound replaces every assertion of that role; an
+    analyst clearing it removes them (the old columns' semantics).  Dates of
+    other roles are kept."""
+    kept = [a for a in times if a.role != role]
+    return mark_conflicts(kept + ([new] if new is not None else []))
 
 
 def _row_to_dict(row) -> dict:
+    times = _stored_times(row)
+    start, stop = display_bounds(times)
     return {
         "id": row["id"],
         "job_id": row["job_id"],
@@ -94,9 +129,11 @@ def _row_to_dict(row) -> dict:
             if "evidence_label" in row.keys() and row["evidence_label"]
             else "reported"
         ),
-        # start_time / stop_time were added via migration; guard old rows
-        "start_time": row["start_time"] if "start_time" in row.keys() else None,
-        "stop_time": row["stop_time"] if "stop_time" in row.keys() else None,
+        # ADR-0063: the value an analyst view shows for each bound (the
+        # analyst's own first, then a verified one), and every date as stored.
+        "start_time": start,
+        "stop_time": stop,
+        "times": [a.model_dump(mode="json", exclude_none=True) for a in times],
         "decision_origin": row["decision_origin"],
     }
 
@@ -128,6 +165,7 @@ def create_relationship(job_id: str, body: RelCreate):
     _stop = _parse_date_field(body.stop_time, "stop_time")
     if _out_of_order(_start, _stop):
         raise HTTPException(400, "stop_time must be later than start_time")
+    _times = [a for a in (_start, _stop) if a is not None]
     rid = str(uuid4())
     now = now_iso()
     with _lock:
@@ -137,12 +175,12 @@ def create_relationship(job_id: str, body: RelCreate):
                 conn.execute(
                     "INSERT INTO relationships "
                     "(id,job_id,source_value,relationship_type,target_value,"
-                    "confidence,accepted,evidence_text,evidence_label,start_time,stop_time,"
+                    "confidence,accepted,evidence_text,evidence_label,times_json,"
                     "decision_origin,decided_at) "
-                    "VALUES (?,?,?,?,?,?,1,?,?,?,?,?,?)",
+                    "VALUES (?,?,?,?,?,?,1,?,?,?,?,?)",
                     (rid, job_id, body.source_value.strip(), body.relationship_type,
                      body.target_value.strip(), body.confidence, body.evidence_text, _label,
-                     _start, _stop, decisions.HUMAN, now),
+                     times_to_json(_times), decisions.HUMAN, now),
                 )
                 conn.execute(
                     "INSERT INTO review_decisions "
@@ -150,10 +188,12 @@ def create_relationship(job_id: str, body: RelCreate):
                     "VALUES (?,?,?,?,?,?,?)",
                     (job_id, "relationship", rid, None, 1, decisions.HUMAN, now),
                 )
+    _shown_start, _shown_stop = display_bounds(_times)
     return {
         "id": rid, "job_id": job_id, **body.model_dump(), "evidence_label": _label,
-        "start_time": _start, "stop_time": _stop, "accepted": True,
-        "decision_origin": decisions.HUMAN,
+        "start_time": _shown_start, "stop_time": _shown_stop,
+        "times": [a.model_dump(mode="json", exclude_none=True) for a in _times],
+        "accepted": True, "decision_origin": decisions.HUMAN,
     }
 
 
@@ -217,27 +257,31 @@ def update_relationship(job_id: str, rel_id: str, patch: RelPatch):
                 # an invalid stored range that neither request alone would
                 # have been allowed to write.
                 existing = conn.execute(
-                    "SELECT start_time, stop_time FROM relationships WHERE id=? AND job_id=?",
+                    "SELECT * FROM relationships WHERE id=? AND job_id=?",
                     (rel_id, job_id),
                 ).fetchone()
                 if not existing:
                     raise HTTPException(404, "Relationship not found")
-                existing_start = existing["start_time"] if "start_time" in existing.keys() else None
-                existing_stop = existing["stop_time"] if "stop_time" in existing.keys() else None
-                new_start = (
-                    _parse_date_field(patch.start_time, "start_time")
-                    if "start_time" in patch.model_fields_set else existing_start
-                )
-                new_stop = (
-                    _parse_date_field(patch.stop_time, "stop_time")
-                    if "stop_time" in patch.model_fields_set else existing_stop
-                )
-                if _out_of_order(new_start, new_stop):
+                times = _stored_times(existing)
+                if "start_time" in patch.model_fields_set:
+                    times = _with_bound(times, "start",
+                                        _parse_date_field(patch.start_time, "start_time"))
+                if "stop_time" in patch.model_fields_set:
+                    times = _with_bound(times, "end",
+                                        _parse_date_field(patch.stop_time, "stop_time"))
+                # The pair the export would see: the analyst's own bound when
+                # there is one, else a verified one.
+                def _effective(role: str) -> TemporalAssertion | None:
+                    mine = [a for a in times if a.role == role and a.origin == "analyst"]
+                    ok = [a for a in times if a.role == role and a.status == "verified"]
+                    pool = mine or ok
+                    return pool[0] if pool else None
+                if _out_of_order(_effective("start"), _effective("end")):
                     raise HTTPException(400, "stop_time must be later than start_time")
-                updates.append("start_time=?")
-                values.append(new_start)
-                updates.append("stop_time=?")
-                values.append(new_stop)
+                # The legacy columns are folded into the assertions above and
+                # cleared, so a row has one source of dates.
+                updates += ["times_json=?", "start_time=?", "stop_time=?"]
+                values += [times_to_json(times), None, None]
 
             values.extend([rel_id, job_id])
             with transaction(conn):

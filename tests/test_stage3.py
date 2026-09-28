@@ -432,107 +432,183 @@ class TestNormalizeLlmJson:
         assert result.relationships[0].target_value == "LegionRelay"
 
 
-# ── relationship start_time / stop_time (STIX 2.1 SRO §5.1.2) ──────────────────
+# ── relationship dates — the model's `times`, shaped, never parsed (ADR-0063) ──
 
-class TestRelationshipTemporalBounds:
-    """
-    RelationshipExtracted.start_time/stop_time must only ever reach Pydantic as
-    a real datetime or None — never a raw LLM string that could fail
-    validation and, per enrich_chunk's ValidationError handling, wipe out the
-    entire chunk's results.
-    """
+class TestRelationshipTimes:
+    """_normalize_llm_json shapes the model's dates for TemporalAssertion and
+    judges nothing: the check needs the chunk (pipeline.temporal).  A raw
+    string must never reach Pydantic as something that fails validation and,
+    per enrich_chunk's ValidationError handling, wipes out the whole chunk."""
 
     def _rel(self, **overrides):
         base = {"source_value": "APT29", "relationship_type": "uses", "target_value": "SUNBURST"}
         base.update(overrides)
         return {"relationships": [base]}
 
-    def test_iso_dates_parsed(self):
-        out = _normalize_llm_json(self._rel(start_time="2022-11-04", stop_time="2023-03-01"))
-        rel = out["relationships"][0]
-        assert rel["start_time"].isoformat().startswith("2022-11-04")
-        assert rel["stop_time"].isoformat().startswith("2023-03-01")
+    def test_times_list_shaped(self):
+        out = _normalize_llm_json(self._rel(times=[
+            {"role": "start", "time_text": "since March 2023", "value": "2023-03"}]))
+        assert out["relationships"][0]["times"] == [{
+            "role": "start", "time_text": "since March 2023", "model_value": "2023-03",
+            "first_last": None}]
 
-    def test_year_month_padded(self):
-        out = _normalize_llm_json(self._rel(start_time="2022-11"))
-        rel = out["relationships"][0]
-        assert rel["start_time"].isoformat().startswith("2022-11-01")
+    def test_the_models_reading_never_becomes_value(self):
+        """`value` is what the CODE reads from the quote; the model's goes to
+        model_value, for comparison only."""
+        out = _normalize_llm_json(self._rel(times=[
+            {"role": "within", "time_text": "in 2021", "value": "2021-01-01"}]))
+        item = out["relationships"][0]["times"][0]
+        assert "value" not in item
+        assert item["model_value"] == "2021-01-01"
 
-    def test_year_only_padded(self):
-        out = _normalize_llm_json(self._rel(start_time="2022"))
-        rel = out["relationships"][0]
-        assert rel["start_time"].isoformat().startswith("2022-01-01")
+    def test_nothing_is_padded(self):
+        out = _normalize_llm_json(self._rel(times=[{"role": "within", "time_text": "in 2021",
+                                                    "value": "2021"}]))
+        assert out["relationships"][0]["times"][0]["model_value"] == "2021"
 
-    def test_missing_dates_stay_none(self):
+    def test_aliases_and_role_synonyms(self):
+        out = _normalize_llm_json(self._rel(dates=[
+            {"type": "since", "text": "since 2022"},
+            {"kind": "first_seen", "quote": "first seen in 2019", "first": True}]))
+        times = out["relationships"][0]["times"]
+        assert [(t["role"], t["time_text"]) for t in times] == [
+            ("start", "since 2022"), ("observed", "first seen in 2019")]
+        assert times[1]["first_last"] == "first"
+
+    def test_unknown_role_and_empty_items_dropped(self):
+        out = _normalize_llm_json(self._rel(times=[
+            {"role": "whenever", "time_text": "in 2021"}, {"role": "start"}, 3, None, "  "]))
+        assert out["relationships"][0]["times"] == []
+
+    def test_a_bare_string_is_the_weakest_role(self):
+        """No role given: "within" — it never fills a native bound."""
+        out = _normalize_llm_json(self._rel(times=["in 2021"]))
+        assert out["relationships"][0]["times"][0]["role"] == "within"
+
+    def test_missing_times_is_an_empty_list(self):
         out = _normalize_llm_json(self._rel())
         rel = out["relationships"][0]
-        assert rel["start_time"] is None
-        assert rel["stop_time"] is None
+        assert rel["times"] == []
+        assert "start_time" not in rel and "stop_time" not in rel
 
-    def test_garbage_date_dropped_not_raised(self):
-        """A hallucinated/unparseable date must never surface as a validation error."""
-        out = _normalize_llm_json(self._rel(start_time="sometime last spring"))
-        rel = out["relationships"][0]
-        assert rel["start_time"] is None
-        # The rest of the relationship must survive intact.
-        assert rel["source_value"] == "APT29"
+    def test_legacy_keys_become_unquoted_assertions(self):
+        """A bare start_time/stop_time (an older prompt, a model's habit) has
+        no quote: kept for the analyst, never parsed, never padded."""
+        out = _normalize_llm_json(self._rel(start_time="2022", end_date="2023-03-01"))
+        times = out["relationships"][0]["times"]
+        assert [(t["role"], t["time_text"], t["model_value"]) for t in times] == [
+            ("start", "", "2022"), ("end", "", "2023-03-01")]
 
-    def test_stop_before_start_drops_both(self):
-        """STIX 2.1: stop_time MUST be later than start_time — violations are
-        dropped, not passed through to raise inside stix2/Pydantic."""
-        out = _normalize_llm_json(self._rel(start_time="2023-06-01", stop_time="2023-01-01"))
-        rel = out["relationships"][0]
-        assert rel["start_time"] is None
-        assert rel["stop_time"] is None
-
-    def test_aliased_keys_renamed(self):
-        """Claude used start_date/end_date instead of start_time/stop_time."""
-        out = _normalize_llm_json(self._rel(start_date="2022-01-01", end_date="2022-06-01"))
-        rel = out["relationships"][0]
-        assert rel["start_time"].isoformat().startswith("2022-01-01")
-        assert rel["stop_time"].isoformat().startswith("2022-06-01")
-
-    def test_implausible_year_dropped(self):
-        out = _normalize_llm_json(self._rel(start_time="0001-01-01"))
-        rel = out["relationships"][0]
-        assert rel["start_time"] is None
-
-    def test_full_payload_survives_pydantic(self):
-        raw = self._rel(start_time="2022-11-04", stop_time="2023-03-01", confidence=0.9)
-        normalized = _normalize_llm_json(raw)
-        result = LLMEnrichmentResult.model_validate(normalized)
+    def test_garbage_survives_pydantic(self):
+        raw = self._rel(times=[{"role": "start", "time_text": "sometime last spring",
+                                "value": "whenever"}],
+                        start_time="0001-01-01", confidence=0.9)
+        result = LLMEnrichmentResult.model_validate(_normalize_llm_json(raw))
         rel = result.relationships[0]
-        assert rel.start_time is not None
-        assert rel.stop_time is not None
-        assert rel.stop_time > rel.start_time
+        assert rel.source_value == "APT29"
+        assert [(t.role, t.status) for t in rel.times] == [("start", "unresolved"),
+                                                            ("start", "unresolved")]
 
 
-# ── reference_date — Document Creation Time anchor for relative dates ────────────
+# ── the model copies a date; the code reads and judges it (ADR-0063) ─────────
 
-class TestReferenceDatePrompt:
-    """enrich_chunk must pass the reference_date through to the LLM prompt so
-    it can resolve a SIMPLE relative relationship date (§ stage1_ingestion.
-    extract_reference_date) — and must degrade to "unknown" (never invent a
-    date) when none is available."""
+class TestTimesCheckedInEnrichChunk:
+    _TEXT = ("APT29 deployed SUNBURST against SolarWinds since March 2023. "
+             "It exploited CVE-2021-44228 and contacted 185.220.101.45.")
 
-    def test_reference_date_appears_in_prompt(self, mock_llm, sample_cti_text, sample_entities):
-        # _call_llm is also invoked by the downstream stage3d/3f verification
-        # sub-stages, so mock_llm.call_args (the LAST call) is not reliable —
-        # the main enrichment prompt is always the FIRST call.
+    def _payload(self, times):
+        return json.dumps({"relationships": [{
+            "source_value": "APT29", "relationship_type": "uses", "target_value": "SUNBURST",
+            "evidence_text": "APT29 deployed SUNBURST against SolarWinds since March 2023.",
+            "evidence_label": "reported", "times": times}]})
+
+    def _run(self, times, **kwargs):
+        with patch("pipeline.stage3_llm._call_llm", return_value=self._payload(times)):
+            return enrich_chunk(self._TEXT, _make_entities(), verify_rels=False,
+                                verify_ttps_on=False, **kwargs)
+
+    def test_status_is_computed_not_taken(self):
+        result = self._run([{"role": "start", "time_text": "since March 2023",
+                             "status": "conflict"}])
+        a = result.relationships[0].times[0]
+        assert (a.value, a.precision, a.status) == ("2023-03", "month", "verified")
+
+    def test_a_year_inside_a_cve_is_not_a_date(self):
+        result = self._run([{"role": "within", "time_text": "2021"}])
+        a = result.relationships[0].times[0]
+        assert (a.status, a.reason) == ("conflict", "boundary")
+
+    def test_the_models_reading_is_compared(self):
+        result = self._run([{"role": "start", "time_text": "since March 2023", "value": "2023-04"}])
+        a = result.relationships[0].times[0]
+        assert (a.status, a.reason) == ("conflict", "value_mismatch")
+
+    def test_a_file_timestamp_never_resolves_last_month(self):
         from datetime import datetime, timezone
-        enrich_chunk(
-            sample_cti_text, sample_entities,
-            reference_date=datetime(2023, 3, 15, tzinfo=timezone.utc),
-        )
-        prompt = mock_llm.call_args_list[0].args[1]
-        assert "2023-03-15" in prompt
-        assert "may be a conversion/print" in prompt   # the caveat, not a bare date
+        text = "APT29 deployed SUNBURST last month against SolarWinds."
+        payload = json.dumps({"relationships": [{
+            "source_value": "APT29", "relationship_type": "uses", "target_value": "SUNBURST",
+            "evidence_text": text, "times": [{"role": "within", "time_text": "last month"}]}]})
+        with patch("pipeline.stage3_llm._call_llm", return_value=payload):
+            result = enrich_chunk(text, _make_entities(), verify_rels=False, verify_ttps_on=False,
+                                  reference_date=datetime(2026, 9, 1, tzinfo=timezone.utc))
+        a = result.relationships[0].times[0]
+        assert (a.status, a.reason, a.value) == ("unresolved", "weak_anchor", None)
+        assert a.alternatives == ["2026-08"]
 
-    def test_missing_reference_date_shows_unknown(self, mock_llm, sample_cti_text, sample_entities):
+    def test_a_publication_date_resolves_last_month(self):
+        from pipeline.temporal import Anchor, DocumentTime
+        text = "APT29 deployed SUNBURST last month against SolarWinds."
+        payload = json.dumps({"relationships": [{
+            "source_value": "APT29", "relationship_type": "uses", "target_value": "SUNBURST",
+            "evidence_text": text, "times": [{"role": "within", "time_text": "last month"}]}]})
+        doc = DocumentTime.build(text, Anchor(value="2024-06-15", source="publication_meta"))
+        with patch("pipeline.stage3_llm._call_llm", return_value=payload):
+            result = enrich_chunk(text, _make_entities(), verify_rels=False, verify_ttps_on=False,
+                                  document_time=doc)
+        a = result.relationships[0].times[0]
+        assert (a.value, a.status, a.anchor, a.anchor_source) == (
+            "2024-05", "verified", "document", "publication_meta")
+
+    def test_stage3d_replacing_the_quote_leaves_the_dates_alone(self):
+        """A13 — 3d swaps evidence_text for the verifier's quote; the date
+        keeps its own."""
+        verify_answer = json.dumps([{"n": 1, "verified": True,
+                                     "quote": "It exploited CVE-2021-44228."}])
+        answers = iter([self._payload([{"role": "start", "time_text": "since March 2023"}]),
+                        verify_answer])
+        with patch("pipeline.stage3_llm._call_llm", side_effect=lambda *a, **k: next(answers)), \
+             patch("pipeline.stage3d_verify._VERIFY_MIN_RELS", 1):
+            result = enrich_chunk(self._TEXT, _make_entities(), verify_rels=True,
+                                  verify_ttps_on=False)
+        rel = result.relationships[0]
+        assert rel.evidence_text == "It exploited CVE-2021-44228."
+        assert rel.times[0].time_text == "since March 2023"
+        assert rel.times[0].status == "verified"
+
+
+class TestNoReferenceDateInPrompt:
+    """The model copies a relative expression; the code resolves it
+    (ADR-0063 §2).  The prompt therefore carries no reference date — not even
+    the print timestamp it used to, with a caveat."""
+
+    def test_prompt_carries_no_reference_date(self, mock_llm, sample_cti_text, sample_entities):
+        # _call_llm is also invoked by the downstream stage3d/3f verification
+        # sub-stages; the main enrichment prompt is always the FIRST call.
+        from datetime import datetime, timezone
+        enrich_chunk(sample_cti_text, sample_entities,
+                     reference_date=datetime(2023, 3, 15, tzinfo=timezone.utc))
+        system, prompt = mock_llm.call_args_list[0].args[:2]
+        assert "2023-03-15" not in prompt
+        assert "Document reference date" not in prompt
+        assert "start_time" not in prompt
+
+    def test_prompt_asks_for_quoted_times(self, mock_llm, sample_cti_text, sample_entities):
         enrich_chunk(sample_cti_text, sample_entities)
-        prompt = mock_llm.call_args_list[0].args[1]
-        assert "Document reference date" in prompt
-        assert "unknown" in prompt
+        system, prompt = mock_llm.call_args_list[0].args[:2]
+        assert '"times"' in prompt and "time_text" in prompt
+        assert "COPIED CHARACTER FOR CHARACTER" in system
+        assert '"active in 2021" is "within"' in system
 
 
 # ── enrich_document_relations — Stage 3 document-level relation pass (ADR-0057) ──

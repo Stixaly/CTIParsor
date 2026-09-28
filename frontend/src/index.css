@@ -1105,6 +1105,31 @@ html[data-theme="dark"] .rel-ev-hl {
   font-size: 11px; color: var(--ok); background: transparent;
   border: none; cursor: pointer; padding: 0 4px;
 }
+.rel-date-input.partial { width: 13ch; }
+.rel-dates-hint { font-size: 10px; color: var(--ink-4); margin-left: 4px; }
+/* ADR-0063 — every date the source attaches to the relationship, with the
+   status the pipeline computed (or the analyst set). */
+.rel-times {
+  list-style: none; margin: 3px 0 0 4px; padding: 0;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.rel-time {
+  display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+  font-size: 10.5px; color: var(--ink-2);
+}
+.rel-time-role {
+  font-family: "JetBrains Mono", monospace; color: var(--ink-3); min-width: 7ch;
+}
+.rel-time-text { font-style: italic; }
+.rel-time-value { font-family: "JetBrains Mono", monospace; color: var(--ink); }
+.rel-time-status {
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: .04em;
+  border-radius: 3px; padding: 0 4px; border: 1px solid currentColor;
+}
+.rel-time.st-verified   .rel-time-status { color: var(--ok); }
+.rel-time.st-ambiguous  .rel-time-status,
+.rel-time.st-unresolved .rel-time-status { color: var(--warn); }
+.rel-time.st-conflict   .rel-time-status { color: var(--no); }
 .rel-evidence {
   font-family: "Source Serif 4", Georgia, serif;
   font-style: italic; color: var(--ink-2); font-size: 13px;

@@ -22,7 +22,12 @@ Policy shape:
       "long_distance": bool,        # LLM long-distance prediction (default off)
       "fuzzy_alias": bool,          # fuzzy name matching in alias merge (default off)
       "semantic_alias": bool,       # embedding-based alias matching (default off)
-      "max_new_edges": int } }      # safety cap on inferred edges (default 200)
+      "max_new_edges": int },       # safety cap on inferred edges (default 200)
+    "temporal_export": {            # optional — ADR-0063 relationship dates
+      "mode": "faithful" | "day" } }  # faithful (default): only a verified instant
+                                    #   fills start_time/stop_time; day: also a
+                                    #   verified day, projected on the whole
+                                    #   civil day in UTC and labelled as such
 
 "completion" is the "let the tool decide" switch; per-rule "pin" is "the analyst
 specifies the link" and always wins over inference.
@@ -32,6 +37,7 @@ import json
 from fastapi import APIRouter, HTTPException, Request
 
 from api.db import _lock, get_conn
+from pipeline.temporal import EXPORT_MODES
 
 router = APIRouter(prefix="/api/relationship-policy", tags=["policy"])
 
@@ -200,6 +206,14 @@ async def put_policy(request: Request) -> dict:
             or comp["max_new_edges"] < 0
         ):
             raise HTTPException(400, "'completion.max_new_edges' must be a non-negative integer")
+    if "temporal_export" in body:
+        te = body["temporal_export"]
+        if not isinstance(te, dict):
+            raise HTTPException(400, "'temporal_export' must be a JSON object")
+        if "mode" in te and te["mode"] not in EXPORT_MODES:
+            raise HTTPException(
+                400, f"'temporal_export.mode' must be one of: {', '.join(EXPORT_MODES)}"
+            )
 
     policy_json = json.dumps(body)
     with _lock:

@@ -38,7 +38,9 @@ def _llm_result_with_label(label: EvidenceLabel) -> LLMEnrichmentResult:
     )
 
 
-def _llm_result_with_dates(start=None, stop=None) -> LLMEnrichmentResult:
+def _llm_result_with_dates(*times) -> LLMEnrichmentResult:
+    """A relationship carrying the given TemporalAssertion fields (ADR-0063)."""
+    from pipeline.temporal import TemporalAssertion
     return LLMEnrichmentResult(
         threat_actors=["APT29"],
         malware_families=["WellMess"],
@@ -49,11 +51,17 @@ def _llm_result_with_dates(start=None, stop=None) -> LLMEnrichmentResult:
                 target_value="WellMess",
                 confidence=0.9,
                 evidence_text="APT29 used WellMess.",
-                start_time=start,
-                stop_time=stop,
+                times=[TemporalAssertion(**t) for t in times],
             )
         ],
     )
+
+
+_MONTH_START = {"role": "start", "time_text": "since November 2022", "value": "2022-11",
+                "precision": "month", "status": "verified"}
+_INSTANT_END = {"role": "end", "time_text": "2023-03-01T08:00:00Z",
+                "value": "2023-03-01T08:00:00+00:00", "precision": "instant",
+                "status": "verified"}
 
 
 # ── Backup ───────────────────────────────────────────────────────────────────
@@ -203,49 +211,74 @@ def test_finalize_defaults_missing_label_to_reported(temp_db):
     assert rels and all(r.get("x_evidence_label") == "reported" for r in rels)
 
 
-# ── start_time / stop_time (STIX 2.1 SRO Sec 5.1.2) round-trip ────────────────
+# ── relationship dates (ADR-0063) round-trip ─────────────────────────────────
 
-def test_save_entities_persists_start_stop_time(temp_db):
-    from datetime import datetime, timezone
-
+def test_save_entities_persists_partial_dates_unpadded(temp_db):
+    """A month stays a month in the store: the old TEXT columns stay empty,
+    `times_json` holds the assertion as extracted."""
     from api import worker
+    from pipeline.temporal import times_from_json
 
     job_id = _insert_job(temp_db, job_id="job-dates")
-    start = datetime(2022, 11, 4, tzinfo=timezone.utc)
-    stop = datetime(2023, 3, 1, tzinfo=timezone.utc)
-    worker._save_entities(job_id, [], _llm_result_with_dates(start, stop))
+    worker._save_entities(job_id, [], _llm_result_with_dates(_MONTH_START, _INSTANT_END))
 
     row = temp_db.get_conn().execute(
-        "SELECT start_time, stop_time FROM relationships WHERE job_id=?", (job_id,)
+        "SELECT start_time, stop_time, times_json FROM relationships WHERE job_id=?", (job_id,)
     ).fetchone()
     assert row is not None, "relationship was not written"
-    assert row["start_time"].startswith("2022-11-04")
-    assert row["stop_time"].startswith("2023-03-01")
+    assert row["start_time"] is None and row["stop_time"] is None
+    times = times_from_json(row["times_json"])
+    assert [(a.role, a.value, a.precision, a.status) for a in times] == [
+        ("start", "2022-11", "month", "verified"),
+        ("end", "2023-03-01T08:00:00+00:00", "instant", "verified")]
 
 
-def test_finalize_carries_start_stop_time_into_bundle(temp_db):
-    """The DB round-trip through the analyst-review cycle must not silently
-    drop the relationship's temporal bounds — this is exactly the gap that
-    previously existed for evidence_text/evidence_label before their columns
-    were added."""
-    from datetime import datetime, timezone
-
+def test_finalize_carries_dates_into_bundle(temp_db):
+    """The DB round-trip through the analyst-review cycle keeps every date:
+    the month ships as an assertion (a partial value survives the reload that
+    `fromisoformat` used to drop), the instant also as the native bound."""
     from api import worker
 
     job_id = _insert_job(temp_db, job_id="job-dates-finalize")
-    start = datetime(2022, 11, 4, tzinfo=timezone.utc)
-    stop = datetime(2023, 3, 1, tzinfo=timezone.utc)
-    worker._save_entities(job_id, [], _llm_result_with_dates(start, stop))
+    worker._save_entities(job_id, [], _llm_result_with_dates(_MONTH_START, _INSTANT_END))
 
     bundle_json = worker.re_run_final_stages(job_id, skip_rescan=True)
     bundle = json.loads(bundle_json)
     rels = [o for o in bundle["objects"] if o.get("type") == "relationship"]
     assert rels, "no relationship object in the finalized bundle"
-    assert any(
-        r.get("start_time", "").startswith("2022-11-04")
-        and r.get("stop_time", "").startswith("2023-03-01")
-        for r in rels
-    ), "start_time/stop_time did not survive DB -> finalize -> STIX"
+    rel = next(r for r in rels if r.get("x_temporal_assertions"))
+    assert "start_time" not in rel
+    assert rel["stop_time"].startswith("2023-03-01T08:00:00")
+    assert [(a["role"], a["value"]) for a in rel["x_temporal_assertions"]] == [
+        ("start", "2022-11"), ("end", "2023-03-01T08:00:00+00:00")]
+    ledger = json.loads(temp_db.get_conn().execute(
+        "SELECT bundle_ledger_json FROM jobs WHERE id=?", (job_id,)).fetchone()["bundle_ledger_json"])
+    time_changes = [c for e in ledger["relationships"] for c in e.get("times", [])]
+    assert {(c["role"], c["outcome"]) for c in time_changes} == {
+        ("start", "withheld"), ("end", "exported")}
+
+
+def test_a_legacy_row_is_kept_but_never_reinterpreted(temp_db):
+    """A row written before ADR-0063 kept a padded timestamp — a stored
+    1 January may be a year.  It ships as a legacy assertion of unknown
+    precision and fills no native bound (§10)."""
+    from api import worker
+
+    job_id = _insert_job(temp_db, job_id="job-dates-legacy")
+    worker._save_entities(job_id, [], _llm_result_with_dates())
+    with temp_db.get_conn() as conn:
+        conn.execute("UPDATE relationships SET start_time='2022-01-01T00:00:00+00:00', "
+                     "times_json=NULL WHERE job_id=?", (job_id,))
+        conn.commit()
+
+    bundle = json.loads(worker.re_run_final_stages(job_id, skip_rescan=True))
+    rel = next(o for o in bundle["objects"] if o.get("type") == "relationship"
+               and o.get("x_temporal_assertions"))
+    assert "start_time" not in rel
+    (a,) = rel["x_temporal_assertions"]
+    assert (a["origin"], a["status"], a["reason"], a["value"]) == (
+        "legacy", "unresolved", "legacy", "2022-01-01T00:00:00+00:00")
+    assert "precision" not in a
 
 
 def test_finalize_survives_malformed_stored_date(temp_db):

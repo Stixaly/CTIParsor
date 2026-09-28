@@ -6,7 +6,6 @@ that reports it, so the graph can never again show an edge the bundle dropped,
 or a verb the bundle rewrote, without saying so.
 """
 import json
-from datetime import datetime, timezone
 
 from models.schemas import EntityType, RawEntity
 from pipeline.bundle_ledger import MappingLedger
@@ -163,18 +162,50 @@ def test_duplicate_row_is_merged_into_the_first_edge():
     assert second["merged_with"] == first["stix_id"]
 
 
-def test_dated_duplicate_replaces_the_undated_edge_and_the_ledger_follows():
-    start = datetime(2023, 1, 1, tzinfo=timezone.utc)
+def test_a_dated_duplicate_adds_its_date_to_the_first_edge_and_the_ledger_says_so():
+    """ADR-0063 §6 — the first SRO stays; the duplicate's date joins it, and
+    the duplicate's ledger row records what became of that date."""
+    from pipeline.temporal import TemporalAssertion
+    since = TemporalAssertion(role="start", time_text="since January 2023", value="2023-01",
+                              precision="month", status="verified")
     llm = LLMEnrichmentResult(threat_actors=["APT29"], malware_families=["WINELOADER"],
                               relationships=[_rel("APT29", "uses", "WINELOADER"),
-                                             _rel("APT29", "uses", "wineloader", start_time=start)])
+                                             _rel("APT29", "uses", "wineloader", times=[since])])
     bundle, led = _build(llm=llm)
-    undated = _entry(led, "APT29", "uses", "WINELOADER")
+    first = _entry(led, "APT29", "uses", "WINELOADER")
     dated = _entry(led, "APT29", "uses", "wineloader")
-    assert dated["outcome"] == "emitted"
-    assert undated["outcome"] == "merged" and undated["merged_with"] == dated["stix_id"]
-    assert dated["stix_id"] in _by_id(bundle)
-    assert led["objects"][dated["stix_id"]]["origin"] == "extracted"
+    assert first["outcome"] == "emitted"
+    assert dated["outcome"] == "merged" and dated["merged_with"] == first["stix_id"]
+    sro = _by_id(bundle)[first["stix_id"]]
+    assert [a["value"] for a in sro.x_temporal_assertions] == ["2023-01"]
+    assert "start_time" not in sro
+    assert dated["changes"] == []
+    assert dated["times"] == [{
+        "kind": "time", "id": since.id, "role": "start", "value": "2023-01",
+        "precision": "month", "status": "verified", "outcome": "withheld",
+        "reason": "precision_below_policy"}]
+    assert led["objects"][first["stix_id"]]["origin"] == "extracted"
+
+
+def test_an_llm_date_on_an_edge_stage4_generated_is_kept():
+    """The `indicates` edge Stage 4 builds from an IoC association, and an LLM
+    row repeating it (routed through the hash's Indicator, ADR-0041) with a
+    date: the row merges into the generated edge, and its date lands there
+    instead of being dropped with the duplicate."""
+    from pipeline.temporal import TemporalAssertion
+    sha = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    llm = LLMEnrichmentResult(
+        malware_families=["WINELOADER"],
+        ioc_associations=[IoCAssociation(ioc_value=sha, malware_name="WINELOADER")],
+        relationships=[_rel(sha, "indicates", "WINELOADER", times=[TemporalAssertion(
+            role="observed", time_text="in 2022", value="2022", precision="year",
+            status="verified")])])
+    bundle, led = _build([RawEntity(value=sha, entity_type=EntityType.SHA256)], llm=llm)
+    row = _entry(led, sha, "indicates", "WINELOADER")
+    assert row["outcome"] == "merged"
+    sro = _by_id(bundle)[row["stix_id"]]
+    assert [a["value"] for a in sro.get("x_temporal_assertions", [])] == ["2022"]
+    assert [c["reason"] for c in row["times"]] == ["window_role"]
 
 
 def test_unresolved_endpoint_is_dropped_with_its_side():

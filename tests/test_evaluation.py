@@ -223,3 +223,30 @@ def test_agreement_compares_layers_both_annotators_did():
     out = inhouse.agreement(a, b)
     assert set(out) == {"techniques"}
     assert (out["techniques"]["tp"], out["techniques"]["fn"]) == (1, 1)
+
+
+# ── AnnoCTR's TimeML layer (ADR-0063) ────────────────────────────────────────
+
+_TML = """<?xml version="1.0"?>
+<TimeML><DCT><TIMEX3 functionInDocument="CREATION_TIME" tid="t0" value="2021-04-19">2021-04-19</TIMEX3></DCT>
+<TEXT>A report i<TIMEX3 tid="t1" type="DATE" value="2019">n 2019.</TIMEX3> AT&amp;T saw it
+<TIMEX3 tid="t2" type="DATE" value="2021-03">last month</TIMEX3>.</TEXT></TimeML>"""
+
+
+def test_timeml_parse_keeps_offsets_and_the_dct():
+    from evaluation.annoctr_time import parse_tml
+    doc = parse_tml(_TML, "d1", "dev")
+    assert doc is not None and doc.dct == "2021-04-19"
+    assert [(t.text, t.value) for t in doc.timexes] == [("n 2019.", "2019"), ("last month", "2021-03")]
+    for t in doc.timexes:
+        assert doc.text[t.start:t.end] == t.text
+    assert "AT&T" in doc.text
+
+
+def test_timeml_score_repairs_a_shifted_span():
+    from evaluation.annoctr_time import parse_tml, score
+    doc = parse_tml(_TML, "d1", "dev")
+    assert score([doc], repair_spans=False).exact == 1         # "n 2019." does not read
+    repaired = score([doc], repair_spans=True)
+    assert (repaired.exact, repaired.total) == (2, 2)
+    assert repaired.relative_exact == 1                      # "last month" against the DCT

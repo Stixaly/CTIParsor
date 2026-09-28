@@ -49,6 +49,9 @@ def _delete_job_files(job_id: str, original_filename: str) -> None:
     # 1 — Original uploaded file (glob so we don't need to know the extension)
     for f in _UPLOADS_DIR.glob(f"{job_id}.*"):
         f.unlink(missing_ok=True)
+    # …and a URL capture's publication metadata (ADR-0063), kept in a
+    # subdirectory so the glob above never mistakes it for the source.
+    (_UPLOADS_DIR / "meta" / f"{job_id}.json").unlink(missing_ok=True)
 
     # 2 — STIX bundle(s) — reconstruct report_name the same way the worker does
     report_name = re.sub(r"[^\w\-]", "_", Path(original_filename).stem)

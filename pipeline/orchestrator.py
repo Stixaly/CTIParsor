@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any
 from api.logging_config import get_logger
 from models.schemas import EntityType, RawEntity
 from pipeline.env_flags import env_int
+from pipeline.temporal import DocumentTime
 
 if TYPE_CHECKING:
     from pipeline.stage3_llm import LLMEnrichmentResult
@@ -198,6 +199,9 @@ class RunResult:
     stages: list[StageOutcome] = field(default_factory=list)
     text: str = ""
     reference_date: datetime | None = None
+    # The document anchor relationship dates resolve against, with its source
+    # (ADR-0063 §4): a pipeline.temporal.Anchor, or None.
+    anchor: Any = None
     chunks: list[str] = field(default_factory=list)
     entities_per_chunk: list[list[RawEntity]] = field(default_factory=list)
     entities: list[RawEntity] = field(default_factory=list)
@@ -429,10 +433,13 @@ def build_bundle(
     graph_completion: bool = True,
     long_distance: bool = True,
     ledger=None,
+    document_anchor=None,
 ):
     """Stage 4 (with the Stage 4c long-distance inferer it needs) — shared by
     a pipeline run and by finalize.  `cve_metadata` comes from lookup_cves().
-    `ledger` is an optional MappingLedger Stage 4 fills (ADR-0061)."""
+    `ledger` is an optional MappingLedger Stage 4 fills (ADR-0061).
+    `document_anchor` is the report's publication date and its source
+    (ADR-0063 §7), carried on the Report as `x_source_published`."""
     from pipeline.stage4_stix_mapping import build_stix_bundle
     from pipeline.stage4c_long_distance import default_long_distance_inferer
 
@@ -449,6 +456,7 @@ def build_bundle(
         long_distance_infer=default_long_distance_inferer(policy) if long_distance else None,
         graph_completion=graph_completion,
         ledger=ledger,
+        document_anchor=document_anchor,
     )
 
 
@@ -511,7 +519,7 @@ class _Run:
     # -- stages --------------------------------------------------------------
 
     def ingest(self) -> None:
-        from pipeline.stage1_ingestion import chunk_text, extract_reference_date, ingest
+        from pipeline.stage1_ingestion import chunk_text, extract_anchor, extract_reference_date, ingest
         from pipeline.stage2_extraction import refang
 
         t0 = time.monotonic()
@@ -534,6 +542,16 @@ class _Run:
         t_ingest = time.monotonic() - t0
 
         self.figures()
+
+        # The anchor relationship dates resolve against, and where it came from
+        # (ADR-0063 §4) — a pasted text has no file, but may have a header line.
+        # Read from the final text (figures included), the same text finalize
+        # reads it from, so a rebuild finds the same anchor.
+        try:
+            self.r.anchor = extract_anchor(self.doc.file_path, self.r.text)
+        except Exception as exc:   # an anchor must never fail a run
+            logger.warning(f"[Stage 1] document anchor unavailable: {exc}")
+            self.r.anchor = None
 
         t0 = time.monotonic()
         max_chars = chunk_size_for(len(self.r.text))
@@ -730,8 +748,12 @@ class _Run:
              "entities_per_chunk": [_entities_key(e) for e in r.entities_per_chunk],
              "gazetteer": _entities_key(r.gazetteer), "cyner": _entities_key(r.cyner),
              "semantic": _entities_key(r.semantic_ttps), "doc_context": doc_context,
-             "allow_list": sorted(ner_allow_list), "reference_date": r.reference_date},
+             "allow_list": sorted(ner_allow_list), "reference_date": r.reference_date,
+             "anchor": r.anchor.model_dump(mode="json") if r.anchor is not None else None},
         )
+        # ADR-0063 — built once: the folded document text places every date
+        # occurrence, so two overlapping chunks count it once.
+        self._document_time = DocumentTime.build(r.text, r.anchor)
         checkpoint = hooks.checkpoint
         chunk_results: dict[int, LLMEnrichmentResult] = {}
         if checkpoint is not None:
@@ -780,9 +802,9 @@ class _Run:
                     doc_context=doc_context or None,
                     ner_allow_list=ner_allow_list,
                     provider=provider,
-                    reference_date=r.reference_date,
                     verify_rels=verify_rels,
                     verify_ttps_on=verify_ttps,
+                    document_time=self._document_time,
                 )
 
             res = call()
@@ -902,7 +924,10 @@ class _Run:
                     keys.add((name.lower(), etype))
         logger.info(f"[Stage 3 doc-relations] {len(known)} known entities, "
                     f"{len(self.r.text)} chars of report text")
-        doc_result = enrich_document_relations(self.r.text, known)
+        doc_result = enrich_document_relations(
+            self.r.text, known,
+            document_time=getattr(self, "_document_time", None)
+            or DocumentTime.build(self.r.text, self.r.anchor))
         logger.info(f"[Stage 3 doc-relations] {len(doc_result.relationships)} relationships found")
         results.append(doc_result)
         self.record("3doc", RAN, "", time.monotonic() - t0,
@@ -952,6 +977,7 @@ class _Run:
             graph_completion="4b" not in self.opts.disabled,
             long_distance="4c" not in self.opts.disabled,
             ledger=ledger,
+            document_anchor=r.anchor,
         )
         r.ledger = ledger.to_dict()
         n_objects = len(list(r.bundle.objects))

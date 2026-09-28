@@ -199,6 +199,72 @@ def extract_reference_date(file_path: str) -> datetime | None:
     return None
 
 
+def capture_meta_path(source: Path) -> Path:
+    """Where a URL capture leaves the page's publication metadata for the job
+    whose source is `source` (ADR-0063 §4).  A subdirectory, so the
+    ``uploads/{job_id}.*`` globs that find a job's source file never see it."""
+    return source.parent / "meta" / f"{source.stem}.json"
+
+
+def html_publication_candidates(html: str) -> list[dict]:
+    """Publication-date candidates from an HTML page's own metadata:
+    ``<meta>`` names and properties, JSON-LD ``datePublished`` /
+    ``dateModified``, and ``<time itemprop=…>``.  ``html_to_text`` drops all of
+    it, so it is read here, from the file, before the markup is gone."""
+    from pipeline.temporal import publication_candidates
+
+    soup = BeautifulSoup(html, "html.parser")
+    metas: list[tuple[str, str]] = []
+    for tag in soup.find_all("meta"):
+        key = tag.get("property") or tag.get("name") or tag.get("itemprop") or ""
+        content = tag.get("content") or ""
+        if isinstance(key, str) and isinstance(content, str) and key and content:
+            metas.append((key, content))
+    jsonld = [s.get_text() for s in soup.find_all("script", attrs={"type": "application/ld+json"})]
+    times: list[tuple[str, str]] = []
+    for tag in soup.find_all("time"):
+        prop, value = tag.get("itemprop"), tag.get("datetime")
+        if isinstance(prop, str) and isinstance(value, str):
+            times.append((prop, value))
+    return publication_candidates(metas, jsonld, times)
+
+
+def extract_anchor(file_path: str | None, text: str):
+    """The document anchor relationship dates are resolved against (ADR-0063
+    §4), with its source: a URL capture's publication metadata, an HTML
+    file's, an explicit "Published …" line near the top of the text, and only
+    then the file's own timestamp — which is kept but, being when the file was
+    produced, never resolves "last month".  Returns a ``pipeline.temporal.
+    Anchor`` carrying every candidate seen, or None."""
+    from pipeline.temporal import choose_anchor, header_candidates
+
+    candidates: list[dict] = []
+    path = Path(file_path) if file_path else None
+    if path is not None:
+        sidecar = capture_meta_path(path)
+        try:
+            if sidecar.is_file():
+                import json as _json
+                for c in _json.loads(sidecar.read_text(encoding="utf-8")).get("candidates", []):
+                    if isinstance(c, dict):
+                        candidates.append(c)
+        except Exception as exc:
+            logger.debug(f"[anchor] capture metadata unreadable for {file_path}: {exc}")
+        if path.suffix.lower() in (".html", ".htm"):
+            try:
+                candidates.extend(html_publication_candidates(
+                    path.read_text(encoding="utf-8", errors="replace")))
+            except Exception as exc:
+                logger.debug(f"[anchor] HTML metadata unreadable for {file_path}: {exc}")
+    candidates.extend(header_candidates(text or ""))
+    if path is not None:
+        created = extract_reference_date(str(path))
+        if created is not None:
+            candidates.append({"value": created.date().isoformat(), "source": "file_metadata",
+                               "kind": "created", "detail": path.suffix.lower().lstrip(".")})
+    return choose_anchor(candidates)
+
+
 def _is_scanned_pdf(path: Path) -> bool:
     """
     Returns True if the PDF has no embedded text layer (scanned / image-only).

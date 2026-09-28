@@ -7,7 +7,7 @@
  * the legend and the panels all read from here so they cannot disagree.
  */
 import type { EdgeKind } from './graphLayout'
-import type { LedgerChange } from '../../types'
+import type { LedgerChange, LedgerTime } from '../../types'
 
 /** Ledger `origin` of an SRO → the edge kind it is drawn as. */
 export function edgeKindOf(origin: string | undefined): EdgeKind {
@@ -117,6 +117,33 @@ export function relationshipReason(code: string | undefined): string {
 
 export function entityReason(code: string | undefined): string {
   return (code && ENTITY_REASON[code]) || code || 'no reason recorded'
+}
+
+/** Why a date stays out of start_time / stop_time (pipeline/temporal.export_plan). */
+const TIME_WITHHELD: Record<string, string> = {
+  precision_below_policy: 'its precision is coarser than the export policy allows a native timestamp',
+  window_role: 'it places the relationship in a period, it does not start or end it',
+  superseded_by_analyst: "the analyst's own date for this bound replaces it",
+  status_ambiguous: 'the reading is ambiguous',
+  status_unresolved: 'the pipeline could not resolve it',
+  status_conflict: 'it contradicts the text or another date',
+  conflict: 'another date of this relationship contradicts it',
+  evidence_label: 'the claim is only inferred or a gap',
+  qualified: 'it is approximate ("around", "early", "before" …)',
+  no_offset: 'the time has no time zone',
+  equal_bounds: 'start and end are the same instant, and STIX requires stop_time > start_time',
+  less_precise: 'a more precise date fills the bound',
+}
+
+/** One sentence per date Stage 4 exported or kept out of the native bounds
+ *  (ADR-0063 §7-8).  Every date ships in x_temporal_assertions either way. */
+export function describeTime(t: LedgerTime): string {
+  const what = `${t.role} ${t.value ?? '(no value)'}${t.precision ? ` (${t.precision})` : ''}`
+  if (t.outcome === 'exported') return `${what} fills ${t.field}`
+  if (t.outcome === 'projected') {
+    return `${what} fills ${t.field}, projected on the whole day in UTC — the time and zone are the policy's, not the source's`
+  }
+  return `${what} kept in x_temporal_assertions only: ${TIME_WITHHELD[t.reason ?? ''] ?? t.reason ?? 'no reason recorded'}`
 }
 
 /** One sentence per change Stage 4 made to a row. */

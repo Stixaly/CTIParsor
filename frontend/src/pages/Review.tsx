@@ -26,7 +26,7 @@ import DocumentReader from '../components/review/DocumentReader'
 import DetectionsPanel from '../components/review/DetectionsPanel'
 import Marginalia from '../components/review/Marginalia'
 import InlineHoverChip from '../components/review/InlineHoverChip'
-import RelationshipRail from '../components/review/RelationshipRail'
+import RelationshipRail, { type DatePatch } from '../components/review/RelationshipRail'
 import RelationshipCreator from '../components/review/RelationshipCreator'
 import DragRubberBand from '../components/review/DragRubberBand'
 import KeyboardHelp from '../components/review/KeyboardHelp'
@@ -397,10 +397,12 @@ export default function Review() {
     }
   }
 
-  const setRelDates = (id: string, start_time: string | null, stop_time: string | null) => {
-    setLocalRels(rs => rs.map(r => r.id === id ? { ...r, start_time, stop_time } : r))
+  // Only the bound that changed is sent (ADR-0063 §9): the API turns each bound
+  // it receives into the analyst's date, replacing the model's.
+  const setRelDates = (id: string, patch: DatePatch) => {
+    setLocalRels(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r))
     if (!localRelsRef.current.find(r => r.id === id)?._localOnly) {
-      updateRelMutation.mutate({ id, patch: { start_time, stop_time } })
+      updateRelMutation.mutate({ id, patch })
     }
   }
 
