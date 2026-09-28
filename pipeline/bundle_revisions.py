@@ -21,6 +21,9 @@ if TYPE_CHECKING:  # the job-store connection type (ADR-0045); annotation only
 BUNDLE_AFFECTING: tuple[tuple[str, str, str], ...] = (
     ("eaee534", "2026-08-28",
      "Stage 4 no longer emits a relationship whose endpoints resolve to the same object"),
+    ("3a25f45", "2026-09-29",
+     "Relationship dates keep their precision: month/year dates move from start_time/stop_time "
+     "to x_temporal_assertions (ADR-0063)"),
 )
 
 
