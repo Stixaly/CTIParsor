@@ -300,7 +300,7 @@ export default function CoverageExportPanel({
   const primaryStyle: React.CSSProperties = {
     padding: '8px 16px',
     background: 'var(--accent)',
-    color: '#fff',
+    color: 'var(--on-fill)',
     borderRadius: 4,
     fontSize: 14,
     fontWeight: 500,

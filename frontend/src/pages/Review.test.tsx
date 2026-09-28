@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { Entity, Relationship } from '../types'
+import type { Entity, Job, Relationship } from '../types'
+import { ThemeProvider } from '../context/ThemeContext'
 import Review from './Review'
 
 // ADR-0058 — opening the review page used to write accepted=true for every
@@ -29,18 +30,23 @@ const RELS: Relationship[] = [{
   evidence_label: 'observed',
 }]
 
+const JOB: Job = {
+  id: 'job-1', original_filename: 'r.txt', status: 'for_review',
+  report_text: 'APT29 used WellMess and WellMail.', created_at: '', updated_at: '',
+}
+
 const api = vi.hoisted(() => ({
   updateEntity: vi.fn(() => Promise.resolve({})),
   updateRelationship: vi.fn(() => Promise.resolve({})),
+  fetchJob: vi.fn(),
+  fetchEntities: vi.fn(),
+  fetchRelationships: vi.fn(),
 }))
 
 vi.mock('../api/client', () => ({
-  fetchJob: () => Promise.resolve({
-    id: 'job-1', original_filename: 'r.txt', status: 'for_review',
-    report_text: 'APT29 used WellMess and WellMail.', created_at: '', updated_at: '',
-  }),
-  fetchEntities: () => Promise.resolve(ENTITIES),
-  fetchRelationships: () => Promise.resolve(RELS),
+  fetchJob: api.fetchJob,
+  fetchEntities: api.fetchEntities,
+  fetchRelationships: api.fetchRelationships,
   fetchThresholds: () => Promise.resolve({ enabled: true, auto_accept_level: 0.9, control_sample_rate: 0.1 }),
   fetchCoverageReportRules: () => Promise.resolve({ rules: [] }),
   updateEntity: api.updateEntity,
@@ -59,21 +65,31 @@ vi.mock('../components/SourceViewer', () => ({ default: () => null }))
 function renderReview() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={['/review/job-1']}>
-        <Routes>
-          <Route path="/review/:jobId" element={<Review />} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
+    <ThemeProvider>
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={['/review/job-1']}>
+          <Routes>
+            <Route path="/review/:jobId" element={<Review />} />
+            <Route path="/dashboard" element={<p>dashboard page</p>} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    </ThemeProvider>,
   )
 }
 
+beforeEach(() => {
+  api.updateEntity.mockClear()
+  api.updateRelationship.mockClear()
+  api.fetchJob.mockReset().mockImplementation(() => Promise.resolve(JOB))
+  api.fetchEntities.mockReset().mockImplementation(() => Promise.resolve(ENTITIES))
+  api.fetchRelationships.mockReset().mockImplementation(() => Promise.resolve(RELS))
+  localStorage.clear()
+})
+
+const opened = () => screen.findAllByText('WellMess', {}, { timeout: 10_000 })
+
 describe('Review — decisions come from the server (ADR-0058)', () => {
-  beforeEach(() => {
-    api.updateEntity.mockClear()
-    api.updateRelationship.mockClear()
-  })
 
   it('writes nothing when the page opens, whatever the confidence', async () => {
     renderReview()
@@ -91,5 +107,71 @@ describe('Review — decisions come from the server (ADR-0058)', () => {
     expect(screen.getByText(/≥ 90% confidence/)).toBeInTheDocument()
     expect(screen.getAllByText('auto').length).toBeGreaterThan(0)
     expect(screen.getAllByText('confirm').length).toBeGreaterThan(0)
+  }, 20_000)
+})
+
+describe('Review — what the page says about itself', () => {
+  it('says the first load failed instead of showing an empty report', async () => {
+    api.fetchEntities.mockImplementation(() => Promise.reject(new Error('503: Service Unavailable')))
+    renderReview()
+    expect(await screen.findByText('Could not load this report', {}, { timeout: 10_000 }))
+      .toBeInTheDocument()
+    expect(screen.queryByText(/Margin notes/)).not.toBeInTheDocument()
+
+    api.fetchEntities.mockImplementation(() => Promise.resolve(ENTITIES))
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await opened()
+  }, 20_000)
+
+  it('shows the report status in the breadcrumb, not a fixed "For review"', async () => {
+    api.fetchJob.mockImplementation(() => Promise.resolve({ ...JOB, status: 'reviewing' }))
+    renderReview()
+    await opened()
+    const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' })
+    expect(crumbs).toHaveTextContent('Reviewing')
+    expect(crumbs).not.toHaveTextContent('For review')
+  }, 20_000)
+
+  it('labels the theme actually applied and returns to the last light theme', async () => {
+    localStorage.setItem('review.theme', JSON.stringify('cool'))
+    localStorage.setItem('review.accent', JSON.stringify('indigo'))
+    renderReview()
+    await opened()
+    const toggle = screen.getByRole('button', { name: 'Toggle theme' })
+    expect(toggle).toHaveTextContent('Cool · indigo')
+
+    fireEvent.click(toggle)
+    expect(toggle).toHaveTextContent('Dark · indigo')
+    expect(document.documentElement.dataset.theme).toBe('dark')
+
+    fireEvent.click(toggle)   // used to come back Warm
+    expect(toggle).toHaveTextContent('Cool · indigo')
+    expect(document.documentElement.dataset.theme).toBe('cool')
+  }, 20_000)
+
+  it('says when a type filter hides entities, and clears it', async () => {
+    renderReview()
+    await opened()
+    fireEvent.click(screen.getByTitle('Malware'))
+    const note = screen.getByRole('status')
+    expect(note).toHaveTextContent('Showing 2 of 3 · Malware')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filter' }))
+    expect(screen.queryByText(/Showing 2 of 3/)).not.toBeInTheDocument()
+  }, 20_000)
+
+  it('opens a folded side panel as a drawer, and Escape closes it', async () => {
+    const { container } = renderReview()
+    await opened()
+    const stage = container.querySelector('.stage')!
+    expect(stage).not.toHaveAttribute('data-drawer')
+
+    fireEvent.click(screen.getByRole('button', { name: /^Entities/ }))
+    expect(stage).toHaveAttribute('data-drawer', 'entities')
+    fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
+    expect(stage).toHaveAttribute('data-drawer', 'filters')
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(stage).not.toHaveAttribute('data-drawer')
   }, 20_000)
 })

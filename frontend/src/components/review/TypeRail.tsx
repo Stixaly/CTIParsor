@@ -8,11 +8,14 @@ interface Props {
   toggleType: (t: string) => void
   onAcceptAllOfType: (t: string) => void
   onRejectAllOfType: (t: string) => void   // bulk-reject all pending of this type
+  /** Closes the rail when a narrow window shows it as a drawer; the button
+   *  is only displayed there (index.css, RESPONSIVE). */
+  onClose?: () => void
 }
 
 export default function TypeRail({
   entities, activeTypes, toggleType,
-  onAcceptAllOfType, onRejectAllOfType,
+  onAcceptAllOfType, onRejectAllOfType, onClose,
 }: Props) {
   const counts = useMemo(() => {
     const m: Record<string, { total: number; pending: number }> = {}
@@ -28,7 +31,12 @@ export default function TypeRail({
 
   return (
     <nav className="type-rail">
-      <div className="rail-title">Filter</div>
+      <div className="rail-title">
+        Filter
+        {onClose && (
+          <button className="drawer-close" onClick={onClose} aria-label="Close filters">×</button>
+        )}
+      </div>
       {types.map(t => {
         const c = counts[t]
         const active = activeTypes.includes(t)

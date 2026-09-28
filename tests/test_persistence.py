@@ -141,6 +141,34 @@ def test_save_entities_persists_evidence_label(temp_db):
     assert row["evidence_text"] == "APT29 used WellMess."
 
 
+# ── Status: only the reviewer's finalize completes a report ──────────────────
+
+def _job_status(db, job_id):
+    with db.get_conn() as conn:
+        return conn.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()["status"]
+
+
+def test_quick_finalize_rebuilds_the_bundle_but_keeps_the_status(temp_db):
+    """The Review page auto-finalizes 4 s after every edit (quick=true).  That
+    used to mark the report completed, so it left the Reviewing column after
+    the analyst's first click."""
+    from api import worker
+
+    job_id = _insert_job(temp_db, job_id="job-quick")
+    worker._save_entities(job_id, [], _llm_result_with_label(EvidenceLabel.OBSERVED))
+    try:
+        assert worker.re_run_final_stages(job_id, skip_rescan=True)
+        assert _job_status(temp_db, job_id) == "reviewing"
+        with temp_db.get_conn() as conn:
+            assert conn.execute("SELECT bundle_json FROM jobs WHERE id=?",
+                                (job_id,)).fetchone()["bundle_json"]
+
+        assert worker.re_run_final_stages(job_id, skip_rescan=False)
+        assert _job_status(temp_db, job_id) == "completed"
+    finally:
+        worker.bundle_output_path(job_id, "report").unlink(missing_ok=True)
+
+
 # ── Read path: re_run_final_stages reconstructs and carries the label ─────────
 
 def test_finalize_carries_evidence_label_into_bundle(temp_db):

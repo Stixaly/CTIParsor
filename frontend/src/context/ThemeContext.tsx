@@ -5,6 +5,7 @@
  *   theme / setTheme     — 5 named visual themes
  *   accentKey / setAccent — 7 accent colour palettes
  *   isDark               — convenience bool for the dark theme
+ *   lightTheme / toggleDark — dark ⇄ the last light theme chosen
  *
  * Both preferences are persisted to localStorage (same keys as Review page
  * so the user's choice carries over when navigating between pages).
@@ -53,6 +54,23 @@ export const ACCENT_PALETTES: Record<string, {
 
 export const ACCENT_KEYS = Object.keys(ACCENT_PALETTES) as string[]
 
+export type LightTheme = Exclude<Theme, 'dark'>
+
+/** A colour's name, for labels.  The default accent is two colours: oxblood
+ *  on the light themes, coral on the dark one. */
+export function accentName(key: string, isDark: boolean): string {
+  if (key === 'default' || !ACCENT_PALETTES[key]) return isDark ? 'coral' : 'oxblood'
+  return key
+}
+
+/** "Cool · indigo" — the theme and accent actually applied. */
+export function themeLabel(theme: Theme, accentKey: string): string {
+  return `${THEME_LABELS[theme] ?? theme} · ${accentName(accentKey, theme === 'dark')}`
+}
+
+const isLightTheme = (t: unknown): t is LightTheme =>
+  typeof t === 'string' && t !== 'dark' && t in THEME_LABELS
+
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 /** Push theme tokens to html[data-theme] + CSS custom properties. */
@@ -73,6 +91,10 @@ interface ThemeCtx {
   accentKey: string
   setAccent: (k: string) => void
   isDark: boolean
+  /** The light theme the dark toggle returns to — the last one chosen. */
+  lightTheme: LightTheme
+  /** Dark ⇄ the last light theme (Review's toggle). */
+  toggleDark: () => void
 }
 
 const ThemeContext = createContext<ThemeCtx>({
@@ -81,6 +103,8 @@ const ThemeContext = createContext<ThemeCtx>({
   accentKey: 'default',
   setAccent: () => {},
   isDark: false,
+  lightTheme: 'warm',
+  toggleDark: () => {},
 })
 
 // ── Provider ──────────────────────────────────────────────────────────────────
@@ -88,11 +112,24 @@ const ThemeContext = createContext<ThemeCtx>({
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme,     setThemeRaw]  = usePref<Theme>('review.theme',  'warm')
   const [accentKey, setAccentRaw] = usePref('review.accent', 'default')
+  // Seeded from the current theme, so a user already on Cool keeps Cool the
+  // first time they toggle dark and back.
+  const [storedLight, setLightRaw] = usePref<LightTheme>(
+    'review.lightTheme', isLightTheme(theme) ? theme : 'warm')
+  const lightTheme: LightTheme = isLightTheme(storedLight) ? storedLight : 'warm'
 
   // Memoised so consumers that list setTheme/setAccent in dep arrays
   // (or wrapped in React.memo) don't re-render on every parent render.
-  const setTheme  = useCallback((t: Theme)   => { setThemeRaw(t);  applyTheme(t,     accentKey) }, [accentKey])
+  const setTheme  = useCallback((t: Theme)   => {
+    setThemeRaw(t)
+    if (isLightTheme(t)) setLightRaw(t)
+    applyTheme(t, accentKey)
+  }, [accentKey])
   const setAccent = useCallback((k: string)  => { setAccentRaw(k); applyTheme(theme, k)         }, [theme])
+  // It used to be `dark ? 'warm' : 'dark'`, so Cool → dark → light came back Warm.
+  const toggleDark = useCallback(
+    () => setTheme(theme === 'dark' ? lightTheme : 'dark'),
+    [setTheme, theme, lightTheme])
 
   // useLayoutEffect fires synchronously after DOM mutations and BEFORE the
   // browser paints, which prevents a flash of the wrong theme on first load.
@@ -102,7 +139,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [theme, accentKey])
 
   return (
-    <ThemeContext.Provider value={{ theme, setTheme, accentKey, setAccent, isDark: theme === 'dark' }}>
+    <ThemeContext.Provider value={{
+      theme, setTheme, accentKey, setAccent, isDark: theme === 'dark', lightTheme, toggleDark,
+    }}>
       {children}
     </ThemeContext.Provider>
   )

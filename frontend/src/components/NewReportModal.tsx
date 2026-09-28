@@ -285,10 +285,16 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
           </button>
         </div>
 
+        {/* Everything between the header and the actions scrolls.  The dialog
+            is capped at the window's height and clips, so on a short window
+            (or at 200 % zoom) an error or a wrapped line used to squeeze the
+            text field to nothing, or push the markings over it. */}
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+
         {/* Error banner */}
         {error && (
           <div style={{
-            margin: '10px 18px 0', display: 'flex', alignItems: 'flex-start', gap: 6,
+            margin: '10px 18px 0', display: 'flex', alignItems: 'flex-start', gap: 6, flexShrink: 0,
             background: 'color-mix(in oklab, var(--no) 10%, transparent)',
             border: '1px solid color-mix(in oklab, var(--no) 35%, transparent)',
             borderRadius: 8, padding: '8px 10px', fontSize: 12, color: 'var(--no)',
@@ -299,7 +305,7 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
         )}
 
         {/* Body */}
-        <div style={{ flex: 1, minHeight: 0, padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ flex: '1 0 auto', padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           {/* Source row */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.1em', textTransform: 'uppercase' as const, color: 'var(--ink-3)' }}>Source</span>
@@ -323,12 +329,14 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
           {/* File state */}
           {mode === 'file' && file && (
             <div style={{
-              flex: 1, minHeight: 0, border: '1px solid var(--rule)', borderRadius: 12,
+              flex: 1, minHeight: 120, border: '1px solid var(--rule)', borderRadius: 12,
               background: 'var(--bg-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: 12,
             }}>
               <div style={{
                 background: 'var(--bg-elev)', border: '1px solid var(--rule)', borderRadius: 12,
                 padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 14, boxShadow: 'var(--shadow-card)',
+                maxWidth: '100%', minWidth: 0, boxSizing: 'border-box',
               }}>
                 <div style={{
                   width: 38, height: 46, border: '1px solid var(--rule)', borderRadius: 4,
@@ -337,13 +345,15 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
                 }}>
                   <span style={{ fontFamily: MONO, fontSize: 9, color: 'var(--ink-3)' }}>{ext}</span>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</div>
+                {/* minWidth 0 lets a long name shrink to its ellipsis instead
+                    of pushing Remove out of the card on a narrow window. */}
+                <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                  <div title={file.name} style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</div>
                   <div style={{ fontFamily: MONO, fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>
                     {(file.size / 1048576).toFixed(2)} MB · {ext}
                   </div>
                 </div>
-                <button type="button" className="btn-ghost" style={{ fontSize: 11 }} onClick={() => { setFile(null); setValue('') }}>
+                <button type="button" className="btn-ghost" style={{ fontSize: 11, flexShrink: 0 }} onClick={() => { setFile(null); setValue('') }}>
                   Remove
                 </button>
               </div>
@@ -352,7 +362,7 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
 
           {/* Composer state */}
           {mode !== 'file' && (
-            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
               {mode === 'text' && (
                 <input
                   type="text"
@@ -371,7 +381,7 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
                 onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setValue(e.target.value)}
                 placeholder="Paste the report text here, or paste a URL — plain text, Markdown, or a link. You can also drop a file anywhere in this window."
                 style={{
-                  flex: 1, minHeight: 0, resize: 'none', padding: '12px 14px', borderRadius: 12,
+                  flex: 1, minHeight: 140, resize: 'none', padding: '12px 14px', borderRadius: 12,
                   border: '1px solid var(--rule)', background: 'var(--bg)', color: 'var(--ink)',
                   fontFamily: MONO, fontSize: 12.5, lineHeight: 1.6, boxSizing: 'border-box',
                 }}
@@ -416,7 +426,7 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
 
         {/* Markings band */}
         <div style={{
-          padding: '12px 18px', borderTop: '1px solid var(--rule)',
+          padding: '12px 18px', borderTop: '1px solid var(--rule)', flexShrink: 0,
           display: 'flex', flexDirection: 'column', gap: 9,
           background: marksSet ? 'var(--bg-elev)' : 'color-mix(in oklab, var(--warn) 6%, var(--bg-soft))',
           transition: 'background 120ms ease',
@@ -435,9 +445,11 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
           {renderMarkingRow('PAP', pap, setPap, 'PAP marking')}
         </div>
 
-        {/* Footer */}
+        </div>{/* end scrolling region */}
+
+        {/* Footer — outside the scroll: Cancel and Submit stay on screen */}
         <div style={{
-          padding: '11px 18px', borderTop: '1px solid var(--rule)',
+          padding: '11px 18px', borderTop: '1px solid var(--rule)', flexShrink: 0,
           background: 'var(--bg-elev)', display: 'flex', alignItems: 'center', gap: 12,
         }}>
           <div style={{ flex: 1, fontFamily: MONO, fontSize: 11, color: 'var(--ink-3)' }}>{summary}</div>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import type { Entity } from '../../types'
 import { typeDot, typeLabel, REL_TYPES, suggestRelType, TYPE_GROUPS, verbsForPair } from './tokens'
@@ -165,6 +165,28 @@ function RcEntityPicker({
   )
 }
 
+// ── Placement ──────────────────────────────────────────────────────────────────
+
+const EDGE = 12   // px kept free around the card
+
+/** The card's height with nothing scrolled or capped: its header and actions,
+ *  and the body's blocks.  Summed block by block, not read from scrollHeight,
+ *  so an open picker dropdown (absolutely positioned, meant to overflow the
+ *  card) does not count. */
+function naturalHeight(pop: HTMLElement): number {
+  let h = 2   // borders
+  for (const part of Array.from(pop.children) as HTMLElement[]) {
+    if (!part.classList.contains('rc-body')) { h += part.offsetHeight; continue }
+    const cs = getComputedStyle(part)
+    h += parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom)
+    for (const block of Array.from(part.children) as HTMLElement[]) {
+      const s = getComputedStyle(block)
+      h += block.offsetHeight + parseFloat(s.marginTop) + parseFloat(s.marginBottom)
+    }
+  }
+  return h
+}
+
 // ── Main creator popover ───────────────────────────────────────────────────────
 
 export default function RelationshipCreator({
@@ -214,15 +236,50 @@ export default function RelationshipCreator({
     onCreate({ src: src.value, tgt: tgt.value, type, evidence: initial.evidenceText ?? '' })
   }
 
+  // Placement used to assume a 440 × 420 card: on a 390 px window it ran
+  // 70 px off the right edge, and a card grown taller (evidence, the inline
+  // "add entity" form) ran off the bottom.  Measure it instead.
+  const popRef = useRef<HTMLDivElement>(null)
+  const [natural, setNatural] = useState(0)
+  const [viewport, setViewport] = useState({ w: window.innerWidth, h: window.innerHeight })
+
+  // After every render (the chosen entities change the body), before paint.
+  useLayoutEffect(() => {
+    if (popRef.current) setNatural(naturalHeight(popRef.current))
+  })
+  // …and when the window or the card changes size without a render of this
+  // component (a picker's inline "add entity" form is the picker's state).
+  useEffect(() => {
+    const pop = popRef.current
+    if (!pop) return
+    const measure = () => setNatural(naturalHeight(pop))
+    const onResize = () => { setViewport({ w: window.innerWidth, h: window.innerHeight }); measure() }
+    window.addEventListener('resize', onResize)
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null
+    ro?.observe(pop)
+    const body = pop.querySelector('.rc-body')
+    if (body) ro?.observe(body)
+    return () => { window.removeEventListener('resize', onResize); ro?.disconnect() }
+  }, [])
+
+  const width = Math.min(440, viewport.w - 2 * EDGE)
+  const room  = viewport.h - 2 * EDGE
+  const tall  = natural > room   // taller than the window: the body scrolls
+  const height = Math.min(natural || 420, room)
   const style = {
-    left: Math.max(20, Math.min(window.innerWidth  - 460, initial.x - 220)),
-    top:  Math.max(20, Math.min(window.innerHeight - 420, initial.y + 14)),
+    left: Math.max(EDGE, Math.min(viewport.w - EDGE - width, initial.x - width / 2)),
+    top:  Math.max(EDGE, Math.min(viewport.h - EDGE - height, initial.y + 14)),
   }
 
   return createPortal(
     <>
       <div className="rc-backdrop" onClick={onCancel} />
-      <div className="rc-pop" style={style} onClick={e => e.stopPropagation()}>
+      <div
+        ref={popRef}
+        className={`rc-pop ${tall ? 'rc-pop-tall' : ''}`}
+        style={style}
+        onClick={e => e.stopPropagation()}
+      >
 
         <div className="rc-head">
           <span className="rc-head-title">New relationship</span>

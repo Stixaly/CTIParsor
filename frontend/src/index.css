@@ -24,6 +24,10 @@
   --ok:          #2F6B3A;
   --no:          #983131;
   --warn:        #8A6A12;
+  /* Text and marks on an --accent / --ok / --no fill.  White on the light
+     themes, whose fills are dark; the dark theme's fills are light, where
+     white fell to 2.2:1 (ok) and 2.9:1 (no). */
+  --on-fill:     #FFFFFF;
   --shadow-card: 0 1px 2px rgba(43,30,20,.05), 0 8px 24px -8px rgba(43,30,20,.08);
   --shadow-pop:  0 12px 32px -8px rgba(31,19,10,.18), 0 1px 0 rgba(0,0,0,.04);
 }
@@ -100,6 +104,7 @@ html[data-theme="dark"] {
   --ok:          #7FBF8B;
   --no:          #E97373;
   --warn:        #E0BE6A;
+  --on-fill:     #14110C;   /* 8.6:1 on --ok, 6.4:1 on --no, 7.3:1 on --accent */
   --shadow-card: 0 1px 0 rgba(255,255,255,0.02) inset, 0 8px 24px -10px rgba(0,0,0,0.5);
   --shadow-pop:  0 12px 32px -8px rgba(0,0,0,.6);
   --logo-filter: invert(1) brightness(0.92);
@@ -168,8 +173,18 @@ button { font-family: inherit; cursor: pointer; }
   flex: 1;
   display: flex; align-items: center; gap: 8px;
   font-size: 13px; min-width: 0;
+  overflow: hidden;   /* squeezed by the actions: clip, never overlap them */
+}
+/* The actions do not shrink, so below ~1280 px the hint crowded the
+   breadcrumb until they overlapped; the shortcut stays in the help (?). */
+@media (max-width: 1280px) {
+  .kbd-hint { display: none; }
 }
 .crumb-dim  { color: var(--ink-3); white-space: nowrap; }
+.crumb-link {
+  background: none; border: 0; padding: 0; font: inherit; cursor: pointer;
+}
+.crumb-link:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
 .crumb-sep  { color: var(--ink-4); }
 .crumb-strong {
   color: var(--ink); font-weight: 600;
@@ -223,7 +238,7 @@ button { font-family: inherit; cursor: pointer; }
 .btn-ghost:hover { background: var(--bg-soft); }
 .btn-primary {
   display: inline-flex; align-items: center; gap: 6px;
-  background: var(--accent); color: white;
+  background: var(--accent); color: var(--on-fill);
   border: 1px solid var(--accent);
   padding: 7px 14px; font-size: 12.5px; font-weight: 600;
   border-radius: 6px; letter-spacing: 0.01em;
@@ -516,11 +531,12 @@ mark.tok-accepted::after {
 .chip-btn.no { color: var(--no); }
 .chip-btn.ok:hover { background: color-mix(in oklab, var(--ok) 12%, transparent); }
 .chip-btn.no:hover { background: color-mix(in oklab, var(--no) 12%, transparent); }
-.chip-btn.is-on.ok { background: var(--ok); color: white; border-color: var(--ok); }
-.chip-btn.is-on.no { background: var(--no); color: white; border-color: var(--no); }
+.chip-btn.is-on.ok { background: var(--ok); color: var(--on-fill); border-color: var(--ok); }
+.chip-btn.is-on.no { background: var(--no); color: var(--on-fill); border-color: var(--no); }
 .chip::after {
   content: ""; position: absolute;
-  bottom: -5px; left: 50%; transform: translateX(-50%) rotate(45deg);
+  /* --chip-arrow: set when the chip is pushed off-centre to stay on screen */
+  bottom: -5px; left: var(--chip-arrow, 50%); transform: translateX(-50%) rotate(45deg);
   width: 8px; height: 8px; background: var(--bg-elev);
   border-right: 1px solid var(--rule);
   border-bottom: 1px solid var(--rule);
@@ -531,6 +547,23 @@ mark.tok-accepted::after {
   background: var(--bg-elev); border: 1px solid var(--rule);
   border-radius: 8px; padding: 8px;
   box-shadow: var(--shadow-pop); min-width: 240px;
+  /* InlineHoverChip sets the exact room left; this is the fallback. */
+  max-height: min(360px, calc(100vh - 16px)); overflow-y: auto;
+}
+.chip-typemenu-up { top: auto; bottom: calc(100% + 6px); }
+
+/* No room above the mark: the chip hangs under it, arrow on top. */
+.chip.chip-below {
+  transform: translate(-50%, 0);
+  animation: chipInBelow 0.12s ease-out;
+}
+@keyframes chipInBelow {
+  from { opacity: 0; transform: translate(-50%, -4px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+.chip.chip-below::after {
+  top: -5px; bottom: auto;
+  transform: translateX(-50%) rotate(225deg);
 }
 
 /* ===========================================================
@@ -579,7 +612,7 @@ mark.tok-accepted::after {
 }
 .marg-sort-btn:last-child { border-right: 0; }
 .marg-sort-btn:hover { background: var(--bg-soft); color: var(--ink-2); }
-.marg-sort-btn.on { background: var(--accent); color: white; }
+.marg-sort-btn.on { background: var(--accent); color: var(--on-fill); }
 .marg-header-btn {
   background: transparent; border: 0; color: var(--accent);
   font-size: 10.5px; font-weight: 500;
@@ -735,7 +768,7 @@ button.marg-value-link:hover {
   width: 16px; height: 16px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
   background: var(--bg); border: 1px solid var(--rule);
-  border-radius: 3px; font-size: 9px; font-weight: 700; color: white;
+  border-radius: 3px; font-size: 9px; font-weight: 700; color: var(--on-fill);
   cursor: pointer; transition: background .1s, border-color .1s;
   align-self: center;
   /* Hide when unchecked — only show on hover of the card */
@@ -760,7 +793,7 @@ button.marg-value-link:hover {
   color: var(--ink-3);
 }
 .marg-check-header.marg-check-on {
-  background: var(--accent); color: white; border-color: var(--accent);
+  background: var(--accent); color: var(--on-fill); border-color: var(--accent);
 }
 
 /* Selected card highlight */
@@ -825,8 +858,8 @@ button.marg-value-link:hover {
 .mbtn:hover { background: var(--bg-soft); }
 .mbtn.ok { color: var(--ok); }
 .mbtn.no { color: var(--no); }
-.mbtn.on.ok { background: var(--ok); color: white; border-color: var(--ok); }
-.mbtn.on.no { background: var(--no); color: white; border-color: var(--no); }
+.mbtn.on.ok { background: var(--ok); color: var(--on-fill); border-color: var(--ok); }
+.mbtn.on.no { background: var(--no); color: var(--on-fill); border-color: var(--no); }
 
 /* ── Type-picker popup (fixed to viewport, grouped by category) ── */
 .type-picker-popup {
@@ -917,7 +950,7 @@ button.marg-value-link:hover {
   margin-left: -4px; transition: background .15s, color .15s, border-color .15s;
 }
 .rel-eye:hover { color: var(--ink); background: var(--bg-soft); }
-.rel-eye.on { background: var(--accent); color: white; border-color: var(--accent); }
+.rel-eye.on { background: var(--accent); color: var(--on-fill); border-color: var(--accent); }
 .rel-eye.on:hover { filter: brightness(0.96); }
 
 .rel-overlay {
@@ -1028,7 +1061,7 @@ html[data-theme="dark"] .rel-ev-hl {
 .rel-new {
   display: inline-flex; align-items: center; gap: 4px;
   font-size: 11.5px; font-weight: 600; padding: 5px 10px;
-  background: var(--accent); color: white;
+  background: var(--accent); color: var(--on-fill);
   border: 1px solid var(--accent); border-radius: 5px; letter-spacing: 0.01em;
 }
 .rel-new:hover { filter: brightness(0.94); }
@@ -1066,7 +1099,7 @@ html[data-theme="dark"] .rel-ev-hl {
 .toast {
   position: fixed; bottom: 20px;
   left: 50%; transform: translateX(-50%);
-  background: var(--ok); color: white;
+  background: var(--ok); color: var(--on-fill);
   font-size: 13px; font-weight: 600;
   padding: 12px 20px; border-radius: 10px;
   box-shadow: var(--shadow-pop); z-index: 200;
@@ -1081,10 +1114,14 @@ html[data-theme="dark"] .rel-ev-hl {
   position: fixed; inset: 0;
   background: rgba(20,12,4,.45);
   z-index: 300; display: flex; align-items: center; justify-content: center;
+  padding: 16px;
 }
+/* Never taller or wider than the window: at a high zoom the last rows and
+   the Close button used to fall off screen, with nothing to scroll. */
 .kbd-card {
   background: var(--bg-elev); border-radius: 12px;
-  padding: 28px 32px; width: 460px;
+  padding: 28px 32px; width: min(460px, 100%);
+  max-height: 100%; overflow-y: auto; box-sizing: border-box;
   box-shadow: var(--shadow-pop); font-size: 13px;
 }
 .kbd-card h3 {
@@ -1107,8 +1144,13 @@ html[data-theme="dark"] .rel-ev-hl {
   animation: rcFadeIn .15s ease-out;
 }
 @keyframes rcFadeIn { from { opacity: 0; } to { opacity: 1; } }
+/* Width and height follow the window; RelationshipCreator places it so the
+   whole card is on screen.  Only when it is taller than the window does the
+   body scroll (.rc-pop-tall), so the pickers' dropdowns can otherwise
+   overflow the card as before. */
 .rc-pop {
-  position: fixed; z-index: 210; width: 440px;
+  position: fixed; z-index: 210; width: min(440px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px); box-sizing: border-box;
   background: var(--bg-elev); border: 1px solid var(--rule);
   border-radius: 12px; box-shadow: var(--shadow-pop);
   display: flex; flex-direction: column;
@@ -1134,6 +1176,7 @@ html[data-theme="dark"] .rel-ev-hl {
 }
 .rc-close:hover { background: var(--bg-soft); color: var(--ink); }
 .rc-body { padding: 12px 14px; }
+.rc-pop-tall .rc-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .rc-picker { margin-bottom: 10px; }
 .rc-label {
   font-size: 10.5px; text-transform: uppercase;
@@ -1262,17 +1305,89 @@ html[data-theme="dark"] .rel-ev-hl {
   height: 100vh; color: var(--ink-3); gap: 10px;
   font-size: 14px; background: var(--bg);
 }
+/* The first load failed — an error, never an empty report. */
+.review-failed { flex-direction: column; text-align: center; padding: 0 24px; gap: 8px; }
+.review-failed strong { color: var(--ink); font-size: 17px; font-weight: 600; }
+.review-failed-detail { max-width: 520px; font-size: 13px; }
+.review-failed-actions { display: flex; gap: 8px; margin-top: 10px; }
+
+/* ===========================================================
+   DOCUMENT TOOLBAR — view tabs, active filter, panel toggles
+   =========================================================== */
+.doc-toolbar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px;
+  padding: 8px 56px 0;   /* aligns with .doc left/right padding */
+}
+.doc-tools {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  margin-left: auto;
+}
+.filter-note {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 4px 2px 10px; border-radius: 6px;
+  background: var(--accent-soft); color: var(--ink-2); font-size: 11.5px;
+}
+.filter-clear {
+  background: transparent; border: 0; padding: 2px 6px;
+  color: var(--accent); font-size: 11.5px; font-weight: 600;
+  text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
+}
+/* The toggles and the close buttons exist only below a fold (RESPONSIVE). */
+.drawer-toggle { display: none; padding: 4px 9px; font-size: 11.5px; }
+.drawer-close {
+  display: none; align-items: center; justify-content: center;
+  width: 24px; height: 24px; margin-left: auto; flex-shrink: 0; padding: 0;
+  background: transparent; border: 1px solid var(--rule); border-radius: 5px;
+  color: var(--ink-2); font-size: 16px; line-height: 1; cursor: pointer;
+}
+.drawer-close:hover { background: var(--bg-soft); }
+.drawer-backdrop {
+  display: none; position: fixed; inset: 0; z-index: 65;
+  background: rgba(20,12,4,.28);
+}
+.rail-title { display: flex; align-items: center; gap: 6px; }
 
 /* ===========================================================
    RESPONSIVE
+   Below 1180 px the entity margin folds away, below 900 px the type rail
+   too.  Each then opens as a drawer over the document (.stage[data-drawer],
+   set by Review.tsx) — they used to disappear with no way back, leaving an
+   active type filter applied and its only control off screen.
    =========================================================== */
 @media (max-width: 1180px) {
   .stage { grid-template-columns: 168px minmax(0,1fr); }
   .marginalia { display: none; }
+  .drawer-toggle-entities { display: inline-flex; }
+
+  .stage[data-drawer="entities"] .marginalia {
+    display: block;
+    position: fixed; top: 0; right: 0; bottom: 0; z-index: 70;
+    width: min(340px, calc(100vw - 32px)); min-height: 0;
+    padding-top: 14px; overflow-y: auto;
+    background: var(--bg); border-left: 1px solid var(--rule);
+    box-shadow: var(--shadow-pop);
+  }
+  .stage[data-drawer="entities"] .marginalia .drawer-close,
+  .stage[data-drawer="entities"] .drawer-backdrop { display: flex; }
 }
 @media (max-width: 900px) {
   .stage { grid-template-columns: minmax(0,1fr); }
   .type-rail { display: none; }
+  .drawer-toggle-filters { display: inline-flex; }
+  .doc-toolbar { padding: 8px 20px 0; }
+
+  .stage[data-drawer="filters"] .type-rail {
+    display: block;
+    /* align-self: the rail's own flex-start would size it to its content
+       between the insets instead of the window's height. */
+    position: fixed; top: 0; left: 0; bottom: 0; z-index: 70; align-self: stretch;
+    width: min(260px, calc(100vw - 32px)); max-height: none;
+    padding-bottom: 24px;
+    border-right: 1px solid var(--rule);
+    box-shadow: var(--shadow-pop);
+  }
+  .stage[data-drawer="filters"] .type-rail .drawer-close,
+  .stage[data-drawer="filters"] .drawer-backdrop { display: flex; }
 }
 
 /* ===========================================================

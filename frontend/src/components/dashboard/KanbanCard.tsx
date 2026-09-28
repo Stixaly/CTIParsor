@@ -22,14 +22,18 @@ const STATUS_DOT: Record<string, string> = {
 // a NEW component type on every render, so React would unmount and remount them
 // -- discarding their hover state.  The dashboard refetches every 3s, so that
 // remount happens constantly and hover would never stick.
-const TextBtn = ({ label, onClick }: { label: string; onClick: () => void }) => {
+const TextBtn = ({ label, onClick, disabled = false }: {
+  label: string; onClick: () => void; disabled?: boolean
+}) => {
   const [h, setH] = useState(false)
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       onMouseEnter={() => setH(true)}
       onMouseLeave={() => setH(false)}
       style={{
+        opacity: disabled ? 0.6 : 1,
         background: h ? 'var(--accent-soft)' : 'transparent',
         border: '1px solid ' + (h ? 'var(--accent)' : 'var(--rule)'),
         color: 'var(--accent)',
@@ -37,7 +41,7 @@ const TextBtn = ({ label, onClick }: { label: string; onClick: () => void }) => 
         fontWeight: 600,
         padding: '3px 8px',
         borderRadius: 5,
-        cursor: 'pointer',
+        cursor: disabled ? 'progress' : 'pointer',
         whiteSpace: 'nowrap',
       }}
     >
@@ -79,13 +83,15 @@ interface Props {
   relTime: (iso: string) => string
   onSelect: () => void
   onAnalyse: () => void
+  /** True while the report is being moved to Reviewing before it opens. */
+  opening?: boolean
   onDelete: () => void
   onDownload: () => void
   onGraph: () => void
   onCoverage: () => void
 }
 
-export default function KanbanCard({ job, selected, relTime, onSelect, onAnalyse, onDelete, onDownload, onGraph, onCoverage }: Props) {
+export default function KanbanCard({ job, selected, relTime, onSelect, onAnalyse, opening = false, onDelete, onDownload, onGraph, onCoverage }: Props) {
   const [hovered, setHovered] = useState(false)
 
   const actionLabel = job.status === 'for_review' ? 'Analyse' : job.status === 'reviewing' ? 'Resume' : 'Open'
@@ -168,7 +174,7 @@ export default function KanbanCard({ job, selected, relTime, onSelect, onAnalyse
         style={{ paddingLeft: 13, display: 'flex', alignItems: 'center', gap: 3 }}
         onClick={(e: React.MouseEvent) => e.stopPropagation()}
       >
-        <TextBtn label={actionLabel} onClick={onAnalyse} />
+        <TextBtn label={opening ? 'Opening…' : actionLabel} onClick={onAnalyse} disabled={opening} />
 
         {job.status === 'completed' && (
           <>

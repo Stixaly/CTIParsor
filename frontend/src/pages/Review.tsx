@@ -3,7 +3,7 @@ import { usePref } from '../hooks/usePref'
 import { createPortal } from 'react-dom'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Loader2, FileText, AlignLeft, BookOpen, ShieldCheck } from 'lucide-react'
+import { Loader2, FileText, AlignLeft, BookOpen, ShieldCheck, Filter, PanelRight } from 'lucide-react'
 import MarkdownPreview from '../components/MarkdownPreview'
 import SourceViewer from '../components/SourceViewer'
 
@@ -16,8 +16,7 @@ import {
   errorDetail, fetchThresholds,
 } from '../api/client'
 import { downloadBundle } from '../stix/downloadBundle'
-import type { ClientDecisionOrigin, Entity, Relationship } from '../types'
-import { useAppTheme } from '../context/ThemeContext'
+import type { ClientDecisionOrigin, Entity, Job, Relationship } from '../types'
 
 import TopChrome from '../components/review/TopChrome'
 import PipelineRibbon, { type StageInfo } from '../components/review/PipelineRibbon'
@@ -36,8 +35,14 @@ import EntityPopover from '../components/EntityPopover'
 import { usePromotedRules } from '../hooks/usePromotedRules'
 
 // ── Review-specific types ─────────────────────────────────────────────────────
-// Theme type is re-exported from ThemeContext; imported via useAppTheme()
 type SortMode = 'position' | 'type'
+
+/** A side panel the window is too narrow to show in place (index.css,
+ *  RESPONSIVE), opened over the document instead. */
+type Drawer = 'filters' | 'entities'
+
+// The widths at which index.css folds the two side panels away.
+const FOLD_QUERIES = ['(max-width: 1180px)', '(max-width: 900px)']
 
 // ── tiny localStorage hook ───────────────────────────────────────────────────
 // ── ClientEntity extends Entity with local auto-accept flag ─────────────────
@@ -50,7 +55,7 @@ interface ClientRelationship extends Relationship {
 }
 
 interface Point { x: number; y: number }
-interface HoverTarget { id: string; x: number; y: number }
+interface HoverTarget { id: string; x: number; y: number; bottom?: number }
 interface RelCreatorState {
   srcId?: string
   tgtId?: string
@@ -72,8 +77,7 @@ export default function Review() {
   const qc = useQueryClient()
 
   // ── prefs (persisted) ───────────────────────────────────────────────────
-  // theme + accent come from the shared ThemeContext so changes carry across all pages
-  const { theme, setTheme } = useAppTheme()
+  // theme + accent come from the shared ThemeContext (TopChrome reads it).
   const [fontFamily, setFontFamily] = usePref<'serif' | 'sans'>('review.font', 'serif')
   const [density, setDensity]       = usePref<'compact' | 'comfortable' | 'spacious'>('review.density', 'comfortable')
   const [margSort, setMargSort]     = usePref<SortMode>('review.margSort', 'position')
@@ -88,7 +92,13 @@ export default function Review() {
   }, [density, fontFamily])
 
   // ── remote data ─────────────────────────────────────────────────────────
-  const { data: job, isLoading: jobLoading } = useQuery({
+  // `isLoadingError` = the first load failed, so there is no data at all.
+  // Without it the page fell through to an empty report — 0 entities, 0
+  // relationships — which reads as a result, not as a server that is down.
+  const {
+    data: job, isLoading: jobLoading,
+    isLoadingError: jobFailed, error: jobError, refetch: refetchJob,
+  } = useQuery({
     queryKey: ['job', jobId],
     queryFn: () => fetchJob(jobId!),
     enabled: !!jobId,
@@ -117,13 +127,19 @@ export default function Review() {
   // include them or it contradicts the ZIP it produces.
   const sigmaRuleCount = (coverageRules?.rule_total ?? 0) + promotedExtra.length
 
-  const { data: remoteEntities = [], isLoading: entLoading } = useQuery({
+  const {
+    data: remoteEntities = [], isLoading: entLoading,
+    isLoadingError: entFailed, error: entError, refetch: refetchEntities,
+  } = useQuery({
     queryKey: ['entities', jobId],
     queryFn: () => fetchEntities(jobId!),
     enabled: !!jobId,
   })
 
-  const { data: remoteRels = [], isLoading: relsLoading } = useQuery({
+  const {
+    data: remoteRels = [], isLoading: relsLoading,
+    isLoadingError: relsFailed, error: relsError, refetch: refetchRels,
+  } = useQuery({
     queryKey: ['relationships', jobId],
     queryFn: () => fetchRelationships(jobId!),
     enabled: !!jobId,
@@ -202,6 +218,7 @@ export default function Review() {
   const [focusedId, setFocusedId] = useState<string | null>(null)
   const [hoverEntity, setHoverEntity] = useState<HoverTarget | null>(null)
   const [activeTypes, setActiveTypes] = useState<string[]>([])
+  const [drawer, setDrawer] = useState<Drawer | null>(null)
   const [kbdOpen, setKbdOpen] = useState(false)
   const [finalizing, setFinalizing] = useState(false)
   const [finalized, setFinalized] = useState(false)
@@ -223,6 +240,17 @@ export default function Review() {
   /** True while the background quick-finalize API call is in-flight. */
   const [autoFinalizing, setAutoFinalizing] = useState(false)
   const autoFinalizeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // A drawer belongs to the width it was opened at: crossing a fold puts the
+  // panel back in its column (or away), and the drawer state must not
+  // survive to reopen it by surprise the next time the window narrows.
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return
+    const mqs = FOLD_QUERIES.map(q => window.matchMedia(q))
+    const close = () => setDrawer(null)
+    mqs.forEach(mq => mq.addEventListener?.('change', close))
+    return () => mqs.forEach(mq => mq.removeEventListener?.('change', close))
+  }, [])
 
   // ── derived ─────────────────────────────────────────────────────────────
   const docEntities = useMemo(() =>
@@ -389,9 +417,9 @@ export default function Review() {
 
   // ── hover grace timer ─────────────────────────────────────────────────────
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const showHover = (id: string, x: number, y: number) => {
+  const showHover = (id: string, x: number, y: number, bottom?: number) => {
     if (hoverTimerRef.current) { clearTimeout(hoverTimerRef.current); hoverTimerRef.current = null }
-    setHoverEntity({ id, x, y })
+    setHoverEntity({ id, x, y, bottom })
   }
   const scheduleHide = (delay = 220) => {
     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
@@ -483,6 +511,9 @@ export default function Review() {
     try {
       await finalizeJob(jobId)   // full finalize with lexicon re-scan
       qc.invalidateQueries({ queryKey: ['jobs'] })
+      // The server marks the report completed; the breadcrumb follows without
+      // refetching the whole report text.
+      qc.setQueryData<Job>(['job', jobId], j => j && { ...j, status: 'completed' })
       setBundleStale(false)      // bundle is now definitively current
       setReviewCompleted(true)   // flips the primary button to "Download STIX"
       // Stay on the page — the bundle is downloadable in place. A brief toast
@@ -555,7 +586,7 @@ export default function Review() {
       const tag = (e.target as HTMLElement).tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
       if (e.key === '?')                              { setKbdOpen(true); e.preventDefault() }
-      else if (e.key === 'Escape')                    { setKbdOpen(false); setFocusedId(null) }
+      else if (e.key === 'Escape')                    { setKbdOpen(false); setFocusedId(null); setDrawer(null) }
       else if (e.key === 'j' || e.key === 'ArrowDown'){ goNextPending(1); e.preventDefault() }
       else if (e.key === 'k' || e.key === 'ArrowUp')  { goNextPending(-1); e.preventDefault() }
       else if (focusedId && (e.key === 'a' || e.key === 'A')) { accept(focusedId); goNextPending(1) }
@@ -632,7 +663,30 @@ export default function Review() {
     setPopover(null)
   }
 
-  // ── loading ───────────────────────────────────────────────────────────────
+  // ── load failure / loading ────────────────────────────────────────────────
+  if (jobFailed || entFailed || relsFailed) {
+    const retry = () => {
+      if (jobFailed)  refetchJob()
+      if (entFailed)  refetchEntities()
+      if (relsFailed) refetchRels()
+    }
+    return (
+      <div className="review-loading review-failed" role="alert">
+        <strong>Could not load this report</strong>
+        <span className="review-failed-detail">
+          {errorDetail(jobError ?? entError ?? relsError)}
+        </span>
+        <span className="review-failed-detail">
+          Nothing is shown rather than an empty report: the server did not answer.
+        </span>
+        <div className="review-failed-actions">
+          <button className="btn-primary" onClick={retry}>Retry</button>
+          <button className="btn-ghost" onClick={() => navigate('/dashboard')}>Back to dashboard</button>
+        </div>
+      </div>
+    )
+  }
+
   if (jobLoading || entLoading || relsLoading) {
     return (
       <div className="review-loading">
@@ -651,9 +705,9 @@ export default function Review() {
       {/* ── top chrome ── */}
       <TopChrome
         title={job?.original_filename ?? ''}
+        status={job?.status}
         pendingCount={counts.pending}
         finalizing={finalizing}
-        theme={theme}
         onBack={() => navigate('/dashboard')}
         onGraph={() => navigate(`/graph/${jobId}`)}
         onCoverage={() => navigate(`/coverage/${jobId}`)}
@@ -663,7 +717,6 @@ export default function Review() {
         sigmaRuleCount={sigmaRuleCount}
         sigmaDownloading={downloadingSigma}
         reviewCompleted={reviewCompleted}
-        onThemeToggle={() => setTheme(theme === 'dark' ? 'warm' : 'dark')}
         bundleStale={bundleStale}
         autoFinalizing={autoFinalizing}
       />
@@ -686,7 +739,9 @@ export default function Review() {
 
       {/* ── scrollable content area ── */}
       <div className="stage-wrapper">
-        <div className="stage">
+        {/* data-drawer: on a narrow window the side panels fold away and
+            open over the document instead (index.css, RESPONSIVE). */}
+        <div className="stage" data-drawer={drawer ?? undefined}>
           {/* left — type filter rail */}
           <TypeRail
             entities={localEntities}
@@ -694,6 +749,7 @@ export default function Review() {
             toggleType={toggleType}
             onAcceptAllOfType={acceptAllOfType}
             onRejectAllOfType={rejectAllOfType}
+            onClose={() => setDrawer(null)}
           />
 
           {/* centre — document reader / source viewer */}
@@ -711,10 +767,7 @@ export default function Review() {
                 { id: 'detections', icon: <ShieldCheck size={12} />, label: 'Detections' },
               ]
               return (
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 4,
-                  padding: '8px 56px 0',   // aligns with .doc left/right padding
-                }}>
+                <div className="doc-toolbar">
                   <div style={{
                     display: 'inline-flex', borderRadius: 7,
                     border: '1px solid var(--rule)', overflow: 'hidden',
@@ -738,6 +791,36 @@ export default function Review() {
                       </button>
                     ))}
                   </div>
+
+                  <div className="doc-tools">
+                    {/* Always said, at every width: a filter hides entities,
+                        and on a narrow window its rail is not on screen. */}
+                    {activeTypes.length > 0 && (
+                      <span className="filter-note" role="status">
+                        Showing {docEntities.length} of {localEntities.length}
+                        {' · '}{activeTypes.map(typeLabel).join(', ')}
+                        <button className="filter-clear" onClick={() => setActiveTypes([])}>
+                          Clear filter
+                        </button>
+                      </span>
+                    )}
+                    <button
+                      className="btn-ghost drawer-toggle drawer-toggle-filters"
+                      aria-expanded={drawer === 'filters'}
+                      onClick={() => setDrawer(d => d === 'filters' ? null : 'filters')}
+                    >
+                      <Filter size={13} />
+                      Filters{activeTypes.length > 0 ? ` · ${activeTypes.length}` : ''}
+                    </button>
+                    <button
+                      className="btn-ghost drawer-toggle drawer-toggle-entities"
+                      aria-expanded={drawer === 'entities'}
+                      onClick={() => setDrawer(d => d === 'entities' ? null : 'entities')}
+                    >
+                      <PanelRight size={13} />
+                      Entities · {docEntities.length}
+                    </button>
+                  </div>
                 </div>
               )
             })()}
@@ -752,7 +835,7 @@ export default function Review() {
                 highlightStyle="underline"
                 focusedId={focusedId}
                 setFocusedId={setFocusedId}
-                setHoverEntity={h => h ? showHover(h.id, h.x, h.y) : scheduleHide()}
+                setHoverEntity={h => h ? showHover(h.id, h.x, h.y, h.bottom) : scheduleHide()}
                 onAccept={accept}
                 onReject={reject}
                 onReset={reset}
@@ -804,7 +887,10 @@ export default function Review() {
             onChangeType={changeType}
             sortMode={margSort}
             setSortMode={setMargSort}
+            onClose={() => setDrawer(null)}
           />
+
+          {drawer && <div className="drawer-backdrop" onClick={() => setDrawer(null)} />}
         </div>
 
         {/* ── relationship rail (sticky bottom) ── */}
@@ -833,6 +919,7 @@ export default function Review() {
             entity={e}
             x={hoverEntity.x}
             y={hoverEntity.y}
+            bottom={hoverEntity.bottom}
             onAccept={accept}
             onReject={reject}
             onReset={reset}

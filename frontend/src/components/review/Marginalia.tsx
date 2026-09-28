@@ -17,12 +17,15 @@ interface Props {
   onChangeType: (id: string, t: string) => void
   sortMode: SortMode
   setSortMode: (m: SortMode) => void
+  /** Closes the panel when a narrow window shows it as a drawer; the button
+   *  is only displayed there (index.css, RESPONSIVE). */
+  onClose?: () => void
 }
 
 export default function Marginalia({
   entities, focusedId, setFocusedId,
   onAccept, onReject, onReset, onChangeType,
-  sortMode, setSortMode,
+  sortMode, setSortMode, onClose,
 }: Props) {
   // ── card collapse state ────────────────────────────────────────────────
   const [collapsed,    setCollapsed]    = useState<Set<string>>(new Set())
@@ -175,6 +178,9 @@ export default function Marginalia({
             </button>
           ))}
         </div>
+        {onClose && (
+          <button className="drawer-close" onClick={onClose} aria-label="Close entities panel">×</button>
+        )}
       </div>
 
       {/* ── Bulk selection action bar ──────────────────────────────────── */}
