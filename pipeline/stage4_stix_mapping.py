@@ -19,7 +19,7 @@ from pipeline.regex_safety import compile_pattern
 from pipeline.stage3_llm import LLMEnrichmentResult
 from pipeline.stage4b_graph_completion import CompletionStats, complete_graph
 from pipeline.stix_access import field as _field
-from pipeline.stix_rel_spec import rel_is_allowed
+from pipeline.stix_rel_spec import rel_is_allowed, rel_is_listed
 
 logger = get_logger(__name__)
 
@@ -309,13 +309,18 @@ def _is_spurious_observable_ttp_edge(source, target) -> bool:
     return "attack-pattern" in types and bool(types & _OBSERVABLE_SCO_TYPES)
 
 
-def _route_observables_through_indicators(source, target, sco_id_to_indicator: dict):
+def _route_observables_through_indicators(source, verb: str, target, sco_id_to_indicator: dict):
     """
-    ADR-0041: when exactly one endpoint of a relationship is a raw observable
-    (SCO) and the other is a real SDO (malware, threat-actor, intrusion-set,
-    ...), the observable must never itself be the Relationship endpoint — its
-    Indicator (built from the same value, based-on an ObservedData wrapping
-    the SCO) stands in for it.
+    ADR-0041, amended by ADR-0062: when exactly one endpoint of a relationship
+    is a raw observable (SCO) and the other is an SDO (malware, threat-actor,
+    intrusion-set, ...), the observable's Indicator (built from the same value,
+    based-on the SCO) stands in for it — unless STIX 2.1 lists `verb` for the
+    direct pair.  `malware communicates-with domain-name`, `malware drops file`
+    and `infrastructure consists-of <SCO>` are relationships the spec defines
+    on the observable itself; routed through the Indicator they lose their verb
+    (no table lists `malware communicates-with indicator`), so they stay direct.
+    `related-to` is valid between any two objects and names nothing about the
+    pair: it is routed (see stix_rel_spec.rel_is_listed).
 
     Left alone on purpose when both endpoints are observables, or neither is:
     STIX 2.1 has no single correct Relationship-based answer for an
@@ -332,6 +337,9 @@ def _route_observables_through_indicators(source, target, sco_id_to_indicator: d
     target_is_sco = getattr(target, "type", "") in _OBSERVABLE_SCO_TYPES
 
     if source_is_sco == target_is_sco:
+        return source, target
+
+    if rel_is_listed(getattr(source, "type", ""), verb, getattr(target, "type", "")):
         return source, target
 
     if source_is_sco:
@@ -1010,10 +1018,24 @@ def build_stix_bundle(
 
         changes: list[dict] = []
 
-        # ADR-0041: an observable never stands as a Relationship endpoint
-        # opposite a real SDO — its Indicator stands in, or the edge is dropped.
+        # Normalise and validate relationship type against the STIX 2.1 spec
+        asked = rel.relationship_type.strip().lower()
+        rel_type = asked
+        if rel_type not in VALID_REL_TYPES:
+            rel_type = "related-to"   # safe fallback for any LLM hallucination
+            changes.append({"kind": "verb", "from": asked, "to": rel_type,
+                            "reason": "unknown_verb"})
+
+        # ADR-0041, amended by ADR-0062: an observable opposite an SDO is
+        # replaced by its Indicator (or the edge is dropped) unless STIX lists
+        # the verb for the direct pair.  The verb judged is the one the direct
+        # edge would carry: the row's, or the policy's pin for that pair of
+        # types.  A routed edge then takes the policy of the pair it lands on.
         orig_source, orig_target = source, target
-        source, target = _route_observables_through_indicators(source, target, sco_id_to_indicator)
+        source, target = _route_observables_through_indicators(
+            source, _apply_policy(rel_type, source, target, _pol_index), target,
+            sco_id_to_indicator,
+        )
         if source is None or target is None:
             led.relationship(rel, "dropped", reason="no_indicator",
                              source_ref=orig_source.id, target_ref=orig_target.id)
@@ -1027,14 +1049,6 @@ def build_stix_bundle(
         if target.id != orig_target.id:
             changes.append({"kind": "reroute", "end": "target",
                             "from": orig_target.id, "to": target.id})
-
-        # Normalise and validate relationship type against the STIX 2.1 spec
-        asked = rel.relationship_type.strip().lower()
-        rel_type = asked
-        if rel_type not in VALID_REL_TYPES:
-            rel_type = "related-to"   # safe fallback for any LLM hallucination
-            changes.append({"kind": "verb", "from": asked, "to": rel_type,
-                            "reason": "unknown_verb"})
 
         # Apply relationship policy (may override the inferred verb)
         if _pol_index:
@@ -2024,7 +2038,10 @@ def _materialise_pinned_edges(
     Indicator built from it (ADR-0041). When given, a candidate pair with
     exactly one observable endpoint is redirected to route through that
     Indicator (dropped if none exists for it) before the edge key and evidence
-    gate are computed. `None` (the default) disables this step entirely, unlike
+    gate are computed — unless the rule's verb is one STIX lists for the direct
+    pair (`malware communicates-with domain-name`, `malware drops file`,
+    `infrastructure consists-of <SCO>`), which is pinned on the observable
+    itself (ADR-0062). `None` (the default) disables this step entirely, unlike
     an empty dict, which would drop every such candidate — this file's own
     direct unit tests (test_pin_evidence.py, test_pin_budget.py) call this
     function without an Indicator graph behind their fake objects and must see
@@ -2104,7 +2121,7 @@ def _materialise_pinned_edges(
             for _t_obj in _type_to_objs.get(_tgt_type, []):
                 if sco_id_to_indicator is not None:
                     _s_obj, _t_obj = _route_observables_through_indicators(
-                        _s_obj, _t_obj, sco_id_to_indicator
+                        _s_obj, _verb, _t_obj, sco_id_to_indicator
                     )
                     if _s_obj is None or _t_obj is None:
                         continue

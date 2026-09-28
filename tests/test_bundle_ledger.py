@@ -75,17 +75,79 @@ def test_unknown_verb_and_policy_pin_are_reported():
 
 
 def test_observable_endpoint_is_rerouted_through_its_indicator():
+    # No table lists `domain-name indicates malware`; `indicator indicates
+    # malware` is the spec's own edge, so the row keeps its verb once routed.
+    llm = LLMEnrichmentResult(malware_families=["WINELOADER"],
+                              relationships=[_rel("evil.example", "indicates", "WINELOADER")])
+    ents = [RawEntity(value="evil.example", entity_type=EntityType.DOMAIN)]
+    bundle, led = _build(ents, llm)
+    e = _entry(led, "evil.example", "indicates", "WINELOADER")
+    assert [c["kind"] for c in e["changes"]] == ["reroute"]
+    reroute = e["changes"][0]
+    assert reroute["end"] == "source"
+    objs = _by_id(bundle)
+    assert objs[reroute["from"]].type == "domain-name"
+    assert objs[reroute["to"]].type == "indicator"
+    assert objs[e["stix_id"]].source_ref == reroute["to"]
+    assert e["final_type"] == "indicates"
+
+
+def test_listed_observable_pair_ships_as_extracted():
+    # ADR-0062: the row the seeded Industroyer2 report showed rewritten twice
+    # (reroute, then communicates-with -> related-to) now ships untouched.
     llm = LLMEnrichmentResult(malware_families=["WINELOADER"],
                               relationships=[_rel("WINELOADER", "communicates-with", "evil.example")])
     ents = [RawEntity(value="evil.example", entity_type=EntityType.DOMAIN)]
     bundle, led = _build(ents, llm)
     e = _entry(led, "WINELOADER", "communicates-with", "evil.example")
-    reroute = [c for c in e["changes"] if c["kind"] == "reroute"]
-    assert len(reroute) == 1 and reroute[0]["end"] == "target"
+    assert e["outcome"] == "emitted" and e["changes"] == []
+    assert e["final_type"] == "communicates-with"
     objs = _by_id(bundle)
-    assert objs[reroute[0]["from"]].type == "domain-name"
-    assert objs[reroute[0]["to"]].type == "indicator"
-    assert objs[e["stix_id"]].target_ref == reroute[0]["to"]
+    assert objs[e["target_ref"]].type == "domain-name"
+    assert objs[e["stix_id"]].target_ref == e["target_ref"]
+
+
+def test_unlisted_verb_is_rerouted_then_downgraded():
+    # What ADR-0041 still does, and the ledger must keep saying: `uses` is
+    # listed neither for malware -> domain-name nor for malware -> indicator.
+    llm = LLMEnrichmentResult(malware_families=["WINELOADER"],
+                              relationships=[_rel("WINELOADER", "uses", "evil.example")])
+    ents = [RawEntity(value="evil.example", entity_type=EntityType.DOMAIN)]
+    _, led = _build(ents, llm)
+    e = _entry(led, "WINELOADER", "uses", "evil.example")
+    assert [(c["kind"], c.get("reason")) for c in e["changes"]] == [
+        ("reroute", None), ("verb", "not_suggested")]
+    assert e["final_type"] == "related-to"
+
+
+def test_pinned_verb_keeps_the_observable_and_is_reported():
+    pol = {"version": 1, "global": "enforce",
+           "rules": [{"src": "malware", "verb": "communicates-with", "tgt": "domain-name",
+                      "mode": "pin", "enabled": True}]}
+    llm = LLMEnrichmentResult(malware_families=["WINELOADER"],
+                              relationships=[_rel("WINELOADER", "uses", "evil.example")])
+    ents = [RawEntity(value="evil.example", entity_type=EntityType.DOMAIN)]
+    bundle, led = _build(ents, llm, relationship_policy=pol)
+    e = _entry(led, "WINELOADER", "uses", "evil.example")
+    assert e["changes"] == [{"kind": "verb", "from": "uses", "to": "communicates-with",
+                             "reason": "policy_pin"}]
+    assert _by_id(bundle)[e["target_ref"]].type == "domain-name"
+
+
+def test_routed_row_takes_the_policy_of_the_pair_it_lands_on():
+    # `domain-name hosts malware` is listed nowhere: routed, the row meets the
+    # indicator>malware rule, not a domain-name>malware one.
+    pol = {"version": 1, "global": "enforce",
+           "rules": [{"src": "indicator", "verb": "indicates", "tgt": "malware",
+                      "mode": "pin", "enabled": True}]}
+    llm = LLMEnrichmentResult(malware_families=["WINELOADER"],
+                              relationships=[_rel("evil.example", "hosts", "WINELOADER")])
+    ents = [RawEntity(value="evil.example", entity_type=EntityType.DOMAIN)]
+    _, led = _build(ents, llm, relationship_policy=pol)
+    e = _entry(led, "evil.example", "hosts", "WINELOADER")
+    assert [(c["kind"], c.get("reason")) for c in e["changes"]] == [
+        ("reroute", None), ("verb", "policy_pin")]
+    assert e["final_type"] == "indicates"
 
 
 # ── relationships: merged, dropped ───────────────────────────────────────────

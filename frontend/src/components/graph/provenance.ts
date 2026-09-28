@@ -124,5 +124,5 @@ export function describeChange(c: LedgerChange, label: (id: string) => string): 
   if (c.kind === 'verb') {
     return `“${c.from}” → “${c.to}”: ${VERB_REASON[c.reason ?? ''] ?? c.reason ?? ''}`
   }
-  return `${c.end === 'source' ? 'Source' : 'Target'} ${label(c.from)} replaced by its Indicator ${label(c.to)} (an observable never stands opposite an SDO — ADR-0041)`
+  return `${c.end === 'source' ? 'Source' : 'Target'} ${label(c.from)} replaced by its Indicator ${label(c.to)} (an observable opposite an SDO goes through its Indicator unless STIX defines the verb on the observable itself — ADR-0041, ADR-0062)`
 }

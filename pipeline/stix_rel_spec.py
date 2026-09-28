@@ -158,6 +158,27 @@ def rel_is_allowed(src_type: str, verb: str, tgt_type: str) -> bool:
     return tgt_type in targets or ("*SCO*" in targets and tgt_type in SCO_TYPES)
 
 
+def rel_is_listed(src_type: str, verb: str, tgt_type: str) -> bool:
+    """True when `verb` is named for this exact pair: by the spec's per-object
+    relationship tables, or by a project extension (ADR-0061).
+
+    Stricter than `rel_is_allowed` on purpose.  The §3.7 common relationships
+    (``related-to``, ``duplicate-of``, ``derived-from``) are valid between any
+    two objects, so they say nothing about the pair; an unknown or empty type
+    is not given the benefit of the doubt.  Stage 4 keeps an observable as the
+    direct endpoint opposite an SDO only for such a verb, and routes every other
+    claim through the observable's Indicator (ADR-0062).
+    """
+    if not src_type or not verb or not tgt_type:
+        return False
+    verb = verb.lower()
+    for table in (_SUGGESTED, _PROJECT_EXTENSIONS):
+        targets = table.get(src_type, {}).get(verb)
+        if targets and (tgt_type in targets or ("*SCO*" in targets and tgt_type in SCO_TYPES)):
+            return True
+    return False
+
+
 def rel_is_suggested(src_type: str, verb: str, tgt_type: str) -> bool:
     """
     Return True if (src_type) --verb--> (tgt_type) is a *suggested* STIX 2.1

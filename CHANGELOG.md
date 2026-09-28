@@ -8,6 +8,30 @@ sections group by theme rather than strict semver.
 
 ### Fixed
 
+#### An observable keeps the relationships STIX 2.1 defines for it (ADR-0062), 2026-09-28
+
+ADR-0041 routed every observable opposite an SDO through its Indicator
+before checking the verb. `malware communicates-with domain-name`, `malware
+drops file`, `infrastructure consists-of ipv4-addr`, all relationships the
+spec defines on the observable itself, therefore shipped as `related-to` an
+Indicator. The mapping ledger showed it on the seeded Industroyer2 report.
+
+- The routing now applies only when the verb is not *listed* for the direct
+  pair (`stix_rel_spec.rel_is_listed`). `related-to` is valid between any two
+  objects, so it still goes through the Indicator, as ADR-0041 intended.
+- The verb judged is the one the direct edge would carry: the row's, or the
+  policy's pin for that pair of types. A pinned `malware>domain-name` rule
+  reaches extracted rows again; since ADR-0041 its lookup ran on the rerouted
+  `malware>indicator` pair.
+- The pin engine applies the same rule with the rule's own verb. A rule
+  labelled `malware communicates-with domain-name` now emits exactly that
+  edge, and no longer needs the domain to have an Indicator.
+- Measured on 7 real reports re-extracted into a throwaway database: 3 of 150
+  extracted rows no longer lose their verb. Under the Policy page's template,
+  304 of 1,245 pinned edges (24 %) had shipped as `related-to` an Indicator,
+  and none do now. Rows whose verb is listed for no form of the pair (12,
+  e.g. `malware targets ipv4-addr`) still go through the Indicator.
+
 #### Further graphic defects found by a page sweep (N1–N10), 2026-09-28
 
 Found by loading every page at 1024–1440 px, light and dark, with long file

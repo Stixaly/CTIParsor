@@ -122,7 +122,7 @@ Indicator), a deleted row visibly re-created by ATT&CK reference grounding.
 - ADR-0041 routing turns `malware communicates-with domain-name` — a
   *suggested* STIX pair — into `malware related-to indicator`. The ledger makes
   the loss visible; whether the routing should keep suggested SCO pairs is a
-  separate decision.
+  separate decision. (Decided in ADR-0062: it keeps them.)
 - A bundle built before this change has no ledger: the view classifies its
   edges from their provenance properties only and offers a rebuild.
 

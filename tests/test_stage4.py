@@ -1,3 +1,4 @@
+import pytest
 import stix2
 
 from models.schemas import EntityType, RawEntity
@@ -566,7 +567,9 @@ class TestExternalReferenceRouting:
 
 def test_observable_to_malware_relationship_routes_through_indicator():
     """ADR-0041: a relationship from an observable SCO to an SDO must be
-    re-anchored on the SCO's Indicator rather than the raw SCO itself."""
+    re-anchored on the SCO's Indicator rather than the raw SCO itself — when
+    STIX lists no such verb for the direct pair (ADR-0062): no table lists
+    `domain-name hosts malware`."""
     entities = [RawEntity(value="evil.example.org", entity_type=EntityType.DOMAIN)]
     llm = LLMEnrichmentResult(
         malware_families=["WellMess"],
@@ -599,6 +602,91 @@ def test_observable_to_malware_relationship_routes_through_indicator():
         rel.source_ref in indicators and rel.target_ref == malware.id
         for rel in relationships
     )
+
+
+@pytest.mark.parametrize("src, src_stix, verb, tgt, tgt_type, tgt_stix", [
+    ("WellMess", "malware", "communicates-with", "evil.example.org", EntityType.DOMAIN, "domain-name"),
+    ("WellMess", "malware", "communicates-with", "1.2.3.4", EntityType.IPV4, "ipv4-addr"),
+    ("WellMess", "malware", "drops", "payload.dll", EntityType.FILE, "file"),
+    ("WellMess", "malware", "downloads", "a" * 64, EntityType.SHA256, "file"),
+    ("C2 cluster", "infrastructure", "consists-of", "1.2.3.4", EntityType.IPV4, "ipv4-addr"),
+    ("C2 cluster", "infrastructure", "communicates-with", "evil.example.org", EntityType.DOMAIN,
+     "domain-name"),
+])
+def test_listed_observable_relationship_stays_on_the_observable(
+        src, src_stix, verb, tgt, tgt_type, tgt_stix):
+    """ADR-0062: STIX 2.1 defines these relationships on the observable itself.
+    Routed through the Indicator they became `<x> related-to indicator` (no table
+    lists `malware communicates-with indicator`); they ship as extracted."""
+    entities = [RawEntity(value=tgt, entity_type=tgt_type)]
+    if src_stix == "infrastructure":
+        entities.append(RawEntity(value=src, entity_type=EntityType.INFRASTRUCTURE))
+    llm = LLMEnrichmentResult(
+        malware_families=[src] if src_stix == "malware" else [],
+        relationships=[RelationshipExtracted(source_value=src, relationship_type=verb,
+                                             target_value=tgt, confidence=0.8)],
+    )
+    bundle = build_stix_bundle(entities, llm, "listed_pair")
+
+    objs = {o.id: o for o in bundle.objects}
+    from_src = [o for o in bundle.objects
+                if o.get("type") == "relationship" and objs[o.source_ref].get("type") == src_stix]
+    assert [(r.relationship_type, objs[r.target_ref].get("type")) for r in from_src] == [
+        (verb, tgt_stix)]
+
+
+def test_related_to_an_observable_still_routes_through_indicator():
+    """ADR-0062: `related-to` is valid between any two objects, so it names
+    nothing about the pair — the claim goes through the Indicator, as before."""
+    entities = [RawEntity(value="evil.example.org", entity_type=EntityType.DOMAIN)]
+    llm = LLMEnrichmentResult(
+        malware_families=["WellMess"],
+        relationships=[RelationshipExtracted(source_value="WellMess", relationship_type="related-to",
+                                             target_value="evil.example.org", confidence=0.8)],
+    )
+    bundle = build_stix_bundle(entities, llm, "related_to")
+    rel = _find_rel(bundle, "malware", "indicator")
+    assert rel is not None and rel.relationship_type == "related-to"
+    assert _find_rel(bundle, "malware", "domain-name") is None
+
+
+def test_listed_verb_is_judged_in_its_direction():
+    """ADR-0062 keeps the spec's direction: `domain-name communicates-with
+    malware` is not listed (only malware → domain-name is), so it is routed and
+    downgraded exactly as ADR-0041 did.  Flipping it would be a new claim."""
+    entities = [RawEntity(value="evil.example.org", entity_type=EntityType.DOMAIN)]
+    llm = LLMEnrichmentResult(
+        malware_families=["WellMess"],
+        relationships=[RelationshipExtracted(source_value="evil.example.org",
+                                             relationship_type="communicates-with",
+                                             target_value="WellMess", confidence=0.8)],
+    )
+    bundle = build_stix_bundle(entities, llm, "reversed")
+    rel = _find_rel(bundle, "indicator", "malware")
+    assert rel is not None and rel.relationship_type == "related-to"
+    assert _find_rel(bundle, "domain-name", "malware") is None
+
+
+def test_pinned_verb_for_the_direct_pair_decides_the_routing():
+    """ADR-0062: the verb judged is the one the direct edge would carry.  A
+    policy that pins malware>domain-name to communicates-with turns the row's
+    `uses` into a listed verb, so the edge stays on the domain."""
+    pol = {"version": 1, "global": "enforce",
+           "rules": [{"src": "malware", "verb": "communicates-with", "tgt": "domain-name",
+                      "mode": "pin", "enabled": True}],
+           "pin_evidence": {"mode": "cartesian"}}
+    entities = [RawEntity(value="evil.example.org", entity_type=EntityType.DOMAIN)]
+    llm = LLMEnrichmentResult(
+        malware_families=["WellMess"],
+        relationships=[RelationshipExtracted(source_value="WellMess", relationship_type="uses",
+                                             target_value="evil.example.org", confidence=0.8)],
+    )
+    bundle = build_stix_bundle(entities, llm, "pinned_direct", relationship_policy=pol)
+    rels = [o for o in bundle.objects if o.get("type") == "relationship"
+            and o.target_ref.startswith("domain-name--") and o.source_ref.startswith("malware--")]
+    # one edge: the row, re-verbed by the pin; the pin engine finds its key taken
+    assert [r.relationship_type for r in rels] == ["communicates-with"]
+    assert _find_rel(bundle, "malware", "indicator") is None
 
 
 def test_observable_to_observable_relationship_left_alone():
