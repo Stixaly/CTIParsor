@@ -119,7 +119,8 @@ function SegmentGroup({ options, disabled = false }: {
             border: 'none',
             cursor: 'pointer',
             background: o.active ? 'var(--accent)' : 'transparent',
-            color: o.active ? '#fff' : 'var(--ink-3)',
+            // --on-fill: white on the light themes, dark on dark's light accent
+            color: o.active ? 'var(--on-fill)' : 'var(--ink-3)',
           }}
         >
           {o.label}
@@ -279,7 +280,7 @@ export function LastRunPanel({
               border: 'none',
               cursor: 'pointer',
               background: mode === 'fair-share' ? 'var(--accent)' : 'transparent',
-              color: mode === 'fair-share' ? '#fff' : 'var(--ink-3)',
+              color: mode === 'fair-share' ? 'var(--on-fill)' : 'var(--ink-3)',
             }}
           >
             Fair share
@@ -294,7 +295,7 @@ export function LastRunPanel({
               border: 'none',
               cursor: 'pointer',
               background: mode === 'sequential' ? 'var(--accent)' : 'transparent',
-              color: mode === 'sequential' ? '#fff' : 'var(--ink-3)',
+              color: mode === 'sequential' ? 'var(--on-fill)' : 'var(--ink-3)',
             }}
           >
             Sequential

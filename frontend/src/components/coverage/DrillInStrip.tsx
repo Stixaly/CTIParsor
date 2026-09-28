@@ -136,10 +136,11 @@ export default function DrillInStrip({ tech, selection, rulesById, evidence }: {
                               <span style={{ fontFamily: '"JetBrains Mono",monospace', fontSize: 10, color: 'var(--ink-3)' }}>{r.severity}</span>
                               <span style={{
                                 fontFamily: '"JetBrains Mono",monospace', fontSize: 10,
-                                color: r.license === 'none' ? 'var(--warn)' : 'var(--ink-3)',
+                                // --warn a step toward --ink: 4.1:1 on a selected (accent-soft) row
+                                color: r.license === 'none' ? 'color-mix(in oklab, var(--warn) 75%, var(--ink))' : 'var(--ink-3)',
                                 overflowWrap: 'anywhere', minWidth: 0,
                               }}>{r.license}</span>
-                              <span style={{ fontFamily: '"JetBrains Mono",monospace', fontSize: 10, color: 'var(--ink-4)', marginLeft: 'auto' }}>
+                              <span style={{ fontFamily: '"JetBrains Mono",monospace', fontSize: 10, color: 'var(--ink-3)', marginLeft: 'auto' }}>
                                 {FORMAT_STYLE[f].ext}
                               </span>
                             </div>

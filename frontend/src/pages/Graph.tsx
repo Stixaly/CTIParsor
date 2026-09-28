@@ -1017,7 +1017,7 @@ export default function Graph() {
                       padding: '4px 9px', fontSize: 11, border: 'none',
                       cursor: 'pointer', transition: 'background .12s',
                       background: layout === opt.id ? 'var(--accent)' : 'transparent',
-                      color:      layout === opt.id ? 'white'         : 'var(--ink-3)',
+                      color:      layout === opt.id ? 'var(--on-fill)' : 'var(--ink-3)',
                     }}>
                     {opt.icon}
                     <span style={{ display: 'none' }}>{opt.label}</span>

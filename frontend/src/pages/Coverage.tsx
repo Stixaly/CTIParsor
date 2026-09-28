@@ -284,14 +284,21 @@ export default function Coverage() {
       )}
 
       {coverage && coverage.techniques_total > 0 && (
-        <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 12 }}>
+        // Tactic columns wrap onto rows as the width allows (auto-fill keeps
+        // them ≥ 196 px, unstretched on a wide screen).  In one scrolling row
+        // the columns past the right edge were easy to miss: the scrollbar sat
+        // under the tallest column, far below the visible cards.
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(196px, 1fr))',
+          gap: '16px 10px', alignItems: 'start', paddingBottom: 12,
+        }}>
           {columns.map(({ tactic, label, techs: colTechs }) => {
             // Union of rule ids across the column (a rule under two techniques
             // of the same tactic counts once).
             const colIds = [...new Set(colTechs.flatMap(t => t.ruleIds))]
             const colSel = selection.selectedOf(colIds)
             return (
-              <div key={tactic} style={{ minWidth: 196, flex: '0 0 auto' }}>
+              <div key={tactic} style={{ minWidth: 0 }}>
                 <div
                   onClick={() => selection.toggleScope(colIds)}
                   style={{
