@@ -127,7 +127,11 @@ export default function KanbanCard({ job, selected, relTime, onSelect, onAnalyse
             background: STATUS_DOT[job.status] ?? 'var(--ink-4)',
           }}
         />
+        {/* overflowWrap: file names have no spaces, so the first line used to
+            run past the card and be cut mid-name with no ellipsis; they now
+            break anywhere and the 2-line clamp ends in "…". Full name on hover. */}
         <h3
+          title={job.original_filename}
           style={{
             margin: 0,
             minWidth: 0,
@@ -140,6 +144,7 @@ export default function KanbanCard({ job, selected, relTime, onSelect, onAnalyse
             WebkitLineClamp: 2,
             WebkitBoxOrient: 'vertical',
             overflow: 'hidden',
+            overflowWrap: 'anywhere',
           } as React.CSSProperties}
         >
           {job.original_filename}
@@ -161,17 +166,23 @@ export default function KanbanCard({ job, selected, relTime, onSelect, onAnalyse
           overflow: 'hidden',
         }}
       >
-        <span style={{ whiteSpace: 'nowrap' }}>
+        {/* Still one line, but a narrow column now ends it in "…" instead of
+            cutting the time mid-word. */}
+        <span style={{ whiteSpace: 'nowrap', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {job.entity_count !== undefined
             ? `${job.entity_count} ent · ${job.relationship_count ?? 0} rel`
             : 'awaiting extraction'}
         </span>
-        <span style={{ whiteSpace: 'nowrap', color: 'var(--ink-4)' }}>·</span>
-        <span style={{ whiteSpace: 'nowrap', color: 'var(--ink-4)' }}>{relTime(job.updated_at)}</span>
+        <span style={{ whiteSpace: 'nowrap', color: 'var(--ink-4)', flexShrink: 0 }}>·</span>
+        <span style={{ whiteSpace: 'nowrap', color: 'var(--ink-4)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {relTime(job.updated_at)}
+        </span>
       </div>
 
+      {/* Wraps: in a narrow column (a half-screen window) the TLP badge and the
+          delete button used to be pushed out of the card. */}
       <div
-        style={{ paddingLeft: 13, display: 'flex', alignItems: 'center', gap: 3 }}
+        style={{ paddingLeft: 13, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 3, rowGap: 4 }}
         onClick={(e: React.MouseEvent) => e.stopPropagation()}
       >
         <TextBtn label={opening ? 'Opening…' : actionLabel} onClick={onAnalyse} disabled={opening} />

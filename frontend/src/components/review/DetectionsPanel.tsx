@@ -374,8 +374,11 @@ function ScorePill({ score }: { score: number }) {
       style={{
         flexShrink: 0, minWidth: 34, textAlign: 'center', marginTop: 1,
         fontSize: 10.5, fontFamily: 'monospace', padding: '2px 5px', borderRadius: 5,
-        background: `oklch(0.93 0.06 ${hue})`, color: `oklch(0.32 0.13 ${hue})`,
-        border: `1px solid oklch(0.70 0.10 ${hue})`,
+        // Lightness from the theme (--pill-*-l): fixed light values left a
+        // bright chip on the dark theme.
+        background: `oklch(var(--pill-bg-l) 0.06 ${hue})`,
+        color: `oklch(var(--pill-fg-l) 0.13 ${hue})`,
+        border: `1px solid oklch(var(--pill-bd-l) 0.10 ${hue})`,
       }}
     >
       {pct}

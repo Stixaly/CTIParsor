@@ -15,15 +15,18 @@
   --bg-elev:     #FFFCF6;
   --ink:         #1B1714;
   --ink-2:       #4A413B;
-  --ink-3:       #7A6E64;
-  --ink-4:       #B8AC9F;
+  /* Text greys, as contrast on --bg-soft (the darkest background):
+     ink-2 8.7:1, ink-3 5.9:1, ink-4 4.6:1.  ink-4 carried real labels
+     (section titles, counts, hints) at 1.9:1 and ink-3 sat at 4.3:1. */
+  --ink-3:       #635951;
+  --ink-4:       #756A61;
   --rule:        #DCD2C0;
   --rule-soft:   #ECE3D2;
   --accent:      #8B3A2F;
   --accent-soft: #F2DDD7;
   --ok:          #2F6B3A;
   --no:          #983131;
-  --warn:        #8A6A12;
+  --warn:        #85670F;   /* 4.6:1 as text on --bg-soft (was 4.4) */
   /* Text and marks on an --accent / --ok / --no fill.  White on the light
      themes, whose fills are dark; the dark theme's fills are light, where
      white fell to 2.2:1 (ok) and 2.9:1 (no). */
@@ -34,6 +37,11 @@
      background, 6.5:1 under --on-fill, 5.2:1 on --frost-soft. */
   --frost:       #35627F;
   --frost-soft:  #DCE7EE;
+  /* OKLCH lightness of hue-ramped pills (Detections score): light chip,
+     dark text on the light themes; the dark theme inverts them. */
+  --pill-bg-l:   0.93;
+  --pill-fg-l:   0.32;
+  --pill-bd-l:   0.70;
   --shadow-card: 0 1px 2px rgba(43,30,20,.05), 0 8px 24px -8px rgba(43,30,20,.08);
   --shadow-pop:  0 12px 32px -8px rgba(31,19,10,.18), 0 1px 0 rgba(0,0,0,.04);
 }
@@ -44,15 +52,15 @@ html[data-theme="ember"] {
   --bg-elev:     #FBF4E7;
   --ink:         #2A1A0F;
   --ink-2:       #573D2A;
-  --ink-3:       #8A6E55;
-  --ink-4:       #C2A988;
+  --ink-3:       #64503E;   /* 5.8:1 on --bg-soft (was 3.6) */
+  --ink-4:       #765E49;   /* 4.6:1 (was ~2) */
   --rule:        #D2B894;
   --rule-soft:   #E5D2B0;
   --accent:      #B8431B;
   --accent-soft: #F6D7BF;
   --ok:          #3A6E2F;
   --no:          #B5341D;
-  --warn:        #A07414;
+  --warn:        #805D10;   /* 4.6:1 (was 3.2) */
   --shadow-card: 0 1px 2px rgba(43,30,20,.05), 0 8px 24px -8px rgba(43,30,20,.08);
   --shadow-pop:  0 12px 32px -8px rgba(31,19,10,.18), 0 1px 0 rgba(0,0,0,.04);
 }
@@ -63,15 +71,15 @@ html[data-theme="parchment"] {
   --bg-elev:     #FCF6E5;
   --ink:         #2B1D08;
   --ink-2:       #5A4423;
-  --ink-3:       #8E7344;
-  --ink-4:       #C4AC73;
+  --ink-3:       #665331;   /* 5.8:1 on --bg-soft (was 3.5) */
+  --ink-4:       #78613A;   /* 4.6:1 (was ~2) */
   --rule:        #D7BE85;
   --rule-soft:   #E8D5A1;
   --accent:      #9C5A1A;
   --accent-soft: #F3DDB5;
   --ok:          #486C24;
   --no:          #9E4216;
-  --warn:        #966E10;
+  --warn:        #825F0E;   /* 4.6:1 (was 3.6) */
   --shadow-card: 0 1px 2px rgba(43,30,20,.05), 0 8px 24px -8px rgba(43,30,20,.08);
   --shadow-pop:  0 12px 32px -8px rgba(31,19,10,.18), 0 1px 0 rgba(0,0,0,.04);
 }
@@ -82,15 +90,15 @@ html[data-theme="cool"] {
   --bg-elev:     #FFFFFF;
   --ink:         #161A22;
   --ink-2:       #3D4555;
-  --ink-3:       #6B7385;
-  --ink-4:       #ADB2BD;
+  --ink-3:       #555B6A;   /* 5.8:1 on --bg-soft (was 4.1) */
+  --ink-4:       #646B7C;   /* 4.6:1 (was ~2) */
   --rule:        #D6D9E0;
   --rule-soft:   #E6E8EE;
   --accent:      #2B4FA6;
   --accent-soft: #DBE3F4;
   --ok:          #2F6B3A;
   --no:          #983131;
-  --warn:        #8A6A12;
+  --warn:        #85670F;   /* 4.6:1 (was 4.4) */
   --shadow-card: 0 1px 2px rgba(20,26,34,.04), 0 8px 24px -8px rgba(20,26,34,.08);
   --shadow-pop:  0 12px 32px -8px rgba(20,26,34,.16), 0 1px 0 rgba(0,0,0,.04);
 }
@@ -101,8 +109,10 @@ html[data-theme="dark"] {
   --bg-elev:     #211D17;
   --ink:         #F1ECDF;
   --ink-2:       #C9C0AE;
-  --ink-3:       #91897A;
-  --ink-4:       #5A5447;
+  /* As contrast on --bg-elev (the lightest background): ink-3 5.9:1,
+     ink-4 4.6:1 (was 2.2:1). */
+  --ink-3:       #A19888;
+  --ink-4:       #8D8577;
   --rule:        #2E2922;
   --rule-soft:   #25211B;
   --accent:      #E58A66;
@@ -113,6 +123,9 @@ html[data-theme="dark"] {
   --on-fill:     #14110C;   /* 8.6:1 on --ok, 6.4:1 on --no, 7.3:1 on --accent */
   --frost:       #8DBAD6;   /* ≥ 8:1 on the backgrounds, 9.1:1 under --on-fill */
   --frost-soft:  #1B2932;
+  --pill-bg-l:   0.30;
+  --pill-fg-l:   0.88;
+  --pill-bd-l:   0.50;
   --shadow-card: 0 1px 0 rgba(255,255,255,0.02) inset, 0 8px 24px -10px rgba(0,0,0,0.5);
   --shadow-pop:  0 12px 32px -8px rgba(0,0,0,.6);
   --logo-filter: invert(1) brightness(0.92);
@@ -188,7 +201,19 @@ button { font-family: inherit; cursor: pointer; }
 @media (max-width: 1280px) {
   .kbd-hint { display: none; }
 }
-.crumb-dim  { color: var(--ink-3); white-space: nowrap; }
+.crumb-dim  { color: var(--ink-3); white-space: nowrap; flex-shrink: 0; }
+.crumb-sep  { flex-shrink: 0; }
+/* The report name used to vanish below ~1100 px while both crumbs stayed
+   whole.  As the room shrinks the status crumb goes, then "Dashboard" (the
+   back button already leads there); the name keeps what is left, with an
+   ellipsis and the full name on hover. */
+.breadcrumb { container-type: inline-size; }
+@container (max-width: 380px) {
+  .crumb-dim:not(.crumb-link), .crumb-dim:not(.crumb-link) + .crumb-sep { display: none; }
+}
+@container (max-width: 260px) {
+  .crumb-link, .crumb-link + .crumb-sep { display: none; }
+}
 .crumb-link {
   background: none; border: 0; padding: 0; font: inherit; cursor: pointer;
 }
@@ -197,7 +222,7 @@ button { font-family: inherit; cursor: pointer; }
 .crumb-strong {
   color: var(--ink); font-weight: 600;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  max-width: 640px;
+  max-width: 640px; flex: 0 1 auto; min-width: 0;
 }
 .top-actions { display: flex; align-items: center; gap: 10px; }
 
@@ -283,7 +308,8 @@ button { font-family: inherit; cursor: pointer; }
    =========================================================== */
 .ribbon {
   display: grid;
-  grid-template-columns: 290px 1fr auto;
+  /* The stages take what is left and never push the others (minmax 0). */
+  grid-template-columns: minmax(0, 240px) minmax(0, 1fr) auto;
   align-items: center;
   gap: 24px;
   padding: 12px 22px;
@@ -328,6 +354,24 @@ button { font-family: inherit; cursor: pointer; }
   color: var(--ink-3); font-size: 10.5px;
 }
 .pstep-sep { color: var(--ink-4); align-self: center; font-size: 14px; }
+.ribbon-meta { min-width: 0; }
+.ribbon-meta .meta-dim {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pstep-wrap { display: flex; align-items: stretch; gap: 6px; }
+/* PipelineRibbon picks the richest mode whose cards fit: full (number,
+   label, detail) → labels (label only; the › separators give the order) →
+   numbers.  Label and detail stay in each card's tooltip. */
+.ribbon-stages:is([data-mode="labels"], [data-mode="numbers"]),
+.ribbon-stages:is([data-mode="labels"], [data-mode="numbers"]) .pstep-wrap { gap: 3px; }
+.ribbon-stages[data-mode="labels"] :is(.pstep-detail, .pstep-num) { display: none; }
+.ribbon-stages[data-mode="labels"] .pstep { padding: 6px 8px; }
+.ribbon-stages[data-mode="numbers"] .pstep-body { display: none; }
+.ribbon-stages[data-mode="numbers"] .pstep { padding: 6px; }
+@media (max-width: 1600px) {
+  /* Slimmer tallies leave the stages room for their labels. */
+  .tally { padding: 4px 8px; min-width: 52px; }
+}
 
 .ribbon-counts { display: flex; gap: 12px; }
 .tally {
@@ -466,6 +510,8 @@ html[data-density="spacious"] .doc { padding: 44px 52px 100px; }
   font-weight: 700; font-size: 26px; line-height: 1.18;
   letter-spacing: -0.015em; margin: 0 0 6px;
   color: var(--ink); text-wrap: balance;
+  /* The title is the file name: no spaces, so it ran past the column. */
+  overflow-wrap: anywhere;
 }
 .doc-byline {
   font-size: 11.5px; color: var(--ink-3);
@@ -1550,6 +1596,19 @@ html[data-theme="dark"] .rel-ev-hl {
 /* Spinner for the loading state (inline SVG path animation) */
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Referenced inline but never defined, so nothing animated: the processing
+   dialog's "Live Extractor" dot and Review's "not found" hint.  Own names —
+   Tailwind emits its own `pulse` only when `animate-pulse` is used.  Opacity
+   only: the hint is positioned with a transform. */
+@keyframes livePulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .35; }
+}
+@keyframes hintFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
 /* ===========================================================
    PROCESSING DIALOG (ProgressModal)
    Stage list beside the live graph; stacked below 760 px, where the list's
@@ -1593,18 +1652,23 @@ html[data-theme="dark"] .rel-ev-hl {
    =========================================================== */
 /* Editor beside the live preview.  The preview keeps 360 px, so beside the
    210 px sidebar an 800 px window left the editor 230 px: below 1100 px the
-   two stack and the page body scrolls instead of each column. */
+   two stack at their full height and the whole page scrolls (main).  Kept
+   at the leftover window height instead, both rows were cut to ~135 px
+   each with nothing to scroll. */
 .policy-body {
   flex: 1; min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(360px, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   overflow: hidden;
+}
+@media (min-width: 1101px) {
+  .policy-body { grid-template-columns: minmax(0, 1.45fr) minmax(360px, 1fr); }
 }
 @media (max-width: 1100px) {
   .policy-body {
-    grid-template-columns: minmax(0, 1fr);
-    grid-auto-rows: auto;
-    overflow-y: auto;
+    flex: none;
+    grid-auto-rows: max-content;
+    overflow: visible;
   }
   .policy-body > * { border-right: 0 !important; }
   .policy-preview { border-top: 1px solid var(--rule); }

@@ -52,7 +52,7 @@ export default function TopChrome({
         <span className="crumb-sep">›</span>
         <span className="crumb-dim">{status ? JOB_STATUS_LABEL[status] : 'Reports'}</span>
         <span className="crumb-sep">›</span>
-        <span className="crumb-strong">{title}</span>
+        <span className="crumb-strong" title={title}>{title}</span>
       </nav>
 
       <div className="top-actions">

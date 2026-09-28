@@ -1,3 +1,5 @@
+import { useLayoutEffect, useRef, useState } from 'react'
+
 /** Stage breakdown derived from the Job + entity/relationship lists.
  *  All fields are optional — the ribbon degrades gracefully when data is partial. */
 export interface StageInfo {
@@ -78,8 +80,36 @@ function Tally({ n, l, tone }: { n: number; l: string; tone: string }) {
   )
 }
 
+/** How much of each stage card is shown, richest first. */
+const STAGE_MODES = ['full', 'labels', 'numbers'] as const
+type StageMode = typeof STAGE_MODES[number]
+
 export default function PipelineRibbon({ filename, counts, stageInfo }: Props) {
   const stages = buildStages(filename, stageInfo)
+
+  // The six stage cards need ~1150 px: below a ~1900 px window the last ones
+  // sat behind a horizontal scroll nobody saw, and at 1024 px only two showed.
+  // Keep the richest layout that fits — full cards, then labels only, then
+  // numbers only (label and detail stay in each card's tooltip).
+  const stagesRef = useRef<HTMLDivElement>(null)
+  const [mode, setMode] = useState<StageMode>('full')
+  const signature = stages.map(s => s.detail).join('|')
+  useLayoutEffect(() => {
+    const el = stagesRef.current
+    if (!el) return
+    const fit = () => {
+      for (const m of STAGE_MODES) {
+        el.dataset.mode = m                       // measured before paint
+        if (el.scrollWidth <= el.clientWidth + 1) { setMode(m); return }
+      }
+      setMode('numbers')
+    }
+    fit()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(fit)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [signature])
 
   return (
     <div className="ribbon">
@@ -88,13 +118,14 @@ export default function PipelineRibbon({ filename, counts, stageInfo }: Props) {
           <span className="meta-dot ok" />
           Bundle ready
         </div>
-        <div className="meta-dim">{filename}</div>
+        {/* One line with an ellipsis: the name used to spill under the stages. */}
+        <div className="meta-dim" title={filename}>{filename}</div>
       </div>
 
-      <div className="ribbon-stages">
+      <div className="ribbon-stages" ref={stagesRef} data-mode={mode}>
         {stages.map((s, i) => (
-          <div key={s.key} style={{ display: 'flex', alignItems: 'stretch', gap: 6 }}>
-            <div className="pstep">
+          <div key={s.key} className="pstep-wrap">
+            <div className="pstep" title={`${s.n}. ${s.label} — ${s.detail}`}>
               <div className="pstep-num">{s.n}</div>
               <div className="pstep-body">
                 <div className="pstep-label">{s.label}</div>

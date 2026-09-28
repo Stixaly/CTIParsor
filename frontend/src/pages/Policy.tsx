@@ -708,8 +708,12 @@ function PreviewPanel({ rules, globalMode }: { rules: PolicyRule[]; globalMode: 
                 {r.kind === 'pinned' ? 'Pinned' : 'Auto'}
               </span>
               {r.override && (
+                // Tinted from --warn and the card, so it follows the theme: the
+                // fixed #FEF3C7 left pale-yellow text on pale yellow (1.6:1) in dark.
                 <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 20,
-                               background: '#FEF3C7', color: 'var(--warn)' }}>
+                               background: 'color-mix(in oklab, var(--warn) 14%, var(--bg-elev))',
+                               // a step toward --ink: plain --warn fell to 4.1:1 on its own tint
+                               color: 'color-mix(in oklab, var(--warn) 75%, var(--ink))' }}>
                   Override
                 </span>
               )}

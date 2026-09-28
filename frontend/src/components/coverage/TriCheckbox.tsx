@@ -38,7 +38,9 @@ export default function TriCheckbox({ sel, total, size = 14, title, onToggle }: 
     width: size,
     height: size,
     borderRadius: 3,
-    color: '#fff',
+    // ✓ sits on the accent (--on-fill: dark on the dark theme's light accent,
+    // where white fell to ~2.6:1); – sits on a half-tint, so it takes the ink.
+    color: mark === '–' ? 'var(--ink)' : 'var(--on-fill)',
     fontSize: size === 16 ? 9 : 8,
     fontWeight: 700,
     display: 'flex',

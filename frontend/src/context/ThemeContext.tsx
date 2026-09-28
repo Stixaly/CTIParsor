@@ -45,8 +45,10 @@ export const ACCENT_PALETTES: Record<string, {
 }> = {
   default:  { warm: '#8B3A2F', warmSoft: '#F2DDD7', dark: '#E58A66', darkSoft: '#3B231B' },
   indigo:   { warm: '#3B4FA6', warmSoft: '#DDE2F4', dark: '#8FA4F0', darkSoft: '#1F2438' },
-  teal:     { warm: '#147D7A', warmSoft: '#CDEAE8', dark: '#5BC7C2', darkSoft: '#142D2C' },
-  rose:     { warm: '#B53361', warmSoft: '#F6D5E0', dark: '#F08AAB', darkSoft: '#3A1B27' },
+  // teal and rose darkened a step: as text they fell to 3.8:1 and 4.4:1 on
+  // the Ember background; now ≥ 4.6:1 on every light theme.
+  teal:     { warm: '#116D6B', warmSoft: '#CDEAE8', dark: '#5BC7C2', darkSoft: '#142D2C' },
+  rose:     { warm: '#AF315E', warmSoft: '#F6D5E0', dark: '#F08AAB', darkSoft: '#3A1B27' },
   forest:   { warm: '#3A6B2F', warmSoft: '#D3E6CC', dark: '#82BD75', darkSoft: '#1F2E1A' },
   violet:   { warm: '#6B3FAB', warmSoft: '#E2D6F2', dark: '#B194E6', darkSoft: '#251A38' },
   graphite: { warm: '#3D3D3D', warmSoft: '#DDDDDD', dark: '#C9C9C9', darkSoft: '#2A2A2A' },

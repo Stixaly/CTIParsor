@@ -8,6 +8,34 @@ sections group by theme rather than strict semver.
 
 ### Fixed
 
+#### Further graphic defects found by a page sweep (N1–N10), 2026-09-28
+
+Found by loading every page at 1024–1440 px, light and dark, with long file
+names, hashes and URLs; the app targets 15″–38″ desktop screens.
+
+- **Dashboard**: a long report name was cut mid-line with no ellipsis on its
+  Kanban card; it now wraps within two lines ending in "…" (full name on
+  hover). In a narrow column the TLP badge and the delete button wrap
+  instead of being pushed out of the card.
+- **Review**: the document title (the file name) wraps instead of running
+  past the column. The pipeline ribbon's file name is one line with an
+  ellipsis (it spilled under the stages), and the six stage cards shrink to
+  labels, then numbers, as the width requires — below ~1900 px the last ones
+  sat behind an unseen horizontal scroll. The breadcrumb keeps the report
+  name (≥ 120 px) and shortens "Dashboard" and the status first.
+- **Contrast**: the text greys meet 4.5:1 on every background of every
+  theme (`--ink-4` carried labels at ~2:1, `--ink-3` sat at 4.3:1), as do
+  `--warn` (3.2:1 on Ember) and the teal and rose accents (3.8:1 and 4.4:1
+  on Ember). Text on
+  accent fills uses `--on-fill` in the Policy segmented controls, the graph
+  layout switcher and the coverage checkboxes (white fell to 2.6:1 on the
+  dark theme). The Policy "Override" badge and the Detections score pills
+  follow the theme (the badge was 1.6:1 on dark).
+- **Animations**: the processing dialog's live dot pulses and Review's "not
+  found" hint fades in — both named keyframes that did not exist.
+- **Coverage**: the tactic columns wrap onto rows instead of a single row
+  whose right-hand columns were reachable only through a scrollbar far below.
+
 #### Graphic defects from the interface audit (G01–G27), 2026-09-28
 
 - **Policy**: the "Auto" / "Full auto" colour (`--frost`) was never defined,

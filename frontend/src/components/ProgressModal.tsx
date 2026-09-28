@@ -254,7 +254,7 @@ export default function ProgressModal({ jobId, filename, onClose }: Props) {
         {hasGraph && (
           <div className="pm-graph">
             <div style={{ position: 'absolute', top: 16, left: 16, zIndex: 10, display: 'flex', gap: 8, alignItems: 'center', background: 'var(--bg)', border: '1px solid var(--rule)', padding: '4px 10px', borderRadius: 16, fontSize: 12, fontWeight: 500 }}>
-              <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', animation: 'pulse 2s infinite' }} />
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', animation: 'livePulse 2s ease-in-out infinite' }} />
               Live Extractor
             </div>
             <GraphCanvas

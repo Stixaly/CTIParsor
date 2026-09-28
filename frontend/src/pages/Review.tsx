@@ -995,7 +995,7 @@ export default function Review() {
             zIndex: 50,
             display: 'flex', alignItems: 'center', gap: 7,
             maxWidth: 420, textAlign: 'center',
-            animation: 'fadeIn .15s ease',
+            animation: 'hintFadeIn .15s ease',
           }}
         >
           <span style={{ fontSize: 14 }}>💬</span>
