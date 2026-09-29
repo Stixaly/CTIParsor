@@ -152,6 +152,25 @@ describe('buildBundleGraph', () => {
     expect(g.nodes.find(n => n.name === 'NewOne')?.ghost).toBe(true)
   })
 
+  it('reports a date changed since the build, and nothing when the dates match (ADR-0063)', () => {
+    const { bundle, entities, relations, ledger } = fixture()
+    const built = { ...ledger, relationships: ledger.relationships.map(l => l.stix_id === 'relationship--1'
+      ? { ...l, times: [{ kind: 'time' as const, id: 't1', role: 'start' as const, value: '2023-03',
+                          status: 'verified' as const, outcome: 'withheld' as const }] }
+      : l) }
+    const withDate = (value: string) => relations.map((r, i) => i === 0
+      ? { ...r, times: [{ id: 't1', role: 'start' as const, value, status: 'verified' as const,
+                           origin: 'llm' as const }] }
+      : r)
+    const same = buildBundleGraph(bundle, built, entities, withDate('2023-03'))
+    expect(same.diff.filter(d => d.kind === 'stale')).toEqual([])
+    const edited = buildBundleGraph(bundle, built, entities, withDate('2023-02'))
+    const stale = edited.diff.filter(d => d.kind === 'stale')
+    expect(stale.map(d => [d.reason, d.edgeId])).toEqual([['dates_changed_since_build', 'relationship--1']])
+    // A withheld date is not a rewrite of the row.
+    expect(edited.edges.find(e => e.id === 'relationship--1')?.changed).toBe(false)
+  })
+
   it('draws an object’s own reference properties as embedded links', () => {
     const bundle: StixBundle = { id: 'b', type: 'bundle', objects: [
       { id: 'domain-name--d', type: 'domain-name', value: 'evil.example', resolves_to_refs: ['ipv4-addr--i'] },

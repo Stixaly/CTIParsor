@@ -257,14 +257,16 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "")
             getattr(rel.evidence_label, "value", rel.evidence_label)
             if getattr(rel, "evidence_label", None) else "reported"
         )
-        _rel_start = rel.start_time.isoformat() if getattr(rel, "start_time", None) else None
-        _rel_stop = rel.stop_time.isoformat() if getattr(rel, "stop_time", None) else None
+        # Dates as the source states them (ADR-0063); start_time/stop_time
+        # stay NULL — the export decides the native bounds at build time.
+        from pipeline.temporal import times_to_json
         # Stored accepted, as they always were — but as the pipeline's
         # default, not anyone's decision (ADR-0058).
         rows_rel.append((
             str(uuid4()), job_id,
             rel.source_value, rel.relationship_type, rel.target_value,
-            rel.confidence, 1, rel.evidence_text, _label, _rel_start, _rel_stop,
+            rel.confidence, 1, rel.evidence_text, _label,
+            times_to_json(list(getattr(rel, "times", None) or [])),
             "default",
         ))
 
@@ -289,9 +291,9 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "")
             conn.executemany(
                 "INSERT INTO relationships "
                 "(id,job_id,source_value,relationship_type,target_value,"
-                "confidence,accepted,evidence_text,evidence_label,start_time,stop_time,"
+                "confidence,accepted,evidence_text,evidence_label,times_json,"
                 "decision_origin) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT (id) DO NOTHING",
                 rows_rel,
             )
@@ -1004,17 +1006,19 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
         if s.lower().strip() not in rejected_identities
     ]
 
-    def _row_dt(row, col: str):
-        # start_time/stop_time were added via migration; guard old rows, and a
-        # malformed stored string must never crash the finalize rebuild.
-        from datetime import datetime as _dt
-        raw = row[col] if col in row.keys() else None
-        if not raw:
-            return None
-        try:
-            return _dt.fromisoformat(raw)
-        except ValueError:
-            return None
+    def _row_times(row):
+        # ADR-0063 — the dates as stored.  A row written before it has only
+        # start_time/stop_time: legacy dates of unknown precision, kept and
+        # never re-interpreted (a stored 1 January may be a year).
+        from pipeline.temporal import legacy_assertions, times_from_json
+        keys = row.keys()
+        times = times_from_json(row["times_json"] if "times_json" in keys else None)
+        if times:
+            return times
+        return legacy_assertions(
+            row["start_time"] if "start_time" in keys else None,
+            row["stop_time"] if "stop_time" in keys else None,
+        )
 
     db_relationships = [
         RelationshipExtracted(
@@ -1028,8 +1032,7 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
                 if "evidence_label" in row.keys() and row["evidence_label"]
                 else "reported"
             ),
-            start_time=_row_dt(row, "start_time"),
-            stop_time=_row_dt(row, "stop_time"),
+            times=_row_times(row),
         )
         for row in rel_rows
     ]
@@ -1058,6 +1061,18 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
     upload_matches = list((_ROOT / "uploads").glob(f"{job_id}.*"))
     source_hash, source_bytes = load_file_bytes(upload_matches[0] if upload_matches else None)
 
+    # The report's publication date, recomputed from the stored source and
+    # text exactly as the run computed it (ADR-0063 §4) — deterministic, so
+    # nothing extra is stored.
+    try:
+        from pipeline.stage1_ingestion import extract_anchor
+        _source = next((p for p in upload_matches if p.suffix.lower() in (".txt", ".html", ".htm")),
+                       upload_matches[0] if upload_matches else None)
+        document_anchor = extract_anchor(str(_source) if _source else None, report_text)
+    except Exception as exc:
+        logger.debug(f"[finalize] document anchor unavailable: {exc}")
+        document_anchor = None
+
     # Stage 4 through the same function a pipeline run uses (ADR-0059).
     from pipeline.bundle_ledger import MappingLedger
     ledger = MappingLedger()
@@ -1073,6 +1088,7 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
         pap_level=job["pap_level"],
         cve_metadata=lookup_cves(raw_entities),
         ledger=ledger,
+        document_anchor=document_anchor,
     )
     bundle_json = bundle.serialize(pretty=True)
     ledger_json = json.dumps(ledger.to_dict())

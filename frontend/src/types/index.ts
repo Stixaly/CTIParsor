@@ -65,11 +65,55 @@ export interface Relationship {
   accepted: boolean | null
   evidence_text: string | null
   evidence_label?: EvidenceLabel
-  // STIX 2.1 Relationship SRO optional properties (spec Sec 5.1.2) — ISO 8601
-  // date strings, or null when the source text gave no explicit date.
+  // The start / end an analyst view shows (ADR-0063): the analyst's own entry,
+  // else a verified one — at the precision the source gave ("2023", "2023-03",
+  // "2023-03-12", or a timestamp).  Not the SRO's native bounds: the export
+  // policy decides those, and the ledger says why.
   start_time?: string | null
   stop_time?: string | null
+  /** Every date the source attaches to the relationship, as stored. */
+  times?: TemporalAssertion[]
   decision_origin?: DecisionOrigin | null
+}
+
+// ── Relationship dates (ADR-0063) ────────────────────────────────────────────
+// pipeline/temporal.py.  The model names and places a date; the pipeline reads
+// it and computes the status; an analyst's entry is verified by its origin.
+
+export type TemporalRole = 'start' | 'end' | 'within' | 'throughout' | 'observed'
+export type TemporalStatus = 'verified' | 'ambiguous' | 'unresolved' | 'conflict'
+
+export interface TemporalAssertion {
+  id: string
+  role: TemporalRole
+  /** The expression copied from the report; "" for an analyst or legacy date. */
+  time_text?: string
+  /** EDTF, never padded: "2023", "2023-03", "2023-03-12", a timestamp, "a/b". */
+  value?: string
+  precision?: 'year' | 'half' | 'quarter' | 'month' | 'day' | 'instant'
+  qualifier?: 'none' | 'approx' | 'early' | 'mid' | 'late' | 'before' | 'after' | 'by'
+  first_last?: 'first' | 'last'
+  alternatives?: string[]
+  anchor?: 'explicit' | 'document' | 'none'
+  anchor_source?: string
+  anchor_value?: string
+  status: TemporalStatus
+  reason?: string
+  origin: 'llm' | 'analyst' | 'legacy'
+}
+
+/** Stage 4's decision for one date of one review row (ledger `times`). */
+export interface LedgerTime {
+  kind: 'time'
+  id: string
+  role: TemporalRole
+  value?: string
+  precision?: string
+  status: TemporalStatus
+  outcome: 'exported' | 'projected' | 'withheld'
+  reason?: string
+  /** exported / projected: the native property it filled */
+  field?: 'start_time' | 'stop_time'
 }
 
 // ── Detection coverage (ADR-0006) ───────────────────────────────────────────
@@ -311,6 +355,9 @@ export interface LedgerRelationship {
   source_ref?: string
   target_ref?: string
   changes: LedgerChange[]
+  /** ADR-0063: what the export did with each of this row's dates.  Kept apart
+   *  from `changes`, which the Graph page reads as a rewrite of the row. */
+  times?: LedgerTime[]
   reason?: string
   merged_with?: string
   /** self_loop: the one object both ends resolved to */

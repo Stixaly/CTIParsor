@@ -11,8 +11,19 @@ import type { BundleEdgeInfo, BundleNodeInfo, DiffItem, DiffKind } from './build
 import { stixLabel } from './buildBundleGraph'
 import {
   EDGE_KIND_ORDER, EDGE_KIND_STYLE, EDGE_ORIGIN_LABEL, OBJECT_ORIGIN_LABEL,
-  describeChange, entityReason, relationshipReason,
+  describeChange, describeTime, entityReason, relationshipReason,
 } from './provenance'
+
+/** One row of an SRO's x_temporal_assertions (ADR-0063), as shipped. */
+type ShippedTime = {
+  id?: string; role?: string; time_text?: string; value?: string; precision?: string
+  status?: string; reason?: string; origin?: string; native?: string; projection?: string
+}
+
+function shippedTimes(sro: StixObject | null): ShippedTime[] {
+  const raw = sro?.x_temporal_assertions
+  return Array.isArray(raw) ? (raw as ShippedTime[]) : []
+}
 import { typeDot, typeInk, typeLabel, typeSoft } from '../review/tokens'
 
 const MONO: React.CSSProperties = { fontFamily: "'JetBrains Mono', ui-monospace, monospace" }
@@ -353,9 +364,28 @@ export function EdgeDetail({
               {typeof sro.x_policy_rule === 'string' && <Row k="policy rule"><span style={MONO}>{sro.x_policy_rule}</span></Row>}
               {typeof sro.x_pin_evidence === 'string' && <Row k="pin evidence">{sro.x_pin_evidence}</Row>}
               {typeof sro.x_inference_rule === 'string' && <Row k="rule"><span style={MONO}>{sro.x_inference_rule}</span></Row>}
-              {typeof sro.start_time === 'string' && <Row k="start">{sro.start_time}</Row>}
-              {typeof sro.stop_time === 'string' && <Row k="stop">{sro.stop_time}</Row>}
+              {typeof sro.start_time === 'string' && <Row k="start_time">{sro.start_time}</Row>}
+              {typeof sro.stop_time === 'string' && <Row k="stop_time">{sro.stop_time}</Row>}
             </dl>
+            {shippedTimes(sro).length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <div style={{ fontSize: 10.5, color: 'var(--ink-3)', marginBottom: 3 }}>
+                  Dates (x_temporal_assertions)
+                </div>
+                {shippedTimes(sro).map((t, i) => (
+                  <div key={t.id ?? i} style={{ fontSize: 11, lineHeight: 1.45, color: 'var(--ink-2)' }}
+                       title={t.reason ? `${t.status}: ${t.reason}` : t.status}>
+                    <span style={MONO}>{t.role}</span>{' '}
+                    {t.time_text ? <i>“{t.time_text}”</i> : <span style={{ color: 'var(--ink-3)' }}>{t.origin}</span>}{' '}
+                    <span style={MONO}>{t.value ?? '—'}{t.precision ? ` · ${t.precision}` : ''}</span>{' '}
+                    <span style={{ color: t.status === 'verified' ? 'var(--ok)' : t.status === 'conflict' ? 'var(--no)' : 'var(--warn)' }}>
+                      {t.status}
+                    </span>
+                    {t.native && <span style={{ color: 'var(--ink-3)' }}> → {t.native}{t.projection ? ' (projected)' : ''}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
             {premises.length > 0 && (
               <div style={{ marginTop: 8 }}>
                 <div style={{ fontSize: 10.5, color: 'var(--ink-3)', marginBottom: 3 }}>Composed from</div>
@@ -397,6 +427,11 @@ export function EdgeDetail({
                   {ledger.changes.map((c, j) => (
                     <div key={j} style={{ color: 'var(--warn)' }}>{describeChange(c, labelOf)}</div>
                   ))}
+                  {(ledger.times ?? []).map((t, j) => (
+                    <div key={`t${j}`} style={{ color: t.outcome === 'withheld' ? 'var(--ink-3)' : 'var(--ink-2)' }}>
+                      {describeTime(t)}
+                    </div>
+                  ))}
                   {rel === null && <div style={{ color: 'var(--no)' }}>Rejected or deleted since the bundle was built.</div>}
                 </div>
               ))}
@@ -426,6 +461,7 @@ const DIFF_GROUPS: Array<{ kind: DiffKind; title: string; hint: string; tone: 'n
 function diffReason(d: DiffItem, labelOf: (id: string) => string): string {
   if (d.reason === 'added_since_build') return 'added or restored after the build'
   if (d.reason === 'removed_since_build') return 'rejected or deleted after the build — still in the stored bundle'
+  if (d.reason === 'dates_changed_since_build') return 'its dates changed after the build'
   if (d.reason === 'merged_into_edge') return 'same edge as another row or a Stage 4 edge'
   if (d.kind === 'changed' && d.ledgerRel) return d.ledgerRel.changes.map(c => describeChange(c, labelOf)).join(' · ')
   if (d.subject === 'entity' || d.subject === 'object') return entityReason(d.reason)

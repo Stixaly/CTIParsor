@@ -6,6 +6,51 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Changed
+
+#### Relationship dates keep what the source said (ADR-0063), 2026-09-29
+
+A relationship date was the model's own ISO conversion, padded to a 1st of
+the month by `pipeline/dates.py`. Nothing checked it, and Stage 3d could
+overwrite the only quote that carried it. On 7 real reports (150
+relationships), 26 % of relationships were dated. 43 % of the dated bounds
+fell on a 1st: "April and June 2026" shipped as `2026-04-01 → 2026-06-01`.
+Only 57 % had their year in the relationship's own quote.
+
+- **The model names and places a date; the code reads and judges it.** Each
+  relationship carries `times`. Each date there has:
+  - the expression copied verbatim;
+  - its role (`start`, `end`, `within`, `throughout`, `observed`);
+  - the value the code reads from the quote, unpadded (`2021` stays a year);
+  - its precision;
+  - a status the pipeline computes (`verified`, `ambiguous`, `unresolved`,
+    `conflict`) and never takes from the model.
+- **The check is strict about quotes and dates.** A quote must be in the
+  chunk, on word boundaries (`2021` inside `CVE-2021-44228` is not a date).
+  `03/04/2023` stays ambiguous unless its own passage fixes the day/month
+  order.
+- **Relative dates are resolved by the code, only against a publication
+  date.** Sources: the URL capture's page metadata, an HTML file's
+  `<meta>`, a "Published …" header line. A PDF's print timestamp never
+  resolves "last month". The model no longer sees a reference date.
+- **Export is `faithful` by default.** `start_time`/`stop_time` are set only
+  from a verified instant. The policy's `temporal_export.mode: "day"` also
+  projects a verified day onto the whole day, labelled as such. Every date
+  ships in `x_temporal_assertions`. The ledger says per row why each date
+  was exported or not (`times`, beside `changes`). The Report gains
+  `x_source_published`, and `published` stays the build time.
+- **Duplicates keep every date.** "in 2021" and "in 2024" stay two dates;
+  the same quote read through two overlapping chunks stays one.
+- **Storage and the analyst.** Dates are stored in `relationships.times_json`.
+  Rows from before this change become legacy dates of unknown precision,
+  never re-interpreted. The review rail takes a date at any precision
+  ("2023", "March 2023") and sends only the bound that changed.
+- **Measured.** `python -m evaluation.annoctr_time` scores the normaliser on
+  AnnoCTR's TimeML layer: on test, 87.9 % of expressions read, and 99.2 %
+  right when read.
+- **Visible change for consumers.** Month- and year-precision dates no longer
+  appear in `start_time`/`stop_time`; they are in `x_temporal_assertions`.
+
 ### Fixed
 
 #### An observable keeps the relationships STIX 2.1 defines for it (ADR-0062), 2026-09-28

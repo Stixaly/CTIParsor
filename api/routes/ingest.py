@@ -9,6 +9,7 @@ UI, the source viewer and the STIX mapping all keep working unchanged.
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -22,7 +23,7 @@ from api.routes._common import start_job
 from api.routes.upload import _MARKING_LEVELS, UPLOADS_DIR
 from pipeline import web_capture
 from pipeline.regex_safety import compile_pattern
-from pipeline.stage1_ingestion import html_to_text
+from pipeline.stage1_ingestion import capture_meta_path, html_to_text
 
 logger = get_logger(__name__)
 
@@ -274,6 +275,20 @@ async def ingest_url(request: Request, body: UrlIngestRequest):
     except OSError as exc:
         dest.unlink(missing_ok=True)
         raise HTTPException(500, "Could not store the captured text") from exc
+
+    # The page's publication date, from its own metadata (ADR-0063 §4): the
+    # DOM text the pipeline reads has none of it, and the PDF's timestamp is
+    # the capture time.  Stage 1 reads it back through extract_anchor.  Losing
+    # it costs the anchor, never the capture.
+    if result.publication:
+        meta_dest = capture_meta_path(text_dest)
+        try:
+            meta_dest.parent.mkdir(parents=True, exist_ok=True)
+            meta_dest.write_text(json.dumps({"url": result.final_url,
+                                             "candidates": result.publication}),
+                                 encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Could not store the captured page's publication metadata: %s", exc)
 
     # `original_filename` stays .pdf: it is what the source viewer keys its
     # renderer off, and the PDF is what the analyst should be looking at.

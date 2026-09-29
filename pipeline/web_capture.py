@@ -21,7 +21,7 @@ import os
 import re
 import socket
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -184,6 +184,31 @@ _MAX_PDF_PAGE_PX = 19_200
 # character by character.  Neutralising position before printing is the fix;
 # emulate_media("print") is not, and was measured to change nothing at all.
 #
+# The page's own statement of when it was published (ADR-0063 §4): <meta>
+# names/properties, JSON-LD blocks, and <time> elements that say what they
+# date (itemprop).  The pipeline ingests the DOM TEXT, which has none of this,
+# so it is read here, while the browser still has the markup.  Like the others,
+# it runs through page.evaluate() and needs no page JavaScript.
+_PUBLICATION_META_JS = """
+(() => {
+  const metas = [];
+  for (const m of document.querySelectorAll('meta')) {
+    const key = m.getAttribute('property') || m.getAttribute('name') || m.getAttribute('itemprop');
+    const content = m.getAttribute('content');
+    if (key && content) metas.push([key, content]);
+  }
+  const jsonld = [];
+  for (const s of document.querySelectorAll('script[type="application/ld+json"]')) {
+    if (s.textContent && s.textContent.length < 200000) jsonld.push(s.textContent);
+  }
+  const times = [];
+  for (const t of document.querySelectorAll('time[itemprop][datetime]')) {
+    times.push([t.getAttribute('itemprop'), t.getAttribute('datetime')]);
+  }
+  return {metas: metas.slice(0, 400), jsonld: jsonld.slice(0, 20), times: times.slice(0, 50)};
+})()
+"""
+
 # This runs through page.evaluate(), which works even when the context has
 # java_script_enabled=False: that flag stops the page's own scripts, not
 # Playwright's injected evaluation.
@@ -295,6 +320,9 @@ class CaptureResult:
     # the PDF is the archive the analyst reviews, but its text layer destroys
     # 28% of the observables (ADR-0029).
     dom_text: str = ""
+    # Publication-date candidates from the page's own metadata (ADR-0063 §4),
+    # as pipeline.temporal.publication_candidates returns them.
+    publication: list = field(default_factory=list)
 
 
 def _host_is_blocked(host: str) -> bool:
@@ -795,6 +823,7 @@ def capture_url_to_pdf(
             except PlaywrightError:
                 dom_text = ""
             rendered_chars = len(dom_text)
+            publication = publication_meta_from_page(page)
 
             if rendered_chars < _MIN_RENDERED_CHARS:
                 raise CaptureError(
@@ -845,7 +874,26 @@ def capture_url_to_pdf(
         blocked_requests=blocked[0],
         rendered_chars=rendered_chars,
         dom_text=dom_text,
+        publication=publication,
     )
+
+
+def publication_meta_from_page(page) -> list[dict]:
+    """Publication-date candidates the rendered page states about itself
+    (ADR-0063 §4).  Never raises: a page with no metadata, or one that breaks
+    the evaluation, simply has no candidate."""
+    from pipeline.temporal import publication_candidates
+
+    try:
+        raw = page.evaluate(_PUBLICATION_META_JS) or {}
+        return publication_candidates(
+            [tuple(p) for p in raw.get("metas", []) if isinstance(p, list) and len(p) == 2],
+            [s for s in raw.get("jsonld", []) if isinstance(s, str)],
+            [tuple(p) for p in raw.get("times", []) if isinstance(p, list) and len(p) == 2],
+        )
+    except Exception as exc:
+        logger.debug("Publication metadata unreadable: %s", exc)
+        return []
 
 
 def suggest_filename(result: CaptureResult) -> str:

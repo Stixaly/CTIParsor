@@ -62,35 +62,125 @@ def test_relationship_resolves_via_alias():
     assert any(r.source_ref == actors[0].id for r in rels), "alias edge should resolve"
 
 
-def test_relationship_start_stop_time_and_description_propagate():
-    """STIX 2.1 §5.1.2: start_time/stop_time/description are native SRO
-    properties — an LLM relationship that carries them must produce a
-    stix2.Relationship with those same fields set, not just the x_evidence_label
-    custom property."""
-    from datetime import datetime, timezone
-
-    start = datetime(2022, 11, 4, tzinfo=timezone.utc)
-    stop = datetime(2023, 3, 1, tzinfo=timezone.utc)
-    llm = LLMEnrichmentResult(
+def _dated_llm(*times):
+    from pipeline.temporal import TemporalAssertion
+    return LLMEnrichmentResult(
         threat_actors=["APT29"],
         malware_families=["WellMess"],
-        relationships=[
-            RelationshipExtracted(
-                source_value="APT29",
-                relationship_type="uses",
-                target_value="WellMess",
-                confidence=0.9,
-                evidence_text="APT29 used WellMess between November 2022 and March 2023.",
-                start_time=start,
-                stop_time=stop,
-            )
-        ],
+        relationships=[RelationshipExtracted(
+            source_value="APT29", relationship_type="uses", target_value="WellMess",
+            confidence=0.9,
+            evidence_text="APT29 used WellMess between November 2022 and March 2023.",
+            times=[TemporalAssertion(**t) for t in times],
+        )],
     )
-    bundle = build_stix_bundle([], llm, "temporal")
-    rel = next(o for o in bundle.objects if getattr(o, "type", "") == "relationship")
-    assert rel.start_time == start
-    assert rel.stop_time == stop
+
+
+def _only_rel(bundle):
+    return next(o for o in bundle.objects if getattr(o, "type", "") == "relationship")
+
+
+def test_month_precision_dates_ship_as_assertions_not_native_bounds():
+    """ADR-0063 §7, `faithful` (the default): a verified month is carried in
+    x_temporal_assertions and never padded into start_time / stop_time."""
+    bundle = build_stix_bundle([], _dated_llm(
+        {"role": "start", "time_text": "between November 2022", "value": "2022-11",
+         "precision": "month", "status": "verified"},
+        {"role": "end", "time_text": "March 2023", "value": "2023-03",
+         "precision": "month", "status": "verified"},
+    ), "temporal")
+    rel = _only_rel(bundle)
+    assert "start_time" not in rel and "stop_time" not in rel
+    assert [(a["role"], a["value"], a["precision"]) for a in rel.x_temporal_assertions] == [
+        ("start", "2022-11", "month"), ("end", "2023-03", "month")]
     assert rel.description == "APT29 used WellMess between November 2022 and March 2023."
+
+
+def test_a_verified_instant_fills_the_native_bound():
+    from datetime import datetime, timezone
+    bundle = build_stix_bundle([], _dated_llm(
+        {"role": "start", "time_text": "2022-11-04T10:00:00Z", "value": "2022-11-04T10:00:00+00:00",
+         "precision": "instant", "status": "verified"},
+    ), "temporal")
+    rel = _only_rel(bundle)
+    assert rel.start_time == datetime(2022, 11, 4, 10, tzinfo=timezone.utc)
+    assert rel.x_temporal_assertions[0]["native"] == "start_time"
+
+
+def test_day_mode_projects_a_verified_day_and_says_so():
+    from datetime import datetime, timezone
+    llm = _dated_llm(
+        {"role": "start", "time_text": "on 4 November 2022", "value": "2022-11-04",
+         "precision": "day", "status": "verified"},
+        {"role": "end", "time_text": "on 1 March 2023", "value": "2023-03-01",
+         "precision": "day", "status": "verified"},
+    )
+    faithful = _only_rel(build_stix_bundle([], llm, "temporal"))
+    assert "start_time" not in faithful and "stop_time" not in faithful
+    day = _only_rel(build_stix_bundle([], llm, "temporal",
+                                      relationship_policy={"temporal_export": {"mode": "day"}}))
+    assert day.start_time == datetime(2022, 11, 4, tzinfo=timezone.utc)
+    assert day.stop_time == datetime(2023, 3, 1, 23, 59, 59, 999000, tzinfo=timezone.utc)
+    assert {a.get("projection") for a in day.x_temporal_assertions} == {"day"}
+
+
+def test_windows_and_unverified_dates_never_fill_native_bounds():
+    llm = _dated_llm(
+        {"role": "within", "time_text": "in 2021", "value": "2021", "precision": "year",
+         "status": "verified"},
+        {"role": "start", "time_text": "03/04/2023", "precision": "day", "status": "ambiguous",
+         "alternatives": ["2023-04-03", "2023-03-04"]},
+    )
+    rel = _only_rel(build_stix_bundle([], llm, "temporal",
+                                      relationship_policy={"temporal_export": {"mode": "day"}}))
+    assert "start_time" not in rel and "stop_time" not in rel
+    assert len(rel.x_temporal_assertions) == 2
+
+
+def test_a_duplicate_row_adds_its_dates_to_the_edge_and_the_ledger_says_why():
+    """ADR-0063 §6 — the second copy of a triple joins the first: both
+    dates ship, the edge is emitted once, and each ledger row carries the
+    decision for its own date."""
+    from pipeline.bundle_ledger import MappingLedger
+    from pipeline.temporal import TemporalAssertion
+    rel_a = RelationshipExtracted(
+        source_value="APT29", relationship_type="uses", target_value="WellMess",
+        times=[TemporalAssertion(role="within", time_text="in 2021", value="2021",
+                                 precision="year", status="verified")])
+    rel_b = rel_a.model_copy(update={"times": [TemporalAssertion(
+        role="within", time_text="in 2024", value="2024", precision="year", status="verified")]})
+    llm = LLMEnrichmentResult(threat_actors=["APT29"], malware_families=["WellMess"],
+                              relationships=[rel_a, rel_b])
+    ledger = MappingLedger()
+    bundle = build_stix_bundle([], llm, "temporal", ledger=ledger)
+    rels = [o for o in bundle.objects if getattr(o, "type", "") == "relationship"]
+    assert len(rels) == 1
+    assert sorted(a["value"] for a in rels[0].x_temporal_assertions) == ["2021", "2024"]
+    rows = [e for e in ledger.relationships if e["source_value"] == "APT29"]
+    assert [e["outcome"] for e in rows] == ["emitted", "merged"]
+    for row, year in zip(rows, ("2021", "2024")):
+        assert [(c["value"], c["outcome"], c["reason"]) for c in row["times"]] == [
+            (year, "withheld", "window_role")]
+        # A withheld date rewrites nothing: `changes` is what the Graph page
+        # paints as a rewritten row.
+        assert row["changes"] == []
+
+
+def test_report_carries_the_source_publication_date_not_a_print_timestamp():
+    from pipeline.temporal import Anchor
+    llm = _dated_llm()
+    report = next(o for o in build_stix_bundle(
+        [], llm, "temporal",
+        document_anchor=Anchor(value="2024-06-15", source="publication_meta",
+                               detail="article:published_time")).objects
+        if getattr(o, "type", "") == "report")
+    assert report.x_source_published == {"value": "2024-06-15", "source": "publication_meta",
+                                          "detail": "article:published_time"}
+    printed = next(o for o in build_stix_bundle(
+        [], llm, "temporal",
+        document_anchor=Anchor(value="2026-09-01", source="file_metadata")).objects
+        if getattr(o, "type", "") == "report")
+    assert "x_source_published" not in printed
 
 
 def test_relationship_without_dates_has_no_start_stop_time():
