@@ -6,6 +6,8 @@ cutoff in force and each prediction is then held to its own type's cutoff.
 """
 from __future__ import annotations
 
+import pytest
+
 import api.db as db
 import pipeline.thresholds as thresholds
 from models.schemas import EntityType
@@ -130,3 +132,142 @@ def test_bare_version_strings_and_short_spans_are_dropped(monkeypatch):
     monkeypatch.setattr(stage2e_gliner, "_load_gliner", lambda: fake)
     monkeypatch.setattr(stage2e_gliner, "get_threshold", _default_cutoff)
     assert [r.value for r in stage2e_gliner.extract_gliner_entities("Qakbot 0.1.16 ab")] == ["Qakbot"]
+
+
+# ── Loading the model and the batch fallback ─────────────────────────────────
+
+class _FakeGLiNERClass:
+    """Stands in for `gliner.GLiNER`: records how from_pretrained was called."""
+
+    calls: list[tuple[str, dict]] = []
+    fail: Exception | None = None
+
+    @classmethod
+    def from_pretrained(cls, model_id, **kw):
+        cls.calls.append((model_id, kw))
+        if cls.fail is not None:
+            raise cls.fail
+        return "model"
+
+
+@pytest.fixture()
+def fake_gliner_lib(monkeypatch):
+    import sys
+    import types
+
+    module = types.ModuleType("gliner")
+    module.GLiNER = _FakeGLiNERClass            # type: ignore[attr-defined]
+    _FakeGLiNERClass.calls, _FakeGLiNERClass.fail = [], None
+    monkeypatch.setitem(sys.modules, "gliner", module)
+    monkeypatch.setattr(stage2e_gliner, "_SKIP_HEAVY", False)
+    monkeypatch.setattr(stage2e_gliner, "_GLINER_ENABLED", True)
+    stage2e_gliner._load_gliner.cache_clear()
+    yield _FakeGLiNERClass
+    stage2e_gliner._load_gliner.cache_clear()
+
+
+def test_the_model_is_loaded_without_the_deprecated_resume_download(fake_gliner_lib):
+    """GLiNER defaults resume_download=False and huggingface_hub warns on any
+    value but None — the model-tests CI job printed that warning every run."""
+    assert stage2e_gliner._load_gliner() == "model"
+    assert fake_gliner_lib.calls == [(stage2e_gliner._GLINER_MODEL_ID, {"resume_download": None})]
+    assert stage2e_gliner.gliner_available() is True
+
+
+def test_a_model_that_fails_to_load_is_unavailable_not_an_error(fake_gliner_lib):
+    fake_gliner_lib.fail = OSError("401 repo not found")
+    assert stage2e_gliner._load_gliner() is None
+
+
+def test_skip_heavy_models_or_disabling_gliner_loads_nothing(fake_gliner_lib, monkeypatch):
+    monkeypatch.setattr(stage2e_gliner, "_SKIP_HEAVY", True)
+    assert stage2e_gliner._load_gliner() is None and stage2e_gliner.gliner_available() is False
+    stage2e_gliner._load_gliner.cache_clear()
+    monkeypatch.setattr(stage2e_gliner, "_SKIP_HEAVY", False)
+    monkeypatch.setattr(stage2e_gliner, "_GLINER_ENABLED", False)
+    assert stage2e_gliner._load_gliner() is None and stage2e_gliner.gliner_available() is False
+    assert fake_gliner_lib.calls == []
+
+
+def test_without_the_gliner_library_the_stage_is_unavailable(monkeypatch):
+    import sys
+
+    monkeypatch.setitem(sys.modules, "gliner", None)       # import gliner -> ImportError
+    monkeypatch.setattr(stage2e_gliner, "_SKIP_HEAVY", False)
+    monkeypatch.setattr(stage2e_gliner, "_GLINER_ENABLED", True)
+    stage2e_gliner._load_gliner.cache_clear()
+    try:
+        assert stage2e_gliner.gliner_available() is False
+        assert stage2e_gliner._load_gliner() is None
+    finally:
+        stage2e_gliner._load_gliner.cache_clear()
+
+
+class _NoBatchGLiNER(_FakeGLiNER):
+    """A model whose batch call fails: each chunk is retried on its own, and a
+    chunk that fails again contributes nothing instead of sinking the others."""
+
+    def predict_entities(self, texts, labels, threshold, **kw):
+        if not isinstance(texts, str):
+            raise RuntimeError("batch API broken")
+        if "Broken" in texts:
+            raise RuntimeError("cannot read this chunk")
+        return super().predict_entities(texts, labels, threshold, **kw)
+
+
+def test_a_failing_batch_falls_back_to_one_call_per_chunk(monkeypatch):
+    fake = _NoBatchGLiNER([_pred("malware family", 0.9, "Emotet")])
+    monkeypatch.setattr(stage2e_gliner, "_load_gliner", lambda: fake)
+    monkeypatch.setattr(stage2e_gliner, "get_threshold", _default_cutoff)
+    monkeypatch.setattr(stage2e_gliner, "_CHUNK_CHARS", 40)
+    monkeypatch.setattr(stage2e_gliner, "_OVERLAP_CHARS", 0)
+
+    text = "Emotet spread through the mail again.   Broken chunk that the model rejects."
+    results = stage2e_gliner.extract_gliner_entities(text)
+
+    assert [r.value for r in results] == ["Emotet"]
+    assert len(fake.calls) == 1            # the one chunk that answered
+
+
+@pytest.mark.parametrize("raw", [[], [_pred("malware family", 0.9, "Emotet")]])
+def test_degenerate_batch_shapes_are_normalised(monkeypatch, raw):
+    """An empty answer, or a flat list for a one-chunk batch, is not an error."""
+    class _Flat:
+        def predict_entities(self, texts, labels, threshold, **kw):
+            return list(raw)
+
+    monkeypatch.setattr(stage2e_gliner, "_load_gliner", lambda: _Flat())
+    monkeypatch.setattr(stage2e_gliner, "get_threshold", _default_cutoff)
+    values = [r.value for r in stage2e_gliner.extract_gliner_entities("Emotet again.")]
+    assert values == [p["text"] for p in raw]
+
+
+def test_the_registry_wrapper_delegates_to_the_module(monkeypatch):
+    monkeypatch.setattr(stage2e_gliner, "gliner_available", lambda: True)
+    monkeypatch.setattr(stage2e_gliner, "extract_gliner_entities", lambda text: [text])
+    stage = stage2e_gliner.GLiNERStage(config=None)
+    assert stage.name == "gliner" and stage.available() is True
+    assert stage.extract("x") == ["x"]
+
+
+def test_merge_defers_to_precise_sources_for_names_only():
+    from models.schemas import RawEntity
+
+    existing = [
+        RawEntity(value="Emotet", entity_type=EntityType.MALWARE, source="gazetteer"),
+        RawEntity(value="Lazarus", entity_type=EntityType.THREAT_ACTOR, source="alias_list"),
+        RawEntity(value="healthcare", entity_type=EntityType.IDENTITY, source="gliner"),
+    ]
+    found = [
+        RawEntity(value="emotet", entity_type=EntityType.MALWARE, source="gliner"),       # gazetteer has it
+        RawEntity(value="Lazarus", entity_type=EntityType.THREAT_ACTOR, source="gliner"),  # same key
+        RawEntity(value="Healthcare", entity_type=EntityType.IDENTITY, source="gliner"),   # same key
+        RawEntity(value="QakBot", entity_type=EntityType.MALWARE, source="gliner"),
+        RawEntity(value="Emotet", entity_type=EntityType.CAMPAIGN, source="gliner"),      # other type
+    ]
+
+    merged = stage2e_gliner._merge_gliner_into(existing, found)
+
+    assert merged[:3] == existing
+    assert [(e.value, e.entity_type) for e in merged[3:]] == [
+        ("QakBot", EntityType.MALWARE), ("Emotet", EntityType.CAMPAIGN)]

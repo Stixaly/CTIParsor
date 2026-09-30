@@ -139,6 +139,8 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 | Layer | File | ~Tests | Covers |
 |---|---|---:|---|
 | Ingestion | `test_stage1.py` | 8 | text ingestion, chunking, overlap, unsupported formats |
+| Ingestion | `test_stage1_pdf_paths.py` | 31 | per-page scan detection, mixed and fully scanned PDFs (OCR in page batches, failures degrade to the text layer), markitdown fallback, PDF/DOCX creation dates, the document anchor from a capture sidecar or HTML metadata |
+| Ingestion | `test_upload_route.py` | 17 | `/api/upload`: TLP/PAP markings, extension and MIME checks, the `filetype` fallback without libmagic, size limit, full queue, disk errors |
 | Ingestion | `test_ingest_routes.py` | 26 | job creation, TLP validation, URL capture, HTML detection |
 | Ingestion | `test_web_capture.py` | 38 | URL sanitization, SSRF guards, PDF rendering, lazy loading |
 | **Figures** | `test_figure_triage.py` | 12 | size filtering, aspect guards, PDF source detection |
@@ -149,12 +151,13 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 | **Figures** | `test_figure_context.py` | 12 | prompt context blocks, the ban on copying context into `verbatim_text`, per-figure bands, cache-key separation |
 | Extraction | `test_stage2.py` | 75 | IoC extraction, refang/defang, hash recovery, filename handling |
 | NER | `test_stage2d_cyner.py` | 4 | CyNER label mapping, entity extraction, model fallback |
+| NER | `test_stage2e_gliner.py` | 16 | per-type cutoffs, model loading (no deprecated `resume_download`), batch fallback, merge precedence |
 | NER | `test_stage_registry.py` | 4 | registry merging, deduplication, case insensitivity |
 | **Aliases** | `test_aliases.py` | 6 | alias resolution, MITRE ID mapping, surface forms |
 | **Aliases** | `test_alias_disambiguation.py` | 11 | type-aware resolution, alias isolation, canonical name handling |
 | LLM enrich | `test_stage3.py` | 42 | LLM enrichment, JSON parsing, deduplication, prompt sanitization |
 | LLM enrich | `test_stage3_providers.py` | 5 | readiness gating for anthropic, gemini, mistral and the OpenAI-compatible local providers |
-| **CVE enrichment** | `test_cve_enrichment.py` | 7 | CVE id validation, the path-traversal guard before any URL, opt-in network flag, fetch cap, remembered misses |
+| **CVE enrichment** | `test_cve_enrichment.py` | 25 | CVE id validation, the path-traversal guard before any URL, opt-in network flag, fetch and time caps, CIRCL CVE 5.x parsing (ADP then CNA scores), the PostgreSQL cache and its remembered misses |
 | Hallucination filter | `test_stage3b.py` | 11 | hallucination filtering, entity presence checks, allow-list bypass |
 | **TTP precision** | `test_ttp_precision.py` | 14 | threshold resolution, semantic confidence, subsumption, verification |
 | **TTP precision** | `test_ttp_volume_controls.py` | 16 | cross-source dedup, corroboration floors, taxonomy filtering |
@@ -181,6 +184,7 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 | **Relationship policy** | `test_policy_last_run.py` | 17 | stats extraction, database queries, bundle handling |
 | **Relationship policy** | `test_policy_rule_validation.py` | 15 | policy validation, API rejection, graph survival |
 | **Rule adapters** | `test_sigma_adapter.py` | 8 | rule parsing, tactic skipping, registry loading |
+| **Rule adapters** | `test_suricata_yara_adapters.py` | 17 | Suricata and YARA corpora end to end: ids, severity, header atoms from bracketed lists, dedup keys, private rules, file extensions |
 | **Rule adapters** | `test_sigma_negation.py` | 15 | negation logic, selector expansion, condition parsing |
 | **Rule adapters** | `test_multiformat_atoms.py` | 47 | atom extraction, buffer handling, negation, metadata |
 | **Rule adapters** | `test_escape_unescaping.py` | 12 | YARA/Suricata unescaping, backslash handling, edge cases |
@@ -196,13 +200,18 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 | **Detection coverage** | `test_detection_coverage.py` | 48 | scoring policy, format splitting, export selection, evidence |
 | **Detection coverage** | `test_detection_artifacts.py` | 26 | artifact scoring, evidence capping, folding, vocabulary |
 | **Detection coverage** | `test_detection_phases.py` | 13 | tactic mapping, off-matrix handling, phase counting |
+| **Detection coverage** | `test_mitre_db.py` | 8 | ATT&CK/CAPEC index lookup and search ranking, missing or corrupt index |
 | **Detection coverage** | `test_coverage_artifacts_api.py` | 5 | artifact coverage routes, payload shape, 404 handling |
 | **Export filters** | `test_export_filters.py` | 13 | facet totals, format filtering, license exclusion, manifest |
 | **Export filters** | `test_rule_lookup.py` | 8 | rule lookup, metadata retrieval, license handling |
 | **Rule synthesis** | `test_synth_sigma.py` | 47 | rule synthesis, value validation, path escaping, stability |
 | API | `test_api_routes.py` | 11 | health checks, job listing, upload validation, progress |
 | API | `test_relationships_api.py` | 4 | relationship creation, label coercion, patch validation |
-| API | `test_settings_api.py` | 5 | corpus listing, overlay management, rebuild ingestion |
+| API | `test_settings_api.py` | 31 | corpus listing, overlay management, rebuild ingestion, formats, unsafe paths/remotes/tarballs, enable/disable, per-corpus sync |
+| API | `test_jobs_routes.py` | 23 | job list/get/status, finalize, delete (rows and every file), retention sweep, source file, bundle and ledger |
+| API | `test_entities_api.py` | 13 | manual entities, edit, bulk accept/reject/reset, delete, refusals |
+| API | `test_policy_api.py` | 22 | relationship policy round trip, default fallback, every refused shape |
+| API | `test_logging_config.py` | 9 | request ids, JSON/text formatters, `setup_logging` handlers, log helpers |
 | Persistence | `test_persistence.py` | 7 | backup consistency, migration idempotency, label persistence |
 | Persistence | `test_db_transaction.py` | 6 | transaction rollback, commit, exception handling |
 | Persistence | `test_container_env.py` | 4 | `CTIPARSOR_GIT_REV` fallback when `git` is absent or fails (ADR-0044) — `_path_from_env`/`BACKUP_DIR` and `CTIPARSOR_DB_PATH` were removed along with SQLite (ADR-0053) |

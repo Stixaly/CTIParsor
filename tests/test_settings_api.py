@@ -163,3 +163,91 @@ def test_create_corpus_rejects_an_upload_pack_flag_as_the_git_remote(temp_db, te
         "name": "evil", "git": "--upload-pack=touch /tmp/pwned",
     })
     assert r.status_code == 400
+
+
+# ── Formats, validation, enable/disable and per-corpus sync ─────────────────
+
+def test_formats_list_every_known_format_with_its_counts(temp_db, temp_db_client, tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+    temp_db_client.post("/api/settings/corpora/rebuild")
+    temp_db_client.post("/api/settings/corpora", json={"name": "et", "adapter": "suricata"})
+
+    formats = {f["format"]: f for f in temp_db_client.get("/api/settings/formats").json()["formats"]}
+
+    assert set(formats) >= {"sigma", "suricata", "yara"}
+    assert formats["sigma"] == {"format": "sigma", "available": True, "corpora": 1, "rules": 1}
+    assert formats["suricata"]["corpora"] == 1 and formats["yara"]["corpora"] == 0
+
+
+def test_a_configured_format_without_a_parser_stays_visible(temp_db, temp_db_client, tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(settings_mod, "_ADAPTERS", {"sigma": object()})
+
+    r = temp_db_client.post("/api/settings/corpora", json={"name": "sig-base", "adapter": "YARA"})
+    assert "no parser in this build" in r.json()["warning"] and "Available now: sigma" in r.json()["warning"]
+    formats = {f["format"]: f for f in temp_db_client.get("/api/settings/formats").json()["formats"]}
+    assert formats["yara"]["available"] is False and formats["yara"]["corpora"] == 1
+
+
+@pytest.mark.parametrize("body,message", [
+    ({"name": "   "}, "name is required"),
+    ({"name": "x", "git": "https://h/x.git", "tarball": "https://h/x.tgz"}, "not both"),
+    ({"name": "x", "tarball": "file:///etc/passwd"}, "not a safe URL"),
+    ({"name": "x", "tarball": "http://127.0.0.1/rules.tgz"}, "not a safe URL"),
+])
+def test_create_refuses_an_incomplete_or_unsafe_corpus(temp_db, temp_db_client, tmp_path, monkeypatch,
+                                                       body, message):
+    _setup(tmp_path, monkeypatch)
+    r = temp_db_client.post("/api/settings/corpora", json=body)
+    assert r.status_code == 400 and message in r.json()["detail"]
+
+
+def test_a_corpus_can_be_disabled_and_enabled_again(temp_db, temp_db_client, tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+
+    off = temp_db_client.patch("/api/settings/corpora/demo", json={"enabled": False}).json()
+    assert off["corpora"][0]["enabled"] is False
+    on = temp_db_client.patch("/api/settings/corpora/demo", json={"enabled": True}).json()
+    assert on["corpora"][0]["enabled"] is True and on["corpora"][0]["license"] == "DRL-1.1"
+    assert temp_db_client.patch("/api/settings/corpora/nope", json={"enabled": True}).status_code == 404
+
+
+def _registry(tmp_path, monkeypatch, entry: str):
+    cfg = tmp_path / "detection_corpora.yaml"
+    cfg.write_text("corpora:\n" + entry, encoding="utf-8")
+    monkeypatch.setattr(settings_mod, "_CONFIG", cfg)
+
+
+@pytest.mark.parametrize("entry,status,message", [
+    ("  - name: manual\n    path: ./corpora/manual\n", 400, "managed manually"),
+    ("  - name: secret\n    git: git@github.com:org/secret.git\n    path: ./corpora/secret\n"
+     "    private: true\n", 400, "is private"),
+])
+def test_sync_refuses_manual_and_private_corpora(temp_db, temp_db_client, tmp_path, monkeypatch,
+                                                 entry, status, message):
+    _registry(tmp_path, monkeypatch, entry)
+    monkeypatch.setattr(settings_mod, "sync_corpus", lambda c: pytest.fail("must not fetch"))
+    name = entry.split("name: ")[1].split("\n")[0]
+    r = temp_db_client.post(f"/api/settings/corpora/{name}/sync")
+    assert r.status_code == status and message in r.json()["detail"]
+    assert temp_db_client.post("/api/settings/corpora/nope/sync").status_code == 404
+
+
+def test_a_failed_sync_is_a_502(temp_db, temp_db_client, tmp_path, monkeypatch):
+    _registry(tmp_path, monkeypatch, "  - name: pub\n    git: https://h/pub.git\n    path: ./corpora/pub\n")
+    monkeypatch.setattr(settings_mod, "sync_corpus", lambda c: (False, "fatal: repository not found"))
+    r = temp_db_client.post("/api/settings/corpora/pub/sync")
+    assert r.status_code == 502 and "repository not found" in r.json()["detail"]
+
+
+def test_a_successful_sync_reingests_the_store(temp_db, temp_db_client, tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+    cfg = settings_mod._CONFIG
+    cfg.write_text(cfg.read_text(encoding="utf-8") + "    git: https://h/demo.git\n", encoding="utf-8")
+    synced = []
+    monkeypatch.setattr(settings_mod, "sync_corpus", lambda c: synced.append(c["name"]) or (True, "up to date"))
+
+    r = temp_db_client.post("/api/settings/corpora/demo/sync").json()
+
+    assert synced == ["demo"] and r["detail"] == "up to date"
+    assert r["corpora"][0]["rules"] == 1                # rebuilt from the local clone
