@@ -138,7 +138,10 @@ def _load_gliner():
         return None
     try:
         from gliner import GLiNER
-        model = GLiNER.from_pretrained(_GLINER_MODEL_ID)
+        # GLiNER defaults resume_download to False and forwards it to
+        # huggingface_hub's snapshot_download, which warns on any value but
+        # None ("deprecated and ignored").  None is the hub's own "not passed".
+        model = GLiNER.from_pretrained(_GLINER_MODEL_ID, resume_download=None)
         logger.info(f"GLiNER model loaded: {_GLINER_MODEL_ID}")
         return model
     except ImportError:
