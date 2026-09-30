@@ -24,6 +24,16 @@ from pipeline.orchestrator import (
 REPO = Path(__file__).resolve().parents[1]
 
 
+@pytest.fixture(autouse=True)
+def _no_heavy_models(monkeypatch):
+    """SKIP_HEAVY_MODELS for this module, whatever the environment says: the
+    model-tests CI job installs CyNER/GLiNER/embeddings and leaves the flag
+    unset, which made Stage 2d run and the stage report differ from the one
+    asserted here.  These tests are about the orchestrator, not the models."""
+    for module in ("pipeline.stage2c_ttp_semantic", "pipeline.stage2d_cyner", "pipeline.stage2e_gliner"):
+        monkeypatch.setattr(f"{module}._SKIP_HEAVY", True)
+
+
 def _opts(**kw) -> RunOptions:
     """Fixed options: nothing read from the developer's .env."""
     kw.setdefault("disabled", frozenset({"2f"}))   # the CVE cache needs a database

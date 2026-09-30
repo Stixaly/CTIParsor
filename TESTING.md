@@ -139,6 +139,8 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 | Layer | File | ~Tests | Covers |
 |---|---|---:|---|
 | Ingestion | `test_stage1.py` | 8 | text ingestion, chunking, overlap, unsupported formats |
+| Ingestion | `test_stage1_pdf_paths.py` | 31 | per-page scan detection, mixed and fully scanned PDFs (OCR in page batches, failures degrade to the text layer), markitdown fallback, PDF/DOCX creation dates, the document anchor from a capture sidecar or HTML metadata |
+| Ingestion | `test_upload_route.py` | 17 | `/api/upload`: TLP/PAP markings, extension and MIME checks, the `filetype` fallback without libmagic, size limit, full queue, disk errors |
 | Ingestion | `test_ingest_routes.py` | 26 | job creation, TLP validation, URL capture, HTML detection |
 | Ingestion | `test_web_capture.py` | 38 | URL sanitization, SSRF guards, PDF rendering, lazy loading |
 | **Figures** | `test_figure_triage.py` | 12 | size filtering, aspect guards, PDF source detection |
@@ -149,12 +151,14 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 | **Figures** | `test_figure_context.py` | 12 | prompt context blocks, the ban on copying context into `verbatim_text`, per-figure bands, cache-key separation |
 | Extraction | `test_stage2.py` | 75 | IoC extraction, refang/defang, hash recovery, filename handling |
 | NER | `test_stage2d_cyner.py` | 4 | CyNER label mapping, entity extraction, model fallback |
+| NER | `test_stage2e_gliner.py` | 16 | per-type cutoffs, model loading (no deprecated `resume_download`), batch fallback, merge precedence |
 | NER | `test_stage_registry.py` | 4 | registry merging, deduplication, case insensitivity |
 | **Aliases** | `test_aliases.py` | 6 | alias resolution, MITRE ID mapping, surface forms |
 | **Aliases** | `test_alias_disambiguation.py` | 11 | type-aware resolution, alias isolation, canonical name handling |
 | LLM enrich | `test_stage3.py` | 42 | LLM enrichment, JSON parsing, deduplication, prompt sanitization |
 | LLM enrich | `test_stage3_providers.py` | 5 | readiness gating for anthropic, gemini, mistral and the OpenAI-compatible local providers |
-| **CVE enrichment** | `test_cve_enrichment.py` | 7 | CVE id validation, the path-traversal guard before any URL, opt-in network flag, fetch cap, remembered misses |
+| LLM enrich | `test_stage3_calls.py` | 75 | client construction, provider diagnostics, Anthropic/OpenAI-compatible calls and retries, dispatch, repair of a truncated answer (never collapsed to one nested object), `enrich_chunk`/`enrich_all_chunks`/`enrich_document_relations` branches |
+| **CVE enrichment** | `test_cve_enrichment.py` | 25 | CVE id validation, the path-traversal guard before any URL, opt-in network flag, fetch and time caps, CIRCL CVE 5.x parsing (ADP then CNA scores), the PostgreSQL cache and its remembered misses |
 | Hallucination filter | `test_stage3b.py` | 11 | hallucination filtering, entity presence checks, allow-list bypass |
 | **TTP precision** | `test_ttp_precision.py` | 14 | threshold resolution, semantic confidence, subsumption, verification |
 | **TTP precision** | `test_ttp_volume_controls.py` | 16 | cross-source dedup, corroboration floors, taxonomy filtering |
@@ -166,6 +170,7 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 | **Evidence spans** | `test_merge_keeps_evidence.py` | 10 | evidence preservation, confidence ranking, deduplication |
 | **Evidence labels** | `test_evidence_consensus.py` | 4 | label normalization, STIX properties, consensus boosting |
 | STIX mapping | `test_stage4.py` | 66 | SDO/SCO/SRO build, alias merging, IoC coverage, observable routing (ADR-0041, ADR-0062) |
+| STIX mapping | `test_stage4_paths.py` | 52 | every observable to its SCO and pattern, named SDOs, PAP, embedded-rule Indicators, pin budget/grounding/malformed policies, relationship guards, CVE/CVSS and campaign merges, stix2 refusals |
 | STIX mapping | `test_stix_rel_spec.py` | 4 | listed vs allowed relationships: common verbs, unknown types, direction |
 | STIX mapping | `test_bundle_ledger.py` | 20 | mapping ledger: every row outcome and change, origins, 4b alias merge, API round-trip (ADR-0061) |
 | STIX mapping | `test_stix_self_edges.py` | 4 | self-edge prevention, endpoint validation, bundle integrity |
@@ -181,6 +186,7 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 | **Relationship policy** | `test_policy_last_run.py` | 17 | stats extraction, database queries, bundle handling |
 | **Relationship policy** | `test_policy_rule_validation.py` | 15 | policy validation, API rejection, graph survival |
 | **Rule adapters** | `test_sigma_adapter.py` | 8 | rule parsing, tactic skipping, registry loading |
+| **Rule adapters** | `test_suricata_yara_adapters.py` | 17 | Suricata and YARA corpora end to end: ids, severity, header atoms from bracketed lists, dedup keys, private rules, file extensions |
 | **Rule adapters** | `test_sigma_negation.py` | 15 | negation logic, selector expansion, condition parsing |
 | **Rule adapters** | `test_multiformat_atoms.py` | 47 | atom extraction, buffer handling, negation, metadata |
 | **Rule adapters** | `test_escape_unescaping.py` | 12 | YARA/Suricata unescaping, backslash handling, edge cases |
@@ -196,16 +202,22 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 | **Detection coverage** | `test_detection_coverage.py` | 48 | scoring policy, format splitting, export selection, evidence |
 | **Detection coverage** | `test_detection_artifacts.py` | 26 | artifact scoring, evidence capping, folding, vocabulary |
 | **Detection coverage** | `test_detection_phases.py` | 13 | tactic mapping, off-matrix handling, phase counting |
+| **Detection coverage** | `test_mitre_db.py` | 8 | ATT&CK/CAPEC index lookup and search ranking, missing or corrupt index |
 | **Detection coverage** | `test_coverage_artifacts_api.py` | 5 | artifact coverage routes, payload shape, 404 handling |
 | **Export filters** | `test_export_filters.py` | 13 | facet totals, format filtering, license exclusion, manifest |
 | **Export filters** | `test_rule_lookup.py` | 8 | rule lookup, metadata retrieval, license handling |
 | **Rule synthesis** | `test_synth_sigma.py` | 47 | rule synthesis, value validation, path escaping, stability |
 | API | `test_api_routes.py` | 11 | health checks, job listing, upload validation, progress |
 | API | `test_relationships_api.py` | 4 | relationship creation, label coercion, patch validation |
-| API | `test_settings_api.py` | 5 | corpus listing, overlay management, rebuild ingestion |
+| API | `test_settings_api.py` | 31 | corpus listing, overlay management, rebuild ingestion, formats, unsafe paths/remotes/tarballs, enable/disable, per-corpus sync |
+| API | `test_jobs_routes.py` | 23 | job list/get/status, finalize, delete (rows and every file), retention sweep, source file, bundle and ledger |
+| API | `test_entities_api.py` | 13 | manual entities, edit, bulk accept/reject/reset, delete, refusals |
+| API | `test_policy_api.py` | 22 | relationship policy round trip, default fallback, every refused shape |
+| API | `test_logging_config.py` | 9 | request ids, JSON/text formatters, `setup_logging` handlers, log helpers |
 | Persistence | `test_persistence.py` | 7 | backup consistency, migration idempotency, label persistence |
 | Persistence | `test_db_transaction.py` | 6 | transaction rollback, commit, exception handling |
 | Persistence | `test_container_env.py` | 4 | `CTIPARSOR_GIT_REV` fallback when `git` is absent or fails (ADR-0044) — `_path_from_env`/`BACKUP_DIR` and `CTIPARSOR_DB_PATH` were removed along with SQLite (ADR-0053) |
+| Queue | `test_worker.py` | 30 | the worker's terminal states (no bundle, timeout, abort, reclaimed, failed backup), hook guards, subprocess thread caps, the crash watcher, the finalize rebuild applying reviewer rejections and reading legacy/ADR-0063 dates |
 | Queue | `test_job_queue.py` | 14 | the queue loop (ADR-0046): atomic claim under 8 threads, lease-based orphan requeue, heartbeat scoping, slot accounting with a fake spawn, `run_pipeline_async` under roles `api` and `all`, `--once` |
 | Persistence | `test_db_backend.py` | 12 | the PostgreSQL adapter without a server: `?`→`%s` outside literals, `%`→`%%`, the `Row` type, `backend()`/`get_conn()` requiring `DATABASE_URL` (ADR-0053), a fake psycopg connection proving `with` never closes and `transaction()` issues plain `BEGIN` (ADR-0045) |
 | Persistence | `test_db_postgres.py` | 10 | skipped unless `CTIPARSOR_TEST_DATABASE_URL` is set (every other DB-touching test needs it too, via `temp_db` — ADR-0053): round trips, SSE resume ids, upserts, cascade, the coverage call without `jobs_conn`, the API through `temp_db_client`, and both migration scripts end to end (ADR-0045, ADR-0053) |

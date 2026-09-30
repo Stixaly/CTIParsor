@@ -22,7 +22,7 @@ import logging.handlers
 import os
 import sys
 from contextvars import ContextVar
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from pipeline.env_flags import env_int
@@ -99,7 +99,8 @@ class JSONFormatter(logging.Formatter):
         }
 
         if self.include_timestamp:
-            log_data["timestamp"] = datetime.utcnow().isoformat() + "Z"
+            # Same "…T09:38:30.277123Z" as the deprecated utcnow().isoformat() + "Z".
+            log_data["timestamp"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         if self.include_level:
             log_data["level"] = record.levelname

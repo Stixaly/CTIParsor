@@ -1346,20 +1346,28 @@ def _parse_llm_response(raw_text: str) -> LLMEnrichmentResult | None:
     # the LLM output, ignoring any surrounding prose or markdown fences.
     decoder = json.JSONDecoder()
     parsed_json: dict | None = None
+    first = raw_text.find("{")
     for i, ch in enumerate(raw_text):
         if ch == "{":
             try:
                 obj, _ = decoder.raw_decode(raw_text, i)
-                if isinstance(obj, dict):
-                    parsed_json = obj
-                    break
             except json.JSONDecodeError:
                 continue
+            if isinstance(obj, dict):
+                # An object nested in an outer one that never closes is one
+                # TTP or relationship of a truncated answer, not the answer:
+                # taking it returned an empty result for the whole chunk.
+                # Repair or salvage the outer object below instead.
+                if i > first and _unclosed_stack(raw_text[first:i])[0]:
+                    break
+                parsed_json = obj
+                break
 
     # Response was likely cut off by max_tokens — try to repair the dangling
-    # structure before giving up entirely.
-    if parsed_json is None:
-        completed = _try_complete_truncated_json(raw_text)
+    # structure before giving up entirely.  From the first "{": a ```json
+    # fence or a sentence before it would otherwise defeat the repair.
+    if parsed_json is None and first >= 0:
+        completed = _try_complete_truncated_json(raw_text[first:])
         if completed is not None:
             try:
                 parsed_json = json.loads(completed)
