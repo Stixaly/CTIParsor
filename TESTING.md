@@ -157,6 +157,7 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 | **Aliases** | `test_alias_disambiguation.py` | 11 | type-aware resolution, alias isolation, canonical name handling |
 | LLM enrich | `test_stage3.py` | 42 | LLM enrichment, JSON parsing, deduplication, prompt sanitization |
 | LLM enrich | `test_stage3_providers.py` | 5 | readiness gating for anthropic, gemini, mistral and the OpenAI-compatible local providers |
+| LLM enrich | `test_stage3_calls.py` | 75 | client construction, provider diagnostics, Anthropic/OpenAI-compatible calls and retries, dispatch, repair of a truncated answer (never collapsed to one nested object), `enrich_chunk`/`enrich_all_chunks`/`enrich_document_relations` branches |
 | **CVE enrichment** | `test_cve_enrichment.py` | 25 | CVE id validation, the path-traversal guard before any URL, opt-in network flag, fetch and time caps, CIRCL CVE 5.x parsing (ADP then CNA scores), the PostgreSQL cache and its remembered misses |
 | Hallucination filter | `test_stage3b.py` | 11 | hallucination filtering, entity presence checks, allow-list bypass |
 | **TTP precision** | `test_ttp_precision.py` | 14 | threshold resolution, semantic confidence, subsumption, verification |
@@ -169,6 +170,7 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 | **Evidence spans** | `test_merge_keeps_evidence.py` | 10 | evidence preservation, confidence ranking, deduplication |
 | **Evidence labels** | `test_evidence_consensus.py` | 4 | label normalization, STIX properties, consensus boosting |
 | STIX mapping | `test_stage4.py` | 66 | SDO/SCO/SRO build, alias merging, IoC coverage, observable routing (ADR-0041, ADR-0062) |
+| STIX mapping | `test_stage4_paths.py` | 52 | every observable to its SCO and pattern, named SDOs, PAP, embedded-rule Indicators, pin budget/grounding/malformed policies, relationship guards, CVE/CVSS and campaign merges, stix2 refusals |
 | STIX mapping | `test_stix_rel_spec.py` | 4 | listed vs allowed relationships: common verbs, unknown types, direction |
 | STIX mapping | `test_bundle_ledger.py` | 20 | mapping ledger: every row outcome and change, origins, 4b alias merge, API round-trip (ADR-0061) |
 | STIX mapping | `test_stix_self_edges.py` | 4 | self-edge prevention, endpoint validation, bundle integrity |
@@ -215,6 +217,7 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 | Persistence | `test_persistence.py` | 7 | backup consistency, migration idempotency, label persistence |
 | Persistence | `test_db_transaction.py` | 6 | transaction rollback, commit, exception handling |
 | Persistence | `test_container_env.py` | 4 | `CTIPARSOR_GIT_REV` fallback when `git` is absent or fails (ADR-0044) — `_path_from_env`/`BACKUP_DIR` and `CTIPARSOR_DB_PATH` were removed along with SQLite (ADR-0053) |
+| Queue | `test_worker.py` | 30 | the worker's terminal states (no bundle, timeout, abort, reclaimed, failed backup), hook guards, subprocess thread caps, the crash watcher, the finalize rebuild applying reviewer rejections and reading legacy/ADR-0063 dates |
 | Queue | `test_job_queue.py` | 14 | the queue loop (ADR-0046): atomic claim under 8 threads, lease-based orphan requeue, heartbeat scoping, slot accounting with a fake spawn, `run_pipeline_async` under roles `api` and `all`, `--once` |
 | Persistence | `test_db_backend.py` | 12 | the PostgreSQL adapter without a server: `?`→`%s` outside literals, `%`→`%%`, the `Row` type, `backend()`/`get_conn()` requiring `DATABASE_URL` (ADR-0053), a fake psycopg connection proving `with` never closes and `transaction()` issues plain `BEGIN` (ADR-0045) |
 | Persistence | `test_db_postgres.py` | 10 | skipped unless `CTIPARSOR_TEST_DATABASE_URL` is set (every other DB-touching test needs it too, via `temp_db` — ADR-0053): round trips, SSE resume ids, upserts, cascade, the coverage call without `jobs_conn`, the API through `temp_db_client`, and both migration scripts end to end (ADR-0045, ADR-0053) |
