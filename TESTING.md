@@ -173,7 +173,7 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 | STIX mapping | `test_stage4.py` | 66 | SDO/SCO/SRO build, alias merging, IoC coverage, observable routing (ADR-0041, ADR-0062) |
 | STIX mapping | `test_stage4_paths.py` | 52 | every observable to its SCO and pattern, named SDOs, PAP, embedded-rule Indicators, pin budget/grounding/malformed policies, relationship guards, CVE/CVSS and campaign merges, stix2 refusals |
 | STIX mapping | `test_stix_rel_spec.py` | 4 | listed vs allowed relationships: common verbs, unknown types, direction |
-| STIX mapping | `test_bundle_ledger.py` | 20 | mapping ledger: every row outcome and change, origins, 4b alias merge, API round-trip (ADR-0061) |
+| STIX mapping | `test_bundle_ledger.py` | 24 | mapping ledger: every row outcome and change, origins, 4b alias merge, API round-trip (ADR-0061); an IoC `indicates` a technique through its Indicator, turned around when written backwards (ADR-0065) |
 | STIX mapping | `test_stix_self_edges.py` | 4 | self-edge prevention, endpoint validation, bundle integrity |
 | **Graph completion** | `test_stage4b_completion.py` | 18 | transitive completion, alias merging, grounding, pins |
 | **Graph completion** | `test_stage4c_long_distance.py` | 16 | long-distance inference, direction swap, evidence recording, passages naming the entities in a long report |
@@ -209,7 +209,7 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 | **Export filters** | `test_rule_lookup.py` | 8 | rule lookup, metadata retrieval, license handling |
 | **Rule synthesis** | `test_synth_sigma.py` | 47 | rule synthesis, value validation, path escaping, stability |
 | API | `test_api_routes.py` | 11 | health checks, job listing, upload validation, progress |
-| API | `test_relationships_api.py` | 4 | relationship creation, label coercion, patch validation |
+| API | `test_relationships_api.py` | 18 | relationship creation, label coercion, patch validation, dates, `POST /relationships/bulk` (`human_bulk`, journaled, other jobs untouched — ADR-0065) |
 | API | `test_settings_api.py` | 31 | corpus listing, overlay management, rebuild ingestion, formats, unsafe paths/remotes/tarballs, enable/disable, per-corpus sync |
 | API | `test_jobs_routes.py` | 23 | job list/get/status, finalize, delete (rows and every file), retention sweep, source file, bundle and ledger |
 | API | `test_entities_api.py` | 13 | manual entities, edit, bulk accept/reject/reset, delete, refusals |
@@ -311,6 +311,8 @@ logic is untested (see §6, P1-d).
   `worker._run_pipeline` and the `main.py` CLI on one fixture with the LLM mocked
   and checks both build the same bundle.
 - **j. Frontend interaction tests** for the relationship rail / graph editor.
+  The rail has some (vitest, `RelationshipRail.test.tsx`): dates (ADR-0063),
+  "to review", groups by target and their one-click decision (ADR-0065).
 
 ---
 

@@ -1048,6 +1048,20 @@ html[data-theme="dark"] .rel-ev-hl {
 .rel-card { padding: 8px 10px; border-bottom: 1px solid var(--rule-soft); }
 .rel-card.rok { background: color-mix(in oklab, var(--ok) 4%, transparent); }
 .rel-card.rno { opacity: 0.45; }
+/* ADR-0065 — relationships that share a target, decided as one group. */
+.rel-group {
+  border: 1px solid var(--rule-soft); border-radius: 6px;
+  margin: 6px 0 10px; overflow: hidden;
+}
+.rel-group > .rel-card:last-child { border-bottom: 0; }
+.rel-group-head {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 6px 10px; background: var(--bg-soft);
+  border-bottom: 1px solid var(--rule-soft); font-size: 12px;
+}
+.rel-group-type { font-size: 10.5px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .04em; }
+.rel-group-count { font-family: "JetBrains Mono", monospace; font-size: 10.5px; color: var(--ink-3); }
+.mbtn.rel-group-btn { width: auto; padding: 0 8px; font-size: 11px; }
 .rel-line {
   display: flex; align-items: center; gap: 8px;
   font-size: 12.5px; flex-wrap: wrap;
@@ -1345,6 +1359,7 @@ html[data-theme="dark"] .rel-ev-hl {
   text-transform: uppercase; letter-spacing: 0.04em;
 }
 .rc-arrow { color: var(--ink-3); font-size: 18px; }
+.rc-hint { font-size: 11px; color: var(--ink-3); margin: 0 0 6px; line-height: 1.4; }
 .rc-evidence {
   margin-top: 10px; padding: 8px 10px; background: var(--bg-soft);
   border-radius: 6px; border-left: 3px solid var(--accent);

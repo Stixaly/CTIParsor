@@ -53,6 +53,30 @@ Only 57 % had their year in the relationship's own quote.
 
 ### Fixed
 
+#### Review shows what nobody decided; an IoC indicates a technique (ADR-0065), 2026-10-01
+
+**An IoC → technique link never reached the bundle.**
+- The relationship form offered all 35 verbs for the pair.
+- Stage 4 dropped every observable ↔ attack-pattern edge before routing the
+  observable through its Indicator. An accepted `link.ps1 indicates Group
+  Policy Modification` was dropped.
+- Now `indicates` ships as `indicator indicates attack-pattern`, the form STIX
+  2.1 lists. A row written the other way round is turned around, and the ledger
+  says so. Other verbs are still dropped.
+- The form offers only `indicates` for that pair and says why.
+- The form's search also matches ATT&CK ids ("T1484") and shows up to 50
+  results instead of 8.
+
+**No relationship was ever offered for review.**
+- The pipeline stores every relationship accepted, as `default` (ADR-0058). The
+  rail's "pending" tab counted only undecided rows, so it read 0 on every
+  report, while every relationship shipped.
+- "To review" now counts what no analyst has decided. A `default` chip marks a
+  row kept by default, and ✓ confirms it instead of resetting it.
+- Rows that share a target are grouped. ✓ all / ✗ all decide a group in one
+  call: `POST /api/jobs/{id}/relationships/bulk`, journaled as `human_bulk`.
+- What ships does not change.
+
 #### The whole-document relation steps read the whole document (ADR-0064), 2026-10-01
 
 Three steps meant to see past a chunk read only the start of the report. Nothing

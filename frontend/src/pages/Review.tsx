@@ -10,7 +10,7 @@ import SourceViewer from '../components/SourceViewer'
 import {
   fetchJob, fetchEntities, fetchRelationships,
   updateEntity, createEntity,
-  createRelationship, updateRelationship,
+  createRelationship, updateRelationship, bulkUpdateRelationships,
   finalizeJob, finalizeJobQuick, sourceUrl, bulkUpdateEntities,
   fetchCoverageReportRules, detectionsExportUrl,
   errorDetail, fetchThresholds,
@@ -26,7 +26,7 @@ import DocumentReader from '../components/review/DocumentReader'
 import DetectionsPanel from '../components/review/DetectionsPanel'
 import Marginalia from '../components/review/Marginalia'
 import InlineHoverChip from '../components/review/InlineHoverChip'
-import RelationshipRail, { type DatePatch } from '../components/review/RelationshipRail'
+import RelationshipRail, { type BulkAction, type DatePatch } from '../components/review/RelationshipRail'
 import RelationshipCreator from '../components/review/RelationshipCreator'
 import DragRubberBand from '../components/review/DragRubberBand'
 import KeyboardHelp from '../components/review/KeyboardHelp'
@@ -200,15 +200,19 @@ export default function Review() {
   }, [remoteRels])
 
   // Subsequent updates: merge server state while preserving the locally-set
-  // `accepted` value so rapid mutations (accept A then B before the first
-  // refetch lands) don't silently revert B back to null.
+  // decision so rapid mutations (accept A then B before the first refetch
+  // lands) don't silently revert B.  The origin travels with `accepted`: a
+  // row confirmed here must not fall back to `default` and reappear under
+  // "to review" until its PATCH lands.
   useEffect(() => {
     if (!bootstrappedRelsRef.current) return
     setLocalRels(prev => {
       const prevMap: Record<string, ClientRelationship> = {}
       prev.forEach(r => { prevMap[r.id] = r })
       return remoteRels.map(r =>
-        prevMap[r.id] ? { ...r, accepted: prevMap[r.id].accepted } : r
+        prevMap[r.id]
+          ? { ...r, accepted: prevMap[r.id].accepted, decision_origin: prevMap[r.id].decision_origin }
+          : r
       )
     })
   }, [remoteRels])
@@ -383,11 +387,33 @@ export default function Review() {
 
   // ── relationship mutations ───────────────────────────────────────────────
   const setRelAccepted = (id: string, val: boolean | null) => {
-    setLocalRels(rs => rs.map(r => r.id === id ? { ...r, accepted: val } : r))
+    setLocalRels(rs => rs.map(r => r.id === id ? { ...r, accepted: val, decision_origin: 'human' } : r))
     // Use the always-current ref so we never read stale localRels from a closure
     if (!localRelsRef.current.find(r => r.id === id)?._localOnly) {
       updateRelMutation.mutate({ id, patch: { accepted: val } })
     }
+  }
+
+  // A review group — every relationship sharing a target — in one call
+  // (ADR-0065).  `human_bulk`, like the entity groups: calibration does not
+  // read it.
+  const bulkRelMutation = useMutation({
+    mutationFn: ({ ids, action }: { ids: string[]; action: BulkAction }) =>
+      bulkUpdateRelationships(jobId!, ids, action),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['relationships', jobId] }); markDirty() },
+    onError: (err: Error) => {
+      console.error('[bulkUpdateRelationships] failed:', err.message)
+      alert(`Could not update these relationships: ${errorDetail(err)}`)
+      qc.invalidateQueries({ queryKey: ['relationships', jobId] })
+    },
+  })
+
+  const setRelsBulk = (ids: string[], action: BulkAction) => {
+    const val = action === 'accept' ? true : action === 'reject' ? false : null
+    const chosen = new Set(ids)
+    setLocalRels(rs => rs.map(r => chosen.has(r.id) ? { ...r, accepted: val, decision_origin: 'human_bulk' } : r))
+    const stored = ids.filter(id => !localRelsRef.current.find(r => r.id === id)?._localOnly)
+    if (stored.length) bulkRelMutation.mutate({ ids: stored, action })
   }
 
   const setRelType = (id: string, relationship_type: string) => {
@@ -910,6 +936,7 @@ export default function Review() {
           getEntityType={value =>
             localEntities.find(e => e.value === value)?.entity_type
           }
+          onBulk={setRelsBulk}
         />
       </div>
 

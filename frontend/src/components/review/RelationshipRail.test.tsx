@@ -111,3 +111,61 @@ describe('RelationshipRail — relationship dates (ADR-0063)', () => {
     expect(screen.getByText('+ dates')).toBeTruthy()
   })
 })
+
+// ── ADR-0065 — what is left to review, grouped by target ─────────────────────
+
+function renderFull(rels: Relationship[], over: Record<string, unknown> = {}) {
+  const props = {
+    rels,
+    onAccept: vi.fn(), onReject: vi.fn(), onReset: vi.fn(), onJump: vi.fn(),
+    onChangeType: vi.fn(), onChangeDates: vi.fn(),
+    showInDoc: false, setShowInDoc: vi.fn(), onNewRelationship: vi.fn(),
+    onBulk: vi.fn(),
+    ...over,
+  }
+  render(<RelationshipRail {...props} />)
+  return props
+}
+
+describe('RelationshipRail — review groups (ADR-0065)', () => {
+  const byDefault = (id: string, src: string, tgt: string) =>
+    rel({ id, source_value: src, target_value: tgt, accepted: true, decision_origin: 'default' })
+
+  it('lists rows the pipeline accepted by default under "to review", with a chip', () => {
+    renderFull([byDefault('r1', 'APT29', 'WellMess'),
+                rel({ id: 'r2', accepted: true, decision_origin: 'human' })])
+    expect(screen.getByRole('button', { name: /to review 1/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /accepted 1/ })).toBeTruthy()
+    expect(screen.getByText('default')).toBeTruthy()
+  })
+
+  it('groups the rows sharing a target and decides a group in one call', async () => {
+    const user = userEvent.setup()
+    const props = renderFull([
+      byDefault('r1', 'APT29', 'WellMess'),
+      byDefault('r2', 'Cozy Bear', 'wellmess'),     // same target, other case
+      byDefault('r3', 'APT29', 'Ukraine'),
+    ])
+    const group = screen.getByRole('group', { name: 'Relationships to WellMess' })
+    expect(group.textContent).toContain('2 relationships')
+    await user.click(screen.getByTitle('Accept these 2 relationships'))
+    expect(props.onBulk).toHaveBeenCalledWith(['r1', 'r2'], 'accept')
+    // A row alone under its target gets no group header.
+    expect(screen.queryByRole('group', { name: 'Relationships to Ukraine' })).toBeNull()
+  })
+
+  it('can be shown flat again', async () => {
+    const user = userEvent.setup()
+    renderFull([byDefault('r1', 'A', 'X'), byDefault('r2', 'B', 'X')])
+    await user.click(screen.getByRole('button', { name: 'by target' }))
+    expect(screen.queryByRole('group')).toBeNull()
+  })
+
+  it('✓ on a row accepted by default confirms it instead of resetting it', async () => {
+    const user = userEvent.setup()
+    const props = renderFull([byDefault('r1', 'APT29', 'WellMess')])
+    await user.click(screen.getByTitle('Confirm (accepted by default, not reviewed)'))
+    expect(props.onAccept).toHaveBeenCalledWith('r1')
+    expect(props.onReset).not.toHaveBeenCalled()
+  })
+})

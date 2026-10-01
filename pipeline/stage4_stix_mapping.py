@@ -332,7 +332,8 @@ _EV_REPORTED = {"x_evidence_label": "reported"}
 def _is_spurious_observable_ttp_edge(source, target) -> bool:
     """True for an observable-SCO ↔ attack-pattern edge (a type error the LLM
     sometimes emits).  Such an edge carries no valid STIX meaning and is dropped
-    to protect relationship precision (ADR-0012)."""
+    to protect relationship precision (ADR-0012) — unless its verb is
+    `indicates`, which the observable's Indicator states (ADR-0065)."""
     types = {getattr(source, "type", ""), getattr(target, "type", "")}
     return "attack-pattern" in types and bool(types & _OBSERVABLE_SCO_TYPES)
 
@@ -1049,15 +1050,24 @@ def build_stix_bundle(
             led.relationship(rel, "dropped", reason="self_loop", stix_ref=source.id)
             continue
 
+        changes: list[dict] = []
+
         # Precision guard: drop spurious observable-SCO ↔ attack-pattern edges
         # (e.g. "domain communicates-with T1071.001") rather than emitting them
         # as a noisy `related-to`.  See _is_spurious_observable_ttp_edge.
+        # `indicates` is the exception (ADR-0065): STIX lists `indicator
+        # indicates attack-pattern`, so the observable's Indicator states it —
+        # routed below like any observable opposite an SDO.  It used to be
+        # dropped too, so an analyst's accepted "IoC indicates technique" never
+        # shipped.  Written the other way round, the row is turned around.
         if _is_spurious_observable_ttp_edge(source, target):
-            led.relationship(rel, "dropped", reason="observable_to_attack_pattern",
-                             source_ref=source.id, target_ref=target.id)
-            continue
-
-        changes: list[dict] = []
+            if rel.relationship_type.strip().lower() != "indicates":
+                led.relationship(rel, "dropped", reason="observable_to_attack_pattern",
+                                 source_ref=source.id, target_ref=target.id)
+                continue
+            if getattr(source, "type", "") == "attack-pattern":
+                changes.append({"kind": "direction", "from": source.id, "to": target.id})
+                source, target = target, source
 
         # Normalise and validate relationship type against the STIX 2.1 spec
         asked = rel.relationship_type.strip().lower()

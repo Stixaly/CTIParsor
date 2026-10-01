@@ -110,6 +110,16 @@ export const updateRelationship = (jobId: string, relId: string, patch: object) 
   })
 export const deleteRelationship = (jobId: string, relId: string) =>
   req<{ deleted: string }>(`/jobs/${jobId}/relationships/${relId}`, { method: 'DELETE' })
+/** Decide many relationships in one call — a review group (ADR-0065).  Stored
+ *  as `human_bulk`, which calibration does not read. */
+export const bulkUpdateRelationships = (
+  jobId: string,
+  ids: string[],
+  action: 'accept' | 'reject' | 'reset',
+) =>
+  req<{ updated: number; action: string }>(`/jobs/${jobId}/relationships/bulk`, {
+    method: 'POST', body: JSON.stringify({ ids, action }),
+  })
 
 // Detection coverage (ADR-0006)
 export const fetchCoverage = (jobId: string) =>

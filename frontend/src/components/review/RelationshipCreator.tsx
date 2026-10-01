@@ -100,6 +100,7 @@ function RcEntityPicker({
                   <span className="rc-chip-dot" style={{ background: typeDot(o.entity_type) }} />
                   <span className="rc-chip-type">{typeLabel(o.entity_type)}</span>
                   <span className="rc-chip-val">{o.value}</span>
+                  {o.mitre_id && <span className="rc-chip-type">{o.mitre_id}</span>}
                 </button>
               ))}
             </div>
@@ -212,8 +213,10 @@ export default function RelationshipCreator({
   /** Filter entity list for a picker:
    *  - exclude the entity already selected in the other picker
    *  - exclude rejected entities (accepted === false)
-   *  - case-insensitive match on value or entity_type
-   *  - limit to 8 results */
+   *  - case-insensitive match on value, entity_type or ATT&CK id ("T1059")
+   *  - at most 50 results; the list scrolls.  It used to stop at 8, so
+   *    "ttp" listed 8 of a report's techniques and the rest could only be
+   *    reached by typing their exact name. */
   const filterEntities = (q: string, excludeId: string) => {
     const qq = q.toLowerCase()
     return entities
@@ -222,9 +225,10 @@ export default function RelationshipCreator({
         e.accepted !== false &&          // hide rejected — they're irrelevant as link endpoints
         (qq === '' ||
          e.value.toLowerCase().includes(qq) ||
-         e.entity_type.includes(qq))
+         e.entity_type.includes(qq) ||
+         (e.mitre_id ?? '').toLowerCase().includes(qq))
       )
-      .slice(0, 8)
+      .slice(0, 50)
   }
 
   const src     = entities.find(e => e.id === srcId)
@@ -324,6 +328,15 @@ export default function RelationshipCreator({
             })()}
             <span className="rc-arrow">↓</span>
           </div>
+          {src && tgt && (() => {
+            const { valid, constrained } = verbsForPair(src.entity_type, tgt.entity_type)
+            return constrained && valid.length === 1 && valid[0] === 'indicates' ? (
+              <div className="rc-hint">
+                An IoC and a technique are linked through the IoC's Indicator: the
+                bundle says “indicator indicates attack-pattern” (ADR-0065).
+              </div>
+            ) : null
+          })()}
 
           <RcEntityPicker
             label="Target"

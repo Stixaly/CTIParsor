@@ -87,7 +87,7 @@ const RELATIONSHIP_REASON: Record<string, string> = {
   unresolved_target:            'its target matches no object in the bundle',
   unresolved_both:              'neither end matches an object in the bundle',
   self_loop:                    'both ends resolve to the same object (an alias), which would be a self-loop',
-  observable_to_attack_pattern: 'an observable cannot be linked straight to a technique — a technique is attributed through malware or an actor',
+  observable_to_attack_pattern: 'an observable is linked to a technique only by “indicates”, through its Indicator — any other verb has no STIX meaning for this pair',
   no_indicator:                 'no STIX pattern could be built for the observable, so no Indicator can stand in for it',
   invalid:                      'the STIX library rejected the relationship',
   self_loop_after_alias_merge:  'the alias merge made both ends the same object',
@@ -150,6 +150,9 @@ export function describeTime(t: LedgerTime): string {
 export function describeChange(c: LedgerChange, label: (id: string) => string): string {
   if (c.kind === 'verb') {
     return `“${c.from}” → “${c.to}”: ${VERB_REASON[c.reason ?? ''] ?? c.reason ?? ''}`
+  }
+  if (c.kind === 'direction') {
+    return `Turned around: ${label(c.to)} → ${label(c.from)} (an observable indicates a technique, not the other way round — ADR-0065)`
   }
   return `${c.end === 'source' ? 'Source' : 'Target'} ${label(c.from)} replaced by its Indicator ${label(c.to)} (an observable opposite an SDO goes through its Indicator unless STIX defines the verb on the observable itself — ADR-0041, ADR-0062)`
 }

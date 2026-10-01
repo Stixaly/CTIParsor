@@ -238,6 +238,44 @@ def test_observable_to_attack_pattern_is_dropped():
     assert e["outcome"] == "dropped" and e["reason"] == "observable_to_attack_pattern"
 
 
+def _ioc_ttp(rel):
+    from pipeline.stage3_llm import TTPExtracted
+    llm = LLMEnrichmentResult(
+        ttps=[TTPExtracted(technique_name="Group Policy Modification", mitre_id="T1484.001")],
+        relationships=[rel],
+    )
+    ents = [RawEntity(value="evil.example.com", entity_type=EntityType.DOMAIN)]
+    return _build(ents, llm)
+
+
+def test_observable_indicates_attack_pattern_ships_through_its_indicator():
+    # ADR-0065: an analyst's "IoC indicates technique" used to be dropped like
+    # the LLM's type errors.  STIX lists `indicator indicates attack-pattern`.
+    bundle, led = _ioc_ttp(_rel("evil.example.com", "indicates", "Group Policy Modification"))
+    e = _entry(led, "evil.example.com", "indicates", "Group Policy Modification")
+    assert e["outcome"] == "emitted" and e["final_type"] == "indicates"
+    sro = _by_id(bundle)[e["stix_id"]]
+    assert _by_id(bundle)[sro.source_ref].type == "indicator"
+    assert _by_id(bundle)[sro.target_ref].type == "attack-pattern"
+    assert [c["kind"] for c in e["changes"]] == ["reroute"]
+
+
+def test_attack_pattern_indicates_observable_is_turned_around():
+    bundle, led = _ioc_ttp(_rel("Group Policy Modification", "indicates", "evil.example.com"))
+    e = _entry(led, "Group Policy Modification", "indicates", "evil.example.com")
+    assert e["outcome"] == "emitted"
+    sro = _by_id(bundle)[e["stix_id"]]
+    assert _by_id(bundle)[sro.source_ref].type == "indicator"
+    assert _by_id(bundle)[sro.target_ref].type == "attack-pattern"
+    assert [c["kind"] for c in e["changes"]] == ["direction", "reroute"]
+
+
+def test_observable_to_attack_pattern_other_verbs_stay_dropped():
+    _, led = _ioc_ttp(_rel("evil.example.com", "related-to", "Group Policy Modification"))
+    e = _entry(led, "evil.example.com", "related-to", "Group Policy Modification")
+    assert e["outcome"] == "dropped" and e["reason"] == "observable_to_attack_pattern"
+
+
 # ── entities ─────────────────────────────────────────────────────────────────
 
 def _entities(led, value, etype):
