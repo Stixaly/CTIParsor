@@ -53,6 +53,32 @@ Only 57 % had their year in the relationship's own quote.
 
 ### Fixed
 
+#### STIX ids are OpenCTI's standard ids (ADR-0066), 2026-10-01
+
+**The problem.** Domain objects, indicators and markings were UUIDv5 under the
+namespace STIX 2.1 reserves for observables, which the spec forbids (MUST NOT).
+The key they were hashed from (`cti:<type>:<name>`) was one only CTIParsor
+computed.
+
+**The change.**
+- Ids are now computed exactly as OpenCTI computes its standard ids
+  (`pipeline/stix_ids.py`, mirroring pycti's `generate_id`). Each type hashes a
+  few normalised properties: a technique's ATT&CK id, a sector's name and class,
+  an indicator's pattern, a PAP marking's definition.
+- Run against OpenCTI's own code, the ids match 15 out of 15.
+- A bundle now lands on the objects OpenCTI already holds: the ATT&CK
+  technique, the built-in PAP marking, the sector, the country.
+- Relationships and the Report keep random UUIDv4 ids.
+- Incidents keep a name-only id, because pycti also hashes the build time.
+
+**What does not change.** The validator's `{103}` (UUIDv5 is not UUIDv4) and
+`{302}` (no hash on the ATT&CK URL) warnings remain, by choice: OpenCTI's own
+exports show both, and MITRE's ATT&CK data has no hash on any of its 37,478
+URLs.
+
+**Visible change.** Every SDO, indicator and marking id changes once, at the
+next finalize.
+
 #### Review shows what nobody decided; an IoC indicates a technique (ADR-0065), 2026-10-01
 
 **An IoC → technique link never reached the bundle.**
