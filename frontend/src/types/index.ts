@@ -336,7 +336,9 @@ export interface StixBundle {
 export type LedgerOutcome = 'emitted' | 'merged' | 'dropped'
 
 export interface LedgerChange {
-  kind: 'verb' | 'reroute'
+  /** direction: the row was written technique → observable and turned
+   *  around; `from` is the original source, `to` the original target. */
+  kind: 'verb' | 'reroute' | 'direction'
   from: string
   to: string
   /** verb: 'not_suggested' | 'policy_pin' | 'unknown_verb' */

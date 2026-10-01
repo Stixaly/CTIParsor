@@ -45,6 +45,16 @@ class RelPatch(BaseModel):
     decision_origin: str = decisions.HUMAN
 
 
+class RelBulk(BaseModel):
+    ids: list[str]
+    action: str                    # "accept" | "reject" | "reset"
+
+
+# A review group is every row that shares a target; the largest measured on
+# the 7 real reports was 6.  The cap keeps one call to one bounded statement.
+_BULK_MAX = 500
+
+
 class RelCreate(BaseModel):
     source_value: str
     relationship_type: str
@@ -195,6 +205,37 @@ def create_relationship(job_id: str, body: RelCreate):
         "times": [a.model_dump(mode="json", exclude_none=True) for a in _times],
         "accepted": True, "decision_origin": decisions.HUMAN,
     }
+
+
+@router.post("/bulk")
+def bulk_update_relationships(job_id: str, body: RelBulk):
+    """Accept, reject or reset the given relationships in one statement.
+
+    The review page groups the relationships that share a target and decides a
+    group in one click.  Every row is journaled as `human_bulk` (ADR-0058),
+    which calibration does not read.  Ids that belong to another job are not
+    touched.  Returns { updated: N, action }.
+    """
+    if body.action not in ("accept", "reject", "reset"):
+        raise HTTPException(400, "action must be one of: accept | reject | reset")
+    ids = list(dict.fromkeys(i for i in body.ids if i))
+    if not ids:
+        raise HTTPException(400, "ids must not be empty")
+    if len(ids) > _BULK_MAX:
+        raise HTTPException(400, f"at most {_BULK_MAX} ids per call")
+
+    with get_conn() as conn:
+        require_job(conn, job_id)
+
+    accepted = {"accept": True, "reject": False, "reset": None}[body.action]
+    placeholders = ",".join("?" * len(ids))
+    with _lock:
+        with get_conn() as conn:
+            updated = decisions.record(
+                conn, "relationship", f"job_id=? AND id IN ({placeholders})", (job_id, *ids),
+                accepted=accepted, origin=decisions.HUMAN_BULK, decided_at=now_iso(),
+            )
+    return {"updated": updated, "action": body.action}
 
 
 @router.patch("/{rel_id}")

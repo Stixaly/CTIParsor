@@ -264,3 +264,73 @@ def test_patching_a_legacy_row_folds_its_columns_into_assertions(temp_db, temp_d
     row = temp_db.get_conn().execute(
         "SELECT start_time, stop_time FROM relationships WHERE id=?", (rid,)).fetchone()
     assert (row["start_time"], row["stop_time"]) == (None, None)
+
+
+# ── POST /relationships/bulk — a review group in one call (ADR-0065) ─────────
+
+def _pipeline_rel(temp_db, job_id, rel_id, src, tgt):
+    """A row as the worker stores it: accepted, by the pipeline's default."""
+    with temp_db.get_conn() as conn:
+        conn.execute(
+            "INSERT INTO relationships (id, job_id, source_value, relationship_type, "
+            "target_value, confidence, accepted, decision_origin) VALUES (?,?,?,?,?,?,?,?)",
+            (rel_id, job_id, src, "uses", tgt, 0.8, 1, "default"),
+        )
+        conn.commit()
+
+
+def _state(temp_db, rel_id):
+    with temp_db.get_conn() as conn:
+        row = conn.execute(
+            "SELECT accepted, decision_origin FROM relationships WHERE id=?", (rel_id,)
+        ).fetchone()
+    return row["accepted"], row["decision_origin"]
+
+
+def test_bulk_decides_every_listed_row_as_human_bulk_and_journals_it(temp_db, temp_db_client):
+    job_id = _make_job(temp_db, job_id="job-bulk")
+    for i, src in enumerate(["APT29", "Cozy Bear", "NOBELIUM"]):
+        _pipeline_rel(temp_db, job_id, f"b{i}", src, "WellMess")
+    resp = temp_db_client.post(f"/api/jobs/{job_id}/relationships/bulk",
+                               json={"ids": ["b0", "b1"], "action": "reject"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"updated": 2, "action": "reject"}
+    assert _state(temp_db, "b0") == (0, "human_bulk")
+    assert _state(temp_db, "b1") == (0, "human_bulk")
+    assert _state(temp_db, "b2") == (1, "default")          # not listed, untouched
+    with temp_db.get_conn() as conn:
+        journal = conn.execute(
+            "SELECT target_id, previous, accepted, origin FROM review_decisions "
+            "WHERE job_id=? AND target_kind='relationship' ORDER BY target_id", (job_id,)
+        ).fetchall()
+    assert [(r["target_id"], r["previous"], r["accepted"], r["origin"]) for r in journal] == [
+        ("b0", 1, 0, "human_bulk"), ("b1", 1, 0, "human_bulk")]
+
+
+def test_bulk_accept_turns_a_default_row_into_a_decision(temp_db, temp_db_client):
+    job_id = _make_job(temp_db, job_id="job-bulk-accept")
+    _pipeline_rel(temp_db, job_id, "a0", "APT29", "WellMess")
+    resp = temp_db_client.post(f"/api/jobs/{job_id}/relationships/bulk",
+                               json={"ids": ["a0"], "action": "accept"})
+    assert resp.status_code == 200, resp.text
+    assert _state(temp_db, "a0") == (1, "human_bulk")
+
+
+def test_bulk_never_touches_another_jobs_rows(temp_db, temp_db_client):
+    mine = _make_job(temp_db, job_id="job-bulk-mine")
+    other = _make_job(temp_db, job_id="job-bulk-other")
+    _pipeline_rel(temp_db, other, "o0", "APT29", "WellMess")
+    resp = temp_db_client.post(f"/api/jobs/{mine}/relationships/bulk",
+                               json={"ids": ["o0"], "action": "reject"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["updated"] == 0
+    assert _state(temp_db, "o0") == (1, "default")
+
+
+def test_bulk_refuses_a_bad_action_or_no_ids(temp_db, temp_db_client):
+    job_id = _make_job(temp_db, job_id="job-bulk-bad")
+    url = f"/api/jobs/{job_id}/relationships/bulk"
+    assert temp_db_client.post(url, json={"ids": ["x"], "action": "delete"}).status_code == 400
+    assert temp_db_client.post(url, json={"ids": [], "action": "accept"}).status_code == 400
+    assert temp_db_client.post("/api/jobs/no-such-job/relationships/bulk",
+                               json={"ids": ["x"], "action": "accept"}).status_code == 404

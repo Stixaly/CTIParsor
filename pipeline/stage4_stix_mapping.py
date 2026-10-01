@@ -1,7 +1,6 @@
 import base64
 import json
 import os
-import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -11,6 +10,7 @@ import yaml
 # Initialize logging
 from api.logging_config import get_logger
 from models.schemas import STIX_RELATIONSHIP_TYPES, EntityType, RawEntity
+from pipeline import stix_ids
 from pipeline.aliases import alias_surface_forms, canonical_name
 from pipeline.bundle_ledger import ORIGIN_EXTRACTED, MappingLedger
 from pipeline.detection.suricata_atoms import parse_options, rule_header
@@ -125,23 +125,6 @@ class PinStats:
         }
 
 
-# STIX 2.1 deterministic ID namespace (SCO/SDO identity namespace per the spec)
-_STIX_NAMESPACE = uuid.UUID("00abedb4-aa42-466c-9c01-fed23315a9b7")
-
-
-def _make_deterministic_id(value: str, entity_type: str, prefix: str = "") -> str:
-    """
-    Generate a deterministic STIX 2.1-compliant ID for an entity.
-
-    Uses UUID v5 (namespace + name) so the same entity always gets the same
-    STIX ID across runs and reports, preventing duplicate objects in bundles.
-    STIX 2.1 requires IDs to be in <type>--<UUIDv4-or-v5> format.
-    """
-    normalized = f"{prefix}:{entity_type.lower().strip()}:{value.lower().strip()}"
-    det_uuid = uuid.uuid5(_STIX_NAMESPACE, normalized)
-    return f"{entity_type}--{det_uuid}"
-
-
 # Provenance & sharing metadata — authoring Identity + TLP/PAP markings
 #
 # Every object in the bundle is stamped with:
@@ -183,7 +166,10 @@ def _pap_marking(level: str | None):
     lvl = level.strip().upper()
     if lvl not in _PAP_LEVELS:
         return None
-    pap_id = _make_deterministic_id(f"PAP:{lvl}", "marking-definition", "cti")
+    # OpenCTI's built-in PAP markings are PAP:CLEAR/GREEN/AMBER/RED; PAP 2.0
+    # renamed WHITE to CLEAR, as TLP did.  The same pair gives the same id, so
+    # OpenCTI files this marking under its own (ADR-0066).
+    pap_id = stix_ids.marking_id("PAP", f"PAP:{'CLEAR' if lvl == 'WHITE' else lvl}")
     return stix2.MarkingDefinition(
         id=pap_id,
         definition_type="statement",
@@ -199,7 +185,7 @@ def _authoring_identity() -> stix2.Identity:
     only via the `attributed-to` relationship.
     """
     name = os.environ.get("STIX_AUTHOR_NAME", "CTIParsor").strip() or "CTIParsor"
-    ident_id = _make_deterministic_id(name, "identity", prefix="author")
+    ident_id = stix_ids.identity_id(name, "system")
     return stix2.Identity(
         id=ident_id,
         name=name,
@@ -332,7 +318,8 @@ _EV_REPORTED = {"x_evidence_label": "reported"}
 def _is_spurious_observable_ttp_edge(source, target) -> bool:
     """True for an observable-SCO ↔ attack-pattern edge (a type error the LLM
     sometimes emits).  Such an edge carries no valid STIX meaning and is dropped
-    to protect relationship precision (ADR-0012)."""
+    to protect relationship precision (ADR-0012) — unless its verb is
+    `indicates`, which the observable's Indicator states (ADR-0065)."""
     types = {getattr(source, "type", ""), getattr(target, "type", "")}
     return "attack-pattern" in types and bool(types & _OBSERVABLE_SCO_TYPES)
 
@@ -544,7 +531,7 @@ def build_stix_bundle(
         # renamed the SDO after the wrong one *and* registered that object's
         # entire alias set here, mis-wiring every later relationship endpoint.
         canon = canonical_name(name, stix_type)
-        det_id = _make_deterministic_id(canon, stix_type, "cti")
+        det_id = stix_ids.named_object_id(stix_type, canon)
         obj = _named_seen_ids.get(det_id)
         if obj is None:
             obj = factory(canon, det_id)
@@ -636,9 +623,8 @@ def build_stix_bundle(
                     url=ref_url,
                 )
             )
-        # Use MITRE ID for deterministic ID if available, otherwise use name
-        ttp_id_value = ttp.mitre_id if ttp.mitre_id else ttp.technique_name
-        ttp_id = _make_deterministic_id(ttp_id_value, "attack-pattern", "cti")
+        # The ATT&CK id when there is one, else the name — as OpenCTI (ADR-0066)
+        ttp_id = stix_ids.attack_pattern_id(ttp.technique_name, ttp.mitre_id)
         obj = stix2.AttackPattern(
             name=ttp.technique_name,
             description=ttp.description or "",
@@ -706,7 +692,7 @@ def build_stix_bundle(
                 led.entity(entity.value, EntityType.CVE.value, "merged",
                            obj=name_to_stix[key], reason="same_value")
                 continue
-            vuln_id = _make_deterministic_id(entity.value, "vulnerability", "cti")
+            vuln_id = stix_ids.named_object_id("vulnerability", entity.value)
             # `x_cvss_*`, not `x_mitre_cvss_*`: this comes from CIRCL/NVD, and the
             # `x_mitre_` namespace would assert a MITRE provenance the value does
             # not have.  The vector is only emitted when present — a null custom
@@ -742,7 +728,7 @@ def build_stix_bundle(
     if llm_result.campaign_name:
         _camp_key = llm_result.campaign_name.lower()
         if _camp_key not in name_to_stix:  # may already exist from raw_entities Campaign entity
-            campaign_id = _make_deterministic_id(llm_result.campaign_name, "campaign", "cti")
+            campaign_id = stix_ids.named_object_id("campaign", llm_result.campaign_name)
             obj = stix2.Campaign(name=llm_result.campaign_name, id=campaign_id)
             stix_objects.append(obj)
             name_to_stix[_camp_key] = obj
@@ -780,7 +766,7 @@ def build_stix_bundle(
                 led.entity(country, EntityType.LOCATION.value, "merged", obj=existing,
                            reason="same_value", input="targeted_country")
                 continue
-            location_id = _make_deterministic_id(f"{country}_{iso2}", "location", "cti")
+            location_id = stix_ids.location_id(country)
             obj = stix2.Location(name=country, country=iso2, id=location_id)
             stix_objects.append(obj)
             name_to_stix[f"location:{country.lower()}"] = obj
@@ -806,7 +792,7 @@ def build_stix_bundle(
                 led.entity(sector, EntityType.IDENTITY.value, "merged", obj=existing,
                            reason="same_value", input="targeted_sector")
                 continue
-            identity_id = _make_deterministic_id(sector, "identity", "cti")
+            identity_id = stix_ids.identity_id(sector, "class")
             obj = stix2.Identity(name=sector, identity_class="class", id=identity_id)
             stix_objects.append(obj)
             name_to_stix[f"identity:{sector.lower()}"] = obj
@@ -820,7 +806,7 @@ def build_stix_bundle(
     # --- CourseOfAction SDOs (recommended mitigations) ---
     for coa in llm_result.course_of_action:
         try:
-            coa_id = _make_deterministic_id(coa, "course-of-action", "cti")
+            coa_id = stix_ids.course_of_action_id(coa)
             obj = stix2.CourseOfAction(name=coa, id=coa_id)
             stix_objects.append(obj)
             name_to_stix[f"coa:{coa.lower()}"] = obj
@@ -895,7 +881,7 @@ def build_stix_bundle(
             continue
 
         try:
-            indicator_id = _make_deterministic_id(f"ioc_{assoc.ioc_value}", "indicator", "cti")
+            indicator_id = stix_ids.indicator_id(pattern)
             indicator = stix2.Indicator(
                 name=f"Malicious IoC: {assoc.ioc_value}",
                 pattern=pattern,
@@ -936,7 +922,7 @@ def build_stix_bundle(
             led.annotate(_field(sco, "id"), no_indicator="no_pattern")
             continue
         try:
-            indicator_id = _make_deterministic_id(f"ioc_{entity.value}", "indicator", "cti")
+            indicator_id = stix_ids.indicator_id(pattern)
             indicator = stix2.Indicator(
                 name=f"Indicator: {entity.value}",
                 pattern=pattern,
@@ -1049,15 +1035,24 @@ def build_stix_bundle(
             led.relationship(rel, "dropped", reason="self_loop", stix_ref=source.id)
             continue
 
+        changes: list[dict] = []
+
         # Precision guard: drop spurious observable-SCO ↔ attack-pattern edges
         # (e.g. "domain communicates-with T1071.001") rather than emitting them
         # as a noisy `related-to`.  See _is_spurious_observable_ttp_edge.
+        # `indicates` is the exception (ADR-0065): STIX lists `indicator
+        # indicates attack-pattern`, so the observable's Indicator states it —
+        # routed below like any observable opposite an SDO.  It used to be
+        # dropped too, so an analyst's accepted "IoC indicates technique" never
+        # shipped.  Written the other way round, the row is turned around.
         if _is_spurious_observable_ttp_edge(source, target):
-            led.relationship(rel, "dropped", reason="observable_to_attack_pattern",
-                             source_ref=source.id, target_ref=target.id)
-            continue
-
-        changes: list[dict] = []
+            if rel.relationship_type.strip().lower() != "indicates":
+                led.relationship(rel, "dropped", reason="observable_to_attack_pattern",
+                                 source_ref=source.id, target_ref=target.id)
+                continue
+            if getattr(source, "type", "") == "attack-pattern":
+                changes.append({"kind": "direction", "from": source.id, "to": target.id})
+                source, target = target, source
 
         # Normalise and validate relationship type against the STIX 2.1 spec
         asked = rel.relationship_type.strip().lower()
@@ -1352,7 +1347,8 @@ def verify_ioc_coverage(raw_entities: list[RawEntity], bundle: stix2.Bundle) -> 
 
     Detection is exact, not heuristic: SCO ids are the deterministic UUIDv5 the
     stix2 library derives from the observable value, and Indicator ids are the
-    deterministic ids build_stix_bundle assigns ("ioc_{value}").  We recompute
+    deterministic ids build_stix_bundle assigns (from their pattern, as OpenCTI
+    does — ADR-0066).  We recompute
     both and check membership in the bundle.
 
     Returns a report dict:
@@ -1384,8 +1380,9 @@ def verify_ioc_coverage(raw_entities: list[RawEntity], bundle: stix2.Bundle) -> 
         sco = _entity_to_sco(entity)
         has_sco = sco is not None and getattr(sco, "id", None) in bundle_ids
 
-        indicator_id = _make_deterministic_id(f"ioc_{entity.value}", "indicator", "cti")
-        has_indicator = indicator_id in bundle_ids
+        # The Indicator id is its pattern's (ADR-0066), so rebuild the pattern.
+        pattern = _build_stix_pattern(entity.value, sco) if sco is not None else None
+        has_indicator = pattern is not None and stix_ids.indicator_id(pattern) in bundle_ids
 
         record = {"value": entity.value, "type": entity.entity_type.value}
         if has_sco:
@@ -1569,14 +1566,14 @@ def _entity_to_sdo(entity: RawEntity):
         v = entity.value
 
         if t == EntityType.INFRASTRUCTURE:
-            infra_id = _make_deterministic_id(v, "infrastructure", "cti")
+            infra_id = stix_ids.named_object_id("infrastructure", v)
             return stix2.Infrastructure(
                 name=v,
                 infrastructure_types=["unknown"],
                 id=infra_id,
             )
         if t == EntityType.INTRUSION_SET:
-            intrusion_id = _make_deterministic_id(v, "intrusion-set", "cti")
+            intrusion_id = stix_ids.named_object_id("intrusion-set", v)
             return stix2.IntrusionSet(name=v, id=intrusion_id)
         if t == EntityType.LOCATION:
             iso2 = _COUNTRY_ISO.get(v.strip().lower())
@@ -1586,16 +1583,16 @@ def _entity_to_sdo(entity: RawEntity):
                 # that constraint. Skip rather than build one, same as the
                 # targeted_countries loop above (~line 641) for the same reason.
                 return None
-            location_id = _make_deterministic_id(f"{v}_{iso2}", "location", "cti")
+            location_id = stix_ids.location_id(v)
             return stix2.Location(name=v, country=iso2, id=location_id)
         if t == EntityType.IDENTITY:
-            identity_id = _make_deterministic_id(v, "identity", "cti")
+            identity_id = stix_ids.identity_id(v, "class")
             return stix2.Identity(name=v, identity_class="class", id=identity_id)
         if t == EntityType.CAMPAIGN:
-            campaign_id = _make_deterministic_id(v, "campaign", "cti")
+            campaign_id = stix_ids.named_object_id("campaign", v)
             return stix2.Campaign(name=v, id=campaign_id)
         if t == EntityType.INCIDENT:
-            incident_id = _make_deterministic_id(v, "incident", "cti")
+            incident_id = stix_ids.incident_id(v)
             return stix2.Incident(name=v, id=incident_id)
 
     except Exception:
@@ -1691,7 +1688,7 @@ def _add_embedded_rule_indicator(
     Shared by all four embedded-rule formats (yara, suricata, snort, sigma) so
     the "create the Indicator, then auto-link it" logic exists once.
     """
-    rule_id = _make_deterministic_id(f"{pattern_type}_rule_{pattern}", "indicator", "cti")
+    rule_id = stix_ids.indicator_id(pattern)
     if rule_id in seen_ids:
         return
     seen_ids.add(rule_id)

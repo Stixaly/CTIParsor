@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import type { Relationship, TemporalAssertion } from '../../types'
-import { REL_TYPES, confPct, verbsForPair } from './tokens'
+import { REL_TYPES, confPct, relNeedsReview, typeDot, typeLabel, verbsForPair } from './tokens'
+
+export type BulkAction = 'accept' | 'reject' | 'reset'
 
 /** One bound an analyst sets or clears (ADR-0063 §9).  Only the bound that
  *  changed is sent: re-sending the other would turn the model's date into the
@@ -21,6 +23,9 @@ interface Props {
   /** Optional: look up the STIX entity_type for a given entity value string.
    *  When provided, the verb edit select shows only spec-valid verbs first. */
   getEntityType?: (value: string) => string | undefined
+  /** Decide every relationship of a group in one call (ADR-0065).  Without
+   *  it the groups show no group buttons. */
+  onBulk?: (ids: string[], action: BulkAction) => void
 }
 
 /** A stored date as the rail shows it: a partial value as it is ("2023",
@@ -132,9 +137,13 @@ function RelCard({ r, onAccept, onReject, onReset, onJump, onChangeType, onChang
   const { valid, others, constrained } = srcType && tgtType
     ? verbsForPair(srcType, tgtType)
     : { valid: REL_TYPES, others: [], constrained: false }
+  // ADR-0058: the pipeline stores every relationship accepted, as `default`.
+  // That is nobody's decision, so ✓ confirms it instead of resetting it.
+  const byDefault = r.accepted === true && r.decision_origin === 'default'
+  const acceptedByPerson = r.accepted === true && !byDefault
 
   return (
-    <div className={`rel-card ${r.accepted === true ? 'rok' : ''} ${r.accepted === false ? 'rno' : ''}`}>
+    <div className={`rel-card ${acceptedByPerson ? 'rok' : ''} ${r.accepted === false ? 'rno' : ''}`}>
       <div className="rel-line">
         <button className="rel-node" onClick={() => onJump(r.source_value)}>
           {r.source_value}
@@ -166,11 +175,19 @@ function RelCard({ r, onAccept, onReject, onReset, onJump, onChangeType, onChang
           {r.target_value}
         </button>
         <span className="rel-conf">{confPct(r.confidence)}%</span>
+        {byDefault && (
+          <span
+            className="marg-origin"
+            title="Kept by default: the pipeline stores every relationship accepted, and it ships unless rejected. Nobody has reviewed it."
+          >
+            default
+          </span>
+        )}
         <div className="rel-actions">
           <button
-            className={`mbtn ok ${r.accepted === true ? 'on' : ''}`}
-            onClick={() => r.accepted === true ? onReset(r.id) : onAccept(r.id)}
-            title="Accept"
+            className={`mbtn ok ${acceptedByPerson ? 'on' : ''}`}
+            onClick={() => acceptedByPerson ? onReset(r.id) : onAccept(r.id)}
+            title={byDefault ? 'Confirm (accepted by default, not reviewed)' : 'Accept'}
           >✓</button>
           <button
             className={`mbtn no ${r.accepted === false ? 'on' : ''}`}
@@ -216,11 +233,31 @@ const RAIL_MIN = 56
 const railMax = () => Math.max(RAIL_MIN, window.innerHeight - 240)
 const clampRail = (h: number) => Math.max(RAIL_MIN, Math.min(railMax(), h))
 
+const FILTER_LABEL: Record<Filter, string> = {
+  pending: 'to review', all: 'all', accepted: 'accepted', rejected: 'rejected',
+}
+
+/** Rows sharing a target, biggest group first — the unit the analyst decides
+ *  in one click (ADR-0065).  Matched case-insensitively, as Stage 4 resolves
+ *  endpoints. */
+function groupByTarget(rels: Relationship[]): Array<{ key: string; target: string; rows: Relationship[] }> {
+  const groups = new Map<string, { key: string; target: string; rows: Relationship[] }>()
+  for (const r of rels) {
+    const key = r.target_value.trim().toLowerCase()
+    const g = groups.get(key)
+    if (g) g.rows.push(r)
+    else groups.set(key, { key, target: r.target_value, rows: [r] })
+  }
+  return [...groups.values()].sort((a, b) =>
+    b.rows.length - a.rows.length || a.target.localeCompare(b.target))
+}
+
 export default function RelationshipRail({
   rels, onAccept, onReject, onReset, onJump, onChangeType, onChangeDates,
-  showInDoc, setShowInDoc, onNewRelationship, getEntityType,
+  showInDoc, setShowInDoc, onNewRelationship, getEntityType, onBulk,
 }: Props) {
   const [filter, setFilter] = useState<Filter>('pending')
+  const [grouped, setGrouped] = useState(true)
   const [collapsed, setCollapsed] = useState(false)
   // The height asked for (default or dragged); what is shown is that height
   // clamped to the current window, so it comes back when the window grows.
@@ -263,20 +300,38 @@ export default function RelationshipRail({
     window.addEventListener('pointerup', up)
   }
 
+  // "To review" is what no analyst has decided: pending rows and the rows the
+  // pipeline stored accepted by default (ADR-0058).  It used to count only
+  // pending rows, and the pipeline never stores one, so the tab read 0 on
+  // every report while all its relationships went out unreviewed.
+  const inFilter = (r: Relationship, f: Filter) => {
+    if (f === 'pending')  return relNeedsReview(r)
+    if (f === 'accepted') return r.accepted === true && !relNeedsReview(r)
+    if (f === 'rejected') return r.accepted === false
+    return true
+  }
   const counts = {
     all:      rels.length,
-    pending:  rels.filter(r => r.accepted === null).length,
-    accepted: rels.filter(r => r.accepted === true).length,
-    rejected: rels.filter(r => r.accepted === false).length,
+    pending:  rels.filter(r => inFilter(r, 'pending')).length,
+    accepted: rels.filter(r => inFilter(r, 'accepted')).length,
+    rejected: rels.filter(r => inFilter(r, 'rejected')).length,
   }
 
-  const filtered = rels.filter(r => {
-    if (filter === 'all')      return true
-    if (filter === 'pending')  return r.accepted === null
-    if (filter === 'accepted') return r.accepted === true
-    if (filter === 'rejected') return r.accepted === false
-    return true
-  })
+  const filtered = rels.filter(r => inFilter(r, filter))
+
+  const card = (r: Relationship) => (
+    <RelCard
+      key={r.id}
+      r={r}
+      onAccept={onAccept}
+      onReject={onReject}
+      onReset={onReset}
+      onJump={onJump}
+      onChangeType={onChangeType}
+      onChangeDates={onChangeDates}
+      getEntityType={getEntityType}
+    />
+  )
 
   const actualHeight = collapsed ? 42 : clampRail(height)
 
@@ -325,11 +380,23 @@ export default function RelationshipRail({
               key={f}
               className={`rel-tab ${filter === f ? 'on' : ''}`}
               onClick={() => setFilter(f)}
+              title={f === 'pending'
+                ? 'Not decided by an analyst: pending, or kept by default — these ship unless rejected'
+                : undefined}
             >
-              {f} <span className="rel-count">{counts[f]}</span>
+              {FILTER_LABEL[f]} <span className="rel-count">{counts[f]}</span>
             </button>
           ))}
         </div>
+
+        <button
+          className={`rel-tab ${grouped ? 'on' : ''}`}
+          aria-pressed={grouped}
+          onClick={() => setGrouped(g => !g)}
+          title="Group the relationships that share a target, to decide each group at once"
+        >
+          by target
+        </button>
 
         <button
           className="rel-new"
@@ -345,21 +412,42 @@ export default function RelationshipRail({
 
       {!collapsed && (
         <div className="rel-list">
-          {filtered.map(r => (
-            <RelCard
-              key={r.id}
-              r={r}
-              onAccept={onAccept}
-              onReject={onReject}
-              onReset={onReset}
-              onJump={onJump}
-              onChangeType={onChangeType}
-              onChangeDates={onChangeDates}
-              getEntityType={getEntityType}
-            />
-          ))}
+          {grouped
+            ? groupByTarget(filtered).map(g => g.rows.length < 2 ? card(g.rows[0]) : (
+                <div key={g.key} className="rel-group" role="group" aria-label={`Relationships to ${g.target}`}>
+                  <div className="rel-group-head">
+                    {(() => {
+                      const t = getEntityType?.(g.target)
+                      return t ? (
+                        <>
+                          <span className="rc-chip-dot" style={{ background: typeDot(t) }} />
+                          <span className="rel-group-type">{typeLabel(t)}</span>
+                        </>
+                      ) : null
+                    })()}
+                    <button className="rel-node" onClick={() => onJump(g.target)}>{g.target}</button>
+                    <span className="rel-group-count">{g.rows.length} relationships</span>
+                    {onBulk && (
+                      <div className="rel-actions">
+                        <button
+                          className="mbtn ok rel-group-btn"
+                          onClick={() => onBulk(g.rows.map(r => r.id), 'accept')}
+                          title={`Accept these ${g.rows.length} relationships`}
+                        >✓ all</button>
+                        <button
+                          className="mbtn no rel-group-btn"
+                          onClick={() => onBulk(g.rows.map(r => r.id), 'reject')}
+                          title={`Reject these ${g.rows.length} relationships`}
+                        >✗ all</button>
+                      </div>
+                    )}
+                  </div>
+                  {g.rows.map(card)}
+                </div>
+              ))
+            : filtered.map(card)}
           {filtered.length === 0 && (
-            <div className="rel-empty">All caught up. Nothing in "{filter}."</div>
+            <div className="rel-empty">All caught up. Nothing in "{FILTER_LABEL[filter]}."</div>
           )}
         </div>
       )}

@@ -302,35 +302,32 @@ export function coverageColor(score: number): { background: string; color: strin
  * (e.g. "cve" → "vulnerability", "sha256" / "md5" → "file") are aliased.
  */
 export function suggestRelType(srcType: string, tgtType: string): string {
-  // Normalise underscore → hyphen and apply pipeline→STIX aliases
-  const aliases: Record<string, string> = {
-    cve: 'vulnerability', ttp: 'attack-pattern', technique: 'attack-pattern',
-    tactic: 'attack-pattern', procedure: 'attack-pattern',
-    sha256: 'file', sha1: 'file', md5: 'file',
-    asn: 'autonomous-system', domain: 'domain-name',
-    email: 'email-addr', ipv4: 'ipv4-addr', ipv6: 'ipv6-addr',
-    mac_addr: 'mac-addr', registry_key: 'windows-registry-key',
-    user_account: 'user-account', network_traffic: 'network-traffic',
-    intrusion_set: 'intrusion-set', threat_actor: 'threat-actor',
-    attack_pattern: 'attack-pattern', course_of_action: 'course-of-action',
-    malware_analysis: 'malware-analysis',
-  }
-  const norm = (t: string) => {
-    const h = t.replace(/_/g, '-')
-    return aliases[h] ?? aliases[t] ?? h
-  }
-
-  const s = norm(srcType)
-  const x = norm(tgtType)
-  const verbs = specVerbs(s, x)
-
-  if (verbs) {
+  // The verbs the select will offer — it used to look the pair up on its own
+  // and suggest `related-to` for an observable and a technique, a verb the
+  // select no longer offers and Stage 4 drops.
+  const { valid, constrained } = verbsForPair(srcType, tgtType)
+  if (constrained) {
     // Return the first specific verb (skip the universal fallbacks)
     const universal = ['related-to', 'duplicate-of', 'derived-from']
-    const specific  = verbs.filter(v => !universal.includes(v))
-    return specific[0] ?? verbs[0]
+    const specific  = valid.filter(v => !universal.includes(v))
+    return specific[0] ?? valid[0]
   }
   return 'related-to'
+}
+
+/** STIX types Stage 4 treats as observables (`_OBSERVABLE_SCO_TYPES` in
+ *  pipeline/stage4_stix_mapping.py) — keep the two lists the same. */
+const OBSERVABLE_TYPES = new Set([
+  'ipv4-addr', 'ipv6-addr', 'domain-name', 'url', 'email-addr', 'mac-addr',
+  'autonomous-system', 'file', 'windows-registry-key', 'mutex',
+  'user-account', 'network-traffic', 'software', 'artifact',
+])
+
+/** No analyst has decided this relationship: it is pending, or the pipeline
+ *  stored it accepted by default (ADR-0058).  Either way it ships unless
+ *  someone rejects it, so it is what the analyst still has to look at. */
+export function relNeedsReview(r: { accepted: boolean | null; decision_origin?: string | null }): boolean {
+  return r.accepted === null || r.decision_origin === 'default'
 }
 
 /**
@@ -368,7 +365,16 @@ export function verbsForPair(srcType: string, tgtType: string): {
   }
 
   const all = REL_TYPES
-  const valid = specVerbs(norm(srcType), norm(tgtType))
+  // An observable and a technique: Stage 4 ships only `indicates`, through
+  // the observable's Indicator (`indicator indicates attack-pattern`), either
+  // way round, and drops every other verb (ADR-0012, ADR-0065).  Offering all
+  // 35 here let an analyst build a link that never reached the bundle.
+  const s = norm(srcType), t = norm(tgtType)
+  if ((OBSERVABLE_TYPES.has(s) && t === 'attack-pattern') ||
+      (s === 'attack-pattern' && OBSERVABLE_TYPES.has(t))) {
+    return { valid: ['indicates'], others: all.filter(v => v !== 'indicates'), constrained: true }
+  }
+  const valid = specVerbs(s, t)
   if (!valid) return { valid: all, others: [], constrained: false }
   const others = all.filter(v => !valid.includes(v))
   return { valid, others, constrained: true }

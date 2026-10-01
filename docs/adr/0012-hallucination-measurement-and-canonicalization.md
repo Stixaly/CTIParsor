@@ -1,6 +1,10 @@
 # ADR-0012 — Hallucination measurement, entity canonicalisation & relationship precision
 
 **Status:** Accepted
+**Amended by:** ADR-0065. The observable ↔ attack-pattern guard now lets
+`indicates` through: the observable's Indicator states it (`indicator indicates
+attack-pattern`). It used to drop an analyst's accepted IoC → technique link
+too.
 
 ## Context
 

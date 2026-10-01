@@ -5,6 +5,7 @@ import {
   generateDefangedVariants,
   verbsForPair,
   confPct,
+  relNeedsReview,
 } from './tokens'
 
 type E = { id: string; value: string; entity_type: string; accepted: boolean | null }
@@ -152,6 +153,26 @@ describe('verbsForPair', () => {
     const r = verbsForPair('ipv4', 'campaign')
     expect(r.constrained).toBe(false)
     expect(r.valid.length).toBeGreaterThan(5)
+  })
+
+  // ADR-0065: Stage 4 ships only `indicates` between an observable and a
+  // technique (through the Indicator) and drops every other verb.
+  it('offers only "indicates" between an IoC and a technique, either way round', () => {
+    for (const [s, t] of [['file', 'ttp'], ['domain', 'ttp'], ['sha256', 'technique'], ['ttp', 'ipv4']]) {
+      const r = verbsForPair(s, t)
+      expect(r.constrained).toBe(true)
+      expect(r.valid).toEqual(['indicates'])
+    }
+    expect(suggestRelType('domain', 'ttp')).toBe('indicates')
+  })
+})
+
+describe('relNeedsReview', () => {
+  it('counts pending rows and rows the pipeline accepted by default', () => {
+    expect(relNeedsReview({ accepted: null, decision_origin: null })).toBe(true)
+    expect(relNeedsReview({ accepted: true, decision_origin: 'default' })).toBe(true)
+    expect(relNeedsReview({ accepted: true, decision_origin: 'human' })).toBe(false)
+    expect(relNeedsReview({ accepted: false, decision_origin: 'human_bulk' })).toBe(false)
   })
 })
 
