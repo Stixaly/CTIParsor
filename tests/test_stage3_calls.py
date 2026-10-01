@@ -463,7 +463,7 @@ def _llm(monkeypatch, *answers):
     calls: list[tuple[str, str, str | None]] = []
     replies = list(answers)
 
-    def call(system, user, provider=None):
+    def call(system, user, provider=None, max_prompt_length=None):
         calls.append((system, user, provider))
         reply = replies.pop(0) if replies else ""
         return reply() if callable(reply) else reply
@@ -536,11 +536,11 @@ def test_relationship_and_ttp_verification_run_on_the_same_provider(monkeypatch)
     calls = _llm(monkeypatch, _ANSWER, "verify-rel", "verify-ttp")
     seen: dict = {}
 
-    def verify_relationships(text, result, call, enabled):
+    def verify_relationships(text, result, call, enabled, **kw):
         seen["rel"] = call("S3d", "U3d")
         return result
 
-    def verify_ttps(text, result, call, corroborated, enabled):
+    def verify_ttps(text, result, call, corroborated, enabled, **kw):
         seen["ttp"] = call("S3f", "U3f")
         seen["corroborated"] = corroborated
         return result
@@ -622,7 +622,7 @@ def test_the_document_pass_cuts_an_oversized_answer_and_verifies(monkeypatch):
     monkeypatch.setattr("pipeline.stage3d_verify.verify_enabled", lambda: True)
     seen = []
 
-    def verify_relationships(text, result, call):
+    def verify_relationships(text, result, call, **kw):
         seen.append((text, call("S", "U")))
         return result
 

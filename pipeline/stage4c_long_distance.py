@@ -17,6 +17,7 @@ avoid importing the network layer at mapping-module load time.
 from __future__ import annotations
 
 import json
+import re
 from typing import Callable, Optional
 
 from api.logging_config import get_logger
@@ -67,6 +68,80 @@ def _type(obj: object) -> str:
     return field(obj, "type") or ""
 
 
+def _surface_forms(obj: object) -> list[str]:
+    """Every string the report may use for `obj`: its name, its aliases, and
+    its ATT&CK ID (a technique is often cited as T1059 alone)."""
+    forms = [_name(obj), *(field(obj, "aliases") or [])]
+    for ref in field(obj, "external_references") or []:
+        if field(ref, "source_name") == "mitre-attack" and field(ref, "external_id"):
+            forms.append(field(ref, "external_id"))
+    # Two-letter forms ("Go") would match inside ordinary words.
+    return sorted({f.lower() for f in forms if isinstance(f, str) and len(f) >= 3})
+
+
+_WINDOW = 700   # characters kept on each side of a mention
+_SNAP = 200     # how far a window edge may move to reach a sentence boundary
+_GAP = "\n[...]\n"  # between two passages
+
+
+def _snap(text: str, start: int, end: int) -> tuple[int, int]:
+    """Move a window's edges out to the nearest sentence or line boundary, so
+    the model can quote whole sentences."""
+    lo = max(0, start - _SNAP)
+    cut = max(text.rfind("\n", lo, start), text.rfind(". ", lo, start))
+    if cut != -1:
+        start = cut + (2 if text.startswith(". ", cut) else 1)
+    m = re.search(r"[.!?](?=\s|$)|\n", text[end:end + _SNAP])
+    if m:
+        end += m.end()
+    return start, end
+
+
+def _excerpt(text: str, forms_a: list[str], forms_b: list[str], budget: int) -> str:
+    """The report text sent for one A/B question: all of it when it fits in
+    `budget`, otherwise the passages that mention A or B.
+
+    The first `budget` characters used to be sent instead, so an entity first
+    named further down could never be connected — and connecting entities
+    named far apart is what this step is for.  Passages naming both entities
+    come first; the rest follow in document order until the budget is spent.
+    Falls back to the start of the report when neither entity is found.
+    """
+    if len(text) <= budget:
+        return text
+    low = text.lower()
+    windows = []
+    for form in {*forms_a, *forms_b}:
+        i = low.find(form)
+        while i != -1:
+            windows.append(_snap(text, max(0, i - _WINDOW), min(len(text), i + len(form) + _WINDOW)))
+            i = low.find(form, i + len(form))
+    if not windows:
+        return text[:budget]
+
+    windows.sort()
+    merged = [list(windows[0])]
+    for s, e in windows[1:]:
+        if s <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], e)
+        else:
+            merged.append([s, e])
+
+    def names_both(span: list[int]) -> bool:
+        seg = low[span[0]:span[1]]
+        return any(f in seg for f in forms_a) and any(f in seg for f in forms_b)
+
+    chosen: list[tuple[int, str]] = []
+    left = budget
+    for s, e in sorted(merged, key=lambda sp: (not names_both(sp), sp[0])):
+        if left <= 0:
+            break
+        seg = text[s:e][:left]
+        chosen.append((s, seg))
+        left -= len(seg) + len(_GAP)
+    return _GAP.join(seg for _, seg in sorted(chosen))
+
+
 def _parse(raw: str) -> Optional[dict]:
     """Return the first valid JSON object in the response, or None."""
     decoder = json.JSONDecoder()
@@ -84,11 +159,15 @@ def _parse(raw: str) -> Optional[dict]:
 def build_long_distance_inferer(
     llm_fn: Callable[[str, str], str],
     *,
-    max_chars: int = 6_000,
+    max_chars: int = 12_000,
     confidence: float = 0.6,
 ) -> Callable[[object, object, str], Optional[InferredEdge]]:
     """Build the ``(central, topic, report_text) -> InferredEdge | None`` callable
-    that Stage 4b's long-distance step invokes, bound to ``llm_fn``."""
+    that Stage 4b's long-distance step invokes, bound to ``llm_fn``.
+
+    ``max_chars`` bounds the report text of each call (see ``_excerpt``): one
+    call per disconnected sub-graph, so sending a whole long report every time
+    would multiply its cost by the number of islands."""
     system = _SYSTEM.format(verbs=", ".join(sorted(STIX_RELATIONSHIP_TYPES)))
 
     def infer(central, topic, report_text) -> Optional[InferredEdge]:
@@ -96,7 +175,8 @@ def build_long_distance_inferer(
         if not a_name or not b_name:
             return None
         prompt = _USER_TEMPLATE.format(
-            text=(report_text or "")[:max_chars],
+            text=_excerpt(report_text or "", _surface_forms(central),
+                          _surface_forms(topic), max_chars),
             a_name=a_name, a_type=_type(central),
             b_name=b_name, b_type=_type(topic),
         )

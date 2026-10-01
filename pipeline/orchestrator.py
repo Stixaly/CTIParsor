@@ -906,6 +906,7 @@ class _Run:
         whose two facts sit in different chunks.  Its result is appended to the
         per-chunk ones, so the existing merge dedups it."""
         from pipeline.stage3_llm import document_level_relations_enabled, enrich_document_relations
+        from pipeline.stage3d_verify import verify_enabled as rel_verify_enabled
 
         enabled = (self.opts.document_relations if self.opts.document_relations is not None
                    else document_level_relations_enabled())
@@ -927,7 +928,10 @@ class _Run:
         doc_result = enrich_document_relations(
             self.r.text, known,
             document_time=getattr(self, "_document_time", None)
-            or DocumentTime.build(self.r.text, self.r.anchor))
+            or DocumentTime.build(self.r.text, self.r.anchor),
+            # The same 3d switch the chunks got — it used to read the
+            # environment only, ignoring a run that asked for 3d.
+            verify_rels=self.opts.switch("3d", self.opts.verify_relationships, rel_verify_enabled))
         logger.info(f"[Stage 3 doc-relations] {len(doc_result.relationships)} relationships found")
         results.append(doc_result)
         self.record("3doc", RAN, "", time.monotonic() - t0,

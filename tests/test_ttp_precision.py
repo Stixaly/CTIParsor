@@ -181,6 +181,26 @@ class TestTTPVerification:
         out = v.verify_ttps("text", result, lambda s, u: "not json")
         assert len(out.ttps) == 1
 
+    def test_the_whole_chunk_reaches_the_checker(self, monkeypatch):
+        # A long report's chunks run to 5 000 characters plus overlap; the
+        # checker used to see the first 3 500 of them.
+        import pipeline.stage3f_ttp_verify as v
+        monkeypatch.setattr(v, "_VERIFY_ENABLED", True)
+        chunk = "x" * 4_800 + " They ran PowerShell to fetch the payload."
+        prompts = []
+        result = LLMEnrichmentResult(ttps=[TTPExtracted(technique_name="PowerShell", mitre_id="T1059.001")])
+        v.verify_ttps(chunk, result, lambda s, u: prompts.append(u) or "[]")
+        assert chunk in prompts[0]
+
+    def test_past_the_limit_the_text_is_cut_and_the_claims_kept(self, monkeypatch):
+        import pipeline.stage3f_ttp_verify as v
+        monkeypatch.setattr(v, "_VERIFY_ENABLED", True)
+        prompts = []
+        result = LLMEnrichmentResult(ttps=[TTPExtracted(technique_name="PowerShell", mitre_id="T1059.001")])
+        v.verify_ttps("y" * 20_000, result, lambda s, u: prompts.append(u) or "[]",
+                      max_prompt_chars=3_000)
+        assert len(prompts[0]) == 3_000 and '1. "PowerShell" (T1059.001)' in prompts[0]
+
 
 # ── Advisory/table-caption content gate ─────────────────────────────────────
 # Stage 2c's keyword gate lets mitigation-advice sentences ("Enforce phishing-

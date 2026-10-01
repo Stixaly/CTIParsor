@@ -1,8 +1,23 @@
-"""Parsing helpers for LLM responses shared by the verification stages."""
+"""Helpers shared by the verification stages: prompt sizing and response parsing."""
 from __future__ import annotations
 
 import json
 import math
+
+
+def fit_text(template: str, text: str, max_chars: int | None, **fields: str) -> str:
+    """Format `template` with `text`, cutting the TEXT, never the rest, so the
+    prompt fits in `max_chars` (None: no limit).
+
+    Every verification prompt puts the source text first and the claims and
+    answer format after it.  Truncating the finished prompt, as `_call_llm`
+    does, cuts the claims off: the model gets text and no question.
+    """
+    prompt = template.format(text=text, **fields)
+    if max_chars is None or len(prompt) <= max_chars:
+        return prompt
+    keep = max(0, len(text) - (len(prompt) - max_chars))
+    return template.format(text=text[:keep], **fields)
 
 
 def parse_numbered_claims(raw: str, count: int) -> dict[int, dict] | None:

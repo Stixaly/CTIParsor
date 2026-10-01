@@ -155,12 +155,13 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 | NER | `test_stage_registry.py` | 4 | registry merging, deduplication, case insensitivity |
 | **Aliases** | `test_aliases.py` | 6 | alias resolution, MITRE ID mapping, surface forms |
 | **Aliases** | `test_alias_disambiguation.py` | 11 | type-aware resolution, alias isolation, canonical name handling |
-| LLM enrich | `test_stage3.py` | 42 | LLM enrichment, JSON parsing, deduplication, prompt sanitization |
+| LLM enrich | `test_stage3.py` | 80 | LLM enrichment, JSON parsing, deduplication, prompt sanitization, the document-level pass reaching the provider whole |
+| Relationship verification | `test_stage3d_verify.py` | 9 | Stage 3d sees the whole text, cuts the text not the claims, batches, document mode (reference sentence yes, chain no) |
 | LLM enrich | `test_stage3_providers.py` | 5 | readiness gating for anthropic, gemini, mistral and the OpenAI-compatible local providers |
 | LLM enrich | `test_stage3_calls.py` | 75 | client construction, provider diagnostics, Anthropic/OpenAI-compatible calls and retries, dispatch, repair of a truncated answer (never collapsed to one nested object), `enrich_chunk`/`enrich_all_chunks`/`enrich_document_relations` branches |
 | **CVE enrichment** | `test_cve_enrichment.py` | 25 | CVE id validation, the path-traversal guard before any URL, opt-in network flag, fetch and time caps, CIRCL CVE 5.x parsing (ADP then CNA scores), the PostgreSQL cache and its remembered misses |
 | Hallucination filter | `test_stage3b.py` | 11 | hallucination filtering, entity presence checks, allow-list bypass |
-| **TTP precision** | `test_ttp_precision.py` | 14 | threshold resolution, semantic confidence, subsumption, verification |
+| **TTP precision** | `test_ttp_precision.py` | 36 | threshold resolution, semantic confidence, subsumption, verification (whole chunk sent) |
 | **TTP precision** | `test_ttp_volume_controls.py` | 16 | cross-source dedup, corroboration floors, taxonomy filtering |
 | **TTP precision** | `test_ttp_sentence_gates.py` | 14 | sentence unwrapping, keyword gating, candidate selection |
 | **TTP precision** | `test_ttp_evidence_merge.py` | 11 | evidence preference, semantic fallback, label preservation |
@@ -175,7 +176,7 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 | STIX mapping | `test_bundle_ledger.py` | 20 | mapping ledger: every row outcome and change, origins, 4b alias merge, API round-trip (ADR-0061) |
 | STIX mapping | `test_stix_self_edges.py` | 4 | self-edge prevention, endpoint validation, bundle integrity |
 | **Graph completion** | `test_stage4b_completion.py` | 18 | transitive completion, alias merging, grounding, pins |
-| **Graph completion** | `test_stage4c_long_distance.py` | 10 | long-distance inference, direction swap, evidence recording |
+| **Graph completion** | `test_stage4c_long_distance.py` | 16 | long-distance inference, direction swap, evidence recording, passages naming the entities in a long report |
 | **Graph completion** | `test_grounding_by_label.py` | 8 | STIX display names, edge scoring, bundle validation |
 | Validation/export | `test_stage5.py` | 8 | bundle validation, file writing, nested directories |
 | **Provenance** | `test_provenance.py` | 5 | authoring identity, TLP marking, created_by_ref |
