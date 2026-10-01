@@ -3,6 +3,11 @@
 **Status:** Accepted (implemented 2026-09-20)
 **Date:** 2026-09-20
 **Relates to:** [pipeline/stage3_llm.py](../../pipeline/stage3_llm.py), ADR-0004 (P2-B document context), ADR-0009 (evidence labels), ADR-0013/ADR-0055 (graph completion, `long_distance`)
+**Amended by:** ADR-0064. Until 2026-10-01, `_call_llm` cut this pass's prompt to
+32 000 characters, so past ~30 000 the entity list and answer format never reached
+the model. The validation below bypassed that cut, and Stage 3d read only the
+report's first 3 500 characters. ADR-0064 fixes both and measures the pass on 7
+real reports.
 
 ## Context
 

@@ -53,6 +53,44 @@ Only 57 % had their year in the relationship's own quote.
 
 ### Fixed
 
+#### The whole-document relation steps read the whole document (ADR-0064), 2026-10-01
+
+Three steps meant to see past a chunk read only the start of the report. Nothing
+failed, so it did not show.
+
+- **The document-level pass (ADR-0057)** allowed 300 000 characters, but
+  `_call_llm` cut every prompt to `LLM_MAX_PROMPT_LENGTH` (32 000). The entity
+  list and the answer format come after the report text. Past ~30 000
+  characters, the model got part of a report and nothing to answer.
+  - `_call_llm` now takes a per-call limit.
+  - Past a limit, the report text is cut, never the instructions after it.
+- **Stage 3d** sent the first 3 500 characters.
+  - On the document pass, every claim supported further down was removed: on 7
+    real reports, it kept 71 of 336 document-level relations; now 309.
+  - On reports over 30 000 characters, the tail of each chunk was never checked.
+  - Stage 3f had the same cut.
+  - Both now get the whole text they are given.
+  - 3d verifies in batches of `STIX_VERIFY_BATCH_SIZE` (40).
+  - On the whole report, 3d accepts a second sentence only when it says who the
+    first one's subject is. A chain through a third entity does not count.
+- **Stage 4c** read the first 6 000 characters. It now sends the passages that
+  name either entity (name, alias or ATT&CK id), or the whole report up to
+  12 000 characters.
+- **The document pass now follows the run's 3d switch**, not only the
+  environment.
+
+**Measured on the 7 reports, relations after 3d:**
+
+| | Chunks only (default) | Document pass only | Both |
+|---|---|---|---|
+| Relations | 195 | 309 | 434 |
+| Strict precision | 0.81 | 0.51 | 0.58 |
+| Estimated correct relations | ≈157 | ≈157 | ≈253 |
+
+The document pass stays off by default. Before turning it on, see ADR-0064. At
+~15 tokens/s, its answer on a 37 000-character report takes 11 minutes, past
+the shipped `LLM_TIMEOUT`.
+
 #### An observable keeps the relationships STIX 2.1 defines for it (ADR-0062), 2026-09-28
 
 ADR-0041 routed every observable opposite an SDO through its Indicator

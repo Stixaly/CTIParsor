@@ -40,7 +40,7 @@ from typing import Callable
 
 from api.logging_config import get_logger
 from pipeline.env_flags import env_bool, env_int
-from pipeline.llm_parse import parse_numbered_claims
+from pipeline.llm_parse import fit_text, parse_numbered_claims
 
 logger = get_logger(__name__)
 
@@ -112,6 +112,7 @@ def verify_ttps(
     corroborated_ids: set[str] | None = None,
     *,
     enabled: bool | None = None,
+    max_prompt_chars: int | None = None,
 ) -> object:
     """
     Run a self-verification pass on the TTPs in *result*.
@@ -120,7 +121,12 @@ def verify_ttps(
     falls back to ENABLE_TTP_VERIFICATION.
 
     Args:
-        text:             The source CTI text chunk fed to enrich_chunk().
+        text:             The source CTI text chunk fed to enrich_chunk(), sent
+                          whole.  It used to be cut at 3 500 characters, which
+                          hid the tail of the 4 000/5 000-character chunks of
+                          long reports from the checker.
+        max_prompt_chars: the prompt limit `llm_fn` applies; past it the text
+                          is cut here, so the claims always reach the model.
         result:           LLMEnrichmentResult from enrich_chunk().
         llm_fn:           The _call_llm() callable from stage3_llm (passed in to
                           avoid a circular import).
@@ -170,7 +176,7 @@ def verify_ttps(
         claims_lines.append(f'{i + 1}. "{t.technique_name}"{ident}{tactic_hint}')
     claims_str = "\n".join(claims_lines)
 
-    prompt = _VERIFY_USER_TEMPLATE.format(text=text[:3_500], claims=claims_str)
+    prompt = fit_text(_VERIFY_USER_TEMPLATE, text, max_prompt_chars, claims=claims_str)
 
     from pipeline import llm_stats
 

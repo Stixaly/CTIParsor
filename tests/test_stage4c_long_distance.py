@@ -84,6 +84,67 @@ def test_inferer_handles_empty_llm_response():
     assert infer(a, b, "text") is None
 
 
+# ── what report text each question is sent ────────────────────────────────────
+def _prompt_seen(a, b, report_text, **kw) -> str:
+    seen = []
+    infer = build_long_distance_inferer(lambda s, u: seen.append(u) or "", **kw)
+    infer(a, b, report_text)
+    return seen[0]
+
+
+def _filler(n: int) -> str:
+    return "Unrelated background sentence about the threat landscape. " * (n // 58 + 1)
+
+
+def test_a_report_within_the_budget_is_sent_whole():
+    text = _filler(9_000) + "APT-X deployed MW."
+    prompt = _prompt_seen(stix2.IntrusionSet(name="APT-X"), stix2.Malware(name="MW", is_family=True), text)
+    assert text in prompt
+
+
+def test_a_long_report_sends_the_passages_naming_the_entities():
+    # Both entities are named only far past the old 6 000-character cut.
+    statement = "Later analysis showed that APT-X deployed Mistral against the energy sector."
+    text = _filler(40_000) + statement + " " + _filler(40_000)
+    prompt = _prompt_seen(stix2.IntrusionSet(name="APT-X"), stix2.Malware(name="Mistral", is_family=True),
+                          text, max_chars=3_000)
+    assert statement in prompt
+    assert len(prompt) < 3_000 + 1_000   # the excerpt plus the question around it
+
+
+def test_aliases_and_attack_ids_find_passages_too():
+    ap = stix2.AttackPattern(name="PowerShell", external_references=[
+        {"source_name": "mitre-attack", "external_id": "T1059.001"}])
+    actor = stix2.IntrusionSet(name="APT34", aliases=["OilRig"])
+    statement = "OilRig relied on T1059.001 for execution."
+    text = _filler(30_000) + statement + " " + _filler(30_000)
+    assert statement in _prompt_seen(actor, ap, text, max_chars=3_000)
+
+
+def test_passages_naming_both_entities_come_before_the_rest():
+    both = "APT-X deployed Mistral on the servers."
+    early = "APT-X was first seen in 2019."   # names A only, but earlier
+    text = early + " " + _filler(20_000) + " " + both + " " + _filler(20_000)
+    prompt = _prompt_seen(stix2.IntrusionSet(name="APT-X"), stix2.Malware(name="Mistral", is_family=True),
+                          text, max_chars=1_000)
+    assert both in prompt and early not in prompt
+
+
+def test_two_letter_names_do_not_pick_passages():
+    # "Go" would match inside "good", "ago", "Google" all over the report.
+    text = "Opening paragraph. " + _filler(30_000) + " It was a good day ago."
+    prompt = _prompt_seen(stix2.Malware(name="Go", is_family=True), stix2.Malware(name="Absent", is_family=True),
+                          text, max_chars=2_000)
+    assert "Opening paragraph." in prompt and "good day" not in prompt
+
+
+def test_no_mention_falls_back_to_the_start_of_the_report():
+    text = "Opening paragraph. " + _filler(30_000)
+    prompt = _prompt_seen(stix2.IntrusionSet(name="Nowhere"), stix2.Malware(name="Absent", is_family=True),
+                          text, max_chars=2_000)
+    assert "Opening paragraph." in prompt
+
+
 # ── integration through complete_graph ────────────────────────────────────────
 def test_long_distance_connects_islands_and_records_evidence():
     # Sub-graph 1 (topic side): intrusion-set with the highest degree.

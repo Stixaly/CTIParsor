@@ -15,6 +15,7 @@ from tenacity import RetryError, retry, retry_if_exception_type, stop_after_atte
 from api.logging_config import get_logger
 from models.schemas import EntityType, EvidenceLabel, RawEntity
 from pipeline.env_flags import env_int
+from pipeline.llm_parse import fit_text
 from pipeline.temporal import (
     ROLES as _TIME_ROLES,
 )
@@ -845,22 +846,26 @@ def _call_openai_compatible(client_param, model: str, system: str, user: str, la
         return ""
 
 
-def _call_llm(system: str, user: str, provider: str | None = None) -> str:
+def _call_llm(system: str, user: str, provider: str | None = None,
+              max_prompt_length: int | None = None) -> str:
     """Dispatches to an LLM provider with retry logic.
 
     `provider` overrides the global LLM_PROVIDER for this call only — used by the
     Stage 3e consensus pass to run the same prompt through a second model.
+    `max_prompt_length` overrides the LLM_MAX_PROMPT_LENGTH cut for this call —
+    the document-level pass reads a whole report, not a chunk.
     """
     # Sanitize ONLY the user message — it embeds untrusted report text, so it is
     # the prompt-injection vector.  The system prompt is developer-controlled;
     # running it through the sanitizer would needlessly escape its content and
     # corrupt the Markdown layout the model relies on.
     #
-    # Use the full prompt-length budget (_MAX_PROMPT_LENGTH) here.  The previous
-    # default of 10 000 chars silently truncated the assembled prompt — cutting
-    # off the JSON output schema at the end of the template for larger chunks —
-    # even though enrich_chunk had already validated it against the 32 000 cap.
-    sanitized_user = _sanitize_text_for_prompt(user, max_length=_MAX_PROMPT_LENGTH)
+    # The cut keeps the head of the prompt, so a caller whose prompt may be
+    # longer must shorten its own text first (see llm_parse.fit_text): cut
+    # here, the instructions after the text are what goes.  The document-level
+    # pass used to reach this line with its 300 000-char budget and lose its
+    # entity list and answer format to the 32 000 default.
+    sanitized_user = _sanitize_text_for_prompt(user, max_length=max_prompt_length or _MAX_PROMPT_LENGTH)
 
     prov = (provider or _PROVIDER).lower()
     # The seed is a standard parameter on these servers only; Mistral names it
@@ -1590,7 +1595,8 @@ def enrich_chunk(
             def _verify_call(s, u):
                 return _call_llm(s, u, provider=provider)
             result = cast(LLMEnrichmentResult,
-                          verify_relationships(text, result, _verify_call, enabled=True))
+                          verify_relationships(text, result, _verify_call, enabled=True,
+                                               max_prompt_chars=_MAX_PROMPT_LENGTH))
 
     # Stage 3f — self-verification of TTP claims (ADR precision §3)
     # Mirrors Stage 3d for techniques: each LLM-extracted TTP must be supported by
@@ -1607,7 +1613,8 @@ def enrich_chunk(
                 return _call_llm(s, u, provider=provider)
             result = cast(
                 LLMEnrichmentResult,
-                verify_ttps(text, result, _ttp_verify_call, corroborated_ids, enabled=True),
+                verify_ttps(text, result, _ttp_verify_call, corroborated_ids, enabled=True,
+                            max_prompt_chars=_MAX_PROMPT_LENGTH),
             )
 
     return result
@@ -1698,10 +1705,14 @@ def enrich_document_relations(
     known_entities: list[RawEntity],
     provider: str | None = None,
     document_time: DocumentTime | None = None,
+    verify_rels: bool | None = None,
 ) -> LLMEnrichmentResult:
     """
     Stage 3 document-level relation pass (ADR-0057) — opt-in via
     ENABLE_DOCUMENT_LEVEL_RELATIONS=true (see document_level_relations_enabled()).
+
+    `verify_rels` switches Stage 3d for this call, as in enrich_chunk; None
+    follows ENABLE_STIX_VERIFICATION.
 
     Sends the WHOLE report (not a chunk) plus the full known-entity list and
     asks for relationships only. Intended to be appended to the list of
@@ -1725,23 +1736,22 @@ def enrich_document_relations(
         f"- [{e.entity_type.value}] {e.value}" for e in known_entities
     )
 
-    prompt = _DOC_RELATIONS_USER_PROMPT_TEMPLATE.format(
-        text=full_text,
-        entity_list=entity_list,
-    )
-
-    if len(prompt) > _DOC_MAX_PROMPT_LENGTH:
+    # Past the ceiling the REPORT is cut, never the entity list and answer
+    # format that follow it: without them the model has nothing to answer.
+    prompt = fit_text(_DOC_RELATIONS_USER_PROMPT_TEMPLATE, full_text, _DOC_MAX_PROMPT_LENGTH,
+                      entity_list=entity_list)
+    if full_text not in prompt:
         logger.warning(
-            f"[Stage 3 doc-relations] Prompt too long ({len(prompt)} chars > "
-            f"{_DOC_MAX_PROMPT_LENGTH} max) — truncating. Raise "
-            "LLM_DOC_MAX_PROMPT_LENGTH if this report should fit whole."
+            f"[Stage 3 doc-relations] Report too long for LLM_DOC_MAX_PROMPT_LENGTH="
+            f"{_DOC_MAX_PROMPT_LENGTH} — its end is not sent. Raise the limit if "
+            "this report should fit whole."
         )
-        prompt = prompt[:_DOC_MAX_PROMPT_LENGTH]
 
     logger.info(f"[Stage 3 doc-relations] Calling LLM ({len(prompt)} prompt chars, "
                 f"{len(known_entities)} known entities)")
 
-    raw_text = _call_llm(_DOC_RELATIONS_SYSTEM_PROMPT, prompt, provider=provider)
+    raw_text = _call_llm(_DOC_RELATIONS_SYSTEM_PROMPT, prompt, provider=provider,
+                         max_prompt_length=_DOC_MAX_PROMPT_LENGTH)
     if not raw_text:
         logger.warning("[Stage 3 doc-relations] LLM returned empty response")
         return LLMEnrichmentResult()
@@ -1777,10 +1787,13 @@ def enrich_document_relations(
     # sentences can still be verified.
     if result.relationships:
         from pipeline.stage3d_verify import verify_enabled, verify_relationships
-        if verify_enabled():
+        if verify_enabled() if verify_rels is None else verify_rels:
             def _verify_call(s, u):
-                return _call_llm(s, u, provider=provider)
-            result = cast(LLMEnrichmentResult, verify_relationships(full_text, result, _verify_call))
+                return _call_llm(s, u, provider=provider, max_prompt_length=_DOC_MAX_PROMPT_LENGTH)
+            result = cast(LLMEnrichmentResult,
+                          verify_relationships(full_text, result, _verify_call, enabled=True,
+                                               max_prompt_chars=_DOC_MAX_PROMPT_LENGTH,
+                                               document=True))
 
     return result
 

@@ -698,12 +698,52 @@ class TestEnrichDocumentRelationsGuards:
 
     def test_oversized_text_is_truncated_not_raised(self, mock_llm, sample_entities, monkeypatch):
         # Use a small ceiling so the test doesn't need a real 300k-char string.
-        monkeypatch.setattr("pipeline.stage3_llm._DOC_MAX_PROMPT_LENGTH", 200)
+        monkeypatch.setattr("pipeline.stage3_llm._DOC_MAX_PROMPT_LENGTH", 2_000)
         huge_text = "APT29 deployed SUNBURST malware against SolarWinds targets. " * 100
         result = enrich_document_relations(huge_text, sample_entities)
         assert isinstance(result, LLMEnrichmentResult)
         prompt = mock_llm.call_args_list[0].args[1]
-        assert len(prompt) <= 200
+        assert len(prompt) <= 2_000
+        # The report is what gets cut — the entity list and answer format that
+        # follow it must survive, or the model has nothing to answer.
+        assert "Known entities in this report" in prompt
+        assert "Return ONLY this JSON shape" in prompt
+        assert mock_llm.call_args_list[0].kwargs["max_prompt_length"] == 2_000
+
+    def test_a_long_report_reaches_the_provider_whole(self, sample_entities, monkeypatch):
+        # Through the real _call_llm: its 32 000-char default used to cut a
+        # 60 000-char report and, with it, the entity list and answer format.
+        import pipeline.stage3_llm as s3
+        sent = []
+        monkeypatch.setattr(s3, "_provider_ready", lambda *a, **k: True)
+        monkeypatch.setattr(s3, "_call_anthropic", lambda system, user: sent.append(user) or '{"relationships": []}')
+        monkeypatch.setattr(s3, "_PROVIDER", "anthropic")
+        report = "APT29 deployed SUNBURST malware against SolarWinds targets. " * 1_000
+        enrich_document_relations(report, sample_entities, provider="anthropic", verify_rels=False)
+        assert len(sent[0]) > 60_000
+        assert "Known entities in this report" in sent[0] and "Return ONLY this JSON shape" in sent[0]
+
+    def test_verification_reads_the_whole_report_in_document_mode(self, mock_llm, sample_entities, monkeypatch):
+        seen = {}
+
+        def verify(text, result, call, **kw):
+            seen.update(text=text, **kw)
+            return result
+        monkeypatch.setattr("pipeline.stage3d_verify.verify_relationships", verify)
+        report = "APT29 deployed SUNBURST malware against SolarWinds targets. " * 300
+        enrich_document_relations(report, sample_entities, verify_rels=True)
+        assert seen["text"] == report
+        assert seen["document"] is True and seen["enabled"] is True
+        from pipeline.stage3_llm import _DOC_MAX_PROMPT_LENGTH
+        assert seen["max_prompt_chars"] == _DOC_MAX_PROMPT_LENGTH
+
+    def test_verification_follows_the_callers_switch(self, mock_llm, sample_cti_text, sample_entities, monkeypatch):
+        called = []
+        monkeypatch.setattr("pipeline.stage3d_verify.verify_relationships",
+                            lambda *a, **k: called.append(1) or a[1])
+        monkeypatch.setattr("pipeline.stage3d_verify._VERIFY_ENABLED", True)
+        enrich_document_relations(sample_cti_text, sample_entities, verify_rels=False)
+        assert called == []
 
 
 class TestEnrichDocumentRelationsMergeIntegration:
