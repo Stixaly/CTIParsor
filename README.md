@@ -676,6 +676,10 @@ string that a wrapped line cut, and it adds an `import` the report declares
 outside the rule. A rule that still does not compile is left out, and the
 Graph page lists it with the compiler's message
 ([ADR-0067](docs/adr/0067-quoted-yara-rules-ship-only-if-they-compile.md)).
+Sigma, Suricata and Snort rules go through the parsers OpenCTI uses for them.
+A rule typed `snort` by its context but accepted only by Suricata's parser
+ships as `suricata`
+([ADR-0070](docs/adr/0070-quoted-sigma-suricata-snort-rules-ship-only-if-opencti-parses-them.md)).
 
 ---
 
@@ -2083,6 +2087,7 @@ CREATE INDEX idx_rule_text_tsv ON rule_text USING GIN (body_tsv);
 | `stix2` | STIX 2.1 object + bundle construction |
 | `stix2-validator` | Bundle JSON-schema validation |
 | `yara-python` | Compiles each YARA rule quoted in a report, as OpenCTI does on import; a rule that does not compile is left out (ADR-0067). Wheels up to CPython 3.13 |
+| `pysigma`, `parsuricata` | Parse each Sigma / Suricata rule quoted in a report with the parsers OpenCTI uses (Snort: OpenCTI's own parser, copied in `pipeline/detection/opencti_snort/`); a refused rule is left out (ADR-0070) |
 | `PyYAML` | Sigma rule parsing + the detection-corpus registry |
 | `python-dotenv` | `.env` loading |
 | `spacy` | Optional NER fallback (no model downloaded by default) |

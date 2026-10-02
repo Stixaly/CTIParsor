@@ -21,6 +21,12 @@ select = ["E", "F", "W", "I"]
 # argument" errors for every constructor call (e.g. ChunkConfig(), LLMConfig()).
 plugins = ["pydantic.mypy"]
 
+# OpenCTI's Snort parser, copied unmodified so it stays the parser OpenCTI runs
+# (ADR-0070): its implicit Optionals are OpenCTI's, not ours to rewrite.
+[[tool.mypy.overrides]]
+module = "pipeline.detection.opencti_snort.*"
+ignore_errors = true
+
 [tool.pytest.ini_options]
 # Mirrors pytest.ini so both files remain in sync.
 # (If pytest.ini already exists and conflicts, keep pytest.ini authoritative.)

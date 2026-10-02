@@ -43,6 +43,10 @@ stix2-validator>=3.2.0       # STIX bundle validation
 # OpenCTI refuses a YARA Indicator that yara.compile() rejects; Stage 4 runs the
 # same check on rules quoted in reports (ADR-0067).  Wheels up to CPython 3.13.
 yara-python>=4.5.4,<5
+# The parsers OpenCTI checks Sigma and Suricata Indicators with (ADR-0070);
+# its Snort parser is copied in pipeline/detection/opencti_snort.
+pysigma>=1.5.0,<2
+parsuricata>=0.4.1,<0.5
 
 # ── Utilities ────────────────────────────────────────────────────────────────
 python-dotenv>=1.0.0         # .env file loading

@@ -13,6 +13,9 @@ from models.schemas import STIX_RELATIONSHIP_TYPES, EntityType, RawEntity
 from pipeline import stix_ids
 from pipeline.aliases import alias_surface_forms, canonical_name
 from pipeline.bundle_ledger import ORIGIN_EXTRACTED, MappingLedger
+from pipeline.detection.pattern_check import REFUSED as PATTERN_REFUSED
+from pipeline.detection.pattern_check import check_pattern, net_rule_dialect
+from pipeline.detection.pattern_check import ledger_info as pattern_ledger_info
 from pipeline.detection.suricata_atoms import parse_options, rule_header
 from pipeline.detection.yara_atoms import split_rules
 from pipeline.detection.yara_check import DOES_NOT_COMPILE, prepare_embedded_rule
@@ -988,20 +991,31 @@ def build_stix_bundle(
             ledger=led, ledger_info=_prepared.ledger_info(),
         )
 
+    # The same gate for the other formats, with OpenCTI's own parsers (ADR-0070).
     for _ptype, _pattern, _title in _find_embedded_net_rules(report_text):
+        _ptype, _status, _error, _retyped = net_rule_dialect(_ptype, _pattern)
+        if _status == PATTERN_REFUSED:
+            led.left_out(stix_ids.indicator_id(_pattern), "object", "rule_does_not_parse",
+                         name=f"{_ptype.capitalize()} rule: {_title}", error=_error)
+            continue
         _add_embedded_rule_indicator(
             stix_objects, name_to_stix, seen_embedded_rule_ids,
             pattern_type=_ptype, pattern=_pattern, title=_title,
             llm_result=llm_result, pol_index=_pol_index, seen_rel_keys=seen_rel_keys,
-            ledger=led,
+            ledger=led, ledger_info=pattern_ledger_info(_status, _retyped),
         )
 
     for _yaml_text, _doc in _find_embedded_sigma_rules(report_text):
+        _status, _error = check_pattern("sigma", _yaml_text)
+        if _status == PATTERN_REFUSED:
+            led.left_out(stix_ids.indicator_id(_yaml_text), "object", "rule_does_not_parse",
+                         name=f"Sigma rule: {_doc.get('title', '')}", error=_error)
+            continue
         _add_embedded_rule_indicator(
             stix_objects, name_to_stix, seen_embedded_rule_ids,
             pattern_type="sigma", pattern=_yaml_text, title=str(_doc.get("title", "")),
             llm_result=llm_result, pol_index=_pol_index, seen_rel_keys=seen_rel_keys,
-            ledger=led,
+            ledger=led, ledger_info=pattern_ledger_info(_status),
         )
 
     # --- Targets SROs: threat actors → targets → locations and sectors ---

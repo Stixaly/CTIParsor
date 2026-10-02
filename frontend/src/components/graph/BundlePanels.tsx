@@ -268,8 +268,14 @@ export function BundleNodeDetail({
                 the rule; it was added to the pattern.
               </Note>
             )}
+            {typeof info?.originInfo.retyped_from === 'string' && (
+              <Note tone="warn">
+                Typed {String(info.originInfo.pattern_type)}: the report called it {info.originInfo.retyped_from}, but
+                only the {String(info.originInfo.pattern_type)} parser OpenCTI uses accepts this rule.
+              </Note>
+            )}
             {info?.originInfo.pattern_check === 'unverified' && (
-              <Note tone="warn">Not compiled: yara-python was not installed where this bundle was built, so OpenCTI may refuse this rule.</Note>
+              <Note tone="warn">Not checked: the parser OpenCTI uses for this rule type was not installed where this bundle was built, so OpenCTI may refuse it.</Note>
             )}
           </div>
         )}
@@ -470,7 +476,7 @@ const DIFF_GROUPS: Array<{ kind: DiffKind; title: string; hint: string; tone: 'n
   { kind: 'merged',  title: 'Merged', tone: 'info',
     hint: 'Rows that resolved to an object or an edge that already existed (duplicates, aliases).' },
   { kind: 'removed', title: 'Removed', tone: 'no',
-    hint: 'Objects and edges that do not ship: the Stage 4b alias merge absorbed them, or a detection rule quoted in the report does not compile.' },
+    hint: 'Objects and edges that do not ship: the Stage 4b alias merge absorbed them, or OpenCTI’s parser refuses a detection rule quoted in the report.' },
 ]
 
 function diffReason(d: DiffItem, labelOf: (id: string) => string): string {
