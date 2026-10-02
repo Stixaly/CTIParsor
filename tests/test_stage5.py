@@ -14,6 +14,7 @@ import io
 import json
 import zipfile
 
+import pytest
 import stix2
 
 from models.schemas import EntityType, RawEntity
@@ -66,10 +67,36 @@ def _rich_bundle() -> stix2.Bundle:
 # ── validate_and_export ────────────────────────────────────────────────────────
 
 class TestValidateAndExport:
-    def test_returns_bool(self, tmp_path):
+    def test_returns_one_of_three_statuses(self, tmp_path):
         bundle = _minimal_bundle()
         result = validate_and_export(bundle, str(tmp_path / "out.json"))
-        assert isinstance(result, bool)
+        assert result.status in ("validated", "unverified", "invalid")
+        assert result.ok == (result.status != "invalid")
+
+    def test_missing_schemas_are_unverified_not_valid(self, tmp_path, monkeypatch):
+        """The schemas missing used to return True, like a bundle they accepted."""
+        monkeypatch.setattr(stage5_validation, "_schemas_installed", lambda: False)
+        sentinel = tmp_path / ".stix2_schemas_missing"
+        sentinel.touch()
+        monkeypatch.setattr(stage5_validation, "_WARN_SENTINEL", sentinel)
+        out = tmp_path / "out.json"
+        result = validate_and_export(_minimal_bundle(), str(out))
+        assert result.status == "unverified" and result.ok and out.exists()
+
+    def test_best_practice_warnings_are_kept(self, tmp_path):
+        if not stage5_validation._schemas_installed():
+            pytest.skip("stix2-validator schemas not installed")
+        m = stix2.Malware(name="x", is_family=True)
+        t = stix2.Tool(name="y")
+        bundle = stix2.Bundle(m, t, stix2.Relationship(m, "executes", t), allow_custom=True)
+        result = validate_and_export(bundle, str(tmp_path / "out.json"))
+        assert result.status == "validated"
+        assert any("{202}" in w for w in result.warnings)
+
+    def test_the_schema_archive_is_a_pinned_commit(self):
+        assert "refs/heads" not in stage5_validation._SCHEMA_ZIP_URL
+        assert stage5_validation.SCHEMA_COMMIT in stage5_validation._SCHEMA_ZIP_URL
+        assert stage5_validation.SCHEMA_COMMIT in stage5_validation._ZIP_SCHEMA_PREFIX
 
     def test_file_is_created(self, tmp_path):
         bundle = _minimal_bundle()

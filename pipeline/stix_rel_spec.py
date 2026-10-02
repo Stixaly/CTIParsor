@@ -30,6 +30,15 @@ SCO_TYPES: frozenset[str] = frozenset({
     "windows-registry-key", "x509-certificate",
 })
 
+# All STIX 2.1 SDO types — §4.  A relationship links SDOs and SCOs, never an
+# SRO or a meta object such as a marking-definition (§5.1).
+SDO_TYPES: frozenset[str] = frozenset({
+    "attack-pattern", "campaign", "course-of-action", "grouping", "identity",
+    "incident", "indicator", "infrastructure", "intrusion-set", "location",
+    "malware", "malware-analysis", "note", "observed-data", "opinion", "report",
+    "threat-actor", "tool", "vulnerability",
+})
+
 # Common relationships (§3.7) usable between ANY two objects.
 _UNIVERSAL_ANY: frozenset[str] = frozenset({"related-to"})
 # Common relationships valid only when source and target share the same type.

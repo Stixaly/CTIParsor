@@ -13,8 +13,8 @@ import {
   type CSSProperties,
 } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getRelationshipPolicy, putRelationshipPolicy, getPolicyLastRun } from '../api/client'
-import { UNIVERSAL_VERBS, pairVerbs } from '../stix/relConstraints'
+import { errorDetail, getRelationshipPolicy, putRelationshipPolicy, getPolicyLastRun } from '../api/client'
+import { UNIVERSAL_VERBS, pairVerbs, shippedVerbs } from '../stix/relConstraints'
 import { LastRunPanel, RuleRunBadge, pinStatIndex } from '../components/PolicySynthesis'
 import type { PinBudgetMode, PinRuleStat } from '../types'
 
@@ -96,10 +96,9 @@ const ALL_VERBS = VERB_GROUPS.flatMap(g => g.verbs)
 // previously kept its own copy of the table, which had already drifted from the
 // Review components' copy; the shared module makes drift impossible.
 
-/** True if the verb is spec-defined for the pair (or pair is unconstrained). */
+/** True if Stage 4 ships the verb as written for this pair (see shippedVerbs). */
 function verbIsCompliant(src: string, tgt: string, verb: string): boolean {
-  const allowed = pairVerbs(src, tgt)
-  return allowed === null || allowed.includes(verb)
+  return shippedVerbs(src, tgt).includes(verb)
 }
 
 // ── Default rule set ──────────────────────────────────────────────────────────
@@ -321,16 +320,16 @@ function VerbSelect({
   tgt?: string
 }) {
   const specVerbsForPair = src && tgt ? pairVerbs(src, tgt) : null
-  // When both types are known but the pair has no Appendix B definition,
-  // fall back to the three universal verbs (§5.1.2) — never show "other" verbs.
-  const effectiveVerbs: string[] | null = specVerbsForPair ?? (src && tgt ? UNIVERSAL_VERBS : null)
+  // When both types are known, offer only what Stage 4 ships as written —
+  // never show "other" verbs.
+  const effectiveVerbs: string[] | null = src && tgt ? shippedVerbs(src, tgt) : null
   const compliant = effectiveVerbs ? effectiveVerbs.includes(value) : true
 
   const borderColor = compliant ? 'var(--rule)' : 'color-mix(in oklab, var(--warn) 40%, var(--rule))'
   const titleText = effectiveVerbs
     ? specVerbsForPair
       ? `Valid STIX 2.1 verbs for ${typeLabel(src ?? '')} → ${typeLabel(tgt ?? '')}`
-      : `No Appendix B definition — only universal verbs shown`
+      : `No Appendix B definition — only the verbs Stage 4 ships for this pair`
     : undefined
 
   return (
@@ -448,7 +447,7 @@ function RuleRow({ rule, onPatch, onDelete, stat }: {
       {/* STIX 2.1 compliance indicator: warn when verb is not spec-defined for this pair */}
       {pinned && !verbIsCompliant(rule.src, rule.tgt, rule.verb) && (
         <span
-          title={`"${rule.verb}" is not a spec-defined verb for ${typeLabel(rule.src)} → ${typeLabel(rule.tgt)} per STIX 2.1 Appendix B. STIX allows user-defined verbs, so this will still be emitted.`}
+          title={`"${rule.verb}" is not a spec-defined verb for ${typeLabel(rule.src)} → ${typeLabel(rule.tgt)} per STIX 2.1 Appendix B. Stage 4 ships it as related-to.`}
           style={{
             fontSize: 10, color: 'var(--warn)',
             background: 'color-mix(in oklab, var(--warn) 10%, transparent)',
@@ -484,9 +483,9 @@ function RuleRow({ rule, onPatch, onDelete, stat }: {
 // ── Add-rule composer ─────────────────────────────────────────────────────────
 
 /** Pick the best default verb for a pair: first specific verb (skip universals).
- *  Falls back to UNIVERSAL_VERBS when the pair has no Appendix B definition. */
+ *  Picks among the verbs Stage 4 ships for the pair (see shippedVerbs). */
 function _bestVerb(s: string, t: string, current: string): string {
-  const valid = pairVerbs(s, t) ?? UNIVERSAL_VERBS
+  const valid = shippedVerbs(s, t)
   if (valid.includes(current)) return current
   const specific = valid.filter(v => !UNIVERSAL_VERBS.includes(v))
   return specific[0] ?? valid[0] ?? current
@@ -1066,6 +1065,18 @@ export default function Policy() {
   // ── Page ────────────────────────────────────────────────────────────────────
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg)' }}>
+
+      {/* The server validates every rule (verb, types, one rule per pair); a
+          refused save used to fail silently and the page kept the edit. */}
+      {saveMut.isError && (
+        <div role="alert" style={{
+          padding: '10px 30px', fontSize: 12.5, color: 'var(--no)',
+          background: 'color-mix(in oklab, var(--no) 8%, var(--bg))',
+          borderBottom: '1px solid color-mix(in oklab, var(--no) 30%, var(--rule))',
+        }}>
+          The policy was not saved: {errorDetail(saveMut.error)}
+        </div>
+      )}
 
       {/* ── Page head ─────────────────────────────────────────────────────── */}
       <div style={{

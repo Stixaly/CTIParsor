@@ -127,6 +127,18 @@ describe('buildBundleGraph', () => {
     expect(g.deg['threat-actor--a']).toBe(2)
   })
 
+  it('lists a quoted rule that does not compile with the compiler’s message (ADR-0067)', () => {
+    const { bundle, entities, relations, ledger } = fixture()
+    ledger.removed = [{ stix_id: 'indicator--y', kind: 'object', reason: 'rule_does_not_compile',
+                        name: 'Yara rule: R', error: 'line 10: syntax error' }]
+    const g = buildBundleGraph(bundle, ledger, entities, relations)
+    const item = g.diff.find(d => d.reason === 'rule_does_not_compile')!
+    expect(item.kind).toBe('removed')
+    expect(item.title).toBe('Yara rule: R')
+    expect(item.error).toBe('line 10: syntax error')
+    expect(item.nodeId).toBeUndefined()
+  })
+
   it('lists a self-loop without drawing it', () => {
     const { bundle, entities, relations, ledger } = fixture()
     const g = buildBundleGraph(bundle, ledger, entities, relations)

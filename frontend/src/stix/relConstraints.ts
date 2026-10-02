@@ -2,8 +2,10 @@
  * STIX 2.1 Appendix B per-pair relationship constraints — single source of truth.
  *
  * Maps "sourceType>targetType" → the spec-defined verbs for that pair.
- * Every pair additionally accepts the three universal verbs (§5.1.2):
- * related-to, duplicate-of, derived-from.
+ * Every pair additionally accepts `related-to`; a same-type pair also accepts
+ * `duplicate-of` and `derived-from` (§3.7, see `commonVerbs`).  The table must
+ * equal `_SUGGESTED` in pipeline/stix_rel_spec.py
+ * (tests/test_rel_constraints_parity.py).
  *
  * This module is intentionally dependency-free (no React, no component imports)
  * so it can be shared by both the Review components (tokens.ts) and the Policy
@@ -118,19 +120,75 @@ export const STIX_REL_CONSTRAINTS: Record<string, string[]> = {
   'ipv4-addr>mac-addr': ['resolves-to'],  // validator: ipv4-addr resolves-to mac-addr
   'ipv6-addr>autonomous-system': ['belongs-to'],
   'ipv6-addr>mac-addr': ['resolves-to'],  // validator: ipv6-addr resolves-to mac-addr
-  // Pairs with no Appendix B verb — only the universal 'related-to' applies.
-  'email-message>email-addr': ['related-to'],
-  'file>malware': ['related-to'],
 }
 
-/** STIX §5.1.2 common relationships usable between any two object types. */
+/** The STIX 2.1 common relationships (§3.7).  Only `related-to` links any two
+ *  objects; `duplicate-of` and `derived-from` link two objects of the same
+ *  type, so pick a pair's own with `commonVerbs`.  Same rule as the backend's
+ *  `pipeline/stix_rel_spec.py`: offering `malware duplicate-of tool` here let
+ *  an analyst pick a verb that Stage 4 then shipped as `related-to`. */
 export const UNIVERSAL_VERBS = ['related-to', 'duplicate-of', 'derived-from']
 
+/** The common relationships valid for this pair of types. */
+export function commonVerbs(src: string, tgt: string): string[] {
+  return src === tgt ? UNIVERSAL_VERBS : ['related-to']
+}
+
 /**
- * Return the spec-defined valid verbs for a (src, tgt) pair (with the universal
- * verbs always appended), or null when the pair has no Appendix B definition.
+ * Return the spec-defined valid verbs for a (src, tgt) pair, followed by the
+ * common verbs valid for it, or null when the pair has no Appendix B definition.
  */
 export function pairVerbs(src: string, tgt: string): string[] | null {
   const v = STIX_REL_CONSTRAINTS[`${src}>${tgt}`]
-  return v ? [...new Set([...v, ...UNIVERSAL_VERBS])] : null
+  return v ? [...new Set([...v, ...commonVerbs(src, tgt)])] : null
+}
+
+/** STIX types Stage 4 treats as observables (`_OBSERVABLE_SCO_TYPES` in
+ *  pipeline/stage4_stix_mapping.py, checked by tests/test_rel_constraints_parity.py). */
+export const OBSERVABLE_TYPES = new Set([
+  'ipv4-addr', 'ipv6-addr', 'domain-name', 'url', 'email-addr', 'mac-addr',
+  'autonomous-system', 'file', 'windows-registry-key', 'mutex',
+  'user-account', 'network-traffic', 'software', 'artifact',
+])
+
+/** All STIX 2.1 cyber-observable types (`SCO_TYPES` in pipeline/stix_rel_spec.py). */
+export const SCO_TYPES = new Set([
+  'artifact', 'autonomous-system', 'directory', 'domain-name', 'email-addr',
+  'email-message', 'file', 'ipv4-addr', 'ipv6-addr', 'mac-addr', 'mutex',
+  'network-traffic', 'process', 'software', 'url', 'user-account',
+  'windows-registry-key', 'x509-certificate',
+])
+
+/** The verbs named for this exact pair: the spec's table, plus the project's
+ *  `indicator based-on <SCO>` (`_PROJECT_EXTENSIONS`, ADR-0061). */
+function listedVerbs(src: string, tgt: string): string[] {
+  const ext = src === 'indicator' && SCO_TYPES.has(tgt) ? ['based-on'] : []
+  return [...(STIX_REL_CONSTRAINTS[`${src}>${tgt}`] ?? []), ...ext]
+}
+
+const uniq = (xs: string[]) => [...new Set(xs)]
+
+/**
+ * The verbs Stage 4 ships as written for a src → tgt row or pinned rule.  Any
+ * other verb ships as `related-to`, except between an observable and a
+ * technique, where Stage 4 drops it.  Same decisions as
+ * `verb_ships_as_written` in pipeline/stage4_stix_mapping.py; both are held to
+ * `shippedVerbs.fixture.json` (tests/test_rel_constraints_parity.py).
+ *
+ * - An observable and a technique, either way round: only `indicates`,
+ *   through the observable's Indicator (ADR-0012, ADR-0065).
+ * - An observable opposite an SDO: the verbs listed for the pair stay on the
+ *   observable; any other verb is carried by the observable's Indicator in its
+ *   place (ADR-0041, ADR-0062), so it ships if the Indicator's pair allows it.
+ * - Otherwise: the listed verbs, then the common verbs valid for the pair.
+ */
+export function shippedVerbs(src: string, tgt: string): string[] {
+  const srcObs = OBSERVABLE_TYPES.has(src), tgtObs = OBSERVABLE_TYPES.has(tgt)
+  if ((srcObs && tgt === 'attack-pattern') || (src === 'attack-pattern' && tgtObs)) {
+    return ['indicates']
+  }
+  const allowed = (s: string, t: string) => uniq([...listedVerbs(s, t), ...commonVerbs(s, t)])
+  if (srcObs && !tgtObs) return uniq([...listedVerbs(src, tgt), ...allowed('indicator', tgt)])
+  if (tgtObs && !srcObs) return uniq([...listedVerbs(src, tgt), ...allowed(src, 'indicator')])
+  return allowed(src, tgt)
 }

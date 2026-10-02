@@ -137,8 +137,9 @@ describe('suggestRelType', () => {
     expect(suggestRelType('threat_actor', 'malware')).toBe('uses')
   })
 
-  it('falls back to related-to for an unconstrained pair', () => {
-    expect(suggestRelType('ipv4', 'campaign')).toBe('related-to')
+  it('suggests what ships for an unlisted pair', () => {
+    expect(suggestRelType('ipv4', 'campaign')).toBe('indicates')   // through the IoC's Indicator
+    expect(suggestRelType('threat_actor', 'domain')).toBe('related-to')
   })
 })
 
@@ -149,10 +150,15 @@ describe('verbsForPair', () => {
     expect(r.valid).toContain('exploits')
   })
 
-  it('returns all verbs for an unconstrained pair', () => {
-    const r = verbsForPair('ipv4', 'campaign')
-    expect(r.constrained).toBe(false)
-    expect(r.valid.length).toBeGreaterThan(5)
+  it('offers an unlisted IoC → SDO pair the verbs of the Indicator that ships in its place', () => {
+    // Stage 4 routes the observable through its Indicator (ADR-0041/0062).
+    expect(verbsForPair('ipv4', 'campaign').valid).toEqual(['indicates', 'related-to'])
+    expect(verbsForPair('sha256', 'malware').valid).toEqual(['indicates', 'related-to'])
+  })
+
+  it('offers an unlisted SDO pair only the common verbs, the ones that ship', () => {
+    expect(verbsForPair('threat_actor', 'domain').valid).toEqual(['related-to'])
+    expect(verbsForPair('malware', 'tool').valid).not.toContain('duplicate-of')
   })
 
   // ADR-0065: Stage 4 ships only `indicates` between an observable and a

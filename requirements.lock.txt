@@ -28,6 +28,8 @@ cryptography==50.0.1      # via pdfminer-six
 cymem==2.0.13             # via preshed, spacy, thinc
 defusedxml==0.7.1         # via markitdown, -r requirements.txt
 deprecated==3.0.0         # via limits
+diskcache==5.6.3          # via pysigma
+diskcache-stubs==5.6.3.6.20240818  # via pysigma
 distro==1.9.0             # via openai
 docstring-parser==0.18.0  # via anthropic
 fastapi==0.141.1          # via -r requirements-api.txt
@@ -53,13 +55,15 @@ idna==3.20                # via anyio, httpx, httpx2, jsonschema, requests
 iniconfig==2.3.0          # via pytest
 iocextract==1.16.1        # via -r requirements.txt
 isoduration==20.11.0      # via jsonschema
-jinja2==3.1.6             # via spacy, torch
+jinja2==3.1.6             # via pysigma, spacy, torch
 jiter==0.17.0             # via anthropic, openai
 joblib==1.6.0             # via scikit-learn
+jq==1.12.0                # via pysigma
 jsonpointer==3.1.1        # via jsonschema
 jsonschema==4.26.0        # via stix2-validator
 jsonschema-specifications==2025.9.1  # via jsonschema
 lark==1.3.1               # via rfc3987-syntax
+lark-parser==0.12.0       # via parsuricata
 limits==5.8.0             # via slowapi
 lxml==6.1.3               # via python-docx
 magika==0.6.3             # via markitdown
@@ -75,7 +79,8 @@ networkx==3.7             # via torch
 numpy==2.5.3              # via blis, gliner, magika, onnxruntime, scikit-learn, scipy, sentence-transformers, spacy, thinc, transformers, -r requirements.txt
 onnxruntime==1.20.1       # via magika
 openai==2.54.0            # via -r requirements.txt
-packaging==26.3           # via gliner, huggingface-hub, limits, onnxruntime, pytesseract, pytest, spacy, thinc, transformers, weasel
+packaging==26.3           # via gliner, huggingface-hub, limits, onnxruntime, pysigma, pytesseract, pytest, spacy, thinc, transformers, weasel
+parsuricata==0.4.1        # via -r requirements.txt
 pdf2image==1.17.0         # via -r requirements.txt
 pdfminer-six==20260107    # via pdfplumber
 pdfplumber==0.11.10       # via -r requirements.txt
@@ -92,8 +97,10 @@ pydantic==2.13.5          # via anthropic, fastapi, openai, spacy, thinc, weasel
 pydantic-core==2.46.5     # via pydantic
 pyee==13.0.1              # via playwright
 pygments==2.21.0          # via pytest, rich
+pyparsing==3.3.3          # via pysigma
 pypdfium2==5.13.0         # via pdfplumber
 pyreadline3==3.5.6 ; sys_platform == 'win32'  # via humanfriendly
+pysigma==1.5.0            # via -r requirements.txt
 pytesseract==0.3.13       # via -r requirements.txt
 pytest==9.1.1             # via -r requirements.txt
 python-dateutil==2.9.0.post0  # via arrow, stix2-validator
@@ -102,11 +109,11 @@ python-dotenv==1.2.3      # via magika, uvicorn, -r requirements.txt
 python-magic==0.4.27      # via -r requirements-api.txt
 python-multipart==0.0.32  # via -r requirements-api.txt
 pytz==2026.4              # via stix2
-pyyaml==6.0.3             # via huggingface-hub, transformers, uvicorn, -r requirements.txt
+pyyaml==6.0.3             # via huggingface-hub, pysigma, transformers, uvicorn, -r requirements.txt
 rapidfuzz==3.14.6         # via -r requirements.txt
 referencing==0.37.0       # via jsonschema, jsonschema-specifications
 regex==2026.9.10          # via iocextract, transformers
-requests==2.34.2          # via markitdown, spacy, stix2, stix2-validator
+requests==2.34.2          # via markitdown, pysigma, spacy, stix2, stix2-validator
 rfc3339-validator==0.1.4  # via jsonschema
 rfc3986-validator==0.1.1  # via jsonschema
 rfc3987-syntax==1.1.0     # via jsonschema
@@ -144,7 +151,8 @@ tqdm==4.70.1              # via gliner, huggingface-hub, openai, sentence-transf
 transformers==5.16.1      # via gliner, sentence-transformers, -r requirements.txt
 truststore==0.10.4 ; sys_platform != 'emscripten'  # via httpcore2, httpx2
 typer==0.27.2             # via spacy, transformers, weasel
-typing-extensions==4.16.0  # via anthropic, anyio, beautifulsoup4, fastapi, httpx2, huggingface-hub, limits, openai, psycopg, pydantic, pydantic-core, pyee, python-docx, referencing, sentence-transformers, starlette, torch, typing-inspection
+types-pyyaml==6.0.12.20260906  # via pysigma
+typing-extensions==4.16.0  # via anthropic, anyio, beautifulsoup4, diskcache-stubs, fastapi, httpx2, huggingface-hub, limits, openai, psycopg, pydantic, pydantic-core, pyee, pysigma, python-docx, referencing, sentence-transformers, starlette, torch, typing-inspection
 typing-inspection==0.4.4  # via fastapi, pydantic
 tzdata==2026.4            # via arrow, psycopg
 uri-template==1.3.0       # via jsonschema
@@ -157,3 +165,4 @@ weasel==1.0.0             # via spacy
 webcolors==25.10.0        # via jsonschema
 websockets==17.1          # via uvicorn
 wrapt==2.5.0              # via deprecated, smart-open
+yara-python==4.5.4        # via -r requirements.txt

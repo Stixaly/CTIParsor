@@ -4,7 +4,7 @@
    entity type names (underscore form).
    ============================================================ */
 
-import { pairVerbs } from '../../stix/relConstraints'
+import { pairVerbs, shippedVerbs } from '../../stix/relConstraints'
 import type { DetectionFormat } from '../../types'
 
 export interface TypeStyle {
@@ -315,14 +315,6 @@ export function suggestRelType(srcType: string, tgtType: string): string {
   return 'related-to'
 }
 
-/** STIX types Stage 4 treats as observables (`_OBSERVABLE_SCO_TYPES` in
- *  pipeline/stage4_stix_mapping.py) — keep the two lists the same. */
-const OBSERVABLE_TYPES = new Set([
-  'ipv4-addr', 'ipv6-addr', 'domain-name', 'url', 'email-addr', 'mac-addr',
-  'autonomous-system', 'file', 'windows-registry-key', 'mutex',
-  'user-account', 'network-traffic', 'software', 'artifact',
-])
-
 /** No analyst has decided this relationship: it is pending, or the pipeline
  *  stored it accepted by default (ADR-0058).  Either way it ships unless
  *  someone rejects it, so it is what the analyst still has to look at. */
@@ -335,10 +327,10 @@ export function relNeedsReview(r: { accepted: boolean | null; decision_origin?: 
  * for populating a grouped <select>.
  *
  * Returns an object with:
- *   valid   — spec-defined verbs for this exact pair (+ universal verbs)
+ *   valid   — the verbs Stage 4 ships as written for this pair (see
+ *             shippedVerbs); any other verb ships as related-to
  *   others  — all other STIX verbs not in valid[]
- *   all     — every known STIX verb (for unconstrained pairs)
- *   constrained — true when the pair is in the spec
+ *   constrained — true (both types are known here)
  *
  * Both underscore and hyphen type names are accepted.
  */
@@ -365,17 +357,10 @@ export function verbsForPair(srcType: string, tgtType: string): {
   }
 
   const all = REL_TYPES
-  // An observable and a technique: Stage 4 ships only `indicates`, through
-  // the observable's Indicator (`indicator indicates attack-pattern`), either
-  // way round, and drops every other verb (ADR-0012, ADR-0065).  Offering all
-  // 35 here let an analyst build a link that never reached the bundle.
-  const s = norm(srcType), t = norm(tgtType)
-  if ((OBSERVABLE_TYPES.has(s) && t === 'attack-pattern') ||
-      (s === 'attack-pattern' && OBSERVABLE_TYPES.has(t))) {
-    return { valid: ['indicates'], others: all.filter(v => v !== 'indicates'), constrained: true }
-  }
-  const valid = specVerbs(s, t)
-  if (!valid) return { valid: all, others: [], constrained: false }
+  // Only what Stage 4 ships as written (see shippedVerbs).  Offering all 35
+  // let an analyst build a link that never reached the bundle, or reached it
+  // as related-to.
+  const valid = shippedVerbs(norm(srcType), norm(tgtType))
   const others = all.filter(v => !valid.includes(v))
   return { valid, others, constrained: true }
 }

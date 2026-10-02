@@ -69,3 +69,36 @@ def test_an_invalid_policy_is_refused_and_not_stored(temp_db_client, body, messa
     resp = temp_db_client.put(_URL, json=body)
     assert resp.status_code == 400 and message in resp.json()["detail"]
     assert temp_db_client.get(_URL).json() == {"version": 1, "global": "enforce", "rules": []}
+
+
+def _rule(src="threat-actor", verb="uses", tgt="malware", mode="pin", enabled=True):
+    return {"src": src, "verb": verb, "tgt": tgt, "mode": mode, "enabled": enabled}
+
+
+@pytest.mark.parametrize("rules,message", [
+    ([_rule(src="actor")], "'rules[0]'.src must be a STIX 2.1 SDO or SCO type"),
+    ([_rule(tgt="marking-definition")], "'rules[0]'.tgt must be a STIX 2.1 SDO or SCO type"),
+    ([_rule(verb="executes")], "'rules[0]'.verb 'executes' is not a STIX 2.1 relationship type"),
+    ([_rule(mode="force")], "'rules[0]'.mode must be"),
+    ([_rule(enabled="yes")], "'rules[0]'.enabled must be a boolean"),
+    ([_rule(), _rule(verb="related-to", mode="auto")], "'rules[1]' repeats the pair threat-actor>malware"),
+    # A pinned verb Stage 4 would not ship: it used to emit related-to edges
+    # labelled with a verb they did not carry.
+    ([_rule(src="malware", verb="duplicate-of", tgt="tool")], "which Stage 4 would not ship as written"),
+    ([_rule(src="ipv4-addr", verb="uses", tgt="attack-pattern")], "which Stage 4 would not ship as written"),
+])
+def test_a_rule_stage4_would_not_apply_as_written_is_refused(temp_db_client, rules, message):
+    resp = temp_db_client.put(_URL, json={"version": 1, "global": "enforce", "rules": rules})
+    assert resp.status_code == 400 and message in resp.json()["detail"]
+
+
+@pytest.mark.parametrize("rule", [
+    _rule(src="ipv4-addr", verb="indicates", tgt="malware"),          # through the IoC's Indicator
+    _rule(src="malware", verb="communicates-with", tgt="domain-name"),  # listed on the observable
+    _rule(src="malware", verb="duplicate-of", tgt="malware"),           # same type (§3.7)
+    _rule(src="malware", verb="duplicate-of", tgt="tool", enabled=False),
+    _rule(src="malware", verb="duplicate-of", tgt="tool", mode="auto"),
+])
+def test_a_rule_that_ships_as_written_or_is_not_pinned_is_stored(temp_db_client, rule):
+    resp = temp_db_client.put(_URL, json={"version": 1, "global": "enforce", "rules": [rule]})
+    assert resp.status_code == 200, resp.json()

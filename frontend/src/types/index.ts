@@ -396,6 +396,8 @@ export interface LedgerRemoval {
   replaced_by?: string | null
   /** An absorbed object's name (it is no longer in the bundle to look up). */
   name?: string
+  /** Why a quoted detection rule did not compile (ADR-0067). */
+  error?: string
 }
 
 export interface BundleLedger {
