@@ -293,7 +293,6 @@ def test_worker_and_cli_run_the_same_pipeline(temp_db, mock_llm, sample_cti_text
     build the same bundle, object for object and edge for edge."""
     from api import worker
 
-    monkeypatch.setattr(worker, "_ROOT", tmp_path)
     monkeypatch.setenv("CVE_ENRICHMENT", "false")     # never reach CIRCL from a test
     for var in ("ENABLE_CONSENSUS", "ENABLE_DOCUMENT_LEVEL_RELATIONS", "PIPELINE_DISABLED_STAGES"):
         monkeypatch.delenv(var, raising=False)

@@ -12,15 +12,15 @@ from types import SimpleNamespace
 import pytest
 
 import api.worker as worker
+from api.paths import output_dir, uploads_dir
 from models.schemas import EntityType, RawEntity
 from pipeline.orchestrator import RunAborted
 from pipeline.stage3_llm import LLMEnrichmentResult, RelationshipExtracted, TTPExtracted
 
 
 @pytest.fixture()
-def db(temp_db, tmp_path, monkeypatch):
-    monkeypatch.setattr(worker, "_ROOT", tmp_path)
-    (tmp_path / "uploads").mkdir()
+def db(temp_db):
+    uploads_dir().mkdir(parents=True)        # under tmp_path (conftest)
     return temp_db
 
 
@@ -205,7 +205,7 @@ def _run(monkeypatch, outcome, *, during=None):
         return outcome
 
     monkeypatch.setattr(worker, "run_document", run_document)
-    worker._run_pipeline("j1", str(worker._ROOT / "uploads" / "j1.txt"), "APT report.txt")
+    worker._run_pipeline("j1", str(uploads_dir() / "j1.txt"), "APT report.txt")
 
 
 def _reclaim(db, new_owner: str = "w2"):
@@ -278,16 +278,15 @@ def test_the_subprocess_caps_native_threads_before_running(monkeypatch):
 
 def test_the_upload_is_found_by_job_id(db):
     assert worker._upload_path_for("j1") is None
-    (worker._ROOT / "uploads" / "j1.pdf").write_bytes(b"%PDF")
+    (uploads_dir() / "j1.pdf").write_bytes(b"%PDF")
     assert worker._upload_path_for("j1").endswith("uploads/j1.pdf")
 
 
 def test_an_unreadable_uploads_directory_is_no_upload(monkeypatch, caplog):
-    class _Broken:
-        def __truediv__(self, other):
-            raise PermissionError("uploads: permission denied")
+    def _broken():
+        raise PermissionError("uploads: permission denied")
 
-    monkeypatch.setattr(worker, "_ROOT", _Broken())
+    monkeypatch.setattr(worker, "uploads_dir", _broken)
     assert worker._upload_path_for("j1") is None
     assert "Failed to resolve upload path" in caplog.text
 
@@ -447,7 +446,7 @@ def test_finalize_applies_every_reviewer_rejection_to_the_llm_blob(db):
     assert _objects(bundle, "ipv4-addr") == ["185.220.101.45"]
     row = _row(db)
     assert row["status"] == "completed" and json.loads(row["bundle_ledger_json"])
-    assert (worker._ROOT / "output" / "APT_report_j1_bundle.json").exists()
+    assert (output_dir() / "APT_report_j1_bundle.json").exists()
 
 
 def test_finalize_survives_a_corrupt_llm_blob_and_an_unreadable_anchor(db, monkeypatch):

@@ -15,10 +15,11 @@ import pytest
 import api.queue_loop as queue_loop
 import api.worker as worker
 from api.db import get_conn, now_iso
+from api.paths import uploads_dir
 
 
 @pytest.fixture
-def setup_db(temp_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def setup_db(temp_db):
     """Isolated database, plus an uploads/ root under tmp_path.
 
     temp_db (tests/conftest.py) points api.db at a disposable PostgreSQL
@@ -27,8 +28,7 @@ def setup_db(temp_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     constraints the real schema enforces -- jobs.updated_at is NOT NULL --
     and, worse, leave the test bodies talking to a developer's real database.
     """
-    monkeypatch.setattr(worker, "_ROOT", tmp_path)
-    (tmp_path / "uploads").mkdir(exist_ok=True)
+    uploads_dir().mkdir(parents=True, exist_ok=True)   # under tmp_path (conftest)
     return temp_db
 
 
@@ -46,7 +46,7 @@ def _insert_job(
 
 
 def _touch_upload(job_id: str) -> None:
-    (worker._ROOT / "uploads" / f"{job_id}.txt").touch()
+    (uploads_dir() / f"{job_id}.txt").touch()
 
 
 class FakeHandle:

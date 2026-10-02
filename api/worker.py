@@ -25,6 +25,7 @@ from api.logging_config import get_logger
 logger = get_logger(__name__)
 
 from api.db import _lock, backup_db, emit_progress, get_conn, now_iso, set_job_status
+from api.paths import output_dir, uploads_dir
 from pipeline.env_flags import env_int
 from pipeline.orchestrator import (
     Document,
@@ -139,7 +140,7 @@ def bundle_output_path(job_id: str, report_name: str) -> Path:
     file on disk.  The DB-stored bundle_json was always per-job; only the
     on-disk export collided.
     """
-    return _ROOT / "output" / f"{report_name}_{job_id}_bundle.json"
+    return output_dir() / f"{report_name}_{job_id}_bundle.json"
 
 
 def _ttp_ids_covered(llm_result) -> tuple[set[str], set[str]]:
@@ -343,7 +344,7 @@ class _WorkerHooks(Hooks):
         self.started = started
         # output/{job_id}_stage3.ckpt.json — a lingering file always means the
         # previous run crashed mid-Stage 3.
-        self.checkpoint = FileCheckpoint(_ROOT / "output" / f"{job_id}_stage3.ckpt.json", job_id)
+        self.checkpoint = FileCheckpoint(output_dir() / f"{job_id}_stage3.ckpt.json", job_id)
 
     def progress(self, event: str, data: dict) -> None:
         emit_progress(self.job_id, event, data)
@@ -544,7 +545,7 @@ def _upload_path_for(job_id: str) -> str | None:
     shares the uploads volume with the API can find it (ADR-0046).
     """
     try:
-        matches = sorted((_ROOT / "uploads").glob(f"{job_id}.*"))
+        matches = sorted(uploads_dir().glob(f"{job_id}.*"))
         if matches:
             return str(matches[0])
     except Exception as exc:
@@ -1058,7 +1059,7 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
     report_name       = re.sub(r"[^\w\-]", "_", Path(original_filename).stem)
 
     # Locate the uploaded file to recompute its hash (stable — file never changes)
-    upload_matches = list((_ROOT / "uploads").glob(f"{job_id}.*"))
+    upload_matches = list(uploads_dir().glob(f"{job_id}.*"))
     source_hash, source_bytes = load_file_bytes(upload_matches[0] if upload_matches else None)
 
     # The report's publication date, recomputed from the stored source and

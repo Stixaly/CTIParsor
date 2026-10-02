@@ -102,17 +102,27 @@ def test_finalize_same_filename_jobs_do_not_collide(temp_db):
 
     pa = worker.bundle_output_path("job-a", "report")
     pb = worker.bundle_output_path("job-b", "report")
-    try:
-        assert pa.exists() and pb.exists()
-        assert pa != pb
+    assert pa.exists() and pb.exists()
+    assert pa != pb
 
-        # Deleting job-a's files must leave job-b's bundle intact.
-        _delete_job_files("job-a", "report.txt")
-        assert not pa.exists()
-        assert pb.exists()
-    finally:
-        pa.unlink(missing_ok=True)
-        pb.unlink(missing_ok=True)
+    # Deleting job-a's files must leave job-b's bundle intact.
+    _delete_job_files("job-a", "report.txt")
+    assert not pa.exists()
+    assert pb.exists()
+
+
+def test_bundles_are_written_where_the_output_dir_setting_says(temp_db, tmp_path):
+    """CTIPARSOR_OUTPUT_DIR (api/paths.py) decides where a finalized bundle
+    lands; conftest points it at tmp_path, so no test writes into output/."""
+    from api import worker
+
+    job_id = _insert_job(temp_db, job_id="job-out")
+    worker._save_entities(job_id, [], _llm_result_with_label(EvidenceLabel.OBSERVED))
+    worker.re_run_final_stages(job_id, skip_rescan=True)
+
+    path = worker.bundle_output_path(job_id, "report")
+    assert path.parent == tmp_path / "output"
+    assert path.exists()
 
 
 # ── Migration ───────────────────────────────────────────────────────────────
@@ -164,17 +174,14 @@ def test_quick_finalize_rebuilds_the_bundle_but_keeps_the_status(temp_db):
 
     job_id = _insert_job(temp_db, job_id="job-quick")
     worker._save_entities(job_id, [], _llm_result_with_label(EvidenceLabel.OBSERVED))
-    try:
-        assert worker.re_run_final_stages(job_id, skip_rescan=True)
-        assert _job_status(temp_db, job_id) == "reviewing"
-        with temp_db.get_conn() as conn:
-            assert conn.execute("SELECT bundle_json FROM jobs WHERE id=?",
-                                (job_id,)).fetchone()["bundle_json"]
+    assert worker.re_run_final_stages(job_id, skip_rescan=True)
+    assert _job_status(temp_db, job_id) == "reviewing"
+    with temp_db.get_conn() as conn:
+        assert conn.execute("SELECT bundle_json FROM jobs WHERE id=?",
+                            (job_id,)).fetchone()["bundle_json"]
 
-        assert worker.re_run_final_stages(job_id, skip_rescan=False)
-        assert _job_status(temp_db, job_id) == "completed"
-    finally:
-        worker.bundle_output_path(job_id, "report").unlink(missing_ok=True)
+    assert worker.re_run_final_stages(job_id, skip_rescan=False)
+    assert _job_status(temp_db, job_id) == "completed"
 
 
 # ── Read path: re_run_final_stages reconstructs and carries the label ─────────

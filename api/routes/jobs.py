@@ -10,16 +10,12 @@ from pydantic import BaseModel
 
 from api.db import _lock, get_conn, now_iso
 from api.logging_config import get_logger
+from api.paths import output_dir, uploads_dir
 from api.routes._common import require_job
 from api.worker import re_run_final_stages
 from pipeline.env_flags import env_int
 
 logger = get_logger(__name__)
-
-_ROOT        = Path(__file__).parent.parent.parent
-# Folder where uploaded files are kept (mirrors upload.py UPLOADS_DIR)
-_UPLOADS_DIR = _ROOT / "uploads"
-_OUTPUT_DIR  = _ROOT / "output"
 
 # Age (in days) past which a job's DB row and files are swept automatically.
 # 0 (default) disables the sweep entirely -- the previous behaviour, where only
@@ -47,11 +43,12 @@ def _delete_job_files(job_id: str, original_filename: str) -> None:
     from api.worker import bundle_output_path
 
     # 1 — Original uploaded file (glob so we don't need to know the extension)
-    for f in _UPLOADS_DIR.glob(f"{job_id}.*"):
+    uploads, output = uploads_dir(), output_dir()
+    for f in uploads.glob(f"{job_id}.*"):
         f.unlink(missing_ok=True)
     # …and a URL capture's publication metadata (ADR-0063), kept in a
     # subdirectory so the glob above never mistakes it for the source.
-    (_UPLOADS_DIR / "meta" / f"{job_id}.json").unlink(missing_ok=True)
+    (uploads / "meta" / f"{job_id}.json").unlink(missing_ok=True)
 
     # 2 — STIX bundle(s) — reconstruct report_name the same way the worker does
     report_name = re.sub(r"[^\w\-]", "_", Path(original_filename).stem)
@@ -60,12 +57,12 @@ def _delete_job_files(job_id: str, original_filename: str) -> None:
     out_path.with_stem(out_path.stem + "_invalid").unlink(missing_ok=True)
     # Best-effort cleanup of the legacy non-job-scoped names written by older
     # builds (these collided across same-filename jobs — see bundle_output_path).
-    (_OUTPUT_DIR / f"{report_name}_bundle.json").unlink(missing_ok=True)
-    (_OUTPUT_DIR / f"{report_name}_bundle_invalid.json").unlink(missing_ok=True)
+    (output / f"{report_name}_bundle.json").unlink(missing_ok=True)
+    (output / f"{report_name}_bundle_invalid.json").unlink(missing_ok=True)
 
     # 3 — Stage 3 LLM checkpoint (and its .tmp rename-in-progress counterpart)
-    (_OUTPUT_DIR / f"{job_id}_stage3.ckpt.json").unlink(missing_ok=True)
-    (_OUTPUT_DIR / f"{job_id}_stage3.ckpt.tmp").unlink(missing_ok=True)
+    (output / f"{job_id}_stage3.ckpt.json").unlink(missing_ok=True)
+    (output / f"{job_id}_stage3.ckpt.tmp").unlink(missing_ok=True)
 
 
 class StatusPatch(BaseModel):
@@ -262,7 +259,7 @@ def get_source_file(job_id: str):
     with get_conn() as conn:
         require_job(conn, job_id)
 
-    matches = list(_UPLOADS_DIR.glob(f"{job_id}.*"))
+    matches = list(uploads_dir().glob(f"{job_id}.*"))
     if not matches:
         raise HTTPException(404, "Source file not found — it may have been removed")
 

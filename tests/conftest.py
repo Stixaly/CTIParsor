@@ -6,11 +6,14 @@ Provides:
   - mock_llm_response / mock_llm          — patches _call_llm so no API key needed
   - storage                               — InMemoryJobStorage for worker tests
   - api_client                            — FastAPI TestClient with DB mocked out
+
+and keeps every test's uploads and bundles out of the working tree.
 """
 from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -139,6 +142,49 @@ def _forget_store_backed_caches():
     overrides.reload()
 
 
+# ── Uploads and bundles stay in tmp_path ───────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _files_stay_in_tmp_path(tmp_path, monkeypatch):
+    """Uploaded sources and exported bundles go under this test's tmp_path
+    (api/paths.py), not into the checkout's uploads/ and output/.  Finalizing
+    a job writes a bundle file: whether a test passes must not depend on that
+    directory being writable, and a run must not leave files behind in it."""
+    monkeypatch.setenv("CTIPARSOR_UPLOADS_DIR", str(tmp_path / "uploads"))
+    monkeypatch.setenv("CTIPARSOR_OUTPUT_DIR", str(tmp_path / "output"))
+
+
+_REPO = Path(__file__).resolve().parent.parent
+_GUARDED_DIRS = ("uploads", "output")
+_FILES_BEFORE = pytest.StashKey[set[Path]]()
+
+
+def _guarded_files() -> set[Path]:
+    return {p for d in _GUARDED_DIRS if (_REPO / d).is_dir()
+            for p in (_REPO / d).rglob("*") if p.is_file()}
+
+
+def pytest_sessionstart(session):
+    session.config.stash[_FILES_BEFORE] = _guarded_files()
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Name any file the run added to uploads/ or output/: a path the fixture
+    above does not cover yet.  Fails the run in CI; only warns elsewhere,
+    since an API started from this checkout writes there too."""
+    new = sorted(_guarded_files() - session.config.stash.get(_FILES_BEFORE, set()))
+    if not new:
+        return
+    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+    if reporter is not None:
+        reporter.write_sep("=", "files written into the working tree", red=True)
+        for p in new:
+            reporter.write_line(f"  {p.relative_to(_REPO)}")
+        reporter.write_line("Route them through api/paths.py or tmp_path (tests/conftest.py).")
+    if os.environ.get("CI"):
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
 # ── Storage fixture ────────────────────────────────────────────────────────────
 
 @pytest.fixture()
@@ -146,7 +192,7 @@ def storage() -> InMemoryJobStorage:
     return InMemoryJobStorage()
 
 
-# ── Isolated SQLite database ────────────────────────────────────────────────────
+# ── Isolated PostgreSQL schema ───────────────────────────────────────────────────
 
 @pytest.fixture()
 def temp_db(monkeypatch):

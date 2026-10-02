@@ -1,7 +1,7 @@
 """POST /api/upload — extension, marking, MIME and write-path checks.
 
 The worker is stubbed (start_job imports run_pipeline_async from api.worker on
-each call) and uploads land in tmp_path, so nothing is processed for real.
+each call) and uploads land under tmp_path, so nothing is processed for real.
 """
 from __future__ import annotations
 
@@ -11,17 +11,26 @@ from unittest.mock import patch
 
 import pytest
 
+from api.paths import uploads_dir
+
 _REPORT = b"APT29 deployed SUNBURST and contacted 185.220.101.45 for C2.\n"
 _PDF = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n1 0 obj << >> endobj\n"
 _PNG = b"\x89PNG\r\n\x1a\n" + b"\0" * 32
 
 
 @pytest.fixture()
-def client(temp_db_client, tmp_path, monkeypatch):
+def uploads():
+    """Where this test's uploads land: tmp_path/uploads (tests/conftest.py)."""
+    path = uploads_dir()
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+@pytest.fixture()
+def client(temp_db_client):
     import api.main
 
     api.main.limiter.reset()                  # 10/minute is shared by every test
-    monkeypatch.setattr("api.routes.upload.UPLOADS_DIR", tmp_path)
     with patch("api.worker.run_pipeline_async", return_value="started") as spawn:
         temp_db_client.spawn = spawn          # type: ignore[attr-defined]
         yield temp_db_client
@@ -46,13 +55,13 @@ def _job(temp_db, job_id: str) -> dict:
         return dict(conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone())
 
 
-def test_a_text_report_is_stored_and_handed_to_the_pipeline(client, temp_db, tmp_path):
+def test_a_text_report_is_stored_and_handed_to_the_pipeline(client, temp_db, uploads):
     resp = _upload(client, "report.TXT", _REPORT, tlp_level=" amber ", pap_level="green")
 
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "processing" and body["filename"] == "report.TXT"
-    dest = tmp_path / f"{body['job_id']}.txt"
+    dest = uploads / f"{body['job_id']}.txt"
     assert dest.read_bytes() == _REPORT
     job = _job(temp_db, body["job_id"])
     assert (job["tlp_level"], job["pap_level"], job["status"]) == ("AMBER", "GREEN", "uploaded")
@@ -79,22 +88,22 @@ def test_an_unsupported_extension_is_refused(client):
     assert resp.status_code == 400 and "Unsupported format '.exe'" in resp.json()["detail"]
 
 
-def test_a_file_whose_content_contradicts_its_extension_is_refused(client, tmp_path):
+def test_a_file_whose_content_contradicts_its_extension_is_refused(client, uploads):
     resp = _upload(client, "report.pdf", _REPORT)
     assert resp.status_code == 415
     assert "text/plain" in resp.json()["detail"]
-    assert list(tmp_path.iterdir()) == []
+    assert list(uploads.iterdir()) == []
 
 
 def test_a_real_pdf_is_accepted(client):
     assert _upload(client, "report.pdf", _PDF).status_code == 200
 
 
-def test_a_request_larger_than_the_limit_is_refused_before_reading(client, monkeypatch, tmp_path):
+def test_a_request_larger_than_the_limit_is_refused_before_reading(client, monkeypatch, uploads):
     monkeypatch.setattr("api.routes.upload._MAX_BYTES", 64)
     resp = _upload(client, "r.txt", _REPORT * 4)
     assert resp.status_code == 413 and "File too large" in resp.json()["detail"]
-    assert list(tmp_path.iterdir()) == []
+    assert list(uploads.iterdir()) == []
 
 
 def test_a_full_queue_answers_503(client):
@@ -108,7 +117,7 @@ def test_a_queued_job_is_reported_as_queued(client):
     assert _upload(client, "r.txt", _REPORT).json()["status"] == "queued"
 
 
-def test_a_disk_error_is_a_500_and_leaves_no_file(client, monkeypatch, tmp_path):
+def test_a_disk_error_is_a_500_and_leaves_no_file(client, monkeypatch, uploads):
     real_open = Path.open
 
     def failing_open(self, mode="r", *a, **kw):
@@ -119,7 +128,7 @@ def test_a_disk_error_is_a_500_and_leaves_no_file(client, monkeypatch, tmp_path)
     monkeypatch.setattr(Path, "open", failing_open)
     resp = _upload(client, "r.txt", _REPORT)
     assert resp.status_code == 500 and "disk write error" in resp.json()["detail"]
-    assert list(tmp_path.iterdir()) == []
+    assert list(uploads.iterdir()) == []
 
 
 # ── Without libmagic: the `filetype` fallback ────────────────────────────────
@@ -147,7 +156,7 @@ def test_fallback_accepts_a_real_pdf(client, no_libmagic):
     assert _upload(client, "r.pdf", _PDF).status_code == 200
 
 
-def test_an_empty_file_is_refused(client, no_libmagic, tmp_path):
+def test_an_empty_file_is_refused(client, no_libmagic, uploads):
     resp = _upload(client, "r.txt", b"")
     assert resp.status_code == 500 and "empty file" in resp.json()["detail"]
-    assert list(tmp_path.iterdir()) == []
+    assert list(uploads.iterdir()) == []
