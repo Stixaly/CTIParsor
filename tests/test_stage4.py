@@ -961,6 +961,55 @@ More prose after.
     assert ind1.id == ind2.id
 
 
+# ── ADR-0067: a quoted YARA rule ships only if it compiles ────────────────────
+
+def _yara_indicators(bundle):
+    return [o for o in bundle.objects if o.get("type") == "indicator" and o.get("pattern_type") == "yara"]
+
+
+def test_a_rule_the_layout_wrapped_ships_repaired_and_the_ledger_says_so():
+    from pipeline.bundle_ledger import MappingLedger
+    from tests.test_yara_check import WRAPPED_RULE
+
+    led = MappingLedger()
+    bundle = build_stix_bundle([], LLMEnrichmentResult(malware_families=["INDUSTROYER"]), "r",
+                               report_text=f"Appendix: YARA Rules\n\n{WRAPPED_RULE}\n\nMore prose.", ledger=led)
+    (indicator,) = _yara_indicators(bundle)
+    assert "containing bytecode associated" in indicator.pattern
+    assert led.objects[indicator.id]["rejoined_lines"] == 1
+    assert any(o.get("type") == "relationship" and o.get("source_ref") == indicator.id
+               for o in bundle.objects)
+
+
+def test_a_rule_that_does_not_compile_is_left_out_with_every_edge_to_it(monkeypatch):
+    from pipeline.bundle_ledger import MappingLedger
+    from pipeline.detection import yara_check
+
+    monkeypatch.setattr(yara_check, "compile_status", lambda source: ("does_not_compile", "line 4: syntax error"))
+    report_text = """Prose.
+
+rule Detects_LOCKBIT_Variant
+{
+  strings:
+    $s1 = "foo"
+  condition:
+    $s1
+}
+"""
+    led = MappingLedger()
+    bundle = build_stix_bundle([], LLMEnrichmentResult(malware_families=["LOCKBIT"]), "r",
+                               report_text=report_text, ledger=led)
+    assert _yara_indicators(bundle) == []
+    ids = {o.id for o in bundle.objects}
+    for o in bundle.objects:
+        if o.get("type") == "relationship":
+            assert o.source_ref in ids and o.target_ref in ids
+    (removed,) = led.removed
+    assert removed["reason"] == "rule_does_not_compile"
+    assert removed["name"] == "Yara rule: Detects_LOCKBIT_Variant"
+    assert removed["error"] == "line 4: syntax error"
+
+
 # ── ADR-0043: source document embedded as Artifact.payload_bin ────────────────
 
 def test_source_bytes_produce_a_self_contained_artifact():

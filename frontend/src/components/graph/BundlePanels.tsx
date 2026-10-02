@@ -256,6 +256,21 @@ export function BundleNodeDetail({
             {typeof info?.originInfo.no_indicator === 'string' && (
               <Note tone="warn">No Indicator was built for this observable: no STIX pattern exists for it.</Note>
             )}
+            {typeof info?.originInfo.rejoined_lines === 'number' && (
+              <Note tone="warn">
+                Repaired: the report's layout cut a quoted <code>meta</code> string; {info.originInfo.rejoined_lines} line(s)
+                were joined back with a space so the rule compiles.
+              </Note>
+            )}
+            {Array.isArray(info?.originInfo.added_imports) && (
+              <Note tone="warn">
+                The report declares <code>{(info.originInfo.added_imports as string[]).map(m => `import "${m}"`).join(', ')}</code> outside
+                the rule; it was added to the pattern.
+              </Note>
+            )}
+            {info?.originInfo.pattern_check === 'unverified' && (
+              <Note tone="warn">Not compiled: yara-python was not installed where this bundle was built, so OpenCTI may refuse this rule.</Note>
+            )}
           </div>
         )}
 
@@ -454,8 +469,8 @@ const DIFF_GROUPS: Array<{ kind: DiffKind; title: string; hint: string; tone: 'n
     hint: 'Rows that ship with another verb, or with an observable replaced by its Indicator.' },
   { kind: 'merged',  title: 'Merged', tone: 'info',
     hint: 'Rows that resolved to an object or an edge that already existed (duplicates, aliases).' },
-  { kind: 'removed', title: 'Removed after creation', tone: 'no',
-    hint: 'Objects and edges the Stage 4b alias merge absorbed.' },
+  { kind: 'removed', title: 'Removed', tone: 'no',
+    hint: 'Objects and edges that do not ship: the Stage 4b alias merge absorbed them, or a detection rule quoted in the report does not compile.' },
 ]
 
 function diffReason(d: DiffItem, labelOf: (id: string) => string): string {
@@ -522,6 +537,9 @@ export function DiffPanel({
                             {d.subject === 'object' ? labelOf(d.title) : d.title}
                           </div>
                           <div style={{ fontSize: 10.5, color: 'var(--ink-3)', lineHeight: 1.4 }}>{diffReason(d, labelOf)}</div>
+                          {d.error && (
+                            <div style={{ fontSize: 10, color: 'var(--ink-4)', marginTop: 2, ...MONO }}>{d.error}</div>
+                          )}
                         </button>
                       )
                     })}

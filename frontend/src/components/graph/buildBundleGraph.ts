@@ -55,6 +55,8 @@ export interface DiffItem {
   edgeId?: string
   ledgerRel?: LedgerRelationship
   ledgerEntity?: LedgerEntity
+  /** The compiler's message for a quoted detection rule left out (ADR-0067). */
+  error?: string
 }
 
 export interface BundleGraphData extends GraphData {
@@ -308,6 +310,7 @@ export function buildBundleGraph(
       title: r.name ?? r.stix_id, reason: r.reason,
       nodeId: r.kind === 'object' && inBundle(r.replaced_by ?? undefined) ? r.replaced_by ?? undefined : undefined,
       edgeId: r.kind === 'relationship' && r.replaced_by && edgeInfo.has(r.replaced_by) ? r.replaced_by : undefined,
+      error: r.error,
     })
   }
 

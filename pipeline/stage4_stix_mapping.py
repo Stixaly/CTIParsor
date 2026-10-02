@@ -15,6 +15,7 @@ from pipeline.aliases import alias_surface_forms, canonical_name
 from pipeline.bundle_ledger import ORIGIN_EXTRACTED, MappingLedger
 from pipeline.detection.suricata_atoms import parse_options, rule_header
 from pipeline.detection.yara_atoms import split_rules
+from pipeline.detection.yara_check import DOES_NOT_COMPILE, prepare_embedded_rule
 from pipeline.regex_safety import compile_pattern
 from pipeline.stage3_llm import LLMEnrichmentResult
 from pipeline.stage4b_graph_completion import CompletionStats, complete_graph
@@ -944,14 +945,22 @@ def build_stix_bundle(
     # --- Indicator SDOs for detection rules embedded verbatim in the report (ADR-0042) ---
     seen_embedded_rule_ids: set[str] = set()
 
+    # A rule that does not compile is left out (ADR-0067): OpenCTI refuses the
+    # Indicator, then every edge to it.  The layout's damage is repaired first.
     for _rule in split_rules(report_text):
         if _rule.is_private:
             continue
+        _prepared = prepare_embedded_rule(_rule.body, _rule.imports)
+        if _prepared.status == DOES_NOT_COMPILE:
+            led.left_out(stix_ids.indicator_id(_prepared.pattern), "object",
+                         "rule_does_not_compile", name=f"Yara rule: {_rule.name}",
+                         error=_prepared.error, **_prepared.ledger_info())
+            continue
         _add_embedded_rule_indicator(
             stix_objects, name_to_stix, seen_embedded_rule_ids,
-            pattern_type="yara", pattern=_rule.body, title=_rule.name,
+            pattern_type="yara", pattern=_prepared.pattern, title=_rule.name,
             llm_result=llm_result, pol_index=_pol_index, seen_rel_keys=seen_rel_keys,
-            ledger=led,
+            ledger=led, ledger_info=_prepared.ledger_info(),
         )
 
     for _ptype, _pattern, _title in _find_embedded_net_rules(report_text):
@@ -1679,6 +1688,7 @@ def _add_embedded_rule_indicator(
     pol_index,
     seen_rel_keys: set,
     ledger: MappingLedger | None = None,
+    ledger_info: dict | None = None,
 ) -> None:
     """
     Create an Indicator SDO for a detection rule found verbatim in the report
@@ -1687,6 +1697,8 @@ def _add_embedded_rule_indicator(
 
     Shared by all four embedded-rule formats (yara, suricata, snort, sigma) so
     the "create the Indicator, then auto-link it" logic exists once.
+    `ledger_info` says how the shipped pattern differs from the quoted one
+    (ADR-0067).
     """
     rule_id = stix_ids.indicator_id(pattern)
     if rule_id in seen_ids:
@@ -1705,7 +1717,8 @@ def _add_embedded_rule_indicator(
     except Exception:
         return
     if ledger is not None:
-        ledger.object(indicator, "embedded_rule", pattern_type=pattern_type, title=title)
+        ledger.object(indicator, "embedded_rule", pattern_type=pattern_type, title=title,
+                      **(ledger_info or {}))
 
     # A minimum length guard keeps a short tool name (e.g. "RDP", "SMB") from
     # matching a coincidental substring of an unrelated rule title.

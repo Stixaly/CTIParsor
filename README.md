@@ -669,6 +669,14 @@ prose the way YARA's braces do — and is fail-closed: a candidate that doesn't
 parse as a valid rule yields nothing rather than a guess. Design:
 [ADR-0042](docs/adr/0042-embedded-yara-rules-as-indicators.md).
 
+A YARA rule ships only if it compiles: OpenCTI refuses a YARA Indicator that
+`yara.compile()` rejects, and then every edge to it. Before compiling, Stage 4
+repairs two kinds of damage the report's layout causes. It joins back a `meta`
+string that a wrapped line cut, and it adds an `import` the report declares
+outside the rule. A rule that still does not compile is left out, and the
+Graph page lists it with the compiler's message
+([ADR-0067](docs/adr/0067-quoted-yara-rules-ship-only-if-they-compile.md)).
+
 ---
 
 ## Detection coverage
@@ -2074,6 +2082,7 @@ CREATE INDEX idx_rule_text_tsv ON rule_text USING GIN (body_tsv);
 | `pydantic` | LLM output schema validation |
 | `stix2` | STIX 2.1 object + bundle construction |
 | `stix2-validator` | Bundle JSON-schema validation |
+| `yara-python` | Compiles each YARA rule quoted in a report, as OpenCTI does on import; a rule that does not compile is left out (ADR-0067). Wheels up to CPython 3.13 |
 | `PyYAML` | Sigma rule parsing + the detection-corpus registry |
 | `python-dotenv` | `.env` loading |
 | `spacy` | Optional NER fallback (no model downloaded by default) |

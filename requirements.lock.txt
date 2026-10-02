@@ -157,3 +157,4 @@ weasel==1.0.0             # via spacy
 webcolors==25.10.0        # via jsonschema
 websockets==17.1          # via uvicorn
 wrapt==2.5.0              # via deprecated, smart-open
+yara-python==4.5.4        # via -r requirements.txt

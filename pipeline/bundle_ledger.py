@@ -21,7 +21,9 @@ Shape of `to_dict()` (version 1):
     relationships  [{source_value, relationship_type, target_value, outcome,
                      stix_id?, final_type?, source_ref?, target_ref?,
                      changes: [...], reason?, merged_with?}]
-    removed        [{stix_id, kind, reason, replaced_by?}]   removed after creation
+    removed        [{stix_id, kind, reason, replaced_by?, name?, ...}]
+                     not shipped: absorbed by an alias merge, or a detection
+                     rule that does not compile
 
 Outcomes: "emitted" (this input produced the object), "merged" (it resolved to
 an object or edge that already existed — `stix_id` / `merged_with` names it),
@@ -75,6 +77,11 @@ class MappingLedger:
         """Add facts to an already-recorded object (an IoC with no Indicator)."""
         if stix_id is not None and stix_id in self.objects:
             self.objects[stix_id].update(_clean(info))
+
+    def left_out(self, stix_id: str, kind: str, reason: str, **info: Any) -> None:
+        """Stage 4 had what it needed to build `stix_id` and did not ship it
+        (a quoted detection rule that does not compile, ADR-0067)."""
+        self.removed.append({"stix_id": stix_id, "kind": kind, "reason": reason, **_clean(info)})
 
     # ── entities ─────────────────────────────────────────────────────────────
     def entity(
