@@ -106,5 +106,5 @@ Indicators and all 14 edges become importable.
   yet.
 - Of the 14 edges, 12 were `indicates attack-pattern` inferences from
   `indicates + uses`. Saying that a byte-pattern rule "indicates" every
-  technique its malware uses is a stretch. That is ADR-0013's rule to
-  revisit, not this ADR's.
+  technique its malware uses is a stretch. ADR-0068 removes that
+  composition.

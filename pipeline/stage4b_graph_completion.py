@@ -130,7 +130,9 @@ _TRANSITIVE_RULES: dict[tuple[str, str], str] = {
     ("variant-of", "uses"): "uses",
     ("variant-of", "variant-of"): "variant-of",
     ("uses", "exploits"): "targets",             # actor uses malware, malware exploits vuln ⟹ actor targets vuln
-    ("indicates", "uses"): "indicates",          # indicator->malware->TTP ⟹ indicator indicates TTP
+    # No ("indicates", "uses") (ADR-0068): an Indicator detects the malware, not
+    # each technique that malware uses.  A report or an analyst can still state
+    # "IoC indicates technique" as a row (ADR-0065).
     ("indicates", "variant-of"): "indicates",
 }
 

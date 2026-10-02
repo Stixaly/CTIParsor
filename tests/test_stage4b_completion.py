@@ -59,6 +59,24 @@ def test_transitive_uses_chain_adds_suggested_edge():
     assert inf[0].get("confidence") == 72
 
 
+def test_an_indicator_does_not_inherit_its_malwares_techniques():
+    """ADR-0068: indicator --indicates--> malware --uses--> attack-pattern
+    no longer composes to indicator --indicates--> attack-pattern.  A YARA
+    rule for a binary detects the malware, not every technique it uses."""
+    mw = stix2.Malware(name="INDUSTROYER.V2", is_family=True)
+    ap = stix2.AttackPattern(name="Native API")
+    ind = stix2.Indicator(name="Yara rule: R", pattern="rule R { condition: true }",
+                          pattern_type="yara", valid_from="2026-10-02T00:00:00Z")
+    objs = [mw, ap, ind,
+            stix2.Relationship(ind, "indicates", mw, confidence=90),
+            stix2.Relationship(mw, "uses", ap, confidence=90)]
+
+    stats = complete_graph(objs)
+
+    assert stats.transitive_added == 0
+    assert ("indicator", "indicates", "attack-pattern") not in _triples(objs)
+
+
 def test_transitive_skips_non_suggested_pair():
     """intrusion-set --attributed-to--> threat-actor --attributed-to--> identity
     would compose to intrusion-set --attributed-to--> identity, which is NOT a
