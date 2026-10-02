@@ -31,19 +31,36 @@ CTIParsor no longer supports SQLite (ADR-0053) — every check below needs a
 reachable PostgreSQL server, which the `dev` compose service already points
 at (`CTIPARSOR_TEST_DATABASE_URL`, set in `compose.yaml`):
 
+`make ci` runs every check the pull-request CI runs, with the same scope and
+the same floors; each step also has a target of its own:
+
 ```bash
-docker compose run --rm dev pytest tests/ -q -k "not llm"     # fast lane (CI gate)
-docker compose run --rm dev pytest tests/ -q                  # full suite (adds retry/transient tests)
-docker compose run --rm dev ruff check pipeline/ api/ models/ tests/ scripts/ --select E,F,W,I
-docker compose run --rm dev sh -c "cd frontend && npx tsc --noEmit"   # frontend type-check
+make ci               # all of the below
+make lint             # ruff check .            (scope and rules: pyproject.toml)
+make typecheck        # mypy                    (scope and flags: pyproject.toml)
+make coverage         # pytest --cov, then the coverage floors (total + per area)
+make frontend-check   # npm run check: eslint, tsc, vitest
+make test             # the whole suite, without coverage
 ```
 
-`docker compose run --rm dev` bind-mounts the repo live over `/app` — edits
-on the host are picked up with no image rebuild. A single-test edit/run
-loop pays `docker compose run`'s startup cost each time; run `pytest tests/path/to/test_x.py -k name`
-the same way to keep it small.
+They run in two containers: `dev` for Python (the Dockerfile's `dev` stage:
+the app image plus ruff, mypy and pytest-cov, rebuilt with
+`docker compose --profile dev build dev` after a dependency change) and
+`frontend-dev` for Node. The same commands work by hand, e.g.
+`docker compose run --rm dev pytest tests/test_x.py -k name` for a small loop,
+or `docker compose run --rm frontend-dev sh -c "npm ci && npm run lint"`.
+`dev` bind-mounts the repo live over `/app`, so edits on the host need no
+image rebuild. The image build and smoke test, which CI also runs, are
+`make docker-smoke` (see *Container changes* below).
 
 - LLM calls are mocked via `conftest.mock_llm`; tests run offline.
+- Every test writes uploads and bundles under its own `tmp_path`
+  (`tests/conftest.py` points `api/paths.py` there), never into the checkout's
+  `uploads/` or `output/`; a run that still adds a file there names it, and
+  fails in CI.
+- A test skipped because an import is missing (`pytest.importorskip`) fails
+  in CI and in `make coverage` (`CTIPARSOR_REQUIRE_TEST_DEPS=1`): install the
+  dependency in the CI job rather than let its tests skip.
 - DB-touching tests use the isolated `temp_db` / `temp_db_client` fixtures — a
   disposable schema per test on the server above, never a developer's real
   database. Reuse them for any new worker/route test; the fixture fails with

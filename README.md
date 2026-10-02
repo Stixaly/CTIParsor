@@ -71,7 +71,7 @@ make run-dir
 **Development mode** (live reload, no host Python/Node install):
 
 ```bash
-docker compose run --rm dev pytest tests/ -v          # or: make docker-test
+docker compose run --rm dev pytest -v                # or: make test
 docker compose --profile dev up frontend-dev           # Vite HMR → http://localhost:5173
 ```
 
@@ -386,8 +386,8 @@ saved in the job store, like the worker (`--policy db`, the default), or
 
 ### Run tests
 ```bash
-docker compose run --rm dev pytest tests/ -v               # all tests
-docker compose run --rm dev pytest tests/ -v -k "not llm"  # skip LLM tests (no key needed)
+docker compose run --rm dev pytest -v      # all tests (make test); no API key needed, the LLM is mocked
+make ci                                    # every check CI runs: lint, types, tests + coverage floors, frontend
 ```
 
 `CTIPARSOR_TEST_DATABASE_URL` is already set for the `dev` service in
@@ -431,8 +431,9 @@ validate any extraction change before/after.
 ### make shortcuts
 
 A `Makefile` wraps the most common workflows — every target that touches
-Python/Node routes through `docker compose run --rm dev` (ADR-0054), so
-`make` itself is the only thing that needs to be on the host besides Docker.
+Python routes through `docker compose run --rm dev`, Node through
+`frontend-dev` (ADR-0054), so `make` itself is the only thing that needs to
+be on the host besides Docker.
 
 | Command | Description |
 |---|---|
@@ -443,7 +444,11 @@ Python/Node routes through `docker compose run --rm dev` (ADR-0054), so
 | `make detection-index` | Parse the clones into the rule store (dedups, writes rule sizes) |
 | `make backfill-rules` | Backfill rule body sizes on a store built before ADR-0022 |
 | `make test` | Run all tests, in the `dev` container |
-| `make test-fast` | Run tests without LLM calls (no API key needed) |
+| `make test-fast` | Quicker loop: also skips every test whose id contains `llm` (not what CI runs) |
+| `make lint` / `make typecheck` | `ruff check .` / `mypy`, scope and rules from `pyproject.toml` |
+| `make coverage` | All tests with branch coverage, then the floors CI enforces (total and per area) |
+| `make frontend-check` | ESLint, `tsc` and Vitest (`npm run check`), in the `frontend-dev` container |
+| `make ci` | Every check the pull-request CI runs, locally (the four above) |
 | `make run` | Run pipeline on `tests/fixtures/sample_report.txt` |
 | `make run-dir` | Run pipeline on every file in `input/` |
 | `make check` | Diagnostic: list which pipeline stages are available |
@@ -459,7 +464,7 @@ Python/Node routes through `docker compose run --rm dev` (ADR-0054), so
 | `make docker-bootstrap` | One-shot in the container: download models, clone corpora, build the rule store |
 | `make docker-smoke` | Build, start and verify the image (health, non-root, read-only root, Chromium sandbox) |
 | `make docker-logs` / `make docker-down` | Follow the API logs / stop the stack (volumes are kept) |
-| `make docker-test` | Run the full test suite in the `dev` container (alias for `make test`) |
+| `make docker-test` | Alias for `make test` |
 | `make docker-frontend-dev` | Start the Vite dev server with HMR, in a container — `http://localhost:5173` |
 
 ---
