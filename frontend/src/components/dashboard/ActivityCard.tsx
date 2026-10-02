@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { Loader2, AlertTriangle, X } from 'lucide-react'
 import { useSSE } from '../../hooks/useSSE'
 import type { Job } from '../../types'

@@ -248,6 +248,9 @@ export default function RelationshipCreator({
   const [viewport, setViewport] = useState({ w: window.innerWidth, h: window.innerHeight })
 
   // After every render (the chosen entities change the body), before paint.
+  // No dependency list on purpose; it cannot loop, since setNatural bails out
+  // when the measured height is unchanged.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useLayoutEffect(() => {
     if (popRef.current) setNatural(naturalHeight(popRef.current))
   })
@@ -305,9 +308,9 @@ export default function RelationshipCreator({
           <div className="rc-type-row">
             {/* Verb select — shows only spec-valid verbs for this pair first */}
             {(() => {
-              const { valid, others, constrained } = src && tgt
+              const { valid, constrained } = src && tgt
                 ? verbsForPair(src.entity_type, tgt.entity_type)
-                : { valid: REL_TYPES, others: [], constrained: false }
+                : { valid: REL_TYPES, constrained: false }
               return (
                 <select
                   className="rc-type"

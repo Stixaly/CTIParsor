@@ -308,6 +308,14 @@ export interface ProgressEvent {
   relationships?: number
 }
 
+/** A `partial_graph` progress event: what one chunk found, streamed so the
+ *  live graph fills in (pipeline/orchestrator.py `_partial_graph`). */
+export interface PartialGraphEvent extends ProgressEvent {
+  _type: 'partial_graph'
+  nodes?: { id: string; type: string; name: string }[]
+  links?: { source: string; target: string; type: string }[]
+}
+
 export interface StixObject {
   id: string
   type: string

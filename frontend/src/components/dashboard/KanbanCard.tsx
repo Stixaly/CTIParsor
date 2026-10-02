@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { GitGraph, ShieldCheck, Download, Trash2 } from 'lucide-react'
-import type { Job, JobStatus } from '../../types'
+import type { Job } from '../../types'
 
 const MONO  = "'JetBrains Mono', ui-monospace, monospace"
 const SERIF = "'Source Serif 4', Georgia, serif"

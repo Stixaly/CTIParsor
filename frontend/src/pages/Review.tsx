@@ -30,7 +30,7 @@ import RelationshipRail, { type BulkAction, type DatePatch } from '../components
 import RelationshipCreator from '../components/review/RelationshipCreator'
 import DragRubberBand from '../components/review/DragRubberBand'
 import KeyboardHelp from '../components/review/KeyboardHelp'
-import { typeDot, typeLabel } from '../components/review/tokens'
+import { typeLabel } from '../components/review/tokens'
 import EntityPopover from '../components/EntityPopover'
 import { usePromotedRules } from '../hooks/usePromotedRules'
 
@@ -78,8 +78,8 @@ export default function Review() {
 
   // ── prefs (persisted) ───────────────────────────────────────────────────
   // theme + accent come from the shared ThemeContext (TopChrome reads it).
-  const [fontFamily, setFontFamily] = usePref<'serif' | 'sans'>('review.font', 'serif')
-  const [density, setDensity]       = usePref<'compact' | 'comfortable' | 'spacious'>('review.density', 'comfortable')
+  const [fontFamily]                = usePref<'serif' | 'sans'>('review.font', 'serif')
+  const [density]                   = usePref<'compact' | 'comfortable' | 'spacious'>('review.density', 'comfortable')
   const [margSort, setMargSort]     = usePref<SortMode>('review.margSort', 'position')
   const [showRibbon]                = usePref('review.ribbon', true)
 
@@ -320,16 +320,19 @@ export default function Review() {
   // ── local-first entity mutations ─────────────────────────────────────────
   // `bulk` marks a decision taken over many cards in one click (a group, a
   // selection) — stored as `human_bulk`, which calibration does not read.
-  const setAccepted = (id: string, val: boolean | null, bulk = false) => {
+  // TanStack Query keeps `mutate` stable across renders, so these callbacks are
+  // created once, as before, without closing over a stale mutation object.
+  const { mutate: mutateEntity } = updateMutation
+  const setAccepted = useCallback((id: string, val: boolean | null, bulk = false) => {
     const decision_origin: ClientDecisionOrigin = bulk ? 'human_bulk' : 'human'
     setLocalEntities(es => es.map(e => e.id === id
       ? { ...e, accepted: val, autoAccepted: false, decision_origin }
       : e))
-    updateMutation.mutate({ id, patch: { accepted: val, decision_origin } })
-  }
-  const accept      = useCallback((id: string, bulk?: boolean) => setAccepted(id, true, bulk), [])
-  const reject      = useCallback((id: string, bulk?: boolean) => setAccepted(id, false, bulk), [])
-  const reset       = useCallback((id: string) => setAccepted(id, null), [])
+    mutateEntity({ id, patch: { accepted: val, decision_origin } })
+  }, [mutateEntity])
+  const accept      = useCallback((id: string, bulk?: boolean) => setAccepted(id, true, bulk), [setAccepted])
+  const reject      = useCallback((id: string, bulk?: boolean) => setAccepted(id, false, bulk), [setAccepted])
+  const reset       = useCallback((id: string) => setAccepted(id, null), [setAccepted])
 
   const changeType = (id: string, entity_type: string) => {
     setLocalEntities(es => es.map(e => e.id === id ? { ...e, entity_type } : e))
@@ -615,7 +618,7 @@ export default function Review() {
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
       if (e.key === '?')                              { setKbdOpen(true); e.preventDefault() }
       else if (e.key === 'Escape')                    { setKbdOpen(false); setFocusedId(null); setDrawer(null) }
-      else if (e.key === 'j' || e.key === 'ArrowDown'){ goNextPending(1); e.preventDefault() }
+      else if (e.key === 'j' || e.key === 'ArrowDown') { goNextPending(1); e.preventDefault() }
       else if (e.key === 'k' || e.key === 'ArrowUp')  { goNextPending(-1); e.preventDefault() }
       else if (focusedId && (e.key === 'a' || e.key === 'A')) { accept(focusedId); goNextPending(1) }
       else if (focusedId && (e.key === 'r' || e.key === 'R')) { reject(focusedId); goNextPending(1) }
@@ -626,7 +629,8 @@ export default function Review() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [focusedId, orderedEntityIds, goNextPending, handleFinalize, handleDownload, reviewCompleted])
+  }, [focusedId, orderedEntityIds, goNextPending, handleFinalize, handleDownload, reviewCompleted,
+      accept, reject, reset, navigate, jobId])
 
   // ── auto-finalize (debounced) ─────────────────────────────────────────────
   //

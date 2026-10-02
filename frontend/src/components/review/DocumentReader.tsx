@@ -1,4 +1,4 @@
-import { useMemo, useRef, useEffect, useCallback, type CSSProperties } from 'react'
+import { useMemo, useRef, useEffect, type CSSProperties } from 'react'
 import type { Entity } from '../../types'
 import { typeColor, buildRanges } from './tokens'
 import RelationshipOverlay from './RelationshipOverlay'
@@ -33,7 +33,6 @@ interface Props {
 export default function DocumentReader({
   text, title, byline, entities, highlightStyle,
   focusedId, setFocusedId, setHoverEntity,
-  onAccept, onReject, onReset, onChangeType,
   onCreate, onMarkShiftClick, onMarkDragStart, onSelectionRelate,
   relEvidence, relsForOverlay, showRelArrows,
   onEntityNotInText,
@@ -64,10 +63,6 @@ export default function DocumentReader({
     return spans.sort((a, b) => a.start - b.start)
   }, [relEvidence, text])
 
-  const isInEvidence = useCallback((pos: number) => {
-    return evidenceSpans.some(s => pos >= s.start && pos < s.end)
-  }, [evidenceSpans])
-
   // ── scroll focused mark into view ────────────────────────────────────────
   useEffect(() => {
     if (!focusedId) return
@@ -86,7 +81,7 @@ export default function DocumentReader({
   }, [focusedId, onEntityNotInText])
 
   // ── text selection ────────────────────────────────────────────────────────
-  const handleMouseUp = (e: React.MouseEvent) => {
+  const handleMouseUp = () => {
     const sel = window.getSelection()
     const t = sel?.toString().trim() ?? ''
     if (t.length < 2) return

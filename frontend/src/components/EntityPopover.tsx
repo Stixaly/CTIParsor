@@ -42,7 +42,7 @@ function validateIoC(text: string, type: string): ValidationResult | null {
       }
     case 'domain':
       return {
-        valid: /^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/.test(v),
+        valid: /^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/.test(v),
         hint: 'Expected format: example.com  (hostname with a valid TLD)',
       }
     case 'url':
@@ -82,7 +82,7 @@ function validateIoC(text: string, type: string): ValidationResult | null {
       }
     case 'mac_addr':
       return {
-        valid: /^([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}$/.test(v),
+        valid: /^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/.test(v),
         hint: 'Expected format: 00:1A:2B:3C:4D:5E',
       }
     case 'registry_key':

@@ -126,7 +126,6 @@ export function buildBundleGraph(
 ): BundleGraphData {
   const objects = bundle?.objects ?? []
   const origins = ledger?.objects ?? {}
-  const byStixId = new Map(objects.map(o => [o.id, o]))
 
   // The author identity is every other object's created_by_ref.
   const authorIds = new Set(objects.map(o => o.created_by_ref).filter((x): x is string => typeof x === 'string'))

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 
 /** A piece of UI state mirrored into localStorage under `key`.
  *
@@ -14,9 +14,11 @@ export function usePref<T>(key: string, init: T): [T, (v: T) => void] {
     try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : init }
     catch { return init }
   })
-  const set = (v: T) => {
+  // Stable across renders (like useState's own setter), so callers can list it
+  // in a dependency array without re-running their hook on every render.
+  const set = useCallback((v: T) => {
     setVal(v)
     try { localStorage.setItem(key, JSON.stringify(v)) } catch {}
-  }
+  }, [key])
   return [val, set]
 }
