@@ -111,3 +111,20 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
     CMD ["python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).status == 200 else 1)"]
 ENTRYPOINT ["tini", "--", "/usr/local/bin/entrypoint.sh"]
 CMD ["serve"]
+
+# ── Stage 4: development image (the compose `dev` service) ────────────────────
+# The runtime image plus the lint, type-check and coverage tools CI installs
+# (requirements-dev.txt), so every check in CONTRIBUTING.md runs in `dev`.
+# Never shipped: built only when asked for by name (`--target dev`).
+FROM runtime AS dev
+USER root
+RUN pip install --no-cache-dir -c /app/requirements.lock.txt -r /app/requirements-dev.txt
+USER ctiparsor
+# It runs one-shot commands, not the API the inherited check polls.
+HEALTHCHECK NONE
+
+# ── Default target: the runtime image ─────────────────────────────────────────
+# A build without --target produces the LAST stage.  Ending on `runtime` keeps
+# `docker build .`, compose's app/worker and the CI publish job on the image
+# without dev tools; BuildKit skips the `dev` stage unless it is the target.
+FROM runtime
