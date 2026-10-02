@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from api.db import get_conn, init_db
 from api.db_backend import DBConnection
+from pipeline.regex_safety import compile_pattern
 
 SCO_TYPES = {
     "artifact",

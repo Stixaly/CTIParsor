@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from collections import Counter
 from dataclasses import dataclass
@@ -129,7 +128,8 @@ def check_object_id_format(bundles: list[tuple[str, dict]]) -> Finding:
         malformed = 0
         type_mismatch = 0
         total = 0
-        id_re = compile_pattern(r'^[a-z0-9-]+--[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
+        id_re = compile_pattern(
+            r'^[a-z0-9-]+--[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
         for job_id, bundle in bundles:
             for obj in _objects(bundle):
                 if not isinstance(obj, dict):
