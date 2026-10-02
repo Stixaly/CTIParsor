@@ -37,7 +37,12 @@ import json
 from fastapi import APIRouter, HTTPException, Request
 
 from api.db import _lock, get_conn
+from models.schemas import STIX_RELATIONSHIP_TYPES
+from pipeline.stage4_stix_mapping import verb_ships_as_written
+from pipeline.stix_rel_spec import SCO_TYPES, SDO_TYPES
 from pipeline.temporal import EXPORT_MODES
+
+_OBJECT_TYPES = SDO_TYPES | SCO_TYPES
 
 router = APIRouter(prefix="/api/relationship-policy", tags=["policy"])
 
@@ -143,6 +148,39 @@ def get_policy() -> dict:
     return _DEFAULT_POLICY.copy()
 
 
+def _rule_error(i: int, rule: dict, pairs: dict[str, int]) -> str | None:
+    """What is wrong with one policy rule, or None.
+
+    The rule is held to what Stage 4 does with it: a pinned rule whose verb
+    Stage 4 would not ship as written used to be stored and then emit
+    `related-to` edges labelled with a verb they did not carry, and a second
+    rule for a pair silently replaced the first (`_pol_index` keeps one rule
+    per pair, even a disabled one).
+    """
+    where = f"'rules[{i}]'"
+    src, verb, tgt = rule.get("src"), rule.get("verb"), rule.get("tgt")
+    for name, value in (("src", src), ("tgt", tgt)):
+        if value not in _OBJECT_TYPES:
+            return f"{where}.{name} must be a STIX 2.1 SDO or SCO type, not {value!r}"
+    if verb not in STIX_RELATIONSHIP_TYPES:
+        return f"{where}.verb {verb!r} is not a STIX 2.1 relationship type"
+    if "mode" in rule and rule["mode"] not in ("pin", "auto"):
+        return f"{where}.mode must be 'pin' or 'auto'"
+    if "enabled" in rule and not isinstance(rule["enabled"], bool):
+        return f"{where}.enabled must be a boolean"
+    pair = f"{src}>{tgt}"
+    if pair in pairs:
+        return (f"{where} repeats the pair {pair} of 'rules[{pairs[pair]}]': "
+                "Stage 4 applies one rule per pair")
+    pairs[pair] = i
+    if rule.get("mode") == "pin" and rule.get("enabled", True) \
+            and not verb_ships_as_written(str(src), verb, str(tgt)):
+        return (f"{where} pins {src} {verb} {tgt}, which Stage 4 would not ship as written: "
+                "STIX 2.1 does not list it for this pair, so it would become related-to "
+                "(or be dropped, between an observable and a technique)")
+    return None
+
+
 @router.put("")
 async def put_policy(request: Request) -> dict:
     """Replace the relationship policy (full replacement, not patch)."""
@@ -159,9 +197,13 @@ async def put_policy(request: Request) -> dict:
     # Validate the items, not just the container: `{"rules": ["oops"]}` used to
     # pass this check, get stored, and then fail every subsequent job in
     # build_stix_bundle with an opaque AttributeError.
+    _pairs: dict[str, int] = {}
     for _i, _rule in enumerate(body.get("rules") or []):
         if not isinstance(_rule, dict):
             raise HTTPException(400, f"'rules[{_i}]' must be a JSON object")
+        _error = _rule_error(_i, _rule, _pairs)
+        if _error:
+            raise HTTPException(400, _error)
     if "global" in body and body["global"] not in ("enforce", "auto"):
         raise HTTPException(400, "'global' must be 'enforce' or 'auto'")
     if "pin_budget_mode" in body and body["pin_budget_mode"] not in (

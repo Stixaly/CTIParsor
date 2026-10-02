@@ -1,0 +1,1557 @@
+{
+ "default": [
+  "related-to"
+ ],
+ "pairs": {
+  "artifact>artifact": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "artifact>attack-pattern": [
+   "indicates"
+  ],
+  "artifact>campaign": [
+   "indicates",
+   "related-to"
+  ],
+  "artifact>directory": [
+   "based-on",
+   "related-to"
+  ],
+  "artifact>email-message": [
+   "based-on",
+   "related-to"
+  ],
+  "artifact>indicator": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "artifact>infrastructure": [
+   "indicates",
+   "related-to"
+  ],
+  "artifact>intrusion-set": [
+   "indicates",
+   "related-to"
+  ],
+  "artifact>malware": [
+   "indicates",
+   "related-to"
+  ],
+  "artifact>observed-data": [
+   "based-on",
+   "related-to"
+  ],
+  "artifact>process": [
+   "based-on",
+   "related-to"
+  ],
+  "artifact>threat-actor": [
+   "indicates",
+   "related-to"
+  ],
+  "artifact>tool": [
+   "indicates",
+   "related-to"
+  ],
+  "artifact>x509-certificate": [
+   "based-on",
+   "related-to"
+  ],
+  "attack-pattern>artifact": [
+   "indicates"
+  ],
+  "attack-pattern>attack-pattern": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "attack-pattern>autonomous-system": [
+   "indicates"
+  ],
+  "attack-pattern>domain-name": [
+   "indicates"
+  ],
+  "attack-pattern>email-addr": [
+   "indicates"
+  ],
+  "attack-pattern>file": [
+   "indicates"
+  ],
+  "attack-pattern>identity": [
+   "related-to",
+   "targets"
+  ],
+  "attack-pattern>ipv4-addr": [
+   "indicates"
+  ],
+  "attack-pattern>ipv6-addr": [
+   "indicates"
+  ],
+  "attack-pattern>location": [
+   "related-to",
+   "targets"
+  ],
+  "attack-pattern>mac-addr": [
+   "indicates"
+  ],
+  "attack-pattern>malware": [
+   "delivers",
+   "related-to",
+   "uses"
+  ],
+  "attack-pattern>mutex": [
+   "indicates"
+  ],
+  "attack-pattern>network-traffic": [
+   "indicates"
+  ],
+  "attack-pattern>software": [
+   "indicates"
+  ],
+  "attack-pattern>tool": [
+   "related-to",
+   "uses"
+  ],
+  "attack-pattern>url": [
+   "indicates"
+  ],
+  "attack-pattern>user-account": [
+   "indicates"
+  ],
+  "attack-pattern>vulnerability": [
+   "related-to",
+   "targets"
+  ],
+  "attack-pattern>windows-registry-key": [
+   "indicates"
+  ],
+  "autonomous-system>attack-pattern": [
+   "indicates"
+  ],
+  "autonomous-system>autonomous-system": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "autonomous-system>campaign": [
+   "indicates",
+   "related-to"
+  ],
+  "autonomous-system>directory": [
+   "based-on",
+   "related-to"
+  ],
+  "autonomous-system>email-message": [
+   "based-on",
+   "related-to"
+  ],
+  "autonomous-system>indicator": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "autonomous-system>infrastructure": [
+   "indicates",
+   "related-to"
+  ],
+  "autonomous-system>intrusion-set": [
+   "indicates",
+   "related-to"
+  ],
+  "autonomous-system>malware": [
+   "indicates",
+   "related-to"
+  ],
+  "autonomous-system>observed-data": [
+   "based-on",
+   "related-to"
+  ],
+  "autonomous-system>process": [
+   "based-on",
+   "related-to"
+  ],
+  "autonomous-system>threat-actor": [
+   "indicates",
+   "related-to"
+  ],
+  "autonomous-system>tool": [
+   "indicates",
+   "related-to"
+  ],
+  "autonomous-system>x509-certificate": [
+   "based-on",
+   "related-to"
+  ],
+  "campaign>attack-pattern": [
+   "related-to",
+   "uses"
+  ],
+  "campaign>campaign": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "campaign>identity": [
+   "related-to",
+   "targets"
+  ],
+  "campaign>infrastructure": [
+   "compromises",
+   "related-to",
+   "uses"
+  ],
+  "campaign>intrusion-set": [
+   "attributed-to",
+   "related-to"
+  ],
+  "campaign>location": [
+   "originates-from",
+   "related-to",
+   "targets"
+  ],
+  "campaign>malware": [
+   "related-to",
+   "uses"
+  ],
+  "campaign>threat-actor": [
+   "attributed-to",
+   "related-to"
+  ],
+  "campaign>tool": [
+   "related-to",
+   "uses"
+  ],
+  "campaign>vulnerability": [
+   "related-to",
+   "targets"
+  ],
+  "course-of-action>artifact": [
+   "investigates",
+   "mitigates",
+   "related-to"
+  ],
+  "course-of-action>attack-pattern": [
+   "mitigates",
+   "related-to"
+  ],
+  "course-of-action>autonomous-system": [
+   "investigates",
+   "mitigates",
+   "related-to"
+  ],
+  "course-of-action>course-of-action": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "course-of-action>domain-name": [
+   "investigates",
+   "mitigates",
+   "related-to"
+  ],
+  "course-of-action>email-addr": [
+   "investigates",
+   "mitigates",
+   "related-to"
+  ],
+  "course-of-action>file": [
+   "investigates",
+   "mitigates",
+   "related-to"
+  ],
+  "course-of-action>indicator": [
+   "investigates",
+   "mitigates",
+   "related-to"
+  ],
+  "course-of-action>ipv4-addr": [
+   "investigates",
+   "mitigates",
+   "related-to"
+  ],
+  "course-of-action>ipv6-addr": [
+   "investigates",
+   "mitigates",
+   "related-to"
+  ],
+  "course-of-action>mac-addr": [
+   "investigates",
+   "mitigates",
+   "related-to"
+  ],
+  "course-of-action>malware": [
+   "mitigates",
+   "related-to",
+   "remediates"
+  ],
+  "course-of-action>mutex": [
+   "investigates",
+   "mitigates",
+   "related-to"
+  ],
+  "course-of-action>network-traffic": [
+   "investigates",
+   "mitigates",
+   "related-to"
+  ],
+  "course-of-action>software": [
+   "investigates",
+   "mitigates",
+   "related-to"
+  ],
+  "course-of-action>tool": [
+   "mitigates",
+   "related-to"
+  ],
+  "course-of-action>url": [
+   "investigates",
+   "mitigates",
+   "related-to"
+  ],
+  "course-of-action>user-account": [
+   "investigates",
+   "mitigates",
+   "related-to"
+  ],
+  "course-of-action>vulnerability": [
+   "mitigates",
+   "related-to",
+   "remediates"
+  ],
+  "course-of-action>windows-registry-key": [
+   "investigates",
+   "mitigates",
+   "related-to"
+  ],
+  "directory>directory": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "domain-name>attack-pattern": [
+   "indicates"
+  ],
+  "domain-name>campaign": [
+   "indicates",
+   "related-to"
+  ],
+  "domain-name>directory": [
+   "based-on",
+   "related-to"
+  ],
+  "domain-name>domain-name": [
+   "derived-from",
+   "duplicate-of",
+   "related-to",
+   "resolves-to"
+  ],
+  "domain-name>email-message": [
+   "based-on",
+   "related-to"
+  ],
+  "domain-name>indicator": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "domain-name>infrastructure": [
+   "indicates",
+   "related-to"
+  ],
+  "domain-name>intrusion-set": [
+   "indicates",
+   "related-to"
+  ],
+  "domain-name>ipv4-addr": [
+   "related-to",
+   "resolves-to"
+  ],
+  "domain-name>ipv6-addr": [
+   "related-to",
+   "resolves-to"
+  ],
+  "domain-name>malware": [
+   "indicates",
+   "related-to"
+  ],
+  "domain-name>observed-data": [
+   "based-on",
+   "related-to"
+  ],
+  "domain-name>process": [
+   "based-on",
+   "related-to"
+  ],
+  "domain-name>threat-actor": [
+   "indicates",
+   "related-to"
+  ],
+  "domain-name>tool": [
+   "indicates",
+   "related-to"
+  ],
+  "domain-name>x509-certificate": [
+   "based-on",
+   "related-to"
+  ],
+  "email-addr>attack-pattern": [
+   "indicates"
+  ],
+  "email-addr>campaign": [
+   "indicates",
+   "related-to"
+  ],
+  "email-addr>directory": [
+   "based-on",
+   "related-to"
+  ],
+  "email-addr>email-addr": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "email-addr>email-message": [
+   "based-on",
+   "related-to"
+  ],
+  "email-addr>indicator": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "email-addr>infrastructure": [
+   "indicates",
+   "related-to"
+  ],
+  "email-addr>intrusion-set": [
+   "indicates",
+   "related-to"
+  ],
+  "email-addr>malware": [
+   "indicates",
+   "related-to"
+  ],
+  "email-addr>observed-data": [
+   "based-on",
+   "related-to"
+  ],
+  "email-addr>process": [
+   "based-on",
+   "related-to"
+  ],
+  "email-addr>threat-actor": [
+   "indicates",
+   "related-to"
+  ],
+  "email-addr>tool": [
+   "indicates",
+   "related-to"
+  ],
+  "email-addr>x509-certificate": [
+   "based-on",
+   "related-to"
+  ],
+  "email-message>email-message": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "file>attack-pattern": [
+   "indicates"
+  ],
+  "file>campaign": [
+   "indicates",
+   "related-to"
+  ],
+  "file>directory": [
+   "based-on",
+   "related-to"
+  ],
+  "file>email-message": [
+   "based-on",
+   "related-to"
+  ],
+  "file>file": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "file>indicator": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "file>infrastructure": [
+   "indicates",
+   "related-to"
+  ],
+  "file>intrusion-set": [
+   "indicates",
+   "related-to"
+  ],
+  "file>malware": [
+   "indicates",
+   "related-to"
+  ],
+  "file>observed-data": [
+   "based-on",
+   "related-to"
+  ],
+  "file>process": [
+   "based-on",
+   "related-to"
+  ],
+  "file>threat-actor": [
+   "indicates",
+   "related-to"
+  ],
+  "file>tool": [
+   "indicates",
+   "related-to"
+  ],
+  "file>x509-certificate": [
+   "based-on",
+   "related-to"
+  ],
+  "identity>identity": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "identity>location": [
+   "located-at",
+   "related-to"
+  ],
+  "incident>incident": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "indicator>artifact": [
+   "based-on",
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "indicator>attack-pattern": [
+   "indicates",
+   "related-to"
+  ],
+  "indicator>autonomous-system": [
+   "based-on",
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "indicator>campaign": [
+   "indicates",
+   "related-to"
+  ],
+  "indicator>directory": [
+   "based-on",
+   "related-to"
+  ],
+  "indicator>domain-name": [
+   "based-on",
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "indicator>email-addr": [
+   "based-on",
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "indicator>email-message": [
+   "based-on",
+   "related-to"
+  ],
+  "indicator>file": [
+   "based-on",
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "indicator>indicator": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "indicator>infrastructure": [
+   "indicates",
+   "related-to"
+  ],
+  "indicator>intrusion-set": [
+   "indicates",
+   "related-to"
+  ],
+  "indicator>ipv4-addr": [
+   "based-on",
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "indicator>ipv6-addr": [
+   "based-on",
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "indicator>mac-addr": [
+   "based-on",
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "indicator>malware": [
+   "indicates",
+   "related-to"
+  ],
+  "indicator>mutex": [
+   "based-on",
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "indicator>network-traffic": [
+   "based-on",
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "indicator>observed-data": [
+   "based-on",
+   "related-to"
+  ],
+  "indicator>process": [
+   "based-on",
+   "related-to"
+  ],
+  "indicator>software": [
+   "based-on",
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "indicator>threat-actor": [
+   "indicates",
+   "related-to"
+  ],
+  "indicator>tool": [
+   "indicates",
+   "related-to"
+  ],
+  "indicator>url": [
+   "based-on",
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "indicator>user-account": [
+   "based-on",
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "indicator>windows-registry-key": [
+   "based-on",
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "indicator>x509-certificate": [
+   "based-on",
+   "related-to"
+  ],
+  "infrastructure>artifact": [
+   "consists-of",
+   "related-to"
+  ],
+  "infrastructure>autonomous-system": [
+   "consists-of",
+   "related-to"
+  ],
+  "infrastructure>directory": [
+   "consists-of",
+   "related-to"
+  ],
+  "infrastructure>domain-name": [
+   "communicates-with",
+   "consists-of",
+   "related-to"
+  ],
+  "infrastructure>email-addr": [
+   "consists-of",
+   "related-to"
+  ],
+  "infrastructure>email-message": [
+   "consists-of",
+   "related-to"
+  ],
+  "infrastructure>file": [
+   "consists-of",
+   "related-to"
+  ],
+  "infrastructure>infrastructure": [
+   "communicates-with",
+   "consists-of",
+   "controls",
+   "derived-from",
+   "duplicate-of",
+   "related-to",
+   "uses"
+  ],
+  "infrastructure>ipv4-addr": [
+   "communicates-with",
+   "consists-of",
+   "related-to"
+  ],
+  "infrastructure>ipv6-addr": [
+   "communicates-with",
+   "consists-of",
+   "related-to"
+  ],
+  "infrastructure>location": [
+   "located-at",
+   "related-to"
+  ],
+  "infrastructure>mac-addr": [
+   "consists-of",
+   "related-to"
+  ],
+  "infrastructure>malware": [
+   "controls",
+   "delivers",
+   "hosts",
+   "related-to"
+  ],
+  "infrastructure>mutex": [
+   "consists-of",
+   "related-to"
+  ],
+  "infrastructure>network-traffic": [
+   "consists-of",
+   "related-to"
+  ],
+  "infrastructure>observed-data": [
+   "consists-of",
+   "related-to"
+  ],
+  "infrastructure>process": [
+   "consists-of",
+   "related-to"
+  ],
+  "infrastructure>software": [
+   "consists-of",
+   "related-to"
+  ],
+  "infrastructure>tool": [
+   "hosts",
+   "related-to"
+  ],
+  "infrastructure>url": [
+   "communicates-with",
+   "consists-of",
+   "related-to"
+  ],
+  "infrastructure>user-account": [
+   "consists-of",
+   "related-to"
+  ],
+  "infrastructure>vulnerability": [
+   "has",
+   "related-to"
+  ],
+  "infrastructure>windows-registry-key": [
+   "consists-of",
+   "related-to"
+  ],
+  "infrastructure>x509-certificate": [
+   "consists-of",
+   "related-to"
+  ],
+  "intrusion-set>attack-pattern": [
+   "related-to",
+   "uses"
+  ],
+  "intrusion-set>identity": [
+   "related-to",
+   "targets"
+  ],
+  "intrusion-set>infrastructure": [
+   "compromises",
+   "hosts",
+   "owns",
+   "related-to",
+   "uses"
+  ],
+  "intrusion-set>intrusion-set": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "intrusion-set>location": [
+   "originates-from",
+   "related-to",
+   "targets"
+  ],
+  "intrusion-set>malware": [
+   "related-to",
+   "uses"
+  ],
+  "intrusion-set>threat-actor": [
+   "attributed-to",
+   "related-to"
+  ],
+  "intrusion-set>tool": [
+   "related-to",
+   "uses"
+  ],
+  "intrusion-set>vulnerability": [
+   "related-to",
+   "targets"
+  ],
+  "ipv4-addr>attack-pattern": [
+   "indicates"
+  ],
+  "ipv4-addr>autonomous-system": [
+   "belongs-to",
+   "related-to"
+  ],
+  "ipv4-addr>campaign": [
+   "indicates",
+   "related-to"
+  ],
+  "ipv4-addr>directory": [
+   "based-on",
+   "related-to"
+  ],
+  "ipv4-addr>email-message": [
+   "based-on",
+   "related-to"
+  ],
+  "ipv4-addr>indicator": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "ipv4-addr>infrastructure": [
+   "indicates",
+   "related-to"
+  ],
+  "ipv4-addr>intrusion-set": [
+   "indicates",
+   "related-to"
+  ],
+  "ipv4-addr>ipv4-addr": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "ipv4-addr>mac-addr": [
+   "related-to",
+   "resolves-to"
+  ],
+  "ipv4-addr>malware": [
+   "indicates",
+   "related-to"
+  ],
+  "ipv4-addr>observed-data": [
+   "based-on",
+   "related-to"
+  ],
+  "ipv4-addr>process": [
+   "based-on",
+   "related-to"
+  ],
+  "ipv4-addr>threat-actor": [
+   "indicates",
+   "related-to"
+  ],
+  "ipv4-addr>tool": [
+   "indicates",
+   "related-to"
+  ],
+  "ipv4-addr>x509-certificate": [
+   "based-on",
+   "related-to"
+  ],
+  "ipv6-addr>attack-pattern": [
+   "indicates"
+  ],
+  "ipv6-addr>autonomous-system": [
+   "belongs-to",
+   "related-to"
+  ],
+  "ipv6-addr>campaign": [
+   "indicates",
+   "related-to"
+  ],
+  "ipv6-addr>directory": [
+   "based-on",
+   "related-to"
+  ],
+  "ipv6-addr>email-message": [
+   "based-on",
+   "related-to"
+  ],
+  "ipv6-addr>indicator": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "ipv6-addr>infrastructure": [
+   "indicates",
+   "related-to"
+  ],
+  "ipv6-addr>intrusion-set": [
+   "indicates",
+   "related-to"
+  ],
+  "ipv6-addr>ipv6-addr": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "ipv6-addr>mac-addr": [
+   "related-to",
+   "resolves-to"
+  ],
+  "ipv6-addr>malware": [
+   "indicates",
+   "related-to"
+  ],
+  "ipv6-addr>observed-data": [
+   "based-on",
+   "related-to"
+  ],
+  "ipv6-addr>process": [
+   "based-on",
+   "related-to"
+  ],
+  "ipv6-addr>threat-actor": [
+   "indicates",
+   "related-to"
+  ],
+  "ipv6-addr>tool": [
+   "indicates",
+   "related-to"
+  ],
+  "ipv6-addr>x509-certificate": [
+   "based-on",
+   "related-to"
+  ],
+  "location>location": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "mac-addr>attack-pattern": [
+   "indicates"
+  ],
+  "mac-addr>campaign": [
+   "indicates",
+   "related-to"
+  ],
+  "mac-addr>directory": [
+   "based-on",
+   "related-to"
+  ],
+  "mac-addr>email-message": [
+   "based-on",
+   "related-to"
+  ],
+  "mac-addr>indicator": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "mac-addr>infrastructure": [
+   "indicates",
+   "related-to"
+  ],
+  "mac-addr>intrusion-set": [
+   "indicates",
+   "related-to"
+  ],
+  "mac-addr>mac-addr": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "mac-addr>malware": [
+   "indicates",
+   "related-to"
+  ],
+  "mac-addr>observed-data": [
+   "based-on",
+   "related-to"
+  ],
+  "mac-addr>process": [
+   "based-on",
+   "related-to"
+  ],
+  "mac-addr>threat-actor": [
+   "indicates",
+   "related-to"
+  ],
+  "mac-addr>tool": [
+   "indicates",
+   "related-to"
+  ],
+  "mac-addr>x509-certificate": [
+   "based-on",
+   "related-to"
+  ],
+  "malware-analysis>malware": [
+   "analysis-of",
+   "characterizes",
+   "dynamic-analysis-of",
+   "related-to",
+   "static-analysis-of"
+  ],
+  "malware-analysis>malware-analysis": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "malware>attack-pattern": [
+   "related-to",
+   "uses"
+  ],
+  "malware>domain-name": [
+   "communicates-with",
+   "related-to"
+  ],
+  "malware>file": [
+   "downloads",
+   "drops",
+   "related-to"
+  ],
+  "malware>identity": [
+   "related-to",
+   "targets"
+  ],
+  "malware>infrastructure": [
+   "beacons-to",
+   "exfiltrates-to",
+   "related-to",
+   "targets",
+   "uses"
+  ],
+  "malware>intrusion-set": [
+   "authored-by",
+   "related-to"
+  ],
+  "malware>ipv4-addr": [
+   "communicates-with",
+   "related-to"
+  ],
+  "malware>ipv6-addr": [
+   "communicates-with",
+   "related-to"
+  ],
+  "malware>location": [
+   "originates-from",
+   "related-to",
+   "targets"
+  ],
+  "malware>malware": [
+   "controls",
+   "derived-from",
+   "downloads",
+   "drops",
+   "duplicate-of",
+   "related-to",
+   "uses",
+   "variant-of"
+  ],
+  "malware>threat-actor": [
+   "authored-by",
+   "related-to"
+  ],
+  "malware>tool": [
+   "downloads",
+   "drops",
+   "related-to",
+   "uses"
+  ],
+  "malware>url": [
+   "communicates-with",
+   "related-to"
+  ],
+  "malware>vulnerability": [
+   "exploits",
+   "related-to",
+   "targets"
+  ],
+  "mutex>attack-pattern": [
+   "indicates"
+  ],
+  "mutex>campaign": [
+   "indicates",
+   "related-to"
+  ],
+  "mutex>directory": [
+   "based-on",
+   "related-to"
+  ],
+  "mutex>email-message": [
+   "based-on",
+   "related-to"
+  ],
+  "mutex>indicator": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "mutex>infrastructure": [
+   "indicates",
+   "related-to"
+  ],
+  "mutex>intrusion-set": [
+   "indicates",
+   "related-to"
+  ],
+  "mutex>malware": [
+   "indicates",
+   "related-to"
+  ],
+  "mutex>mutex": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "mutex>observed-data": [
+   "based-on",
+   "related-to"
+  ],
+  "mutex>process": [
+   "based-on",
+   "related-to"
+  ],
+  "mutex>threat-actor": [
+   "indicates",
+   "related-to"
+  ],
+  "mutex>tool": [
+   "indicates",
+   "related-to"
+  ],
+  "mutex>x509-certificate": [
+   "based-on",
+   "related-to"
+  ],
+  "network-traffic>attack-pattern": [
+   "indicates"
+  ],
+  "network-traffic>campaign": [
+   "indicates",
+   "related-to"
+  ],
+  "network-traffic>directory": [
+   "based-on",
+   "related-to"
+  ],
+  "network-traffic>email-message": [
+   "based-on",
+   "related-to"
+  ],
+  "network-traffic>indicator": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "network-traffic>infrastructure": [
+   "indicates",
+   "related-to"
+  ],
+  "network-traffic>intrusion-set": [
+   "indicates",
+   "related-to"
+  ],
+  "network-traffic>malware": [
+   "indicates",
+   "related-to"
+  ],
+  "network-traffic>network-traffic": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "network-traffic>observed-data": [
+   "based-on",
+   "related-to"
+  ],
+  "network-traffic>process": [
+   "based-on",
+   "related-to"
+  ],
+  "network-traffic>threat-actor": [
+   "indicates",
+   "related-to"
+  ],
+  "network-traffic>tool": [
+   "indicates",
+   "related-to"
+  ],
+  "network-traffic>x509-certificate": [
+   "based-on",
+   "related-to"
+  ],
+  "observed-data>observed-data": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "process>process": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "software>attack-pattern": [
+   "indicates"
+  ],
+  "software>campaign": [
+   "indicates",
+   "related-to"
+  ],
+  "software>directory": [
+   "based-on",
+   "related-to"
+  ],
+  "software>email-message": [
+   "based-on",
+   "related-to"
+  ],
+  "software>indicator": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "software>infrastructure": [
+   "indicates",
+   "related-to"
+  ],
+  "software>intrusion-set": [
+   "indicates",
+   "related-to"
+  ],
+  "software>malware": [
+   "indicates",
+   "related-to"
+  ],
+  "software>observed-data": [
+   "based-on",
+   "related-to"
+  ],
+  "software>process": [
+   "based-on",
+   "related-to"
+  ],
+  "software>software": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "software>threat-actor": [
+   "indicates",
+   "related-to"
+  ],
+  "software>tool": [
+   "indicates",
+   "related-to"
+  ],
+  "software>x509-certificate": [
+   "based-on",
+   "related-to"
+  ],
+  "threat-actor>attack-pattern": [
+   "related-to",
+   "uses"
+  ],
+  "threat-actor>identity": [
+   "attributed-to",
+   "impersonates",
+   "related-to",
+   "targets"
+  ],
+  "threat-actor>infrastructure": [
+   "compromises",
+   "hosts",
+   "owns",
+   "related-to",
+   "uses"
+  ],
+  "threat-actor>location": [
+   "located-at",
+   "related-to",
+   "targets"
+  ],
+  "threat-actor>malware": [
+   "related-to",
+   "uses"
+  ],
+  "threat-actor>threat-actor": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "threat-actor>tool": [
+   "related-to",
+   "uses"
+  ],
+  "threat-actor>vulnerability": [
+   "related-to",
+   "targets"
+  ],
+  "tool>identity": [
+   "related-to",
+   "targets"
+  ],
+  "tool>infrastructure": [
+   "related-to",
+   "targets",
+   "uses"
+  ],
+  "tool>location": [
+   "related-to",
+   "targets"
+  ],
+  "tool>malware": [
+   "delivers",
+   "drops",
+   "related-to"
+  ],
+  "tool>tool": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "tool>vulnerability": [
+   "has",
+   "related-to",
+   "targets"
+  ],
+  "url>attack-pattern": [
+   "indicates"
+  ],
+  "url>campaign": [
+   "indicates",
+   "related-to"
+  ],
+  "url>directory": [
+   "based-on",
+   "related-to"
+  ],
+  "url>email-message": [
+   "based-on",
+   "related-to"
+  ],
+  "url>indicator": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "url>infrastructure": [
+   "indicates",
+   "related-to"
+  ],
+  "url>intrusion-set": [
+   "indicates",
+   "related-to"
+  ],
+  "url>malware": [
+   "indicates",
+   "related-to"
+  ],
+  "url>observed-data": [
+   "based-on",
+   "related-to"
+  ],
+  "url>process": [
+   "based-on",
+   "related-to"
+  ],
+  "url>threat-actor": [
+   "indicates",
+   "related-to"
+  ],
+  "url>tool": [
+   "indicates",
+   "related-to"
+  ],
+  "url>url": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "url>x509-certificate": [
+   "based-on",
+   "related-to"
+  ],
+  "user-account>attack-pattern": [
+   "indicates"
+  ],
+  "user-account>campaign": [
+   "indicates",
+   "related-to"
+  ],
+  "user-account>directory": [
+   "based-on",
+   "related-to"
+  ],
+  "user-account>email-message": [
+   "based-on",
+   "related-to"
+  ],
+  "user-account>indicator": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "user-account>infrastructure": [
+   "indicates",
+   "related-to"
+  ],
+  "user-account>intrusion-set": [
+   "indicates",
+   "related-to"
+  ],
+  "user-account>malware": [
+   "indicates",
+   "related-to"
+  ],
+  "user-account>observed-data": [
+   "based-on",
+   "related-to"
+  ],
+  "user-account>process": [
+   "based-on",
+   "related-to"
+  ],
+  "user-account>threat-actor": [
+   "indicates",
+   "related-to"
+  ],
+  "user-account>tool": [
+   "indicates",
+   "related-to"
+  ],
+  "user-account>user-account": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "user-account>x509-certificate": [
+   "based-on",
+   "related-to"
+  ],
+  "vulnerability>vulnerability": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "windows-registry-key>attack-pattern": [
+   "indicates"
+  ],
+  "windows-registry-key>campaign": [
+   "indicates",
+   "related-to"
+  ],
+  "windows-registry-key>directory": [
+   "based-on",
+   "related-to"
+  ],
+  "windows-registry-key>email-message": [
+   "based-on",
+   "related-to"
+  ],
+  "windows-registry-key>indicator": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "windows-registry-key>infrastructure": [
+   "indicates",
+   "related-to"
+  ],
+  "windows-registry-key>intrusion-set": [
+   "indicates",
+   "related-to"
+  ],
+  "windows-registry-key>malware": [
+   "indicates",
+   "related-to"
+  ],
+  "windows-registry-key>observed-data": [
+   "based-on",
+   "related-to"
+  ],
+  "windows-registry-key>process": [
+   "based-on",
+   "related-to"
+  ],
+  "windows-registry-key>threat-actor": [
+   "indicates",
+   "related-to"
+  ],
+  "windows-registry-key>tool": [
+   "indicates",
+   "related-to"
+  ],
+  "windows-registry-key>windows-registry-key": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ],
+  "windows-registry-key>x509-certificate": [
+   "based-on",
+   "related-to"
+  ],
+  "x509-certificate>x509-certificate": [
+   "derived-from",
+   "duplicate-of",
+   "related-to"
+  ]
+ },
+ "types": [
+  "artifact",
+  "attack-pattern",
+  "autonomous-system",
+  "campaign",
+  "course-of-action",
+  "directory",
+  "domain-name",
+  "email-addr",
+  "email-message",
+  "file",
+  "identity",
+  "incident",
+  "indicator",
+  "infrastructure",
+  "intrusion-set",
+  "ipv4-addr",
+  "ipv6-addr",
+  "location",
+  "mac-addr",
+  "malware",
+  "malware-analysis",
+  "mutex",
+  "network-traffic",
+  "observed-data",
+  "process",
+  "software",
+  "threat-actor",
+  "tool",
+  "url",
+  "user-account",
+  "vulnerability",
+  "windows-registry-key",
+  "x509-certificate"
+ ]
+}

@@ -525,13 +525,12 @@ def test_ioc_coverage_all_observables_covered():
 
 
 def test_ioc_coverage_network_traffic_gets_an_indicator():
-    # ADR-0041: network_traffic maps to a 'software' SCO, which now has a STIX
-    # pattern branch — it used to be silently dropped here (no Indicator),
-    # which would have made ADR-0041's "route through the Indicator, or drop"
-    # rule delete every network-traffic relationship instead of fixing it.
+    # ADR-0041/ADR-0069: a network-traffic needs a pattern, or ADR-0041's
+    # "route through the Indicator, or drop" rule deletes every relationship
+    # it is in.
     entities = [
         RawEntity(value="8.8.8.8", entity_type=EntityType.IPV4),
-        RawEntity(value="tcp/4444", entity_type=EntityType.NETWORK_TRAFFIC),
+        RawEntity(value="tcp/4444 to 203.0.113.9", entity_type=EntityType.NETWORK_TRAFFIC),
     ]
     bundle = build_stix_bundle(entities, LLMEnrichmentResult(), "r")
     cov = verify_ioc_coverage(entities, bundle)
@@ -808,18 +807,33 @@ def test_observable_to_observable_relationship_left_alone():
     )
 
 
-def test_network_traffic_gets_an_indicator():
-    """ADR-0041: the new 'software' pattern branch means a NETWORK_TRAFFIC
-    entity (placeholder SCO type 'software') now yields an Indicator instead
-    of being silently dropped."""
+def test_network_traffic_is_a_network_traffic_to_its_destination():
+    """ADR-0069: it used to ship as Software(name=...), which kept the words
+    and lost the type, the destination and the port."""
     entities = [
         RawEntity(value="beacon to 10.0.0.1:443", entity_type=EntityType.NETWORK_TRAFFIC)
     ]
     bundle = build_stix_bundle(entities, LLMEnrichmentResult(), "nt_test")
 
-    types = {o.get("type") for o in bundle.objects}
-    assert "software" in types
-    assert "indicator" in types
+    nt = next(o for o in bundle.objects if o.get("type") == "network-traffic")
+    ip = next(o for o in bundle.objects if o.get("type") == "ipv4-addr")
+    assert nt.dst_ref == ip.id and ip.value == "10.0.0.1"
+    assert nt.dst_port == 443 and nt.protocols == ["ipv4"]
+    assert not any(o.get("type") == "software" for o in bundle.objects)
+    ind = next(o for o in bundle.objects if o.get("type") == "indicator")
+    assert ind.pattern == "[network-traffic:dst_ref.value = '10.0.0.1' AND network-traffic:dst_port = 443]"
+
+
+def test_network_traffic_with_no_destination_is_left_out_and_says_why():
+    from pipeline.bundle_ledger import MappingLedger
+
+    led = MappingLedger()
+    entities = [RawEntity(value="tcp/445", entity_type=EntityType.NETWORK_TRAFFIC)]
+    bundle = build_stix_bundle(entities, LLMEnrichmentResult(), "nt_test", ledger=led)
+
+    assert not any(o.get("type") in ("network-traffic", "software") for o in bundle.objects)
+    (entry,) = [e for e in led.entities if e["value"] == "tcp/445"]
+    assert entry["outcome"] == "dropped" and entry["reason"] == "no_traffic_endpoint"
 
 
 # ── ADR-0042: embedded detection rules become Indicator SDOs ──────────────────

@@ -59,6 +59,7 @@ export const OBJECT_ORIGIN_LABEL: Record<string, string> = {
   entity:            'Review entity',
   ioc_indicator:     'Indicator built from an IoC',
   embedded_rule:     'Detection rule quoted in the report',
+  network_traffic_endpoint: 'Destination of a network-traffic observable',
   targeted_country:  'LLM “targeted countries” list',
   targeted_sector:   'LLM “targeted sectors” list',
   course_of_action:  'LLM “course of action” list',
@@ -87,7 +88,7 @@ const RELATIONSHIP_REASON: Record<string, string> = {
   unresolved_target:            'its target matches no object in the bundle',
   unresolved_both:              'neither end matches an object in the bundle',
   self_loop:                    'both ends resolve to the same object (an alias), which would be a self-loop',
-  observable_to_attack_pattern: 'an observable is linked to a technique only by “indicates”, through its Indicator — any other verb has no STIX meaning for this pair',
+  observable_to_attack_pattern: 'an observable is linked to a technique only by “indicates”, through its Indicator — this project drops any other verb for this pair (a precision choice, ADR-0012; STIX itself would allow a custom one)',
   no_indicator:                 'no STIX pattern could be built for the observable, so no Indicator can stand in for it',
   invalid:                      'the STIX library rejected the relationship',
   self_loop_after_alias_merge:  'the alias merge made both ends the same object',
@@ -104,6 +105,7 @@ const ENTITY_REASON: Record<string, string> = {
   not_representable: 'the value cannot be expressed as this STIX type',
   not_in_llm_lists:  'found by NER but not listed by the LLM — the first build maps named objects from the LLM lists only; a rebuild includes it',
   rule_does_not_compile: 'the YARA rule quoted in the report does not compile, so OpenCTI would refuse its Indicator and every edge to it',
+  no_traffic_endpoint: 'a STIX network-traffic needs a destination (an IP, or a domain with a protocol), and this value names none',
 }
 
 const VERB_REASON: Record<string, string> = {

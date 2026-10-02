@@ -127,9 +127,8 @@ def run_pipeline(input_file: str, output_file: str, options: RunOptions | None =
         print_bundle_summary(result.bundle)
     _print_stages(result)
 
-    from pipeline.stage5_validation import _schemas_installed
     valid = bool(result.valid)
-    if valid and not _schemas_installed():
+    if result.validation == "unverified":
         status = "OK (validation skipped — schemas missing)"
     elif valid:
         status = "OK"

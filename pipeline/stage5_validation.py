@@ -5,6 +5,7 @@ import os
 import tempfile
 import urllib.request
 import zipfile
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import stix2
@@ -22,15 +23,42 @@ logger = get_logger(__name__)
 _PROJECT_ROOT  = Path(__file__).parent.parent
 _WARN_SENTINEL = _PROJECT_ROOT / ".stix2_schemas_missing"
 
-# GitHub archive URL for the OASIS STIX 2.1 JSON schema repository.
-# The archive is a ZIP of the full repo; we extract only the schemas/ subtree.
+# GitHub archive of the OASIS STIX 2.1 JSON schema repository, pinned to one
+# commit (master on 2026-01-19).  It used to be the moving master branch, so
+# two installs restored on different days could validate against different
+# schemas.  The archive is a ZIP of the full repo; only schemas/ is extracted.
+SCHEMA_COMMIT = "9af1db41b7b86c06324f899649ae83480134f66e"
 _SCHEMA_ZIP_URL = (
     "https://github.com/oasis-open/cti-stix2-json-schemas"
-    "/archive/refs/heads/master.zip"
+    f"/archive/{SCHEMA_COMMIT}.zip"
 )
 # Prefix inside the ZIP archive where the schemas live.
-# cti-stix2-json-schemas-master/schemas/{common,observables,sdos,sros}/*.json
-_ZIP_SCHEMA_PREFIX = "cti-stix2-json-schemas-master/schemas/"
+# cti-stix2-json-schemas-<commit>/schemas/{common,observables,sdos,sros}/*.json
+_ZIP_SCHEMA_PREFIX = f"cti-stix2-json-schemas-{SCHEMA_COMMIT}/schemas/"
+
+VALIDATED = "validated"
+INVALID = "invalid"
+UNVERIFIED = "unverified"
+
+
+@dataclass
+class ValidationResult:
+    """What Stage 5 knows about a bundle.
+
+    ``unverified`` means the JSON schemas were missing: only the stix2 library's
+    own checks ran.  It used to be reported as ``True``, the same answer as a
+    bundle the schemas accepted.  ``warnings`` are the validator's best-practice
+    findings (e.g. {202}, a relationship STIX does not suggest for the pair);
+    they never make a bundle invalid.
+    """
+    status: str
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        """The bundle was written under its own name (not ``_invalid``)."""
+        return self.status != INVALID
 
 
 def _schema_dir() -> Path:
@@ -143,7 +171,7 @@ def _try_restore_schemas() -> bool:
         return False
 
 
-def validate_and_export(bundle: stix2.Bundle, output_path: str) -> bool:
+def validate_and_export(bundle: stix2.Bundle, output_path: str) -> ValidationResult:
     """
     Validate the STIX 2.1 bundle and write it to disk.
 
@@ -151,13 +179,11 @@ def validate_and_export(bundle: stix2.Bundle, output_path: str) -> bool:
         bundle: STIX bundle to validate.
         output_path: destination file path.
 
-    Returns:
-        True  — bundle passed JSON-schema validation (or validation was skipped
-                because schemas are unavailable); file written at output_path.
-        False — bundle failed validation; file written with _invalid suffix.
-
-    Callers should not treat True as "schema-clean" when schemas are absent —
-    use _schemas_installed() to distinguish the two True cases if needed.
+    Returns a `ValidationResult`:
+        validated  — the JSON schemas accepted it; file written at output_path.
+        unverified — the schemas are missing, only the stix2 library checked it;
+                     file written at output_path.
+        invalid    — the schemas refused it; file written with _invalid suffix.
 
     Schema-validation layer vs. stix2-library validation:
         The stix2 library validates every STIX object at *construction* time
@@ -196,15 +222,20 @@ def validate_and_export(bundle: stix2.Bundle, output_path: str) -> bool:
                 except OSError:
                     pass
                 _write_file(bundle_json, output_path)
-                return True
+                return ValidationResult(UNVERIFIED)
         else:
-            # Sentinel present — schemas still missing, skip silently
+            # Sentinel present — schemas still missing, not checked again
             _write_file(bundle_json, output_path)
-            return True
+            return ValidationResult(UNVERIFIED)
 
     # ── Full JSON-schema validation ───────────────────────────────────────────
     options = ValidationOptions(version="2.1")
     results = validate_string(bundle_json, options=options)
+    found = getattr(results, "object_results", None) or [results]
+    errors = [str(e) for r in found for e in (r.errors or [])]
+    warnings = [str(w) for r in found for w in (r.warnings or [])]
+    if warnings:
+        logger.info(f"[Stage 5] {len(warnings)} best-practice warning(s), e.g. {warnings[0]}")
 
     if not results.is_valid:
         logger.error("STIX 2.1 validation errors detected:")
@@ -212,10 +243,10 @@ def validate_and_export(bundle: stix2.Bundle, output_path: str) -> bool:
         p = Path(output_path)
         invalid_path = str(p.with_stem(p.stem + "_invalid"))
         _write_file(bundle_json, invalid_path)
-        return False
+        return ValidationResult(INVALID, errors, warnings)
 
     _write_file(bundle_json, output_path)
-    return True
+    return ValidationResult(VALIDATED, errors, warnings)
 
 
 def _write_file(content: str, output_path: str) -> None:

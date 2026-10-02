@@ -16,6 +16,7 @@ from pipeline.bundle_ledger import ORIGIN_EXTRACTED, MappingLedger
 from pipeline.detection.suricata_atoms import parse_options, rule_header
 from pipeline.detection.yara_atoms import split_rules
 from pipeline.detection.yara_check import DOES_NOT_COMPILE, prepare_embedded_rule
+from pipeline.network_traffic import parse_network_traffic
 from pipeline.regex_safety import compile_pattern
 from pipeline.stage3_llm import LLMEnrichmentResult
 from pipeline.stage4b_graph_completion import CompletionStats, complete_graph
@@ -295,9 +296,12 @@ _OBSERVABLE_IOC_TYPES: frozenset[EntityType] = frozenset({
 
 # STIX 2.1 cyber-observable (SCO) type strings.  Used to reject spurious
 # LLM edges that link a raw observable directly to an attack-pattern (e.g.
-# "domain communicates-with T1071.001") — not a valid STIX relationship: a
-# technique is expressed via a malware/actor `uses` attack-pattern, and the
-# observable is tied to that malware via `indicates`, never straight to the TTP.
+# "domain communicates-with T1071.001").  STIX does not forbid such an edge: it
+# is not in the suggested tables, and the spec allows custom relationships.
+# Dropping it is this project's precision choice (ADR-0012), because the LLM
+# emits it as a type error: a technique is expressed via a malware/actor `uses`
+# attack-pattern, and the observable is tied to that malware via `indicates`.
+# Frontend copy: OBSERVABLE_TYPES in frontend/src/stix/relConstraints.ts.
 _OBSERVABLE_SCO_TYPES: frozenset[str] = frozenset({
     "ipv4-addr", "ipv6-addr", "domain-name", "url", "email-addr", "mac-addr",
     "autonomous-system", "file", "windows-registry-key", "mutex",
@@ -318,8 +322,8 @@ _EV_REPORTED = {"x_evidence_label": "reported"}
 
 def _is_spurious_observable_ttp_edge(source, target) -> bool:
     """True for an observable-SCO ↔ attack-pattern edge (a type error the LLM
-    sometimes emits).  Such an edge carries no valid STIX meaning and is dropped
-    to protect relationship precision (ADR-0012) — unless its verb is
+    sometimes emits).  STIX permits it as a custom relationship; this project
+    drops it to protect relationship precision (ADR-0012) — unless its verb is
     `indicates`, which the observable's Indicator states (ADR-0065)."""
     types = {getattr(source, "type", ""), getattr(target, "type", "")}
     return "attack-pattern" in types and bool(types & _OBSERVABLE_SCO_TYPES)
@@ -368,6 +372,27 @@ def _route_observables_through_indicators(source, verb: str, target, sco_id_to_i
     if indicator is None:
         return None, None
     return source, indicator
+
+
+def verb_ships_as_written(src_type: str, verb: str, tgt_type: str) -> bool:
+    """True when Stage 4 ships `verb` unchanged for a src → tgt row or pinned
+    rule, False when it ships as ``related-to`` (or, between an observable and
+    a technique, drops it).  The decisions of the semantic loop, by type only:
+    the observable/technique guard, then the routing through the observable's
+    Indicator, then the `rel_is_allowed` downgrade.  `shippedVerbs` in
+    frontend/src/stix/relConstraints.ts is the same rule, and
+    tests/test_rel_constraints_parity.py holds both to one matrix."""
+    verb = (verb or "").strip().lower()
+    src_obs, tgt_obs = src_type in _OBSERVABLE_SCO_TYPES, tgt_type in _OBSERVABLE_SCO_TYPES
+    if (src_obs and tgt_type == "attack-pattern") or (src_type == "attack-pattern" and tgt_obs):
+        return verb == "indicates"
+    if rel_is_listed(src_type, verb, tgt_type):
+        return True
+    if src_obs and not tgt_obs:
+        return rel_is_allowed("indicator", verb, tgt_type)
+    if tgt_obs and not src_obs:
+        return rel_is_allowed(src_type, verb, "indicator")
+    return rel_is_allowed(src_type, verb, tgt_type)
 
 
 def build_stix_bundle(
@@ -1386,7 +1411,8 @@ def verify_ioc_coverage(raw_entities: list[RawEntity], bundle: stix2.Bundle) -> 
         seen.add(key)
         total += 1
 
-        sco = _entity_to_sco(entity)
+        sco = (_network_traffic_sco(entity.value, [], {}, {}, None)
+               if entity.entity_type == EntityType.NETWORK_TRAFFIC else _entity_to_sco(entity))
         has_sco = sco is not None and getattr(sco, "id", None) in bundle_ids
 
         # The Indicator id is its pattern's (ADR-0066), so rebuild the pattern.
@@ -1413,6 +1439,37 @@ def verify_ioc_coverage(raw_entities: list[RawEntity], bundle: stix2.Bundle) -> 
     }
 
 
+_HOST_SCO = {"ipv4-addr": stix2.IPv4Address, "ipv6-addr": stix2.IPv6Address,
+             "domain-name": stix2.DomainName}
+
+
+def _network_traffic_sco(value: str, scos: list, value_to_sco: dict, canonical_to_sco: dict,
+                         ledger: MappingLedger | None):
+    """A `network-traffic` to the destination `value` names, or None (ADR-0069).
+
+    The destination is the observable already built for that host, or a new
+    one (recorded in the ledger as the traffic's endpoint).  It used to be a
+    `Software(name=value)` placeholder, which lost the type and the endpoint.
+    """
+    d = parse_network_traffic(value)
+    if d is None:
+        return None
+    host = value_to_sco.get(d.host) or canonical_to_sco.get(d.host)
+    if host is None:
+        host = _HOST_SCO[d.host_type](value=d.host)
+        scos.append(host)
+        value_to_sco[d.host] = canonical_to_sco[d.host] = host
+        if ledger is not None:
+            ledger.object(host, "network_traffic_endpoint", traffic=value)
+    kwargs: dict = {"dst_ref": host.id, "protocols": list(d.protocols)}
+    if d.port is not None:
+        kwargs["dst_port"] = d.port
+    try:
+        return stix2.NetworkTraffic(**kwargs)
+    except Exception:
+        return None
+
+
 def _map_iocs_to_scos(
     entities: list[RawEntity], ledger: MappingLedger | None = None,
 ) -> tuple[list, dict[str, object]]:
@@ -1423,7 +1480,7 @@ def _map_iocs_to_scos(
     ledger: when given, each observable entity's outcome is recorded — the SCO
     it became, the SCO it duplicates, or why none could be built (ADR-0061).
     """
-    scos = []
+    scos: list = []
     value_to_sco: dict[str, object] = {}
     # Tracks the value as it will actually appear in the STIX output --
     # hive-expanded for a registry key (_expand_registry_hive is a no-op for
@@ -1458,7 +1515,10 @@ def _map_iocs_to_scos(
             value_to_sco[key] = canonical_to_sco[canonical_key]
             _record(entity, "merged", canonical_to_sco[canonical_key], "same_observable")
             continue
-        sco = _entity_to_sco(entity)
+        if entity.entity_type == EntityType.NETWORK_TRAFFIC:
+            sco = _network_traffic_sco(entity.value, scos, value_to_sco, canonical_to_sco, ledger)
+        else:
+            sco = _entity_to_sco(entity)
         if sco is not None:
             scos.append(sco)
             value_to_sco[key] = sco
@@ -1467,7 +1527,8 @@ def _map_iocs_to_scos(
             if ledger is not None:
                 ledger.object(sco, "entity")
         else:
-            _record(entity, "dropped", reason="not_representable")
+            _record(entity, "dropped", reason="no_traffic_endpoint"
+                    if entity.entity_type == EntityType.NETWORK_TRAFFIC else "not_representable")
 
     return scos, value_to_sco
 
@@ -1536,10 +1597,7 @@ def _entity_to_sco(entity: RawEntity):
             num_str = v.upper().removeprefix("AS").strip()
             if num_str.isdigit():
                 return stix2.AutonomousSystem(number=int(num_str), name=v)
-        if t == EntityType.NETWORK_TRAFFIC:
-            # Store raw network-traffic descriptor as a Software object when
-            # full src/dst resolution isn't available (placeholder SCO).
-            return stix2.Software(name=v)
+        # NETWORK_TRAFFIC is built by _network_traffic_sco (ADR-0069).
 
         # ── File / hash observables ──────────────────────────────────────────
         if t == EntityType.MD5:
@@ -1645,12 +1703,16 @@ def _build_stix_pattern(ioc_value: str, sco) -> str | None:
         return f"[mutex:name = '{esc}']"
     elif sco_type == "user-account":
         return f"[user-account:user_id = '{esc}']"
-    elif sco_type == "software":
-        # NETWORK_TRAFFIC entities map to a placeholder Software SCO (see
-        # _entity_to_sco) rather than a full network-traffic object; giving it
-        # a pattern here is what makes ADR-0041's "route through the Indicator,
-        # or drop" rule not silently drop every network-traffic relationship.
-        return f"[software:name = '{esc}']"
+    elif sco_type == "network-traffic":
+        # A pattern is what keeps ADR-0041's "route through the Indicator, or
+        # drop" rule from dropping every network-traffic relationship.  It
+        # names the destination and port the descriptor states (ADR-0069).
+        d = parse_network_traffic(ioc_value)
+        if d is not None:
+            terms = [f"network-traffic:dst_ref.value = '{_escape_stix_value(d.host)}'"]
+            if d.port is not None:
+                terms.append(f"network-traffic:dst_port = {d.port}")
+            return "[" + " AND ".join(terms) + "]"
     elif sco_type == "file":
         hashes = sco.get("hashes", {})
         if hashes:

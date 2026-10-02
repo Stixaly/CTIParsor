@@ -38,7 +38,6 @@ def _objects(bundle, stix_type: str) -> list:
     (EntityType.FILE, "C:\\Temp\\x.dll", "file", "[file:name = 'C:\\\\Temp\\\\x.dll']"),
     (EntityType.MUTEX, "Global\\M1", "mutex", "[mutex:name = 'Global\\\\M1']"),
     (EntityType.USER_ACCOUNT, "svc_backup", "user-account", "[user-account:user_id = 'svc_backup']"),
-    (EntityType.NETWORK_TRAFFIC, "tcp/445", "software", "[software:name = 'tcp/445']"),
     (EntityType.ASN, "as64500", "autonomous-system", "[autonomous-system:number = 64500]"),
 ])
 def test_each_observable_becomes_an_sco_with_a_pattern(etype, value, stix_type, pattern):

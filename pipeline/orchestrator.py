@@ -220,6 +220,8 @@ class RunResult:
     ioc_coverage: dict | None = None
     synthesis: dict | None = None
     valid: bool | None = None
+    # Stage 5's status: "validated", "unverified" (no JSON schemas) or "invalid".
+    validation: str | None = None
 
     def outcome(self, stage: str) -> StageOutcome | None:
         return next((o for o in self.stages if o.stage == stage), None)
@@ -1044,11 +1046,16 @@ class _Run:
 
         t0 = time.monotonic()
         Path(self.doc.output_path).parent.mkdir(parents=True, exist_ok=True)
-        self.r.valid = validate_and_export(self.r.bundle, self.doc.output_path)
-        logger.info(f"[Stage 5] Validation complete — valid={self.r.valid}")
-        self.record("5", RAN, "" if self.r.valid else "bundle failed schema validation",
-                    time.monotonic() - t0, valid=int(bool(self.r.valid)))
-        self.hooks.progress("stage", {"stage": 5, "label": "Validation", "valid": self.r.valid})
+        result = validate_and_export(self.r.bundle, self.doc.output_path)
+        self.r.valid, self.r.validation = result.ok, result.status
+        logger.info(f"[Stage 5] Validation complete — {result.status}, "
+                    f"{len(result.warnings)} warning(s)")
+        reason = {"invalid": "bundle failed schema validation",
+                  "unverified": "JSON schemas missing: not schema-validated"}.get(result.status, "")
+        self.record("5", RAN, reason, time.monotonic() - t0, valid=int(result.ok),
+                    unverified=int(result.status == "unverified"), warnings=len(result.warnings))
+        self.hooks.progress("stage", {"stage": 5, "label": "Validation", "valid": result.ok,
+                                      "validation": result.status})
 
 
 def _partial_graph(res) -> dict:
