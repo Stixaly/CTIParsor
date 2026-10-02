@@ -11,7 +11,7 @@ import urllib.error
 import urllib.request
 import zlib
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 from pipeline.env_flags import env_float
 from pipeline.vllm_options import vllm_extra_body
@@ -316,7 +316,7 @@ class AnthropicVisionBackend:
         self.model = model
         self.timeout = timeout
         self.max_concurrency = 4
-        self._client = None
+        self._client: Any = None   # anthropic.Anthropic; the SDK is optional
         self._available: bool | None = None
 
     def _get_client(self):

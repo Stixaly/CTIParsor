@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { X, Loader2, AlertTriangle, Upload } from 'lucide-react'
+import { X, Loader2, AlertTriangle } from 'lucide-react'
 import { uploadFile, ingestText, ingestUrl, errorDetail } from '../api/client'
 import { MARKING_LEVELS } from '../types'
 import type { MarkingLevel } from '../types'

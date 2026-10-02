@@ -35,6 +35,15 @@ interface Policy {
   rules: PolicyRule[]
 }
 
+/** The stored policy as GET returns it.  Policies saved before ADR-0026/0027
+ *  lack the pin keys, and the server does not vouch for any field's shape. */
+interface StoredPolicy {
+  rules?: PolicyRule[]
+  global?: string
+  pin_budget_mode?: string
+  pin_evidence?: { mode?: string; window?: number }
+}
+
 // ── STIX object-type metadata ─────────────────────────────────────────────────
 
 const STIX_HUE: Record<string, number> = {
@@ -68,7 +77,6 @@ const TYPE_GROUPS = [
   { group: 'Infrastructure & detection', types: ['infrastructure', 'indicator', 'course-of-action'] },
   { group: 'Observables (SCO)',         types: ['domain-name', 'ipv4-addr', 'ipv6-addr', 'url', 'email-addr', 'email-message', 'file', 'autonomous-system', 'windows-registry-key', 'user-account', 'mutex', 'mac-addr'] },
 ]
-const ALL_TYPES = TYPE_GROUPS.flatMap(g => g.types)
 
 // ── Verb vocabulary (mirrors VALID_REL_TYPES in stage4_stix_mapping.py) ───────
 
@@ -88,7 +96,6 @@ const VERB_GROUPS = [
   { group: 'Generic',                verbs: ['duplicate-of', 'derived-from', 'related-to'] },
 ]
 
-const ALL_VERBS = VERB_GROUPS.flatMap(g => g.verbs)
 
 // ── STIX 2.1 Appendix B per-pair constraints ──────────────────────────────────
 // The constraint table, UNIVERSAL_VERBS, and pairVerbs() now live in the shared,
@@ -789,7 +796,7 @@ function IOModal({ rules, globalMode, onClose, onImport }: {
     try {
       const o = JSON.parse(draft)
       if (!Array.isArray(o.rules)) throw new Error('missing rules[]')
-      const clean: PolicyRule[] = o.rules.map((r: any, i: number) => ({
+      const clean: PolicyRule[] = o.rules.map((r: Partial<PolicyRule>, i: number) => ({
         id: 'rule-imp-' + i + '-' + Date.now(),
         src: r.src, verb: r.verb || 'related-to', tgt: r.tgt,
         mode: r.mode === 'auto' ? 'auto' : 'pin',
@@ -799,8 +806,8 @@ function IOModal({ rules, globalMode, onClose, onImport }: {
       onImport(clean, o.global === 'auto' ? 'auto' : 'enforce')
       setMsg({ ok: true, t: `Imported ${clean.length} rules` })
       setTimeout(onClose, 700)
-    } catch (e: any) {
-      setMsg({ ok: false, t: 'Invalid JSON — ' + e.message })
+    } catch (e) {
+      setMsg({ ok: false, t: 'Invalid JSON — ' + (e instanceof Error ? e.message : String(e)) })
     }
   }
 
@@ -937,7 +944,7 @@ export default function Policy() {
   const seeded = useRef(false)
   useEffect(() => {
     if (seeded.current || !remotePolicy) return
-    const p = remotePolicy as any
+    const p = remotePolicy as StoredPolicy
     // Seed from server whenever we get a valid response — including an empty
     // rules array.  The old `if (p.rules?.length)` guard meant that an empty
     // saved policy never set seeded.current=true, so this effect would keep
@@ -954,7 +961,7 @@ export default function Policy() {
       // so fall back to the same defaults Stage 4 applies.
       const ev = p.pin_evidence
       setEvidenceOn(!(ev && ev.mode === 'cartesian'))
-      if (ev && Number.isInteger(ev.window) && ev.window >= 0) {
+      if (ev && typeof ev.window === 'number' && Number.isInteger(ev.window) && ev.window >= 0) {
         setWindowSize(ev.window)
       }
     }
@@ -974,7 +981,7 @@ export default function Policy() {
   }, [remotePolicy])
 
   const savePolicy = useCallback((patch: Record<string, unknown>) => {
-    saveMut.mutate({ ...serverPolicyRef.current, version: 1, ...patch } as any)
+    saveMut.mutate({ ...serverPolicyRef.current, version: 1, ...patch })
   }, [saveMut])
 
   // ── Pin budget (ADR-0026) ───────────────────────────────────────────────────
@@ -1034,7 +1041,7 @@ export default function Policy() {
     saveTimer.current = setTimeout(() => {
       savePolicy({ global: globalMode, rules: pendingRulesRef.current })
     }, 1500)
-  }, [globalMode, saveMut])
+  }, [globalMode, savePolicy])
 
   const changeGlobalMode = (m: 'enforce' | 'auto') => {
     setGlobalMode(m)

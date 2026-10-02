@@ -20,7 +20,7 @@ def client(temp_db_client, tmp_path, monkeypatch):
     import api.main
 
     api.main.limiter.reset()
-    monkeypatch.setattr("api.routes.ingest.UPLOADS_DIR", tmp_path)
+    monkeypatch.setenv("CTIPARSOR_UPLOADS_DIR", str(tmp_path))
     # start_job() (api/routes/_common.py) imports run_pipeline_async from
     # api.worker locally on each call, so that is the name that must be
     # patched -- api.routes.ingest no longer holds a module-level reference

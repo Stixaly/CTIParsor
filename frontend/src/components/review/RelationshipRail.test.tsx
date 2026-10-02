@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import RelationshipRail from './RelationshipRail'
+import RelationshipRail, { type DatePatch } from './RelationshipRail'
 import type { Relationship, TemporalAssertion } from '../../types'
 
 const rel = (over: Partial<Relationship> = {}): Relationship => ({
@@ -19,7 +19,7 @@ const rel = (over: Partial<Relationship> = {}): Relationship => ({
 const noop = () => {}
 const noopNum = (_x: number, _y: number) => {}
 
-function renderRail(rels: Relationship[], onChangeDates = noop as any) {
+function renderRail(rels: Relationship[], onChangeDates: (id: string, patch: DatePatch) => void = noop) {
   return render(
     <RelationshipRail
       rels={rels}

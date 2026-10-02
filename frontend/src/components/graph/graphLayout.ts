@@ -377,7 +377,6 @@ export function layoutRadial(
   let maxD = 0
   for (const id in depth) maxD = Math.max(maxD, depth[id])
   for (const n of nodes) if (depth[n.id] == null) depth[n.id] = maxD + 1
-  maxD++
 
   const rings: Record<number, GraphNode[]> = {}
   for (const n of nodes) (rings[depth[n.id]] = rings[depth[n.id]] || []).push(n)

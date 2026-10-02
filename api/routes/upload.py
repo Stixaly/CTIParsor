@@ -6,6 +6,7 @@ import magic
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from api.main import limiter
+from api.paths import uploads_dir
 from api.routes._common import start_job
 
 # Explicit annotation needed: this module is part of an import cycle
@@ -15,7 +16,6 @@ from api.routes._common import start_job
 # call site in api/main.py.
 router: APIRouter = APIRouter(prefix="/api", tags=["upload"])
 
-UPLOADS_DIR = Path(__file__).parent.parent.parent / "uploads"
 SUPPORTED = {".pdf", ".docx", ".html", ".htm", ".txt", ".md"}
 SUPPORTED_MIME = {
     ".pdf": ["application/pdf"],
@@ -130,8 +130,9 @@ def upload_file(
         )
 
     job_id = str(uuid4())
-    dest = UPLOADS_DIR / f"{job_id}{suffix}"
-    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    uploads = uploads_dir()
+    dest = uploads / f"{job_id}{suffix}"
+    uploads.mkdir(parents=True, exist_ok=True)
 
     # Stream remaining content to disk
     written = len(first_chunk)

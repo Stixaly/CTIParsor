@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ProgressEvent } from '../types'
+import type { PartialGraphEvent, ProgressEvent } from '../types'
 
 // Maximum number of consecutive SSE errors before giving up and marking done.
 const MAX_ERRORS = 5
 
 export function useSSE(jobId: string | null) {
-  const [events, setEvents] = useState<ProgressEvent[]>([])
+  const [events, setEvents] = useState<(ProgressEvent | PartialGraphEvent)[]>([])
   const [done, setDone] = useState(false)
   const errorCountRef = useRef(0)
 
@@ -37,7 +37,8 @@ export function useSSE(jobId: string | null) {
       errorCountRef.current = 0
       try {
         const payload = JSON.parse(e.data)
-        setEvents(prev => [...prev, { _type: "partial_graph", ...payload } as any])
+        const event: PartialGraphEvent = { _type: 'partial_graph', ...payload }
+        setEvents(prev => [...prev, event])
       } catch { /* ignore malformed data */ }
     }
 
@@ -64,7 +65,8 @@ export function useSSE(jobId: string | null) {
   }, [jobId])
 
   const latestStage = events.filter(e => e.stage !== undefined).slice(-1)[0]
-  const partialGraphEvents = events.filter((e: any) => e._type === 'partial_graph')
+  const partialGraphEvents = events.filter(
+    (e): e is PartialGraphEvent => '_type' in e && e._type === 'partial_graph')
 
   return { events, done, latestStage, partialGraphEvents }
 }

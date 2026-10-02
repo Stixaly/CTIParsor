@@ -4,7 +4,8 @@
 # the DB-password secret, everything else runs in containers.
 
 .PHONY: setup package-offline setup-offline \
-        test test-fast run run-dir check check-docs \
+        test test-fast lint typecheck coverage frontend-check ci \
+        run run-dir check check-docs \
         corpora detection-index backfill-rules \
         audit lock update-deps npm-outdated npm-update clean \
         docker-build docker-up docker-bootstrap docker-smoke docker-logs docker-down \
@@ -13,10 +14,13 @@
 CTI_ENV_FILE ?= .env
 
 # Used by every target that runs pipeline/test code: the `dev` compose
-# service (profile `dev`, ADR-0054) — same image as `app`/`worker`, with the
-# repo bind-mounted live over /app so edits need no rebuild. `--rm` since
+# service (profile `dev`, ADR-0054) — the `app`/`worker` image plus the CI
+# tools, with the repo bind-mounted live over /app so edits need no rebuild. `--rm` since
 # these are one-shot invocations, not long-running services.
 DEV_RUN = docker compose run --rm dev
+# The same, with a test skipped for a missing import counted as a failure,
+# as in CI (tests/conftest.py): the dev image has every dependency.
+DEV_RUN_CI = docker compose run --rm -e CTIPARSOR_REQUIRE_TEST_DEPS=1 dev
 
 # ── Setup ────────────────────────────────────────────────────────────────────
 
@@ -52,13 +56,35 @@ backfill-rules: .secrets/db_password
 
 # ── Testing ──────────────────────────────────────────────────────────────────
 
-## Run all tests
+## Run all tests (the selection CI runs: tests/, eval_pipeline.py included)
 test: .secrets/db_password
-	$(DEV_RUN) pytest tests/ -v
+	$(DEV_RUN) pytest -v
 
-## Run tests excluding LLM-dependent tests (no API key required)
+## Quicker loop: also deselects every test whose id contains "llm" (56 in 10
+## modules today, mostly Stage 3 and vision tests on a mocked LLM). Not what CI runs.
 test-fast: .secrets/db_password
 	$(DEV_RUN) pytest tests/ -v -k "not llm"
+
+## Lint the Python code (scope and rules: pyproject.toml)
+lint: .secrets/db_password
+	$(DEV_RUN) ruff check .
+
+## Type-check the Python code (scope and flags: pyproject.toml)
+typecheck: .secrets/db_password
+	$(DEV_RUN) mypy
+
+## Run all tests with branch coverage, then the floors CI enforces: the total
+## (pyproject.toml) and per area (scripts/check_coverage.py)
+coverage: .secrets/db_password
+	$(DEV_RUN_CI) sh -c "pytest -q -rs --cov --cov-report=term-missing:skip-covered && python scripts/check_coverage.py"
+
+## Frontend lint, type check and unit tests (`npm run check`, as in CI)
+frontend-check:
+	docker compose run --rm frontend-dev sh -c "npm ci --no-audit --no-fund && npm run check"
+
+## Every check CI runs on a pull request, locally: lint, types, tests with
+## coverage floors, frontend.  (The image build and smoke test: make docker-smoke)
+ci: lint typecheck coverage frontend-check
 
 # ── Pipeline ─────────────────────────────────────────────────────────────────
 
@@ -184,9 +210,8 @@ docker-logs:
 docker-down:
 	docker compose down
 
-## Run the full test suite in the `dev` container (ADR-0054) -- alias for `make test`
-docker-test: .secrets/db_password
-	docker compose run --rm dev pytest tests/ --ignore=tests/eval_pipeline.py -v
+## Alias for `make test` (every target runs in the `dev` container, ADR-0054)
+docker-test: test
 
 ## Frontend hot-reload dev server (Vite, HMR) -- http://localhost:5173,
 ## proxies /api to the `app` service (must be running: `make docker-up`)

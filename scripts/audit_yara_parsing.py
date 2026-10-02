@@ -12,15 +12,14 @@ It does not modify any files.
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from collections.abc import Iterator
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from pipeline.regex_safety import compile_pattern
 from pipeline.detection.yara_atoms import _strip_comments, split_rules
+from pipeline.regex_safety import compile_pattern
 
 _RE_MULTI_PREFIX = compile_pattern(
     r"(?m)^[ \t]*((?:(?:private|global)[ \t]+){2,})rule[ \t]+(\w+)"

@@ -113,13 +113,18 @@ Two `profiles: [dev]` services replace the old venv-based dev loop (ADR-0054)
 — neither starts with a plain `docker compose up -d`:
 
 ```bash
-docker compose run --rm dev pytest tests/ -v            # or: make docker-test
+docker compose run --rm dev pytest -v                   # or: make test (make ci: every CI check)
 docker compose run --rm dev cli input/report.pdf        # CLI, same as make run-dir
 docker compose --profile dev up frontend-dev             # Vite HMR -> http://localhost:5173
 ```
 
-`dev` is the same image as `app`/`worker`, `read_only: false`, with the repo
-bind-mounted live over `/app` — edits on the host need no rebuild.
+`dev` is the Dockerfile's `dev` stage — the `app`/`worker` image plus the
+lint, type-check and coverage tools CI uses (`requirements-dev.txt`) —
+`read_only: false`, with the repo bind-mounted live over `/app`: edits on the
+host need no rebuild, a dependency change does (`docker compose --profile dev
+build dev`).  The stage is never shipped: a build without `--target` stops at
+`runtime`.  An air-gapped install has the `app` image but not this one, so its
+first `make test` needs the network once to build it.
 `tests/` ships in this bind mount, not in the built image (`.dockerignore`
 excludes it from `app`/`worker` on purpose). Bind-mounting `.` over `/app`
 also replaces the image's `uploads`/`output`/`corpora` symlinks with this
@@ -127,6 +132,10 @@ repo's own directories, so `docker compose run --rm dev cli` reads/writes
 those host paths directly. `frontend-dev` bind-mounts `frontend/` into a
 plain `node:24-bookworm-slim` container and proxies `/api` to the `app`
 service (`VITE_API_PROXY_TARGET=http://app:8000`, set in `compose.yaml`).
+Its `node_modules` is a named volume (`frontend-node-modules`), so the
+container's root-run `npm ci` never writes into the checkout's
+`frontend/node_modules`.  `make frontend-check` runs the frontend's lint,
+type check and tests there.
 
 ## Configuration
 

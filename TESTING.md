@@ -4,10 +4,12 @@ This document is the source of truth for how CTIParsor is tested: what each laye
 covers, how to run it, the coverage targets, and the open gaps. Update it whenever
 a feature lands so the gap list stays honest.
 
-_Last reviewed: 2026-09-16 — after the container/PostgreSQL/worker-queue split
-(ADR-0044/0045/0046) added the two-engine test mode and the queue-loop suite;
-carries forward the 2026-06-18 review of evidence-labels, cross-model
-consensus, STIX provenance and the P1-a/b/c persistence + route coverage._
+_Last reviewed: 2026-10-03 — CI now blocks on every deterministic test
+(eval_pipeline.py and the OpenCTI parser tests included), on branch coverage
+floors and on the frontend lint; tests write only under their tmp_path.
+Carries forward the 2026-09-16 review (container/PostgreSQL/worker-queue
+split, ADR-0044/0045/0046) and the 2026-06-18 one (evidence labels,
+cross-model consensus, STIX provenance)._
 
 ---
 
@@ -28,7 +30,7 @@ That shape dictates the pyramid:
         │   Stage / unit tests          │   many — one file per pipeline stage,
         │   (deterministic, mocked LLM) │   the bulk of the suite
         └───────────────────────────────┘
-   Frontend: type-check only today (gap — see §6)
+   Frontend: Vitest + Testing Library (pages, rail, graph helpers), tsc, ESLint
 ```
 
 **Cover:** transformation correctness, idempotency, error handling, STIX 2.1 spec
@@ -45,19 +47,32 @@ compose service already has `CTIPARSOR_TEST_DATABASE_URL` pointed at a
 disposable PostgreSQL schema per run, no manual setup needed:
 
 ```bash
-# Fast lane — no API key, deterministic. This is the gate for every push.
-docker compose run --rm dev pytest tests/ -q -k "not llm"
-
-# Full suite (includes transient-error/retry tests marked "llm")
-docker compose run --rm dev pytest tests/ -q
-
-# Frontend (type safety only, today)
-docker compose run --rm dev sh -c "cd frontend && npx tsc --noEmit"
+make ci               # what the pull-request CI runs: lint, types, tests + coverage floors, frontend
+make test             # the whole suite (docker compose run --rm dev pytest -v), no coverage
+make coverage         # the whole suite with branch coverage, then the floors (§8)
+make frontend-check   # eslint + tsc + vitest (npm run check), in the frontend-dev container
 ```
 
+`make test`, `make docker-test` (its alias) and CI select the same tests:
+`pytest.ini` names `tests/` and collects `eval_pipeline.py` as well.
+`make test-fast` adds `-k "not llm"`, which drops every test whose id contains
+`llm`: 56 in 10 modules on 2026-10-03, mostly Stage 3 and vision tests that
+run on the mocked LLM anyway. It is a quicker loop, not the gate.
+
 The `mock_llm` fixture patches `pipeline.stage3_llm._call_llm`, so Stage 3 tests
-run offline. Tests that exercise real retry/timeout behaviour are name-tagged
-`llm` and deselected by `-k "not llm"`.
+run offline; no test needs an API key.
+
+Two rules hold for every test, enforced in `tests/conftest.py`:
+
+- **Files stay in `tmp_path`.** `api/paths.py` reads the uploads and output
+  directories from `CTIPARSOR_UPLOADS_DIR` / `CTIPARSOR_OUTPUT_DIR`, which an
+  autouse fixture points at the test's `tmp_path`. A run that still adds a
+  file to the checkout's `uploads/` or `output/` lists it at the end, and
+  fails under CI.
+- **A missing dependency is not a skip in CI.** With
+  `CTIPARSOR_REQUIRE_TEST_DEPS=1` (CI's fast job, `make coverage`), a test
+  skipped by `pytest.importorskip` fails instead. Use `importorskip` (not a
+  `skipif` on `find_spec`) for an optional import, so this applies to it.
 
 ### Measuring TTP precision (ATE benchmark)
 
@@ -129,12 +144,15 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 
 ---
 
-## 3. Current coverage map (1071 tests, 67 modules)
+## 3. Current coverage map
 
-`make test` executes `pytest tests/`. The counts below come from
-`pytest --collect-only` and therefore include `parametrize` expansion. A bare
-`pytest` from the repo root also collects 14 tests vendored under
-`corpora/sigmahq/tests/`, which are not this project's.
+CI's fast job passes 2128 tests on 2026-10-03 (110 `test_*.py` modules plus
+`eval_pipeline.py`) and skips 4: tesseract/poppler and the STIX JSON schemas
+are not in that job, one benchmark needs the embedding cache, and one test
+waits for a multi-tactic T1059 in the ATT&CK index. The table
+lists the main modules with counts from an earlier `pytest --collect-only`
+(they include `parametrize` expansion); `pytest --collect-only -q` is the
+current truth.
 
 | Layer | File | ~Tests | Covers |
 |---|---|---:|---|
@@ -223,14 +241,14 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 | Queue | `test_job_queue.py` | 14 | the queue loop (ADR-0046): atomic claim under 8 threads, lease-based orphan requeue, heartbeat scoping, slot accounting with a fake spawn, `run_pipeline_async` under roles `api` and `all`, `--once` |
 | Persistence | `test_db_backend.py` | 12 | the PostgreSQL adapter without a server: `?`→`%s` outside literals, `%`→`%%`, the `Row` type, `backend()`/`get_conn()` requiring `DATABASE_URL` (ADR-0053), a fake psycopg connection proving `with` never closes and `transaction()` issues plain `BEGIN` (ADR-0045) |
 | Persistence | `test_db_postgres.py` | 10 | skipped unless `CTIPARSOR_TEST_DATABASE_URL` is set (every other DB-touching test needs it too, via `temp_db` — ADR-0053): round trips, SSE resume ids, upserts, cascade, the coverage call without `jobs_conn`, the API through `temp_db_client`, and both migration scripts end to end (ADR-0045, ADR-0053) |
+| Shared helpers | `test_shared_helpers.py` | 27 | environment parsing, claim extraction, unescaping logic |
+| Benchmarks | `eval_pipeline.py` | 10 | NER F1, ATE precision, grounding metrics, adversarial tests |
 
 `CTIPARSOR_TEST_DATABASE_URL=postgresql://user:pw@host/db` is **required**,
 not optional (ADR-0053: CTIParsor has no SQLite fallback) — the `temp_db`
 fixture creates a disposable schema per test on that server and fails the
 test run with a clear message if the variable is unset. CI sets it in both
 `fast-tests` and `model-tests`.
-| Shared helpers | `test_shared_helpers.py` | 27 | environment parsing, claim extraction, unescaping logic |
-| Benchmarks | `eval_pipeline.py` | 10 | NER F1, ATE precision, grounding metrics, adversarial tests |
 
 **Shared infra** (`conftest.py`): `sample_cti_text`, `sample_entities`,
 `mock_llm` / `mock_llm_empty` / `mock_llm_bad_json`, `storage`, `api_client`.
@@ -254,9 +272,14 @@ instead, which runs against a real disposable PostgreSQL schema).
 The write→read round-trip through PostgreSQL (`worker._save_entities` →
 `re_run_final_stages`) and schema migrations. **Currently the weakest layer** (see §6).
 
-### Frontend (type-check only)
-`tsc --noEmit` runs in CI. No behavioural tests yet — the review-page promotion
-logic is untested (see §6, P1-d).
+### Frontend (Vitest, ESLint, tsc)
+17 Vitest files (141 tests on 2026-10-03) with Testing Library and jsdom: the
+Review and Dashboard pages, the relationship rail, the document reader, the
+graph builders and layout, the API client, a dependency audit. ESLint runs
+the TypeScript rules, `rules-of-hooks` and `exhaustive-deps` as errors, and
+the formatting the code already follows (`frontend/eslint.config.js`).
+`npm run check` runs lint, `tsc` and Vitest, the three steps of CI's frontend
+job. Still untested as a unit: the review-page promotion gate (§6, P1-d).
 
 ---
 
@@ -286,7 +309,7 @@ logic is untested (see §6, P1-d).
 - **d. Promotion gate (frontend) untested.** The evidence-graded auto-accept in
   `Review.tsx` is now real logic (`observed` auto-promotes; `inferred`/`gap` never
   do). → Extract it to a pure `shouldAutoAcceptRelationship(conf, label, accepted)`
-  helper and unit-test it (see §7 for the table). Requires standing up Vitest.
+  helper and unit-test it with Vitest (see §7 for the table).
 - **e. Consensus worker wiring untested.** Only `reconcile()` is covered; the
   `consensus_enabled()` gate and the "only double-run chunks with relationships"
   guard are not. → Unit-test `consensus_enabled()` across env combinations
@@ -297,9 +320,8 @@ logic is untested (see §6, P1-d).
 - **f. Stage 3c (MITRE normalisation)** has no test file. Consensus and evidence
   grading both feed it. → `test_stage3c.py`: fuzzy-match score tiers (≥85 canonical,
   70–84 keep-phrasing, <70 passthrough).
-- **g. Stage 3d (relationship self-verification)** has no test file — and it's the
-  exact behaviour consensus (3e) improves on. → `test_stage3d.py` with `mock_llm`
-  returning a supporting / non-supporting quote.
+- **g. ✅ DONE — Stage 3d (relationship self-verification)** is covered by
+  `test_stage3d_verify.py` (whole text, batching, document mode).
 - **h. Strict STIX validator path.** `.stix2_schemas_missing` means the JSON-schema
   validator is skipped, so the `x_evidence_label` custom-prop + `allow_custom` path
   is only asserted via `serialize()`. → When schemas are installed, add a Stage 5
@@ -348,19 +370,28 @@ def test_patch_rejects_unknown_evidence_label(api_client, job_with_rel):
 
 ---
 
-## 8. Coverage targets & CI
+## 8. Coverage floors & CI
 
-| Area | Target | Rationale |
-|---|---|---|
-| Pipeline stages | ≥ 85% line | core correctness |
-| API routes | ≥ 80% line | contract + boundaries |
-| New-feature branches (labels, consensus, provenance) | 100% of decision branches | regressions here corrupt intel grading |
-| Worker / persistence | establish ≥ 70% (from ~0) | biggest current risk |
-| Frontend gate logic | 100% of the helper's table | pure logic, cheap to cover |
+Coverage is measured with branches (`[tool.coverage.run] branch = true`) over
+`pipeline/`, `api/` and `models/`, minus the copied OpenCTI Snort parser.
+The floors are what CI's fast job measured on 2026-10-03, rounded down:
+they stop a slide, they are not targets. Raise one when its area gains tests.
 
-**CI lanes:**
-1. **Fast** (every push): `pytest -k "not llm"` + `tsc --noEmit`. No secrets.
-2. **Full** (pre-merge / nightly): full `pytest` + Vitest + coverage gate.
+| Floor | Measured | Enforced by |
+|---|---:|---|
+| Total | 87% (88.0%) | `fail_under` in `pyproject.toml`, through `pytest --cov` |
+| STIX mapping and validation (Stage 4, Stage 5, the ledger, ids, the OpenCTI pattern gates) | 92% (92.7%) | `scripts/check_coverage.py` |
+| Persistence (`api/db*.py`, `api/storage.py`, `api/worker.py`, `api/paths.py`) | 91% (91.8%) | `scripts/check_coverage.py` |
 
-Add `pytest --cov=pipeline --cov=api --cov-report=term-missing` and fail the build
-below the stage target once P1 gaps are closed.
+**CI jobs** (`.github/workflows/ci.yml`); the image is published only when the
+first three pass:
+1. **fast-tests** (every push and PR): `ruff check .`, `mypy` (scope and flags
+   in `pyproject.toml`), every test with `CTIPARSOR_REQUIRE_TEST_DEPS=1`, the
+   coverage floors. Installs the OpenCTI pattern parsers, google-re2 and
+   numpy, but not torch/transformers (`SKIP_HEAVY_MODELS=1`). No secrets.
+2. **frontend-tests**: `npm run lint`, `npm run typecheck`, `npm test`.
+3. **container-image**: builds the image and runs `scripts/docker_smoke.sh`.
+4. **model-tests** (pushes to main only, not a gate): the same suite with the
+   models downloaded and a live API key; it may fail for reasons outside the code.
+
+`make ci` runs jobs 1 and 2 locally, in the `dev` and `frontend-dev` containers.

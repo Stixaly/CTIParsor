@@ -134,9 +134,9 @@ function RelCard({ r, onAccept, onReject, onReset, onJump, onChangeType, onChang
   // Resolve entity types for constraint-aware verb filtering
   const srcType = getEntityType?.(r.source_value)
   const tgtType = getEntityType?.(r.target_value)
-  const { valid, others, constrained } = srcType && tgtType
+  const { valid, constrained } = srcType && tgtType
     ? verbsForPair(srcType, tgtType)
-    : { valid: REL_TYPES, others: [], constrained: false }
+    : { valid: REL_TYPES, constrained: false }
   // ADR-0058: the pipeline stores every relationship accepted, as `default`.
   // That is nobody's decision, so ✓ confirms it instead of resetting it.
   const byDefault = r.accepted === true && r.decision_origin === 'default'

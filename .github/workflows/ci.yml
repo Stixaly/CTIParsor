@@ -45,39 +45,50 @@ jobs:
       - name: Install API dependencies (includes psycopg)
         run: pip install -c requirements.lock.txt -r requirements-api.txt
 
+      # The parsers OpenCTI checks Indicator patterns with (ADR-0067, ADR-0070),
+      # google-re2 (ADR-0049) and numpy are light; without them their tests
+      # skipped here, so the import gates and the ReDoS guard only ran in the
+      # non-blocking model-tests job.
       - name: Install core pipeline dependencies (no torch / transformers)
         run: |
           pip install -c requirements.lock.txt \
             pydantic stix2 stix2-validator iocextract python-dotenv tenacity \
             rapidfuzz pyahocorasick anthropic \
-            pdfplumber python-docx beautifulsoup4 defusedxml
+            pdfplumber python-docx beautifulsoup4 defusedxml \
+            yara-python pysigma parsuricata numpy google-re2
 
       - name: Install test + lint dependencies
         run: pip install -c requirements.lock.txt pytest httpx -r requirements-dev.txt
 
+      # Scope and rules live in pyproject.toml, so `ruff check .` and `mypy`
+      # check the same files here, in `make ci` and in an editor.
       - name: Lint (ruff)
-        run: ruff check pipeline/ api/ models/ evaluation/ tests/ main.py --select E,F,W,I
+        run: ruff check .
 
       # Blocking since the tree reached zero errors (2026-09-27); mypy is pinned
       # in requirements-dev.txt so a new release cannot fail this on its own.
       - name: Type check (mypy)
-        run: mypy pipeline/ api/ models/ evaluation/ --ignore-missing-imports
+        run: mypy
 
+      # tests/eval_pipeline.py runs here too (pytest.ini collects it).
+      # CTIPARSOR_REQUIRE_TEST_DEPS turns a test skipped for a missing import
+      # into a failure (tests/conftest.py).  Coverage: branch mode, the total
+      # floor in pyproject.toml, then per-area floors (scripts/check_coverage.py).
       - name: Run unit tests
         env:
           SKIP_HEAVY_MODELS: "1"
           ANTHROPIC_API_KEY: "test-key-not-used"
           LLM_PROVIDER: "anthropic"
           CTIPARSOR_TEST_DATABASE_URL: postgresql://ctiparsor:ci@127.0.0.1:5432/ctiparsor
+          CTIPARSOR_REQUIRE_TEST_DEPS: "1"
         run: |
-          pytest tests/ \
-            --ignore=tests/eval_pipeline.py \
-            -v \
-            --cov=pipeline \
-            --cov=api \
-            --cov=models \
-            --cov-report=term-missing \
+          pytest -v -rs \
+            --cov \
+            --cov-report=term-missing:skip-covered \
             --cov-report=xml
+
+      - name: Coverage floors per area (STIX mapping and validation, persistence)
+        run: python scripts/check_coverage.py
 
       - name: Upload coverage report
         uses: codecov/codecov-action@v6
@@ -86,9 +97,10 @@ jobs:
           files: coverage.xml
           fail_ci_if_error: false
 
-  # ── Frontend — type check + unit tests (vitest) ────────────────────────────
+  # ── Frontend — lint + type check + unit tests (vitest) ─────────────────────
+  # The same three steps as `npm run check` (frontend/package.json).
   frontend-tests:
-    name: Frontend (type check + unit tests)
+    name: Frontend (lint + type check + unit tests)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -106,18 +118,23 @@ jobs:
       - name: Install (package-lock.json, exact)
         run: npm ci --no-audit --no-fund
 
+      - name: Lint (eslint)
+        run: npm run lint
+
       - name: Type check (tsc)
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
       - name: Unit tests (vitest)
         run: npm test
 
   # ── Model tests — runs only on pushes to main (expensive: ~800 MB downloads) ──
+  # Not a gate: it needs model downloads and a live API key, so it may fail for
+  # reasons outside the code.  Every deterministic test also runs in
+  # fast-tests, which publish-image waits for.
   model-tests:
     name: Model tests (full pipeline, with model downloads)
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    # Allow this job to fail without blocking the fast-tests result
     continue-on-error: true
     services:
       postgres:
@@ -153,14 +170,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           LLM_PROVIDER: "anthropic"
           CTIPARSOR_TEST_DATABASE_URL: postgresql://ctiparsor:ci@127.0.0.1:5432/ctiparsor
-        run: |
-          pytest tests/ \
-            --ignore=tests/eval_pipeline.py \
-            -v \
-            --cov=pipeline \
-            --cov=api \
-            --cov=models \
-            --cov-report=term-missing
+        run: pytest -v -rs --cov --cov-report=term-missing:skip-covered
 
   # ── Container image — build it and run the smoke test (ADR-0044) ─────────────
   # Keeps the Dockerfile from rotting: a dependency that no longer installs on

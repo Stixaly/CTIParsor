@@ -66,7 +66,6 @@ export default function Settings() {
   const [priority, setPriority] = useState<string>('')
   const [msg, setMsg] = useState<string>('')
 
-  const firstAvailable = formats.find((f) => f.available)?.format ?? 'sigma'
   const selectedFormat = formats.find((f) => f.format === adapter)
   const formatAvailable = selectedFormat ? selectedFormat.available : false
 

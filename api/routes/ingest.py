@@ -19,8 +19,9 @@ from pydantic import BaseModel
 
 from api.logging_config import get_logger
 from api.main import limiter
+from api.paths import uploads_dir
 from api.routes._common import start_job
-from api.routes.upload import _MARKING_LEVELS, UPLOADS_DIR
+from api.routes.upload import _MARKING_LEVELS
 from pipeline import web_capture
 from pipeline.regex_safety import compile_pattern
 from pipeline.stage1_ingestion import capture_meta_path, html_to_text
@@ -179,8 +180,9 @@ async def ingest_text(request: Request, body: TextIngestRequest):
     filename = slug + suffix
 
     job_id = str(uuid4())
-    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-    dest = UPLOADS_DIR / f"{job_id}{suffix}"
+    uploads = uploads_dir()
+    uploads.mkdir(parents=True, exist_ok=True)
+    dest = uploads / f"{job_id}{suffix}"
 
     try:
         dest.write_text(text, encoding="utf-8")
@@ -214,8 +216,9 @@ async def ingest_url(request: Request, body: UrlIngestRequest):
         raise HTTPException(400, str(exc)) from exc
 
     job_id = str(uuid4())
-    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-    dest = UPLOADS_DIR / f"{job_id}.pdf"
+    uploads = uploads_dir()
+    uploads.mkdir(parents=True, exist_ok=True)
+    dest = uploads / f"{job_id}.pdf"
     # Render to a staging name and promote it only on success.  asyncio cannot
     # cancel a thread: when the deadline below fires, the capture is still
     # running and will finish writing whatever it was given.  Pointing it at

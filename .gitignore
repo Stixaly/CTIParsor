@@ -60,3 +60,9 @@ docker/nginx/htpasswd
 # DB password materialized from .env for compose.yaml's bind-mounted secret
 # (Makefile's docker-up/docker-bootstrap, scripts/docker_smoke.sh)
 .secrets/
+
+# Coverage data (pytest --cov, make coverage)
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/

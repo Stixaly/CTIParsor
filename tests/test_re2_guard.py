@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib.util
 import re
 import time
 
@@ -8,16 +7,13 @@ import pytest
 
 from pipeline.stage2_extraction import _compile_pattern, extract_entities, refang
 
-_HAS_RE2 = importlib.util.find_spec("re2") is not None
-
 
 def test_compile_pattern_returns_stdlib_when_re2_absent_or_flag_unsupported():
     assert isinstance(_compile_pattern(r"abc", re.VERBOSE), re.Pattern)
 
 
-@pytest.mark.skipif(not _HAS_RE2, reason="re2 not installed")
 def test_compile_pattern_uses_re2_when_available_and_supported():
-    import re2 as re2_module  # noqa: F401
+    pytest.importorskip("re2")
 
     p = _compile_pattern(r"abc")
     assert type(p).__module__ == "re2"
@@ -28,15 +24,15 @@ def test_compile_pattern_uses_re2_when_available_and_supported():
     assert type(p2).__module__ == "re2"
 
 
-@pytest.mark.skipif(not _HAS_RE2, reason="re2 not installed")
 def test_ignorecase_via_re2_matches_correctly():
+    pytest.importorskip("re2")
     p = _compile_pattern(r"hello", re.IGNORECASE)
     assert p.search("HELLO WORLD") is not None
     assert p.search("goodbye") is None
 
 
-@pytest.mark.skipif(not _HAS_RE2, reason="re2 not installed")
 def test_catastrophic_backtracking_pattern_finishes_fast_under_re2():
+    pytest.importorskip("re2")
     p = _compile_pattern(r"(a+)+$")
     text = "a" * 30 + "b"
     start = time.monotonic()

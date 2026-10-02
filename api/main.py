@@ -17,6 +17,7 @@ setup_logging()
 logger = get_logger(__name__)
 
 from api.db import get_conn, init_db
+from api.paths import output_dir, uploads_dir
 
 # Rate limiter must be defined before routes are imported because
 # api/routes/upload.py does `from api.main import limiter` at module level.
@@ -47,8 +48,8 @@ async def lifespan(app: FastAPI):
     name is resolved from the module namespace at call time.
     """
     init_db()
-    Path("uploads").mkdir(exist_ok=True)
-    Path("output").mkdir(exist_ok=True)
+    uploads_dir().mkdir(parents=True, exist_ok=True)
+    output_dir().mkdir(parents=True, exist_ok=True)
     # Who runs the pipeline depends on CTIPARSOR_ROLE (ADR-0046).  `all`, the
     # host-install default: this process, through the queue loop in a background
     # thread — and a job left `processing` at boot is an orphan of a restart,

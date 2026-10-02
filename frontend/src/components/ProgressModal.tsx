@@ -3,7 +3,10 @@ import { useSSE } from '../hooks/useSSE'
 import { useMemo, useRef } from 'react'
 import GraphCanvas, { type GraphCanvasHandle } from './graph/GraphCanvas'
 import { buildGraphData } from './graph/buildGraphData'
-import type { GraphNode, GraphEdge } from './graph/graphLayout'
+import type { Entity, PartialGraphEvent, Relationship } from '../types'
+
+type PartialGraphNode = NonNullable<PartialGraphEvent['nodes']>[number]
+type PartialGraphLink = NonNullable<PartialGraphEvent['links']>[number]
 
 // The live graph shows every type it streams.
 const NO_HIDDEN_TYPES = new Set<string>()
@@ -27,11 +30,10 @@ export default function ProgressModal({ jobId, filename, onClose }: Props) {
 
   // Accumulate streaming graph
   const { sNodes, sEdges, byId, deg, adj } = useMemo(() => {
-    const nodeMap = new Map<string, any>()
-    const edgeMap = new Map<string, any>()
+    const nodeMap = new Map<string, PartialGraphNode>()
+    const edgeMap = new Map<string, PartialGraphLink>()
 
-    for (const ev of partialGraphEvents || []) {
-      const e = ev as any
+    for (const e of partialGraphEvents) {
       for (const n of e.nodes || []) {
         if (!nodeMap.has(n.id)) nodeMap.set(n.id, n)
       }
@@ -41,7 +43,7 @@ export default function ProgressModal({ jobId, filename, onClose }: Props) {
       }
     }
 
-    const gEntities = Array.from(nodeMap.values()).map(n => ({
+    const gEntities = Array.from(nodeMap.values()).map((n): Entity => ({
       id: n.id,
       job_id: jobId,
       value: n.name,
@@ -51,9 +53,9 @@ export default function ProgressModal({ jobId, filename, onClose }: Props) {
       mitre_id: null,
       accepted: true,
       source: 'llm',
-    } as any)) // cast to any to bypass exact Entity matching if any strict fields are missing
+    }))
 
-    const gRelationships = Array.from(edgeMap.values()).map(l => ({
+    const gRelationships = Array.from(edgeMap.values()).map((l): Relationship => ({
       id: `${l.source}-${l.type}-${l.target}`,
       job_id: jobId,
       source_value: l.source,
@@ -62,7 +64,7 @@ export default function ProgressModal({ jobId, filename, onClose }: Props) {
       confidence: 1.0,
       accepted: true,
       evidence_text: null,
-    } as any))
+    }))
 
     const layoutData = buildGraphData(gEntities, gRelationships)
     return { sNodes: layoutData.nodes, sEdges: layoutData.edges, ...layoutData }
@@ -249,7 +251,7 @@ export default function ProgressModal({ jobId, filename, onClose }: Props) {
             )}
           </div>
         </div>
-        
+
         {/* Right side: Graph Stream */}
         {hasGraph && (
           <div className="pm-graph">

@@ -23,7 +23,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, Download, Eye, Link2, X, Search, RotateCcw,
   Maximize2, Tag, Network, AlignCenter, CircleDot, Check, Trash2,
-  Plus, ChevronRight, ChevronLeft, GitCompare, RefreshCw,
+  Plus, ChevronLeft, GitCompare, RefreshCw,
 } from 'lucide-react'
 
 import {
@@ -45,7 +45,6 @@ import {
 } from '../components/graph/BundlePanels'
 
 // ── Deduped relationship-type list for <select> ───────────────────────────────
-const REL_TYPES_UNIQ = [...new Set(REL_TYPES)]
 
 // ── Mono font shorthand ───────────────────────────────────────────────────────
 const MONO: React.CSSProperties = { fontFamily: "'JetBrains Mono', ui-monospace, monospace" }
@@ -320,7 +319,7 @@ function DetailPanel({
 // ── Relationship Editor ───────────────────────────────────────────────────────
 
 function RelEditor({
-  jobId, nodes, edges, byId, fate, labelOf, onClose, onPick,
+  nodes, edges, byId, fate, labelOf, onClose, onPick,
   onAccept, onReject, onReset, onDelete, onCreate, onAddEntity,
 }: {
   jobId: string
@@ -675,7 +674,7 @@ function GraphNodePicker({
 // automatic relationship type suggestion).
 
 function AddRelForm({
-  nodes, byId, onCreate, onCancel, onAddEntity,
+  nodes, onCreate, onCancel, onAddEntity,
 }: {
   nodes: GraphNode[]
   byId: Map<string, GraphNode>
@@ -748,9 +747,9 @@ function AddRelForm({
         />
         {/* Verb select — filtered to spec-valid verbs when both types are known */}
         {(() => {
-          const { valid, others, constrained } = srcType && tgtType
+          const { valid, constrained } = srcType && tgtType
             ? verbsForPair(srcType, tgtType)
-            : { valid: REL_TYPES, others: [], constrained: false }
+            : { valid: REL_TYPES, constrained: false }
           return (
             <select value={rel} onChange={e => setRel(e.target.value)} style={{
               ...selStyle,

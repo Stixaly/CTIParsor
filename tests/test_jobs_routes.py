@@ -8,18 +8,16 @@ from unittest.mock import patch
 
 import pytest
 
+from api.paths import output_dir, uploads_dir
 from api.routes import jobs as jobs_routes
 
 
 @pytest.fixture()
-def dirs(tmp_path, monkeypatch):
-    """uploads/ and output/ (and the worker's bundle path) redirected to tmp_path."""
-    uploads, output = tmp_path / "uploads", tmp_path / "output"
-    uploads.mkdir()
-    output.mkdir()
-    monkeypatch.setattr(jobs_routes, "_UPLOADS_DIR", uploads)
-    monkeypatch.setattr(jobs_routes, "_OUTPUT_DIR", output)
-    monkeypatch.setattr("api.worker._ROOT", tmp_path)
+def dirs():
+    """uploads/ and output/, both under tmp_path (tests/conftest.py)."""
+    uploads, output = uploads_dir(), output_dir()
+    uploads.mkdir(parents=True, exist_ok=True)
+    output.mkdir(parents=True, exist_ok=True)
     return uploads, output
 
 

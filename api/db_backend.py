@@ -120,7 +120,7 @@ class PgConnection:
         self.url = url
         self.schema = schema
         self.application_name = application_name
-        self._conn = None
+        self._conn: Any = None   # psycopg.Connection, imported lazily in _connect
         self._connect()
 
     def _connect(self):
@@ -131,7 +131,8 @@ class PgConnection:
                 "DATABASE_URL points at PostgreSQL but psycopg is not installed - "
                 "pip install 'psycopg[binary]'"
             ) from None
-        kwargs = {"autocommit": True, "row_factory": pg_row_factory, "application_name": self.application_name}
+        kwargs: dict[str, Any] = {"autocommit": True, "row_factory": pg_row_factory,
+                                  "application_name": self.application_name}
         if self.schema:
             kwargs["options"] = f"-c search_path={self.schema}"
         self._conn = psycopg.connect(self.url, **kwargs)

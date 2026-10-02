@@ -240,10 +240,13 @@ services:
     restart: unless-stopped
 
   # Development/test runner (ADR-0054): the pipeline/API/tests run only in
-  # containers now, so this is what replaces the old venv workflow. Same
-  # image as `app`/`worker` (all Python packages already baked into
-  # /opt/venv), but with the repo bind-mounted live over /app instead of the
-  # image's baked-in COPY -- edits on the host are picked up with no rebuild.
+  # containers now, so this is what replaces the old venv workflow. The
+  # Dockerfile's `dev` stage: the `app`/`worker` image (all Python packages
+  # baked into /opt/venv) plus ruff, mypy and pytest-cov, the tools CI runs
+  # (requirements-dev.txt).  Rebuild it after a lock change:
+  # `docker compose --profile dev build dev`.  The repo is bind-mounted live
+  # over /app instead of the image's baked-in COPY -- edits on the host are
+  # picked up with no rebuild.
   # `tests/` is deliberately absent from the built image (.dockerignore) for
   # exactly this reason: it was never meant to ship in `app`/`worker`, only
   # to arrive via this bind mount.
@@ -268,6 +271,14 @@ services:
   # files cross the bind mount, a completely different I/O profile).
   dev:
     <<: [*app-image, *app-hardening]
+    image: ${CTI_DEV_IMAGE:-ctiparsor:dev}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dev
+      args:
+        GIT_REV: ${CTI_GIT_REV:-}
+        INSTALL_CAPTURE: ${CTI_INSTALL_CAPTURE:-true}
     read_only: false
     profiles: [dev]
     env_file: ${CTI_ENV_FILE:-.env}
@@ -277,6 +288,13 @@ services:
       # the real job/rule store, nothing touches the default schema.
       CTIPARSOR_TEST_DATABASE_URL: postgresql://${CTI_DB_USER:-ctiparsor}@postgres:5432/${CTI_DB_NAME:-ctiparsor}
       SKIP_HEAVY_MODELS: "1"
+      # The tools' caches and coverage data go to the container's /tmp: this
+      # user (uid 1001) cannot write the host user's .ruff_cache/.mypy_cache
+      # in the checkout, and should not leave files of its own there.
+      RUFF_CACHE_DIR: /tmp/ruff-cache
+      MYPY_CACHE_DIR: /tmp/mypy-cache
+      COVERAGE_FILE: /tmp/.coverage
+      PYTEST_ADDOPTS: "-o cache_dir=/tmp/pytest-cache"
       <<: *job-store
     depends_on:
       postgres:
@@ -301,6 +319,12 @@ services:
   # built frontend already makes; see frontend/vite.config.ts for the dev
   # proxy target) rather than joining the backend/llm networks -- it never
   # needs to reach Postgres or an LLM provider directly.
+  #
+  # node_modules lives in a named volume, not in the bind-mounted checkout:
+  # `npm ci` runs as root here, and writing into frontend/node_modules left a
+  # root-owned tree (with Linux-only binaries) that a host `npm` then could
+  # not update.  Also the frontend checks, the same steps as CI:
+  #   docker compose run --rm frontend-dev sh -c "npm ci && npm run check"
   frontend-dev:
     image: node:24-bookworm-slim
     profiles: [dev]
@@ -309,6 +333,7 @@ services:
       VITE_API_PROXY_TARGET: http://app:8000
     volumes:
       - ./frontend:/ui
+      - frontend-node-modules:/ui/node_modules
     ports:
       - "127.0.0.1:5173:5173"
     command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
@@ -444,3 +469,4 @@ volumes:
   cti-cache: {}
   pg-data: {}
   ollama-models: {}
+  frontend-node-modules: {}

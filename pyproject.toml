@@ -1,5 +1,11 @@
 [tool.ruff]
 line-length = 120
+# The scope is the repository, so `ruff check .` checks the same files in CI,
+# in `make ci` and in an editor; the CI command once listed directories by
+# hand and left scripts/ out.  Gitignored trees are skipped, and these are
+# named too: in the `dev` container cache/ is a volume holding the corpus
+# clones, third-party code that no .gitignore entry covers.
+extend-exclude = ["cache", "corpora", "offline", "data", "frontend"]
 
 [tool.ruff.lint]
 # Pinned so a bare `ruff check` matches CI.  Without an explicit `select`, ruff
@@ -16,6 +22,19 @@ select = ["E", "F", "W", "I"]
 "*.py" = ["E402"]
 
 [tool.mypy]
+# A bare `mypy` checks what CI checks.
+files = ["pipeline", "api", "models", "evaluation"]
+ignore_missing_imports = true
+# Tightened step by step, each flag once the tree passes it (2026-10-03).
+# check_untyped_defs: the bodies of functions without annotations are checked
+# too, not skipped.  Measured next steps: warn_return_any (28 errors),
+# warn_unreachable (27), disallow_incomplete_defs (140).  warn_unused_ignores
+# is out: an ignore needed with one set of optional packages is unused with
+# another, so CI and the dev image would disagree.
+check_untyped_defs = true
+warn_redundant_casts = true
+strict_equality = true
+extra_checks = true
 # Pydantic models declare defaults via `Field(default, ...)`; without this
 # plugin mypy can't see through `Field()` and reports spurious "Missing named
 # argument" errors for every constructor call (e.g. ChunkConfig(), LLMConfig()).
@@ -27,6 +46,19 @@ plugins = ["pydantic.mypy"]
 module = "pipeline.detection.opencti_snort.*"
 ignore_errors = true
 
-[tool.pytest.ini_options]
-# Mirrors pytest.ini so both files remain in sync.
-# (If pytest.ini already exists and conflicts, keep pytest.ini authoritative.)
+[tool.coverage.run]
+# Branch coverage: a line run on one side of an `if` no longer counts the
+# other side as tested.
+branch = true
+source = ["pipeline", "api", "models"]
+# OpenCTI's Snort parser, copied unmodified (ADR-0070), like for mypy above.
+omit = ["pipeline/detection/opencti_snort/*"]
+
+[tool.coverage.report]
+# A floor, not a target: CI's fast-tests job measured 88.0% on 2026-10-03;
+# a point under it, so coverage cannot slide unnoticed.  Raise it as tests land.
+# The per-area floors are in scripts/check_coverage.py.
+fail_under = 87
+precision = 1
+
+# pytest's own settings are in pytest.ini, which pytest reads first.

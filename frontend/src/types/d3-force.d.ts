@@ -37,15 +37,15 @@ declare module 'd3-force' {
     alphaTarget(value: number): Simulation<N, L>;
   }
 
-  export function forceSimulation<N extends SimulationNodeDatum = SimulationNodeDatum, L extends SimulationLinkDatum<N> = SimulationLinkDatum<N>>(nodes?: N[]): Simulation<N, L>;
+  export function forceSimulation<N extends SimulationNodeDatum = SimulationNodeDatum, L extends SimulationLinkDatum<N> = SimulationLinkDatum<N>>(nodes?: N[]): Simulation<N, L>
 
-  export function forceManyBody<N extends SimulationNodeDatum = SimulationNodeDatum>(): Force<N, SimulationLinkDatum<N>>;
+  export function forceManyBody<N extends SimulationNodeDatum = SimulationNodeDatum>(): Force<N, SimulationLinkDatum<N>>
 
-  export function forceLink<N extends SimulationNodeDatum = SimulationNodeDatum, L extends SimulationLinkDatum<N> = SimulationLinkDatum<N>>(links?: L[]): Force<N, L>;
+  export function forceLink<N extends SimulationNodeDatum = SimulationNodeDatum, L extends SimulationLinkDatum<N> = SimulationLinkDatum<N>>(links?: L[]): Force<N, L>
 
-  export function forceCollide<N extends SimulationNodeDatum = SimulationNodeDatum>(radius?: ((d: N, i: number, nodes: N[]) => number) | number): Force<N, SimulationLinkDatum<N>>;
+  export function forceCollide<N extends SimulationNodeDatum = SimulationNodeDatum>(radius?: ((d: N, i: number, nodes: N[]) => number) | number): Force<N, SimulationLinkDatum<N>>
 
-  export function forceX<N extends SimulationNodeDatum = SimulationNodeDatum>(x?: number): Force<N, SimulationLinkDatum<N>>;
+  export function forceX<N extends SimulationNodeDatum = SimulationNodeDatum>(x?: number): Force<N, SimulationLinkDatum<N>>
 
-  export function forceY<N extends SimulationNodeDatum = SimulationNodeDatum>(y?: number): Force<N, SimulationLinkDatum<N>>;
+  export function forceY<N extends SimulationNodeDatum = SimulationNodeDatum>(y?: number): Force<N, SimulationLinkDatum<N>>
 }

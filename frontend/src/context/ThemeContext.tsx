@@ -14,7 +14,7 @@
  * render so HTML[data-theme] stays in sync even across React Router navigation.
  */
 
-import { createContext, useContext, useState, useEffect, useLayoutEffect, useCallback, type ReactNode } from 'react'
+import { createContext, useContext, useLayoutEffect, useCallback, type ReactNode } from 'react'
 import { usePref } from '../hooks/usePref'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -126,8 +126,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     setThemeRaw(t)
     if (isLightTheme(t)) setLightRaw(t)
     applyTheme(t, accentKey)
-  }, [accentKey])
-  const setAccent = useCallback((k: string)  => { setAccentRaw(k); applyTheme(theme, k)         }, [theme])
+  }, [accentKey, setThemeRaw, setLightRaw])
+  const setAccent = useCallback((k: string)  => { setAccentRaw(k); applyTheme(theme, k)         }, [theme, setAccentRaw])
   // It used to be `dark ? 'warm' : 'dark'`, so Cool → dark → light came back Warm.
   const toggleDark = useCallback(
     () => setTheme(theme === 'dark' ? lightTheme : 'dark'),
