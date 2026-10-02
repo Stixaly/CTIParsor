@@ -185,6 +185,34 @@ def pytest_sessionfinish(session, exitstatus):
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
+# ── A missing test dependency fails where it is required ────────────────────
+# pytest.importorskip skips quietly, which is right on a laptop without
+# yara-python and wrong in CI: the OpenCTI pattern gates (ADR-0067, ADR-0070)
+# went untested there because the job never installed their parsers.
+# CTIPARSOR_REQUIRE_TEST_DEPS=1 (the fast CI job) makes such a skip a failure.
+
+_MISSING_IMPORT = "could not import"        # pytest.importorskip's skip reason
+
+
+def _missing_import_is_a_failure(report) -> None:
+    if (os.environ.get("CTIPARSOR_REQUIRE_TEST_DEPS") == "1" and report.skipped
+            and _MISSING_IMPORT in str(report.longrepr)):
+        report.outcome = "failed"
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collectreport(report):
+    """A module-level importorskip skips the whole file at collection."""
+    _missing_import_is_a_failure(report)
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(item, call):
+    report = yield
+    _missing_import_is_a_failure(report)
+    return report
+
+
 # ── Storage fixture ────────────────────────────────────────────────────────────
 
 @pytest.fixture()

@@ -318,7 +318,7 @@ def _load_pipeline():
         _model = AutoModelForTokenClassification.from_pretrained(_MODEL_ID, local_files_only=True)
         _tokenizer = AutoTokenizer.from_pretrained(_MODEL_ID, local_files_only=True)
         ner = pipeline(
-            "ner",
+            "token-classification",   # what pipeline() resolves "ner" to; its overloads name only this
             model=_model,
             tokenizer=_tokenizer,
             aggregation_strategy="simple",  # merges B-/I- tokens → full entity spans
@@ -336,7 +336,7 @@ def _load_pipeline():
     logger.info(f"CyNER model '{_MODEL_ID}' not in local cache — attempting download…")
     try:
         ner = pipeline(
-            "ner",
+            "token-classification",
             model=_MODEL_ID,
             aggregation_strategy="simple",
             device=-1,
