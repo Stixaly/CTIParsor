@@ -47,6 +47,13 @@ yara-python>=4.5.4,<5
 # its Snort parser is copied in pipeline/detection/opencti_snort.
 pysigma>=1.5.0,<2
 parsuricata>=0.4.1,<0.5
+# parsuricata imports `lark` from lark-parser 0.12, as OpenCTI installs it.
+# jsonschema 4.25 added rfc3987-syntax to the format-nongpl extra
+# stix2-validator asks for, which brings lark 1.x: both distributions write
+# the same `lark` package, the last one installed wins, and with lark 1.x
+# parsuricata fails to import, so every Suricata rule shipped unchecked.
+# rfc3987-syntax only checks the `iri` format, which no STIX 2.1 schema uses.
+jsonschema>=4.20,<4.25
 
 # ── Utilities ────────────────────────────────────────────────────────────────
 python-dotenv>=1.0.0         # .env file loading
