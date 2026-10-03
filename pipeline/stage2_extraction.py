@@ -7,6 +7,10 @@ from pipeline.regex_safety import compile_pattern as _compile_pattern
 
 _SKIP_HEAVY = env_bool("SKIP_HEAVY_MODELS")
 
+from api.logging_config import get_logger  # noqa: E402
+
+logger = get_logger(__name__)
+
 try:
     import spacy as _spacy_module
 except ImportError:
@@ -422,17 +426,19 @@ def _extract_network_iocs(text: str) -> list[RawEntity]:
     Extrait IP, URL, domaines et emails.
     iocextract est utilisé s'il est disponible, mais les regex tournent
     toujours en complément pour ne rien manquer.
+
+    `iocextract.extract_ipv4s` is deliberately NOT called: its backtracking
+    pattern is quadratic in the size of the text (measured 2026-10: 39 s for a
+    45 KB report with a 2,000-address appendix, ~4 min extrapolated for 5,000),
+    and it was redundant — `_IPV4_PATTERN` below runs on the same text, which
+    Stage 1 and `extract_entities` have already refanged.  The remaining three
+    calls cost about 1 % of Stage 2 and are kept under tests/test_stage2_performance.py.
     """
     results: list[RawEntity] = []
 
     # --- iocextract (gère le defanging résiduel) ---
     if _IOCEXTRACT_AVAILABLE:
         try:
-            for ip in iocextract.extract_ipv4s(text, refang=True):
-                ip = ip.strip()
-                if _IPV4_PATTERN.fullmatch(ip):
-                    results.append(RawEntity(value=ip, entity_type=EntityType.IPV4))
-
             for ip in iocextract.extract_ipv6s(text, refang=True):
                 if ip.strip():
                     results.append(RawEntity(value=ip.strip(), entity_type=EntityType.IPV6))
@@ -445,8 +451,10 @@ def _extract_network_iocs(text: str) -> list[RawEntity]:
             for email in iocextract.extract_emails(text, refang=True):
                 if "@" in email:
                     results.append(RawEntity(value=email.strip(), entity_type=EntityType.EMAIL))
-        except Exception:
-            pass
+        except Exception as exc:
+            # The regexes below cover the same ground; say that the helper
+            # failed instead of losing that fact.
+            logger.warning(f"[Stage 2] iocextract failed, regex extraction only: {type(exc).__name__}: {exc}")
 
     # --- Regex complémentaires (toujours actifs) ---
 
