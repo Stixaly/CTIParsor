@@ -23,7 +23,7 @@ jobs:
         language: [python, javascript-typescript]
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Both languages are interpreted: no build step, nothing installed.
       - uses: github/codeql-action/init@v4
