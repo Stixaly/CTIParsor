@@ -37,10 +37,13 @@ import json
 from fastapi import APIRouter, HTTPException, Request
 
 from api.db import _lock, get_conn
+from api.logging_config import get_logger
 from models.schemas import STIX_RELATIONSHIP_TYPES
 from pipeline.stage4_stix_mapping import verb_ships_as_written
 from pipeline.stix_rel_spec import SCO_TYPES, SDO_TYPES
 from pipeline.temporal import EXPORT_MODES
+
+logger = get_logger(__name__)
 
 _OBJECT_TYPES = SDO_TYPES | SCO_TYPES
 
@@ -143,8 +146,10 @@ def get_policy() -> dict:
     if row and row["policy_json"] and row["policy_json"] != "{}":
         try:
             return json.loads(row["policy_json"])
-        except Exception:
-            pass
+        except ValueError as exc:
+            # The page then shows the factory default as if it were stored.
+            logger.error("stored relationship policy is not valid JSON (%s); "
+                         "showing the factory default", exc)
     return _DEFAULT_POLICY.copy()
 
 

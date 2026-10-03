@@ -40,7 +40,7 @@ from typing import Callable
 
 from api.logging_config import get_logger
 from pipeline.env_flags import env_bool, env_int
-from pipeline.llm_parse import fit_text, parse_numbered_claims
+from pipeline.llm_parse import fit_report, parse_numbered_claims
 
 logger = get_logger(__name__)
 
@@ -176,11 +176,11 @@ def verify_ttps(
         claims_lines.append(f'{i + 1}. "{t.technique_name}"{ident}{tactic_hint}')
     claims_str = "\n".join(claims_lines)
 
-    prompt = fit_text(_VERIFY_USER_TEMPLATE, text, max_prompt_chars, claims=claims_str)
+    prompt, spotlight = fit_report(_VERIFY_USER_TEMPLATE, text, max_prompt_chars, claims=claims_str)
 
     from pipeline import llm_stats
 
-    raw = llm_fn(_VERIFY_SYSTEM, prompt)
+    raw = llm_fn(f"{_VERIFY_SYSTEM}\n\n{spotlight}", prompt)
     if not raw:
         logger.warning("TTP verification LLM call failed — keeping all TTPs")
         llm_stats.bump("ttp_verification_failed")

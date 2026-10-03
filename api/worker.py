@@ -895,6 +895,7 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
     })
 
     raw_entities: list[RawEntity] = []
+    unreadable: list[str] = []
 
     for row in all_entity_rows:
         etype_str = row["entity_type"]
@@ -910,11 +911,14 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
                     mitre_id=row["mitre_id"],
                     source=row["source"],
                 ))
-            except Exception:
-                pass  # defensive — skip any unknown enum value
+            except ValueError as exc:     # a stored row the model no longer accepts
+                unreadable.append(f"{etype_str} {value!r}: {exc}".splitlines()[0])
 
         # EntityType.INTRUSION_SET is already in _RAW_ENTITY_TYPES and handled
-        # by _entity_to_sdo.  Any unrecognised type strings are silently skipped.
+        # by _entity_to_sdo.  Type strings outside that set are not bundle objects.
+    if unreadable:
+        logger.warning("[finalize] job %s: %d stored entity row(s) could not be read and are "
+                       "left out of the bundle, e.g. %s", job_id, len(unreadable), unreadable[0])
 
     # Malware, threat-actor and tool names: the stored rows, every source
     # (gazetteer, NER, LLM, analyst) minus the rejected ones — through the same
@@ -933,8 +937,12 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
     if job["llm_result_json"]:
         try:
             llm_result = LLMEnrichmentResult.model_validate_json(job["llm_result_json"])
-        except Exception:
-            pass
+        except ValueError as exc:
+            # Techniques, IoC associations, campaign, sectors, countries and
+            # remediations live only in this JSON: the bundle goes without them.
+            logger.error("[finalize] job %s: the stored LLM result cannot be read (%s); "
+                         "the bundle has no techniques, campaign or targets from it",
+                         job_id, str(exc).splitlines()[0])
 
     # ── Build rejection filter sets from the DB ────────────────────────────────
     # Bug fix: the JSON blob bypasses accept/reject decisions made in the UI.

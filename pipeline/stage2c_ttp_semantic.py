@@ -110,8 +110,9 @@ def _thresholds() -> tuple[float, float]:
             t = manifest.get("thresholds")
             if isinstance(t, dict) and "high" in t and "medium" in t:
                 high, medium = float(t["high"]), float(t["medium"])
-        except Exception:
-            pass
+        except (OSError, ValueError, TypeError, AttributeError) as exc:
+            logger.warning(f"[Stage 2c] {_MANIFEST_PATH.name} unreadable ({exc}); "
+                           f"default thresholds {high}/{medium}")
 
     hi_env = os.getenv("TTP_HIGH_THRESHOLD")
     md_env = os.getenv("TTP_MEDIUM_THRESHOLD")
@@ -585,8 +586,9 @@ def semantic_available() -> bool:
                 manifest = json.loads(_MANIFEST_PATH.read_text(encoding="utf-8"))
                 if manifest.get("model", _LEGACY_MODEL) != _TTP_EMBEDDING_MODEL:
                     return False
-            except Exception:
-                pass
+            except (OSError, ValueError, AttributeError) as exc:
+                logger.warning(f"[Stage 2c] {_MANIFEST_PATH.name} unreadable ({exc}); "
+                               "assuming the embeddings match the configured model")
         return True
     except ImportError:
         return False

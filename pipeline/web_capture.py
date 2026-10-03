@@ -733,10 +733,11 @@ def capture_url_to_pdf(
                 return
 
             route.continue_()
-        except Exception:
+        except Exception as exc:
+            logger.debug(f"[capture] request refused after an error in the route filter: {exc}")
             try:
                 route.abort()
-            except Exception:
+            except Exception:  # noqa: S110 — already handled or the page is gone: nothing loads either way
                 pass
 
     sandboxed = os.environ.get(_UNSANDBOXED_ENV, "").strip().lower() not in {"1", "true", "yes"}
@@ -844,8 +845,8 @@ def capture_url_to_pdf(
         finally:
             try:
                 browser.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(f"[capture] closing the browser failed: {exc}")
 
     if not dest.exists() or dest.stat().st_size == 0:
         dest.unlink(missing_ok=True)
