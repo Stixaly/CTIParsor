@@ -84,6 +84,10 @@ python -m evaluation retrieval --split dev --corpus short,both --method dense,rr
 # the select path (Stage 2c retrieves, Stage 3f selects with a quote)
 TTP_MODE=select python -m evaluation run --split dev --name sel-dev
 
+# where the technique errors arise: never retrieved / retrieved, not selected /
+# false positives from the candidates or from outside them -> runs/<name>/ttp-errors.json
+python -m evaluation ttp-errors --name sel-dev
+
 # 50 quotes for a person to judge (does the passage show the technique used?)
 python -m evaluation support-sample --name baseline-dev
 ```

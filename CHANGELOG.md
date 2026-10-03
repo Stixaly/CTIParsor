@@ -322,6 +322,17 @@ names, hashes and URLs; the app targets 15″–38″ desktop screens.
 
 ### Added
 
+#### Where a run's technique errors arise: `evaluation ttp-errors`, 2026-10-03
+
+Splits every gold parent technique of a run into found, retrieved but not
+selected, and never retrieved, and every false positive by whether it came
+from the candidate list (ADR-0072 step 4: "never retrieved" is a retrieval
+problem, "retrieved, not selected" a selector problem). Writes
+`runs/<name>/ttp-errors.json` with the most frequent techniques per category;
+counts match `score` exactly. Run records now keep the quote of a selection
+the code refused, so a refusal can be told apart as missing, too short or not
+verbatim.
+
 #### TTPs: retrieve from ATT&CK procedures, select with a quote (ADR-0072), 2026-10-03
 
 Stage 2c emitted a technique for any sentence whose best cosine match cleared
