@@ -895,12 +895,6 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
     })
 
     raw_entities: list[RawEntity] = []
-    malware_names:       list[str] = []
-    threat_actor_names:  list[str] = []
-    tool_names:          list[str] = []
-    seen_names: dict[str, set[str]] = {
-        "malware": set(), "threat_actor": set(), "tool": set()
-    }
 
     for row in all_entity_rows:
         etype_str = row["entity_type"]
@@ -919,26 +913,18 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
             except Exception:
                 pass  # defensive — skip any unknown enum value
 
-        elif etype_str == EntityType.MALWARE.value:
-            key = value.lower()
-            if key not in seen_names["malware"]:
-                malware_names.append(value)
-                seen_names["malware"].add(key)
-
-        elif etype_str == EntityType.THREAT_ACTOR.value:
-            key = value.lower()
-            if key not in seen_names["threat_actor"]:
-                threat_actor_names.append(value)
-                seen_names["threat_actor"].add(key)
-
-        elif etype_str == EntityType.TOOL.value:
-            key = value.lower()
-            if key not in seen_names["tool"]:
-                tool_names.append(value)
-                seen_names["tool"].add(key)
-
         # EntityType.INTRUSION_SET is already in _RAW_ENTITY_TYPES and handled
         # by _entity_to_sdo.  Any unrecognised type strings are silently skipped.
+
+    # Malware, threat-actor and tool names: the stored rows, every source
+    # (gazetteer, NER, LLM, analyst) minus the rejected ones — through the same
+    # helper a pipeline run uses before Stage 4 (pipeline/named_entities.py).
+    from pipeline.named_entities import with_named_entities
+    _named = with_named_entities(LLMEnrichmentResult(),
+                                 ((row["entity_type"], row["value"]) for row in all_entity_rows))
+    malware_names      = _named.malware_families
+    threat_actor_names = _named.threat_actors
+    tool_names         = _named.tools
 
     # ── Load original LLM JSON for fields that have no individual entity rows ───
     # (TTPs, ioc_associations, campaign_name, targeted_sectors/countries,

@@ -1030,9 +1030,14 @@ class _Run:
         source_hash, source_bytes = load_file_bytes(self.doc.file_path)
         assert r.llm_result is not None   # enrich() always sets it
         from pipeline.bundle_ledger import MappingLedger
+        from pipeline.named_entities import with_named_entities
         ledger = MappingLedger()
+        # Stage 4 maps malware / actors / tools from the LLM's lists; the
+        # gazetteer's and NER's names join them here, as the worker's
+        # finalisation already did from the job store — the CLI dropped them
+        # (audit B 8.1.2).  `r.llm_result` itself is left as Stage 3 made it.
         r.bundle = build_bundle(
-            r.entities, r.llm_result,
+            r.entities, with_named_entities(r.llm_result, r.entities),
             report_name=self.doc.report_name,
             report_text=r.text,
             original_filename=self.doc.name,

@@ -49,6 +49,17 @@ python -m evaluation prepare               # layer registry, ATT&CK mapping, nea
 * `near-duplicates.json` — copies and excerpts across splits (and any
   `--corpus` folder, e.g. a Phase 4 retrieval corpus).
 
+## What `run` scores
+
+`run` disables Stages 1f, 4 and 5 and scores the pipeline's own lists —
+`result.entities` for IoCs and the detectors' names, the LLM's
+`malware_families` / `threat_actors` / `tools` / `ttps` — not a bundle. So the
+October 2026 audit's CLI defect (detector names dropped at Stage 4, fixed by
+`pipeline/named_entities.py`) never touched these numbers, and the entity
+precision reported here is the union of the detectors before Stage 4 — which
+is neither the CLI's bundle nor the worker's. `inhouse-run` is the exception:
+Stage 4 stays on and relationships are scored as the bundle ships them.
+
 ## Running and scoring
 
 ```bash
