@@ -49,15 +49,35 @@ _THRESHOLD_LONG   = 75   # names ≥10 chars (e.g. Cobalt Strike, SilverFish)
 # Names shorter than this are never fuzzy-matched (exact only).
 _MIN_NAME_LENGTH = 3
 
+# Fuzzy matching is for what it was written for — a multi-word name that OCR
+# or a line break split or hyphenated ("Cobalt- Strike", "CobaltStrike") —
+# and for nothing else.  A fuzzy window of the name's own width accepts the
+# *neighbouring* identifier: UNC4763 or UNC4737 for UNC4736, APT2 for APT28,
+# BlackBasta for BlackCat (ratio 80 against the 75 threshold) — measured by
+# the October 2026 audit — and a wrong attribution is the costliest error a
+# CTI extractor can make.  So a name with a digit, a name under 8 characters
+# and a single-token name are matched exactly, on word boundaries, or not at
+# all; a long name's digits (none, by construction) must equal the window's.
+_FUZZY_MIN_LENGTH = 8
+_DIGITS = re.compile(r"\d+")
+_TOKEN_SPLIT = re.compile(r"[\s\-_/]+")
+
+
+def _fuzzy_allowed(name_lower: str) -> bool:
+    """True for a long, multi-token name without digits."""
+    if len(name_lower) < _FUZZY_MIN_LENGTH or _DIGITS.search(name_lower):
+        return False
+    return len([t for t in _TOKEN_SPLIT.split(name_lower) if t]) >= 2
+
 
 def _threshold_for(name: str) -> int:
     """Returns the appropriate fuzzy similarity threshold based on name length."""
     n = len(name)
     if n <= 5:
-        return _THRESHOLD_SHORT    # e.g. FIN7, APT1
+        return _THRESHOLD_SHORT    # e.g. FIN7, APT1 — exact only since the audit
     if n <= 9:
-        return _THRESHOLD_MEDIUM   # e.g. APT29, LummaC2
-    return _THRESHOLD_LONG         # e.g. Cobalt Strike, SilverFish
+        return _THRESHOLD_MEDIUM   # e.g. Cobalt-S (hyphenated 8–9 char names)
+    return _THRESHOLD_LONG         # e.g. Cobalt Strike, Mustang Panda
 
 
 def _name_in_text(name: str, text: str, threshold: int | None = None) -> bool:
@@ -65,10 +85,13 @@ def _name_in_text(name: str, text: str, threshold: int | None = None) -> bool:
     Returns True if `name` can be found in `text` with sufficient similarity.
 
     Strategy:
-    1. Exact substring match (fast path — covers most cases).
-    2. Sliding window fuzzy match of the same character width as the name
-       (catches OCR artifacts, hyphenation differences, minor typos).
-       Threshold scales with name length to avoid short-name false positives.
+    1. Exact match on word boundaries, whatever the length: "APT29" is not
+       in "APT290", "FIN" is not in "financial".
+    2. For a multi-word name without digits only: a sliding-window fuzzy
+       match of the same character width (OCR artefacts, hyphenation, line
+       breaks), with the threshold scaled by length and the window's digits
+       required to equal the name's.  Identifiers (UNC4736, APT28, TA505,
+       Storm-0558), short names and single tokens never get this step.
 
     Args:
         name:      entity name to search for
@@ -81,29 +104,34 @@ def _name_in_text(name: str, text: str, threshold: int | None = None) -> bool:
     name_lower = name.lower().strip()
     text_lower = text.lower()
 
-    # For short names (≤5 chars), use word-boundary regex to avoid false positives
-    # like "FIN" matching inside "financial", or "APT" in "chapter".
-    if len(name_lower) <= 5:
-        pattern = r'(?<![a-z0-9])' + re.escape(name_lower) + r'(?![a-z0-9])'
-        if re.search(pattern, text_lower):
-            return True
-    else:
-        # Longer names: simple substring is safe and fast
-        if name_lower in text_lower:
-            return True
+    pattern = r'(?<![a-z0-9])' + re.escape(name_lower) + r'(?![a-z0-9])'
+    if re.search(pattern, text_lower):
+        return True
 
-    if not _RAPIDFUZZ_AVAILABLE:
-        return False   # without rapidfuzz, only exact matching is available
+    if not _RAPIDFUZZ_AVAILABLE or not _fuzzy_allowed(name_lower):
+        return False
 
     effective_threshold = threshold if threshold is not None else _threshold_for(name_lower)
 
-    # Sliding window fuzzy match (same width as the name)
+    # Sliding window fuzzy match, the name's width, aligned on words: the
+    # window starts where a word starts and runs to the end of the word it
+    # would otherwise cut.  A window free to start mid-word slid past a
+    # digit ("o Mustang Pan" for "Mustang Pand4") and defeated the digit check.
     w = len(name_lower)
-    if w > len(text_lower):
+    n = len(text_lower)
+    if w > n:
         return False
 
-    for i in range(len(text_lower) - w + 1):
-        window = text_lower[i : i + w]
+    name_digits = _DIGITS.findall(name_lower)
+    for i in range(n - w + 1):
+        if i > 0 and text_lower[i - 1].isalnum():
+            continue                       # not the start of a word
+        j = i + w
+        while j < n and text_lower[j].isalnum():
+            j += 1                         # finish the word the window cut
+        window = text_lower[i:j]
+        if _DIGITS.findall(window) != name_digits:
+            continue
         if fuzz.ratio(name_lower, window) >= effective_threshold:
             return True
 
