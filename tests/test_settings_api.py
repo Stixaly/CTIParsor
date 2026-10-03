@@ -31,6 +31,13 @@ def _setup(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setattr(settings_mod, "_CONFIG", cfg)
+    # A git remote is checked like a tarball URL (public host, resolved
+    # addresses).  The GitHub remotes these tests post must not need DNS; every
+    # other URL still meets the real policy (a file:// or loopback tarball
+    # is refused on its scheme and address, before any lookup).
+    real_validate_url = settings_mod.validate_url
+    monkeypatch.setattr(settings_mod, "validate_url",
+                        lambda url: url if url.startswith("https://github.com/") else real_validate_url(url))
     return cfg
 
 
@@ -130,11 +137,48 @@ def test_remote_shaped_as_a_flag_or_transport_helper_is_rejected(bad_remote):
 
 @pytest.mark.parametrize("good_remote", [
     "https://github.com/SigmaHQ/sigma.git",
-    "git@github.com:your-org/private-sigma.git",   # scp-shorthand, used for private corpora
-    "ssh://git@example.com/org/repo.git",
+    "HTTPS://gitlab.example.org/org/repo",
 ])
-def test_ordinary_remotes_are_accepted(good_remote):
+def test_https_remotes_on_a_public_host_are_accepted(good_remote, monkeypatch):
+    monkeypatch.setattr(settings_mod, "validate_url", lambda url: url)
     settings_mod._validate_remote(good_remote, "git")  # must not raise
+
+
+@pytest.mark.parametrize("bad_remote", [
+    "git@github.com:your-org/private-sigma.git",   # scp-shorthand: ssh
+    "ssh://git@internal.corp/org/repo.git",
+    "git://example.com/repo.git",
+    "file:///etc",
+    "http://169.254.169.254/latest/meta-data/",
+    "http://github.com/SigmaHQ/sigma.git",         # plain http: no
+])
+def test_remotes_that_are_not_https_are_refused(bad_remote, monkeypatch):
+    """`git clone` runs on the server with its network (audit B 8.2.2): only an
+    https:// remote on a public host, exactly like a tarball URL.  A private
+    corpus over SSH is cloned by hand and registered with its `path`."""
+    monkeypatch.setattr(settings_mod, "validate_url", lambda url: url)
+    with pytest.raises(HTTPException) as exc:
+        settings_mod._validate_remote(bad_remote, "git")
+    assert exc.value.status_code == 400
+    assert "https" in str(exc.value.detail)
+
+
+def test_an_https_remote_on_a_private_host_is_refused(monkeypatch):
+    from pipeline.web_capture import CaptureError
+
+    def refuse(url):
+        raise CaptureError("Host 'intranet' resolves to a non-public address")
+    monkeypatch.setattr(settings_mod, "validate_url", refuse)
+    with pytest.raises(HTTPException) as exc:
+        settings_mod._validate_remote("https://intranet/repo.git", "git")
+    assert exc.value.status_code == 400
+    assert "non-public" in str(exc.value.detail)
+
+
+def test_tarball_remotes_keep_their_own_policy(monkeypatch):
+    """The https rule is the git remote's; a tarball is checked by validate_url
+    at creation (below) and at fetch time, as before."""
+    settings_mod._validate_remote("https://example.org/rules.tar.gz", "tarball")
 
 
 def test_create_corpus_rejects_a_path_escaping_corpora(temp_db, temp_db_client, tmp_path, monkeypatch):

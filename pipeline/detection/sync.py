@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import tarfile
@@ -59,18 +60,33 @@ class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
 _SAFE_OPENER = urllib.request.build_opener(_SafeRedirectHandler)
 
 
+# git is told, on its own command line, which transports a corpus may use:
+# https only — `file://` would read the server's filesystem, `ssh://` and
+# `git://` reach internal hosts, and a redirect could switch to any of them
+# (audit B 8.2.2).  Config given with `-c` applies to the clone and to every
+# submodule or redirect that command follows; `GIT_ENV` below says the same
+# through the environment for the `pull` of a clone made before this policy.
+GIT_HARDENING: tuple[str, ...] = (
+    "-c", "protocol.allow=never",
+    "-c", "protocol.https.allow=always",
+    "-c", "protocol.file.allow=never",
+    "-c", "http.followRedirects=false",
+)
+GIT_ENV: dict[str, str] = {"GIT_ALLOW_PROTOCOL": "https", "GIT_TERMINAL_PROMPT": "0"}
+
+
 def git_command(corpus: dict) -> list[str] | None:
     """The git command to fetch one corpus: `clone --depth 1` when the local
-    `path` is missing, else `pull --ff-only`. Returns None when the corpus has no
-    `git` remote (its path is managed manually)."""
+    `path` is missing, else `pull --ff-only`, both with GIT_HARDENING. Returns
+    None when the corpus has no `git` remote (its path is managed manually)."""
     remote = corpus.get("git")
     if not remote:
         return None
     path = Path(corpus.get("path", ""))
     if path.exists():
-        return ["git", "-C", str(path), "pull", "--ff-only"]
+        return ["git", *GIT_HARDENING, "-C", str(path), "pull", "--ff-only"]
     path.parent.mkdir(parents=True, exist_ok=True)
-    return ["git", "clone", "--depth", "1", remote, str(path)]
+    return ["git", *GIT_HARDENING, "clone", "--depth", "1", remote, str(path)]
 
 
 def _download(url: str, dest: Path, *, timeout: int) -> int:
@@ -250,8 +266,13 @@ def sync_corpus(corpus: dict, *, timeout: int = 900) -> tuple[bool, str]:
     cmd = git_command(corpus)
     if cmd is None:
         return False, "no git remote or tarball URL — this corpus's path is managed manually"
+    remote = str(corpus.get("git") or "")
+    if not remote.lower().startswith("https://"):
+        # The registry can come from a YAML file nobody validated over the API.
+        return False, f"git remote refused: only https:// remotes are fetched ({remote[:80]!r})"
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                              env={**os.environ, **GIT_ENV})
     except (FileNotFoundError, subprocess.TimeoutExpired) as e:
         return False, str(e)
     if proc.returncode != 0:

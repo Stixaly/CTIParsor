@@ -43,7 +43,7 @@ detection rule quoted in the report itself is represented.
 | Completed edge (Stage 4b/4c) | `relationship` SRO + `x_inference_rule` (`transitive:uses+uses`, `attack-reference:G0016>S0002`, `long-distance`) and `x_inferred_from` (premise edge ids); long-distance edges also carry `x_evidence_text` (the quoted sentence) |
 | Policy-materialised edge | `relationship` SRO + `x_evidence_label="assessed"` and `x_policy_rule` (`"malware uses attack-pattern"`) — the analyst's link model, not a claim the document made, so it fails the review auto-accept gate |
 | Synthesis accounting | `x_synthesis_stats` on the `report` SDO — per-rule `candidates / emitted / truncated` for the pin pass, plus Stage 4b's completion counters |
-| Sharing markings | TLP `marking-definition` (+ optional PAP statement marking) referenced by `object_marking_refs` on every object |
+| Sharing markings | exactly one TLP `marking-definition` (+ optional PAP statement marking) referenced by `object_marking_refs` on every object. CLEAR, GREEN, AMBER and RED are the spec's objects; AMBER+STRICT is OpenCTI's own (`definition_type: "TLP"`, OpenCTI's extension and static id, two SHOULD warnings accepted by choice). An unknown level is refused, never defaulted (ADR-0073) |
 | Pipeline authorship | one authoring `identity` SDO; `created_by_ref` on every SDO/SRO (the pipeline, **not** the threat actor) |
 | Report wrapper | `report` SDO |
 

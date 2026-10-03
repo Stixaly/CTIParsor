@@ -33,6 +33,7 @@ from pipeline.orchestrator import (  # noqa: E402
     StageRequired,
     run_document,
 )
+from pipeline.stage4_stix_mapping import tlp_default  # noqa: E402
 from pipeline.stage5_validation import print_bundle_summary  # noqa: E402
 
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".html", ".htm", ".txt", ".md"}
@@ -253,6 +254,7 @@ Exemples :
     disabled = _ids(args.disable_stage) | ({"3"} if args.no_llm else set())
     try:
         options = RunOptions.from_env(disabled=disabled, required=_ids(args.require_stage))
+        tlp_default()   # a bad STIX_TLP is refused here, never a guessed marking (ADR-0073)
     except ValueError as exc:
         parser.error(str(exc))
 

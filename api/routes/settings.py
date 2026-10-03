@@ -9,6 +9,7 @@ ADR-0019: Multi-format support (sigma/suricata/yara). Format availability is
 derived from the pipeline detection registry adapters (_ADAPTERS).
 """
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -103,12 +104,40 @@ def _validate_corpus_path(raw_path: str, subdir: str | None) -> None:
 
 
 def _validate_remote(value: str | None, field: str) -> None:
-    if value is not None and _UNSAFE_REMOTE_RE.match(value):
+    if value is None:
+        return
+    if _UNSAFE_REMOTE_RE.match(value):
         raise HTTPException(
             400,
             f"'{field}' must not start with '-' (parsed as a git option, not a URL) "
             "or a 'scheme::' transport helper",
         )
+    if field == "git":
+        _validate_git_remote(value)
+
+
+def _validate_git_remote(value: str) -> None:
+    """An https:// remote on a public host, and nothing else.
+
+    `git clone <remote>` runs on the server with the container's network: a
+    `file://` remote reads the filesystem, `ssh://` and `git://` reach internal
+    hosts, `http://169.254.169.254/...` is the cloud metadata service (audit B
+    8.2.2).  The tarball path already applied `validate_url`'s policy; the git
+    path now does too, and pipeline/detection/sync.py locks git to https as
+    well, so a remote that gets past this check still cannot switch protocol.
+    A private corpus over SSH is cloned by hand into corpora/ and registered
+    with its `path` only (that module's docstring).
+    """
+    if urlsplit(value).scheme.lower() != "https":
+        raise HTTPException(
+            400,
+            "'git' must be an https:// URL — ssh://, git://, file:// and scp-style "
+            "remotes are refused; clone a private corpus by hand and register its path",
+        )
+    try:
+        validate_url(value)
+    except CaptureError as e:
+        raise HTTPException(400, f"'git' is not a safe remote: {e}")
 
 
 def _with_counts() -> list[dict]:

@@ -393,10 +393,16 @@ GLINER_MODEL=urchade/gliner_medium-v2.1  # good accuracy/speed balance (~300 MB)
 GLINER_MODEL=urchade/gliner_small-v2.1   # fastest, less accurate (~120 MB)
 ```
 
-### Use a domain-specific TTP embedding model
+### Try another TTP embedding model
+
+ADR-0023 measured SecureBERT-Plus against the default and found no gain
+(its paper's +8-12% did not carry over); the candidate it names is
+ATT&CK-BERT. Whatever the model, the change goes through the evaluation
+(`docs/eval/README.md`) before it becomes the default.
+
 ```env
 # .env
-TTP_EMBEDDING_MODEL=ehsanaghaei/SecureBERT-Plus
+TTP_EMBEDDING_MODEL=<another sentence-transformers model>
 # Then rebuild the embedding cache:
 docker compose run --rm dev python scripts/build_indexes.py --only embeddings
 # and bake it into the image app and worker run:

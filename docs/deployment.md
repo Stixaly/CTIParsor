@@ -20,9 +20,14 @@ Two consequences worth knowing up front:
 - **There is no separate frontend server to deploy.** The image's build stage
   builds `frontend/dist/` and the `app` container serves it — nothing to build
   or ship separately.
-- **There is no CORS to configure.** Same origin, always. The
-  `allow_origins=["*"]` in `api/main.py` exists for local development against
-  the Vite dev server on a different port; it is not load-bearing in production.
+- **There is no CORS to configure.** Same origin, always: `api/main.py`
+  sets no CORS header at all (an earlier `allow_origins=["*"]` was removed),
+  and the Vite dev server proxies `/api` so development is same-origin too.
+- **The API answers only to the hosts in `API_ALLOWED_HOSTS`** (default
+  `localhost,127.0.0.1,[::1]`) and refuses cross-site writes — the DNS
+  rebinding and CSRF defences an app without authentication needs. Every
+  option below that exposes the app on another name or address says what to
+  put there; forgetting it shows as `400 Invalid host header`.
 
 ## 1. Choosing the bind address
 
