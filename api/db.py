@@ -76,8 +76,8 @@ def _postgres_conn() -> PgConnection:
         if pg_conn is not None:
             try:
                 pg_conn.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("closing a stale PostgreSQL connection failed: %s", exc)
         if backend() != "postgresql":  # raises if DATABASE_URL is unset/malformed
             raise RuntimeError("DATABASE_URL is not set")
         pg_conn = PgConnection(DATABASE_URL, schema=_PG_SCHEMA)  # type: ignore[arg-type]
@@ -110,8 +110,8 @@ def reset_connections() -> None:
     if pg_conn is not None:
         try:
             pg_conn.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("closing this thread's PostgreSQL connection failed: %s", exc)
     _local.pg_conn = None
 
 

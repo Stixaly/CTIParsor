@@ -37,8 +37,11 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from api.logging_config import get_logger
 from models.schemas import EvidenceLabel
 from pipeline.regex_safety import compile_pattern
+
+logger = get_logger(__name__)
 
 Role = Literal["start", "end", "within", "throughout", "observed"]
 Precision = Literal["year", "half", "quarter", "month", "day", "instant"]
@@ -1133,14 +1136,18 @@ def times_from_json(raw: str | None) -> list[TemporalAssertion]:
         return []
     try:
         data = json.loads(raw)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
+        logger.warning("stored relationship dates are not valid JSON (%s); the dates are lost", exc)
         return []
     out: list[TemporalAssertion] = []
+    unreadable = 0
     for item in data if isinstance(data, list) else []:
         try:
             out.append(TemporalAssertion.model_validate(item))
-        except Exception:
-            continue
+        except ValueError:
+            unreadable += 1
+    if unreadable:
+        logger.warning("%d stored relationship date(s) no longer validate and are dropped", unreadable)
     return out
 
 

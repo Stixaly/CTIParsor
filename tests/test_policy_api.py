@@ -3,6 +3,8 @@ shape the PUT refuses before it can reach Stage 4 (test_policy_rule_validation
 covers the non-object rule items)."""
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 _URL = "/api/relationship-policy"
@@ -33,12 +35,16 @@ def test_a_full_policy_round_trips(temp_db_client):
 
 
 @pytest.mark.parametrize("stored", ["{}", "{not json"])
-def test_an_empty_or_corrupt_stored_policy_falls_back_to_the_default(temp_db_client, temp_db, stored):
+def test_an_empty_or_corrupt_stored_policy_falls_back_to_the_default(temp_db_client, temp_db, stored,
+                                                                      caplog):
     with temp_db.get_conn() as conn:
         conn.execute("INSERT INTO relationship_policy (id, policy_json) VALUES (1, ?) "
                      "ON CONFLICT (id) DO UPDATE SET policy_json = excluded.policy_json", (stored,))
         conn.commit()
-    assert temp_db_client.get(_URL).json()["global"] == "enforce"
+    with caplog.at_level(logging.ERROR, logger="api.routes.policy"):
+        assert temp_db_client.get(_URL).json()["global"] == "enforce"
+    # Empty means "never saved"; corrupt is an error the operator must see.
+    assert any("not valid JSON" in r.getMessage() for r in caplog.records) == (stored != "{}")
 
 
 def test_a_body_that_is_not_json_is_refused(temp_db_client):

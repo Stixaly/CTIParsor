@@ -412,8 +412,10 @@ def _read_pdf_text(path: Path) -> str:
             result = md.convert(str(path))
             if result.text_content and len(result.text_content.strip()) > 100:
                 return result.text_content
-        except Exception:
-            pass
+        except Exception as exc:
+            # The fallback below loses the tables' structure: say so.
+            logger.warning(f"[Stage 1] markitdown could not convert {path.name} ({exc}); "
+                           "falling back to pdfplumber plain text")
 
     # Fallback: pdfplumber plain-text extraction
     text_parts = []
