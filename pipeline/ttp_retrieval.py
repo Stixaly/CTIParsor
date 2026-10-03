@@ -476,6 +476,13 @@ class Retriever:
                 self.tech_ids.append(tid)
                 starts.append(i)
         self._starts = np.array(starts, dtype=np.int64)
+        # Unit rows once, so a query is one matrix product — numpy only, no
+        # torch: the lean CI job and a BM25-only install have no
+        # sentence-transformers.
+        self._unit: Any = None
+        if corpus.embeddings is not None and method != "bm25":
+            emb = np.asarray(corpus.embeddings, dtype=np.float32)
+            self._unit = emb / np.maximum(np.linalg.norm(emb, axis=1, keepdims=True), 1e-12)
         self._bm25 = BM25(corpus.texts) if method != "dense" else None
         self._names = {tid: name for tid, name in zip(corpus.ids, corpus.names) if name}
 
@@ -508,10 +515,10 @@ class Retriever:
         bm_arg: Any = None
         bm_rank: Any = None
         if self.method != "bm25":
-            from sentence_transformers import util
-
-            q = self.model.encode(texts, batch_size=32, convert_to_numpy=True, show_progress_bar=False)
-            entry = util.cos_sim(q, self.corpus.embeddings).numpy()
+            q = np.asarray(self.model.encode(texts, batch_size=32, convert_to_numpy=True,
+                                             show_progress_bar=False), dtype=np.float32)
+            q = q / np.maximum(np.linalg.norm(q, axis=1, keepdims=True), 1e-12)
+            entry = q @ self._unit.T
             dense_best, dense_arg = self._group(entry)
             dense_rank = _ranks_desc(dense_best)
         if self._bm25 is not None:
