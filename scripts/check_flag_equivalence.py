@@ -42,7 +42,7 @@ VALUES: tuple[str, ...] = (
 )
 
 #: Values each flag is actually documented with, in `.env.example` and
-#: `README.md`.  A discrepancy on one of these is a real
+#: `docs/configuration.md`.  A discrepancy on one of these is a real
 #: regression; a discrepancy on any other value only means the operator
 #: typed something the old code silently ignored.
 DOCUMENTED: dict[str, frozenset[str]] = {

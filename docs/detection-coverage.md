@@ -2,7 +2,12 @@
 
 A practical walkthrough for setting up Sigma corpora and reading the coverage
 matrix. For the design rationale see [ADR-0006](adr/0006-multi-corpus-detection-ingestion.md),
-[ADR-0007](adr/0007-in-app-configuration-panel.md), [ADR-0008](adr/0008-detection-coverage-matrix.md).
+[ADR-0007](adr/0007-in-app-configuration-panel.md), [ADR-0008](adr/0008-detection-coverage-matrix.md),
+[ADR-0014](adr/0014-observable-driven-detection-proposals.md),
+[ADR-0015](adr/0015-multi-format-detection-matching.md),
+[ADR-0020](adr/0020-filtered-multi-format-export.md),
+[ADR-0022](adr/0022-per-format-coverage-breakdown.md),
+[ADR-0025](adr/0025-evidence-keyed-detection-coverage.md).
 
 > **Readiness, not validation.** Coverage tells you whether a detection *exists*
 > (and from how many independent corpora) for each extracted technique — not that a
@@ -263,9 +268,10 @@ identical in shape:
 └─ README.txt       · formats present, excluded counts
 ```
 
-Each rule keeps the extension its tool requires, and `MANIFEST.json` records the
-excluded count — an export that silently dropped rules would otherwise look
-identical to one where they never matched.
+Each rule keeps the extension its tool requires (a Suricata rule written as
+`.yml` loads in nothing), and `MANIFEST.json` records the excluded count — an
+export that silently dropped rules would otherwise look identical to one where
+they never matched.
 
 Your selection is remembered per report in `localStorage`.
 
@@ -275,11 +281,25 @@ The coverage matrix tells you *whether* a rule exists. The Review **Detections**
 tab tells you *which rules to read first* — a different question, answered from
 the report's own technical content (ADR-0014).
 
+A tag-only join proposes every rule sharing a technique: on a real Linux/WebLogic
+intrusion that is **2 688 rules**, the largest bucket being 760 PowerShell rules.
+Ranking on observables cuts that to a handful of rules that actually name the
+report's artifacts.
+
 Each rule's `detection:` block is indexed into normalized **atoms** (the literal
-values it looks for) and each report's IoCs, file paths, registry keys, tool
+values it looks for — `Image`, `CommandLine`, `TargetFilename`, `TargetObject`,
+`Hashes`, `DestinationHostname`, …) and each report's IoCs, file paths, registry keys, tool
 names and CVEs are normalized into the same vocabulary. Proposals are ranked on
 that overlap, weighted by how rare each value is across the whole corpus, then
 adjusted for platform:
+
+| Signal | Effect |
+|---|---|
+| **Observable overlap**, weighted by IDF | a match on `cmd.exe` (in thousands of rules) scores ~0; a match on a campaign-specific binary scores ~1 |
+| **ATT&CK technique** | still counted — just no longer the only selector |
+| **Platform** | a Windows rule is demoted on a Linux report, never dropped |
+
+Proposals land in three tiers:
 
 | Tier | Meaning | Read it because |
 |---|---|---|
@@ -288,8 +308,9 @@ adjusted for platform:
 | **Off-platform** | technique match, but the rule targets another OS | usually noise; kept for mixed intrusions |
 
 Each proposal shows *why* it ranked: `Image ≡ meshagent64-v2.exe` (exact) or
-`cmdline ⊃ sshpass` (substring). Rules carrying **no ATT&CK tag** are reachable
-here even though the coverage matrix cannot see them. Open the rule body to
+`cmdline ⊃ sshpass` (substring). Rules carrying **no ATT&CK tag** (1 049 of
+11 396 in the default corpora) are reachable here even though the coverage
+matrix cannot see them. Open the rule body to
 see every one of those matches highlighted in place, not just the first one
 summarised in the row.
 
@@ -298,8 +319,8 @@ Suricata, YARA). A rule the *report itself* quotes verbatim — a vendor
 publishing their own YARA/Suricata/Sigma alongside the write-up — is a
 different feature: it never goes through corpus matching at all, and instead
 lands directly in the exported STIX bundle as its own `indicator` object. See
-the README's "STIX objects produced" table and
-[ADR-0042](adr/0042-embedded-yara-rules-as-indicators.md).
+[Detection rules embedded in the report itself](stix-output.md#detection-rules-embedded-in-the-report-itself)
+and [ADR-0042](adr/0042-embedded-yara-rules-as-indicators.md).
 
 The list is one ranked table with **format as a column**, not one section per
 tool — the top of the list is the top of the list whichever tool the rule belongs
