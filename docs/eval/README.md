@@ -64,12 +64,28 @@ python -m evaluation run --split dev --name t0-no2c-dev --disable 2c
 python -m evaluation compare --a t0-dev --b t0-no2c-dev              # paired bootstrap, TTPs
 python -m evaluation compare --a t0-dev --b t0-no2c-dev --task malware
 
-# Stage 2c's candidate recall (the ceiling of any retrieval-based TTP step)
-python -m evaluation retrieval --split dev --k 1,3,5,10,20
+# candidate recall (the ceiling of any retrieval-based TTP step), no LLM —
+# per passage, per document and per chunk (ADR-0072)
+python scripts/build_indexes.py --only retrieval     # corpus of the select path
+python -m evaluation retrieval --split dev --corpus short,both --method dense,rrf \
+    --gate on,off --k 1,5,10,20,25 --chunk 5:25,10:25
+
+# the select path (Stage 2c retrieves, Stage 3f selects with a quote)
+TTP_MODE=select python -m evaluation run --split dev --name sel-dev
 
 # 50 quotes for a person to judge (does the passage show the technique used?)
 python -m evaluation support-sample --name baseline-dev
 ```
+
+`retrieval` reports, per corpus × retriever × keyword gate: recall per
+passage (the technique is in the top-k of a passage carrying one of its
+annotated mentions), per window (that passage or a neighbour), per document,
+at parent level and exact id; the distinct candidate ids per document; where
+each miss was lost (gate, rank, elsewhere); with `--chunk k:cap`, the recall
+of the capped candidate lists the selector actually gets. Procedure examples
+MITRE wrote from an AnnoCTR report are left out (`--keep-cited` keeps them);
+`run` does the same for the select path through
+`TTP_RETRIEVAL_EXCLUDE_CITED`. Results: ADR-0072.
 
 A run is resumable (one file per report) and stops at once if the LLM cannot
 run — including when every call fails, e.g. a model name the server does not

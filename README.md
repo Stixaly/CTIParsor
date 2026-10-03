@@ -206,6 +206,8 @@ update them.
 │  • 1 match/sentence (top_k=1); TTP_TOP2_MARGIN guards any 2nd match  │
 │  • ATT&CK-only by default (918 of 1 533): CAPEC shadows the real    │
 │    technique, so it is excluded — TTP_SEMANTIC_DOMAINS=all restores │
+│  • TTP_MODE=select (ADR-0072): retrieves ranked candidates only —   │
+│    ATT&CK descriptions + procedures, BM25 ⊕ dense; never a TTP      │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
@@ -263,6 +265,9 @@ update them.
 │  techniques are dropped. Semantic-corroborated TTPs are trusted and │
 │  skipped, so cost tracks 3d (~1.4× calls — ADR-0011 Phase B).       │
 │  Enable: ENABLE_TTP_VERIFICATION=true in .env                       │
+│  TTP_MODE=select (ADR-0072): selects among the retrieved candidates │
+│  and the LLM's own picks, exact quote checked by code; a failed     │
+│  call ships nothing (candidates go to review)                       │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
@@ -1056,6 +1061,11 @@ STIX_VERIFY_MIN_RELS=1
 # a bypass.  Without this stage TTPs have no evidence gate at all.
 ENABLE_TTP_VERIFICATION=true
 TTP_VERIFY_MIN=1
+
+# TTP mode (ADR-0072).  verify (default): the measured baseline above.  select:
+# Stage 2c only retrieves candidates and 3f selects among them with a quote.
+# Needs `python scripts/build_indexes.py --only retrieval`; evaluate on dev first.
+# TTP_MODE=verify
 
 # Stage 2c — taxonomies the semantic matcher may return (ATT&CK-only default;
 # "all" restores CAPEC, which otherwise shadows the real ATT&CK technique)

@@ -19,6 +19,14 @@ Generates three files under pipeline/data/:
     Pre-computed sentence-transformer embeddings for all MITRE technique
     descriptions.  Used by stage2c_ttp_semantic.py for semantic TTP detection.
 
+  attack_retrieval_corpus.json      (~7 MB, not committed — built on demand)
+  attack_retrieval_embeddings.npy   (~27 MB with all-MiniLM-L6-v2)
+    The candidate-retrieval corpus of ADR-0072: one entry per technique
+    (full description) and one per distinct ATT&CK procedure example (`uses`
+    relationship description), with their embeddings.  Used by
+    pipeline/ttp_retrieval.py (TTP_MODE=select) and `python -m evaluation
+    retrieval`.  Only built with `--only retrieval`.
+
 Usage:
     # Auto-discover bundle files in the default locations
     python scripts/build_indexes.py
@@ -34,6 +42,7 @@ Usage:
     python scripts/build_indexes.py --only mitre
     python scripts/build_indexes.py --only gazetteer
     python scripts/build_indexes.py --only embeddings
+    python scripts/build_indexes.py --only retrieval [--keep-names] [--retrieval-out DIR]
 
 Prerequisites:
     pip install sentence-transformers numpy
@@ -46,6 +55,7 @@ or place them in ~/Downloads/ — the script will auto-detect them there.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -486,6 +496,83 @@ def build_embeddings(bundles: dict[str, Path | None]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Retrieval corpus builder  (ADR-0072 — procedure examples)
+# ---------------------------------------------------------------------------
+
+def build_retrieval(bundles: dict[str, Path | None], *, neutralise: bool = True,
+                    out_dir: Path | None = None) -> None:
+    """Build attack_retrieval_corpus.json + attack_retrieval_embeddings.npy.
+
+    Entries: one `description` per active technique (name + full description,
+    citations and markup removed) and one `procedure` per distinct `uses`
+    example whose target is an active technique.  With `neutralise` (the
+    default), the actor, software and campaign names in the procedures become
+    placeholders: recall is the same either way on AnnoCTR dev (ADR-0072), and
+    the example the selector is shown then names no other report's actor.
+    The manifest records the bundles' sha256 and ATT&CK version, the model and
+    the options, so a result can always be tied to the corpus it came from.
+    """
+    if str(_REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(_REPO_ROOT))
+    import os
+
+    from dotenv import load_dotenv
+
+    from pipeline.ttp_retrieval import build_corpus_entries
+    load_dotenv()
+
+    out_dir = out_dir or _DATA_DIR
+    corpus_path = out_dir / "attack_retrieval_corpus.json"
+    emb_path = out_dir / "attack_retrieval_embeddings.npy"
+    print(f"\n[retrieval] Building {corpus_path.name} (neutralise names: {neutralise})…")
+
+    entries: list[dict] = []
+    sources: list[dict] = []
+    for key, path in bundles.items():
+        if path is None or key == "capec":
+            continue
+        raw = path.read_bytes()
+        objects = json.loads(raw).get("objects", [])
+        versions = sorted({o.get("x_mitre_version", "") for o in objects
+                           if o.get("type") == "x-mitre-collection"} - {""})
+        sources.append({"bundle": path.name, "sha256": hashlib.sha256(raw).hexdigest(),
+                        "attack_version": versions[-1] if versions else None})
+        entries += build_corpus_entries(objects, _domain_from_path(path), neutralise=neutralise)
+    if not entries:
+        print("  SKIP  no ATT&CK bundle — nothing to build")
+        return
+    entries.sort(key=lambda e: (e["id"], e["kind"], e["text"]))
+
+    model_id = os.getenv("TTP_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+    digest = hashlib.sha256(json.dumps([s["sha256"] for s in sources]).encode()
+                            + (b"neutral" if neutralise else b"raw")).hexdigest()[:12]
+    counts: dict[str, int] = {}
+    for e in entries:
+        counts[e["kind"]] = counts.get(e["kind"], 0) + 1
+    manifest = {"version": f"retrieval-{digest}", "model": model_id, "neutralise_names": neutralise,
+                "sources": sources, "counts": counts,
+                "techniques": len({e["id"] for e in entries})}
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    corpus_path.write_text(json.dumps({"manifest": manifest, "entries": entries},
+                                      ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    print(f"  {counts} over {manifest['techniques']} techniques → {corpus_path}")
+
+    try:
+        import numpy as np
+        from sentence_transformers import SentenceTransformer
+    except ImportError as e:
+        print(f"  SKIP  embeddings — missing dependency: {e} (BM25 retrieval still works)")
+        return
+    model = SentenceTransformer(model_id)
+    emb = model.encode([e["text"] for e in entries], batch_size=64,
+                       show_progress_bar=True, convert_to_numpy=True)
+    np.save(str(emb_path), emb.astype(np.float32))
+    print(f"  DONE  embeddings {emb.shape} ({model_id}) → {emb_path} "
+          f"({emb_path.stat().st_size / 1e6:.1f} MB)")
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -499,9 +586,14 @@ def main() -> None:
     parser.add_argument("--ics",        type=Path, help="Path to ics-attack.json")
     parser.add_argument("--capec",      type=Path, help="Path to stix-capec.json")
     parser.add_argument(
-        "--only", choices=["mitre", "gazetteer", "embeddings", "relationships"],
-        help="Rebuild only the specified index",
+        "--only", choices=["mitre", "gazetteer", "embeddings", "relationships", "retrieval"],
+        help="Rebuild only the specified index (`retrieval` is never built by default)",
     )
+    parser.add_argument("--keep-names", action="store_true",
+                        help="retrieval: keep actor/software/campaign names in procedures "
+                             "(default: replaced by placeholders)")
+    parser.add_argument("--retrieval-out", type=Path,
+                        help="retrieval: write the corpus here instead of pipeline/data/")
     args = parser.parse_args()
 
     # Resolve bundle paths
@@ -542,6 +634,8 @@ def main() -> None:
         build_embeddings(bundles)
     if only is None or only == "relationships":
         build_attack_relationships(bundles)
+    if only == "retrieval":
+        build_retrieval(bundles, neutralise=not args.keep_names, out_dir=args.retrieval_out)
 
     print()
     print("Done.  Index files written to:", _DATA_DIR)

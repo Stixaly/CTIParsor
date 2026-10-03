@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, Any
 
 from api.logging_config import get_logger
 from models.schemas import EntityType, RawEntity
-from pipeline.env_flags import env_int
+from pipeline.env_flags import env_bool, env_int
 from pipeline.temporal import DocumentTime
 
 if TYPE_CHECKING:
@@ -100,6 +100,10 @@ class RunOptions:
     document_relations: bool | None = None
     verify_relationships: bool | None = None     # Stage 3d
     verify_ttps: bool | None = None              # Stage 3f
+    # ADR-0072 — "verify": Stage 2c emits techniques and 3f checks the LLM's
+    # (the measured baseline); "select": 2c only retrieves candidates and 3f
+    # selects among them, so nothing ships without a quote.
+    ttp_mode: str = "verify"
     llm_parallelism: int = 3
     checkpoint_every: int = 5
 
@@ -111,6 +115,7 @@ class RunOptions:
         from pipeline.stage3_llm import document_level_relations_enabled
         from pipeline.stage3d_verify import verify_enabled as rel_verify_enabled
         from pipeline.stage3e_consensus import consensus_enabled
+        from pipeline.stage3f_ttp_select import ttp_mode
         from pipeline.stage3f_ttp_verify import verify_enabled as ttp_verify_enabled
 
         values: dict[str, Any] = {
@@ -118,6 +123,7 @@ class RunOptions:
             "document_relations": document_level_relations_enabled(),
             "verify_relationships": rel_verify_enabled(),
             "verify_ttps": ttp_verify_enabled(),
+            "ttp_mode": ttp_mode(),
             "llm_parallelism": env_int("LLM_PARALLELISM", default=3),
             "checkpoint_every": env_int("CHECKPOINT_EVERY", default=5),
         }
@@ -132,6 +138,8 @@ class RunOptions:
         if unknown:
             raise ValueError(f"unknown stage id(s): {', '.join(sorted(unknown))}; "
                              f"known: {', '.join(STAGES)}")
+        if self.ttp_mode not in ("verify", "select"):
+            raise ValueError(f"ttp_mode must be 'verify' or 'select', not {self.ttp_mode!r}")
 
     def switch(self, stage: str, configured: bool | None, default: Callable[[], bool]) -> bool:
         """Effective on/off for an optional stage: off when disabled, else the
@@ -207,6 +215,9 @@ class RunResult:
     entities: list[RawEntity] = field(default_factory=list)
     gazetteer: list[RawEntity] = field(default_factory=list)
     semantic_ttps: list[RawEntity] = field(default_factory=list)
+    # ADR-0072 select mode: the retrieved candidates of each chunk.  Never
+    # entities, never in the bundle — Stage 3f selects from them.
+    ttp_candidates: list[list] = field(default_factory=list)
     cyner: list[RawEntity] = field(default_factory=list)
     gliner: list[RawEntity] = field(default_factory=list)
     alias_list: list[RawEntity] = field(default_factory=list)
@@ -639,9 +650,24 @@ class _Run:
             self.record("2b", RAN, "", time.monotonic() - t0, entities=len(self.r.gazetteer))
         entities = list(best.values())
 
-        # Stage 2c — semantic TTP detection.
+        # Stage 2c — semantic TTP detection (verify mode), or candidate
+        # retrieval for Stage 3f to select from (select mode, ADR-0072).
         from pipeline.stage2c_ttp_semantic import detect_ttps_semantic, semantic_available
-        if self.gate("2c", semantic_available):
+        offline_note = ""
+        if self.opts.ttp_mode == "select" and self._stage3_can_run():
+            from pipeline.ttp_retrieval import candidates_for_chunks, retrieval_available
+            if self.gate("2c", retrieval_available, "retrieval corpus or model unavailable "
+                         "(python scripts/build_indexes.py --only retrieval)"):
+                t0 = time.monotonic()
+                self.r.ttp_candidates = candidates_for_chunks(self.r.chunks)
+                self.record("2c", RAN, "candidates only (select mode)", time.monotonic() - t0,
+                            candidates=sum(len(c) for c in self.r.ttp_candidates))
+        elif self.gate("2c", semantic_available):
+            if self.opts.ttp_mode == "select":
+                # No LLM to select with: the old detector, said to be weaker.
+                offline_note = ("offline fallback (select mode without an LLM): "
+                                "unvalidated semantic matches, less reliable")
+                logger.warning(f"[Stage 2c] {offline_note}")
             t0 = time.monotonic()
             self.r.semantic_ttps = detect_ttps_semantic(text)
             keys = {(e.value.lower(), e.entity_type) for e in entities}
@@ -650,7 +676,8 @@ class _Run:
                 if key not in keys:
                     entities.append(se)
                     keys.add(key)
-            self.record("2c", RAN, "", time.monotonic() - t0, entities=len(self.r.semantic_ttps))
+            self.record("2c", RAN, offline_note, time.monotonic() - t0,
+                        entities=len(self.r.semantic_ttps))
 
         # Stage 2d — CyNER.
         from pipeline.stage2d_cyner import cyner_available, extract_cyner_entities
@@ -699,6 +726,10 @@ class _Run:
             "alias_list": len(self.r.alias_list),
         })
 
+    def _stage3_can_run(self) -> bool:
+        from pipeline.stage3_llm import _provider_ready
+        return "3" not in self.opts.disabled and _provider_ready()
+
     def enrich(self) -> None:
         from pipeline.stage3_llm import (
             _merge_results,
@@ -745,8 +776,10 @@ class _Run:
         ner_allow_list = set(known_values)
 
         fingerprint = stage3_fingerprint(
-            stage3_settings(consensus=consensus, verify_rels=verify_rels, verify_ttps=verify_ttps),
+            stage3_settings(consensus=consensus, verify_rels=verify_rels, verify_ttps=verify_ttps,
+                            ttp_mode=opts.ttp_mode),
             {"chunks": chunks,
+             "ttp_candidates": [[c.attack_id for c in cs] for cs in r.ttp_candidates],
              "entities_per_chunk": [_entities_key(e) for e in r.entities_per_chunk],
              "gazetteer": _entities_key(r.gazetteer), "cyner": _entities_key(r.cyner),
              "semantic": _entities_key(r.semantic_ttps), "doc_context": doc_context,
@@ -772,12 +805,21 @@ class _Run:
         }
 
         work: list[tuple[int, str, list]] = []
+        select_only: list[tuple[int, str]] = []
+        # Opt-in: on AnnoCTR dev 36 of 101 chunks would cost a call for at most
+        # 5 of 129 gold techniques (3.9%) found only in skipped chunks.
+        select_skipped = (opts.ttp_mode == "select" and verify_ttps
+                          and env_bool("TTP_SELECT_SKIPPED_CHUNKS", default=False))
         skipped = 0
         for i, (chunk, ents) in enumerate(zip(chunks, r.entities_per_chunk), 1):
             if i in chunk_results:
                 continue
             if chunk_has_signals(chunk, ents, known_values):
                 work.append((i, chunk, ents))
+            elif select_skipped and i - 1 < len(r.ttp_candidates) and r.ttp_candidates[i - 1]:
+                # No IoC and no known name, but retrieval found behaviour in a
+                # gated passage: one selection call, no extraction (ADR-0072).
+                select_only.append((i, chunk))
             else:
                 skipped += 1
                 logger.debug(f"[Stage 3] chunk {i}/{total} — skipped (no CTI signals)")
@@ -786,6 +828,7 @@ class _Run:
         stats_before = llm_stats.snapshot()
         parallelism = max(1, self.opts.llm_parallelism)
         logger.info(f"[Stage 3] {len(work)} chunks → LLM ({skipped} skipped, "
+                    f"{len(select_only)} technique selection only, "
                     f"{len(chunk_results)} from checkpoint, parallelism={parallelism})")
         log_lock = threading.Lock()
         doubled = 0
@@ -795,6 +838,8 @@ class _Run:
                 logger.info(f"[Stage 3] chunk {idx}/{total} — {len(chunk)} chars "
                             f"[elapsed {time.monotonic() - t0:.0f}s]")
             t_chunk = time.monotonic()
+            cands = r.ttp_candidates[idx - 1] if idx - 1 < len(r.ttp_candidates) else []
+
             def call(provider: str | None = None) -> LLMEnrichmentResult:
                 return enrich_chunk(
                     chunk, ents,
@@ -807,6 +852,8 @@ class _Run:
                     verify_rels=verify_rels,
                     verify_ttps_on=verify_ttps,
                     document_time=self._document_time,
+                    ttp_mode=opts.ttp_mode,
+                    ttp_candidates=cands,
                 )
 
             res = call()
@@ -824,8 +871,13 @@ class _Run:
                             f"{', '.join(parts) or 'nothing extracted'}")
             return idx, res, second_run
 
+        def selection_only(idx: int, chunk: str) -> tuple[int, LLMEnrichmentResult, bool]:
+            from pipeline.stage3_llm import select_chunk_ttps
+            return idx, select_chunk_ttps(chunk, r.ttp_candidates[idx - 1]), False
+
         with ThreadPoolExecutor(max_workers=parallelism) as executor:
             futures = [executor.submit(process, i, c, e) for i, c, e in work]
+            futures += [executor.submit(selection_only, i, c) for i, c in select_only]
             completed = since_ckpt = 0
             for future in as_completed(futures):
                 hooks.check_timeout()
@@ -845,7 +897,7 @@ class _Run:
 
                 hooks.progress("stage", {
                     "stage": 3, "label": "LLM enrichment",
-                    "chunk": completed, "total": len(work), **totals,
+                    "chunk": completed, "total": len(work) + len(select_only), **totals,
                 })
                 hooks.progress("partial_graph", _partial_graph(res))
 
@@ -859,10 +911,12 @@ class _Run:
         stats_after = llm_stats.snapshot()
         d = llm_stats.delta(stats_before, stats_after)
         kinds = ("extraction_ok", "extraction_empty", "extraction_invalid", "extraction_provider_failed")
-        counts = dict(llm_calls=len(work), provider_calls=d.get("provider_calls", 0),
+        counts = dict(llm_calls=len(work), selection_only_chunks=len(select_only),
+                      provider_calls=d.get("provider_calls", 0),
                       provider_failures=d.get("provider_failures", 0),
                       **{k: d.get(k, 0) for k in kinds},
-                      skipped_chunks=skipped, from_checkpoint=total - len(work) - skipped, **totals)
+                      skipped_chunks=skipped,
+                      from_checkpoint=total - len(work) - len(select_only) - skipped, **totals)
         attempted = sum(d.get(k, 0) for k in kinds)
         unusable = attempted - d.get("extraction_ok", 0)
         detail = (f"{d.get('extraction_provider_failed', 0)} failed requests, "
@@ -878,24 +932,32 @@ class _Run:
         else:
             self.record("3", RAN, f"{unusable} of {attempted} extraction calls unusable: {detail}"
                         if unusable else "", time.monotonic() - t0, **counts)
+        select = opts.ttp_mode == "select"
         for sid, on, prefix in (("3d", verify_rels, "rel_verification"),
-                                ("3f", verify_ttps, "ttp_verification")):
+                                ("3f", verify_ttps, "ttp_selection" if select else "ttp_verification")):
             ok, unparsed, failed = (d.get(f"{prefix}_ok", 0), d.get(f"{prefix}_unparsed", 0),
                                     d.get(f"{prefix}_failed", 0))
+            # Select mode keeps nothing it could not check (ADR-0072); verify
+            # mode keeps the claims its failed calls could not judge.
+            lost = ("their candidates sent to review, none kept" if sid == "3f" and select
+                    else "those claims kept unverified")
+            extra = {"rejected": d.get("ttp_selection_rejected", 0)} if sid == "3f" and select else {}
             if not on:
-                self.record(sid, SKIPPED, "disabled")
+                self.record(sid, SKIPPED, "disabled" + (": the LLM's techniques ship unchecked"
+                                                        if sid == "3f" and select else ""))
             elif ok + unparsed + failed == 0:
-                self.record(sid, RAN, "nothing to verify", 0.0, ok=0, unparsed=0, failed=0)
+                self.record(sid, RAN, "nothing to verify", 0.0, ok=0, unparsed=0, failed=0, **extra)
             elif ok == 0 and unparsed + failed:
-                # A verification that never answers keeps every claim — the
+                # A verification that never answers checked nothing — the
                 # stage was requested and did nothing.
                 self.record(sid, FAILED, f"no usable verification answer ({unparsed} unparseable, "
-                            f"{failed} failed): every claim kept unverified", 0.0,
-                            ok=ok, unparsed=unparsed, failed=failed)
+                            f"{failed} failed): " + ("every candidate sent to review" if sid == "3f"
+                                                     and select else "every claim kept unverified"),
+                            0.0, ok=ok, unparsed=unparsed, failed=failed, **extra)
             else:
                 self.record(sid, RAN, f"{unparsed + failed} of {ok + unparsed + failed} verifications "
-                            "unusable, those claims kept unverified" if unparsed + failed else "",
-                            0.0, ok=ok, unparsed=unparsed, failed=failed)
+                            f"unusable, {lost}" if unparsed + failed else "",
+                            0.0, ok=ok, unparsed=unparsed, failed=failed, **extra)
         if consensus:
             self.record("3e", RAN, "", 0.0, chunks=doubled)
         else:

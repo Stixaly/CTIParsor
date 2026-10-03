@@ -4,7 +4,7 @@
   run             run the application's pipeline on a split (resumable)
   score           score a run: TTPs, entities, evidence
   compare         paired bootstrap between two runs on the same documents
-  retrieval       Stage 2c candidate recall at several k (no LLM)
+  retrieval       candidate recall per passage / document at several k (no LLM)
   support-sample  CSV of quotes for a person to judge
   preannotate     draft gold.json for an in-house report (to be corrected by hand)
   inhouse-run     run the pipeline on the in-house reports, from their original files
@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -115,7 +116,12 @@ def _predictions(result) -> dict:
                       "evidence_text": r.evidence_text,
                       "evidence_label": getattr(r.evidence_label, "value", r.evidence_label)}
                      for r in llm.relationships]
+    # ADR-0072 select mode: what 3f left undecided, and what it chose from.
+    review = ([{"mitre_id": rv.attack_id, "reason": rv.reason, "sources": rv.sources}
+               for rv in llm.ttp_review] if llm is not None else [])
+    candidates = sorted({c.attack_id for cs in getattr(result, "ttp_candidates", []) for c in cs})
     return {"ttp_ids": sorted(i for i in ttp_ids if _TECH_ID.match(i)), "ttps": ttps,
+            "ttp_review": review, "ttp_candidates": candidates,
             "entities": entities, "relations": relations,
             "bundle_relations": _bundle_relations(result.bundle)}
 
@@ -142,6 +148,13 @@ def cmd_run(args) -> None:
     from pipeline.orchestrator import Document, RunOptions, StageRequired, run_document
 
     disabled = {"1f", "4", "5"} | {s.strip() for s in (args.disable or "").split(",") if s.strip()}
+    # The procedures MITRE wrote from AnnoCTR reports stay out of the select
+    # path's retrieval corpus during an evaluation (ADR-0072).
+    if not os.environ.get("TTP_RETRIEVAL_EXCLUDE_CITED"):
+        excl = OUT / "annoctr-cited-exclude.txt"
+        excl.parent.mkdir(parents=True, exist_ok=True)
+        excl.write_text("\n".join(annoctr_cited_exclusions()) + "\n", encoding="utf-8")
+        os.environ["TTP_RETRIEVAL_EXCLUDE_CITED"] = str(excl)
     options = RunOptions.from_env(disabled=disabled,
                                   required=set() if args.allow_degraded else {"3"})
     run_dir = OUT / "runs" / args.name
@@ -151,6 +164,7 @@ def cmd_run(args) -> None:
         _write(meta_path, {"name": args.name, "split": args.split, "started": time.strftime("%Y-%m-%dT%H:%M:%S"),
                            "disabled": sorted(options.disabled), "required": sorted(options.required),
                            "consensus": options.consensus, "document_relations": options.document_relations,
+                           "ttp_mode": options.ttp_mode,
                            "manifest": build_manifest()})
     consecutive_required = 0
     for i, d in enumerate(docs, 1):
@@ -341,30 +355,138 @@ def cmd_compare(args) -> None:
 
 # ── retrieval ────────────────────────────────────────────────────────────────
 
-def cmd_retrieval(args) -> None:
-    from pipeline.stage2c_ttp_semantic import semantic_available, semantic_topk_ids
+def annoctr_cited_exclusions() -> list[str]:
+    """URL fragments of every AnnoCTR report (its slug), all splits.
 
-    if not semantic_available():
-        sys.exit("Stage 2c is unavailable (SKIP_HEAVY_MODELS, embeddings or model missing)")
-    canonical, _ = _canonical_fn()
+    MITRE cites some of these blog posts in its procedure examples — 48 in the
+    2026-10 bundle, 28 of them from test reports.  A retrieval corpus that
+    keeps them would hand the retriever sentences written from the report it
+    is scored on (ADR-0072)."""
+    out = []
+    for split in annoctr.SPLITS:
+        folder = annoctr.DEFAULT_ROOT / "text" / split
+        for p in sorted(folder.glob("*.txt")) if folder.is_dir() else []:
+            parts = p.stem.split("_", 2)
+            if len(parts) == 3 and len(parts[2]) >= 12:
+                out.append(parts[2])
+    return sorted(set(out))
+
+
+def _chunk_recall(docs, retriever, gate: bool, spec: str, canonical, cand_id) -> dict:
+    """Recall of the candidate lists the selector gets, one per Stage 1 chunk
+    (`spec` = "k_per_passage:cap")."""
+    from evaluation import retrieval as rv
+    from pipeline.orchestrator import chunk_size_for
+    from pipeline.stage1_ingestion import chunk_text
+    from pipeline.ttp_retrieval import chunk_candidates_with, split_passages
+
+    k_s, _, cap_s = spec.partition(":")
+    k, cap = int(k_s), int(cap_s or 0)
+    out = []
+    for d in docs:
+        chunks = chunk_text(d.text, max_chars=chunk_size_for(len(d.text)))
+        cands = chunk_candidates_with(retriever, chunks, k_per_passage=k, max_per_chunk=cap or None,
+                                      keyword_gate=gate)
+        passages = split_passages(d.text)
+        gold: dict[str, list[str]] = {}
+        gold_ids: set[str] = set()
+        for m in d.techniques:
+            c = canonical(m.label)
+            if not c:
+                continue
+            gold_ids.add(c)
+            if m.start is not None and m.end is not None:
+                i = rv.passage_of([(p.start, p.end) for p in passages], m.start, m.end)
+                if i is not None:
+                    gold.setdefault(c, []).append(passages[i].text)
+        out.append(rv.DocChunks(gold, gold_ids, [" ".join(ch.split()) for ch in chunks],
+                                [[cand_id(x.attack_id) for x in cs] for cs in cands]))
+    return {"k_per_passage": k, "cap": cap, **rv.chunk_row(out)}
+
+
+def cmd_retrieval(args) -> None:
+    from evaluation import retrieval as rv
+    from pipeline import stage2c_ttp_semantic as s2c
+    from pipeline import ttp_retrieval as tr
+
+    canonical, cat = _canonical_fn()
+
+    def cand_id(t: str) -> str:
+        # Candidates may come from a newer bundle than the pipeline index:
+        # follow revocations, never drop a candidate for not being indexed.
+        return cat.resolve(t).canonical or t.upper()
+
     ks = sorted({int(k) for k in args.k.split(",")})
+    corpora = [c.strip() for c in args.corpus.split(",")]
+    methods = [m.strip() for m in args.method.split(",")]
+    gates = [g.strip() == "on" for g in args.gate.split(",")]
+    excl = [] if args.keep_cited else annoctr_cited_exclusions()
     docs = _docs(args.split, args.limit)
-    table = []
-    for k in ks:
-        found = gold_n = cands = 0
-        for d in docs:
-            gold = {c.split(".", 1)[0] for g in d.technique_ids if (c := canonical(g))}
-            got = {c.split(".", 1)[0] for t in semantic_topk_ids(d.text, k) if (c := canonical(t))}
-            found += len(gold & got)
-            gold_n += len(gold)
-            cands += len(got)
-        table.append({"k": k, "recall": round(found / gold_n, 4) if gold_n else None,
-                      "mean_candidate_techniques": round(cands / len(docs), 1)})
-        print(f"  k={k:<3} technique recall {table[-1]['recall']}  "
-              f"mean candidates/doc {table[-1]['mean_candidate_techniques']}", flush=True)
-    _write(OUT / f"retrieval-{args.split}.json", {"split": args.split, "documents": len(docs),
-                                                  "unit": "top-k per candidate sentence, union per document",
-                                                  "table": table})
+    path = Path(args.corpus_dir) / "attack_retrieval_corpus.json" if args.corpus_dir else None
+    emb = Path(args.corpus_dir) / "attack_retrieval_embeddings.npy" if args.corpus_dir else None
+    model = None
+    results = []
+    for corpus_kind in corpora:
+        corpus = tr.load_corpus(corpus_kind, path=path, emb_path=emb, exclude_cited=excl)
+        if corpus is None:
+            print(f"corpus {corpus_kind}: unavailable (python scripts/build_indexes.py --only retrieval)")
+            continue
+        for method in methods:
+            if method != "bm25" and model is None:
+                model = s2c._load_model()
+                if model is None:
+                    sys.exit("dense retrieval needs the embedding model (SKIP_HEAVY_MODELS?)")
+            retriever = tr.Retriever(corpus, method, model if method != "bm25" else None)
+            for gate in gates:
+                rankings = []
+                for d in docs:
+                    t0 = time.monotonic()
+                    passages = tr.split_passages(d.text)
+                    kept = tr.gate_passages(passages, keyword_gate=gate)
+                    kept_set = set(kept)
+                    kept_idx = {i for i, p in enumerate(passages) if p in kept_set}
+                    ranked_lists = retriever.rank(kept, k=max(ks))
+                    by_pos = {(p.start, p.end): [cand_id(c.attack_id) for c in row]
+                              for p, row in zip(kept, ranked_lists)}
+                    gold: dict[str, list[tuple[int, int]]] = {}
+                    unlocated: set[str] = set()
+                    for m in d.techniques:
+                        c = canonical(m.label)
+                        if not c:
+                            continue
+                        if m.start is None or m.end is None:
+                            unlocated.add(c)
+                        else:
+                            gold.setdefault(c, []).append((m.start, m.end))
+                    rankings.append(rv.DocRanking(
+                        d.doc_id, len(passages), [(p.start, p.end) for p in passages], kept_idx,
+                        {i: by_pos[(p.start, p.end)] for i, p in enumerate(passages) if i in kept_idx},
+                        gold, unlocated - set(gold), time.monotonic() - t0))
+                rows = [rv.recall_row(rankings, k) for k in ks]
+                cfg = {"corpus": corpus_kind, "corpus_version": corpus.version,
+                       "entries": len(corpus.ids), "method": method,
+                       "keyword_gate": "on" if gate else "off",
+                       "coverage": rv.coverage(rankings), "table": rows,
+                       "buckets": {str(k): rv.buckets(rankings, k) for k in (min(ks), max(ks))},
+                       "chunks": [_chunk_recall(docs, retriever, gate, kc, canonical, cand_id)
+                                  for kc in (args.chunk or "").split(",") if kc.strip()]}
+                results.append(cfg)
+                for row in cfg["chunks"]:
+                    print(f"    per chunk k={row['k_per_passage']} cap={row['cap']}: local "
+                          f"{row['local_recall']} doc {row['doc_recall']} "
+                          f"({row['candidates_per_chunk']} candidates x {row['chunks_per_doc']} chunks)")
+                print(f"{corpus_kind:<11} {method:<7} gate={cfg['keyword_gate']:<3} "
+                      f"kept {cfg['coverage']['mentions_in_kept_passage']}  "
+                      + "  ".join(f"k={r['k']}: P {r['parent']['passage_recall']}"
+                                  f" W {r['parent']['window_recall']} D {r['parent']['doc_recall']}"
+                                  f" ({r['parent']['unique_ids_per_doc']} ids)" for r in rows),
+                      flush=True)
+    name = f"retrieval-{args.split}" + (f"-{args.name}" if args.name else "")
+    _write(OUT / f"{name}.json", {
+        "split": args.split, "documents": len(docs), "excluded_cited_reports": len(excl),
+        "unit": "passage = Stage 2c sentence; k = distinct technique ids per passage",
+        "results": results})
+    print(f"written to {OUT / (name + '.json')}")
 
 
 # ── support-sample ───────────────────────────────────────────────────────────
@@ -559,7 +681,17 @@ def main() -> None:
 
     p = sub.add_parser("retrieval")
     p.add_argument("--split", choices=annoctr.SPLITS, default="dev")
-    p.add_argument("--k", default="1,3,5,10,20")
+    p.add_argument("--k", default="1,5,10,20,25")
+    p.add_argument("--corpus", default="short",
+                   help="comma list of short, description, procedure, both (ADR-0072)")
+    p.add_argument("--method", default="dense", help="comma list of dense, bm25, minrank, rrf")
+    p.add_argument("--gate", default="on", help="keyword gate: on, off or on,off")
+    p.add_argument("--corpus-dir", help="a corpus built with --retrieval-out (default pipeline/data)")
+    p.add_argument("--keep-cited", action="store_true",
+                   help="keep the procedures MITRE wrote from AnnoCTR reports")
+    p.add_argument("--chunk", help="also measure per-chunk candidate lists, "
+                   "comma list of k_per_passage:cap, e.g. 5:25,10:25")
+    p.add_argument("--name", help="suffix of the output file")
     p.add_argument("--limit", type=int)
     p.set_defaults(fn=cmd_retrieval)
 

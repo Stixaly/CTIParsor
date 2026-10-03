@@ -263,6 +263,39 @@ names, hashes and URLs; the app targets 15″–38″ desktop screens.
 
 ### Added
 
+#### TTPs: retrieve from ATT&CK procedures, select with a quote (ADR-0072), 2026-10-03
+
+Stage 2c emitted a technique for any sentence whose best cosine match cleared
+a threshold; on AnnoCTR dev that was 55 % of the predicted techniques at 0.16
+precision, and turning it off lifted F1 from 0.339 to 0.488. Its matches also
+reached the output through Stage 3c's seeding and told the Stage 3 LLM not to
+re-extract them.
+
+- **A procedure corpus.** `python scripts/build_indexes.py --only retrieval`
+  builds a versioned, git-ignored corpus: 697 full technique descriptions
+  (the old cache embedded the first 300 characters) and 16,653 distinct
+  ATT&CK `uses` examples. Links, citations and tags are removed. Actor,
+  software and campaign names are neutralised by default (`--keep-names`
+  keeps them). Each example keeps the URLs it cites.
+- **Hybrid retrieval.** `pipeline/ttp_retrieval.py` ranks techniques (not
+  examples) per passage with dense cosine, BM25, min-rank fusion or RRF.
+- **`python -m evaluation retrieval`, rewritten.** It measures recall per
+  passage, per document and per chunk, at parent level and exact id, with
+  the candidate count and an error bucket per miss. On dev, parent recall per
+  passage at k=5 goes from 0.33 (today's cache, dense, keyword gate) to 0.77
+  (both corpora, RRF). It is 0.95 at k=25. Per capped chunk list (the
+  selector's input), 0.45 → 0.86. The 48 MITRE examples that cite AnnoCTR
+  reports (28 from test) are excluded, and `evaluation run` does the same.
+- **`TTP_MODE=select` (off by default).** Stage 2c only retrieves
+  `TtpCandidate`s: never an entity, never in the bundle or the prompt. Stage
+  3f makes one call per chunk with the chunk, its retrieved candidates and
+  the LLM's own proposals. The code keeps a choice only if its id is a
+  candidate and its quote is in the chunk. A failed or unparseable call ships
+  nothing: its candidates go to `ttp_review`, and the stage report says so.
+  Without an LLM, the old detector runs, labelled "offline fallback, less
+  reliable". `TTP_MODE=verify` is today's pipeline, unchanged.
+- To decide: the dev runs listed in ADR-0072, compared with the 2c-off run.
+
 #### The graph shows the bundle that ships (ADR-0061), 2026-09-28
 
 The Graph page drew the review rows, never the bundle: on the stored bundles

@@ -27,6 +27,10 @@ _CAPTURED_ENV = (
     "VLLM_ENABLE_THINKING", "REVIEW_CONTROL_SAMPLE_RATE", "PIPELINE_DISABLED_STAGES",
     "ENABLE_DOCUMENT_LEVEL_RELATIONS", "CVE_ENRICHMENT", "OCR_LANG",
     "LLM_TEMPERATURE", "LLM_SEED",
+    "TTP_MODE", "TTP_RETRIEVAL_CORPUS", "TTP_RETRIEVAL_METHOD", "TTP_CANDIDATES_PER_PASSAGE",
+    "TTP_CANDIDATES_PER_CHUNK", "TTP_SELECT_MIN_QUOTE_WORDS", "TTP_RETRIEVAL_EXCLUDE_CITED",
+    "TTP_RETRIEVAL_KEYWORD_GATE", "TTP_SELECT_SKIPPED_CHUNKS",
+    "TTP_ADVISORY_GATE",
 )
 
 # The data files whose content decides what Stages 2b, 2c and 3c emit.
@@ -34,6 +38,7 @@ _DATA_DIR = Path(__file__).parent.parent / "pipeline" / "data"
 _DATA_FILES = (
     "mitre_index.json", "attack_relationships.json", "gazetteer.json",
     "mitre_embeddings.npy", "mitre_embeddings_meta.json",
+    "attack_retrieval_corpus.json", "attack_retrieval_embeddings.npy",
 )
 
 # Distributions whose version can change an extraction or a bundle.
