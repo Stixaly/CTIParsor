@@ -1,17 +1,17 @@
 """Documentation drift guard.
 
-Recalculates every precise number claimed in README.md from the source of
-truth (JSON data files and Python module constants) and reports any
-discrepancy.
+Recalculates every precise number claimed in README.md and docs/pipeline.md
+from the source of truth (JSON data files and Python module constants) and
+reports any discrepancy.
 
 Usage:
     python scripts/check_doc_claims.py
-    python scripts/check_doc_claims.py --readme docs/README.md --quiet
+    python scripts/check_doc_claims.py --doc docs/pipeline.md --quiet
 
 Exit codes:
     0  all checks OK or SKIP
     1  at least one FAIL
-    2  README file not found
+    2  a documentation file not found
 """
 from __future__ import annotations
 
@@ -27,7 +27,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pipeline.regex_safety import compile_pattern
 
 ROOT = Path(__file__).resolve().parent.parent
-README = ROOT / "README.md"
+#: The pages the claims below are documented in, searched as one text.
+DOCS: tuple[Path, ...] = (ROOT / "README.md", ROOT / "docs" / "pipeline.md")
 
 _NUM = "[\\d\\u202f\\u00a0, ]+"
 
@@ -36,7 +37,7 @@ _NUM = "[\\d\\u202f\\u00a0, ]+"
 class Claim:
     """One documented number, and how to recompute it from the source of truth."""
     label: str
-    readme_pattern: str
+    doc_pattern: str
     actual: Callable[[], float | int | None]
     tolerance: float = 0.0
 
@@ -225,16 +226,16 @@ def _fmt(n: float) -> str:
     return str(n)
 
 
-def check_all(readme_text: str) -> list[tuple[str, str, str, str]]:
+def check_all(doc_text: str) -> list[tuple[str, str, str, str]]:
     """Run every claim. Returns rows of (status, label, documented, actual).
 
     status is one of "OK", "FAIL", "SKIP".
     """
     rows: list[tuple[str, str, str, str]] = []
     for claim in CLAIMS:
-        m = re.search(claim.readme_pattern, readme_text)
+        m = re.search(claim.doc_pattern, doc_text)
         if m is None:
-            rows.append(("SKIP", claim.label, "not found in README", ""))
+            rows.append(("SKIP", claim.label, "not found in docs", ""))
             continue
 
         # Extract the documented number
@@ -243,7 +244,7 @@ def check_all(readme_text: str) -> list[tuple[str, str, str, str]]:
         else:
             num_match = re.search(r"\d+(?:\.\d+)?", m.group(0))
             if num_match is None:
-                rows.append(("SKIP", claim.label, "not found in README", ""))
+                rows.append(("SKIP", claim.label, "not found in docs", ""))
                 continue
             raw = num_match.group(0)
 
@@ -268,13 +269,15 @@ def check_all(readme_text: str) -> list[tuple[str, str, str, str]]:
 def main() -> int:
     """CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="Check README.md numbers against the source of truth."
+        description="Check documented numbers against the source of truth."
     )
     parser.add_argument(
-        "--readme",
+        "--doc", "--readme",
+        dest="docs",
         type=Path,
-        default=README,
-        help="Path to the README file to check (default: %(default)s)",
+        action="append",
+        help="A documentation file to check; repeatable "
+             "(default: README.md and docs/pipeline.md)",
     )
     parser.add_argument(
         "--quiet",
@@ -283,18 +286,18 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    readme_path: Path = args.readme
-    if not readme_path.is_file():
-        print(f"error: README not found: {readme_path}", file=sys.stderr)
-        return 2
+    texts: list[str] = []
+    for doc_path in args.docs or DOCS:
+        if not doc_path.is_file():
+            print(f"error: documentation file not found: {doc_path}", file=sys.stderr)
+            return 2
+        try:
+            texts.append(doc_path.read_text(encoding="utf-8"))
+        except OSError as exc:
+            print(f"error: cannot read {doc_path}: {exc}", file=sys.stderr)
+            return 2
 
-    try:
-        readme_text = readme_path.read_text(encoding="utf-8")
-    except OSError as exc:
-        print(f"error: cannot read {readme_path}: {exc}", file=sys.stderr)
-        return 2
-
-    rows = check_all(readme_text)
+    rows = check_all("\n".join(texts))
 
     # Compute column widths
     headers = ("STATUS", "CLAIM", "DOCUMENTED", "ACTUAL")

@@ -149,7 +149,8 @@ Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 CI's fast job passes 2128 tests on 2026-10-03 (110 `test_*.py` modules plus
 `eval_pipeline.py`) and skips 4: tesseract/poppler and the STIX JSON schemas
 are not in that job, one benchmark needs the embedding cache, and one test
-waits for a multi-tactic T1059 in the ATT&CK index. The table
+waits for a multi-tactic T1059 in the ATT&CK index; `test_doc_claims.py`,
+added after that count, adds 2. The table
 lists the main modules with counts from an earlier `pytest --collect-only`
 (they include `parametrize` expansion); `pytest --collect-only -q` is the
 current truth.
@@ -242,6 +243,7 @@ current truth.
 | Persistence | `test_db_backend.py` | 12 | the PostgreSQL adapter without a server: `?`→`%s` outside literals, `%`→`%%`, the `Row` type, `backend()`/`get_conn()` requiring `DATABASE_URL` (ADR-0053), a fake psycopg connection proving `with` never closes and `transaction()` issues plain `BEGIN` (ADR-0045) |
 | Persistence | `test_db_postgres.py` | 10 | skipped unless `CTIPARSOR_TEST_DATABASE_URL` is set (every other DB-touching test needs it too, via `temp_db` — ADR-0053): round trips, SSE resume ids, upserts, cascade, the coverage call without `jobs_conn`, the API through `temp_db_client`, and both migration scripts end to end (ADR-0045, ADR-0053) |
 | Shared helpers | `test_shared_helpers.py` | 27 | environment parsing, claim extraction, unescaping logic |
+| Docs | `test_doc_claims.py` | 2 | every number `scripts/check_doc_claims.py` checks in README.md and docs/pipeline.md still matches its source, and is still found (what `make check-docs` did on demand only) |
 | Benchmarks | `eval_pipeline.py` | 10 | NER F1, ATE precision, grounding metrics, adversarial tests |
 
 `CTIPARSOR_TEST_DATABASE_URL=postgresql://user:pw@host/db` is **required**,
@@ -283,7 +285,7 @@ job. Still untested as a unit: the review-page promotion gate (§6, P1-d).
 
 ---
 
-## 5. Coverage of the three new features
+## 5. Coverage of the June 2026 features (evidence labels, consensus, provenance)
 
 | Feature | Unit | Integration | End-to-end | Status |
 |---|---|---|---|---|

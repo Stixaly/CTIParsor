@@ -104,7 +104,7 @@ bash scripts/docker_smoke.sh --no-build --job   # also process a sample report e
 | a detection-rule format | a new `RuleCorpusAdapter` in `pipeline/detection/` + register it in `registry.py` |
 | an API route | `api/routes/`, then `app.include_router(...)` in `api/main.py` |
 | a frontend page | `frontend/src/pages/` + a route in `App.tsx` (+ a nav link in `Layout.tsx`) |
-| a job-store or rule-store table or column | `_JOB_STORE_DDL_POSTGRES` or `_RULE_STORE_DDL_POSTGRES` in `api/db.py` (ADR-0045, ADR-0053 — one PostgreSQL-only DDL tuple per store, `IF NOT EXISTS`/`ADD COLUMN IF NOT EXISTS` so it doubles as the migration); document it in the README's Database schema section |
+| a job-store or rule-store table or column | `_JOB_STORE_DDL_POSTGRES` or `_RULE_STORE_DDL_POSTGRES` in `api/db.py` (ADR-0045, ADR-0053 — one PostgreSQL-only DDL tuple per store, `IF NOT EXISTS`/`ADD COLUMN IF NOT EXISTS` so it doubles as the migration); document it in [`docs/database-schema.md`](docs/database-schema.md) |
 | queue / worker behaviour | `api/queue_loop.py` (the claim, lease, heartbeat) — `api/worker.py` only owns spawning the subprocess (ADR-0046) |
 | a compose service or resource limit | `compose.yaml`, then `docs/docker.md`'s sizing table and `.env.example` |
 
@@ -118,8 +118,8 @@ bash scripts/docker_smoke.sh --no-build --job   # also process a sample report e
   `_RULE_STORE_DDL_POSTGRES` in `api/db.py` (one statement per tuple entry,
   applied through `_apply_postgres_ddl()`, which tolerates the
   duplicate-object race of two processes both calling `init_db()` against a
-  fresh database). Document the new table or column in the README's
-  [Database schema](README.md#database-schema) section.
+  fresh database). Document the new table or column in
+  [`docs/database-schema.md`](docs/database-schema.md).
   - **Avoid a bulk-read column on `detection_rules`.** Put per-rule scalars
     in their own table keyed by `rule_id` instead, as `rule_atoms`,
     `rule_techniques`, `rule_related` and `rule_bytes` do (ADR-0022) — the
@@ -138,9 +138,14 @@ bash scripts/docker_smoke.sh --no-build --job   # also process a sample report e
 - **Commits** — branch off `main`; keep a change + its tests + doc update together.
 
 ## Docs to keep current
-When a feature lands, update: [`README.md`](README.md) (user-facing — including
-the **Database schema** and **Project structure** sections if either changed),
-[`CHANGELOG.md`](CHANGELOG.md), the relevant ADR, and [`TESTING.md`](TESTING.md) if
-coverage changed. Feature-specific walkthroughs live in [`docs/`](docs/); if you
-add or replace a screenshot, follow
-[`docs/screenshots/README.md`](docs/screenshots/README.md) and update its index.
+When a feature lands, update: the reference page in [`docs/`](docs/) it touches
+([`pipeline.md`](docs/pipeline.md), [`configuration.md`](docs/configuration.md),
+[`web-ui.md`](docs/web-ui.md), [`stix-output.md`](docs/stix-output.md),
+[`api.md`](docs/api.md), [`database-schema.md`](docs/database-schema.md), or the
+project structure in [`development.md`](docs/development.md)),
+[`README.md`](README.md) only if it changes the overview (a highlight, a stage,
+a quick-start step), [`CHANGELOG.md`](CHANGELOG.md), the relevant ADR, and
+[`TESTING.md`](TESTING.md) if coverage changed. Keep the README a landing page:
+detail goes in `docs/`, the README links to it. If you add or replace a
+screenshot, follow [`docs/screenshots/README.md`](docs/screenshots/README.md) and
+update its index.
