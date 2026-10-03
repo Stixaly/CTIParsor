@@ -17,6 +17,7 @@ maintenance routine that keeps them current.
 | `pdf2image` + `pytesseract` | OCR for scanned PDFs |
 | `python-docx` | DOCX parsing |
 | `beautifulsoup4` | HTML parsing |
+| `defusedxml` | XML parsing hardened against entity-expansion attacks (DOCX internals) |
 | `iocextract` | Regex IoC extraction with defang support |
 | `sentence-transformers` | Semantic TTP embeddings (Stage 2c) |
 | `transformers` | HuggingFace backbone (CyNER 2.0, Stage 2d) |
@@ -26,16 +27,18 @@ maintenance routine that keeps them current.
 | `pyahocorasick` | Aho-Corasick multi-pattern scan (Stage 2b, 50× faster) |
 | `rapidfuzz` | Fuzzy string matching (Stage 3b filter + Stage 3c normalisation) |
 | `anthropic` | Claude API client |
-| `openai` | Mistral AI / Ollama client (OpenAI-compatible) |
+| `openai` | Client for every OpenAI-compatible provider: Gemini, Mistral AI, Ollama, vLLM, LM Studio |
 | `pydantic` | LLM output schema validation |
 | `stix2` | STIX 2.1 object + bundle construction |
 | `stix2-validator` | Bundle JSON-schema validation |
+| `jsonschema` | Not imported directly: capped below 4.25, whose extra pulls lark 1.x through `stix2-validator` and breaks `parsuricata`'s import — every Suricata rule would ship unchecked |
 | `yara-python` | Compiles each YARA rule quoted in a report, as OpenCTI does on import; a rule that does not compile is left out (ADR-0067). Wheels up to CPython 3.13 |
 | `pysigma`, `parsuricata` | Parse each Sigma / Suricata rule quoted in a report with the parsers OpenCTI uses (Snort: OpenCTI's own parser, copied in `pipeline/detection/opencti_snort/`); a refused rule is left out (ADR-0070) |
 | `PyYAML` | Sigma rule parsing + the detection-corpus registry |
 | `python-dotenv` | `.env` loading |
-| `spacy` | Optional NER fallback (no model downloaded by default) |
+| `spacy` | Optional NER fallback (no model downloaded by default); listed in `requirements-optional.txt` too |
 | `tenacity` | Retry with backoff on transient LLM errors |
+| `pytest` | Test runner. It sits in the runtime set, so it also ships in the `app` image; the other dev tools are in `requirements-dev.txt`, installed only in the `dev` image |
 
 ### Web API (`requirements-api.txt`)
 
@@ -48,6 +51,7 @@ maintenance routine that keeps them current.
 | `slowapi` | Request rate limiting |
 | `python-magic` | Upload content-type sniffing (libmagic) |
 | `filetype` | Upload type detection fallback, pure Python |
+| `psycopg` | PostgreSQL driver for both stores (ADR-0045, ADR-0053) |
 
 ### Optional (requirements-optional.txt)
 

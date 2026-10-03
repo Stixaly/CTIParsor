@@ -9,19 +9,23 @@ alternatives that were rejected; this page is the map.
 ## 1. The two shapes it runs in
 
 The same code runs in two shapes, chosen by environment variables, with no
-code path that exists only for containers.
+code path that exists only for containers. **Only the container stack is
+supported** (ADR-0054): `setup.sh` no longer installs anything on the host, and
+the host column below describes a legacy install, kept because the code still
+honours its settings and [docs/upgrading.md](upgrading.md) moves such an
+install's data onto the container stack.
 
-| | Host install (`bash setup.sh`, `python run_api.py`) | Container stack (`docker compose up -d`) |
+| | Host install — legacy (`python run_api.py`) | Container stack (`docker compose up -d`) |
 |---|---|---|
-| Processes | one: the API, with the pipeline loop in a background thread | four always on: `app`, `worker` (×N), `postgres`, plus optional `proxy` and `ollama` |
+| Processes | one: the API, with the pipeline loop in a background thread | four always on: `app`, `worker` (×N), `postgres`, `capture-proxy`, plus optional `proxy` and `ollama` |
 | Job store (reports) | PostgreSQL (`DATABASE_URL`, mandatory — ADR-0053) | PostgreSQL 17, service `postgres` |
 | Rule store (detection corpus) | the same PostgreSQL database (ADR-0053) | the same `postgres` service |
 | Who runs the pipeline | the API process (`CTIPARSOR_ROLE=all`) | the `worker` containers (`CTIPARSOR_ROLE=worker`); the API only queues (`api`) |
 | Exposure | loopback by default (`API_HOST`) | loopback by default (`CTI_BIND`); `proxy` profile for TLS + password |
 
-The container stack's four-process split is opt-in on the left: a host
-install may run `python -m api.queue_loop` as a service and get the same
-split without containers. `DATABASE_URL` itself is not opt-in on either side
+On a legacy host install the four-process split was opt-in: running
+`python -m api.queue_loop` as a service gave the same split without
+containers. `DATABASE_URL` itself is not opt-in on either side
 any more — CTIParsor has no SQLite fallback (ADR-0053), so a host install
 needs a reachable PostgreSQL server just as the container stack does; the
 lightest way to get one for a single-analyst host install is `docker compose
@@ -36,6 +40,7 @@ flowchart LR
         app["app\nCTIPARSOR_ROLE=api\nFastAPI + React UI :8000"]
         worker["worker x N\nCTIPARSOR_ROLE=worker\nqueue loop + pipeline subprocess"]
         bootstrap["bootstrap (profile)\none-shot: models, corpora, rule store"]
+        capproxy["capture-proxy\nSquid egress filter\nfor URL capture"]
     end
     subgraph backend [network backend - internal, no route out]
         pg[("postgres\njob store + rule store")]
@@ -51,11 +56,13 @@ flowchart LR
     app --> ollama
     worker --> ollama
     worker -->|LLM APIs, HuggingFace| internet((internet))
-    app -->|CVE lookups, URL capture| internet
+    app -->|CVE lookups| internet
+    app -->|URL capture| capproxy -->|public addresses only| internet
     state[("volume cti-state\nuploads, output, backups")]
     cache[("volume cti-cache\nHF models, corpora")]
     pgdata[("volume pg-data")]
     app --- state
+    app --- cache
     worker --- state
     worker --- cache
     bootstrap --- state
@@ -67,9 +74,10 @@ flowchart LR
 |---|---|---|---|
 | `app` | `ctiparsor` (this repo's `Dockerfile`) | serves the API and the built web UI on one port; accepts uploads, pasted text and URLs; queues them; serves progress (SSE), review, coverage, export; runs the corpus rebuild from the Settings page | nothing persistent of its own |
 | `worker` | same image, `command: worker` | claims queued reports, runs each in an isolated subprocess (models loaded there), writes entities, relationships, the bundle and progress events | its lease on the jobs it runs |
-| `postgres` | `postgres:17-alpine` | **both stores**: the job store (`jobs`, `entities`, `relationships`, `progress_events`, `relationship_policy`, `report_figures`, `figure_reads`, `cve_cache`) and, since ADR-0053, the detection-rule corpus (`detection_rules`, `rule_bytes`, `rule_techniques`, `rule_atoms`, `rule_related`, `rule_text`) | volume `pg-data` |
+| `postgres` | `postgres:17-alpine` | **both stores**: the job store (`jobs`, `entities`, `relationships`, `review_decisions`, `progress_events`, `relationship_policy`, `model_thresholds`, `entity_overrides`, `report_figures`, `figure_reads`, `cve_cache`) and, since ADR-0053, the detection-rule corpus (`detection_rules`, `rule_bytes`, `rule_techniques`, `rule_atoms`, `rule_related`, `rule_text`) | volume `pg-data` |
 | `cti-state` volume | — | `uploads/`, `output/`, `backups/`, the private corpus overlay — no database file lives here any more | back it up alongside `pg-data` |
 | `cti-cache` volume | — | 2.6 GB of HuggingFace models, 0.7 GB of corpus clones | rebuildable with `bootstrap` |
+| `capture-proxy` | `ubuntu/squid` | forces the URL-capture tab's Chromium through an egress filter that refuses private, loopback and link-local destinations, closing the DNS-rebinding gap Python's own URL checks leave (`docker/squid/squid.conf`) | nothing persistent |
 | `proxy` (profile) | `nginxinc/nginx-unprivileged` | TLS termination and HTTP basic auth, the only thing meant to be published on a network | certs and htpasswd you provide |
 | `ollama` (profile) | `ollama/ollama` | a local LLM for Stage 3 and Stage 1f, reachable only from `app` and `worker` | volume `ollama-models` |
 | `bootstrap` (profile) | same image, `command: bootstrap` | one shot: creates the schema, downloads the models, clones the corpora, builds the rule store | — |
@@ -83,8 +91,8 @@ corpus's `MATCH` queries are all quoted-phrase lookups, not free-text
 ranking), and the one SQLite planner hint the corpus code relied on was
 defeating a SQLite-specific query-planner gap that PostgreSQL's cost-based
 planner does not share. **CTIParsor no longer supports SQLite at all** —
-`DATABASE_URL` is mandatory, for the host install, the container stack and
-the test suite alike. In code this is `api.db.get_conn()` for the job store
+`DATABASE_URL` is mandatory, for the container stack, a legacy host install
+and the test suite alike. In code this is `api.db.get_conn()` for the job store
 and `api.db.get_rule_conn()` for the rule store; both resolve to the same
 PostgreSQL connection today, kept as two accessors in case the corpus ever
 needs a database of its own.
@@ -140,7 +148,7 @@ container stack reads the same file twice — once to fill its own `${...}`
 values, once to pass it to every container — so the LLM keys, the pipeline
 flags, the database password and the resource limits live together.
 
-| Variable | Host install | Container stack |
+| Variable | Host install (legacy) | Container stack |
 |---|---|---|
 | `DATABASE_URL`, `PGPASSWORD` | **required** (ADR-0053: no SQLite fallback) — points both stores at PostgreSQL | set by compose to the `postgres` service |
 | `CTI_DB_PASSWORD`, `CTI_DB_USER`, `CTI_DB_NAME` | unused | required password; user and database created on first start |
@@ -235,7 +243,7 @@ names as the missing piece.
 
 - [docs/docker.md](docker.md) — running the stack day to day
 - [docs/upgrading.md](upgrading.md) — moving an existing install to this layout
-- [docs/deployment.md](deployment.md) — host installs, exposure, systemd
+- [docs/deployment.md](deployment.md) — serving several analysts: bind address, exposure, TLS proxy, systemd
 - [SECURITY.md](../SECURITY.md) — threat model
 - ADRs [0044](adr/0044-container-images.md), [0045](adr/0045-postgresql-for-the-job-store.md),
   [0046](adr/0046-worker-container.md), [0047](adr/0047-publish-image-to-ghcr.md),

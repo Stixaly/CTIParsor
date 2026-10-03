@@ -51,8 +51,10 @@ Four view modes toggled at the top of the document pane:
 | `R` | Reject focused entity |
 | `U` | Reset to pending |
 | `G` | Open STIX graph |
-| `F` | Finalize bundle |
+| `C` | Open the detection-coverage page |
+| `F` | Finalize the bundle — once the review is completed, download it |
 | `?` | Show shortcut help |
+| `Esc` | Close the help, the drawer, and clear the focus |
 
 **Entity states:**
 - **Pending** (default) — included in bundle
@@ -117,13 +119,23 @@ a **readiness score** (not lab validation):
 
 | Score | Meaning |
 |---|---|
-| 3 — Corroborated | a rule exists in **≥ 2** corpora |
-| 2 — Covered | a rule exists in **1** corpus |
-| 1 — Telemetry only | ATT&CK data-source mapping, no rule yet |
+| 3 — Corroborated | a rule tagged with the technique exists in **≥ 2** corpora |
+| 2 — Covered | a rule tagged with the technique exists in **1** corpus |
+| 1 — Telemetry only | reserved for an ATT&CK data-source mapping with no rule; nothing computes it yet, so no cell shows it |
 | 0 — No coverage | technique extracted, no rule |
 
-Cells show the technique, rule count, and contributing corpora. A banner makes
-the "readiness ≠ validation" distinction explicit.
+The score follows the rules' ATT&CK tags, but the rules listed under each
+technique are only those that hold a value the report contains (ADR-0030). A
+cell can therefore read *Covered* and list no rule: a rule carries the tag,
+none matches this report. Rules promoted from the Review page's **Detections**
+tab join the selection in a group of their own. A banner makes the
+"readiness ≠ validation" distinction explicit.
+
+Below the matrix, the selection table and the export panel build the ZIP of
+rules to deploy. The artifact view of ADR-0025 — coverage scored per hash,
+domain or path rather than per technique — is not on this page; it is served by
+`GET /api/jobs/{id}/coverage/artifacts`. Walkthrough:
+[docs/detection-coverage.md](detection-coverage.md).
 
 ## Settings page
 

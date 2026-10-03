@@ -81,14 +81,23 @@ the [README](../README.md#how-it-works); this page is the detail.
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
-│  Stage 3 — LLM ENRICHMENT              (requires API key)            │
+│  Stage 2g — ALIAS LISTS                                 (offline ✅)  │
+│  Regex for the "X (aka Y, Z)" / "X, also known as Y and Z" construct │
+│  • Every name in the list → threat actor (the dominant use of aka)   │
+│  • Catches aliases no gazetteer or NER model knows yet               │
+│  • Confidence 0.55: meant for review, calibrated like 2d/2e          │
+└─────────────────────────────┬────────────────────────────────────────┘
+                              │
+┌─────────────────────────────▼────────────────────────────────────────┐
+│  Stage 3 — LLM ENRICHMENT                (requires an LLM provider)  │
 │  Input : chunk + pre-detected IoCs + gazetteer/NER context          │
 │  Output: threat actors, malware families, tools, TTPs,              │
 │          relationships (+ evidence quote), IoC→malware links,       │
 │          targeted sectors/countries, course of action               │
 │  • Parallel processing (configurable via LLM_PARALLELISM)           │
 │  • Crash-resume: checkpoint saved every N chunks                     │
-│  • Providers: Anthropic Claude | Mistral AI | Ollama                │
+│  • Providers: Anthropic | Gemini | Mistral (hosted)                  │
+│               Ollama | vLLM | LM Studio (local)                      │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
@@ -134,6 +143,17 @@ the [README](../README.md#how-it-works); this page is the detail.
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
+│  Stage 3doc — DOCUMENT-LEVEL RELATIONS        (optional — ADR-0057)  │
+│  One extra LLM call over the WHOLE report, relationships only, for   │
+│  facts stated far apart (paragraph 2 → paragraph 40)                 │
+│  • Measured (ADR-0064): ~60% more correct relationships, but only    │
+│    40% of the ones it adds are strictly correct                      │
+│  • Needs a context window that fits the report and a long timeout    │
+│  • Goes through 3d like the chunks when 3d is on                     │
+│  Enable: ENABLE_DOCUMENT_LEVEL_RELATIONS=true in .env                │
+└─────────────────────────────┬────────────────────────────────────────┘
+                              │
+┌─────────────────────────────▼────────────────────────────────────────┐
 │  Stage 3c — MITRE ATT&CK NORMALISATION                 (offline ✅)  │
 │  Runs ONCE per document, after every chunk is merged — not per chunk │
 │  Fuzzy-matches extracted TTPs against the full ATT&CK corpus         │
@@ -143,6 +163,15 @@ the [README](../README.md#how-it-works); this page is the detail.
 │  • Score < 70 : pass through unchanged                               │
 │  + Merge precision (ADR-0011): only HIGH-confidence semantic wins    │
 │    over the LLM; parent technique dropped when a sub-technique fires │
+└─────────────────────────────┬────────────────────────────────────────┘
+                              │
+┌─────────────────────────────▼────────────────────────────────────────┐
+│  Stage 2f — CVE ENRICHMENT                  (cache; network opt-in)  │
+│  Adds a description and a CVSS v3 score to each CVE's Vulnerability  │
+│  (x_cvss_v3_score, x_cvss_v3_vector), from the cve_cache table       │
+│  • CVE_ENRICHMENT=true: misses are looked up on the public CIRCL     │
+│    API (≤ 25 lookups, ≤ 30 s per report); off by default             │
+│  Runs just before Stage 4, despite its number                        │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
@@ -209,9 +238,13 @@ LLM provider) or failed — the CLI prints it, the worker stores it in the job's
 run config (`stage_report`). The lexicon re-scan runs on Finalize, so it stays
 web-only.
 
-Stage order note: 3b, 3d, 3f and 3e run **per chunk**; 3c runs **once per
-document**, after every chunk has been merged. The boxes are drawn in that
-execution order.
+Stage order note: 3b, 3d, 3f and 3e run **per chunk**; 3doc reads the whole
+document once and its result joins the per-chunk ones; 3c runs **once per
+document**, after every result has been merged; 2f runs right before Stage 4,
+whose Vulnerability objects it feeds. The boxes are drawn in that execution
+order, the order of the CLI's stage ids too:
+`1 1f 2 2b 2c 2d 2e 2g 3 3d 3f 3e 3doc 2f 4 4b 4c 5` (3b and 3c have no id of
+their own: 3b is part of Stage 3, 3c always runs).
 
 ## Extraction quality layers
 
@@ -352,22 +385,37 @@ docker compose run --rm dev python scripts/build_indexes.py --only mitre        
 docker compose run --rm dev python scripts/build_indexes.py --only gazetteer     # gazetteer.json
 docker compose run --rm dev python scripts/build_indexes.py --only embeddings    # mitre_embeddings.npy
 docker compose run --rm dev python scripts/build_indexes.py --only relationships # attack_relationships.json
+
+# Never built by default: the candidate corpus TTP_MODE=select needs (ADR-0072)
+docker compose run --rm dev python scripts/build_indexes.py --only retrieval     # attack_retrieval_*
 ```
 
 The script auto-discovers bundle files in `data/`, `~/Downloads/`, and `~/Documents/`. Accepts `--enterprise`, `--mobile`, `--ics`, `--capec` flags for explicit paths.
 
-| File | Stage | Size |
-|---|---|---|
-| `pipeline/data/mitre_index.json` | 3c normalisation | ~430 KB |
-| `pipeline/data/gazetteer.json` | 2b gazetteer NER | ~194 KB |
-| `pipeline/data/attack_relationships.json` | 4b ATT&CK grounding | ~586 KB |
-| `pipeline/data/mitre_embeddings.npy` | 2c semantic TTP | ~2.3 MB |
-| `pipeline/data/mitre_embeddings_meta.json` | 2c semantic TTP | ~60 KB |
-| `pipeline/data/mitre_embeddings_manifest.json` | 2c cache validity + thresholds | ~1 KB |
+| File | Stage | Size | In git |
+|---|---|---|---|
+| `pipeline/data/mitre_index.json` | 3c normalisation | ~750 KB | yes |
+| `pipeline/data/gazetteer.json` | 2b gazetteer NER | ~280 KB | yes |
+| `pipeline/data/attack_relationships.json` | 4b ATT&CK grounding | ~600 KB | yes |
+| `pipeline/data/mitre_embeddings.npy` | 2c semantic TTP | ~2.3 MB | yes |
+| `pipeline/data/mitre_embeddings_meta.json` | 2c semantic TTP | ~190 KB | yes |
+| `pipeline/data/mitre_embeddings_manifest.json` | 2c cache validity + thresholds | ~1 KB | no — written by `--only embeddings` |
+| `pipeline/data/attack_retrieval_corpus.json` | 2c candidate retrieval (`TTP_MODE=select`) | ~7 MB | no — gitignored, `--only retrieval` |
+| `pipeline/data/attack_retrieval_embeddings.npy` | 2c candidate retrieval (`TTP_MODE=select`) | ~27 MB | no — gitignored, `--only retrieval` |
 
-These files are not gitignored — commit them to your repo to avoid a per-clone rebuild.
+The five committed files are all a fresh clone needs: rebuild them only after a
+MITRE ATT&CK release, and commit the result to avoid a per-clone rebuild.
 
-> The **manifest** records the model the cache was built with (so Stage 2c can detect a stale cache after `TTP_EMBEDDING_MODEL` changes) and the calibrated `thresholds` (`high`/`medium`) for that model — written by `build_indexes.py --only embeddings` (ADR-0011 Phase A).
+> The **manifest** records the model the cache was built with (so Stage 2c can detect a stale cache after `TTP_EMBEDDING_MODEL` changes) and the calibrated `thresholds` (`high`/`medium`) for that model — written by `build_indexes.py --only embeddings` (ADR-0011 Phase A). It is not in git: without it Stage 2c assumes the committed cache was built with the default `all-MiniLM-L6-v2` and uses that model's thresholds, which is true of the committed files. Switching model means rebuilding the embeddings, which writes it.
+
+The retrieval corpus holds one entry per technique and one per distinct ATT&CK
+procedure example, with actor and software names replaced by placeholders
+(`--keep-names` keeps them). `bootstrap` does not build it: run the command
+above, then rebuild the image (`make docker-build`) so `app` and `worker` carry
+it — `pipeline/data/` is baked into the image and read-only at run time. Without
+it, `TTP_MODE=select` reports Stage 2c unavailable. The same goes for any index
+rebuilt here: the `dev` container writes it into the repository, the image
+picks it up at the next build.
 
 ## Offline support
 
@@ -382,8 +430,11 @@ These files are not gitignored — commit them to your repo to avoid a per-clone
 | Stage 3b — hallucination filter | ✅ fully offline (rapidfuzz) |
 | Stage 3c — MITRE normalisation + merge precision | ✅ after `build_indexes.py` |
 | Stage 3f — TTP self-verification (opt-in) | ❌ requires an LLM provider |
-| Stage 3 — Anthropic / Mistral | ❌ requires internet |
-| Stage 3 — Ollama | ✅ if instance is local |
+| Stage 2g — alias lists | ✅ fully offline (regex) |
+| Stage 2f — CVE enrichment | ✅ from the `cve_cache` table; ❌ the CIRCL lookup, opt-in with `CVE_ENRICHMENT=true` |
+| Stage 3 — Anthropic / Gemini / Mistral | ❌ requires internet |
+| Stage 3 — Ollama / vLLM / LM Studio | ✅ if the server is local |
+| Stage 3doc — document-level relations (opt-in) | ❌ requires an LLM provider |
 | OCR (Tesseract) | ✅ local binary |
 | Web UI (frontend assets) | ✅ served from local dist/ |
-| Detection coverage (Sigma) | ✅ after `sync_corpora` (one-time clone) + `build_detection_index` |
+| Detection coverage (Sigma, Suricata, YARA) | ✅ after `sync_corpora` (one-time clone) + `build_detection_index` |

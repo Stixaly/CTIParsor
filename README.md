@@ -158,23 +158,26 @@ ran, were skipped (disabled, model missing, no LLM provider) or failed.
 | **1f** Figure reading | A vision model transcribes the figures of a PDF (diagrams, screenshots, tables) into the text | opt-in — `VISION_PROVIDER` |
 | **2** Regex IoCs | IPs, domains, URLs, emails, MACs, ASNs, paths, registry keys, hashes, CVEs, raw ATT&CK IDs | always |
 | **2b** Gazetteer NER | Aho-Corasick scan for the malware, tools and groups ATT&CK knows | always |
-| **2c** Semantic TTPs | Sentence-transformer similarity against ATT&CK technique descriptions | always |
+| **2c** Semantic TTPs | Sentence-transformer similarity against ATT&CK technique descriptions; with `TTP_MODE=select`, only retrieves candidates for 3f to choose from | always |
 | **2d** CyNER 2.0 | DeBERTa-v3 cybersecurity NER — malware and threat groups | on by default — `CYNER_ENABLED` |
 | **2e** GLiNER | Zero-shot NER — sectors, campaigns, infrastructure, actors not yet in ATT&CK | on by default — `GLINER_ENABLED` |
+| **2g** Alias lists | Splits "X (aka Y, Z)" constructs into threat-actor names no dictionary knows yet | always |
 | **3** LLM enrichment | Actors, malware, tools, TTPs, relationships with an evidence quote, targets, mitigations | with an LLM provider |
 | **3b** Hallucination filter | Fuzzy-matches every LLM-returned name against the source chunk | with Stage 3 |
 | **3d** Relationship verification | A second LLM call must quote the sentence supporting each relationship | opt-in — `ENABLE_STIX_VERIFICATION` |
 | **3f** TTP verification | The same for techniques: quote the sentence describing their use | on in `.env.example` — `ENABLE_TTP_VERIFICATION` |
 | **3e** Cross-model consensus | A second provider re-runs relationship-bearing chunks; agreement raises confidence | opt-in — `ENABLE_CONSENSUS` |
+| **3doc** Document-level relations | One call over the whole report for relationships between facts stated far apart | opt-in — `ENABLE_DOCUMENT_LEVEL_RELATIONS` |
 | **3c** ATT&CK normalisation | Canonical technique names and IDs, once per document; parent dropped when a sub-technique is present | always |
+| **2f** CVE enrichment | Description and CVSS v3 score for each CVE, from a local cache; the CIRCL lookup that fills it is opt-in | always (cache) — network with `CVE_ENRICHMENT` |
 | **4** STIX mapping | SCOs, SDOs, Indicators, relationships, TLP/PAP markings, authoring identity | always |
 | **4b** Graph completion | ATT&CK-curated edges and transitive inference, each labelled as inferred or reported | on by default — policy `completion` |
 | **4c** Long-distance prediction | The LLM links disconnected sub-graphs — a quote is required | opt-in — policy `completion.long_distance` |
 | **5** Validation & export | `stix2` + `stix2-validator`, then `output/{report}_bundle.json` | always |
 
 Every stage that needs no LLM runs offline once `bootstrap` has cached the
-models. The full stage diagram, what each quality layer catches and why, the
-ATT&CK indexes and the offline matrix are in
+models, except the opt-in CVE lookup. The full stage diagram, what each
+quality layer catches and why, the ATT&CK indexes and the offline matrix are in
 **[docs/pipeline.md](docs/pipeline.md)**.
 
 ### Architecture
@@ -396,12 +399,17 @@ A real store is **52,481 Suricata**, **22,303 YARA** and **11,396 Sigma**
 rules, and coverage, drill-in and export keep the three languages distinct
 throughout (ADR-0015 / ADR-0022).
 
-- **Keyed on the report's technical content, not its ATT&CK tags** (ADR-0025).
-  A rule counts when it holds a hash, address, domain, path, registry key, tool
-  or malware name the report contains, scored by how many independent corpora
-  carry it and grouped by **Pyramid of Pain** tier. Scoring by tag measured
-  badly: across two real reports the tag join selects **25,493 rules of which
-  4 match anything in them**. ATT&CK stays as an unscored phase band.
+- **The Coverage page** lays the report's ATT&CK techniques out by tactic and
+  colours each by a readiness score: rules in two or more corpora, in one, or
+  in none. The rules listed under a technique are only those that hold a value
+  the report actually contains — a hash, domain, path, tool or malware name
+  (ADR-0030) — because sharing an ATT&CK tag says little about the report:
+  across two real reports the tag join selects **25,493 rules of which 4 match
+  anything in them**.
+- **Artifact coverage** (ADR-0025) scores the report's own hashes, addresses,
+  domains, paths, registry keys, tools and malware names instead of its
+  techniques, grouped by **Pyramid of Pain** tier. It is served by
+  `GET /api/jobs/{id}/coverage/artifacts`; the UI does not show it yet.
 - **Rule proposals** — the Review page's **Detections** tab ranks rules on the
   report's observables (weighted by how rare each value is) and platform, and
   shows which value matched which rule field (ADR-0014).
@@ -409,14 +417,12 @@ throughout (ADR-0015 / ADR-0022).
   then download a ZIP with each rule in its native extension and a manifest
   of licences and exclusions.
 
-The `bootstrap` run already fetches and indexes the corpora. To refresh them
-later:
+The `bootstrap` run already clones the corpora and builds the rule store. Two
+things it leaves to you:
 
 ```bash
-docker compose run --rm dev python scripts/sync_corpora.py          # clone/pull each git repo (public: no auth; private: SSH agent);
-                                                                       # download + verify tarball corpora (ET Open)
-docker compose run --rm dev python scripts/build_detection_index.py # parse local clones → detection-rule store (PostgreSQL, ADR-0053)
-# or: make corpora && make detection-index
+docker compose run --rm app python scripts/build_rule_text.py   # rule-title index for brand evidence (ADR-0031) — never built by bootstrap
+docker compose --profile bootstrap run --rm bootstrap --no-models  # later: re-clone every corpus and rebuild the store
 ```
 
 Walkthrough, scoring details and troubleshooting:
@@ -451,6 +457,7 @@ Other settings worth knowing:
 | `ENABLE_CONSENSUS` + `CONSENSUS_PROVIDER` | Stage 3e cross-model consensus |
 | `TTP_EMBEDDING_MODEL`, `GLINER_MODEL` | The Stage 2c and 2e models |
 | `STIX_TLP`, `STIX_AUTHOR_NAME` | The marking and authoring identity stamped on every object |
+| `JOB_RETENTION_DAYS` | Delete finished reports older than N days — `0`, the default, keeps them until someone deletes them |
 | `DATABASE_URL` | PostgreSQL — set for you by `compose.yaml` |
 
 Every variable, with its default and the reasoning behind it:
@@ -478,6 +485,8 @@ Every variable, with its default and the reasoning behind it:
   the `proxy` profile adds TLS and a password in front (`docker compose
   --profile proxy up -d`), the `ollama` profile a local LLM with no published
   port;
+- sends the URL tab's Chromium through `capture-proxy`, a Squid egress filter
+  that only lets it reach public addresses;
 - adds isolation, **not authentication** — [docs/deployment.md §2](docs/deployment.md#2-what-no-authentication-actually-means)
   applies unchanged.
 
@@ -578,7 +587,7 @@ to the `app` service. Both are `profiles: [dev]`, so a plain
 | `make ci` | Every check the pull-request CI runs, locally: lint, types, tests + coverage floors, frontend |
 | `make run` | Run the pipeline on `tests/fixtures/sample_report.txt` |
 | `make check` | Diagnostic: list which pipeline stages are available |
-| `make check-docs` | Verify the numbers claimed in the docs against the source of truth |
+| `make check-docs` | Verify the numbers claimed in the docs against the source of truth (CI runs it too) |
 | `make audit` | Scan Python + npm dependencies for known CVEs |
 
 The full list of `make` targets, the extraction-quality benchmarks, the

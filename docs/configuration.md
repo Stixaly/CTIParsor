@@ -1,14 +1,26 @@
 # Configuration
 
 Every setting CTIParsor reads from `.env`. The [README](../README.md#configuration)
-covers the minimum to get a first report through; `.env.example` carries every
-variable with its default.
+covers the minimum to get a first report through. `.env.example` carries every
+variable with its default and is the reference when this page and it differ;
+`bash setup.sh` copies it to `.env` on a fresh clone. The containers receive the
+whole file, so a change takes effect at the next `docker compose up -d`.
 
-All configuration lives in `.env`. Copy `.env.example` to get started:
-
-```bash
-cp .env.example .env
-```
+- [Database](#database--postgresql-required)
+- [LLM provider](#llm-provider)
+- [NLP stages](#nlp-stages)
+- [Vision (Stage 1f)](#vision-stage-1f--figures)
+- [Advanced: checking passes, throughput, STIX output](#advanced)
+- [TTP mode: verify or select](#ttp-mode-verify-or-select)
+- [Document-level relations (Stage 3doc)](#document-level-relations-stage-3doc)
+- [LLM request limits and sampling](#llm-request-limits-and-sampling)
+- [CVE enrichment (Stage 2f)](#cve-enrichment-stage-2f)
+- [Analyst feedback](#analyst-feedback)
+- [Worker, queue and retention](#worker-queue-and-retention)
+- [OCR](#ocr)
+- [Logging](#logging)
+- [Expert tuning](#expert-tuning)
+- [Web server and Docker Compose](#web-server-and-docker-compose)
 
 Every on/off flag below reads the same vocabulary, case- and whitespace-
 insensitive: `1`, `true`, `yes`, `on` enable; `0`, `false`, `no`, `off` disable.
@@ -118,7 +130,8 @@ Leave `ANTHROPIC_API_KEY` unset. Stage 3 is skipped. The pipeline still produces
 # Stage 2c — Semantic TTP embedding model
 # Default: all-MiniLM-L6-v2 (80 MB, fast)
 # Upgrade: ehsanaghaei/SecureBERT-Plus (500 MB, +8-12% F1 on CTI text)
-# After changing: docker compose run --rm dev python scripts/build_indexes.py --only embeddings
+# After changing: docker compose run --rm dev python scripts/build_indexes.py --only embeddings,
+# then make docker-build: the cache lives in pipeline/data/, baked into the image
 TTP_EMBEDDING_MODEL=all-MiniLM-L6-v2
 
 # Stage 2c — semantic precision tuning (ADR-0011 Phase A). Thresholds are
@@ -214,9 +227,7 @@ STIX_VERIFY_MIN_RELS=1
 ENABLE_TTP_VERIFICATION=true
 TTP_VERIFY_MIN=1
 
-# TTP mode (ADR-0072).  verify (default): the measured baseline above.  select:
-# Stage 2c only retrieves candidates and 3f selects among them with a quote.
-# Needs `python scripts/build_indexes.py --only retrieval`; evaluate on dev first.
+# TTP mode (ADR-0072) — see "TTP mode: verify or select" below.
 # TTP_MODE=verify
 
 # Stage 2c — taxonomies the semantic matcher may return (ATT&CK-only default;
@@ -239,3 +250,228 @@ STIX_AUTHOR_NAME=CTIParsor
 # HuggingFace token (removes rate limits on model downloads)
 HF_TOKEN=
 ```
+
+## TTP mode: verify or select
+
+`TTP_MODE` (ADR-0072) decides how techniques are found.
+
+| | `verify` (default) | `select` |
+|---|---|---|
+| Stage 2c | emits techniques from cosine similarity to ATT&CK descriptions | only **retrieves** ranked candidates per passage, from ATT&CK descriptions *and* procedure examples, BM25 and dense rankings fused — it emits no technique |
+| Stage 3f | checks the LLM's techniques after the fact; a high-confidence 2c match skips the check; a failed call keeps the claims | **chooses** among those candidates and the LLM's own proposals, each with a quote the code must find in the text; a failed call ships nothing and sends its candidates to review |
+| Measured | the baseline of `docs/eval/baseline-2026-09.md` | on AnnoCTR dev, see [docs/eval/README.md](eval/README.md) |
+
+To switch:
+
+1. Build the retrieval corpus, which `bootstrap` does not build (~35 MB), then
+   rebuild the image: `pipeline/data/` is part of the image, read-only at run
+   time, so the corpus has to be written into the repository and baked in.
+
+   ```bash
+   docker compose run --rm dev python scripts/build_indexes.py --only retrieval
+   make docker-build && docker compose up -d
+   ```
+2. Run the dev evaluation on your own setup first:
+   `TTP_MODE=select python -m evaluation run --split dev --name sel-dev` in the
+   `dev` container, compared with a `verify` run
+   ([docs/eval/README.md](eval/README.md)).
+3. Set `TTP_MODE=select` and keep `ENABLE_TTP_VERIFICATION=true`: with 3f off,
+   select mode drops the retrieved candidates and lets the LLM's techniques
+   through unchecked.
+
+Without an LLM provider, select mode cannot select: Stage 2c falls back to the
+`verify` detector and the run records it as an offline fallback.
+
+```env
+# Corpus retrieved from: short (the legacy cache), description, procedure or both
+# TTP_RETRIEVAL_CORPUS=both
+# Retriever: dense, bm25, minrank or rrf
+# TTP_RETRIEVAL_METHOD=rrf
+# Candidates kept per passage, then per chunk (the LLM's own proposals are added
+# on top, never cut).  10 / 40 put 86% of the gold techniques in their own
+# chunk's list on AnnoCTR dev, 21 per chunk on average.
+# TTP_CANDIDATES_PER_PASSAGE=10
+# TTP_CANDIDATES_PER_CHUNK=40
+# The technical-keyword allow-list, applied to retrieval
+# TTP_RETRIEVAL_KEYWORD_GATE=true
+# Chunks Stage 3 skips (no IoC, no known name) but with candidates get a
+# selection call each: 36 more calls for at most 4% more recall on dev
+# TTP_SELECT_SKIPPED_CHUNKS=false
+# A selection quote shorter than this many words goes to review
+# TTP_SELECT_MIN_QUOTE_WORDS=3
+# File of URL fragments: procedure examples citing one are not retrieved (the
+# evaluation sets it so examples written from a scored report stay out)
+# TTP_RETRIEVAL_EXCLUDE_CITED=
+```
+
+## Document-level relations (Stage 3doc)
+
+One extra LLM call per report reads the **whole** document and extracts
+relationships only, linking facts stated far apart ("X is a variant of Y" in
+paragraph 2, "Y is attributed to Z" in paragraph 40) — ADR-0057, ADR-0064.
+Measured on 7 real reports: about 60% more correct relationships, but only 40%
+of the ones it adds are strictly correct (vague `related-to`, generic
+endpoints). When Stage 3d is on, its result goes through 3d like the chunks'.
+
+It needs a context window that fits the whole report and room for a long
+answer: on a 37 000-character report it wrote 50 000 characters, 11 minutes at
+~15 tokens/s. Raise `LLM_TIMEOUT` and `LLM_MAX_OUTPUT_TOKENS` with it, or the
+call times out and adds nothing.
+
+```env
+ENABLE_DOCUMENT_LEVEL_RELATIONS=false
+# Prompt ceiling for this pass only (largest report of this project's corpus: ~110k chars)
+# LLM_DOC_MAX_PROMPT_LENGTH=300000
+```
+
+## LLM request limits and sampling
+
+```env
+# Keep LLM_MAX_RESPONSE_LENGTH above ~4 x LLM_MAX_OUTPUT_TOKENS: a response cut
+# shorter than the model may write loses its JSON, and the chunk with it.
+# LLM_MAX_OUTPUT_TOKENS=8192
+# LLM_MAX_PROMPT_LENGTH=32000
+# LLM_MAX_RESPONSE_LENGTH=48000
+# Claims per Stage 3d call: a document-level pass's ~100 claims in one call
+# would outgrow the output budget (ADR-0064)
+# STIX_VERIFY_BATCH_SIZE=40
+
+# Unset: each provider's default (temperature 0.7 for Qwen on vLLM, 1.0 on
+# Anthropic), so two runs of one report can differ.  Set them to make runs
+# repeatable, e.g. for an evaluation.  The seed reaches vLLM, Ollama and LM Studio only.
+# LLM_TEMPERATURE=0
+# LLM_SEED=13
+```
+
+`CHUNK_MAX_CHARS`, `CHUNK_OVERLAP` and `LLM_MAX_RETRIES` appear in
+`.env.example` but **have no effect**: the worker picks the chunk size itself
+(3 000 characters, 4 000 above 30k, 5 000 above 60k, with a 400-character
+overlap) and Stage 3 retries a failed call 3 times. They are read into a
+config object nothing uses.
+
+## CVE enrichment (Stage 2f)
+
+Stage 2f adds a description and a CVSS v3 score to each CVE's `vulnerability`
+object (`x_cvss_v3_score`, `x_cvss_v3_vector`). It always reads the
+`cve_cache` table; with the flag on, it also looks up what the cache does not
+hold on the public CIRCL API — at most 25 lookups and 30 s per report — and
+caches the answer, misses included. Off by default, because Stages 1, 2, 4
+and 5 otherwise run fully offline.
+
+```env
+# CVE_ENRICHMENT=false
+```
+
+## Analyst feedback
+
+Besides `THRESHOLD_CALIBRATION_ENABLED` and `ENTITY_OVERRIDES_ENABLED` above:
+
+```env
+# ADR-0058: the worker auto-accepts entities at >= 90% confidence when a job
+# finishes, but leaves this share of them pending ("confirm" chip).  Analysts'
+# verdicts on those measure how often auto-accept is right
+# (GET /api/thresholds -> auto_accept_audit).  0 disables.
+# REVIEW_CONTROL_SAMPLE_RATE=0.10
+```
+
+## Worker, queue and retention
+
+```env
+# Reports processed at the same time, per worker container.  Each holds ~4.4 GB
+# (mostly GLiNER): size it from RAM, floor((RAM_GB - 4) / 4.4), and raise
+# CTI_WORKER_MEMORY with it.  1 for the compose worker.
+# WORKER_MAX_CONCURRENT=1
+# Seconds one report may run (figures and LLM included) before it is cancelled.
+# A local LLM needs more: ~100 s for one short chunk with 3d and 3f on was
+# measured with Qwen3.8-27B on vLLM.
+# WORKER_JOB_TIMEOUT=1800
+# Reports allowed to wait once every slot is busy; beyond it an upload gets
+# HTTP 503 instead of being silently dropped.  0 = unbounded.
+# API_QUEUE_MAX_DEPTH=50
+
+# Delete finished jobs (rows and files) older than N days.  0 = never.  Queued
+# and running jobs are never swept.  The sweep runs at most every
+# JOB_RETENTION_SWEEP_S seconds.
+# JOB_RETENTION_DAYS=0
+# JOB_RETENTION_SWEEP_S=3600
+
+# A running job whose heartbeat is older than the lease goes back to the queue
+# (keep the lease at least 3x the heartbeat); poll interval; how long a
+# stopping worker lets running reports finish before requeueing them.
+# WORKER_HEARTBEAT_S=30
+# WORKER_LEASE_TIMEOUT_S=180
+# WORKER_POLL_S=2
+# WORKER_DRAIN_S=60
+
+# Stages to skip for every report this process runs (worker and CLI alike), to
+# measure what a stage contributes.  Ids: 1f 2 2b 2c 2d 2e 2g 3 3d 3f 3e 3doc 2f 4 4b 4c 5
+# PIPELINE_DISABLED_STAGES=
+```
+
+`CTIPARSOR_ROLE` (`api`, `worker`, or `all` on a legacy host install) is set
+per service by `compose.yaml`; leave it alone.
+
+## OCR
+
+```env
+# Tesseract language(s) for scanned PDF pages, e.g. eng+fra.  OCR is decided page by page.
+# OCR_LANG=eng
+```
+
+The image installs Debian's `tesseract-ocr`, which brings English only. Another
+language needs its `tesseract-ocr-<lang>` package added to the `Dockerfile`
+and an image rebuild.
+
+## Logging
+
+```env
+# DEBUG | INFO | WARNING | ERROR
+# LOG_LEVEL=INFO
+# text | json
+# LOG_FORMAT=text
+# Also write to this file (empty = stdout only), rotated at MAX_LOG_SIZE bytes,
+# LOG_BACKUP_COUNT old files kept
+# LOG_FILE=
+# MAX_LOG_SIZE=10485760
+# LOG_BACKUP_COUNT=5
+```
+
+Under Docker, `docker compose logs -f app worker` reads stdout. The root
+filesystem is read-only, so a `LOG_FILE` has to point into a volume, e.g.
+`/app/state/ctiparsor.log`.
+
+## Expert tuning
+
+Calibrated values: change them only alongside a measurement
+(`tests/eval_pipeline.py` is the harness for the TTP ones).
+
+```env
+# Stage 2c gates
+# TTP_KEYWORD_GATE=true        # require technical keywords before proposing a technique
+# TTP_ADVISORY_GATE=true       # ignore mitigation text and table captions
+# TTP_UNWRAP_LINES=true        # rejoin lines broken by newlines before matching
+# TTP_MAX_CANDIDATES=200       # candidates kept per document
+
+# Stage 2d / 2e batching: phrases per batch, window size in characters
+# CYNER_BATCH_SIZE=4
+# CYNER_CHUNK_CHARS=1600
+# GLINER_BATCH_SIZE=4
+# GLINER_CHUNK_CHARS=1600
+
+# Tests and audit scripts only: skip spaCy, CyNER, GLiNER and the
+# sentence-transformers models, so nothing is downloaded.  Never in production.
+# SKIP_HEAVY_MODELS=
+```
+
+The Stage 2c thresholds and `TTP_SEMANTIC_DOMAINS` are in [NLP stages](#nlp-stages)
+and [Advanced](#advanced).
+
+## Web server and Docker Compose
+
+`API_HOST`, `API_PORT`, `API_WORKERS`, `API_RELOAD` and `FORWARDED_ALLOW_IPS`
+configure the single API process; under Docker, compose forces the first three
+and publishes with `CTI_BIND` / `CTI_PORT`. The compose-level settings —
+published ports, image name, `CTI_INSTALL_CAPTURE`, per-container CPU and memory
+(`CTI_<SERVICE>_CPUS`, `CTI_<SERVICE>_MEMORY`) — are in sections 9 and 12 of
+`.env.example`, with what each exposure means in
+[docs/deployment.md](deployment.md) and the sizing in [docs/docker.md](docker.md).

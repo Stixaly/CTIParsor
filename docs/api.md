@@ -7,18 +7,19 @@ by the running app at `http://localhost:8000/docs`.
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/upload` | Upload a file (multipart `file=`). Returns `{ job_id }`. Starts pipeline. |
+| `POST` | `/api/upload` | Upload a file (multipart `file=`) and queue it. Returns `{ job_id, filename, status }`, `status` being `queued` or `processing`; 503 when the queue is full. |
 | `POST` | `/api/ingest/text` | Ingest pasted text (JSON `text`, optional `title`). Stored `.html`, `.md` or `.txt` by content — pasted markup is stripped, not ingested raw. 20 chars min, 2 MB max. |
 | `POST` | `/api/ingest/url` | Render a URL with headless Chromium (JSON `url`, optional `enable_js`). Writes `{job_id}.pdf` (archive, shown in Review) and `{job_id}.txt` (rendered DOM text, ingested). 400 policy refusal · 502 unreachable or blank render · 503 Playwright absent · 504 timeout. |
 | `GET` | `/api/jobs` | List all jobs |
 | `GET` | `/api/jobs/{id}` | Get a single job (includes entity/relationship counts) |
 | `PATCH` | `/api/jobs/{id}` | Update status |
 | `DELETE` | `/api/jobs/{id}` | Delete job, all DB rows, and all associated files |
-| `POST` | `/api/jobs/{id}/finalize` | Re-run lexicon re-scan + Stages 4–5; sets status `completed` |
+| `POST` | `/api/jobs/{id}/finalize` | Re-run lexicon re-scan + Stages 4–5; sets status `completed`. `?quick=true` skips the re-scan (the rebuild the UI schedules after each edit) |
 | `GET` | `/api/jobs/{id}/bundle` | Download the STIX 2.1 bundle JSON |
+| `GET` | `/api/jobs/{id}/bundle/ledger` | What Stage 4 did with each entity and relationship row when it built the stored bundle (ADR-0061): what each became, what was rewritten or dropped and why, why each generated object exists. 404 when the bundle predates the ledger — a quick finalize writes one |
 | `GET` | `/api/jobs/{id}/source` | Stream the original uploaded file |
 
-Job status lifecycle: `uploaded` → `processing` → `for_review` → `reviewing` → `completed` / `failed`
+Job status lifecycle: `uploaded` → `queued` → `processing` → `for_review` → `reviewing` → `completed` / `failed`. A job whose worker stops heartbeating goes back to `queued` (ADR-0046).
 
 ## Entities
 
@@ -50,6 +51,7 @@ Job status lifecycle: `uploaded` → `processing` → `for_review` → `reviewin
 | `PATCH` | `/api/jobs/{id}/relationships/{rid}` | Update (`accepted`, `source_value`, `relationship_type`, `target_value`, `evidence_text`) |
 | `DELETE` | `/api/jobs/{id}/relationships/{rid}` | Remove |
 | `GET` | `/api/jobs/{id}/relationships/valid-types` | List valid STIX relationship type strings |
+| `POST` | `/api/jobs/{id}/relationships/bulk` | Accept, reject or reset several relationships in one call: `{ "ids": [...], "action": "accept" \| "reject" \| "reset" }`, at most 500 ids. Journaled as `human_bulk` (ADR-0058), which threshold calibration does not read. Returns `{ updated, action }` |
 
 ### Relationship object
 
@@ -120,7 +122,7 @@ is split:
 | `"fair-share"` *(default)* | max-min fair share — rules served in ascending demand order, each taking at most an equal share of the remainder, so a small rule is always satisfied in full |
 | `"sequential"` | legacy first-come-first-served — the first rules in the array take everything, later ones can emit nothing |
 
-Measured over the four bundles in `cti_stix.db`, switching to fair share takes
+Measured over the four bundles stored when ADR-0026 was written, switching to fair share takes
 the number of rules that actually emit an edge from **20 to 46**. Every
 materialised edge carries `x_evidence_label="assessed"` and `x_policy_rule`, and
 the Report SDO carries `x_synthesis_stats` with the per-rule
@@ -186,32 +188,16 @@ data: {"status":"for_review"}
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/jobs/{id}/coverage` | Per-report coverage matrix: each technique's 0–3 score + contributing corpora |
+| `GET` | `/api/jobs/{id}/coverage` | Per-report coverage matrix: each technique's 0–3 score + contributing corpora. Scores come from the rules' ATT&CK tags; score 1 (telemetry only) is never produced, no data-source mapping is wired in |
 | `GET` | `/api/jobs/{id}/coverage/rules` | Rules **backed by a value the report contains**, grouped by technique; rules carrying no ATT&CK tag (all YARA) arrive under `(untagged)`. Carries `tag_total` — what the unfiltered tag join would have returned (ADR-0030) |
 | `GET` | `/api/jobs/{id}/coverage/{technique}/rules` | License-aware drill-down: which rules cover a technique |
 | `GET` | `/api/jobs/{id}/detections/proposals` | Rules **ranked** on the report's observables + platform, with match evidence (ADR-0014) |
-| `GET` | `/api/jobs/{id}/coverage/artifacts` | Indexed coverage on evidence (ADR-0025), scoring the report's technical content (hashes, addresses, paths, tool/malware identities) by whether a rule actually holds that value, staged by Pyramid of Pain, with the ATT&CK band carried un-scored to locate the intrusion in the kill chain |
+| `GET` | `/api/jobs/{id}/coverage/artifacts` | Indexed coverage on evidence (ADR-0025), scoring the report's technical content (hashes, addresses, paths, tool/malware identities) by whether a rule actually holds that value, staged by Pyramid of Pain, with the ATT&CK band carried un-scored to locate the intrusion in the kill chain. Not displayed by the UI yet |
 | `GET` | `/api/jobs/{id}/detections/export` | Downloads the report's detection rules as a ZIP, filterable by repeatable `format`, `corpus`, `license`, `severity` query parameters (ADR-0020), where "detected" means canonical rules attachable to the report's accepted ATT&CK techniques, sharing the same archive constructor as the POST form |
 | `GET` | `/api/jobs/{id}/detections/export/facets` | Rule counts and byte volumes per axis for the filter UI (ADR-0020), allowing operators to see volume and license distribution before downloading (e.g., 18,196 rules / 268 MB, 1,642 all-rights-reserved), returning `total: 0` rather than 404 for jobs without rules |
 | `POST` | `/api/jobs/{id}/detections/export` | ZIP of exactly the rules in `{"rule_ids": [...]}` — the granular selection the axis filters cannot express (ADR-0022) |
 | `POST` | `/api/rules/lookup` | Metadata for arbitrary canonical rule ids, bodies on demand (`include_body`, ≤ 500 ids). Not job-scoped — the proposals panel shows rules outside the report's tag join by construction |
 | `GET` | `/api/detection-corpora` | Per-corpus rule counts in the store |
-
-## Queue
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/queue/status` | Backlog and worker liveness (ADR-0048): job counts by status, oldest-queued age, and per-worker heartbeat freshness against `WORKER_LEASE_TIMEOUT_S`. Unauthenticated, like every other GET route (SECURITY.md). |
-
-```json
-// GET /api/queue/status
-{ "role": "api", "backend": "postgresql",
-  "counts": { "queued": 2, "processing": 1, "failed": 0, "for_review": 12, "completed": 40 },
-  "queue": { "depth": 2, "max_depth": 50,
-             "oldest_queued_job_id": "3f2a...", "oldest_queued_seconds": 42.5 },
-  "workers": [ { "worker_id": "worker-1:7:a1b2c3", "running_jobs": 1,
-                 "oldest_heartbeat_seconds_ago": 3.2, "stale": false } ] }
-```
 
 ```json
 // GET /api/jobs/{id}/coverage
@@ -254,6 +240,22 @@ produce the same layout — `rules/{format}/{corpus}__{slug}.{ext}`, `MANIFEST.j
                      "weight": 0.68 } ] } ] }
 ```
 
+## Queue
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/queue/status` | Backlog and worker liveness (ADR-0048): job counts by status, oldest-queued age, and per-worker heartbeat freshness against `WORKER_LEASE_TIMEOUT_S`. Unauthenticated, like every other GET route (SECURITY.md). |
+
+```json
+// GET /api/queue/status
+{ "role": "api", "backend": "postgresql",
+  "counts": { "queued": 2, "processing": 1, "failed": 0, "for_review": 12, "completed": 40 },
+  "queue": { "depth": 2, "max_depth": 50,
+             "oldest_queued_job_id": "3f2a...", "oldest_queued_seconds": 42.5 },
+  "workers": [ { "worker_id": "worker-1:7:a1b2c3", "running_jobs": 1,
+                 "oldest_heartbeat_seconds_ago": 3.2, "stale": false } ] }
+```
+
 ## Settings (corpora)
 
 Manages the gitignored local overlay only — the committed registry is never edited by the app.
@@ -267,6 +269,14 @@ Manages the gitignored local overlay only — the committed registry is never ed
 | `PATCH` | `/api/settings/corpora/{name}` | Enable or disable a corpus without losing its configuration (body: `{"enabled": bool}`), existing because deletion writes a disable for committed registry corpora with no UI reactivation path, as ADR-0015 delivered seven disabled corpora inaccessible without this endpoint; returns 404 if the corpus is unknown |
 | `POST` | `/api/settings/corpora/{name}/sync` | Clone/pull the git repository of a single public corpus and re-ingest the store, exposing the same network step as `scripts/sync_corpora.py` for the "Redownload" button, restricted to PUBLIC corpora so private git credentials never transit the application (ADR-0006), blocking until the git operation completes |
 | `POST` | `/api/settings/corpora/rebuild` | Re-ingest all enabled corpora from their local clones |
+
+## NER thresholds and entity overrides
+
+The confidence cutoffs and the deny / promote lists that grow from the analysts'
+decisions (ADR-0051, ADR-0052).
+
+| Method | Path | Description |
+|---|---|---|
 | `GET` | `/api/thresholds` | The NER confidence cutoffs in force (ADR-0051): each stage's default, the worker's auto-accept level and control-sample rate, `auto_accept_audit` (per source and type, the share of control-sample entities analysts confirmed — ADR-0058), and every stored per-(source, entity_type) override with its provenance |
 | `POST` | `/api/thresholds/recalibrate` | Fit P(accepted \| score) per (source, entity_type) from the analysts' decisions and propose the cutoff at which it reaches `target_precision` (default 0.90, needs `min_samples` = 200 decisions); a dry run unless `"apply": true`. Reads only one-at-a-time analyst decisions unless `include_bulk` / `include_legacy` (ADR-0058), and returns `excluded_by_origin` |
 | `PUT` | `/api/thresholds/{source}/{entity_type}` | Hand-set one cutoff (`origin: manual`) |

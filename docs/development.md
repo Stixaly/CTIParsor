@@ -35,7 +35,7 @@ be on the host besides Docker.
 | `make run` | Run pipeline on `tests/fixtures/sample_report.txt` |
 | `make run-dir` | Run pipeline on every file in `input/` |
 | `make check` | Diagnostic: list which pipeline stages are available |
-| `make check-docs` | Verify every number claimed in the README and `docs/pipeline.md` against the source of truth |
+| `make check-docs` | Verify every number claimed in the README and `docs/pipeline.md` against the source of truth (CI runs the same check through `tests/test_doc_claims.py`) |
 | `make audit` | Scan Python + npm deps for known CVEs (`pip-audit` + `npm audit`), no image build needed |
 | `make lock` | Resolve `requirements*.txt` into `requirements.lock.txt` — the exact versions the image and CI install |
 | `make update-deps` | Re-resolve to the newest versions the ranges allow, rebuild the image from the new lock, run tests |
@@ -111,13 +111,21 @@ CTIParsor/
 │   ├── stage2c_ttp_semantic.py    # Sentence-transformer TTP detection
 │   ├── stage2d_cyner.py           # CyNER 2.0 cybersecurity NER (DeBERTa-v3)
 │   ├── stage2e_gliner.py          # GLiNER / NuNER zero-shot NER
+│   ├── stage2g_alias_list.py      # "X (aka Y, Z)" alias lists → threat actors (regex)
+│   ├── stage2f_cve_enrichment.py  # CVE description + CVSS v3 from the cve_cache table / CIRCL (opt-in)
 │   ├── stage3_llm.py              # LLM enrichment, parallel + checkpoint
 │   ├── stage3b_validate.py        # Post-LLM hallucination filter
 │   ├── stage3c_mitre.py           # MITRE ATT&CK TTP normalisation
 │   ├── stage3d_verify.py          # Relationship self-verification
 │   ├── stage3e_consensus.py       # Cross-model consensus (opt-in)
-│   ├── stage3f_ttp_verify.py      # TTP self-verification (opt-in, ADR-0011)
+│   ├── stage3f_ttp_verify.py      # TTP self-verification (ADR-0011) — TTP_MODE=verify
+│   ├── stage3f_ttp_select.py      # Choose techniques among retrieved candidates, with a quote (ADR-0072) — TTP_MODE=select
+│   ├── ttp_retrieval.py           # ATT&CK candidate retrieval: BM25 + dense over descriptions and procedures (ADR-0072)
 │   ├── stage4_stix_mapping.py     # STIX 2.1 mapping + TLP/PAP + authoring identity
+│   ├── stix_ids.py                # STIX ids computed the way OpenCTI computes its standard ids (ADR-0066)
+│   ├── bundle_ledger.py           # What Stage 4 did with each row: kept, rewritten, dropped, why (ADR-0061)
+│   ├── temporal.py                # Relationship dates as the source states them (ADR-0063)
+│   ├── network_traffic.py         # Analyst-typed traffic ("tcp/443 to evil.example") → network-traffic SCO (ADR-0069)
 │   ├── stage4b_graph_completion.py # Alias merge + ATT&CK grounding + transitive (ADR-0013)
 │   ├── stage4c_long_distance.py   # LLM long-distance relation inferer (opt-in)
 │   ├── stix_rel_spec.py           # STIX 2.1 suggested-relationship table (spec guard)
@@ -125,6 +133,8 @@ CTIParsor/
 │   ├── bundle_revisions.py        # Which stored bundles predate an output fix (ADR-0035)
 │   ├── mitre_db.py                # Lazy-loaded MITRE index (techniques + tactics)
 │   ├── vlm.py                     # Provider-agnostic vision backends + capability probe (ADR-0033)
+│   ├── vllm_options.py            # vLLM request options shared by Stage 3 and Stage 1f
+│   ├── llm_stats.py               # Counts what the LLM stages actually got back (ADR-0060)
 │   ├── figure_store.py            # report_figures / figure_reads persistence + span lookup
 │   ├── web_capture.py             # Render an arbitrary web page to PDF, safely (ADR-0029)
 │   ├── aliases.py                 # Alias canonicalisation for named entities (ADR-0012)
@@ -133,9 +143,15 @@ CTIParsor/
 │   ├── stix_access.py             # Uniform field access for STIX objects (dict or stix2 instance)
 │   ├── orchestrator.py            # The one pipeline (Stages 1-5) for worker, CLI and benchmark (ADR-0059)
 │   ├── decisions.py               # Who decided each accept/reject; server-side auto-accept (ADR-0058)
+│   ├── thresholds.py              # Per-(source, type) NER cutoffs at runtime (ADR-0051)
+│   ├── calibration.py             # Fit those cutoffs from analyst decisions (ADR-0051)
+│   ├── overrides.py               # Deny / promote lists at runtime (ADR-0052)
+│   ├── promotion.py               # Grow those lists from analyst decisions (ADR-0052)
 │   ├── registry.py                # Stage Registry — unused since ADR-0059 (orchestrator.py owns Stage 2)
 │   ├── base.py                    # ExtractionStage protocol + BaseExtractionStage
 │   ├── env_flags.py               # Single vocabulary for boolean environment flags
+│   ├── regex_safety.py            # ReDoS-safe regex compilation through re2 (ADR-0049)
+│   ├── security.py                # Path-containment check (Zip Slip / path traversal guard)
 │   ├── detection/                 # Detection-rule ingestion + coverage (ADR-0006)
 │   │   ├── base.py                # RuleCorpusAdapter (pluggable format seam)
 │   │   ├── sigma.py               # SigmaAdapter (YAML → DetectionRule)
@@ -153,6 +169,9 @@ CTIParsor/
 │   │   ├── relevance.py           # IDF-weighted rule ranking + evidence (ADR-0014)
 │   │   ├── dedup.py               # Cross-corpus rule dedup, `related:` folding (ADR-0017)
 │   │   ├── synth_sigma.py         # Report-derived Sigma synthesis (ADR-0016)
+│   │   ├── yara_check.py          # A quoted YARA rule ships only if it compiles (ADR-0067)
+│   │   ├── pattern_check.py       # A quoted Sigma/Suricata/Snort rule ships only if OpenCTI's parser accepts it (ADR-0070)
+│   │   ├── opencti_snort/         # OpenCTI's own Snort parser, copied in (ADR-0070)
 │   │   ├── tlds.py                # TLD table backing the hostname gate (ADR-0015)
 │   │   ├── sync.py                # Corpus clone/pull driver
 │   │   ├── builder.py             # Rebuild the rule store from local clones
@@ -164,28 +183,62 @@ CTIParsor/
 │       ├── gazetteer.json         # Named-entity dictionary
 │       ├── attack_relationships.json # 20 015 curated ATT&CK edges (Stage 4b grounding)
 │       ├── mitre_embeddings.npy   # Pre-computed TTP embeddings
-│       └── mitre_embeddings_meta.json
+│       ├── mitre_embeddings_meta.json
+│       ├── mitre_embeddings_manifest.json # Model + thresholds of the cache (generated, not in git)
+│       └── attack_retrieval_*     # TTP_MODE=select corpus (generated by --only retrieval, gitignored)
 │
 ├── scripts/
-│   ├── build_indexes.py           # Build all pipeline/data/ indexes
+│   │  ── build and operate ──
+│   ├── build_indexes.py           # Build the pipeline/data/ indexes (--only retrieval for TTP_MODE=select)
 │   ├── download_attack.py         # Download enterprise-attack.json
-│   ├── measure_corpus_ingest.py   # Ingest chosen corpora into a scratch DB, report per-format stats
 │   ├── sync_corpora.py            # Clone/pull rule corpora (ambient git auth) + tarball fetch (ET Open)
 │   ├── build_detection_index.py   # Parse clones → detection-rule store
-│   ├── migrate_jobs_to_postgres.py # One-shot copy of an existing job store into PostgreSQL (ADR-0045)
 │   ├── build_rule_atoms.py        # Backfill rule_atoms from stored bodies (ADR-0014)
-│   ├── build_rule_text.py         # FTS5 index over rule title+description (ADR-0031)
+│   ├── build_rule_text.py         # tsvector index over rule titles, for brand evidence (ADR-0031/0053)
 │   ├── backfill_rule_bytes.py     # Backfill rule_bytes on an older store (ADR-0022)
-│   ├── audit_coverage_formats.py  # Read-only: per-format breakdown + drill-down latency
-│   ├── audit_store_invariants.py  # Read-only: 16 invariants over the rule/entity store
-│   ├── audit_bundle_invariants.py # Read-only: 16 invariants over every stored STIX bundle
-│   ├── measure_negated_atoms.py   # Before/after of the ADR-0034 negation fix on the store
+│   ├── calibrate_thresholds.py    # Propose / --apply NER cutoffs from analyst decisions (ADR-0051)
+│   ├── promote_overrides.py       # Propose / --apply deny + promote rules from decisions (ADR-0052)
+│   ├── package_offline_docker.sh  # Build the air-gap bundle (ADR-0054)
+│   ├── check_offline_bundle_docker.sh # Verify an air-gap bundle restores and runs
+│   ├── offline_lib_docker.sh      # Functions shared by check_offline_bundle_docker.sh and setup.sh --offline
+│   ├── docker_smoke.sh            # Build, start and verify the container stack (make docker-smoke)
+│   ├── migrate_jobs_to_postgres.py # One-shot copy of a cti_stix.db job store into PostgreSQL (ADR-0045)
+│   ├── migrate_rules_to_postgres.py # The same for the rule store (ADR-0053)
+│   │  ── checks and diagnostics ──
 │   ├── check_stages.py            # Diagnostic: which stages are available (make check)
 │   ├── check_doc_claims.py        # Doc drift guard: documented numbers vs source (make check-docs)
-│   ├── probe_vlm_figures.py       # Compare vision providers on a PDF's figures, no DB write
+│   ├── check_coverage.py          # Per-area coverage floors on top of the total one (make coverage)
+│   ├── check_flag_equivalence.py  # env_bool vs the old per-flag parsing, value by value
+│   ├── check_unescape_equivalence.py # A/B of the atom unescape refactor on real corpus data
+│   ├── check_evidence_gate.py     # Validate the coverage evidence gate on the store (ADR-0030)
+│   │  ── read-only audits and measurements (the numbers quoted in the ADRs) ──
+│   ├── audit_api_edge_cases.py    # GET-only API edge-case conformance harness
+│   ├── audit_bundle_invariants.py # Invariants over every stored STIX bundle
+│   ├── audit_coverage_formats.py  # Per-format breakdown + drill-down latency
+│   ├── audit_edge_provenance.py   # Share of bundle edges carrying x_evidence_label, by label
+│   ├── audit_graph_completion.py  # Replay Stage 4b over stored bundles (ADR-0013)
+│   ├── audit_store_invariants.py  # Invariants over the rule/entity store
+│   ├── audit_yara_escape_impact.py # Impact of the YARA unescape-order defect (ADR-0015)
+│   ├── audit_yara_parsing.py      # The YARA parser against real corpora (ADR-0015)
+│   ├── measure_advisory_gate.py   # What the TTP advisory gate drops on real reports
+│   ├── measure_cold_start.py      # Import + model-load cost of a worker process
+│   ├── measure_corpus_ingest.py   # Ingest chosen corpora into a scratch DB, report per-format stats
+│   ├── measure_figure_iocs.py     # Are the vision model's `iocs` grounded in its own transcription
+│   ├── measure_graph_links.py     # Bundle connectivity and sentence co-mention candidates
 │   ├── measure_image_surface.py   # How much of a corpus is images, and how many survive triage
+│   ├── measure_negated_atoms.py   # Before/after of the ADR-0034 negation fix on the store
+│   ├── measure_normalize_divergence.py # Divergences between the three atom normalizers
+│   ├── measure_pin_allocation.py  # Pin edges under sequential vs fair-share budgets (ADR-0026)
+│   ├── measure_relevance.py       # Proposed-rule relevance on real reports
 │   ├── measure_stage1f_tradeoffs.py # Crop vs whole page: tokens, latency, kind accuracy
-│   └── measure_figure_iocs.py     # Read-only: are the model's `iocs` grounded in its own transcription
+│   ├── measure_ttp_vs_observable_coverage.py # Technique coverage vs evidence-backed coverage
+│   ├── measure_web_capture.py     # PDF capture and ingestion quality of the URL tab
+│   ├── probe_ttp_recall_caps.py   # Stage 2c's two recall caps on real reports (ADR-0023)
+│   ├── probe_vlm_figures.py       # Compare vision providers on a PDF's figures, no DB write
+│   ├── rebuild_bundle_provenance.py # Rebuild a bundle in memory, audit edge provenance
+│   ├── validate_artifact_coverage.py # Validation harness for artifact coverage (ADR-0025)
+│   ├── verify_ate_scorer.py       # Mutation harness for the ATE scorer (ADR-0023)
+│   └── verify_ner_scorer.py       # Mutation harness for the NER scorer
 ├── models/
 │   ├── schemas.py                 # Pydantic: RawEntity, EntityType, EvidenceLabel
 │   ├── config.py                  # PipelineConfig (chunk size, model ids, env binding)
@@ -200,18 +253,21 @@ CTIParsor/
 │   ├── queue_loop.py              # Claims queued jobs, heartbeats, requeues orphans (ADR-0046)
 │   ├── run_config.py              # Capture a job's execution config so its bundle is reproducible (ADR-0024)
 │   ├── storage.py                 # Storage abstraction for pipeline job state
+│   ├── paths.py                   # Where uploads and bundles live (CTIPARSOR_UPLOADS_DIR / _OUTPUT_DIR)
 │   ├── logging_config.py          # Centralized logging configuration
 │   └── routes/
 │       ├── upload.py              # POST /api/upload (50 MB limit, streamed)
 │       ├── ingest.py              # POST /api/ingest/{text,url} — paste + URL capture
-│       ├── jobs.py                # CRUD /api/jobs + finalize + source + bundle
+│       ├── jobs.py                # CRUD /api/jobs + finalize + source + bundle + bundle ledger
 │       ├── entities.py            # CRUD /api/jobs/{id}/entities
-│       ├── relationships.py       # CRUD /api/jobs/{id}/relationships
+│       ├── relationships.py       # CRUD /api/jobs/{id}/relationships + bulk decisions
 │       ├── progress.py            # GET /api/jobs/{id}/progress (SSE)
 │       ├── coverage.py            # GET /api/jobs/{id}/coverage + detection-corpora
 │       ├── queue.py               # GET /api/queue/status — backlog + worker liveness (ADR-0048)
 │       ├── settings.py            # Corpora management (ADR-0007)
 │       ├── policy.py              # Relationship policy: pinned rules + completion block
+│       ├── thresholds.py          # /api/thresholds — NER cutoffs, recalibration (ADR-0051)
+│       ├── overrides.py           # /api/overrides — deny / promote lists (ADR-0052)
 │       └── _common.py             # Guards shared by the job-scoped route modules
 │
 ├── frontend/                      # React 18 + TypeScript + Vite 6
@@ -227,7 +283,7 @@ CTIParsor/
 │   │   │   ├── MarkdownPreview.tsx # VS Code-like .md renderer (react-markdown)
 │   │   │   ├── SourceViewer.tsx    # Inline original-file view (PDF/HTML/TXT/MD)
 │   │   │   ├── PdfViewer.tsx       # pdf.js pages + entity-highlight overlay
-│   │   │   ├── ProgressModal.tsx   # 6-stage SSE progress display (1f included)
+│   │   │   ├── ProgressModal.tsx   # 5-stage SSE progress display
 │   │   │   ├── EntityPopover.tsx   # Entity type picker
 │   │   │   └── review/
 │   │   │       ├── DocumentReader.tsx  # Annotated text with entity marks
@@ -247,7 +303,10 @@ CTIParsor/
 │   │   │   ├── useSSE.ts          # EventSource (5-retry on transient error)
 │   │   │   ├── useMitreSearch.ts  # Client-side ATT&CK search
 │   │   │   ├── useCoverage.ts     # Coverage data hook (view ↔ source seam)
-│   │   │   └── useRuleSelection.ts # Rule selection as an exclusion set (ADR-0022)
+│   │   │   ├── useRuleSelection.ts # Rule selection as an exclusion set (ADR-0022)
+│   │   │   ├── usePromotedRules.ts # Rules promoted from the Detections tab into the coverage selection
+│   │   │   ├── usePref.ts         # A UI preference kept in localStorage
+│   │   │   └── sets.ts            # Set<string> load/save helpers shared by the two hooks above
 │   │   ├── api/client.ts          # Typed fetch wrappers
 │   │   ├── context/ThemeContext.tsx # 5 themes × 7 accent palettes
 │   │   └── types/index.ts         # Shared TS types
@@ -255,7 +314,7 @@ CTIParsor/
 │       ├── stix-icons/            # 27 official OASIS STIX 2.1 White SVG icons
 │       └── mitre_index.json       # ATT&CK index served to the frontend
 │
-├── tests/                         # 63 modules, 1 030 tests — map in TESTING.md
+├── tests/                         # 114 test_*.py modules, ~2 100 tests — map and counts in TESTING.md
 │   ├── test_stage1.py             # Ingestion, chunking, overlap, defanging
 │   ├── test_stage2.py             # IoC extraction, refanging, deduplication
 │   ├── test_stage4.py             # STIX mapping
@@ -273,7 +332,7 @@ CTIParsor/
 │   ├── architecture.md            # Deployment architecture: processes, stores, data flow, sizing
 │   ├── docker.md                  # Running the container stack day to day
 │   ├── upgrading.md               # Runbook: moving an existing install to PostgreSQL / workers
-│   ├── deployment.md              # Host installs: bind address, exposure, systemd
+│   ├── deployment.md              # Serving several analysts: bind address, exposure, TLS proxy, systemd
 │   ├── detection-coverage.md      # The coverage matrix, walkthrough
 │   ├── pipeline.md                # Every stage, the quality layers, ATT&CK data, offline support
 │   ├── configuration.md           # The full `.env` reference
@@ -290,10 +349,13 @@ CTIParsor/
 ├── .env.example                   # Configuration template
 ├── requirements.txt               # Pipeline dependencies
 ├── requirements-api.txt           # API server dependencies
-├── setup.sh                       # One-shot setup for Linux / WSL
-├── Dockerfile                     # 3-stage image: UI build, venv build, slim runtime (ADR-0044)
-├── compose.yaml                   # app + profiles bootstrap / ollama / proxy, hardened
-└── docker/                        # entrypoint, model warm-up, seccomp profile, nginx config
+├── requirements-optional.txt      # Playwright (URL capture), google-re2, spaCy
+├── requirements-dev.txt           # ruff, mypy, pytest-cov
+├── requirements.lock.txt          # Exact versions the image and CI install (make lock)
+├── setup.sh                       # Prepares .env + the DB secret, checks Docker; --offline installs a bundle
+├── Dockerfile                     # UI build, venv build, slim runtime, + a `dev` target with the CI tools (ADR-0044, ADR-0054)
+├── compose.yaml                   # app, worker, postgres, capture-proxy + profiles bootstrap / dev / ollama / proxy, hardened
+└── docker/                        # entrypoint, model warm-up, seccomp profile, nginx + squid config
 ```
 
 ## Extending the pipeline
@@ -337,4 +399,6 @@ GLINER_MODEL=urchade/gliner_small-v2.1   # fastest, less accurate (~120 MB)
 TTP_EMBEDDING_MODEL=ehsanaghaei/SecureBERT-Plus
 # Then rebuild the embedding cache:
 docker compose run --rm dev python scripts/build_indexes.py --only embeddings
+# and bake it into the image app and worker run:
+make docker-build && docker compose up -d
 ```

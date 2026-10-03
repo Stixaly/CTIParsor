@@ -1,7 +1,7 @@
 # Detection Coverage — How-To
 
-A practical walkthrough for setting up Sigma corpora and reading the coverage
-matrix. For the design rationale see [ADR-0006](adr/0006-multi-corpus-detection-ingestion.md),
+A practical walkthrough for setting up Sigma, Suricata and YARA corpora and
+reading the coverage matrix. For the design rationale see [ADR-0006](adr/0006-multi-corpus-detection-ingestion.md),
 [ADR-0007](adr/0007-in-app-configuration-panel.md), [ADR-0008](adr/0008-detection-coverage-matrix.md),
 [ADR-0014](adr/0014-observable-driven-detection-proposals.md),
 [ADR-0015](adr/0015-multi-format-detection-matching.md),
@@ -32,10 +32,12 @@ matrix. For the design rationale see [ADR-0006](adr/0006-multi-corpus-detection-
 > rule held any of its 98 values, but "okta" recurred across 7 of its domains and
 > the panel now serves the 31 Okta and Scattered Spider rules that matter.
 >
-> Brand lookup needs the FTS5 index — build it alongside the atom index:
+> Brand lookup needs the rule-title index (`rule_text`, a PostgreSQL `tsvector`
+> since ADR-0053). Neither `bootstrap` nor the Settings page's **Rebuild index**
+> builds it — run it yourself:
 >
 > ```bash
-> python scripts/build_rule_text.py
+> docker compose run --rm app python scripts/build_rule_text.py
 > ```
 >
 > Rebuild it whenever the rule corpora change. While it is absent, brand evidence
@@ -87,11 +89,17 @@ cp detection_corpora.local.yaml.example detection_corpora.local.yaml
 ## 2. Fetch the clones
 
 ```bash
-python scripts/sync_corpora.py
+docker compose run --rm app python scripts/sync_corpora.py
 ```
 Clones/pulls each repo with a `git:` remote using your **ambient git auth** —
 public repos need none; private repos use your SSH agent / credential helper.
-Clones land under `./corpora/` (gitignored). No credentials are stored.
+Clones land under `./corpora/`, which in the `app`, `worker` and `bootstrap`
+containers is the `cti-cache` volume (in the `dev` container, the repo's own
+gitignored `corpora/`). No credentials are stored.
+
+`bootstrap` runs this step and the next one for you; `docker compose --profile
+bootstrap run --rm bootstrap --no-models` repeats both later without
+re-downloading the models.
 
 A corpus with a `tarball:` URL instead of `git:` (ET Open, which is not
 published as a git repository) is downloaded, checked against its published
@@ -103,7 +111,7 @@ copy in place.
 ## 3. Build the rule store
 
 ```bash
-python scripts/build_detection_index.py
+docker compose run --rm app python scripts/build_detection_index.py
 ```
 Parses every enabled corpus's local clone into the `detection_rules` /
 `rule_techniques` / `rule_atoms` tables in PostgreSQL (`DATABASE_URL`,
@@ -114,8 +122,8 @@ If your store was built before ADR-0014, add the atom index in place — no
 re-clone needed, it re-derives everything from the stored rule bodies:
 
 ```bash
-python scripts/build_rule_atoms.py
-python scripts/build_rule_text.py
+docker compose run --rm app python scripts/build_rule_atoms.py
+docker compose run --rm app python scripts/build_rule_text.py
 ```
 
 ## 4. Read the matrix
@@ -134,7 +142,7 @@ Below it, techniques are laid out in ATT&CK-tactic columns and coloured by score
 |---|---|---|
 | 3 — Corroborated | rules in ≥ 2 corpora | high confidence |
 | 2 — Covered | rule in 1 corpus | corroborate before relying on it |
-| 1 — Telemetry only | data-source mapped, no rule | write a detection |
+| 1 — Telemetry only | data-source mapped, no rule (not computed yet — see Troubleshooting) | write a detection |
 | 0 — No coverage | extracted, no rule | gap — prioritise |
 
 > **This scoring is superseded.** It answers "does a rule carry this ATT&CK tag?",
@@ -147,7 +155,8 @@ Below it, techniques are laid out in ATT&CK-tactic columns and coloured by score
 ## Artifact coverage (ADR-0025)
 
 `GET /api/jobs/{id}/coverage/artifacts` scores one row per **technical artifact**
-the report gives you to match on, rather than per technique:
+the report gives you to match on, rather than per technique. The Coverage page
+does not display it yet: read it through the API.
 
 | Score | Meaning |
 |---|---|
@@ -339,10 +348,10 @@ Ranking is deterministic and offline — no model is involved (ADR-0008).
 | corpus shows `0` rules | rules untagged with `attack.tXXXX`, or pointed at a non-rules dir |
 | private repo won't clone | ensure your SSH agent has the key; `git clone` it manually to confirm access |
 | a technique reads 0 despite a known rule | the rule lacks an `attack.tXXXX` tag — coverage keys on ATT&CK tags (the Detections tab still finds it via its atoms) |
-| Detections warns the atom index is empty | run `python scripts/build_rule_atoms.py`; until then rules can only be ranked by technique |
+| Detections warns the atom index is empty | run `docker compose run --rm app python scripts/build_rule_atoms.py`; until then rules can only be ranked by technique |
 | no proposal is tiered "Matched this report" | the report has few IoCs, or its observables appear in no rule — the behavioural tier is then the real answer |
 | every YARA lane reads 0 | YARA rules carry no `attack.tXXXX` tags, so a technique-keyed join cannot reach them (ADR-0020). The board, ticks and drill-in show this as an honest absence; the Detections tab still finds YARA via observables |
-| sizes all show `0 B` | the `rule_bytes` side table is empty on a store built before ADR-0022 — run `python -m scripts.backfill_rule_bytes` (no corpus re-clone needed) |
+| sizes all show `0 B` | the `rule_bytes` side table is empty on a store built before ADR-0022 — run `docker compose run --rm app python -m scripts.backfill_rule_bytes` (no corpus re-clone needed) |
 | the coverage page seems cut off | it scrolls itself; if it does not, the page's own scroll container is missing — `body`/`#root` are `overflow:hidden` by design so the Review page can own its panes |
 | score never reaches 1 ("telemetry only") | the ATT&CK data-source enrichment (ADR-0008 Phase 1) isn't built yet — scores are rule-based (0/2/3) until then |
 | artifact coverage is almost all 0 | expected, and true: a current campaign's indicators are not in public corpora yet. Read the per-tier fractions and treat the uncovered list as the backlog (ADR-0025) |
