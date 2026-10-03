@@ -305,8 +305,10 @@ class FileCheckpoint:
     def clear(self) -> None:
         try:
             self.path.unlink(missing_ok=True)
-        except Exception:
-            pass
+        except OSError as exc:
+            # Harmless for results (a checkpoint resumes only on a matching
+            # fingerprint, see load), but the file stays on disk.
+            logger.warning(f"[Stage 3] Checkpoint not removed: {exc}")
 
 
 def _entities_key(entities: list) -> list:

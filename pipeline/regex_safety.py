@@ -5,7 +5,11 @@ through `compile_pattern` rather than `re.compile` directly, so it inherits
 re2's linear-time guarantee instead of being one edit away from reintroducing
 catastrophic backtracking.
 """
+import logging
 import re
+
+# stdlib logging: this module is imported before any other, logging config included.
+_logger = logging.getLogger(__name__)
 
 try:
     import re2 as _re2_module
@@ -44,6 +48,7 @@ def compile_pattern(pattern: str, flags: int = 0):
             re2_pattern = f"(?{prefix_letters}){pattern}" if prefix_letters else pattern
             try:
                 return _re2_module.compile(re2_pattern)
-            except Exception:
-                pass
+            except Exception as exc:     # re2 refuses lookaround and backreferences
+                _logger.debug("re2 refused %r (%s): compiled with re, no linear-time guarantee",
+                              pattern[:80], exc)
     return re.compile(pattern, flags)

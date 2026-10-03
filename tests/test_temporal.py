@@ -6,6 +6,7 @@ in-house set, not asserted here.
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 import pytest
@@ -418,6 +419,18 @@ def test_storage_round_trip():
     assert times_to_json([]) is None
     assert times_from_json("not json") == []
     assert times_from_json('[{"role": "nonsense"}]') == []
+
+
+def test_unreadable_stored_dates_are_logged_not_dropped_silently(caplog):
+    good = times_to_json([_verified("start", "2023-03", "month")])
+    assert good is not None
+    with caplog.at_level(logging.WARNING, logger="pipeline.temporal"):
+        kept = times_from_json(good[:-1] + ', {"role": "nonsense"}]')
+        assert times_from_json("not json") == []
+    assert len(kept) == 1
+    messages = [r.getMessage() for r in caplog.records]
+    assert messages[0].startswith("1 stored relationship date(s) no longer validate")
+    assert messages[1].startswith("stored relationship dates are not valid JSON")
 
 
 @pytest.mark.parametrize("value,lo,hi", [

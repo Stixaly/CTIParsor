@@ -187,7 +187,7 @@ def observables_from_entities(rows: Iterable[Mapping[str, object]]) -> list[Obse
         try:
             raw_value = row.get("value")
             raw_type = row.get("entity_type")
-        except Exception:                       # noqa: BLE001 — not a mapping
+        except Exception:                       # noqa: BLE001, S112 — not a mapping
             continue
         if not isinstance(raw_value, str) or not raw_value.strip():
             continue
@@ -291,7 +291,7 @@ def observables_from_entities(rows: Iterable[Mapping[str, object]]) -> list[Obse
 
             # Every other entity type (ttp, threat_actor, campaign, …) is not a
             # detection observable — it says who, not what to look for.
-        except Exception:                       # noqa: BLE001 — one bad row, not a crash
+        except Exception:                       # noqa: BLE001, S112 — one bad row, not a crash
             continue
 
     return out

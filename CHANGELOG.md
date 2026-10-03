@@ -70,6 +70,17 @@ exports it, with OpenCTI's own id.
   not. `pipeline/named_entities.py` adds the detectors' names on both paths.
 - **Stage 4 dropped Indicators and CourseOfActions silently** (B 8.1.9): each
   failure is now a `dropped / build_failed` ledger entry with the error.
+- **No exception is swallowed without a trace in the code that ships**: the
+  20 remaining `except Exception: pass` of `pipeline/` and `api/` log, record
+  or catch a narrower error. The ones that lost data said nothing at all: a
+  finalize whose stored LLM result no longer parses rebuilt a bundle with no
+  techniques, campaign or targets; stored entity rows and relationship dates
+  that no longer validate were dropped; a corrupt stored policy showed the
+  factory default as if it were saved; a markitdown failure fell back to plain
+  text with no word about the lost tables; the run manifest wrote `None` for
+  the prompt fingerprint without saying why. ruff now enforces S110/S112
+  (`pass`/`continue` in a broad handler) outside `scripts/` and `tests/`; the
+  four handlers left say why on their line.
 - **Compose images are pinned by digest**; `capture-proxy` was
   `ubuntu/squid:latest` (B 8.2.6) and is `6.6-24.04_edge` (24.04 LTS; `latest`
   pointed at 25.04, end of life).

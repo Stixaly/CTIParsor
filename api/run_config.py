@@ -86,22 +86,24 @@ def build_manifest() -> dict:
         from pipeline.stage3_llm import prompt_fingerprint, provider_label, sampling_options
         llm = {"model": provider_label(), "prompt_fingerprint": prompt_fingerprint(),
                "sampling": sampling_options() or "provider default"}
-    except Exception:
-        pass
+    except Exception as exc:
+        # The manifest says why it cannot pin the prompt, instead of a bare None.
+        llm["error"] = f"{type(exc).__name__}: {exc}"
 
     models: dict[str, str | None] = {
         "embedding": os.getenv("TTP_EMBEDDING_MODEL", "all-MiniLM-L6-v2"),
         "cyner": None, "gliner": None,
     }
+    # None: the module's dependencies are not installed, so the model never runs.
     try:
         from pipeline.stage2d_cyner import _MODEL_ID as _cyner_model
         models["cyner"] = _cyner_model
-    except Exception:
+    except ImportError:
         pass
     try:
         from pipeline.stage2e_gliner import _GLINER_MODEL_ID as _gliner_model
         models["gliner"] = _gliner_model
-    except Exception:
+    except ImportError:
         pass
 
     return {
@@ -132,8 +134,8 @@ def _resolve_git_rev() -> str | None:
             rev = result.stdout.strip()
             if rev:
                 return rev
-    except Exception:
-        pass
+    except (OSError, subprocess.SubprocessError):
+        pass                      # no git binary, or it hung: the build stamp below
 
     # A container image carries no .git directory, so the build stamps the
     # revision into the environment instead (docker build --build-arg GIT_REV).
