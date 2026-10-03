@@ -151,3 +151,8 @@ before Phase 5 (structured ingestion), which needs the in-house set to be
 measured at all. Two cheaper candidates showed up on the way: the semantic
 stage, whose removal alone lifts technique F1 by +0.12 to +0.15 (ablation
 above), and CyNER / spaCy precision on named entities.
+
+**Follow-up (2026-10-03):** the retrieval half of Phase 4 is measured in
+ADR-0072 — parent recall per passage at k=5 from 0.33 (Stage 2c's cache and
+retriever) to 0.77 (ATT&CK descriptions + procedure examples, BM25 ⊕ dense);
+the selector (`TTP_MODE=select`) awaits its dev run.

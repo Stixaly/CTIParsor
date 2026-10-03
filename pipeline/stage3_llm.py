@@ -16,6 +16,7 @@ from api.logging_config import get_logger
 from models.schemas import EntityType, EvidenceLabel, RawEntity
 from pipeline.env_flags import env_int
 from pipeline.llm_parse import fit_text
+from pipeline.stage3f_ttp_select import TtpReview
 from pipeline.temporal import (
     ROLES as _TIME_ROLES,
 )
@@ -417,6 +418,9 @@ class LLMEnrichmentResult(BaseModel):
     targeted_countries: list[str] = []
     campaign_name: str | None = None
     course_of_action: list[str] = []   # recommended mitigations / remediation steps
+    # ADR-0072 select mode: candidates Stage 3f could not decide (its call
+    # failed, or the quote did not validate).  Kept out of the bundle.
+    ttp_review: list[TtpReview] = []
 
 
 # --- Prompts ---
@@ -944,22 +948,30 @@ def all_prompts_fingerprint() -> str:
     the 3d / 3f verification prompts."""
     import hashlib
 
-    from pipeline import stage3d_verify, stage3f_ttp_verify
+    from pipeline import stage3d_verify, stage3f_ttp_select, stage3f_ttp_verify
     parts = [_SYSTEM_PROMPT, _USER_PROMPT_TEMPLATE,
              _DOC_RELATIONS_SYSTEM_PROMPT, _DOC_RELATIONS_USER_PROMPT_TEMPLATE,
              stage3d_verify._VERIFY_SYSTEM, stage3d_verify._VERIFY_USER_TEMPLATE,
-             stage3f_ttp_verify._VERIFY_SYSTEM, stage3f_ttp_verify._VERIFY_USER_TEMPLATE]
+             stage3f_ttp_verify._VERIFY_SYSTEM, stage3f_ttp_verify._VERIFY_USER_TEMPLATE,
+             stage3f_ttp_select._SELECT_SYSTEM, stage3f_ttp_select._SELECT_USER_TEMPLATE]
     return hashlib.sha256("\x00".join(parts).encode("utf-8")).hexdigest()[:16]
 
 
-def stage3_settings(*, consensus: bool, verify_rels: bool, verify_ttps: bool) -> dict:
+def stage3_settings(*, consensus: bool, verify_rels: bool, verify_ttps: bool,
+                    ttp_mode: str = "verify") -> dict:
     """Every setting that changes what Stage 3 returns for a given input — the
     Stage 3 checkpoint must not resume across a change in any of them."""
     from pipeline.stage3e_consensus import consensus_provider
+    from pipeline.ttp_retrieval import retrieval_settings
     from pipeline.vllm_options import vllm_extra_body
 
     second = consensus_provider() if consensus else ""
     return {
+        "ttp_mode": ttp_mode,
+        "ttp_select": ({**retrieval_settings(),
+                        "min_quote_words": env_int("TTP_SELECT_MIN_QUOTE_WORDS", default=3),
+                        "skipped_chunks": os.getenv("TTP_SELECT_SKIPPED_CHUNKS", "")}
+                       if ttp_mode == "select" else {}),
         "model": provider_label(),
         "consensus_model": provider_label(second) if second else "",
         "prompts": all_prompts_fingerprint(),
@@ -1443,12 +1455,17 @@ def enrich_chunk(
     verify_rels: bool | None = None,
     verify_ttps_on: bool | None = None,
     document_time: DocumentTime | None = None,
+    ttp_mode: str = "verify",
+    ttp_candidates: list | None = None,
 ) -> LLMEnrichmentResult:
     """
     Enrich a text chunk with LLM intelligence.
 
     `verify_rels` / `verify_ttps_on` switch Stages 3d / 3f for this call;
     None follows ENABLE_STIX_VERIFICATION / ENABLE_TTP_VERIFICATION.
+    `ttp_mode="select"` makes 3f choose among `ttp_candidates` (this chunk's
+    retrieved techniques) and the LLM's own proposals instead of verifying the
+    latter (ADR-0072).
 
     Args:
         text:                   The raw CTI text chunk.
@@ -1598,6 +1615,17 @@ def enrich_chunk(
                           verify_relationships(text, result, _verify_call, enabled=True,
                                                max_prompt_chars=_MAX_PROMPT_LENGTH))
 
+    # Stage 3f, select mode (ADR-0072) — the chunk's candidates (retrieved +
+    # the LLM's proposals) go through one selection call; only what the code
+    # validates becomes a technique.  With 3f off, the LLM's techniques pass
+    # unchecked and the retrieved candidates are dropped.
+    if ttp_mode == "select":
+        from pipeline.stage3f_ttp_verify import verify_enabled as ttp_verify_enabled
+        if not (ttp_verify_enabled() if verify_ttps_on is None else verify_ttps_on):
+            return result
+        sel = select_chunk_ttps(text, ttp_candidates or [], result.ttps, provider=provider)
+        return result.model_copy(update={"ttps": sel.ttps, "ttp_review": sel.ttp_review})
+
     # Stage 3f — self-verification of TTP claims (ADR precision §3)
     # Mirrors Stage 3d for techniques: each LLM-extracted TTP must be supported by
     # a sentence describing its use, or it is dropped.  TTPs already corroborated
@@ -1618,6 +1646,29 @@ def enrich_chunk(
             )
 
     return result
+
+
+def select_chunk_ttps(text: str, retrieved: list, llm_ttps: list | None = None,
+                      provider: str | None = None) -> LLMEnrichmentResult:
+    """Stage 3f, select mode, on one chunk: the retrieved candidates and the
+    LLM's proposals (`llm_ttps`, possibly none) through one selection call.
+    Returns only techniques and review items (ADR-0072).
+
+    Also called with no proposals for a chunk Stage 3 skipped (no IoC, no
+    known name) that retrieval still found behaviour in."""
+    from pipeline.stage3f_ttp_select import chunk_candidates, llm_proposals_as_candidates, select_ttps
+
+    proposals, labels, no_id = llm_proposals_as_candidates(llm_ttps or [])
+    if no_id:
+        llm_stats.bump("ttp_selection_proposals_without_id", no_id)
+    cands = chunk_candidates(retrieved, proposals)
+    if not cands:
+        return LLMEnrichmentResult()
+
+    def _select_call(s, u):
+        return _call_llm(s, u, provider=provider)
+    sel = select_ttps(text, cands, _select_call, llm_labels=labels, max_prompt_chars=_MAX_PROMPT_LENGTH)
+    return LLMEnrichmentResult(ttps=sel.selected, ttp_review=sel.review)
 
 
 def enrich_all_chunks(
@@ -1948,6 +1999,13 @@ def _merge_results(
             # No evidence or confidence on this model — last-seen is harmless here.
             ioc_map[ioc_key] = assoc
 
+    # Undecided candidates (ADR-0072), once per id, and only while no chunk
+    # selected that technique.
+    review_map: dict[str, TtpReview] = {}
+    for r in results:
+        for rv in r.ttp_review:
+            review_map.setdefault(rv.attack_id.upper(), rv)
+
     all_actors = [a for r in results for a in r.threat_actors]
     all_malware = [m for r in results for m in r.malware_families]
     all_tools = [t for r in results for t in r.tools]
@@ -1961,6 +2019,8 @@ def _merge_results(
         list(ttp_map.values()),
         semantic_entities=semantic_ttp_entities,
     )
+
+    selected_ids = {(t.mitre_id or "").upper() for t in normalized_ttps}
 
     # Pick the campaign name that appears most often across chunks;
     # fall back to the first non-None name if all are unique.
@@ -1990,4 +2050,5 @@ def _merge_results(
         targeted_countries=_dedup_names(all_countries),
         campaign_name=campaign_name,
         course_of_action=_dedup_names(all_coas),
+        ttp_review=[rv for key, rv in review_map.items() if key not in selected_ids],
     )

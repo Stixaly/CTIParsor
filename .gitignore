@@ -66,3 +66,7 @@ docker/nginx/htpasswd
 .coverage.*
 coverage.xml
 htmlcov/
+
+# ADR-0072 retrieval corpus (built by scripts/build_indexes.py --only retrieval, ~35 MB)
+pipeline/data/attack_retrieval_corpus.json
+pipeline/data/attack_retrieval_embeddings.npy

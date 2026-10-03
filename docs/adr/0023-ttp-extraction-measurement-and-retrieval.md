@@ -302,3 +302,13 @@ Phases 1–2 are in the tree (`tests/eval_pipeline.py` dual-granularity scorer,
 are not: there is no BM25 code in `pipeline/`, no procedure-example embedding
 in `pipeline/stage2c_ttp_semantic.py`, and Stage 3f is still a post-hoc
 verifier. Keep this ADR open for those four items.
+
+## Status review (2026-10-03)
+
+Phases 4–6 are implemented by ADR-0072: the procedure corpus
+(`--only retrieval`; the current bundle has 17,136 usable `uses` examples, not
+18,215 — that count came from another bundle), BM25 + dense fusion in
+`pipeline/ttp_retrieval.py` (RRF measured above min-rank on AnnoCTR dev), and
+Stage 3f's select mode (`TTP_MODE=select`). The offline fallback keeps today's
+threshold detector, as Phase 6 required. Select mode stays off until its dev
+run with the LLM.
