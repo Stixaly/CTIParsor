@@ -7,12 +7,23 @@ deliberate limits. It is defensive in scope.
 ## Threat surfaces & how they're handled
 
 ### 1. Untrusted input documents (prompt injection)
-Reports are attacker-influenced text. Before any LLM call, **only the user message
-is sanitised** — the system prompt is developer-controlled and never run through the
-sanitiser (`pipeline/stage3_llm.py::_sanitize_text_for_prompt`). Sanitisation:
-- strips null bytes / control chars and removes HTML/XML tags and code fences,
-- redacts common injection phrasings (`ignore previous…`, `role: system`, jailbreak/DAN, developer-mode),
+Reports are attacker-influenced text. Every prompt that embeds it encloses it
+between two marker lines carrying a nonce (a hash of the text), and the system
+prompt names those markers and says that what lies between them is data, never
+instructions (spotlighting, `pipeline/llm_parse.py::fit_report`, ADR-0074).
+Before any LLM call the user message is also prepared by
+`pipeline/stage3_llm.py::_sanitize_text_for_prompt`, which deletes nothing the
+report says:
+- removes control characters and invisible ones (zero-width, direction marks,
+  bidi overrides and isolates, BOM), counted in the stage report;
+- defuses chat-template markup (`<|im_end|>`, `<|im_start|>`, `<think>`,
+  `[INST]`…) by inserting a space, because vLLM, Ollama and LM Studio would
+  otherwise tokenize it as the real control token; also counted;
 - caps length to the prompt budget.
+
+Phrasings such as "ignore previous instructions" are no longer redacted: the
+rule deleted genuine descriptions of malware behaviour and missed every
+synonym or other language (ADR-0074).
 
 Defence in depth after the LLM: every returned name is fuzzy-matched against the
 source text (Stage 3b hallucination filter), MITRE IDs are normalised against the

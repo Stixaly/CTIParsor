@@ -206,7 +206,7 @@ def calls(monkeypatch):
     answers = {"select": '{"selected": []}'}
 
     def fake(system, user, provider=None):
-        if system == sel._SELECT_SYSTEM:
+        if system.startswith(sel._SELECT_SYSTEM):
             log.append("select")
             return answers["select"]
         log.append("extract")
@@ -302,7 +302,7 @@ def select_pipeline(monkeypatch, mock_llm_response):
     prompts: list[str] = []
 
     def fake(system, user, provider=None):
-        if system == sel._SELECT_SYSTEM:
+        if system.startswith(sel._SELECT_SYSTEM):
             prompts.append(user)
             excerpt = user.split("---\n", 2)[1].rsplit("\n---", 1)[0]
             return answer["select"](excerpt)

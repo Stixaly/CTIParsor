@@ -22,6 +22,7 @@ from typing import Callable, Optional
 
 from api.logging_config import get_logger
 from models.schemas import STIX_RELATIONSHIP_TYPES
+from pipeline.llm_parse import fit_report
 from pipeline.stage4b_graph_completion import InferredEdge
 from pipeline.stix_access import field
 
@@ -174,13 +175,14 @@ def build_long_distance_inferer(
         a_name, b_name = _name(central), _name(topic)
         if not a_name or not b_name:
             return None
-        prompt = _USER_TEMPLATE.format(
-            text=_excerpt(report_text or "", _surface_forms(central),
-                          _surface_forms(topic), max_chars),
+        prompt, spotlight = fit_report(
+            _USER_TEMPLATE,
+            _excerpt(report_text or "", _surface_forms(central), _surface_forms(topic), max_chars),
+            None,
             a_name=a_name, a_type=_type(central),
             b_name=b_name, b_type=_type(topic),
         )
-        raw = llm_fn(system, prompt)
+        raw = llm_fn(f"{system}\n\n{spotlight}", prompt)
         if not raw:
             return None
         data = _parse(raw)

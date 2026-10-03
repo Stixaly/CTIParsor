@@ -85,14 +85,14 @@ def test_the_document_mode_accepts_a_reference_sentence_but_not_a_chain():
     llm_fn, calls = _recorder()
     v.verify_relationships("text", _rels(1), llm_fn, enabled=True, document=True)
     system = calls[0][0]
-    assert system == v._VERIFY_SYSTEM_DOCUMENT
+    assert system.startswith(v._VERIFY_SYSTEM_DOCUMENT)
     assert "TWO sentences" in system and "A chain through a third entity is NOT support" in system
 
 
 def test_the_chunk_mode_keeps_the_single_sentence_rule():
     llm_fn, calls = _recorder()
     v.verify_relationships("text", _rels(1), llm_fn, enabled=True)
-    assert calls[0][0] == v._VERIFY_SYSTEM
+    assert calls[0][0].startswith(v._VERIFY_SYSTEM)
 
 
 def test_a_two_sentence_quote_survives_in_document_mode():
