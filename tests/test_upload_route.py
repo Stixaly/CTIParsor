@@ -75,12 +75,26 @@ def test_blank_markings_mean_no_marking(client, temp_db):
     assert job["tlp_level"] is None and job["pap_level"] is None
 
 
-@pytest.mark.parametrize("field", ["tlp_level", "pap_level"])
-def test_an_unknown_marking_is_refused(client, field):
+@pytest.mark.parametrize("field,levels", [
+    ("tlp_level", "CLEAR, GREEN, AMBER, AMBER+STRICT, RED"),     # TLP 2.0 names (ADR-0073)
+    ("pap_level", "AMBER, GREEN, RED, WHITE"),
+])
+def test_an_unknown_marking_is_refused(client, field, levels):
     resp = _upload(client, "r.txt", _REPORT, **{field: "PURPLE"})
     assert resp.status_code == 400
-    assert "AMBER, GREEN, RED, WHITE" in resp.json()["detail"]
+    assert levels in resp.json()["detail"]
     client.spawn.assert_not_called()
+
+
+@pytest.mark.parametrize("given,stored", [
+    ("TLP:AMBER", "AMBER"), ("tlp:amber+strict", "AMBER+STRICT"), ("white", "CLEAR"), ("Clear", "CLEAR"),
+])
+def test_a_tlp_is_stored_in_its_canonical_form(client, temp_db, given, stored):
+    """`TLP:AMBER` used to be refused by the API and, from the environment,
+    to ship as TLP:CLEAR (audit B 8.1.3)."""
+    resp = _upload(client, "r.txt", _REPORT, tlp_level=given)
+    assert resp.status_code == 200
+    assert _job(temp_db, resp.json()["job_id"])["tlp_level"] == stored
 
 
 def test_an_unsupported_extension_is_refused(client):

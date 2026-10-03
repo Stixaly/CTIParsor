@@ -21,7 +21,7 @@ from api.logging_config import get_logger
 from api.main import limiter
 from api.paths import uploads_dir
 from api.routes._common import start_job
-from api.routes.upload import _MARKING_LEVELS
+from api.routes.upload import clean_pap, clean_tlp
 from pipeline import web_capture
 from pipeline.regex_safety import compile_pattern
 from pipeline.stage1_ingestion import capture_meta_path, html_to_text
@@ -78,15 +78,9 @@ class UrlIngestRequest(BaseModel):
 
 
 def _clean_marking(value: str | None, field: str) -> str | None:
-    """Normalise a TLP/PAP marking to upper case, rejecting unknown levels."""
-    if value is None:
-        return None
-    v = value.strip().upper()
-    if not v:
-        return None
-    if v not in _MARKING_LEVELS:
-        raise HTTPException(400, f"Invalid {field}. Valid: {', '.join(sorted(_MARKING_LEVELS))}")
-    return v
+    """A TLP / PAP marking as stored, or 400 — the rules live in
+    api/routes/upload.py so the three entry points agree (ADR-0073)."""
+    return clean_tlp(value) if field == "tlp_level" else clean_pap(value)
 
 
 def _looks_like_markdown(text: str) -> bool:

@@ -7,8 +7,10 @@ const SERIF = "'Source Serif 4', Georgia, serif"
 
 const MARKING_TONE: Record<string, string> = {
   WHITE: 'var(--ink-3)',
+  CLEAR: 'var(--ink-3)',
   GREEN: 'var(--ok)',
   AMBER: 'var(--warn)',
+  'AMBER+STRICT': 'var(--warn)',
   RED:   'var(--no)',
 }
 

@@ -19,7 +19,11 @@ from uuid import uuid4
 
 import pytest
 
-from api.storage import InMemoryJobStorage
+# The API answers only to the hosts in API_ALLOWED_HOSTS (api/main.py, read at
+# import); Starlette's TestClient presents itself as `testserver`.
+os.environ.setdefault("API_ALLOWED_HOSTS", "testserver,localhost,127.0.0.1,[::1]")
+
+from api.storage import InMemoryJobStorage  # noqa: E402
 from models.config import PipelineConfig
 from models.schemas import EntityType, RawEntity
 

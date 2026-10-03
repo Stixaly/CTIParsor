@@ -140,28 +140,90 @@ class PinStats:
 #   • object_marking_refs → TLP (and optionally PAP) markings.
 #
 # TLP uses the well-known marking-definition objects bundled with stix2 (fixed
-# IDs per the spec).  The level comes from the per-job `tlp_level`, falling back
-# to the STIX_TLP env default.  PAP is not part of OASIS STIX 2.1, so it's a
-# "statement" marking that still passes strict JSON-schema validation.  Together
-# this makes a bundle "ingestion-grade" for OpenCTI / MISP.
+# IDs per the spec) for CLEAR, GREEN, AMBER and RED.  The level comes from the
+# per-job `tlp_level`, falling back to the STIX_TLP env default — and a level
+# that is not one of the known ones is an error, never a quieter marking
+# (ADR-0073: a bundle that said TLP:WHITE because `TLP:AMBER` was spelled
+# with its prefix is the worst outcome a marking can have).  PAP is not part
+# of OASIS STIX 2.1, so it's a "statement" marking that still passes strict
+# JSON-schema validation.  Together this makes a bundle "ingestion-grade" for
+# OpenCTI / MISP.
+#
+# TLP 2.0 (FIRST, August 2022) renamed WHITE to CLEAR and added AMBER+STRICT.
+# STIX 2.1 predates it and stix2 refuses any `tlp` marking that is not one of
+# the four spec objects, so AMBER+STRICT is emitted the way OpenCTI itself
+# exports it (opencti-graphql/src/database/stix-2-1-converter.ts,
+# `convertMarkingToStix`): `definition_type: "TLP"`, the name, no
+# `definition`, OpenCTI's property extension — and the id OpenCTI fixes for
+# it in schema/identifier.js (`MARKING_TLP_AMBER_STRICT`), so an import lands
+# on the platform's own object.  stix2validator reports two SHOULD warnings
+# on that object ({111}, {201}), accepted by choice like {103}/{302}.
 # ---------------------------------------------------------------------------
+
+#: The levels a report can carry, canonical spelling (TLP 2.0 names).
+TLP_LEVELS: tuple[str, ...] = ("CLEAR", "GREEN", "AMBER", "AMBER+STRICT", "RED")
+
+_TLP_ALIASES: dict[str, str] = {
+    "WHITE": "CLEAR",          # TLP 1.0 name → the same marking-definition
+    "CLEAR": "CLEAR",
+    "GREEN": "GREEN",
+    "AMBER": "AMBER",
+    "AMBER+STRICT": "AMBER+STRICT",
+    "RED": "RED",
+}
+
+#: OpenCTI's property extension (opencti-graphql/src/types/stix-2-1-extensions.ts).
+OPENCTI_EXTENSION_ID = "extension-definition--ea279b3e-5c71-4632-ac08-831c66a786ba"
+
+#: TLP:AMBER+STRICT as OpenCTI defines and exports it (id from identifier.js).
+TLP_AMBER_STRICT = stix2.MarkingDefinition(
+    id="marking-definition--826578e1-40ad-459f-bc73-ede076f81f37",
+    created="2022-08-02T00:00:00.000Z",     # TLP 2.0, the version that defined the level
+    definition_type="TLP",
+    name="TLP:AMBER+STRICT",
+    extensions={OPENCTI_EXTENSION_ID: {"extension_type": "property-extension",
+                                       "order": 4, "color": "#d84315"}},
+    allow_custom=True,
+)
 
 _TLP_MARKINGS: dict[str, object] = {
     "RED": stix2.TLP_RED,
+    "AMBER+STRICT": TLP_AMBER_STRICT,
     "AMBER": stix2.TLP_AMBER,
     "GREEN": stix2.TLP_GREEN,
-    "WHITE": stix2.TLP_WHITE,
-    "CLEAR": stix2.TLP_WHITE,   # TLP 2.0 naming → STIX 2.1 TLP:WHITE
+    "CLEAR": stix2.TLP_WHITE,   # TLP 2.0 naming → STIX 2.1's TLP:WHITE object
 }
 
 _PAP_LEVELS: frozenset[str] = frozenset({"RED", "AMBER", "GREEN", "WHITE"})
 
 
+def normalise_tlp(level: str | None) -> str:
+    """`TLP:amber+strict` -> `AMBER+STRICT`, `white` -> `CLEAR`.  Raises
+    ValueError on anything else: a marking is never guessed (ADR-0073)."""
+    if level is None or not level.strip():
+        raise ValueError("a TLP level is required: STIX_TLP in the environment, "
+                         "or the report's tlp_level")
+    key = "".join(level.split()).upper()
+    if key.startswith("TLP:"):
+        key = key[4:]
+    if key not in _TLP_ALIASES:
+        raise ValueError(f"unknown TLP level {level!r}: expected one of "
+                         f"{', '.join(TLP_LEVELS)} (a TLP: prefix is accepted; WHITE means CLEAR)")
+    return _TLP_ALIASES[key]
+
+
+def tlp_default() -> str:
+    """The TLP a report gets unless it was imported with its own: STIX_TLP,
+    validated; AMBER when unset.  Called at API, worker and CLI startup so a
+    bad value stops the process instead of marking a bundle wrongly."""
+    return normalise_tlp(os.environ.get("STIX_TLP", "AMBER"))
+
+
 def _tlp_marking(level: str | None):
-    """Returns the stix2 TLP marking-definition for `level`, or None."""
-    if not level:
-        return None
-    return _TLP_MARKINGS.get(level.strip().upper())
+    """The marking-definition for `level` (the report's own, else the
+    STIX_TLP default).  Raises on an unknown level — fail closed."""
+    key = normalise_tlp(level) if level and level.strip() else tlp_default()
+    return _TLP_MARKINGS[key]
 
 
 def _pap_marking(level: str | None):
@@ -840,8 +902,12 @@ def build_stix_bundle(
             stix_objects.append(obj)
             name_to_stix[f"coa:{coa.lower()}"] = obj
             led.object(obj, "course_of_action")
-        except Exception:
-            pass
+        except Exception as exc:
+            # Never silently (ADR-0061): the review graph shows the row, the
+            # bundle does not have it, and the ledger says why.
+            logger.warning(f"[Stage 4] course of action not built: {coa!r}: {type(exc).__name__}: {exc}")
+            led.entity(coa, "course-of-action", "dropped", reason="build_failed",
+                       input="course_of_action", error=f"{type(exc).__name__}: {exc}")
 
     # Shared dedup set for ALL Relationship SROs created below (indicates,
     # based-on, targets, and the semantic relationships loop).  Keyed by
@@ -934,8 +1000,12 @@ def build_stix_bundle(
                 led.object(rel, "ioc_association", ioc_value=assoc.ioc_value,
                            malware_name=assoc.malware_name)
             _based_on(indicator, sco)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(f"[Stage 4] indicator not built for {assoc.ioc_value!r}: "
+                           f"{type(exc).__name__}: {exc}")
+            led.entity(assoc.ioc_value, "indicator", "dropped", reason="build_failed",
+                       input="ioc_association", malware_name=assoc.malware_name,
+                       error=f"{type(exc).__name__}: {exc}")
 
     # --- Indicator SDOs for remaining IoCs (not already covered by ioc_associations) ---
     # Research best-practice: every accepted IoC should have a machine-readable pattern
@@ -967,8 +1037,12 @@ def build_stix_bundle(
                 sco_id_to_indicator[sco.id] = indicator
             led.object(indicator, "ioc_indicator", ioc_value=entity.value, sco_id=_field(sco, "id"))
             _based_on(indicator, sco)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(f"[Stage 4] indicator not built for {entity.value!r}: "
+                           f"{type(exc).__name__}: {exc}")
+            led.entity(entity.value, "indicator", "dropped", reason="build_failed",
+                       input=entity.entity_type.value, sco_id=_field(sco, "id"),
+                       error=f"{type(exc).__name__}: {exc}")
 
     # --- Indicator SDOs for detection rules embedded verbatim in the report (ADR-0042) ---
     seen_embedded_rule_ids: set[str] = set()
@@ -1362,11 +1436,11 @@ def build_stix_bundle(
     marking_defs: list = []
     marking_refs: list[str] = []
 
-    # Per-job tlp_level wins; otherwise fall back to the STIX_TLP env default.
-    tlp_marking = _tlp_marking(tlp_level) or _tlp_marking(os.environ.get("STIX_TLP", "clear"))
-    if tlp_marking is not None:
-        marking_defs.append(tlp_marking)
-        marking_refs.append(tlp_marking.id)
+    # Per-job tlp_level wins; otherwise the STIX_TLP default.  Always one
+    # marking: an unknown level raised above this line (ADR-0073).
+    tlp_marking = _tlp_marking(tlp_level)
+    marking_defs.append(tlp_marking)
+    marking_refs.append(tlp_marking.id)
 
     pap_marking = _pap_marking(pap_level)
     if pap_marking is not None:

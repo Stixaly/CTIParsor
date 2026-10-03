@@ -6,6 +6,65 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Security
+
+#### The API answers only to its own hosts and refuses cross-site writes, 2026-10-03
+
+Reproduced by the October 2026 audit (B 8.2.1): any `Host` header was
+accepted (DNS rebinding reads and edits every report as same-origin, even
+over an SSH tunnel) and a multipart `POST /api/upload` from a foreign origin
+created a job (CSRF: no preflight on a simple request). `api/main.py` now runs
+Starlette's `TrustedHostMiddleware` on `API_ALLOWED_HOSTS` (default
+`localhost,127.0.0.1,[::1]`; **list the public name or address you reach the
+app on**, see docs/deployment.md) and answers 403 to a mutating request the
+browser marks `Sec-Fetch-Site: cross-site` or stamps with a foreign `Origin`.
+curl, scripts and the nginx `proxy` profile are unaffected.
+`tests/test_api_hosts.py`.
+
+#### Corpus git remotes: https on a public host only, 2026-10-03
+
+`POST /api/settings/corpora` accepted `file://`, `ssh://`, `git://` and
+internal addresses as a `git` remote and `git clone`d them on the server
+(B 8.2.2). The remote now goes through the same `validate_url` policy as a
+tarball, and git itself is locked to https (`protocol.allow=never`,
+`protocol.https.allow=always`, `GIT_ALLOW_PROTOCOL=https`, no redirects, no
+terminal prompt) for the API and the CLI sync alike. A private corpus over
+SSH is cloned by hand and registered with its `path`.
+
+#### A TLP marking is never guessed (ADR-0073), 2026-10-03
+
+`TLP:AMBER`, `AMBER+STRICT` or any unknown value fell back to TLP:CLEAR, and
+`STIX_TLP=TLP:AMBER` with no level on the job shipped an unmarked bundle
+(B 8.1.3). One function now normalises the level (`TLP:` prefix, WHITE →
+CLEAR) and raises on anything else; the API, the worker and the CLI refuse to
+start on a bad `STIX_TLP`; the default is **AMBER** (set `STIX_TLP=clear` to
+keep the old one). AMBER+STRICT is a fifth level, shipped the way OpenCTI
+exports it, with OpenCTI's own id.
+
+### Fixed
+
+- **Stage 2 was quadratic in the size of the report** (B 8.1.1):
+  `iocextract.extract_ipv4s`, 99 % of Stage 2's time and ~4 min for a
+  5,000-address appendix, was redundant with `_IPV4_PATTERN` and is gone;
+  `tests/test_stage2_performance.py` holds 200 KB with 5,000 IPs under 2 s.
+- **Stage 3b accepted the neighbouring identifier** (B 8.1.4): UNC4763 for
+  UNC4736, APT2 for APT28, BlackBasta for BlackCat. Names with a digit, under
+  8 characters or single-token are matched exactly on word boundaries; fuzzy
+  matching stays for multi-word names OCR split. `tests/test_stage3b_confusables.py`.
+- **CLI bundles had no actors, malware or tools** (B 8.1.2): Stage 4 reads
+  the LLM's lists, the worker rebuilt them from the job store, the CLI did
+  not. `pipeline/named_entities.py` adds the detectors' names on both paths.
+- **Stage 4 dropped Indicators and CourseOfActions silently** (B 8.1.9): each
+  failure is now a `dropped / build_failed` ledger entry with the error.
+- **Compose images are pinned by digest**; `capture-proxy` was
+  `ubuntu/squid:latest` (B 8.2.6) and is `6.6-24.04_edge` (24.04 LTS; `latest`
+  pointed at 25.04, end of life).
+- **Documentation figures taken from papers say so** (B 8.9.1): aCTIon's
+  27% → 8%, CyNER's model-card F1, SecureBERT-Plus's +8–12% (ADR-0023 found no
+  gain; no longer recommended), the ~40% estimate; `check_doc_claims.py` fails
+  on a figure stated without its source. `docs/deployment.md` no longer
+  describes a CORS setting that was removed.
+
 ### Changed
 
 #### Relationship dates keep what the source said (ADR-0063), 2026-09-29

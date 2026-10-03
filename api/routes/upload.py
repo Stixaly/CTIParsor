@@ -8,6 +8,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from api.main import limiter
 from api.paths import uploads_dir
 from api.routes._common import start_job
+from pipeline.stage4_stix_mapping import normalise_tlp
 
 # Explicit annotation needed: this module is part of an import cycle
 # (api.main -> api.routes.upload -> api.main, for the `limiter` import),
@@ -31,9 +32,32 @@ _MAX_BYTES = 50 * 1024 * 1024
 # Maximum file size to check in memory for MIME validation (10 MB)
 _MAX_MIME_CHECK = 10 * 1024 * 1024
 
-# Allowed TLP / PAP marking levels (object_marking_refs applied to every
-# object in the generated STIX bundle — see stage4_stix_mapping.py)
-_MARKING_LEVELS = {"RED", "AMBER", "GREEN", "WHITE"}
+# PAP marking levels (object_marking_refs applied to every object in the
+# generated STIX bundle — see stage4_stix_mapping.py).  TLP levels come from
+# the same module, which also owns their spelling (ADR-0073).
+_PAP_LEVELS = {"RED", "AMBER", "GREEN", "WHITE"}
+
+
+def clean_tlp(value: str | None) -> str | None:
+    """A job's TLP as stored: canonical (`TLP:amber+strict` -> `AMBER+STRICT`,
+    `white` -> `CLEAR`), None when blank, 400 when unknown — never silently
+    another level."""
+    if value is None or not value.strip():
+        return None
+    try:
+        return normalise_tlp(value)
+    except ValueError as exc:
+        raise HTTPException(400, f"Invalid tlp_level: {exc}")
+
+
+def clean_pap(value: str | None) -> str | None:
+    """A job's PAP as stored: upper-cased, None when blank, 400 when unknown."""
+    if value is None or not value.strip():
+        return None
+    v = value.strip().upper()
+    if v not in _PAP_LEVELS:
+        raise HTTPException(400, f"Invalid pap_level. Valid: {', '.join(sorted(_PAP_LEVELS))}")
+    return v
 
 
 @router.post("/upload")
@@ -49,8 +73,10 @@ def upload_file(
 
     Rate limited to 10 uploads per minute per IP address.
 
-    tlp_level / pap_level — optional TLP/PAP markings ("RED"|"AMBER"|"GREEN"|"WHITE")
-    applied to every object in the generated STIX bundle.
+    tlp_level — optional TLP marking (CLEAR | GREEN | AMBER | AMBER+STRICT | RED,
+    a `TLP:` prefix and WHITE accepted); pap_level — optional PAP marking
+    (RED | AMBER | GREEN | WHITE).  Applied to every object in the generated
+    STIX bundle; without a TLP the report gets the STIX_TLP default.
 
     Declared as a plain `def`, not `async def`: the body does blocking disk I/O
     (`dest.open("wb")`, `f.write`) and a synchronous SQLite insert (`start_job`).
@@ -58,14 +84,8 @@ def upload_file(
     those calls never block the event loop the way they would inside an
     `async def` that never awaits them.
     """
-    if tlp_level is not None:
-        tlp_level = tlp_level.strip().upper() or None
-        if tlp_level and tlp_level not in _MARKING_LEVELS:
-            raise HTTPException(400, f"Invalid tlp_level. Valid: {', '.join(sorted(_MARKING_LEVELS))}")
-    if pap_level is not None:
-        pap_level = pap_level.strip().upper() or None
-        if pap_level and pap_level not in _MARKING_LEVELS:
-            raise HTTPException(400, f"Invalid pap_level. Valid: {', '.join(sorted(_MARKING_LEVELS))}")
+    tlp_level = clean_tlp(tlp_level)
+    pap_level = clean_pap(pap_level)
     # Check file extension
     suffix = Path(file.filename or "file").suffix.lower()
     if suffix not in SUPPORTED:

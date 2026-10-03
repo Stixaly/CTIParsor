@@ -2,23 +2,26 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { X, Loader2, AlertTriangle } from 'lucide-react'
 import { uploadFile, ingestText, ingestUrl, errorDetail } from '../api/client'
-import { MARKING_LEVELS } from '../types'
-import type { MarkingLevel } from '../types'
+import { TLP_LEVELS, PAP_LEVELS } from '../types'
+import type { MarkingLevel, TlpLevel, PapLevel } from '../types'
 
 const MONO  = "'JetBrains Mono', ui-monospace, monospace"
 const SERIF = "'Source Serif 4', Georgia, serif"
 
-// Display order is WHITE → RED, the reverse of MARKING_LEVELS, which is declared
-// RED-first in types/index.ts.  The constant is the source of truth for the API
-// and must not be reordered; this is a presentation concern only.
-const MARKING_DISPLAY_ORDER = [...MARKING_LEVELS].reverse()
+// Display order is CLEAR/WHITE → RED, the reverse of the constants, which are
+// declared RED-first in types/index.ts.  The constants are the source of truth
+// for the API and must not be reordered; this is a presentation concern only.
+const TLP_DISPLAY_ORDER = [...TLP_LEVELS].reverse()
+const PAP_DISPLAY_ORDER = [...PAP_LEVELS].reverse()
 
 // Tone per marking level.  Used by the pills here and by the TLP chip on the
-// kanban card, so any change has to stay in sync with Dashboard.tsx.
+// kanban card, so any change has to stay in sync with KanbanCard.tsx.
 const MARKING_TONE: Record<MarkingLevel, string> = {
   WHITE: 'var(--ink-3)',
+  CLEAR: 'var(--ink-3)',
   GREEN: 'var(--ok)',
   AMBER: 'var(--warn)',
+  'AMBER+STRICT': 'var(--warn)',
   RED:   'var(--no)',
 }
 
@@ -55,8 +58,8 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
   const [title, setTitle]       = useState('')
   const [file, setFile]         = useState<File | null>(null)
   const [enableJs, setEnableJs] = useState(false)
-  const [tlp, setTlp]           = useState<MarkingLevel | null>(null)
-  const [pap, setPap]           = useState<MarkingLevel | null>(null)
+  const [tlp, setTlp]           = useState<TlpLevel | null>(null)
+  const [pap, setPap]           = useState<PapLevel | null>(null)
   const [error, setError]       = useState<string | null>(null)
   const [modalDrag, setModalDrag] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -195,15 +198,16 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
     if (f) { setFile(f); setValue('') }
   }
 
-  const renderMarkingRow = (
+  const renderMarkingRow = <L extends MarkingLevel>(
     label: string,
-    selected: MarkingLevel | null,
-    onPick: (l: MarkingLevel) => void,
+    levels: readonly L[],
+    selected: L | null,
+    onPick: (l: L) => void,
     ariaLabel: string,
   ) => (
     <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }} role="radiogroup" aria-label={ariaLabel}>
       <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-2)', width: 26, flexShrink: 0 }}>{label}</span>
-      {MARKING_DISPLAY_ORDER.map((level) => {
+      {levels.map((level) => {
         const tone = MARKING_TONE[level]
         const isSel = selected === level
         return (
@@ -441,8 +445,8 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
             <div style={{ flex: 1 }} />
             <span style={{ fontSize: 10.5, color: 'var(--ink-4)' }}>Applied to every object in the bundle</span>
           </div>
-          {renderMarkingRow('TLP', tlp, setTlp, 'TLP marking')}
-          {renderMarkingRow('PAP', pap, setPap, 'PAP marking')}
+          {renderMarkingRow('TLP', TLP_DISPLAY_ORDER, tlp, setTlp, 'TLP marking')}
+          {renderMarkingRow('PAP', PAP_DISPLAY_ORDER, pap, setPap, 'PAP marking')}
         </div>
 
         </div>{/* end scrolling region */}

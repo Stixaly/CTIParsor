@@ -129,7 +129,8 @@ Leave `ANTHROPIC_API_KEY` unset. Stage 3 is skipped. The pipeline still produces
 ```env
 # Stage 2c — Semantic TTP embedding model
 # Default: all-MiniLM-L6-v2 (80 MB, fast)
-# Upgrade: ehsanaghaei/SecureBERT-Plus (500 MB, +8-12% F1 on CTI text)
+# Alternative: ehsanaghaei/SecureBERT-Plus (500 MB; its paper's +8-12% F1 on CTI text
+# did not carry over: ADR-0023 measured no gain here, so it is not recommended)
 # After changing: docker compose run --rm dev python scripts/build_indexes.py --only embeddings,
 # then make docker-build: the cache lives in pipeline/data/, baked into the image
 TTP_EMBEDDING_MODEL=all-MiniLM-L6-v2
@@ -142,7 +143,7 @@ TTP_EMBEDDING_MODEL=all-MiniLM-L6-v2
 # TTP_TOP2_MARGIN=0.05        # drop a 2nd match for the same sentence beyond this
 #                             # cosine gap from the top match
 
-# Stage 2d — CyNER 2.0 cybersecurity NER (DeBERTa-v3, F1 91.88%)
+# Stage 2d — CyNER 2.0 cybersecurity NER (DeBERTa-v3; model card F1 91.88%, not measured here)
 CYNER_ENABLED=true
 # CYNER_MODEL=PranavaKailash/CyNER-2.0-DeBERTa-v3-base   # default; override to swap models
 
@@ -215,7 +216,8 @@ CHECKPOINT_EVERY=5
 LLM_TIMEOUT=120
 
 # Stage 3d — Self-verification of relationships
-# Adds ~1.4× LLM calls; reduces relationship hallucination 27% → 8%
+# Adds ~1.4× LLM calls.  The aCTIon paper reports 27% → 8% hallucination on its
+# own benchmark; CTIParsor's measured figure is the grounding harness's (docs/eval/)
 ENABLE_STIX_VERIFICATION=false
 STIX_VERIFY_MIN_RELS=1
 
@@ -244,7 +246,7 @@ CONSENSUS_PROVIDER=mistral
 # Stage 4 — STIX provenance & sharing metadata
 # Every object is stamped with a TLP marking (object_marking_refs) and a
 # created_by_ref pointing at an authoring Identity (the pipeline, not the actor).
-STIX_TLP=clear               # clear | green | amber | red
+STIX_TLP=amber               # clear | green | amber | amber+strict | red (ADR-0073)
 STIX_AUTHOR_NAME=CTIParsor
 
 # HuggingFace token (removes rate limits on model downloads)
@@ -470,7 +472,19 @@ and [Advanced](#advanced).
 
 `API_HOST`, `API_PORT`, `API_WORKERS`, `API_RELOAD` and `FORWARDED_ALLOW_IPS`
 configure the single API process; under Docker, compose forces the first three
-and publishes with `CTI_BIND` / `CTI_PORT`. The compose-level settings —
+and publishes with `CTI_BIND` / `CTI_PORT`.
+
+`API_ALLOWED_HOSTS` (default `localhost,127.0.0.1,[::1]`) is the list of
+`Host` names the API answers to; any other gets 400 before a handler runs,
+which is what stops DNS rebinding against an unauthenticated app. **List the
+name or address you reach the app on** when it is not loopback: the LAN
+address behind `API_HOST=0.0.0.0`, the public name behind the `proxy`
+profile. `*.example.org` patterns work; `*` turns the check off. The same
+list decides which `Origin` a browser may write from. Cross-site writes
+(`Sec-Fetch-Site: cross-site`, or a foreign `Origin`) are refused with 403;
+curl and scripts send neither header and are not affected.
+
+The compose-level settings —
 published ports, image name, `CTI_INSTALL_CAPTURE`, per-container CPU and memory
 (`CTI_<SERVICE>_CPUS`, `CTI_<SERVICE>_MEMORY`) — are in sections 9 and 12 of
 `.env.example`, with what each exposure means in

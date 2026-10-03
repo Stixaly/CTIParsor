@@ -21,8 +21,14 @@ export interface Job {
 
 // TLP / PAP marking levels offered at upload time — applied via
 // object_marking_refs to every object in the generated STIX bundle.
-export const MARKING_LEVELS = ['RED', 'AMBER', 'GREEN', 'WHITE'] as const
-export type MarkingLevel = typeof MARKING_LEVELS[number]
+// TLP uses the TLP 2.0 names (ADR-0073): CLEAR replaced WHITE, AMBER+STRICT
+// sits between AMBER and RED; the API also accepts WHITE and a `TLP:` prefix
+// and stores the canonical form.  PAP keeps its four levels.
+export const TLP_LEVELS = ['RED', 'AMBER+STRICT', 'AMBER', 'GREEN', 'CLEAR'] as const
+export const PAP_LEVELS = ['RED', 'AMBER', 'GREEN', 'WHITE'] as const
+export type TlpLevel = typeof TLP_LEVELS[number]
+export type PapLevel = typeof PAP_LEVELS[number]
+export type MarkingLevel = TlpLevel | PapLevel
 
 export interface Entity {
   id: string

@@ -1,5 +1,7 @@
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -8,6 +10,7 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 # Initialize logging before importing other modules
 from api.logging_config import clear_request_id, get_logger, set_request_id, setup_logging
@@ -47,6 +50,10 @@ async def lifespan(app: FastAPI):
     Tests patch `api.main.init_db`; the patch still applies here because the
     name is resolved from the module namespace at call time.
     """
+    # A bad STIX_TLP stops the process here, not at the first bundle — a
+    # marking is never guessed (ADR-0073).
+    from pipeline.stage4_stix_mapping import tlp_default
+    logger.info("[startup] default TLP: %s", tlp_default())
     init_db()
     uploads_dir().mkdir(parents=True, exist_ok=True)
     output_dir().mkdir(parents=True, exist_ok=True)
@@ -124,6 +131,72 @@ async def add_request_id(request: Request, call_next):
     finally:
         clear_request_id()
         logger.debug(f"Request completed: {request.method} {request.url}")
+
+
+# ---------------------------------------------------------------------------
+# Who may talk to this API from a browser (audit B 8.2.1).
+#
+# The app has no authentication, and the same-origin policy below only stops a
+# page on another origin from READING responses — it does not stop the
+# browser from SENDING the request.  Two attacks follow from that alone:
+#   * CSRF: a page the analyst visits submits a multipart form to /api/upload
+#     (a "simple" request, no preflight) and a job is created — LLM cost,
+#     a polluted workspace, a prompt-injection vector;
+#   * DNS rebinding: the attacker's page points its own hostname at
+#     127.0.0.1 and then calls this API as *same origin* — reads and edits
+#     everything, TLP:RED reports included, even over an SSH tunnel.
+# `TrustedHostMiddleware` closes rebinding: a request whose Host header is
+# not one of API_ALLOWED_HOSTS gets 400 before any handler.  The write guard
+# closes CSRF: a mutating request a browser marks as cross-site
+# (`Sec-Fetch-Site`) or stamps with a foreign `Origin` gets 403.  Neither
+# touches curl, scripts or the nginx `proxy` profile (which forwards Host),
+# and a browser request from this app's own page carries a same-origin
+# `Origin` or no `Origin` at all.
+# ---------------------------------------------------------------------------
+
+def allowed_hosts() -> list[str]:
+    """Hostnames this API answers to: API_ALLOWED_HOSTS, comma-separated, port
+    ignored; "*" disables the check (nothing safer than the network then).
+    The public name behind a proxy, or the address API_HOST=0.0.0.0 is
+    reached on, has to be listed — see docs/deployment.md."""
+    raw = os.environ.get("API_ALLOWED_HOSTS", "localhost,127.0.0.1,[::1]")
+    hosts = [h.strip().lower() for h in raw.split(",") if h.strip()]
+    return hosts or ["localhost", "127.0.0.1", "[::1]"]
+
+
+_ALLOWED_HOSTS = allowed_hosts()
+_MUTATING = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+def _host_allowed(hostname: str | None) -> bool:
+    if "*" in _ALLOWED_HOSTS:
+        return True
+    h = (hostname or "").lower()
+    for pattern in _ALLOWED_HOSTS:
+        if pattern.startswith("*.") and h.endswith(pattern[1:]):
+            return True
+        if h == pattern or (pattern.startswith("[") and h == pattern.strip("[]")):
+            return True
+    return False
+
+
+@app.middleware("http")
+async def refuse_cross_site_writes(request: Request, call_next):
+    """A browser on another origin can still SEND a request (no CORS needed
+    for a multipart POST); refuse it before any handler runs."""
+    if request.method in _MUTATING:
+        site = request.headers.get("sec-fetch-site")
+        if site and site not in ("same-origin", "none"):
+            return JSONResponse({"detail": "cross-site request refused"}, status_code=403)
+        origin = request.headers.get("origin")
+        if origin and origin != "null" and not _host_allowed(urlsplit(origin).hostname):
+            return JSONResponse({"detail": "origin not allowed"}, status_code=403)
+    return await call_next(request)
+
+
+# Added last, so it runs first: an unknown Host is answered 400 before the
+# request-id middleware or the write guard see it.
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=_ALLOWED_HOSTS, www_redirect=False)
 
 # No CORSMiddleware: one uvicorn process serves both the API and the built
 # React UI (see the SPA mount below), so the browser only ever calls this API

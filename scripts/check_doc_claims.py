@@ -28,7 +28,8 @@ from pipeline.regex_safety import compile_pattern
 
 ROOT = Path(__file__).resolve().parent.parent
 #: The pages the claims below are documented in, searched as one text.
-DOCS: tuple[Path, ...] = (ROOT / "README.md", ROOT / "docs" / "pipeline.md")
+DOCS: tuple[Path, ...] = (ROOT / "README.md", ROOT / "docs" / "pipeline.md",
+                          ROOT / "docs" / "configuration.md", ROOT / "docs" / "development.md")
 
 _NUM = "[\\d\\u202f\\u00a0, ]+"
 
@@ -206,6 +207,42 @@ CLAIMS: list[Claim] = [
 ]
 
 
+@dataclass(frozen=True)
+class LiteratureClaim:
+    """A figure taken from a paper or a model card and never measured on
+    CTIParsor (audit of October 2026, B 8.9.1: four of them read as
+    measurements).  Every line that states the figure must also say where it
+    comes from, or that it is not measured here.  A figure that is gone from
+    the docs is fine — that is the other correct outcome."""
+    label: str
+    figure_pattern: str
+    source_pattern: str = (r"paper|model card|literature|reported|estimate|not measured|"
+                           r"ADR-0023|its own (?:benchmark|figure)")
+
+
+LITERATURE: list[LiteratureClaim] = [
+    LiteratureClaim("Stage 3d hallucination figure (aCTIon paper)",
+                    r"~?27\s?%\s?(?:→|->|to)\s?~?8\s?%"),
+    LiteratureClaim("Stage 2d CyNER F1 (model card)", r"91\.88\s?%"),
+    LiteratureClaim("SecureBERT-Plus F1 gain (its paper)", r"\+?8[–-]12\s?%"),
+    LiteratureClaim("Stage 3c wrong-id figure (estimate)", r"~?40\s?% of (?:the )?wrong"),
+]
+
+
+def check_literature(doc_text: str) -> list[tuple[str, str, str, str]]:
+    """Every line stating a literature figure names its source: OK or FAIL
+    per line; nothing when the figure is absent."""
+    rows: list[tuple[str, str, str, str]] = []
+    for claim in LITERATURE:
+        for line in doc_text.splitlines():
+            if not re.search(claim.figure_pattern, line):
+                continue
+            stated = re.search(claim.source_pattern, line, re.IGNORECASE) is not None
+            rows.append(("OK" if stated else "FAIL", claim.label, line.strip()[:70],
+                         "source stated" if stated else "no source on this line"))
+    return rows
+
+
 def _to_number(raw: str) -> float | None:
     """Convert a raw number string (with thousands separators) to float.
 
@@ -263,6 +300,7 @@ def check_all(doc_text: str) -> list[tuple[str, str, str, str]]:
         else:
             status = "FAIL"
         rows.append((status, claim.label, _fmt(documented), _fmt(float(actual))))
+    rows.extend(check_literature(doc_text))
     return rows
 
 

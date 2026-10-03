@@ -53,7 +53,8 @@ the [README](../README.md#how-it-works); this page is the detail.
 │  Sentence-transformer cosine-similarity against the pre-embedded    │
 │  MITRE technique descriptions (local .npy cache)                    │
 │  • Default model: all-MiniLM-L6-v2 (80 MB)                         │
-│  • Upgrade: ehsanaghaei/SecureBERT-Plus (+8-12% F1 on CTI text)     │
+│  • SecureBERT-Plus: +8-12% F1 is its paper's figure; ADR-0023       │
+│    measured no gain here — not recommended                          │
 │  • Model-aware tiers: ≥ high wins over LLM / medium = candidate     │
 │    (MiniLM 0.62 / 0.48; resolved per-model — ADR-0011 Phase A)      │
 │  • 1 match/sentence (top_k=1); TTP_TOP2_MARGIN guards any 2nd match  │
@@ -65,7 +66,7 @@ the [README](../README.md#how-it-works); this page is the detail.
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
 │  Stage 2d — CyNER 2.0                       (offline once cached)   │
-│  DeBERTa-v3 fine-tuned on cybersecurity NER (F1 91.88%)             │
+│  DeBERTa-v3 fine-tuned on cybersecurity NER (model card F1 91.88%)  │
 │  Detects: Malware, Threat_group (threat-actor groups)               │
 │  Model: PranavaKailash/CyNER-2.0-DeBERTa-v3-base (CYNER_ENABLED)    │
 └─────────────────────────────┬────────────────────────────────────────┘
@@ -103,9 +104,11 @@ the [README](../README.md#how-it-works); this page is the detail.
 ┌─────────────────────────────▼────────────────────────────────────────┐
 │  Stage 3b — HALLUCINATION FILTER                        (offline ✅)  │
 │  Verifies each LLM-returned name against source chunk text           │
-│  via fuzzy sliding-window matching (rapidfuzz):                     │
-│  • ≤ 5 chars (FIN7, APT1)   : 92% similarity threshold             │
-│  • 6–9 chars (LummaC2)      : 80% similarity threshold             │
+│  exact on word boundaries; fuzzy (rapidfuzz sliding window) only for│
+│  multi-word names ≥ 8 chars without a digit — identifiers never:    │
+│  • ≤ 5 chars (FIN7, APT1)   : exact only (92% similarity threshold │
+│    constant kept for the record)                                   │
+│  • 6–9 chars (Cobalt-S..)   : 80% similarity threshold             │
 │  • ≥ 10 chars (Cobalt Strike): 75% similarity threshold            │
 │  Campaign names: word-level fallback to avoid over-filtering        │
 │  Names already confirmed by NER or doc context skip the fuzzy scan   │
@@ -115,7 +118,8 @@ the [README](../README.md#how-it-works); this page is the detail.
 │  Stage 3d — RELATIONSHIP SELF-VERIFICATION              (optional)   │
 │  Second LLM call: "quote the exact sentence supporting this claim"  │
 │  Unsupported relationships are removed.                             │
-│  Effect: hallucination rate 27% → 8% (aCTIon paper, NEC Labs 2023) │
+│  aCTIon paper: 27% → 8% hallucination on its benchmark; CTIParsor's│
+│  own figure is the grounding harness's (docs/eval), not this one   │
 │  Cost: ~1.4× total LLM calls (only chunks with ≥ 1 relationship)   │
 │  Enable: ENABLE_STIX_VERIFICATION=true in .env                      │
 └─────────────────────────────┬────────────────────────────────────────┘
@@ -302,22 +306,22 @@ Named entities at chunk boundaries appear in both adjacent chunks. De-duplicated
 
 ### 3. Hallucination filter (Stage 3b)
 
-After every LLM call, each returned name is fuzzy-matched against the source chunk text. Names below the length-adjusted threshold are dropped and logged.
+After every LLM call, each returned name is checked against the source chunk text: an exact match on word boundaries first, then — only for a multi-word name of 8 characters or more with no digit — a fuzzy sliding-window match whose threshold depends on length. A name with a digit (UNC4736, APT28, Storm-0558), a short name or a single token is never fuzzy-matched: the window used to accept the *neighbouring* identifier (UNC4763 for UNC4736, APT2 for APT28, BlackBasta for BlackCat — reproduced by the October 2026 audit), and a wrong attribution is the costliest error an extractor can make. Names that fail are dropped and logged.
 
-| Name length | Strategy | Threshold |
+| Name | Strategy | Threshold |
 |---|---|---|
-| ≤ 5 chars | Exact + fuzzy | 92% |
-| 6–9 chars | Exact + fuzzy | 80% |
-| ≥ 10 chars | Exact + fuzzy | 75% |
+| ≤ 5 chars, any name with a digit, any single token | Exact (word boundaries) | — |
+| 6–9 chars, multi-word, no digit | Exact + fuzzy | 80% |
+| ≥ 10 chars, multi-word, no digit | Exact + fuzzy | 75% |
 | Campaign names | Word-level keyword fallback | — |
 
 ### 4. MITRE normalisation (Stage 3c)
 
-Fuzzy-matched against the full ATT&CK corpus. Eliminates ~40% of wrong or invented MITRE IDs. Merge precision (ADR-0011): only a **high-confidence** semantic match overrides the LLM — a medium-confidence one is kept only when the LLM is silent and never wins the dedup. When a sub-technique (`T1059.001`) is present, its parent (`T1059`) is dropped as redundant.
+Fuzzy-matched against the full ATT&CK corpus. The ~40% of wrong or invented MITRE IDs it was expected to remove is an estimate, not measured here. Merge precision (ADR-0011): only a **high-confidence** semantic match overrides the LLM — a medium-confidence one is kept only when the LLM is silent and never wins the dedup. When a sub-technique (`T1059.001`) is present, its parent (`T1059`) is dropped as redundant.
 
 ### 5. Relationship self-verification (Stage 3d)
 
-Second LLM call per chunk quotes the exact supporting sentence for every relationship. Unsupported relationships are dropped. Reduces hallucination rate from ~27% to ~8% (aCTIon paper benchmark).
+Second LLM call per chunk quotes the exact supporting sentence for every relationship. Unsupported relationships are dropped. The aCTIon paper reports a hallucination rate falling from ~27% to ~8% on its own benchmark; CTIParsor's measured figure is the grounding harness's (≈ 11 % named-entity relationship hallucination on a 4-report corpus, see the ADR-0012 note below).
 
 ### 6. TTP self-verification (Stage 3f)
 

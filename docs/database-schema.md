@@ -19,7 +19,7 @@ CREATE TABLE jobs (
     report_text     TEXT,           -- refanged extracted text (stored once)
     bundle_json     TEXT,           -- serialised STIX bundle
     llm_result_json TEXT,           -- LLM result snapshot for finalize
-    tlp_level       TEXT,           -- per-job TLP marking (clear|green|amber|red)
+    tlp_level       TEXT,           -- per-job TLP marking (clear|green|amber|amber+strict|red, ADR-0073)
     pap_level       TEXT,           -- per-job PAP statement marking
     run_config_json TEXT,           -- run-config snapshot (ADR-0024): a bundle
                                     -- stays explainable after the policy changes
