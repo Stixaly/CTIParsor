@@ -405,7 +405,7 @@ detection rules inline, nothing extracts them — never built)
        codebase uses onto RE2's inline `(?ims)` prefix syntax.  7 of the
        19 sub-patterns use lookaround RE2 cannot parse at all and fall
        back to stdlib `re` regardless of the flag mapping -- checking
-       that, rather than assuming the flag fix covered everything, found
+       that, rahttps://github.com/Stixaly/CTIParsor/pull/96/conflict?name=docs%252Fadr%252FREADME.md&ancestor_oid=c949a9a108d074963dce7877befc21c2299fc0af&base_oid=d753e7cecadd7196570768f4b9ce51d89962cf32&head_oid=396cc73420e573aaa0ea9fc605cab0a587d9222fther than assuming the flag fix covered everything, found
        none of the 7 has a nested unbounded quantifier, so backtracking
        blowup was never reachable on them either way (stress-tested
        against adversarial input up to 16k chars, <11 ms).  Validated

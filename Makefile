@@ -113,14 +113,18 @@ check-docs: .secrets/db_password
 # them (`docker compose build --no-cache` bypasses layer caching so pip/npm
 # re-resolve against the current constraints instead of reusing old wheels).
 
-## Scan Python deps for known CVEs (pip-audit, no image build needed)
+## Scan the dependencies for known CVEs, as the CI dependency-audit job does:
+## the exact versions of requirements.lock.txt (not the ranges), and the UI's
+## production packages.  Accepted ones are listed in SECURITY.md.
+AUDIT_IGNORE ?= --ignore-vuln PYSEC-2026-2447
 audit:
 	docker run --rm -v "$$(pwd)":/audit -w /audit python:3.12-slim \
-	    sh -c "pip install --quiet pip-audit && python -m pip_audit -r requirements.txt -r requirements-api.txt"
+	    sh -c "pip install --quiet pip-audit && python -m pip_audit -r requirements.lock.txt \
+	        --no-deps --disable-pip --progress-spinner off $(AUDIT_IGNORE)"
 	@echo ""
-	@echo "=== npm dependency audit ==="
+	@echo "=== npm dependency audit (production) ==="
 	docker run --rm -v "$$(pwd)/frontend":/ui -w /ui node:24-bookworm-slim \
-	    sh -c "npm audit --audit-level=moderate || true"
+	    sh -c "npm audit --omit=dev --audit-level=high"
 
 ## Resolve requirements*.txt -> requirements.lock.txt, the exact versions the
 ## image and CI install (Python 3.12, CPU-only torch, every platform).
