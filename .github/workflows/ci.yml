@@ -97,6 +97,38 @@ jobs:
           files: coverage.xml
           fail_ci_if_error: false
 
+  # ── Dependency audit — the exact versions the image ships (ADR-0075) ────────
+  # Blocking: a known vulnerability in requirements.lock.txt, or a high one in
+  # the UI's production dependencies, fails the build unless SECURITY.md
+  # accepts it with a reason. `--no-deps --disable-pip` audits the pins as
+  # written, installing nothing; torch's +cpu build is not on PyPI, so
+  # pip-audit says it cannot look it up and skips it.
+  dependency-audit:
+    name: Dependency audit (pip-audit on the lock, npm audit)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: pip-audit (requirements.lock.txt)
+        run: |
+          pip install pip-audit
+          # PYSEC-2026-2447 (diskcache, pickle in a cache directory): accepted, see SECURITY.md.
+          pip-audit -r requirements.lock.txt --no-deps --disable-pip --progress-spinner off \
+            --ignore-vuln PYSEC-2026-2447
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: npm audit (the UI's production dependencies)
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high
+
   # ── Frontend — lint + type check + unit tests (vitest) ─────────────────────
   # The same three steps as `npm run check` (frontend/package.json).
   frontend-tests:
@@ -209,14 +241,22 @@ jobs:
   # not the only control. Rebuilds with docker/build-push-action, but
   # cache-from: type=gha reuses the smoke-test job's layers, so this is a cheap
   # re-tag-and-push, not a second full build.
+  #
+  # ADR-0075: the pushed image gets a CycloneDX SBOM (syft) and two signed
+  # attestations bound to its digest, build provenance and that SBOM, pushed
+  # to GHCR next to it. A consumer checks them with
+  # `gh attestation verify oci://ghcr.io/stixaly/ctiparsor@<digest> -R Stixaly/CTIParsor`.
+  # No storage record: those exist for organisation-owned repositories only.
   publish-image:
     name: Publish image to GHCR
-    needs: [fast-tests, frontend-tests, container-image]
+    needs: [fast-tests, frontend-tests, container-image, dependency-audit]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+      id-token: write          # Sigstore signing certificate for the attestations
+      attestations: write
 
     steps:
       - uses: actions/checkout@v6
@@ -245,6 +285,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
 
       - name: Build and push
+        id: push
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -255,3 +296,28 @@ jobs:
             GIT_REV=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: SBOM of the pushed image (CycloneDX, syft)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ steps.image.outputs.name }}@${{ steps.push.outputs.digest }}
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+          artifact-name: ctiparsor-image-sbom.cdx.json
+
+      - name: Attest build provenance
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Attest the SBOM
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          sbom-path: sbom.cdx.json
+          push-to-registry: true
+          create-storage-record: false

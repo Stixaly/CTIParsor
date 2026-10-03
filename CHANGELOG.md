@@ -8,6 +8,20 @@ sections group by theme rather than strict semver.
 
 ### Security
 
+#### A verifiable supply chain (ADR-0075), 2026-10-03
+
+The Dockerfile's base images are pinned by digest, like compose's. A blocking
+`dependency-audit` CI job runs `pip-audit` on `requirements.lock.txt` (the
+versions the image installs; `make audit` used to scan the ranges and never
+failed) and `npm audit` on the UI's production packages; the image is
+published only after it passes. One known vulnerability is accepted, with
+its reason, in SECURITY.md: diskcache 5.6.3 (PYSEC-2026-2447), which
+CTIParsor never loads. CodeQL scans the Python and the TypeScript. Each
+image pushed to GHCR gets a CycloneDX SBOM and two signed attestations
+(build provenance, SBOM): `gh attestation verify oci://ghcr.io/stixaly/ctiparsor@<digest>
+-R Stixaly/CTIParsor`. Dependabot proposes updates for actions, images and
+npm; Python stays on `make update-deps`.
+
 #### The API answers only to its own hosts and refuses cross-site writes, 2026-10-03
 
 Reproduced by the October 2026 audit (B 8.2.1): any `Host` header was

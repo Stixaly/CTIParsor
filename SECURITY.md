@@ -101,6 +101,25 @@ pipeline still produces valid STIX. ML models are downloaded once and cached.
   above still applies inside it; API keys reach the container through `env_file` and are
   readable by whoever holds the Docker socket.
 
+## Supply chain (ADR-0075)
+- **Pinned inputs.** Python dependencies install from `requirements.lock.txt`
+  (`make lock`); the Dockerfile's base images and every compose image are
+  pinned by digest. Dependabot proposes new digests, GitHub Actions and UI
+  packages as pull requests.
+- **Audited on every push.** The `dependency-audit` CI job runs `pip-audit` on
+  the lock and `npm audit` on the UI's production dependencies, and blocks
+  the image: a known vulnerability ships only if it is listed below.
+- **Static analysis.** CodeQL (`security-extended`) scans the Python and the
+  TypeScript on every push and weekly; findings are in the Security tab.
+- **Verifiable image.** Each image pushed to GHCR carries a CycloneDX SBOM and
+  two signed attestations bound to its digest, build provenance and that SBOM:
+  `gh attestation verify oci://ghcr.io/stixaly/ctiparsor@sha256:<digest> -R Stixaly/CTIParsor`.
+
+### Accepted vulnerabilities
+| Id | Package | Why it is accepted | Reviewed |
+|---|---|---|---|
+| PYSEC-2026-2447 (CVE-2025-69872, GHSA-w8v5-vhqr-4h9v) | diskcache 5.6.3, no fixed release | Code execution needs **write access to the cache directory** first. diskcache comes with pySigma, which only uses it to cache MITRE ATT&CK data (`sigma.data.mitre_attack`, `~/.cache/pysigma`); CTIParsor never imports that module, and the Sigma gate (ADR-0070) parses a rule with ATT&CK tags without loading diskcache (checked 2026-10-03). | 2026-10-03 |
+
 ## Reporting a vulnerability
 Open a private security advisory on the repository, or contact the maintainer
 directly. Please do not file public issues for exploitable vulnerabilities.
