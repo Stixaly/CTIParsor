@@ -1,6 +1,6 @@
 # ADR-0072: TTPs — retrieve candidates from ATT&CK procedures, ship only what a selector can quote
 
-**Status:** Accepted — retrieval measured; select mode implemented, **off by default** until its dev run (below)
+**Status:** Accepted — select mode is **the default** since its dev run of 2026-10-03 (see "Outcome" at the end, and docs/eval/baseline-2026-10.md)
 **Date:** 2026-10-03
 **Deciders:** maintainer
 **Implements:** ADR-0023 Phases 4–6 (procedure corpus, BM25 + dense, selector)
@@ -222,3 +222,24 @@ candidates and `ttp_review`, so the error review can split a miss into
   evaluation record, not yet persisted or shown); per-passage selection; a
   fine-tuned selector, which the roadmap rightly puts after the prompt-only
   selector plateaus.
+
+## Outcome — the dev run (2026-10-03)
+
+All four runs on `d580e8c`, same server, temperature 0, seed 13
+([baseline-2026-10](../eval/baseline-2026-10.md)). Against the 2c-off run,
+`sel-dev` lifts parent technique F1 from 0.465 to **0.607** (+0.142, paired
+bootstrap 95% interval [+0.061, +0.236]), precision from 0.500 to 0.587 and
+recall from 0.434 to 0.628, for +18% time per report: every condition of the
+ADR-0060 rule holds, so **select mode becomes the default**. Retrieval puts
+123 of the 129 gold techniques among a report's candidates (ceiling 0.954);
+the selector now loses most (42 offered, not chosen). Every shipped quote is
+found in the text, against 98.2% before.
+
+The gain is retrieval's. Selecting among the LLM's own proposals alone
+(`sel-noret-dev`, 0.443) is no better than verify without 2c (−0.021,
+interval [−0.085, +0.023]) and loses recall (−0.070); retrieval adds +0.163
+[+0.085, +0.267] on top of it. A deployment without the corpus would run
+that weaker configuration, so **the corpus is committed** with the default
+switch (`pipeline/data/attack_retrieval_*`, ~35 MB, the exact file the dev
+run measured), like the other indexes, rather than built at image build or at
+bootstrap: a clone and the published image carry it, offline included.

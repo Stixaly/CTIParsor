@@ -10,3 +10,4 @@
 *.svg binary
 *.pdf binary
 *.db binary
+*.npy binary

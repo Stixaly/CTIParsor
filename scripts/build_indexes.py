@@ -19,13 +19,14 @@ Generates three files under pipeline/data/:
     Pre-computed sentence-transformer embeddings for all MITRE technique
     descriptions.  Used by stage2c_ttp_semantic.py for semantic TTP detection.
 
-  attack_retrieval_corpus.json      (~7 MB, not committed — built on demand)
+  attack_retrieval_corpus.json      (~7 MB)
   attack_retrieval_embeddings.npy   (~27 MB with all-MiniLM-L6-v2)
     The candidate-retrieval corpus of ADR-0072: one entry per technique
     (full description) and one per distinct ATT&CK procedure example (`uses`
     relationship description), with their embeddings.  Used by
     pipeline/ttp_retrieval.py (TTP_MODE=select) and `python -m evaluation
-    retrieval`.  Only built with `--only retrieval`.
+    retrieval`.  Only built with `--only retrieval`; committed, like the
+    files above, since select mode became the default (2026-10-03).
 
 Usage:
     # Auto-discover bundle files in the default locations

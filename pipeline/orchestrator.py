@@ -100,10 +100,11 @@ class RunOptions:
     document_relations: bool | None = None
     verify_relationships: bool | None = None     # Stage 3d
     verify_ttps: bool | None = None              # Stage 3f
-    # ADR-0072 — "verify": Stage 2c emits techniques and 3f checks the LLM's
-    # (the measured baseline); "select": 2c only retrieves candidates and 3f
-    # selects among them, so nothing ships without a quote.
-    ttp_mode: str = "verify"
+    # ADR-0072 — "select" (default since the 2026-10-03 dev run,
+    # docs/eval/baseline-2026-10.md): 2c only retrieves candidates and 3f
+    # selects among them, so nothing ships without a quote; "verify": 2c emits
+    # techniques and 3f checks the LLM's.
+    ttp_mode: str = "select"
     llm_parallelism: int = 3
     checkpoint_every: int = 5
 

@@ -25,7 +25,7 @@ proves the words exist — whether they support the technique is still judged by
 a person on a sample (`python -m evaluation support-sample`).
 
 Configuration:
-  TTP_MODE=select                 — this path (default: verify, the measured baseline)
+  TTP_MODE=select                 — this path, the default (verify: the September baseline)
   TTP_SELECT_MIN_QUOTE_WORDS=3    — shorter quotes are returned for review
 """
 from __future__ import annotations
@@ -115,13 +115,13 @@ or {{"selected": []}} when the excerpt shows none of them."""
 
 
 def ttp_mode() -> str:
-    """TTP_MODE: "verify" (default — the measured baseline) or "select"."""
+    """TTP_MODE: "select" (default since docs/eval/baseline-2026-10.md) or "verify"."""
     import os
 
-    mode = os.getenv("TTP_MODE", "verify").strip().lower() or "verify"
+    mode = os.getenv("TTP_MODE", "select").strip().lower() or "select"
     if mode not in ("verify", "select"):
-        logger.warning("TTP_MODE=%s is not verify or select — using verify", mode)
-        return "verify"
+        logger.warning("TTP_MODE=%s is not verify or select — using select", mode)
+        return "select"
     return mode
 
 

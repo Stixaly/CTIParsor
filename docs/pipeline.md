@@ -60,7 +60,7 @@ the [README](../README.md#how-it-works); this page is the detail.
 │  • 1 match/sentence (top_k=1); TTP_TOP2_MARGIN guards any 2nd match  │
 │  • ATT&CK-only by default (918 of 1 533): CAPEC shadows the real    │
 │    technique, so it is excluded — TTP_SEMANTIC_DOMAINS=all restores │
-│  • TTP_MODE=select (ADR-0072): retrieves ranked candidates only —   │
+│  • TTP_MODE=select (default): retrieves ranked candidates only —    │
 │    ATT&CK descriptions + procedures, BM25 ⊕ dense; never a TTP      │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
@@ -131,7 +131,7 @@ the [README](../README.md#how-it-works); this page is the detail.
 │  techniques are dropped. Semantic-corroborated TTPs are trusted and │
 │  skipped, so cost tracks 3d (~1.4× calls — ADR-0011 Phase B).       │
 │  Enable: ENABLE_TTP_VERIFICATION=true in .env                       │
-│  TTP_MODE=select (ADR-0072): selects among the retrieved candidates │
+│  TTP_MODE=select (default): selects among the retrieved candidates  │
 │  and the LLM's own picks, exact quote checked by code; a failed     │
 │  call ships nothing (candidates go to review)                       │
 └─────────────────────────────┬────────────────────────────────────────┘
@@ -390,7 +390,7 @@ docker compose run --rm dev python scripts/build_indexes.py --only gazetteer    
 docker compose run --rm dev python scripts/build_indexes.py --only embeddings    # mitre_embeddings.npy
 docker compose run --rm dev python scripts/build_indexes.py --only relationships # attack_relationships.json
 
-# Never built by default: the candidate corpus TTP_MODE=select needs (ADR-0072)
+# Only on request: the candidate corpus of TTP_MODE=select, the default (ADR-0072)
 docker compose run --rm dev python scripts/build_indexes.py --only retrieval     # attack_retrieval_*
 ```
 
@@ -404,22 +404,23 @@ The script auto-discovers bundle files in `data/`, `~/Downloads/`, and `~/Docume
 | `pipeline/data/mitre_embeddings.npy` | 2c semantic TTP | ~2.3 MB | yes |
 | `pipeline/data/mitre_embeddings_meta.json` | 2c semantic TTP | ~190 KB | yes |
 | `pipeline/data/mitre_embeddings_manifest.json` | 2c cache validity + thresholds | ~1 KB | no — written by `--only embeddings` |
-| `pipeline/data/attack_retrieval_corpus.json` | 2c candidate retrieval (`TTP_MODE=select`) | ~7 MB | no — gitignored, `--only retrieval` |
-| `pipeline/data/attack_retrieval_embeddings.npy` | 2c candidate retrieval (`TTP_MODE=select`) | ~27 MB | no — gitignored, `--only retrieval` |
+| `pipeline/data/attack_retrieval_corpus.json` | 2c candidate retrieval (`TTP_MODE=select`) | ~7 MB | yes — `--only retrieval` |
+| `pipeline/data/attack_retrieval_embeddings.npy` | 2c candidate retrieval (`TTP_MODE=select`) | ~27 MB | yes — `--only retrieval` |
 
-The five committed files are all a fresh clone needs: rebuild them only after a
+The seven committed files are all a fresh clone needs: rebuild them only after a
 MITRE ATT&CK release, and commit the result to avoid a per-clone rebuild.
 
 > The **manifest** records the model the cache was built with (so Stage 2c can detect a stale cache after `TTP_EMBEDDING_MODEL` changes) and the calibrated `thresholds` (`high`/`medium`) for that model — written by `build_indexes.py --only embeddings` (ADR-0011 Phase A). It is not in git: without it Stage 2c assumes the committed cache was built with the default `all-MiniLM-L6-v2` and uses that model's thresholds, which is true of the committed files. Switching model means rebuilding the embeddings, which writes it.
 
 The retrieval corpus holds one entry per technique and one per distinct ATT&CK
 procedure example, with actor and software names replaced by placeholders
-(`--keep-names` keeps them). `bootstrap` does not build it: run the command
-above, then rebuild the image (`make docker-build`) so `app` and `worker` carry
-it — `pipeline/data/` is baked into the image and read-only at run time. Without
-it, `TTP_MODE=select` reports Stage 2c unavailable. The same goes for any index
-rebuilt here: the `dev` container writes it into the repository, the image
-picks it up at the next build.
+(`--keep-names` keeps them). It is committed since select mode became the
+default: the file a clone and the image carry is the one the dev evaluation
+measured (docs/eval/baseline-2026-10.md), and without it select mode selects
+among the LLM's proposals only, which measured worse in recall than `verify`.
+Like any index rebuilt here, the `dev` container writes it into the repository
+and the image picks it up at the next build (`pipeline/data/` is baked in,
+read-only at run time).
 
 ## Offline support
 

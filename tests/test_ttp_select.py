@@ -181,13 +181,14 @@ def test_chunk_candidates_put_the_llm_first_and_merge_provenance():
     assert out[0].example_kind == "procedure" and out[0].fused_rank == 1
 
 
-def test_ttp_mode_reads_the_environment(monkeypatch):
+def test_ttp_mode_reads_the_environment_and_defaults_to_select(monkeypatch):
+    # select is the default since docs/eval/baseline-2026-10.md
     monkeypatch.delenv("TTP_MODE", raising=False)
-    assert sel.ttp_mode() == "verify"
-    monkeypatch.setenv("TTP_MODE", "SELECT")
     assert sel.ttp_mode() == "select"
-    monkeypatch.setenv("TTP_MODE", "both")
+    monkeypatch.setenv("TTP_MODE", "VERIFY")
     assert sel.ttp_mode() == "verify"
+    monkeypatch.setenv("TTP_MODE", "both")
+    assert sel.ttp_mode() == "select"
 
 
 # ── enrich_chunk in select mode ──────────────────────────────────────────────
@@ -282,8 +283,9 @@ def test_run_options_refuse_an_unknown_ttp_mode(monkeypatch):
     from pipeline.orchestrator import RunOptions
     with pytest.raises(ValueError):
         RunOptions(ttp_mode="both")
-    monkeypatch.setenv("TTP_MODE", "select")
-    assert RunOptions.from_env().ttp_mode == "select"
+    assert RunOptions().ttp_mode == "select"
+    monkeypatch.setenv("TTP_MODE", "verify")
+    assert RunOptions.from_env().ttp_mode == "verify"
 
 
 @pytest.fixture()
