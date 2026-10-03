@@ -382,7 +382,7 @@ services:
   # Certificate, key and htpasswd are created by the operator (see docs/docker.md).
   proxy:
     profiles: [proxy]
-    image: nginxinc/nginx-unprivileged:1.28-alpine@sha256:7377697a821c131a924a7105fafbe7414db4e9fcc77a6f08f776f33f141ec3f8
+    image: nginxinc/nginx-unprivileged:1.31-alpine@sha256:26b0bf6fbf07297983cb341998d79c831508787de26627dd2a112321b9c3a4af
     depends_on:
       app:
         condition: service_healthy
