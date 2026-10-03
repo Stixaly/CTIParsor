@@ -67,6 +67,10 @@ services:
       API_HOST: 0.0.0.0
       API_PORT: "8000"
       API_RELOAD: "0"
+      # Host names the API answers to (api/main.py).  `app` is what the
+      # frontend-dev proxy sends; add the public name or address analysts use
+      # (CTI_BIND's, or the proxy's) in .env — or it answers 400 to them.
+      API_ALLOWED_HOSTS: "${API_ALLOWED_HOSTS:-localhost,127.0.0.1,[::1],app}"
       # The API only accepts and queues reports; the `worker` service runs
       # them (ADR-0046).  This container therefore never loads a model.
       CTIPARSOR_ROLE: api
@@ -194,7 +198,9 @@ services:
   # capability is dropped and the root filesystem is read-only (the socket
   # directory and /tmp are tmpfs).  Back it up with pg_dump (docs/docker.md).
   postgres:
-    image: postgres:17-alpine
+    # Images are pinned to the multi-arch index digest their tag resolved to on
+    # 2026-10-03 (Docker Hub); move a tag and its digest together.
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
     user: "70:70"
     environment:
       POSTGRES_USER: ${CTI_DB_USER:-ctiparsor}
@@ -326,7 +332,7 @@ services:
   # not update.  Also the frontend checks, the same steps as CI:
   #   docker compose run --rm frontend-dev sh -c "npm ci && npm run check"
   frontend-dev:
-    image: node:24-bookworm-slim
+    image: node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6
     profiles: [dev]
     working_dir: /ui
     environment:
@@ -352,7 +358,7 @@ services:
   #             capabilities: [gpu]
   ollama:
     profiles: [ollama]
-    image: ollama/ollama:0.34.1
+    image: ollama/ollama:0.34.1@sha256:0c0a83210471fb50226bcdc2d6611d20ab13ae87e024cc304c94a6a5765c5e65
     volumes:
       - ollama-models:/root/.ollama
     networks:
@@ -376,7 +382,7 @@ services:
   # Certificate, key and htpasswd are created by the operator (see docs/docker.md).
   proxy:
     profiles: [proxy]
-    image: nginxinc/nginx-unprivileged:1.28-alpine
+    image: nginxinc/nginx-unprivileged:1.28-alpine@sha256:7377697a821c131a924a7105fafbe7414db4e9fcc77a6f08f776f33f141ec3f8
     depends_on:
       app:
         condition: service_healthy
@@ -422,7 +428,9 @@ services:
   # its raw socket under `cap_drop: [ALL]` and logs a startup warning; harmless
   # here, since nothing in this config defines a `cache_peer` for it to probe.
   capture-proxy:
-    image: ubuntu/squid:latest
+    # 6.6 on Ubuntu 24.04 LTS: `latest` pointed at 25.04, end of life since
+    # January 2026 (audit B 8.2.6).  docker/squid/squid.conf parses on 6.6.
+    image: ubuntu/squid:6.6-24.04_edge@sha256:8a3baed477e2c282ab8aa5edad442f69873246964f225c5c2ae8364b6610963c
     user: "13:13"
     read_only: true
     tmpfs:
