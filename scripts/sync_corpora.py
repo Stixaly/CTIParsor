@@ -15,6 +15,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -24,13 +25,14 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from pipeline.detection.registry import load_corpora  # noqa: E402
-from pipeline.detection.sync import fetch_tarball, git_command  # noqa: E402
+from pipeline.detection.sync import GIT_ENV, fetch_tarball, git_command  # noqa: E402
 
 
 def _run(cmd: list[str]) -> bool:
     print("  $ " + " ".join(cmd))
     try:
-        subprocess.run(cmd, check=True)
+        # Same transport policy as the API's sync: https only, no prompt.
+        subprocess.run(cmd, check=True, env={**os.environ, **GIT_ENV})
         return True
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         print(f"  ! failed: {e}")

@@ -66,15 +66,39 @@ def test_git_command_clones_when_path_missing_and_pulls_when_present(tmp_path: P
     corpus = {"name": "test", "path": str(path), "git": "https://example.com/repo.git"}
     cmd = git_command(corpus)
     assert cmd is not None
-    assert cmd[:5] == ["git", "clone", "--depth", "1", "https://example.com/repo.git"]
-    assert cmd[-1] == str(path)
+    assert cmd[0] == "git"
+    assert cmd[-5:] == ["clone", "--depth", "1", "https://example.com/repo.git", str(path)]
 
     path.mkdir()
     cmd = git_command(corpus)
-    assert cmd == ["git", "-C", str(path), "pull", "--ff-only"]
+    assert cmd[-4:] == ["-C", str(path), "pull", "--ff-only"]
 
     corpus_no_git = {"name": "test", "path": str(path)}
     assert git_command(corpus_no_git) is None
+
+
+def test_git_is_locked_to_https_on_its_own_command_line(tmp_path: Path) -> None:
+    """A remote that gets past the API check still cannot switch transport
+    (audit B 8.2.2): the policy travels with the command and the environment,
+    so the CLI sync and a redirect get it too."""
+    corpus = {"name": "t", "path": str(tmp_path / "c"), "git": "https://example.com/repo.git"}
+    cmd = git_command(corpus)
+    assert cmd is not None
+    flags = [cmd[i + 1] for i, tok in enumerate(cmd) if tok == "-c"]
+    assert {"protocol.allow=never", "protocol.https.allow=always",
+            "protocol.file.allow=never", "http.followRedirects=false"} <= set(flags)
+    assert cmd.index("clone") > cmd.index("-c")          # config precedes the subcommand
+    assert sync_mod.GIT_ENV["GIT_ALLOW_PROTOCOL"] == "https"
+    assert sync_mod.GIT_ENV["GIT_TERMINAL_PROMPT"] == "0"
+
+
+def test_sync_refuses_a_registry_remote_that_is_not_https(tmp_path: Path, monkeypatch) -> None:
+    """The registry can come from a YAML file nobody validated over the API."""
+    calls: list = []
+    monkeypatch.setattr(sync_mod.subprocess, "run", lambda *a, **k: calls.append(a))
+    ok, detail = sync_corpus({"name": "t", "path": str(tmp_path / "c"), "git": "ssh://git@h/x.git"})
+    assert ok is False and "https" in detail
+    assert calls == []
 
 
 def test_parse_md5_accepts_bare_hash_and_hash_filename_lines() -> None:
@@ -259,7 +283,7 @@ def test_sync_corpus_dispatches_tarball_git_and_manual(tmp_path: Path, monkeypat
         stderr = ""
 
     monkeypatch.setattr(sync_mod.subprocess, "run", lambda *a, **kw: FakeProc())
-    assert sync_corpus({"git": "u", "path": str(tmp_path)}) == (True, "pulled")
+    assert sync_corpus({"git": "https://u/x.git", "path": str(tmp_path)}) == (True, "pulled")
 
     ok, detail = sync_corpus({"path": "p"})
     assert ok is False
