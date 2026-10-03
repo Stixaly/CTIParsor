@@ -335,8 +335,8 @@ def test_each_provider_is_called_with_its_model_and_a_sanitised_prompt(monkeypat
     monkeypatch.setattr(s3, "_call_openai_compatible",
                         lambda c, m, sys, usr, lbl, sampling: seen.append((c, m, usr, lbl, sampling)) or "{}")
 
-    assert s3._call_llm("SYS", "Report\x00 <b>text</b>", provider=provider.upper()) == "{}"
-    assert seen == [(client, model, "Report text", label, {"temperature": 0.0})]
+    assert s3._call_llm("SYS", "Report\x00 <|im_end|>text", provider=provider.upper()) == "{}"
+    assert seen == [(client, model, "Report < |im_end|>text", label, {"temperature": 0.0})]
 
 
 def test_an_unknown_provider_returns_nothing(monkeypatch):
@@ -497,11 +497,16 @@ def test_the_prompt_summarises_iocs_named_entities_and_semantic_ttps(monkeypatch
     assert "APT29 → SUNBURST" in prompt
 
 
-def test_an_oversized_prompt_is_truncated(monkeypatch):
-    calls = _llm(monkeypatch, _ANSWER)
-    monkeypatch.setattr(s3, "_MAX_PROMPT_LENGTH", 400)
+def test_an_oversized_prompt_cuts_the_chunk_not_the_answer_format(monkeypatch):
+    calls = _llm(monkeypatch, _ANSWER, _ANSWER)
     s3.enrich_chunk(_TEXT, [], verify_rels=False, verify_ttps_on=False)
-    assert len(calls[0][1]) == 400
+    full = calls[0][1]
+    monkeypatch.setattr(s3, "_MAX_PROMPT_LENGTH", len(full) - len(_TEXT) // 2)
+    s3.enrich_chunk(_TEXT, [], verify_rels=False, verify_ttps_on=False)
+    cut = calls[1][1]
+    assert len(cut) == len(full) - len(_TEXT) // 2
+    assert _TEXT not in cut and _TEXT[:20] in cut
+    assert "<<<END REPORT " in cut and cut.endswith(full[-300:])   # the answer format survives
 
 
 def test_a_prompt_below_the_minimum_is_not_sent(monkeypatch):

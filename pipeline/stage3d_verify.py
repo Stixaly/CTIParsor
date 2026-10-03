@@ -49,7 +49,7 @@ from typing import Callable
 # Initialize logging
 from api.logging_config import get_logger
 from pipeline.env_flags import env_bool, env_int
-from pipeline.llm_parse import fit_text, parse_numbered_claims
+from pipeline.llm_parse import fit_report, parse_numbered_claims
 
 logger = get_logger(__name__)
 
@@ -220,9 +220,9 @@ def _verify_batch(text: str, rels: list, llm_fn: Callable[[str, str], str], syst
         f'{i + 1}. "{r.source_value}" {r.relationship_type} "{r.target_value}"'
         for i, r in enumerate(rels)
     )
-    prompt = fit_text(_VERIFY_USER_TEMPLATE, text, max_prompt_chars, claims=claims_str)
+    prompt, spotlight = fit_report(_VERIFY_USER_TEMPLATE, text, max_prompt_chars, claims=claims_str)
 
-    raw = llm_fn(system, prompt)
+    raw = llm_fn(f"{system}\n\n{spotlight}", prompt)
     if not raw:
         # LLM call failed — keep the batch (safe fallback)
         logger.warning("Verification LLM call failed — keeping these relationships")

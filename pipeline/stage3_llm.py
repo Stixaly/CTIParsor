@@ -6,7 +6,6 @@ from datetime import datetime
 from typing import cast
 
 import anthropic
-from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, ValidationError
 from tenacity import RetryError, retry, retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -15,7 +14,7 @@ from tenacity import RetryError, retry, retry_if_exception_type, stop_after_atte
 from api.logging_config import get_logger
 from models.schemas import EntityType, EvidenceLabel, RawEntity
 from pipeline.env_flags import env_int
-from pipeline.llm_parse import fit_text
+from pipeline.llm_parse import SPOTLIGHT_RULE, fit_report
 from pipeline.stage3f_ttp_select import TtpReview
 from pipeline.temporal import (
     ROLES as _TIME_ROLES,
@@ -88,16 +87,44 @@ _MAX_OUTPUT_TOKENS = env_int("LLM_MAX_OUTPUT_TOKENS", default=8192)
 _MIN_PROMPT_LENGTH = 100
 
 
+_CONTROL_CHARS = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]')
+# Zero-width characters, direction marks, bidi embeddings/overrides/isolates and
+# the BOM: invisible to the analyst, able to hide or reorder what the model reads.
+_INVISIBLE_CHARS = re.compile('[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]')
+# Strings a chat template turns into control tokens.  vLLM renders the template
+# to text and tokenizes it whole, so `<|im_end|>` written in a report becomes the
+# real end-of-turn token and `<|im_start|>system` opens a system turn (checked
+# on the Qwen3.8 server, 2026-10-03; `<think>` and `<tool_call>` are single
+# tokens too).  Ollama and LM Studio template the same way.
+_CHAT_MARKUP = re.compile(
+    r'<\|[^<>|\s]{1,64}\|>'
+    r'|</?(?:think|tool_call|tool_response|start_of_turn|end_of_turn|s)>'
+    r'|\[/?INST\]|<</?SYS>>',
+    re.IGNORECASE,
+)
+
+
+def _defuse(match: re.Match) -> str:
+    """`<|im_start|>` -> `< |im_start|>`: still readable, no longer the token."""
+    s = match.group(0)
+    return s[0] + " " + s[1:]
+
+
 def _sanitize_text_for_prompt(text: str, max_length: int = 10000) -> str:
     """
-    Sanitize text to prevent prompt injection attacks.
+    Prepare the user message for the model without deleting intelligence.
+
+    Removes control and invisible characters and defuses chat-template markup;
+    the report itself reaches the model between spotlighting markers
+    (`llm_parse.fit_report`), which is the defence against instructions in it.
+    Counts what it changed in llm_stats.
 
     Args:
         text: The raw text to sanitize
         max_length: Maximum length of the sanitized text
 
     Returns:
-        Sanitized text safe for LLM prompts
+        The text as the model should see it
     """
     if not text:
         return ""
@@ -105,8 +132,13 @@ def _sanitize_text_for_prompt(text: str, max_length: int = 10000) -> str:
     # Truncate to max length first
     text = text[:max_length]
 
-    # Remove null bytes and control characters
-    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text)
+    text = _CONTROL_CHARS.sub('', text)
+    text, n = _INVISIBLE_CHARS.subn('', text)
+    if n:
+        llm_stats.bump("prompt_invisible_chars_removed", n)
+    text, n = _CHAT_MARKUP.subn(_defuse, text)
+    if n:
+        llm_stats.bump("prompt_chat_markup_defused", n)
 
     # NOTE: backslashes are intentionally NOT escaped.  The previous
     # `text.replace('\\', '\\\\')` corrupted every Windows path in the report
@@ -115,32 +147,11 @@ def _sanitize_text_for_prompt(text: str, max_length: int = 10000) -> str:
     # plain message body, not into JSON or a code context, so escaping has no
     # security value here — only corruption.
 
-    # Remove XML/HTML tags that could be used for injection (a fake <system>
-    # or <|im_start|>-style wrapper meant to look like conversation markup to
-    # the model).  A blind `re.sub(r'<[^>]+>', '', text)` used to do this, but
-    # it also ate anything else shaped like `<...>` -- a real CTI report
-    # describing a command (`cmd < input.txt > output.txt`) or a generic type
-    # (`vector<int>`) silently lost the bracketed span.  BeautifulSoup only
-    # recognises `<` immediately followed by a tag-name character as an
-    # opening tag, so shell redirection and comparisons with surrounding
-    # spaces (`< input.txt >`, `x < 5`) survive; a tight `<tagname>` still
-    # parses as a tag and is removed either way, same as before.
-    text = BeautifulSoup(text, "html.parser").get_text()
-
-    # Remove sequences that look like genuine instruction-injection attempts.
-    # These target instruction *reassignment*, not security vocabulary.  The old
-    # filter also redacted bare words "jailbreak", "developer mode", and
-    # "DAN ... mode" — terms that appear constantly in legitimate malware/CTI
-    # reports — silently deleting real intelligence.  Those broad single-word
-    # triggers have been removed; only structural injection patterns remain.
-    injection_patterns = [
-        r'\b(ignore|forget|disregard)\b.*\b(previous|above|prior)\b',
-        r'\brole\s*[:=]\s*system\b',
-        r'\buser\s*[:=]\s*assistant\b',
-        r'\bassistant\s*[:=]\s*user\b',
-    ]
-    for pattern in injection_patterns:
-        text = re.sub(pattern, '[REDACTED]', text, flags=re.IGNORECASE)
+    # Nothing else is removed (ADR-0074).  HTML tags used to be stripped and
+    # four "injection" phrasings replaced by [REDACTED]: that deleted
+    # `<iframe src=…>` (an IoC), redacted from "ignore" to "prior" in a line
+    # describing execution guardrails (T1480), and let a synonym, another
+    # language or an invisible character through.
 
     # Normalize whitespace while PRESERVING line structure.  The system prompt
     # instructs the model to use Markdown layout (headers, tables, bullet lists)
@@ -456,16 +467,14 @@ You analyze security report excerpts and extract structured threat intelligence.
 The input text may be Markdown-formatted (headers, tables, bullet lists) —
 use that structure to identify IoC sections, attribution tables, and TTP lists.
 
-IMPORTANT — Four deterministic/ML NER passes have already run before you:
-  1. A regex engine extracted all IoCs (IPs, hashes, domains, CVEs, URLs).
-  2. A MITRE ATT&CK gazetteer matched 1,792 known malware families, tools, and
-     APT groups against the text with high precision.
-  3. A CyNER model (XLM-RoBERTa fine-tuned on cybersecurity corpora) extracted
-     malware family names and threat-actor organization names.
-  4. A semantic sentence-embedding model (all-MiniLM-L6-v2) matched ATT&CK
-     technique descriptions against the text and found TTPs with high cosine-
-     similarity confidence.
-  All sets are listed in the prompt as "Already detected entities/TTPs".
+IMPORTANT — automatic passes have already run before you:
+  1. Regular expressions extracted IoCs (IPs, hashes, domains, CVEs, URLs).
+  2. A list of MITRE ATT&CK names was matched against the text for malware
+     families, tools and threat groups.
+  3. A named-entity model proposed malware family and threat-actor names.
+  4. A sentence-embedding model proposed ATT&CK techniques whose descriptions
+     resemble passages of the text.
+  What they found is listed in the prompt as "Already detected entities/TTPs".
 
 Your job is therefore focused on what deterministic models cannot do:
   1. Discover RELATIONSHIPS between the already-detected entities.
@@ -564,7 +573,7 @@ For ttps: ONLY include techniques NOT already listed in the semantic TTPs sectio
       "source_value": "exact source entity name (from any detected list)",
       "relationship_type": "uses|attributed-to|targets|delivers|drops|exploits|communicates-with|
 beacons-to|exfiltrates-to|compromises|hosts|owns|indicates|mitigates|
-remediates|originated-from|authored-by|impersonates|variant-of|
+remediates|originates-from|authored-by|impersonates|variant-of|
 related-to|...",
       "target_value": "exact target entity name (from any detected list)",
       "confidence": 0.0-1.0,
@@ -939,7 +948,8 @@ def provider_label(provider: str | None = None) -> str:
 def prompt_fingerprint() -> str:
     """Short hash of the Stage 3 extraction prompts — changes whenever their wording does."""
     import hashlib
-    digest = hashlib.sha256((_SYSTEM_PROMPT + "\x00" + _USER_PROMPT_TEMPLATE).encode("utf-8"))
+    digest = hashlib.sha256("\x00".join((_SYSTEM_PROMPT, _USER_PROMPT_TEMPLATE, SPOTLIGHT_RULE))
+                            .encode("utf-8"))
     return digest.hexdigest()[:16]
 
 
@@ -953,7 +963,8 @@ def all_prompts_fingerprint() -> str:
              _DOC_RELATIONS_SYSTEM_PROMPT, _DOC_RELATIONS_USER_PROMPT_TEMPLATE,
              stage3d_verify._VERIFY_SYSTEM, stage3d_verify._VERIFY_USER_TEMPLATE,
              stage3f_ttp_verify._VERIFY_SYSTEM, stage3f_ttp_verify._VERIFY_USER_TEMPLATE,
-             stage3f_ttp_select._SELECT_SYSTEM, stage3f_ttp_select._SELECT_USER_TEMPLATE]
+             stage3f_ttp_select._SELECT_SYSTEM, stage3f_ttp_select._SELECT_USER_TEMPLATE,
+             SPOTLIGHT_RULE]
     return hashlib.sha256("\x00".join(parts).encode("utf-8")).hexdigest()[:16]
 
 
@@ -1083,6 +1094,19 @@ def check_relationship_times(result: "LLMEnrichmentResult", text: str,
 
 
 
+# Spellings a model writes instead of a STIX verb; only the unambiguous ones.
+# Any other unknown verb still reaches Stage 4, which ships it as related-to
+# and records `unknown_verb` in the ledger.  The user template itself said
+# `originated-from` until 2026-10.
+_VERB_SPELLINGS = {"originated-from": "originates-from"}
+
+
+def _normalize_verb(verb: str) -> str:
+    """'Attributed_To ' -> 'attributed-to'; 'originated-from' -> 'originates-from'."""
+    v = re.sub(r"[\s_]+", "-", verb.strip().lower())
+    return _VERB_SPELLINGS.get(v, v)
+
+
 def _normalize_llm_json(data: dict) -> dict:
     """
     Coerce common LLM schema-deviation patterns into the field names and types
@@ -1192,6 +1216,8 @@ def _normalize_llm_json(data: dict) -> dict:
                     if isinstance(r.get(k), str) and r[k].strip():
                         r["relationship_type"] = r.pop(k)
                         break
+            if isinstance(r.get("relationship_type"), str):
+                r["relationship_type"] = _normalize_verb(r["relationship_type"])
             # Coerce evidence_label to a known value; unknown/missing → "reported"
             # so a malformed label never discards an otherwise-valid relationship.
             _lbl = str(r.get("evidence_label", "")).lower().strip()
@@ -1542,8 +1568,9 @@ def enrich_chunk(
     # Document context (P2-B): helps LLM link IoC appendix entries to malware/actor
     ctx_summary = doc_context.strip() if doc_context else "None"
 
-    prompt = _USER_PROMPT_TEMPLATE.format(
-        text=text,
+    # Past the ceiling the CHUNK is cut, never the lists and answer format after it.
+    prompt, spotlight = fit_report(
+        _USER_PROMPT_TEMPLATE, text, _MAX_PROMPT_LENGTH,
         doc_context=ctx_summary,
         detected_ioc_entities=ioc_summary,
         detected_gazetteer_entities=gaz_summary,
@@ -1551,9 +1578,8 @@ def enrich_chunk(
     )
 
     # Validate prompt length
-    if len(prompt) > _MAX_PROMPT_LENGTH:
-        logger.warning(f"Prompt too long ({len(prompt)} chars > {_MAX_PROMPT_LENGTH} max) — truncating")
-        prompt = prompt[:_MAX_PROMPT_LENGTH]
+    if text not in prompt:
+        logger.warning(f"Prompt too long (> {_MAX_PROMPT_LENGTH} chars) — the chunk's end is not sent")
     elif len(prompt) < _MIN_PROMPT_LENGTH:
         logger.warning(f"Prompt too short ({len(prompt)} chars < {_MIN_PROMPT_LENGTH} min) — skipping chunk")
         return LLMEnrichmentResult()
@@ -1561,7 +1587,7 @@ def enrich_chunk(
     logger.debug(f"Calling {provider_label()} ({len(prompt)} prompt chars)")
 
     llm_stats.reset_last_call()
-    raw_text = _call_llm(_SYSTEM_PROMPT, prompt, provider=provider)
+    raw_text = _call_llm(f"{_SYSTEM_PROMPT}\n\n{spotlight}", prompt, provider=provider)
     if not raw_text:
         # Three different things return "": a failed request, an answer with no
         # content, a blocked prompt.  Counted apart (ADR-0060), still skipped.
@@ -1789,8 +1815,8 @@ def enrich_document_relations(
 
     # Past the ceiling the REPORT is cut, never the entity list and answer
     # format that follow it: without them the model has nothing to answer.
-    prompt = fit_text(_DOC_RELATIONS_USER_PROMPT_TEMPLATE, full_text, _DOC_MAX_PROMPT_LENGTH,
-                      entity_list=entity_list)
+    prompt, spotlight = fit_report(_DOC_RELATIONS_USER_PROMPT_TEMPLATE, full_text,
+                                   _DOC_MAX_PROMPT_LENGTH, entity_list=entity_list)
     if full_text not in prompt:
         logger.warning(
             f"[Stage 3 doc-relations] Report too long for LLM_DOC_MAX_PROMPT_LENGTH="
@@ -1801,7 +1827,7 @@ def enrich_document_relations(
     logger.info(f"[Stage 3 doc-relations] Calling LLM ({len(prompt)} prompt chars, "
                 f"{len(known_entities)} known entities)")
 
-    raw_text = _call_llm(_DOC_RELATIONS_SYSTEM_PROMPT, prompt, provider=provider,
+    raw_text = _call_llm(f"{_DOC_RELATIONS_SYSTEM_PROMPT}\n\n{spotlight}", prompt, provider=provider,
                          max_prompt_length=_DOC_MAX_PROMPT_LENGTH)
     if not raw_text:
         logger.warning("[Stage 3 doc-relations] LLM returned empty response")

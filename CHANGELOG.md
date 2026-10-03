@@ -8,6 +8,20 @@ sections group by theme rather than strict semver.
 
 ### Security
 
+#### Report text reaches the model as delimited data, nothing is redacted (ADR-0074), 2026-10-03
+
+A report containing `<|im_end|>` or `<|im_start|>system` produced the real
+chat-template tokens on the vLLM server (checked on Qwen3.8; `<think>` and
+`<tool_call>` too): the sanitiser never touched them. Meanwhile it deleted
+intelligence — `[REDACTED]` from "ignore" to "prior" in a description of
+environmental keying, `<iframe src=…>` with its URL — and let any synonym or
+other language through (B 8.2.3). Every prompt that embeds report text now
+encloses it between `<<<REPORT n>>>` / `<<<END REPORT n>>>` markers named by
+the system prompt (spotlighting; `n` is a hash of the text, so prompts stay
+reproducible). The sanitiser removes invisible characters, defuses chat
+markup with a space, and deletes nothing else; both are counted in the stage
+report. **Every prompt fingerprint changes.**
+
 #### The API answers only to its own hosts and refuses cross-site writes, 2026-10-03
 
 Reproduced by the October 2026 audit (B 8.2.1): any `Host` header was
@@ -64,6 +78,16 @@ exports it, with OpenCTI's own id.
   gain; no longer recommended), the ~40% estimate; `check_doc_claims.py` fails
   on a figure stated without its source. `docs/deployment.md` no longer
   describes a CORS setting that was removed.
+- **The extraction prompt offered a verb STIX does not have** (B 8.1.6): the
+  user template said `originated-from`, which Stage 4 shipped as
+  `related-to`. The template says `originates-from`, model output is
+  normalised (`originated-from`, `attributed_to`, `communicates with`), and a
+  test holds every prompt's verb list to `STIX_RELATIONSHIP_TYPES`.
+- **The extraction prompt described its inputs with stale figures and
+  reliability claims** (B 8.3.4): "1,792 known malware families … with high
+  precision", "XLM-RoBERTa" (CyNER is DeBERTa-v3), techniques found "with
+  high cosine-similarity confidence" (measured precision 0.16). It now says
+  what each pass proposed, nothing about how good it is.
 
 ### Changed
 
