@@ -15,7 +15,9 @@
 #      FORCE=1;
 #   4. restores, then compares the row count of every table with the old one.
 #
-# Usage, from the repository root, with app and worker stopped:
+# Usage, from the repository root, with app and worker stopped (the script
+# stops the old postgres service itself: the dump must be the only server on
+# the 17 volume):
 #   scripts/upgrade_postgres_17_to_18.sh
 # Environment: COMPOSE_PROJECT_NAME (default: ctiparsor, compose.yaml's name),
 #   OLD_VOLUME (default: <project>_pg-data), CTI_DB_USER / CTI_DB_NAME
@@ -80,6 +82,22 @@ docker volume inspect "$OLD_VOLUME" >/dev/null 2>&1 \
 if [ -n "$($COMPOSE ps -q app worker 2>/dev/null)" ]; then
     die "app or worker is running: stop them first ($COMPOSE stop app worker)"
 fi
+# The stack's own PostgreSQL 17 still runs on the old volume until step 2
+# replaces it.  The throwaway server below would open the same cluster beside
+# it: in a container both are PID 1, so each takes the other's postmaster.pid
+# for a stale one, and two servers on one data directory corrupt it.
+# Found by its compose labels, stopped with docker itself: the compose file
+# now describes the 18 service, not the container still running.
+OLD_PG="$(docker ps -q --filter "volume=$OLD_VOLUME" \
+    --filter "label=com.docker.compose.project=$PROJECT" \
+    --filter "label=com.docker.compose.service=postgres")"
+if [ -n "$OLD_PG" ]; then
+    log "stopping the stack's PostgreSQL 17: it runs on $OLD_VOLUME, which the dump opens"
+    # shellcheck disable=SC2086  # one id per word
+    docker stop -t 60 $OLD_PG >/dev/null
+fi
+STILL="$(docker ps --filter "volume=$OLD_VOLUME" --format '{{.Names}}' | tr '\n' ' ')"
+[ -z "$STILL" ] || die "still running on $OLD_VOLUME: $STILL- stop it first: two PostgreSQL servers on one data directory corrupt it"
 
 # ── 1. dump the 17 cluster ────────────────────────────────────────────────────
 mkdir -p "$BACKUP_DIR"
