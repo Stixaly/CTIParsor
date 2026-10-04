@@ -8,6 +8,32 @@ sections group by theme rather than strict semver.
 
 ### Security
 
+#### Pinned workflows, an image scan, and what the settings must add (ADR-0078), 2026-10-04
+
+- **Pinning.** Every GitHub Action is pinned to a full commit SHA, with its
+  version as a comment so Dependabot keeps both current. Anchore had stopped
+  moving its major tags in March: `anchore/sbom-action@v0` was running a
+  release six months old.
+- **Tokens.** Workflow tokens are read-only unless a job asks for more, and
+  no checkout leaves its token in `.git/config`.
+- **New checks:**
+  - CodeQL also analyses the workflows (`actions`);
+  - Grype scans the image's operating-system packages, which no other check
+    saw, and sends the CVEs that have a fix to Code scanning;
+  - dependency review fails a PR that adds a dependency with a high-severity
+    vulnerability;
+  - CI runs every Monday, so vulnerabilities published since the last push
+    are found without one.
+- **Scorecard.** OpenSSF Scorecard rates the repository weekly; the badge is
+  in the README.
+- **Reporting.** SECURITY.md links the private advisory form.
+- **Settings, applied by the maintainer:**
+  - Dependabot alerts (security updates stay off for the uv lock);
+  - private vulnerability reporting;
+  - a `main` ruleset: pull requests only, required checks, no force-push,
+    CodeQL high-severity gate;
+  - after this merge, required SHA pinning.
+
 #### CodeQL's first findings triaged, 2026-10-04
 
 The 25 alerts CodeQL raised when it was switched on (ADR-0075):

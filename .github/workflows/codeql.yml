@@ -1,6 +1,8 @@
 name: CodeQL
 
-# Static security analysis of the Python and the TypeScript (ADR-0075).
+# Static security analysis of the Python, the TypeScript (ADR-0075) and the
+# GitHub Actions workflows themselves (ADR-0078: script injection from PR
+# titles or branch names, over-broad token permissions, untrusted checkouts).
 # Findings land in the repository's Security tab; the job fails only if the
 # analysis itself cannot run, so a finding is triaged there, not in CI.
 on:
@@ -9,6 +11,9 @@ on:
   pull_request:
   schedule:
     - cron: "17 4 * * 1"          # weekly, for queries that improve between pushes
+
+permissions:
+  contents: read
 
 jobs:
   analyze:
@@ -20,16 +25,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [python, javascript-typescript]
+        language: [python, javascript-typescript, actions]
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      # Both languages are interpreted: no build step, nothing installed.
+      # All three are interpreted: no build step, nothing installed.
       # tests/ is not shipped (.dockerignore) and holds attacker-shaped input
       # on purpose — `"evil.com" in urls` asserts, a `(a+)+$` the ReDoS guard
       # must survive — which CodeQL reads as the flaws they test for.
-      - uses: github/codeql-action/init@v4
+      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           languages: ${{ matrix.language }}
           queries: security-extended
@@ -37,6 +44,6 @@ jobs:
             paths-ignore:
               - tests
 
-      - uses: github/codeql-action/analyze@v4
+      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           category: /language:${{ matrix.language }}

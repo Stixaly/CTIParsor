@@ -120,8 +120,20 @@ pipeline still produces valid STIX. ML models are downloaded once and cached.
 - **Audited on every push.** The `dependency-audit` CI job runs `pip-audit` on
   the lock and `npm audit` on the UI's production dependencies, and blocks
   the image: a known vulnerability ships only if it is listed below.
-- **Static analysis.** CodeQL (`security-extended`) scans the Python and the
-  TypeScript on every push and weekly; findings are in the Security tab.
+- **Static analysis.** CodeQL (`security-extended`) scans the Python, the
+  TypeScript and the GitHub Actions workflows on every push and weekly;
+  findings are in the Security tab.
+- **Image scan (ADR-0078).** Grype scans the built image's operating-system
+  packages on every push, every PR and weekly; vulnerabilities with a fix are
+  reported to Code scanning (category `container-image`).
+- **Pull requests (ADR-0078).** Dependency review fails a PR that adds or
+  changes a dependency with a known vulnerability of high severity or worse.
+- **Pinned workflows (ADR-0078).** Every GitHub Action is pinned to a full
+  commit SHA (Dependabot updates it); tokens are read-only unless a job
+  asks for more, and no checkout keeps its credentials. OpenSSF Scorecard
+  rates these practices weekly (README badge).
+- **Weekly, without a push.** CI runs every Monday, so a vulnerability
+  published on a version already shipped is found within a week.
 - **Verifiable image.** Each image pushed to GHCR carries a CycloneDX SBOM and
   two signed attestations bound to its digest, build provenance and that SBOM:
   `gh attestation verify oci://ghcr.io/stixaly/ctiparsor@sha256:<digest> -R Stixaly/CTIParsor`.
@@ -132,5 +144,7 @@ pipeline still produces valid STIX. ML models are downloaded once and cached.
 | PYSEC-2026-2447 (CVE-2025-69872, GHSA-w8v5-vhqr-4h9v) | diskcache 5.6.3, no fixed release | Code execution needs **write access to the cache directory** first. diskcache comes with pySigma, which only uses it to cache MITRE ATT&CK data (`sigma.data.mitre_attack`, `~/.cache/pysigma`); CTIParsor never imports that module, and the Sigma gate (ADR-0070) parses a rule with ATT&CK tags without loading diskcache (checked 2026-10-03). | 2026-10-03 |
 
 ## Reporting a vulnerability
-Open a private security advisory on the repository, or contact the maintainer
-directly. Please do not file public issues for exploitable vulnerabilities.
+Report it privately:
+[open a security advisory](https://github.com/Stixaly/CTIParsor/security/advisories/new)
+(Security tab → "Report a vulnerability"), or contact the maintainer directly.
+Please do not file public issues for exploitable vulnerabilities.
