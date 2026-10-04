@@ -34,14 +34,33 @@ page select is, and a verify run needs `TTP_MODE=verify`.
 
 | Run | Precision | Recall | **F1 parent (micro)** | F1 per document | Exact id F1 | s / report |
 |---|---|---|---|---|---|---|
-| `t0-dev-d580e8c` | _pending_ | | | | | |
+| `t0-dev-d580e8c` | 0.270 | 0.426 | **0.330** | 0.274 | 0.127 | 325.2 |
 | `t0-no2c-dev` | 0.500 | 0.434 | **0.465** | 0.402 | 0.191 | 334.5 |
 | `sel-dev` | 0.587 | 0.628 | **0.607** | 0.529 | 0.232 | 396.2 |
 | `sel-noret-dev` | 0.566 | 0.364 | **0.443** | 0.359 | 0.223 | 329.2 |
 
-Recall of techniques annotated explicitly / only implicitly: `t0-no2c-dev`
-19/36 (0.53) and 37/93 (0.40); `sel-dev` 28/36 (0.78) and 53/93 (0.57);
-`sel-noret-dev` 16/36 (0.44) and 31/93 (0.33).
+Recall of techniques annotated explicitly / only implicitly: `t0-dev-d580e8c`
+16/36 (0.44) and 39/93 (0.42); `t0-no2c-dev` 19/36 (0.53) and 37/93 (0.40);
+`sel-dev` 28/36 (0.78) and 53/93 (0.57); `sel-noret-dev` 16/36 (0.44) and
+31/93 (0.33).
+
+### What Stage 2c costs as shipped, on one code base
+
+| Paired difference, F1 parent | | 95% interval | Precision | Recall |
+|---|---|---|---|---|
+| `t0-no2c-dev` − `t0-dev-d580e8c` (2c off) | **+0.134** | [+0.068, +0.203] | +0.230 | +0.008 [−0.063, +0.082] |
+| `sel-dev` − `t0-dev-d580e8c` (what users get, before → after) | **+0.276** | [+0.231, +0.329] | +0.317 | +0.202 |
+| `t0-dev-d580e8c` − September's `t0-dev` (five Stage 3 commits) | −0.008 | [−0.036, +0.018] | −0.008 | −0.008 |
+
+The September ablation's figure (+0.12 to +0.15 for 2c off) holds on today's
+code: as shipped, 2c adds 93 false positives (149 against 56) and no correct
+technique (55 against 56). The five Stage 3 commits between the two baselines
+did not move technique F1. For a user, the default goes from 0.330 to 0.607.
+
+`t0-dev-d580e8c` ran from 23:05 to 00:32; the checkout moved to `main` at
+23:50 (PRs #94–96 merged). Python keeps the modules a process has imported,
+and every Stage 1–3 module was imported on the first report, so the run is a
+`d580e8c` run throughout.
 
 ### The decision (ADR-0060 rule, against `t0-no2c-dev`)
 
@@ -114,13 +133,13 @@ after 2026-10-03 do.
 
 ## Evidence
 
-| | `t0-no2c-dev` | `sel-dev` | `sel-noret-dev` |
-|---|---|---|---|
-| Techniques with a quote | 113 | 141 | 68 |
-| Quote found in the text | 98.2% | **100%** (the code checks it before shipping) | 100% |
-| Correct techniques with a located quote | 60 | 90 | 46 |
-| … on the passage annotated for that technique | 65% | 70% | 72% |
-| … within 200 characters of it | 72% | 76% | 76% |
+| | `t0-dev-d580e8c` | `t0-no2c-dev` | `sel-dev` | `sel-noret-dev` |
+|---|---|---|---|---|
+| Techniques with a quote | 207 | 113 | 141 | 68 |
+| Quote found in the text | 98.1% | 98.2% | **100%** (the code checks it before shipping) | 100% |
+| Correct techniques with a located quote | 57 | 60 | 90 | 46 |
+| … on the passage annotated for that technique | 63% | 65% | 70% | 72% |
+| … within 200 characters of it | 70% | 72% | 76% | 76% |
 
 Whether a quote **supports** its technique is not measured by any of these:
 the 50 quotes in `data/eval/runs/sel-dev/support-sample.csv` wait for a
@@ -136,7 +155,8 @@ and nothing on the entity path.
 
 `sel-dev`: 68/68 extraction calls usable; 3d 61/61; selection 64 usable and 1
 unparseable; no provider failure. `t0-no2c-dev`: 68/68, 3d 61/61, 3f 58/58.
-`sel-noret-dev`: 68/68, 3d 61/61, selection 57/57.
+`sel-noret-dev`: 68/68, 3d 61/61, selection 57/57. `t0-dev-d580e8c`: 68/68,
+3d 62/62, 3f 59/59.
 
 ## Next
 

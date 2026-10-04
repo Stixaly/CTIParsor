@@ -230,7 +230,9 @@ All four runs on `d580e8c`, same server, temperature 0, seed 13
 `sel-dev` lifts parent technique F1 from 0.465 to **0.607** (+0.142, paired
 bootstrap 95% interval [+0.061, +0.236]), precision from 0.500 to 0.587 and
 recall from 0.434 to 0.628, for +18% time per report: every condition of the
-ADR-0060 rule holds, so **select mode becomes the default**. Retrieval puts
+ADR-0060 rule holds, so **select mode becomes the default**. Against the
+shipped default re-run on the same code (verify with 2c, 0.330), it is
++0.276 [+0.231, +0.329]. Retrieval puts
 123 of the 129 gold techniques among a report's candidates (ceiling 0.954);
 the selector now loses most (42 offered, not chosen). Every shipped quote is
 found in the text, against 98.2% before.
