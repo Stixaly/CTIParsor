@@ -183,6 +183,6 @@ class PgConnection:
         if exc_type is not None:
             try:
                 self.rollback()
-            except Exception:
+            except Exception:  # noqa: S110 — `exc` propagates; a failed rollback must not mask it
                 pass
         return False

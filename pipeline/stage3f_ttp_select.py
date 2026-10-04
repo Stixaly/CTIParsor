@@ -40,7 +40,7 @@ from pydantic import BaseModel, Field
 from api.logging_config import get_logger
 from models.schemas import EvidenceLabel
 from pipeline.env_flags import env_int
-from pipeline.llm_parse import fit_text
+from pipeline.llm_parse import fit_report
 from pipeline.regex_safety import compile_pattern
 from pipeline.ttp_retrieval import TtpCandidate
 
@@ -238,9 +238,9 @@ def select_ttps(
         return [TtpReview(attack_id=c.attack_id, name=c.name, reason=reason, sources=c.sources)
                 for c in offered]
 
-    prompt = fit_text(_SELECT_USER_TEMPLATE, text, max_prompt_chars,
-                      candidates=format_candidates(offered))
-    raw = llm_fn(_SELECT_SYSTEM, prompt)
+    prompt, spotlight = fit_report(_SELECT_USER_TEMPLATE, text, max_prompt_chars,
+                                   candidates=format_candidates(offered))
+    raw = llm_fn(f"{_SELECT_SYSTEM}\n\n{spotlight}", prompt)
     if not raw:
         llm_stats.bump("ttp_selection_failed")
         logger.warning("TTP selection call failed — %d candidates sent to review", len(offered))

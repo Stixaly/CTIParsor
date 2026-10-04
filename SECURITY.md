@@ -7,12 +7,23 @@ deliberate limits. It is defensive in scope.
 ## Threat surfaces & how they're handled
 
 ### 1. Untrusted input documents (prompt injection)
-Reports are attacker-influenced text. Before any LLM call, **only the user message
-is sanitised** — the system prompt is developer-controlled and never run through the
-sanitiser (`pipeline/stage3_llm.py::_sanitize_text_for_prompt`). Sanitisation:
-- strips null bytes / control chars and removes HTML/XML tags and code fences,
-- redacts common injection phrasings (`ignore previous…`, `role: system`, jailbreak/DAN, developer-mode),
+Reports are attacker-influenced text. Every prompt that embeds it encloses it
+between two marker lines carrying a nonce (a hash of the text), and the system
+prompt names those markers and says that what lies between them is data, never
+instructions (spotlighting, `pipeline/llm_parse.py::fit_report`, ADR-0074).
+Before any LLM call the user message is also prepared by
+`pipeline/stage3_llm.py::_sanitize_text_for_prompt`, which deletes nothing the
+report says:
+- removes control characters and invisible ones (zero-width, direction marks,
+  bidi overrides and isolates, BOM), counted in the stage report;
+- defuses chat-template markup (`<|im_end|>`, `<|im_start|>`, `<think>`,
+  `[INST]`…) by inserting a space, because vLLM, Ollama and LM Studio would
+  otherwise tokenize it as the real control token; also counted;
 - caps length to the prompt budget.
+
+Phrasings such as "ignore previous instructions" are no longer redacted: the
+rule deleted genuine descriptions of malware behaviour and missed every
+synonym or other language (ADR-0074).
 
 Defence in depth after the LLM: every returned name is fuzzy-matched against the
 source text (Stage 3b hallucination filter), MITRE IDs are normalised against the
@@ -100,6 +111,25 @@ pipeline still produces valid STIX. ML models are downloaded once and cached.
   profile that keeps the Chromium sandbox on, API published on loopback only. Everything
   above still applies inside it; API keys reach the container through `env_file` and are
   readable by whoever holds the Docker socket.
+
+## Supply chain (ADR-0075)
+- **Pinned inputs.** Python dependencies install from `requirements.lock.txt`
+  (`make lock`); the Dockerfile's base images and every compose image are
+  pinned by digest. Dependabot proposes new digests, GitHub Actions and UI
+  packages as pull requests.
+- **Audited on every push.** The `dependency-audit` CI job runs `pip-audit` on
+  the lock and `npm audit` on the UI's production dependencies, and blocks
+  the image: a known vulnerability ships only if it is listed below.
+- **Static analysis.** CodeQL (`security-extended`) scans the Python and the
+  TypeScript on every push and weekly; findings are in the Security tab.
+- **Verifiable image.** Each image pushed to GHCR carries a CycloneDX SBOM and
+  two signed attestations bound to its digest, build provenance and that SBOM:
+  `gh attestation verify oci://ghcr.io/stixaly/ctiparsor@sha256:<digest> -R Stixaly/CTIParsor`.
+
+### Accepted vulnerabilities
+| Id | Package | Why it is accepted | Reviewed |
+|---|---|---|---|
+| PYSEC-2026-2447 (CVE-2025-69872, GHSA-w8v5-vhqr-4h9v) | diskcache 5.6.3, no fixed release | Code execution needs **write access to the cache directory** first. diskcache comes with pySigma, which only uses it to cache MITRE ATT&CK data (`sigma.data.mitre_attack`, `~/.cache/pysigma`); CTIParsor never imports that module, and the Sigma gate (ADR-0070) parses a rule with ATT&CK tags without loading diskcache (checked 2026-10-03). | 2026-10-03 |
 
 ## Reporting a vulnerability
 Open a private security advisory on the repository, or contact the maintainer

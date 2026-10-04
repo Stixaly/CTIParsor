@@ -1,7 +1,10 @@
 # syntax=docker/dockerfile:1.7
 
+# Base images are pinned by digest, like compose.yaml's: a tag can be re-pushed,
+# a digest cannot. Dependabot (.github/dependabot.yml) proposes new digests.
+
 # ── Stage 1: build the React frontend ─────────────────────────────────────────
-FROM node:24-bookworm-slim AS ui
+FROM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS ui
 WORKDIR /ui
 COPY frontend/package.json frontend/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
@@ -9,7 +12,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # ── Stage 2: build the Python virtualenv ──────────────────────────────────────
-FROM python:3.12-slim-bookworm AS builder
+FROM python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS builder
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential libxml2-dev libxslt1-dev pkg-config \
@@ -28,7 +31,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements.lock.txt
 
 # ── Stage 3: runtime image ────────────────────────────────────────────────────
-FROM python:3.12-slim-bookworm AS runtime
+FROM python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS runtime
 
 ARG INSTALL_CAPTURE=true
 ARG GIT_REV=""

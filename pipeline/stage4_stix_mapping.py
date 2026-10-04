@@ -1705,8 +1705,10 @@ def _entity_to_sco(entity: RawEntity):
         if t == EntityType.USER_ACCOUNT:
             return stix2.UserAccount(user_id=v)
 
-    except Exception:
-        pass
+    except Exception as exc:
+        # The caller records the entity as dropped / not_representable; the
+        # reason stix2 gave is only here.
+        logger.debug("no SCO for %s %r: %s", entity.entity_type.value, entity.value, exc)
     return None
 
 
@@ -1750,8 +1752,9 @@ def _entity_to_sdo(entity: RawEntity):
             incident_id = stix_ids.incident_id(v)
             return stix2.Incident(name=v, id=incident_id)
 
-    except Exception:
-        pass
+    except Exception as exc:
+        # The caller records the entity as dropped; the reason stix2 gave is only here.
+        logger.debug("no SDO for %s %r: %s", entity.entity_type.value, entity.value, exc)
     return None
 
 

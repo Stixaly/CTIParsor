@@ -1,0 +1,36 @@
+# What Dependabot keeps current, and what it leaves to `make lock` (ADR-0075).
+#
+# Python is not here: requirements.lock.txt is compiled by `uv pip compile`
+# (`make lock`), which Dependabot neither regenerates (its uv support reads a
+# uv.lock) nor treats as pip-compile output, so it would bump single pins and
+# leave the rest of the resolution stale. The `pip-audit` CI job fails on a
+# known vulnerability in the lock instead, and `make update-deps` re-resolves.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Base images of the Dockerfile and the images compose.yaml pins by digest
+  # (lot 0, D11): a new digest arrives as a PR, never silently.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    groups:
+      frontend-minor-and-patch:
+        update-types: ["minor", "patch"]

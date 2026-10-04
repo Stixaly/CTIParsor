@@ -5,6 +5,7 @@ test is about the worker, not about what a real run extracts."""
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 from types import SimpleNamespace
@@ -449,7 +450,7 @@ def test_finalize_applies_every_reviewer_rejection_to_the_llm_blob(db):
     assert (output_dir() / "APT_report_j1_bundle.json").exists()
 
 
-def test_finalize_survives_a_corrupt_llm_blob_and_an_unreadable_anchor(db, monkeypatch):
+def test_finalize_survives_a_corrupt_llm_blob_and_an_unreadable_anchor(db, monkeypatch, caplog):
     _job(db, status="reviewing", llm_result_json="{not json", report_text="APT29 used SUNBURST.")
     _entity(db, "j1", "APT29", "threat_actor")
 
@@ -457,10 +458,14 @@ def test_finalize_survives_a_corrupt_llm_blob_and_an_unreadable_anchor(db, monke
         raise ValueError("bad sidecar")
 
     monkeypatch.setattr("pipeline.stage1_ingestion.extract_anchor", anchor_fails)
-    bundle = worker.re_run_final_stages("j1", skip_rescan=True)
+    with caplog.at_level(logging.ERROR, logger="api.worker"):
+        bundle = worker.re_run_final_stages("j1", skip_rescan=True)
 
     assert _objects(bundle, "threat-actor") == ["APT29"]
     assert _row(db)["status"] == "reviewing"                      # the quick rebuild leaves it alone
+    # The techniques and targets of that blob are gone from the bundle: said, not silent.
+    assert any("j1" in r.getMessage() and "stored LLM result cannot be read" in r.getMessage()
+               for r in caplog.records)
 
 
 def test_finalize_reads_relationship_dates_old_and_new(db):
