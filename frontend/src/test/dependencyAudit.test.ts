@@ -1,3 +1,6 @@
+// Reads package-lock.json from disk: Node's types, which TypeScript 6 no
+// longer includes by default (the app itself runs in the browser).
+/// <reference types="node" />
 import { describe, it, expect } from 'vitest'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
