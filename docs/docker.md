@@ -14,7 +14,7 @@ decisions behind the containerization itself.
 - **Image**: `ctiparsor:local` (4.48 GB). Contains the React UI, Python 3.12 venv (torch CPU), and Chromium (optional).
 - **Volumes** (Compose prefixes them with the project name, so `docker volume ls` shows `ctiparsor_cti-state` and so on):
   - `cti-state`: uploads, outputs, backups — back it up. No database file lives here any more (ADR-0053).
-  - `pg-data`: the PostgreSQL job store AND rule store (jobs, entities, relationships, progress, policy, figure and CVE caches, plus the detection-rule corpus since ADR-0053) — back it up with `pg_dump`.
+  - `pg-data-18`: the PostgreSQL 18 job store AND rule store (jobs, entities, relationships, progress, policy, figure and CVE caches, plus the detection-rule corpus since ADR-0053) — back it up with `pg_dump`.
   - `cti-cache`: HuggingFace models, Sigma/YARA/Suricata corpora — rebuildable with `bootstrap`.
   - `ollama-models`: (Only if using the `ollama` profile).
 - **Services**: `app`, `worker`, `postgres` and `capture-proxy` always run. `app` only accepts and queues reports (`CTIPARSOR_ROLE=api`) and never loads a model; `worker` claims queued reports from the job store and runs each in an isolated subprocess, heartbeating the rows it owns so several workers can share the queue (ADR-0046) — scale it with `docker compose up -d --scale worker=2`; `postgres` is both stores (ADR-0045, ADR-0053: PostgreSQL 17, on the internal network only, running as the image's `postgres` user with every capability dropped and a read-only root; `CTI_DB_PASSWORD` in `.env` is required). `capture-proxy` is a Squid egress filter the URL-capture tab's Chromium goes through, so it can reach public addresses only (see *Security model*). Three optional profiles:
@@ -175,7 +175,7 @@ The app receives `DATABASE_URL=postgresql://<CTI_DB_USER>@postgres:5432/<CTI_DB_
 
 ## Data and backups
 
-Data persists in named volumes. Two of them hold what you cannot rebuild: `cti-state` (uploads, outputs) and `pg-data` (every report AND the detection-rule corpus, since ADR-0053).
+Data persists in named volumes. Two of them hold what you cannot rebuild: `cti-state` (uploads, outputs) and `pg-data-18` (every report AND the detection-rule corpus, since ADR-0053).
 
 **Backup:**
 ```bash
@@ -313,7 +313,7 @@ Not supported in the image (torch CPU only).
 |---|---|---|
 | `env file .env not found` | Missing `.env` | `cp .env.example .env` |
 | `required variable CTI_DB_PASSWORD is missing a value` | No database password | `echo "CTI_DB_PASSWORD=$(openssl rand -hex 24)" >> .env` |
-| `password authentication failed for user "ctiparsor"` | `CTI_DB_PASSWORD` changed after the `pg-data` volume was initialised | Restore the old value, or `docker compose down -v` to start a fresh database (deletes every report) |
+| `password authentication failed for user "ctiparsor"` | `CTI_DB_PASSWORD` changed after the `pg-data-18` volume was initialised | Restore the old value, or `docker compose down -v` to start a fresh database (deletes every report) |
 | Reports (or detection rules) processed before the PostgreSQL move are gone from the list | They are still in `cti_stix.db` on `cti-state` | Run the migration commands in *Data and backups* |
 | `docker compose pull` reports `denied` | The GHCR package is still private and you are not authenticated, or the first publish hasn't landed yet | `docker login ghcr.io`, or build locally with `docker compose build` |
 | Backlog is unclear — is the queue actually backing up? | Watching logs is guesswork | `curl -s localhost:8000/api/queue/status \| python3 -m json.tool` — `queue.depth` against `queue.max_depth`, `queue.oldest_queued_seconds`, and each worker's `stale` flag (ADR-0048) |

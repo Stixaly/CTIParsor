@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:18-alpine
         env:
           POSTGRES_USER: ctiparsor
           POSTGRES_PASSWORD: ci
@@ -170,7 +170,7 @@ jobs:
     continue-on-error: true
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:18-alpine
         env:
           POSTGRES_USER: ctiparsor
           POSTGRES_PASSWORD: ci

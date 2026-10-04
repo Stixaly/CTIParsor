@@ -200,7 +200,7 @@ services:
   postgres:
     # Images are pinned to the multi-arch index digest their tag resolved to on
     # 2026-10-03 (Docker Hub); move a tag and its digest together.
-    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
     user: "70:70"
     environment:
       POSTGRES_USER: ${CTI_DB_USER:-ctiparsor}
@@ -210,7 +210,11 @@ services:
       # default only applies it to host connections).
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
     volumes:
-      - pg-data:/var/lib/postgresql/data
+      # PostgreSQL 18's image keeps its cluster in /var/lib/postgresql/18/docker
+      # and refuses to start with a mount at the old .../data path.  A new
+      # volume, so a 17 cluster in `pg-data` is never mistaken for an empty 18
+      # one: scripts/upgrade_postgres_17_to_18.sh moves it (docs/upgrading.md §7).
+      - pg-data-18:/var/lib/postgresql
       - ./.secrets/db_password:/run/secrets/db_password:ro
     tmpfs:
       - /tmp
@@ -468,13 +472,15 @@ networks:
     internal: true
   llm: {}
 
-# cti-state and pg-data are what a backup must contain (uploads and outputs
+# cti-state and pg-data-18 are what a backup must contain (uploads and outputs
 # on the first; both the job store and the rule store on the second, since
 # ADR-0053 — pg_dump it); cti-cache can be dropped and rebuilt with
 # bootstrap.
 volumes:
   cti-state: {}
   cti-cache: {}
-  pg-data: {}
+  # PostgreSQL 18's cluster.  The 17 volume, `pg-data`, is no longer declared:
+  # `docker compose down -v` leaves it alone until you delete it yourself.
+  pg-data-18: {}
   ollama-models: {}
   frontend-node-modules: {}

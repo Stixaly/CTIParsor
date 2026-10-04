@@ -61,6 +61,9 @@ docker/nginx/htpasswd
 # (Makefile's docker-up/docker-bootstrap, scripts/docker_smoke.sh)
 .secrets/
 
+# Database dumps (scripts/upgrade_postgres_17_to_18.sh) -- they hold every report
+/backups/
+
 # Coverage data (pytest --cov, make coverage)
 .coverage
 .coverage.*
