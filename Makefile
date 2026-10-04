@@ -114,14 +114,16 @@ check-docs: .secrets/db_password
 # re-resolve against the current constraints instead of reusing old wheels).
 
 ## Scan the dependencies for known CVEs, as the CI dependency-audit job does:
-## the exact versions of both locks (the image's and CI's tools), and the UI's
+## the exact versions of the three PyPI locks (image, CI tools, scanner), and the UI's
 ## production packages.  Accepted ones are listed in SECURITY.md.
 AUDIT_IGNORE ?= --ignore-vuln PYSEC-2026-2447
 audit:
 	docker run --rm -v "$$(pwd)":/audit -w /audit python:3.14-slim \
-	    sh -c "pip install --quiet --require-hashes -r requirements-audit.lock.txt \
-	        && python -m pip_audit -r requirements.lock.txt -r requirements-ci.lock.txt -r requirements-audit.lock.txt \
-	        --no-deps --disable-pip --progress-spinner off $(AUDIT_IGNORE)"
+	    sh -c "pip install --quiet --require-hashes -r requirements-audit.lock.txt && status=0 \
+	        && for lock in requirements.lock.txt requirements-ci.lock.txt requirements-audit.lock.txt; do \
+	            echo \"== \$$lock\"; python -m pip_audit -r \$$lock \
+	                --no-deps --disable-pip --progress-spinner off $(AUDIT_IGNORE) || status=1; done; \
+	        exit \$$status"
 	@echo ""
 	@echo "=== npm dependency audit (production) ==="
 	docker run --rm -v "$$(pwd)/frontend":/ui -w /ui node:24-bookworm-slim \

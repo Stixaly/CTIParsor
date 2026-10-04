@@ -125,13 +125,19 @@ jobs:
       - name: Install pip-audit (by hash, ADR-0080)
         run: pip install --require-hashes -r requirements-audit.lock.txt
 
-      # The image's lock, CI's tools and the scanner's own dependencies.
+      # The image's lock, CI's tools and the scanner's own dependencies, one
+      # run each: pip-audit refuses a package that two -r files both list.
+      # Every lock is audited before the step fails.
       - name: pip-audit (the three locks)
         run: |
           # PYSEC-2026-2447 (diskcache, pickle in a cache directory): accepted, see SECURITY.md.
-          pip-audit -r requirements.lock.txt -r requirements-ci.lock.txt -r requirements-audit.lock.txt \
-            --no-deps --disable-pip --progress-spinner off \
-            --ignore-vuln PYSEC-2026-2447
+          status=0
+          for lock in requirements.lock.txt requirements-ci.lock.txt requirements-audit.lock.txt; do
+            echo "== $lock"
+            pip-audit -r "$lock" --no-deps --disable-pip --progress-spinner off \
+              --ignore-vuln PYSEC-2026-2447 || status=1
+          done
+          exit "$status"
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
