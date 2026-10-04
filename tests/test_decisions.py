@@ -48,12 +48,26 @@ def _journal(db, target_id):
 # ── Migration ────────────────────────────────────────────────────────────────
 
 def test_rows_decided_before_the_column_existed_become_legacy(temp_db):
+    # A database deployed before ADR-0058: schema version 5, no decision_origin
+    # column, no record of its version (ADR-0077 recognises it at the start).
+    from api import migrations as history
+    conn = temp_db.get_conn()
+    conn.execute_script(f'DROP SCHEMA "{temp_db._PG_SCHEMA}" CASCADE')
+    conn.execute_script(f'CREATE SCHEMA "{temp_db._PG_SCHEMA}"')
+    for mg in history.load()[:5]:
+        for statement in mg.statements:
+            conn.execute_script(statement)
     job = _job(temp_db)
-    decided = _entity(temp_db, job, accepted=1)
-    pending = _entity(temp_db, job, accepted=None)
+    decided, pending = str(uuid4()), str(uuid4())
+    for eid, accepted in ((decided, 1), (pending, None)):
+        conn.execute("INSERT INTO entities (id, job_id, value, entity_type, accepted) VALUES (?,?,?,?,?)",
+                     (eid, job, "WellMess", "malware", accepted))
 
-    temp_db.init_db()   # the migration runs on every start
+    temp_db.init_db()   # the start applies version 6 and its backfill, once
 
+    how = {r["version"]: r["how"] for r in conn.execute("SELECT version, how FROM schema_migrations").fetchall()}
+    assert {v for v, h in how.items() if h == "recognised"} == {1, 2, 3, 4, 5}
+    assert how[6] == "applied"
     assert _row(temp_db, decided)["decision_origin"] == "legacy"
     assert _row(temp_db, pending)["decision_origin"] is None
 

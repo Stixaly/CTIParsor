@@ -358,6 +358,44 @@ CTIParsor/
 └── docker/                        # entrypoint, model warm-up, seccomp profile, nginx + squid config
 ```
 
+## Database migrations
+
+The schema is versioned (ADR-0077). Every change to a table — a column, an
+index, a constraint, a backfill, a rewrite of stored JSON — is a new module
+in `api/migrations/`, never an edit of an existing one: the API, the workers
+and `bootstrap` apply what a database lacks at start, and refuse to start if
+an applied migration's statements changed (its checksum is recorded).
+
+```bash
+python -m api.migrate status   # where this database is, what is pending
+python -m api.migrate up       # apply what is pending (start does it too)
+python -m api.migrate check    # exit 1 unless the database is at the code's version
+```
+
+To add version N:
+
+1. `api/migrations/vNNNN_short_name.py` defining `MIGRATION = Migration(...)`:
+   `version`, `name`, `store` (`jobs` or `rules`), `statements` (SQL, run in
+   order inside one transaction), and `is_applied(conn)` — the check that
+   finds this version's changes in a database (`column_exists`,
+   `table_exists`, `index_exists`, `constraint_exists`, or a query on the
+   data). The runner runs it after applying, and rolls the version back if it
+   does not see the changes; it also recognises with it how far a database
+   created before versioning had got.
+2. Data: a `data(conn)` function for what SQL alone does not express —
+   rewriting JSON columns with the project's models, backfills in batches.
+   Its source is part of the checksum.
+3. **Expand, then contract.** A worker of the previous revision may still run
+   during a restart: add a column nullable, fill it, and only make it required
+   or drop the old one in a later version.
+4. **Destructive steps** (drop, rename, retype, rewrite in place): list the
+   tables in `snapshot_tables`; the runner copies each to
+   `_pre_vNNNN_<table>` in the same transaction before running. There are no
+   down-migrations: the snapshot, or a `pg_dump`, is the way back.
+5. A test in `tests/test_migrations.py`, from a database at version N-1 with
+   data written the way that version wrote it. `test_a_deployment_stopped_at_any_version_is_brought_up_to_date`
+   and the schema-equivalence test cover the whole line.
+
 ## Extending the pipeline
 
 ### Add a new LLM provider

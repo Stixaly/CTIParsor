@@ -462,6 +462,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--once", action="store_true", help="Run a single pass and exit")
     args = parser.parse_args(argv)
 
+    # Bring the schema to this code's version before taking any job (ADR-0077).
+    # Under the migration lock: whichever of the API and the workers starts
+    # first migrates, the others wait and find nothing left to do.
+    from api.db import init_db
+    init_db()
+
     logger.info(
         f"[queue] worker {WORKER_ID} starting: max_concurrent={args.max_concurrent}, "
         f"poll={POLL_S}s, heartbeat={HEARTBEAT_S}s, lease={LEASE_TIMEOUT_S}s"

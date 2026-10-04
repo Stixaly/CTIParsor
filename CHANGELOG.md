@@ -117,6 +117,24 @@ exports it, with OpenCTI's own id.
 
 ### Changed
 
+#### The database knows its version; every start brings it up to date (ADR-0077), 2026-10-04
+
+`init_db()` used to replay an idempotent DDL list at each API start: no
+record of what a database had, no way to rename, split, retype or rewrite
+data, backfills forever, no defence against an older image on a newer
+schema, and a worker that relied on the API starting first. The schema is
+now a history, `api/migrations/v0001`–`v0009`, rebuilt from git one version
+per schema-changing commit since the first PostgreSQL job store (ADR-0045),
+each with its statements, an optional data step and its own verification.
+**The API, every worker and `bootstrap` bring the database to the code's
+version at start**, under an advisory lock (whoever starts first migrates,
+the others wait), one transaction per version, verified before it is
+recorded in `schema_migrations`. A database created before the history is
+recognised version by version, without a change; a database newer than the
+code, or an applied migration edited since, stops the start with what to do.
+`python -m api.migrate status | up | check`. How to add a version:
+docs/development.md, "Database migrations".
+
 #### Frontend toolchain: Vite 8, plugin-react 6, vitest 5, jsdom 30, TypeScript 6.0, 2026-10-04
 
 The Dependabot PRs for the frontend, applied together because they depend on
