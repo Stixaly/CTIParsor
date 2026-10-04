@@ -136,6 +136,10 @@ pipeline still produces valid STIX. ML models are downloaded once and cached.
   rates these practices weekly (README badge).
 - **Weekly, without a push.** CI runs every Monday, so a vulnerability
   published on a version already shipped is found within a week.
+- **Fuzzing (ADR-0081).** Atheris fuzzes the code that reads
+  attacker-controlled input (report text, quoted rules, dates, the prompt
+  enclosure) on every pull request and weekly; a crash, a broken invariant,
+  an input slower than 10 s or a memory blow-up fails the run.
 - **Verifiable image.** Each image pushed to GHCR carries a CycloneDX SBOM and
   two signed attestations bound to its digest, build provenance and that SBOM:
   `gh attestation verify oci://ghcr.io/stixaly/ctiparsor@sha256:<digest> -R Stixaly/CTIParsor`.

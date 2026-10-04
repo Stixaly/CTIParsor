@@ -60,6 +60,25 @@ make ci                                    # every check CI runs: lint, types, t
 `CTIPARSOR_TEST_DATABASE_URL` is already set for the `dev` service in
 `compose.yaml` (ADR-0054) — no manual export needed.
 
+## Fuzzing
+
+`fuzz/` holds four Atheris targets for the code that reads attacker-controlled
+input (ADR-0081): report text (`fuzz_report_text`), dates (`fuzz_dates`), the
+gates quoted rules go through (`fuzz_rule_gates`), and the prompt enclosure
+(`fuzz_spotlight`). The `Fuzzing` workflow runs each for 60 s on a pull
+request and 10 minutes weekly; `tests/test_fuzz_targets.py` runs them over
+their seeds in the ordinary suite. Atheris installs on Linux x86_64 only
+(`requirements-dev.txt`). To fuzz locally, give libFuzzer a *copy* of the
+seeds — it writes what it finds into the corpus directory:
+
+```bash
+cp -r fuzz/corpus/rule_gates /tmp/corpus && python fuzz/fuzz_rule_gates.py -max_total_time=300 -timeout=10 /tmp/corpus
+```
+
+A failing run in CI uploads the input as the `fuzz-crash-<target>` artifact;
+`python fuzz/fuzz_<target>.py <that file>` replays it. Add the input to
+`fuzz/corpus/<target>/` once fixed, so the seed test keeps it fixed.
+
 ## Measure extraction quality (offline)
 
 Three benchmarks live in `tests/eval_pipeline.py` — recall (`ner`, `ate`) and a
