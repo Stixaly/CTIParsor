@@ -158,14 +158,14 @@ ran, were skipped (disabled, model missing, no LLM provider) or failed.
 | **1f** Figure reading | A vision model transcribes the figures of a PDF (diagrams, screenshots, tables) into the text | opt-in — `VISION_PROVIDER` |
 | **2** Regex IoCs | IPs, domains, URLs, emails, MACs, ASNs, paths, registry keys, hashes, CVEs, raw ATT&CK IDs | always |
 | **2b** Gazetteer NER | Aho-Corasick scan for the malware, tools and groups ATT&CK knows | always |
-| **2c** Semantic TTPs | Sentence-transformer similarity against ATT&CK technique descriptions; with `TTP_MODE=select`, only retrieves candidates for 3f to choose from | always |
+| **2c** TTP candidates | Retrieves ranked ATT&CK candidates per passage (descriptions and procedure examples, BM25 and dense) for 3f to choose from; with `TTP_MODE=verify`, emits techniques by sentence-transformer similarity instead | always |
 | **2d** CyNER 2.0 | DeBERTa-v3 cybersecurity NER — malware and threat groups | on by default — `CYNER_ENABLED` |
 | **2e** GLiNER | Zero-shot NER — sectors, campaigns, infrastructure, actors not yet in ATT&CK | on by default — `GLINER_ENABLED` |
 | **2g** Alias lists | Splits "X (aka Y, Z)" constructs into threat-actor names no dictionary knows yet | always |
 | **3** LLM enrichment | Actors, malware, tools, TTPs, relationships with an evidence quote, targets, mitigations | with an LLM provider |
 | **3b** Hallucination filter | Fuzzy-matches every LLM-returned name against the source chunk | with Stage 3 |
 | **3d** Relationship verification | A second LLM call must quote the sentence supporting each relationship | opt-in — `ENABLE_STIX_VERIFICATION` |
-| **3f** TTP verification | The same for techniques: quote the sentence describing their use | on in `.env.example` — `ENABLE_TTP_VERIFICATION` |
+| **3f** TTP selection | Chooses the techniques among 2c's candidates and the LLM's proposals, each with a quote the code finds in the text; a failed call ships nothing (`TTP_MODE=verify`: checks the LLM's techniques after the fact) | on in `.env.example` — `ENABLE_TTP_VERIFICATION` |
 | **3e** Cross-model consensus | A second provider re-runs relationship-bearing chunks; agreement raises confidence | opt-in — `ENABLE_CONSENSUS` |
 | **3doc** Document-level relations | One call over the whole report for relationships between facts stated far apart | opt-in — `ENABLE_DOCUMENT_LEVEL_RELATIONS` |
 | **3c** ATT&CK normalisation | Canonical technique names and IDs, once per document; parent dropped when a sub-technique is present | always |

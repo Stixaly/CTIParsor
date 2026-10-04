@@ -60,7 +60,8 @@ def test_a_run_reports_every_stage_and_builds_a_valid_bundle(mock_llm, sample_ct
     assert [o.stage for o in result.stages] == [
         "1f", "1", "2", "2b", "2c", "2d", "2e", "2g", "3", "3d", "3f", "3e", "3doc",
         "2f", "4", "4b", "4c", "5"]
-    assert result.outcome("3f").reason == "disabled"      # _opts turns 3d / 3f off
+    # _opts turns 3d / 3f off; in select mode, the default, that is worth a warning.
+    assert result.outcome("3f").reason == "disabled: the LLM's techniques ship unchecked"
     assert result.outcome("4c").reason == "not enabled by the relationship policy"
     assert {o.stage for o in result.stages} == set(orch.STAGES)
     assert result.ran("1") and result.ran("2") and result.ran("3") and result.ran("4")
@@ -411,7 +412,11 @@ def test_verification_and_completion_stages_can_be_turned_off(mock_llm, sample_c
     # 3d / 3f were on; the mocked verifier answers extraction JSON, which it cannot parse.
     assert result.outcome("3d").status == result.outcome("3f").status == "failed"
     off = run_document(Document(text=sample_cti_text), _opts(disabled={"2f", "3d", "3f"}))
-    assert off.outcome("3d").reason == off.outcome("3f").reason == "disabled"
+    assert off.outcome("3d").reason == "disabled"
+    assert off.outcome("3f").reason == "disabled: the LLM's techniques ship unchecked"
+    off_verify = run_document(Document(text=sample_cti_text),
+                              _opts(disabled={"2f", "3d", "3f"}, ttp_mode="verify"))
+    assert off_verify.outcome("3f").reason == "disabled"
 
 
 def test_cli_policy_source(tmp_path, capsys):

@@ -117,18 +117,20 @@ exports it, with OpenCTI's own id.
 
 ### Changed
 
-#### PostgreSQL 18, on a new volume (ADR-0076), 2026-10-04
+#### Frontend toolchain: Vite 8, plugin-react 6, vitest 5, jsdom 30, TypeScript 6.0, 2026-10-04
 
-**Existing container stacks: run `scripts/upgrade_postgres_17_to_18.sh`
-before `docker compose up`** (docs/upgrading.md §7). The `postgres` service
-moves to `postgres:18-alpine` (Dependabot #98, whose smoke test failed: the
-18 image refuses the old `/var/lib/postgresql/data` mount). Its cluster lives
-in a new volume, `pg-data-18`, mounted at `/var/lib/postgresql`; the 17
-volume `pg-data` is left as it was and no longer declared. The script dumps
-the 17 database with a throwaway PostgreSQL 17, restores it into 18 and
-checks every table's row count; it refuses to overwrite a non-empty 18
-database without `FORCE=1`. CI's test database is 18. Dumps go to
-`./backups/`, now gitignored.
+The Dependabot PRs for the frontend, applied together because they depend on
+each other: `@vitejs/plugin-react` 6 requires Vite 8 (the Rolldown-based
+bundler), vitest 5 runs on it, and jsdom 30 is its test DOM. `@types/node`
+moves to 24 (vitest 5 wants 22 or later), plus the minor and patch group
+(react-query, react-router, testing-library, autoprefixer, postcss).
+TypeScript goes to **6.0.3, not 7**: typescript-eslint, even its canary,
+accepts TypeScript < 6.1, so 7 would drop the lint. TypeScript 6 checks
+side-effect imports and no longer loads every `@types` package by default:
+`src/vite-env.d.ts` references Vite's client types (CSS imports), and the one
+test that reads files references Node's. `npm run check` (lint, typecheck,
+141 tests), the production build and `npm audit --omit=dev` pass; the UI was
+checked in the browser (dashboard, review, graph, PDF viewer).
 
 #### Relationship dates keep what the source said (ADR-0063), 2026-09-29
 
@@ -384,6 +386,17 @@ names, hashes and URLs; the app targets 15″–38″ desktop screens.
   and keeps its actions on screen.
 
 ### Added
+
+#### Where a run's technique errors arise: `evaluation ttp-errors`, 2026-10-03
+
+Splits every gold parent technique of a run into found, retrieved but not
+selected, and never retrieved, and every false positive by whether it came
+from the candidate list (ADR-0072 step 4: "never retrieved" is a retrieval
+problem, "retrieved, not selected" a selector problem). Writes
+`runs/<name>/ttp-errors.json` with the most frequent techniques per category;
+counts match `score` exactly. Run records now keep the quote of a selection
+the code refused, so a refusal can be told apart as missing, too short or not
+verbatim.
 
 #### TTPs: retrieve from ATT&CK procedures, select with a quote (ADR-0072), 2026-10-03
 

@@ -103,6 +103,23 @@ def test_ttp_scores_canonicalise_both_sides_and_split_explicit_from_implicit():
     assert s.implicit_recall == (0, 1)          # T1105 only ever implicit
 
 
+def test_ttp_errors_split_misses_by_retrieval_and_false_positives_by_origin():
+    canon = {"T1105": "T1105", "T1566.001": "T1566.001", "T1027": "T1027", "T1059.001": "T1059.001",
+             "T1486": "T1486", "T1219": "T1219", "T1086": None}.get
+    split, reasons = metrics.ttp_error_split(
+        pred_ids={"T1566.001", "T1027", "T1219"},
+        gold_ids={"T1566.001", "T1105", "T1059.001", "T1486", "T1086"},
+        candidate_ids={"T1566.001", "T1105", "T1027"},
+        review={"T1059.001": "quote missing, too short or not found verbatim"},
+        canonical=canon)
+    assert split == {"found": ["T1566"],
+                     "retrieved_not_selected": ["T1059", "T1105"],   # review; candidate
+                     "never_retrieved": ["T1486"],                   # T1086 is out of scope
+                     "fp_from_candidates": ["T1027"],
+                     "fp_outside_candidates": ["T1219"]}
+    assert reasons == {"quote missing, too short or not found verbatim": 1}
+
+
 def test_per_document_average_differs_from_micro():
     docs = [Counts(9, 1, 0), Counts(0, 1, 1)]
     p, r = 9 / 11, 9 / 10                       # micro: tp 9, fp 2, fn 1
