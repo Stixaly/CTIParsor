@@ -102,6 +102,21 @@ exports it, with OpenCTI's own id.
 
 ### Changed
 
+#### Frontend toolchain: Vite 8, plugin-react 6, vitest 5, jsdom 30, TypeScript 6.0, 2026-10-04
+
+The Dependabot PRs for the frontend, applied together because they depend on
+each other: `@vitejs/plugin-react` 6 requires Vite 8 (the Rolldown-based
+bundler), vitest 5 runs on it, and jsdom 30 is its test DOM. `@types/node`
+moves to 24 (vitest 5 wants 22 or later), plus the minor and patch group
+(react-query, react-router, testing-library, autoprefixer, postcss).
+TypeScript goes to **6.0.3, not 7**: typescript-eslint, even its canary,
+accepts TypeScript < 6.1, so 7 would drop the lint. TypeScript 6 checks
+side-effect imports and no longer loads every `@types` package by default:
+`src/vite-env.d.ts` references Vite's client types (CSS imports), and the one
+test that reads files references Node's. `npm run check` (lint, typecheck,
+141 tests), the production build and `npm audit --omit=dev` pass; the UI was
+checked in the browser (dashboard, review, graph, PDF viewer).
+
 #### Relationship dates keep what the source said (ADR-0063), 2026-09-29
 
 A relationship date was the model's own ISO conversion, padded to a 1st of
