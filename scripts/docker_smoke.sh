@@ -269,7 +269,9 @@ fi
 
 # ── Step 9d: queue-status endpoint answers (ADR-0048) ─────────────────────────
 info "Checking GET /api/queue/status..."
-QUEUE_ROLE=$(curl -fsS "$BASE/api/queue/status" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("role"))' 2>/dev/null)
+# Fetched, then parsed: never `curl | python3`, which reads as download-and-run.
+QUEUE_JSON=$(curl -fsS "$BASE/api/queue/status" 2>/dev/null)
+QUEUE_ROLE=$(printf '%s' "$QUEUE_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("role"))' 2>/dev/null)
 if [ "$QUEUE_ROLE" = "api" ]; then
     pass "queue status endpoint answers (role: $QUEUE_ROLE)"
 else
@@ -373,7 +375,8 @@ if [ "$DO_JOB" = true ]; then
                 COUNTS=$(echo "$JOB_RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); print(str(d.get('entity_count')) + ' entities, ' + str(d.get('relationship_count')) + ' relationships')" 2>/dev/null)
                 info "Job result: $COUNTS"
                 # Parsed, not grepped: FastAPI serialises without spaces, a pretty-printer with them.
-                BUNDLE_OBJECTS=$(curl -fsS "$BASE/api/jobs/$JOB_ID/bundle" 2>/dev/null \
+                BUNDLE_JSON=$(curl -fsS "$BASE/api/jobs/$JOB_ID/bundle" 2>/dev/null)
+                BUNDLE_OBJECTS=$(printf '%s' "$BUNDLE_JSON" \
                     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d["objects"]) if d.get("type") == "bundle" else "")' 2>/dev/null)
                 if [ -n "$BUNDLE_OBJECTS" ]; then
                     pass "bundle exported ($BUNDLE_OBJECTS STIX objects)"

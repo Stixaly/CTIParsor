@@ -79,7 +79,9 @@ SMOKE_STATUS=$?
 echo ""
 echo "=== Extra check: detection-corpora rule count (not covered by docker_smoke.sh) ==="
 BIND="${CTI_BIND:-127.0.0.1}"; PORT="${CTI_PORT:-8000}"
-RULE_COUNT=$(curl -fsS "http://$BIND:$PORT/api/detection-corpora" 2>/dev/null \
+# Fetched, then parsed: never `curl | python3`, which reads as download-and-run.
+CORPORA_JSON=$(curl -fsS "http://$BIND:$PORT/api/detection-corpora" 2>/dev/null)
+RULE_COUNT=$(printf '%s' "$CORPORA_JSON" \
     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(sum(c.get("rules", 0) for c in d.get("corpora", [])))' 2>/dev/null)
 if [ -n "$RULE_COUNT" ] && [ "$RULE_COUNT" -gt 0 ] 2>/dev/null; then
     echo "  PASS  detection-corpora rule count: $RULE_COUNT"
