@@ -163,8 +163,10 @@ if wait_healthy; then
     pass "container healthy"
 else
     fail "container healthy"
-    info "Dumping last 80 lines of logs..."
-    $COMPOSE logs --tail 80 app
+    # Every service, not only app: when a dependency (postgres) is the one
+    # that never gets healthy, app has not even started and logs nothing.
+    info "Dumping last 80 lines of logs of every service..."
+    $COMPOSE logs --tail 80
     # Go directly to teardown
     if [ "$CLEAN" = true ]; then
         $COMPOSE down -v
