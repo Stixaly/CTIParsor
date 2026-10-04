@@ -156,6 +156,11 @@ fails if the Sigma gate ever needs it. Expect `pip check` in the image to report
 "pysigma requires diskcache, which is not installed": that is this decision.
 
 ### Accepted vulnerabilities
+The image scan's accepted ones (Grype, Code scanning) are also listed in
+`.grype.yaml`, each rule tied to the exact package version reviewed. The scan
+leaves them out, and reports them again as soon as that version changes, for
+a new review. A row here and its rule there are added together.
+
 | Id | Package | Why it is accepted | Reviewed |
 |---|---|---|---|
 | GHSA-vfj7-8cjw-p6xm | braces 3.0.3 (npm), no fixed release | A **build-time** dependency only (`"dev": true` in `frontend/package-lock.json`): the UI's build tools use it to expand their own glob patterns. It is not in the built UI nor in the image, and no report text ever reaches it. | 2026-10-04 |

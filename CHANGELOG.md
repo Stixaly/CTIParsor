@@ -8,6 +8,18 @@ sections group by theme rather than strict semver.
 
 ### Security
 
+#### The image scan skips the CVEs SECURITY.md accepts, per version, 2026-10-04
+
+Three CPython 3.14.8 CVEs have no fix in a 3.14 release and cannot be
+reached from CTIParsor: poplib, the `TemporaryDirectory` race, and the
+`tarfile` link fallback. SECURITY.md already accepted them.
+
+Until now they could only be dismissed by hand, alert by alert. They are now
+listed in `.grype.yaml`, which the image scan reads, each with its reason
+and tied to python 3.14.8 exactly. The scan stops reporting them, and the
+three alerts close at the next scan of `main`. When the image moves to
+another Python, the rules stop matching and Grype reports them again.
+
 #### diskcache is no longer shipped, 2026-10-04
 
 diskcache 5.6.3 has an unfixed unsafe-pickle CVE (PYSEC-2026-2447).
