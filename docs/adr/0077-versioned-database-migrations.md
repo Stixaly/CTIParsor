@@ -1,138 +1,115 @@
-# ADR-0077: The database knows its version; a migration runner brings it up to date
+# ADR-0077: The database knows its version; every start brings it up to date
 
-**Status:** Proposed
+**Status:** Accepted — application schema (part A) implemented; engine guards (part B) to do
 **Date:** 2026-10-04
 **Deciders:** maintainer
 **Amends:** ADR-0045 (PostgreSQL job store), ADR-0053 (PostgreSQL only), ADR-0076 (PostgreSQL 18)
 
 ## Context
 
-Two kinds of version change reach the database, and neither is tracked today.
+Two kinds of version change reach the database, and neither was tracked.
 
-**1. The application's data model.** `api/db.py` holds two tuples of
+**1. The application's data model.** `api/db.py` held two tuples of
 statements, `_RULE_STORE_DDL_POSTGRES` and `_JOB_STORE_DDL_POSTGRES`, that
-`init_db()` replays on every API start and every `bootstrap`. Every statement
-is written to be idempotent — `CREATE TABLE IF NOT EXISTS`,
-`ALTER TABLE … ADD COLUMN IF NOT EXISTS`, and two backfills
-(`UPDATE … SET decision_origin='legacy' WHERE … IS NULL`) that "after the
-first run match nothing". The comment says it plainly: *this list is the
-migration mechanism too*. It has worked because every change so far was
-additive. It cannot express anything else:
+`init_db()` replayed at every API start and every `bootstrap`. Every statement
+was idempotent — `CREATE TABLE IF NOT EXISTS`, `ALTER TABLE … ADD COLUMN IF
+NOT EXISTS`, two backfills that "after the first run match nothing". The
+comment said it: *this list is the migration mechanism too*. It worked
+because every change so far was additive. It could not express anything else:
 
-- no record of what was applied, when, by which code revision: the database
-  cannot say which version it is at;
+- no record of what was applied, when, by which code: the database could not
+  say which version it was at;
 - a change that is not idempotent by construction — rename or retype a
-  column, split a table, drop a column, move data from one column into a new
-  table, rewrite stored JSON — has no place in the list;
-- backfills run on every start, forever, and grow with the data;
-- an older image started against a newer database (a rollback) is not
-  detected;
-- concurrency is handled by tolerating duplicate-object errors
-  (`_apply_postgres_ddl`), and the worker never runs `init_db()`: it relies
-  on the API having started first.
+  column, split a table, drop a column, move data, rewrite stored JSON — had
+  no place in the list;
+- backfills ran at every start, forever;
+- an older image started on a newer database was not detected;
+- concurrency was handled by tolerating duplicate-object errors, and the
+  worker never ran `init_db()`: it relied on the API having started first.
 
-Part of the data model lives **inside columns**: `llm_result_json`
-(a Pydantic model), `bundle_json`, `bundle_ledger_json` (`LEDGER_VERSION`),
-`times_json` (`TemporalAssertion`, with a `legacy` origin), `policy_json`
-(`"version": 1`). Their evolution is handled by tolerant readers in the code;
-nothing ever rewrites old rows, and since lot 0's D10 a row a reader can no
-longer parse is logged, not silently skipped.
+Part of the data model lives **inside columns**: `llm_result_json` (a
+Pydantic model), `bundle_json`, `bundle_ledger_json` (`LEDGER_VERSION`),
+`times_json` (`TemporalAssertion`), `policy_json` (`"version": 1`).
 
-**2. The database engine.** ADR-0076 moved PostgreSQL 17 → 18 with a
-one-off script, run by hand before `docker compose up`, because a major
-version cannot open the previous one's data directory. If the step is
-skipped, the new server starts on an empty cluster and the app sees no
-reports — no error anywhere. With the 18 image's single mount at
-`/var/lib/postgresql`, the next major will do exactly that again: PostgreSQL 19
-will find `18/docker` beside its empty `19/docker` and initialise the latter.
+**2. The database engine.** ADR-0076 moved PostgreSQL 17 → 18 with a one-off
+script run by hand before `docker compose up`; skipped, the new server starts
+on an empty cluster and the app shows no reports, without an error. With the
+18 image's single mount at `/var/lib/postgresql`, the next major will do the
+same: 19 will find `18/docker` beside an empty `19/docker` and initialise it.
 
-The requirement (maintainer, 2026-10-04): **whenever the data model or the
-version changes, a migration step must find out which version the database
-is at and apply the upgrades of the schema and of the data that are needed.**
-Constraints that shape the answer: one maintainer; compose stack with an
-`app` and N `worker` containers on one PostgreSQL; air-gapped installs; the
-app container has no PostgreSQL client and is given no Docker socket;
-dependency count and supply chain matter (ADR-0075); Dependabot keeps the
-engine moving forward.
+**Requirements (maintainer, 2026-10-04).** When the application starts, the
+server checks the tables present and applies the migrations needed to be up to
+date — schema *and* data — whatever earlier version the database is at; so
+there is a history of verification and upgrade scripts, one per version. The
+history starts with the PostgreSQL versions: the SQLite store before
+ADR-0045 was a prototype and is out of scope.
+
+Constraints: one maintainer; compose stack with an `app` and N `worker`
+containers on one PostgreSQL; air-gapped installs; the app container has no
+PostgreSQL client and is given no Docker socket; dependency count and supply
+chain matter (ADR-0075); Dependabot keeps the engine moving forward.
 
 ## Decision
 
-### A. The application schema: versioned migrations, applied by one runner
+### A. The application schema: a versioned history, applied at every start
 
-1. **`schema_migrations` table**: `version` (integer, primary key), `name`,
-   `checksum` (SHA-256 of the migration's source), `applied_at`,
-   `duration_ms`, `app_revision` (git revision of the code that applied it).
-   The database's version is `max(version)`.
-2. **Migrations are files**, `api/migrations/NNNN_short_name.{sql,py}`,
-   numbered without gaps, **forward-only**. SQL for schema changes; Python
-   (`def upgrade(conn): …`) for data changes — backfills in batches, rewriting
-   JSON columns from one stored format to the next. Each runs **in one
-   transaction** (PostgreSQL has transactional DDL), so a failure leaves the
-   version unchanged; a migration that cannot run in a transaction
-   (`CREATE INDEX CONCURRENTLY`) says so in a header and runs alone.
-3. **Migration 0001 is the baseline**: today's two DDL tuples, unchanged,
-   still idempotent — on an existing database it changes nothing and records
-   version 1; on an empty one it creates everything. The tuples are frozen
-   after it; every later change is a new file. The two legacy backfills move
-   into it and stop running at each start.
-4. **One runner**, `python -m api.migrate`, with `status` (current, target,
-   pending, checksum mismatches), `up` (apply what is pending) and `check`
-   (exit non-zero unless the database is exactly at the code's version):
-   - takes a PostgreSQL **advisory lock**, so app, workers and a manual run
-     never migrate concurrently — the others wait, then find nothing pending;
-   - refuses to run if an applied migration's checksum changed (an applied
-     migration is never edited; write a new one);
-   - refuses to touch a database whose version is **newer** than the code's
-     (an older image after a rollback): the process stops with "database at
-     version N, this code knows up to M — restore the pre-migration backup or
-     deploy a newer image".
-5. **Who runs it.** A one-shot `migrate` service in compose (the app image,
-   `command: migrate`), between `postgres` and `app`/`worker`:
-   `app` and `worker` depend on it with `condition: service_completed_successfully`.
-   `bootstrap` runs it first. At start, `app` and `worker` only run
-   `migrate check` and stop with a clear message if the version is not
-   theirs — they never migrate themselves. `init_db()` becomes `migrate up`
-   for host and test setups, so tests always build the schema the same way
-   production does.
-6. **Backups before what cannot be undone.** A migration declares itself
-   `destructive` (drops, renames, type changes, rewriting data in place). The
-   runner applies additive migrations by itself; it applies a destructive one
-   only if a backup was recorded after the database reached its current
-   version (`schema_backups` row, written by `make db-backup`, which runs
-   `pg_dump -Fc` inside the postgres container — the only place a `pg_dump`
-   of the server's own major is guaranteed). Otherwise it stops and says
-   which command to run. Restoring that dump is the way back: there are no
-   down-migrations.
-7. **Rules for writing migrations** (docs/development.md): expand then
-   contract — a new column is added nullable, filled, and only made required
-   or used exclusively in a later migration, so a worker of the previous
-   revision never meets a schema it cannot write to during a rolling restart;
-   a stored JSON format gets a version field, its migration rewrites old rows
-   in batches, and the tolerant reader is removed one release later.
+1. **`schema_migrations`** records each version a database has: `version`,
+   `name`, `checksum`, `how` (`applied`, or `recognised` for a database
+   created before the history), `applied_at`, `duration_ms`, `app_revision`.
+   The database's version is the highest one.
+2. **The history is code:** `api/migrations/vNNNN_<name>.py`, one module per
+   version, numbered without gaps from **version 1 = the first PostgreSQL job
+   store (ADR-0045, commit 5e2c2f8)**. The nine versions to date were rebuilt
+   from git, each with the exact statements its commit added: job store (1),
+   `model_thresholds` (2), `entity_overrides` (3), relationship time bounds
+   (4), rule store (5), decision provenance and its `legacy` backfill (6),
+   `review_decisions` without its key to `jobs` (7), bundle ledger (8),
+   relationship dates (9).
+3. **Each version carries its verification**, `is_applied(conn)`: the tables,
+   columns, indexes, constraints — and data conditions where it has a data
+   step (version 6: no decision left without an origin) — that its changes
+   leave. It is used twice: after applying, to roll the version back if its
+   changes are not there; and on a database created before the history, to
+   recognise how far that database had got.
+4. **Forward only, one transaction per version**: snapshot of the tables it
+   declares (`snapshot_tables` → `_pre_vNNNN_<table>`, for drops, renames,
+   retypes, rewrites in place), statements, `data(conn)` Python step (JSON
+   rewrites, batched backfills), verification, record. A failure rolls the
+   whole version back and stops the start. No down-migrations: the snapshot
+   (or a `pg_dump`) is the way back.
+5. **Applied at every start, by every process**: `init_db()` — called by the
+   API at start, by every worker at start, by `bootstrap`, by the test
+   fixtures — runs `api.migrate.upgrade` under a **PostgreSQL advisory lock**
+   (one per schema), so whichever process starts first migrates and the
+   others wait and find nothing left; the worker no longer depends on the
+   API starting first.
+6. **Refusals that stop the start, with the reason and what to do**: a
+   database newer than the code (an older image after a newer one migrated);
+   a recorded checksum that no longer matches its file (an applied migration
+   was edited — a change is always a new file). The checksum covers the
+   statements and the data step, whitespace-normalised, not the comments.
+7. `python -m api.migrate status | up | check` for operators and scripts;
+   the one-shot SQLite import scripts get each store's statements from the
+   history (`store_statements`), and the database they fill is recognised at
+   the next start.
 
-### B. The engine: detect the major version, never start on an empty cluster by mistake
+### B. The engine: detect the major version, never start on an empty cluster (to do)
 
 8. **A guard in front of PostgreSQL's entrypoint** (`docker/postgres/guard.sh`,
    mounted read-only, compose `entrypoint:`): if `$PGDATA` has no cluster yet
    but another `/var/lib/postgresql/<major>/docker/PG_VERSION` exists in the
-   volume, it exits with "cluster of PostgreSQL <old> found, this image is
-   <new>: run `make db-upgrade`" instead of initialising an empty one. This
-   is the failure ADR-0076 could only document.
-9. **The app remembers which cluster it was on.** The runner records the
-   cluster's `system_identifier` and the schema version in
-   `cti-state/db-identity.json`. If at start the database is empty while that
-   file says data existed on another cluster, it refuses to create a fresh
-   schema: "the database was replaced and is empty — PostgreSQL upgraded
-   without moving the data? run `make db-upgrade`". A database restored from
-   a dump (new identifier, tables present) is accepted and recorded.
-10. **`make db-upgrade` generalises ADR-0076's script**: it reads the
-    cluster's major from `PG_VERSION` in the volume (a throwaway `alpine`
-    container), the target major from the compose image, dumps with a
-    throwaway server of the **source** major (`postgres:<old>-alpine`), starts
-    the target, restores, compares every table's row count, and then runs
-    `migrate up` — so an engine upgrade and the schema migrations it may
-    bring happen in one command, in the right order. `scripts/upgrade_postgres_17_to_18.sh`
-    becomes the special case for the pre-18 layout.
+   volume, exit with "cluster of PostgreSQL <old> found, this image is
+   <new>: run `make db-upgrade`" instead of initialising an empty one.
+9. **The app remembers which cluster it was on**: the cluster's
+   `system_identifier` and the schema version in `cti-state/db-identity.json`;
+   an empty database where that file says data existed on another cluster
+   stops the start ("PostgreSQL upgraded without moving the data? run
+   `make db-upgrade`"); a database restored from a dump (new identifier,
+   tables present) is accepted and recorded.
+10. **`make db-upgrade`** generalises ADR-0076's script: reads the cluster's
+    major from `PG_VERSION` in the volume, the target from the compose image,
+    dumps with a throwaway server of the source major, restores, compares
+    every table's row count; the next start then applies the schema history.
 
 ## Options considered
 
@@ -145,12 +122,12 @@ engine moving forward.
 | Complexity | Low — a table and a number |
 | Cost | None |
 | Scalability | Breaks at the first non-additive change |
-| Team familiarity | High — it is today's code |
+| Team familiarity | High — the previous code |
 
-**Pros:** nothing to learn; nothing to migrate.
-**Cons:** the stamp says a number but the list still cannot express a rename,
-a split, a data move; backfills still replay at every start; no ordering
-between data and schema steps.
+**Pros:** nothing to learn.
+**Cons:** the stamp gives a number but the list still cannot express a
+rename, a split, a data move; backfills replay at every start; no history of
+what each version was, so "whatever earlier version" cannot be honoured.
 
 #### Option A2: Alembic
 
@@ -159,129 +136,106 @@ between data and schema steps.
 | Complexity | Medium — SQLAlchemy as a new dependency for its engine, `env.py`, revision graph |
 | Cost | Two new dependencies (SQLAlchemy, Alembic) to audit and keep current |
 | Scalability | Proven at any size; branches and merges of revision graphs |
-| Team familiarity | Widely known; but this code base uses raw psycopg and SQL strings, no ORM models |
+| Team familiarity | Widely known; but this code base uses raw psycopg and SQL strings, no ORM |
 
-**Pros:** the standard tool; `alembic_version` table; downgrade scaffolding;
-offline SQL generation.
+**Pros:** the standard tool; version table; offline SQL generation.
 **Cons:** autogenerate — its main convenience — needs SQLAlchemy models the
-project does not have, so migrations are written by hand anyway; no advisory
-lock built in (still to add); a second database layer (SQLAlchemy engine)
-beside `api/db_backend.py`; down-migrations encourage a false sense of
-reversibility for data changes.
+project does not have, so migrations are written by hand anyway; no
+recognition of databases created before it (a manual `stamp`); no advisory
+lock built in; a second database layer beside `api/db_backend.py`.
 
-#### Option A3: in-house runner over numbered SQL/Python files *(chosen)*
+#### Option A3: in-house runner over numbered Python modules *(chosen)*
 
 | Dimension | Assessment |
 |---|---|
-| Complexity | Low–medium — ~200 lines of runner, three commands, two tables |
-| Cost | No new dependency; tests to write once |
-| Scalability | Linear history fits one product with one database; no branching needed |
-| Team familiarity | Same idioms as `api/db.py` (psycopg, SQL strings, `_apply_postgres_ddl`) |
+| Complexity | Low–medium — ~250 lines of runner, three commands, one table |
+| Cost | No new dependency |
+| Scalability | A linear history fits one product with one database |
+| Team familiarity | Same idioms as `api/db.py` (psycopg, SQL strings, `transaction()`) |
 
-**Pros:** exactly the guarantees asked for (version, order, once, transaction,
-lock, checksum, refuse-newer, backup gate) and nothing else; migrations are
-plain files a reviewer reads; works offline; reuses `api/db_backend.py`.
-**Cons:** ours to maintain; no generator for SQL (not needed: there are no
-models to diff); features like branch merges would have to be written if ever
-needed.
+**Pros:** exactly the guarantees asked for — version, order, once,
+transaction, lock, verification per version, recognition of older databases,
+refuse-newer, checksum — and nothing else; plain files a reviewer reads;
+works offline.
+**Cons:** ours to maintain; branch merges of the history would have to be
+written if ever needed.
 
 #### Option A4: an external migration binary (dbmate, golang-migrate, Flyway)
 
 | Dimension | Assessment |
 |---|---|
-| Complexity | Low to use, medium to ship (one more binary or a JVM in the image) |
-| Cost | A binary per architecture to pin, attest and audit (ADR-0075) |
+| Complexity | Low to use, medium to ship (a binary per architecture, or a JVM) |
+| Cost | One more artefact to pin, attest and audit (ADR-0075) |
 | Scalability | Proven |
 | Team familiarity | Low |
 
-**Pros:** mature, SQL-only, version table and locking included (Flyway, golang-migrate).
-**Cons:** data migrations that rewrite JSON with the project's own Pydantic
-models need Python anyway; a second toolchain in a Python image; Flyway brings
-a JVM.
+**Pros:** mature; version table and locking included.
+**Cons:** data migrations that rewrite JSON with the project's own models need
+Python anyway; no per-version verification of the kind A3 uses to recognise
+older databases.
 
 ### Engine major version
 
-#### Option E1: a hand-written script per upgrade (ADR-0076 as it is)
-
-Works, tested; but relies on the operator reading the upgrade notes, and the
-failure when they do not is silent (empty database).
-
-#### Option E2: detect and guard, then one generic command *(chosen)*
-
-Guard in the postgres entrypoint, cluster identity on the app side,
-`make db-upgrade` that reads both versions and does dump → restore → verify →
-`migrate up`. Dump/restore is slower than `pg_upgrade --link` but needs only
-the official images and works across any number of majors.
-
-#### Option E3: automatic in-place upgrade (`pg_upgrade --link` via a third-party image such as pgautoupgrade)
-
-Fastest and fully automatic, but hands the only copy of the data to an
-unaudited image at container start, with both binaries' versions to keep in
-step; rejected in ADR-0076 for the same reason.
+- **E1, a hand-written script per upgrade** (ADR-0076): works, but the
+  failure when it is skipped is silent.
+- **E2, detect and guard, then one generic command** *(chosen, to do)*.
+- **E3, automatic in-place `pg_upgrade --link` via a third-party image
+  (pgautoupgrade):** fastest, but hands the only copy of the data to an
+  unaudited image at start; rejected in ADR-0076.
 
 ## Trade-off analysis
 
-The deciding facts are that every migration this project will write is hand
-written (no ORM to diff), that half of the data model is JSON inside columns
-whose migration needs the project's own Python models, and that the stack
-runs several processes against one database. A3 gives version tracking,
-ordering, exactly-once, transactions and a lock in a few hundred lines that
-use the code base's own database layer; A2 would add an ORM layer to obtain
-the same table and runner, without its main feature; A1 does not meet the
-requirement for non-additive changes; A4 still needs Python for the data half.
+Every migration this project writes is hand written (no ORM to diff), half the
+data model is JSON inside columns that only the project's Python models can
+rewrite, several processes start against one database, and the databases in
+the field were created by an unversioned list. A3 answers all four: Python
+modules hold SQL and data steps alike, the advisory lock serialises the
+starts, and the per-version verification that guards each application is the
+same check that recognises an older database's version. A2 would add an ORM
+layer for its version table without its main feature, and would still need
+the recognition written by hand; A1 cannot meet "whatever earlier version"
+for non-additive changes; A4 still needs Python for the data half.
 
-On the engine side, the cost that matters is not the minutes a dump/restore
-takes but the silent empty database when the step is forgotten: E2 turns
-that into a refusal with the command to run, at two independent points (the
-postgres guard and the app's cluster identity), and keeps the data path on
-official images only.
-
-Forward-only with a mandatory backup before destructive steps is preferred to
-down-migrations: a down-migration of a data change rarely restores the data
-that was transformed, and a restore of the dump taken just before always does.
+Migrating at start rather than in a separate one-shot step is what the
+maintainer asked for, and is safe here because of the lock and the
+transaction per version; the cost — a start blocked while a long data
+migration runs — is visible in the log and is the moment it has to happen
+anyway. Forward-only with snapshots is preferred to down-migrations: a
+down-migration of a data change rarely restores what was transformed; the
+snapshot taken in the same transaction always does.
 
 ## Consequences
 
-- **Easier:** any schema or data change — rename, split, retype, move data,
-  rewrite stored JSON — ships as a file with a test; `migrate status` answers
-  "which version is this database at"; a rollback to an older image is
-  refused instead of writing to a schema it does not know; a forgotten engine
-  upgrade stops with instructions instead of showing an empty application.
-- **Harder:** every schema change needs a migration file and a test; applied
-  migrations cannot be edited; destructive migrations need `make db-backup`
-  first (one command, on purpose).
-- **Startup:** `docker compose up` gains a short one-shot `migrate` step
-  before `app` and `worker`; the API no longer creates tables at start.
-- **To revisit:** if the project ever needs several deployable branches with
-  diverging schemas, the linear numbering will need merge handling (A2's
-  strength); if a database grows large enough that dump/restore takes too
-  long, `pg_upgrade --link` with official images.
+- **Easier:** any schema or data change ships as a file with a test; a
+  database at any version since ADR-0045 is brought up to date by starting
+  the application; `migrate status` answers "which version is this
+  database"; an older image is refused instead of writing to a schema it does
+  not know; the worker no longer depends on the API's start order.
+- **Harder:** every schema change needs a migration module, its verification
+  and a test; applied migrations cannot be edited.
+- **Verified (2026-10-04):** the history builds exactly the schema the old
+  `init_db()` built (columns, types, defaults, constraints, indexes compared
+  through the catalog); a database stopped at each of versions 1–8 with data
+  in it is brought to 9 with its data and the version-6 backfill; the
+  pre-versioning schema and a copy of the preview database (7 reports) are
+  recognised at version 9 without a change; four processes starting together
+  migrate once; a failing version and a version whose check does not see it
+  roll back entirely; an edited migration and a newer database are refused.
+- **To revisit:** part B; if a data migration ever takes long enough to make
+  a start unacceptably slow, run it as a one-shot `migrate up` before
+  deploying (the command exists).
 
 ## Action items
 
-1. [ ] `api/migrate.py`: runner (`status`, `up`, `check`), `schema_migrations`
-       and `schema_backups` tables, advisory lock, checksums, refuse-newer,
-       destructive gate, cluster identity file.
-2. [ ] `api/migrations/0001_baseline.sql` from today's two DDL tuples and
-       their two backfills; `init_db()` calls the runner; the tuples are
-       frozen with a comment pointing here.
-3. [ ] Tests: empty database → target version equals the baseline schema
-       (compared with `information_schema`); existing database at the
-       pre-ADR schema → version 1, no change; two concurrent runners → one
-       applies, one waits and finds nothing; edited checksum → refused;
-       newer database → refused; destructive migration without backup →
-       refused; a sample Python data migration in batches; CI job that
-       migrates a dump of the previous release's schema.
-4. [ ] compose: `migrate` one-shot service; `app`/`worker` depend on it with
-       `service_completed_successfully`; their entrypoints run `migrate check`;
-       `bootstrap` runs `migrate up` first.
-5. [ ] `make db-backup` (pg_dump in the postgres container, records a
-       `schema_backups` row), `make db-status`, `make db-migrate`.
-6. [ ] `docker/postgres/guard.sh` and compose `entrypoint:` for the postgres
-       service; test it with an 18 cluster in a volume and a 19 image.
-7. [ ] `make db-upgrade`: generic engine upgrade (detect, dump with the source
-       major, restore, verify row counts, `migrate up`); ADR-0076's script kept
-       for the pre-18 layout.
-8. [ ] docs: `docs/development.md` (how to write a migration: expand/contract,
-       destructive flag, JSON formats), `docs/upgrading.md` (one procedure for
-       every upgrade), `docs/database-schema.md` (where the version lives).
+1. [x] `api/migrate.py`: runner (`status`, `up`, `check`), `schema_migrations`,
+       advisory lock, checksums, refuse-newer, verification after apply,
+       recognition of pre-history databases, snapshots.
+2. [x] `api/migrations/v0001`–`v0009` rebuilt from git; `init_db()` runs the
+       runner; the DDL tuples are derived from the history.
+3. [x] The API, every worker and `bootstrap` migrate at start.
+4. [x] `tests/test_migrations.py`; `tests/fixtures/schema_before_adr0077.json`
+       freezes the schema the old `init_db()` built.
+5. [x] docs: `docs/development.md` (writing a migration), `docs/database-schema.md`.
+6. [ ] Part B: `docker/postgres/guard.sh` and compose `entrypoint:`; cluster
+       identity in `cti-state`; `make db-upgrade`; `docs/upgrading.md`.
+7. [ ] CI job that migrates a dump of the previous release's database.
