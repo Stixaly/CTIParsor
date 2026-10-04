@@ -26,10 +26,16 @@ jobs:
       - uses: actions/checkout@v7
 
       # Both languages are interpreted: no build step, nothing installed.
+      # tests/ is not shipped (.dockerignore) and holds attacker-shaped input
+      # on purpose — `"evil.com" in urls` asserts, a `(a+)+$` the ReDoS guard
+      # must survive — which CodeQL reads as the flaws they test for.
       - uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
           queries: security-extended
+          config: |
+            paths-ignore:
+              - tests
 
       - uses: github/codeql-action/analyze@v4
         with:

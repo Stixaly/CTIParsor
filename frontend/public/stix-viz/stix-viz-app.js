@@ -381,6 +381,23 @@ require(["domReady!", "stix2viz/stix2viz/stix2viz"], function (document, stix2vi
     // ------------------------------------------------------------------ //
     //  Auto-fetch from ?bundle_url= query parameter
     // ------------------------------------------------------------------ //
+    // Only a bundle of this app's own jobs: an arbitrary bundle_url would let a
+    // crafted link make this page fetch, and draw, anything (CodeQL
+    // js/client-side-request-forgery).  The request is rebuilt from the job id.
+    const BUNDLE_PATH = /^\/api\/jobs\/([A-Za-z0-9_-]+)\/bundle$/;
+
+    function bundleRequestUrl(raw) {
+        let url;
+        try {
+            url = new URL(raw, window.location.origin);
+        } catch (e) {
+            return null;
+        }
+        if (url.origin !== window.location.origin) return null;
+        let match = BUNDLE_PATH.exec(url.pathname);
+        return match ? "/api/jobs/" + match[1] + "/bundle" : null;
+    }
+
     function fetchBundleFromParam() {
         let params    = new URLSearchParams(window.location.search);
         let bundleUrl = params.get("bundle_url");
@@ -389,10 +406,15 @@ require(["domReady!", "stix2viz/stix2viz/stix2viz"], function (document, stix2vi
             showError("No bundle_url parameter provided.");
             return;
         }
+        let requestUrl = bundleRequestUrl(bundleUrl);
+        if (!requestUrl) {
+            showError("bundle_url must be this app's /api/jobs/<id>/bundle.");
+            return;
+        }
 
         if (loadingEl) loadingEl.style.display = "flex";
 
-        fetch(bundleUrl)
+        fetch(requestUrl)
             .then(function (resp) {
                 if (!resp.ok) throw new Error("HTTP " + resp.status + " – " + resp.statusText);
                 return resp.text();

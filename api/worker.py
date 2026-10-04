@@ -837,6 +837,9 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
             job = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
             if not job:
                 return None
+    # The id the database holds (a uuid the server generated), not the
+    # request's string: it names the bundle file and goes into the log.
+    job_id = job["id"]
 
     # ── Report lexicon re-scan — runs BEFORE rebuilding the bundle ────────────
     # Uses the reviewer's accepted entities as a per-report domain lexicon and

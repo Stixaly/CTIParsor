@@ -222,6 +222,40 @@ def test_fetch_tarball_download_failure_leaves_path_untouched(tmp_path: Path, mo
     assert not list(dest.parent.glob("corpus-*.tar"))
 
 
+def test_a_failed_sync_tells_the_browser_what_failed_and_the_log_why(tmp_path: Path, monkeypatch,
+                                                                     caplog) -> None:
+    # The API returns `detail` to the browser: no server path, no OS text in it.
+    def fake_download(url: str, dest: Path, *, timeout: int) -> int:
+        raise OSError(f"[Errno 28] No space left on device: '{dest}'\nforged log line")
+
+    monkeypatch.setattr(sync_mod, "_download", fake_download)
+    monkeypatch.setattr(sync_mod, "validate_url", lambda url: url)
+
+    corpus = {"name": "et", "path": str(tmp_path / "et"), "tarball": "https://x/e.tar.gz"}
+    with caplog.at_level("WARNING"):
+        ok, detail = fetch_tarball(corpus)
+    assert (ok, detail) == (False, "download failed (details in the server log)")
+    [record] = [r for r in caplog.records if "download failed" in r.getMessage()]
+    assert "No space left on device" in record.getMessage()
+    assert "\n" not in record.getMessage()            # one log line, whatever the text
+
+
+def test_git_missing_or_slow_is_said_plainly(tmp_path: Path, monkeypatch) -> None:
+    corpus = {"name": "t", "path": str(tmp_path / "c"), "git": "https://example.org/x.git"}
+
+    def missing(*a, **k):
+        raise FileNotFoundError(2, "No such file or directory", "git")
+
+    monkeypatch.setattr(sync_mod.subprocess, "run", missing)
+    assert sync_corpus(corpus) == (False, "git is not installed (details in the server log)")
+
+    def slow(cmd, **k):
+        raise sync_mod.subprocess.TimeoutExpired(cmd, k["timeout"])
+
+    monkeypatch.setattr(sync_mod.subprocess, "run", slow)
+    assert sync_corpus(corpus, timeout=7) == (False, "git did not finish within 7 s (details in the server log)")
+
+
 def test_fetch_tarball_rejects_non_archive(tmp_path: Path, monkeypatch) -> None:
     def fake_download(url: str, dest: Path, *, timeout: int) -> int:
         dest.write_bytes(b"not a tar")
