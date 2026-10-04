@@ -8,6 +8,23 @@ sections group by theme rather than strict semver.
 
 ### Security
 
+#### Python 3.14 (ADR-0079), 2026-10-04
+
+The image, CI and the lock move from Python 3.12.15 to 3.14.8.
+
+- **CVEs.** 3.14.8 clears five of the seven Python vulnerabilities Grype
+  found; the other two are fixed only in 3.15 and not reachable from
+  CTIParsor.
+- **Dependencies.** onnxruntime goes from 1.20.1 to 1.30.0: the old version
+  could not install on 3.14. Nothing else in the lock changes version.
+- **yara-python.** It has no 3.14 wheel, so the image compiles it, with
+  OpenSSL. Without OpenSSL the build drops the `hash` module and PE
+  signatures without an error, and the YARA gate would then refuse rules
+  OpenCTI accepts. A test now checks those modules are present.
+- **Smoke test.** `scripts/docker_smoke.sh` runs in its own compose project
+  (`ctiparsor-smoke`). On the default project, `ctiparsor`, its `--clean`
+  deleted a local install's database and state volumes.
+
 #### The image scan's first findings, 2026-10-04
 
 Grype's first run (ADR-0078) reported 14 vulnerabilities with a fix in the

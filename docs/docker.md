@@ -11,7 +11,7 @@ decisions behind the containerization itself.
 
 ## What you get
 
-- **Image**: `ctiparsor:local` (4.48 GB). Contains the React UI, Python 3.12 venv (torch CPU), and Chromium (optional).
+- **Image**: `ctiparsor:local` (4.61 GB). Contains the React UI, Python 3.14 venv (torch CPU), and Chromium (optional).
 - **Volumes** (Compose prefixes them with the project name, so `docker volume ls` shows `ctiparsor_cti-state` and so on):
   - `cti-state`: uploads, outputs, backups — back it up. No database file lives here any more (ADR-0053).
   - `pg-data-18`: the PostgreSQL 18 job store AND rule store (jobs, entities, relationships, progress, policy, figure and CVE caches, plus the detection-rule corpus since ADR-0053) — back it up with `pg_dump`.

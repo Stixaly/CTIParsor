@@ -100,6 +100,21 @@ def test_opencti_check_refuses_the_quoted_rule_and_accepts_the_repaired_one():
     yara.compile(source=prepared.pattern)
 
 
+@pytest.mark.parametrize("rule", [
+    'import "hash" rule r { condition: hash.md5(0, filesize) == "d41d8cd98f00b204e9800998ecf8427e" }',
+    'import "pe" rule r { condition: pe.number_of_signatures > 0 }',
+    'import "dotnet" rule r { condition: dotnet.number_of_resources >= 0 }',
+])
+def test_yara_python_has_the_modules_opencti_compiles_against(rule):
+    # yara-python publishes no wheel for Python 3.14 (ADR-0079): the image and
+    # CI compile it, and a build without the OpenSSL headers leaves out `hash`
+    # and PE signatures without an error.  The gate would then refuse rules
+    # OpenCTI accepts.
+    yara = pytest.importorskip("yara")
+    assert {"hash", "pe", "dotnet", "math", "elf"} <= set(yara.modules)
+    yara.compile(source=rule)
+
+
 def test_a_rule_the_repairs_cannot_fix_does_not_compile():
     pytest.importorskip("yara")
     body = 'rule r {\n strings:\n  $a = "abc\ndef"\n condition:\n  $a\n}'
