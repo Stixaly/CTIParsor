@@ -87,24 +87,35 @@ first URL-capture request to fail; `/api/ingest/url` responds 503 until then.
 |---|---|---|
 | `requirements.txt` | **Human-managed** — lower bounds + major-version caps | When you want to allow a new major version |
 | `requirements-api.txt` | Same, for API-only packages | Rarely |
-| `requirements.lock.txt` | **Machine-generated** — exact versions of all three files above, resolved for Python 3.12 with CPU-only torch; what the image and CI install | Never by hand — run `make lock` |
+| `requirements.lock.txt` | **Machine-generated** — exact versions of all three files above, resolved for Python 3.14 with CPU-only torch, every file's sha256 from PyPI; what the image installs | Never by hand — run `make lock` |
+| `requirements-torch.lock.txt` | **Machine-generated** — torch's CPU build and its hashes, from the PyTorch index | Never by hand — run `make lock` |
+| `requirements-ci.txt` | What CI's fast tests install: the API, the light pipeline dependencies, the dev tools | When a test needs a new light dependency |
+| `requirements-ci.lock.txt` | **Machine-generated** — `requirements-ci.txt` at the versions of `requirements.lock.txt`, with hashes | Never by hand — run `make lock` |
 | `requirements-dev.txt` | Pinned test / lint / type-check tools for CI | When you upgrade ruff, mypy or pytest-cov on purpose |
+| `requirements-audit.txt` / `.lock.txt` | pip-audit, pinned, and its hashed lock | When you upgrade pip-audit on purpose |
 | `frontend/package.json` | npm semver ranges (`^`) | When you want to allow a new major version |
 | `frontend/package-lock.json` | npm lock file | Never by hand — run `make npm-update` to update it |
 
-Both lock files are what gets installed: the `Dockerfile` runs
-`pip install -r requirements.lock.txt` and `npm ci`, and CI installs every
-Python package under `-c requirements.lock.txt`, so the versions CI tested are
-the versions the image ships. A rebuild never re-resolves on its own; only
+The lock files are what gets installed, **by hash** (ADR-0080): the
+`Dockerfile` runs `pip install --require-hashes` on
+`requirements-torch.lock.txt` (PyTorch index only, `--no-deps`) and then on
+`requirements.lock.txt` (PyPI only), and `npm ci`. CI installs
+`requirements-ci.lock.txt` the same way, resolved under the image's versions, so
+the versions CI tested are the versions the image ships. A file whose sha256
+differs from the lock's fails the install. A rebuild never re-resolves on its own; only
 `make lock` (keeps the pins that still fit the ranges) or `make update-deps`
-(`--upgrade`) moves a version. The lock names the PyTorch CPU index itself,
+(`--upgrade`) moves a version. The resolution uses the PyTorch CPU index,
 which is what keeps the ~2.2 GB of CUDA wheels out of the image.
 
-The lock pins versions, **not file hashes**. torch's `+cpu` wheels live on a
-second index that also mirrors common packages; under `--require-hashes` pip
-may pick the mirror's file for a version and reject it against PyPI's hash.
-Hashing would need torch installed alone from its index first, then the rest
-from PyPI only, each with its own hashed lock — not done yet.
+**The two indexes are never mixed at install time.** torch's `+cpu` wheels live
+on a second index that also re-hosts common packages under PyPI's file names
+but with other bytes: markupsafe 3.0.3's Linux wheel there has another sha256.
+So torch is installed alone from its index first (`requirements-torch.lock.txt`,
+`--no-deps`), then everything else from PyPI only: `requirements.lock.txt`
+names no index. `make lock` (`scripts/lock.sh`) resolves with both indexes, to
+pick the `+cpu` build, then rewrites every PyPI pin's hashes with the sha256
+PyPI publishes for that release (`scripts/lock_pypi_hashes.py`): the resolver
+had recorded the PyTorch index's copies for markupsafe, colorama and jinja2.
 
 ### Quarterly maintenance workflow
 

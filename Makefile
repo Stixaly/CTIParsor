@@ -114,32 +114,29 @@ check-docs: .secrets/db_password
 # re-resolve against the current constraints instead of reusing old wheels).
 
 ## Scan the dependencies for known CVEs, as the CI dependency-audit job does:
-## the exact versions of requirements.lock.txt (not the ranges), and the UI's
+## the exact versions of both locks (the image's and CI's tools), and the UI's
 ## production packages.  Accepted ones are listed in SECURITY.md.
 AUDIT_IGNORE ?= --ignore-vuln PYSEC-2026-2447
 audit:
 	docker run --rm -v "$$(pwd)":/audit -w /audit python:3.14-slim \
-	    sh -c "pip install --quiet pip-audit && python -m pip_audit -r requirements.lock.txt \
+	    sh -c "pip install --quiet --require-hashes -r requirements-audit.lock.txt \
+	        && python -m pip_audit -r requirements.lock.txt -r requirements-ci.lock.txt -r requirements-audit.lock.txt \
 	        --no-deps --disable-pip --progress-spinner off $(AUDIT_IGNORE)"
 	@echo ""
 	@echo "=== npm dependency audit (production) ==="
 	docker run --rm -v "$$(pwd)/frontend":/ui -w /ui node:24-bookworm-slim \
 	    sh -c "npm audit --omit=dev --audit-level=high"
 
-## Resolve requirements*.txt -> requirements.lock.txt, the exact versions the
-## image and CI install (Python 3.14, CPU-only torch, every platform).
+## Resolve the requirement ranges into the hashed locks the image, CI and the
+## audit install with `pip install --require-hashes` (scripts/lock.sh, ADR-0080):
+## requirements.lock.txt (PyPI), requirements-torch.lock.txt (torch's CPU
+## build, PyTorch index), requirements-ci.lock.txt, requirements-audit.lock.txt.
 ## Keeps the current pins that still fit the ranges; LOCK_FLAGS=--upgrade
 ## re-resolves everything to the newest allowed versions.
 LOCK_FLAGS ?=
 lock:
-	docker run --rm --user "$$(id -u):$$(id -g)" -e HOME=/tmp -v "$$(pwd)":/w -w /w python:3.14-slim \
-	    sh -c "pip install --quiet --target /tmp/uv uv && /tmp/uv/bin/uv pip compile \
-	        requirements.txt requirements-api.txt requirements-optional.txt \
-	        --universal --python-version 3.14 \
-	        --extra-index-url https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match \
-	        --emit-index-url --annotation-style line --custom-compile-command 'make lock' \
-	        $(LOCK_FLAGS) -o requirements.lock.txt"
-	@echo "Locked $$(grep -c '==' requirements.lock.txt) packages -> requirements.lock.txt"
+	docker run --rm --user "$$(id -u):$$(id -g)" -e HOME=/tmp -e LOCK_FLAGS="$(LOCK_FLAGS)" \
+	    -v "$$(pwd)":/w -w /w python:3.14-slim sh scripts/lock.sh
 
 ## Re-resolve to the newest versions the ranges allow, rebuild the image from
 ## the new lock, run the fast test suite.

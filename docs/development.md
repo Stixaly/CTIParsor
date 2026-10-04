@@ -37,7 +37,7 @@ be on the host besides Docker.
 | `make check` | Diagnostic: list which pipeline stages are available |
 | `make check-docs` | Verify every number claimed in the README and `docs/pipeline.md` against the source of truth (CI runs the same check through `tests/test_doc_claims.py`) |
 | `make audit` | Scan Python + npm deps for known CVEs (`pip-audit` + `npm audit`), no image build needed |
-| `make lock` | Resolve `requirements*.txt` into `requirements.lock.txt` — the exact versions the image and CI install |
+| `make lock` | Resolve `requirements*.txt` into the hashed locks the image, CI and the audit install with `pip install --require-hashes` (`scripts/lock.sh`, ADR-0080) |
 | `make update-deps` | Re-resolve to the newest versions the ranges allow, rebuild the image from the new lock, run tests |
 | `make npm-outdated` | Show which npm packages have newer versions available |
 | `make npm-update` | Upgrade npm packages within semver ranges, verify TypeScript |
@@ -351,7 +351,9 @@ CTIParsor/
 ├── requirements-api.txt           # API server dependencies
 ├── requirements-optional.txt      # Playwright (URL capture), google-re2, spaCy
 ├── requirements-dev.txt           # ruff, mypy, pytest-cov
-├── requirements.lock.txt          # Exact versions the image and CI install (make lock)
+├── requirements-ci.txt            # What CI's fast tests install (locked with the image's versions)
+├── requirements-audit.txt         # pip-audit, pinned
+├── requirements*.lock.txt         # Hashed locks: image (PyPI), torch (PyTorch index), CI, audit (make lock)
 ├── setup.sh                       # Prepares .env + the DB secret, checks Docker; --offline installs a bundle
 ├── Dockerfile                     # UI build, venv build, slim runtime, + a `dev` target with the CI tools (ADR-0044, ADR-0054)
 ├── compose.yaml                   # app, worker, postgres, capture-proxy + profiles bootstrap / dev / ollama / proxy, hardened

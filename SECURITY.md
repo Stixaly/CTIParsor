@@ -113,8 +113,10 @@ pipeline still produces valid STIX. ML models are downloaded once and cached.
   readable by whoever holds the Docker socket.
 
 ## Supply chain (ADR-0075)
-- **Pinned inputs.** Python dependencies install from `requirements.lock.txt`
-  (`make lock`); the Dockerfile's base images and every compose image are
+- **Pinned inputs.** Python dependencies install from hashed locks
+  (`make lock`, ADR-0080) with `pip install --require-hashes`: a file whose
+  sha256 differs from the lock's fails the install, and torch's index serves
+  torch alone. The Dockerfile's base images and every compose image are
   pinned by digest. Dependabot proposes new digests, GitHub Actions and UI
   packages as pull requests.
 - **Audited on every push.** The `dependency-audit` CI job runs `pip-audit` on
