@@ -6,6 +6,23 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Fixed
+
+#### The test run's warnings on Python 3.14, 2026-10-04
+
+- **16 `ResourceWarning: unclosed database`.** Since Python 3.13, an sqlite3
+  connection that is garbage-collected while open reports it.
+  `tracemalloc` traced them to two test helpers that never closed their
+  stand-in databases: 10 from `tests/test_technique_idf.py::_db`, 6 from
+  `tests/test_db_transaction.py::_conn`. Both now close what they opened
+  after every test, failed or not. The warnings showed up in unrelated
+  tests, wherever the garbage collector ran.
+- **slowapi's `asyncio.iscoroutinefunction` deprecation.** slowapi is the
+  API's rate limiter; this call is removed in Python 3.16, and the latest
+  release, 0.1.10, still makes it. The tests filter that one warning, scoped
+  to slowapi's module. ADR-0079 records that the image cannot move to 3.16
+  until slowapi is fixed or replaced.
+
 ### Security
 
 #### What OpenSSF Scorecard found, 2026-10-04

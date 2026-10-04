@@ -12,10 +12,22 @@ from pipeline.detection.store import (
     technique_document_frequency,
 )
 
+_OPEN: list[sqlite3.Connection] = []
+
+
+@pytest.fixture(autouse=True)
+def _close_connections():
+    """Close what `_db` opened, even when the test fails: Python 3.13+
+    reports an unclosed sqlite3 connection as a ResourceWarning."""
+    yield
+    while _OPEN:
+        _OPEN.pop().close()
+
 
 def _db() -> sqlite3.Connection:
     """In-memory store with detection_rules + rule_techniques."""
     conn = sqlite3.connect(":memory:")
+    _OPEN.append(conn)
     conn.executescript(
         """
         CREATE TABLE detection_rules (
