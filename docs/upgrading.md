@@ -199,7 +199,10 @@ scripts/upgrade_postgres_17_to_18.sh
 docker compose up -d                      # or make docker-up
 ```
 
-The script starts a throwaway PostgreSQL 17 on `pg-data`, dumps the database
+The script first stops the stack's own PostgreSQL 17 if it still runs on
+`pg-data`, and refuses to go on while any other container uses that volume:
+two servers on one data directory corrupt it, and inside containers
+PostgreSQL's lock file does not stop the second. It then starts a throwaway PostgreSQL 17 on `pg-data`, dumps the database
 with `pg_dump -Fc` into `./backups/` (kept, gitignored), starts the 18
 service on `pg-data-18`, restores, and compares the row count of every table
 between the two; it stops on any difference. Keep `CTI_DB_PASSWORD` as it
