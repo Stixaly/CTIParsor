@@ -107,6 +107,48 @@ def score_ttps(pred_ids: set[str], gold_kinds: dict[str, set[str]],
     )
 
 
+TTP_ERROR_CATEGORIES = ("found", "retrieved_not_selected", "never_retrieved",
+                        "fp_from_candidates", "fp_outside_candidates")
+
+
+def ttp_error_split(pred_ids: Iterable[str], gold_ids: Iterable[str], candidate_ids: Iterable[str],
+                    review: dict[str, str], canonical: Callable[[str], str | None]
+                    ) -> tuple[dict[str, list[str]], dict[str, int]]:
+    """Where one document's parent-level technique errors come from (ADR-0072).
+
+    Each gold parent is `found`, `retrieved_not_selected` (among the document's
+    candidates or left for review, not shipped) or `never_retrieved`; each
+    shipped parent that is not gold is `fp_from_candidates` or
+    `fp_outside_candidates`.  Returns the parents in each category, and how
+    often each review reason (`review`: item id -> reason) held back a gold one.
+
+    The candidate list is the union over the report's chunks, so "retrieved"
+    means retrieved for some chunk of the report, not necessarily the chunk
+    that mentions the technique."""
+    def parents(ids: Iterable[str]) -> set[str]:
+        return {c.split(".", 1)[0] for i in ids if (c := canonical(i.upper())) is not None}
+
+    gold, pred, cands = parents(gold_ids), parents(pred_ids), parents(candidate_ids)
+    held: dict[str, str] = {}
+    for rid, reason in review.items():
+        for par in parents([rid]):
+            held.setdefault(par, reason)
+    split: dict[str, list[str]] = {k: [] for k in TTP_ERROR_CATEGORIES}
+    reasons: dict[str, int] = {}
+    for g in sorted(gold):
+        if g in pred:
+            split["found"].append(g)
+        elif g in cands or g in held:
+            split["retrieved_not_selected"].append(g)
+            if g in held:
+                reasons[held[g]] = reasons.get(held[g], 0) + 1
+        else:
+            split["never_retrieved"].append(g)
+    for f in sorted(pred - gold):
+        split["fp_from_candidates" if f in cands else "fp_outside_candidates"].append(f)
+    return split, reasons
+
+
 # ── Named entities (document level) ──────────────────────────────────────────
 
 def _norm(v: str) -> str:

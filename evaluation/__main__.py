@@ -3,6 +3,7 @@
   prepare         registry of annotated layers, ATT&CK mapping, near-duplicates
   run             run the application's pipeline on a split (resumable)
   score           score a run: TTPs, entities, evidence
+  ttp-errors      where a run's technique errors arise: never retrieved, not selected, origin of FPs
   compare         paired bootstrap between two runs on the same documents
   retrieval       candidate recall per passage / document at several k (no LLM)
   support-sample  CSV of quotes for a person to judge
@@ -116,8 +117,11 @@ def _predictions(result) -> dict:
                       "evidence_text": r.evidence_text,
                       "evidence_label": getattr(r.evidence_label, "value", r.evidence_label)}
                      for r in llm.relationships]
-    # ADR-0072 select mode: what 3f left undecided, and what it chose from.
-    review = ([{"mitre_id": rv.attack_id, "reason": rv.reason, "sources": rv.sources}
+    # ADR-0072 select mode: what 3f left undecided, and what it chose from.  The
+    # quote of a refused selection is kept: without it a refusal cannot be told
+    # apart as a missing, a too-short or a non-verbatim quote.
+    review = ([{"mitre_id": rv.attack_id, "reason": rv.reason, "sources": rv.sources,
+                "evidence_quote": rv.evidence_quote}
                for rv in llm.ttp_review] if llm is not None else [])
     candidates = sorted({c.attack_id for cs in getattr(result, "ttp_candidates", []) for c in cs})
     return {"ttp_ids": sorted(i for i in ttp_ids if _TECH_ID.match(i)), "ttps": ttps,
@@ -327,6 +331,50 @@ def cmd_score(args) -> None:
     if skipped:
         print(f"  stages not run: {skipped}")
     print(f"  LLM health     {llm_health}")
+
+
+# ── ttp-errors ───────────────────────────────────────────────────────────────
+
+def cmd_ttp_errors(args) -> None:
+    """Split a run's technique errors by where they arise (ADR-0072): never
+    retrieved, retrieved but not selected, and false positives by origin."""
+    meta, preds = _load_run(args.name)
+    canonical, _ = _canonical_fn()
+    docs = {d.doc_id: d for d in _docs(meta["split"])}
+    techniques: dict[str, dict[str, int]] = {k: {} for k in metrics.TTP_ERROR_CATEGORIES}
+    reasons: dict[str, int] = {}
+    per_doc = {}
+    for doc_id, p in sorted(preds.items()):
+        d = docs.get(doc_id)
+        if d is None or "error" in p:
+            continue
+        review = {rv["mitre_id"]: rv.get("reason") or "" for rv in p.get("ttp_review") or []}
+        split, why = metrics.ttp_error_split(p["ttp_ids"], d.technique_kinds(),
+                                             p.get("ttp_candidates") or [], review, canonical)
+        per_doc[doc_id] = split
+        for cat, ids in split.items():
+            for tid in ids:
+                techniques[cat][tid] = techniques[cat].get(tid, 0) + 1
+        for k, v in why.items():
+            reasons[k] = reasons.get(k, 0) + v
+    totals = {cat: sum(ids.values()) for cat, ids in techniques.items()}
+    gold_n = totals["found"] + totals["retrieved_not_selected"] + totals["never_retrieved"]
+    report = {
+        "run": args.name, "documents": len(per_doc), "totals": totals, "gold": gold_n,
+        "candidate_ceiling": round((totals["found"] + totals["retrieved_not_selected"]) / gold_n, 4)
+        if gold_n else None,
+        "review_reasons_of_missed_gold": reasons,
+        "most_frequent": {cat: sorted(ids.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
+                          for cat, ids in techniques.items() if cat != "found"},
+        "per_document": per_doc,
+    }
+    _write(OUT / "runs" / args.name / "ttp-errors.json", report)
+    print(f"{args.name}: {len(per_doc)} documents, {gold_n} gold parent techniques")
+    for cat in metrics.TTP_ERROR_CATEGORIES:
+        print(f"  {cat:<24} {totals[cat]}")
+    print(f"  candidate ceiling        {report['candidate_ceiling']}")
+    if reasons:
+        print(f"  held back by review      {reasons}")
 
 
 # ── compare ──────────────────────────────────────────────────────────────────
@@ -671,6 +719,10 @@ def main() -> None:
     p = sub.add_parser("score")
     p.add_argument("--name", required=True)
     p.set_defaults(fn=cmd_score)
+
+    p = sub.add_parser("ttp-errors")
+    p.add_argument("--name", required=True)
+    p.set_defaults(fn=cmd_ttp_errors)
 
     p = sub.add_parser("compare")
     p.add_argument("--a", required=True, help="reference run")

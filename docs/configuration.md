@@ -229,8 +229,8 @@ STIX_VERIFY_MIN_RELS=1
 ENABLE_TTP_VERIFICATION=true
 TTP_VERIFY_MIN=1
 
-# TTP mode (ADR-0072) — see "TTP mode: verify or select" below.
-# TTP_MODE=verify
+# TTP mode (ADR-0072) — see "TTP mode: select or verify" below.
+# TTP_MODE=select
 
 # Stage 2c — taxonomies the semantic matcher may return (ATT&CK-only default;
 # "all" restores CAPEC, which otherwise shadows the real ATT&CK technique)
@@ -253,33 +253,31 @@ STIX_AUTHOR_NAME=CTIParsor
 HF_TOKEN=
 ```
 
-## TTP mode: verify or select
+## TTP mode: select or verify
 
 `TTP_MODE` (ADR-0072) decides how techniques are found.
 
-| | `verify` (default) | `select` |
+| | `select` (default) | `verify` |
 |---|---|---|
-| Stage 2c | emits techniques from cosine similarity to ATT&CK descriptions | only **retrieves** ranked candidates per passage, from ATT&CK descriptions *and* procedure examples, BM25 and dense rankings fused — it emits no technique |
-| Stage 3f | checks the LLM's techniques after the fact; a high-confidence 2c match skips the check; a failed call keeps the claims | **chooses** among those candidates and the LLM's own proposals, each with a quote the code must find in the text; a failed call ships nothing and sends its candidates to review |
-| Measured | the baseline of `docs/eval/baseline-2026-09.md` | on AnnoCTR dev, see [docs/eval/README.md](eval/README.md) |
+| Stage 2c | only **retrieves** ranked candidates per passage, from ATT&CK descriptions *and* procedure examples, BM25 and dense rankings fused — it emits no technique | emits techniques from cosine similarity to ATT&CK descriptions |
+| Stage 3f | **chooses** among those candidates and the LLM's own proposals, each with a quote the code must find in the text; a failed call ships nothing and sends its candidates to review | checks the LLM's techniques after the fact; a high-confidence 2c match skips the check; a failed call keeps the claims |
+| Measured on AnnoCTR dev ([baseline-2026-10](eval/baseline-2026-10.md)) | technique F1 **0.607** (P 0.587, R 0.628), +18% time per report | 0.465 with Stage 2c off, the best `verify` configuration |
 
-To switch:
+Keep `ENABLE_TTP_VERIFICATION=true`: with 3f off, select mode drops the
+retrieved candidates and lets the LLM's techniques through unchecked.
 
-1. Build the retrieval corpus, which `bootstrap` does not build (~35 MB), then
-   rebuild the image: `pipeline/data/` is part of the image, read-only at run
-   time, so the corpus has to be written into the repository and baked in.
+Retrieval reads its corpus from `pipeline/data/attack_retrieval_*` (~35 MB),
+committed and baked into the image. Rebuild it after a MITRE ATT&CK release,
+then rebuild the image:
 
-   ```bash
-   docker compose run --rm dev python scripts/build_indexes.py --only retrieval
-   make docker-build && docker compose up -d
-   ```
-2. Run the dev evaluation on your own setup first:
-   `TTP_MODE=select python -m evaluation run --split dev --name sel-dev` in the
-   `dev` container, compared with a `verify` run
-   ([docs/eval/README.md](eval/README.md)).
-3. Set `TTP_MODE=select` and keep `ENABLE_TTP_VERIFICATION=true`: with 3f off,
-   select mode drops the retrieved candidates and lets the LLM's techniques
-   through unchecked.
+```bash
+docker compose run --rm dev python scripts/build_indexes.py --only retrieval
+make docker-build && docker compose up -d
+```
+
+Without the corpus, Stage 2c reports itself unavailable and 3f selects among
+the LLM's own proposals only: technique F1 0.443 on dev, recall 0.364, below
+`verify` without 2c ([baseline-2026-10](eval/baseline-2026-10.md)).
 
 Without an LLM provider, select mode cannot select: Stage 2c falls back to the
 `verify` detector and the run records it as an offline fallback.
