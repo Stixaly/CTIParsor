@@ -7,10 +7,22 @@ import pytest
 
 from api.db import transaction
 
+_OPEN: list[sqlite3.Connection] = []
+
+
+@pytest.fixture(autouse=True)
+def _close_connections():
+    """Close what `_conn` opened, even when the test fails: Python 3.13+
+    reports an unclosed sqlite3 connection as a ResourceWarning."""
+    yield
+    while _OPEN:
+        _OPEN.pop().close()
+
 
 def _conn(tmp_path) -> sqlite3.Connection:
     """An autocommit connection with one table holding a single row."""
     conn = sqlite3.connect(str(tmp_path / "t.db"), isolation_level=None)
+    _OPEN.append(conn)
     conn.execute("CREATE TABLE t (x INTEGER)")
     conn.execute("INSERT INTO t VALUES (1)")
     return conn
