@@ -94,6 +94,10 @@ chmod 644 .secrets/db_password
 
 # ── Variables ─────────────────────────────────────────────────────────────────
 DOCKER_BIN="${DOCKER_BIN:-docker}"
+# Its own compose project, never the operator's stack: compose.yaml names the
+# project `ctiparsor`, so on a machine that runs CTIParsor `--clean` (`down -v`)
+# deleted the real database and state volumes.
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-ctiparsor-smoke}"
 COMPOSE="$DOCKER_BIN compose"
 BIND="${CTI_BIND:-127.0.0.1}"
 PORT="${CTI_PORT:-8000}"

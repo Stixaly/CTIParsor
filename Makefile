@@ -118,7 +118,7 @@ check-docs: .secrets/db_password
 ## production packages.  Accepted ones are listed in SECURITY.md.
 AUDIT_IGNORE ?= --ignore-vuln PYSEC-2026-2447
 audit:
-	docker run --rm -v "$$(pwd)":/audit -w /audit python:3.12-slim \
+	docker run --rm -v "$$(pwd)":/audit -w /audit python:3.14-slim \
 	    sh -c "pip install --quiet pip-audit && python -m pip_audit -r requirements.lock.txt \
 	        --no-deps --disable-pip --progress-spinner off $(AUDIT_IGNORE)"
 	@echo ""
@@ -127,15 +127,15 @@ audit:
 	    sh -c "npm audit --omit=dev --audit-level=high"
 
 ## Resolve requirements*.txt -> requirements.lock.txt, the exact versions the
-## image and CI install (Python 3.12, CPU-only torch, every platform).
+## image and CI install (Python 3.14, CPU-only torch, every platform).
 ## Keeps the current pins that still fit the ranges; LOCK_FLAGS=--upgrade
 ## re-resolves everything to the newest allowed versions.
 LOCK_FLAGS ?=
 lock:
-	docker run --rm --user "$$(id -u):$$(id -g)" -e HOME=/tmp -v "$$(pwd)":/w -w /w python:3.12-slim \
+	docker run --rm --user "$$(id -u):$$(id -g)" -e HOME=/tmp -v "$$(pwd)":/w -w /w python:3.14-slim \
 	    sh -c "pip install --quiet --target /tmp/uv uv && /tmp/uv/bin/uv pip compile \
 	        requirements.txt requirements-api.txt requirements-optional.txt \
-	        --universal --python-version 3.12 \
+	        --universal --python-version 3.14 \
 	        --extra-index-url https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match \
 	        --emit-index-url --annotation-style line --custom-compile-command 'make lock' \
 	        $(LOCK_FLAGS) -o requirements.lock.txt"

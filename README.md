@@ -5,7 +5,7 @@
 <p>
   <img alt="STIX 2.1" src="https://img.shields.io/badge/STIX-2.1-1f6feb">
   <img alt="MITRE ATT&CK" src="https://img.shields.io/badge/MITRE-ATT%26CK-c0392b">
-  <img alt="Python 3.12" src="https://img.shields.io/badge/python-3.12-3776ab?logo=python&logoColor=white">
+  <img alt="Python 3.14" src="https://img.shields.io/badge/python-3.14-3776ab?logo=python&logoColor=white">
   <img alt="React + FastAPI" src="https://img.shields.io/badge/UI-React%20%2B%20FastAPI-61dafb?logo=react&logoColor=white">
   <img alt="Docker Compose" src="https://img.shields.io/badge/install-Docker%20Compose-2496ed?logo=docker&logoColor=white">
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-green"></a>

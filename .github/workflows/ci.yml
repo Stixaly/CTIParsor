@@ -50,13 +50,19 @@ jobs:
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.14"
           cache: pip
 
       # Every install is constrained by requirements.lock.txt: the versions
       # tested here are the versions the image ships (`make lock`).
       - name: Install API dependencies (includes psycopg)
         run: pip install -c requirements.lock.txt -r requirements-api.txt
+
+      # yara-python publishes no wheel for Python 3.14 (ADR-0079): pip compiles
+      # it, and without the OpenSSL headers the build drops the `hash` module
+      # and PE signatures silently (tests/test_yara_check.py would then fail).
+      - name: OpenSSL headers for the yara-python build
+        run: dpkg -s libssl-dev >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y --no-install-recommends libssl-dev; }
 
       # The parsers OpenCTI checks Indicator patterns with (ADR-0067, ADR-0070),
       # google-re2 (ADR-0049) and numpy are light; without them their tests
@@ -127,7 +133,7 @@ jobs:
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: pip-audit (requirements.lock.txt)
         run: |
@@ -223,8 +229,11 @@ jobs:
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.14"
           cache: pip
+
+      - name: OpenSSL headers for the yara-python build (ADR-0079)
+        run: dpkg -s libssl-dev >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y --no-install-recommends libssl-dev; }
 
       - name: Install all dependencies (the image's exact versions)
         run: pip install -r requirements.lock.txt
@@ -241,7 +250,7 @@ jobs:
 
   # ── Container image — build it and run the smoke test (ADR-0044) ─────────────
   # Keeps the Dockerfile from rotting: a dependency that no longer installs on
-  # python:3.12-slim, or a hardening flag Chromium stops tolerating, fails here.
+  # python:3.14-slim, or a hardening flag Chromium stops tolerating, fails here.
   container-image:
     name: Container image (build + smoke)
     runs-on: ubuntu-latest
@@ -267,7 +276,7 @@ jobs:
             GIT_REV=${{ github.sha }}
 
       # ADR-0078: the operating-system packages of the image (Debian under
-      # python:3.12-slim, Chromium, libraries) are seen by no other check —
+      # python:3.14-slim, Chromium, libraries) are seen by no other check —
       # pip-audit and npm audit stop at the lock files.  Grype reports the
       # vulnerabilities that have a fix, the ones a rebuild or a base-image
       # bump can remove, to Code scanning; it does not fail the build: the

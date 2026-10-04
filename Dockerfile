@@ -12,10 +12,14 @@ COPY frontend/ ./
 RUN npm run build
 
 # ── Stage 2: build the Python virtualenv ──────────────────────────────────────
-FROM python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS builder
+# Python 3.14 (ADR-0079).  libssl-dev: yara-python 4.5.4 publishes no wheel for
+# 3.14, so pip compiles it here, and without the OpenSSL headers that build
+# silently leaves out the `hash` module and PE signature parsing; the Stage 4
+# YARA gate would then refuse rules OpenCTI accepts.
+FROM python:3.14-slim-bookworm@sha256:c8137f4c460908c8763f281c8f22c431eb5c538514ba9553fc3a89c06b7cfb88 AS builder
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential libxml2-dev libxslt1-dev pkg-config \
+        build-essential libxml2-dev libxslt1-dev libssl-dev pkg-config \
     && rm -rf /var/lib/apt/lists/*
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
@@ -31,7 +35,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements.lock.txt
 
 # ── Stage 3: runtime image ────────────────────────────────────────────────────
-FROM python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS runtime
+FROM python:3.14-slim-bookworm@sha256:c8137f4c460908c8763f281c8f22c431eb5c538514ba9553fc3a89c06b7cfb88 AS runtime
 
 ARG INSTALL_CAPTURE=true
 ARG GIT_REV=""
