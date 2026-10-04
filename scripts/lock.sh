@@ -1,10 +1,11 @@
 #!/bin/sh
-# `make lock`: resolve the requirement ranges into four hashed locks (ADR-0080).
+# `make lock`: resolve the requirement ranges into five hashed locks (ADR-0080).
 #
 #   requirements.lock.txt        every package the image installs, from PyPI
 #   requirements-torch.lock.txt  torch's CPU build, from the PyTorch index
 #   requirements-ci.lock.txt     what CI's fast tests install, same versions
 #   requirements-audit.lock.txt  pip-audit, for the dependency-audit job
+#   requirements-uv.lock.txt     uv, which this script runs
 #
 # Installed with `pip install --require-hashes` everywhere: a file whose sha256
 # differs from the one recorded here fails the install.  torch is installed
@@ -14,12 +15,13 @@
 # lock that names both indexes let pip take either.
 #
 # Run inside python:3.14-slim by `make lock`; UV may point at an existing uv.
-# LOCK_FLAGS=--upgrade re-resolves everything to the newest allowed versions.
+# LOCK_FLAGS=--upgrade re-resolves everything to the newest allowed versions,
+# uv included: the uv this run installs is the one the previous run locked.
 set -eu
 
 TORCH_INDEX="https://download.pytorch.org/whl/cpu"
 if [ -z "${UV:-}" ]; then
-    pip install --quiet --target /tmp/uv uv
+    pip install --quiet --require-hashes --no-deps --target /tmp/uv -r requirements-uv.lock.txt
     UV=/tmp/uv/bin/uv
 fi
 common() {
@@ -50,8 +52,10 @@ common /tmp/torch.in --index-url "$TORCH_INDEX" --no-deps -o requirements-torch.
 
 common requirements-ci.txt -c requirements.lock.txt $NOT_SHIPPED -o requirements-ci.lock.txt
 common requirements-audit.txt -o requirements-audit.lock.txt
-python3 scripts/lock_pypi_hashes.py requirements-ci.lock.txt requirements-audit.lock.txt
+printf "uv\n" > /tmp/uv.in
+common /tmp/uv.in -o requirements-uv.lock.txt
+python3 scripts/lock_pypi_hashes.py requirements-ci.lock.txt requirements-audit.lock.txt requirements-uv.lock.txt
 
-for f in requirements.lock.txt requirements-torch.lock.txt requirements-ci.lock.txt requirements-audit.lock.txt; do
+for f in requirements.lock.txt requirements-torch.lock.txt requirements-ci.lock.txt requirements-audit.lock.txt requirements-uv.lock.txt; do
     echo "Locked $(grep -c '==' "$f") packages -> $f"
 done

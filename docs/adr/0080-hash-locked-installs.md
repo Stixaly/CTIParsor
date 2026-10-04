@@ -49,7 +49,7 @@ The image had been shipping whichever copy pip found.
    first: the pip Python 3.14.8 bundles (26.2.1) is current, and the upgrade
    was the one download without a hash.
 5. The audit job also audits CI's tools and the scanner itself: the three
-   locks.
+   locks (four since item 7).
 6. **Amended 2026-10-04: diskcache is not shipped.**
    - **Why:** it has an unfixed pickle-deserialisation CVE (PYSEC-2026-2447),
      and Dependabot raised one alert for each lock listing it.
@@ -61,6 +61,16 @@ The image had been shipping whichever copy pip found.
    - **Guard:** a test fails if the Sigma gate ever needs it.
    - **Cost:** `pip check` reports the missing declared dependency, by
      design (SECURITY.md, "Not shipped").
+7. **Amended 2026-10-04: uv, which `make lock` runs, has a hashed lock too.**
+   - **Why:** `scripts/lock.sh` installed it with a bare `pip install uv`,
+     the one pip install left without a hash. Scorecard's Pinned-Dependencies
+     counted 9 of 10 pip installs pinned, and named that line.
+   - **How:** a fifth lock, `requirements-uv.lock.txt`, which `lock.sh`
+     installs with `--require-hashes --no-deps` and then regenerates.
+     `make lock` keeps its pin; `make update-deps` upgrades it with the
+     rest, and the next run installs that version.
+   - **Audit:** the dependency-audit job and `make audit` audit it with the
+     other three PyPI locks.
 
 ## Consequences
 

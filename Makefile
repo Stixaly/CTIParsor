@@ -114,13 +114,14 @@ check-docs: .secrets/db_password
 # re-resolve against the current constraints instead of reusing old wheels).
 
 ## Scan the dependencies for known CVEs, as the CI dependency-audit job does:
-## the exact versions of the three PyPI locks (image, CI tools, scanner), and the UI's
-## production packages.  Accepted ones are listed in SECURITY.md.
+## the exact versions of the four PyPI locks (image, CI tools, scanner, the uv
+## `make lock` runs), and the UI's production packages.  Accepted ones are
+## listed in SECURITY.md.
 AUDIT_IGNORE ?=
 audit:
 	docker run --rm -v "$$(pwd)":/audit -w /audit python:3.14-slim \
 	    sh -c "pip install --quiet --require-hashes -r requirements-audit.lock.txt && status=0 \
-	        && for lock in requirements.lock.txt requirements-ci.lock.txt requirements-audit.lock.txt; do \
+	        && for lock in requirements.lock.txt requirements-ci.lock.txt requirements-audit.lock.txt requirements-uv.lock.txt; do \
 	            echo \"== \$$lock\"; python -m pip_audit -r \$$lock \
 	                --no-deps --disable-pip --progress-spinner off $(AUDIT_IGNORE) || status=1; done; \
 	        exit \$$status"
@@ -132,7 +133,8 @@ audit:
 ## Resolve the requirement ranges into the hashed locks the image, CI and the
 ## audit install with `pip install --require-hashes` (scripts/lock.sh, ADR-0080):
 ## requirements.lock.txt (PyPI), requirements-torch.lock.txt (torch's CPU
-## build, PyTorch index), requirements-ci.lock.txt, requirements-audit.lock.txt.
+## build, PyTorch index), requirements-ci.lock.txt, requirements-audit.lock.txt,
+## requirements-uv.lock.txt (the uv this script runs).
 ## Keeps the current pins that still fit the ranges; LOCK_FLAGS=--upgrade
 ## re-resolves everything to the newest allowed versions.
 LOCK_FLAGS ?=

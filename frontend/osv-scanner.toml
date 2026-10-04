@@ -1,0 +1,12 @@
+# OSV-Scanner's configuration for package-lock.json, which the Vulnerabilities
+# check of OpenSSF Scorecard scans (ADR-0078).  The rules for adding an entry
+# are in the repository root's osv-scanner.toml.
+
+# braces: stack exhaustion on deeply nested patterns, no fixed release
+# (CVE-2026-93687).  A build-time dependency only ("dev": true): the UI's build
+# tools expand their own glob patterns with it.  It is not in the built UI nor
+# in the image, and no report text ever reaches it.
+[[IgnoredVulns]]
+id = "GHSA-vfj7-8cjw-p6xm"
+ignoreUntil = 2027-01-04
+reason = "Build-time only: a dev dependency of the UI's build tools, in neither the built UI nor the image (SECURITY.md, reviewed 2026-10-04)"

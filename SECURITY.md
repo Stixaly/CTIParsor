@@ -154,12 +154,20 @@ it, but only its ATT&CK and D3FEND data cache imports it
 loads. `tests/test_pattern_check.py::test_the_sigma_gate_never_needs_diskcache`
 fails if the Sigma gate ever needs it. Expect `pip check` in the image to report
 "pysigma requires diskcache, which is not installed": that is this decision.
+Scorecard's Vulnerabilities check still finds it: its scanner, OSV-Scanner,
+resolves `requirements-ci.txt` (ranges, not the lock) through pySigma's
+declared dependencies. The root `osv-scanner.toml` leaves it out, until the
+date it gives.
 
 ### Accepted vulnerabilities
 The image scan's accepted ones (Grype, Code scanning) are also listed in
 `.grype.yaml`, each rule tied to the exact package version reviewed. The scan
 leaves them out, and reports them again as soon as that version changes, for
-a new review. A row here and its rule there are added together.
+a new review. The ones in a manifest, which Scorecard's Vulnerabilities check
+scans with OSV-Scanner, are listed in the `osv-scanner.toml` next to that
+manifest (`frontend/osv-scanner.toml` for braces), each until a review date;
+Scorecard reports them again after it. A row here and its rule there are
+added together.
 
 | Id | Package | Why it is accepted | Reviewed |
 |---|---|---|---|

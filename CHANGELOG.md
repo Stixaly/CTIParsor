@@ -8,6 +8,29 @@ sections group by theme rather than strict semver.
 
 ### Security
 
+#### Scorecard: the accepted vulnerabilities and the last unhashed pip install, 2026-10-04
+
+OpenSSF Scorecard still found two vulnerabilities and one pip install without
+hashes.
+
+- **Two vulnerabilities SECURITY.md already settles.** Scorecard scans the
+  manifests with OSV-Scanner, which reads neither SECURITY.md nor
+  `.grype.yaml`. It reported:
+  - braces 3.0.3 in `frontend/package-lock.json`, accepted: build-time only;
+  - diskcache, although no lock lists it any more. OSV-Scanner resolves
+    `requirements-ci.txt`, a list of ranges, through pySigma's declared
+    dependencies.
+
+  Each is now listed, with its reason, in the `osv-scanner.toml` next to its
+  manifest (the root, and `frontend/`), until 2027-01-04. After that date
+  Scorecard reports it again, for a new review. pip-audit, npm audit and
+  Dependabot do not read these files.
+- **uv, installed by hash (ADR-0080, item 7).** `make lock` installed uv
+  with a bare `pip install uv`, the one pip install left without a hash. It
+  now installs uv from its own hashed lock, `requirements-uv.lock.txt`
+  (uv 0.12.23). `make lock` regenerates that lock, and the dependency-audit
+  job audits it with the other locks.
+
 #### The image scan skips the CVEs SECURITY.md accepts, per version, 2026-10-04
 
 Three CPython 3.14.8 CVEs have no fix in a 3.14 release and cannot be

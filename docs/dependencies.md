@@ -93,6 +93,7 @@ first URL-capture request to fail; `/api/ingest/url` responds 503 until then.
 | `requirements-ci.lock.txt` | **Machine-generated** — `requirements-ci.txt` at the versions of `requirements.lock.txt`, with hashes | Never by hand — run `make lock` |
 | `requirements-dev.txt` | Pinned test / lint / type-check tools for CI | When you upgrade ruff, mypy or pytest-cov on purpose |
 | `requirements-audit.txt` / `.lock.txt` | pip-audit, pinned, and its hashed lock | When you upgrade pip-audit on purpose |
+| `requirements-uv.lock.txt` | **Machine-generated** — the uv `make lock` installs, by hash, to resolve the other locks | Never by hand — `make lock` keeps it, `make update-deps` upgrades it |
 | `frontend/package.json` | npm semver ranges (`^`) | When you want to allow a new major version |
 | `frontend/package-lock.json` | npm lock file | Never by hand — run `make npm-update` to update it |
 

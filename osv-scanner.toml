@@ -1,0 +1,18 @@
+# OSV-Scanner's configuration for the manifests in this directory, which the
+# Vulnerabilities check of OpenSSF Scorecard scans (ADR-0078).  frontend/ has
+# its own: the scanner reads the file next to each manifest, not a parent's.
+#
+# Each entry is a vulnerability SECURITY.md reviewed, with the reason it does
+# not reach CTIParsor.  It expires at `ignoreUntil`, and Scorecard reports it
+# again, for a new review.  An entry is added here only together with its row in
+# SECURITY.md.  pip-audit, npm audit and Dependabot do not read this file.
+
+# diskcache: unsafe pickle deserialisation, no fixed release (CVE-2025-69872,
+# GHSA-w8v5-vhqr-4h9v).  No lock lists it and no install pulls it back
+# (SECURITY.md, "Not shipped").  The scanner reports it anyway: it resolves
+# requirements-ci.txt, a list of ranges, through pySigma's declared
+# dependencies.  If a lock ever listed diskcache again, pip-audit would fail.
+[[IgnoredVulns]]
+id = "PYSEC-2026-2447"
+ignoreUntil = 2027-01-04
+reason = "Not shipped: left out of every lock, and every install is --no-deps (SECURITY.md, Not shipped, reviewed 2026-10-04)"
