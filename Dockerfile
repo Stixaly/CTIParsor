@@ -32,14 +32,16 @@ WORKDIR /build
 # the lock recorded, so a re-uploaded or tampered release fails the build.
 # Two indexes, never mixed: torch alone from the PyTorch index (its own lock,
 # --no-deps), then everything else from PyPI only — the PyTorch index re-hosts
-# common packages under PyPI's names, with other bytes.  No pip upgrade first:
+# common packages under PyPI's names, with other bytes.  --no-deps: the lock is
+# the whole closure, and it lets diskcache stay out (pySigma declares it, only
+# its ATT&CK data cache imports it — scripts/lock.sh).  No pip upgrade first:
 # the pip this Python bundles is current (26.2.1 with 3.14.8), and an upgrade
 # would be the one download without a hash.
 COPY requirements.lock.txt requirements-torch.lock.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --require-hashes --no-deps --index-url https://download.pytorch.org/whl/cpu \
         -r requirements-torch.lock.txt \
-    && pip install --require-hashes -r requirements.lock.txt
+    && pip install --require-hashes --no-deps -r requirements.lock.txt
 
 # ── Stage 3: runtime image ────────────────────────────────────────────────────
 FROM python:3.14-slim-bookworm@sha256:c8137f4c460908c8763f281c8f22c431eb5c538514ba9553fc3a89c06b7cfb88 AS runtime
@@ -144,7 +146,7 @@ CMD ["serve"]
 # Never shipped: built only when asked for by name (`--target dev`).
 FROM runtime AS dev
 USER root
-RUN pip install --no-cache-dir --require-hashes -r /app/requirements-ci.lock.txt
+RUN pip install --no-cache-dir --require-hashes --no-deps -r /app/requirements-ci.lock.txt
 USER ctiparsor
 # It runs one-shot commands, not the API the inherited check polls.
 HEALTHCHECK NONE

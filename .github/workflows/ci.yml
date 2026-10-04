@@ -64,7 +64,7 @@ jobs:
       # audit tools, at the versions the image ships, every file checked
       # against the sha256 the lock recorded.
       - name: Install dependencies (by hash)
-        run: pip install --require-hashes -r requirements-ci.lock.txt
+        run: pip install --require-hashes --no-deps -r requirements-ci.lock.txt
 
       # Scope and rules live in pyproject.toml, so `ruff check .` and `mypy`
       # check the same files here, in `make ci` and in an editor.
@@ -130,12 +130,13 @@ jobs:
       # Every lock is audited before the step fails.
       - name: pip-audit (the three locks)
         run: |
-          # PYSEC-2026-2447 (diskcache, pickle in a cache directory): accepted, see SECURITY.md.
+          # No --ignore-vuln: diskcache (PYSEC-2026-2447, no fix) is no longer
+          # in any lock (scripts/lock.sh); an exception added here goes in
+          # SECURITY.md with its reason.
           status=0
           for lock in requirements.lock.txt requirements-ci.lock.txt requirements-audit.lock.txt; do
             echo "== $lock"
-            pip-audit -r "$lock" --no-deps --disable-pip --progress-spinner off \
-              --ignore-vuln PYSEC-2026-2447 || status=1
+            pip-audit -r "$lock" --no-deps --disable-pip --progress-spinner off || status=1
           done
           exit "$status"
 
@@ -238,11 +239,11 @@ jobs:
         run: |
           pip install --require-hashes --no-deps --index-url https://download.pytorch.org/whl/cpu \
             -r requirements-torch.lock.txt
-          pip install --require-hashes -r requirements.lock.txt
+          pip install --require-hashes --no-deps -r requirements.lock.txt
 
       # Same versions for what both locks share: already installed, left alone.
       - name: Install test dependencies (by hash)
-        run: pip install --require-hashes -r requirements-ci.lock.txt
+        run: pip install --require-hashes --no-deps -r requirements-ci.lock.txt
 
       - name: Run full test suite (with model inference)
         env:

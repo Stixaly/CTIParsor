@@ -504,10 +504,6 @@ deprecated==3.0.0 \
     --hash=sha256:16850204d3a1e6bb0acd06bff48d96e8b0a0d25d1c52f71705405a0f4894192d \
     --hash=sha256:58204cf4a7f6270d547af5c278ee7a6bb56045a4b3d8441a1cd11660f41b7939
     # via limits
-diskcache==5.6.3 \
-    --hash=sha256:2c3a3fa2743d8535d832ec61c2054a1641f41775aa7c556758a109941e33e4fc \
-    --hash=sha256:5e31b2d5fbad117cc363ebaf6b689474db18a1f6438bc82358b024abd4c2ca19
-    # via pysigma
 diskcache-stubs==5.6.3.6.20240818 \
     --hash=sha256:b6eb43899e906b3167a20ac09a9a226f30267a306a96542ea720ebbfc3282796 \
     --hash=sha256:e1db90940b344140730976abe79f57f5b43ca296cbb43fa95da0c69b12d5de4f
@@ -3458,3 +3454,6 @@ yara-python==4.5.4 \
     --hash=sha256:fd84af5b6da3429236b61f3ad8760fdc739d0e1d6a08b8f3d90cd375e71594df \
     --hash=sha256:fe8ad189843c729eae74be3b8447a4753fac2cebe705e5e2a7280badfcc7e3b4
     # via -r requirements.txt
+
+# The following packages were excluded from the output:
+# diskcache

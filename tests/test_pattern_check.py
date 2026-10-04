@@ -61,6 +61,18 @@ def test_a_sigma_rule_without_a_condition_is_refused():
     assert check_pattern("sigma", no_condition)[0] == REFUSED
 
 
+def test_the_sigma_gate_never_needs_diskcache():
+    # diskcache (unfixed pickle CVE) is left out of the locks (scripts/lock.sh):
+    # pySigma declares it, but only its ATT&CK / D3FEND data cache imports it.
+    # A rule carrying ATT&CK tags must still pass the gate without loading it
+    # — in CI it is not installed, and an import of it would turn the gate
+    # into "unverified".
+    tagged = _SIGMA.replace("level: high", "level: high\ntags:\n    - attack.execution\n    - attack.t1059.001")
+    assert check_pattern("sigma", tagged) == (ACCEPTED, None)
+    assert "diskcache" not in sys.modules
+    assert not [m for m in sys.modules if m.startswith("sigma.data")]
+
+
 def test_a_very_long_line_is_refused_without_parsing():
     status, error = check_pattern("snort", "alert tcp any any -> any any (" + "a" * 20000 + ")")
     assert status == REFUSED and "longer than" in error

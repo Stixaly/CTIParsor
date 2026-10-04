@@ -6,6 +6,22 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Security
+
+#### diskcache is no longer shipped, 2026-10-04
+
+diskcache 5.6.3 has an unfixed unsafe-pickle CVE (PYSEC-2026-2447).
+Dependabot raised it twice, once per lock. Until now it was accepted in
+SECURITY.md. It is now **removed** from the image and from CI:
+
+- **Why it can go.** pySigma declares it, but only its ATT&CK and D3FEND
+  data cache imports it, which CTIParsor never loads.
+- **How.** The locks omit it, and every install of them is `--no-deps`.
+- **Guard.** A test checks that the Sigma gate passes a rule with ATT&CK
+  tags without loading it.
+
+pip-audit no longer needs an `--ignore-vuln`.
+
 ### Fixed
 
 #### The test run's warnings on Python 3.14, 2026-10-04

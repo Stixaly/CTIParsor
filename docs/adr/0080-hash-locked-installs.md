@@ -50,6 +50,17 @@ The image had been shipping whichever copy pip found.
    was the one download without a hash.
 5. The audit job also audits CI's tools and the scanner itself: the three
    locks.
+6. **Amended 2026-10-04: diskcache is not shipped.**
+   - **Why:** it has an unfixed pickle-deserialisation CVE (PYSEC-2026-2447),
+     and Dependabot raised one alert for each lock listing it.
+   - **Why it can go:** pySigma declares it, but only its ATT&CK and D3FEND
+     data cache imports it, and CTIParsor never loads that cache.
+   - **How:** the image and CI locks omit it (`--no-emit-package
+     diskcache`), and every install of them is `--no-deps`, so pip installs
+     exactly the lock, already the full closure, and does not pull it back.
+   - **Guard:** a test fails if the Sigma gate ever needs it.
+   - **Cost:** `pip check` reports the missing declared dependency, by
+     design (SECURITY.md, "Not shipped").
 
 ## Consequences
 

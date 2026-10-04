@@ -144,10 +144,20 @@ pipeline still produces valid STIX. ML models are downloaded once and cached.
   two signed attestations bound to its digest, build provenance and that SBOM:
   `gh attestation verify oci://ghcr.io/stixaly/ctiparsor@sha256:<digest> -R Stixaly/CTIParsor`.
 
+### Not shipped
+**diskcache** (PYSEC-2026-2447 / CVE-2025-69872 / GHSA-w8v5-vhqr-4h9v,
+unsafe pickle deserialisation, no fixed release) was accepted here until
+2026-10-04. It is now left out of every lock (`scripts/lock.sh`), and every
+install is `--no-deps`, so it is in neither the image nor CI. pySigma declares
+it, but only its ATT&CK and D3FEND data cache imports it
+(`sigma/data/mitre_attack.py`, `mitre_d3fend.py`), which CTIParsor never
+loads. `tests/test_pattern_check.py::test_the_sigma_gate_never_needs_diskcache`
+fails if the Sigma gate ever needs it. Expect `pip check` in the image to report
+"pysigma requires diskcache, which is not installed": that is this decision.
+
 ### Accepted vulnerabilities
 | Id | Package | Why it is accepted | Reviewed |
 |---|---|---|---|
-| PYSEC-2026-2447 (CVE-2025-69872, GHSA-w8v5-vhqr-4h9v) | diskcache 5.6.3, no fixed release | Code execution needs **write access to the cache directory** first. diskcache comes with pySigma, which only uses it to cache MITRE ATT&CK data (`sigma.data.mitre_attack`, `~/.cache/pysigma`); CTIParsor never imports that module, and the Sigma gate (ADR-0070) parses a rule with ATT&CK tags without loading diskcache (checked 2026-10-03). | 2026-10-03 |
 | GHSA-vfj7-8cjw-p6xm | braces 3.0.3 (npm), no fixed release | A **build-time** dependency only (`"dev": true` in `frontend/package-lock.json`): the UI's build tools use it to expand their own glob patterns. It is not in the built UI nor in the image, and no report text ever reaches it. | 2026-10-04 |
 | CVE-2025-15367, CVE-2026-12345 (Grype, Code scanning) | CPython 3.14.8, fixed in 3.15 only | `poplib` command injection: CTIParsor never imports `poplib`. `tempfile.TemporaryDirectory` cleanup race: needs a local attacker who can write to the temporary directory. The only use is in `scripts/measure_web_capture.py`, a measurement script the application never runs, and the container's `/tmp` is its own. Revisit when the image moves to Python 3.15 (ADR-0079). | 2026-10-04 |
 | CVE-2026-87910 (Grype, Code scanning) | CPython 3.14.8, fixed in 3.12.15 and 3.13.16, not yet in a 3.14 release | `tarfile` falls back to extracting another member when it extracts a link on a system without links. The image runs Linux, which has links. CTIParsor's only tar extraction, the corpus sync (`pipeline/detection/sync.py::_safe_members`), keeps regular files and directories only, so no link is ever extracted. The next 3.14 image digest, which Dependabot proposes weekly, brings the fix. | 2026-10-04 |
