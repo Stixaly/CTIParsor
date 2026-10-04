@@ -2097,8 +2097,33 @@ _SENTENCE_SPLIT_RE = compile_pattern(r"(?<=[.!?])\s+|\n{2,}")
 # [autonomous-system:number = 1234].  An Indicator's `name` is
 # "Indicator: evil.com", which never appears in prose (0/136 measured), while
 # its pattern values do (131/136, 96.3%) — so the pattern is its anchor.
-_PATTERN_STR_RE = compile_pattern(r"'((?:[^'\\]|\\.)*)'")
 _PATTERN_NUM_RE = compile_pattern(r"=\s*(\d+)\s*\]")
+
+
+def _pattern_strings(pattern: str) -> list[str]:
+    """The quoted literals of a STIX pattern, escapes left in: what
+    `re.findall(r"'((?:[^'\\]|\\.)*)'", pattern)` returns, in one pass.  The
+    regex retried from every escaped quote after a literal that never closes —
+    quadratic under backtracking `re` (no re2) on a value full of `\\'`."""
+    found: list[str] = []
+    n = len(pattern)
+    i = pattern.find("'")
+    while i != -1:
+        j = i + 1
+        while j < n and pattern[j] != "'":
+            if pattern[j] == "\\":
+                if j + 1 == n or pattern[j + 1] == "\n":
+                    break                     # `\\.` cannot take it: no literal here
+                j += 1
+            j += 1
+        if j < n and pattern[j] == "'":
+            found.append(pattern[i + 1:j])
+            i = pattern.find("'", j + 1)
+        else:
+            # Every quote between i and j was escaped, and the regex, started
+            # there, would have ended at the same j: none of them opens one.
+            i = pattern.find("'", j)
+    return found
 
 
 def _evidence_terms(obj: object) -> list[str]:
@@ -2114,7 +2139,7 @@ def _evidence_terms(obj: object) -> list[str]:
         if not isinstance(pattern, str):
             return []
         terms: list[str] = []
-        terms.extend(_PATTERN_STR_RE.findall(pattern))
+        terms.extend(_pattern_strings(pattern))
         terms.extend(_PATTERN_NUM_RE.findall(pattern))
         cleaned: list[str] = []
         for t in terms:

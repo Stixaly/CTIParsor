@@ -22,17 +22,29 @@ The 25 alerts CodeQL raised when it was switched on (ADR-0075):
   failed", "not a tar archive", "git is not installed"…). The text goes to the
   server log, on one line.
 - **`stix-viz` page (1).** It fetched and drew whatever URL `?bundle_url=`
-  named. It now only takes this app's `/api/jobs/<id>/bundle`.
+  named. It now only takes this app's `/api/jobs/<id>/bundle`, with the id
+  URI-encoded so it cannot step out of its path segment (`../`).
 - **Tests (9).** CodeQL no longer scans `tests/`: it is not shipped, and its
   `"evil.com" in urls` asserts and `(a+)+$` are the attacker input the tests
   are for.
-- **Polynomial regexes (3): false positives.** CodeQL cannot tell which
-  regex `compile_pattern` returns, so it flagged every one of them at three
-  call sites that use other, linear regexes. All 12 involved compile with
-  re2 in the image (checked). `requirements-api.txt` still told people to
-  `pip install re2`, the abandoned package that does not build on Python
-  3.12+, which leaves the stdlib fallback in place. It now points to
-  google-re2.
+- **Polynomial regexes (3): ten slow regexes, rewritten.** CodeQL pinned
+  them on three call sites that use other, linear regexes: it cannot tell
+  which regex `compile_pattern` returns. The ten regexes it named are linear
+  under re2, which the image and CI install. Under stdlib `re` (a source
+  install or a dev venv without google-re2), they were quadratic, and the
+  YARA rule header was cubic: 110 s on one line of 8,000 tabs. The affected
+  inputs:
+  - the refang pass over report text (`\s{1,16}` before a spaced `[.]`);
+  - quarter and half dates;
+  - YARA rule headers, meta and string lines;
+  - the edge-stripping of advisory tokens and the literals of an indicator
+    pattern (now short loops).
+
+  Results are unchanged on 30,000+ random inputs per regex, every rewritten
+  pattern still compiles with re2, and `tests/test_linear_regexes.py` holds
+  each one under one second on CodeQL's input with stdlib `re`.
+  `requirements-api.txt` still said `pip install re2`, the abandoned package
+  that does not build on Python 3.12+; it now points to google-re2.
 
 
 #### A verifiable supply chain (ADR-0075), 2026-10-03

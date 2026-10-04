@@ -282,11 +282,13 @@ _R_M_D_Y = compile_pattern(                                                   # 
 _R_M_Y = compile_pattern(r"^([^\s\d]+?)\.?,?\s+(?:of\s+)?(\d{4})$")
 _R_D_M = compile_pattern(r"^(\d{1,2})(?:st|nd|rd|th|er)?\s+(?:of\s+)?([^\s\d]+?)\.?$")
 _R_M_D = compile_pattern(r"^([^\s\d]+?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?$")
-_R_Q = compile_pattern(r"^q([1-4])\s*[-/]?\s*(\d{4})$")
-_R_Y_Q = compile_pattern(r"^(\d{4})\s*[-/]?\s*q([1-4])$")
+# `\s*(?:[-/]\s*)?`, not `\s*[-/]?\s*`: without the separator the two `\s*`
+# share every space, which backtracking `re` (no re2) tries pairwise.
+_R_Q = compile_pattern(r"^q([1-4])\s*(?:[-/]\s*)?(\d{4})$")
+_R_Y_Q = compile_pattern(r"^(\d{4})\s*(?:[-/]\s*)?q([1-4])$")
 _R_QN = compile_pattern(r"^([1-4])q\s*(\d{4})$")
 _R_Q_WORDS = compile_pattern(r"^([^\s]+)\s+(?:quarter|trimestre)\s+(?:of\s+|de\s+|d')?(\d{4})$")
-_R_H = compile_pattern(r"^h([12])\s*[-/]?\s*(\d{4})$")
+_R_H = compile_pattern(r"^h([12])\s*(?:[-/]\s*)?(\d{4})$")
 _R_H_WORDS = compile_pattern(r"^([^\s]+)\s+(?:half|semestre)\s+(?:of\s+|de\s+|d')?(\d{4})$")
 _R_AGO = compile_pattern(r"^(\d+|[a-z]+)\s+(day|week|month|year)s?\s+ago$")
 _R_IL_Y_A = compile_pattern(r"^il y a\s+(\d+|[a-z]+)\s+(jours?|semaines?|mois|ans|années?|annees?)$")

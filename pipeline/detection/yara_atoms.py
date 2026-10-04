@@ -77,17 +77,24 @@ NOISE_LITERALS: frozenset[str] = frozenset({
 # 1,492). Requiring it on the `rule` line silently skipped whole files — peid.yar
 # alone holds 7,615 rules and yielded zero.
 # The tag group stays line-bound (`[^\{\n]*`): tags never wrap.
+# No two adjacent quantifiers share a character, so backtracking `re` (no re2)
+# stays linear on a long run of tabs: after the tags only a newline can start
+# the whitespace before the brace (the group took the rest of the line), and the
+# tags keep their surrounding blanks — the caller splits them.
 _RE_RULE = compile_pattern(
-    r"(?m)^[ \t]*(?:(private|global)[ \t]+)*rule[ \t]+([A-Za-z_]\w*)[ \t]*(?::[ \t]*([^\{\n]*))?\s*\{"
+    r"(?m)^[ \t]*(?:(private|global)[ \t]+)*rule[ \t]+([A-Za-z_]\w*)"
+    r"(?:[ \t]*:([^\{\n]*)(?:\n\s*)?|\s*)\{"
 )
 _RE_HASH = compile_pattern(r"^[0-9a-f]{32,128}$")
 _RE_IP = compile_pattern(r"^\d{1,3}(\.\d{1,3}){3}$")
 # A path ends in an *alphabetic* extension and contains no spaces.  `[a-z0-9]{1,4}`
 # alone accepted "ufasoft bitcoin-miner/0.20" and " p = document.inde" as files.
 _RE_FILE_EXT = compile_pattern(r"^\S+\.[a-z]{1,4}$")
-_RE_META_LINE = compile_pattern(r"^\s*([A-Za-z_]\w*)\s*=\s*(.+)$")
+# `=(.+)$`, not `=\s*(.+)$`: the value is stripped by the caller, and `\s*`
+# beside `.+` made backtracking `re` (no re2) quadratic on a run of blanks.
+_RE_META_LINE = compile_pattern(r"^\s*([A-Za-z_]\w*)\s*=(.+)$")
 # `\w*` not `[A-Za-z_]\w*`: YARA allows an anonymous string, declared bare as `$`.
-_RE_STRING_DECL = compile_pattern(r"^\s*\$(\w*)\s*=\s*(.+)$")
+_RE_STRING_DECL = compile_pattern(r"^\s*\$(\w*)\s*=(.+)$")
 _RE_IMPORT = compile_pattern(r'(?m)^\s*import\s+"(\w+)"')
 _RE_SPLIT_META = compile_pattern(r"[,\s]+")
 
