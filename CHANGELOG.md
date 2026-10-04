@@ -25,6 +25,27 @@ sections group by theme rather than strict semver.
 
 ### Security
 
+#### Fuzzing the code that reads attacker input (ADR-0081), 2026-10-04
+
+Four Atheris fuzzers (`fuzz/`) target the code that reads what the report's
+author controls:
+
+- report text (refang, extraction);
+- dates;
+- the gates quoted rules pass before OpenCTI (Sigma, Suricata, Snort, YARA
+  through libyara, STIX literals);
+- the enclosure that keeps report text from closing its block in an LLM
+  prompt.
+
+Each target checks its own invariant. A crash, an input slower than 10 s or
+a memory blow-up also fails the run.
+
+They run 60 s each on every pull request and 10 minutes weekly (the
+`Fuzzing` workflow), and the failing input is uploaded. A seed test keeps
+them alive in the ordinary suite. A first two-minute run per target tried
+1.1 million inputs on the parsers and 23.5 million on the enclosure, and
+found nothing.
+
 #### Every pip install checks hashes (ADR-0080), 2026-10-04
 
 The image, CI and the audit now install with `pip install --require-hashes`,

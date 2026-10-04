@@ -1,0 +1,65 @@
+name: Fuzzing
+
+# Coverage-guided fuzzing of the code that reads attacker-controlled input
+# (ADR-0081): report text, quoted detection rules, dates, the prompt enclosure.
+# Atheris (libFuzzer for Python) mutates the seeds in fuzz/corpus/ for a fixed
+# time; a crash, a broken invariant, an input slower than -timeout or a memory
+# blow-up past -rss_limit_mb fails the job and uploads the input that did it.
+# 60 s a target on pull requests, 10 minutes in the weekly run.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "11 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: Fuzz (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [report_text, dates, rule_gates, spotlight]
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      # yara-python is compiled for 3.14 (ADR-0079): without the OpenSSL
+      # headers it builds without `hash` and PE signatures.
+      - name: OpenSSL headers for the yara-python build
+        run: dpkg -s libssl-dev >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y --no-install-recommends libssl-dev; }
+
+      - name: Install dependencies (by hash, ADR-0080)
+        run: pip install --require-hashes -r requirements-ci.lock.txt
+
+      # libFuzzer writes what it finds into the corpus directory: a copy, so
+      # the committed seeds stay as they are.
+      - name: Fuzz
+        env:
+          TARGET: ${{ matrix.target }}
+          SECONDS_PER_TARGET: ${{ github.event_name == 'schedule' && '600' || '60' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/corpus" "$RUNNER_TEMP/crashes"
+          cp -r "fuzz/corpus/$TARGET/." "$RUNNER_TEMP/corpus/"
+          python "fuzz/fuzz_$TARGET.py" \
+            -max_total_time="$SECONDS_PER_TARGET" -timeout=10 -rss_limit_mb=2048 -max_len=16384 \
+            -artifact_prefix="$RUNNER_TEMP/crashes/" "$RUNNER_TEMP/corpus"
+
+      - name: Upload the input that failed
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: ${{ runner.temp }}/crashes/
+          retention-days: 30

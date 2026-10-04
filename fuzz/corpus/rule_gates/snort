@@ -1,0 +1,1 @@
+alert tcp $HOME_NET any -> $EXTERNAL_NET 443 (msg:"beacon"; content:"|16 03|"; sid:1000002;)

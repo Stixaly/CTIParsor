@@ -1,0 +1,10 @@
+import "pe"
+rule WellMess_Strings : apt29 {
+  meta:
+    author = "x"
+  strings:
+    $a = "GetRandomString" ascii wide
+    $h = { 4D 5A [2] 50 45 }
+  condition:
+    pe.is_pe and any of them
+}
