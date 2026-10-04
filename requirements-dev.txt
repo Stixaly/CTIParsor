@@ -1,7 +1,7 @@
-# Test, lint and type-check tools for CI.  Pinned so a new release cannot turn
-# CI red on its own; bump them on purpose.  pytest and httpx are not listed:
-# they are runtime dependencies, pinned in requirements.lock.txt, and CI
-# installs everything with `-c requirements.lock.txt`.
+# Test, lint and type-check tools.  Pinned so a new release cannot turn CI red
+# on its own; bump them on purpose.  pytest and httpx are not listed: they are
+# runtime dependencies, pinned in requirements.lock.txt.  CI installs this file
+# through requirements-ci.lock.txt, with hashes (ADR-0080).
 pytest-cov==7.1.0
 ruff==0.16.6
 mypy==2.3.1

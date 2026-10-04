@@ -25,6 +25,30 @@ sections group by theme rather than strict semver.
 
 ### Security
 
+#### Every pip install checks hashes (ADR-0080), 2026-10-04
+
+The image, CI and the audit now install with `pip install --require-hashes`,
+from four locks `make lock` writes:
+
+- the image's own, from PyPI;
+- torch's CPU build, from the PyTorch index;
+- CI's fast-test set, at the image's versions;
+- pip-audit.
+
+**The first hashed build caught the image taking markupsafe 3.0.3 from the
+PyTorch index**, whose copy is not PyPI's file. The two indexes are no longer
+mixed at install time. torch is installed alone from its index first; then
+everything else comes from PyPI only, with the hashes PyPI publishes (the
+resolver had recorded the PyTorch copies' hashes for markupsafe, jinja2 and
+colorama).
+
+Other changes:
+
+- CI's three installs become one.
+- The audit also covers CI's tools and the scanner itself.
+- The image no longer upgrades pip without a hash: Python 3.14.8's bundled
+  pip, 26.2.1, is current.
+
 #### What OpenSSF Scorecard found, 2026-10-04
 
 The first Scorecard run scored 6.9/10. This entry covers its two checks that

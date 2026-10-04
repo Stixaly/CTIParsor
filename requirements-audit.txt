@@ -1,0 +1,4 @@
+# The vulnerability scanner the CI dependency-audit job and `make audit` run
+# (ADR-0080).  Its own lock, requirements-audit.lock.txt, with hashes: the job
+# needs nothing else, and the application's locks are what it audits.
+pip-audit==2.10.1

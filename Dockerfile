@@ -26,13 +26,20 @@ ENV PATH="/opt/venv/bin:$PATH"
 WORKDIR /build
 # The exact versions CI tested (`make lock`): requirements*.txt hold the ranges,
 # requirements.lock.txt the resolution of all three, playwright and google-re2
-# included.  It names the PyTorch CPU index itself and pins torch to its +cpu
-# build, so no CUDA wheel (about 2.2 GB of nvidia_* packages this CPU image
-# would never use) is ever pulled in.
-COPY requirements.lock.txt ./
+# included, with torch pinned to its +cpu build, so no CUDA wheel (about 2.2 GB
+# of nvidia_* packages this CPU image would never use) is ever pulled in.
+# --require-hashes (ADR-0080): every file pip downloads must match the sha256
+# the lock recorded, so a re-uploaded or tampered release fails the build.
+# Two indexes, never mixed: torch alone from the PyTorch index (its own lock,
+# --no-deps), then everything else from PyPI only — the PyTorch index re-hosts
+# common packages under PyPI's names, with other bytes.  No pip upgrade first:
+# the pip this Python bundles is current (26.2.1 with 3.14.8), and an upgrade
+# would be the one download without a hash.
+COPY requirements.lock.txt requirements-torch.lock.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --upgrade pip && \
-    pip install -r requirements.lock.txt
+    pip install --require-hashes --no-deps --index-url https://download.pytorch.org/whl/cpu \
+        -r requirements-torch.lock.txt \
+    && pip install --require-hashes -r requirements.lock.txt
 
 # ── Stage 3: runtime image ────────────────────────────────────────────────────
 FROM python:3.14-slim-bookworm@sha256:c8137f4c460908c8763f281c8f22c431eb5c538514ba9553fc3a89c06b7cfb88 AS runtime
@@ -130,12 +137,14 @@ ENTRYPOINT ["tini", "--", "/usr/local/bin/entrypoint.sh"]
 CMD ["serve"]
 
 # ── Stage 4: development image (the compose `dev` service) ────────────────────
-# The runtime image plus the lint, type-check and coverage tools CI installs
-# (requirements-dev.txt), so every check in CONTRIBUTING.md runs in `dev`.
+# The runtime image plus the lint, type-check, coverage and audit tools CI
+# installs (requirements-ci.lock.txt, by hash; what the runtime already has is
+# the same version and is left alone), so every check in CONTRIBUTING.md runs
+# in `dev`.
 # Never shipped: built only when asked for by name (`--target dev`).
 FROM runtime AS dev
 USER root
-RUN pip install --no-cache-dir -c /app/requirements.lock.txt -r /app/requirements-dev.txt
+RUN pip install --no-cache-dir --require-hashes -r /app/requirements-ci.lock.txt
 USER ctiparsor
 # It runs one-shot commands, not the API the inherited check polls.
 HEALTHCHECK NONE

@@ -53,31 +53,18 @@ jobs:
           python-version: "3.14"
           cache: pip
 
-      # Every install is constrained by requirements.lock.txt: the versions
-      # tested here are the versions the image ships (`make lock`).
-      - name: Install API dependencies (includes psycopg)
-        run: pip install -c requirements.lock.txt -r requirements-api.txt
-
       # yara-python publishes no wheel for Python 3.14 (ADR-0079): pip compiles
       # it, and without the OpenSSL headers the build drops the `hash` module
       # and PE signatures silently (tests/test_yara_check.py would then fail).
       - name: OpenSSL headers for the yara-python build
         run: dpkg -s libssl-dev >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y --no-install-recommends libssl-dev; }
 
-      # The parsers OpenCTI checks Indicator patterns with (ADR-0067, ADR-0070),
-      # google-re2 (ADR-0049) and numpy are light; without them their tests
-      # skipped here, so the import gates and the ReDoS guard only ran in the
-      # non-blocking model-tests job.
-      - name: Install core pipeline dependencies (no torch / transformers)
-        run: |
-          pip install -c requirements.lock.txt \
-            pydantic stix2 stix2-validator iocextract python-dotenv tenacity \
-            rapidfuzz pyahocorasick anthropic \
-            pdfplumber python-docx beautifulsoup4 defusedxml \
-            yara-python pysigma parsuricata numpy google-re2
-
-      - name: Install test + lint dependencies
-        run: pip install -c requirements.lock.txt pytest httpx -r requirements-dev.txt
+      # requirements-ci.lock.txt (`make lock`, ADR-0080): the API, the light
+      # pipeline dependencies (no torch / transformers) and the test, lint and
+      # audit tools, at the versions the image ships, every file checked
+      # against the sha256 the lock recorded.
+      - name: Install dependencies (by hash)
+        run: pip install --require-hashes -r requirements-ci.lock.txt
 
       # Scope and rules live in pyproject.toml, so `ruff check .` and `mypy`
       # check the same files here, in `make ci` and in an editor.
@@ -135,12 +122,22 @@ jobs:
         with:
           python-version: "3.14"
 
-      - name: pip-audit (requirements.lock.txt)
+      - name: Install pip-audit (by hash, ADR-0080)
+        run: pip install --require-hashes -r requirements-audit.lock.txt
+
+      # The image's lock, CI's tools and the scanner's own dependencies, one
+      # run each: pip-audit refuses a package that two -r files both list.
+      # Every lock is audited before the step fails.
+      - name: pip-audit (the three locks)
         run: |
-          pip install pip-audit
           # PYSEC-2026-2447 (diskcache, pickle in a cache directory): accepted, see SECURITY.md.
-          pip-audit -r requirements.lock.txt --no-deps --disable-pip --progress-spinner off \
-            --ignore-vuln PYSEC-2026-2447
+          status=0
+          for lock in requirements.lock.txt requirements-ci.lock.txt requirements-audit.lock.txt; do
+            echo "== $lock"
+            pip-audit -r "$lock" --no-deps --disable-pip --progress-spinner off \
+              --ignore-vuln PYSEC-2026-2447 || status=1
+          done
+          exit "$status"
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -235,11 +232,17 @@ jobs:
       - name: OpenSSL headers for the yara-python build (ADR-0079)
         run: dpkg -s libssl-dev >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y --no-install-recommends libssl-dev; }
 
-      - name: Install all dependencies (the image's exact versions)
-        run: pip install -r requirements.lock.txt
+      # As the image does (ADR-0080): torch alone from the PyTorch index, then
+      # everything else from PyPI only, every file checked by hash.
+      - name: Install all dependencies (the image's exact versions, by hash)
+        run: |
+          pip install --require-hashes --no-deps --index-url https://download.pytorch.org/whl/cpu \
+            -r requirements-torch.lock.txt
+          pip install --require-hashes -r requirements.lock.txt
 
-      - name: Install test dependencies
-        run: pip install -c requirements.lock.txt pytest httpx -r requirements-dev.txt
+      # Same versions for what both locks share: already installed, left alone.
+      - name: Install test dependencies (by hash)
+        run: pip install --require-hashes -r requirements-ci.lock.txt
 
       - name: Run full test suite (with model inference)
         env:
