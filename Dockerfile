@@ -69,10 +69,20 @@ ENV PYTHONUNBUFFERED=1 \
 # library — verified via ldd, it links only libstdc++/libgcc_s, both already
 # present in this base image (ADR-0049);
 # tini reaps the Chromium and pipeline subprocesses.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# `apt-get upgrade` first (ADR-0078): the base image is pinned by digest, so
+# the Debian security updates published since it was built (libpcre2, Grype
+# 2026-10-04) reach this image only here, not when Dependabot next bumps it.
+RUN apt-get update && apt-get upgrade -y --no-install-recommends \
+    && apt-get install -y --no-install-recommends \
         ca-certificates git tini tesseract-ocr poppler-utils \
         libxml2 libxslt1.1 libmagic1 \
     && rm -rf /var/lib/apt/lists/*
+
+# The base image's own pip (/usr/local) is never used: the application runs
+# from /opt/venv, whose pip the builder upgrades.  Left in place it ships the
+# known vulnerabilities of an old pip (six, Grype 2026-10-04).  The system
+# interpreter is named explicitly: PATH puts the venv first.
+RUN /usr/local/bin/python -m pip uninstall -y -q pip
 
 RUN groupadd --gid "${APP_GID}" ctiparsor && \
     useradd --uid "${APP_UID}" --gid "${APP_GID}" --create-home \
