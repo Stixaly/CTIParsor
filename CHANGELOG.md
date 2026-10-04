@@ -8,6 +8,28 @@ sections group by theme rather than strict semver.
 
 ### Security
 
+#### The image scan's first findings, 2026-10-04
+
+Grype's first run (ADR-0078) reported 14 vulnerabilities with a fix in the
+image:
+
+- **pip (6, the image's highest at high).** They were in the base image's
+  own pip, under `/usr/local`, which the application never uses: it runs
+  from `/opt/venv`, whose pip the builder upgrades. That pip is now
+  uninstalled from the runtime image.
+- **libpcre2 (1, high).** The runtime stage now runs `apt-get upgrade`
+  before installing its packages. A digest-pinned base image otherwise
+  receives Debian's security updates only when Dependabot next bumps it.
+- **Python 3.12.15 (7).** These are fixed in Python 3.13 and later only:
+  base64 decoding, imaplib, poplib, `tempfile.TemporaryDirectory`,
+  `http.cookies`, `pkgutil` (the last one disputed). None of these is
+  reachable from CTIParsor; the only use is `TemporaryDirectory` in a
+  measurement script. They stay open until the image moves to a newer
+  Python.
+
+Dependabot's one alert, diskcache, has no fix and is accepted in
+SECURITY.md.
+
 #### Pinned workflows, an image scan, and what the settings must add (ADR-0078), 2026-10-04
 
 - **Pinning.** Every GitHub Action is pinned to a full commit SHA, with its
