@@ -9,6 +9,7 @@
   <img alt="React + FastAPI" src="https://img.shields.io/badge/UI-React%20%2B%20FastAPI-61dafb?logo=react&logoColor=white">
   <img alt="Docker Compose" src="https://img.shields.io/badge/install-Docker%20Compose-2496ed?logo=docker&logoColor=white">
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-green"></a>
+  <a href="https://scorecard.dev/viewer/?uri=github.com/Stixaly/CTIParsor"><img alt="OpenSSF Scorecard" src="https://api.scorecard.dev/projects/github.com/Stixaly/CTIParsor/badge"></a>
 </p>
 
 CTIParsor reads a threat-intelligence report — a PDF, DOCX, HTML, TXT or
