@@ -27,12 +27,20 @@ common() {
         --annotation-style line --custom-compile-command "make lock" ${LOCK_FLAGS:-} "$@"
 }
 
+# diskcache is left out of every lock, and every install is `--no-deps`, so pip
+# does not pull it back in.  pySigma declares it, but only its ATT&CK and D3FEND
+# data cache imports it (sigma/data/mitre_attack.py, mitre_d3fend.py), which
+# CTIParsor never loads; and it has an unfixed pickle-deserialisation CVE
+# (PYSEC-2026-2447).  tests/test_pattern_check.py checks the Sigma gate works
+# without it and never loads it.
+NOT_SHIPPED="--no-emit-package diskcache"
+
 # The resolution needs the PyTorch index to pick torch's +cpu build (no CUDA);
 # the lock names no index, so pip installs everything in it from PyPI, and its
 # hashes are then rewritten to PyPI's files (scripts/lock_pypi_hashes.py).
 common requirements.txt requirements-api.txt requirements-optional.txt \
     --extra-index-url "$TORCH_INDEX" --index-strategy unsafe-best-match \
-    -o requirements.lock.txt
+    $NOT_SHIPPED -o requirements.lock.txt
 python3 scripts/lock_pypi_hashes.py requirements.lock.txt
 
 TORCH="$(sed -n 's/^torch==\([^ ;]*+cpu\).*/\1/p' requirements.lock.txt)"
@@ -40,7 +48,7 @@ TORCH="$(sed -n 's/^torch==\([^ ;]*+cpu\).*/\1/p' requirements.lock.txt)"
 printf "torch==%s ; sys_platform != 'darwin'\n" "$TORCH" > /tmp/torch.in
 common /tmp/torch.in --index-url "$TORCH_INDEX" --no-deps -o requirements-torch.lock.txt
 
-common requirements-ci.txt -c requirements.lock.txt -o requirements-ci.lock.txt
+common requirements-ci.txt -c requirements.lock.txt $NOT_SHIPPED -o requirements-ci.lock.txt
 common requirements-audit.txt -o requirements-audit.lock.txt
 python3 scripts/lock_pypi_hashes.py requirements-ci.lock.txt requirements-audit.lock.txt
 

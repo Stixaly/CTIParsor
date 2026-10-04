@@ -116,7 +116,7 @@ check-docs: .secrets/db_password
 ## Scan the dependencies for known CVEs, as the CI dependency-audit job does:
 ## the exact versions of the three PyPI locks (image, CI tools, scanner), and the UI's
 ## production packages.  Accepted ones are listed in SECURITY.md.
-AUDIT_IGNORE ?= --ignore-vuln PYSEC-2026-2447
+AUDIT_IGNORE ?=
 audit:
 	docker run --rm -v "$$(pwd)":/audit -w /audit python:3.14-slim \
 	    sh -c "pip install --quiet --require-hashes -r requirements-audit.lock.txt && status=0 \
