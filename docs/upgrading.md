@@ -20,6 +20,7 @@ checkout.
 |---|---|---|
 | a host install (`setup.sh`, `python run_api.py`) on the pre-ADR-0053 single-file layout | move both stores to PostgreSQL (§2), then move to the container stack (§4) — Docker is the only supported end state (ADR-0054) | — |
 | the first compose stack (ADR-0044, before PostgreSQL) | add `CTI_DB_PASSWORD`, rebuild, migrate the reports and rules already in `cti_stix.db` (§4) | scale workers (§5) |
+| the container stack on PostgreSQL 17 (volume `pg-data`, before 2026-10-04) | move the database to PostgreSQL 18 **before** `docker compose up` (§7) | — |
 | nothing yet | follow the quick start in [docs/docker.md](docker.md) | — |
 
 Prerequisites for the container sections: Docker Engine 24+, Compose v2.24+,
@@ -178,6 +179,46 @@ rebuild the corpus from the Settings page. The sizing table is in
   pre-existing packaging problem, tracked separately.
 - The bundle's recorded git revision comes from the image build argument in
   containers (`make docker-build` sets it).
+
+## 7. Container stack: PostgreSQL 17 → 18
+
+**What changes.** The `postgres` service runs `postgres:18-alpine` on a new
+volume, `pg-data-18`, mounted at `/var/lib/postgresql`. PostgreSQL 18's image
+keeps its cluster in `/var/lib/postgresql/18/docker` and refuses to start with
+a mount at the old `/var/lib/postgresql/data` path; and a 17 data directory
+cannot be opened by 18 in any case. The old volume, `pg-data`, is no longer
+declared by compose: it is not used, and `docker compose down -v` does not
+delete it.
+
+**What you must do,** after pulling, **before** `docker compose up`:
+
+```bash
+git pull
+docker compose stop app worker            # nothing writes during the move
+scripts/upgrade_postgres_17_to_18.sh
+docker compose up -d                      # or make docker-up
+```
+
+The script starts a throwaway PostgreSQL 17 on `pg-data`, dumps the database
+with `pg_dump -Fc` into `./backups/` (kept, gitignored), starts the 18
+service on `pg-data-18`, restores, and compares the row count of every table
+between the two; it stops on any difference. Keep `CTI_DB_PASSWORD` as it
+was: the 17 cluster must accept it. It refuses to restore into an 18 database
+that already has tables (the app started on it first): rerun with `FORCE=1`
+to replace them with the dump.
+
+If you ran `docker compose up` first, the app is on an **empty** 18 database
+and your reports are still in `pg-data`: stop app and worker, run the script
+with `FORCE=1`, start again.
+
+**How to go back.** Check out the previous commit: compose mounts `pg-data`
+on `postgres:17-alpine` again, as it was at the move — what the app wrote on
+18 since is not in it. Delete `pg-data` yourself
+(`docker volume rm ctiparsor_pg-data`) once the app shows your reports on 18.
+
+**A host database** (`DATABASE_URL` outside compose) is yours to upgrade with
+PostgreSQL's own tools (`pg_upgrade`, or `pg_dump` / `pg_restore`); the
+application runs on 17 and 18 alike (CI tests 18).
 
 ## Escalation
 

@@ -60,7 +60,7 @@ flowchart LR
     app -->|URL capture| capproxy -->|public addresses only| internet
     state[("volume cti-state\nuploads, output, backups")]
     cache[("volume cti-cache\nHF models, corpora")]
-    pgdata[("volume pg-data")]
+    pgdata[("volume pg-data-18")]
     app --- state
     app --- cache
     worker --- state
@@ -74,8 +74,8 @@ flowchart LR
 |---|---|---|---|
 | `app` | `ctiparsor` (this repo's `Dockerfile`) | serves the API and the built web UI on one port; accepts uploads, pasted text and URLs; queues them; serves progress (SSE), review, coverage, export; runs the corpus rebuild from the Settings page | nothing persistent of its own |
 | `worker` | same image, `command: worker` | claims queued reports, runs each in an isolated subprocess (models loaded there), writes entities, relationships, the bundle and progress events | its lease on the jobs it runs |
-| `postgres` | `postgres:17-alpine` | **both stores**: the job store (`jobs`, `entities`, `relationships`, `review_decisions`, `progress_events`, `relationship_policy`, `model_thresholds`, `entity_overrides`, `report_figures`, `figure_reads`, `cve_cache`) and, since ADR-0053, the detection-rule corpus (`detection_rules`, `rule_bytes`, `rule_techniques`, `rule_atoms`, `rule_related`, `rule_text`) | volume `pg-data` |
-| `cti-state` volume | — | `uploads/`, `output/`, `backups/`, the private corpus overlay — no database file lives here any more | back it up alongside `pg-data` |
+| `postgres` | `postgres:18-alpine` | **both stores**: the job store (`jobs`, `entities`, `relationships`, `review_decisions`, `progress_events`, `relationship_policy`, `model_thresholds`, `entity_overrides`, `report_figures`, `figure_reads`, `cve_cache`) and, since ADR-0053, the detection-rule corpus (`detection_rules`, `rule_bytes`, `rule_techniques`, `rule_atoms`, `rule_related`, `rule_text`) | volume `pg-data` |
+| `cti-state` volume | — | `uploads/`, `output/`, `backups/`, the private corpus overlay — no database file lives here any more | back it up alongside `pg-data-18` |
 | `cti-cache` volume | — | 2.6 GB of HuggingFace models, 0.7 GB of corpus clones | rebuildable with `bootstrap` |
 | `capture-proxy` | `ubuntu/squid` | forces the URL-capture tab's Chromium through an egress filter that refuses private, loopback and link-local destinations, closing the DNS-rebinding gap Python's own URL checks leave (`docker/squid/squid.conf`) | nothing persistent |
 | `proxy` (profile) | `nginxinc/nginx-unprivileged` | TLS termination and HTTP basic auth, the only thing meant to be published on a network | certs and htpasswd you provide |

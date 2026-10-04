@@ -117,6 +117,19 @@ exports it, with OpenCTI's own id.
 
 ### Changed
 
+#### PostgreSQL 18, on a new volume (ADR-0076), 2026-10-04
+
+**Existing container stacks: run `scripts/upgrade_postgres_17_to_18.sh`
+before `docker compose up`** (docs/upgrading.md §7). The `postgres` service
+moves to `postgres:18-alpine` (Dependabot #98, whose smoke test failed: the
+18 image refuses the old `/var/lib/postgresql/data` mount). Its cluster lives
+in a new volume, `pg-data-18`, mounted at `/var/lib/postgresql`; the 17
+volume `pg-data` is left as it was and no longer declared. The script dumps
+the 17 database with a throwaway PostgreSQL 17, restores it into 18 and
+checks every table's row count; it refuses to overwrite a non-empty 18
+database without `FORCE=1`. CI's test database is 18. Dumps go to
+`./backups/`, now gitignored.
+
 #### Relationship dates keep what the source said (ADR-0063), 2026-09-29
 
 A relationship date was the model's own ISO conversion, padded to a 1st of
