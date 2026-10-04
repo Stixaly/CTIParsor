@@ -284,7 +284,8 @@ jobs:
       # pip-audit and npm audit stop at the lock files.  Grype reports the
       # vulnerabilities that have a fix, the ones a rebuild or a base-image
       # bump can remove, to Code scanning; it does not fail the build: the
-      # alerts are triaged there, like CodeQL's.
+      # alerts are triaged there, like CodeQL's.  .grype.yaml leaves out the
+      # ones SECURITY.md accepts, each for the exact package version reviewed.
       - name: Scan the image (Grype, vulnerabilities with a fix)
         id: grype
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
@@ -293,6 +294,7 @@ jobs:
           only-fixed: true
           fail-build: false
           output-format: sarif
+          config: .grype.yaml
 
       # A pull request from a fork gets no write token: its scan stays in the log.
       - name: Upload the image scan to Code scanning
