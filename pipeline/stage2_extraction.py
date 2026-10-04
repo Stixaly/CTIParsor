@@ -239,10 +239,14 @@ _REG_KEY_PATTERN = _compile_pattern(
 # Defanging — normalise all common CTI analyst conventions back to live form.
 #
 # Combined into a single regex for O(1) matching passes over large documents.
+# The blanks before a spaced "[.]" are bounded (`\s{1,16}`, not `\s+`): an
+# unbounded leading `\s+` makes backtracking `re` (no re2) rescan a run of
+# blanks from each of its positions — quadratic on report text.  No real
+# defang puts 16 blanks before its dot; past that, `[.]` alone still refangs.
 # ---------------------------------------------------------------------------
 _DEFANG_PATTERN = _compile_pattern(
     r"hxxps?://|h\[tt\]ps?://|https?\[s\]://|https?\[:\]://|meow://|fxx?p://|"
-    r"\s+\[\.\]\s+|\s+\(\.\)\s+|\[\.\]|\(\.\)|\{\.\}|\[dot\]|\(dot\)|"
+    r"\s{1,16}\[\.\]\s+|\s{1,16}\(\.\)\s+|\[\.\]|\(\.\)|\{\.\}|\[dot\]|\(dot\)|"
     r"\[:\]|\(:\)|"
     r"\[//\]|\[/\]|"
     r"\[@\]|\(@\)|\{@\}|\[at\]|\(at\)",

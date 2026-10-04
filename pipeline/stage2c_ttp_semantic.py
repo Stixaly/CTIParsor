@@ -44,6 +44,7 @@ from __future__ import annotations
 import functools
 import json
 import os
+import string
 from pathlib import Path
 
 from models.schemas import EntityType, RawEntity
@@ -299,10 +300,21 @@ _ADVISORY_VERBS: frozenset[str] = frozenset({
 # and one or more digits, as a whole word.
 _TABLE_CAPTION_PATTERN = compile_pattern(r"\bTable\s+\d+\b")
 
-# Strips a run of non-letter characters from either end of a token (leading
-# punctuation like "(Enforce" or trailing punctuation like "Restrict," or
-# "Restrict:"), so the token can be compared to _ADVISORY_VERBS cleanly.
-_NON_LETTER_EDGE = compile_pattern(r"^[^a-zA-Z]+|[^a-zA-Z]+$")
+_ASCII_LETTERS = frozenset(string.ascii_letters)
+
+
+def _strip_non_letters(token: str) -> str:
+    """`token` without the non-letters at either end (leading punctuation like
+    "(Enforce", trailing like "Restrict," or "Restrict:"), so it compares to
+    _ADVISORY_VERBS cleanly.  A loop, not `^[^a-zA-Z]+|[^a-zA-Z]+$`: on a long
+    run of punctuation backtracking `re` (no re2) tries the second branch from
+    every position of the run."""
+    start, end = 0, len(token)
+    while start < end and token[start] not in _ASCII_LETTERS:
+        start += 1
+    while end > start and token[end - 1] not in _ASCII_LETTERS:
+        end -= 1
+    return token[start:end]
 
 
 def _advisory_gate_enabled() -> bool:
@@ -326,7 +338,7 @@ def _is_advisory_noise(sentence: str) -> bool:
         return True
     tokens = sentence.split()[:8]
     for token in tokens:
-        stripped = _NON_LETTER_EDGE.sub("", token)
+        stripped = _strip_non_letters(token)
         if not stripped:
             continue
         if stripped[0].isupper() and stripped.lower() in _ADVISORY_VERBS:
