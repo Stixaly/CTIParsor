@@ -174,11 +174,13 @@ def _delete_job(job_id: str) -> bool:
         with get_conn() as conn:
             # Fetch original_filename BEFORE deleting — needed to locate output files
             row = conn.execute(
-                "SELECT original_filename FROM jobs WHERE id=?", (job_id,)
+                "SELECT id, original_filename FROM jobs WHERE id=?", (job_id,)
             ).fetchone()
             if not row:
                 return False
-            original_filename = row["original_filename"]
+            # From here on the id is the one the database holds (a uuid the
+            # server generated), never the request's string: it names files.
+            job_id, original_filename = row["id"], row["original_filename"]
 
             # Delete children first so a crash mid-delete doesn't leave orphaned rows
             # (the FK CASCADE would do this automatically when foreign_keys=ON, but

@@ -8,6 +8,33 @@ sections group by theme rather than strict semver.
 
 ### Security
 
+#### CodeQL's first findings triaged, 2026-10-04
+
+The 25 alerts CodeQL raised when it was switched on (ADR-0075):
+
+- **Job ids in file names and logs (11).** `DELETE /api/jobs/{id}` and
+  finalize built file paths and log lines from the id in the URL. Both now
+  use the id the database holds, a uuid the server generated. A request that
+  names no job never reached the files, but a `%0A` in the URL could forge a
+  log line.
+- **Corpus sync errors (1).** The Settings page received the raw exception
+  text: server paths and OS messages. It now says what failed ("download
+  failed", "not a tar archive", "git is not installed"…). The text goes to the
+  server log, on one line.
+- **`stix-viz` page (1).** It fetched and drew whatever URL `?bundle_url=`
+  named. It now only takes this app's `/api/jobs/<id>/bundle`.
+- **Tests (9).** CodeQL no longer scans `tests/`: it is not shipped, and its
+  `"evil.com" in urls` asserts and `(a+)+$` are the attacker input the tests
+  are for.
+- **Polynomial regexes (3): false positives.** CodeQL cannot tell which
+  regex `compile_pattern` returns, so it flagged every one of them at three
+  call sites that use other, linear regexes. All 12 involved compile with
+  re2 in the image (checked). `requirements-api.txt` still told people to
+  `pip install re2`, the abandoned package that does not build on Python
+  3.12+, which leaves the stdlib fallback in place. It now points to
+  google-re2.
+
+
 #### A verifiable supply chain (ADR-0075), 2026-10-03
 
 The Dockerfile's base images are pinned by digest, like compose's. A blocking

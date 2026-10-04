@@ -22,14 +22,26 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
+from api.logging_config import get_logger
 from pipeline.regex_safety import compile_pattern
 from pipeline.security import is_contained
 from pipeline.web_capture import CaptureError, validate_url
+
+logger = get_logger(__name__)
 
 MANIFEST_NAME = ".sync.json"     # written into `path` after a tarball fetch (ADR-0015 §5)
 _USER_AGENT = "cti-to-stix/1.0 (detection corpus sync)"
 _CHUNK = 1 << 20
 _MD5_RE = compile_pattern(r"^[0-9a-f]{32}$")
+
+
+def _failed(what: str, exc: BaseException) -> tuple[bool, str]:
+    """A failed sync as the API returns it to the browser: what failed, not the
+    exception's text — server paths, resolver and OS internals go to the log
+    (CodeQL py/stack-trace-exposure)."""
+    text = str(exc).replace("\r", "\\r").replace("\n", "\\n")   # one log line: the URL is the caller's
+    logger.warning(f"[corpora] {what}: {text}")
+    return False, f"{what} (details in the server log)"
 
 
 class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -181,7 +193,7 @@ def fetch_tarball(corpus: dict, *, timeout: int = 900) -> tuple[bool, str]:
     try:
         validate_url(url)
     except CaptureError as e:
-        return False, f"invalid tarball URL: {e}"
+        return _failed("invalid tarball URL", e)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     staging = path.parent / f".{path.name}.staging"
@@ -196,7 +208,7 @@ def fetch_tarball(corpus: dict, *, timeout: int = 900) -> tuple[bool, str]:
         try:
             size = _download(url, archive, timeout=timeout)
         except (urllib.error.URLError, OSError, TimeoutError, ValueError) as e:
-            return False, f"download failed: {e}"
+            return _failed("download failed", e)
 
         sha256_obj = hashlib.sha256()
         md5_obj = hashlib.md5(usedforsecurity=False)   # integrity check; FIPS-safe
@@ -218,7 +230,7 @@ def fetch_tarball(corpus: dict, *, timeout: int = 900) -> tuple[bool, str]:
         try:
             tar = tarfile.open(archive, mode="r:*")
         except (tarfile.TarError, OSError, EOFError) as e:
-            return False, f"not a tar archive: {e}"
+            return _failed("not a tar archive", e)
 
         with tar:
             members, skipped = _safe_members(tar, staging)
@@ -243,7 +255,7 @@ def fetch_tarball(corpus: dict, *, timeout: int = 900) -> tuple[bool, str]:
                 shutil.rmtree(path)
             staging.rename(path)
         except OSError as e:
-            return False, f"could not replace {path}: {e}"
+            return _failed("could not replace the previous copy", e)
 
         detail = f"fetched {size:,} bytes, {len(members)} files"
         if skipped > 0:
@@ -273,8 +285,10 @@ def sync_corpus(corpus: dict, *, timeout: int = 900) -> tuple[bool, str]:
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
                               env={**os.environ, **GIT_ENV})
-    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
-        return False, str(e)
+    except FileNotFoundError as e:
+        return _failed("git is not installed", e)
+    except subprocess.TimeoutExpired as e:
+        return _failed(f"git did not finish within {timeout} s", e)
     if proc.returncode != 0:
         return False, (proc.stderr or proc.stdout or "git failed").strip()[:1000]
     return True, (proc.stdout or proc.stderr or "ok").strip()[:1000]

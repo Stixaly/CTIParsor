@@ -8,6 +8,7 @@ filetype>=1.2.0
 # PostgreSQL driver for the job store, used only when DATABASE_URL is set (ADR-0045).
 # Upper bound: psycopg 4 is not released; bump deliberately after `make test-fast`.
 psycopg[binary]>=3.2,<4
-# re2 is an optional performance dep (ReDoS protection) that requires system headers.
-# Install manually after: apt install libre2-dev && pip install re2
-# The pipeline falls back to stdlib `re` if it is absent.
+# ReDoS protection (ADR-0049) is google-re2, in requirements-optional.txt: prebuilt
+# wheels, no system headers (the PyPI package plainly named `re2` is abandoned and
+# does not build on Python 3.12+). The image and CI install it; without it the
+# pipeline falls back to stdlib `re`, whose backtracking report text can exploit.
