@@ -8,6 +8,27 @@ sections group by theme rather than strict semver.
 
 ### Security
 
+#### What OpenSSF Scorecard found, 2026-10-04
+
+The first Scorecard run scored 6.9/10. This entry covers its two checks that
+code can fix.
+
+- **Vulnerabilities: 5.** Three were not in the shipped versions:
+  - The lock already installs pytest 9.1.1, python-dotenv 1.2.3 and
+    sentencepiece 0.2.2. But `requirements.txt` still allowed the
+    vulnerable releases (`>=8.0.0`, `>=1.0.0`, `>=0.1.99`), and Scorecard
+    reads the ranges. The minimums are now the fixed releases (9.0.3, 1.2.2,
+    0.2.1); the lock does not change.
+  - The other two have no fix. diskcache was already accepted. braces is a
+    build-time-only dependency of the UI, now accepted in SECURITY.md.
+- **CPython 3.14.8: 3 CVEs reported by Grype, all unreachable and accepted.**
+  - Two are fixed only in 3.15.
+  - The third, the `tarfile` link fallback, is fixed in 3.12.15 but not yet
+    in a 3.14 release. The corpus sync never extracts a link.
+- **Download-then-run: 3.** These were false positives: smoke-test and
+  offline-check scripts piped `curl` of the local API's JSON into
+  `python3 -c`. They now fetch first, then parse.
+
 #### Python 3.14 (ADR-0079), 2026-10-04
 
 The image, CI and the lock move from Python 3.12.15 to 3.14.8.
