@@ -223,7 +223,7 @@ the [README](../README.md#how-it-works); this page is the detail.
 ┌─────────────────────────────▼────────────────────────────────────────┐
 │  Stage 5 — VALIDATION & EXPORT                         (offline ✅)  │
 │  stix2 library validates every object at construction time           │
-│  stix2-validator JSON-schema check (when schemas installed)          │
+│  stix2-validator JSON-schema check (schemas ship with the repo)      │
 │  Valid bundle → output/{report}_bundle.json                         │
 │  Invalid bundle → output/{report}_bundle_invalid.json (for debug)   │
 └──────────────────────────────────────────────────────────────────────┘

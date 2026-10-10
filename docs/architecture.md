@@ -58,8 +58,8 @@ flowchart LR
     hostllm["LLM on the host\nLM Studio, vLLM, Ollama"]
     app -.->|host.docker.internal| hostllm
     worker -.->|host.docker.internal| hostllm
-    worker -->|LLM APIs, HuggingFace, CVE, STIX schemas| internet((internet))
-    app -->|corpus sync, and on finalize LLM, CVE, STIX schemas| internet
+    worker -->|LLM APIs, HuggingFace, CVE| internet((internet))
+    app -->|corpus sync, and on finalize LLM, CVE| internet
     bootstrap -->|HuggingFace, corpora| internet
     app -->|URL capture| capproxy -->|public addresses only| internet
     state[("volume cti-state\nuploads, output, backups")]
@@ -165,21 +165,17 @@ outside the host reaches `postgres`: it publishes no port.
 | `huggingface.co` | `bootstrap`; `worker`, if the cache lacks a model | once per model: `all-MiniLM-L6-v2`, `CyNER-2.0-DeBERTa-v3-base`, `gliner_large-v2.1` | `HF_HUB_OFFLINE=1`, once the cache is filled |
 | `github.com` and `rules.emergingthreats.net`: the corpora listed in `detection_corpora.yaml` | `bootstrap`; `app` (Settings → Redownload) | on demand | `bootstrap --no-corpora` |
 | `cve.circl.lu` | `worker` (Stage 2f); `app` (finalize) | for a CVE not yet in the cache | `CVE_ENRICHMENT`, off by default |
-| `github.com`: the STIX schema archive (ADR-0069) | `worker`; `app` (finalize) | every Stage 5 run, see below | nothing today |
 | any public web address an analyst submits | `app`'s Chromium, through `capture-proxy` | the URL tab | `CTI_INSTALL_CAPTURE=false` |
 | `registry.ollama.ai` | `ollama` | `ollama pull` | — |
 
 Image pulls (GHCR, Docker Hub) are made by the Docker daemon, not by a
 container.
 
-**The STIX schemas are fetched on every Stage 5 run.** The wheel of
-stix2-validator 3.3.1 carries no JSON schema, and the image does not add
-them. Stage 5 downloads the archive to install them, and the install fails,
-because `/opt/venv` is read-only. A marker file, `/app/.stix2_schemas_missing`,
-should then stop the retries, but `/app` is read-only too. So the next
-report, or the next finalize, downloads the archive again, and every bundle
-is `unverified` (ADR-0069). Where outbound traffic is dropped rather than
-refused, each attempt waits up to its 30 s timeout.
+**Stage 5 downloads nothing.** The STIX JSON schemas ship with the
+repository (`pipeline/data/stix2_json_schemas/`), and the image installs them
+at build time (ADR-0069, amendment of 2026-10-10). Until then, Stage 5
+fetched them from GitHub on every run, could not install them on the
+read-only filesystem, and left every bundle `unverified`.
 
 **Why one store now.** ADR-0045 moved the per-report tables to PostgreSQL so
 several processes could write them and the API could be stateless, while

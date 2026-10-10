@@ -119,6 +119,13 @@ WORKDIR /app
 COPY . /app/
 COPY --from=ui /ui/dist /app/frontend/dist
 
+# The STIX 2.1 JSON schemas Stage 5 validates against, into stix2-validator's
+# package directory: its wheel ships without them, and at runtime the
+# filesystem is read-only.  From the repository's own copy
+# (pipeline/data/stix2_json_schemas/): nothing is downloaded, and the build
+# fails if they do not land (ADR-0069, amendment of 2026-10-10).
+RUN python -c "import sys; from pipeline.stage5_validation import install_schemas; sys.exit(0 if install_schemas() else 1)"
+
 RUN install -m 0755 /app/docker/entrypoint.sh /usr/local/bin/entrypoint.sh \
     && mkdir -p /app/state /app/cache \
     # a named volume mounted on an empty path copies the owner from the image,

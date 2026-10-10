@@ -3,6 +3,9 @@
 **Status:** Accepted (documented alongside implementation)
 **Date:** 2026-06-19
 **Deciders:** maintainer
+**Amended by:** ADR-0069's amendment of 2026-10-10. The JSON schemas ship with
+the repository, so the strict `stix2-validator` runs, and the
+provenance-stamped bundle validates (`tests/test_stage5.py`).
 
 > Records three related trust/provenance features that shipped together. Inspired
 > by the Operation Desert Hydra CTI methodology (evidence grading, source markings).

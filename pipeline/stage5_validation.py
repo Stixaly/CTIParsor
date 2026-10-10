@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import io
 import os
+import shutil
 import tempfile
-import urllib.request
-import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -13,28 +11,24 @@ from stix2validator import ValidationOptions, print_results, validate_string
 
 # Initialize logging
 from api.logging_config import get_logger
-from pipeline.security import is_contained
 
 logger = get_logger(__name__)
 
-# Sentinel written to the project root the first time schemas are confirmed
-# missing AND the auto-restore failed.  Subsequent subprocess invocations
-# check the file and skip the warning+restore attempt without re-checking.
-_PROJECT_ROOT  = Path(__file__).parent.parent
-_WARN_SENTINEL = _PROJECT_ROOT / ".stix2_schemas_missing"
-
-# GitHub archive of the OASIS STIX 2.1 JSON schema repository, pinned to one
-# commit (master on 2026-01-19).  It used to be the moving master branch, so
-# two installs restored on different days could validate against different
-# schemas.  The archive is a ZIP of the full repo; only schemas/ is extracted.
+# The OASIS STIX 2.1 JSON schemas, carried by this repository: the
+# stix2-validator 3.3.x wheels ship without them (the git submodule that holds
+# them is missing from the wheel).  `schemas/` of
+# oasis-open/cti-stix2-json-schemas at one commit (master on 2026-01-19),
+# unchanged, with its BSD-3-Clause LICENSE (pipeline/data/stix2_json_schemas/).
+# The image installs them into the package at build time (Dockerfile); another
+# install gets them at its first Stage 5 run (install_schemas).  Nothing is
+# downloaded: Stage 5 used to fetch them from GitHub, and in the read-only
+# container it fetched them again on every run without ever installing them
+# (ADR-0069, amendment of 2026-10-10).
 SCHEMA_COMMIT = "9af1db41b7b86c06324f899649ae83480134f66e"
-_SCHEMA_ZIP_URL = (
-    "https://github.com/oasis-open/cti-stix2-json-schemas"
-    f"/archive/{SCHEMA_COMMIT}.zip"
-)
-# Prefix inside the ZIP archive where the schemas live.
-# cti-stix2-json-schemas-<commit>/schemas/{common,observables,sdos,sros}/*.json
-_ZIP_SCHEMA_PREFIX = f"cti-stix2-json-schemas-{SCHEMA_COMMIT}/schemas/"
+VENDORED_SCHEMAS = Path(__file__).parent / "data" / "stix2_json_schemas" / "schemas"
+
+# install_schemas() failing is said once per process, not once per bundle.
+_missing_reported = False
 
 VALIDATED = "validated"
 INVALID = "invalid"
@@ -77,98 +71,42 @@ def _schema_dir() -> Path:
     return Path(_v.__file__).parent / "schemas-2.1" / "schemas"
 
 
-def _schemas_installed() -> bool:
-    """Return True if stix2-validator's bundled JSON schemas are present.
-
-    Uses rglob (recursive) because the JSON files live in subdirectories
-    (common/, observables/, sdos/, sros/) — a non-recursive glob("*.json")
-    always returns empty even when schemas are correctly installed.
-    """
-    d = _schema_dir()
+def _has_schemas(d: Path) -> bool:
+    """True if `d` holds JSON schemas.  Recursive: they live in subdirectories
+    (common/, observables/, sdos/, sros/)."""
     return d.is_dir() and any(d.rglob("*.json"))
 
 
-def _try_restore_schemas() -> bool:
+def _schemas_installed() -> bool:
+    """Return True if stix2-validator's bundled JSON schemas are present."""
+    return _has_schemas(_schema_dir())
+
+
+def install_schemas(dest: Path | None = None) -> bool:
+    """Copy the vendored schemas into stix2-validator's package directory.
+
+    Returns True when the schemas are in place afterwards; never raises.  The
+    tree is copied next to its destination, then renamed into place: several
+    worker subprocesses can run this at once, and none ever reads a
+    half-copied directory.  The one whose rename loses finds the winner's
+    copy.  Local files only: nothing is downloaded.
     """
-    Download the full OASIS cti-stix2-json-schemas archive from GitHub and
-    extract the schemas/ subtree into the stix2validator package directory.
-
-    This is a one-time self-healing step for the packaging bug in
-    stix2validator 3.3.x where the git-submodule schemas are absent from the
-    PyPI wheel.
-
-    Layout after restore:
-        {schema_dir}/common/core.json
-        {schema_dir}/common/cyber-observable-core.json
-        {schema_dir}/observables/ipv4-addr.json
-        {schema_dir}/sdos/malware.json
-        ...
-
-    Returns True if at least one schema was extracted successfully.
-    """
-    dest = _schema_dir()
+    dest = dest or _schema_dir()
+    if _has_schemas(dest):
+        return True
+    staging: Path | None = None
     try:
-        logger.info(
-            f"Downloading STIX 2.1 JSON schemas from OASIS GitHub "
-            f"({_SCHEMA_ZIP_URL})…"
-        )
-        with urllib.request.urlopen(_SCHEMA_ZIP_URL, timeout=30) as resp:  # noqa: S310
-            zip_bytes = resp.read()
-
-        extracted = 0
-        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-            for entry in zf.namelist():
-                if not entry.startswith(_ZIP_SCHEMA_PREFIX):
-                    continue
-                rel = entry[len(_ZIP_SCHEMA_PREFIX):]   # e.g. "common/core.json"
-                if not rel or not rel.endswith(".json"):
-                    continue
-                # `_SCHEMA_ZIP_URL` is a fixed, trusted GitHub archive URL — but a
-                # Zip Slip guard on the extract is what actually makes that true,
-                # not the URL being hardcoded today. `entry` is untrusted archive
-                # content the moment it is used to build a filesystem path: the
-                # prefix/suffix checks above accept `…/schemas/../../../etc/x.json`
-                # just as readily as a real schema file. `is_contained`
-                # (pipeline/security.py) is the same check pipeline/detection/sync.py
-                # makes for corpus tarballs; this path extracts a zip instead of a
-                # tar but needs the identical containment check before any write.
-                out = (dest / rel).resolve()
-                if not is_contained(out, dest):
-                    logger.warning(f"Skipping unsafe schema archive entry: {entry!r}")
-                    continue
-                out.parent.mkdir(parents=True, exist_ok=True)
-                # Atomic write: stage to a temp file in the same directory, then
-                # os.replace() into place.  Multiple worker subprocesses can hit
-                # this self-heal concurrently; a plain write_bytes() would let one
-                # process read a half-written schema another is still writing.
-                # os.replace() is atomic on the same filesystem, so a reader sees
-                # either the old absent file or the complete new one — never a
-                # torn JSON document.
-                fd, tmp = tempfile.mkstemp(dir=str(out.parent), suffix=".tmp")
-                try:
-                    with os.fdopen(fd, "wb") as fh:
-                        fh.write(zf.read(entry))
-                    os.replace(tmp, out)
-                except BaseException:
-                    try:
-                        os.unlink(tmp)
-                    except OSError:
-                        pass
-                    raise
-                extracted += 1
-
-        if extracted:
-            logger.info(
-                f"stix2-validator schemas restored: "
-                f"{extracted} JSON files written to {dest}"
-            )
-        return extracted > 0
-
-    except Exception as exc:
-        logger.debug(
-            f"Schema auto-restore failed ({type(exc).__name__}): {exc}"
-        )
-        return False
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(prefix=".schemas-", dir=dest.parent))
+        shutil.copytree(VENDORED_SCHEMAS, staging, dirs_exist_ok=True)
+        os.replace(staging, dest)    # onto a missing or empty directory only
+        staging = None
+    except OSError as exc:
+        logger.debug(f"Schema install into {dest} failed ({type(exc).__name__}): {exc}")
+    finally:
+        if staging is not None:
+            shutil.rmtree(staging, ignore_errors=True)
+    return _has_schemas(dest)
 
 
 def validate_and_export(bundle: stix2.Bundle, output_path: str) -> ValidationResult:
@@ -194,39 +132,20 @@ def validate_and_export(bundle: stix2.Bundle, output_path: str) -> ValidationRes
     """
     bundle_json = bundle.serialize(pretty=True)
 
-    if not _schemas_installed():
-        # ── Missing-schemas recovery path ────────────────────────────────────
-        # Only warn + attempt recovery once per server installation (not once
-        # per job).  The sentinel file persists across subprocess restarts.
-        if not _WARN_SENTINEL.exists():
-            logger.warning(
-                "stix2-validator schemas not found in the installed package "
-                "(packaging bug in stix2-validator 3.3.x — git submodule missing from PyPI wheel). "
-                "Attempting auto-restore from OASIS GitHub…"
+    if not _schemas_installed() and not install_schemas():
+        # Only where the package directory is read-only and lacks them: an image
+        # built without the Dockerfile's install step.
+        global _missing_reported
+        if not _missing_reported:
+            _missing_reported = True
+            logger.error(
+                f"STIX JSON schemas missing from {_schema_dir()} and not installable "
+                f"from {VENDORED_SCHEMAS}: bundles are 'unverified', checked by the "
+                "stix2 library only.  The Dockerfile installs them at build time: "
+                "rebuild the image."
             )
-            restored = _try_restore_schemas()
-            if restored and _schemas_installed():
-                logger.info(
-                    "Schema restore succeeded — full JSON-schema validation now active."
-                )
-                # Fall through to the validation block below
-            else:
-                logger.warning(
-                    "Schema auto-restore failed. "
-                    "Falling back to stix2-library-only validation (still catches most errors). "
-                    "To restore full validation manually:\n"
-                    "  pip install 'git+https://github.com/oasis-open/cti-stix-validator'"
-                )
-                try:
-                    _WARN_SENTINEL.touch()
-                except OSError:
-                    pass
-                _write_file(bundle_json, output_path)
-                return ValidationResult(UNVERIFIED)
-        else:
-            # Sentinel present — schemas still missing, not checked again
-            _write_file(bundle_json, output_path)
-            return ValidationResult(UNVERIFIED)
+        _write_file(bundle_json, output_path)
+        return ValidationResult(UNVERIFIED)
 
     # ── Full JSON-schema validation ───────────────────────────────────────────
     options = ValidationOptions(version="2.1")

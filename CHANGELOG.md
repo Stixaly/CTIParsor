@@ -6,6 +6,33 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Fixed
+
+#### Stage 5 validates bundles in the container, and downloads nothing, 2026-10-10
+
+The stix2-validator 3.3.1 wheel carries no JSON schema. Stage 5 downloaded
+them from GitHub when it found them missing. In the container, this went
+wrong:
+
+- the install failed, because `/opt/venv` is read-only;
+- the marker that should stop the retries could not be written either;
+- so every report and every finalize downloaded the archive again;
+- every bundle the image produced was `unverified`.
+
+**The schemas now ship with the repository**, in
+`pipeline/data/stix2_json_schemas/`. They are the same pinned commit
+(`9af1db4`), unchanged, with their BSD-3-Clause licence.
+
+- The image installs them at build time, and the build fails without them.
+  The Docker smoke test checks they are there.
+- Another install gets them from the same copy at its first Stage 5 run.
+- Nothing is downloaded, and there is no marker file any more.
+
+Stage 4's bundles pass full validation, with the network blocked and their
+`x_` properties included (TESTING.md gap h, done). A bundle the schemas
+refuse is now `invalid` rather than `unverified`. It is still stored
+(ADR-0069, amendment).
+
 ### Documentation
 
 #### The containers: their code, their ports, their traffic, 2026-10-10

@@ -297,6 +297,17 @@ else
     fail "yara-python, pysigma and parsuricata import"
 fi
 
+# ── Step 10c: Stage 5's JSON schemas are in the image ─────────────────────────
+# stix2-validator's wheel ships without them; the Dockerfile installs the
+# repository's copy into the package.  Without them every bundle is
+# 'unverified' (ADR-0069, amendment of 2026-10-10).
+info "Checking the STIX JSON schemas..."
+if in_app python -c "import sys; from pipeline.stage5_validation import _schemas_installed; sys.exit(0 if _schemas_installed() else 1)" 2>/dev/null; then
+    pass "STIX JSON schemas installed: Stage 5 validates bundles in full"
+else
+    fail "STIX JSON schemas installed"
+fi
+
 # ── Step 11: google-re2 available (ADR-0049) ──────────────────────────────────
 info "Checking re2..."
 if in_app python -c "import re2" 2>/dev/null; then
