@@ -222,7 +222,7 @@ def paired_bootstrap(a: list[Counts], b: list[Counts], metric: str = "f1",
     is not better (a one-sided p-value estimate)."""
     if len(a) != len(b) or not a:
         raise ValueError("paired bootstrap needs the same, non-empty document list on both sides")
-    rng = random.Random(seed)
+    rng = random.Random(seed)  # noqa: S311 — a reproducible resample, not a secret
     idx = range(len(a))
 
     def value(counts: list[Counts], sample: Iterable[int]) -> float:

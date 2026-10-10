@@ -47,7 +47,7 @@ WINDOWS_HINTS: tuple[str, ...] = (
     "%programdata%", "appdata/roaming", "program files",
 )
 LINUX_HINTS: tuple[str, ...] = (
-    "/etc/", "/usr/", "/var/", "/tmp/", "/bin/", "/sbin/", "/dev/",
+    "/etc/", "/usr/", "/var/", "/tmp/", "/bin/", "/sbin/", "/dev/",  # noqa: S108 — a path hint, not a file
     "/opt/", "/home/", ".sh", ".elf", "/proc/",
 )
 MACOS_HINTS: tuple[str, ...] = (

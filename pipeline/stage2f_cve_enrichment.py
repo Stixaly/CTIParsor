@@ -49,7 +49,7 @@ def _fetch_from_circl(cve_id: str) -> dict | None:
     req = urllib.request.Request(url, headers={"User-Agent": "CTIParsor/1.0"})
 
     try:
-        with urllib.request.urlopen(req, timeout=5) as response:
+        with urllib.request.urlopen(req, timeout=5) as response:  # noqa: S310 — https, a checked CVE id
             if response.status != 200:
                 return None
             body = json.loads(response.read().decode())

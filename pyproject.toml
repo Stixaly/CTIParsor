@@ -13,22 +13,29 @@ extend-exclude = ["cache", "corpora", "offline", "data", "frontend"]
 # E501 (line length), despite `line-length` being set right above.  That gap let
 # an unsorted import block and a 147-column line reach a commit while local
 # linting reported clean.
-# S110/S112 (an exception swallowed by `pass` or `continue`): the October 2026
-# audit found three such handlers dropping Indicators and CourseOfActions from
-# Stage 4 without a trace (B 8.1.9).  A handler now logs, records or names a
-# narrower exception; the few left say why on a `noqa: S110` line.  Blind
-# `except Exception` that logs (BLE001, ~215 sites) is not enforced.
-select = ["E", "F", "W", "I", "S110", "S112"]
+# S (flake8-bandit), since 2026-10-10 (ADR-0075 "Not done"): every finding in
+# shipped code was fixed or says why on a `noqa: Sxxx — reason` line.  S110/S112
+# came first: the October 2026 audit found three handlers dropping Indicators
+# and CourseOfActions from Stage 4 without a trace (B 8.1.9).
+# S608 (SQL built from a string) is CodeQL's job: py/sql-injection follows the
+# data from its source, where S608 flags every f-string — on 2026-10-10 its 31
+# shipped sites all interpolated `?` lists or identifiers fixed in the code.
+# Blind `except Exception` that logs (BLE001, 126 sites) is not enforced.
+select = ["E", "F", "W", "I", "S"]
+ignore = ["S608"]
 
 [tool.ruff.lint.per-file-ignores]
 # E402 (module-level import not at top of file): intentional throughout this
 # codebase -- logging must be configured before other modules are imported,
 # so setup_logging()/get_logger() calls precede subsequent imports.
 "*.py" = ["E402"]
-# One-off audit and migration scripts, and tests, where a swallowed exception
-# is part of what is checked: the rule is for code that ships.
-"scripts/**" = ["E402", "S110", "S112"]
-"tests/**" = ["E402", "S110", "S112"]
+# One-off audit and migration scripts, tests and fuzz targets, where an assert
+# or a swallowed exception is part of what is checked: S is for code that ships.
+"scripts/**" = ["E402", "S"]
+"tests/**" = ["E402", "S"]
+"fuzz/**" = ["S"]
+# Vendored from OpenCTI as it is (docs/dependencies.md): its asserts stay.
+"pipeline/detection/opencti_snort/**" = ["S101"]
 
 [tool.mypy]
 # A bare `mypy` checks what CI checks.

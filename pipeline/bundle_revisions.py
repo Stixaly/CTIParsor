@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -45,12 +46,21 @@ def git_rev_of(run_config_json: str | None) -> str | None:
     return None
 
 
+_SHA = re.compile(r"[0-9a-f]{7,40}")
+
+
 def is_ancestor(rev: str, descendant: str, repo_root: Path | None = None) -> bool | None:
-    """Check if rev is an ancestor of descendant using git merge-base."""
+    """Check if rev is an ancestor of descendant using git merge-base.
+
+    Both must be commit ids: a stored revision is data, and one starting with
+    `-` would reach git as an option.  Anything else is "unknown" (None).
+    """
+    if not (_SHA.fullmatch(rev or "") and _SHA.fullmatch(descendant or "")):
+        return None
     cwd = repo_root or Path(__file__).resolve().parent.parent
     try:
-        result = subprocess.run(
-            ["git", "merge-base", "--is-ancestor", rev, descendant],
+        result = subprocess.run(  # noqa: S603 — two commit ids checked above
+            ["git", "merge-base", "--is-ancestor", rev, descendant],  # noqa: S607 — git from PATH
             cwd=cwd,
             timeout=10,
             capture_output=True,

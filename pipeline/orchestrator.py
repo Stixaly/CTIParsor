@@ -1031,7 +1031,8 @@ class _Run:
 
         t0 = time.monotonic()
         source_hash, source_bytes = load_file_bytes(self.doc.file_path)
-        assert r.llm_result is not None   # enrich() always sets it
+        if r.llm_result is None:   # enrich() always sets it
+            raise RuntimeError("Stage 4 reached without a Stage 3 result")
         from pipeline.bundle_ledger import MappingLedger
         from pipeline.named_entities import with_named_entities
         ledger = MappingLedger()
@@ -1154,7 +1155,8 @@ def run_document(document: Document, options: RunOptions | None = None,
     run.extract()
     run.hooks.check_timeout()
     run.enrich()
-    assert run.r.llm_result is not None
+    if run.r.llm_result is None:   # enrich() always sets it
+        raise RuntimeError("Stage 3 left no result")
     run.hooks.extraction_ready(run.r.entities, run.r.llm_result, run.r.text)
     run.map_to_stix()
     run.validate()

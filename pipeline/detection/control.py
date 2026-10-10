@@ -83,7 +83,7 @@ UBIQUITOUS_EXACT_PATHS: frozenset[str] = frozenset({
     "/etc/crontab", "/etc/resolv.conf", "/etc/fstab", "/etc/issue",
     "/dev/null", "/dev/tcp", "/dev/udp", "/dev/zero", "/dev/random",
     "/proc/self", "/proc/version", "/proc/cpuinfo", "/proc/mounts",
-    "/tmp", "/var/tmp", "/var/log", "/usr/bin", "/usr/sbin", "/bin", "/sbin",
+    "/tmp", "/var/tmp", "/var/log", "/usr/bin", "/usr/sbin", "/bin", "/sbin",  # noqa: S108 — paths rules name
     "/var/log/auth.log", "/var/log/syslog", "/var/log/messages",
     "/var/log/secure", "/var/log/wtmp", "/var/log/btmp", "/var/log/lastlog",
     "/var/log/cron", "/var/log/maillog", "/var/log/kern.log",
@@ -157,7 +157,7 @@ UBIQUITOUS_DOMAINS: frozenset[str] = frozenset({
 #: wildcard/broadcast forms. RFC1918 ranges are NOT here -- an internal pivot
 #: target is real incident content (ADR-0014).
 UBIQUITOUS_IPS: frozenset[str] = frozenset({
-    "0.0.0.0", "255.255.255.255", "8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1",
+    "0.0.0.0", "255.255.255.255", "8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1",  # noqa: S104 — not a bind
     "9.9.9.9", "149.112.112.112", "208.67.222.222", "208.67.220.220",
     "64.6.64.6", "77.88.8.8", "114.114.114.114",
 })

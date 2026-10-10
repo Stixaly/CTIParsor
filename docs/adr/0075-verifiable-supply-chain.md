@@ -84,8 +84,28 @@ finds none in the UI's production packages.
   to torch (`--index-strategy unsafe-best-match` today lets any package
   resolve from it). Needs a full image build to verify; scheduled after the
   2026-10-03 evaluation runs, which share the machine.
-- ruff's full `S` (bandit) set and `BLE001` (blind except, ~215 sites);
-  S110/S112 are enforced since lot 0's D10 extension.
+- ~~ruff's full `S` (bandit) set~~: enforced on shipped code since
+  2026-10-10, with three exceptions.
+  - S608 is left to CodeQL's `py/sql-injection`, which follows the data. Its
+    31 sites all interpolated `?` lists or identifiers fixed in the code.
+  - Tests, scripts and fuzz targets are exempt.
+  - The vendored Snort parser keeps its asserts.
+
+  Four findings were real hardening:
+  - the worker's liveness file is opened without following a symlink;
+  - `git merge-base` receives only commit ids;
+  - the vision providers' URLs must be http(s);
+  - two asserts became explicit errors.
+
+  The other findings carry a `noqa: Sxxx — reason`.
+- `BLE001` (blind `except Exception`, 126 sites in shipped code): not
+  enforced. Surveyed on 2026-10-10:
+  - 76 log the error;
+  - 9 record it in the result;
+  - 23 convert it (HTTPException) or are justified `pass`es;
+  - 18 return a fallback without logging.
+
+  Only those 18 can hide a failure; they are the ones to review.
 
 ## Consequences
 

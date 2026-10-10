@@ -12,6 +12,7 @@ import urllib.request
 import zlib
 from dataclasses import dataclass
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 from pipeline.env_flags import env_float
 from pipeline.vllm_options import vllm_extra_body
@@ -193,12 +194,20 @@ class FigureRead:
     error: str | None = None
 
 
+def _web_url(url: str) -> str:
+    """`url` if it is http(s).  The base URLs come from the operator's settings
+    (OLLAMA_BASE_URL, VLLM_BASE_URL); a `file:` one must not read local files."""
+    if urlsplit(url).scheme not in ("http", "https"):
+        raise ValueError(f"vision provider URL must be http(s): {url[:80]!r}")
+    return url
+
+
 def _http_json(url: str, payload: dict, headers: dict[str, str], timeout: float) -> dict:
     """POST JSON and return the decoded response."""
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    req = urllib.request.Request(_web_url(url), data=data, headers=headers, method="POST")  # noqa: S310 — http(s)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 — http(s), _web_url
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", "replace")[:500]
@@ -207,9 +216,9 @@ def _http_json(url: str, payload: dict, headers: dict[str, str], timeout: float)
 
 def _http_get_json(url: str, headers: dict[str, str], timeout: float) -> dict:
     """GET JSON and return the decoded response."""
-    req = urllib.request.Request(url, headers=headers, method="GET")
+    req = urllib.request.Request(_web_url(url), headers=headers, method="GET")  # noqa: S310 — http(s), _web_url
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 — http(s), _web_url
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", "replace")[:500]

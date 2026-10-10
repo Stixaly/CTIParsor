@@ -8,6 +8,31 @@ sections group by theme rather than strict semver.
 
 ### Security
 
+#### ruff's bandit rules (S) on shipped code, 2026-10-10
+
+ADR-0075's "Not done" item. Every finding in shipped code was fixed or now
+says why on a `noqa: Sxxx — reason` line. Four were worth fixing:
+
+- **The worker's liveness file is never followed through a symlink.**
+  `touch_alive` opens it with `O_NOFOLLOW`: on a host install `/tmp` is
+  shared, and another user's link at that name made the worker create its
+  target.
+- **`git merge-base` receives only commit ids.** A stored bundle revision
+  shaped like an option (`--output=…`) used to reach git.
+- **The vision providers' URLs must be http(s).** A `file:` base URL in the
+  settings could read local files.
+- **Two `assert`s in the orchestrator became explicit errors**: `python -O`
+  drops asserts.
+
+Not enforced:
+- S608 (SQL built from a string) is left to CodeQL's `py/sql-injection`.
+  All 31 sites interpolated `?` lists or identifiers fixed in the code.
+- Tests, scripts and fuzz targets are exempt.
+- `BLE001` stays off. Of its 126 sites, 18 return a fallback without
+  logging: those are the ones to review (ADR-0075).
+
+### Security
+
 #### The UI's build tools: source-map-js and postcss-selector-parser, 2026-10-10
 
 Dependabot raised two alerts, and Scorecard's scanner found the same two in

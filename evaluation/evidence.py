@@ -87,7 +87,7 @@ def support_sample(rows: list[EvidenceRow], texts: dict[str, str], path: Path, n
         return (entry or {}).get("name", "")
 
     pool = [r for r in rows if r.located]
-    rng = random.Random(seed)
+    rng = random.Random(seed)  # noqa: S311 — a reproducible sample, not a secret
     picked = rng.sample(pool, min(n, len(pool)))
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as f:
