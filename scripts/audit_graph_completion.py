@@ -16,6 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from api.db import get_conn, init_db
+from pipeline.decisions import SHIPS
 from pipeline.stage4b_graph_completion import complete_graph
 
 _TYPE_MAP = {
@@ -40,7 +41,7 @@ def load_job_graph(conn, job_id: str) -> list:
     # Step A — entities
     cur = conn.execute(
         "SELECT DISTINCT value, entity_type, mitre_id FROM entities "
-        "WHERE job_id=? AND (accepted IS NULL OR accepted=1)",
+        "WHERE job_id=? AND " + SHIPS,
         (job_id,),
     )
     for row in cur.fetchall():

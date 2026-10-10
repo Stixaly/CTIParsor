@@ -219,7 +219,8 @@ candidates and `ttp_review`, so the error review can split a miss into
   `TTP_RETRIEVAL_EXCLUDE_CITED` so a test run never retrieves from MITRE
   examples written from AnnoCTR reports.
 * **Not done:** a review UI for `ttp_review` (kept in the result and the
-  evaluation record, not yet persisted or shown); per-passage selection; a
+  evaluation record, not yet persisted or shown — done by ADR-0082: stored
+  pending as a held `ttp` row, shown in Review); per-passage selection; a
   fine-tuned selector, which the roadmap rightly puts after the prompt-only
   selector plateaus.
 

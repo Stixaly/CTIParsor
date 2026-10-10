@@ -117,7 +117,9 @@ the [README](../README.md#how-it-works); this page is the detail.
 ┌─────────────────────────────▼────────────────────────────────────────┐
 │  Stage 3d — RELATIONSHIP SELF-VERIFICATION              (optional)   │
 │  Second LLM call: "quote the exact sentence supporting this claim"  │
-│  Unsupported relationships are removed.                             │
+│  Unsupported relationships are removed. Undecided ones (failed      │
+│  call, no verdict, quote not in the text) are held for an analyst:  │
+│  stored pending, out of the bundle until accepted (ADR-0082)        │
 │  aCTIon paper: 27% → 8% hallucination on its benchmark; CTIParsor's│
 │  own figure is the grounding harness's (docs/eval), not this one   │
 │  Cost: ~1.4× total LLM calls (only chunks with ≥ 1 relationship)   │

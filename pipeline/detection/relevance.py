@@ -19,6 +19,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from pipeline.decisions import SHIPS
 from pipeline.detection.control import is_ubiquitous
 from pipeline.detection.observables import Observable, observables_from_entities, report_platform
 from pipeline.detection.store import (
@@ -515,7 +516,7 @@ def job_observable_rows(conn: DBConnection, job_id: str) -> list[dict]:
     """
     rows = conn.execute(
         "SELECT value, entity_type FROM entities "
-        "WHERE job_id=? AND (accepted IS NULL OR accepted=1)",
+        "WHERE job_id=? AND " + SHIPS,
         (job_id,),
     ).fetchall()
     return [{"value": r[0], "entity_type": r[1]} for r in rows]

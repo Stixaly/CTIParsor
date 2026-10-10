@@ -9,8 +9,9 @@ like a model that found nothing.  These counters keep the four apart:
   the model name, timeout after retries);
 * extraction_ok / extraction_empty / extraction_invalid / extraction_provider_failed
   — one per Stage 3 extraction call, by what came back;
-* rel_verification_* / ttp_verification_* — Stages 3d and 3f, whose failures
-  keep every claim unverified.
+* rel_verification_* / ttp_verification_* — Stages 3d and 3f.  A 3d failure
+  holds its claims for review (ADR-0082, `rel_verification_held` counts every
+  held claim); a 3f verify-mode failure keeps its claims unverified.
 
 The orchestrator reads a snapshot before and after Stage 3 and reports the
 difference in the stage report.  Thread-safe: Stage 3 runs chunks in parallel.

@@ -322,6 +322,17 @@ export function relNeedsReview(r: { accepted: boolean | null; decision_origin?: 
   return r.accepted === null || r.decision_origin === 'default'
 }
 
+/** A row the pipeline held back and nobody has decided yet (ADR-0082).  It
+ *  ships only once accepted on its own card: group and selection accepts skip
+ *  it, and the API refuses a `human_bulk` accept of it. */
+export function heldPending(r: { accepted: boolean | null; held_reason?: string | null }): boolean {
+  return r.accepted === null && !!r.held_reason
+}
+
+export function heldTitle(reason: string): string {
+  return `Held for review: ${reason}. Not in the bundle until you accept it here.`
+}
+
 /**
  * Return the valid STIX 2.1 verbs for a (srcType, tgtType) pair, suitable
  * for populating a grouped <select>.

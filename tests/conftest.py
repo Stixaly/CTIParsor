@@ -70,6 +70,19 @@ def _llm_provider_ready(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-for-pytest")
 
 
+@pytest.fixture(autouse=True)
+def _llm_checks_at_their_defaults(monkeypatch):
+    """Stages 3d and 3f run as their defaults (off), as in CI, whatever the
+    developer's `.env` says: `pipeline.stage3_llm` loads it at import, and
+    both modules read their switch once.  `mock_llm` answers every call with
+    the extraction JSON, which a verifier cannot parse — and an unparseable
+    verification holds its claims for review (ADR-0082) — so with a local
+    `ENABLE_STIX_VERIFICATION=true` the Stage 3 tests lost their relationship.
+    A test about verification turns it on itself."""
+    monkeypatch.setattr("pipeline.stage3d_verify._VERIFY_ENABLED", False)
+    monkeypatch.setattr("pipeline.stage3f_ttp_verify._VERIFY_ENABLED", False)
+
+
 @pytest.fixture()
 def mock_llm_response() -> dict:
     """Minimal valid LLM JSON response matching the LLMEnrichmentResult schema."""

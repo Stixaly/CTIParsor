@@ -26,6 +26,7 @@ logger = get_logger(__name__)
 
 from api.db import _lock, backup_db, emit_progress, get_conn, now_iso, set_job_status
 from api.paths import output_dir, uploads_dir
+from pipeline.decisions import SHIPS as _SHIPS
 from pipeline.env_flags import env_int
 from pipeline.orchestrator import (
     Document,
@@ -251,7 +252,35 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "")
             _ev_text, _ev_label, _ev_start, _ev_end,
         ))
 
-    rows_rel = []
+    # ADR-0082 — techniques Stage 3f's selection could not decide, stored
+    # pending with the reason: finalize leaves them out until an analyst
+    # accepts one.  Graded `gap`: nothing established them.  A technique
+    # already stored from another source is not listed twice.
+    rows_held: list[tuple] = []
+    _stored_ids = {
+        (r[6] or "").upper() for r in rows_ioc + rows_llm if r[3] == "ttp"
+    }
+    for held_ttp in getattr(llm_result, "ttp_review", None) or []:
+        _mid = held_ttp.attack_id.upper()
+        if _mid in _stored_ids:
+            continue
+        _stored_ids.add(_mid)
+        _quote = (held_ttp.evidence_quote or "").strip() or None
+        _start = _end = None
+        if _quote and report_text:
+            try:
+                _span = locate(_quote, report_text)
+            except Exception:   # locating must never fail a job
+                _span = None
+            if _span is not None:
+                _start, _end = _span.start, _span.end
+        rows_held.append((
+            str(uuid4()), job_id, held_ttp.name or held_ttp.attack_id, "ttp",
+            "", 0.9, held_ttp.attack_id, None, "llm",
+            _quote, "gap", _start, _end, held_ttp.reason,
+        ))
+
+    rows_rel: list[tuple] = []
     for rel in llm_result.relationships:
         # evidence_label is an EvidenceLabel enum on the model — store its value
         _label = (
@@ -268,24 +297,36 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "")
             rel.source_value, rel.relationship_type, rel.target_value,
             rel.confidence, 1, rel.evidence_text, _label,
             times_to_json(list(getattr(rel, "times", None) or [])),
-            "default",
+            "default", None,
+        ))
+    # ADR-0082 — claims Stage 3d could not decide: pending, nobody's decision
+    # yet, with the reason; finalize leaves them out until an analyst accepts.
+    for held_rel in getattr(llm_result, "rel_review", None) or []:
+        _label = getattr(held_rel.evidence_label, "value", held_rel.evidence_label) or "reported"
+        rows_rel.append((
+            str(uuid4()), job_id,
+            held_rel.source_value, held_rel.relationship_type, held_rel.target_value,
+            held_rel.confidence, None, held_rel.evidence_text, _label,
+            times_to_json(list(held_rel.times or [])),
+            None, held_rel.reason,
         ))
 
     with _lock:
         with get_conn() as conn:
-            # Only TTP rows carry evidence (ADR-0028); every other row is padded
-            # here rather than at each of the six places they are built.
+            # Only TTP rows carry evidence (ADR-0028) and only held rows a
+            # reason (ADR-0082); every other row is padded here rather than at
+            # each of the places they are built.
             _entity_rows = [
-                r if len(r) == 13 else (*r, None, None, None, None)
+                (*r, None) if len(r) == 13 else (*r, None, None, None, None, None)
                 for r in rows_ioc + rows_llm
-            ]
+            ] + rows_held
             # ON CONFLICT DO NOTHING is the portable spelling of INSERT OR IGNORE
             # (SQLite 3.24+ and PostgreSQL, ADR-0045).
             conn.executemany(
                 "INSERT INTO entities "
                 "(id,job_id,value,entity_type,context,confidence,mitre_id,accepted,source,"
-                "evidence_text,evidence_label,evidence_start,evidence_end) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                "evidence_text,evidence_label,evidence_start,evidence_end,held_reason) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT (id) DO NOTHING",
                 _entity_rows,
             )
@@ -293,8 +334,8 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "")
                 "INSERT INTO relationships "
                 "(id,job_id,source_value,relationship_type,target_value,"
                 "confidence,accepted,evidence_text,evidence_label,times_json,"
-                "decision_origin) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?) "
+                "decision_origin,held_reason) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT (id) DO NOTHING",
                 rows_rel,
             )
@@ -860,14 +901,14 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
 
             # ALL accepted/unreviewed entities regardless of source
             all_entity_rows = conn.execute(
-                "SELECT * FROM entities WHERE job_id=? AND (accepted IS NULL OR accepted=1)",
+                "SELECT * FROM entities WHERE job_id=? AND " + _SHIPS,
                 (job_id,),
             ).fetchall()
 
             # ALL accepted/unreviewed relationships (DB is authoritative —
             # includes every manual addition, edit, or deletion from the UI)
             rel_rows = conn.execute(
-                "SELECT * FROM relationships WHERE job_id=? AND (accepted IS NULL OR accepted=1)",
+                "SELECT * FROM relationships WHERE job_id=? AND " + _SHIPS,
                 (job_id,),
             ).fetchall()
 
