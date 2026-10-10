@@ -57,7 +57,7 @@ def main() -> int:
         o, c = raw.find("("), raw.rfind(")")
         if o == -1 or c <= o:
             continue
-        for key, value in parse_options(raw[o + 1:c]):
+        for _key, value in parse_options(raw[o + 1:c]):
             if not isinstance(value, str) or not value:
                 continue
             checked += 1

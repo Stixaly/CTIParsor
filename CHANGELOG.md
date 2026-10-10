@@ -8,6 +8,33 @@ sections group by theme rather than strict semver.
 
 ### Fixed
 
+#### ruff's bugbear rules (B), and the GLiNER batch they caught, 2026-10-10
+
+`ruff check` now runs flake8-bugbear on the whole repository, tests and
+scripts included. Of its 57 findings, 52 were fixed and none carries a
+`noqa`; the other 5 were FastAPI declarations (last paragraph).
+
+- **Stage 2e could drop the last chunks of a batch.** GLiNER's batch answer
+  was zipped against its chunks. An answer with fewer lists than chunks,
+  such as the flat list a one-chunk call returns, then stood for the first
+  chunk, and the other chunks' entities were lost without a log line. Such
+  an answer now takes the existing path that asks the model one chunk at a
+  time (`test_a_batch_answer_short_of_its_chunks_is_retried_per_chunk`).
+- **Every `zip()` over parallel lists says `strict=True`** (B905): Stage 3's
+  chunks and their entities, Stage 4's dates and their ledger decisions,
+  database rows, the retrieval corpus, the AnnoCTR BIO tags. A length
+  mismatch now raises instead of truncating. Two test assertions,
+  `all(... zip(bbox, expected))`, passed on an empty bbox; they no longer do.
+- **`raise` inside `except` names its cause** (B904): `from exc`, as
+  `api/routes/ingest.py` already did, and `from None` where the rejection
+  is not caused by the exception being handled.
+- Duplicate entries in `DOMAIN_STOPWORDS` (B033), loop variables nothing
+  read (B007), and a closure over loop variables in `promotion.py` (B023,
+  harmless there, now a `functools.partial`).
+
+FastAPI's `Depends`, `File`, `Form` and `Query` defaults are declared
+immutable calls (`pyproject.toml`): they declare parameters (B008).
+
 #### Stage 2 network indicators: IPv6, sentence-final IPv4, half-bracket defangs, 2026-10-10
 
 Three recall defects in `pipeline/stage2_extraction.py`, each there since the

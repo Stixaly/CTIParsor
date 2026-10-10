@@ -1301,7 +1301,8 @@ def build_stix_bundle(
             continue
         # Beside `changes`, not in it: the Graph page reads any change as a
         # rewrite of the row (ADR-0061), and a withheld date rewrites nothing.
-        _by_identity = {temporal_identity(a): d for a, d in zip(_state["times"], _plan.decisions)}
+        _by_identity = {temporal_identity(a): d
+                        for a, d in zip(_state["times"], _plan.decisions, strict=True)}
         for _entry, _own in _state["entries"]:
             for a in _own:
                 decision = _by_identity.get(temporal_identity(a))

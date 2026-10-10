@@ -1728,7 +1728,7 @@ def enrich_all_chunks(
     all_results = []
     total = len(chunks)
 
-    for i, (chunk, entities) in enumerate(zip(chunks, entities_per_chunk), 1):
+    for i, (chunk, entities) in enumerate(zip(chunks, entities_per_chunk, strict=True), 1):
         logger.info(f"LLM chunk {i}/{total}...")
         result = enrich_chunk(
             chunk, entities,

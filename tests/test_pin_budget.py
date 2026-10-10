@@ -35,7 +35,7 @@ def test_fair_share_never_exceeds_demand_or_budget() -> None:
     demands = [1, 2, 3, 400, 500]
     result = _fair_share(demands, 50)
     assert sum(result) == 50
-    for r, d in zip(result, demands):
+    for r, d in zip(result, demands, strict=True):
         assert r <= d
 
 

@@ -276,7 +276,7 @@ def list_overrides(conn) -> list[dict]:
         "SELECT source, entity_type, threshold, sample_size, target_precision, precision_at, "
         "recall_retained, origin, updated_at FROM model_thresholds ORDER BY source, entity_type"
     ).fetchall()
-    return [dict(zip(r.keys(), tuple(r))) for r in rows]
+    return [dict(zip(r.keys(), tuple(r), strict=True)) for r in rows]
 
 
 def calibrate(

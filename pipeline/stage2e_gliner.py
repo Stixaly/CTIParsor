@@ -224,6 +224,10 @@ def extract_gliner_entities(text: str) -> list[RawEntity]:
                 batch_preds = [[] for _ in batch]
             else:
                 batch_preds = raw
+            # A flat list for a many-chunk batch, or one list short: zipped
+            # against the chunks it would drop the last ones' entities.
+            if len(batch_preds) != len(batch):
+                raise ValueError(f"{len(batch_preds)} answers for {len(batch)} chunks")
         except Exception as e:
             logger.warning(f"Batch inference error (falling back to single): {e}")
             # Per-chunk fallback
@@ -239,7 +243,7 @@ def extract_gliner_entities(text: str) -> list[RawEntity]:
                     logger.error(f"Inference error at offset {char_offset}: {e2}")
                     batch_preds.append([])
 
-        for predictions, (chunk_text, char_offset) in zip(batch_preds, batch):
+        for predictions, (chunk_text, _offset) in zip(batch_preds, batch, strict=True):
             for pred in predictions:
                 label = pred.get("label", "")
                 score = float(pred.get("score", 0.0))

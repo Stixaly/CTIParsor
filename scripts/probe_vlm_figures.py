@@ -98,7 +98,7 @@ def _top_pages(pdfs: list[Path], per_pdf: int) -> list[PageScore]:
         by_pdf[s.pdf].append(s)
 
     selected: list[PageScore] = []
-    for pdf, scores in by_pdf.items():
+    for scores in by_pdf.values():
         scores.sort(key=lambda x: x.fig_area, reverse=True)
         selected.extend(scores[:per_pdf])
 

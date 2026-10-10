@@ -350,8 +350,8 @@ def _labelled_hash_len(text: str, block_start: int) -> int | None:
     best_pos, best_len = -1, None
     for hash_len, pattern in _HASH_LABEL_PATTERNS:
         last = None
-        for last in pattern.finditer(window):
-            pass
+        for match in pattern.finditer(window):
+            last = match
         if last is not None and last.start() > best_pos:
             best_pos, best_len = last.start(), hash_len
     return best_len

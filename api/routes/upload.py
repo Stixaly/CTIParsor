@@ -47,7 +47,7 @@ def clean_tlp(value: str | None) -> str | None:
     try:
         return normalise_tlp(value)
     except ValueError as exc:
-        raise HTTPException(400, f"Invalid tlp_level: {exc}")
+        raise HTTPException(400, f"Invalid tlp_level: {exc}") from exc
 
 
 def clean_pap(value: str | None) -> str | None:
@@ -128,19 +128,21 @@ def upload_file(
         if suffix in {".txt", ".md"}:
             try:
                 first_chunk.decode("utf-8")
-            except UnicodeDecodeError:
-                raise HTTPException(400, "Text file is not valid UTF-8.")
+            except UnicodeDecodeError as exc:
+                raise HTTPException(400, "Text file is not valid UTF-8.") from exc
         else:
+            # The rejections below are filetype's verdict, not python-magic's
+            # failure: `from None` keeps that failure out of their traceback.
             kind = filetype.guess(first_chunk)
             if kind is None:
-                raise HTTPException(400, "Could not determine file type. Please ensure the file is valid.")
+                raise HTTPException(400, "Could not determine file type. Please ensure the file is valid.") from None
             allowed_mimes = SUPPORTED_MIME.get(suffix, [])
             if allowed_mimes and kind.mime not in allowed_mimes:
                 raise HTTPException(
                     415,
                     f"File content appears to be '{kind.mime}' but extension is '{suffix}'. "
                     f"Expected: {', '.join(allowed_mimes)}"
-                )
+                ) from None
 
     # Check total size after reading first chunk
     if len(first_chunk) > _MAX_BYTES:

@@ -239,7 +239,7 @@ def _add_entity(doc: AnnoctrDoc, etype: str, label: str, surface: str) -> None:
 def _bio_spans(tokens: list[str], tags: list[str]) -> list[tuple[str, str]]:
     spans: list[tuple[str, str]] = []
     cur_type, cur_tokens = None, []
-    for tok, tag in zip(tokens, tags):
+    for tok, tag in zip(tokens, tags, strict=True):
         if tag.startswith("B-") or (tag.startswith("I-") and tag[2:] != cur_type):
             if cur_type:
                 spans.append((cur_type, " ".join(cur_tokens)))

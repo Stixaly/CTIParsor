@@ -137,7 +137,7 @@ def _validate_git_remote(value: str) -> None:
     try:
         validate_url(value)
     except CaptureError as e:
-        raise HTTPException(400, f"'git' is not a safe remote: {e}")
+        raise HTTPException(400, f"'git' is not a safe remote: {e}") from e
 
 
 def _with_counts() -> list[dict]:
@@ -211,7 +211,7 @@ def create_corpus(body: CorpusIn):
         try:
             validate_url(body.tarball)
         except CaptureError as e:
-            raise HTTPException(400, f"'tarball' is not a safe URL to fetch: {e}")
+            raise HTTPException(400, f"'tarball' is not a safe URL to fetch: {e}") from e
 
     entry = body.model_dump()
     entry["name"] = name

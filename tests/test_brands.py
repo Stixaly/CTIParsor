@@ -153,7 +153,7 @@ def test_brand_evidence_never_corroborates(temp_db):
     tokens = brand_tokens(conn, domains)
     assert tokens, "expected 'okta' to be found as a brand token"
     evidence = brand_evidence(conn, tokens)
-    for rule_id, proofs in evidence.items():
+    for proofs in evidence.values():
         for proof in proofs:
             assert proof["discriminating"] is False
             assert proof["kind"] == "title"

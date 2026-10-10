@@ -191,8 +191,8 @@ async def put_policy(request: Request) -> dict:
     """Replace the relationship policy (full replacement, not patch)."""
     try:
         body = await request.json()
-    except Exception:
-        raise HTTPException(400, "Request body must be valid JSON")
+    except Exception as exc:
+        raise HTTPException(400, "Request body must be valid JSON") from exc
 
     # Light validation
     if not isinstance(body, dict):

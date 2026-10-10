@@ -162,7 +162,7 @@ def _fmt_table(rows: list[Measurement]) -> str:
     headers = ["HOST", "CAP s", "ING s", "PDF KB", "BLK", "DOM ch", "PDF ch", "KEEP", "CHK", "IOC D/P", "LOST"]
     widths = [26, 6, 6, 7, 4, 8, 8, 6, 4, 9, 5]
 
-    header_line = " | ".join(h.ljust(w) for h, w in zip(headers, widths))
+    header_line = " | ".join(h.ljust(w) for h, w in zip(headers, widths, strict=True))
     sep_line = "-+-".join("-" * w for w in widths)
 
     lines = [header_line, sep_line]
@@ -189,7 +189,7 @@ def _fmt_table(rows: list[Measurement]) -> str:
         lost = str(row.iocs_lost)
 
         values = [host, cap_s, ing_s, pdf_kb, blk, dom_ch, pdf_ch, keep, chk, ioc_dp, lost]
-        line = " | ".join(v.ljust(w) for v, w in zip(values, widths))
+        line = " | ".join(v.ljust(w) for v, w in zip(values, widths, strict=True))
         lines.append(line)
 
     return "\n".join(lines)

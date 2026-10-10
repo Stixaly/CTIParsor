@@ -583,7 +583,7 @@ def rule_facets_for_job(
         ):
             total += 1
             total_bytes += nbytes or 0
-            for axis, raw_value in zip(axes, (fmt, corpus, lic, sev)):
+            for axis, raw_value in zip(axes, (fmt, corpus, lic, sev), strict=True):
                 value = (raw_value or "").strip().lower() or "unknown"
                 b = buckets[axis].setdefault(
                     value, {"value": value, "rules": 0, "bytes": 0}

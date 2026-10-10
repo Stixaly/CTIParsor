@@ -75,7 +75,7 @@ DOMAIN_STOPWORDS: frozenset[str] = frozenset({
     "service", "services", "server", "host", "hosting", "node", "cloud",
     "online", "web", "website", "site", "page", "home", "index", "main",
     "network", "system", "platform", "app", "apps", "application", "mobile",
-    "device", "devices", "desktop", "client", "api", "endpoint", "console",
+    "device", "devices", "desktop", "api", "endpoint", "console",
     "dashboard", "panel", "office", "work", "workspace", "desk", "helpdesk",
     "help", "support", "contact", "info", "information", "data", "file",
     "files", "document", "documents", "drive", "storage", "backup", "archive",
@@ -88,8 +88,8 @@ DOMAIN_STOPWORDS: frozenset[str] = frozenset({
     "best", "free", "premium", "pro", "plus", "prime", "smart", "quick",
     "fast", "easy", "simple", "direct", "live", "real", "true", "auto",
     "self", "personal", "business", "corporate", "enterprise", "company",
-    "group", "solution", "solutions", "tech", "technology", "digital",
-    "network", "connect", "sync", "keys", "key", "code", "codes", "pass",
+    "solution", "solutions", "tech", "technology", "digital",
+    "keys", "key", "code", "codes", "pass",
 })
 
 

@@ -2224,7 +2224,7 @@ def run_rel_benchmark(samples: list[RelSample], verbose: bool = False) -> RelSco
             names.update((a or "").lower() for a in (o.get("aliases") or []))
             id_names[o.id] = {n for n in names if n}
 
-        def _matches(edge_key, gold_edge) -> bool:
+        def _matches(edge_key, gold_edge, id_names=id_names) -> bool:
             src_id, verb, tgt_id = edge_key
             g_src, g_verb, g_tgt = (x.lower() for x in gold_edge)
             return (verb == g_verb
