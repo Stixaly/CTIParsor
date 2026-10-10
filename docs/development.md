@@ -37,7 +37,7 @@ be on the host besides Docker.
 | `make check` | Diagnostic: list which pipeline stages are available |
 | `make check-docs` | Verify every number claimed in the README and `docs/pipeline.md` against the source of truth (CI runs the same check through `tests/test_doc_claims.py`) |
 | `make audit` | Scan Python + npm deps for known CVEs (`pip-audit` + `npm audit`), no image build needed |
-| `make lock` | Resolve `requirements*.txt` into the hashed locks the image, CI and the audit install with `pip install --require-hashes` (`scripts/lock.sh`, ADR-0080) |
+| `make lock` | Resolve `requirements/requirements*.txt` into the hashed locks the image, CI and the audit install with `pip install --require-hashes` (`scripts/lock.sh`, ADR-0080) |
 | `make update-deps` | Re-resolve to the newest versions the ranges allow, rebuild the image from the new lock, run tests |
 | `make npm-outdated` | Show which npm packages have newer versions available |
 | `make npm-update` | Upgrade npm packages within semver ranges, verify TypeScript |
@@ -68,7 +68,7 @@ gates quoted rules go through (`fuzz_rule_gates`), and the prompt enclosure
 (`fuzz_spotlight`). The `Fuzzing` workflow runs each for 60 s on a pull
 request and 10 minutes weekly; `tests/test_fuzz_targets.py` runs them over
 their seeds in the ordinary suite. Atheris installs on Linux x86_64 only
-(`requirements-dev.txt`). To fuzz locally, give libFuzzer a *copy* of the
+(`requirements/requirements-dev.txt`). To fuzz locally, give libFuzzer a *copy* of the
 seeds — it writes what it finds into the corpus directory:
 
 ```bash
@@ -372,11 +372,13 @@ CTIParsor/
 ├── THIRD_PARTY_NOTICES.md         # The files copied from other projects, their sources and licences
 ├── .env                           # Secrets (gitignored)
 ├── .env.example                   # Configuration template
-├── requirements.txt               # The light runtime: pipeline without ML models, and the API (+ dev = CI)
-├── requirements-full.txt          # -r requirements.txt + ML models, OCR, openai, Playwright: the image
-├── requirements-dev.txt           # ruff, mypy, pytest-cov, reuse, schemathesis, atheris (fuzzing), httpx
-├── requirements-audit.txt         # pip-audit, pinned
-├── requirements*.lock.txt         # Hashed locks: image (PyPI), torch (PyTorch index), CI, audit, uv (make lock)
+├── requirements/                  # Python dependencies (README.md: which file is for what)
+│   ├── requirements.txt           # The light runtime: pipeline without ML models, and the API (+ dev = CI)
+│   ├── requirements-full.txt      # -r requirements.txt + ML models, OCR, openai, Playwright: the image
+│   ├── requirements-dev.txt       # ruff, mypy, pytest-cov, reuse, schemathesis, atheris (fuzzing), httpx
+│   ├── requirements-audit.txt     # pip-audit, pinned
+│   ├── requirements*.lock.txt     # Hashed locks: image (PyPI), torch (PyTorch index), CI, audit, uv (make lock)
+│   └── osv-scanner.toml           # Scorecard's accepted vulnerabilities for these files (SECURITY.md)
 ├── setup.sh                       # Prepares .env + the DB secret, checks Docker; --offline installs a bundle
 ├── Dockerfile                     # UI build, venv build, slim runtime, + a `dev` target with the CI tools (ADR-0044, ADR-0054)
 ├── compose.yaml                   # app, worker, postgres, capture-proxy + profiles bootstrap / dev / ollama / proxy, hardened

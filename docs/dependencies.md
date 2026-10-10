@@ -8,6 +8,9 @@ maintenance routine that keeps them current.
 
 ## Packages
 
+Every Python requirement file is in `requirements/`, with the
+`osv-scanner.toml` that applies to them.
+
 ### The light runtime (`requirements.txt`)
 
 The pipeline without its ML models, and the API: what CI's fast tests
@@ -141,19 +144,19 @@ make audit
 make update-deps
 
 # 3. Review what changed: make update-deps rewrites all five Python locks
-git diff --stat -- 'requirements*.lock.txt'
-git diff requirements.lock.txt
+git diff --stat -- requirements/
+git diff requirements/requirements.lock.txt
 
 # 4. Upgrade npm packages within package.json semver ranges
 make npm-update
 
 # 5. Commit every lock together: CI's lock is resolved under the image's
 #    versions, so committing only the image's leaves CI on the old ones
-git add requirements*.lock.txt frontend/package-lock.json
+git add requirements/ frontend/package-lock.json
 git commit -m "chore: quarterly dependency update $(date +%Y-%m)"
 
 # 6. Review the accepted vulnerabilities (below)
-grep -n ignoreUntil osv-scanner.toml frontend/osv-scanner.toml
+grep -n ignoreUntil requirements/osv-scanner.toml frontend/osv-scanner.toml
 ```
 
 **Step 6: the accepted vulnerabilities.** SECURITY.md lists the vulnerabilities
@@ -168,17 +171,17 @@ The rules come in two kinds:
 
 - **`.grype.yaml`** (image scan): tied to the exact package version. A rule
   stops matching on its own when the image moves to another version.
-- **`osv-scanner.toml`** (Scorecard's Vulnerabilities check), at the root
-  and in `frontend/`: tied to a date, `ignoreUntil`. After that date
+- **`osv-scanner.toml`** (Scorecard's Vulnerabilities check), in
+  `requirements/` and in `frontend/`, next to the manifests they cover: tied to a date, `ignoreUntil`. After that date
   Scorecard reports the vulnerability again, and the score drops until the
   review sets a new date.
 
 ### Bumping a capped major version
 
-When a new major ships (e.g., `numpy 3.0`), bump the cap in `requirements.txt` **intentionally** after verifying the breaking-changes list:
+When a new major ships (e.g., `numpy 3.0`), bump the cap in `requirements/requirements.txt` (or `requirements-full.txt`) **intentionally** after verifying the breaking-changes list:
 
 ```bash
-# Edit requirements.txt: change numpy>=1.24.0,<3  →  numpy>=1.24.0,<4
+# Edit requirements/requirements.txt: change numpy>=1.24.0,<3  →  numpy>=1.24.0,<4
 # Then:
 make update-deps   # upgrades, runs tests, re-locks
 ```

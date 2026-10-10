@@ -59,7 +59,7 @@ docker run --rm -v ctiparsor_cti-state:/s -v "$PWD":/b alpine tar czf /b/cti-sta
    scripts, they cover different tables:
 
    ```bash
-   .venv/bin/pip install -r requirements.txt
+   .venv/bin/pip install -r requirements/requirements.txt
    .venv/bin/python scripts/migrate_jobs_to_postgres.py --dry-run
    .venv/bin/python scripts/migrate_jobs_to_postgres.py
    .venv/bin/python scripts/migrate_rules_to_postgres.py --dry-run

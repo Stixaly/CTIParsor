@@ -289,7 +289,7 @@ fi
 # ── Step 10b: the parsers OpenCTI checks Indicator patterns with ──────────────
 # A parser that fails to import does not fail a job: its rules ship marked
 # unverified (ADR-0067, ADR-0070), so check the import here.  parsuricata
-# needs lark-parser's `lark`, which lark 1.x overwrites (requirements.txt).
+# needs lark-parser's `lark`, which lark 1.x overwrites (requirements/requirements.txt).
 info "Checking the OpenCTI pattern parsers..."
 if in_app python -c "import yara, sigma.collection, parsuricata" 2>/dev/null; then
     pass "yara-python, pysigma and parsuricata import"

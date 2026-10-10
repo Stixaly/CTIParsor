@@ -1,6 +1,6 @@
 # OSV-Scanner's configuration for package-lock.json, which the Vulnerabilities
 # check of OpenSSF Scorecard scans (ADR-0078).  The rules for adding an entry
-# are in the repository root's osv-scanner.toml.
+# are in requirements/osv-scanner.toml.
 #
 # No entry since 2026-10-10: braces (GHSA-vfj7-8cjw-p6xm), the one accepted
 # here, left with Tailwind CSS 3.
