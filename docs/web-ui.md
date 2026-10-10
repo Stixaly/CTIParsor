@@ -3,6 +3,11 @@
 A tour of the analyst interface, page by page. Screenshots are in the
 [README](../README.md#screenshots).
 
+**Browsers.** The UI's styles are built with Tailwind CSS 4, which needs
+Chrome or Edge 111, Safari 16.4 or Firefox 128, or later (all from 2023–2024).
+An older browser skips the parts of the stylesheet it does not support
+(cascade layers, among them Tailwind's reset), and the pages look off.
+
 ## Workflow
 
 ```
