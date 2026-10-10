@@ -77,6 +77,7 @@ first URL-capture request to fail; `/api/ingest/url` responds 503 until then.
 | `d3-force` | Physics simulation for STIX graph |
 | `lucide-react` | Icon library |
 | `react-markdown` + `remark-gfm` | Markdown preview (VS Code-like) |
+| `react-pdf` (bundles `pdfjs-dist`) | The Source tab's PDF viewer: pdf.js renders the uploaded report in the analyst's browser, so a pdf.js advisory concerns the UI |
 | `vite` + TypeScript | Build toolchain |
 
 ## Keeping dependencies current
@@ -89,9 +90,9 @@ first URL-capture request to fail; `/api/ingest/url` responds 503 until then.
 | `requirements-api.txt` | Same, for API-only packages | Rarely |
 | `requirements.lock.txt` | **Machine-generated** — exact versions of all three files above, resolved for Python 3.14 with CPU-only torch, every file's sha256 from PyPI; what the image installs | Never by hand — run `make lock` |
 | `requirements-torch.lock.txt` | **Machine-generated** — torch's CPU build and its hashes, from the PyTorch index | Never by hand — run `make lock` |
-| `requirements-ci.txt` | What CI's fast tests install: the API, the light pipeline dependencies, the dev tools | When a test needs a new light dependency |
+| `requirements-ci.txt` | What CI's fast tests install: the API, the light pipeline dependencies, the dev tools, `pytest` and `httpx` (FastAPI's `TestClient` needs it) | When a test needs a new light dependency |
 | `requirements-ci.lock.txt` | **Machine-generated** — `requirements-ci.txt` at the versions of `requirements.lock.txt`, with hashes | Never by hand — run `make lock` |
-| `requirements-dev.txt` | Pinned test / lint / type-check tools for CI | When you upgrade ruff, mypy or pytest-cov on purpose |
+| `requirements-dev.txt` | Pinned test / lint / type-check / fuzzing tools for CI: ruff, mypy, pytest-cov, atheris (Linux x86_64 only, ADR-0081) | When you upgrade one of them on purpose |
 | `requirements-audit.txt` / `.lock.txt` | pip-audit, pinned, and its hashed lock | When you upgrade pip-audit on purpose |
 | `requirements-uv.lock.txt` | **Machine-generated** — the uv `make lock` installs, by hash, to resolve the other locks | Never by hand — `make lock` keeps it, `make update-deps` upgrades it |
 | `frontend/package.json` | npm semver ranges (`^`) | When you want to allow a new major version |

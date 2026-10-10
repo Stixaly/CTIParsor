@@ -61,6 +61,18 @@ The compose stack runs PostgreSQL for you (`docker compose up` starts a
 hardened `postgres` service; set `CTI_DB_PASSWORD` in `.env`). `pg_dump` is
 the backup tool for both stores now.
 
+Every start of the API, of a worker and of `bootstrap` brings the schema up to
+date (ADR-0077). The first process to start migrates, under a PostgreSQL
+advisory lock; the others wait for it, then find nothing left to do. They wait
+at most this long, then stop with an error. Compose restarts the API and
+the worker (`restart: unless-stopped`), not `bootstrap`:
+
+```env
+# Seconds a starting process waits for another one's migration.  Raise it
+# before an upgrade whose data migration is known to be long.
+# DB_MIGRATION_LOCK_TIMEOUT_S=600
+```
+
 ## LLM provider
 
 Set `LLM_PROVIDER` to choose your backend.
@@ -402,6 +414,11 @@ Besides `THRESHOLD_CALIBRATION_ENABLED` and `ENTITY_OVERRIDES_ENABLED` above:
 # WORKER_LEASE_TIMEOUT_S=180
 # WORKER_POLL_S=2
 # WORKER_DRAIN_S=60
+
+# The file the worker touches on every poll: its liveness.  The compose
+# healthcheck reads the same variable and fails once the file is two minutes
+# old.  It must be writable (the container's /tmp is a tmpfs).
+# WORKER_ALIVE_FILE=/tmp/ctiparsor-worker.alive
 
 # Stages to skip for every report this process runs (worker and CLI alike), to
 # measure what a stage contributes.  Ids: 1f 2 2b 2c 2d 2e 2g 3 3d 3f 3e 3doc 2f 4 4b 4c 5

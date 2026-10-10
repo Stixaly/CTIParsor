@@ -8,6 +8,35 @@ sections group by theme rather than strict semver.
 
 ### Documentation
 
+#### The fuzzers are required checks; what the docs left out, 2026-10-10
+
+- **The four fuzz jobs are required checks on `main`.** This is recorded in
+  ADR-0078's amendment, ADR-0081 and `fuzz.yml`. A fuzzer failure is fixed
+  before the merge, and its input joins `fuzz/corpus/<target>/`, where the
+  fast tests replay it.
+- **TESTING.md.**
+  - It did not mention fuzzing (ADR-0081). It now has a section on it, and
+    `test_fuzz_targets.py` in the coverage map.
+  - Its CI list named four jobs and said the image waits for three. It now
+    lists all seven jobs and the three other workflows. The image waits for
+    four: the dependency audit too.
+- **CONTRIBUTING.md.** For a test skipped on a missing import, it said to
+  install the dependency in the CI job. Since ADR-0080 it goes in
+  `requirements-ci.txt`, then `make lock`. A `pip install` in a workflow
+  would bypass the hashes.
+- **`/api/health`** is in `docs/api.md`: 200 when the job store answers, 503
+  when it does not.
+- **Two variables documented nowhere.** Both are now in `.env.example` and
+  `docs/configuration.md`:
+  - `DB_MIGRATION_LOCK_TIMEOUT_S`: how long a starting process waits for
+    another one's migration, 600 s by default;
+  - `WORKER_ALIVE_FILE`.
+- **Fixed: `WORKER_ALIVE_FILE` and the worker's healthcheck.** The compose
+  healthcheck read a fixed path, so setting the variable made the worker
+  unhealthy. It now reads the same variable as the worker.
+- **`docs/dependencies.md`** lists react-pdf (pdf.js, the Source tab's PDF
+  viewer), atheris and httpx.
+
 #### What Scorecard still scores low, and the quarterly routine's locks, 2026-10-10
 
 - **ADR-0078, amendment.** The Scorecard workflow and ADR-0078 named

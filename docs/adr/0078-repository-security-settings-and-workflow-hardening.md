@@ -165,7 +165,33 @@ without a provenance file (`*.intoto.jsonl`, 10/10) or a signature (`*.sig`,
 its assets scores 0. That costs about half a point of the overall score. A
 Release, if there is ever one, attaches SLSA provenance for its assets.
 
+**The fuzzers are required checks too (decided 2026-10-10).** Item 10's
+list of required checks predates ADR-0081. The ruleset also requires:
+
+- `Fuzz (report_text)`
+- `Fuzz (dates)`
+- `Fuzz (rule_gates)`
+- `Fuzz (spotlight)`
+
+No change reaches `main` while a fuzzer fails on it. This goes further than
+ADR-0071, which blocks on deterministic checks. Sixty seconds of mutation
+can find a defect that the pull request did not introduce. Such a failure
+is still a bug to fix before the merge:
+
+1. Reproduce it from the uploaded artifact:
+   `python fuzz/fuzz_<target>.py <file>`.
+2. Fix it.
+3. Add the input to `fuzz/corpus/<target>/`.
+
+From then on, `tests/test_fuzz_targets.py` replays that input in the fast
+tests, so an exception or a broken invariant fails them. A merely slow input
+fails only the fuzz run. The Fuzzing workflow runs on every pull request,
+with no path filter, so these checks always report.
+
 **Settings observed through the API on 2026-10-10.** Private vulnerability
 reporting (item 9) is **off**, so SECURITY.md's "open a security advisory"
 link does not work for a reporter outside the repository. The `main`
-ruleset (item 10) is **disabled**. Action item 4 stays open.
+ruleset (item 10) is **disabled**. Action item 4 stays open, and now
+includes the four fuzz checks. Items 8 (Dependabot alerts) and 11 (actions
+pinned by SHA) cannot be read without administrator access. The maintainer
+checks them in Settings.

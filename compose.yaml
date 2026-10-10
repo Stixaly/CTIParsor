@@ -136,9 +136,10 @@ services:
       - backend
       - llm
     # The loop touches this file on every poll (WORKER_POLL_S, 2 s); two minutes
-    # without a touch means the supervisor is wedged, not merely busy.
+    # without a touch means the supervisor is wedged, not merely busy.  The path
+    # is WORKER_ALIVE_FILE when .env sets it, as the worker reads it.
     healthcheck:
-      test: ["CMD-SHELL", "find /tmp/ctiparsor-worker.alive -mmin -2 | grep -q ."]
+      test: ["CMD-SHELL", "find \"$${WORKER_ALIVE_FILE:-/tmp/ctiparsor-worker.alive}\" -mmin -2 | grep -q ."]
       interval: 30s
       timeout: 5s
       start_period: 30s

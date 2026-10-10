@@ -245,6 +245,7 @@ produce the same layout — `rules/{format}/{corpus}__{slug}.{ext}`, `MANIFEST.j
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/queue/status` | Backlog and worker liveness (ADR-0048): job counts by status, oldest-queued age, and per-worker heartbeat freshness against `WORKER_LEASE_TIMEOUT_S`. Unauthenticated, like every other GET route (SECURITY.md). |
+| `GET` | `/api/health` | Liveness and readiness of the API: `{"status": "ok"}` with 200, or `{"status": "degraded", "detail": "job store unreachable"}` with **503** when the job store does not answer. The image's `HEALTHCHECK` calls it, and a host monitor should check the status code, not the body. It says nothing about the workers: `/api/queue/status` does. Unauthenticated. |
 
 ```json
 // GET /api/queue/status

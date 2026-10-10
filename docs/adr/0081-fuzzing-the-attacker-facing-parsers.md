@@ -4,6 +4,9 @@
 **Date:** 2026-10-04
 **Deciders:** maintainer
 **Amends:** ADR-0078 (repository security)
+**Amended by:** ADR-0078's amendment of 2026-10-10. The four fuzz jobs are
+required checks on `main`, and a failure's input joins the seed corpus with
+its fix.
 
 ## Context
 
