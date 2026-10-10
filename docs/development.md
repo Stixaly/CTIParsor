@@ -374,7 +374,7 @@ CTIParsor/
 ├── requirements.txt               # Pipeline dependencies
 ├── requirements-api.txt           # API server dependencies
 ├── requirements-optional.txt      # Playwright (URL capture), google-re2, spaCy
-├── requirements-dev.txt           # ruff, mypy, pytest-cov, reuse, atheris (fuzzing)
+├── requirements-dev.txt           # ruff, mypy, pytest-cov, reuse, schemathesis, atheris (fuzzing)
 ├── requirements-ci.txt            # What CI's fast tests install (locked with the image's versions)
 ├── requirements-audit.txt         # pip-audit, pinned
 ├── requirements*.lock.txt         # Hashed locks: image (PyPI), torch (PyTorch index), CI, audit, uv (make lock)

@@ -6,6 +6,27 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Added
+
+#### The API tested against its own OpenAPI schema (Schemathesis), 2026-10-10
+
+`tests/test_api_schema.py` sends every API operation requests generated
+from the schema FastAPI publishes: valid ones, and ones that break a
+declared constraint. Each response must not be a server error and must
+match its declared schema. Generation is derandomized, so the test is as
+deterministic as the rest of the fast tests (ADR-0071); it runs in about
+30 s, against a disposable database holding one reviewed job. URL
+capture, corpus sync and rebuild, and the progress stream are left out:
+they reach the network, the corpus clones, or never end. TESTING.md
+describes it.
+
+Its first run found one defect: `GET /api/jobs/{job_id}/relationships/valid-types`
+was published without its `job_id` parameter, an OpenAPI schema that
+generated clients reject. The route now declares it; it answers as before.
+
+`schemathesis` 4.30.1 joins `requirements-dev.txt`; the CI lock gains it
+and 11 dependencies, every other pin unchanged.
+
 ### Documentation
 
 #### Every file names its copyright and licence (REUSE), 2026-10-10

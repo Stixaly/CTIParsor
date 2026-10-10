@@ -271,6 +271,35 @@ rejections. `init_db` is patched in `api_client` (no real database — for tests
 that do need one, e.g. anything touching `/api/health`, use `temp_db_client`
 instead, which runs against a real disposable PostgreSQL schema).
 
+### The API against its OpenAPI schema (Schemathesis)
+`tests/test_api_schema.py` generates requests for every operation from the
+schema FastAPI publishes (`/openapi.json`), with Schemathesis: valid ones,
+and ones that break a declared constraint (wrong types, missing fields,
+odd Unicode, unexpected methods). Each response must not be a server error
+and must match the schema its operation declares. About 20 examples per
+operation and mode; 51 operations in about 30 s.
+
+- **Deterministic.** Generation is derandomized: every run sends the same
+  requests, so the test is a gate like the others (ADR-0071), and a failure
+  comes back with the command that found it (in CI, the whole suite). An
+  operation's examples depend on what ran before it in the process: `-k` on
+  one operation, or the module alone, sends other requests. A route change
+  changes the requests too. Measured: two runs of the module send the same
+  1,991 requests, also after other code has consumed Python's global
+  `random` state; only the multipart boundary, drawn when a request is
+  sent, differs.
+- **Against real data.** Through `temp_db_client`, with one reviewed job,
+  two entities and a relationship: `job_id`, `entity_id` and `rel_id` take
+  their ids, so the handlers run instead of answering 404.
+- **Offline.** The corpus routes write to a copy of the registry under
+  `tmp_path`, and URL validation answers without DNS. Left out: URL capture
+  (a browser on the network), corpus sync and rebuild (clones), the progress
+  stream (Server-Sent Events, open while a job runs).
+
+Its first run found `GET /api/jobs/{job_id}/relationships/valid-types`
+published without its `job_id` parameter: an OpenAPI schema that
+generated clients reject.
+
 ### Persistence / worker (integration)
 The write→read round-trip through PostgreSQL (`worker._save_entities` →
 `re_run_final_stages`) and schema migrations. **Currently the weakest layer** (see §6).
