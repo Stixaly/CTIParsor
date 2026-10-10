@@ -6,6 +6,30 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Security
+
+#### The UI's build tools: source-map-js and postcss-selector-parser, 2026-10-10
+
+Dependabot raised two alerts, and Scorecard's scanner found the same two in
+`frontend/package-lock.json`. Both are in the UI's build tools only (`"dev":
+true`): neither is in the built UI nor in the image.
+
+| Package | Advisory | Fix |
+|---|---|---|
+| source-map-js 1.2.1 | GHSA-68fv-2mgg-jv7q, high: event-loop DoS through section offsets | 1.2.2, within the existing ranges (lock only) |
+| postcss-selector-parser 6.1.4 | GHSA-rj75-hqrm-r3gf, moderate: quadratic selector parsing | an npm override to `^7.1.6` (`frontend/package.json`) |
+
+Tailwind CSS 3 asks for postcss-selector-parser 6.x, and its last 3.x
+release still does. The override is checked:
+
+- `npm run build` gives a `dist/` byte-identical to the build without it;
+- `npm run check` passes (lint, typecheck, 141 tests).
+
+`docs/dependencies.md` says why the override exists and when it goes: with
+Tailwind CSS 4, which also removes braces, the one accepted npm advisory.
+`npm audit` now reports only braces, and the Scorecard-equivalent scan
+reports nothing.
+
 ### Documentation
 
 #### The fuzzers are required checks; what the docs left out, 2026-10-10
