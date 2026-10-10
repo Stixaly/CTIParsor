@@ -53,6 +53,8 @@ def _row_to_dict(row) -> dict:
         "source": row["source"],
         "decision_origin": row["decision_origin"],
         "control_sample": bool(row["control_sample"]),
+        # ADR-0082: why the pipeline held this row back; it ships once accepted.
+        "held_reason": row["held_reason"],
     }
 
 
@@ -91,7 +93,8 @@ def create_entity(job_id: str, body: EntityCreate):
             conn.commit()
     return {"id": eid, "job_id": job_id, "value": body.value, "entity_type": body.entity_type,
             "context": body.context, "confidence": body.confidence, "mitre_id": body.mitre_id,
-            "accepted": None, "source": "manual", "decision_origin": None, "control_sample": False}
+            "accepted": None, "source": "manual", "decision_origin": None, "control_sample": False,
+            "held_reason": None}
 
 
 @router.patch("/{entity_id}")
@@ -103,6 +106,8 @@ def update_entity(job_id: str, entity_id: str, patch: EntityPatch):
         ).fetchone()
         if not row:
             raise HTTPException(404, "Entity not found")
+    if decisions.held_from_bulk_accept(row, patch.accepted, patch.decision_origin):
+        raise HTTPException(409, f"held for review ({row['held_reason']}): accept it on its own card")
 
     updates: list[str] = []
     # SQL parameter values are heterogeneous (strings, None for NULL-clearing).
@@ -163,7 +168,7 @@ def accept_all_pending(job_id: str):
     with _lock:
         with get_conn() as conn:
             accepted = decisions.record(
-                conn, "entity", "job_id=? AND accepted IS NULL", (job_id,),
+                conn, "entity", "job_id=? AND accepted IS NULL AND held_reason IS NULL", (job_id,),
                 accepted=True, origin=decisions.HUMAN_BULK, decided_at=now_iso(),
             )
     return {"accepted": accepted}
@@ -210,6 +215,10 @@ def bulk_update_entities(job_id: str, body: BulkPatch):
 
     # Only touch pending rows unless the caller explicitly asked for "all"
     scope_clause = "AND accepted IS NULL" if body.scope == "pending" else ""
+    # A row the pipeline held back (ADR-0082) is accepted one card at a time,
+    # by someone who read why: never by a click over a whole type.
+    if body.action == "accept":
+        scope_clause += " AND (held_reason IS NULL OR accepted IS NOT NULL)"
 
     with _lock:
         with get_conn() as conn:

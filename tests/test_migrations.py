@@ -21,6 +21,9 @@ from api import migrations as history
 from api.db_backend import PgConnection
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "schema_before_adr0077.json"
+# The last version init_db() had built when ADR-0077 froze it; every version
+# after it exists only as a migration.
+_FROZEN_AT = 9
 
 
 @pytest.fixture()
@@ -126,7 +129,7 @@ def test_an_empty_database_gets_every_version_then_nothing(schema):
 
 def test_the_history_builds_the_schema_init_db_built_before_versioning(schema):
     built, frozen = schema(), schema()
-    migrate.upgrade(built)
+    _legacy_at(built, _FROZEN_AT)
     _legacy_before_adr0077(frozen)
     assert _shape(built) == _shape(frozen)
 
@@ -139,12 +142,14 @@ def test_a_database_from_before_versioning_is_recognised_not_rebuilt(schema):
     conn.execute("INSERT INTO jobs (id, original_filename, created_at, updated_at) VALUES ('j1','r.pdf','t','t')")
     report = migrate.upgrade(conn)
     target = history.latest_version()
-    assert report.recognised == list(range(1, target + 1)) and report.applied == []
-    assert _records(conn) == [(v, "recognised") for v in range(1, target + 1)]
+    assert report.recognised == list(range(1, _FROZEN_AT + 1))
+    assert report.applied == list(range(_FROZEN_AT + 1, target + 1))
+    assert _records(conn) == ([(v, "recognised") for v in range(1, _FROZEN_AT + 1)]
+                              + [(v, "applied") for v in range(_FROZEN_AT + 1, target + 1)])
     assert conn.execute("SELECT count(*) AS n FROM jobs").fetchone()["n"] == 1
 
 
-@pytest.mark.parametrize("stopped_at", range(1, 9))
+@pytest.mark.parametrize("stopped_at", range(1, history.latest_version()))
 def test_a_deployment_stopped_at_any_version_is_brought_up_to_date(schema, stopped_at):
     old, fresh = schema(), schema()
     _legacy_at(old, stopped_at)

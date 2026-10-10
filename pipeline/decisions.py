@@ -48,6 +48,23 @@ HUMAN_ORIGINS: tuple[str, ...] = (HUMAN, HUMAN_BULK)
 # calibration puts on a proposed cutoff (pipeline.calibration).
 AUTO_ACCEPT_LEVEL = 0.90
 
+# The rows of `entities` / `relationships` that ship: accepted, or pending and
+# not held back.  A row the pipeline held (ADR-0082: Stage 3d or 3f could not
+# decide it, `held_reason` says why) ships only once an analyst accepts it.
+# Every reader that describes what a report says — finalize, coverage, rule
+# relevance — filters with this, so they cannot drift apart.
+SHIPS = "(accepted = 1 OR (accepted IS NULL AND held_reason IS NULL))"
+
+
+def held_from_bulk_accept(row: Any, accepted: bool | None, origin: str) -> bool:
+    """Would this write accept a held, still-pending row as part of a group?
+
+    A held row is accepted one card at a time, by someone who read why it was
+    held (ADR-0082); the bulk endpoints skip it, and a single write labelled
+    `human_bulk` is refused for it."""
+    return (accepted is True and origin == HUMAN_BULK
+            and row["held_reason"] is not None and row["accepted"] is None)
+
 _TABLES = {"entity": "entities", "relationship": "relationships"}
 
 
@@ -136,7 +153,7 @@ def apply_auto_accept(
     """
     rate = control_sample_rate() if rate is None else rate
     eligible = conn.execute(
-        "SELECT id FROM entities WHERE job_id=? AND accepted IS NULL "
+        "SELECT id FROM entities WHERE job_id=? AND accepted IS NULL AND held_reason IS NULL "
         "AND decision_origin IS NULL AND control_sample=0 AND confidence >= ?",
         (job_id, level),
     ).fetchall()
@@ -149,7 +166,7 @@ def apply_auto_accept(
         )
     accepted = record(
         conn, "entity",
-        "job_id=? AND accepted IS NULL AND decision_origin IS NULL "
+        "job_id=? AND accepted IS NULL AND held_reason IS NULL AND decision_origin IS NULL "
         "AND control_sample=0 AND confidence >= ?",
         (job_id, level),
         accepted=True, origin=AUTO_POLICY, decided_at=decided_at,

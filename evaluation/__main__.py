@@ -124,9 +124,14 @@ def _predictions(result) -> dict:
                 "evidence_quote": rv.evidence_quote}
                for rv in llm.ttp_review] if llm is not None else [])
     candidates = sorted({c.attack_id for cs in getattr(result, "ttp_candidates", []) for c in cs})
+    # ADR-0082: the claims 3d held back.  Not in `relations` — they do not
+    # ship unless an analyst accepts them — but countable, with the reason.
+    rel_review = ([{"source": h.source_value, "type": h.relationship_type, "target": h.target_value,
+                    "evidence_text": h.evidence_text, "reason": h.reason}
+                   for h in llm.rel_review] if llm is not None else [])
     return {"ttp_ids": sorted(i for i in ttp_ids if _TECH_ID.match(i)), "ttps": ttps,
             "ttp_review": review, "ttp_candidates": candidates,
-            "entities": entities, "relations": relations,
+            "entities": entities, "relations": relations, "rel_review": rel_review,
             "bundle_relations": _bundle_relations(result.bundle)}
 
 

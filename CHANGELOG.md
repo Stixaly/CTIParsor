@@ -6,6 +6,40 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Changed
+
+#### What the model could not decide waits for an analyst (ADR-0082), 2026-10-10
+
+- **Stage 3d no longer ships what it could not check.** It used to keep every
+  claim it did not explicitly refute:
+  - its batch's call failed, or the answer was not JSON;
+  - the answer said nothing about it, or had no `verified` field (which
+    counted as true);
+  - it was "verified" with no quote, or with a quote that is nowhere in the
+    text.
+
+  They shipped as verified. Each one is now held, with the reason. A
+  verified claim's quote must be in the text word for word; punctuation,
+  Markdown emphasis and link targets do not count (`evidence_span.stated_in`,
+  179 of 181 dev-run quotes).
+- **Select mode's undecided techniques (`ttp_review`) are no longer lost.**
+  Until now they reached only the evaluation record.
+- **Held rows are stored pending, with `held_reason`** (migration v0010,
+  on `entities` and `relationships`), and stay out of the bundle, the
+  coverage matrix and rule relevance until an analyst accepts them.
+  Accepting goes one card at a time: auto-accept, type, group, selection and
+  "accept all pending" skip a held row, and a `human_bulk` accept of one is
+  refused (409). Review marks them with a `held` chip that gives the reason.
+- One predicate, `pipeline.decisions.SHIPS`, now says what a report ships,
+  for every reader that used to repeat `accepted IS NULL OR accepted=1`.
+- `tests/test_migrations.py` no longer assumes the history ends at the
+  schema ADR-0077 froze (version 9).
+- Tests run Stages 3d and 3f at their defaults (off), as CI does, whatever
+  the developer's `.env` says. With a local `ENABLE_STIX_VERIFICATION=true`,
+  `mock_llm`'s answer reached the verifier, which cannot parse it.
+- The ADR index's 0049 entry had a GitHub conflict URL pasted into a word;
+  removed.
+
 ### Security
 
 #### The UI's build tools: source-map-js and postcss-selector-parser, 2026-10-10

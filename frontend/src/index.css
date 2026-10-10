@@ -781,7 +781,8 @@ mark.tok-accepted::after {
   padding: 1px 5px; border-radius: 3px;
   color: var(--ink-3); background: var(--bg-soft);
 }
-.marg-origin-control {
+.marg-origin-control,
+.marg-origin-held {
   color: var(--warn);
   background: color-mix(in oklab, var(--warn) 12%, var(--bg-elev));
 }

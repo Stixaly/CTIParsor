@@ -6,6 +6,7 @@ import {
   verbsForPair,
   confPct,
   relNeedsReview,
+  heldPending,
 } from './tokens'
 
 type E = { id: string; value: string; entity_type: string; accepted: boolean | null }
@@ -179,6 +180,16 @@ describe('relNeedsReview', () => {
     expect(relNeedsReview({ accepted: true, decision_origin: 'default' })).toBe(true)
     expect(relNeedsReview({ accepted: true, decision_origin: 'human' })).toBe(false)
     expect(relNeedsReview({ accepted: false, decision_origin: 'human_bulk' })).toBe(false)
+  })
+})
+
+describe('heldPending (ADR-0082)', () => {
+  it('is a held row nobody has decided yet', () => {
+    expect(heldPending({ accepted: null, held_reason: 'verification call failed' })).toBe(true)
+    expect(heldPending({ accepted: true, held_reason: 'verification call failed' })).toBe(false)
+    expect(heldPending({ accepted: false, held_reason: 'verification call failed' })).toBe(false)
+    expect(heldPending({ accepted: null, held_reason: null })).toBe(false)
+    expect(heldPending({ accepted: null })).toBe(false)
   })
 })
 

@@ -411,6 +411,14 @@ class RelationshipExtracted(BaseModel):
     times: list[TemporalAssertion] = Field(default_factory=list)
 
 
+class RelationshipReview(RelationshipExtracted):
+    """A claim Stage 3d could not decide (ADR-0082): its call failed, its answer
+    was unreadable or silent on it, or the quote it gave is not in the text.
+    Kept out of the bundle, stored pending with `reason`; ships if an analyst
+    accepts it."""
+    reason: str
+
+
 class IoCAssociation(BaseModel):
     """Links a specific IoC value (hash, domain, IP, URL) to a named malware family."""
     ioc_value: str
@@ -430,8 +438,11 @@ class LLMEnrichmentResult(BaseModel):
     campaign_name: str | None = None
     course_of_action: list[str] = []   # recommended mitigations / remediation steps
     # ADR-0072 select mode: candidates Stage 3f could not decide (its call
-    # failed, or the quote did not validate).  Kept out of the bundle.
+    # failed, or the quote did not validate).  Kept out of the bundle, stored
+    # pending for an analyst (ADR-0082).
     ttp_review: list[TtpReview] = []
+    # ADR-0082: relationships Stage 3d could not decide.  Same treatment.
+    rel_review: list[RelationshipReview] = []
 
 
 # --- Prompts ---
@@ -2031,6 +2042,13 @@ def _merge_results(
     for r in results:
         for rv in r.ttp_review:
             review_map.setdefault(rv.attack_id.upper(), rv)
+    # Undecided relationships (ADR-0082), the same way: once per claim, and
+    # only while no chunk (nor the document pass) verified it.
+    rel_review_map: dict[tuple, RelationshipReview] = {}
+    for r in results:
+        for held in r.rel_review:
+            key = (held.source_value.lower(), held.relationship_type, held.target_value.lower())
+            rel_review_map.setdefault(key, held)
 
     all_actors = [a for r in results for a in r.threat_actors]
     all_malware = [m for r in results for m in r.malware_families]
@@ -2077,4 +2095,5 @@ def _merge_results(
         campaign_name=campaign_name,
         course_of_action=_dedup_names(all_coas),
         ttp_review=[rv for key, rv in review_map.items() if key not in selected_ids],
+        rel_review=[held for key, held in rel_review_map.items() if key not in rel_map],
     )

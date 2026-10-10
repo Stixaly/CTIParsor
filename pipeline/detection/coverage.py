@@ -15,6 +15,8 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from pipeline.decisions import SHIPS
+
 if TYPE_CHECKING:  # the job-store connection type (ADR-0045); annotation only
     from api.db_backend import DBConnection
 
@@ -135,7 +137,7 @@ def job_technique_ids(conn: DBConnection, job_id: str) -> list[str]:
         "SELECT DISTINCT mitre_id FROM entities "
         "WHERE job_id=? AND mitre_id IS NOT NULL AND mitre_id != '' "
         "AND entity_type IN ('technique','ttp','tactic','procedure') "
-        "AND (accepted IS NULL OR accepted=1)",
+        "AND " + SHIPS,
         (job_id,),
     ).fetchall()
     return [r[0].upper() for r in rows if r[0]]

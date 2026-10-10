@@ -145,6 +145,8 @@ def _row_to_dict(row) -> dict:
         "stop_time": stop,
         "times": [a.model_dump(mode="json", exclude_none=True) for a in times],
         "decision_origin": row["decision_origin"],
+        # ADR-0082: why the pipeline held this claim back; it ships once accepted.
+        "held_reason": row["held_reason"],
     }
 
 
@@ -203,7 +205,7 @@ def create_relationship(job_id: str, body: RelCreate):
         "id": rid, "job_id": job_id, **body.model_dump(), "evidence_label": _label,
         "start_time": _shown_start, "stop_time": _shown_stop,
         "times": [a.model_dump(mode="json", exclude_none=True) for a in _times],
-        "accepted": True, "decision_origin": decisions.HUMAN,
+        "accepted": True, "decision_origin": decisions.HUMAN, "held_reason": None,
     }
 
 
@@ -229,10 +231,13 @@ def bulk_update_relationships(job_id: str, body: RelBulk):
 
     accepted = {"accept": True, "reject": False, "reset": None}[body.action]
     placeholders = ",".join("?" * len(ids))
+    # A claim the pipeline held back (ADR-0082) is accepted one at a time, by
+    # someone who read why: a group accept leaves it pending.
+    held = " AND (held_reason IS NULL OR accepted IS NOT NULL)" if body.action == "accept" else ""
     with _lock:
         with get_conn() as conn:
             updated = decisions.record(
-                conn, "relationship", f"job_id=? AND id IN ({placeholders})", (job_id, *ids),
+                conn, "relationship", f"job_id=? AND id IN ({placeholders}){held}", (job_id, *ids),
                 accepted=accepted, origin=decisions.HUMAN_BULK, decided_at=now_iso(),
             )
     return {"updated": updated, "action": body.action}
@@ -246,6 +251,14 @@ def update_relationship(job_id: str, rel_id: str, patch: RelPatch):
         raise HTTPException(
             400, f"decision_origin must be one of: {', '.join(sorted(decisions.CLIENT_ORIGINS))}",
         )
+
+    if patch.accepted is True and patch.decision_origin == decisions.HUMAN_BULK:
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT accepted, held_reason FROM relationships WHERE id=? AND job_id=?", (rel_id, job_id)
+            ).fetchone()
+        if row and decisions.held_from_bulk_accept(row, patch.accepted, patch.decision_origin):
+            raise HTTPException(409, f"held for review ({row['held_reason']}): accept it on its own card")
 
     # Build dynamic SET clause from whichever fields were sent
     updates: list[str] = []

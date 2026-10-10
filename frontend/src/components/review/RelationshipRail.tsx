@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import type { Relationship, TemporalAssertion } from '../../types'
-import { REL_TYPES, confPct, relNeedsReview, typeDot, typeLabel, verbsForPair } from './tokens'
+import { REL_TYPES, confPct, heldPending, heldTitle, relNeedsReview, typeDot, typeLabel, verbsForPair } from './tokens'
 
 export type BulkAction = 'accept' | 'reject' | 'reset'
 
@@ -181,6 +181,11 @@ function RelCard({ r, onAccept, onReject, onReset, onJump, onChangeType, onChang
             title="Kept by default: the pipeline stores every relationship accepted, and it ships unless rejected. Nobody has reviewed it."
           >
             default
+          </span>
+        )}
+        {heldPending(r) && (
+          <span className="marg-origin marg-origin-held" title={heldTitle(r.held_reason!)}>
+            held
           </span>
         )}
         <div className="rel-actions">

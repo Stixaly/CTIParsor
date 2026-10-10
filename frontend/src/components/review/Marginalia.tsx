@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
 import type { Entity } from '../../types'
-import { typeDot, typeLabel } from './tokens'
+import { heldPending, typeDot, typeLabel } from './tokens'
 import MarginaliaCard from './MarginaliaCard'
 import { toggleInSet } from '../../hooks/sets'
 
@@ -81,8 +81,10 @@ export default function Marginalia({
     }
   }
 
+  // A held row (ADR-0082) is accepted on its own card only.
   const bulkAcceptSelected = () => {
-    selectedIds.forEach(id => onAccept(id, true))
+    const held = new Set(entities.filter(heldPending).map(e => e.id))
+    selectedIds.forEach(id => { if (!held.has(id)) onAccept(id, true) })
     clearSelection()
   }
 

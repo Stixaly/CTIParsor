@@ -940,11 +940,14 @@ class _Run:
                                 ("3f", verify_ttps, "ttp_selection" if select else "ttp_verification")):
             ok, unparsed, failed = (d.get(f"{prefix}_ok", 0), d.get(f"{prefix}_unparsed", 0),
                                     d.get(f"{prefix}_failed", 0))
-            # Select mode keeps nothing it could not check (ADR-0072); verify
-            # mode keeps the claims its failed calls could not judge.
+            # Select mode keeps nothing it could not check (ADR-0072), nor does
+            # 3d since ADR-0082; 3f's verify mode keeps the claims its failed
+            # calls could not judge.
             lost = ("their candidates sent to review, none kept" if sid == "3f" and select
+                    else "those claims held for review" if sid == "3d"
                     else "those claims kept unverified")
-            extra = {"rejected": d.get("ttp_selection_rejected", 0)} if sid == "3f" and select else {}
+            extra = ({"rejected": d.get("ttp_selection_rejected", 0)} if sid == "3f" and select
+                     else {"held": d.get("rel_verification_held", 0)} if sid == "3d" else {})
             if not on:
                 self.record(sid, SKIPPED, "disabled" + (": the LLM's techniques ship unchecked"
                                                         if sid == "3f" and select else ""))
@@ -955,7 +958,8 @@ class _Run:
                 # stage was requested and did nothing.
                 self.record(sid, FAILED, f"no usable verification answer ({unparsed} unparseable, "
                             f"{failed} failed): " + ("every candidate sent to review" if sid == "3f"
-                                                     and select else "every claim kept unverified"),
+                                                     and select else "every claim held for review"
+                                                     if sid == "3d" else "every claim kept unverified"),
                             0.0, ok=ok, unparsed=unparsed, failed=failed, **extra)
             else:
                 self.record(sid, RAN, f"{unparsed + failed} of {ok + unparsed + failed} verifications "

@@ -169,3 +169,18 @@ describe('RelationshipRail — review groups (ADR-0065)', () => {
     expect(props.onReset).not.toHaveBeenCalled()
   })
 })
+
+describe('RelationshipRail — claims held for review (ADR-0082)', () => {
+  it('says a held claim waits for this card, and why', () => {
+    renderRail([rel({ held_reason: 'quote not found in the text' })])
+    const badge = screen.getByText('held')
+    expect(badge.getAttribute('title')).toContain('quote not found in the text')
+    expect(badge.getAttribute('title')).toContain('Not in the bundle until you accept it')
+  })
+
+  it('shows no badge once the claim is decided, nor on a claim nobody held', () => {
+    renderRail([rel({ id: 'r1', held_reason: 'verification call failed', accepted: true }),
+                rel({ id: 'r2', target_value: 'SUNBURST' })])
+    expect(screen.queryByText('held')).toBeNull()
+  })
+})

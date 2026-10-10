@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import type { Entity } from '../../types'
-import { typeDot, typeLabel } from './tokens'
+import { heldPending, typeDot, typeLabel } from './tokens'
 
 interface Props {
   entities: Entity[]
@@ -18,11 +18,14 @@ export default function TypeRail({
   onAcceptAllOfType, onRejectAllOfType, onClose,
 }: Props) {
   const counts = useMemo(() => {
-    const m: Record<string, { total: number; pending: number }> = {}
+    // `held`: pending rows the pipeline held back (ADR-0082) — a type's
+    // accept skips them, so its button counts only the others.
+    const m: Record<string, { total: number; pending: number; held: number }> = {}
     entities.forEach(e => {
-      if (!m[e.entity_type]) m[e.entity_type] = { total: 0, pending: 0 }
+      if (!m[e.entity_type]) m[e.entity_type] = { total: 0, pending: 0, held: 0 }
       m[e.entity_type].total++
       if (e.accepted === null) m[e.entity_type].pending++
+      if (heldPending(e)) m[e.entity_type].held++
     })
     return m
   }, [entities])
@@ -56,13 +59,16 @@ export default function TypeRail({
             {/* Bulk action buttons — only visible when there are pending entities */}
             {c.pending > 0 && (
               <div className="rail-bulk">
-                <button
-                  className="rail-accept"
-                  title={`Accept all ${c.pending} pending ${typeLabel(t)}`}
-                  onClick={() => onAcceptAllOfType(t)}
-                >
-                  ✓ {c.pending}
-                </button>
+                {c.pending > c.held && (
+                  <button
+                    className="rail-accept"
+                    title={`Accept all ${c.pending - c.held} pending ${typeLabel(t)}`
+                      + (c.held ? ` (${c.held} held for review: accept those on their own cards)` : '')}
+                    onClick={() => onAcceptAllOfType(t)}
+                  >
+                    ✓ {c.pending - c.held}
+                  </button>
+                )}
                 <button
                   className="rail-reject"
                   title={`Reject all ${c.pending} pending ${typeLabel(t)}`}

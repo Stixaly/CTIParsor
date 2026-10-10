@@ -55,7 +55,7 @@ def temp_db():
         CREATE TABLE entities (
             id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT, value TEXT,
             entity_type TEXT, context TEXT, confidence REAL, mitre_id TEXT,
-            accepted INTEGER, source TEXT
+            accepted INTEGER, source TEXT, held_reason TEXT
         )
     """)
     conn.commit()
