@@ -8,7 +8,7 @@
         run run-dir check check-docs \
         corpora detection-index backfill-rules \
         audit lock update-deps npm-outdated npm-update clean \
-        docker-build docker-up docker-bootstrap docker-smoke docker-logs docker-down \
+        docker-build docker-up docker-bootstrap docker-smoke docker-logs docker-down db-upgrade \
         docker-test docker-frontend-dev
 
 CTI_ENV_FILE ?= .env
@@ -206,6 +206,11 @@ docker-bootstrap: .secrets/db_password
 ## Build, start, and verify the container (health, non-root, read-only, Chromium sandbox)
 docker-smoke: .secrets/db_password
 	bash scripts/docker_smoke.sh
+
+## Move the job store to the PostgreSQL major compose.yaml names (dump, restore,
+## row-count check; the old cluster is left untouched).  App and worker stopped.
+db-upgrade: .secrets/db_password
+	bash scripts/db_upgrade.sh
 
 ## Follow the API logs
 docker-logs:

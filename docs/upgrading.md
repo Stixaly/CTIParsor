@@ -180,7 +180,39 @@ rebuild the corpus from the Settings page. The sizing table is in
 - The bundle's recorded git revision comes from the image build argument in
   containers (`make docker-build` sets it).
 
-## 7. Container stack: PostgreSQL 17 → 18
+## 7. Container stack: a new PostgreSQL major (`make db-upgrade`)
+
+Every PostgreSQL major upgrade goes the same way since ADR-0077 part B:
+
+```bash
+git pull                                  # compose.yaml names the new major
+docker compose stop app worker            # nothing writes during the move
+make db-upgrade                           # dump, new cluster, restore, row counts
+docker compose up -d                      # the app's start applies the schema history
+```
+
+`make db-upgrade` (`scripts/db_upgrade.sh`) finds the cluster to move: another
+major's `/var/lib/postgresql/<major>/docker` in the stack's volume, or the old
+17 volume `pg-data`. It stops whatever runs on it, then dumps it with a
+throwaway server of its own major into `./backups/`. It then creates the new
+major's cluster and restores into it, and stops if any table's row count
+differs. The old cluster is never changed or deleted. Two things stop you
+from starting on an empty database by mistake:
+
+- **The image itself refuses.** PostgreSQL 18 on will not initialise beside
+  another major's cluster in the same volume. Its log says "there appears to
+  be PostgreSQL data in …": run `make db-upgrade`.
+- **The app refuses.** Its state volume remembers which cluster the database
+  was on (`db-identity.json`). An empty database on a new cluster where data
+  had been migrated stops the start with `ClusterChanged`; this is the case
+  where the data sits on another volume. If an empty database is really what
+  you want, delete the entry the message names.
+
+A major `db_upgrade.sh` has no pinned image for needs
+`SOURCE_IMAGE=postgres:<major>-alpine@sha256:<digest>`. To check the procedure
+itself: `scripts/check_db_upgrade.sh` (throwaway projects, nothing of yours).
+
+### PostgreSQL 17 → 18 (ADR-0076)
 
 **What changes.** The `postgres` service runs `postgres:18-alpine` on a new
 volume, `pg-data-18`, mounted at `/var/lib/postgresql`. PostgreSQL 18's image
@@ -195,7 +227,7 @@ delete it.
 ```bash
 git pull
 docker compose stop app worker            # nothing writes during the move
-scripts/upgrade_postgres_17_to_18.sh
+make db-upgrade                           # was scripts/upgrade_postgres_17_to_18.sh, which still works
 docker compose up -d                      # or make docker-up
 ```
 
@@ -203,8 +235,8 @@ The script first stops the stack's own PostgreSQL 17 if it still runs on
 `pg-data`, and refuses to go on while any other container uses that volume:
 two servers on one data directory corrupt it, and inside containers
 PostgreSQL's lock file does not stop the second. It then starts a throwaway PostgreSQL 17 on `pg-data`, dumps the database
-with `pg_dump -Fc` into `./backups/` (kept, gitignored), starts the 18
-service on `pg-data-18`, restores, and compares the row count of every table
+with `pg_dump -Fc` into `./backups/` (kept, gitignored), creates the 18
+cluster on `pg-data-18`, restores, and compares the row count of every table
 between the two; it stops on any difference. Keep `CTI_DB_PASSWORD` as it
 was: the 17 cluster must accept it. It refuses to restore into an 18 database
 that already has tables (the app started on it first): rerun with `FORCE=1`

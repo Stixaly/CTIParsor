@@ -18,6 +18,8 @@ input/*.html
 input/*.txt
 # Web UI
 uploads/
+# Runtime state of a local install (db-identity.json, ADR-0077)
+/state/
 cti_stix.db
 cti_stix.db-shm
 cti_stix.db-wal

@@ -10,6 +10,7 @@ db_backups/
 uploads/
 output/
 input/
+state/
 detection_corpora.local.yaml
 docker/nginx/certs/
 docker/nginx/htpasswd

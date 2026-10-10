@@ -1,6 +1,6 @@
 # ADR-0077: The database knows its version; every start brings it up to date
 
-**Status:** Accepted — application schema (part A) implemented; engine guards (part B) to do
+**Status:** Accepted — part A implemented 2026-10-04, part B 2026-10-10 (see "Part B, as built")
 **Date:** 2026-10-04
 **Deciders:** maintainer
 **Amends:** ADR-0045 (PostgreSQL job store), ADR-0053 (PostgreSQL only), ADR-0076 (PostgreSQL 18)
@@ -221,9 +221,73 @@ snapshot taken in the same transaction always does.
   recognised at version 9 without a change; four processes starting together
   migrate once; a failing version and a version whose check does not see it
   roll back entirely; an edited migration and a newer database are refused.
-- **To revisit:** part B; if a data migration ever takes long enough to make
-  a start unacceptably slow, run it as a one-shot `migrate up` before
-  deploying (the command exists).
+- **To revisit:** if a data migration ever takes long enough to make a start
+  unacceptably slow, run it as a one-shot `migrate up` before deploying (the
+  command exists).
+
+## Part B, as built (2026-10-10)
+
+**8. The guard is the image's own; no entrypoint of ours.** Testing a guard
+written as decided (`docker/postgres/guard.sh`) showed that the official image
+already does it since 18 (docker-library/postgres#1259). On its default
+`PGDATA`, `/var/lib/postgresql/<major>/docker`, an empty data directory beside
+a `PG_VERSION` in `/var/lib/postgresql`, `/var/lib/postgresql/data` or another
+`/var/lib/postgresql/*/docker` stops the start: "there appears to be
+PostgreSQL data in …", "upgrading the Docker image without upgrading the
+underlying database". The control run without our guard had been misread:
+18 created its empty directory and never became ready. So compose keeps the
+image's entrypoint, and `scripts/check_db_upgrade.sh` checks the refusal
+through the compose service itself. This also corrects ADR-0076: re-mounting
+the 17 volume at `/var/lib/postgresql` would not have started an empty
+cluster silently; the image refuses it. What the image cannot see is a data
+directory on another volume, the 17 → 18 case. That is item 9's job.
+
+**9. Cluster identity** (`api/db_identity.py`, called by `api.migrate.upgrade`
+under its lock):
+- Every start records, in `<state>/db-identity.json` (`CTIPARSOR_STATE_DIR`,
+  the `cti-state` volume in the image), the cluster's `system_identifier`
+  (readable without superuser rights) and the schema version.
+- The record is keyed by the address the app connects to
+  (`host:port/database/schema`). `postgres:5432/ctiparsor/public` stays the
+  same across an upgrade, while a developer's second database is a different
+  entry, never a false alarm.
+- An empty database at a recorded address, on another cluster, where data had
+  been migrated stops the start (`ClusterChanged`), naming `make db-upgrade`
+  and the entry to delete if an empty database is wanted.
+- A database restored on a new cluster (tables present) is accepted and
+  recorded.
+- The record's own failures never block a start: an unreadable file, a hidden
+  identifier, an unwritable directory.
+
+**10. `make db-upgrade`** (`scripts/db_upgrade.sh`; the 17 → 18 script now
+calls it):
+- It finds the cluster to move: another major's `<major>/docker` in the
+  stack's volume, else the pre-18 `pg-data` volume.
+- It stops what runs on it, then dumps it with a throwaway server of its own
+  major, pinned per major (`SOURCE_IMAGE` for one it does not know).
+- It creates the new major's cluster in the stack's volume and restores into
+  it, with the same row-count check as before. The volume is mounted at
+  `/pgvol` for this, because the image's refusal (8) also applies to a volume
+  in the middle of the move.
+- It refuses to restore over tables unless `FORCE=1`.
+- `scripts/check_db_upgrade.sh` runs both layouts under throwaway compose
+  projects: 17 in `pg-data`, and 17 beside 18 in `pg-data-18`, which is the
+  layout of a future 18 → 19 upgrade. The service starts on the moved data
+  every time, and a second run restores nothing over it.
+
+**7. The previous release in CI.** There are no release tags, so the previous
+release is the pull request's base commit. `scripts/check_migration_from.py
+<ref>`:
+- runs `<ref>`'s own `init_db` from a `git archive`, then writes a report's
+  rows into that database;
+- migrates it with this code (`migrate up`, then `check`);
+- compares every table's row count;
+- reads the old rows back through the API's serialisers.
+
+The fast-tests job runs it on every pull request. From `claude/held-for-review`
+(version 10) against `main` (version 9), it applied 10 with every row intact.
+It writes the old database with `<ref>`'s code rather than restoring a
+`pg_dump`: the runner's PostgreSQL client is older than the 18 server.
 
 ## Action items
 
@@ -236,6 +300,9 @@ snapshot taken in the same transaction always does.
 4. [x] `tests/test_migrations.py`; `tests/fixtures/schema_before_adr0077.json`
        freezes the schema the old `init_db()` built.
 5. [x] docs: `docs/development.md` (writing a migration), `docs/database-schema.md`.
-6. [ ] Part B: `docker/postgres/guard.sh` and compose `entrypoint:`; cluster
-       identity in `cti-state`; `make db-upgrade`; `docs/upgrading.md`.
-7. [ ] CI job that migrates a dump of the previous release's database.
+6. [x] Part B: the image's own guard, checked (no `guard.sh` needed);
+       cluster identity in `cti-state` (`api/db_identity.py`); `make
+       db-upgrade` (`scripts/db_upgrade.sh`, `scripts/check_db_upgrade.sh`);
+       `docs/upgrading.md`.
+7. [x] CI: a database written by the PR's base commit migrates
+       (`scripts/check_migration_from.py`, fast-tests job).

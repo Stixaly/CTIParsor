@@ -96,6 +96,20 @@ jobs:
       - name: Coverage floors per area (STIX mapping and validation, persistence)
         run: python scripts/check_coverage.py
 
+      # ADR-0077 part B: a database the base commit's code wrote — what every
+      # deployment runs until this PR — migrates to this PR's schema with its
+      # rows intact, and this code reads them back.  No release tags: the base
+      # commit is the previous release.  The SHA reaches the script through
+      # the environment, never through the command text.
+      - name: Migrate a database written by the base commit
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          CTIPARSOR_TEST_DATABASE_URL: postgresql://ctiparsor:ci@127.0.0.1:5432/ctiparsor
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          python scripts/check_migration_from.py "$BASE_SHA"
+
       - name: Upload coverage report
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         if: always()

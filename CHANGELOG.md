@@ -6,6 +6,36 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Changed
+
+#### PostgreSQL major upgrades: `make db-upgrade`, and two refusals (ADR-0077 part B), 2026-10-10
+
+- **`make db-upgrade`** (`scripts/db_upgrade.sh`) moves the job store to
+  the PostgreSQL major compose.yaml names:
+  - it finds the cluster to move, either another major's directory in the
+    stack's volume or the old 17 volume;
+  - it dumps it with a throwaway server of its own major, then restores into
+    the new cluster and compares every table's row count;
+  - it never touches the old cluster, and never restores over tables
+    without `FORCE=1`.
+
+  `scripts/upgrade_postgres_17_to_18.sh` now calls it.
+  `scripts/check_db_upgrade.sh` runs both layouts end to end under
+  throwaway compose projects.
+- **The app refuses an empty database on a new cluster** where data had
+  been migrated. `api/db_identity.py` records each database's cluster in
+  `<state>/db-identity.json` (`CTIPARSOR_STATE_DIR`); `api.migrate` raises
+  `ClusterChanged` with the way out. This is the upgrade that left the data
+  on another volume. A database restored on a new cluster is accepted and
+  recorded.
+- **No entrypoint of ours in front of PostgreSQL.** The 18 image already
+  refuses to initialise beside another major's cluster
+  (docker-library/postgres#1259); checked, including ADR-0076's case of the
+  17 volume re-mounted, which it had described as a silent empty start.
+- **CI migrates a database written by the PR's base commit**
+  (`scripts/check_migration_from.py`, fast-tests job).
+- `state/` (local runtime state) is ignored by git and Docker.
+
 ### Security
 
 #### The UI's build tools: source-map-js and postcss-selector-parser, 2026-10-10

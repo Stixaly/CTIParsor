@@ -416,6 +416,9 @@ To add version N:
 5. A test in `tests/test_migrations.py`, from a database at version N-1 with
    data written the way that version wrote it. `test_a_deployment_stopped_at_any_version_is_brought_up_to_date`
    and the schema-equivalence test cover the whole line.
+6. On the pull request, CI writes a database with the base commit's own code
+   and migrates it with yours (`scripts/check_migration_from.py <ref>`; run it
+   locally against `CTIPARSOR_TEST_DATABASE_URL` with `origin/main`).
 
 ## Extending the pipeline
 
