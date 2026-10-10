@@ -93,3 +93,53 @@ from what Stage 4 ships:
   It is still offered for same-type pairs until an import confirms that.
 - **A catalogue served by the API (point 4).** The fixture keeps the two
   copies equal. Serving the table is a larger change.
+
+## Amendment (2026-10-10) — the JSON schemas ship with the repository
+
+Item 3 pinned the schema archive to commit `9af1db4`, and Stage 5 downloaded
+it from GitHub the first time it found the schemas missing. The
+stix2-validator 3.3.1 wheel carries none, so they were always missing.
+
+**What went wrong in the container.**
+
+1. The archive was downloaded, but the install failed: `/opt/venv` is
+   read-only.
+2. The marker meant to stop the retries, `/app/.stix2_schemas_missing`,
+   could not be written either.
+3. So every report and every finalize downloaded the archive again.
+4. Every bundle the image produced was `unverified`, and full validation
+   never ran.
+5. Where outbound traffic is dropped rather than refused, each attempt also
+   waited up to its 30 s timeout.
+
+**Decision: the schemas ship with the repository.**
+
+- **The files.** `pipeline/data/stix2_json_schemas/` holds `schemas/` of
+  `oasis-open/cti-stix2-json-schemas` at the same commit, unchanged: 57
+  files, 336 KB, with their BSD-3-Clause `LICENSE` and a `README.md` naming
+  the commit.
+- **The image** installs them into stix2-validator's package directory at
+  build time (`Dockerfile`, runtime stage), and the build fails if they do
+  not land. The Docker smoke test checks they are there.
+- **Any other install** (CI, the test suite, a host) gets them from the same
+  copy at its first Stage 5 run (`install_schemas()`). The copy is staged
+  next to the package directory and renamed into place, so concurrent
+  worker subprocesses never read a half-copied tree.
+- **Nothing is downloaded, and there is no marker file.** If the schemas
+  are missing and cannot be installed, Stage 5 logs one error per process
+  and returns `unverified`.
+
+**Consequences.**
+
+- Every bundle is now validated against the JSON schemas, in the image as
+  everywhere else.
+  - With the network blocked, Stage 4's bundles pass, their `x_` provenance
+    properties included (`tests/test_stage5.py`).
+  - A bundle the schemas refuse is now `invalid`, where it used to be
+    `unverified`. It is still stored, and written as `_invalid.json`.
+- Every `$ref` in these schemas is relative, and stix2-validator rewrites
+  each `$id` to the local file. Validation therefore never fetches a schema
+  either.
+- Moving to another schema commit means replacing the files and
+  `SCHEMA_COMMIT` together (`pipeline/data/stix2_json_schemas/README.md`).
+

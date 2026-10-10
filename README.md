@@ -299,6 +299,57 @@ class node_review_ui,node_graph_ui,node_policy_ui toneRose
 class node_coverage_ui,node_settings_ui,node_coverage_engine,node_rule_store,node_analyst,node_web_source,node_llm_provider,node_corpus_sources toneIndigo
 ```
 
+### Containers
+
+How the stack runs: the containers, their networks and ports, and what
+reaches the internet.
+
+```mermaid
+flowchart LR
+    analyst(("Analyst"))
+    internet(("Internet"))
+    subgraph frontend ["network frontend, has egress"]
+        proxy["proxy (profile)<br/>nginx, TLS + password<br/>:8443"]
+        app["app<br/>API + web UI<br/>:8000"]
+        worker["worker x N<br/>the pipeline"]
+        capproxy["capture-proxy<br/>Squid egress filter<br/>:3128"]
+    end
+    subgraph backend ["network backend, internal, no route out"]
+        pg[("postgres :5432<br/>job store + rule store")]
+    end
+    subgraph llm ["network llm"]
+        ollama["ollama (profile)<br/>local LLM :11434"]
+    end
+    analyst -->|"HTTPS, other machines"| proxy --> app
+    analyst -.->|"HTTP, 127.0.0.1 only"| app
+    app --> pg
+    worker --> pg
+    worker --> ollama
+    app -->|"URL capture"| capproxy -->|"public addresses only"| internet
+    app -->|"corpus sync"| internet
+    worker -->|"LLM APIs, HuggingFace, CVE"| internet
+```
+
+| Container | Image | What runs in it | Port |
+|---|---|---|---|
+| `app` | the CTIParsor image, command `serve` | the API, the web UI, URL capture, finalize | 8000, published on 127.0.0.1 |
+| `worker` | the same image, command `worker` | the pipeline, one subprocess per report | none |
+| `bootstrap` (run once) | the same image, command `bootstrap` | the schema, the models, the corpora, the rule store | none |
+| `postgres` | `postgres:18-alpine` | both stores, and the job queue | 5432, internal |
+| `capture-proxy` | Squid | the URL tab's egress filter | 3128, internal |
+| `proxy` (profile) | nginx | TLS and a password in front of `app` | 8443, published |
+| `ollama` (profile) | Ollama | a local LLM | 11434, internal |
+
+**One image for three roles.** `app`, `worker` and `bootstrap` are the image
+published to `ghcr.io/stixaly/ctiparsor`, started with different commands, so
+the API and the workers always run the same code (ADR-0044). The other
+containers run upstream images, pinned by digest and configured from
+`docker/`.
+
+[docs/architecture.md §2](docs/architecture.md#2-the-pieces) has the details:
+the code in each container, every flow with its port, and every outbound
+destination with the setting that turns it off.
+
 ---
 
 ## Usage

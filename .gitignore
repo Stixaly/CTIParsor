@@ -40,8 +40,9 @@ detection_corpora.local.yaml
 # Stage 2d runtime sentinel — written when the CyNER model cannot be loaded
 .cyner_model_unavailable
 
-# Stage 5 runtime sentinel — written when stix2-validator's schemas are
-# missing and _try_restore_schemas() could not fetch them (pipeline/stage5_validation.py)
+# Stage 5's old runtime sentinel.  Nothing writes it since the schemas ship with
+# the repository (ADR-0069, amendment of 2026-10-10); still ignored, so one an
+# older version left in a checkout stays out of git.
 .stix2_schemas_missing
 
 # Local .env backups (contain secrets — never commit)

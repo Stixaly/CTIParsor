@@ -351,10 +351,11 @@ job. Still untested as a unit: the review-page promotion gate (§6, P1-d).
   70–84 keep-phrasing, <70 passthrough).
 - **g. ✅ DONE — Stage 3d (relationship self-verification)** is covered by
   `test_stage3d_verify.py` (whole text, batching, document mode).
-- **h. Strict STIX validator path.** `.stix2_schemas_missing` means the JSON-schema
-  validator is skipped, so the `x_evidence_label` custom-prop + `allow_custom` path
-  is only asserted via `serialize()`. → When schemas are installed, add a Stage 5
-  test that the provenance-stamped, custom-prop bundle still validates.
+- **h. ✅ DONE — Strict STIX validator path.** The JSON schemas ship with the
+  repository (ADR-0069, amendment of 2026-10-10). `test_stage5.py` validates
+  Stage 4's bundles, `x_evidence_label` and `x_synthesis_stats` included, with
+  the network blocked. It also checks that the validator refuses what the
+  stix2 library lets through.
 
 ### P3 — longer horizon
 

@@ -7,12 +7,13 @@ Covers:
   - The written JSON contains the expected STIX type
   - Invalid path → parent directories are created automatically
   - print_bundle_summary does not raise
+  - the vendored JSON schemas, their install, and full validation without network
 """
 from __future__ import annotations
 
-import io
 import json
-import zipfile
+import shutil
+import socket
 
 import pytest
 import stix2
@@ -64,6 +65,22 @@ def _rich_bundle() -> stix2.Bundle:
     )
 
 
+@pytest.fixture
+def no_network(monkeypatch):
+    """Any connection attempt fails the test: Stage 5 must not download."""
+    def refuse(*args, **kwargs):
+        raise AssertionError("Stage 5 opened a network connection")
+    monkeypatch.setattr(socket.socket, "connect", refuse)
+    monkeypatch.setattr(socket, "create_connection", refuse)
+
+
+@pytest.fixture
+def schemas(no_network):
+    """The vendored schemas in stix2-validator's package directory: installed
+    by the image at build time, by install_schemas() anywhere else."""
+    assert stage5_validation.install_schemas(), "the vendored schemas could not be installed"
+
+
 # ── validate_and_export ────────────────────────────────────────────────────────
 
 class TestValidateAndExport:
@@ -73,19 +90,18 @@ class TestValidateAndExport:
         assert result.status in ("validated", "unverified", "invalid")
         assert result.ok == (result.status != "invalid")
 
-    def test_missing_schemas_are_unverified_not_valid(self, tmp_path, monkeypatch):
-        """The schemas missing used to return True, like a bundle they accepted."""
+    def test_missing_schemas_are_unverified_not_valid(self, tmp_path, monkeypatch, no_network):
+        """The schemas missing used to return True, like a bundle they accepted.
+        Missing and not installable (a read-only package directory): unverified,
+        and nothing downloaded."""
         monkeypatch.setattr(stage5_validation, "_schemas_installed", lambda: False)
-        sentinel = tmp_path / ".stix2_schemas_missing"
-        sentinel.touch()
-        monkeypatch.setattr(stage5_validation, "_WARN_SENTINEL", sentinel)
-        out = tmp_path / "out.json"
-        result = validate_and_export(_minimal_bundle(), str(out))
-        assert result.status == "unverified" and result.ok and out.exists()
+        monkeypatch.setattr(stage5_validation, "install_schemas", lambda dest=None: False)
+        for name in ("a.json", "b.json"):          # every bundle, not only the first
+            out = tmp_path / name
+            result = validate_and_export(_minimal_bundle(), str(out))
+            assert result.status == "unverified" and result.ok and out.exists()
 
-    def test_best_practice_warnings_are_kept(self, tmp_path):
-        if not stage5_validation._schemas_installed():
-            pytest.skip("stix2-validator schemas not installed")
+    def test_best_practice_warnings_are_kept(self, tmp_path, schemas):
         m = stix2.Malware(name="x", is_family=True)
         t = stix2.Tool(name="y")
         bundle = stix2.Bundle(m, t, stix2.Relationship(m, "executes", t), allow_custom=True)
@@ -93,10 +109,26 @@ class TestValidateAndExport:
         assert result.status == "validated"
         assert any("{202}" in w for w in result.warnings)
 
-    def test_the_schema_archive_is_a_pinned_commit(self):
-        assert "refs/heads" not in stage5_validation._SCHEMA_ZIP_URL
-        assert stage5_validation.SCHEMA_COMMIT in stage5_validation._SCHEMA_ZIP_URL
-        assert stage5_validation.SCHEMA_COMMIT in stage5_validation._ZIP_SCHEMA_PREFIX
+    def test_pipeline_bundles_pass_full_validation(self, tmp_path, schemas):
+        """TESTING.md gap h: with the schemas installed, Stage 4's bundles,
+        their x_ provenance properties included (x_evidence_label,
+        x_synthesis_stats), pass the JSON schemas, without any download."""
+        for name, bundle in (("minimal", _minimal_bundle()), ("rich", _rich_bundle())):
+            customs = {k for o in bundle.objects for k in o if k.startswith("x_")}
+            assert "x_evidence_label" in customs
+            result = validate_and_export(bundle, str(tmp_path / f"{name}.json"))
+            assert result.status == "validated", (name, result.errors)
+
+    def test_the_validator_catches_what_the_library_lets_through(self, tmp_path, schemas):
+        """Full validation is on: the stix2 library builds a relationship whose
+        type breaks STIX's `^[a-z0-9-]+$`, and the validator refuses it."""
+        m = stix2.Malware(name="x", is_family=True)
+        t = stix2.Tool(name="y")
+        bundle = stix2.Bundle(m, t, stix2.Relationship(m, "Uses It", t), allow_custom=True)
+        result = validate_and_export(bundle, str(tmp_path / "bad.json"))
+        assert result.status == "invalid"
+        assert any("relationship_type" in e for e in result.errors)
+        assert (tmp_path / "bad_invalid.json").exists()
 
     def test_file_is_created(self, tmp_path):
         bundle = _minimal_bundle()
@@ -151,86 +183,77 @@ class TestPrintBundleSummary:
         print_bundle_summary(bundle)
 
 
-# ── _try_restore_schemas (Zip Slip guard on the GitHub schema archive) ─────────
+# ── The vendored schemas and their install ─────────────────────────────────────
 
-def _fake_schema_zip(*entries: tuple[str, bytes]) -> bytes:
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as zf:
-        for name, content in entries:
-            zf.writestr(name, content)
-    return buf.getvalue()
+class TestVendoredSchemas:
+    """pipeline/data/stix2_json_schemas/: schemas/ of
+    oasis-open/cti-stix2-json-schemas at SCHEMA_COMMIT, with its licence."""
+
+    def test_the_schema_tree_is_complete(self):
+        root = stage5_validation.VENDORED_SCHEMAS
+        files = list(root.rglob("*.json"))
+        assert len(files) == 57
+        assert {p.name for p in root.iterdir()} == {"common", "observables", "sdos", "sros"}
+        for name in ("common/core.json", "common/cyber-observable-core.json",
+                     "sdos/malware.json", "sros/relationship.json", "observables/ipv4-addr.json"):
+            json.loads((root / name).read_text(encoding="utf-8"))
+
+    def test_the_licence_and_the_commit_are_recorded(self):
+        here = stage5_validation.VENDORED_SCHEMAS.parent
+        assert "OASIS Open" in (here / "LICENSE").read_text(encoding="utf-8")
+        assert stage5_validation.SCHEMA_COMMIT in (here / "README.md").read_text(encoding="utf-8")
+
+    def test_no_schema_refers_to_the_network(self):
+        """Every $ref is relative or local: validation never fetches a schema."""
+        for path in stage5_validation.VENDORED_SCHEMAS.rglob("*.json"):
+            text = path.read_text(encoding="utf-8")
+            assert '"$ref": "http' not in text.replace('"$ref":"http', '"$ref": "http'), path
 
 
-class _FakeResponse:
-    def __init__(self, body: bytes):
-        self._body = body
+class TestInstallSchemas:
+    def test_installs_the_vendored_tree(self, tmp_path, no_network):
+        dest = tmp_path / "stix2validator" / "schemas-2.1" / "schemas"
+        assert stage5_validation.install_schemas(dest) is True
+        installed = sorted(p.relative_to(dest) for p in dest.rglob("*.json"))
+        vendored = sorted(p.relative_to(stage5_validation.VENDORED_SCHEMAS)
+                          for p in stage5_validation.VENDORED_SCHEMAS.rglob("*.json"))
+        assert installed == vendored
+        assert not [p for p in dest.parent.iterdir() if p.name.startswith(".schemas-")]
 
-    def read(self) -> bytes:
-        return self._body
+    def test_leaves_installed_schemas_alone(self, tmp_path):
+        dest = tmp_path / "schemas"
+        (dest / "common").mkdir(parents=True)
+        (dest / "common" / "core.json").write_text('{"kept": true}')
+        assert stage5_validation.install_schemas(dest) is True
+        assert (dest / "common" / "core.json").read_text() == '{"kept": true}'
 
-    def __enter__(self):
-        return self
+    def test_a_lost_race_keeps_the_winners_copy(self, tmp_path, monkeypatch):
+        """Another worker subprocess installed them between the check and the
+        rename: the rename fails, the staging copy goes, the winner's stays."""
+        dest = tmp_path / "schemas"
+        real_copytree = shutil.copytree
+        calls = []
 
-    def __exit__(self, *a):
-        return False
+        def copy_then_lose(src, dst, *args, **kw):
+            calls.append(dst)
+            result = real_copytree(src, dst, *args, **kw)
+            if dst == calls[0]:          # the top-level copy, not its recursion
+                (dest / "common").mkdir(parents=True)
+                (dest / "common" / "core.json").write_text('{"winner": true}')
+            return result
 
+        monkeypatch.setattr(stage5_validation.shutil, "copytree", copy_then_lose)
+        assert stage5_validation.install_schemas(dest) is True
+        assert (dest / "common" / "core.json").read_text() == '{"winner": true}'
+        assert not [p for p in tmp_path.iterdir() if p.name.startswith(".schemas-")]
 
-class TestTryRestoreSchemas:
-    """
-    `_try_restore_schemas` downloads a GitHub archive and extracts only its
-    `schemas/` subtree — normal operation locked by the first test below. The
-    URL is fixed and trusted, but that is exactly why the extraction itself
-    must not trust archive *entry names*: `pipeline/detection/sync.py` already
-    learned this lesson for corpus tarballs (`_safe_members`), and this zip
-    path needs the identical containment check before any write.
-    """
-
-    def test_extracts_schema_files_under_the_prefix(self, tmp_path, monkeypatch):
-        dest = tmp_path / "schemas-2.1" / "schemas"
-        monkeypatch.setattr(stage5_validation, "_schema_dir", lambda: dest)
-        zip_bytes = _fake_schema_zip(
-            (stage5_validation._ZIP_SCHEMA_PREFIX + "common/core.json", b'{"a": 1}'),
-            (stage5_validation._ZIP_SCHEMA_PREFIX + "sdos/malware.json", b'{"b": 2}'),
-            ("cti-stix2-json-schemas-master/README.md", b"not a schema"),  # no prefix match
-        )
-        monkeypatch.setattr(
-            stage5_validation.urllib.request, "urlopen",
-            lambda *a, **kw: _FakeResponse(zip_bytes),
-        )
-
-        ok = stage5_validation._try_restore_schemas()
-
-        assert ok is True
-        assert (dest / "common" / "core.json").read_bytes() == b'{"a": 1}'
-        assert (dest / "sdos" / "malware.json").read_bytes() == b'{"b": 2}'
-        assert not (tmp_path / "README.md").exists()
-
-    def test_rejects_an_entry_that_escapes_the_schema_directory(self, tmp_path, monkeypatch):
-        """
-        Locks the Zip Slip fix: an archive entry named
-        `<prefix>../../../../tmp/evil.json` still starts with the prefix and
-        ends in `.json`, so both filters above the containment check pass it —
-        the containment check itself is what must stop it landing outside
-        `dest`.
-        """
-        dest = tmp_path / "install" / "schemas-2.1" / "schemas"
-        sentinel = tmp_path / "evil.json"
-        # `dest` sits 3 levels below tmp_path (install/schemas-2.1/schemas), so
-        # 3 `../` segments walk exactly back up to tmp_path, landing on `sentinel`.
-        traversal = "../" * 3 + "evil.json"
-
-        monkeypatch.setattr(stage5_validation, "_schema_dir", lambda: dest)
-        zip_bytes = _fake_schema_zip(
-            (stage5_validation._ZIP_SCHEMA_PREFIX + "common/core.json", b'{"legit": true}'),
-            (stage5_validation._ZIP_SCHEMA_PREFIX + traversal, b"pwned"),
-        )
-        monkeypatch.setattr(
-            stage5_validation.urllib.request, "urlopen",
-            lambda *a, **kw: _FakeResponse(zip_bytes),
-        )
-
-        ok = stage5_validation._try_restore_schemas()
-
-        assert ok is True                                       # the legit entry still lands
-        assert (dest / "common" / "core.json").exists()
-        assert not sentinel.exists()                             # the traversal entry does not
+    def test_an_unwritable_destination_returns_false(self, tmp_path, monkeypatch, no_network):
+        """The read-only container without the build step: False, no exception,
+        nothing left behind, nothing downloaded."""
+        def read_only(*args, **kwargs):
+            raise PermissionError(30, "Read-only file system")
+        monkeypatch.setattr(stage5_validation.shutil, "copytree", read_only)
+        dest = tmp_path / "schemas"
+        assert stage5_validation.install_schemas(dest) is False
+        assert not dest.exists()
+        assert not [p for p in tmp_path.iterdir() if p.name.startswith(".schemas-")]
