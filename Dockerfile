@@ -25,8 +25,8 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 WORKDIR /build
 # The exact versions CI tested (`make lock`): requirements*.txt hold the ranges,
-# requirements.lock.txt the resolution of all three, playwright and google-re2
-# included, with torch pinned to its +cpu build, so no CUDA wheel (about 2.2 GB
+# requirements.lock.txt the resolution of requirements-full.txt, playwright and
+# google-re2 included, with torch pinned to its +cpu build, so no CUDA wheel (about 2.2 GB
 # of nvidia_* packages this CPU image would never use) is ever pulled in.
 # --require-hashes (ADR-0080): every file pip downloads must match the sha256
 # the lock recorded, so a re-uploaded or tampered release fails the build.

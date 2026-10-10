@@ -40,7 +40,7 @@ NOT_SHIPPED="--no-emit-package diskcache"
 # The resolution needs the PyTorch index to pick torch's +cpu build (no CUDA);
 # the lock names no index, so pip installs everything in it from PyPI, and its
 # hashes are then rewritten to PyPI's files (scripts/lock_pypi_hashes.py).
-common requirements.txt requirements-api.txt requirements-optional.txt \
+common requirements-full.txt \
     --extra-index-url "$TORCH_INDEX" --index-strategy unsafe-best-match \
     $NOT_SHIPPED -o requirements.lock.txt
 python3 scripts/lock_pypi_hashes.py requirements.lock.txt
@@ -50,7 +50,8 @@ TORCH="$(sed -n 's/^torch==\([^ ;]*+cpu\).*/\1/p' requirements.lock.txt)"
 printf "torch==%s ; sys_platform != 'darwin'\n" "$TORCH" > /tmp/torch.in
 common /tmp/torch.in --index-url "$TORCH_INDEX" --no-deps -o requirements-torch.lock.txt
 
-common requirements-ci.txt -c requirements.lock.txt $NOT_SHIPPED -o requirements-ci.lock.txt
+# CI's fast tests: the light runtime and the dev tools, at the image's versions.
+common requirements.txt requirements-dev.txt -c requirements.lock.txt $NOT_SHIPPED -o requirements-ci.lock.txt
 common requirements-audit.txt -o requirements-audit.lock.txt
 printf "uv\n" > /tmp/uv.in
 common /tmp/uv.in -o requirements-uv.lock.txt

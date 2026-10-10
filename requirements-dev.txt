@@ -1,7 +1,12 @@
 # Test, lint and type-check tools.  Pinned so a new release cannot turn CI red
-# on its own; bump them on purpose.  pytest and httpx are not listed: they are
-# runtime dependencies, pinned in requirements.lock.txt.  CI installs this file
-# through requirements-ci.lock.txt, with hashes (ADR-0080).
+# on its own; bump them on purpose.  pytest is a runtime dependency, in
+# requirements.txt.  CI installs requirements.txt and this file through
+# requirements-ci.lock.txt, with hashes (ADR-0080).
+#
+# tests/test_stage3_calls.py imports httpx.  The image has it through openai,
+# which CI does not install: it is named here, at the image's version (the CI
+# lock is resolved under requirements.lock.txt).
+httpx
 pytest-cov==7.1.0
 ruff==0.16.6
 mypy==2.3.1

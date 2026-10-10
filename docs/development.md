@@ -372,11 +372,9 @@ CTIParsor/
 ├── THIRD_PARTY_NOTICES.md         # The files copied from other projects, their sources and licences
 ├── .env                           # Secrets (gitignored)
 ├── .env.example                   # Configuration template
-├── requirements.txt               # Pipeline dependencies
-├── requirements-api.txt           # API server dependencies
-├── requirements-optional.txt      # Playwright (URL capture), google-re2, spaCy
-├── requirements-dev.txt           # ruff, mypy, pytest-cov, reuse, schemathesis, atheris (fuzzing)
-├── requirements-ci.txt            # What CI's fast tests install (locked with the image's versions)
+├── requirements.txt               # The light runtime: pipeline without ML models, and the API (+ dev = CI)
+├── requirements-full.txt          # -r requirements.txt + ML models, OCR, openai, Playwright: the image
+├── requirements-dev.txt           # ruff, mypy, pytest-cov, reuse, schemathesis, atheris (fuzzing), httpx
 ├── requirements-audit.txt         # pip-audit, pinned
 ├── requirements*.lock.txt         # Hashed locks: image (PyPI), torch (PyTorch index), CI, audit, uv (make lock)
 ├── setup.sh                       # Prepares .env + the DB secret, checks Docker; --offline installs a bundle

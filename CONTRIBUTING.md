@@ -80,10 +80,12 @@ image rebuild. The image build and smoke test, which CI also runs, are
   fails in CI.
 - A test skipped because an import is missing (`pytest.importorskip`) fails
   in CI and in `make coverage` (`CTIPARSOR_REQUIRE_TEST_DEPS=1`): add the
-  dependency to `requirements-ci.txt` and run `make lock`, rather than let its
-  tests skip. CI installs nothing but the hashed locks (ADR-0080), so never add
-  a `pip install <package>` to a workflow. An application dependency goes in
-  `requirements.txt` or `requirements-api.txt`, as a range, then `make lock`.
+  dependency to `requirements.txt` (or a test-only tool to `requirements-dev.txt`)
+  and run `make lock`, rather than let its tests skip. CI installs nothing but
+  the hashed locks (ADR-0080), so never add a `pip install <package>` to a
+  workflow. An application dependency goes in `requirements.txt` when the fast
+  tests need it, in `requirements-full.txt` when only the image does, as a
+  range, then `make lock`.
   Commit every lock `make lock` rewrites ([`docs/dependencies.md`](docs/dependencies.md)).
 - DB-touching tests use the isolated `temp_db` / `temp_db_client` fixtures — a
   disposable schema per test on the server above, never a developer's real
