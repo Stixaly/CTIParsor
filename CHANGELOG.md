@@ -6,32 +6,29 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
-### Fixed
+### Security
 
-#### Stage 5 validates bundles in the container, and downloads nothing, 2026-10-10
+#### The UI's build tools: source-map-js and postcss-selector-parser, 2026-10-10
 
-The stix2-validator 3.3.1 wheel carries no JSON schema. Stage 5 downloaded
-them from GitHub when it found them missing. In the container, this went
-wrong:
+Dependabot raised two alerts, and Scorecard's scanner found the same two in
+`frontend/package-lock.json`. Both are in the UI's build tools only (`"dev":
+true`): neither is in the built UI nor in the image.
 
-- the install failed, because `/opt/venv` is read-only;
-- the marker that should stop the retries could not be written either;
-- so every report and every finalize downloaded the archive again;
-- every bundle the image produced was `unverified`.
+| Package | Advisory | Fix |
+|---|---|---|
+| source-map-js 1.2.1 | GHSA-68fv-2mgg-jv7q, high: event-loop DoS through section offsets | 1.2.2, within the existing ranges (lock only) |
+| postcss-selector-parser 6.1.4 | GHSA-rj75-hqrm-r3gf, moderate: quadratic selector parsing | an npm override to `^7.1.6` (`frontend/package.json`) |
 
-**The schemas now ship with the repository**, in
-`pipeline/data/stix2_json_schemas/`. They are the same pinned commit
-(`9af1db4`), unchanged, with their BSD-3-Clause licence.
+Tailwind CSS 3 asks for postcss-selector-parser 6.x, and its last 3.x
+release still does. The override is checked:
 
-- The image installs them at build time, and the build fails without them.
-  The Docker smoke test checks they are there.
-- Another install gets them from the same copy at its first Stage 5 run.
-- Nothing is downloaded, and there is no marker file any more.
+- `npm run build` gives a `dist/` byte-identical to the build without it;
+- `npm run check` passes (lint, typecheck, 141 tests).
 
-Stage 4's bundles pass full validation, with the network blocked and their
-`x_` properties included (TESTING.md gap h, done). A bundle the schemas
-refuse is now `invalid` rather than `unverified`. It is still stored
-(ADR-0069, amendment).
+`docs/dependencies.md` says why the override exists and when it goes: with
+Tailwind CSS 4, which also removes braces, the one accepted npm advisory.
+`npm audit` now reports only braces, and the Scorecard-equivalent scan
+reports nothing.
 
 ### Documentation
 
