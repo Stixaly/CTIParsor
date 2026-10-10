@@ -1,6 +1,42 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* Tailwind CSS 4: its preflight (reset) and the few utilities the UI uses
+   (`animate-spin`); every other style is in this file. The sources it scans
+   are named, as tailwind.config.js's `content` did in v3: auto-detection
+   would also read public/ (the vendored graph viewer). */
+@import "tailwindcss" source(none);
+@source "../index.html";
+@source "./";
+
+/* What tailwind.config.js set in v3. The preflight reads the sans and mono
+   stacks for <html> and <code>/<pre>. */
+@theme {
+  --font-sans: "Inter", -apple-system, system-ui, sans-serif;
+  --font-serif: "Source Serif 4", "Iowan Old Style", Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* v3's preflight defaults, which v4 changed: a border with no colour of its
+   own was gray-200 (v4: the text colour), a placeholder was gray-400 (v4:
+   the text colour at half opacity), and an <option> kept the browser's
+   padding (v4 resets every element's). The v3 values, so the UI looks as it
+   did: compared element by element, every page and both theme families. */
+@layer base {
+  *, ::after, ::before, ::backdrop, ::file-selector-button {
+    border-color: #e5e7eb;
+  }
+  input::placeholder, textarea::placeholder {
+    color: #9ca3af;
+  }
+  option {
+    padding: revert;
+  }
+}
+
+/* v3's preflight also gave a disabled control the default cursor. Outside a
+   layer, as v3's preflight was, so it outranks `button { cursor: pointer }`
+   below and loses to a later rule of the same specificity, as in v3. */
+:disabled {
+  cursor: default;
+}
 
 /* ===========================================================
    GOOGLE FONTS (fallback — index.html carries the preconnect link)

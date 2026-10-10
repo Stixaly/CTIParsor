@@ -6,6 +6,35 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Security
+
+#### The UI on Tailwind CSS 4: the last accepted npm vulnerability goes, 2026-10-10
+
+Tailwind CSS 3 brought braces (GHSA-vfj7-8cjw-p6xm, no fixed release),
+accepted in SECURITY.md as a build-time dependency, and postcss-selector-parser
+6.x, forced to 7.1.6 by an npm override. The UI now builds with Tailwind
+CSS 4.3.3 through `@tailwindcss/vite`: PostCSS, autoprefixer, braces and
+postcss-selector-parser leave the lock (61 packages out, 12 in), the
+override and the OSV-Scanner exception go, and `npm audit` reports nothing,
+dev dependencies included.
+
+The UI looks the same, checked element by element. The UI uses Tailwind for
+its reset (preflight) and one utility (`animate-spin`); the rest is its own
+CSS. With the CSS that `main` builds (v3) and v4's swapped in the same page,
+every element's computed style (colours, borders, fonts, cursor, spacing,
+sizes) was compared on the dashboard, the new-report dialog, Policy,
+Settings, Review, Graph and Coverage, on a real report, in the light and dark
+themes: about 8,000 elements per theme, no difference. Four of v4's reset
+changes are set back to v3's values in `index.css`: a border with no colour
+of its own is gray-200 again (not the text colour), placeholders gray-400,
+an `<option>` keeps the browser's padding, and a disabled control the
+default cursor.
+
+`tailwind.config.js` and `postcss.config.js` are gone: the fonts are in
+`index.css`'s `@theme`, and the sources Tailwind scans are named there, so
+it does not read `public/` (the vendored graph viewer). Tailwind 4 needs
+Chrome or Edge 111, Safari 16.4 or Firefox 128, or later (docs/web-ui.md).
+
 ### Added
 
 #### The API tested against its own OpenAPI schema (Schemathesis), 2026-10-10

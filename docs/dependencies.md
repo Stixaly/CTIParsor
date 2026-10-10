@@ -119,25 +119,19 @@ pick the `+cpu` build, then rewrites every PyPI pin's hashes with the sha256
 PyPI publishes for that release (`scripts/lock_pypi_hashes.py`): the resolver
 had recorded the PyTorch index's copies for markupsafe, colorama and jinja2.
 
-### The npm override: postcss-selector-parser
+### The UI's lock
 
-`frontend/package.json` forces `postcss-selector-parser` to `^7.1.6`, under
-`"overrides"`.
-
-- **Why.** Tailwind CSS 3, and postcss-nested through it, ask for `^6.1.2`.
-  Every 6.x release has GHSA-rj75-hqrm-r3gf, quadratic selector parsing: a
-  build-time denial of service, fixed in 7.1.6 only. Tailwind 3.4.19, the
-  last 3.x, still asks for 6.x.
-- **Why it is safe.** With the override, `npm run build` gives a `dist/`
-  byte-identical to the build without it, CSS included, and
-  `npm run check` passes.
-- **When it goes.** Remove it when the UI moves to Tailwind CSS 4. Tailwind
-  4 no longer uses postcss-selector-parser, nor braces (SECURITY.md,
-  "Accepted vulnerabilities").
+`frontend/package.json` has no `"overrides"` since Tailwind CSS 4
+(2026-10-10): the one it had forced postcss-selector-parser past a
+Tailwind 3 dependency with a known vulnerability. Tailwind 4 builds through
+`@tailwindcss/vite`, without PostCSS, autoprefixer, braces or
+postcss-selector-parser; `npm audit` reports nothing, dev dependencies
+included.
 
 Change `frontend/package-lock.json` with npm 11, as `make npm-update`, CI
 and the `Dockerfile` do. npm 10 drops the `libc` fields of the lock's native
-optional packages, which choose between the glibc and musl builds.
+optional packages, which choose between the glibc and musl builds: Tailwind
+4's `@tailwindcss/oxide` and `lightningcss` are such packages.
 
 ### Quarterly maintenance workflow
 
