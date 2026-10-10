@@ -16,7 +16,7 @@ RUN npm run build
 # 3.14, so pip compiles it here, and without the OpenSSL headers that build
 # silently leaves out the `hash` module and PE signature parsing; the Stage 4
 # YARA gate would then refuse rules OpenCTI accepts.
-FROM python:3.14-slim-bookworm@sha256:c8137f4c460908c8763f281c8f22c431eb5c538514ba9553fc3a89c06b7cfb88 AS builder
+FROM python:3.14-slim-bookworm@sha256:48b13b003dda20b16f9442b8475aa05fe21bf6579a8c881db92ffb4d8fd20f83 AS builder
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential libxml2-dev libxslt1-dev libssl-dev pkg-config \
@@ -44,7 +44,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     && pip install --require-hashes --no-deps -r requirements.lock.txt
 
 # ── Stage 3: runtime image ────────────────────────────────────────────────────
-FROM python:3.14-slim-bookworm@sha256:c8137f4c460908c8763f281c8f22c431eb5c538514ba9553fc3a89c06b7cfb88 AS runtime
+FROM python:3.14-slim-bookworm@sha256:48b13b003dda20b16f9442b8475aa05fe21bf6579a8c881db92ffb4d8fd20f83 AS runtime
 
 ARG INSTALL_CAPTURE=true
 ARG GIT_REV=""
