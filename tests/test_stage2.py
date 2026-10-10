@@ -316,6 +316,28 @@ class TestRefangNoFalsePositives:
         # The intended "{.}" defang convention must still work.
         assert refang("evil{.}com") == "evil.com"
 
+    def test_bracket_after_a_dot_is_not_a_defang_in_prose(self):
+        for text in ("Built on [.NET] 4.8", "several tools (e.g.] see below"):
+            assert refang(text) == text
+
+
+class TestRefangHalfBracket:
+    """One bracket around a dot (lab52's style): none of those indicators was extracted."""
+
+    def test_closing_bracket(self):
+        assert refang("www.destroy2013.]com") == "www.destroy2013.com"
+
+    def test_opening_bracket(self):
+        assert refang("evil[.com") == "evil.com"
+
+    def test_indicators_are_extracted(self):
+        text = ("C2 servers www.destroy2013.]com and 107.150.112.]250, "
+                "payload at http://miandfish.]store/player/install")
+        found = {(e.entity_type, e.value) for e in extract_entities(text)}
+        assert (EntityType.DOMAIN, "www.destroy2013.com") in found
+        assert (EntityType.IPV4, "107.150.112.250") in found
+        assert (EntityType.URL, "http://miandfish.store/player/install") in found
+
 
 class TestASNExtraction:
     def test_real_asn_formats(self):
@@ -345,6 +367,40 @@ class TestIPv4Boundaries:
         entities = extract_entities("Updated to build 192.168.1.1.5 internally.")
         ipv4s = {e.value for e in entities if e.entity_type == EntityType.IPV4}
         assert "192.168.1.1" not in ipv4s
+
+    def test_address_ending_a_sentence(self):
+        # Regression: the trailing guard refused any following ".", so an
+        # address before a full stop was never extracted.
+        entities = extract_entities("The loader beacons to 141.138.157.240. It then sleeps.")
+        ipv4s = {e.value for e in entities if e.entity_type == EntityType.IPV4}
+        assert "141.138.157.240" in ipv4s
+
+
+class TestIPv6:
+    """Until 2026-10 no IPv6 address was ever extracted: the call raised TypeError."""
+
+    def test_addresses_extracted(self, caplog):
+        text = "The implant beaconed to 2001:db8:85a3::8a2e:370:7334 and 2a03:2880:f12f:83:face:b00c:0:25de."
+        ipv6s = {e.value for e in extract_entities(text) if e.entity_type == EntityType.IPV6}
+        assert ipv6s == {"2001:db8:85a3::8a2e:370:7334", "2a03:2880:f12f:83:face:b00c:0:25de"}
+        assert "iocextract failed" not in caplog.text
+
+    def test_what_iocextract_also_returns_is_refused(self):
+        text = ("Build time 12:30:45, MAC 00:1a:2b:3c:4d:5e, certificate "
+                "6C:0C:E2:DD:05:84:C4:7C, and the C++ call Abc::Def().")
+        ipv6s = [e.value for e in extract_entities(text) if e.entity_type == EntityType.IPV6]
+        assert ipv6s == []
+
+    def test_a_raising_helper_is_logged_not_fatal(self, monkeypatch, caplog):
+        import iocextract
+
+        def broken(_text):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(iocextract, "extract_ipv6s", broken)
+        entities = extract_entities("C2 at 185.220.101.45 and 2001:db8::1:2.")
+        assert {e.value for e in entities if e.entity_type == EntityType.IPV4} == {"185.220.101.45"}
+        assert "iocextract failed" in caplog.text
 
 
 class TestHyphenLinebreaks:

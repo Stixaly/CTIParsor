@@ -6,6 +6,37 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Fixed
+
+#### Stage 2 network indicators: IPv6, sentence-final IPv4, half-bracket defangs, 2026-10-10
+
+Three recall defects in `pipeline/stage2_extraction.py`, each there since the
+first commit or close to it. Measured on AnnoCTR's 400 texts, old against
+new: +22 IPv4, 13 truncated lab52 domains now whole (`1.duckdns` →
+`1.duckdns.org`), 11 defanged URLs now refanged, no URL or email lost.
+
+- **No IPv6 address was ever extracted.** The code called
+  `iocextract.extract_ipv6s(text, refang=True)`; the function takes no
+  `refang`, so it raised `TypeError` on every report, and the
+  `extract_urls` / `extract_emails` calls after it in the same `try` never
+  ran either. The IPv6 call is fixed and its candidates are validated:
+  iocextract's pattern is loose (in AnnoCTR: 101 candidates, all clock
+  times, MAC addresses or a byte fingerprint). The URL and email calls are
+  removed, not revived: turned on, they added 244 URLs (mostly copies of
+  regex hits with Markdown escapes or a trailing slash) and 39 "emails"
+  such as `i7-6700hqcpu@2.60ghz`, each of which hid its host from the
+  domain list — `avsvmcloud.com`, SUNBURST's C2, among them.
+- **An IPv4 address that ends a sentence was dropped.** The trailing guard
+  meant to refuse a fifth octet (`192.168.1.1.5`) refused any following
+  `.`. It now refuses `.` followed by a digit only; 5 C2 addresses in
+  AnnoCTR. The same change lets through two version strings that end a
+  sentence (`1.6.0.27.`), the kind of match the pattern already made
+  mid-sentence.
+- **One-bracket defangs were not refanged.** `www.destroy2013.]com`,
+  `107.150.112.]250`, `evil[.com` — 9 AnnoCTR texts, all lab52 — gave no
+  indicator or a truncated one. `refang` now restores a dot written with
+  one bracket between two alphanumerics, so `[.NET]` stays as it is.
+
 ### Security
 
 #### The UI's build tools: source-map-js and postcss-selector-parser, 2026-10-10
