@@ -6,6 +6,28 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Documentation
+
+#### What Scorecard still scores low, and the quarterly routine's locks, 2026-10-10
+
+- **ADR-0078, amendment.** The Scorecard workflow and ADR-0078 named
+  Fuzzing among the checks a one-maintainer project scores low by
+  construction. Fuzzing scores 10 since ADR-0081. Only Code-Review and
+  Contributors are low by construction. The amendment lists every check
+  below 10, why, and what raises it.
+- **Signed-Releases.** It is not scored while there is no GitHub Release.
+  A Release without a provenance file or a signature among its assets
+  would score 0. The amendment says so, and which files count.
+- **Settings checked through the API.** Private vulnerability reporting is
+  off, so SECURITY.md's reporting link does not work for an outside
+  reporter. The `main` ruleset exists but is disabled.
+- **The quarterly routine (`docs/dependencies.md`).**
+  - It reviewed and committed only the image's lock. `make update-deps`
+    rewrites all five, and CI's lock follows the image's versions. It now
+    commits every lock, and so does the hint `make update-deps` prints.
+  - New step: review the accepted vulnerabilities, and move their
+    `osv-scanner.toml` review dates.
+
 ### Security
 
 #### Scorecard: the accepted vulnerabilities and the last unhashed pip install, 2026-10-04

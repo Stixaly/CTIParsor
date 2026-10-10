@@ -149,7 +149,7 @@ update-deps:
 	docker compose build app
 	$(MAKE) test-fast
 	@echo ""
-	@echo "Done. Review 'git diff requirements.lock.txt' then commit if tests passed."
+	@echo "Done. Review 'git diff requirements*.lock.txt', then commit every lock if tests passed."
 
 ## Show which npm packages have newer versions available
 npm-outdated:

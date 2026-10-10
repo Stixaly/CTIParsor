@@ -372,7 +372,7 @@ CTIParsor/
 ├── requirements-dev.txt           # ruff, mypy, pytest-cov
 ├── requirements-ci.txt            # What CI's fast tests install (locked with the image's versions)
 ├── requirements-audit.txt         # pip-audit, pinned
-├── requirements*.lock.txt         # Hashed locks: image (PyPI), torch (PyTorch index), CI, audit (make lock)
+├── requirements*.lock.txt         # Hashed locks: image (PyPI), torch (PyTorch index), CI, audit, uv (make lock)
 ├── setup.sh                       # Prepares .env + the DB secret, checks Docker; --offline installs a bundle
 ├── Dockerfile                     # UI build, venv build, slim runtime, + a `dev` target with the CI tools (ADR-0044, ADR-0054)
 ├── compose.yaml                   # app, worker, postgres, capture-proxy + profiles bootstrap / dev / ollama / proxy, hardened

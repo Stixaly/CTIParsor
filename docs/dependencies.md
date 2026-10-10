@@ -127,16 +127,38 @@ make audit
 # 2. Upgrade Python packages within the capped ranges, re-run tests, re-lock
 make update-deps
 
-# 3. Review what changed
+# 3. Review what changed: make update-deps rewrites all five Python locks
+git diff --stat -- 'requirements*.lock.txt'
 git diff requirements.lock.txt
 
 # 4. Upgrade npm packages within package.json semver ranges
 make npm-update
 
-# 5. Commit both lock files together
-git add requirements.lock.txt frontend/package-lock.json
+# 5. Commit every lock together: CI's lock is resolved under the image's
+#    versions, so committing only the image's leaves CI on the old ones
+git add requirements*.lock.txt frontend/package-lock.json
 git commit -m "chore: quarterly dependency update $(date +%Y-%m)"
+
+# 6. Review the accepted vulnerabilities (below)
+grep -n ignoreUntil osv-scanner.toml frontend/osv-scanner.toml
 ```
+
+**Step 6: the accepted vulnerabilities.** SECURITY.md lists the vulnerabilities
+the project ships knowingly ("Accepted vulnerabilities") or keeps out ("Not
+shipped"), each with its reason. Every quarter, for each one:
+
+1. Check whether a fix has shipped, and whether the reason still holds.
+2. If a fix has shipped, upgrade, then remove the row and its rule.
+3. If not, update the row's "Reviewed" date, and move its rule forward.
+
+The rules come in two kinds:
+
+- **`.grype.yaml`** (image scan): tied to the exact package version. A rule
+  stops matching on its own when the image moves to another version.
+- **`osv-scanner.toml`** (Scorecard's Vulnerabilities check), at the root
+  and in `frontend/`: tied to a date, `ignoreUntil`. After that date
+  Scorecard reports the vulnerability again, and the score drops until the
+  review sets a new date.
 
 ### Bumping a capped major version
 
