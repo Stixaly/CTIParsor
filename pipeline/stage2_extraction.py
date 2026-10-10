@@ -1,3 +1,4 @@
+import ipaddress
 import re
 from urllib.parse import urlparse
 
@@ -101,16 +102,16 @@ _HASH_BLOCK_PATTERN = _compile_pattern(
     r"(?![0-9a-zA-Z])"
 )
 
-# The leading/trailing (?<![\d.]) / (?![\d.]) guards stop the pattern from
+# The leading (?<![\d.]) and trailing (?!\d|\.\d) guards stop the pattern from
 # slicing four octets out of a longer dotted-number run.  Without them
 # "192.168.1.1.5" (a 5-part build/sequence string) yielded a bogus IoC
-# "192.168.1.1".  The guards are harmless to .fullmatch() — at the string
-# boundaries the negative lookarounds always succeed — so a real dotted quad
-# like "192.168.1.1" still validates.
+# "192.168.1.1".  The trailing guard refuses a fifth octet, not a full stop:
+# until 2026-10 it was (?![\d.]), which dropped every address that ends a
+# sentence ("…beacons to 141.138.157.240."); 5 C2 addresses in AnnoCTR.
 _IPV4_PATTERN = _compile_pattern(
     r"(?<![\d.])"
     r"(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)"
-    r"(?![\d.])"
+    r"(?!\d|\.\d)"
 )
 
 # Bare filenames (no path) — only when the extension is executable / script /
@@ -253,6 +254,12 @@ _DEFANG_PATTERN = _compile_pattern(
     re.IGNORECASE
 )
 
+# A dot defanged with one bracket — "www.destroy2013.]com", "107.150.112.]250",
+# "evil[.com" — between two alphanumerics, so prose ("[.NET]", "(e.g.]") stays.
+# 9 of AnnoCTR's 400 texts write their indicators this way; until 2026-10 none
+# of those indicators was extracted.
+_HALF_BRACKET_DOT = _compile_pattern(r"(?<=[A-Za-z0-9])(?:\.\]|\[\.)(?=[A-Za-z0-9])")
+
 def _defang_repl(match: re.Match) -> str:
     m = match.group(0).lower()
 
@@ -287,7 +294,7 @@ def refang(text: str) -> str:
     """
     if not text:
         return text
-    return _DEFANG_PATTERN.sub(_defang_repl, text)
+    return _HALF_BRACKET_DOT.sub(".", _DEFANG_PATTERN.sub(_defang_repl, text))
 
 
 def extract_entities(text: str) -> list[RawEntity]:
@@ -297,7 +304,7 @@ def extract_entities(text: str) -> list[RawEntity]:
     Stratégie :
     - Refanging d'abord  → normalise hxxps, [.], etc.
     - Hashes             → regex fixe, toujours fiable
-    - Réseau (IP/URL/…)  → iocextract + regex complémentaires
+    - Réseau (IP/URL/…)  → regex ; IPv6 : iocextract, validé
     - CVE / TTP          → regex
     - NER                → spaCy pour malwares et acteurs
     """
@@ -427,42 +434,39 @@ def _extract_hashes_regex(text: str) -> list[RawEntity]:
 
 def _extract_network_iocs(text: str) -> list[RawEntity]:
     """
-    Extrait IP, URL, domaines et emails.
-    iocextract est utilisé s'il est disponible, mais les regex tournent
-    toujours en complément pour ne rien manquer.
+    Extrait IP, URL, domaines et emails, from text `refang` already ran on.
 
-    `iocextract.extract_ipv4s` is deliberately NOT called: its backtracking
-    pattern is quadratic in the size of the text (measured 2026-10: 39 s for a
-    45 KB report with a 2,000-address appendix, ~4 min extrapolated for 5,000),
-    and it was redundant — `_IPV4_PATTERN` below runs on the same text, which
-    Stage 1 and `extract_entities` have already refanged.  The remaining three
-    calls cost about 1 % of Stage 2 and are kept under tests/test_stage2_performance.py.
+    IPv4, URLs, emails and domains come from this module's regexes; iocextract
+    gives the IPv6 candidates only.  Until 2026-10 the code also asked it for
+    URLs and emails, but behind an `extract_ipv6s(text, refang=True)` that
+    raised TypeError (the function takes no `refang`) on every report, so none
+    of the three ever ran and no IPv6 address was ever extracted.  Turning the
+    URL and email helpers on was measured on AnnoCTR's 400 texts and rejected:
+    +244 URLs, mostly copies of ones the regex has with Markdown escapes or a
+    trailing slash kept, and +39 emails, mostly not addresses
+    ("i7-6700hqcpu@2.60ghz", "screen-shot-…@11.48.30-am.png") — and each new
+    email hides its host from the domain list (avsvmcloud.com, SUNBURST's C2).
+
+    `iocextract.extract_ipv4s` is deliberately NOT called either: its
+    backtracking pattern is quadratic in the size of the text (39 s for a
+    45 KB report with a 2,000-address appendix); tests/test_stage2_performance.py
+    keeps Stage 2 linear.
     """
     results: list[RawEntity] = []
 
-    # --- iocextract (gère le defanging résiduel) ---
     if _IOCEXTRACT_AVAILABLE:
         try:
-            for ip in iocextract.extract_ipv6s(text, refang=True):
-                if ip.strip():
-                    results.append(RawEntity(value=ip.strip(), entity_type=EntityType.IPV6))
-
-            for url in iocextract.extract_urls(text, refang=True):
-                url = url.strip()
-                if url.startswith(("http://", "https://", "ftp://")):
-                    results.append(RawEntity(value=url, entity_type=EntityType.URL))
-
-            for email in iocextract.extract_emails(text, refang=True):
-                if "@" in email:
-                    results.append(RawEntity(value=email.strip(), entity_type=EntityType.EMAIL))
+            candidates = list(iocextract.extract_ipv6s(text))
         except Exception as exc:
-            # The regexes below cover the same ground; say that the helper
-            # failed instead of losing that fact.
-            logger.warning(f"[Stage 2] iocextract failed, regex extraction only: {type(exc).__name__}: {exc}")
+            # Nothing else extracts IPv6: say so instead of losing that fact.
+            logger.warning(f"[Stage 2] iocextract failed, no IPv6 extraction: {type(exc).__name__}: {exc}")
+            candidates = []
+        for candidate in candidates:
+            ip = _ipv6_literal(candidate.strip())
+            if ip:
+                results.append(RawEntity(value=ip, entity_type=EntityType.IPV6))
 
-    # --- Regex complémentaires (toujours actifs) ---
-
-    # IPv4 par regex (complète iocextract sur certains formats)
+    # IPv4 par regex
     for m in _IPV4_PATTERN.finditer(text):
         results.append(RawEntity(value=m.group(), entity_type=EntityType.IPV4))
 
@@ -498,6 +502,29 @@ def _extract_network_iocs(text: str) -> list[RawEntity]:
             results.append(RawEntity(value=domain, entity_type=EntityType.DOMAIN))
 
     return results
+
+
+def _ipv6_literal(candidate: str) -> str | None:
+    """
+    `candidate` when it is an IPv6 address worth reporting, else None.
+
+    iocextract's IPv6 pattern is loose: in AnnoCTR's 400 texts it returned 101
+    candidates and not one address — 100 clock times ("02:46:43") and MAC
+    addresses, which `ipaddress` refuses, and an 8-byte fingerprint
+    ("6C:0C:E2:DD:05:84:C4:7C"), which it accepts.  So: a valid address, with
+    at least three groups (not "abc::def" from C++ scope syntax), and not
+    eight two-digit groups (a colon-separated byte string).
+    """
+    try:
+        ipaddress.IPv6Address(candidate)
+    except ValueError:
+        return None
+    groups = [g for g in candidate.split(":") if g]
+    if len(groups) < 3:
+        return None
+    if "::" not in candidate and all(len(g) == 2 for g in groups):
+        return None
+    return candidate
 
 
 def _url_host(url: str) -> str:

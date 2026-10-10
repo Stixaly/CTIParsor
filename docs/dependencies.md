@@ -18,7 +18,7 @@ maintenance routine that keeps them current.
 | `python-docx` | DOCX parsing |
 | `beautifulsoup4` | HTML parsing |
 | `defusedxml` | XML parsing hardened against entity-expansion attacks (DOCX internals) |
-| `iocextract` | Regex IoC extraction with defang support |
+| `iocextract` | IPv6 candidates for Stage 2, which validates them (IPv4, URLs, emails and domains are Stage 2's own regexes) |
 | `sentence-transformers` | Semantic TTP embeddings (Stage 2c) |
 | `transformers` | HuggingFace backbone (CyNER 2.0, Stage 2d) |
 | `sentencepiece` | Tokenizer for CyNER 2.0's DeBERTa-v3 (Stage 2d) |

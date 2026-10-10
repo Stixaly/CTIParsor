@@ -6,39 +6,36 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
-### Changed
+### Fixed
 
-#### What the model could not decide waits for an analyst (ADR-0082), 2026-10-10
+#### Stage 2 network indicators: IPv6, sentence-final IPv4, half-bracket defangs, 2026-10-10
 
-- **Stage 3d no longer ships what it could not check.** It used to keep every
-  claim it did not explicitly refute:
-  - its batch's call failed, or the answer was not JSON;
-  - the answer said nothing about it, or had no `verified` field (which
-    counted as true);
-  - it was "verified" with no quote, or with a quote that is nowhere in the
-    text.
+Three recall defects in `pipeline/stage2_extraction.py`, each there since the
+first commit or close to it. Measured on AnnoCTR's 400 texts, old against
+new: +22 IPv4, 13 truncated lab52 domains now whole (`1.duckdns` →
+`1.duckdns.org`), 11 defanged URLs now refanged, no URL or email lost.
 
-  They shipped as verified. Each one is now held, with the reason. A
-  verified claim's quote must be in the text word for word; punctuation,
-  Markdown emphasis and link targets do not count (`evidence_span.stated_in`,
-  179 of 181 dev-run quotes).
-- **Select mode's undecided techniques (`ttp_review`) are no longer lost.**
-  Until now they reached only the evaluation record.
-- **Held rows are stored pending, with `held_reason`** (migration v0010,
-  on `entities` and `relationships`), and stay out of the bundle, the
-  coverage matrix and rule relevance until an analyst accepts them.
-  Accepting goes one card at a time: auto-accept, type, group, selection and
-  "accept all pending" skip a held row, and a `human_bulk` accept of one is
-  refused (409). Review marks them with a `held` chip that gives the reason.
-- One predicate, `pipeline.decisions.SHIPS`, now says what a report ships,
-  for every reader that used to repeat `accepted IS NULL OR accepted=1`.
-- `tests/test_migrations.py` no longer assumes the history ends at the
-  schema ADR-0077 froze (version 9).
-- Tests run Stages 3d and 3f at their defaults (off), as CI does, whatever
-  the developer's `.env` says. With a local `ENABLE_STIX_VERIFICATION=true`,
-  `mock_llm`'s answer reached the verifier, which cannot parse it.
-- The ADR index's 0049 entry had a GitHub conflict URL pasted into a word;
-  removed.
+- **No IPv6 address was ever extracted.** The code called
+  `iocextract.extract_ipv6s(text, refang=True)`; the function takes no
+  `refang`, so it raised `TypeError` on every report, and the
+  `extract_urls` / `extract_emails` calls after it in the same `try` never
+  ran either. The IPv6 call is fixed and its candidates are validated:
+  iocextract's pattern is loose (in AnnoCTR: 101 candidates, all clock
+  times, MAC addresses or a byte fingerprint). The URL and email calls are
+  removed, not revived: turned on, they added 244 URLs (mostly copies of
+  regex hits with Markdown escapes or a trailing slash) and 39 "emails"
+  such as `i7-6700hqcpu@2.60ghz`, each of which hid its host from the
+  domain list — `avsvmcloud.com`, SUNBURST's C2, among them.
+- **An IPv4 address that ends a sentence was dropped.** The trailing guard
+  meant to refuse a fifth octet (`192.168.1.1.5`) refused any following
+  `.`. It now refuses `.` followed by a digit only; 5 C2 addresses in
+  AnnoCTR. The same change lets through two version strings that end a
+  sentence (`1.6.0.27.`), the kind of match the pattern already made
+  mid-sentence.
+- **One-bracket defangs were not refanged.** `www.destroy2013.]com`,
+  `107.150.112.]250`, `evil[.com` — 9 AnnoCTR texts, all lab52 — gave no
+  indicator or a truncated one. `refang` now restores a dot written with
+  one bracket between two alphanumerics, so `[.NET]` stays as it is.
 
 ### Security
 

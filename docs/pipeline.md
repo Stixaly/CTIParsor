@@ -17,7 +17,7 @@ the [README](../README.md#how-it-works); this page is the detail.
 │  PDF / DOCX / HTML / TXT / MD → normalised text + chunks            │
 │  • Text PDF    : markitdown (structure-preserving) → pdfplumber      │
 │  • Scanned PDF : auto-detected → OCR via Tesseract / pdf2image       │
-│  • Defanging   : hxxps://, [.], (.), [at], [@] → live form          │
+│  • Defanging   : hxxps://, [.], (.), .], [at], [@] → live form      │
 │  • Chunking    : paragraph-aware + 400-char sliding-window overlap   │
 │  • Adaptive    : larger chunks for large docs (3 000–5 000 chars)    │
 └─────────────────────────────┬────────────────────────────────────────┘
