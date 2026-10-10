@@ -324,3 +324,15 @@ def test_blank_png_decodes_and_clears_the_qwen_patch_size():
     img = image_mod.open(io.BytesIO(vlm._blank_png()))
     img.load()
     assert img.size == (64, 64)
+
+
+def test_a_vision_provider_url_must_be_http(monkeypatch):
+    """The base URLs come from settings; a file: one must not read local files."""
+    opened = []
+    monkeypatch.setattr("pipeline.vlm.urllib.request.urlopen", lambda *a, **k: opened.append(a))
+    for url in ("file:///etc/passwd", "ftp://host/models", "gopher://x"):
+        with pytest.raises(ValueError, match="http"):
+            vlm._http_get_json(url, {}, 1.0)
+        with pytest.raises(ValueError, match="http"):
+            vlm._http_json(url, {}, {}, 1.0)
+    assert opened == []

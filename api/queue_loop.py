@@ -37,7 +37,8 @@ DRAIN_S = env_int("WORKER_DRAIN_S", default=60)
 # A DB query on every ~2s poll tick would be wasteful for something that only
 # needs to run a few times a day; this is a separate, much coarser interval.
 RETENTION_SWEEP_S = env_int("JOB_RETENTION_SWEEP_S", default=3600)
-ALIVE_FILE = Path(os.getenv("WORKER_ALIVE_FILE", "/tmp/ctiparsor-worker.alive"))
+# /tmp is the container's own tmpfs; touch_alive never follows a symlink there.
+ALIVE_FILE = Path(os.getenv("WORKER_ALIVE_FILE", "/tmp/ctiparsor-worker.alive"))  # noqa: S108 — see above
 WORKER_ID = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:6]}"
 _VALID_ROLES = ("all", "api", "worker")
 
@@ -207,9 +208,18 @@ def _default_spawn(job_id: str, file_path: str, original_filename: str, on_exit:
 
 
 def touch_alive(path: Path | None = None) -> None:
-    """Refresh the liveness file the container healthcheck watches; never raises."""
+    """Refresh the liveness file the container healthcheck watches; never raises.
+
+    Opened with O_NOFOLLOW: on a host install /tmp is shared, and another user's
+    symlink at that name must not make the worker create or touch its target.
+    """
+    target = path or ALIVE_FILE
     try:
-        (path or ALIVE_FILE).touch()
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        try:
+            os.utime(fd if os.utime in os.supports_fd else target)
+        finally:
+            os.close(fd)
     except OSError:
         pass
 

@@ -124,7 +124,7 @@ def _resolve_git_rev() -> str | None:
     try:
         project_root = Path(__file__).parent.parent
         result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
+            ["git", "rev-parse", "HEAD"],  # noqa: S607 — git from PATH, fixed arguments
             capture_output=True,
             text=True,
             timeout=5,

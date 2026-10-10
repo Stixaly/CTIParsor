@@ -58,14 +58,24 @@ def test_is_ancestor_file_not_found(monkeypatch):
     def raise_error(*args, **kwargs):
         raise FileNotFoundError("git not found")
     monkeypatch.setattr("pipeline.bundle_revisions.subprocess.run", raise_error)
-    assert is_ancestor("rev", "desc") is None
+    assert is_ancestor("deadbeef", "cafe1234") is None
 
 
 def test_is_ancestor_code_128(monkeypatch):
     class MockResult:
         returncode = 128
     monkeypatch.setattr("pipeline.bundle_revisions.subprocess.run", lambda *args, **kwargs: MockResult())
-    assert is_ancestor("rev", "desc") is None
+    assert is_ancestor("deadbeef", "cafe1234") is None
+
+
+def test_is_ancestor_never_passes_git_anything_but_commit_ids(monkeypatch):
+    """A stored revision is data: one shaped like an option must not reach git."""
+    calls = []
+    monkeypatch.setattr("pipeline.bundle_revisions.subprocess.run", lambda *a, **k: calls.append(a))
+    for rev in ("--output=/tmp/x", "-h", "HEAD", "abc123-dirty", "", "deadbeef;rm"):
+        assert is_ancestor(rev, "cafe1234") is None
+        assert is_ancestor("cafe1234", rev) is None
+    assert calls == []
 
 
 def test_is_ancestor_code_0_and_1(monkeypatch):
@@ -75,10 +85,10 @@ def test_is_ancestor_code_0_and_1(monkeypatch):
         returncode = 1
 
     monkeypatch.setattr("pipeline.bundle_revisions.subprocess.run", lambda *args, **kwargs: MockResult0())
-    assert is_ancestor("rev", "desc") is True
+    assert is_ancestor("deadbeef", "cafe1234") is True
 
     monkeypatch.setattr("pipeline.bundle_revisions.subprocess.run", lambda *args, **kwargs: MockResult1())
-    assert is_ancestor("rev", "desc") is False
+    assert is_ancestor("deadbeef", "cafe1234") is False
 
 
 def test_audit_staleness():

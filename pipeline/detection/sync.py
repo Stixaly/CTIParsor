@@ -104,7 +104,8 @@ def git_command(corpus: dict) -> list[str] | None:
 def _download(url: str, dest: Path, *, timeout: int) -> int:
     """Stream `url` into `dest` in _CHUNK-sized blocks; returns the bytes written.
     Raises URLError/OSError — the caller decides what a failure means."""
-    req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
+    # The URL passed validate_url (fetch_tarball), each redirect too (_SAFE_OPENER).
+    req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})  # noqa: S310 — see above
     with _SAFE_OPENER.open(req, timeout=timeout) as resp:
         total = 0
         with open(dest, "wb") as f:
@@ -119,7 +120,7 @@ def _download(url: str, dest: Path, *, timeout: int) -> int:
 
 def _fetch_text(url: str, *, timeout: int) -> str | None:
     """Fetch a small text sidecar (the .md5 next to a tarball). None on any failure."""
-    req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
+    req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})  # noqa: S310 — as _download
     try:
         with _SAFE_OPENER.open(req, timeout=timeout) as resp:
             data = resp.read(4096)
@@ -237,7 +238,7 @@ def fetch_tarball(corpus: dict, *, timeout: int = 900) -> tuple[bool, str]:
             if not members:
                 return False, "archive contains no extractable files"
             kwargs: dict = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
-            tar.extractall(staging, members=members, **kwargs)
+            tar.extractall(staging, members=members, **kwargs)  # noqa: S202 — _safe_members + data filter
 
         manifest = {
             "url": url,
@@ -283,7 +284,7 @@ def sync_corpus(corpus: dict, *, timeout: int = 900) -> tuple[bool, str]:
         # The registry can come from a YAML file nobody validated over the API.
         return False, f"git remote refused: only https:// remotes are fetched ({remote[:80]!r})"
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,  # noqa: S603 — https remote
                               env={**os.environ, **GIT_ENV})
     except FileNotFoundError as e:
         return _failed("git is not installed", e)

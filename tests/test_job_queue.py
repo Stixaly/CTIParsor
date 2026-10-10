@@ -309,6 +309,19 @@ def test_run_once_touches_the_alive_file(setup_db, tmp_path: Path, monkeypatch: 
     assert (tmp_path / "alive").exists()
 
 
+def test_the_alive_file_is_never_followed_through_a_symlink(tmp_path: Path):
+    """On a host install /tmp is shared: another user's symlink at that name
+    must not make the worker create (or touch) its target."""
+    target = tmp_path / "victim"
+    link = tmp_path / "alive"
+    link.symlink_to(target)
+    queue_loop.touch_alive(link)
+    assert not target.exists()
+
+    queue_loop.touch_alive(tmp_path / "real")
+    assert (tmp_path / "real").exists()
+
+
 def test_run_once_does_not_touch_alive_file_when_a_db_call_fails(
     setup_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
