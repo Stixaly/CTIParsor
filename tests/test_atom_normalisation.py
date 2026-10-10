@@ -70,6 +70,6 @@ def test_extract_atoms_never_emits_an_untrimmed_value():
             "condition": "selection",
         }
     }
-    for cls, value in extract_atoms(rule):
+    for _cls, value in extract_atoms(rule):
         assert value == value.strip(), f"unstripped {value!r}"
         assert value == value.lower(), f"non-lowercase {value!r}"

@@ -300,8 +300,8 @@ def get_bundle(job_id: str):
 
     try:
         return json.loads(row["bundle_json"])
-    except Exception:
-        raise HTTPException(500, "Bundle JSON is corrupted")
+    except Exception as exc:
+        raise HTTPException(500, "Bundle JSON is corrupted") from exc
 
 
 @router.get("/{job_id}/bundle/ledger")
@@ -326,5 +326,5 @@ def get_bundle_ledger(job_id: str):
 
     try:
         return json.loads(row["bundle_ledger_json"])
-    except Exception:
-        raise HTTPException(500, "Bundle ledger JSON is corrupted")
+    except Exception as exc:
+        raise HTTPException(500, "Bundle ledger JSON is corrupted") from exc

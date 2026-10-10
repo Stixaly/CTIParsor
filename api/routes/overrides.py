@@ -99,7 +99,7 @@ def create_override(body: OverrideIn) -> dict:
                 row = add_manual(conn, body.term, body.entity_type, body.action, now_iso(),
                                  display=body.display, note=body.note)
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, str(exc)) from exc
     overrides.reload()
     return row
 

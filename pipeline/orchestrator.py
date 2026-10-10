@@ -814,7 +814,7 @@ class _Run:
         select_skipped = (opts.ttp_mode == "select" and verify_ttps
                           and env_bool("TTP_SELECT_SKIPPED_CHUNKS", default=False))
         skipped = 0
-        for i, (chunk, ents) in enumerate(zip(chunks, r.entities_per_chunk), 1):
+        for i, (chunk, ents) in enumerate(zip(chunks, r.entities_per_chunk, strict=True), 1):
             if i in chunk_results:
                 continue
             if chunk_has_signals(chunk, ents, known_values):

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import itertools
 
 from pipeline.stage1f_figures import (
     CLOSE,
@@ -180,5 +181,5 @@ def test_span_offsets_do_not_overlap(monkeypatch):
     _, spans = inject_append("Report body.", reads)
 
     ordered = sorted(spans, key=lambda s: s.char_start)
-    for a, b in zip(ordered, ordered[1:]):
+    for a, b in itertools.pairwise(ordered):
         assert a.char_end <= b.char_start

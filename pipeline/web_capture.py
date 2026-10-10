@@ -562,8 +562,8 @@ def validate_url(raw_url: str) -> str:
 
     try:
         parsed = urlsplit(url)
-    except ValueError:
-        raise CaptureError("Malformed URL")
+    except ValueError as exc:
+        raise CaptureError("Malformed URL") from exc
 
     scheme = parsed.scheme.lower()
     if scheme not in _ALLOWED_SCHEMES:
@@ -578,8 +578,8 @@ def validate_url(raw_url: str) -> str:
 
     try:
         port = parsed.port
-    except ValueError:
-        raise CaptureError("Invalid port")
+    except ValueError as exc:
+        raise CaptureError("Invalid port") from exc
 
     if port is not None and port not in _ALLOWED_PORTS:
         raise CaptureError(f"Port {port} is not allowed. Allowed: 80, 443, 8080, 8443.")

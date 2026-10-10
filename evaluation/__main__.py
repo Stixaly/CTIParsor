@@ -500,7 +500,7 @@ def cmd_retrieval(args) -> None:
                     kept_idx = {i for i, p in enumerate(passages) if p in kept_set}
                     ranked_lists = retriever.rank(kept, k=max(ks))
                     by_pos = {(p.start, p.end): [cand_id(c.attack_id) for c in row]
-                              for p, row in zip(kept, ranked_lists)}
+                              for p, row in zip(kept, ranked_lists, strict=True)}
                     gold: dict[str, list[tuple[int, int]]] = {}
                     unlocated: set[str] = set()
                     for m in d.techniques:

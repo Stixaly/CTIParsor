@@ -200,7 +200,7 @@ def main() -> None:
     widths = [34, 5, 5, 8, 7, 5, 6, 5]
 
     def fmt_row(cols: list[str]) -> str:
-        return " ".join(c.ljust(w) for c, w in zip(cols, widths))
+        return " ".join(c.ljust(w) for c, w in zip(cols, widths, strict=True))
 
     print(fmt_row(headers))
     print("-" * sum(widths))

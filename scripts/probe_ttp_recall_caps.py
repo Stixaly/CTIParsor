@@ -106,7 +106,7 @@ def print_table(reports: list[tuple[str, str]], show_dropped: int = 0):
             from pipeline.stage2c_ttp_semantic import _has_ttp_keyword, _split_candidate_sentences
             sentences = _split_candidate_sentences(text)
             dropped = [s for s in sentences if not _has_ttp_keyword(s)]
-            for i, s in enumerate(dropped[:show_dropped]):
+            for s in dropped[:show_dropped]:
                 print(f"  Dropped: {s[:110]}")
 
     # Total line

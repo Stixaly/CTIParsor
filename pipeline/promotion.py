@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import asdict, dataclass, field
+from functools import partial
 from uuid import uuid4
 
 from api.db import transaction
@@ -129,22 +130,19 @@ def compute_candidates(
         if not total:
             continue
         display = t.surface.most_common(1)[0][0] if t.surface else term
-
-        def _candidate(action: str, job_count: int) -> Candidate:
-            return Candidate(
-                term=term, entity_type=entity_type, action=action, display=display,
-                accepted_count=t.accepted, rejected_count=t.rejected, job_count=job_count,
-                sources=sorted(t.sources),
-            )
+        _candidate = partial(
+            Candidate, term=term, entity_type=entity_type, display=display,
+            accepted_count=t.accepted, rejected_count=t.rejected, sources=sorted(t.sources),
+        )
 
         if (t.rejected >= min_rejections and len(t.rejected_jobs) >= min_jobs
                 and t.rejected / total >= share):
-            out.append(_candidate("deny", len(t.rejected_jobs)))
+            out.append(_candidate(action="deny", job_count=len(t.rejected_jobs)))
         if (entity_type in GAZETTEER_TYPES and t.accepted >= min_accepts
                 and len(t.accepted_jobs) >= min_jobs and t.accepted / total >= share
                 and term not in known_terms and len(term) >= _MIN_TERM_LEN
                 and not _is_generic_fragment(term)):
-            out.append(_candidate("promote", len(t.accepted_jobs)))
+            out.append(_candidate(action="promote", job_count=len(t.accepted_jobs)))
     return out
 
 
@@ -152,7 +150,7 @@ def compute_candidates(
 
 
 def _row(r) -> dict:
-    return dict(zip(r.keys(), tuple(r)))
+    return dict(zip(r.keys(), tuple(r), strict=True))
 
 
 def list_overrides(conn, *, status: str | None = None, action: str | None = None) -> list[dict]:

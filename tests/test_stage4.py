@@ -158,7 +158,7 @@ def test_a_duplicate_row_adds_its_dates_to_the_edge_and_the_ledger_says_why():
     assert sorted(a["value"] for a in rels[0].x_temporal_assertions) == ["2021", "2024"]
     rows = [e for e in ledger.relationships if e["source_value"] == "APT29"]
     assert [e["outcome"] for e in rows] == ["emitted", "merged"]
-    for row, year in zip(rows, ("2021", "2024")):
+    for row, year in zip(rows, ("2021", "2024"), strict=True):
         assert [(c["value"], c["outcome"], c["reason"]) for c in row["times"]] == [
             (year, "withheld", "window_role")]
         # A withheld date rewrites nothing: `changes` is what the Graph page

@@ -48,7 +48,7 @@ def rewrite(path: str) -> tuple[int, int]:
             i += 1
     wanted = [(n, v) for _, _, n, v in blocks if n.lower() not in KEEP]
     with ThreadPoolExecutor(12) as pool:
-        found = dict(zip(wanted, pool.map(lambda nv: pypi_hashes(*nv), wanted)))
+        found = dict(zip(wanted, pool.map(lambda nv: pypi_hashes(*nv), wanted), strict=True))
     changed = 0
     for start, end, name, version in reversed(blocks):
         if name.lower() in KEEP:

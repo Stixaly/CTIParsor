@@ -21,8 +21,16 @@ extend-exclude = ["cache", "corpora", "offline", "data", "frontend"]
 # data from its source, where S608 flags every f-string — on 2026-10-10 its 31
 # shipped sites all interpolated `?` lists or identifiers fixed in the code.
 # Blind `except Exception` that logs (BLE001, 126 sites) is not enforced.
-select = ["E", "F", "W", "I", "S"]
+# B (flake8-bugbear), since 2026-10-10: on its first run B905 found a GLiNER
+# batch answer zipped against its chunks, where a short answer dropped the
+# last chunks' entities without a word.  Every zip() over parallel lists now
+# says strict=True; a pairwise walk uses itertools.pairwise.
+select = ["E", "F", "W", "I", "S", "B"]
 ignore = ["S608"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI reads these defaults as parameter declarations, never as values.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Form", "fastapi.Query"]
 
 [tool.ruff.lint.per-file-ignores]
 # E402 (module-level import not at top of file): intentional throughout this

@@ -229,6 +229,33 @@ def test_a_failing_batch_falls_back_to_one_call_per_chunk(monkeypatch):
     assert len(fake.calls) == 1            # the one chunk that answered
 
 
+class _ShortBatchGLiNER(_FakeGLiNER):
+    """A batch answered with fewer lists than chunks: a flat list, the shape a
+    one-chunk call returns.  Asked one chunk at a time, it reads each."""
+
+    def predict_entities(self, texts, labels, threshold, **kw):
+        self.calls.append({"texts": texts})
+        if not isinstance(texts, str):
+            return [_pred("malware family", 0.9, "Emotet")]
+        return [_pred("malware family", 0.9, texts.split()[0])]
+
+
+def test_a_batch_answer_short_of_its_chunks_is_retried_per_chunk(monkeypatch):
+    """Zipped as it came, the flat answer would stand for the first chunk and
+    the second chunk's Qakbot would be dropped without a word."""
+    fake = _ShortBatchGLiNER([])
+    monkeypatch.setattr(stage2e_gliner, "_load_gliner", lambda: fake)
+    monkeypatch.setattr(stage2e_gliner, "get_threshold", _default_cutoff)
+    monkeypatch.setattr(stage2e_gliner, "_CHUNK_CHARS", 40)
+    monkeypatch.setattr(stage2e_gliner, "_OVERLAP_CHARS", 0)
+
+    text = "Emotet spread through the mail again.   Qakbot followed it a week later."
+    results = stage2e_gliner.extract_gliner_entities(text)
+
+    assert sorted(r.value for r in results) == ["Emotet", "Qakbot"]
+    assert [type(c["texts"]) for c in fake.calls] == [list, str, str]
+
+
 @pytest.mark.parametrize("raw", [[], [_pred("malware family", 0.9, "Emotet")]])
 def test_degenerate_batch_shapes_are_normalised(monkeypatch, raw):
     """An empty answer, or a flat list for a one-chunk batch, is not an error."""

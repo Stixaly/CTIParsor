@@ -484,7 +484,7 @@ class Retriever:
             emb = np.asarray(corpus.embeddings, dtype=np.float32)
             self._unit = emb / np.maximum(np.linalg.norm(emb, axis=1, keepdims=True), 1e-12)
         self._bm25 = BM25(corpus.texts) if method != "dense" else None
-        self._names = {tid: name for tid, name in zip(corpus.ids, corpus.names) if name}
+        self._names = {tid: name for tid, name in zip(corpus.ids, corpus.names, strict=True) if name}
 
     def _group(self, entry_scores):
         """(per-technique best score, index of the best entry) over each block."""

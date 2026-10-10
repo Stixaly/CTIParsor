@@ -210,7 +210,7 @@ def _comention_candidates(
     seen_pairs: set[frozenset[str]] = set()
     rescuable: set[str] = set()
 
-    for sidx, nids in sentence_to_nodes.items():
+    for nids in sentence_to_nodes.values():
         if len(nids) < 2:
             continue
         for a_id, b_id in itertools.combinations(nids, 2):

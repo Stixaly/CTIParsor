@@ -166,14 +166,14 @@ def test_save_spans_then_load_spans_round_trips():
     assert loaded[0].kind == "chart"
     assert loaded[0].char_start == 0
     assert loaded[0].char_end == 100
-    assert all(abs(a - b) < 0.01 for a, b in zip(loaded[0].bbox, (1.0, 2.0, 3.0, 4.0)))
+    assert all(abs(a - b) < 0.01 for a, b in zip(loaded[0].bbox, (1.0, 2.0, 3.0, 4.0), strict=True))
 
     assert loaded[1].ordinal == 2
     assert loaded[1].page == 2
     assert loaded[1].kind == "table"
     assert loaded[1].char_start == 200
     assert loaded[1].char_end == 300
-    assert all(abs(a - b) < 0.01 for a, b in zip(loaded[1].bbox, (5.0, 6.0, 7.0, 8.0)))
+    assert all(abs(a - b) < 0.01 for a, b in zip(loaded[1].bbox, (5.0, 6.0, 7.0, 8.0), strict=True))
 
 
 def test_save_spans_replaces_a_previous_run():
