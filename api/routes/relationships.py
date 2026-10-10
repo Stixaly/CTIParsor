@@ -161,7 +161,10 @@ def list_relationships(job_id: str):
 
 
 @router.get("/valid-types")
-def get_valid_types():
+def get_valid_types(job_id: str):
+    # The types are the same for every job. `job_id` comes from the router's
+    # prefix: declared here, it is in the OpenAPI schema, which was otherwise
+    # invalid for this path (found by tests/test_api_schema.py).
     return VALID_REL_TYPES
 
 
