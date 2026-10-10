@@ -225,11 +225,14 @@ mkdir -p docker/nginx/certs
 openssl req -x509 -newkey rsa:4096 -nodes -days 365 \
   -keyout docker/nginx/certs/cti.key -out docker/nginx/certs/cti.crt \
   -subj '/CN=cti.example.internal'
-printf 'alice:%s\n' "$(openssl passwd -apr1)" > docker/nginx/htpasswd   # prompts for the password
+htpasswd -nBC 12 alice > docker/nginx/htpasswd   # bcrypt, prompts for the password (apt install apache2-utils)
 chmod 644 docker/nginx/certs/cti.crt docker/nginx/htpasswd
 chmod 640 docker/nginx/certs/cti.key && sudo chown 0:101 docker/nginx/certs/cti.key   # nginx runs as uid 101
 docker compose --profile proxy up -d       # https://<host>:8443
 ```
+
+No `htpasswd` on the host, or an old `$apr1$` (MD5-based) entry: see
+[deployment.md, option C](deployment.md#option-c--tls--password-proxy-in-front).
 
 Also set `FORWARDED_ALLOW_IPS=*` in `.env` when using this profile. `proxy` and
 `app` are separate containers on the `frontend` bridge network, so `app` sees

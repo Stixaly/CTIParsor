@@ -3,6 +3,26 @@
 Thanks for working on CTIParsor. This guide gets you from clone to a green test run
 and points at the seams where most changes go.
 
+## How a change gets in
+
+1. Open an issue first for anything larger than a fix, so the approach can be
+   agreed before the work ([GitHub Issues](https://github.com/Stixaly/CTIParsor/issues)).
+   A vulnerability goes to [SECURITY.md](SECURITY.md#reporting-a-vulnerability) instead.
+2. Fork, branch off `main`, and keep one change per pull request: the code,
+   **its tests**, and the docs it changes, together (see *Conventions*). New
+   behaviour comes with a test that fails without it.
+3. Open a pull request against `main`. `main` is protected (ADR-0078): it
+   takes changes only through pull requests, and only once every required
+   check passes — the fast tests (ruff, `reuse lint`, mypy, pytest with
+   coverage floors), the dependency audit and review, the frontend checks,
+   the container build and smoke test, CodeQL, and the four fuzzers. Run
+   `make ci` before pushing to see the same results.
+4. The maintainer reviews it; review conversations are resolved before the
+   merge.
+
+Contributions are accepted under the project's licence, Apache-2.0
+([LICENSE](LICENSE)).
+
 ## Environment
 
 Docker is the only supported way to develop CTIParsor (ADR-0054) — nothing

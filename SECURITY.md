@@ -180,3 +180,9 @@ Report it privately:
 [open a security advisory](https://github.com/Stixaly/CTIParsor/security/advisories/new)
 (Security tab → "Report a vulnerability"), or contact the maintainer directly.
 Please do not file public issues for exploitable vulnerabilities.
+
+The advisory stays private between you and the maintainer until it is
+published. You get a first answer within 14 days. A confirmed vulnerability
+is fixed in a pull request; the advisory is then published, with a CVE
+requested through GitHub when the issue warrants one, and the CHANGELOG
+names the fix.
