@@ -330,7 +330,8 @@ CTIParsor/
 │   │   ├── context/ThemeContext.tsx # 5 themes × 7 accent palettes
 │   │   └── types/index.ts         # Shared TS types
 │   └── public/
-│       ├── stix-icons/            # 27 official OASIS STIX 2.1 White SVG icons
+│       ├── stix-icons/            # 27 white STIX 2.1 SVG icons, EclecticIQ's stix-icons (CC BY-SA 4.0)
+│       ├── stix-viz/              # OASIS cti-stix-visualization, for the graph view (THIRD_PARTY_NOTICES.md)
 │       └── mitre_index.json       # ATT&CK index served to the frontend
 │
 ├── tests/                         # 114 test_*.py modules, ~2 100 tests — map and counts in TESTING.md
@@ -364,12 +365,16 @@ CTIParsor/
 │   ├── eval/                      # Evaluation protocol and baselines (ADR-0060)
 │   └── adr/                       # Architecture Decision Records (see docs/adr/README.md)
 ├── TESTING.md                     # Test strategy
+├── LICENSE                        # Apache-2.0, CTIParsor's licence
+├── LICENSES/                      # Every licence a file in the repository is under
+├── REUSE.toml                     # Copyright and licence per file, checked by `reuse lint`
+├── THIRD_PARTY_NOTICES.md         # The files copied from other projects, their sources and licences
 ├── .env                           # Secrets (gitignored)
 ├── .env.example                   # Configuration template
 ├── requirements.txt               # Pipeline dependencies
 ├── requirements-api.txt           # API server dependencies
 ├── requirements-optional.txt      # Playwright (URL capture), google-re2, spaCy
-├── requirements-dev.txt           # ruff, mypy, pytest-cov, atheris (fuzzing)
+├── requirements-dev.txt           # ruff, mypy, pytest-cov, reuse, atheris (fuzzing)
 ├── requirements-ci.txt            # What CI's fast tests install (locked with the image's versions)
 ├── requirements-audit.txt         # pip-audit, pinned
 ├── requirements*.lock.txt         # Hashed locks: image (PyPI), torch (PyTorch index), CI, audit, uv (make lock)

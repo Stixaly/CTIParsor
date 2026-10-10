@@ -6,6 +6,35 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Documentation
+
+#### Every file names its copyright and licence (REUSE), 2026-10-10
+
+The repository carries files from other projects, and nothing listed them
+in one place. It now follows the [REUSE](https://reuse.software)
+specification 3.3, and `reuse lint` runs in CI's fast tests:
+
+- `REUSE.toml` gives each file its copyright and licence: Apache-2.0 for
+  CTIParsor's own files, an override for each set of copied files.
+- `LICENSES/` holds every licence text in use, MITRE's ATT&CK and CAPEC
+  licences included (split from `mitre/cti`'s `LICENSE.txt`).
+- `THIRD_PARTY_NOTICES.md` lists the copied files with their source,
+  copyright, licence and whether they were modified. Each file listed as
+  unmodified was compared byte for byte with its source.
+
+What the inventory found:
+- **The 27 STIX icons are EclecticIQ's, under CC BY-SA 4.0**, not "official
+  OASIS" icons as `docs/development.md` said. So are the 52 graph icons
+  that OASIS's viewer ships (by Bret Jordan). CC BY-SA asks for
+  attribution, and the image ships the UI: `.dockerignore`, which kept every
+  `*.md` out of the image, now lets `THIRD_PARTY_NOTICES.md` in.
+- **MITRE's licences ask every copy to reproduce MITRE's copyright
+  designation**, for the ATT&CK and CAPEC data in `pipeline/data/` and
+  `frontend/public/mitre_index.json`. The notices reproduce it.
+
+`reuse` 6.2.0 joins `requirements-dev.txt`; the CI lock gains it and four
+dependencies, every other pin unchanged.
+
 ### Fixed
 
 #### ruff's bugbear rules (B), and the GLiNER batch they caught, 2026-10-10

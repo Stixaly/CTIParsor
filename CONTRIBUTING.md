@@ -139,6 +139,11 @@ bash scripts/docker_smoke.sh --no-build --job   # also process a sample report e
   defect keeps riding in every artefact built before it — which is exactly how
   six self-edges outlived their fix.
 - **Line length** is 120 (ruff). Keep imports sorted (`ruff --fix` handles `I001`).
+- **Files copied from another project** (code, data, icons) keep their
+  copyright and licence. Give them a table in [`REUSE.toml`](REUSE.toml),
+  their licence text in `LICENSES/` (`reuse download <SPDX id>`), and a row in
+  [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). `reuse lint` checks it
+  in CI's fast tests.
 - **Commits** — branch off `main`; keep a change + its tests + doc update together.
 
 ## Docs to keep current

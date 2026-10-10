@@ -5,6 +5,8 @@
 pytest-cov==7.1.0
 ruff==0.16.6
 mypy==2.3.1
+# `reuse lint`: every file names its copyright and licence (REUSE.toml).
+reuse==6.2.0
 # Atheris, Google's coverage-guided fuzzer for Python (fuzz/, ADR-0081): it
 # publishes wheels for Linux x86_64 only, and no source to build elsewhere.
 atheris==3.1.0 ; sys_platform == 'linux' and platform_machine == 'x86_64'

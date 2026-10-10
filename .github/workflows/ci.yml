@@ -71,6 +71,12 @@ jobs:
       - name: Lint (ruff)
         run: ruff check .
 
+      # Every file names its copyright and licence (REUSE.toml, LICENSES/);
+      # a file copied from another project needs its own entry there and a
+      # line in THIRD_PARTY_NOTICES.md.
+      - name: Licences (reuse lint)
+        run: reuse lint
+
       # Blocking since the tree reached zero errors (2026-09-27); mypy is pinned
       # in requirements-dev.txt so a new release cannot fail this on its own.
       - name: Type check (mypy)
