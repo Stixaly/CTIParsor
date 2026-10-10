@@ -14,7 +14,10 @@ At every start of the API, of a worker and of `bootstrap` (`api.db.init_db`):
    (`is_applied`) sees its changes is recorded as `recognised`;
 5. apply every other migration in order, each in one transaction — snapshot
    of the tables it declares, statements, data step, then its own check, then
-   the record; a failure rolls the whole version back and stops the start.
+   the record; a failure rolls the whole version back and stops the start;
+6. refuse an EMPTY database that the state volume knew on another cluster with
+   data (a PostgreSQL upgrade that left the data behind), and record this
+   database's cluster and version for the next start (`api.db_identity`).
 
     python -m api.migrate status     # where the database is, what is pending
     python -m api.migrate up         # apply what is pending
@@ -30,6 +33,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from api import db_identity
 from api import migrations as history
 from api.logging_config import get_logger
 from pipeline.env_flags import env_int
@@ -67,6 +71,10 @@ class ChecksumMismatch(MigrationError):
 
 class VerificationFailed(MigrationError):
     pass
+
+
+class ClusterChanged(MigrationError):
+    """An empty database on another cluster than the one its data was on."""
 
 
 @dataclass
@@ -156,6 +164,12 @@ def upgrade(conn: Any = None) -> Report:
         _verify_records(records, known)
         report = Report(before=max(records, default=0), after=0, target=len(known))
         unversioned = not records and any(history.table_exists(conn, t) for t in _OWN_TABLES)
+        # ADR-0077 part B: an empty database where the state volume says data
+        # existed on another cluster is a PostgreSQL upgrade that left the
+        # data behind; migrating would turn it into a fresh install.
+        why = db_identity.refusal(conn, empty=not records and not unversioned)
+        if why:
+            raise ClusterChanged(why)
         revision = _revision() if len(records) < len(known) else None
         for mg in known:
             if mg.version in records:
@@ -167,6 +181,7 @@ def upgrade(conn: Any = None) -> Report:
             _apply(conn, mg, revision)
             report.applied.append(mg.version)
         report.after = report.target
+        db_identity.record(conn, report.after)
     finally:
         conn.execute(f"SELECT pg_advisory_unlock({_LOCK_KEY})")
     if report.recognised:

@@ -4,6 +4,9 @@
 **Date:** 2026-10-04
 **Deciders:** maintainer
 **Amends:** ADR-0045 (PostgreSQL for the job store), ADR-0054 (full-Docker installation)
+**Amended by:** ADR-0077 part B (2026-10-10): re-mounting `pg-data` at the new path is refused by
+the 18 image itself ("there appears to be PostgreSQL data in …", exit 1), not started silently —
+checked; the script below is now one case of `make db-upgrade`.
 
 ## Context
 

@@ -22,3 +22,9 @@ def uploads_dir() -> Path:
 def output_dir() -> Path:
     """Exported STIX bundles and Stage 3 crash-resume checkpoints."""
     return Path(os.environ.get("CTIPARSOR_OUTPUT_DIR") or _ROOT / "output")
+
+
+def state_dir() -> Path:
+    """What the app remembers between starts (`db-identity.json`, ADR-0077).
+    In the image, the `cti-state` volume; ``CTIPARSOR_STATE_DIR`` moves it."""
+    return Path(os.environ.get("CTIPARSOR_STATE_DIR") or _ROOT / "state")

@@ -418,7 +418,9 @@ the first four pass:
 1. **fast-tests** (every push and PR): `ruff check .`, `mypy` (scope and flags
    in `pyproject.toml`), every test with `CTIPARSOR_REQUIRE_TEST_DEPS=1`, the
    coverage floors. Installs the OpenCTI pattern parsers, google-re2 and
-   numpy, but not torch/transformers (`SKIP_HEAVY_MODELS=1`). No secrets.
+   numpy, but not torch/transformers (`SKIP_HEAVY_MODELS=1`). No secrets. On
+   a PR, also migrates a database written by the base commit's code
+   (`scripts/check_migration_from.py`, ADR-0077).
 2. **frontend-tests**: `npm run lint`, `npm run typecheck`, `npm test`.
 3. **container-image**: builds the image, runs `scripts/docker_smoke.sh`, and
    scans the image with Grype into Code scanning (not a gate, ADR-0078).

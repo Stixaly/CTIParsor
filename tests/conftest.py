@@ -169,6 +169,7 @@ def _files_stay_in_tmp_path(tmp_path, monkeypatch):
     directory being writable, and a run must not leave files behind in it."""
     monkeypatch.setenv("CTIPARSOR_UPLOADS_DIR", str(tmp_path / "uploads"))
     monkeypatch.setenv("CTIPARSOR_OUTPUT_DIR", str(tmp_path / "output"))
+    monkeypatch.setenv("CTIPARSOR_STATE_DIR", str(tmp_path / "state"))
 
 
 _REPO = Path(__file__).resolve().parent.parent
