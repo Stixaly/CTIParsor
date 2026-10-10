@@ -676,3 +676,9 @@ read [CONTRIBUTING.md](CONTRIBUTING.md); the test strategy is in
 ## License
 
 CTIParsor is released under the [Apache License 2.0](LICENSE).
+
+Some files come from other projects and keep their own licence: OpenCTI's
+Snort parser, OASIS's STIX schemas and graph viewer, EclecticIQ's STIX icons
+(CC BY-SA 4.0), and data built from MITRE ATT&CK and CAPEC. See
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md); [REUSE.toml](REUSE.toml)
+gives each file's copyright and licence.

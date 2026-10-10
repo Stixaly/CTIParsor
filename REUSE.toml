@@ -1,0 +1,104 @@
+# Who holds the copyright on each file, and under which licence, in the REUSE
+# format (https://reuse.software).  `reuse lint` checks it in CI (fast-tests).
+# THIRD_PARTY_NOTICES.md says the same for a reader, with each source's URL.
+#
+# The first annotation covers every file; the ones after it name the files
+# copied from elsewhere and override it (`precedence = "override"`): a later
+# table that matches a file wins.  A file added from another project gets its
+# own table here, and a line in THIRD_PARTY_NOTICES.md.
+version = 1
+
+[[annotations]]
+path = "**"
+SPDX-FileCopyrightText = "CTIParsor contributors"
+SPDX-License-Identifier = "Apache-2.0"
+
+# OpenCTI's Snort rule parser, copied unmodified (ADR-0070).
+[[annotations]]
+path = "pipeline/detection/opencti_snort/**"
+precedence = "override"
+SPDX-FileCopyrightText = "2021-2026 Filigran SAS"
+SPDX-License-Identifier = "Apache-2.0"
+
+# OASIS's STIX 2.1 JSON schemas (pipeline/data/stix2_json_schemas/LICENSE).
+[[annotations]]
+path = "pipeline/data/stix2_json_schemas/**"
+precedence = "override"
+SPDX-FileCopyrightText = "2016 OASIS Open"
+SPDX-License-Identifier = "BSD-3-Clause"
+
+# Built from MITRE's ATT&CK STIX bundles (scripts/build_indexes.py).
+[[annotations]]
+path = [
+    "pipeline/data/attack_relationships.json",
+    "pipeline/data/attack_retrieval_corpus.json",
+    "pipeline/data/attack_retrieval_embeddings.npy",
+    "pipeline/data/gazetteer.json",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "The MITRE Corporation"
+SPDX-License-Identifier = "LicenseRef-MITRE-ATTACK"
+
+# Built from ATT&CK and CAPEC: the technique index and its embeddings.
+[[annotations]]
+path = [
+    "pipeline/data/mitre_index.json",
+    "pipeline/data/mitre_embeddings.npy",
+    "pipeline/data/mitre_embeddings_meta.json",
+    "frontend/public/mitre_index.json",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "The MITRE Corporation"
+SPDX-License-Identifier = "LicenseRef-MITRE-ATTACK AND LicenseRef-MITRE-CAPEC"
+
+# EclecticIQ's STIX icons, White/normal/SVG, unmodified.
+[[annotations]]
+path = "frontend/public/stix-icons/**"
+precedence = "override"
+SPDX-FileCopyrightText = "EclecticIQ"
+SPDX-License-Identifier = "CC-BY-SA-4.0"
+
+# OASIS cti-stix-visualization: the library and the application's styles,
+# unmodified; then the page and script CTIParsor adapted from its application.
+[[annotations]]
+path = [
+    "frontend/public/stix-viz/stix2viz/stix2viz/stix2viz.js",
+    "frontend/public/stix-viz/application.css",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "2016 OASIS Open"
+SPDX-License-Identifier = "BSD-3-Clause"
+
+[[annotations]]
+path = [
+    "frontend/public/stix-viz/stix-viz.html",
+    "frontend/public/stix-viz/stix-viz-app.js",
+]
+precedence = "override"
+SPDX-FileCopyrightText = ["2016 OASIS Open", "CTIParsor contributors"]
+SPDX-License-Identifier = "BSD-3-Clause AND Apache-2.0"
+
+# The graph icons cti-stix-visualization ships, by Bret Jordan.
+[[annotations]]
+path = "frontend/public/stix-viz/stix2viz/stix2viz/icons/**"
+precedence = "override"
+SPDX-FileCopyrightText = "Bret Jordan"
+SPDX-License-Identifier = "CC-BY-SA-4.0"
+
+[[annotations]]
+path = "frontend/public/stix-viz/stix2viz/visjs/vis-network.min.js"
+precedence = "override"
+SPDX-FileCopyrightText = ["2011-2017 Almende B.V.", "2017-2019 visjs contributors"]
+SPDX-License-Identifier = "Apache-2.0 OR MIT"
+
+[[annotations]]
+path = "frontend/public/stix-viz/require.js"
+precedence = "override"
+SPDX-FileCopyrightText = "jQuery Foundation and other contributors"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = "frontend/public/stix-viz/domReady.js"
+precedence = "override"
+SPDX-FileCopyrightText = "2010-2012 The Dojo Foundation"
+SPDX-License-Identifier = "MIT OR BSD-3-Clause"

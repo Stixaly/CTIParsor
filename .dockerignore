@@ -42,6 +42,9 @@ tests/
 *.zip
 *.tar
 *.md
+# ...but the image ships copied files whose licences ask for attribution
+# (the CC BY-SA icons, MITRE's data): the notices travel with them.
+!THIRD_PARTY_NOTICES.md
 CLAUDE.md
 Makefile
 setup.sh
