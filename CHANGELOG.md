@@ -8,6 +8,32 @@ sections group by theme rather than strict semver.
 
 ### Documentation
 
+#### The containers: their code, their ports, their traffic, 2026-10-10
+
+`docs/architecture.md` §2 gains three views, each checked against
+`compose.yaml`, the `Dockerfile` and the code:
+
+- **What each container runs and the code in it.** One application image
+  holds all of the project's code. `app`, `worker` and `bootstrap` start
+  it with different commands. The other services are upstream images,
+  configured by files from `docker/`. It also says why only one image is
+  published: the API and the workers must run the same version, because
+  both migrate the schema and share the job rows (ADR-0044, ADR-0077).
+- **Who talks to whom:** network, protocol and port for each flow.
+- **What leaves the host:** destination, from which container, when, and
+  the setting that turns it off.
+
+Corrected on the way:
+
+- PostgreSQL 18, not 17, and the `pg-data-18` volume.
+- The diagram now shows bootstrap's downloads, the LLM on the host, and
+  the calls `app` makes when it finalizes a report.
+
+It also records a defect found while tracing the traffic. The image has no
+STIX schemas, so every Stage 5 run downloads them from GitHub, fails to
+install them on the read-only filesystem, and leaves the bundle
+`unverified`.
+
 #### The fuzzers are required checks; what the docs left out, 2026-10-10
 
 - **The four fuzz jobs are required checks on `main`.** This is recorded in

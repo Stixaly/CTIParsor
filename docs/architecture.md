@@ -18,7 +18,7 @@ install's data onto the container stack.
 | | Host install — legacy (`python run_api.py`) | Container stack (`docker compose up -d`) |
 |---|---|---|
 | Processes | one: the API, with the pipeline loop in a background thread | four always on: `app`, `worker` (×N), `postgres`, `capture-proxy`, plus optional `proxy` and `ollama` |
-| Job store (reports) | PostgreSQL (`DATABASE_URL`, mandatory — ADR-0053) | PostgreSQL 17, service `postgres` |
+| Job store (reports) | PostgreSQL (`DATABASE_URL`, mandatory — ADR-0053) | PostgreSQL 18, service `postgres` |
 | Rule store (detection corpus) | the same PostgreSQL database (ADR-0053) | the same `postgres` service |
 | Who runs the pipeline | the API process (`CTIPARSOR_ROLE=all`) | the `worker` containers (`CTIPARSOR_ROLE=worker`); the API only queues (`api`) |
 | Exposure | loopback by default (`API_HOST`) | loopback by default (`CTI_BIND`); `proxy` profile for TLS + password |
@@ -40,10 +40,10 @@ flowchart LR
         app["app\nCTIPARSOR_ROLE=api\nFastAPI + React UI :8000"]
         worker["worker x N\nCTIPARSOR_ROLE=worker\nqueue loop + pipeline subprocess"]
         bootstrap["bootstrap (profile)\none-shot: models, corpora, rule store"]
-        capproxy["capture-proxy\nSquid egress filter\nfor URL capture"]
+        capproxy["capture-proxy\nSquid egress filter :3128\nfor URL capture"]
     end
     subgraph backend [network backend - internal, no route out]
-        pg[("postgres\njob store + rule store")]
+        pg[("postgres :5432\njob store + rule store")]
     end
     subgraph llm [network llm]
         ollama["ollama (profile)\nlocal LLM :11434"]
@@ -53,10 +53,14 @@ flowchart LR
     app --> pg
     worker --> pg
     bootstrap --> pg
-    app --> ollama
+    app -->|finalize, Stage 4c| ollama
     worker --> ollama
-    worker -->|LLM APIs, HuggingFace| internet((internet))
-    app -->|CVE lookups| internet
+    hostllm["LLM on the host\nLM Studio, vLLM, Ollama"]
+    app -.->|host.docker.internal| hostllm
+    worker -.->|host.docker.internal| hostllm
+    worker -->|LLM APIs, HuggingFace, CVE, STIX schemas| internet((internet))
+    app -->|corpus sync, and on finalize LLM, CVE, STIX schemas| internet
+    bootstrap -->|HuggingFace, corpora| internet
     app -->|URL capture| capproxy -->|public addresses only| internet
     state[("volume cti-state\nuploads, output, backups")]
     cache[("volume cti-cache\nHF models, corpora")]
@@ -74,13 +78,108 @@ flowchart LR
 |---|---|---|---|
 | `app` | `ctiparsor` (this repo's `Dockerfile`) | serves the API and the built web UI on one port; accepts uploads, pasted text and URLs; queues them; serves progress (SSE), review, coverage, export; runs the corpus rebuild from the Settings page | nothing persistent of its own |
 | `worker` | same image, `command: worker` | claims queued reports, runs each in an isolated subprocess (models loaded there), writes entities, relationships, the bundle and progress events | its lease on the jobs it runs |
-| `postgres` | `postgres:18-alpine` | **both stores**: the job store (`jobs`, `entities`, `relationships`, `review_decisions`, `progress_events`, `relationship_policy`, `model_thresholds`, `entity_overrides`, `report_figures`, `figure_reads`, `cve_cache`) and, since ADR-0053, the detection-rule corpus (`detection_rules`, `rule_bytes`, `rule_techniques`, `rule_atoms`, `rule_related`, `rule_text`) | volume `pg-data` |
+| `postgres` | `postgres:18-alpine` | **both stores**: the job store (`jobs`, `entities`, `relationships`, `review_decisions`, `progress_events`, `relationship_policy`, `model_thresholds`, `entity_overrides`, `report_figures`, `figure_reads`, `cve_cache`) and, since ADR-0053, the detection-rule corpus (`detection_rules`, `rule_bytes`, `rule_techniques`, `rule_atoms`, `rule_related`, `rule_text`) | volume `pg-data-18` |
 | `cti-state` volume | — | `uploads/`, `output/`, `backups/`, the private corpus overlay — no database file lives here any more | back it up alongside `pg-data-18` |
 | `cti-cache` volume | — | 2.6 GB of HuggingFace models, 0.7 GB of corpus clones | rebuildable with `bootstrap` |
 | `capture-proxy` | `ubuntu/squid` | forces the URL-capture tab's Chromium through an egress filter that refuses private, loopback and link-local destinations, closing the DNS-rebinding gap Python's own URL checks leave (`docker/squid/squid.conf`) | nothing persistent |
 | `proxy` (profile) | `nginxinc/nginx-unprivileged` | TLS termination and HTTP basic auth, the only thing meant to be published on a network | certs and htpasswd you provide |
 | `ollama` (profile) | `ollama/ollama` | a local LLM for Stage 3 and Stage 1f, reachable only from `app` and `worker` | volume `ollama-models` |
 | `bootstrap` (profile) | same image, `command: bootstrap` | one shot: creates the schema, downloads the models, clones the corpora, builds the rule store | — |
+
+### What each container runs, and the code in it
+
+All of the project's code ships in **one image**, built from this
+repository's `Dockerfile`:
+
+- **The Python application:**
+  - `api/`: FastAPI, the queue, the worker supervisor, the migrations;
+  - `pipeline/`: every stage, with its data files;
+  - `models/`: Pydantic schemas, not ML models;
+  - `scripts/`, `evaluation/` and `fuzz/`;
+  - `main.py` (the batch CLI) and `run_api.py`.
+- **The web UI**, built in the `ui` stage (`frontend/dist`).
+- **The container's own scripts:** `docker/entrypoint.sh`, which provides the
+  commands below, and `docker/warm_models.py`.
+- **A Python 3.14 virtualenv**, installed by hash from `requirements.lock.txt`:
+  CPU-only torch, transformers, GLiNER, sentence-transformers, pySigma,
+  yara-python and the rest.
+- **System tools:**
+  - Chromium, through Playwright (left out with `CTI_INSTALL_CAPTURE=false`);
+  - Tesseract, Poppler, git and tini.
+
+It carries no model (they go to the `cti-cache` volume), no report and no
+secret (`.dockerignore`).
+
+| Container | Image | What runs in it | Listens on |
+|---|---|---|---|
+| `app` | the application image, command `serve` | `run_api.py`: the API (`api/main.py`, `api/routes/`) and the built UI; URL capture in Chromium (`pipeline/web_capture.py`); the corpus sync and the rule-store rebuild from the Settings page (`pipeline/detection/`); finalize, which re-runs the lexicon scan and Stages 4–5 in this process (`api/worker.py::re_run_final_stages`). It loads no model (`CTIPARSOR_ROLE=api`). | 8000/tcp, HTTP |
+| `worker` | the application image, command `worker` | `api/queue_loop.py` claims queued reports. Each one runs in its own subprocess: every stage, with the models loaded there (`api/worker.py`, `pipeline/orchestrator.py`). | nothing |
+| `bootstrap` | the application image, command `bootstrap` | Runs once: the schema (`api.db.init_db`), the models (`docker/warm_models.py`), the corpora (`scripts/sync_corpora.py`), the rule store (`scripts/build_detection_index.py`) and the stage report (`scripts/check_stages.py`). | nothing |
+| `postgres` | `postgres:18-alpine`, upstream | PostgreSQL. No project code: the other containers apply the schema (`api/migrations/`, ADR-0077). | 5432/tcp, `backend` only |
+| `capture-proxy` | `ubuntu/squid`, upstream | Squid, configured by `docker/squid/squid.conf` (mounted read-only): public addresses only, ports 80, 443, 8080 and 8443, no cache. | 3128/tcp, `frontend` |
+| `proxy` (profile) | `nginxinc/nginx-unprivileged`, upstream | nginx, configured by `docker/nginx/default.conf`: TLS 1.2 and 1.3, basic auth, uploads up to 50 MB, a reverse proxy to `app:8000`. | 8443/tcp, HTTPS |
+| `ollama` (profile) | `ollama/ollama`, upstream | A local LLM. No project code. | 11434/tcp, `llm` |
+| `dev` (profile) | the `Dockerfile`'s `dev` stage, never published | The application image plus CI's tools, with the checkout bind-mounted over `/app`: tests, lint, type check, `cli`. | nothing |
+| `frontend-dev` (profile) | `node:26-bookworm-slim`, upstream | The Vite dev server over the bind-mounted `frontend/`, with the API proxied to `app:8000`. | 5173/tcp, host loopback |
+
+`compose.yaml` pins the upstream images by digest, and Dependabot proposes
+new ones.
+
+**Why only one image is published.** `app`, `worker` and `bootstrap` are
+the same image, started with a different command (ADR-0044).
+`ghcr.io/stixaly/ctiparsor` is the worker as much as the API, and
+`CTI_IMAGE` sets it for all three ([docs/docker.md](docker.md)).
+
+One image means the API and the workers always run the same version of the
+code. They must:
+
+- both apply the schema migrations at start, and refuse a database newer
+  than their code (ADR-0077);
+- they read and write the same job rows.
+
+The other services run upstream images, configured by files mounted from
+`docker/`. There is nothing of ours to publish for them.
+
+### Who talks to whom
+
+| From | To | Network | Protocol, port | What for |
+|---|---|---|---|---|
+| the analyst's browser | `app` | published on `CTI_BIND:CTI_PORT` (`127.0.0.1:8000`) | HTTP | the UI, the API, progress (SSE) |
+| the analyst's browser | `proxy` | published on `CTI_TLS_BIND:CTI_TLS_PORT` (`0.0.0.0:8443`) | HTTPS, basic auth | the same, from other machines |
+| `proxy` | `app` | `frontend` | HTTP, 8000 | the reverse proxy |
+| `app`, `worker`, `bootstrap`, `dev` | `postgres` | `backend` | PostgreSQL, 5432, `scram-sha-256` | both stores, and the queue itself (there is no broker) |
+| `app` (Chromium) | `capture-proxy` | `frontend` | HTTP proxy, 3128 (`CONNECT` for HTTPS) | URL capture only |
+| `worker`, `app` (finalize), `dev` | `ollama` | `llm` | HTTP, 11434 | the LLM, when `LLM_PROVIDER=ollama` |
+| `worker`, `app` (finalize), `dev` | the host | `host.docker.internal` | HTTP | an LLM on the host: LM Studio, vLLM or Ollama |
+| `frontend-dev` | `app` | `frontend` | HTTP, 8000 | the dev server's API proxy |
+
+`app` and `worker` never call each other. They meet in the job store and on
+the `cti-state` volume: the upload goes in, the bundle comes out. Nothing
+outside the host reaches `postgres`: it publishes no port.
+
+### What leaves the host
+
+| Destination | From | When | Turned off by |
+|---|---|---|---|
+| the LLM provider: `api.anthropic.com`, `generativelanguage.googleapis.com` or `api.mistral.ai` | `worker`: Stage 3 and the stages that call the LLM (1f, 3d, 3e, 3f, 3doc, 4c). `app`: Stage 4c on finalize, when the relationship policy enables long-distance links. | every report | a self-hosted provider: `LLM_PROVIDER=ollama`, `lmstudio` or `vllm` |
+| `huggingface.co` | `bootstrap`; `worker`, if the cache lacks a model | once per model: `all-MiniLM-L6-v2`, `CyNER-2.0-DeBERTa-v3-base`, `gliner_large-v2.1` | `HF_HUB_OFFLINE=1`, once the cache is filled |
+| `github.com` and `rules.emergingthreats.net`: the corpora listed in `detection_corpora.yaml` | `bootstrap`; `app` (Settings → Redownload) | on demand | `bootstrap --no-corpora` |
+| `cve.circl.lu` | `worker` (Stage 2f); `app` (finalize) | for a CVE not yet in the cache | `CVE_ENRICHMENT`, off by default |
+| `github.com`: the STIX schema archive (ADR-0069) | `worker`; `app` (finalize) | every Stage 5 run, see below | nothing today |
+| any public web address an analyst submits | `app`'s Chromium, through `capture-proxy` | the URL tab | `CTI_INSTALL_CAPTURE=false` |
+| `registry.ollama.ai` | `ollama` | `ollama pull` | — |
+
+Image pulls (GHCR, Docker Hub) are made by the Docker daemon, not by a
+container.
+
+**The STIX schemas are fetched on every Stage 5 run.** The wheel of
+stix2-validator 3.3.1 carries no JSON schema, and the image does not add
+them. Stage 5 downloads the archive to install them, and the install fails,
+because `/opt/venv` is read-only. A marker file, `/app/.stix2_schemas_missing`,
+should then stop the retries, but `/app` is read-only too. So the next
+report, or the next finalize, downloads the archive again, and every bundle
+is `unverified` (ADR-0069). Where outbound traffic is dropped rather than
+refused, each attempt waits up to its 30 s timeout.
 
 **Why one store now.** ADR-0045 moved the per-report tables to PostgreSQL so
 several processes could write them and the API could be stateless, while
