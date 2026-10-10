@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { LayoutDashboard, Github, Link2, Settings as SettingsIcon } from 'lucide-react'
+import { LayoutDashboard, Link2, Settings as SettingsIcon, Tag } from 'lucide-react'
 import ThemeSwitcher from './ThemeSwitcher'
 
 /** Sidebar shell used by Dashboard and Policy.
@@ -71,7 +71,8 @@ export default function Layout() {
           alignItems: 'center',
           gap: 5,
         }}>
-          <Github size={11} />
+          {/* lucide-react 1.x has no brand icons; this was a GitHub mark, not a link */}
+          <Tag size={11} />
           cti-to-stix v1.0
         </div>
       </aside>
