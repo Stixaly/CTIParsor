@@ -10,7 +10,9 @@ sections group by theme rather than strict semver.
 
 #### The containers: their code, their ports, their traffic, 2026-10-10
 
-`docs/architecture.md` §2 gains three views, each checked against
+The README's "How it works" gains a **Containers** view: a diagram of the
+containers, their networks and ports, a table of what each one runs, and a
+link to the details. `docs/architecture.md` §2 gains three views, each checked against
 `compose.yaml`, the `Dockerfile` and the code:
 
 - **What each container runs and the code in it.** One application image
