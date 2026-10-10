@@ -211,7 +211,7 @@ export default function DocumentReader({
   const paragraphs: React.ReactNode[][] = []
   let buf: React.ReactNode[] = []
   segments.forEach((seg, i) => {
-    const child = (seg as React.ReactElement).props?.children
+    const child = (seg as React.ReactElement<{ children?: React.ReactNode }>).props?.children
     if (typeof child === 'string' && child.includes('\n\n')) {
       const parts = child.split('\n\n')
       buf.push(<span key={`p-${i}-0`}>{parts[0]}</span>)
