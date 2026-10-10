@@ -4,9 +4,10 @@ name: Scorecard
 # practices — branch protection, pinned dependencies, token permissions,
 # dangerous workflows, signed releases, vulnerabilities.  Published to
 # scorecard.dev (the README badge links the full report).  The results are not
-# uploaded to Code scanning: several checks (Code-Review, Fuzzing,
-# CII-Best-Practices) score a one-maintainer project low by construction and
-# would sit there as alerts nobody can close.
+# uploaded to Code scanning: Code-Review and Contributors score a
+# one-maintainer project low by construction and would sit there as alerts
+# nobody can close.  Which checks remain below 10, and why: ADR-0078,
+# amendment of 2026-10-10.
 #
 # publish_results restricts this workflow to Scorecard's own allow-list:
 # no `run:` steps, read-only token at the top, only the actions below.

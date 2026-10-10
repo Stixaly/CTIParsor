@@ -6,7 +6,81 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Documentation
+
+#### The fuzzers are required checks; what the docs left out, 2026-10-10
+
+- **The four fuzz jobs are required checks on `main`.** This is recorded in
+  ADR-0078's amendment, ADR-0081 and `fuzz.yml`. A fuzzer failure is fixed
+  before the merge, and its input joins `fuzz/corpus/<target>/`, where the
+  fast tests replay it.
+- **TESTING.md.**
+  - It did not mention fuzzing (ADR-0081). It now has a section on it, and
+    `test_fuzz_targets.py` in the coverage map.
+  - Its CI list named four jobs and said the image waits for three. It now
+    lists all seven jobs and the three other workflows. The image waits for
+    four: the dependency audit too.
+- **CONTRIBUTING.md.** For a test skipped on a missing import, it said to
+  install the dependency in the CI job. Since ADR-0080 it goes in
+  `requirements-ci.txt`, then `make lock`. A `pip install` in a workflow
+  would bypass the hashes.
+- **`/api/health`** is in `docs/api.md`: 200 when the job store answers, 503
+  when it does not.
+- **Two variables documented nowhere.** Both are now in `.env.example` and
+  `docs/configuration.md`:
+  - `DB_MIGRATION_LOCK_TIMEOUT_S`: how long a starting process waits for
+    another one's migration, 600 s by default;
+  - `WORKER_ALIVE_FILE`.
+- **Fixed: `WORKER_ALIVE_FILE` and the worker's healthcheck.** The compose
+  healthcheck read a fixed path, so setting the variable made the worker
+  unhealthy. It now reads the same variable as the worker.
+- **`docs/dependencies.md`** lists react-pdf (pdf.js, the Source tab's PDF
+  viewer), atheris and httpx.
+
+#### What Scorecard still scores low, and the quarterly routine's locks, 2026-10-10
+
+- **ADR-0078, amendment.** The Scorecard workflow and ADR-0078 named
+  Fuzzing among the checks a one-maintainer project scores low by
+  construction. Fuzzing scores 10 since ADR-0081. Only Code-Review and
+  Contributors are low by construction. The amendment lists every check
+  below 10, why, and what raises it.
+- **Signed-Releases.** It is not scored while there is no GitHub Release.
+  A Release without a provenance file or a signature among its assets
+  would score 0. The amendment says so, and which files count.
+- **Settings checked through the API.** Private vulnerability reporting is
+  off, so SECURITY.md's reporting link does not work for an outside
+  reporter. The `main` ruleset exists but is disabled.
+- **The quarterly routine (`docs/dependencies.md`).**
+  - It reviewed and committed only the image's lock. `make update-deps`
+    rewrites all five, and CI's lock follows the image's versions. It now
+    commits every lock, and so does the hint `make update-deps` prints.
+  - New step: review the accepted vulnerabilities, and move their
+    `osv-scanner.toml` review dates.
+
 ### Security
+
+#### Scorecard: the accepted vulnerabilities and the last unhashed pip install, 2026-10-04
+
+OpenSSF Scorecard still found two vulnerabilities and one pip install without
+hashes.
+
+- **Two vulnerabilities SECURITY.md already settles.** Scorecard scans the
+  manifests with OSV-Scanner, which reads neither SECURITY.md nor
+  `.grype.yaml`. It reported:
+  - braces 3.0.3 in `frontend/package-lock.json`, accepted: build-time only;
+  - diskcache, although no lock lists it any more. OSV-Scanner resolves
+    `requirements-ci.txt`, a list of ranges, through pySigma's declared
+    dependencies.
+
+  Each is now listed, with its reason, in the `osv-scanner.toml` next to its
+  manifest (the root, and `frontend/`), until 2027-01-04. After that date
+  Scorecard reports it again, for a new review. pip-audit, npm audit and
+  Dependabot do not read these files.
+- **uv, installed by hash (ADR-0080, item 7).** `make lock` installed uv
+  with a bare `pip install uv`, the one pip install left without a hash. It
+  now installs uv from its own hashed lock, `requirements-uv.lock.txt`
+  (uv 0.12.23). `make lock` regenerates that lock, and the dependency-audit
+  job audits it with the other locks.
 
 #### The image scan skips the CVEs SECURITY.md accepts, per version, 2026-10-04
 

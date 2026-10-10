@@ -137,3 +137,61 @@ Settings are not files. These are applied by hand (Settings → Advanced Securit
 5. [ ] Maintainer, after merge: require SHA-pinned actions (item 11); add
        "Dependency review (what this PR adds)" and "CodeQL (actions)" to the
        required checks.
+
+## Amendment (2026-10-10) — Scorecard after ADR-0080 and ADR-0081
+
+Item 7 named Code-Review, Fuzzing and CII-Best-Practices as the checks a
+one-maintainer project scores low by construction. Fuzzing now scores 10
+(ADR-0081), and CII-Best-Practices does not belong in the list. The checks
+below 10 on 2026-10-10, and why:
+
+| Check | Why it is below 10 | What raises it |
+|---|---|---|
+| Code-Review | Each change needs an approval from someone other than its author. | A second human reviewer, nothing else: by construction. |
+| Contributors | It counts the companies and organizations of contributors with at least 5 commits. Only one is found. | Outside contributors: by construction. |
+| Branch-Protection | Item 10's "basic rules" ruleset exists but is **disabled** (API, 2026-10-10). | Enabling it: deletion and force-push blocked give 3/10, about 4/10 with a required pull request and "require branches to be up to date". The next tier needs required approvals, which would block the only maintainer. |
+| CII-Best-Practices | No OpenSSF Best Practices badge. | Maintainer: register the project at bestpractices.dev. "In progress" gives 2/10, "passing" 5/10. |
+
+Pinned-Dependencies and Vulnerabilities reach 10 with ADR-0080's item 7 and
+the `osv-scanner.toml` files (SECURITY.md, "Accepted vulnerabilities").
+Each entry there expires at its review date, and the check drops back until
+the review. `docs/dependencies.md`'s quarterly routine includes that review.
+
+**Signed-Releases is not scored, as long as the repository publishes no
+GitHub Release.** A Release changes that. Scorecard looks at the assets of
+the last five Releases only, not at the GHCR image's attestations. A Release
+without a provenance file (`*.intoto.jsonl`, 10/10) or a signature (`*.sig`,
+`*.asc`, `*.minisig`, `*.sign`, `*.sigstore`, `*.sigstore.json`, 8/10) among
+its assets scores 0. That costs about half a point of the overall score. A
+Release, if there is ever one, attaches SLSA provenance for its assets.
+
+**The fuzzers are required checks too (decided 2026-10-10).** Item 10's
+list of required checks predates ADR-0081. The ruleset also requires:
+
+- `Fuzz (report_text)`
+- `Fuzz (dates)`
+- `Fuzz (rule_gates)`
+- `Fuzz (spotlight)`
+
+No change reaches `main` while a fuzzer fails on it. This goes further than
+ADR-0071, which blocks on deterministic checks. Sixty seconds of mutation
+can find a defect that the pull request did not introduce. Such a failure
+is still a bug to fix before the merge:
+
+1. Reproduce it from the uploaded artifact:
+   `python fuzz/fuzz_<target>.py <file>`.
+2. Fix it.
+3. Add the input to `fuzz/corpus/<target>/`.
+
+From then on, `tests/test_fuzz_targets.py` replays that input in the fast
+tests, so an exception or a broken invariant fails them. A merely slow input
+fails only the fuzz run. The Fuzzing workflow runs on every pull request,
+with no path filter, so these checks always report.
+
+**Settings observed through the API on 2026-10-10.** Private vulnerability
+reporting (item 9) is **off**, so SECURITY.md's "open a security advisory"
+link does not work for a reporter outside the repository. The `main`
+ruleset (item 10) is **disabled**. Action item 4 stays open, and now
+includes the four fuzz checks. Items 8 (Dependabot alerts) and 11 (actions
+pinned by SHA) cannot be read without administrator access. The maintainer
+checks them in Settings.

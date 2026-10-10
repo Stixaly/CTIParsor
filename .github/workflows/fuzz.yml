@@ -6,6 +6,11 @@ name: Fuzzing
 # time; a crash, a broken invariant, an input slower than -timeout or a memory
 # blow-up past -rss_limit_mb fails the job and uploads the input that did it.
 # 60 s a target on pull requests, 10 minutes in the weekly run.
+#
+# The four jobs are required checks on main (ADR-0078, amendment of
+# 2026-10-10), so pull_request has no path filter: a required check that never
+# reports blocks the merge.  A failure is fixed before the merge, and its input
+# added to fuzz/corpus/<target>/, where tests/test_fuzz_targets.py replays it.
 on:
   pull_request:
   push:

@@ -243,6 +243,7 @@ current truth.
 | Persistence | `test_db_backend.py` | 12 | the PostgreSQL adapter without a server: `?`→`%s` outside literals, `%`→`%%`, the `Row` type, `backend()`/`get_conn()` requiring `DATABASE_URL` (ADR-0053), a fake psycopg connection proving `with` never closes and `transaction()` issues plain `BEGIN` (ADR-0045) |
 | Persistence | `test_db_postgres.py` | 10 | skipped unless `CTIPARSOR_TEST_DATABASE_URL` is set (every other DB-touching test needs it too, via `temp_db` — ADR-0053): round trips, SSE resume ids, upserts, cascade, the coverage call without `jobs_conn`, the API through `temp_db_client`, and both migration scripts end to end (ADR-0045, ADR-0053) |
 | Shared helpers | `test_shared_helpers.py` | 27 | environment parsing, claim extraction, unescaping logic |
+| Fuzzing | `test_fuzz_targets.py` | 5 | every Atheris target (ADR-0081) over its seed corpus, `fuzz/corpus/<target>/`, and the empty input: a target that stops importing, or whose invariant a seed breaks, fails here between fuzzing runs; skipped off Linux x86_64 (no Atheris wheel) |
 | Docs | `test_doc_claims.py` | 2 | every number `scripts/check_doc_claims.py` checks in README.md and docs/pipeline.md still matches its source, and is still found (what `make check-docs` did on demand only) |
 | Benchmarks | `eval_pipeline.py` | 10 | NER F1, ATE precision, grounding metrics, adversarial tests |
 
@@ -273,6 +274,32 @@ instead, which runs against a real disposable PostgreSQL schema).
 ### Persistence / worker (integration)
 The write→read round-trip through PostgreSQL (`worker._save_entities` →
 `re_run_final_stages`) and schema migrations. **Currently the weakest layer** (see §6).
+
+### Attacker-facing parsers (fuzzing, ADR-0081)
+Four Atheris targets in `fuzz/` mutate their seeds for 60 s on every pull
+request and push to `main`, and for 10 minutes weekly:
+
+- `report_text`: refang and extraction;
+- `dates`: date parsing;
+- `rule_gates`: the Sigma, Suricata, Snort, YARA and STIX-literal gates;
+- `spotlight`: the prompt enclosure.
+
+A failure is one of:
+
+- an exception;
+- a broken invariant;
+- a native crash;
+- an input slower than 10 s;
+- more than 2 GB of memory.
+
+The four jobs are required checks (ADR-0078, amendment of 2026-10-10), so a
+failure is fixed before the merge:
+
+1. Reproduce it from the uploaded artifact: `python fuzz/fuzz_<target>.py <file>`.
+2. Fix it.
+3. Add the input to `fuzz/corpus/<target>/`.
+
+From then on, `test_fuzz_targets.py` replays that input in the fast tests.
 
 ### Frontend (Vitest, ESLint, tsc)
 17 Vitest files (141 tests on 2026-10-03) with Testing Library and jsdom: the
@@ -385,15 +412,27 @@ they stop a slide, they are not targets. Raise one when its area gains tests.
 | STIX mapping and validation (Stage 4, Stage 5, the ledger, ids, the OpenCTI pattern gates) | 92% (92.7%) | `scripts/check_coverage.py` |
 | Persistence (`api/db*.py`, `api/storage.py`, `api/worker.py`, `api/paths.py`) | 91% (91.8%) | `scripts/check_coverage.py` |
 
-**CI jobs** (`.github/workflows/ci.yml`); the image is published only when the
-first three pass:
+**CI jobs** (`.github/workflows/ci.yml`). The image is published only when
+the first four pass:
 1. **fast-tests** (every push and PR): `ruff check .`, `mypy` (scope and flags
    in `pyproject.toml`), every test with `CTIPARSOR_REQUIRE_TEST_DEPS=1`, the
    coverage floors. Installs the OpenCTI pattern parsers, google-re2 and
    numpy, but not torch/transformers (`SKIP_HEAVY_MODELS=1`). No secrets.
 2. **frontend-tests**: `npm run lint`, `npm run typecheck`, `npm test`.
-3. **container-image**: builds the image and runs `scripts/docker_smoke.sh`.
-4. **model-tests** (pushes to main only, not a gate): the same suite with the
+3. **container-image**: builds the image, runs `scripts/docker_smoke.sh`, and
+   scans the image with Grype into Code scanning (not a gate, ADR-0078).
+4. **dependency-audit**: `pip-audit` on the Python locks and `npm audit` on the
+   UI's production packages (ADR-0075, ADR-0080). It also runs weekly.
+5. **dependency-review** (pull requests only): fails a PR that adds a
+   dependency with a known high or critical vulnerability (ADR-0078).
+6. **model-tests** (pushes to main only, not a gate): the same suite with the
    models downloaded and a live API key; it may fail for reasons outside the code.
+7. **publish-image** (pushes to main only): pushes the image to GHCR with its
+   SBOM and signed attestations, after jobs 1 to 4.
+
+Three more workflows run beside it. **Fuzzing** (`fuzz.yml`) runs the four
+targets above, and its four jobs are required checks. **CodeQL**
+(`codeql.yml`) analyses Python, TypeScript and the workflows. **Scorecard**
+(`scorecard.yml`) rates the repository's practices; it tests nothing.
 
 `make ci` runs jobs 1 and 2 locally, in the `dev` and `frontend-dev` containers.

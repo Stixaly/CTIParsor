@@ -125,16 +125,16 @@ jobs:
       - name: Install pip-audit (by hash, ADR-0080)
         run: pip install --require-hashes -r requirements-audit.lock.txt
 
-      # The image's lock, CI's tools and the scanner's own dependencies, one
-      # run each: pip-audit refuses a package that two -r files both list.
-      # Every lock is audited before the step fails.
-      - name: pip-audit (the three locks)
+      # The image's lock, CI's tools, the scanner's own dependencies and the uv
+      # `make lock` runs, one run each: pip-audit refuses a package that two -r
+      # files both list.  Every lock is audited before the step fails.
+      - name: pip-audit (the four locks)
         run: |
           # No --ignore-vuln: diskcache (PYSEC-2026-2447, no fix) is no longer
           # in any lock (scripts/lock.sh); an exception added here goes in
           # SECURITY.md with its reason.
           status=0
-          for lock in requirements.lock.txt requirements-ci.lock.txt requirements-audit.lock.txt; do
+          for lock in requirements.lock.txt requirements-ci.lock.txt requirements-audit.lock.txt requirements-uv.lock.txt; do
             echo "== $lock"
             pip-audit -r "$lock" --no-deps --disable-pip --progress-spinner off || status=1
           done

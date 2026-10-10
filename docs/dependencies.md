@@ -77,6 +77,7 @@ first URL-capture request to fail; `/api/ingest/url` responds 503 until then.
 | `d3-force` | Physics simulation for STIX graph |
 | `lucide-react` | Icon library |
 | `react-markdown` + `remark-gfm` | Markdown preview (VS Code-like) |
+| `react-pdf` (bundles `pdfjs-dist`) | The Source tab's PDF viewer: pdf.js renders the uploaded report in the analyst's browser, so a pdf.js advisory concerns the UI |
 | `vite` + TypeScript | Build toolchain |
 
 ## Keeping dependencies current
@@ -89,10 +90,11 @@ first URL-capture request to fail; `/api/ingest/url` responds 503 until then.
 | `requirements-api.txt` | Same, for API-only packages | Rarely |
 | `requirements.lock.txt` | **Machine-generated** — exact versions of all three files above, resolved for Python 3.14 with CPU-only torch, every file's sha256 from PyPI; what the image installs | Never by hand — run `make lock` |
 | `requirements-torch.lock.txt` | **Machine-generated** — torch's CPU build and its hashes, from the PyTorch index | Never by hand — run `make lock` |
-| `requirements-ci.txt` | What CI's fast tests install: the API, the light pipeline dependencies, the dev tools | When a test needs a new light dependency |
+| `requirements-ci.txt` | What CI's fast tests install: the API, the light pipeline dependencies, the dev tools, `pytest` and `httpx` (FastAPI's `TestClient` needs it) | When a test needs a new light dependency |
 | `requirements-ci.lock.txt` | **Machine-generated** — `requirements-ci.txt` at the versions of `requirements.lock.txt`, with hashes | Never by hand — run `make lock` |
-| `requirements-dev.txt` | Pinned test / lint / type-check tools for CI | When you upgrade ruff, mypy or pytest-cov on purpose |
+| `requirements-dev.txt` | Pinned test / lint / type-check / fuzzing tools for CI: ruff, mypy, pytest-cov, atheris (Linux x86_64 only, ADR-0081) | When you upgrade one of them on purpose |
 | `requirements-audit.txt` / `.lock.txt` | pip-audit, pinned, and its hashed lock | When you upgrade pip-audit on purpose |
+| `requirements-uv.lock.txt` | **Machine-generated** — the uv `make lock` installs, by hash, to resolve the other locks | Never by hand — `make lock` keeps it, `make update-deps` upgrades it |
 | `frontend/package.json` | npm semver ranges (`^`) | When you want to allow a new major version |
 | `frontend/package-lock.json` | npm lock file | Never by hand — run `make npm-update` to update it |
 
@@ -126,16 +128,38 @@ make audit
 # 2. Upgrade Python packages within the capped ranges, re-run tests, re-lock
 make update-deps
 
-# 3. Review what changed
+# 3. Review what changed: make update-deps rewrites all five Python locks
+git diff --stat -- 'requirements*.lock.txt'
 git diff requirements.lock.txt
 
 # 4. Upgrade npm packages within package.json semver ranges
 make npm-update
 
-# 5. Commit both lock files together
-git add requirements.lock.txt frontend/package-lock.json
+# 5. Commit every lock together: CI's lock is resolved under the image's
+#    versions, so committing only the image's leaves CI on the old ones
+git add requirements*.lock.txt frontend/package-lock.json
 git commit -m "chore: quarterly dependency update $(date +%Y-%m)"
+
+# 6. Review the accepted vulnerabilities (below)
+grep -n ignoreUntil osv-scanner.toml frontend/osv-scanner.toml
 ```
+
+**Step 6: the accepted vulnerabilities.** SECURITY.md lists the vulnerabilities
+the project ships knowingly ("Accepted vulnerabilities") or keeps out ("Not
+shipped"), each with its reason. Every quarter, for each one:
+
+1. Check whether a fix has shipped, and whether the reason still holds.
+2. If a fix has shipped, upgrade, then remove the row and its rule.
+3. If not, update the row's "Reviewed" date, and move its rule forward.
+
+The rules come in two kinds:
+
+- **`.grype.yaml`** (image scan): tied to the exact package version. A rule
+  stops matching on its own when the image moves to another version.
+- **`osv-scanner.toml`** (Scorecard's Vulnerabilities check), at the root
+  and in `frontend/`: tied to a date, `ignoreUntil`. After that date
+  Scorecard reports the vulnerability again, and the score drops until the
+  review sets a new date.
 
 ### Bumping a capped major version
 
