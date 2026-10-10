@@ -8,26 +8,26 @@ maintenance routine that keeps them current.
 
 ## Packages
 
-### Core pipeline (`requirements.txt`)
+Every Python requirement file is in `requirements/`, with the
+`osv-scanner.toml` that applies to them.
+
+### The light runtime (`requirements.txt`)
+
+The pipeline without its ML models, and the API: what CI's fast tests
+install, with the dev tools.
 
 | Package | Purpose |
 |---|---|
 | `pdfplumber` | Text-layer PDF extraction + scanned PDF detection |
-| `markitdown` | PDF / DOCX → structured Markdown |
-| `pdf2image` + `pytesseract` | OCR for scanned PDFs |
 | `python-docx` | DOCX parsing |
 | `beautifulsoup4` | HTML parsing |
 | `defusedxml` | XML parsing hardened against entity-expansion attacks (DOCX internals) |
 | `iocextract` | IPv6 candidates for Stage 2, which validates them (IPv4, URLs, emails and domains are Stage 2's own regexes) |
-| `sentence-transformers` | Semantic TTP embeddings (Stage 2c) |
-| `transformers` | HuggingFace backbone (CyNER 2.0, Stage 2d) |
-| `sentencepiece` | Tokenizer for CyNER 2.0's DeBERTa-v3 (Stage 2d) |
+| `google-re2` | Linear-time regex engine, guards catastrophic backtracking (ADR-0049; the plain `re2` package on PyPI is abandoned and does not build on Python 3.12+) |
 | `numpy` | Embedding cache (`.npy`) |
-| `gliner` | Zero-shot NER (Stage 2e) |
 | `pyahocorasick` | Aho-Corasick multi-pattern scan (Stage 2b, 50× faster) |
 | `rapidfuzz` | Fuzzy string matching (Stage 3b filter + Stage 3c normalisation) |
 | `anthropic` | Claude API client |
-| `openai` | Client for every OpenAI-compatible provider: Gemini, Mistral AI, Ollama, vLLM, LM Studio |
 | `pydantic` | LLM output schema validation |
 | `stix2` | STIX 2.1 object + bundle construction |
 | `stix2-validator` | Bundle JSON-schema validation |
@@ -36,14 +36,8 @@ maintenance routine that keeps them current.
 | `pysigma`, `parsuricata` | Parse each Sigma / Suricata rule quoted in a report with the parsers OpenCTI uses (Snort: OpenCTI's own parser, copied in `pipeline/detection/opencti_snort/`); a refused rule is left out (ADR-0070) |
 | `PyYAML` | Sigma rule parsing + the detection-corpus registry |
 | `python-dotenv` | `.env` loading |
-| `spacy` | Optional NER fallback (no model downloaded by default); listed in `requirements-optional.txt` too |
 | `tenacity` | Retry with backoff on transient LLM errors |
 | `pytest` | Test runner. It sits in the runtime set, so it also ships in the `app` image; the other dev tools are in `requirements-dev.txt`, installed only in the `dev` image |
-
-### Web API (`requirements-api.txt`)
-
-| Package | Purpose |
-|---|---|
 | `fastapi` | REST API framework |
 | `uvicorn[standard]` | ASGI server |
 | `python-multipart` | File upload (multipart/form-data) |
@@ -53,13 +47,21 @@ maintenance routine that keeps them current.
 | `filetype` | Upload type detection fallback, pure Python |
 | `psycopg` | PostgreSQL driver for both stores (ADR-0045, ADR-0053) |
 
-### Optional (requirements-optional.txt)
+### What the image adds (`requirements-full.txt`)
+
+It starts with `-r requirements.txt`; the image installs it whole.
 
 | Package | Purpose |
 |---|---|
+| `markitdown` | PDF / DOCX → structured Markdown |
+| `pdf2image` + `pytesseract` | OCR for scanned PDFs |
+| `sentence-transformers` | Semantic TTP embeddings (Stage 2c) |
+| `transformers` | HuggingFace backbone (CyNER 2.0, Stage 2d) |
+| `sentencepiece` | Tokenizer for CyNER 2.0's DeBERTa-v3 (Stage 2d) |
+| `gliner` | Zero-shot NER (Stage 2e) |
+| `spacy` | Optional NER fallback (no model downloaded by default) |
+| `openai` | Client for every OpenAI-compatible provider: Gemini, Mistral AI, Ollama, vLLM, LM Studio |
 | `playwright` | Headless Chromium for URL capture (ADR-0029) |
-| `google-re2` | Linear-time regex engine, guards catastrophic backtracking (ADR-0049; the plain `re2` package on PyPI is abandoned and does not build on Python 3.12+) |
-| `spacy` | Optional NER fallback |
 
 Playwright and Chromium are already installed in the image, system libraries
 included (`Dockerfile`) — nothing to do. The API checks for a working
@@ -86,13 +88,12 @@ first URL-capture request to fail; `/api/ingest/url` responds 503 until then.
 
 | File | What it is | When to edit |
 |---|---|---|
-| `requirements.txt` | **Human-managed** — lower bounds + major-version caps | When you want to allow a new major version |
-| `requirements-api.txt` | Same, for API-only packages | Rarely |
-| `requirements.lock.txt` | **Machine-generated** — exact versions of all three files above, resolved for Python 3.14 with CPU-only torch, every file's sha256 from PyPI; what the image installs | Never by hand — run `make lock` |
+| `requirements.txt` | **Human-managed** — the light runtime: lower bounds + major-version caps | When a package the fast tests need is added, or a new major allowed |
+| `requirements-full.txt` | **Human-managed** — `-r requirements.txt` and what only the image needs (ML models, OCR, `openai`, Playwright) | When the image alone needs a new package |
+| `requirements.lock.txt` | **Machine-generated** — exact versions of `requirements-full.txt`, resolved for Python 3.14 with CPU-only torch, every file's sha256 from PyPI; what the image installs | Never by hand — run `make lock` |
 | `requirements-torch.lock.txt` | **Machine-generated** — torch's CPU build and its hashes, from the PyTorch index | Never by hand — run `make lock` |
-| `requirements-ci.txt` | What CI's fast tests install: the API, the light pipeline dependencies, the dev tools, `pytest` and `httpx` (FastAPI's `TestClient` needs it) | When a test needs a new light dependency |
-| `requirements-ci.lock.txt` | **Machine-generated** — `requirements-ci.txt` at the versions of `requirements.lock.txt`, with hashes | Never by hand — run `make lock` |
-| `requirements-dev.txt` | Pinned test / lint / type-check / fuzzing tools for CI: ruff, mypy, pytest-cov, atheris (Linux x86_64 only, ADR-0081) | When you upgrade one of them on purpose |
+| `requirements-ci.lock.txt` | **Machine-generated** — `requirements.txt` and `requirements-dev.txt` at the versions of `requirements.lock.txt`, with hashes; what CI's fast tests install | Never by hand — run `make lock` |
+| `requirements-dev.txt` | Pinned test / lint / type-check / fuzzing tools for CI: ruff, mypy, pytest-cov, reuse, schemathesis, atheris (Linux x86_64 only, ADR-0081), and `httpx` (a test imports it; the image has it through `openai`) | When you upgrade one of them on purpose |
 | `requirements-audit.txt` / `.lock.txt` | pip-audit, pinned, and its hashed lock | When you upgrade pip-audit on purpose |
 | `requirements-uv.lock.txt` | **Machine-generated** — the uv `make lock` installs, by hash, to resolve the other locks | Never by hand — `make lock` keeps it, `make update-deps` upgrades it |
 | `frontend/package.json` | npm semver ranges (`^`) | When you want to allow a new major version |
@@ -143,19 +144,19 @@ make audit
 make update-deps
 
 # 3. Review what changed: make update-deps rewrites all five Python locks
-git diff --stat -- 'requirements*.lock.txt'
-git diff requirements.lock.txt
+git diff --stat -- requirements/
+git diff requirements/requirements.lock.txt
 
 # 4. Upgrade npm packages within package.json semver ranges
 make npm-update
 
 # 5. Commit every lock together: CI's lock is resolved under the image's
 #    versions, so committing only the image's leaves CI on the old ones
-git add requirements*.lock.txt frontend/package-lock.json
+git add requirements/ frontend/package-lock.json
 git commit -m "chore: quarterly dependency update $(date +%Y-%m)"
 
 # 6. Review the accepted vulnerabilities (below)
-grep -n ignoreUntil osv-scanner.toml frontend/osv-scanner.toml
+grep -n ignoreUntil requirements/osv-scanner.toml frontend/osv-scanner.toml
 ```
 
 **Step 6: the accepted vulnerabilities.** SECURITY.md lists the vulnerabilities
@@ -170,17 +171,17 @@ The rules come in two kinds:
 
 - **`.grype.yaml`** (image scan): tied to the exact package version. A rule
   stops matching on its own when the image moves to another version.
-- **`osv-scanner.toml`** (Scorecard's Vulnerabilities check), at the root
-  and in `frontend/`: tied to a date, `ignoreUntil`. After that date
+- **`osv-scanner.toml`** (Scorecard's Vulnerabilities check), in
+  `requirements/` and in `frontend/`, next to the manifests they cover: tied to a date, `ignoreUntil`. After that date
   Scorecard reports the vulnerability again, and the score drops until the
   review sets a new date.
 
 ### Bumping a capped major version
 
-When a new major ships (e.g., `numpy 3.0`), bump the cap in `requirements.txt` **intentionally** after verifying the breaking-changes list:
+When a new major ships (e.g., `numpy 3.0`), bump the cap in `requirements/requirements.txt` (or `requirements-full.txt`) **intentionally** after verifying the breaking-changes list:
 
 ```bash
-# Edit requirements.txt: change numpy>=1.24.0,<3  →  numpy>=1.24.0,<4
+# Edit requirements/requirements.txt: change numpy>=1.24.0,<3  →  numpy>=1.24.0,<4
 # Then:
 make update-deps   # upgrades, runs tests, re-locks
 ```

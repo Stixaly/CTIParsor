@@ -109,7 +109,7 @@ check-docs: .secrets/db_password
 # ── Dependency maintenance ────────────────────────────────────────────────────
 # All Python/Node dependencies live in the image now, not a host venv/
 # node_modules — "upgrade" means bumping the version constraints in
-# requirements.txt/package.json by hand, then rebuilding to actually resolve
+# requirements/requirements*.txt and package.json by hand, then rebuilding to actually resolve
 # them (`docker compose build --no-cache` bypasses layer caching so pip/npm
 # re-resolve against the current constraints instead of reusing old wheels).
 
@@ -120,8 +120,8 @@ check-docs: .secrets/db_password
 AUDIT_IGNORE ?=
 audit:
 	docker run --rm -v "$$(pwd)":/audit -w /audit python:3.14-slim \
-	    sh -c "pip install --quiet --require-hashes -r requirements-audit.lock.txt && status=0 \
-	        && for lock in requirements.lock.txt requirements-ci.lock.txt requirements-audit.lock.txt requirements-uv.lock.txt; do \
+	    sh -c "pip install --quiet --require-hashes -r requirements/requirements-audit.lock.txt && status=0 \
+	        && for lock in requirements/requirements.lock.txt requirements/requirements-ci.lock.txt requirements/requirements-audit.lock.txt requirements/requirements-uv.lock.txt; do \
 	            echo \"== \$$lock\"; python -m pip_audit -r \$$lock \
 	                --no-deps --disable-pip --progress-spinner off $(AUDIT_IGNORE) || status=1; done; \
 	        exit \$$status"
@@ -132,7 +132,7 @@ audit:
 
 ## Resolve the requirement ranges into the hashed locks the image, CI and the
 ## audit install with `pip install --require-hashes` (scripts/lock.sh, ADR-0080):
-## requirements.lock.txt (PyPI), requirements-torch.lock.txt (torch's CPU
+## requirements/: requirements.lock.txt (PyPI), requirements-torch.lock.txt (torch's CPU
 ## build, PyTorch index), requirements-ci.lock.txt, requirements-audit.lock.txt,
 ## requirements-uv.lock.txt (the uv this script runs).
 ## Keeps the current pins that still fit the ranges; LOCK_FLAGS=--upgrade
@@ -149,7 +149,7 @@ update-deps:
 	docker compose build app
 	$(MAKE) test-fast
 	@echo ""
-	@echo "Done. Review 'git diff requirements*.lock.txt', then commit every lock if tests passed."
+	@echo "Done. Review 'git diff requirements/', then commit every lock if tests passed."
 
 ## Show which npm packages have newer versions available
 npm-outdated:

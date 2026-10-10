@@ -160,8 +160,8 @@ loads. `tests/test_pattern_check.py::test_the_sigma_gate_never_needs_diskcache`
 fails if the Sigma gate ever needs it. Expect `pip check` in the image to report
 "pysigma requires diskcache, which is not installed": that is this decision.
 Scorecard's Vulnerabilities check still finds it: its scanner, OSV-Scanner,
-resolves `requirements-ci.txt` (ranges, not the lock) through pySigma's
-declared dependencies. The root `osv-scanner.toml` leaves it out, until the
+resolves `requirements/requirements.txt` (ranges, not the lock) through pySigma's
+declared dependencies. `requirements/osv-scanner.toml` leaves it out, until the
 date it gives.
 
 ### Accepted vulnerabilities

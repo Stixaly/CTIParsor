@@ -254,7 +254,7 @@ services:
   # containers now, so this is what replaces the old venv workflow. The
   # Dockerfile's `dev` stage: the `app`/`worker` image (all Python packages
   # baked into /opt/venv) plus ruff, mypy and pytest-cov, the tools CI runs
-  # (requirements-dev.txt).  Rebuild it after a lock change:
+  # (requirements/requirements-dev.txt).  Rebuild it after a lock change:
   # `docker compose --profile dev build dev`.  The repo is bind-mounted live
   # over /app instead of the image's baked-in COPY -- edits on the host are
   # picked up with no rebuild.

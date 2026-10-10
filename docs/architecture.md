@@ -100,7 +100,7 @@ repository's `Dockerfile`:
 - **The web UI**, built in the `ui` stage (`frontend/dist`).
 - **The container's own scripts:** `docker/entrypoint.sh`, which provides the
   commands below, and `docker/warm_models.py`.
-- **A Python 3.14 virtualenv**, installed by hash from `requirements.lock.txt`:
+- **A Python 3.14 virtualenv**, installed by hash from `requirements/requirements.lock.txt`:
   CPU-only torch, transformers, GLiNER, sentence-transformers, pySigma,
   yara-python and the rest.
 - **System tools:**

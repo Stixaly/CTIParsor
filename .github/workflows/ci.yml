@@ -59,12 +59,12 @@ jobs:
       - name: OpenSSL headers for the yara-python build
         run: dpkg -s libssl-dev >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y --no-install-recommends libssl-dev; }
 
-      # requirements-ci.lock.txt (`make lock`, ADR-0080): the API, the light
+      # requirements/requirements-ci.lock.txt (`make lock`, ADR-0080): the API, the light
       # pipeline dependencies (no torch / transformers) and the test, lint and
       # audit tools, at the versions the image ships, every file checked
       # against the sha256 the lock recorded.
       - name: Install dependencies (by hash)
-        run: pip install --require-hashes --no-deps -r requirements-ci.lock.txt
+        run: pip install --require-hashes --no-deps -r requirements/requirements-ci.lock.txt
 
       # Scope and rules live in pyproject.toml, so `ruff check .` and `mypy`
       # check the same files here, in `make ci` and in an editor.
@@ -78,7 +78,7 @@ jobs:
         run: reuse lint
 
       # Blocking since the tree reached zero errors (2026-09-27); mypy is pinned
-      # in requirements-dev.txt so a new release cannot fail this on its own.
+      # in requirements/requirements-dev.txt so a new release cannot fail this on its own.
       - name: Type check (mypy)
         run: mypy
 
@@ -124,7 +124,7 @@ jobs:
           fail_ci_if_error: false
 
   # ── Dependency audit — the exact versions the image ships (ADR-0075) ────────
-  # Blocking: a known vulnerability in requirements.lock.txt, or a high one in
+  # Blocking: a known vulnerability in requirements/requirements.lock.txt, or a high one in
   # the UI's production dependencies, fails the build unless SECURITY.md
   # accepts it with a reason. `--no-deps --disable-pip` audits the pins as
   # written, installing nothing; torch's +cpu build is not on PyPI, so
@@ -143,7 +143,7 @@ jobs:
           python-version: "3.14"
 
       - name: Install pip-audit (by hash, ADR-0080)
-        run: pip install --require-hashes -r requirements-audit.lock.txt
+        run: pip install --require-hashes -r requirements/requirements-audit.lock.txt
 
       # The image's lock, CI's tools, the scanner's own dependencies and the uv
       # `make lock` runs, one run each: pip-audit refuses a package that two -r
@@ -154,7 +154,7 @@ jobs:
           # in any lock (scripts/lock.sh); an exception added here goes in
           # SECURITY.md with its reason.
           status=0
-          for lock in requirements.lock.txt requirements-ci.lock.txt requirements-audit.lock.txt requirements-uv.lock.txt; do
+          for lock in requirements/requirements.lock.txt requirements/requirements-ci.lock.txt requirements/requirements-audit.lock.txt requirements/requirements-uv.lock.txt; do
             echo "== $lock"
             pip-audit -r "$lock" --no-deps --disable-pip --progress-spinner off || status=1
           done
@@ -258,12 +258,12 @@ jobs:
       - name: Install all dependencies (the image's exact versions, by hash)
         run: |
           pip install --require-hashes --no-deps --index-url https://download.pytorch.org/whl/cpu \
-            -r requirements-torch.lock.txt
-          pip install --require-hashes --no-deps -r requirements.lock.txt
+            -r requirements/requirements-torch.lock.txt
+          pip install --require-hashes --no-deps -r requirements/requirements.lock.txt
 
       # Same versions for what both locks share: already installed, left alone.
       - name: Install test dependencies (by hash)
-        run: pip install --require-hashes --no-deps -r requirements-ci.lock.txt
+        run: pip install --require-hashes --no-deps -r requirements/requirements-ci.lock.txt
 
       - name: Run full test suite (with model inference)
         env:

@@ -8,7 +8,7 @@ The locks rewritten here name no index, so pip installs from PyPI; their
 hashes must be PyPI's.  torch is left alone: requirements-torch.lock.txt
 installs it from the PyTorch index first, and here it is already satisfied.
 
-    python3 scripts/lock_pypi_hashes.py requirements.lock.txt [more locks…]
+    python3 scripts/lock_pypi_hashes.py requirements/requirements.lock.txt [more locks…]
 """
 from __future__ import annotations
 

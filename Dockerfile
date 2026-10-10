@@ -24,9 +24,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 WORKDIR /build
-# The exact versions CI tested (`make lock`): requirements*.txt hold the ranges,
-# requirements.lock.txt the resolution of all three, playwright and google-re2
-# included, with torch pinned to its +cpu build, so no CUDA wheel (about 2.2 GB
+# The exact versions CI tested (`make lock`): requirements/*.txt hold the ranges,
+# requirements.lock.txt the resolution of requirements-full.txt, playwright and
+# google-re2 included, with torch pinned to its +cpu build, so no CUDA wheel (about 2.2 GB
 # of nvidia_* packages this CPU image would never use) is ever pulled in.
 # --require-hashes (ADR-0080): every file pip downloads must match the sha256
 # the lock recorded, so a re-uploaded or tampered release fails the build.
@@ -37,7 +37,7 @@ WORKDIR /build
 # its ATT&CK data cache imports it — scripts/lock.sh).  No pip upgrade first:
 # the pip this Python bundles is current (26.2.1 with 3.14.8), and an upgrade
 # would be the one download without a hash.
-COPY requirements.lock.txt requirements-torch.lock.txt ./
+COPY requirements/requirements.lock.txt requirements/requirements-torch.lock.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --require-hashes --no-deps --index-url https://download.pytorch.org/whl/cpu \
         -r requirements-torch.lock.txt \
@@ -147,13 +147,13 @@ CMD ["serve"]
 
 # ── Stage 4: development image (the compose `dev` service) ────────────────────
 # The runtime image plus the lint, type-check, coverage and audit tools CI
-# installs (requirements-ci.lock.txt, by hash; what the runtime already has is
+# installs (requirements/requirements-ci.lock.txt, by hash; what the runtime already has is
 # the same version and is left alone), so every check in CONTRIBUTING.md runs
 # in `dev`.
 # Never shipped: built only when asked for by name (`--target dev`).
 FROM runtime AS dev
 USER root
-RUN pip install --no-cache-dir --require-hashes --no-deps -r /app/requirements-ci.lock.txt
+RUN pip install --no-cache-dir --require-hashes --no-deps -r /app/requirements/requirements-ci.lock.txt
 USER ctiparsor
 # It runs one-shot commands, not the API the inherited check polls.
 HEALTHCHECK NONE

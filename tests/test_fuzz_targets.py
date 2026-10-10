@@ -10,7 +10,7 @@ import sys
 
 import pytest
 
-pytest.importorskip("atheris")      # Linux x86_64 only (requirements-dev.txt)
+pytest.importorskip("atheris")      # Linux x86_64 only (requirements/requirements-dev.txt)
 
 FUZZ = pathlib.Path(__file__).resolve().parent.parent / "fuzz"
 TARGETS = sorted(p.stem.removeprefix("fuzz_") for p in FUZZ.glob("fuzz_*.py"))

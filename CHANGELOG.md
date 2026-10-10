@@ -6,6 +6,33 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Changed
+
+#### The Python requirement files: four lists instead of six, in `requirements/`, 2026-10-10
+
+Eleven `requirements*` files sat at the root, and `requirements-ci.txt` was
+a hand-kept copy of about twenty names from `requirements.txt`: a new
+dependency had to be added twice, or its tests skipped in CI. spaCy was
+declared in two files.
+
+- `requirements.txt` is the light runtime, the pipeline without its ML
+  models and the API; `requirements-full.txt` starts with it and adds what
+  only the image needs. `requirements-api.txt`, `-optional.txt` and
+  `-ci.txt` are gone: the CI lock resolves `requirements.txt` +
+  `requirements-dev.txt` under the image lock.
+- Every requirement file, and the `osv-scanner.toml` covering them, is in
+  `requirements/`, with a README saying which file is for what.
+- **Nothing installed changes.** The five locks, regenerated, have the same
+  pins, markers and sha256 as before (158 / 1 / 127 / 28 / 1 packages),
+  and are byte-identical after the move.
+- The names keep "requirements": OSV-Scanner reads a `.txt` only when its
+  name contains it, and only the `osv-scanner.toml` next to a file, so
+  Scorecard's scan keeps seeing them. ADR-0080 is amended.
+
+To add a Python dependency: `requirements/requirements.txt` when the fast
+tests need it, `requirements/requirements-full.txt` when only the image does,
+then `make lock` (CONTRIBUTING.md).
+
 ### Security
 
 #### The UI on Tailwind CSS 4: the last accepted npm vulnerability goes, 2026-10-10

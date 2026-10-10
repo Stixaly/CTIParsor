@@ -119,7 +119,7 @@ docker compose --profile dev up frontend-dev             # Vite HMR -> http://lo
 ```
 
 `dev` is the Dockerfile's `dev` stage — the `app`/`worker` image plus the
-lint, type-check and coverage tools CI uses (`requirements-dev.txt`) —
+lint, type-check and coverage tools CI uses (`requirements/requirements-dev.txt`) —
 `read_only: false`, with the repo bind-mounted live over `/app`: edits on the
 host need no rebuild, a dependency change does (`docker compose --profile dev
 build dev`).  The stage is never shipped: a build without `--target` stops at

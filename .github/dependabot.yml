@@ -1,6 +1,6 @@
 # What Dependabot keeps current, and what it leaves to `make lock` (ADR-0075).
 #
-# Python is not here: requirements.lock.txt is compiled by `uv pip compile`
+# Python is not here: requirements/requirements.lock.txt is compiled by `uv pip compile`
 # (`make lock`), which Dependabot neither regenerates (its uv support reads a
 # uv.lock) nor treats as pip-compile output, so it would bump single pins and
 # leave the rest of the resolution stale. The `pip-audit` CI job fails on a
