@@ -132,11 +132,11 @@ Settings are not files. These are applied by hand (Settings → Advanced Securit
 2. [x] CodeQL `actions`; Grype image scan to Code scanning; dependency review
        on PRs; weekly CI; Scorecard with README badge.
 3. [x] SECURITY.md: reporting through private advisories, the new checks.
-4. [ ] Maintainer: Dependabot alerts, private vulnerability reporting, the
-       `main` ruleset (items 8–10).
-5. [ ] Maintainer, after merge: require SHA-pinned actions (item 11); add
+4. [x] Maintainer: Dependabot alerts, private vulnerability reporting, the
+       `main` ruleset (items 8–10). Done 2026-10-10; see the last amendment.
+5. [x] Maintainer, after merge: require SHA-pinned actions (item 11); add
        "Dependency review (what this PR adds)" and "CodeQL (actions)" to the
-       required checks.
+       required checks. Done 2026-10-10.
 
 ## Amendment (2026-10-10) — Scorecard after ADR-0080 and ADR-0081
 
@@ -195,3 +195,54 @@ ruleset (item 10) is **disabled**. Action item 4 stays open, and now
 includes the four fuzz checks. Items 8 (Dependabot alerts) and 11 (actions
 pinned by SHA) cannot be read without administrator access. The maintainer
 checks them in Settings.
+
+## Amendment (2026-10-10) — the settings as applied
+
+The maintainer applied items 8–11 on 2026-10-10. Read back through the API
+the same day:
+
+| Setting | State |
+|---|---|
+| Dependabot alerts, dependency graph (item 8) | on |
+| Dependabot security updates (item 8) | **on**, not off: see below |
+| Private vulnerability reporting (item 9) | on |
+| Secret scanning, push protection | on |
+| Actions must be pinned to a full SHA (item 11) | on; every `uses:` on `main` already was |
+| Head branches deleted after merge | on |
+
+**The `main` ruleset (item 10)**, "basic rules", is active on the default
+branch:
+
+- deletion and force-push blocked;
+- changes through a pull request, 0 approvals, open review conversations
+  resolved first;
+- 13 required checks, each from GitHub Actions except the code-scanning
+  summary: `Fast tests (lint + type check + unit tests)`,
+  `Dependency audit (pip-audit on the lock, npm audit)`,
+  `Dependency review (what this PR adds)`,
+  `Frontend (lint + type check + unit tests)`,
+  `Container image (build + smoke)`, `CodeQL (python)`,
+  `CodeQL (javascript-typescript)`, `CodeQL (actions)`, the four
+  `Fuzz (…)` jobs, and `CodeQL` (GitHub Advanced Security);
+- code scanning results required from CodeQL: security alerts **medium or
+  higher**, other alerts **errors and warnings**. Stricter than item 10's
+  "high or higher": the gate reads only the alerts a pull request adds;
+- bypass: repository administrators, in pull requests only.
+
+Three choices differ from the Decision:
+
+- **Dependabot security updates stay on.** Item 8 feared an update that
+  bumps one pin of the uv-compiled lock. Such a lock fails
+  `pip install --require-hashes` in the required checks, so it cannot be
+  merged. The npm updates have been useful (source-map-js, PR #125).
+- **Grype does not gate the merge**, as item 4 meant: the image's base
+  gains published CVEs every week, and a pull request would be blocked by
+  one released between two scans of `main`.
+- **"Require branches to be up to date" is off.** Pull requests that touch
+  the same file (CHANGELOG) would each need an update after every merge.
+  Scorecard's Branch-Protection check would give about a point more.
+
+Two rules first saved with the ruleset were removed the same day, because
+they would have blocked every pull request: a required check named
+`Dependabot`, which no pull request ever reports, and "require code quality
+results", which waits for GitHub Code Quality, not enabled here.

@@ -8,6 +8,18 @@ sections group by theme rather than strict semver.
 
 ### Documentation
 
+#### ADR-0078's repository settings, as applied, 2026-10-10
+
+The maintainer applied the settings ADR-0078 left to them (items 8–11);
+the ADR's last amendment records them as read back through the API. `main`
+now takes changes only through a pull request whose 13 required checks
+pass, with a CodeQL gate on the alerts a pull request adds (medium severity
+or higher). Private vulnerability reporting, secret scanning with push
+protection, and required SHA-pinned actions are on. Three choices differ
+from the ADR's Decision, each with its reason: Dependabot security updates
+stay on, Grype does not gate the merge, and branches need not be up to
+date. SECURITY.md describes the protected branch.
+
 #### Every file names its copyright and licence (REUSE), 2026-10-10
 
 The repository carries files from other projects, and nothing listed them
