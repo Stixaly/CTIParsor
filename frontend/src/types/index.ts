@@ -45,6 +45,9 @@ export interface Entity {
   decision_origin?: DecisionOrigin | null
   /** Left pending by auto-accept so an analyst's verdict can measure it. */
   control_sample?: boolean
+  /** Why the pipeline held this row back (ADR-0082): not in the bundle until
+   *  an analyst accepts it, one card at a time. */
+  held_reason?: string | null
 }
 
 export type DecisionOrigin =
@@ -80,6 +83,9 @@ export interface Relationship {
   /** Every date the source attaches to the relationship, as stored. */
   times?: TemporalAssertion[]
   decision_origin?: DecisionOrigin | null
+  /** Why Stage 3d held this claim back (ADR-0082): not in the bundle until an
+   *  analyst accepts it, one card at a time. */
+  held_reason?: string | null
 }
 
 // ── Relationship dates (ADR-0063) ────────────────────────────────────────────

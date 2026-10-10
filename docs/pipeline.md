@@ -17,7 +17,7 @@ the [README](../README.md#how-it-works); this page is the detail.
 │  PDF / DOCX / HTML / TXT / MD → normalised text + chunks            │
 │  • Text PDF    : markitdown (structure-preserving) → pdfplumber      │
 │  • Scanned PDF : auto-detected → OCR via Tesseract / pdf2image       │
-│  • Defanging   : hxxps://, [.], (.), [at], [@] → live form          │
+│  • Defanging   : hxxps://, [.], (.), .], [at], [@] → live form      │
 │  • Chunking    : paragraph-aware + 400-char sliding-window overlap   │
 │  • Adaptive    : larger chunks for large docs (3 000–5 000 chars)    │
 └─────────────────────────────┬────────────────────────────────────────┘
@@ -117,7 +117,9 @@ the [README](../README.md#how-it-works); this page is the detail.
 ┌─────────────────────────────▼────────────────────────────────────────┐
 │  Stage 3d — RELATIONSHIP SELF-VERIFICATION              (optional)   │
 │  Second LLM call: "quote the exact sentence supporting this claim"  │
-│  Unsupported relationships are removed.                             │
+│  Unsupported relationships are removed. Undecided ones (failed      │
+│  call, no verdict, quote not in the text) are held for an analyst:  │
+│  stored pending, out of the bundle until accepted (ADR-0082)        │
 │  aCTIon paper: 27% → 8% hallucination on its benchmark; CTIParsor's│
 │  own figure is the grounding harness's (docs/eval), not this one   │
 │  Cost: ~1.4× total LLM calls (only chunks with ≥ 1 relationship)   │

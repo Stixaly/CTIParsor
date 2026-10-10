@@ -30,7 +30,7 @@ import RelationshipRail, { type BulkAction, type DatePatch } from '../components
 import RelationshipCreator from '../components/review/RelationshipCreator'
 import DragRubberBand from '../components/review/DragRubberBand'
 import KeyboardHelp from '../components/review/KeyboardHelp'
-import { typeLabel } from '../components/review/tokens'
+import { heldPending, typeLabel } from '../components/review/tokens'
 import EntityPopover from '../components/EntityPopover'
 import { usePromotedRules } from '../hooks/usePromotedRules'
 
@@ -365,10 +365,11 @@ export default function Review() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['entities', jobId] }); markDirty() },
   })
 
-  /** Accept all pending entities of type `t` — local-first, single API call. */
+  /** Accept all pending entities of type `t` — local-first, single API call.
+   *  Held rows (ADR-0082) stay pending: the server skips them too. */
   const acceptAllOfType = (t: string) => {
     setLocalEntities(es => es.map(e =>
-      e.entity_type === t && e.accepted === null
+      e.entity_type === t && e.accepted === null && !heldPending(e)
         ? { ...e, accepted: true, autoAccepted: false }
         : e
     ))
@@ -413,6 +414,12 @@ export default function Review() {
 
   const setRelsBulk = (ids: string[], action: BulkAction) => {
     const val = action === 'accept' ? true : action === 'reject' ? false : null
+    // A held claim (ADR-0082) is accepted on its own card only; the server
+    // skips it too.  Rejecting a group may include it.
+    if (action === 'accept') {
+      const held = new Set(localRelsRef.current.filter(heldPending).map(r => r.id))
+      ids = ids.filter(id => !held.has(id))
+    }
     const chosen = new Set(ids)
     setLocalRels(rs => rs.map(r => chosen.has(r.id) ? { ...r, accepted: val, decision_origin: 'human_bulk' } : r))
     const stored = ids.filter(id => !localRelsRef.current.find(r => r.id === id)?._localOnly)

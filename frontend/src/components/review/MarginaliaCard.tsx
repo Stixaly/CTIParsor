@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import type { Entity } from '../../types'
-import { typeDot, typeLabel, typeSoft, typeInk, confPct, SOURCE_LABEL, TYPE_GROUPS } from './tokens'
+import { typeDot, typeLabel, typeSoft, typeInk, confPct, heldPending, heldTitle, SOURCE_LABEL, TYPE_GROUPS } from './tokens'
 
 interface Props {
   entity: Entity
@@ -134,6 +134,13 @@ export default function MarginaliaCard({
                 title="Control sample: auto-accept left this one for you. Your verdict measures how often auto-accept is right."
               >
                 confirm
+              </span>
+            )}
+            {/* ADR-0082 — the pipeline could not decide it: why, and that it
+                waits for this card's ✓. */}
+            {heldPending(e) && (
+              <span className="marg-origin marg-origin-held" title={heldTitle(e.held_reason!)}>
+                held
               </span>
             )}
             {e.decision_origin === 'auto_policy' && e.accepted === true && (

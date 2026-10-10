@@ -4,8 +4,22 @@ Module to locate LLM-generated quotes within source text and return character
 spans in the original coordinate system.
 """
 
+import re
 from bisect import bisect_right
 from dataclasses import dataclass
+
+# Word-level comparison for `stated_in`.  Both are a single character class or
+# literal run — linear under stdlib `re`, which is used on purpose: re2's `\W`
+# is ASCII-only, and a quote in Cyrillic would have no words at all.
+_WORD = re.compile(r"[^\W_]+")
+# A Markdown link's target, which converters leave in report text and a model
+# leaves out of its quote: "[REvil](/threat-actors/revil)" quoted as "REvil".
+# The closing parenthesis is optional: a quote cut short ends inside the URL.
+_MD_LINK_TARGET = re.compile(r"\]\([^)\s]*\)?")
+
+# The separator the document-level verifier puts between the two sentences of
+# one quote (stage3d_verify._VERIFY_SYSTEM_DOCUMENT).
+QUOTE_JOIN = "[...]"
 
 # Character substitutions PDF extraction introduces.  Each maps ONE source
 # character to ONE replacement character, so normalising never shifts offsets —
@@ -318,3 +332,29 @@ def sentence_bounds(text: str) -> list[tuple[int, int]]:
             bounds.append((start, n))
 
     return bounds
+
+
+def words(text: str) -> str:
+    """`text` as its words, lower-cased, one space apart and one on each side.
+
+    Punctuation, Markdown emphasis, table pipes and link targets are not words,
+    so a quote that leaves them out still matches: the four dev-run quotes an
+    exact comparison missed were `**Filename**:` quoted as `Filename:`, a
+    linked name, a table row and a "Corp.Ltd." line break.
+    """
+    return " " + " ".join(_WORD.findall(_MD_LINK_TARGET.sub("]", text).lower())) + " "
+
+
+def stated_in(quote: str, text_words: str, *, min_words: int = 3) -> bool:
+    """Is every part of `quote` in the text, word for word?
+
+    `text_words` is `words(text)`, computed once by the caller.  A quote's parts
+    are its sentences joined by QUOTE_JOIN; each must appear on its own.  Fewer
+    than `min_words` words in all is no quote: a word or two matches almost
+    anywhere (see `locate`).
+    """
+    parts = [words(p) for p in quote.split(QUOTE_JOIN)]
+    parts = [p for p in parts if p.strip()]
+    if sum(len(p.split()) for p in parts) < min_words:
+        return False
+    return all(p in text_words for p in parts)

@@ -6,35 +6,36 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
-### Changed
+### Fixed
 
-#### PostgreSQL major upgrades: `make db-upgrade`, and two refusals (ADR-0077 part B), 2026-10-10
+#### Stage 2 network indicators: IPv6, sentence-final IPv4, half-bracket defangs, 2026-10-10
 
-- **`make db-upgrade`** (`scripts/db_upgrade.sh`) moves the job store to
-  the PostgreSQL major compose.yaml names:
-  - it finds the cluster to move, either another major's directory in the
-    stack's volume or the old 17 volume;
-  - it dumps it with a throwaway server of its own major, then restores into
-    the new cluster and compares every table's row count;
-  - it never touches the old cluster, and never restores over tables
-    without `FORCE=1`.
+Three recall defects in `pipeline/stage2_extraction.py`, each there since the
+first commit or close to it. Measured on AnnoCTR's 400 texts, old against
+new: +22 IPv4, 13 truncated lab52 domains now whole (`1.duckdns` →
+`1.duckdns.org`), 11 defanged URLs now refanged, no URL or email lost.
 
-  `scripts/upgrade_postgres_17_to_18.sh` now calls it.
-  `scripts/check_db_upgrade.sh` runs both layouts end to end under
-  throwaway compose projects.
-- **The app refuses an empty database on a new cluster** where data had
-  been migrated. `api/db_identity.py` records each database's cluster in
-  `<state>/db-identity.json` (`CTIPARSOR_STATE_DIR`); `api.migrate` raises
-  `ClusterChanged` with the way out. This is the upgrade that left the data
-  on another volume. A database restored on a new cluster is accepted and
-  recorded.
-- **No entrypoint of ours in front of PostgreSQL.** The 18 image already
-  refuses to initialise beside another major's cluster
-  (docker-library/postgres#1259); checked, including ADR-0076's case of the
-  17 volume re-mounted, which it had described as a silent empty start.
-- **CI migrates a database written by the PR's base commit**
-  (`scripts/check_migration_from.py`, fast-tests job).
-- `state/` (local runtime state) is ignored by git and Docker.
+- **No IPv6 address was ever extracted.** The code called
+  `iocextract.extract_ipv6s(text, refang=True)`; the function takes no
+  `refang`, so it raised `TypeError` on every report, and the
+  `extract_urls` / `extract_emails` calls after it in the same `try` never
+  ran either. The IPv6 call is fixed and its candidates are validated:
+  iocextract's pattern is loose (in AnnoCTR: 101 candidates, all clock
+  times, MAC addresses or a byte fingerprint). The URL and email calls are
+  removed, not revived: turned on, they added 244 URLs (mostly copies of
+  regex hits with Markdown escapes or a trailing slash) and 39 "emails"
+  such as `i7-6700hqcpu@2.60ghz`, each of which hid its host from the
+  domain list — `avsvmcloud.com`, SUNBURST's C2, among them.
+- **An IPv4 address that ends a sentence was dropped.** The trailing guard
+  meant to refuse a fifth octet (`192.168.1.1.5`) refused any following
+  `.`. It now refuses `.` followed by a digit only; 5 C2 addresses in
+  AnnoCTR. The same change lets through two version strings that end a
+  sentence (`1.6.0.27.`), the kind of match the pattern already made
+  mid-sentence.
+- **One-bracket defangs were not refanged.** `www.destroy2013.]com`,
+  `107.150.112.]250`, `evil[.com` — 9 AnnoCTR texts, all lab52 — gave no
+  indicator or a truncated one. `refang` now restores a dot written with
+  one bracket between two alphanumerics, so `[.NET]` stays as it is.
 
 ### Security
 

@@ -61,6 +61,8 @@ Four view modes toggled at the top of the document pane:
 - **Accepted** ✓ — explicitly confirmed, included
 - **Rejected** ✗ — excluded from bundle
 
+**Held for review** (ADR-0082): a relationship Stage 3d could not decide, or a technique Stage 3f's selection could not, is stored pending with a `held` chip whose tooltip says why (the verification call failed, the answer said nothing about it, its quote is not in the text…). Unlike other pending rows it is **not** in the bundle until you accept it, and only on its own card: accepting a type, a group or a selection skips it, and auto-accept never takes it. Rejecting a group may include it.
+
 **Auto-accept:** when a job finishes, the worker accepts its entities with confidence ≥ 90% and records them as `auto_policy` (ADR-0058); opening the page writes nothing. A banner shows the count with an Undo option, and each card carries an `auto` chip. About one in ten of those entities (`REVIEW_CONTROL_SAMPLE_RATE`, default 0.10) is left pending with a `confirm` chip: your verdict on it measures how often auto-accept is right (`GET /api/thresholds` → `auto_accept_audit`).
 
 **Drag-to-relate:** Drag from one entity mark to another → opens relationship creator pre-filled with source and target.

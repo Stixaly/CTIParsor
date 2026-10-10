@@ -18,6 +18,8 @@ How it works:
     • The numbered list of extracted relationships
   The LLM must quote the EXACT sentence from the text that supports each claim.
   If no such sentence exists, the claim is marked unverified and discarded.
+  A claim the pass cannot decide — failed call, unreadable answer, no verdict,
+  a quote that is not in the text — is held for an analyst (ADR-0082).
   On the whole report, a second sentence may only say who the first one's
   subject is (see _VERIFY_SYSTEM_DOCUMENT).
 
@@ -44,11 +46,13 @@ Design note — circular import avoidance:
 """
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Callable
 
 # Initialize logging
 from api.logging_config import get_logger
 from pipeline.env_flags import env_bool, env_int
+from pipeline.evidence_span import stated_in, words
 from pipeline.llm_parse import fit_report, parse_numbered_claims
 
 logger = get_logger(__name__)
@@ -171,15 +175,19 @@ def verify_relationships(
                  that `_VERIFY_SYSTEM_DOCUMENT` describes.
 
     Returns:
-        A new LLMEnrichmentResult with only verified relationships.
-        Unverified relationships are removed.
-        Verified relationships have their evidence_text updated with the
-        supporting quote from the text.
+        A new LLMEnrichmentResult.  `relationships` keeps the claims the model
+        verified with a quote found in `text` (stated_in), their evidence_text
+        replaced by that quote.  A refuted claim is removed.  Every other claim
+        — its batch's call failed or its answer was unparseable, the answer
+        said nothing about it or gave no true/false verdict, or its quote is
+        missing or not in the text — moves to `rel_review` with the reason
+        (ADR-0082): kept out of the bundle, stored pending for an analyst.
+        Until 2026-10 those claims stayed in `relationships`, indistinguishable
+        from verified ones.
 
-    Claims are verified in batches of STIX_VERIFY_BATCH_SIZE.  A batch's claims
-    are kept unverified when its call fails or its answer cannot be parsed.
-    The result is returned unchanged when verification is disabled or there
-    are fewer than STIX_VERIFY_MIN_RELS relationships.
+    Claims are verified in batches of STIX_VERIFY_BATCH_SIZE.  The result is
+    returned unchanged when verification is disabled or there are fewer than
+    STIX_VERIFY_MIN_RELS relationships.
     """
     if not (_VERIFY_ENABLED if enabled is None else enabled):
         return result
@@ -191,29 +199,53 @@ def verify_relationships(
     system = _VERIFY_SYSTEM_DOCUMENT if document else _VERIFY_SYSTEM
     quote_cap = 1_000 if document else 500
     batch_size = max(1, _VERIFY_BATCH)
-    verified_rels = []
+    text_words = words(text)
+    verified_rels: list = []
+    held: list = []
     removed = 0
     for start in range(0, len(rels), batch_size):
-        kept, dropped = _verify_batch(text, rels[start:start + batch_size], llm_fn,
-                                      system, max_prompt_chars, quote_cap)
-        verified_rels.extend(kept)
-        removed += dropped
+        batch = _verify_batch(text, text_words, rels[start:start + batch_size], llm_fn,
+                              system, max_prompt_chars, quote_cap)
+        verified_rels.extend(batch.kept)
+        held.extend(batch.held)
+        removed += batch.removed
 
-    if removed:
-        logger.info(
-            f"Verification: removed {removed}/{len(rels)} "
-            f"unsupported relationships ({len(verified_rels)} kept)"
-        )
-    else:
-        logger.info(f"All {len(rels)} relationships verified")
+    if held:
+        from pipeline import llm_stats
+        llm_stats.bump("rel_verification_held", len(held))
+    logger.info(
+        f"Verification: {len(verified_rels)}/{len(rels)} relationships verified, "
+        f"{removed} refuted, {len(held)} held for review"
+    )
+    return result.model_copy(update={"relationships": verified_rels,
+                                     "rel_review": [*result.rel_review, *held]})
 
-    return result.model_copy(update={"relationships": verified_rels})
+
+@dataclass
+class _Batch:
+    kept: list = field(default_factory=list)
+    held: list = field(default_factory=list)
+    removed: int = 0
 
 
-def _verify_batch(text: str, rels: list, llm_fn: Callable[[str, str], str], system: str,
-                  max_prompt_chars: int | None, quote_cap: int) -> tuple[list, int]:
-    """Verify one batch of claims; return (kept relationships, number removed)."""
+def _verdict(v: dict) -> bool | None:
+    """The claim's true/false verdict, or None when the answer gives none."""
+    value = v.get("verified")
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip().lower() in ("true", "false"):
+        return value.strip().lower() == "true"
+    return None
+
+
+def _verify_batch(text: str, text_words: str, rels: list, llm_fn: Callable[[str, str], str],
+                  system: str, max_prompt_chars: int | None, quote_cap: int) -> _Batch:
+    """Verify one batch of claims."""
     from pipeline import llm_stats
+    from pipeline.stage3_llm import RelationshipReview
+
+    def hold(rel, reason: str):
+        return RelationshipReview(**rel.model_dump(), reason=reason)
 
     # Build numbered claims list  (compact — saves tokens)
     claims_str = "\n".join(
@@ -224,37 +256,40 @@ def _verify_batch(text: str, rels: list, llm_fn: Callable[[str, str], str], syst
 
     raw = llm_fn(f"{system}\n\n{spotlight}", prompt)
     if not raw:
-        # LLM call failed — keep the batch (safe fallback)
-        logger.warning("Verification LLM call failed — keeping these relationships")
+        logger.warning(f"Verification LLM call failed — {len(rels)} relationships held for review")
         llm_stats.bump("rel_verification_failed")
-        return list(rels), 0
+        return _Batch(held=[hold(r, "verification call failed") for r in rels])
 
     verifications = parse_numbered_claims(raw, len(rels))
     if verifications is None:
-        logger.warning("Could not parse verification response — keeping these relationships")
+        logger.warning(f"Could not parse verification response — {len(rels)} relationships held for review")
         llm_stats.bump("rel_verification_unparsed")
-        return list(rels), 0
+        return _Batch(held=[hold(r, "verification answer unparseable") for r in rels])
     llm_stats.bump("rel_verification_ok")
 
-    kept = []
-    removed = 0
+    out = _Batch()
     for i, rel in enumerate(rels):
         v = verifications.get(i + 1)
-
-        # If the LLM didn't return an entry for this claim, default to keeping it
         if v is None:
-            kept.append(rel)
+            out.held.append(hold(rel, "verification answer silent on this claim"))
             continue
-
-        if v.get("verified", True):
-            # Update evidence_text with the LLM's quoted sentence (if available)
-            quote = v.get("quote")
-            if quote and isinstance(quote, str) and quote.strip():
-                rel = rel.model_copy(update={"evidence_text": quote.strip()[:quote_cap]})
-            kept.append(rel)
+        verdict = _verdict(v)
+        if verdict is None:
+            out.held.append(hold(rel, "verification gave no true/false verdict"))
+            continue
+        if not verdict:
+            out.removed += 1
+            continue
+        quote = v.get("quote")
+        quote = quote.strip() if isinstance(quote, str) else ""
+        if not quote:
+            out.held.append(hold(rel, "verified without a quote"))
+        elif not stated_in(quote, text_words):
+            out.held.append(hold(rel.model_copy(update={"evidence_text": quote[:quote_cap]}),
+                                 "quote not found in the text"))
         else:
-            removed += 1
-    return kept, removed
+            out.kept.append(rel.model_copy(update={"evidence_text": quote[:quote_cap]}))
+    return out
 
 
 # ---------------------------------------------------------------------------

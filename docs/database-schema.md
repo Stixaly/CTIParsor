@@ -30,6 +30,7 @@ migrations".
 | 7 | `review_decisions` loses its key to `jobs` | 0059 |
 | 8 | `jobs.bundle_ledger_json` | 0061 |
 | 9 | `relationships.times_json` | 0063 |
+| 10 | `entities.held_reason`, `relationships.held_reason` | 0082 |
 
 ```sql
 CREATE TABLE jobs (
@@ -77,8 +78,11 @@ CREATE TABLE entities (
                                     -- propagated | legacy (decided before the column)
     decided_at     TEXT,
     policy_version TEXT,            -- the auto-accept policy that decided, if any
-    control_sample INTEGER NOT NULL DEFAULT 0  -- 1 = auto-accept left it pending
+    control_sample INTEGER NOT NULL DEFAULT 0, -- 1 = auto-accept left it pending
                                     -- on purpose, to measure its own accuracy
+    held_reason    TEXT             -- ADR-0082: why the pipeline held this row back
+                                    -- (a technique Stage 3f could not decide); a
+                                    -- pending row with a reason ships only once accepted
 );
 
 CREATE TABLE relationships (
@@ -97,7 +101,9 @@ CREATE TABLE relationships (
     stop_time         TEXT,               -- read as dates of unknown precision
     decision_origin   TEXT,               -- same three columns as on entities (ADR-0058)
     decided_at        TEXT,
-    policy_version    TEXT
+    policy_version    TEXT,
+    held_reason       TEXT                -- ADR-0082: why Stage 3d held this claim back;
+                                          -- stored pending, ships only once accepted
 );
 
 -- The review journal (ADR-0058): one row per change of `accepted`, only ever
