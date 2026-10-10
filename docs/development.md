@@ -362,6 +362,7 @@ CTIParsor/
 │   ├── database-schema.md         # Job store + rule store tables
 │   ├── development.md             # This guide
 │   ├── dependencies.md            # Packages, lock files, maintenance routine
+│   ├── openssf-best-practices.md  # The OpenSSF Best Practices self-assessment, criterion by criterion
 │   ├── eval/                      # Evaluation protocol and baselines (ADR-0060)
 │   └── adr/                       # Architecture Decision Records (see docs/adr/README.md)
 ├── TESTING.md                     # Test strategy

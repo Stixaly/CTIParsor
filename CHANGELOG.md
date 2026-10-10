@@ -6,6 +6,42 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Security
+
+#### The TLS proxy: forward secrecy, and no more MD5 password entries, 2026-10-10
+
+Found while answering the OpenSSF Best Practices criteria, and checked
+against the compose proxy image (`nginx-unprivileged:1.31-alpine`, pinned)
+with `curl` and `openssl s_client`:
+
+- **TLS 1.2 accepted suites without forward secrecy.** With no
+  `ssl_ciphers`, nginx's default also took RSA key exchange
+  (`AES256-GCM-SHA384`) and CBC with SHA-1 (`AES128-SHA`). The proxy now
+  offers ECDHE with AEAD ciphers only, Mozilla's "intermediate" list
+  without DHE. Both suites above are refused; ECDHE and TLS 1.3 still
+  connect.
+- **The docs wrote proxy passwords as APR1**, an MD5-based scheme
+  (`openssl passwd -apr1`). They now give bcrypt, cost 12
+  (`htpasswd -nBC 12`), or SHA-512-crypt (`openssl passwd -6`) where
+  `htpasswd` is missing. The image reads both (`$2b$`/`$2y$` and `$6$`
+  entries: 200 with the password, 401 without). An existing `$apr1$`
+  entry keeps working until it is replaced.
+
+### Documentation
+
+#### OpenSSF Best Practices: the answers, and what they asked for, 2026-10-10
+
+`docs/openssf-best-practices.md` answers the 67 "passing" criteria with
+their evidence, ready to enter on bestpractices.dev. Four MUST criteria wait
+for the first versioned release. Three gaps were closed in the repository:
+
+- the README says where bugs and feature requests go (*Feedback and
+  contributing*);
+- CONTRIBUTING.md says how a change gets in: issue, branch, pull request,
+  the required checks, review, with tests in the same change;
+- SECURITY.md says what happens to a private report: a first answer within
+  14 days, then a fix, the advisory and a CHANGELOG line.
+
 ### Documentation
 
 #### ADR-0078's repository settings, as applied, 2026-10-10

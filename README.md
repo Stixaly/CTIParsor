@@ -51,6 +51,7 @@ Two ways to use it:
 - [Installation and deployment](#installation-and-deployment)
 - [Development](#development)
 - [Documentation](#documentation)
+- [Feedback and contributing](#feedback-and-contributing)
 - [License](#license)
 
 ---
@@ -670,6 +671,20 @@ read [CONTRIBUTING.md](CONTRIBUTING.md); the test strategy is in
 | Architecture Decision Records | [docs/adr/README.md](docs/adr/README.md) |
 | Review of STIX relationship generation (in French) | [docs/stix-relationships-review.md](docs/stix-relationships-review.md) |
 | Tests, security, contributing, changes | [TESTING.md](TESTING.md) · [SECURITY.md](SECURITY.md) · [CONTRIBUTING.md](CONTRIBUTING.md) · [CHANGELOG.md](CHANGELOG.md) |
+
+---
+
+## Feedback and contributing
+
+- **Bugs and feature requests:** open an issue in
+  [GitHub Issues](https://github.com/Stixaly/CTIParsor/issues). Say what you
+  ran, what you expected and what happened; attach the stage report or the
+  bundle if the report itself can be shared.
+- **Vulnerabilities:** never in a public issue. Report them privately, as
+  [SECURITY.md](SECURITY.md#reporting-a-vulnerability) describes.
+- **Code, docs, tests:** pull requests are welcome.
+  [CONTRIBUTING.md](CONTRIBUTING.md) explains how a change gets in and what
+  it must pass.
 
 ---
 

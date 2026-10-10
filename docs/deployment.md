@@ -127,11 +127,18 @@ mkdir -p docker/nginx/certs
 openssl req -x509 -newkey rsa:4096 -nodes -days 365 \
   -keyout docker/nginx/certs/cti.key -out docker/nginx/certs/cti.crt \
   -subj '/CN=cti.example.internal'
-printf 'alice:%s\n' "$(openssl passwd -apr1)" > docker/nginx/htpasswd
+htpasswd -nBC 12 alice > docker/nginx/htpasswd   # bcrypt, prompts for the password (apt install apache2-utils)
 chmod 644 docker/nginx/certs/cti.crt docker/nginx/htpasswd
 chmod 640 docker/nginx/certs/cti.key && sudo chown 0:101 docker/nginx/certs/cti.key
 docker compose --profile proxy up -d       # https://<host>:8443
 ```
+
+Without `htpasswd`, `printf 'alice:%s\n' "$(openssl passwd -6)"` writes a
+salted SHA-512-crypt entry, which nginx also reads. Do not use
+`openssl passwd -apr1`: APR1 is built on MD5. An existing `$apr1$` line still
+works; replace it. TLS 1.2 offers only forward-secret ECDHE suites
+(`docker/nginx/default.conf`); they need an RSA or ECDSA key, which the
+command above makes.
 
 This gives you TLS and a gate, and it is the only option here where the
 credential is something other than "can you route to the port". Note what it
