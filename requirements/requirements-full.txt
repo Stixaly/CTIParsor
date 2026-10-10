@@ -13,9 +13,11 @@ pytesseract>=0.3.10          # Tesseract OCR wrapper for scanned PDFs
 # Required for Stage 2c (semantic TTP detection) and Stage 2d (CyNER).
 # Upper bound: each major of sentence-transformers (3→4→5) changed encode() return types.
 # Bump the cap intentionally after running: make test-fast
-sentence-transformers>=2.6.0,<6
+# Floor: 5.6.0 fixes its two OSV advisories.
+sentence-transformers>=5.6.0,<6
 # Upper bound: HuggingFace Transformers 6.x may drop APIs used in Stage 2d.
-transformers>=4.35.0,<6      # HuggingFace Transformers (CyNER model, Stage 2d)
+# Floor: 5.10.0 is the last fix among the 50 OSV advisories on 4.35–5.9.
+transformers>=5.10.0,<6      # HuggingFace Transformers (CyNER model, Stage 2d)
 # CyNER 2.0 is a deberta-v2 model — its tokenizer requires SentencePiece.
 sentencepiece>=0.2.1         # Tokenizer backend for CyNER 2.0 (DeBERTa-v3, Stage 2d); 0.2.1 fixes PYSEC-2026-1909
 

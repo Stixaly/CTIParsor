@@ -6,6 +6,27 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Security
+
+#### Scorecard's eight python-multipart findings: floors read as versions, 2026-10-11
+
+After the requirement files moved to `requirements/` (PR #138), Scorecard's
+Vulnerabilities check dropped from 10 to 2: eight advisories on
+python-multipart (PYSEC-2026-1851, -1852, -3036 to -3041: upload-parsing
+denial of service, parameter smuggling, a file write in a non-default
+configuration). The image and CI were never exposed: their locks pin
+python-multipart 0.0.32, past every fix (0.0.31 the last). OSV-Scanner had
+read `python-multipart>=0.0.9` in `requirements/requirements.txt` as
+version 0.0.9.
+
+- The floors are raised to the last fix: python-multipart `>=0.0.31`, and
+  two Scorecard did not report but would on the same reading,
+  sentence-transformers `>=5.6.0` (2 advisories) and transformers
+  `>=5.10.0` (50 advisories on 4.35–5.9). The five locks do not change.
+- `scripts/check_requirement_floors.py` asks OSV about every floor in the
+  four lists and exits 1 when one is a vulnerable version: 3 of 46 before,
+  0 after. It is step 7 of the quarterly routine (docs/dependencies.md).
+
 ### Changed
 
 #### The Python requirement files: four lists instead of six, in `requirements/`, 2026-10-10
