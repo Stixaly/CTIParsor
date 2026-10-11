@@ -66,3 +66,51 @@ def test_nothing_is_recorded_when_everything_builds():
     assert [o for o in bundle.objects if o["type"] == "indicator"]
     assert [o for o in bundle.objects if o["type"] == "course-of-action"]
     assert not [e for e in ledger["entities"] if e.get("reason") == "build_failed"]
+
+
+# ── The fallbacks that returned without a word (8.1.9, continued) ────────────
+
+def test_an_embedded_rule_that_fails_to_build_is_left_out_with_its_reason(monkeypatch):
+    monkeypatch.setattr(s4.stix2, "Indicator", _boom)
+    ledger = MappingLedger()
+    objects: list = []
+    s4._add_embedded_rule_indicator(
+        objects, {}, set(), pattern_type="yara", pattern="rule Emotet_Loader { condition: true }",
+        title="Emotet_Loader", llm_result=LLMEnrichmentResult(), pol_index=None,
+        seen_rel_keys=set(), ledger=ledger,
+    )
+    assert objects == []
+    [entry] = ledger.to_dict()["removed"]
+    assert entry["reason"] == "build_failed" and entry["name"] == "Yara rule: Emotet_Loader"
+    assert "pattern refused" in entry["error"]
+
+
+def test_a_source_file_that_cannot_be_embedded_is_in_the_ledger(monkeypatch):
+    monkeypatch.setattr(s4.stix2, "Artifact", _boom)
+    ledger = MappingLedger()
+    bundle = s4.build_stix_bundle([], LLMEnrichmentResult(), "r", report_text="text",
+                                  original_filename="apt.pdf", source_bytes=b"%PDF-1.7",
+                                  ledger=ledger)
+    assert not [o for o in bundle.objects if o["type"] == "artifact"]
+    [entry] = _dropped(ledger.to_dict(), "apt.pdf")
+    assert entry["reason"] == "build_failed" and entry["input"] == "source_artifact"
+    assert "pattern refused" in entry["error"]
+
+
+def test_a_report_rebuilt_without_its_optional_fields_says_which(monkeypatch):
+    real_report = s4.stix2.Report
+
+    def only_required(**kwargs):
+        if set(kwargs) - {"name", "published", "object_refs"}:
+            raise ValueError("an optional field is refused")
+        return real_report(**kwargs)
+
+    monkeypatch.setattr(s4.stix2, "Report", only_required)
+    ledger = MappingLedger()
+    bundle = s4.build_stix_bundle([], LLMEnrichmentResult(threat_actors=["APT29"]), "r",
+                                  report_text="APT29 did it.", ledger=ledger)
+    [report] = [o for o in bundle.objects if o["type"] == "report"]
+    entry = ledger.to_dict()["objects"][report.id]
+    assert entry["origin"] == "report" and entry["fallback"] == "optional_fields_dropped"
+    assert "an optional field is refused" in entry["error"]
+    assert entry["dropped_fields"]          # what the bundle lost is named
