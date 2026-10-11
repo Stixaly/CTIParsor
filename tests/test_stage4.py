@@ -469,7 +469,7 @@ def test_suggested_verb_preserved():
 def test_indicator_based_on_its_observable():
     # ADR-0061: indicator --based-on--> the SCO itself.  No ObservedData: it
     # asserted a sighting at build time that nobody made.
-    entities = [RawEntity(value="9.9.9.9", entity_type=EntityType.IPV4)]
+    entities = [RawEntity(value="185.220.101.45", entity_type=EntityType.IPV4)]
     bundle = build_stix_bundle(entities, LLMEnrichmentResult(), "r")
     types = [o.get("type") for o in bundle.objects]
     assert "observed-data" not in types
@@ -529,7 +529,7 @@ def test_ioc_coverage_network_traffic_gets_an_indicator():
     # "route through the Indicator, or drop" rule deletes every relationship
     # it is in.
     entities = [
-        RawEntity(value="8.8.8.8", entity_type=EntityType.IPV4),
+        RawEntity(value="185.220.101.45", entity_type=EntityType.IPV4),
         RawEntity(value="tcp/4444 to 203.0.113.9", entity_type=EntityType.NETWORK_TRAFFIC),
     ]
     bundle = build_stix_bundle(entities, LLMEnrichmentResult(), "r")

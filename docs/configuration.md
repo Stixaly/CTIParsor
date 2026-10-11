@@ -374,6 +374,20 @@ and 5 otherwise run fully offline.
 # CVE_ENRICHMENT=false
 ```
 
+## Benign values without an Indicator (Stage 4)
+
+A value the report names without accusing it ships as an observable without
+an Indicator, so no consumer alerts on it: a non-routable address, the four
+big public DNS resolvers, a security vendor's or sandbox's site (a reference
+link), one of the 10,000 most popular domains (that exact domain only). The
+lists are MISP warninglists (CC0 1.0), vendored by
+`scripts/build_warninglists.py` into `pipeline/data/warninglists.json`; the
+ledger records why each value has no Indicator. On by default.
+
+```env
+# BENIGN_IOC_FILTER=true
+```
+
 ## Analyst feedback
 
 Besides `THRESHOLD_CALIBRATION_ENABLED` and `ENTITY_OVERRIDES_ENABLED` above:

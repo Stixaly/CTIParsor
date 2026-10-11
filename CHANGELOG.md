@@ -8,6 +8,38 @@ sections group by theme rather than strict semver.
 
 ### Fixed
 
+#### A value the report names without accusing it gets no Indicator, 2026-10-11
+
+Every IPv4, domain and URL Stage 2 extracted became an Indicator typed
+`malicious-activity`: the victim's `10.0.0.5`, the `www.google.com` malware
+checks its connectivity with, the vendor blog a report links to (audit
+B 8.1.7). An Indicator is a detection, and a consumer of the bundle would
+alert on them. `pipeline/benign.py` now names why a value is not one, and
+Stage 4 ships it as an observable without an Indicator, the reason in the
+ledger (`no_indicator: benign`):
+
+- a non-routable address (private, loopback, link-local, documentation,
+  shared, reserved, multicast), by Python's `ipaddress`;
+- the four big public DNS resolvers (Google, Cloudflare, Quad9, OpenDNS);
+- a security vendor's, researcher's or sandbox's site, the host of a
+  reference link (MISP warninglists security-provider-blogpost,
+  automated-malware-analysis), except platforms anyone publishes on (GitHub,
+  raw.githubusercontent.com, Medium, Twitter, Dropbox, S3…): a payload there
+  keeps its Indicator;
+- one of the 10,000 most popular domains (MISP warninglist tranco10k), that
+  exact domain only: `evil.duckdns.org` is not popular because `duckdns.org`
+  is, and a URL on a popular domain keeps its Indicator.
+
+The three lists (CC0 1.0) are vendored by `scripts/build_warninglists.py`
+into `pipeline/data/warninglists.json` (174 KB, commit `af01b1d`). MISP's
+public-dns-v4 is not: its 62,780 open resolvers may include a compromised C2.
+On AnnoCTR's 400 texts, about 1,220 of 8,300 network IoCs would lose their
+Indicator: 1,021 reference links, 166 popular domains, 12 reference sites,
+19 non-routable addresses. A claim Stage 4 routes through such a value's
+Indicator is dropped with the reason `benign_observable`; the IoC coverage
+check counts them apart (`benign`) instead of as missing. The Graph page
+says why an observable has no Indicator. `BENIGN_IOC_FILTER=false` turns it
+off.
 #### A quote next to a no-break space is found; the evaluator reads the refanged text, 2026-10-11
 
 - **`evidence_span.locate` missed quotes across a no-break space** that sits

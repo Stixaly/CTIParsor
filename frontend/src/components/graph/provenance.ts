@@ -90,6 +90,7 @@ const RELATIONSHIP_REASON: Record<string, string> = {
   self_loop:                    'both ends resolve to the same object (an alias), which would be a self-loop',
   observable_to_attack_pattern: 'an observable is linked to a technique only by “indicates”, through its Indicator — this project drops any other verb for this pair (a precision choice, ADR-0012; STIX itself would allow a custom one)',
   no_indicator:                 'no STIX pattern could be built for the observable, so no Indicator can stand in for it',
+  benign_observable:            'the observable is named without being accused (a reference link, a popular domain, a non-routable address), so it has no Indicator to stand in for it',
   invalid:                      'the STIX library rejected the relationship',
   self_loop_after_alias_merge:  'the alias merge made both ends the same object',
   duplicate_after_alias_merge:  'the alias merge made it a duplicate of another edge',
@@ -118,6 +119,16 @@ const VERB_REASON: Record<string, string> = {
 
 export function relationshipReason(code: string | undefined): string {
   return (code && RELATIONSHIP_REASON[code]) || code || 'no reason recorded'
+}
+
+/** Why an observable got no Indicator (pipeline/benign.py). */
+export function benignReason(code: unknown): string {
+  const c = typeof code === 'string' ? code : ''
+  if (c === 'non_routable_address') return 'a private or reserved address'
+  if (c === 'public_dns_resolver') return 'a public DNS resolver'
+  if (c.startsWith('reference_site')) return 'a security vendor’s or sandbox’s site, a reference'
+  if (c.startsWith('popular_domain')) return 'one of the 10,000 most popular domains'
+  return c || 'no reason recorded'
 }
 
 export function entityReason(code: string | undefined): string {

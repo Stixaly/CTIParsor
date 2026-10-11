@@ -12,6 +12,7 @@ detection rule quoted in the report itself is represented.
 | Domain | `domain-name` SCO |
 | URL | `url` SCO |
 | Email | `email-addr` SCO |
+| A value the report names without accusing it: a non-routable address, a big public DNS resolver, a security vendor's or sandbox's site, one of the 10,000 most popular domains | its SCO, **without** an Indicator; the ledger says why (`no_indicator: benign`, `benign: <reason>`) |
 | File hash (MD5 / SHA-1 / SHA-256) | `file` SCO |
 | MAC address | `mac-addr` SCO |
 | ASN | `autonomous-system` SCO |
