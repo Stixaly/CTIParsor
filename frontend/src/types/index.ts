@@ -399,6 +399,9 @@ export interface LedgerEntity {
    *  'targeted_country' | 'targeted_sector' */
   input?: string
   mitre_id?: string
+  /** reason 'type_conflict': what MITRE calls this name, in the other family */
+  mitre_ids?: string[]
+  mitre_types?: string[]
 }
 
 export interface LedgerObjectInfo {

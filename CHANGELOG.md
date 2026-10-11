@@ -6,6 +6,26 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Fixed
+
+#### An actor is no longer renamed after a malware, nor software after an actor, 2026-10-11
+
+A name the gazetteer knows for one MITRE object resolved to it whatever type
+was asked (ADR-0021 only used the type to break ties). When the LLM listed
+a ransomware brand as a threat actor, "LockBit Black" became a threat-actor
+named "LockBit 3.0", the malware S1202; OpenCTI derives the id from the type
+and the name, so it created that threat-actor beside the malware (audit
+B 8.1.8). A name now resolves only within its family: actors
+(threat-actor, intrusion-set) or software (malware and tool, which MITRE
+files together and the extractors mix up, so "Mimikatz" asked for as malware
+still resolves). Across families the name stays as written, and the ledger
+records the emitted object with `reason: "type_conflict"` and what MITRE
+calls it (`mitre_ids`, `mitre_types`); the Graph page's panel shows it beside
+the review row. "snake" (Turla and Uroburos) is not a conflict: the type
+picks one. The other half of the finding, more aliases (MISP galaxies,
+Malpedia, ETDA) with their source, is not done here: it needs a choice of
+sources and their licences.
+
 ### Security
 
 #### Scorecard's eight python-multipart findings: floors read as versions, 2026-10-11

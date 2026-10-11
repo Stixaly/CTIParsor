@@ -11,7 +11,7 @@ import yaml
 from api.logging_config import get_logger
 from models.schemas import STIX_RELATIONSHIP_TYPES, EntityType, RawEntity
 from pipeline import stix_ids
-from pipeline.aliases import alias_surface_forms, canonical_name
+from pipeline.aliases import alias_surface_forms, canonical_name, type_conflict
 from pipeline.bundle_ledger import ORIGIN_EXTRACTED, MappingLedger
 from pipeline.detection.pattern_check import REFUSED as PATTERN_REFUSED
 from pipeline.detection.pattern_check import check_pattern, net_rule_dialect
@@ -628,8 +628,17 @@ def build_stix_bundle(
             obj = factory(canon, det_id)
             stix_objects.append(obj)
             _named_seen_ids[det_id] = obj
-            led.entity(name, entity_type, "emitted", obj=obj,
-                       reason="alias_canonical" if canon.lower() != name.lower() else None)
+            # A name MITRE files in the other family (an actor named after a
+            # malware) keeps its name; the review says what MITRE calls it
+            # (audit B 8.1.8).
+            conflict = type_conflict(name, stix_type)
+            if conflict:
+                led.entity(name, entity_type, "emitted", obj=obj, reason="type_conflict",
+                           mitre_ids=[mid for mid, _ in conflict],
+                           mitre_types=sorted({t for _, t in conflict}))
+            else:
+                led.entity(name, entity_type, "emitted", obj=obj,
+                           reason="alias_canonical" if canon.lower() != name.lower() else None)
             led.object(obj, "entity")
         else:
             # Same name twice, or two aliases of one MITRE object.
