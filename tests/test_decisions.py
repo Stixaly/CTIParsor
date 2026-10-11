@@ -379,3 +379,31 @@ def test_deleting_a_report_keeps_its_decision_journal(temp_db, temp_db_client):
         conn.commit()
     assert _row(temp_db, eid) is None                  # the entity went with the job
     assert [line["origin"] for line in _journal(temp_db, eid)] == ["human"]   # its history did not
+
+
+def test_the_llms_names_wait_for_an_analyst(temp_db):
+    """Audit B 8.3.6: the LLM's names were stored at 0.9, the auto-accept level,
+    so each was accepted as if 90 % sure without anything measuring it.  They
+    now stay pending (and ship, as pending rows do); a detector's name at its
+    own confidence is still accepted."""
+    from api import worker
+    from models.schemas import EntityType, RawEntity
+    from pipeline.stage3_llm import LLMEnrichmentResult
+
+    job = _job(temp_db)
+    gazetteer = RawEntity(value="WellMess", entity_type=EntityType.MALWARE, confidence=0.92,
+                          source="gazetteer")
+    worker._save_entities(job, [gazetteer], LLMEnrichmentResult(
+        malware_families=["BlackLoader"], threat_actors=["APT29"], tools=["Rclone"],
+        campaign_name="Operation Example"))
+    conn = temp_db.get_conn()
+    decisions.apply_auto_accept(conn, job, temp_db.now_iso(), rate=0.0)
+    rows = {r["value"]: (r["source"], r["confidence"], r["accepted"]) for r in conn.execute(
+        "SELECT value, source, confidence, accepted FROM entities WHERE job_id=?", (job,))}
+    for name in ("BlackLoader", "APT29", "Rclone", "Operation Example"):
+        assert rows[name] == ("llm", worker.LLM_NAME_CONFIDENCE, None), name
+    assert worker.LLM_NAME_CONFIDENCE < decisions.AUTO_ACCEPT_LEVEL
+    assert rows["WellMess"][2] == 1
+    shipped = {r["value"] for r in conn.execute(
+        f"SELECT value FROM entities WHERE job_id=? AND {decisions.SHIPS}", (job,))}
+    assert {"BlackLoader", "APT29", "Rclone", "Operation Example", "WellMess"} <= shipped
