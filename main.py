@@ -95,6 +95,35 @@ def _print_stages(result: RunResult) -> None:
         print(f"    {o.stage:<5}{STAGE_LABELS.get(o.stage, ''):<27}{o.status:<9}{detail}")
 
 
+def prepare_store() -> bool:
+    """Bring the database to this code's schema, as the API and every worker
+    do at start (ADR-0077), and say once when the run goes without it.
+
+    The CLI used to skip this: on a database with no tables yet it called the
+    store unreachable for the policy and failed Stage 2f on `relation
+    "cve_cache" does not exist` (audit 8.1.11).  A database this code cannot
+    migrate (newer than the code, an edited migration, a cluster that lost
+    its data) stops the CLI as it stops the API.  Returns whether the store
+    can be used."""
+    from api import db
+    from api.migrate import MigrationError
+
+    if not db.DATABASE_URL:
+        print("Base : aucune (DATABASE_URL non défini) — ni politique de relations, "
+              "ni listes d'analyste, ni cache CVE")
+        return False
+    unreachable = (ValueError,) + db.DB_ERRORS   # a malformed URL, or no server
+    try:
+        db.init_db()
+    except MigrationError as exc:
+        sys.exit(f"[ERREUR] Base : {exc}")
+    except unreachable as exc:
+        print(f"Base injoignable ({type(exc).__name__}) — ni politique de relations, "
+              "ni listes d'analyste, ni cache CVE")
+        return False
+    return True
+
+
 def run_pipeline(input_file: str, output_file: str, options: RunOptions | None = None,
                  policy_source: str = "db") -> bool:
     """One report through the same pipeline the API worker runs (ADR-0059)."""
@@ -258,6 +287,7 @@ Exemples :
     except ValueError as exc:
         parser.error(str(exc))
 
+    prepare_store()
     if args.input_dir:
         run_directory(args.input_dir, args.output_dir, options, args.policy)
     else:

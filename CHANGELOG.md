@@ -6,6 +6,23 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Fixed
+
+#### The CLI brings its database to this code's schema, as the API does, 2026-10-11
+
+`main.py` never ran the migrations (ADR-0077); only the API, the workers and
+`bootstrap` did (audit 8.1.11). On a database with no tables yet, a CLI run
+said the store was unreachable for the relationship policy (`UndefinedTable`)
+and Stage 2f failed on `relation "cve_cache" does not exist`; nothing was
+created. The CLI now migrates the database before its first report:
+reproduced on an empty schema of the test server, it now creates the 18
+tables, reads the policy ("aucune enregistrée") and runs Stage 2f. A
+database this code cannot migrate (newer than the code, an edited migration,
+a cluster that lost its data) stops the CLI as it stops the API. With no
+`DATABASE_URL`, or no server behind it, the CLI says so once, before the
+report, and runs without policy, analyst lists or CVE cache, as before.
+`tests/test_cli_store.py`.
+
 ### Security
 
 #### Scorecard's eight python-multipart findings: floors read as versions, 2026-10-11
