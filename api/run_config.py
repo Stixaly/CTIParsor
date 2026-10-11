@@ -12,7 +12,10 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
+from api.logging_config import get_logger
 from pipeline.env_flags import env_bool
+
+logger = get_logger(__name__)
 
 # Allow-list, never a scan of os.environ: the process environment holds API
 # keys (ANTHROPIC_API_KEY, MISTRAL_API_KEY) and this dict is persisted to the
@@ -174,9 +177,10 @@ def build_run_config(policy: dict | None = None) -> dict:
     try:
         from pipeline.stage2c_ttp_semantic import _thresholds
         high, medium = _thresholds()
-        ttp_thresholds: dict[str, float | None] = {"high": high, "medium": medium}
-    except Exception:
-        ttp_thresholds = {"high": None, "medium": None}
+        ttp_thresholds: dict[str, float | str | None] = {"high": high, "medium": medium}
+    except Exception as exc:
+        # The record says why it has no threshold, as `manifest.llm` does.
+        ttp_thresholds = {"high": None, "medium": None, "error": f"{type(exc).__name__}: {exc}"}
 
     # ner_thresholds (ADR-0051) — the per-type cutoffs Stage 2d/2e applied, so
     # a bundle built under a calibrated cutoff stays explainable after the next
@@ -192,8 +196,8 @@ def build_run_config(policy: dict | None = None) -> dict:
                 for source in ("cyner", "gliner")
             },
         }
-    except Exception:
-        ner_thresholds = None
+    except Exception as exc:
+        ner_thresholds = {"error": f"{type(exc).__name__}: {exc}"}
 
     # entity_overrides (ADR-0052) — how many analyst-grown deny / promote rows
     # were active for this run.  The rows themselves are in the store; the
@@ -206,8 +210,8 @@ def build_run_config(policy: dict | None = None) -> dict:
             "deny": len(denied_keys()),
             "promote": len(promoted_entries()),
         }
-    except Exception:
-        entity_overrides = None
+    except Exception as exc:
+        entity_overrides = {"error": f"{type(exc).__name__}: {exc}"}
 
     # stages
     #
@@ -226,7 +230,9 @@ def build_run_config(policy: dict | None = None) -> dict:
         try:
             mod = __import__(module, fromlist=[predicate])
             return bool(getattr(mod, predicate)())
-        except Exception:
+        except Exception as exc:
+            logger.warning(f"[run config] {module}.{predicate}() could not be asked, "
+                           f"recorded as unknown: {type(exc).__name__}: {exc}")
             return None
 
     stages = {

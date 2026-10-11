@@ -1469,7 +1469,9 @@ def corroborated_ttp_ids(semantic_ttp_entities) -> set[str]:
     try:
         from pipeline.stage2c_ttp_semantic import high_confidence_threshold
         floor = high_confidence_threshold()
-    except Exception:
+    except Exception as exc:
+        logger.warning(f"[Stage 3] Stage 2c's high-confidence threshold unavailable, "
+                       f"corroboration floor set to 0.62: {type(exc).__name__}: {exc}")
         floor = 0.62
     return {
         e.mitre_id.upper()

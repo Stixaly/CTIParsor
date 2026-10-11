@@ -531,7 +531,10 @@ def _load_corpus() -> tuple | None:
         try:
             manifest = json.loads(_MANIFEST_PATH.read_text(encoding="utf-8"))
             cache_model = manifest.get("model", _LEGACY_MODEL)
-        except Exception:
+        except (OSError, ValueError, AttributeError) as exc:
+            # Read as a pre-manifest cache: the model check below then decides.
+            logger.warning(f"Embedding manifest unreadable, cache taken as built with "
+                           f"'{_LEGACY_MODEL}': {type(exc).__name__}: {exc}")
             cache_model = _LEGACY_MODEL
     else:
         # No manifest → cache was built before ADR-004; assume legacy model

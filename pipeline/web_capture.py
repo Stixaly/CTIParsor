@@ -41,8 +41,11 @@ try:
     from playwright.sync_api import Error as PlaywrightError
     from playwright.sync_api import sync_playwright
     _PLAYWRIGHT_AVAILABLE = True
-except Exception:  # ImportError, or a broken native install
+except Exception as _exc:  # ImportError, or a broken native install
     _PLAYWRIGHT_AVAILABLE = False
+    if not isinstance(_exc, ModuleNotFoundError):   # absent is a choice; broken is not
+        logger.warning(f"[capture] Playwright is installed but does not load, URL capture is "
+                       f"off: {type(_exc).__name__}: {_exc}")
 
     class PlaywrightError(Exception):  # type: ignore[no-redef]
         """Stand-in so except clauses stay valid when Playwright is absent."""

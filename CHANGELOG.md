@@ -8,40 +8,47 @@ sections group by theme rather than strict semver.
 
 ### Fixed
 
-#### IoCs wrapped inside a PDF table cell are found, 2026-10-11
+#### The CLI brings its database to this code's schema, as the API does, 2026-10-11
 
-A narrow table column wraps a hash or a URL over two or three lines, and
-the PDF text keeps the pieces apart: markitdown writes the continuation
-lines outside the table row, pdfplumber's page text interleaves them with
-the other columns. On a report generated for the audit (B 8.1.5, its
-annex A.11), whose 34 IoCs sit in a value column of 38 % of the table,
-Stage 1 + Stage 2 found 16: no SHA-256, no whole URL. At 20 %, 1.
-
-Stage 1 now runs pdfplumber's table finder on text PDFs (and on the text
-pages of mixed ones). A cell whose lines are single tokens that join into
-one IoC-shaped value (a hash, a URL, an address, a domain, a file, an
-email, a Windows path, defanged or not) is glued back; prose is joined with
-spaces. The rows that had such a cell are added after the document text,
-one per line with their cells joined by " | " (as Word tables are read),
-under `[[table rows rejoined from wrapped cells: page N]]`. The body text is
-unchanged: ADR-0032 measured what replacing markitdown with pdfplumber's
-text costs (18.2 % of the characters, hashes among them).
-
-- The audit's report: 34 of 34 at 38 % (was 16), 33 of 34 at 20 % (was 1),
-  with markitdown or without it. Both PDFs and their truth are fixtures
-  (`tests/test_pdf_table_cells.py`; `scripts/make_pdf_table_fixtures.py`
-  regenerates them with Playwright's Chromium).
-- The 9 in-house PDFs: the same IoCs as before. One had wrapped cells
-  (6 rows rejoined, 783 characters); its hashes were already joined by
-  Stage 2's labelled hash blocks.
-- Cost: the table finder adds 1 to 3 s of Stage 1 per PDF on those 9. It
-  stops after 200 tables or 20,000 cells, and a PDF it cannot read costs the
-  table pass only, with a warning.
-- Not changed: the fragments themselves are still in the body text, so the
-  six truncated URLs it yields on the audit's report (`https://cdn-files4.com/cdn/`)
-  remain false positives, as before this change.
+`main.py` never ran the migrations (ADR-0077); only the API, the workers and
+`bootstrap` did (audit 8.1.11). On a database with no tables yet, a CLI run
+said the store was unreachable for the relationship policy (`UndefinedTable`)
+and Stage 2f failed on `relation "cve_cache" does not exist`; nothing was
+created. The CLI now migrates the database before its first report:
+reproduced on an empty schema of the test server, it now creates the 18
+tables, reads the policy ("aucune enregistrée") and runs Stage 2f. A
+database this code cannot migrate (newer than the code, an edited migration,
+a cluster that lost its data) stops the CLI as it stops the API. With no
+`DATABASE_URL`, or no server behind it, the CLI says so once, before the
+report, and runs without policy, analyst lists or CVE cache, as before.
+`tests/test_cli_store.py`.
 
 ### Security
+
+#### Stage 2 on RE2: five more patterns, the rest pinned and timed (ADR-0049), 2026-10-11
+
+RE2 refuses lookaround, and `compile_pattern` then falls back to `re`,
+without RE2's linear-time guarantee. The October audit (B 8.2.5) found that
+was the case for Stage 2's key patterns. Five now run on RE2, the IPv4
+addresses, the hash blocks of IoC tables, the half-bracket defang
+(`evil.]com`) and the SHA-1 and MD5 column labels, with the guards their
+lookarounds held now checked in code. Each rewrite is exact: on AnnoCTR's
+400 texts, entities, file paths, hashes and refanged text are the same,
+with google-re2 and without it. The only change is on three synthetic
+inputs with Arabic-Indic digits, where `re`'s Unicode `\d` used to extract
+an "address" such as `1.2.3.4١`.
+
+The domain, bare-filename and Unix-path patterns, and three sentence
+splitters (Stages 2c and 4, the retrieval passages), stay on `re`: a filter
+after one RE2 pass would miss some of their matches. `compile_pattern` now
+records each pattern RE2 refuses, and `tests/test_re2_fallbacks.py` fails on
+one it does not list; it runs each listed pattern under `re` on 14
+adversarial inputs of 50,000 characters, within 1 s.
+
+The first IPv4 rewrite restarted its search after each refused match, and
+Stage 2 took 2.7 s instead of 0.5 s on the performance test's 5,000-IP
+appendix: google-re2 encodes the whole text at every call. Every rewrite is
+one pass.
 
 #### Scorecard's eight python-multipart findings: floors read as versions, 2026-10-11
 

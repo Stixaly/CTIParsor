@@ -239,7 +239,9 @@ def _context_bands(pdf_path: Path | str,
                             min(float(page.height), bottom + CONTEXT_MARGIN_PT))
                     try:
                         out[i] = page.crop(band).extract_text() or ""
-                    except Exception:
+                    except Exception as exc:
+                        logger.warning("Figure %d on page %d read without its context text: %s",
+                                       i, page_idx, exc)
                         out[i] = ""
     except Exception as exc:
         logger.warning("Page text unavailable, reading figures without context: %s", exc)

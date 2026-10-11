@@ -1339,7 +1339,12 @@ def build_stix_bundle(
             artifact_obj = stix2.Artifact(**artifact_kwargs)
             stix_objects.append(artifact_obj)
             led.object(artifact_obj, "source_artifact")
-        except Exception:
+        except Exception as exc:
+            # The bundle is then not self-contained: say so (ADR-0043, ADR-0061).
+            logger.warning(f"[Stage 4] source file not embedded: {original_filename!r}: "
+                           f"{type(exc).__name__}: {exc}")
+            led.entity(original_filename, "artifact", "dropped", reason="build_failed",
+                       input="source_artifact", error=f"{type(exc).__name__}: {exc}")
             artifact_obj = None
 
     # --- Graph completion (Stage 4b) — alias merge + inferred edges ---
@@ -1419,14 +1424,21 @@ def build_stix_bundle(
             report = stix2.Report(**report_kwargs)
             stix_objects.append(report)
             led.object(report, "report")
-        except Exception:
-            # Fallback without optional fields if stix2 rejects them
+        except Exception as exc:
+            # Fallback without optional fields if stix2 rejects them.  Every
+            # optional field is lost (description, labels, dates, provenance):
+            # the log and the ledger say which ones and why.
+            dropped = sorted(set(report_kwargs) - {"name", "published", "object_refs"})
+            logger.warning(f"[Stage 4] report built without its optional fields {dropped}: "
+                           f"{type(exc).__name__}: {exc}")
             report = stix2.Report(
                 name=report_name,
                 published=datetime.now(timezone.utc),
                 object_refs=[obj.id for obj in stix_objects if hasattr(obj, "id")],
             )
             stix_objects.append(report)
+            led.object(report, "report", fallback="optional_fields_dropped",
+                       dropped_fields=dropped, error=f"{type(exc).__name__}: {exc}")
 
     # --- Provenance + sharing markings — stamp every object ---
     # Authoring Identity (created_by_ref) + TLP/PAP object markings.  The author
@@ -1555,7 +1567,9 @@ def _network_traffic_sco(value: str, scos: list, value_to_sco: dict, canonical_t
         kwargs["dst_port"] = d.port
     try:
         return stix2.NetworkTraffic(**kwargs)
-    except Exception:
+    except Exception as exc:
+        # The caller records the entity as dropped; this says it was the build.
+        logger.warning(f"[Stage 4] network-traffic not built for {value!r}: {type(exc).__name__}: {exc}")
         return None
 
 
@@ -1868,7 +1882,11 @@ def _add_embedded_rule_indicator(
             id=rule_id,
         )
         stix_objects.append(indicator)
-    except Exception:
+    except Exception as exc:
+        logger.warning(f"[Stage 4] {pattern_type} rule {title!r} not built: {type(exc).__name__}: {exc}")
+        if ledger is not None:
+            ledger.left_out(rule_id, "object", "build_failed", name=f"{pattern_type.capitalize()} rule: {title}",
+                            error=f"{type(exc).__name__}: {exc}", **(ledger_info or {}))
         return
     if ledger is not None:
         ledger.object(indicator, "embedded_rule", pattern_type=pattern_type, title=title,
@@ -2539,7 +2557,10 @@ def _add_relationship(
             kwargs.update(custom)
             kwargs["allow_custom"] = True
         rel = stix2.Relationship(**kwargs)
-    except Exception:
+    except Exception as exc:
+        logger.warning(f"[Stage 4] {rel_type} relationship not built between "
+                       f"{getattr(source, 'id', source)} and {getattr(target, 'id', target)}: "
+                       f"{type(exc).__name__}: {exc}")
         return None
     stix_objects.append(rel)
     return rel

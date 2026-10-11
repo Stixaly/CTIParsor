@@ -34,8 +34,11 @@ from functools import partial
 from uuid import uuid4
 
 from api.db import transaction
+from api.logging_config import get_logger
 from pipeline.decisions import HUMAN_ORIGINS, LEGACY
 from pipeline.overrides import GAZETTEER_TYPES, NAMED_TYPES, normalise
+
+logger = get_logger(__name__)
 
 DEFAULT_MIN_REJECTIONS = 3
 DEFAULT_MIN_ACCEPTS = 3
@@ -176,7 +179,11 @@ def gazetteer_terms() -> frozenset[str]:
     try:
         from pipeline.stage2b_gazetteer import _load
         return frozenset(e["name"] for e in _load())
-    except Exception:
+    except Exception as exc:
+        # Promote candidates are then not checked against the gazetteer: one may
+        # propose a name it already matches.
+        logger.warning(f"[promotion] gazetteer terms unavailable, candidates not checked "
+                       f"against them: {type(exc).__name__}: {exc}")
         return frozenset()
 
 
