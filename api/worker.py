@@ -166,6 +166,16 @@ def _ttp_ids_covered(llm_result) -> tuple[set[str], set[str]]:
     return ids, parents
 
 
+# The LLM's malware, actor, tool and campaign names carry no measured
+# confidence.  They were stored at 0.9, at AUTO_ACCEPT_LEVEL, so every one was
+# accepted automatically and the review page marked it "auto" as if 90 % sure
+# (audit B 8.3.6).  Below the level, they wait for an analyst.  What ships does
+# not change: a pending row ships (decisions.SHIPS); a rejected one does not.
+# A detector's names keep their own confidences, and calibration (ADR-0051)
+# can raise a source past the level once auto_accept_audit has measured it.
+LLM_NAME_CONFIDENCE = 0.5
+
+
 def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "") -> None:
     """Persist Stage 2 IoCs, Stage 2b gazetteer, and Stage 3 LLM entities to the DB.
 
@@ -207,15 +217,17 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "")
     rows_llm: list[tuple] = []
     for name in llm_result.malware_families:
         if not is_denied(name, "malware"):
-            rows_llm.append((str(uuid4()), job_id, name, "malware", "", 0.9, None, None, "llm"))
+            rows_llm.append((str(uuid4()), job_id, name, "malware", "", LLM_NAME_CONFIDENCE, None, None, "llm"))
     for name in llm_result.threat_actors:
         if not is_denied(name, "threat_actor"):
-            rows_llm.append((str(uuid4()), job_id, name, "threat_actor", "", 0.9, None, None, "llm"))
+            rows_llm.append((str(uuid4()), job_id, name, "threat_actor", "", LLM_NAME_CONFIDENCE,
+                             None, None, "llm"))
     for name in llm_result.tools:
         if not is_denied(name, "tool"):
-            rows_llm.append((str(uuid4()), job_id, name, "tool", "", 0.9, None, None, "llm"))
+            rows_llm.append((str(uuid4()), job_id, name, "tool", "", LLM_NAME_CONFIDENCE, None, None, "llm"))
     if llm_result.campaign_name and not is_denied(llm_result.campaign_name, "campaign"):
-        rows_llm.append((str(uuid4()), job_id, llm_result.campaign_name, "campaign", "", 0.9, None, None, "llm"))
+        rows_llm.append((str(uuid4()), job_id, llm_result.campaign_name, "campaign", "",
+                         LLM_NAME_CONFIDENCE, None, None, "llm"))
     # ADR-0028 — resolve each TTP quote to an offset in the report.
     from pipeline.evidence_span import locate
 

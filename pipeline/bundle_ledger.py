@@ -166,6 +166,13 @@ class MappingLedger:
                     e["source_ref"], e["target_ref"] = src, tgt
 
     # ── finish ───────────────────────────────────────────────────────────────
+    def outside_report(self, obj: Any) -> None:
+        """An SRO that ships in the bundle but not in the Report's object_refs:
+        an edge the report does not state (MITRE's, or composed from two
+        others; audit B 8.4.2).  Recorded now, with its origin."""
+        entry = self.objects.setdefault(obj.id, {"origin": _rel_origin_from_props(obj)})
+        entry["outside_report"] = True
+
     def finalize(self, stix_objects: list) -> None:
         """Classify every SRO nobody recorded (policy pins, graph completion)
         from its own provenance properties."""

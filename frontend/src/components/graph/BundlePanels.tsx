@@ -11,7 +11,7 @@ import type { BundleEdgeInfo, BundleNodeInfo, DiffItem, DiffKind } from './build
 import { stixLabel } from './buildBundleGraph'
 import {
   EDGE_KIND_ORDER, EDGE_KIND_STYLE, EDGE_ORIGIN_LABEL, OBJECT_ORIGIN_LABEL,
-  describeChange, describeTime, entityReason, relationshipReason,
+  benignReason, describeChange, describeTime, entityReason, relationshipReason,
 } from './provenance'
 
 /** One row of an SRO's x_temporal_assertions (ADR-0063), as shipped. */
@@ -253,7 +253,12 @@ export function BundleNodeDetail({
             {typeof info?.originInfo.ioc_value === 'string' && (
               <div style={{ fontSize: 10.5, color: 'var(--ink-3)', marginTop: 2 }}>from IoC {info.originInfo.ioc_value}</div>
             )}
-            {typeof info?.originInfo.no_indicator === 'string' && (
+            {info?.originInfo.no_indicator === 'benign' && (
+              <Note tone="warn">
+                No Indicator: the report names this value without accusing it ({benignReason(info.originInfo.benign)}).
+              </Note>
+            )}
+            {typeof info?.originInfo.no_indicator === 'string' && info.originInfo.no_indicator !== 'benign' && (
               <Note tone="warn">No Indicator was built for this observable: no STIX pattern exists for it.</Note>
             )}
             {typeof info?.originInfo.rejoined_lines === 'number' && (

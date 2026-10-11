@@ -27,6 +27,13 @@ precedence = "override"
 SPDX-FileCopyrightText = "2016 OASIS Open"
 SPDX-License-Identifier = "BSD-3-Clause"
 
+# MISP warninglists, vendored by scripts/build_warninglists.py.
+[[annotations]]
+path = "pipeline/data/warninglists.json"
+precedence = "override"
+SPDX-FileCopyrightText = "MISP project contributors"
+SPDX-License-Identifier = "CC0-1.0"
+
 # Built from MITRE's ATT&CK STIX bundles (scripts/build_indexes.py).
 [[annotations]]
 path = [

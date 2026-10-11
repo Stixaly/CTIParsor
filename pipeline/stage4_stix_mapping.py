@@ -12,6 +12,7 @@ from api.logging_config import get_logger
 from models.schemas import STIX_RELATIONSHIP_TYPES, EntityType, RawEntity
 from pipeline import stix_ids
 from pipeline.aliases import alias_surface_forms, canonical_name, type_conflict
+from pipeline.benign import benign_reason
 from pipeline.bundle_ledger import ORIGIN_EXTRACTED, MappingLedger
 from pipeline.detection.pattern_check import REFUSED as PATTERN_REFUSED
 from pipeline.detection.pattern_check import check_pattern, net_rule_dialect
@@ -22,7 +23,7 @@ from pipeline.detection.yara_check import DOES_NOT_COMPILE, prepare_embedded_rul
 from pipeline.network_traffic import parse_network_traffic
 from pipeline.regex_safety import compile_pattern
 from pipeline.stage3_llm import LLMEnrichmentResult
-from pipeline.stage4b_graph_completion import CompletionStats, complete_graph
+from pipeline.stage4b_graph_completion import CompletionStats, complete_graph, stated_by_the_report
 from pipeline.stix_access import field as _field
 from pipeline.stix_rel_spec import rel_is_allowed, rel_is_listed
 from pipeline.temporal import export_mode, export_plan, merge_times, temporal_identity
@@ -955,6 +956,9 @@ def build_stix_bundle(
     # IOC value and some other entity name normalize to the same lowercase
     # key.
     sco_id_to_indicator: dict[str, object] = {}
+    # Observables shipped without an Indicator because the report names them
+    # without accusing them (pipeline/benign.py, audit B 8.1.7).
+    benign_sco_ids: set[str] = set()
 
     for assoc in llm_result.ioc_associations:
         if not assoc.ioc_value or not assoc.malware_name:
@@ -978,6 +982,14 @@ def build_stix_bundle(
                 if rel is not None:
                     led.object(rel, "ioc_association", ioc_value=assoc.ioc_value,
                                malware_name=assoc.malware_name)
+            continue
+
+        why = _benign(sco)
+        if why:
+            benign_sco_ids.add(str(_field(sco, "id")))
+            led.annotate(_field(sco, "id"), no_indicator="benign", benign=why)
+            led.entity(assoc.ioc_value, "indicator", "dropped", reason="benign", benign=why,
+                       input="ioc_association", malware_name=assoc.malware_name)
             continue
 
         pattern = _build_stix_pattern(assoc.ioc_value, sco)
@@ -1024,6 +1036,11 @@ def build_stix_bundle(
             continue  # already has an indicator
         sco = value_to_sco.get(ioc_key)
         if sco is None:
+            continue
+        why = _benign(sco)
+        if why:
+            benign_sco_ids.add(str(_field(sco, "id")))
+            led.annotate(_field(sco, "id"), no_indicator="benign", benign=why)
             continue
         pattern = _build_stix_pattern(entity.value, sco)
         if not pattern:
@@ -1204,7 +1221,8 @@ def build_stix_bundle(
             sco_id_to_indicator,
         )
         if source is None or target is None:
-            led.relationship(rel, "dropped", reason="no_indicator",
+            benign_end = orig_source.id in benign_sco_ids or orig_target.id in benign_sco_ids
+            led.relationship(rel, "dropped", reason="benign_observable" if benign_end else "no_indicator",
                              source_ref=orig_source.id, target_ref=orig_target.id)
             continue
         if source.id == target.id:
@@ -1358,8 +1376,11 @@ def build_stix_bundle(
 
     # --- Graph completion (Stage 4b) — alias merge + inferred edges ---
     # Runs here, before the Report SDO wraps object_refs and before provenance
-    # stamping, so any edges it adds are included in the report and stamped like
-    # every other object.  Append-only + spec-guarded: see stage4b_graph_completion
+    # stamping, so any edges it adds are stamped like every other object.  The
+    # ones the report does not state (MITRE's, and those composed from two
+    # others) ship in the bundle but stay out of the Report's object_refs:
+    # OpenCTI would otherwise file them as contained in this report (audit
+    # B 8.4.2, 8.4.3).  Append-only + spec-guarded: see stage4b_graph_completion
     # and ADR-0013.  Governed by the policy "completion" block; pinned rules win.
     if graph_completion:
         _completion_stats = complete_graph(
@@ -1383,10 +1404,15 @@ def build_stix_bundle(
     # description : full extracted text so STIX consumers see the narrative
     # external_references : filename + hash for tracing back to the source file
     if stix_objects:
+        in_report = [obj.id for obj in stix_objects
+                     if hasattr(obj, "id") and stated_by_the_report(obj)]
+        for obj in stix_objects:
+            if hasattr(obj, "id") and not stated_by_the_report(obj):
+                led.outside_report(obj)
         report_kwargs: dict = {
             "name":        report_name,
             "published":   datetime.now(timezone.utc),
-            "object_refs": [obj.id for obj in stix_objects if hasattr(obj, "id")],
+            "object_refs": in_report,
         }
 
         if report_text:
@@ -1443,7 +1469,7 @@ def build_stix_bundle(
             report = stix2.Report(
                 name=report_name,
                 published=datetime.now(timezone.utc),
-                object_refs=[obj.id for obj in stix_objects if hasattr(obj, "id")],
+                object_refs=in_report,
             )
             stix_objects.append(report)
             led.object(report, "report", fallback="optional_fields_dropped",
@@ -1502,7 +1528,8 @@ def verify_ioc_coverage(raw_entities: list[RawEntity], bundle: stix2.Bundle) -> 
           "with_indicator":    int,
           "missing_sco":       [{"value", "type"}, ...],
           "missing_indicator": [{"value", "type"}, ...],
-          "ok":                bool,  # True iff every IoC has both SCO + Indicator
+          "benign":            [{"value", "type", "reason"}, ...],  # no Indicator, by design
+          "ok":                bool,  # True iff every IoC has its SCO, and its Indicator unless benign
         }
     """
     bundle_ids = {obj.id for obj in bundle.objects if hasattr(obj, "id")}
@@ -1510,6 +1537,7 @@ def verify_ioc_coverage(raw_entities: list[RawEntity], bundle: stix2.Bundle) -> 
     total = with_sco = with_indicator = 0
     missing_sco: list[dict] = []
     missing_indicator: list[dict] = []
+    benign: list[dict] = []
     seen: set[tuple[str, EntityType]] = set()
 
     for entity in raw_entities:
@@ -1534,8 +1562,11 @@ def verify_ioc_coverage(raw_entities: list[RawEntity], bundle: stix2.Bundle) -> 
             with_sco += 1
         else:
             missing_sco.append(record)
+        why = _benign(sco) if sco is not None else None
         if has_indicator:
             with_indicator += 1
+        elif why:
+            benign.append({**record, "reason": why})
         else:
             missing_indicator.append(record)
 
@@ -1545,8 +1576,19 @@ def verify_ioc_coverage(raw_entities: list[RawEntity], bundle: stix2.Bundle) -> 
         "with_indicator":    with_indicator,
         "missing_sco":       missing_sco,
         "missing_indicator": missing_indicator,
+        "benign":            benign,
         "ok":                not missing_sco and not missing_indicator,
     }
+
+
+_SCO_ENTITY_TYPE = {"ipv4-addr": EntityType.IPV4, "ipv6-addr": EntityType.IPV6,
+                    "domain-name": EntityType.DOMAIN, "url": EntityType.URL}
+
+
+def _benign(sco) -> str | None:
+    """Why this observable gets no Indicator (pipeline/benign.py), or None."""
+    etype = _SCO_ENTITY_TYPE.get(_field(sco, "type") or "")
+    return benign_reason(etype, _field(sco, "value") or "") if etype else None
 
 
 _HOST_SCO = {"ipv4-addr": stix2.IPv4Address, "ipv6-addr": stix2.IPv6Address,

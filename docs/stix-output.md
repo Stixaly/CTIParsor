@@ -12,6 +12,7 @@ detection rule quoted in the report itself is represented.
 | Domain | `domain-name` SCO |
 | URL | `url` SCO |
 | Email | `email-addr` SCO |
+| A value the report names without accusing it: a non-routable address, a big public DNS resolver, a security vendor's or sandbox's site, one of the 10,000 most popular domains | its SCO, **without** an Indicator; the ledger says why (`no_indicator: benign`, `benign: <reason>`) |
 | File hash (MD5 / SHA-1 / SHA-256) | `file` SCO |
 | MAC address | `mac-addr` SCO |
 | ASN | `autonomous-system` SCO |
@@ -40,7 +41,7 @@ detection rule quoted in the report itself is represented.
 | Semantic relationship | `relationship` SRO (confidence score) |
 | Relationship evidence grade | `x_evidence_label` custom property on each `relationship` (`observed` / `reported` / `assessed` / `inferred` / `gap`) |
 | TTP evidence (ADR-0028) | each extracted technique carries `evidence_text` — a **verbatim quote** from the report — plus `evidence_label` and `evidence_start`, the resolved character offset. Kept apart from `description`, which is a summary the extractor writes: measured across four reports, quotes locate to a sentence **85.6%** of the time and descriptions **38.9%**. A quote that cannot be located stores a NULL offset and demotes the grade one step; the technique is never dropped |
-| Completed edge (Stage 4b/4c) | `relationship` SRO + `x_inference_rule` (`transitive:uses+uses`, `attack-reference:G0016>S0002`, `long-distance`) and `x_inferred_from` (premise edge ids); long-distance edges also carry `x_evidence_text` (the quoted sentence) |
+| Completed edge (Stage 4b/4c) | `relationship` SRO + `x_inference_rule` (`transitive:uses+uses`, `attack-reference:G0016>S0002`, `long-distance`) and `x_inferred_from` (premise edge ids); long-distance edges also carry `x_evidence_text` (the quoted sentence). MITRE's edges are graded `x_evidence_label: "external-reference"`; they and the transitive ones are in the bundle but not in the Report's `object_refs`, since the report does not state them (ADR-0013 amendment) |
 | Policy-materialised edge | `relationship` SRO + `x_evidence_label="assessed"` and `x_policy_rule` (`"malware uses attack-pattern"`) — the analyst's link model, not a claim the document made, so it fails the review auto-accept gate |
 | Synthesis accounting | `x_synthesis_stats` on the `report` SDO — per-rule `candidates / emitted / truncated` for the pin pass, plus Stage 4b's completion counters |
 | Sharing markings | exactly one TLP `marking-definition` (+ optional PAP statement marking) referenced by `object_marking_refs` on every object. CLEAR, GREEN, AMBER and RED are the spec's objects; AMBER+STRICT is OpenCTI's own (`definition_type: "TLP"`, OpenCTI's extension and static id, two SHOULD warnings accepted by choice). An unknown level is refused, never defaulted (ADR-0073) |
