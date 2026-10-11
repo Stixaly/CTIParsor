@@ -137,3 +137,43 @@ should refang to.
 | Which patterns actually got RE2 | Checked `type()` on all 19 top-level patterns plus the 3 `_HASH_LABEL_PATTERNS` entries inside the container: 12 top-level + 1 hash-label are `re2._Regexp`. 7 fell back to `re.Pattern` — `_HASH_BLOCK_PATTERN`, `_IPV4_PATTERN`, `_DOMAIN_PATTERN`, `_BARE_FILENAME_PATTERN`, `_UNIX_PATH_PATTERN`, and the `sha1`/`md5` entries of `_HASH_LABEL_PATTERNS` — all because they use `(?<!...)`/`(?!...)` lookaround, which RE2 cannot parse under any flag. This ADR's own first draft claimed no such pattern existed; it was wrong, and only checking every pattern's actual compiled type caught it |
 | Are the 7 fallback patterns exploitable anyway | Stress-tested each against adversarial input (5,000–8,000 repeated ambiguous units, e.g. `"/usr" + "/a"*8000`, `"a."*8000`) under plain stdlib `re`, timed: all 5 top-level patterns and both hash-label patterns completed in under 11 ms. None has a nested unbounded quantifier (`_UNIX_PATH_PATTERN`'s `(?:/[^...]+)+` looked structurally suspicious — inner class allows `/`, so segment boundaries are ambiguous — but the pattern has no end anchor, so `re.search` accepts the first greedy match and never explores the ambiguity exhaustively); none is exploitable today. Documented as a checked, not assumed, residual gap |
 | `docker_smoke.sh` re2 check | Ran against the rebuilt image: step 11 now reports PASS (`re2 available — most Stage 2 regexes run in guaranteed linear time`) instead of the historical WARN. Also caught and fixed a pre-existing wording bug in the WARN branch (`scripts/docker_smoke.sh`): it said "re2 available" in the branch that runs when re2 is *not* available |
+
+## Amendment (2026-10-11): five of Stage 2's fallbacks run on RE2, the rest are pinned
+
+The October 2026 audit (B 8.2.5) asked for Stage 2 at 100 % RE2. By then
+RE2 refused 11 patterns across the code: Stage 2's 7 above, the half-bracket
+defang added in October (`_HALF_BRACKET_DOT`), and three sentence splitters
+(Stage 2c, Stage 4, the retrieval passages), all for their lookaround.
+
+**Rewritten for RE2, guards in code** (`pipeline/stage2_extraction.py`):
+`_IPV4_PATTERN` (the octets; the guards filter one `finditer` pass),
+`_HASH_BLOCK_PATTERN` (now `_hash_blocks`: ASCII alphanumeric runs from RE2,
+grouped when all hex and separated by whitespace alone), `_HALF_BRACKET_DOT`
+(the neighbours checked by the `sub` callable), and the SHA-1 and MD5 labels.
+Each rewrite is exact, not approximate: a match the old guards refused hides
+no valid one, and the comment beside each pattern says why. Measured: the
+same entities, file paths, hashes and refanged text on AnnoCTR's 400 texts,
+with google-re2 and without it. The only differences are three synthetic
+cases with Arabic-Indic digits, where `re`'s Unicode `\d` used to extract
+`1.2.3.4١`; RE2's octets are ASCII.
+
+Two RE2 differences the rewrites had to respect:
+
+- RE2's `\s` is ASCII. A rewritten class that needs Python's `\s` (the
+  hash labels) uses `regex_safety.PY_WHITESPACE`, its 29 characters, checked
+  by a test against `str.isspace()` under both engines.
+- google-re2 encodes the whole text at every call. The first IPv4 rewrite
+  restarted `search(text, pos)` after each refused match, as the backtracking
+  engine does; on `test_stage2_performance`'s 5,000-IP appendix that took
+  2.7 s instead of 0.5 s. Every rewrite is one `finditer` pass.
+
+**Still on `re`, pinned and measured**: `_DOMAIN_PATTERN` and
+`_BARE_FILENAME_PATTERN` (a lookahead the engine backtracks over, so a
+filter after one pass would miss the shorter match), `_UNIX_PATH_PATTERN` (a
+path refused for the word character before it can contain a valid one, as
+in `x/tmp/a./usr/bin`), and the three splitters. `compile_pattern` records
+every refusal in `regex_safety.FALLBACKS`; `tests/test_re2_fallbacks.py`
+fails on a refused pattern it does not list, and runs each listed one under
+`re` on 50,000 characters of 14 adversarial inputs within 1 s. The domain
+pattern, the slowest, scales linearly: 42, 83, 168 and 337 ms on 25, 50,
+100 and 200 thousand `a.` pairs.

@@ -8,6 +8,31 @@ sections group by theme rather than strict semver.
 
 ### Security
 
+#### Stage 2 on RE2: five more patterns, the rest pinned and timed (ADR-0049), 2026-10-11
+
+RE2 refuses lookaround, and `compile_pattern` then falls back to `re`,
+without RE2's linear-time guarantee. The October audit (B 8.2.5) found that
+was the case for Stage 2's key patterns. Five now run on RE2, the IPv4
+addresses, the hash blocks of IoC tables, the half-bracket defang
+(`evil.]com`) and the SHA-1 and MD5 column labels, with the guards their
+lookarounds held now checked in code. Each rewrite is exact: on AnnoCTR's
+400 texts, entities, file paths, hashes and refanged text are the same,
+with google-re2 and without it. The only change is on three synthetic
+inputs with Arabic-Indic digits, where `re`'s Unicode `\d` used to extract
+an "address" such as `1.2.3.4١`.
+
+The domain, bare-filename and Unix-path patterns, and three sentence
+splitters (Stages 2c and 4, the retrieval passages), stay on `re`: a filter
+after one RE2 pass would miss some of their matches. `compile_pattern` now
+records each pattern RE2 refuses, and `tests/test_re2_fallbacks.py` fails on
+one it does not list; it runs each listed pattern under `re` on 14
+adversarial inputs of 50,000 characters, within 1 s.
+
+The first IPv4 rewrite restarted its search after each refused match, and
+Stage 2 took 2.7 s instead of 0.5 s on the performance test's 5,000-IP
+appendix: google-re2 encodes the whole text at every call. Every rewrite is
+one pass.
+
 #### Scorecard's eight python-multipart findings: floors read as versions, 2026-10-11
 
 After the requirement files moved to `requirements/` (PR #138), Scorecard's
