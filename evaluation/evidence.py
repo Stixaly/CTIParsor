@@ -36,7 +36,9 @@ def check(doc_id: str, text: str, ttps: list[dict], gold_spans: dict[str, list[t
     """`ttps`: [{"mitre_id", "evidence_text"}]; `gold_spans`: parent id -> located
     mention spans.  One row per predicted technique that carries a quote."""
     from pipeline.evidence_span import locate
+    from pipeline.stage2_extraction import refang_with_offsets
 
+    live: tuple[str, list[int]] | None = None
     rows = []
     for t in ttps:
         quote = (t.get("evidence_text") or "").strip()
@@ -46,6 +48,14 @@ def check(doc_id: str, text: str, ttps: list[dict], gold_spans: dict[str, list[t
         tech = cid.split(".", 1)[0]
         span = locate(quote, text)
         located = (span.start, span.end) if span else None
+        if located is None:
+            # The pipeline reads the text refanged (Stage 1): a quote with
+            # "evil.com" is verbatim there and not in the source's "evil[.]com".
+            # Find it there, and report the span in the source's offsets.
+            live = live or refang_with_offsets(text)
+            span = locate(quote, live[0])
+            if span and span.end > span.start:
+                located = (live[1][span.start], live[1][span.end - 1] + 1)
         spans = gold_spans.get(tech, [])
         correct = tech in gold_spans
         on = near = None

@@ -54,6 +54,11 @@ _LIGATURES: dict[str, str] = {
 }
 
 
+
+def _is_blank(char: str) -> bool:
+    """Whitespace, or a space-like character _CHAR_MAP reads as one."""
+    return char.isspace() or _CHAR_MAP.get(char) == " "
+
 @dataclass(frozen=True)
 class Span:
     """Represents a span of characters in the original text."""
@@ -89,17 +94,19 @@ Normalise for comparison, keeping a map back to original offsets.
                 normalised_chars.append(c)
                 index_map.append(i)
             i += 1
+        elif _is_blank(char):
+            # ONE space for a run of blanks, the spaces _CHAR_MAP maps to " "
+            # included: mapped one by one, "of  plain" became "of  plain"
+            # and a quote written "of plain" was not found, in the worker (whose
+            # technique then lost a grade) as in the evaluation.
+            normalised_chars.append(" ")
+            index_map.append(i)
+            while i < n and _is_blank(text[i]):
+                i += 1
         elif char in _CHAR_MAP:
             normalised_chars.append(_CHAR_MAP[char])
             index_map.append(i)
             i += 1
-        elif char.isspace():
-            # Emit ONE space
-            normalised_chars.append(" ")
-            index_map.append(i)
-            # Skip all consecutive whitespace
-            while i < n and text[i].isspace():
-                i += 1
         else:
             # `str.lower()` is NOT length-preserving: U+0130 (Turkish dotted I)
             # lowercases to two characters.  Appending that as one list element

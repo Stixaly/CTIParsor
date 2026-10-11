@@ -133,11 +133,21 @@ def test_a_held_technique_is_outside_the_report_until_accepted(temp_db, temp_db_
 
 
 def test_auto_accept_never_takes_a_held_row(temp_db):
-    job = _saved(temp_db)      # the held technique is stored at 0.9, the auto-accept level
+    from api import worker
+    from models.schemas import EntityType, RawEntity
+
+    # The held technique is stored at 0.9, the auto-accept level; beside it, a
+    # gazetteer name at 0.92 shows auto-accept ran (the LLM's own names wait
+    # for an analyst, audit 8.3.6).
+    job = _job(temp_db)
+    witness = RawEntity(value="WellMess", entity_type=EntityType.MALWARE, confidence=0.92,
+                        source="gazetteer")
+    worker._save_entities(job, [witness], _result(), _TEXT)
     decisions.apply_auto_accept(temp_db.get_conn(), job, temp_db.now_iso(), rate=0.0)
     assert _held_ttp(temp_db, job)["accepted"] is None
     names = temp_db.get_conn().execute(
-        "SELECT accepted FROM entities WHERE job_id=? AND value='WellMess'", (job,)).fetchone()
+        "SELECT accepted FROM entities WHERE job_id=? AND value='WellMess' AND source='gazetteer'",
+        (job,)).fetchone()
     assert names["accepted"] == 1
 
 

@@ -229,12 +229,13 @@ Named entities are unchanged too (strict: malware P 0.20 R 0.87, threat
 actor P 0.13 R 0.94, tool P 0.34 R 0.73). LLM health: 196 provider calls, no
 failure; 68/68 extractions, 3d 61/61, selection 67/67.
 
-**Quotes found in the text: 98.0% (150 of 153), not 100%.** The three are
-verbatim in the text the pipeline read, which is refanged: since PR #128
-Stage 1 rejoins half-bracket defangs, so `www.destroy2013.]com` reaches the
-model as `www.destroy2013.com`, and the evaluator locates quotes in
-AnnoCTR's raw text. An evaluation artefact (the evaluator should refang the
-text it searches), not a quote the code let through.
+**Quotes found in the text: 100% (153 of 153).** The first scoring said
+98.0%: three quotes are verbatim in the text the pipeline read, which is
+refanged (since PR #128 Stage 1 rejoins half-bracket defangs, so
+`www.destroy2013.]com` reaches the model as `www.destroy2013.com`), and the
+evaluator searched AnnoCTR's raw text. It now also searches the refanged
+text and maps the span back to the source's offsets
+(`stage2_extraction.refang_with_offsets`).
 
 This configuration, `dcd685e`, is the one run once on test.
 
@@ -262,9 +263,11 @@ splits' difference, not a fit.
 - Named entities, strict: malware P 0.197 R 0.889, threat actor P 0.119
   R 0.967, tool P 0.250 R 0.750. The same shape as dev: high recall, low
   precision.
-- Evidence: 312 techniques with a quote, 98.1% found in AnnoCTR's raw text
-  (the refang artefact above), 63% of the located correct ones on the
-  annotated passage, 72% within 200 characters of it.
+- Evidence: 312 techniques with a quote, all found in the text (98.1% at
+  first: the refang artefact above, and two quotes lost to a no-break space,
+  a defect of `evidence_span.locate` the worker shared, fixed); 63% of the
+  located correct ones on the annotated passage, 72% within 200 characters
+  of it.
 - LLM health: 357 provider calls, no failure; 122/122 extractions, 3d 116 of
   117 parsed, selection 118/118. 366.9 s per report.
 
@@ -290,4 +293,5 @@ F1 0.698, exact id 0.425.
 3. ~~Judge the 50 quotes of `support-sample.csv`~~ (Evidence, above).
 4. Resolve a revoked ATT&CK id to its replacement and prefer Enterprise
    names (the T1629 domain error), measured on dev.
-5. Locate quotes in the refanged text in `evaluation/evidence.py`.
+5. ~~Locate quotes in the refanged text in `evaluation/evidence.py`~~ (done,
+   with the no-break space fix in `evidence_span`).
