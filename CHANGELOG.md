@@ -6,6 +6,41 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Fixed
+
+#### IoCs wrapped inside a PDF table cell are found, 2026-10-11
+
+A narrow table column wraps a hash or a URL over two or three lines, and
+the PDF text keeps the pieces apart: markitdown writes the continuation
+lines outside the table row, pdfplumber's page text interleaves them with
+the other columns. On a report generated for the audit (B 8.1.5, its
+annex A.11), whose 34 IoCs sit in a value column of 38 % of the table,
+Stage 1 + Stage 2 found 16: no SHA-256, no whole URL. At 20 %, 1.
+
+Stage 1 now runs pdfplumber's table finder on text PDFs (and on the text
+pages of mixed ones). A cell whose lines are single tokens that join into
+one IoC-shaped value (a hash, a URL, an address, a domain, a file, an
+email, a Windows path, defanged or not) is glued back; prose is joined with
+spaces. The rows that had such a cell are added after the document text,
+one per line with their cells joined by " | " (as Word tables are read),
+under `[[table rows rejoined from wrapped cells: page N]]`. The body text is
+unchanged: ADR-0032 measured what replacing markitdown with pdfplumber's
+text costs (18.2 % of the characters, hashes among them).
+
+- The audit's report: 34 of 34 at 38 % (was 16), 33 of 34 at 20 % (was 1),
+  with markitdown or without it. Both PDFs and their truth are fixtures
+  (`tests/test_pdf_table_cells.py`; `scripts/make_pdf_table_fixtures.py`
+  regenerates them with Playwright's Chromium).
+- The 9 in-house PDFs: the same IoCs as before. One had wrapped cells
+  (6 rows rejoined, 783 characters); its hashes were already joined by
+  Stage 2's labelled hash blocks.
+- Cost: the table finder adds 1 to 3 s of Stage 1 per PDF on those 9. It
+  stops after 200 tables or 20,000 cells, and a PDF it cannot read costs the
+  table pass only, with a warning.
+- Not changed: the fragments themselves are still in the body text, so the
+  six truncated URLs it yields on the audit's report (`https://cdn-files4.com/cdn/`)
+  remain false positives, as before this change.
+
 ### Security
 
 #### Scorecard's eight python-multipart findings: floors read as versions, 2026-10-11

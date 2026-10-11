@@ -16,6 +16,8 @@ the [README](../README.md#how-it-works); this page is the detail.
 │  Stage 1 — INGESTION                                    (offline ✅)  │
 │  PDF / DOCX / HTML / TXT / MD → normalised text + chunks            │
 │  • Text PDF    : markitdown (structure-preserving) → pdfplumber      │
+│  • PDF tables  : rows whose IoC wrapped in its cell, rejoined and    │
+│                  added after the text under a [[table rows …]] mark  │
 │  • Scanned PDF : auto-detected → OCR via Tesseract / pdf2image       │
 │  • Defanging   : hxxps://, [.], (.), .], [at], [@] → live form      │
 │  • Chunking    : paragraph-aware + 400-char sliding-window overlap   │

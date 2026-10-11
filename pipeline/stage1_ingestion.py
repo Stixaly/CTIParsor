@@ -367,6 +367,89 @@ def _ocr_page(path: Path, page_number: int) -> str:
             img.close()
 
 
+# ── IoCs in wrapped table cells (audit B 8.1.5) ─────────────────────────────
+# A narrow table column wraps a hash or a URL over several lines, and neither
+# markitdown nor pdfplumber's page text keeps the pieces together: markitdown
+# writes the continuation lines outside the table row, so on the audit's
+# generated report Stage 2 found 0 of 12 SHA-256 and 0 of 6 URLs (16 of 34
+# IoCs).  pdfplumber's table finder gives each cell's text whole; a cell whose
+# lines are single tokens that join into one IoC-shaped value is glued back.
+# The body text is kept as it is (ADR-0032 measured what replacing markitdown
+# with pdfplumber's text costs: 18.2 % of the characters, hashes among them);
+# the rows that had such a cell are added after it, under a marker.
+_TABLE_MARK = "[[table rows rejoined from wrapped cells: page {page}]]"
+_MAX_TABLES = 200          # a hostile PDF does not get to run the finder forever
+_MAX_CELLS = 20_000
+_IOC_SHAPED = compile_pattern(
+    r"^(?:[0-9a-fA-F]{32,128}"                               # a hash
+    r"|[A-Za-z][A-Za-z0-9+.-]*://\S+"                        # a URL
+    r"|(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?"                # an IPv4[:port]
+    r"|[^\s@]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+"            # an email address
+    r"|[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,24}(?:[/:?#]\S*)?"   # a domain, a file
+    r"|[A-Za-z]:\\\S+)$"                                     # a Windows path
+)
+_DEFANGS = (("[.]", "."), ("(.)", "."), ("{.}", "."), ("[:]", ":"), ("[at]", "@"), ("[@]", "@"),
+            ("hxxp", "http"), ("fxp", "ftp"))
+
+
+def _join_cell(cell: str | None) -> tuple[str, bool]:
+    """A table cell's text on one line, and whether wrapped lines were glued.
+
+    Lines are glued without a space only when each is a single token and the
+    result, refanged, is IoC-shaped; prose is joined with spaces."""
+    lines = [line.strip() for line in (cell or "").splitlines() if line.strip()]
+    if len(lines) > 1 and not any(any(ch.isspace() for ch in line) for line in lines):
+        glued = "".join(lines)
+        live = glued
+        for fanged, plain in _DEFANGS:
+            live = live.replace(fanged, plain)
+        if _IOC_SHAPED.match(live):
+            return glued, True
+    return " ".join(lines), False
+
+
+def _rejoined_table_rows(path: Path, skip_pages: frozenset[int] = frozenset()) -> str:
+    """The rows of the PDF's tables in which a wrapped cell was glued back, one
+    per line with its cells joined by " | " (as Word tables are read), under a
+    marker per page; "" when there is none.  `skip_pages` (0-based): scans."""
+    out: list[str] = []
+    tables = cells = 0
+    try:
+        with pdfplumber.open(path) as pdf:
+            for index, page in enumerate(pdf.pages):
+                if index in skip_pages:
+                    continue
+                rows: list[str] = []
+                for table in page.extract_tables() or []:
+                    tables += 1
+                    for row in table:
+                        cells += len(row)
+                        joined = [_join_cell(c) for c in row]
+                        if any(glued for _, glued in joined):
+                            rows.append(" | ".join(text for text, _ in joined))
+                    if tables >= _MAX_TABLES or cells >= _MAX_CELLS:
+                        break
+                if rows:
+                    out.append(_TABLE_MARK.format(page=index + 1) + "\n" + "\n".join(rows))
+                if tables >= _MAX_TABLES or cells >= _MAX_CELLS:
+                    logger.warning(f"[Stage 1] {path.name}: table pass stopped at {tables} tables, "
+                                   f"{cells} cells")
+                    break
+    except Exception as exc:
+        logger.warning(f"[Stage 1] {path.name}: tables not read, wrapped IoCs in table cells may be "
+                       f"lost: {type(exc).__name__}: {exc}")
+        return ""
+    if out:
+        logger.info(f"[Stage 1] {path.name}: {sum(b.count(chr(10)) for b in out)} table rows "
+                    "with wrapped IoC cells rejoined")
+    return "\n\n".join(out)
+
+
+def _with_table_rows(text: str, path: Path, skip_pages: frozenset[int] = frozenset()) -> str:
+    rows = _rejoined_table_rows(path, skip_pages)
+    return f"{text}\n\n{rows}" if rows else text
+
+
 def _read_pdf(path: Path) -> str:
     """Text of a PDF, with OCR decided page by page.
 
@@ -399,7 +482,8 @@ def _read_pdf(path: Path) -> str:
                     f"(lang={ocr_lang()})")
         for i in scanned:
             page_texts[i] = _ocr_page(path, i + 1) or page_texts[i]
-        return "\n".join(t for t in page_texts if t.strip())
+        return _with_table_rows("\n".join(t for t in page_texts if t.strip()), path,
+                                frozenset(scanned))
     return _read_pdf_text(path)
 
 
@@ -411,7 +495,7 @@ def _read_pdf_text(path: Path) -> str:
             md = MarkItDown()
             result = md.convert(str(path))
             if result.text_content and len(result.text_content.strip()) > 100:
-                return result.text_content
+                return _with_table_rows(result.text_content, path)
         except Exception as exc:
             # The fallback below loses the tables' structure: say so.
             logger.warning(f"[Stage 1] markitdown could not convert {path.name} ({exc}); "
@@ -424,7 +508,7 @@ def _read_pdf_text(path: Path) -> str:
             text = page.extract_text()
             if text:
                 text_parts.append(text)
-    return "\n".join(text_parts)
+    return _with_table_rows("\n".join(text_parts), path)
 
 
 def _read_docx(path: Path) -> str:
