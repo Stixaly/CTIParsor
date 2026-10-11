@@ -31,6 +31,7 @@ SPDX-License-Identifier = "BSD-3-Clause"
 [[annotations]]
 path = [
     "pipeline/data/attack_relationships.json",
+    "pipeline/data/attack_revoked.json",
     "pipeline/data/attack_retrieval_corpus.json",
     "pipeline/data/attack_retrieval_embeddings.npy",
     "pipeline/data/gazetteer.json",

@@ -21,7 +21,7 @@ on 2026-10-10.
 | `frontend/public/stix-viz/stix2viz/visjs/vis-network.min.js` | [vis-network](https://github.com/visjs/vis-network), as cti-stix-visualization ships it | 2011-2017 Almende B.V.; 2017-2019 visjs contributors | Apache-2.0 OR MIT | no |
 | `frontend/public/stix-viz/require.js` | [RequireJS](https://github.com/requirejs/requirejs) 2.3.6, as cti-stix-visualization ships it | jQuery Foundation and other contributors | MIT | no |
 | `frontend/public/stix-viz/domReady.js` | [RequireJS domReady](https://github.com/requirejs/domReady) 2.0.1, as cti-stix-visualization ships it | 2010-2012 The Dojo Foundation | MIT OR BSD-3-Clause | no |
-| `pipeline/data/attack_relationships.json`, `attack_retrieval_corpus.json`, `attack_retrieval_embeddings.npy`, `gazetteer.json` | built from MITRE ATT&CK's STIX bundles in [mitre/cti](https://github.com/mitre/cti) (`scripts/build_indexes.py`) | The MITRE Corporation | LicenseRef-MITRE-ATTACK | derived |
+| `pipeline/data/attack_relationships.json`, `attack_revoked.json`, `attack_retrieval_corpus.json`, `attack_retrieval_embeddings.npy`, `gazetteer.json` | built from MITRE ATT&CK's STIX bundles in [mitre/cti](https://github.com/mitre/cti) (`scripts/build_indexes.py`) | The MITRE Corporation | LicenseRef-MITRE-ATTACK | derived |
 | `pipeline/data/mitre_index.json`, `mitre_embeddings.npy`, `mitre_embeddings_meta.json`, `frontend/public/mitre_index.json` | built from ATT&CK and CAPEC's STIX bundles in mitre/cti | The MITRE Corporation | LicenseRef-MITRE-ATTACK AND LicenseRef-MITRE-CAPEC | derived |
 
 ## MITRE ATT&CK and CAPEC

@@ -85,6 +85,32 @@ def search(query: str, limit: int = 15) -> list[dict]:
     return results[:limit]
 
 
+_REVOKED_PATH = Path(__file__).parent / "data" / "attack_revoked.json"
+
+
+@functools.lru_cache(maxsize=1)
+def _revoked() -> dict:
+    try:
+        return json.loads(_REVOKED_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logger.warning(f"[mitre_db] {_REVOKED_PATH.name} unreadable, revoked ids are not "
+                       f"replaced: {type(exc).__name__}: {exc}")
+        return {}
+
+
+def replacement_for(mitre_id: str) -> str | None:
+    """The active technique a revoked ATT&CK id was replaced by, or None
+    (`scripts/build_indexes.py --only revoked`)."""
+    table = {k.upper(): v for k, v in (_revoked().get("revoked_by") or {}).items()}
+    return table.get((mitre_id or "").strip().upper())
+
+
+def revoked_names() -> dict[str, str]:
+    """Lower-cased name of a revoked Enterprise technique, no active one bearing
+    it any more → its replacement's id ("impair defenses" → T1685)."""
+    return dict(_revoked().get("names") or {})
+
+
 def available() -> bool:
     """Return True if the index file exists."""
     return _INDEX_PATH.exists()

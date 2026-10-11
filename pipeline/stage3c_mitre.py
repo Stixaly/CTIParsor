@@ -64,6 +64,10 @@ def _load_index() -> dict[str, dict] | None:
         return None
 
     index: dict[str, dict] = {}
+    # A name several domains share ("Phishing": T1566, Mobile T1660, CAPEC-98)
+    # resolves to the Enterprise one: reports are about enterprise intrusions,
+    # and the last entry written used to win.
+    name_rank: dict[str, int] = {}
 
     for entry in list(get_tactics()) + list(get_techniques()):
         mid  = entry["id"]
@@ -76,10 +80,25 @@ def _load_index() -> dict[str, dict] | None:
             else ""
         )
         rec = {"id": mid, "name": name, "url": url}
-        index[name.lower()] = rec
+        rank = _DOMAIN_RANK.get(entry.get("domain", ""), len(_DOMAIN_RANK))
+        if rank < name_rank.get(name.lower(), len(_DOMAIN_RANK) + 1):
+            index[name.lower()] = rec
+            name_rank[name.lower()] = rank
         index[mid.lower()]  = rec
 
+    # The name of a revoked technique is its replacement's, ahead of a Mobile,
+    # ICS or CAPEC technique that kept it: "Impair Defenses" (T1562, revoked
+    # for T1685 in 2026) is otherwise only the Mobile T1629.
+    from pipeline.mitre_db import revoked_names
+    for old_name, new_id in revoked_names().items():
+        if new_id.lower() in index and name_rank.get(old_name, len(_DOMAIN_RANK) + 1) > 0:
+            index[old_name] = index[new_id.lower()]
+            name_rank[old_name] = 0
+
     return index if index else None
+
+
+_DOMAIN_RANK = {"enterprise-attack": 0, "ics-attack": 1, "mobile-attack": 2, "capec": 3}
 
 
 def _resolve(technique_name: str, mitre_id: str | None) -> tuple[str, str | None, str | None]:
@@ -87,6 +106,16 @@ def _resolve(technique_name: str, mitre_id: str | None) -> tuple[str, str | None
     index = _load_index()
     if not index or not _RAPIDFUZZ_AVAILABLE:
         return technique_name, mitre_id, None
+
+    # 0. A revoked id the report still writes (T1562) is its replacement
+    #    (T1685): resolving it by name instead found the Mobile technique of
+    #    the same name (T1629), the only one left with it.
+    if mitre_id and mitre_id.lower() not in index:
+        from pipeline.mitre_db import replacement_for
+        new_id = replacement_for(mitre_id)
+        if new_id and new_id.lower() in index:
+            e = index[new_id.lower()]
+            return e["name"], e["id"], e["url"]
 
     name_lower = technique_name.lower().strip()
 
