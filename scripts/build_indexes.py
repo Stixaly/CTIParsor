@@ -71,6 +71,7 @@ _DATA_DIR    = _REPO_ROOT / "pipeline" / "data"
 _INDEX_PATH      = _DATA_DIR / "mitre_index.json"
 _GAZ_PATH        = _DATA_DIR / "gazetteer.json"
 _ATTACK_REL_PATH = _DATA_DIR / "attack_relationships.json"
+_REVOKED_PATH    = _DATA_DIR / "attack_revoked.json"
 _EMB_PATH       = _DATA_DIR / "mitre_embeddings.npy"
 _META_PATH      = _DATA_DIR / "mitre_embeddings_meta.json"
 _MANIFEST_PATH  = _DATA_DIR / "mitre_embeddings_manifest.json"
@@ -574,6 +575,63 @@ def build_retrieval(bundles: dict[str, Path | None], *, neutralise: bool = True,
 
 
 # ---------------------------------------------------------------------------
+# Revoked techniques → their replacement
+# ---------------------------------------------------------------------------
+
+def build_revoked(bundles: dict[str, Path | None]) -> None:
+    """Build pipeline/data/attack_revoked.json: each revoked ATT&CK technique id
+    and the active id its `revoked-by` chain ends on.
+
+    The MITRE index leaves revoked techniques out, so an id a report still
+    writes (T1562, revoked for T1685 in 2026) used to be resolved by its name
+    instead, and "Impair Defenses" now only names the Mobile technique T1629.
+    """
+    print("\n[revoked] Building attack_revoked.json…")
+    revoked_by: dict[str, str] = {}
+    revoked_names: dict[str, str] = {}
+    active_names: set[str] = set()
+    sources: dict[str, str] = {}
+    for key, path in bundles.items():
+        if path is None or key == "capec":
+            continue
+        objects = _load_bundle(path)
+        sources[path.name] = max((o.get("modified", "") for o in objects), default="")
+        ext: dict[str, str] = {}
+        names: dict[str, str] = {}
+        active: set[str] = set()
+        for obj in objects:
+            if obj.get("type") != "attack-pattern":
+                continue
+            for ref in obj.get("external_references", []):
+                if ref.get("source_name") in ("mitre-attack", "mitre-mobile-attack", "mitre-ics-attack"):
+                    if ref.get("external_id"):
+                        ext[obj["id"]] = ref["external_id"]
+                    break
+            names[obj["id"]] = (obj.get("name") or "").strip().lower()
+            if obj["id"] in ext and not obj.get("revoked") and not obj.get("x_mitre_deprecated"):
+                active.add(obj["id"])
+                active_names.add(names[obj["id"]])
+        edges = {o["source_ref"]: o["target_ref"] for o in objects
+                 if o.get("type") == "relationship" and o.get("relationship_type") == "revoked-by"
+                 and o.get("source_ref") in ext and o.get("target_ref") in ext}
+        for src in edges:
+            seen, cur = {src}, edges[src]
+            while cur in edges and cur not in seen:      # follow the chain
+                seen.add(cur)
+                cur = edges[cur]
+            if cur in active:
+                revoked_by[ext[src]] = ext[cur]
+                if names.get(src):
+                    revoked_names[names[src]] = ext[cur]
+    # A revoked name another active technique of these bundles still bears
+    # keeps resolving to that one.
+    names_out = {n: i for n, i in sorted(revoked_names.items()) if n and n not in active_names}
+    _REVOKED_PATH.write_text(json.dumps({"sources": sources, "revoked_by": dict(sorted(revoked_by.items())),
+                                         "names": names_out}, indent=1) + "\n", encoding="utf-8")
+    print(f"  DONE  {len(revoked_by)} revoked techniques → {_REVOKED_PATH.name}")
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -587,7 +645,8 @@ def main() -> None:
     parser.add_argument("--ics",        type=Path, help="Path to ics-attack.json")
     parser.add_argument("--capec",      type=Path, help="Path to stix-capec.json")
     parser.add_argument(
-        "--only", choices=["mitre", "gazetteer", "embeddings", "relationships", "retrieval"],
+        "--only", choices=["mitre", "gazetteer", "embeddings", "relationships", "revoked",
+                           "retrieval"],
         help="Rebuild only the specified index (`retrieval` is never built by default)",
     )
     parser.add_argument("--keep-names", action="store_true",
@@ -635,6 +694,8 @@ def main() -> None:
         build_embeddings(bundles)
     if only is None or only == "relationships":
         build_attack_relationships(bundles)
+    if only is None or only == "revoked":
+        build_revoked(bundles)
     if only == "retrieval":
         build_retrieval(bundles, neutralise=not args.keep_names, out_dir=args.retrieval_out)
 

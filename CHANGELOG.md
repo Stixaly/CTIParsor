@@ -8,6 +8,30 @@ sections group by theme rather than strict semver.
 
 ### Fixed
 
+#### A revoked ATT&CK id is its replacement; a shared name is the Enterprise technique, 2026-10-11
+
+The MITRE index leaves revoked techniques out, so an id a report still
+writes was resolved by its name: T1562 *Impair Defenses*, revoked for T1685
+in ATT&CK 2026, became the Mobile T1629, the only technique left with that
+name, in a report about a Windows intrusion (found in the 50 quotes judged
+on 2026-10-11). `scripts/build_indexes.py --only revoked` now writes
+`pipeline/data/attack_revoked.json` (149 revoked ids and the active one each
+`revoked-by` chain ends on, and the revoked names no active technique
+bears), and Stage 3c maps a revoked id or name to its replacement. A name
+several domains share ("Phishing": T1566, Mobile T1660, CAPEC-98) resolves
+to the Enterprise technique instead of the last one indexed. An explicit id
+still decides.
+
+Measured on AnnoCTR dev (`sel-dev-revoked-5d1bbe4` against
+`sel-dev-dcd685e`): F1 0.584 against 0.609, −0.024 [−0.089, +0.024], not
+significant. The fix changed what it targets (the T1629 false positive gone,
+a correct T1685 found); the rest is run-to-run variance: on one report the
+selection answer did not parse this time, holding its 41 candidates and
+losing 7 correct techniques. Without that report, the same 76 correct
+techniques and 44 misses in both runs.
+
+### Fixed
+
 #### A value the report names without accusing it gets no Indicator, 2026-10-11
 
 Every IPv4, domain and URL Stage 2 extracted became an Indicator typed
