@@ -165,7 +165,9 @@ def normalize_ttps(
     try:
         from pipeline.stage2c_ttp_semantic import high_confidence_threshold
         high_thresh = high_confidence_threshold()
-    except Exception:
+    except Exception as exc:
+        logger.warning(f"[Stage 3c] Stage 2c's high-confidence threshold unavailable, "
+                       f"0.62 used: {type(exc).__name__}: {exc}")
         high_thresh = 0.62
 
     normalized: dict[str, TTPExtracted] = {}

@@ -42,8 +42,12 @@ def _join_hyphen_linebreaks(text: str) -> str:
 try:
     from markitdown import MarkItDown
     _MARKITDOWN_AVAILABLE = True
-except Exception:  # ImportError, ModuleNotFoundError, native-lib failures
+except ModuleNotFoundError:
+    _MARKITDOWN_AVAILABLE = False   # optional: the image installs it, the light runtime does not
+except Exception as _exc:  # installed but broken (a native library, a bad dependency)
     _MARKITDOWN_AVAILABLE = False
+    logger.warning(f"[Stage 1] markitdown is installed but does not load, PDFs are read as "
+                   f"plain text and their tables lose their structure: {type(_exc).__name__}: {_exc}")
 
 try:
     import pytesseract
@@ -278,7 +282,9 @@ def _is_scanned_pdf(path: Path) -> bool:
             total_chars = sum(len(page.extract_text() or "") for page in pages)
             avg_chars = total_chars / len(pages)
             return avg_chars < _MIN_CHARS_PER_PAGE
-    except Exception:
+    except Exception as exc:
+        logger.warning(f"[Stage 1] could not tell whether {Path(path).name} is a scan, reading it as "
+                       f"text (no OCR): {type(exc).__name__}: {exc}")
         return False
 
 

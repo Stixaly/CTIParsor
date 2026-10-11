@@ -1,9 +1,11 @@
 import ipaddress
 import re
+from collections.abc import Iterator
 from urllib.parse import urlparse
 
 from models.schemas import EntityType, RawEntity
 from pipeline.env_flags import env_bool
+from pipeline.regex_safety import PY_WHITESPACE as _WS
 from pipeline.regex_safety import compile_pattern as _compile_pattern
 
 _SKIP_HEAVY = env_bool("SKIP_HEAVY_MODELS")
@@ -96,11 +98,34 @@ _MITRE_TTP_PATTERN = _compile_pattern(r"\bTA?\d{4}(?:\.\d{3})?\b")
 # non-hex text ("File Hash", filenames, descriptions) separates one table row
 # from the next.  (?<![...]) / (?![...]) keep us from slicing hex out of a
 # longer token.
-_HASH_BLOCK_PATTERN = _compile_pattern(
-    r"(?<![0-9a-zA-Z])"
-    r"[0-9a-fA-F]{2,}(?:\s+[0-9a-fA-F]{2,})*"
-    r"(?![0-9a-zA-Z])"
-)
+#
+# RE2 has no lookaround (ADR-0049), so the blocks are built from tokens: an
+# ASCII alphanumeric run, found by RE2, is a hash fragment when it is all hex
+# and 2+ long, and fragments separated by whitespace alone form one block.
+# This is what `(?<![0-9a-zA-Z])[0-9a-fA-F]{2,}(?:\s+[0-9a-fA-F]{2,})*
+# (?![0-9a-zA-Z])` matched under `re`: its guards made every fragment a whole
+# run, since a shorter one would leave a hex character next to it.
+_ALNUM_RUN_PATTERN = _compile_pattern(r"[0-9A-Za-z]+")
+_HEX_CHARS = frozenset("0123456789abcdefABCDEF")
+
+
+def _hash_blocks(text: str) -> Iterator[tuple[int, str]]:
+    """(start, block) for each run of hex fragments, in order."""
+    start = end = -1
+    for m in _ALNUM_RUN_PATTERN.finditer(text):
+        token_start, token_end = m.span()
+        if token_end - token_start >= 2 and _HEX_CHARS.issuperset(m.group()):
+            if start >= 0 and text[end:token_start].isspace():
+                end = token_end           # same block: whitespace alone between
+                continue
+            if start >= 0:
+                yield start, text[start:end]
+            start, end = token_start, token_end
+        elif start >= 0:
+            yield start, text[start:end]
+            start = -1
+    if start >= 0:
+        yield start, text[start:end]
 
 # The leading (?<![\d.]) and trailing (?!\d|\.\d) guards stop the pattern from
 # slicing four octets out of a longer dotted-number run.  Without them
@@ -108,11 +133,27 @@ _HASH_BLOCK_PATTERN = _compile_pattern(
 # "192.168.1.1".  The trailing guard refuses a fifth octet, not a full stop:
 # until 2026-10 it was (?![\d.]), which dropped every address that ends a
 # sentence ("…beacons to 141.138.157.240."); 5 C2 addresses in AnnoCTR.
+#
+# RE2 has no lookaround (ADR-0049): the pattern is the four octets, and
+# _ipv4_matches drops the matches the guards refuse.  Nothing else is lost: a
+# shorter last octet would be followed by a digit too, and no match can start
+# inside a refused one, where every character follows a digit or a dot.  One
+# finditer pass: google-re2 encodes the whole text at each call, so a search
+# restarted after each refusal is quadratic on an IoC appendix.  The guards
+# read `\d` as `re` did (str.isdecimal()); the octets are ASCII under RE2.
 _IPV4_PATTERN = _compile_pattern(
-    r"(?<![\d.])"
     r"(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)"
-    r"(?!\d|\.\d)"
 )
+
+
+def _ipv4_matches(text: str) -> Iterator[str]:
+    for m in _IPV4_PATTERN.finditer(text):
+        start, end = m.span()
+        before, after = text[start - 1:start], text[end:end + 2]
+        if (before.isdecimal() or before == "."
+                or after[:1].isdecimal() or (after[:1] == "." and after[1:].isdecimal())):
+            continue
+        yield m.group()
 
 # Bare filenames (no path) — only when the extension is executable / script /
 # installer-like, so we capture malware artefacts (payload.exe, _fanout.sh,
@@ -220,6 +261,10 @@ _BARE_FILENAME_PATTERN = _compile_pattern(
 # Unix / Linux file paths — must start with a recognised system root directory
 # to avoid false positives on prose fragments.
 # Examples: /tmp/backdoor.elf  /usr/bin/python3  /proc/self/exe
+# Runs on `re` (tests/test_re2_fallbacks.py): a path refused for the word
+# character before it can hold a valid one ("x/tmp/a./usr/bin"), which a filter
+# after one RE2 pass cannot find, and restarting RE2 after each refusal is
+# quadratic (google-re2 encodes the whole text at each call).
 _UNIX_PATH_PATTERN = _compile_pattern(
     r"(?<!\w)"
     r"/(?:bin|boot|dev|etc|home|lib(?:64)?|opt|proc|root|run|sbin|srv|sys|tmp|usr|var)"
@@ -258,7 +303,18 @@ _DEFANG_PATTERN = _compile_pattern(
 # "evil[.com" — between two alphanumerics, so prose ("[.NET]", "(e.g.]") stays.
 # 9 of AnnoCTR's 400 texts write their indicators this way; until 2026-10 none
 # of those indicators was extracted.
-_HALF_BRACKET_DOT = _compile_pattern(r"(?<=[A-Za-z0-9])(?:\.\]|\[\.)(?=[A-Za-z0-9])")
+# The two alphanumerics around it are checked by _half_bracket_repl (RE2 has no
+# lookaround, ADR-0049).  A refused match hides no other: every match opens
+# with "." or "[", and its neighbour inside a match is then "[" or "]".
+_HALF_BRACKET_DOT = _compile_pattern(r"\.\]|\[\.")
+_ASCII_ALNUM = frozenset("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
+
+
+def _half_bracket_repl(m: re.Match) -> str:
+    text, (start, end) = m.string, m.span()
+    if start and end < len(text) and text[start - 1] in _ASCII_ALNUM and text[end] in _ASCII_ALNUM:
+        return "."
+    return m.group()
 
 def _defang_repl(match: re.Match) -> str:
     m = match.group(0).lower()
@@ -294,7 +350,7 @@ def refang(text: str) -> str:
     """
     if not text:
         return text
-    return _HALF_BRACKET_DOT.sub(".", _DEFANG_PATTERN.sub(_defang_repl, text))
+    return _HALF_BRACKET_DOT.sub(_half_bracket_repl, _DEFANG_PATTERN.sub(_defang_repl, text))
 
 
 def extract_entities(text: str) -> list[RawEntity]:
@@ -332,10 +388,13 @@ _HASH_TYPE_BY_LEN = {64: EntityType.SHA256, 40: EntityType.SHA1, 32: EntityType.
 # Algorithm labels that precede a hash column/cell in an IOC table ("SHA-256",
 # "Hash (md5)", "SHA 1"…).  Used only to break genuinely ambiguous blocks, where
 # the fragments read equally well as one wrapped hash or as several stacked ones.
+# "SHA1" and "MD5" must not be followed by a digit ("SHA-12", "md50"): checked
+# in _labelled_hash_len, RE2 having no lookahead (ADR-0049).  A refused match
+# hides no other: none can start inside one.
 _HASH_LABEL_PATTERNS = (
-    (64, _compile_pattern(r"sha[\s\-_]*256", re.IGNORECASE)),
-    (40, _compile_pattern(r"sha[\s\-_]*1(?!\d)", re.IGNORECASE)),
-    (32, _compile_pattern(r"md[\s\-_]*5(?!\d)", re.IGNORECASE)),
+    (64, _compile_pattern(r"sha[" + _WS + r"\-_]*256", re.IGNORECASE), False),
+    (40, _compile_pattern(r"sha[" + _WS + r"\-_]*1", re.IGNORECASE), True),
+    (32, _compile_pattern(r"md[" + _WS + r"\-_]*5", re.IGNORECASE), True),
 )
 # How far back to look for that label — one or two table rows.
 _HASH_LABEL_WINDOW = 200
@@ -348,9 +407,11 @@ def _labelled_hash_len(text: str, block_start: int) -> int | None:
     """
     window = text[max(0, block_start - _HASH_LABEL_WINDOW):block_start]
     best_pos, best_len = -1, None
-    for hash_len, pattern in _HASH_LABEL_PATTERNS:
+    for hash_len, pattern, no_digit_after in _HASH_LABEL_PATTERNS:
         last = None
         for match in pattern.finditer(window):
+            if no_digit_after and window[match.end():match.end() + 1].isdecimal():
+                continue
             last = match
         if last is not None and last.start() > best_pos:
             best_pos, best_len = last.start(), hash_len
@@ -397,8 +458,7 @@ def _extract_hashes_regex(text: str) -> list[RawEntity]:
         seen_values.add(v)
         results.append(RawEntity(value=v, entity_type=et))
 
-    for m in _HASH_BLOCK_PATTERN.finditer(text):
-        block = m.group(0)
+    for block_start, block in _hash_blocks(text):
         fragments = block.split()
         if len(fragments) == 1:
             emit(block)
@@ -407,7 +467,7 @@ def _extract_hashes_regex(text: str) -> list[RawEntity]:
         joined = "".join(fragments)
         complete = [f for f in fragments if len(f) in _HASH_TYPE_BY_LEN]
         join_is_hash = len(joined) in _HASH_TYPE_BY_LEN
-        label_len = _labelled_hash_len(text, m.start())
+        label_len = _labelled_hash_len(text, block_start)
 
         if len(complete) == len(fragments):
             # Stack — unless the column is explicitly labelled with the joined
@@ -467,8 +527,8 @@ def _extract_network_iocs(text: str) -> list[RawEntity]:
                 results.append(RawEntity(value=ip, entity_type=EntityType.IPV6))
 
     # IPv4 par regex
-    for m in _IPV4_PATTERN.finditer(text):
-        results.append(RawEntity(value=m.group(), entity_type=EntityType.IPV4))
+    for ip in _ipv4_matches(text):
+        results.append(RawEntity(value=ip, entity_type=EntityType.IPV4))
 
     # URLs complètes
     for m in _URL_PATTERN.finditer(text):

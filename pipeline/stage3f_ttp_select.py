@@ -134,7 +134,11 @@ def _definitions() -> dict[str, str]:
     try:
         from pipeline import mitre_db
         return {t["id"].upper(): (t.get("description") or "") for t in mitre_db.get_techniques()}
-    except Exception:
+    except Exception as exc:
+        # Cached: every selection prompt of this process then lists the
+        # candidates without their ATT&CK definition.
+        logger.error(f"[Stage 3f] ATT&CK definitions unavailable, candidates are offered "
+                     f"without them: {type(exc).__name__}: {exc}")
         return {}
 
 

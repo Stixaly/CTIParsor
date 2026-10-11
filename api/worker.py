@@ -229,7 +229,11 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "")
         if _quote and report_text:
             try:
                 _span = locate(_quote, report_text)
-            except Exception:   # locating must never fail a job
+            except Exception as exc:   # locating must never fail a job
+                # ... but it demotes the technique below as if the quote were
+                # not in the text: say it was the locator.
+                logger.warning(f"[Worker] job {job_id}: quote of {ttp.mitre_id or ttp.technique_name} not located "
+                               f"(locator error, graded as not found): {type(exc).__name__}: {exc}")
                 _span = None
             if _span is not None:
                 # BOTH ends. `evidence_text` is the model's wording and
@@ -270,7 +274,9 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "")
         if _quote and report_text:
             try:
                 _span = locate(_quote, report_text)
-            except Exception:   # locating must never fail a job
+            except Exception as exc:   # locating must never fail a job
+                logger.warning(f"[Worker] job {job_id}: quote of held {held_ttp.attack_id} not located "
+                               f"(locator error): {type(exc).__name__}: {exc}")
                 _span = None
             if _span is not None:
                 _start, _end = _span.start, _span.end

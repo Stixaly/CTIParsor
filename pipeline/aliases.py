@@ -41,6 +41,10 @@ import functools
 import json
 from pathlib import Path
 
+from api.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 _GAZETTEER = Path(__file__).parent / "data" / "gazetteer.json"
 _MITRE_INDEX = Path(__file__).parent / "data" / "mitre_index.json"
 
@@ -83,7 +87,10 @@ def _load() -> tuple[
 
     try:
         entries = json.loads(_GAZETTEER.read_text(encoding="utf-8"))
-    except Exception:
+    except (OSError, ValueError) as exc:
+        # Every name then stays as the extractor wrote it, for the whole process.
+        logger.error(f"[aliases] {_GAZETTEER.name} unreadable, no alias is resolved: "
+                     f"{type(exc).__name__}: {exc}")
         return name2ids, id2canonical, id2surfaces, id2entity_type
 
     for e in entries:
@@ -194,7 +201,9 @@ def _load_techniques() -> tuple[dict[str, str], dict[str, str]]:
     id2name: dict[str, str] = {}
     try:
         index = json.loads(_MITRE_INDEX.read_text(encoding="utf-8"))
-    except Exception:
+    except (OSError, ValueError) as exc:
+        logger.error(f"[aliases] {_MITRE_INDEX.name} unreadable, no technique name is resolved: "
+                     f"{type(exc).__name__}: {exc}")
         return name2id, id2name
     for t in index.get("techniques", []):
         tid = (t.get("id") or "").strip()
