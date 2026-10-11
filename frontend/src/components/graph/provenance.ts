@@ -100,6 +100,7 @@ const ENTITY_REASON: Record<string, string> = {
   same_observable:   'same observable once normalised (registry hive)',
   same_technique:    'same ATT&CK technique as another row',
   alias_canonical:   'an alias of a MITRE object, named by its canonical name',
+  type_conflict:     'MITRE files this name under another kind of object (an actor named after a malware, or software after an actor), so it was not renamed — check the type',
   alias_merge:       'merged into an alias by graph completion (Stage 4b)',
   no_iso_country:    'a STIX Location needs an ISO country code, and this name has none',
   not_representable: 'the value cannot be expressed as this STIX type',

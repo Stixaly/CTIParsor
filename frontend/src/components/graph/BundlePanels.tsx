@@ -292,6 +292,11 @@ export function BundleNodeDetail({
                   {ledger.outcome === 'emitted' && ledger.reason === 'alias_canonical' && (
                     <div style={{ color: 'var(--warn)' }}>renamed “{ledger.stix_name}”: {entityReason(ledger.reason)}</div>
                   )}
+                  {ledger.outcome === 'emitted' && ledger.reason === 'type_conflict' && (
+                    <div style={{ color: 'var(--warn)' }}>
+                      type conflict{ledger.mitre_ids?.length ? ` (MITRE ${ledger.mitre_ids.join(', ')}: ${(ledger.mitre_types ?? []).join(', ')})` : ''}: {entityReason(ledger.reason)}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

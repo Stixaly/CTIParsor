@@ -17,6 +17,7 @@ Public API:
   mitre_id_for(name, stix_type=None)        -> canonical MITRE id ("G0049") or None
   canonical_name(name, stix_type=None)      -> canonical display name ("OilRig"); identity if unknown
   alias_surface_forms(name, stix_type=None) -> {every known surface form + the MITRE id}, lowercased
+  type_conflict(name, stix_type)            -> [(id, type)] the name denotes in the other family, or []
 
 All lookups are case-insensitive.  Unknown names pass through unchanged, so this
 is safe to apply blindly.
@@ -25,6 +26,14 @@ A surface form can denote several MITRE objects (23 in the shipped gazetteer:
 "snake" is both the Turla group G0010 and the Uroburos malware S0022). Callers
 should pass the STIX type they are about to create. An ambiguous form which the
 type cannot narrow resolves to nothing and passes through unchanged (ADR-0021).
+
+A form never resolves across families: a threat actor is not renamed after
+software, nor software after an actor.  "LockBit Black" asked for as a
+threat-actor used to become "LockBit 3.0", the malware S1202; OpenCTI derives
+the id from type and name, so it created a threat-actor "LockBit 3.0" beside
+the malware (audit B 8.1.8).  The name now stays as written and
+`type_conflict` tells the caller what MITRE calls it.  Malware and tool stay
+one family: MITRE files both as software, and the extractors mix them up.
 """
 from __future__ import annotations
 
@@ -51,6 +60,19 @@ _STIX_TYPE_TO_ENTITY_TYPES: dict[str, frozenset[str]] = {
     "malware": frozenset({"malware"}),
     "tool": frozenset({"tool"}),
 }
+
+#: The family of a STIX type and of a gazetteer `entity_type`: a form resolves
+#: only within its family (see the module docstring).
+_STIX_FAMILY = {"threat-actor": "actor", "intrusion-set": "actor", "malware": "software", "tool": "software"}
+_ENTITY_FAMILY = {"threat_actor": "actor", "malware": "software", "tool": "software"}
+
+
+def _other_family(mid: str, stix_type: str | None, id2entity_type: dict[str, str]) -> bool:
+    """Is MITRE object `mid` of another family than `stix_type`?  False when
+    either side is unknown: no type asked, or no type recorded."""
+    wanted = _STIX_FAMILY.get((stix_type or "").strip().lower())
+    found = _ENTITY_FAMILY.get(id2entity_type.get(mid, ""))
+    return bool(wanted and found and wanted != found)
 
 
 @functools.lru_cache(maxsize=1)
@@ -102,9 +124,10 @@ def _load() -> tuple[
 def _resolve(name: str, stix_type: str | None) -> str | None:
     """The single MITRE id *name* denotes, or None when that is not decidable.
 
-    An unambiguous surface form resolves whatever *stix_type* says; a form
-    carried by several ids is narrowed by type, and resolves to None when the
-    type is absent or still leaves more than one candidate (ADR-0021).
+    An unambiguous surface form resolves within *stix_type*'s family (actor,
+    software); a form carried by several ids is narrowed by type, and resolves
+    to None when the type is absent or still leaves more than one candidate
+    (ADR-0021).
     """
     if not isinstance(name, str) or not name:
         return None
@@ -116,7 +139,8 @@ def _resolve(name: str, stix_type: str | None) -> str | None:
     if not ids:
         return None
     if len(ids) == 1:
-        return next(iter(ids))
+        mid = next(iter(ids))
+        return None if _other_family(mid, stix_type, id2entity_type) else mid
     if stix_type is None or not isinstance(stix_type, str):
         return None
     wanted = _STIX_TYPE_TO_ENTITY_TYPES.get(stix_type.strip().lower())
@@ -154,6 +178,18 @@ def alias_surface_forms(name: str, stix_type: str | None = None) -> set[str]:
         forms |= id2surfaces.get(mid, set())
         forms.add(mid.lower())
     return forms
+
+
+def type_conflict(name: str, stix_type: str) -> list[tuple[str, str]]:
+    """The MITRE objects *name* denotes in the other family than *stix_type*,
+    as (id, gazetteer type), when it denotes none in its own: what the review
+    shows beside an actor named after a malware.  [] otherwise."""
+    if not isinstance(name, str) or not name.strip():
+        return []
+    name2ids, _, _, id2entity_type = _load()
+    ids = sorted(name2ids.get(name.lower().strip(), ()))
+    other = [(i, id2entity_type[i]) for i in ids if _other_family(i, stix_type, id2entity_type)]
+    return other if len(other) == len(ids) else []
 
 
 # ── MITRE ATT&CK technique name ↔ ID ──────────────────────────────────────────

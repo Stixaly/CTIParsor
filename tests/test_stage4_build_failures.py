@@ -68,6 +68,17 @@ def test_nothing_is_recorded_when_everything_builds():
     assert not [e for e in ledger["entities"] if e.get("reason") == "build_failed"]
 
 
+def test_an_actor_named_after_a_malware_keeps_its_name_and_says_so():
+    """Audit B 8.1.8: OpenCTI derives the id from type and name, so renaming the
+    actor "LockBit 3.0" created a threat-actor beside the malware."""
+    bundle, ledger = _build(llm=LLMEnrichmentResult(threat_actors=["LockBit Black"]))
+    [actor] = [o for o in bundle.objects if o["type"] == "threat-actor"]
+    assert actor["name"] == "LockBit Black"
+    [entry] = [e for e in ledger["entities"] if e["value"] == "LockBit Black"]
+    assert entry["outcome"] == "emitted" and entry["reason"] == "type_conflict"
+    assert entry["mitre_ids"] == ["S1202"] and entry["mitre_types"] == ["malware"]
+
+
 # ── The fallbacks that returned without a word (8.1.9, continued) ────────────
 
 def test_an_embedded_rule_that_fails_to_build_is_left_out_with_its_reason(monkeypatch):

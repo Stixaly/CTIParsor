@@ -88,3 +88,35 @@ def test_empty_and_non_string_inputs_are_safe():
 def test_unknown_names_pass_through():
     assert pipeline.aliases.canonical_name("totally-unknown-actor-xyz") == "totally-unknown-actor-xyz"
     assert pipeline.aliases.mitre_id_for("totally-unknown-actor-xyz") is None
+
+
+# ── A name never resolves across families (audit B 8.1.8) ────────────────────
+
+def test_an_actor_is_not_renamed_after_a_malware():
+    # "LockBit Black" is only an alias of the malware LockBit 3.0 (S1202).
+    assert pipeline.aliases.canonical_name("LockBit Black", "threat-actor") == "LockBit Black"
+    assert pipeline.aliases.mitre_id_for("LockBit Black", "threat-actor") is None
+    assert pipeline.aliases.type_conflict("LockBit Black", "threat-actor") == [("S1202", "malware")]
+    # Asked for as what it is, or with no type, it still canonicalises.
+    assert pipeline.aliases.canonical_name("LockBit Black", "malware") == "LockBit 3.0"
+    assert pipeline.aliases.canonical_name("LockBit Black") == "LockBit 3.0"
+    assert pipeline.aliases.type_conflict("LockBit Black", "malware") == []
+
+
+def test_software_is_not_renamed_after_an_actor():
+    assert pipeline.aliases.canonical_name("Fancy Bear", "malware") == "Fancy Bear"
+    assert pipeline.aliases.alias_surface_forms("Fancy Bear", "malware") == {"fancy bear"}
+    assert pipeline.aliases.type_conflict("Fancy Bear", "tool") == [("G0007", "threat_actor")]
+    assert pipeline.aliases.canonical_name("Fancy Bear", "intrusion-set") == "APT28"
+
+
+def test_malware_and_tool_stay_one_family():
+    # MITRE files both as software and the extractors mix them up (ADR-0021).
+    assert pipeline.aliases.mitre_id_for("mimikatz", "malware") == "S0002"
+    assert pipeline.aliases.type_conflict("mimikatz", "malware") == []
+
+
+def test_a_form_of_both_families_is_no_conflict():
+    # "snake": Turla (G0010) and Uroburos (S0022) — the type picks one.
+    assert pipeline.aliases.type_conflict("snake", "threat-actor") == []
+    assert pipeline.aliases.canonical_name("snake", "threat-actor") == "Turla"
