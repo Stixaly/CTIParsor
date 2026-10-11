@@ -2,7 +2,7 @@ import base64
 import json
 import os
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import stix2
 import yaml
@@ -40,6 +40,30 @@ def _source_published(anchor) -> dict | None:
     if not isinstance(data, dict) or not data.get("value") or data.get("source") == "file_metadata":
         return None
     return {k: data[k] for k in ("value", "source", "detail") if data.get(k)}
+
+
+def _ioc_valid_from(anchor) -> tuple[datetime, str]:
+    """When an IoC's Indicator is valid from, and on what basis.
+
+    The report's publication date when the document gives one (ADR-0063's
+    anchor, publication-grade: not a file's metadata), at midnight UTC; else
+    the time the bundle is built.  It used to be the build time always, so an
+    IoC a 2021 report names was valid "from today" and for ever (audit
+    B 8.1.10).  No `valid_until`: OpenCTI computes it from its decay rule for
+    the indicator's type, and an Indicator whose lifetime is already over is
+    created revoked there, as an IoC of an old report should be.
+    """
+    published = _source_published(anchor)
+    if published:
+        try:
+            day = date.fromisoformat(str(published["value"])[:10])
+        except ValueError:
+            day = None
+        if day is not None:
+            when = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
+            if when <= datetime.now(timezone.utc):
+                return when, "report_published"
+    return datetime.now(timezone.utc), "build_time"
 
 
 def _with_temporal(sro, plan):
@@ -956,6 +980,7 @@ def build_stix_bundle(
     # IOC value and some other entity name normalize to the same lowercase
     # key.
     sco_id_to_indicator: dict[str, object] = {}
+    ioc_valid_from, ioc_valid_basis = _ioc_valid_from(document_anchor)
     # Observables shipped without an Indicator because the report names them
     # without accusing them (pipeline/benign.py, audit B 8.1.7).
     benign_sco_ids: set[str] = set()
@@ -1002,7 +1027,7 @@ def build_stix_bundle(
                 name=f"Malicious IoC: {assoc.ioc_value}",
                 pattern=pattern,
                 pattern_type="stix",
-                valid_from=datetime.now(timezone.utc),
+                valid_from=ioc_valid_from,
                 indicator_types=["malicious-activity"],
                 id=indicator_id,
             )
@@ -1012,7 +1037,7 @@ def build_stix_bundle(
             if hasattr(sco, "id"):
                 sco_id_to_indicator[sco.id] = indicator
             led.object(indicator, "ioc_indicator", ioc_value=assoc.ioc_value,
-                       sco_id=getattr(sco, "id", None))
+                       sco_id=getattr(sco, "id", None), valid_from_basis=ioc_valid_basis)
 
             rel = _add_relationship(stix_objects, indicator, "indicates", malware, confidence=0.8,
                                     pol_index=_pol_index, seen=seen_rel_keys,
@@ -1052,7 +1077,7 @@ def build_stix_bundle(
                 name=f"Indicator: {entity.value}",
                 pattern=pattern,
                 pattern_type="stix",
-                valid_from=datetime.now(timezone.utc),
+                valid_from=ioc_valid_from,
                 indicator_types=["malicious-activity"],
                 id=indicator_id,
             )
@@ -1061,7 +1086,8 @@ def build_stix_bundle(
             seen_indicators.add(ioc_key)
             if hasattr(sco, "id"):
                 sco_id_to_indicator[sco.id] = indicator
-            led.object(indicator, "ioc_indicator", ioc_value=entity.value, sco_id=_field(sco, "id"))
+            led.object(indicator, "ioc_indicator", ioc_value=entity.value, sco_id=_field(sco, "id"),
+                       valid_from_basis=ioc_valid_basis)
             _based_on(indicator, sco)
         except Exception as exc:
             logger.warning(f"[Stage 4] indicator not built for {entity.value!r}: "

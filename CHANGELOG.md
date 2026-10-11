@@ -6,6 +6,21 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Changed
+
+#### An IoC's Indicator is valid from the report's date, 2026-10-11
+
+`valid_from` was the time the bundle was built, with no `valid_until`: an IoC
+a 2021 report names was valid "from today" and for ever (audit B 8.1.10).
+It is now the report's publication date when the document gives one
+(ADR-0063's publication-grade anchor, the one `x_source_published` carries),
+at midnight UTC, and the build time otherwise; the ledger records which
+(`valid_from_basis`). No `valid_until` is set: OpenCTI computes it from its
+decay rule for the indicator's type and creates an Indicator whose lifetime
+is already over **revoked**, so the IoCs of an old report now arrive revoked
+in OpenCTI, as the maintainer chose. A detection rule quoted in a report
+keeps the build time: it still detects its family years later.
+
 ### Fixed
 
 #### A revoked ATT&CK id is its replacement; a shared name is the Enterprise technique, 2026-10-11

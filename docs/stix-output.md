@@ -32,7 +32,7 @@ detection rule quoted in the report itself is represented.
 | Targeted sector | `identity` SDO (`identity_class: class`) |
 | Infrastructure | `infrastructure` SDO |
 | Remediation step | `course-of-action` SDO |
-| Any accepted IoC | `indicator` SDO (STIX pattern) + `based-on` SRO |
+| Any accepted IoC | `indicator` SDO (STIX pattern) + `based-on` SRO; `valid_from` is the report's publication date when the document gives one (else the build time), no `valid_until`: OpenCTI derives it from its decay rule, so an IoC of an old report arrives revoked |
 | IoC linked to malware | extra `indicates` SRO Indicator → Malware |
 | Relationship between an SDO and an observable (LLM-extracted or policy-pinned) | kept on the observable when STIX 2.1 defines that verb for the pair (`malware communicates-with domain-name`, `malware drops`/`downloads file`, `infrastructure consists-of <any observable>`); every other claim — `related-to` included — goes through the observable's `indicator` (ADR-0041, ADR-0062) |
 | Detection rule quoted verbatim in the report (YARA, Suricata, Snort, or Sigma) | `indicator` SDO with `pattern_type` set to the format and `pattern` holding the rule text as-is; auto-linked with `indicates` to a malware/tool whose name appears in the rule's own title (ADR-0042) |
