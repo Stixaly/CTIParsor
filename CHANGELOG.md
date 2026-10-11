@@ -6,6 +6,20 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Changed
+
+#### What the report does not state stays out of its Report, 2026-10-11
+
+Graph completion's reference grounding, on by default, added MITRE's curated
+edges between the report's objects (APT29 uses Mimikatz) labelled `reported`,
+and they and the transitive edges composed from two of the report's edges
+entered the Report's `object_refs`: OpenCTI filed them as contained in the
+report (audit B 8.4.2, 8.4.3). MITRE's edges are now graded
+`external-reference`, and both kinds ship in the bundle but outside the
+Report, recorded in the ledger with `outside_report: true`. OpenCTI imports
+them as relationships between the objects. Long-distance edges, read from
+the report's own text, stay in it. ADR-0013 is amended.
+
 ### Documentation
 
 #### AnnoCTR test, once: technique F1 0.690; 50 quotes judged, 2026-10-11

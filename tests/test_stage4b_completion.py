@@ -184,7 +184,7 @@ def test_reference_grounding_adds_curated_edge():
                                                         "alias": False}})
 
     assert stats.reference_added >= 1
-    refs = [o for o in _rels(objs) if o.get("x_evidence_label") == "reported"]
+    refs = [o for o in _rels(objs) if o.get("x_evidence_label") == "external-reference"]
     assert any(o.get("x_inference_rule") == "attack-reference:G0016>S0002"
                for o in refs)
 
@@ -378,3 +378,41 @@ def test_build_stix_bundle_runs_completion():
                 if o.get("type") == "relationship"
                 and o.get("x_evidence_label") == "inferred"]
     assert any(o.get("x_inference_rule", "").startswith("transitive:") for o in inferred)
+
+
+# ── What the report does not state stays out of its Report (audit 8.4.2, 8.4.3) ─
+
+def test_edges_the_report_does_not_state_ship_outside_the_report():
+    """MITRE's curated edges and the ones composed from two others ship in the
+    bundle but not in the Report's object_refs: OpenCTI files a Report's
+    object_refs as contained in that report, and these are not the report's."""
+    import pipeline.stage4b_graph_completion as s4b
+    from pipeline.bundle_ledger import MappingLedger
+
+    if not s4b._attack_pairs():
+        pytest.skip("attack_relationships.json not built")
+    llm = LLMEnrichmentResult(
+        threat_actors=["APT29"], malware_families=["Mimikatz", "WellMess"],
+        ttps=[TTPExtracted(technique_name="Phishing", mitre_id="T1566", description="",
+                           evidence_text="WellMess was delivered by phishing emails to staff.")],
+        relationships=[
+            RelationshipExtracted(source_value="APT29", relationship_type="uses", target_value="WellMess",
+                                  confidence=0.8, evidence_text="APT29 used WellMess."),
+            RelationshipExtracted(source_value="WellMess", relationship_type="uses", target_value="Phishing",
+                                  confidence=0.8, evidence_text="WellMess was delivered by phishing."),
+        ],
+    )
+    ledger = MappingLedger()
+    bundle = build_stix_bundle([], llm, "r", report_text="APT29 used WellMess and Mimikatz.",
+                               ledger=ledger)
+    [report] = [o for o in bundle.objects if o["type"] == "report"]
+    rels = [o for o in bundle.objects if o["type"] == "relationship"]
+    reference = [r for r in rels if str(r.get("x_inference_rule", "")).startswith("attack-reference:")]
+    transitive = [r for r in rels if str(r.get("x_inference_rule", "")).startswith("transitive:")]
+    extracted = [r for r in rels if not r.get("x_inference_rule")]
+    assert reference and transitive and extracted
+    assert all(r["x_evidence_label"] == "external-reference" for r in reference)
+    for r in reference + transitive:
+        assert r.id not in report["object_refs"]
+        assert ledger.to_dict()["objects"][r.id]["outside_report"] is True
+    assert all(r.id in report["object_refs"] for r in extracted)
