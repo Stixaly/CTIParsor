@@ -23,7 +23,7 @@ from pipeline.detection.yara_check import DOES_NOT_COMPILE, prepare_embedded_rul
 from pipeline.network_traffic import parse_network_traffic
 from pipeline.regex_safety import compile_pattern
 from pipeline.stage3_llm import LLMEnrichmentResult
-from pipeline.stage4b_graph_completion import CompletionStats, complete_graph
+from pipeline.stage4b_graph_completion import CompletionStats, complete_graph, stated_by_the_report
 from pipeline.stix_access import field as _field
 from pipeline.stix_rel_spec import rel_is_allowed, rel_is_listed
 from pipeline.temporal import export_mode, export_plan, merge_times, temporal_identity
@@ -1376,8 +1376,11 @@ def build_stix_bundle(
 
     # --- Graph completion (Stage 4b) — alias merge + inferred edges ---
     # Runs here, before the Report SDO wraps object_refs and before provenance
-    # stamping, so any edges it adds are included in the report and stamped like
-    # every other object.  Append-only + spec-guarded: see stage4b_graph_completion
+    # stamping, so any edges it adds are stamped like every other object.  The
+    # ones the report does not state (MITRE's, and those composed from two
+    # others) ship in the bundle but stay out of the Report's object_refs:
+    # OpenCTI would otherwise file them as contained in this report (audit
+    # B 8.4.2, 8.4.3).  Append-only + spec-guarded: see stage4b_graph_completion
     # and ADR-0013.  Governed by the policy "completion" block; pinned rules win.
     if graph_completion:
         _completion_stats = complete_graph(
@@ -1401,10 +1404,15 @@ def build_stix_bundle(
     # description : full extracted text so STIX consumers see the narrative
     # external_references : filename + hash for tracing back to the source file
     if stix_objects:
+        in_report = [obj.id for obj in stix_objects
+                     if hasattr(obj, "id") and stated_by_the_report(obj)]
+        for obj in stix_objects:
+            if hasattr(obj, "id") and not stated_by_the_report(obj):
+                led.outside_report(obj)
         report_kwargs: dict = {
             "name":        report_name,
             "published":   datetime.now(timezone.utc),
-            "object_refs": [obj.id for obj in stix_objects if hasattr(obj, "id")],
+            "object_refs": in_report,
         }
 
         if report_text:
@@ -1461,7 +1469,7 @@ def build_stix_bundle(
             report = stix2.Report(
                 name=report_name,
                 published=datetime.now(timezone.utc),
-                object_refs=[obj.id for obj in stix_objects if hasattr(obj, "id")],
+                object_refs=in_report,
             )
             stix_objects.append(report)
             led.object(report, "report", fallback="optional_fields_dropped",

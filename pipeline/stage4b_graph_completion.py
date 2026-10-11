@@ -450,10 +450,29 @@ def _rewrite_refs(stix_objects: list, remap: dict[str, str],
 # ── Step 1b — ATT&CK reference grounding ──────────────────────────────────────
 # Adds MITRE-curated edges (built by scripts/build_indexes.py from the ATT&CK
 # STIX bundles) between report objects that both resolve to ATT&CK IDs.  These
-# are expert-maintained facts, not inferences — labelled "reported" with the
-# ATT&CK pair recorded in x_inference_rule for provenance.
+# are expert-maintained facts, not inferences, but MITRE states them, not the
+# report: labelled "external-reference" (they were "reported", the grade for
+# what the source says, audit B 8.4.2), with the ATT&CK pair recorded in
+# x_inference_rule for provenance.  Stage 4 leaves them out of the Report.
 
 _ATTACK_REL_PATH = Path(__file__).parent / "data" / "attack_relationships.json"
+
+#: The grade of an edge MITRE's ATT&CK states between two of the report's
+#: objects.  Outside the EvidenceLabel scale, which grades what the report says.
+EXTERNAL_REFERENCE = "external-reference"
+
+#: The x_inference_rule prefixes of the edges the report does not state:
+#: MITRE's (reference grounding) and the ones deduced by composing two edges.
+#: Stage 4 keeps them in the bundle and out of the Report's object_refs.
+#: Long-distance edges are read from the report's own text and stay in it.
+NOT_STATED_BY_THE_REPORT = ("attack-reference:", "transitive:")
+
+
+def stated_by_the_report(obj) -> bool:
+    """False for an edge graph completion added from outside the report's
+    words (MITRE's, or composed from two others); True for everything else."""
+    rule = obj.get("x_inference_rule") if hasattr(obj, "get") else None
+    return not (isinstance(rule, str) and rule.startswith(NOT_STATED_BY_THE_REPORT))
 
 
 @functools.lru_cache(maxsize=1)
@@ -547,7 +566,7 @@ def _ground_reference(
                 _make_inferred_rel(
                     a, verb, b, 0.85,
                     f"attack-reference:{aid_a}>{aid_b}", [],
-                    label="reported",
+                    label=EXTERNAL_REFERENCE,
                 )
             )
             existing.add(key)
