@@ -15,7 +15,7 @@ detection rule quoted in the report itself is represented.
 | File hash (MD5 / SHA-1 / SHA-256) | `file` SCO |
 | MAC address | `mac-addr` SCO |
 | ASN | `autonomous-system` SCO |
-| File path (Windows/Unix) + bare filename | `file` SCO |
+| File path (Windows/Unix) + bare filename | `file` SCO, the value as written in `name`, path included: no `directory` / `parent_directory_ref`, because OpenCTI identifies a hashless file by its name alone and would merge two directories' `svchost.exe` (ADR-0083) |
 | Registry key | `windows-registry-key` SCO |
 | Mutex † | `mutex` SCO |
 | User account † | `user-account` SCO |

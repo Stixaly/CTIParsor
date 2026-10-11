@@ -6,6 +6,21 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Documentation
+
+#### A file named without a hash keeps its path in `name` (ADR-0083), 2026-10-11
+
+The October audit (B 8.1.12) asked to split `C:\Users\Public\it's.exe`
+into a File named `it's.exe` and a Directory, as STIX 2.1 describes. OpenCTI,
+the target, identifies a hashless file by its name alone and drops the
+directory from its pattern-to-observable conversion: the split would merge
+the `svchost.exe` an attacker dropped in `C:\Users\Public` with the
+legitimate one in System32. CTIParsor keeps the path in `name`, as it already
+did, and ADR-0083 records it as a choice. Checked against OpenCTI's
+`identifier.js`: the id shipped for a hashless file equals OpenCTI's
+standard id. `tests/test_file_identity.py` holds it. A strict STIX export
+profile, when there is one, would split.
+
 ### Fixed
 
 #### The CLI brings its database to this code's schema, as the API does, 2026-10-11
