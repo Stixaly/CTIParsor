@@ -8,44 +8,20 @@ sections group by theme rather than strict semver.
 
 ### Fixed
 
-#### No fallback without a word: the last 23 silent broad handlers, 2026-10-11
+#### The CLI brings its database to this code's schema, as the API does, 2026-10-11
 
-D10 removed the `except Exception: pass` blocks (audit B 8.1.9); a broad
-handler that *returned a fallback* still said nothing. Reading the 124
-handlers ruff's BLE001 lists in the shipped code found 23 such, each now
-logged with its error, and written to the ledger when the bundle changes:
-
-- **The bundle** (Stage 4): a detection rule quoted in the report whose
-  Indicator failed to build disappeared without a ledger entry; it is now
-  `removed / build_failed` with the error, like a rule that does not compile
-  (ADR-0067). The source file not embedded as an Artifact (ADR-0043) is a
-  `dropped / build_failed` entity. A Report rebuilt without its optional
-  fields records which ones it lost (`fallback`, `dropped_fields`). A
-  network-traffic or a derived relationship that fails to build is logged.
-- **Whole-process degradations**: an unreadable `gazetteer.json` turned alias
-  resolution off, and an unreadable `mitre_index.json` technique-name
-  resolution, for the life of the process, with no line in the log; both
-  are now errors in the log (and catch only a read or parse error). So is
-  Stage 3f offering candidates without their ATT&CK definitions. Stage 2c's
-  unreadable embedding manifest, the 0.62 threshold Stages 3 and 3c fall back
-  to, a PDF whose scan status could not be read, a figure read without its
-  context, and promote candidates not checked against the gazetteer are
-  warnings.
-- **The record**: a run config field that could not be read
-  (`ttp_thresholds`, `ner_thresholds`, `entity_overrides`) says why
-  (`"error"`), as `manifest.llm` already did, instead of a bare `null`. A
-  quote the locator failed on is logged before its technique is graded as
-  not found. The Policy page's last run logs a store it could not read or a
-  stored bundle it could not parse.
-- markitdown and Playwright: absent stays silent (optional dependencies);
-  installed but failing to load is a warning.
-
-`tests/test_no_silent_fallbacks.py` now fails on any broad handler in `api/`,
-`pipeline/`, `models/` or `main.py` that neither logs, records, uses its
-exception nor raises, unless its `except` line justifies it in a `noqa`
-(BLE001, S110 or S112) with a reason. Writing it caught one more: the new log
-line of the scan check read `path.name` on a string path, which would have
-raised inside the handler.
+`main.py` never ran the migrations (ADR-0077); only the API, the workers and
+`bootstrap` did (audit 8.1.11). On a database with no tables yet, a CLI run
+said the store was unreachable for the relationship policy (`UndefinedTable`)
+and Stage 2f failed on `relation "cve_cache" does not exist`; nothing was
+created. The CLI now migrates the database before its first report:
+reproduced on an empty schema of the test server, it now creates the 18
+tables, reads the policy ("aucune enregistrée") and runs Stage 2f. A
+database this code cannot migrate (newer than the code, an edited migration,
+a cluster that lost its data) stops the CLI as it stops the API. With no
+`DATABASE_URL`, or no server behind it, the CLI says so once, before the
+report, and runs without policy, analyst lists or CVE cache, as before.
+`tests/test_cli_store.py`.
 
 ### Security
 
