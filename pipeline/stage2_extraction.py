@@ -353,6 +353,36 @@ def refang(text: str) -> str:
     return _HALF_BRACKET_DOT.sub(_half_bracket_repl, _DEFANG_PATTERN.sub(_defang_repl, text))
 
 
+def _sub_with_offsets(pattern, repl, text: str, offsets: list[int]) -> tuple[str, list[int]]:
+    """`pattern.sub(repl, text)`, carrying each character's offset in the
+    original text; a replacement's characters all point at its match's start."""
+    out: list[str] = []
+    out_offsets: list[int] = []
+    pos = 0
+    for m in pattern.finditer(text):
+        start, end = m.span()
+        out.append(text[pos:start])
+        out_offsets.extend(offsets[pos:start])
+        replacement = repl(m)
+        out.append(replacement)
+        out_offsets.extend([offsets[start]] * len(replacement))
+        pos = end
+    out.append(text[pos:])
+    out_offsets.extend(offsets[pos:])
+    return "".join(out), out_offsets
+
+
+def refang_with_offsets(text: str) -> tuple[str, list[int]]:
+    """`refang(text)`, and for each of its characters the offset in `text` it
+    came from.  For a caller that holds spans on the defanged text (an
+    evaluation's annotations) and finds a quote in the refanged one, which is
+    what the pipeline reads."""
+    if not text:
+        return text, []
+    once, offsets = _sub_with_offsets(_DEFANG_PATTERN, _defang_repl, text, list(range(len(text))))
+    return _sub_with_offsets(_HALF_BRACKET_DOT, _half_bracket_repl, once, offsets)
+
+
 def extract_entities(text: str) -> list[RawEntity]:
     """
     Extrait toutes les entités IoC du texte.
