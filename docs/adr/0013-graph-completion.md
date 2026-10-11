@@ -115,3 +115,25 @@ Three of the consequences above need qualifying against what runs:
   keys on the label (auto-promotion gate).
 
 The default-policy and cap questions are taken up by ADR-0038.
+
+## Amendment (2026-10-11): what the report does not state stays out of its Report
+
+The October 2026 audit (B 8.4.2, 8.4.3) found that reference grounding is on
+by default, labels MITRE's curated edges `reported` (the grade for what the
+source states) and runs before the Report SDO is built, so its edges entered
+the Report's `object_refs`: OpenCTI then files "APT29 uses Mimikatz" as
+contained in this report when only MITRE says it. Transitive edges, composed
+from two of the report's edges and not measured rule by rule, entered it the
+same way.
+
+- A reference edge is labelled `external-reference`, outside the
+  EvidenceLabel scale, which grades what the report says.
+- Reference and transitive edges ship in the bundle, as before, but not in
+  the Report's `object_refs`; the ledger records each with
+  `outside_report: true`. OpenCTI imports them as relationships between the
+  objects, not as part of the report. The Graph page builds from the bundle
+  and still shows them, with their provenance.
+- Long-distance edges (step 3, opt-in) are read from the report's own text
+  and stay in the Report.
+- Measuring each transitive rule before it stays on by default waits for the
+  in-house set's gold relationships.
