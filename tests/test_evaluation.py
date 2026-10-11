@@ -267,3 +267,32 @@ def test_timeml_score_repairs_a_shifted_span():
     repaired = score([doc], repair_spans=True)
     assert (repaired.exact, repaired.total) == (2, 2)
     assert repaired.relative_exact == 1                      # "last month" against the DCT
+
+
+def test_a_quote_of_the_refanged_text_is_located_in_the_source():
+    """The pipeline reads the text refanged (Stage 1): its quote says
+    "www.destroy2013.com" where AnnoCTR's text says "www.destroy2013.]com".
+    The evaluator finds it there and reports the span in the source's offsets,
+    where the annotated passages are."""
+    text = ("Intro. This particular sample has the domains www.destroy2013.]com and "
+            "www.fitehook.]com as c2 servers that resolve to 127.0.0.1 most of the day.")
+    s = text.index("This particular")
+    spans = {"T1568": [(s, s + 30)]}
+    quote = ("This particular sample has the domains www.destroy2013.com and "
+             "www.fitehook.com as c2 servers")
+    [row] = evidence.check("d", text, [{"mitre_id": "T1568", "evidence_text": quote}], spans,
+                           lambda t: t or None)
+    assert row.located is not None and row.located[0] == s
+    assert text[row.located[0]:row.located[1]].endswith("c2 servers")
+    assert row.on_passage is True
+
+
+def test_refang_with_offsets_is_refang_and_points_back():
+    from pipeline.stage2_extraction import refang, refang_with_offsets
+
+    text = "Beacon to hxxps://evil[.]com/a and 107.150.112.]250, then foo[at]bar(dot)com."
+    live, offsets = refang_with_offsets(text)
+    assert live == refang(text) and len(offsets) == len(live)
+    i = live.index("250")
+    assert text[offsets[i]:offsets[i] + 3] == "250"
+    assert refang_with_offsets("") == ("", [])

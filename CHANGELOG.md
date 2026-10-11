@@ -6,6 +6,25 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Fixed
+
+#### A quote next to a no-break space is found; the evaluator reads the refanged text, 2026-10-11
+
+- **`evidence_span.locate` missed quotes across a no-break space** that sits
+  next to another blank, as HTML pages leave them: `_CHAR_MAP` turned
+  U+00A0 into a space one character at a time, so "instead of\xa0 plain"
+  became "instead of  plain" and the quote "instead of plain" matched
+  nothing. The worker locates each technique's quote with it and grades a
+  technique whose quote it cannot find one step down, as if the quote were
+  not in the report. On the AnnoCTR test run, 2 of 312 quotes; 0 now. Every
+  space `_CHAR_MAP` reads as one now joins the run of blanks around it.
+- **The evaluator searched AnnoCTR's raw text for quotes the pipeline took
+  from the refanged one** (`www.destroy2013.com` for `www.destroy2013.]com`),
+  and reported 98% of quotes found where all were. It now also searches the
+  refanged text, through `stage2_extraction.refang_with_offsets`, which maps
+  each refanged character back to the source, so the annotated-passage
+  measure keeps working. Quotes found: 153/153 on dev, 312/312 on test.
+
 ### Documentation
 
 #### AnnoCTR test, once: technique F1 0.690; 50 quotes judged, 2026-10-11
