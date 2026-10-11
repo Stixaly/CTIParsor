@@ -121,5 +121,6 @@ def reload() -> None:
         from pipeline import stage2b_gazetteer
         stage2b_gazetteer._load.cache_clear()
         stage2b_gazetteer._build_automaton.cache_clear()
+        stage2b_gazetteer._ambiguous_forms.cache_clear()
     except ImportError:  # pragma: no cover - the gazetteer module is always importable here
         pass

@@ -177,6 +177,11 @@ THRESHOLD_CALIBRATION_ENABLED=true
 # accepting joins the gazetteer), proposed by `docker compose run --rm dev
 # python -m scripts.promote_overrides` and activated by a person.  false ignores them.
 ENTITY_OVERRIDES_ENABLED=true
+# Stage 2b — the ordinary-word policy (docs/gazetteer-ordinary-words.md).
+# shadow: match as before, count what the policy would withhold (the stage
+# report's policy_* counts); apply: withhold it, for measurement until the
+# acceptance gates pass (scripts/measure_gazetteer_policy.py); off: no policy.
+# GAZETTEER_POLICY=shadow
 ```
 
 ## Vision (Stage 1f — figures)

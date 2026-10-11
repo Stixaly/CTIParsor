@@ -643,14 +643,21 @@ class _Run:
             self.record("2", RAN, "", time.monotonic() - t0, entities=len(best))
 
         # Stage 2b — gazetteer; regex wins a tie (more precise for exact values).
+        from pipeline import gazetteer_policy
         from pipeline.stage2b_gazetteer import available as gaz_available
-        from pipeline.stage2b_gazetteer import match_gazetteer
+        from pipeline.stage2b_gazetteer import match_gazetteer_traced
         if self.gate("2b", gaz_available):
             t0 = time.monotonic()
-            self.r.gazetteer = match_gazetteer(text)
+            self.r.gazetteer, gaz_trace = match_gazetteer_traced(text)
             for ge in self.r.gazetteer:
                 best.setdefault((ge.value.lower(), ge.entity_type), ge)
-            self.record("2b", RAN, "", time.monotonic() - t0, entities=len(self.r.gazetteer))
+            # The ordinary-word policy's counts (docs/gazetteer-ordinary-words.md):
+            # in shadow mode what it would withhold, in apply mode what it did.
+            policy_mode = gazetteer_policy.mode()
+            policy_note = f"ordinary-word policy: {policy_mode} ({gazetteer_policy.version()})"
+            self.record("2b", RAN, "" if policy_mode == "off" else policy_note,
+                        time.monotonic() - t0, entities=len(self.r.gazetteer),
+                        **gazetteer_policy.summary(gaz_trace))
         entities = list(best.values())
 
         # Stage 2c — semantic TTP detection (verify mode), or candidate

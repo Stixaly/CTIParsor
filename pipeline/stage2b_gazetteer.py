@@ -27,10 +27,13 @@ from __future__ import annotations
 import functools
 import json
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 from models.schemas import EntityType, RawEntity
+from pipeline import gazetteer_policy
 from pipeline.env_flags import env_bool
+from pipeline.gazetteer_policy import Judgement
 from pipeline.overrides import drop_denied, promoted_entries
 
 _SKIP_HEAVY = env_bool("SKIP_HEAVY_MODELS")
@@ -117,8 +120,30 @@ def _build_automaton():
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def match_gazetteer(text: str) -> list[RawEntity]:
+    """What Stage 2b emits; see match_gazetteer_traced."""
+    return match_gazetteer_traced(text)[0]
+
+
+@functools.lru_cache(maxsize=1)
+def _ambiguous_forms() -> frozenset[str]:
+    return gazetteer_policy.ambiguous_forms(_load())
+
+
+_Judge = Callable[[dict, str], Judgement | None]
+
+
+def _trace_item(entry: dict, text: str, start: int, end: int, verdict: Judgement) -> dict:
+    return {"form": entry["name"], "surface": text[start:end], "start": start, "end": end,
+            "canonical": entry["canonical"], "entity_type": entry["entity_type"],
+            "mitre_id": entry.get("mitre_id"), "decision": verdict.decision,
+            "outcome": verdict.outcome, "reason": verdict.reason}
+
+
+def match_gazetteer_traced(text: str, policy_mode: str | None = None) -> tuple[list[RawEntity], list[dict]]:
     """
-    Scan *text* for known malware families, tools, and APT group names.
+    Scan *text* for known malware families, tools, and APT group names, and
+    say what the ordinary-word policy makes of each occurrence it concerns
+    (pipeline/gazetteer_policy.py; `policy_mode` overrides GAZETTEER_POLICY).
 
     Uses Aho-Corasick if available (O(text_len + matches)); falls back to the
     regex approach (O(N × text_len)) when pyahocorasick is not installed.
@@ -130,11 +155,30 @@ def match_gazetteer(text: str) -> list[RawEntity]:
     Confidence:
       0.92 — exact canonical name match
       0.88 — alias match (non-canonical name)
+
+    The trace lists occurrences the policy has an opinion on.  Shadow mode
+    emits exactly what "off" would and traces the emitted occurrences; apply
+    mode withholds every occurrence the policy does not resolve, before it
+    claims a span or a canonical name (so a later, qualifying mention of the
+    same name is still found), and traces each one it withheld or let through.
+    An ambiguous occurrence is traced once per identity it could be.
     """
+    pmode = policy_mode or gazetteer_policy.mode()
+    ambiguous = _ambiguous_forms() if pmode != "off" else frozenset()
+
+    def judge(entry: dict, surface: str) -> Judgement | None:
+        if gazetteer_policy.is_promoted(entry):
+            return None       # an analyst's promotion matches as before
+        return gazetteer_policy.judge(entry["name"], surface, ambiguous)
+
+    trace: list[dict] = []
+    use = judge if pmode != "off" else None
     automaton = _build_automaton()
     if automaton is not None:
-        return drop_denied(_match_aho(text, automaton))
-    return drop_denied(_match_regex(text))
+        found = _match_aho(text, automaton, use, pmode == "apply", trace)
+    else:
+        found = _match_regex(text, use, pmode == "apply", trace)
+    return drop_denied(found), trace
 
 
 def _is_word_char(ch: str) -> bool:
@@ -142,7 +186,8 @@ def _is_word_char(ch: str) -> bool:
     return ch.isalnum() or ch == '-'
 
 
-def _match_aho(text: str, automaton) -> list[RawEntity]:
+def _match_aho(text: str, automaton, judge: _Judge | None = None, apply: bool = False,
+               trace: list[dict] | None = None) -> list[RawEntity]:
     """
     Aho-Corasick path — O(text_len + match_count).
 
@@ -187,6 +232,13 @@ def _match_aho(text: str, automaton) -> list[RawEntity]:
             continue
         if any(s <= start < e2 or s < end <= e2 for s, e2 in claimed):
             continue
+        verdict = judge(entry, text[start:end]) if judge else None
+        if verdict is not None and verdict.withheld and apply:
+            if trace is not None:
+                trace.append(_trace_item(entry, text, start, end, verdict))
+            continue          # claims neither the span nor the name
+        if verdict is not None and (verdict.decision or verdict.withheld) and trace is not None:
+            trace.append(_trace_item(entry, text, start, end, verdict))
 
         claimed.append((start, end))
         seen_canonicals.add(canonical_lower)
@@ -215,7 +267,8 @@ def _match_aho(text: str, automaton) -> list[RawEntity]:
     return results
 
 
-def _match_regex(text: str) -> list[RawEntity]:
+def _match_regex(text: str, judge: _Judge | None = None, apply: bool = False,
+                 trace: list[dict] | None = None) -> list[RawEntity]:
     """
     Regex fallback path — O(N × text_len).  Used when pyahocorasick is absent.
     Semantically identical to the original implementation.
@@ -257,6 +310,13 @@ def _match_regex(text: str) -> list[RawEntity]:
             start, end = m.start(), m.end()
             if any(s <= start < e2 or s < end <= e2 for s, e2 in claimed):
                 continue
+            verdict = judge(entry, text[start:end]) if judge else None
+            if verdict is not None and verdict.withheld and apply:
+                if trace is not None:
+                    trace.append(_trace_item(entry, text, start, end, verdict))
+                continue      # the next occurrence may qualify
+            if verdict is not None and (verdict.decision or verdict.withheld) and trace is not None:
+                trace.append(_trace_item(entry, text, start, end, verdict))
             claimed.append((start, end))
             seen_canonicals.add(canonical_lower)
 
