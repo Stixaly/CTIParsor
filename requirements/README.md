@@ -21,6 +21,11 @@ uses a lock, by hash: `pip install --require-hashes`.
 tool goes to `requirements-dev.txt`, pinned. Then `make lock`, and commit
 every lock it rewrote.
 
+**A floor is read as a version.** Scorecard's scanner may take
+`package>=X` for an install of X. Keep each floor at or above the release
+that fixes the package's last known vulnerability;
+`python3 scripts/check_requirement_floors.py` checks every floor against OSV.
+
 **The names keep "requirements".** OSV-Scanner reads a `.txt` file only when
 its name contains `requirements`, and it reads the `osv-scanner.toml` next to
 a file, not a parent's: a file renamed `dev.txt`, or moved away from

@@ -157,7 +157,20 @@ git commit -m "chore: quarterly dependency update $(date +%Y-%m)"
 
 # 6. Review the accepted vulnerabilities (below)
 grep -n ignoreUntil requirements/osv-scanner.toml frontend/osv-scanner.toml
+
+# 7. No range's floor may be a vulnerable version (below)
+python3 scripts/check_requirement_floors.py
 ```
+
+**Step 7: the floors.** The locks decide what is installed, and pip-audit
+checks them. Scorecard's scanner, OSV-Scanner, may instead read a range such
+as `python-multipart>=0.0.9` as version 0.0.9: in October 2026 that gave
+eight advisories on python-multipart, whose locks pinned 0.0.32.
+`scripts/check_requirement_floors.py` asks OSV about every floor in the four
+lists and exits 1 when one is affected, naming the fixing releases. Raise
+the floor to the last fix, with a comment saying so, as `python-dotenv` and
+`pytest` do; the locks pin newer versions already, so `make lock` changes
+nothing.
 
 **Step 6: the accepted vulnerabilities.** SECURITY.md lists the vulnerabilities
 the project ships knowingly ("Accepted vulnerabilities") or keeps out ("Not
