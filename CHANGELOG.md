@@ -6,6 +6,25 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Documentation
+
+#### The gazetteer's ordinary-word forms, reviewed one by one, 2026-10-11
+
+`docs/gazetteer-ordinary-words.md` is the maintainer's review of the
+gazetteer forms that are also ordinary words (audit B 8.3.2): "page" is a
+MITRE alias of the malware Elise and occurs 699 times in lowercase in
+AnnoCTR, "play" names both an actor and a ransomware, "route" and "ping"
+are commands as well as words. Each of 151 forms gets a decision: RETAIN
+(1), CASE, an initial capital required (105), or CONTEXT, an explicit naming
+construction required (45), with corpus counts, excerpts and source checks
+(Joker is a real alias of Bread; Microsoft wrote its element names in title
+case too). It also specifies the outcomes a matcher must record (resolved,
+unresolved, excluded), that nothing changes in production before a shadow
+run and acceptance gates on labelled data, and that an unvalidated entity
+must be held, not merely scored lower, since a pending row ships. Proposed
+decisions; nothing is implemented by this entry. The document quotes AnnoCTR
+(CC BY-SA 4.0) and is shared under that licence.
+
 ### Changed
 
 #### An IoC's Indicator is valid from the report's date, 2026-10-11

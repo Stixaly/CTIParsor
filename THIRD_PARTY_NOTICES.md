@@ -14,6 +14,7 @@ on 2026-10-10.
 |---|---|---|---|---|
 | `pipeline/detection/opencti_snort/` | [OpenCTI](https://github.com/OpenCTI-Platform/opencti), `opencti-graphql/src/python/runtime/snort/` (ADR-0070) | 2021-2026 Filigran SAS | Apache-2.0 | no |
 | `pipeline/data/stix2_json_schemas/` | [oasis-open/cti-stix2-json-schemas](https://github.com/oasis-open/cti-stix2-json-schemas), commit `9af1db4` | 2016 OASIS Open | BSD-3-Clause | no |
+| `docs/gazetteer-ordinary-words.md` (excerpts) | short excerpts of [AnnoCTR](https://github.com/boschresearch/anno-ctr-lrec-coling-2024) texts, whitespace-normalised and clipped, with links to their source lines | Bosch Research and AnnoCTR contributors | CC-BY-SA-4.0 (the document as a whole) | excerpted |
 | `frontend/public/stix-icons/` (27 SVG) | [eclecticiq/stix-icons](https://github.com/eclecticiq/stix-icons), `White/normal/SVG/` | EclecticIQ | CC-BY-SA-4.0 | no |
 | `frontend/public/stix-viz/stix2viz/stix2viz/stix2viz.js`, `frontend/public/stix-viz/application.css` | [oasis-open/cti-stix-visualization](https://github.com/oasis-open/cti-stix-visualization) | 2016 OASIS Open | BSD-3-Clause | no |
 | `frontend/public/stix-viz/stix-viz.html`, `frontend/public/stix-viz/stix-viz-app.js` | adapted from cti-stix-visualization's `index.html` and `application.js` | 2016 OASIS Open; CTIParsor contributors | BSD-3-Clause AND Apache-2.0 | yes |
