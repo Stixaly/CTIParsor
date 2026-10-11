@@ -1,0 +1,44 @@
+{
+ "sha256": [
+  "a5bb10eb6bdc95823faeb67d6545b23e0f9ab45fc9ec31eba52c13dfaff8ade7",
+  "0899cd856fba9b131050135138cd87c5e5222f0a0657b94730901988d5cabdbb",
+  "2be9fec91c2c7e4b40fedb0d2bf11da0f6fe4a7047946e3bd492a7377e7c6154",
+  "73014671303fd8235351b0a5e8aa8c6c6d19caf70d0d13900454afde0083d2a4",
+  "6e16930f100e4505c66e0a47609120d6d2c2c7d57c6e59f3f41aae35ba65adf7",
+  "d069ad2efe805a0d3b7f993e96ff2585942072e8c0be8f7c545fa496d717e98d",
+  "78dddd3d59eeda1a0397646b3d6470b2c84aa0604f5861c905444f21f011b501",
+  "df06dfe9f54974fd7fd850e5c1bf7d4887646c9f561a4f025a7816ca28ed7129",
+  "b1b7dd7ad486aef388280d060e0dfd9c14aca36757ba87b0feb39e48a05a921d",
+  "1a9f91939ca6c89cce3b04e0f9d58ca8b22c1fa2969ba45c6c80982363d24655",
+  "1c0cc9af658a84f25db98e61713a8fa0aae24908d0a4cef2d50f6079d93b5d95",
+  "f897eedce542622c8a156206363b904463b2b3df79b7830577481816ee5c4340"
+ ],
+ "domain": [
+  "sync-cloud0.com",
+  "sync-sync1.net",
+  "cloud-mail2.org",
+  "login-secure3.info",
+  "cloud-sync4.xyz",
+  "mail-secure5.top",
+  "cdn-sync6.online",
+  "portal-secure7.site"
+ ],
+ "ipv4": [
+  "46.138.208.228",
+  "200.163.11.153",
+  "124.247.116.168",
+  "212.158.167.41",
+  "182.4.213.136",
+  "39.16.10.49",
+  "84.154.8.200",
+  "141.84.113.152"
+ ],
+ "url": [
+  "https://login-cloud0.com/login/portal0.php?id=66506",
+  "https://update-cdn1.com/sync/portal1.php?id=54317",
+  "https://cloud-cdn2.com/portal/static2.php?id=31102",
+  "https://cloud-portal3.com/update/cdn3.php?id=74812",
+  "https://cdn-files4.com/cdn/portal4.php?id=51661",
+  "https://cdn-update5.com/update/login5.php?id=28488"
+ ]
+}
