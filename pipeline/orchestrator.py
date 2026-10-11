@@ -1067,9 +1067,13 @@ class _Run:
         # Every regex/defang-extracted IoC must have become an SCO + Indicator.
         cov = verify_ioc_coverage(r.entities, r.bundle)
         r.ioc_coverage = cov
+        if cov["benign"]:
+            logger.info(f"[Stage 4] {len(cov['benign'])} IoCs shipped as observables without an "
+                        "Indicator: named without being accused (reference links, popular "
+                        "domains, non-routable addresses)")
         if cov["ok"]:
             logger.info(f"[Stage 4] IoC coverage OK — all {cov['total_iocs']} regex/defang "
-                        f"IoCs have a STIX observable + Indicator")
+                        f"IoCs have a STIX observable, and an Indicator unless benign")
         else:
             logger.warning(f"[Stage 4] IoC coverage gaps — "
                            f"{len(cov['missing_indicator'])}/{cov['total_iocs']} IoCs without an "
@@ -1105,7 +1109,8 @@ class _Run:
         self.hooks.progress("stage", {
             "stage": 4, "label": "STIX mapping", "objects": n_objects,
             "ioc_coverage": {"total": cov["total_iocs"],
-                             "with_indicator": cov["with_indicator"], "ok": cov["ok"]},
+                             "with_indicator": cov["with_indicator"], "benign": len(cov["benign"]),
+                             "ok": cov["ok"]},
             "synthesis": r.synthesis,
         })
 
