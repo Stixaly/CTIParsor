@@ -79,7 +79,8 @@ def _extract_synthesis_stats(bundle_json: str | None) -> dict | None:
         return None
     try:
         parsed = json.loads(bundle_json)
-    except Exception:
+    except ValueError as exc:   # JSONDecodeError, or text that is not UTF-8
+        logger.warning(f"[policy] the last stored bundle does not parse, no synthesis stats: {exc}")
         return None
     if not isinstance(parsed, dict):
         return None
@@ -116,7 +117,9 @@ def get_last_run() -> dict:
                 "WHERE bundle_json IS NOT NULL AND bundle_json != '' "
                 "ORDER BY created_at DESC LIMIT 1"
             ).fetchone()
-    except Exception:
+    except Exception as exc:
+        # The page shows "no run yet" either way; the log says it was the store.
+        logger.warning(f"[policy] last run not read from the job store: {type(exc).__name__}: {exc}")
         return dict(_EMPTY_LAST_RUN)
 
     if row is None:
