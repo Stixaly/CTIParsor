@@ -6,6 +6,34 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Added
+
+#### The gazetteer's ordinary-word policy, in shadow mode, 2026-10-11
+
+Step 1 of `docs/gazetteer-ordinary-words.md` (audit B 8.3.2). Stage 2b now
+judges every occurrence of a reviewed form before it claims a span, on both
+matcher paths: a CASE form in lowercase is `excluded` ("a barium meal"), a
+CONTEXT form is `unresolved` until its naming construction is recognised
+(step 2), and so is any of the 23 forms that name two ATT&CK objects ("Snake":
+Turla and Uroburos; "Machete": the group and the malware), so that no
+identity is chosen by the order of the index. An analyst's promotion is not
+judged. `GAZETTEER_POLICY=shadow`, the default, changes no output: the stage
+report counts what the policy would withhold (`policy_case_mismatch`,
+`policy_missing_context`, `policy_ambiguous_identity`) with the policy
+version. `apply` withholds it, for measurement. The decisions are built from
+the document (`scripts/build_gazetteer_policy.py`; a test fails when they
+drift).
+
+Measured on AnnoCTR train + dev (86 documents, Stage 2b alone, distinct
+document/type/ATT&CK-ID triples, `scripts/measure_gazetteer_policy.py`,
+`docs/eval/gazetteer-policy-2026-10.md`): the whole policy raises precision
+from 0.543 to 0.677 (+13.4 points, 95 % CI [10.1, 17.5]) for 1.0 point of
+recall (CI [-2.5, 0]): two `ping` tools written in prose. CASE and the
+ambiguous forms alone lose nothing (+2.5 points of precision, recall
+unchanged) but stay under the document's +5-point gate. No subset passes
+every gate, and AnnoCTR cannot supply adjudicated negatives, so the policy
+stays in shadow mode.
+
 ### Documentation
 
 #### The gazetteer's ordinary-word forms, reviewed one by one, 2026-10-11

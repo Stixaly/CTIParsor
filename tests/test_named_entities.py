@@ -59,7 +59,7 @@ def test_a_run_without_the_llm_ships_the_gazetteers_entities(sample_cti_text, mo
     found = [_e("APT29", EntityType.THREAT_ACTOR), _e("SUNBURST", EntityType.MALWARE),
              _e("Cobalt Strike", EntityType.TOOL)]
     monkeypatch.setattr(gaz, "available", lambda: True)
-    monkeypatch.setattr(gaz, "match_gazetteer", lambda text: list(found))
+    monkeypatch.setattr(gaz, "match_gazetteer_traced", lambda text: (list(found), []))
     options = RunOptions(disabled=frozenset({"2f", "3"}), consensus=False, document_relations=False,
                          llm_parallelism=1, verify_relationships=False, verify_ttps=False)
 
