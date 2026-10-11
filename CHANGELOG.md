@@ -6,6 +6,20 @@ sections group by theme rather than strict semver.
 
 ## [Unreleased]
 
+### Changed
+
+#### The LLM's names wait for an analyst instead of being accepted automatically, 2026-10-11
+
+The worker stored the LLM's malware, threat-actor, tool and campaign names at
+confidence 0.9, which is the auto-accept level: every one was accepted
+automatically, and the review page marked it "auto" as if 90 % sure, with
+nothing having measured that (audit B 8.3.6). They are now stored at 0.5
+(`worker.LLM_NAME_CONFIDENCE`) and stay pending for an analyst. What ships
+does not change: a pending row ships, a rejected one does not
+(`decisions.SHIPS`). A detector's names keep their own confidences and are
+still accepted at or above the level; the LLM's techniques, whose quote the
+code checks, keep 0.9.
+
 ### Documentation
 
 #### AnnoCTR test, once: technique F1 0.690; 50 quotes judged, 2026-10-11
