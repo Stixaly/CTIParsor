@@ -191,3 +191,18 @@ def test_non_latin_words_count():
     tw = words("Группа использовала вредоносную программу.")
     assert stated_in("использовала вредоносную программу", tw)
     assert not stated_in("использовала другую программу", tw)
+
+
+def test_a_no_break_space_next_to_a_blank_is_one_space():
+    """`_CHAR_MAP` read U+00A0 as a space, one character at a time: "of\xa0 plain"
+    became "of  plain", and a quote written "of plain" was not found.  Two test
+    quotes of AnnoCTR's Zscaler reports were lost that way; the worker then
+    graded their techniques as if the quote were not in the report."""
+    text = ("It also appears to be using HTTPS instead of\xa0 plain HTTP for command "
+            "and control communication.\nIt looks like most of it is the same.")
+    quote = "It also appears to be using HTTPS instead of plain HTTP for command and control communication."
+    span = locate(quote, text)
+    assert span is not None and span.exact
+    assert text[span.start:span.end].startswith("It also") and text[span.end - 1] == "."
+    listed = "delivery vectors, including:\xa0\n* Trickbot spreading through scripting files"
+    assert locate("delivery vectors, including: * Trickbot spreading through scripting files", listed)
