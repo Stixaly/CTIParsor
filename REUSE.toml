@@ -59,6 +59,14 @@ precedence = "override"
 SPDX-FileCopyrightText = "The MITRE Corporation"
 SPDX-License-Identifier = "LicenseRef-MITRE-ATTACK AND LicenseRef-MITRE-CAPEC"
 
+# The gazetteer ordinary-word review quotes AnnoCTR excerpts (CC BY-SA 4.0),
+# so the whole document is shared under that licence.
+[[annotations]]
+path = "docs/gazetteer-ordinary-words.md"
+precedence = "override"
+SPDX-FileCopyrightText = ["CTIParsor contributors", "Bosch Research and AnnoCTR contributors"]
+SPDX-License-Identifier = "CC-BY-SA-4.0"
+
 # EclecticIQ's STIX icons, White/normal/SVG, unmodified.
 [[annotations]]
 path = "frontend/public/stix-icons/**"
