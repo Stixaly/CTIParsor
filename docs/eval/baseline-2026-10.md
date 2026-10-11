@@ -1,4 +1,4 @@
-# Baseline — AnnoCTR dev, 2026-10-03: the ADR-0072 decision
+# Baseline — AnnoCTR, October 2026: the ADR-0072 decision, and test once
 
 The LLM half of ADR-0072: does the selector (`TTP_MODE=select`) beat the best
 configuration measured so far, Stage 2c off, under the ADR-0060 rule? **Dev
@@ -238,11 +238,53 @@ text it searches), not a quote the code let through.
 
 This configuration, `dcd685e`, is the one run once on test.
 
+## Test, once: `sel-test-dcd685e`, 2026-10-11
+
+The configuration above, frozen at `dcd685e`, on AnnoCTR's test split: 34
+reports, 332 document-level gold parent techniques, never run before. Same
+server, model and settings as `sel-dev-dcd685e`.
+
+| Split | Precision | Recall | **F1 parent (micro)** | F1 per document | Exact id F1 |
+|---|---|---|---|---|---|
+| **test** (34 reports) | 0.679 | 0.702 | **0.690** | 0.565 | 0.415 |
+| dev (16 reports, above) | 0.571 | 0.651 | 0.609 | 0.513 | 0.229 |
+
+**0.690 is the number to report** for the select configuration on AnnoCTR
+test. The two splits hold different reports (the split is temporal, every
+vendor in each); test was chosen on nothing, so its higher score is the
+splits' difference, not a fit.
+
+- Recall of techniques annotated explicitly 0.851, only implicitly 0.535.
+- Where the errors are: 233 gold parents found; 64 retrieved for the report
+  and not selected; 35 never retrieved (candidate ceiling 0.895, against
+  0.954 on dev); 108 false positives from the candidates, 2 from outside
+  them; 3 candidates held in review (quote missing or not verbatim).
+- Named entities, strict: malware P 0.197 R 0.889, threat actor P 0.119
+  R 0.967, tool P 0.250 R 0.750. The same shape as dev: high recall, low
+  precision.
+- Evidence: 312 techniques with a quote, 98.1% found in AnnoCTR's raw text
+  (the refang artefact above), 63% of the located correct ones on the
+  annotated passage, 72% within 200 characters of it.
+- LLM health: 357 provider calls, no failure; 122/122 extractions, 3d 116 of
+  117 parsed, selection 118/118. 366.9 s per report.
+
+**A server outage, and three reports run again.** The LLM server stopped
+answering at 15:14. Report 7 and report 8 got no answer at all and were
+recorded as failed; report 6 lost one of its extraction calls and its
+selection call, and came out with no technique. The run stopped at report 9,
+as it is built to, and was resumed when the server answered again. The three
+reports were then run again at the same commit, from a worktree checked out
+at `dcd685e` (the main checkout had moved on), their first records kept in
+`data/eval/runs/sel-test-dcd685e/outage-2026-10-11/`. Running a report again
+that never got its answers chooses nothing between results: sampling is
+fixed (temperature 0, seed 13). The score as it came, on 32 reports with
+report 6 degraded, is kept as `score-as-it-came.json`: P 0.689, R 0.707,
+F1 0.698, exact id 0.425.
+
 ## Next
 
-1. ~~Re-run the selected configuration on dev with the ADR-0074 prompts~~
-   (above), then **once on test**: `sel-test-dcd685e`, its score reported
-   as it comes.
+1. ~~Re-run the selected configuration on dev with the ADR-0074 prompts,
+   then once on test~~ (above): F1 0.690 on test.
 2. The selector's misses (39 on the re-run) are the next target (prompt and
    per-passage selection), measured against `sel-dev-dcd685e`.
 3. ~~Judge the 50 quotes of `support-sample.csv`~~ (Evidence, above).

@@ -8,6 +8,25 @@ sections group by theme rather than strict semver.
 
 ### Documentation
 
+#### AnnoCTR test, once: technique F1 0.690; 50 quotes judged, 2026-10-11
+
+`docs/eval/baseline-2026-10.md` gains three results:
+
+- **Test, run once** on the select configuration frozen at `dcd685e`: 34
+  reports, F1 0.690 (P 0.679, R 0.702), exact id 0.415. The LLM server went
+  down during the run; three reports that got no answer or lost calls were
+  run again at the same commit, and the score as it came (32 reports, F1
+  0.698) is kept beside the complete one.
+- **The dev re-run** with the ADR-0074 prompts: F1 0.609 against 0.607,
+  +0.002 [−0.037, +0.034]. The configuration did not move.
+- **50 quotes judged** by the maintainer: 70% show the technique used, 85%
+  for techniques in the gold; 6 of 16 "false positives" are supported by
+  the text, so AnnoCTR's gold understates precision. The judging found a
+  domain error: a revoked id (T1562) resolved by name to the Mobile
+  technique T1629.
+
+### Documentation
+
 #### A file named without a hash keeps its path in `name` (ADR-0083), 2026-10-11
 
 The October audit (B 8.1.12) asked to split `C:\Users\Public\it's.exe`
