@@ -20,7 +20,8 @@ the comparison docs/gazetteer-ordinary-words.md asks for before activation:
 - the spec's gates, each PASS / FAIL / INCONCLUSIVE.
 
 `--only` applies the withholdings of the named classes only — CASE
-(case_mismatch), CONTEXT (missing_context), AMBIGUOUS (ambiguous_identity).
+(case_mismatch), CONTEXT (missing_context, conflicting_sense, embedded),
+AMBIGUOUS (ambiguous_identity, other_identity).
 
 The test split is not read (docs/eval/README.md: dev to choose, test once).
 Both matcher paths are run (Aho-Corasick when pyahocorasick is installed, and
@@ -50,7 +51,9 @@ from pipeline import overrides as ov  # noqa: E402
 from pipeline import stage2b_gazetteer as gaz  # noqa: E402
 
 TYPES = {"MALWARE": "malware", "GROUP": "threat_actor", "TOOL": "tool"}
-CLASSES = {"CASE": "case_mismatch", "CONTEXT": "missing_context", "AMBIGUOUS": "ambiguous_identity"}
+CLASSES = {"CASE": {"case_mismatch"},
+           "CONTEXT": {"missing_context", "conflicting_sense", "embedded"},
+           "AMBIGUOUS": {"ambiguous_identity", "other_identity"}}
 SPLITS = ("train", "dev")
 _ATTACK_ID = re.compile(r"attack\.mitre\.org/(?:software|groups)/([SG]\d{4})", re.I)
 Triple = tuple[str, str]          # (entity type, ATT&CK ID) within one document
@@ -91,7 +94,7 @@ def load_gold(root: Path, docs) -> dict[str, Gold]:
 
 
 def judged_forms() -> set[str]:
-    return set(gazetteer_policy.decisions()) | set(gaz._ambiguous_forms())
+    return set(gazetteer_policy.decisions()) | set(gaz._policy_index().ambiguous)
 
 
 def affected(text: str, forms: set[str]) -> bool:
@@ -108,8 +111,8 @@ def only(reasons: set[str] | None):
         yield
         return
 
-    def judge(name_key, surface, ambiguous):
-        verdict = original(name_key, surface, ambiguous)
+    def judge(occurrence, index):
+        verdict = original(occurrence, index)
         if verdict.withheld and verdict.reason not in reasons:
             return gazetteer_policy.Judgement("resolved", None, verdict.decision)
         return verdict
@@ -259,7 +262,7 @@ def main() -> None:
     gold = load_gold(args.root, docs)
     forms = judged_forms()
     affected_ids = {d.doc_id for d in docs if affected(d.text, forms)}
-    reasons = {CLASSES[c] for c in args.only} if args.only else None
+    reasons = set().union(*(CLASSES[c] for c in args.only)) if args.only else None
     paths = ["aho", "regex"] if gaz._AHO_AVAILABLE else ["regex"]
     results: dict = {"policy_version": gazetteer_policy.version(), "splits": list(SPLITS),
                      "only": args.only or sorted(CLASSES), "judged_forms": len(forms),

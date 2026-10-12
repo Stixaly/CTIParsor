@@ -125,18 +125,18 @@ def match_gazetteer(text: str) -> list[RawEntity]:
 
 
 @functools.lru_cache(maxsize=1)
-def _ambiguous_forms() -> frozenset[str]:
-    return gazetteer_policy.ambiguous_forms(_load())
+def _policy_index() -> gazetteer_policy.Index:
+    return gazetteer_policy.build_index(_load())
 
 
-_Judge = Callable[[dict, str], Judgement | None]
+_Judge = Callable[[dict, int, int], Judgement | None]
 
 
 def _trace_item(entry: dict, text: str, start: int, end: int, verdict: Judgement) -> dict:
     return {"form": entry["name"], "surface": text[start:end], "start": start, "end": end,
             "canonical": entry["canonical"], "entity_type": entry["entity_type"],
             "mitre_id": entry.get("mitre_id"), "decision": verdict.decision,
-            "outcome": verdict.outcome, "reason": verdict.reason}
+            "outcome": verdict.outcome, "reason": verdict.reason, "rule": verdict.rule}
 
 
 def match_gazetteer_traced(text: str, policy_mode: str | None = None) -> tuple[list[RawEntity], list[dict]]:
@@ -164,12 +164,14 @@ def match_gazetteer_traced(text: str, policy_mode: str | None = None) -> tuple[l
     An ambiguous occurrence is traced once per identity it could be.
     """
     pmode = policy_mode or gazetteer_policy.mode()
-    ambiguous = _ambiguous_forms() if pmode != "off" else frozenset()
+    index = _policy_index() if pmode != "off" else None
 
-    def judge(entry: dict, surface: str) -> Judgement | None:
-        if gazetteer_policy.is_promoted(entry):
+    def judge(entry: dict, start: int, end: int) -> Judgement | None:
+        if index is None or gazetteer_policy.is_promoted(entry):
             return None       # an analyst's promotion matches as before
-        return gazetteer_policy.judge(entry["name"], surface, ambiguous)
+        occurrence = gazetteer_policy.Occurrence(text, start, end, entry["name"],
+                                                 gazetteer_policy.identity(entry))
+        return gazetteer_policy.judge(occurrence, index)
 
     trace: list[dict] = []
     use = judge if pmode != "off" else None
@@ -232,7 +234,7 @@ def _match_aho(text: str, automaton, judge: _Judge | None = None, apply: bool = 
             continue
         if any(s <= start < e2 or s < end <= e2 for s, e2 in claimed):
             continue
-        verdict = judge(entry, text[start:end]) if judge else None
+        verdict = judge(entry, start, end) if judge else None
         if verdict is not None and verdict.withheld and apply:
             if trace is not None:
                 trace.append(_trace_item(entry, text, start, end, verdict))
@@ -310,7 +312,7 @@ def _match_regex(text: str, judge: _Judge | None = None, apply: bool = False,
             start, end = m.start(), m.end()
             if any(s <= start < e2 or s < end <= e2 for s, e2 in claimed):
                 continue
-            verdict = judge(entry, text[start:end]) if judge else None
+            verdict = judge(entry, start, end) if judge else None
             if verdict is not None and verdict.withheld and apply:
                 if trace is not None:
                     trace.append(_trace_item(entry, text, start, end, verdict))
