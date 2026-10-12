@@ -10,6 +10,7 @@ from collections import Counter
 import pytest
 
 import pipeline.overrides as ov
+from pipeline import gazetteer_context
 from pipeline import gazetteer_policy as gp
 from pipeline import promotion as pm
 from pipeline import stage2b_gazetteer as gaz
@@ -38,13 +39,26 @@ def _found(text: str, mode: str) -> set[tuple[str, str | None]]:
     return {(e.value, e.mitre_id) for e in gaz.match_gazetteer_traced(text, policy_mode=mode)[0]}
 
 
+@pytest.fixture(scope="module")
+def index():
+    return gp.build_index(gaz._load())
+
+
+def judge(index, sentence: str, surface: str, identity: str | None = None) -> gp.Judgement:
+    """The policy's outcome for `surface`'s first occurrence in `sentence`."""
+    start = gazetteer_context._name_re(surface.lower()).search(sentence).start()   # the matcher's boundaries
+    name = surface.lower()
+    identity = identity or next(iter(index.candidates[name]))
+    return gp.judge(gp.Occurrence(sentence, start, start + len(surface), name, identity), index)
+
+
 # ── The reviewed decisions ───────────────────────────────────────────────────
 
 def test_the_policy_file_is_the_reviewed_document():
     shipped = json.loads(gp._PATH.read_text(encoding="utf-8"))
     assert shipped == build(), "run: python scripts/build_gazetteer_policy.py"
     assert Counter(shipped["forms"].values()) == {"CASE": 105, "CONTEXT": 45, "RETAIN": 1}
-    assert gp.version() == shipped["version"]
+    assert gp.version() == f"{shipped['version']}+{gazetteer_context.rules_version()}"
 
 
 def test_every_reviewed_form_is_a_gazetteer_name():
@@ -60,41 +74,38 @@ def test_the_index_names_23_ambiguous_forms():
 
 # ── One occurrence ───────────────────────────────────────────────────────────
 
-AMBIGUOUS = frozenset({"snake", "carbanak"})
-
-
 @pytest.mark.parametrize("surface, outcome", [
     ("Barium", "resolved"), ("BARIUM", "resolved"), ("barium", "excluded")])
-def test_a_case_form_needs_an_initial_capital(surface, outcome):
-    verdict = gp.judge("barium", surface, AMBIGUOUS)
+def test_a_case_form_needs_an_initial_capital(index, surface, outcome):
+    verdict = judge(index, f"Attributed to {surface}.", surface)
     assert (verdict.outcome, verdict.decision) == (outcome, "CASE")
     assert verdict.reason == (None if outcome == "resolved" else "case_mismatch")
 
 
-def test_internal_capitals_pass_the_case_rule():
-    assert gp.judge("patchwork", "PatchWork", AMBIGUOUS).outcome == "resolved"
+def test_internal_capitals_pass_the_case_rule(index):
+    assert judge(index, "PatchWork again.", "PatchWork").outcome == "resolved"
 
 
 @pytest.mark.parametrize("surface", ["Page", "page", "PAGE"])
-def test_a_context_form_is_unresolved_until_its_construction_is_recognised(surface):
-    verdict = gp.judge("page", surface, AMBIGUOUS)
+def test_a_context_form_without_its_construction_is_unresolved(index, surface):
+    verdict = judge(index, f"See the {surface} below.", surface)
     assert (verdict.outcome, verdict.reason, verdict.decision) == ("unresolved", "missing_context", "CONTEXT")
 
 
 @pytest.mark.parametrize("surface", ["elfin", "Elfin"])
-def test_the_retained_form_matches_in_any_case(surface):
-    assert gp.judge("elfin", surface, AMBIGUOUS) == gp.Judgement("resolved", None, "RETAIN")
+def test_the_retained_form_matches_in_any_case(index, surface):
+    assert judge(index, f"The {surface} actors.", surface) == gp.Judgement("resolved", None, "RETAIN")
 
 
-def test_a_capital_does_not_resolve_a_same_name_collision():
-    verdict = gp.judge("snake", "Snake", AMBIGUOUS)
+def test_a_capital_does_not_resolve_a_same_name_collision(index):
+    verdict = judge(index, "The Snake implant.", "Snake", "G0010")
     assert (verdict.outcome, verdict.reason, verdict.decision) == ("unresolved", "ambiguous_identity", "CONTEXT")
     # Ambiguous without a reviewed decision too: Carbanak the group and the malware.
-    assert gp.judge("carbanak", "Carbanak", AMBIGUOUS).reason == "ambiguous_identity"
+    assert judge(index, "The Carbanak group.", "Carbanak", "G0008").reason == "ambiguous_identity"
 
 
-def test_a_form_without_a_decision_is_resolved_as_before():
-    assert gp.judge("lazarus group", "lazarus group", AMBIGUOUS) == gp.RESOLVED
+def test_a_form_without_a_decision_is_resolved_as_before(index):
+    assert judge(index, "the lazarus group", "lazarus group") == gp.RESOLVED
 
 
 def test_the_mode_defaults_to_shadow(monkeypatch):

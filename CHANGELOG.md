@@ -8,6 +8,33 @@ sections group by theme rather than strict semver.
 
 ### Added
 
+#### The ordinary-word policy recognises naming constructions, 2026-10-12
+
+Step 2 of `docs/gazetteer-ordinary-words.md`. A CONTEXT form ("page",
+"route", "joker") or a form naming two ATT&CK objects ("snake", "play") is
+resolved when its sentence names the object: an attached ATT&CK ID
+("Machete (S0409)"), an explicit alias of another name of the same object,
+itself identified ("Elise malware, also known as Page"), a typed apposition
+with the nouns the form's rule allows ("Cuba ransomware"; none resolves
+"Play ransomware", which does not say actor or software), or a command line
+or executable for `ping`, `route` and `expand`. An occurrence inside a URL
+or a file name ("landing_page.png") or inside a conflicting sense the rule
+names ("Google Play", "Joker's Stash") is excluded, and a sentence that
+names the other object of an ambiguous form excludes this one. A list item,
+table row or heading is its own unit. The rules per form are in
+`pipeline/data/gazetteer_context_rules.json`, versioned beside the
+document's decisions; every example of the document's acceptance table
+passes, on both matcher paths.
+
+Measured on AnnoCTR train + dev: the whole policy now loses one valid
+mention instead of two (`ping.exe` is back; "using ping and curl" names no
+construction), and passes the precision and recall gates (+17.6 points of
+precision on the affected documents, recall −0.5, CI low −1.7). It still
+fails the per-type gate — that one `ping` is 6 points of 16 gold tool
+triples — so it stays in shadow mode. On the 366 texts outside the test
+split, the constructions resolve 9 occurrences, each one the object it is
+mapped to (`docs/eval/gazetteer-policy-2026-10.md`).
+
 #### The gazetteer's ordinary-word policy, in shadow mode, 2026-10-11
 
 Step 1 of `docs/gazetteer-ordinary-words.md` (audit B 8.3.2). Stage 2b now
