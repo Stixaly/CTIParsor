@@ -13,7 +13,7 @@ import {
   createRelationship, updateRelationship, bulkUpdateRelationships,
   finalizeJob, finalizeJobQuick, sourceUrl, bulkUpdateEntities,
   fetchCoverageReportRules, detectionsExportUrl,
-  errorDetail, fetchThresholds,
+  errorDetail, fetchThresholds, BundleRefusedError,
 } from '../api/client'
 import { downloadBundle } from '../stix/downloadBundle'
 import type { ClientDecisionOrigin, Entity, Job, Relationship } from '../types'
@@ -542,12 +542,12 @@ export default function Review() {
   // Declared before the keyboard effect so the dep array reference is valid.
   const handleFinalize = useCallback(async () => {
     if (!jobId) return
-    // Cancel any pending auto-finalize — manual takes precedence and includes
-    // the full lexicon re-scan that the quick auto-finalize skips.
+    // Cancel any pending auto-finalize — manual takes precedence and, unlike
+    // the quick auto-finalize, completes the report.
     if (autoFinalizeTimer.current) clearTimeout(autoFinalizeTimer.current)
     setFinalizing(true)
     try {
-      await finalizeJob(jobId)   // full finalize with lexicon re-scan
+      await finalizeJob(jobId)   // full finalize: rebuilds the bundle and completes the report
       qc.invalidateQueries({ queryKey: ['jobs'] })
       // The server marks the report completed; the breadcrumb follows without
       // refetching the whole report text.
@@ -559,8 +559,16 @@ export default function Review() {
       // will appear in the Completed column when the user returns to the dashboard.
       setFinalized(true)
       setTimeout(() => setFinalized(false), 2600)
-    } catch {
-      alert('Finalize failed — check server logs')
+    } catch (e) {
+      if (e instanceof BundleRefusedError) {
+        // The server did not complete the report (one it had completed is back
+        // in review); the refused bundle is stored but not served.
+        qc.invalidateQueries({ queryKey: ['jobs'] })
+        qc.invalidateQueries({ queryKey: ['job', jobId] })
+        alert(`Report not completed. ${e.summary()}`)
+      } else {
+        alert('Finalize failed — check server logs')
+      }
     } finally {
       setFinalizing(false)
     }
@@ -574,7 +582,9 @@ export default function Review() {
     if (!jobId) return
     try {
       await downloadBundle(jobId, job?.original_filename)
-    } catch { alert('Bundle not yet available') }
+    } catch (e) {
+      alert(e instanceof BundleRefusedError ? e.summary() : 'Bundle not yet available')
+    }
   }, [jobId, job?.original_filename])
 
   // ── download all detected Sigma rules (ZIP) ───────────────────────────────
@@ -645,7 +655,7 @@ export default function Review() {
   //   1. Sets bundleStale=true so the TopChrome shows "⚠ Bundle outdated"
   //   2. Resets a 4-second debounce timer
   // When the timer fires (4 s of no further changes), triggerAutoFinalize()
-  // calls POST /finalize?quick=true (skips lexicon re-scan for speed).
+  // calls POST /finalize?quick=true (rebuilds the bundle, leaves the status alone).
   // On success, bundleStale resets to false → "✓ Bundle current".
 
   const triggerAutoFinalize = async () => {

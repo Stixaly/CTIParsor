@@ -234,6 +234,8 @@ class RunResult:
     valid: bool | None = None
     # Stage 5's status: "validated", "unverified" (no JSON schemas) or "invalid".
     validation: str | None = None
+    # Stage 5's error messages when the bundle is "invalid" (empty otherwise).
+    validation_errors: list[str] = field(default_factory=list)
 
     def outcome(self, stage: str) -> StageOutcome | None:
         return next((o for o in self.stages if o.stage == stage), None)
@@ -1135,6 +1137,7 @@ class _Run:
         Path(self.doc.output_path).parent.mkdir(parents=True, exist_ok=True)
         result = validate_and_export(self.r.bundle, self.doc.output_path)
         self.r.valid, self.r.validation = result.ok, result.status
+        self.r.validation_errors = result.errors
         logger.info(f"[Stage 5] Validation complete — {result.status}, "
                     f"{len(result.warnings)} warning(s)")
         reason = {"invalid": "bundle failed schema validation",

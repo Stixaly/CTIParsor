@@ -17,6 +17,7 @@ from api.paths import output_dir, uploads_dir
 from models.schemas import EntityType, RawEntity
 from pipeline.orchestrator import RunAborted
 from pipeline.stage3_llm import LLMEnrichmentResult, RelationshipExtracted, TTPExtracted
+from pipeline.stage5_validation import INVALID, UNVERIFIED, VALIDATED, ValidationResult
 
 
 @pytest.fixture()
@@ -185,8 +186,9 @@ def test_an_unreadable_policy_means_building_without_one(monkeypatch, caplog):
 # ── _run_pipeline's terminal states ─────────────────────────────────────────
 
 class _Result:
-    def __init__(self, bundle=None, ledger=None):
+    def __init__(self, bundle=None, ledger=None, validation=None, validation_errors=()):
         self.bundle, self.ledger = bundle, ledger
+        self.validation, self.validation_errors = validation, list(validation_errors)
 
     def stage_report(self):
         return [{"stage": "1", "status": "ran"}]
@@ -437,7 +439,7 @@ def test_finalize_applies_every_reviewer_rejection_to_the_llm_blob(db):
                      "VALUES ('bad', 'j1', '10.0.0.1', 'ipv4', 1, NULL)")
         conn.commit()
 
-    bundle = worker.re_run_final_stages("j1", skip_rescan=False)
+    bundle = worker.re_run_final_stages("j1", quick=False)
 
     assert _objects(bundle, "threat-actor") == ["APT29"]
     assert _objects(bundle, "tool") == ["Mimikatz"]
@@ -447,6 +449,7 @@ def test_finalize_applies_every_reviewer_rejection_to_the_llm_blob(db):
     assert _objects(bundle, "ipv4-addr") == ["185.220.101.45"]
     row = _row(db)
     assert row["status"] == "completed" and json.loads(row["bundle_ledger_json"])
+    assert row["bundle_validation"] in ("validated", "unverified")      # the real Stage 5 ran
     assert (output_dir() / "APT_report_j1_bundle.json").exists()
 
 
@@ -459,7 +462,7 @@ def test_finalize_survives_a_corrupt_llm_blob_and_an_unreadable_anchor(db, monke
 
     monkeypatch.setattr("pipeline.stage1_ingestion.extract_anchor", anchor_fails)
     with caplog.at_level(logging.ERROR, logger="api.worker"):
-        bundle = worker.re_run_final_stages("j1", skip_rescan=True)
+        bundle = worker.re_run_final_stages("j1", quick=True)
 
     assert _objects(bundle, "threat-actor") == ["APT29"]
     assert _row(db)["status"] == "reviewing"                      # the quick rebuild leaves it alone
@@ -487,23 +490,140 @@ def test_finalize_reads_relationship_dates_old_and_new(db):
                      "'APT29 targeted SolarWinds.', '2021-01-01T00:00:00Z')")
         conn.commit()
 
-    bundle = json.loads(worker.re_run_final_stages("j1", skip_rescan=True))
+    bundle = json.loads(worker.re_run_final_stages("j1", quick=True))
 
     rels = {o["relationship_type"]: o for o in bundle["objects"] if o["type"] == "relationship"}
     assert [a["time_text"] for a in rels["uses"]["x_temporal_assertions"]] == ["in 2020"]
     assert rels["targets"]["x_temporal_assertions"]              # the legacy date survives
 
 
-# ── The lexicon re-scan ──────────────────────────────────────────────────────
+# ── Stage 5's verdict decides what a rebuild may complete ────────────────────
 
-def test_the_rescan_skips_indicators_short_names_and_absent_names(db):
+def _stage5(monkeypatch, status, errors=()):
+    """`validate_and_export` is imported inside re_run_final_stages: patch the
+    module's attribute.  The fake writes no file."""
+    monkeypatch.setattr("pipeline.stage5_validation.validate_and_export",
+                        lambda bundle, path: ValidationResult(status, list(errors)))
+
+
+def _reviewed_job(db, status: str = "reviewing") -> None:
+    _job(db, status=status, report_text="APT29 used SUNBURST.")
+    _entity(db, "j1", "APT29", "threat_actor")
+
+
+_LONG_ERRORS = [f"{i}: " + "x" * 600 for i in range(30)]
+
+
+@pytest.mark.parametrize("quick", [True, False])
+@pytest.mark.parametrize("status", ["reviewing", "for_review", "completed"])
+def test_an_invalid_rebuild_is_stored_with_its_errors_and_never_completes(db, monkeypatch, caplog, quick, status):
+    _reviewed_job(db, status)
+    _stage5(monkeypatch, INVALID, _LONG_ERRORS)
+
+    with caplog.at_level(logging.ERROR, logger="api.worker"):
+        with pytest.raises(worker.BundleInvalidError) as raised:
+            worker.re_run_final_stages("j1", quick=quick)
+
+    row = _row(db)
+    assert row["status"] == ("for_review" if status == "completed" else status)   # a completed job is retired
+    assert row["bundle_validation"] == "invalid" and json.loads(row["bundle_json"])["objects"]
+    stored = json.loads(row["bundle_validation_errors"])
+    assert len(stored) == 20 and all(len(e) == 500 for e in stored) and stored[0] == _LONG_ERRORS[0][:500]
+    assert raised.value.errors == stored                                # what the API returns is what is stored
+    assert "failed STIX schema validation" in caplog.text
+
+
+@pytest.mark.parametrize("verdict", [VALIDATED, UNVERIFIED])
+def test_a_full_finalize_completes_the_job_and_stores_the_verdict(db, monkeypatch, verdict):
+    _reviewed_job(db)
+    _stage5(monkeypatch, verdict)
+
+    assert worker.re_run_final_stages("j1", quick=True)
+    row = _row(db)
+    assert (row["status"], row["bundle_validation"], row["bundle_validation_errors"]) == (
+        "reviewing", verdict, None)                                   # quick: verdict stored, status left
+
+    assert worker.re_run_final_stages("j1", quick=False)
+    row = _row(db)
+    assert (row["status"], row["bundle_validation"], row["bundle_validation_errors"]) == (
+        "completed", verdict, None)
+
+
+def test_a_valid_rebuild_replaces_the_verdict_of_an_invalid_one(db, monkeypatch):
+    _reviewed_job(db)
+    _stage5(monkeypatch, INVALID, ["bad"])
+    with pytest.raises(worker.BundleInvalidError):
+        worker.re_run_final_stages("j1", quick=False)
+    assert _row(db)["status"] == "reviewing"
+
+    _stage5(monkeypatch, VALIDATED)
+    assert worker.re_run_final_stages("j1", quick=False)
+    row = _row(db)
+    assert (row["status"], row["bundle_validation"], row["bundle_validation_errors"]) == (
+        "completed", "validated", None)
+
+
+# ── The verdict is written with the bundle ───────────────────────────────────
+
+@pytest.mark.parametrize("owner", [None, "w1"])
+def test_a_bundle_is_finalized_with_its_verdict(db, owner):
+    _job(db, worker_id=owner)
+
+    assert worker._finalize_job("j1", "for_review", owner, bundle_json="{}", ledger_json=None,
+                                validation="invalid", validation_errors=_LONG_ERRORS)
+
+    row = _row(db)
+    assert (row["status"], row["bundle_json"], row["bundle_validation"]) == ("for_review", "{}", "invalid")
+    assert len(json.loads(row["bundle_validation_errors"])) == 20
+
+    assert worker._finalize_job("j1", "for_review", owner, bundle_json="{}")   # a later bundle, no verdict
+    row = _row(db)
+    assert row["bundle_validation"] is None and row["bundle_validation_errors"] is None
+
+
+def test_saving_a_bundle_through_the_storage_clears_the_verdict(db):
+    from api.storage import SQLiteJobStorage
+
+    _job(db, bundle_json="{}", bundle_ledger_json="{}", bundle_validation="invalid",
+         bundle_validation_errors='["bad"]')
+
+    SQLiteJobStorage().save_bundle("j1", '{"type": "bundle"}')
+
+    row = _row(db)
+    assert row["bundle_json"] == '{"type": "bundle"}'
+    assert (row["bundle_ledger_json"], row["bundle_validation"], row["bundle_validation_errors"]) == (
+        None, None, None)
+
+
+def test_a_finalize_without_a_bundle_keeps_the_stored_verdict(db):
+    _job(db, bundle_json="{}", bundle_validation="validated")
+    assert worker._finalize_job("j1", "failed", None)
+    assert _row(db)["bundle_validation"] == "validated"
+
+
+def test_a_reclaimed_job_keeps_its_verdict(db):
+    _job(db, worker_id="w2", bundle_json="{}", bundle_validation="validated")
+    assert worker._finalize_job("j1", "for_review", "w1", bundle_json="{}", validation="invalid",
+                                validation_errors=["bad"]) is False
+    assert _row(db)["bundle_validation"] == "validated"
+
+
+def test_a_run_stores_the_verdict_with_its_bundle_and_stays_in_review(db, monkeypatch, caplog):
     _job(db)
-    for value, etype in [("185.220.101.45", "ipv4"), ("Emo", "malware"), ("NotInText", "malware"),
-                         ("GREYVIBE", "malware")]:
-        _entity(db, "j1", value, etype)
-    _entity(db, "j1", "Unreviewed", "malware", accepted=None)
+    with caplog.at_level(logging.WARNING, logger="api.worker"):
+        _run(monkeypatch, _Result(bundle=_Bundle(), validation="invalid", validation_errors=["bad", "worse"]))
 
-    text = "GREYVIBE was seen. greyvibe_loader is not a match; later GREYVIBE again. Emo 185.220.101.45"
-    assert worker._lexicon_rescan("j1", text) == 0
-    assert worker._lexicon_rescan("j1", "") == 0
-    assert len(_entities(db)) == 5                                  # nothing duplicated
+    row = _row(db)
+    assert row["status"] == "for_review" and row["bundle_json"]            # nothing is published yet
+    assert (row["bundle_validation"], json.loads(row["bundle_validation_errors"])) == (
+        "invalid", ["bad", "worse"])
+    assert _events(db)[-1] == ("done", {"status": "for_review"})
+    assert "failed STIX schema validation" in caplog.text
+
+
+def test_a_run_whose_stage_5_did_not_run_stores_no_verdict(db, monkeypatch):
+    _job(db)
+    _run(monkeypatch, _Result(bundle=_Bundle()))
+    row = _row(db)
+    assert row["status"] == "for_review" and row["bundle_validation"] is None
+    assert row["bundle_validation_errors"] is None

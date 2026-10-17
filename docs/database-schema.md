@@ -31,6 +31,7 @@ migrations".
 | 8 | `jobs.bundle_ledger_json` | 0061 |
 | 9 | `relationships.times_json` | 0063 |
 | 10 | `entities.held_reason`, `relationships.held_reason` | 0082 |
+| 11 | `jobs.bundle_validation`, `jobs.bundle_validation_errors` | 0084 |
 
 ```sql
 CREATE TABLE jobs (
@@ -49,6 +50,14 @@ CREATE TABLE jobs (
                                     -- stale past WORKER_LEASE_TIMEOUT_S -> requeued
     bundle_ledger_json TEXT,        -- what Stage 4 did with each row (ADR-0061):
                                     -- the Graph page's bundle view reads it
+    bundle_validation TEXT,         -- Stage 5's verdict on bundle_json (ADR-0084):
+                                    -- validated | unverified | invalid.  Written in
+                                    -- the same UPDATE as the bundle.  NULL = built
+                                    -- before v11, or Stage 5 did not run: unknown,
+                                    -- served as before.  invalid is not served (409)
+                                    -- and never completes the job
+    bundle_validation_errors TEXT,  -- JSON list: the first 20 error messages, 500
+                                    -- characters each; NULL when there are none
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
@@ -64,6 +73,8 @@ CREATE TABLE entities (
     accepted    INTEGER,            -- NULL=pending  1=accepted  0=rejected
     source      TEXT DEFAULT 'auto' -- ioc | gazetteer | semantic | cyner |
                                     -- gliner | llm | manual | report_lexicon
+                                    -- (report_lexicon: rows of the re-scan removed
+                                    -- on 2026-10-17; nothing writes it now)
     -- Entity evidence (ADR-0028), kept apart from `context`: over 280 stored
     -- TTPs only 36.8% of `context` is findable in the report, against 79.4%
     -- for verbatim quotes.  Both offsets are stored because normalisation
@@ -75,7 +86,8 @@ CREATE TABLE entities (
     evidence_end INTEGER,
     -- Who decided `accepted` (ADR-0058), NULL while nobody has:
     decision_origin TEXT,           -- human | human_bulk | auto_policy | default |
-                                    -- propagated | legacy (decided before the column)
+                                    -- propagated (the removed re-scan: older rows
+                                    -- only) | legacy (decided before the column)
     decided_at     TEXT,
     policy_version TEXT,            -- the auto-accept policy that decided, if any
     control_sample INTEGER NOT NULL DEFAULT 0, -- 1 = auto-accept left it pending

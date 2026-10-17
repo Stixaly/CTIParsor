@@ -1,6 +1,7 @@
 """Tests for edge provenance and run configuration."""
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -10,7 +11,7 @@ if str(_ROOT) not in sys.path:
 
 import stix2
 
-from api.run_config import build_run_config
+from api.run_config import _CAPTURED_ENV, build_run_config
 from pipeline.stage4_stix_mapping import _add_relationship
 
 
@@ -176,11 +177,13 @@ def test_build_run_config_captures_no_secrets(monkeypatch):
     # The secret value should not appear anywhere
     assert "sk-secret-value" not in config_json
 
-    # No key in env should contain KEY, TOKEN, or SECRET
-    for key in config["env"].keys():
-        assert "KEY" not in key.upper(), f"Found KEY in env key: {key}"
-        assert "TOKEN" not in key.upper(), f"Found TOKEN in env key: {key}"
-        assert "SECRET" not in key.upper(), f"Found SECRET in env key: {key}"
+    # No captured name may be credential-shaped.  Checked on the allow-list
+    # itself, whatever the environment sets, and by suffix: a substring test
+    # flagged TTP_KEYWORD_GATE and LLM_MAX_OUTPUT_TOKENS, which are settings.
+    credential = re.compile(
+        r"(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?|_URL|_URI|_DSN|_HOST|_ENDPOINT|PROXY)$")
+    for name in (*_CAPTURED_ENV, *config["env"]):
+        assert not credential.search(name.upper()), f"credential-shaped env name captured: {name}"
 
 
 def test_build_run_config_omits_absent_env_vars(monkeypatch):

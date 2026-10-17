@@ -65,7 +65,7 @@ def _held_ttp(db, job):
 
 def _shipped_rels(db, job) -> set[tuple[str, str, str]]:
     from api import worker
-    objs = json.loads(worker.re_run_final_stages(job, skip_rescan=True))["objects"]
+    objs = json.loads(worker.re_run_final_stages(job, quick=True))["objects"]
     names = {o["id"]: o.get("name") or o.get("value") for o in objs}
     return {(names.get(o["source_ref"]), o["relationship_type"], names.get(o["target_ref"]))
             for o in objs if o["type"] == "relationship"}

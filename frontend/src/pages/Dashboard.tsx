@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, Loader2, AlertTriangle, RotateCw } from 'lucide-react'
-import { fetchJobs, updateJobStatus, deleteJob, fetchBundle, errorDetail } from '../api/client'
+import { fetchJobs, updateJobStatus, deleteJob, fetchBundle, errorDetail, BundleRefusedError } from '../api/client'
 import type { Job, JobStatus } from '../types'
 import { JOB_STATUS_LABEL } from '../components/jobStatus'
 import ProgressModal from '../components/ProgressModal'
@@ -244,8 +244,8 @@ export default function Dashboard() {
       // Defer revocation so the browser has time to start the download before
       // the blob URL is invalidated (revoking synchronously breaks Firefox).
       setTimeout(() => URL.revokeObjectURL(url), 100)
-    } catch {
-      alert('Bundle not yet available')
+    } catch (err) {
+      alert(err instanceof BundleRefusedError ? err.summary() : 'Bundle not yet available')
     }
   }
 

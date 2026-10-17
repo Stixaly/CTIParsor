@@ -3,16 +3,17 @@ import mimetypes
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from api.db import _lock, get_conn, now_iso
 from api.logging_config import get_logger
 from api.paths import output_dir, uploads_dir
 from api.routes._common import require_job
-from api.worker import re_run_final_stages
+from api.worker import BundleInvalidError, re_run_final_stages
 from pipeline.env_flags import env_int
 
 logger = get_logger(__name__)
@@ -69,6 +70,27 @@ class StatusPatch(BaseModel):
     status: str
 
 
+# One code for "Stage 5's schemas refused this bundle", on every route that
+# serves or completes it.  Not 422: FastAPI declares that one with a list
+# `detail` (HTTPValidationError), and ours is an object.
+_BUNDLE_REFUSED: dict[int | str, dict[str, Any]] = {409: {
+    "description": "Stage 5's STIX 2.1 schemas refused the bundle; "
+                   "`detail` is {\"validation\": \"invalid\", \"errors\": [...]}.",
+}}
+
+
+def _bundle_refused(errors: list[str]) -> HTTPException:
+    return HTTPException(409, detail={"validation": "invalid", "errors": errors})
+
+
+def _stored_errors(raw: str | None) -> list[str]:
+    """`jobs.bundle_validation_errors` (a JSON list, already cut short by the worker)."""
+    try:
+        return json.loads(raw or "[]")
+    except ValueError:
+        return []
+
+
 @router.get("")
 def list_jobs():
     with get_conn() as conn:
@@ -117,50 +139,73 @@ def get_job(job_id: str):
     }
 
 
-@router.patch("/{job_id}")
+@router.patch("/{job_id}", responses=_BUNDLE_REFUSED)
 def update_job_status(job_id: str, patch: StatusPatch):
+    """Set a job's status.  409 for `completed` while the stored bundle is one
+    the STIX schemas refused (see finalize)."""
     valid = {"uploaded", "processing", "for_review", "reviewing", "completed", "failed"}
     if patch.status not in valid:
         raise HTTPException(400, f"Invalid status. Valid: {valid}")
+    refused: list[str] | None = None
+    rowcount = 0
     with _lock:
         with get_conn() as conn:
-            result = conn.execute(
-                "UPDATE jobs SET status=?, updated_at=? WHERE id=?",
-                (patch.status, now_iso(), job_id),
-            )
-            conn.commit()
-            rowcount = result.rowcount
+            # Read and write under the same lock and connection: a rebuild
+            # cannot slip its verdict in between.
+            if patch.status == "completed":
+                row = conn.execute(
+                    "SELECT bundle_validation, bundle_validation_errors FROM jobs WHERE id=?", (job_id,)
+                ).fetchone()
+                if row and row["bundle_validation"] == "invalid":
+                    refused = _stored_errors(row["bundle_validation_errors"])
+            if refused is None:
+                result = conn.execute(
+                    "UPDATE jobs SET status=?, updated_at=? WHERE id=?",
+                    (patch.status, now_iso(), job_id),
+                )
+                conn.commit()
+                rowcount = result.rowcount
     # Raise outside the lock so the lock is always released cleanly
+    if refused is not None:
+        raise _bundle_refused(refused)
     if rowcount == 0:
         raise HTTPException(404, "Job not found")
     return {"status": patch.status}
 
 
-@router.post("/{job_id}/finalize")
+@router.post("/{job_id}/finalize", responses=_BUNDLE_REFUSED)
 def finalize_job(job_id: str, quick: bool = False):
     """
     Re-run Stages 4+5 and regenerate the STIX bundle.
 
-    quick=false (default) — full finalize: runs the lexicon re-scan before
-        building the bundle.  Used when the reviewer clicks the Finalize button.
+    quick=false (default) — full finalize: the rebuild also completes the job.
+        Used when the reviewer clicks the Finalize button.
 
-    quick=true — fast finalize: skips the lexicon re-scan.  Used by the
-        debounced auto-finalize triggered after every entity/relationship change
-        so the bundle stays current without user action.  It rebuilds the
-        bundle only: the report keeps its status (completing it is the
-        reviewer's click).
+    quick=true — fast finalize: used by the debounced auto-finalize triggered
+        after every entity/relationship change so the bundle stays current
+        without user action.  It rebuilds the bundle only: the report keeps its
+        status (completing it is the reviewer's click).
         Call via POST /api/jobs/{id}/finalize?quick=true
+
+    Either way, 409 when Stage 5's JSON schemas refuse the rebuilt bundle: the
+    job is not completed (one that was goes back to for_review) and the
+    response lists the first errors.  The response of a success carries the
+    bundle's `validation`: validated, unverified (schemas missing) or unknown.
     """
     with get_conn() as conn:
         require_job(conn, job_id)
 
-    bundle_json = re_run_final_stages(job_id, skip_rescan=quick)
+    try:
+        bundle_json = re_run_final_stages(job_id, quick=quick)
+    except BundleInvalidError as exc:
+        raise _bundle_refused(exc.errors) from exc
     if bundle_json is None:
         raise HTTPException(500, "Finalize failed — check server logs")
 
     with get_conn() as conn:
-        row = conn.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
-    return {"status": row["status"] if row else "completed", "bundle_size": len(bundle_json)}
+        row = conn.execute("SELECT status, bundle_validation FROM jobs WHERE id=?", (job_id,)).fetchone()
+    return {"status": row["status"] if row else "completed", "bundle_size": len(bundle_json),
+            "validation": (row["bundle_validation"] if row else None) or "unknown"}
 
 
 def _delete_job(job_id: str) -> bool:
@@ -287,21 +332,32 @@ def get_source_file(job_id: str):
     )
 
 
-@router.get("/{job_id}/bundle")
+@router.get("/{job_id}/bundle", responses=_BUNDLE_REFUSED)
 def get_bundle(job_id: str):
+    """The stored bundle, with Stage 5's verdict in the `X-Bundle-Validation`
+    header: validated, unverified (JSON schemas missing) or unknown (built
+    before the verdict was stored).  409 when the schemas refused it: the graph
+    view and the download both read this route, and an invalid bundle is not
+    served by either; a rebuild (POST /finalize) that passes replaces it."""
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT bundle_json, original_filename FROM jobs WHERE id=?", (job_id,)
+            "SELECT bundle_json, bundle_validation, bundle_validation_errors FROM jobs WHERE id=?",
+            (job_id,),
         ).fetchone()
         if not row:
             raise HTTPException(404, "Job not found")
         if not row["bundle_json"]:
             raise HTTPException(404, "Bundle not yet available")
 
+    validation = row["bundle_validation"]
+    if validation == "invalid":
+        raise _bundle_refused(_stored_errors(row["bundle_validation_errors"]))
+
     try:
-        return json.loads(row["bundle_json"])
+        bundle = json.loads(row["bundle_json"])
     except Exception as exc:
         raise HTTPException(500, "Bundle JSON is corrupted") from exc
+    return JSONResponse(bundle, headers={"X-Bundle-Validation": validation or "unknown"})
 
 
 @router.get("/{job_id}/bundle/ledger")

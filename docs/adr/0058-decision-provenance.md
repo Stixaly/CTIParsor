@@ -118,3 +118,19 @@ precision of auto-accept.
   not read as a rejection.
 * `actor` stays NULL: the application has no identity (docs/deployment.md
   §2). The column is where ADR-0036's identity will land.
+
+## Amendment (2026-10-17): the lexicon rescan is gone; `propagated` is for older rows
+
+The origins table lists `propagated` as written by the lexicon rescan that
+a full Finalize ran. The audit of 2026-10-17 (Q03) showed that this rescan
+could never insert a row: it skipped every value already accepted, and every
+value it scanned was one. The only exception, a stored value with surrounding
+whitespace, would have been a duplicate. It is removed, and
+`re_run_final_stages(job_id, quick=...)` now uses `quick` only to decide
+whether the rebuild completes the job.
+
+Rows already stored with `source = report_lexicon` and `decision_origin =
+propagated`, if any, stay readable. Nothing writes either value now.
+`propagated` stays in the vocabulary of origins, and the readers that learn
+from decisions still leave it out (`HUMAN_ORIGINS` is `human` and
+`human_bulk`).

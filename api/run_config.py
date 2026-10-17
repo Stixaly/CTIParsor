@@ -34,14 +34,33 @@ _CAPTURED_ENV = (
     "TTP_CANDIDATES_PER_CHUNK", "TTP_SELECT_MIN_QUOTE_WORDS", "TTP_RETRIEVAL_EXCLUDE_CITED",
     "TTP_RETRIEVAL_KEYWORD_GATE", "TTP_SELECT_SKIPPED_CHUNKS",
     "TTP_ADVISORY_GATE",
+    # Stage 4: the marking and the author of the bundle.
+    "STIX_TLP", "STIX_AUTHOR_NAME",
+    # Stage 2 filters and switches.
+    "GAZETTEER_POLICY", "BENIGN_IOC_FILTER", "GLINER_ENABLED",
+    "GLINER_CHUNK_CHARS", "CYNER_CHUNK_CHARS",
+    # Stage 3: prompt and response bounds, and the verification gates.
+    "LLM_MAX_PROMPT_LENGTH", "LLM_DOC_MAX_PROMPT_LENGTH", "LLM_MAX_RESPONSE_LENGTH",
+    "LLM_MAX_OUTPUT_TOKENS", "LLM_TIMEOUT",
+    "STIX_VERIFY_MIN_RELS", "STIX_VERIFY_BATCH_SIZE", "TTP_VERIFY_MIN",
+    # Vision provider (figures).
+    "VISION_PROVIDER", "VISION_MODEL", "VISION_ASSUME_CAPABLE", "VISION_TIMEOUT_S",
+    # The model each provider would use: names, never the keys or base URLs.
+    "ANTHROPIC_MODEL", "GEMINI_MODEL", "MISTRAL_MODEL", "OLLAMA_MODEL",
+    "LMSTUDIO_MODEL", "VLLM_MODEL",
 )
 
-# The data files whose content decides what Stages 2b, 2c and 3c emit.
+# The data files whose content decides what a run emits: the ATT&CK, gazetteer
+# and retrieval data of Stages 2b, 2c, 3c and 3f, the gazetteer's ordinary-word
+# policy and context rules, and the benign-indicator warning lists.
 _DATA_DIR = Path(__file__).parent.parent / "pipeline" / "data"
 _DATA_FILES = (
     "mitre_index.json", "attack_relationships.json", "gazetteer.json",
     "mitre_embeddings.npy", "mitre_embeddings_meta.json",
     "attack_retrieval_corpus.json", "attack_retrieval_embeddings.npy",
+    "warninglists.json", "attack_revoked.json",
+    "gazetteer_policy.json", "gazetteer_context_rules.json",
+    "mitre_embeddings_manifest.json",
 )
 
 # Distributions whose version can change an extraction or a bundle.
@@ -49,6 +68,12 @@ _PACKAGES = (
     "stix2", "pydantic", "pdfplumber", "markitdown", "python-docx", "iocextract",
     "sentence-transformers", "transformers", "torch", "gliner",
     "anthropic", "openai", "google-re2",
+    # Whether a cited rule leaves as an Indicator (ADR-0067/0070), and the
+    # validation status.  parsuricata runs on `lark`, the module that is
+    # actually imported: lark 1.x overwrites lark-parser's files and leaves its
+    # metadata behind, so the two versions are read side by side.
+    "yara-python", "pysigma", "parsuricata", "lark-parser", "lark", "stix2-validator",
+    "spacy", "rapidfuzz",
 )
 
 

@@ -428,7 +428,7 @@ def test_finalize_stores_the_ledger_and_the_api_serves_it(temp_db, temp_db_clien
                               relationships=[_rel("APT29", "uses", "WellMess"),
                                              _rel("APT29", "uses", "Ghost")])
     worker._save_entities(job_id, [], llm)
-    assert worker.re_run_final_stages(job_id, skip_rescan=True)
+    assert worker.re_run_final_stages(job_id, quick=True)
 
     resp = temp_db_client.get(f"/api/jobs/{job_id}/bundle/ledger")
     assert resp.status_code == 200

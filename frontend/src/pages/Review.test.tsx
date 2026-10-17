@@ -41,9 +41,11 @@ const api = vi.hoisted(() => ({
   fetchJob: vi.fn(),
   fetchEntities: vi.fn(),
   fetchRelationships: vi.fn(),
+  finalizeJob: vi.fn(),
 }))
 
-vi.mock('../api/client', () => ({
+vi.mock('../api/client', async () => ({
+  BundleRefusedError: (await vi.importActual<typeof import('../api/client')>('../api/client')).BundleRefusedError,
   fetchJob: api.fetchJob,
   fetchEntities: api.fetchEntities,
   fetchRelationships: api.fetchRelationships,
@@ -52,7 +54,7 @@ vi.mock('../api/client', () => ({
   updateEntity: api.updateEntity,
   updateRelationship: api.updateRelationship,
   createEntity: vi.fn(), createRelationship: vi.fn(),
-  finalizeJob: vi.fn(), finalizeJobQuick: vi.fn(() => Promise.resolve({})),
+  finalizeJob: api.finalizeJob, finalizeJobQuick: vi.fn(() => Promise.resolve({})),
   bulkUpdateEntities: vi.fn(),
   sourceUrl: (id: string) => `/api/jobs/${id}/source`,
   detectionsExportUrl: (id: string) => `/api/jobs/${id}/detections/export`,
@@ -81,6 +83,7 @@ function renderReview() {
 beforeEach(() => {
   api.updateEntity.mockClear()
   api.updateRelationship.mockClear()
+  api.finalizeJob.mockReset()
   api.fetchJob.mockReset().mockImplementation(() => Promise.resolve(JOB))
   api.fetchEntities.mockReset().mockImplementation(() => Promise.resolve(ENTITIES))
   api.fetchRelationships.mockReset().mockImplementation(() => Promise.resolve(RELS))
@@ -107,6 +110,40 @@ describe('Review — decisions come from the server (ADR-0058)', () => {
     expect(screen.getByText(/≥ 90% confidence/)).toBeInTheDocument()
     expect(screen.getAllByText('auto').length).toBeGreaterThan(0)
     expect(screen.getAllByText('confirm').length).toBeGreaterThan(0)
+  }, 20_000)
+})
+
+describe('Review — a bundle the STIX schemas refused', () => {
+  it('says so and why when Finalize is refused, instead of "check server logs"', async () => {
+    const { BundleRefusedError } = await vi.importActual<typeof import('../api/client')>('../api/client')
+    api.finalizeJob.mockImplementation(() =>
+      Promise.reject(new BundleRefusedError(409, ['bad id', 'bad ref', 'bad type', 'bad date'])))
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => {})
+    renderReview()
+    await opened()
+
+    fireEvent.click(screen.getByRole('button', { name: /^Complete Review/ }))
+
+    await waitFor(() => expect(alert).toHaveBeenCalledTimes(1))
+    const said = alert.mock.calls[0][0]
+    expect(said).toContain('Report not completed.')
+    expect(said).toContain('The STIX 2.1 schemas refused this bundle')
+    expect(said).toContain('• bad id')
+    expect(said).toContain('… and 1 more')
+    expect(said).not.toContain('server logs')
+    alert.mockRestore()
+  }, 20_000)
+
+  it('keeps "check server logs" for a failure that is not a refusal', async () => {
+    api.finalizeJob.mockImplementation(() => Promise.reject(new Error('500: boom')))
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => {})
+    renderReview()
+    await opened()
+
+    fireEvent.click(screen.getByRole('button', { name: /^Complete Review/ }))
+
+    await waitFor(() => expect(alert).toHaveBeenCalledWith('Finalize failed — check server logs'))
+    alert.mockRestore()
   }, 20_000)
 })
 

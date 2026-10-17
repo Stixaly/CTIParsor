@@ -188,3 +188,22 @@ when an operator says so.**
 | mypy | `pipeline/calibration.py`, `pipeline/thresholds.py`, `api/routes/thresholds.py`, `scripts/calibrate_thresholds.py` clean (`--ignore-missing-imports`: the optional `transformers`/`gliner` packages are not installed in this checkout) |
 | CLI, end to end | on a scratch store: empty → "nothing to calibrate"; seeded with 640 `gliner/malware` decisions (50 % accepted below 0.60, 95 % above) and 120 `cyner/threat_actor` at 50 % throughout → `gliner/malware` proposed 0.600 (P 0.950, 96.6 % of accepted entities kept, against P 0.922 at the 0.40 in force), `cyner/threat_actor` `target_unreachable`; `--apply` wrote one row; the next run reports `unchanged` at 0.600 |
 | Real data | none in this checkout — the fit was exercised on constructed samples whose answer is known by construction (a 50 % band under a 95 % band proposes the boundary; a clean band only at ≥ 0.90 is refused and reported as `unclamped`) |
+
+## Amendment (2026-10-17): observations at one score are one point of the fit
+
+Decision 4 fits the pool-adjacent-violators regression over `(score,
+accepted)`. The audit of 2026-10-17 (Q02) showed that, with equal scores, the
+fit depended on the order the rows came back from SQL: 100 rejections then
+100 acceptances at 0.60 proposed a cutoff of 0.60 with status `ok` and an
+empirical precision of 0.50 for a target of 0.90; the reverse order proposed
+nothing. A refusal and an acceptance at one score could stay in separate
+blocks, so a step fell between observations that any cutoff keeps or drops
+together. Ties are common: Stages 2d and 2e store `round(score, 4)`.
+
+`isotonic_blocks` now pools the observations with the same score into one
+weighted point (count, accepted) before the fit. This is de Leeuw's
+"secondary" treatment of ties, which scikit-learn applies too. The fit no
+longer depends on the order of the rows (`tests/test_calibration.py`).
+`propose()` is unchanged: its statuses, its sample guards and its auto-accept
+ceiling are as decided above. A stored `model_thresholds` row keeps its value
+until the next `--apply`, as before.

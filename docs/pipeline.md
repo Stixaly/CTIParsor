@@ -230,12 +230,12 @@ the [README](../README.md#how-it-works); this page is the detail.
 │  stix2-validator JSON-schema check (schemas ship with the repo)      │
 │  Valid bundle → output/{report}_bundle.json                         │
 │  Invalid bundle → output/{report}_bundle_invalid.json (for debug)   │
+│  The verdict is stored with the bundle (jobs.bundle_validation):     │
+│  invalid is not served (409) and never completes a job (ADR-0084)    │
 └──────────────────────────────────────────────────────────────────────┘
 
-On Finalize (web UI):
-  + Report Lexicon Re-scan: accepted named entities used as a per-report
-    domain lexicon to find additional occurrences missed by NER/LLM.
-    Source tagged "report_lexicon". Zero ML cost, pure string matching.
+On Finalize (web UI): Stages 4–5 run again on the accepted rows
+(`re_run_final_stages`), and the rebuilt bundle is stored with Stage 5's verdict.
 ```
 
 **The API worker, the `main.py` CLI and the `--stage full` benchmark run the
@@ -243,8 +243,17 @@ same sequence of stages** (`pipeline/orchestrator.py`, ADR-0059); they differ
 only in what happens around it (job store, progress events, crash-resume).
 Every run records which stages ran, were skipped (disabled, model missing, no
 LLM provider) or failed — the CLI prints it, the worker stores it in the job's
-run config (`stage_report`). The lexicon re-scan runs on Finalize, so it stays
-web-only.
+run config (`stage_report`).
+
+**Stage 5's verdict decides what the API serves** (ADR-0084). The worker stores
+it with the bundle: `jobs.bundle_validation` is `validated`, `unverified` (the
+JSON schemas are missing) or `invalid`, and `jobs.bundle_validation_errors`
+holds the first 20 error messages. An `invalid` bundle is not served
+(`GET /api/jobs/{id}/bundle` answers 409 with the errors) and never completes a
+job: a full finalize leaves the status alone, and a `completed` job goes back to
+`for_review`. The initial run still stores the job `for_review`. A bundle built
+before the verdict was stored has none and is served as before. The CLI already
+returned failure on an invalid bundle.
 
 Stage order note: 3b, 3d, 3f and 3e run **per chunk**; 3doc reads the whole
 document once and its result joins the per-chunk ones; 3c runs **once per
@@ -345,9 +354,9 @@ A report with no explicit T-IDs is where technique counts run away, because ever
 | Parent/sub subsumption across sources | `T1027` dropped when `T1027.004` is present, even when the two came from different stages |
 | ATT&CK-only semantic corpus | removes CAPEC near-duplicates of the technique that belongs in the bundle |
 
-### 7. Report lexicon re-scan (Finalize)
+### 7. Report lexicon re-scan (removed)
 
-On **Finalize**, accepted named entities form a per-report domain lexicon. The full text is re-scanned with word-boundary string matching to find additional occurrences that NER or the LLM missed. New occurrences are inserted with `source="report_lexicon"` and `accepted=True`.
+A full **Finalize** used to re-scan the text for the accepted named entities and insert the occurrences NER and the LLM had missed, with `source="report_lexicon"`. It could never insert a row: it skipped every value already accepted, which is every value it scanned (the one exception, a stored value with surrounding whitespace, would have been a duplicate). It was removed on 2026-10-17 (audit Q03). Rows already stored with that source stay readable. `quick` in `re_run_final_stages` now only decides whether the rebuild completes the job: the manual Finalize does, the debounced auto-finalize does not.
 
 ### 8. Entity canonicalisation & relationship precision (Stage 4, ADR-0012)
 

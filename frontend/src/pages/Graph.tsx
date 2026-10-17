@@ -29,7 +29,7 @@ import {
 import {
   fetchJob, fetchEntities, fetchRelationships, fetchBundle, fetchBundleLedger,
   createRelationship, updateRelationship, deleteRelationship,
-  createEntity,
+  createEntity, BundleRefusedError,
 } from '../api/client'
 import { downloadBundle } from '../stix/downloadBundle'
 import { useDebouncedFinalize } from '../stix/useDebouncedFinalize'
@@ -821,11 +821,18 @@ export default function Graph() {
   const { data: job }           = useQuery({ queryKey: ['job', jobId],           queryFn: () => fetchJob(jobId!),           enabled: !!jobId })
   const { data: rawEntities  = [], isLoading: entLoading  } = useQuery({ queryKey: ['entities',      jobId], queryFn: () => fetchEntities(jobId!),      enabled: !!jobId })
   const { data: rawRelations = [], isLoading: relLoading  } = useQuery({ queryKey: ['relationships', jobId], queryFn: () => fetchRelationships(jobId!),  enabled: !!jobId })
-  // A missing bundle is a state to show, not an error to retry.
-  const { data: bundle = null, isLoading: bundleLoading } = useQuery({
+  // A missing bundle is a state to show, not an error to retry.  So is a
+  // refused one (the STIX schemas said no): it exists, but it is not served.
+  const { data: served = null, isLoading: bundleLoading, error: bundleError } = useQuery({
     queryKey: ['bundle', jobId], enabled: !!jobId, retry: false,
-    queryFn: () => fetchBundle(jobId!).catch(() => null),
+    queryFn: () => fetchBundle(jobId!).catch((e: unknown) => {
+      if (e instanceof BundleRefusedError) throw e
+      return null
+    }),
   })
+  // After a refused rebuild, `served` is the previous build's: not what the server serves now.
+  const refused = bundleError instanceof BundleRefusedError ? bundleError : null
+  const bundle  = refused ? null : served
   const { data: ledger = null } = useQuery({
     queryKey: ['bundle-ledger', jobId], enabled: !!jobId, retry: false,
     queryFn: () => fetchBundleLedger(jobId!),
@@ -975,7 +982,9 @@ export default function Graph() {
     try {
       await finalize.flush()   // an edit still waiting for its rebuild goes in first
       await downloadBundle(jobId!, job?.original_filename)
-    } catch { alert('Bundle not yet available') }
+    } catch (e) {
+      alert(e instanceof BundleRefusedError ? e.summary() : 'Bundle not yet available')
+    }
   }
 
   // ── Clear stale selections when their node or edge leaves the graph ───────
@@ -999,7 +1008,8 @@ export default function Graph() {
   const ghostCount   = nodes.filter(n => n.ghost).length
   const droppedCount = edges.filter(e => e.kind === 'dropped').length
   const changedCount = edges.filter(e => e.changed && e.kind !== 'dropped').length
-  const noBundle     = mode === 'bundle' && !bundleLoading && !bundle
+  const bundleRefused = mode === 'bundle' ? refused : null
+  const noBundle     = mode === 'bundle' && !bundleLoading && !bundle && !refused
 
   // ─────────────────────────────────────────────────────────────────────────
   // Render
@@ -1161,6 +1171,21 @@ export default function Graph() {
                 <path d="M21 12a9 9 0 11-6.2-8.6" />
               </svg>
               Loading graph…
+            </div>
+          ) : bundleRefused ? (
+            <div role="alert" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--ink-4)', gap: 8, padding: 24 }}>
+              <Network size={40} style={{ opacity: 0.3 }} />
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--no)' }}>
+                The last build was refused by the STIX 2.1 schemas and is not served
+              </p>
+              <ul style={{ margin: 0, padding: 0, listStyle: 'none', maxWidth: 560, fontSize: 11, color: 'var(--ink-3)', wordBreak: 'break-word', textAlign: 'center' }}>
+                {bundleRefused.errors.slice(0, 3).map((e, i) => <li key={i}>{e}</li>)}
+                {bundleRefused.errors.length > 3 && <li>… and {bundleRefused.errors.length - 3} more</li>}
+              </ul>
+              <p style={{ margin: 0, fontSize: 11 }}>A rebuild that passes replaces it.</p>
+              <button onClick={() => void finalize.rebuild()} disabled={finalize.running} className="btn-primary" style={{ fontSize: 12 }}>
+                <RefreshCw size={12} /> {finalize.running ? 'Building…' : 'Rebuild the bundle'}
+              </button>
             </div>
           ) : noBundle ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--ink-4)', gap: 8 }}>
