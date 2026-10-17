@@ -83,7 +83,8 @@ built yet".
 **The file on disk stays.** `validate_and_export` writes an invalid bundle to
 `{report}_bundle_invalid.json` and leaves the previous valid
 `{report}_bundle.json` alone. The `_invalid` file remains the candidate for
-diagnosis.
+diagnosis. A finalize writes either file only when its build publishes
+(ADR-0086, amendment of 2026-10-18).
 
 ## Options rejected
 

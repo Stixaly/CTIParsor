@@ -132,7 +132,7 @@ bash scripts/docker_smoke.sh --no-build --job   # also process a sample report e
 | a detection-rule format | a new `RuleCorpusAdapter` in `pipeline/detection/` + register it in `registry.py` |
 | an API route | `api/routes/`, then `app.include_router(...)` in `api/main.py` |
 | a frontend page | `frontend/src/pages/` + a route in `App.tsx` (+ a nav link in `Layout.tsx`) |
-| a job-store or rule-store table or column | `_JOB_STORE_DDL_POSTGRES` or `_RULE_STORE_DDL_POSTGRES` in `api/db.py` (ADR-0045, ADR-0053 — one PostgreSQL-only DDL tuple per store, `IF NOT EXISTS`/`ADD COLUMN IF NOT EXISTS` so it doubles as the migration); document it in [`docs/database-schema.md`](docs/database-schema.md) |
+| a job-store or rule-store table, column, index, trigger or backfill | a new migration `api/migrations/vNNNN_<name>.py` (ADR-0077), never an edit of an applied one; a test in `tests/test_migrations.py`; document it in [`docs/database-schema.md`](docs/database-schema.md) |
 | queue / worker behaviour | `api/queue_loop.py` (the claim, lease, heartbeat) — `api/worker.py` only owns spawning the subprocess (ADR-0046) |
 | a compose service or resource limit | `compose.yaml`, then `docs/docker.md`'s sizing table and `.env.example` |
 
@@ -141,13 +141,21 @@ bash scripts/docker_smoke.sh --no-build --job   # also process a sample report e
 - **ADRs** — significant decisions get an Architecture Decision Record in
   [`docs/adr/`](docs/adr/). Copy an existing one; append, don't rewrite. Update the
   [ADR index](docs/adr/README.md).
-- **DB migrations** — `CREATE TABLE IF NOT EXISTS` / `ADD COLUMN IF NOT
-  EXISTS` statements appended to `_JOB_STORE_DDL_POSTGRES` or
-  `_RULE_STORE_DDL_POSTGRES` in `api/db.py` (one statement per tuple entry,
-  applied through `_apply_postgres_ddl()`, which tolerates the
-  duplicate-object race of two processes both calling `init_db()` against a
-  fresh database). Document the new table or column in
+- **DB migrations** — the schema is versioned (ADR-0077). A change is a new
+  module `api/migrations/vNNNN_<name>.py`, one version after the last, that
+  defines `MIGRATION` (its statements, an optional `data` step, and the
+  `is_applied` check). An applied migration is never edited: its checksum is
+  recorded, and the API refuses to start when it changes. `init_db()` applies
+  what a database lacks, under an advisory lock, at every start of the API, a
+  worker or `bootstrap`. Add a column nullable first and make it required in a
+  later version, since a worker of the previous revision may still run. The
+  rules, with the test each version needs in `tests/test_migrations.py`, are in
+  [`docs/development.md`](docs/development.md#database-migrations). Document
+  the new table or column in
   [`docs/database-schema.md`](docs/database-schema.md).
+  `_JOB_STORE_DDL_POSTGRES` and `_RULE_STORE_DDL_POSTGRES` in `api/db.py` are
+  only the concatenated history, kept for the one-shot SQLite import scripts:
+  do not append to them.
   - **Avoid a bulk-read column on `detection_rules`.** Put per-rule scalars
     in their own table keyed by `rule_id` instead, as `rule_atoms`,
     `rule_techniques`, `rule_related` and `rule_bytes` do (ADR-0022) — the
