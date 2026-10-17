@@ -79,6 +79,11 @@ def constraint_exists(conn: Any, table: str, constraint: str) -> bool:
                 (table, constraint))
 
 
+def trigger_exists(conn: Any, trigger: str) -> bool:
+    return _one(conn, "SELECT 1 FROM information_schema.triggers "
+                      "WHERE trigger_schema = current_schema() AND trigger_name = ?", (trigger,))
+
+
 def tables_exist(conn: Any, *tables: str) -> bool:
     return all(table_exists(conn, t) for t in tables)
 
@@ -89,6 +94,10 @@ def columns_exist(conn: Any, table: str, *columns: str) -> bool:
 
 def indexes_exist(conn: Any, *indexes: str) -> bool:
     return all(index_exists(conn, i) for i in indexes)
+
+
+def triggers_exist(conn: Any, *triggers: str) -> bool:
+    return all(trigger_exists(conn, t) for t in triggers)
 
 
 # ── The registry ─────────────────────────────────────────────────────────────

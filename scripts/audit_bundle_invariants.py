@@ -632,9 +632,16 @@ def _report_staleness(conn: DBConnection) -> None:
     print(f"bundle staleness (ADR-0035): {len(stale)} stale, {len(unknown)} without a recorded revision")
     for r in stale:
         fixes = ", ".join(e[0] for e in r["stale"])
-        print(f"  {r['job_id'][:8]}  built at {(r['git_rev'] or '')[:9]}  predates {fixes}")
-    if stale:
-        print("  rebuild with POST /api/jobs/{id}/finalize — Stages 4-5 only, no LLM call")
+        run, built = (r["git_rev"] or "")[:9], (r["build_rev"] or "")[:9]
+        # An "extraction" fix can be missing from the run while a finalize has it.
+        revisions = f"run {run}, built {built}" if run and built and run != built else f"built at {built or run}"
+        print(f"  {r['job_id'][:8]}  {revisions}  predates {fixes}")
+    # The remedy depends on the fix (ADR-0086): a rebuild picks up a Stage 4/5
+    # fix, only a new run picks up one in Stages 1-3.
+    if any(e[3] == "mapping" for r in stale for e in r["stale"]):
+        print("  \"mapping\" fixes: rebuild with POST /api/jobs/{id}/finalize — Stages 4-5 only, no LLM call")
+    if any(e[3] == "extraction" for r in stale for e in r["stale"]):
+        print("  \"extraction\" fixes: only a new run (re-upload) picks them up; a finalize cannot")
 
 
 def main(argv: list[str] | None = None) -> int:

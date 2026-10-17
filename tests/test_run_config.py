@@ -93,3 +93,45 @@ def test_they_are_left_out_when_not_set(stages_imported, monkeypatch):
         monkeypatch.delenv(name, raising=False)
     env = run_config.build_run_config()["env"]
     assert not set(_OUTPUT_ENV) & set(env)
+
+
+# ── The record of a build (ADR-0086) ─────────────────────────────────────────
+
+def test_the_captured_environment_is_the_allow_list_only(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-secret-value")
+    monkeypatch.setenv("STIX_TLP", "amber")
+    monkeypatch.delenv("STIX_AUTHOR_NAME", raising=False)
+    env = run_config.captured_env()
+    assert env["STIX_TLP"] == "amber" and "STIX_AUTHOR_NAME" not in env
+    assert set(env) <= set(run_config._CAPTURED_ENV) and "sk-secret-value" not in env.values()
+    assert run_config.build_run_config()["env"] == env
+
+
+@pytest.mark.parametrize("kind", ["finalize", "quick"])
+def test_a_build_record_names_what_built_the_bundle(monkeypatch, kind):
+    monkeypatch.setattr(run_config, "_resolve_git_rev", lambda: "abc1234")
+    monkeypatch.setenv("STIX_TLP", "amber")
+    policy = {"global": "enforce", "rules": []}
+
+    record = run_config.build_record(policy, kind=kind)
+
+    assert set(record) == {"kind", "built_at", "git_rev", "policy", "env", "manifest"}
+    assert (record["kind"], record["git_rev"], record["policy"]) == (kind, "abc1234", policy)
+    assert record["built_at"].endswith("Z") and record["env"]["STIX_TLP"] == "amber"
+    assert set(record["manifest"]) == {"llm", "models", "data", "packages"}
+    assert "entity_overrides" not in record                      # Stages 4/5 never read them
+
+
+def test_a_runs_build_record_is_copied_from_its_run_config(monkeypatch):
+    monkeypatch.setattr(run_config, "_resolve_git_rev", lambda: "abc1234")
+    config = run_config.build_run_config({"rules": []})
+
+    record = run_config.run_build_record(config)
+
+    assert record["kind"] == "run" and record["built_at"].endswith("Z")
+    assert {k: record[k] for k in ("git_rev", "policy", "env", "manifest")} == {
+        k: config[k] for k in ("git_rev", "policy", "env", "manifest")}
+
+    nothing = run_config.run_build_record(None)                  # the run config could not be built
+    assert nothing["kind"] == "run"
+    assert [nothing[k] for k in ("git_rev", "policy", "env", "manifest")] == [None] * 4

@@ -158,10 +158,22 @@ bash scripts/docker_smoke.sh --no-build --job   # also process a sample report e
     pattern costs nothing extra either way.
 - **Output-affecting fixes get listed.** If a change makes Stage 4/5 emit
   different objects for the same input, append its commit to the
-  bundle-affecting list read by `scripts/audit_bundle_invariants.py` (ADR-0035).
+  bundle-affecting list (`BUNDLE_AFFECTING` in `pipeline/bundle_revisions.py`)
+  read by `scripts/audit_bundle_invariants.py` (ADR-0035).
   Stored bundles are not rebuilt automatically, so without that line a fixed
   defect keeps riding in every artefact built before it — which is exactly how
-  six self-edges outlived their fix.
+  six self-edges outlived their fix. Each entry is `(commit, date, summary,
+  scope)` (ADR-0086). Pick the scope by asking where the fix acts:
+  - `"mapping"`: only in Stages 4/5. A finalize at a revision that has the fix
+    rebuilds the bundle with it, so the entry is judged on the revision that
+    built the stored bundle and a finalize clears it.
+  - `"extraction"`: in Stages 1–3, even if Stage 4 changed too. A finalize
+    rereads the rows the run wrote and cannot add what the run never extracted,
+    so the entry is judged on the run's revision as well and only a new run
+    clears it.
+
+  When in doubt, pick `"extraction"`: it never claims a rebuild fixed what a
+  rebuild cannot.
 - **Line length** is 120 (ruff). Keep imports sorted (`ruff --fix` handles `I001`).
 - **Files copied from another project** (code, data, icons) keep their
   copyright and licence. Give them a table in [`REUSE.toml`](REUSE.toml),

@@ -82,12 +82,13 @@ class SQLiteJobStorage(JobStorage):
         from api import db
         conn = db.get_conn()
         with conn:
-            # No ledger and no Stage 5 verdict come with this bundle: clear the
-            # old ones rather than let them describe a build it did not come
-            # from (ADR-0061).
+            # No ledger, no Stage 5 verdict and no build record come with this
+            # bundle: clear the old ones rather than let them describe a build
+            # it did not come from (ADR-0061, ADR-0086).
             conn.execute(
                 "UPDATE jobs SET bundle_json=?, bundle_ledger_json=NULL, bundle_validation=NULL, "
-                "bundle_validation_errors=NULL, updated_at=? WHERE id=?",
+                "bundle_validation_errors=NULL, bundle_build_json=NULL, bundle_review_revision=NULL, "
+                "updated_at=? WHERE id=?",
                 (bundle_json, db.now_iso(), job_id),
             )
             conn.commit()

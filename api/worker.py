@@ -24,8 +24,9 @@ from api.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-from api.db import _lock, backup_db, emit_progress, get_conn, now_iso, set_job_status
+from api.db import _lock, backup_db, emit_progress, get_conn, now_iso, set_job_status, transaction
 from api.paths import output_dir, uploads_dir
+from api.run_config import BuildKind, build_record, run_build_record, utc_stamp
 from pipeline.decisions import SHIPS as _SHIPS
 from pipeline.env_flags import env_int
 from pipeline.orchestrator import (
@@ -106,7 +107,7 @@ class BundleInvalidError(RuntimeError):
 def _finalize_job(
     job_id: str, status: str, owner_worker_id: str | None, *, bundle_json: str | None = None,
     ledger_json: str | None = None, validation: str | None = None,
-    validation_errors: list[str] | None = None,
+    validation_errors: list[str] | None = None, build_json: str | None = None,
 ) -> bool:
     """Set a job's terminal status, but only if `owner_worker_id` still owns it.
 
@@ -126,7 +127,10 @@ def _finalize_job(
     `ledger_json` is written with the bundle it describes (ADR-0061), never
     on its own: a ledger left over from an earlier build would misreport this one.
     So are `validation` (Stage 5's status) and `validation_errors`: a verdict left
-    over from an earlier build would clear or condemn this one.
+    over from an earlier build would clear or condemn this one.  So is
+    `build_json`, what built the bundle (ADR-0086), and the job's current
+    `review_revision` as the revision it was built from: a finalize that read
+    the rows before this write is then refused.
     """
     errors_json = _validation_errors_json(validation_errors)
     with _lock:
@@ -135,8 +139,10 @@ def _finalize_job(
                 if bundle_json is not None:
                     conn.execute(
                         "UPDATE jobs SET bundle_json=?, bundle_ledger_json=?, bundle_validation=?, "
-                        "bundle_validation_errors=?, status=?, updated_at=? WHERE id=?",
-                        (bundle_json, ledger_json, validation, errors_json, status, now_iso(), job_id),
+                        "bundle_validation_errors=?, bundle_build_json=?, bundle_review_revision=review_revision, "
+                        "status=?, updated_at=? WHERE id=?",
+                        (bundle_json, ledger_json, validation, errors_json, build_json, status, now_iso(),
+                         job_id),
                     )
                 else:
                     conn.execute(
@@ -148,8 +154,9 @@ def _finalize_job(
             if bundle_json is not None:
                 cur = conn.execute(
                     "UPDATE jobs SET bundle_json=?, bundle_ledger_json=?, bundle_validation=?, "
-                    "bundle_validation_errors=?, status=?, updated_at=? WHERE id=? AND worker_id=?",
-                    (bundle_json, ledger_json, validation, errors_json, status, now_iso(), job_id,
+                    "bundle_validation_errors=?, bundle_build_json=?, bundle_review_revision=review_revision, "
+                    "status=?, updated_at=? WHERE id=? AND worker_id=?",
+                    (bundle_json, ledger_json, validation, errors_json, build_json, status, now_iso(), job_id,
                      owner_worker_id),
                 )
             else:
@@ -440,6 +447,8 @@ class _WorkerHooks(Hooks):
         # output/{job_id}_stage3.ckpt.json — a lingering file always means the
         # previous run crashed mid-Stage 3.
         self.checkpoint = FileCheckpoint(output_dir() / f"{job_id}_stage3.ckpt.json", job_id)
+        # The run config `policy_used` built; None until then, or when it raised.
+        self.run_config: dict | None = None
 
     def progress(self, event: str, data: dict) -> None:
         emit_progress(self.job_id, event, data)
@@ -494,7 +503,8 @@ class _WorkerHooks(Hooks):
         # actually applied rather than whatever the row holds when someone asks.
         try:
             from api.run_config import build_run_config
-            rc = json.dumps(build_run_config(policy))
+            self.run_config = build_run_config(policy)
+            rc = json.dumps(self.run_config)
             with _lock:
                 with get_conn() as conn:
                     conn.execute("UPDATE jobs SET run_config_json=?, updated_at=? WHERE id=?",
@@ -567,8 +577,8 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         )
         document.output_path = str(bundle_output_path(job_id, document.report_name))
 
-        result = run_document(document, RunOptions.from_env(),
-                              _WorkerHooks(job_id, _owner_worker_id, start_time))
+        hooks = _WorkerHooks(job_id, _owner_worker_id, start_time)
+        result = run_document(document, RunOptions.from_env(), hooks)
         _record_stage_report(job_id, result.stage_report())
         if result.bundle is None:
             raise RuntimeError("the run produced no bundle (Stage 4 did not run)")
@@ -583,7 +593,8 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
                            "a rebuild passes")
         if not _finalize_job(job_id, "for_review", _owner_worker_id,
                              bundle_json=bundle_json, ledger_json=ledger_json,
-                             validation=result.validation, validation_errors=result.validation_errors):
+                             validation=result.validation, validation_errors=result.validation_errors,
+                             build_json=json.dumps(run_build_record(hooks.run_config))):
             return
 
         emit_progress(job_id, "done", {"status": "for_review"})
@@ -780,6 +791,38 @@ def run_pipeline_async(job_id: str, file_path: str, original_filename: str) -> s
     return "started" if row and row["status"] == "processing" else "queued"
 
 
+def _stored_newer_build(job_id: str, revision: int, *, complete: bool) -> str | None:
+    """The bundle that stands when `re_run_final_stages` read the rows at
+    `revision` and a build from a newer revision is stored (ADR-0086).
+
+    `complete`: the analyst's Finalize, which completes the job with that
+    bundle unless its verdict is invalid.  Raises `BundleInvalidError` with the
+    STORED errors when the stored verdict is invalid.  None when the job no
+    longer exists."""
+    with _lock:
+        with get_conn() as conn:
+            with transaction(conn):
+                if complete:
+                    conn.execute(
+                        "UPDATE jobs SET status='completed', updated_at=? "
+                        "WHERE id=? AND bundle_review_revision > ? AND bundle_validation IS DISTINCT FROM 'invalid'",
+                        (now_iso(), job_id, revision))
+                stored = conn.execute(
+                    "SELECT bundle_json, bundle_validation, bundle_validation_errors FROM jobs WHERE id=?",
+                    (job_id,)).fetchone()
+    if stored is None:
+        return None
+    logger.info(f"[finalize] job {job_id}: rows read at revision {revision}, but a build from a newer "
+                "revision is stored; nothing published")
+    if stored["bundle_validation"] == "invalid":
+        try:
+            errors = json.loads(stored["bundle_validation_errors"] or "[]")
+        except ValueError:
+            errors = []         # a damaged column must not turn a refused build into a 500
+        raise BundleInvalidError([e for e in errors if isinstance(e, str)] if isinstance(errors, list) else [])
+    return stored["bundle_json"]
+
+
 def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
     """
     Re-runs Stage 4+5 using the accepted entities currently in the DB.
@@ -796,6 +839,16 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
     schemas refuse ("invalid") never completes a job, whatever `quick` says: a
     `completed` job goes back to `for_review`, and `BundleInvalidError` is
     raised.  "unverified" (schemas missing) completes as before.
+
+    The rows are read in one snapshot, with the job's `review_revision`; the
+    bundle, ledger, verdict, build record (`bundle_build_json`) and that
+    revision are published by one conditional UPDATE (ADR-0086).  A build from
+    an older revision than the stored bundle's is refused, so a slow finalize
+    never overwrites a newer one.  The refused build returns the stored bundle
+    instead: the full finalize completes the job with it, and a stored invalid
+    verdict raises `BundleInvalidError` with the stored errors; the refused
+    build's own verdict is not acted on.  Its export file in output/ stays as
+    written (never served: the job store is authoritative).
 
     Entity sources stored during the pipeline:
       ioc       – regex-extracted IoC (Stage 2)
@@ -822,26 +875,37 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
 
     with _lock:
         with get_conn() as conn:
-            job = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
-            if not job:
-                return None
-            # The id the database holds (a uuid the server generated), not the
-            # request's string: it names the bundle file and goes into the log.
-            job_id = job["id"]
-            report_text = job["report_text"] or ""
+            # One snapshot, so the rows agree with the revision read with them
+            # whatever the analyst decides while the bundle is being built.
+            with transaction(conn, snapshot=True):
+                job = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+                if not job:
+                    return None
+                # The id the database holds (a uuid the server generated), not the
+                # request's string: it names the bundle file and goes into the log.
+                job_id = job["id"]
+                report_text = job["report_text"] or ""
+                revision = job["review_revision"]
 
-            # ALL accepted/unreviewed entities regardless of source
-            all_entity_rows = conn.execute(
-                "SELECT * FROM entities WHERE job_id=? AND " + _SHIPS,
-                (job_id,),
-            ).fetchall()
+                # ALL accepted/unreviewed entities regardless of source
+                all_entity_rows = conn.execute(
+                    "SELECT * FROM entities WHERE job_id=? AND " + _SHIPS,
+                    (job_id,),
+                ).fetchall()
 
-            # ALL accepted/unreviewed relationships (DB is authoritative —
-            # includes every manual addition, edit, or deletion from the UI)
-            rel_rows = conn.execute(
-                "SELECT * FROM relationships WHERE job_id=? AND " + _SHIPS,
-                (job_id,),
-            ).fetchall()
+                # ALL accepted/unreviewed relationships (DB is authoritative —
+                # includes every manual addition, edit, or deletion from the UI)
+                rel_rows = conn.execute(
+                    "SELECT * FROM relationships WHERE job_id=? AND " + _SHIPS,
+                    (job_id,),
+                ).fetchall()
+
+                # The rejected entity rows, for the JSON-blob fields below.
+                rejected_rows = conn.execute(
+                    "SELECT value, entity_type, mitre_id FROM entities "
+                    "WHERE job_id=? AND accepted=0",
+                    (job_id,),
+                ).fetchall()
 
     # ── Route entities to the correct STIX path ───────────────────────────────
     #
@@ -921,17 +985,9 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
 
     # ── Build rejection filter sets from the DB ────────────────────────────────
     # Bug fix: the JSON blob bypasses accept/reject decisions made in the UI.
-    # Fetch rejected entity rows and use them to filter the JSON-blob fields
+    # Use the rejected entity rows to filter the JSON-blob fields
     # (ttps, campaign_name, targeted_countries, targeted_sectors) so that
     # objects the reviewer explicitly rejected don't sneak back into the bundle.
-    with _lock:
-        with get_conn() as conn:
-            rejected_rows = conn.execute(
-                "SELECT value, entity_type, mitre_id FROM entities "
-                "WHERE job_id=? AND accepted=0",
-                (job_id,),
-            ).fetchall()
-
     rejected_ttp_names:    set[str] = set()
     rejected_ttp_mitre:    set[str] = set()
     rejected_locations:    set[str] = set()
@@ -1046,6 +1102,7 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
     # Stage 4 through the same function a pipeline run uses (ADR-0059).
     from pipeline.bundle_ledger import MappingLedger
     ledger = MappingLedger()
+    policy = _load_policy()
     bundle = build_bundle(
         raw_entities, llm_result,
         report_name=report_name,
@@ -1053,7 +1110,7 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
         original_filename=original_filename,
         source_hash=source_hash,
         source_bytes=source_bytes,
-        policy=_load_policy(),
+        policy=policy,
         tlp_level=job["tlp_level"],
         pap_level=job["pap_level"],
         cve_metadata=lookup_cves(raw_entities),
@@ -1069,27 +1126,40 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
     invalid = validation.status == INVALID
     verdict = (validation.status, _validation_errors_json(validation.errors))
 
+    # One statement publishes the bundle with everything that describes it, and
+    # refuses it when the stored bundle was built from newer rows (equal
+    # revisions: same rows, the last writer wins).  The verdict is stored with
+    # the bundle it judged (like the ledger).  An invalid one never completes
+    # the job, and a job that was completed no longer is: its bundle is no
+    # longer served.
+    kind: BuildKind = "quick" if quick else "finalize"
+    try:
+        record = build_record(policy, kind=kind)
+    except Exception as exc:
+        # Metadata never fails a finalize (the run does the same with its run
+        # config).  No git_rev: freshness falls back to the run's revision, as
+        # for a row built before this record existed.
+        logger.warning(f"[finalize] job {job_id}: build record not built: {type(exc).__name__}: {exc}")
+        record = {"kind": kind, "built_at": utc_stamp(), "error": f"{type(exc).__name__}: {exc}"}
+    build = json.dumps(record)
     with _lock:
         with get_conn() as conn:
-            # The verdict is stored with the bundle it judged (like the ledger).
-            # An invalid one never completes the job, and a job that was
-            # completed no longer is: its bundle is no longer served.
-            if quick or invalid:
-                conn.execute(
-                    "UPDATE jobs SET bundle_json=?, bundle_ledger_json=?, bundle_validation=?, "
-                    "bundle_validation_errors=?, updated_at=? WHERE id=?",
-                    (bundle_json, ledger_json, *verdict, now_iso(), job_id),
-                )
-                if invalid:
-                    conn.execute("UPDATE jobs SET status='for_review' WHERE id=? AND status='completed'",
-                                 (job_id,))
-            else:
-                conn.execute(
-                    "UPDATE jobs SET bundle_json=?, bundle_ledger_json=?, bundle_validation=?, "
-                    "bundle_validation_errors=?, status='completed', updated_at=? WHERE id=?",
-                    (bundle_json, ledger_json, *verdict, now_iso(), job_id),
-                )
+            published = conn.execute(
+                "UPDATE jobs SET bundle_json=?, bundle_ledger_json=?, bundle_validation=?, "
+                "bundle_validation_errors=?, bundle_build_json=?, bundle_review_revision=?, "
+                "status = CASE WHEN ? THEN 'completed' WHEN ? AND status = 'completed' THEN 'for_review' "
+                "ELSE status END, updated_at=? "
+                "WHERE id=? AND (bundle_review_revision IS NULL OR bundle_review_revision <= ?)",
+                (bundle_json, ledger_json, *verdict, build, revision, not quick and not invalid, invalid,
+                 now_iso(), job_id, revision),
+            ).rowcount == 1
             conn.commit()
+
+    if not published:
+        stored = _stored_newer_build(job_id, revision, complete=not quick)
+        if stored is not None:
+            return stored
+        # The job was deleted meanwhile: nothing is stored, as before.
 
     if invalid:
         logger.error(f"[finalize] job {job_id}: the rebuilt bundle failed STIX schema validation "

@@ -3,6 +3,9 @@
 **Status:** Accepted in part (implemented 2026-09-27; multi-evidence merge and
 schema-constrained LLM output still open)
 **Date:** 2026-09-27
+**Amended by:** [0086](0086-a-bundle-names-its-build-and-a-slower-build-does-not-overwrite-it.md)
+(2026-10-17). A finalize records the build it made (`jobs.bundle_build_json`)
+and publishes it only if no newer build is stored.
 **Relates to:** [pipeline/orchestrator.py](../../pipeline/orchestrator.py),
 [api/worker.py](../../api/worker.py), [main.py](../../main.py),
 [tests/eval_pipeline.py](../../tests/eval_pipeline.py),
@@ -164,9 +167,30 @@ nor `env` recorded. `api/run_config.py` now captures, in addition:
   `lark`, the module actually imported: lark 1.x overwrites lark-parser's files
   and leaves its metadata behind, so both versions are read.
 
-**Still not done** (a later lot):
+**Still not done** (a later lot; ADR-0086 took them up, see the next amendment):
 
 - A manifest per finalize or rebuild. A rebuild reads the current policy and
   data without recording a new configuration.
 - Overrides recorded by content. `entity_overrides` (ADR-0052) counts the
   analyst's deny and promote rows; it does not say which.
+
+## Amendment (2026-10-17, second): a finalize records its build and publishes in order
+
+Decision 2 had finalize (`re_run_final_stages`) build its bundle through the
+same `build_bundle()` as a run. It recorded nothing about that build, and two
+finalizes of one job could publish in the reverse order of their reads (audit of
+2026-10-17, lot L1). ADR-0086 changes `re_run_final_stages` and takes up the two
+items above:
+
+- **The build is recorded.** `jobs.bundle_build_json` holds the build's kind
+  (`run`, `finalize` or `quick`), time, `git_rev`, policy, `env` and manifest,
+  taken from the process that built the bundle. A run writes its own record,
+  copied from its run config. `run_config_json` keeps describing the run.
+- **Overrides are recorded by content, in part.** `entity_overrides` gains
+  `fingerprint`, a hash of the active rows. It says whether the same rows
+  applied, not which. The build record carries no overrides: Stages 4 and 5 do
+  not read them.
+- **A finalize reads one snapshot and publishes conditionally.** The rows and the
+  job's `review_revision` are read in one transaction. One `UPDATE` writes the
+  bundle, ledger, verdict, record and revision, and is refused when the stored
+  bundle was built from newer rows. The refused build returns the stored bundle.

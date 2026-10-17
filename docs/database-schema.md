@@ -32,6 +32,7 @@ migrations".
 | 9 | `relationships.times_json` | 0063 |
 | 10 | `entities.held_reason`, `relationships.held_reason` | 0082 |
 | 11 | `jobs.bundle_validation`, `jobs.bundle_validation_errors` | 0084 |
+| 12 | `jobs.review_revision`, `jobs.bundle_review_revision`, `jobs.bundle_build_json`; the triggers that bump `review_revision` | 0086 |
 
 ```sql
 CREATE TABLE jobs (
@@ -44,7 +45,9 @@ CREATE TABLE jobs (
     tlp_level       TEXT,           -- per-job TLP marking (clear|green|amber|amber+strict|red, ADR-0073)
     pap_level       TEXT,           -- per-job PAP statement marking
     run_config_json TEXT,           -- run-config snapshot (ADR-0024): a bundle
-                                    -- stays explainable after the policy changes
+                                    -- stays explainable after the policy changes.
+                                    -- It describes the RUN; a finalize's own build
+                                    -- is bundle_build_json (ADR-0086)
     worker_id       TEXT,           -- which worker claimed this job (ADR-0046)
     heartbeat_at    TEXT,           -- last time that worker reported alive;
                                     -- stale past WORKER_LEASE_TIMEOUT_S -> requeued
@@ -58,6 +61,20 @@ CREATE TABLE jobs (
                                     -- and never completes the job
     bundle_validation_errors TEXT,  -- JSON list: the first 20 error messages, 500
                                     -- characters each; NULL when there are none
+    review_revision BIGINT NOT NULL DEFAULT 0,
+                                    -- ADR-0086: the number of writes to this job's
+                                    -- entities and relationships rows.  Bumped by the
+                                    -- triggers below, in the transaction of each write
+    bundle_review_revision BIGINT,  -- the review_revision bundle_json was read at.
+                                    -- A build is stored only if this is NULL or <= the
+                                    -- revision the build read.  NULL = built before v12,
+                                    -- or by a writer with no snapshot (save_bundle):
+                                    -- any build may replace it
+    bundle_build_json TEXT,         -- what built bundle_json: kind (run | finalize |
+                                    -- quick), built_at, git_rev, policy, env (the
+                                    -- allow-list), manifest.  Written in the same UPDATE
+                                    -- as the bundle.  NULL = built before v12:
+                                    -- run_config_json describes it
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
@@ -117,6 +134,36 @@ CREATE TABLE relationships (
     held_reason       TEXT                -- ADR-0082: why Stage 3d held this claim back;
                                           -- stored pending, ships only once accepted
 );
+
+-- The revision of a job's review (ADR-0086).  A row-level AFTER trigger on
+-- entities and on relationships adds 1 to jobs.review_revision, in the
+-- transaction of the write itself: no route, worker step or script has to
+-- remember to.  A row moved to another job (UPDATE of job_id) bumps both jobs.
+-- The UPDATE names the schema of the table that fired the trigger, since the
+-- tests, and any deployment that sets search_path, have their own `jobs`.
+CREATE FUNCTION bump_review_revision() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+    jobs_touched text[];
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        jobs_touched := ARRAY[NEW.job_id];
+    ELSIF TG_OP = 'DELETE' THEN
+        jobs_touched := ARRAY[OLD.job_id];
+    ELSE
+        jobs_touched := ARRAY[NEW.job_id, OLD.job_id];
+    END IF;
+    EXECUTE format('UPDATE %I.jobs SET review_revision = review_revision + 1 WHERE id = ANY($1)',
+                   TG_TABLE_SCHEMA) USING jobs_touched;
+    RETURN NULL;
+END
+$$;
+
+CREATE TRIGGER entities_review_revision AFTER INSERT OR UPDATE OR DELETE ON entities
+    FOR EACH ROW EXECUTE FUNCTION bump_review_revision();
+CREATE TRIGGER relationships_review_revision AFTER INSERT OR UPDATE OR DELETE ON relationships
+    FOR EACH ROW EXECUTE FUNCTION bump_review_revision();
+-- Cost: about 0.1 ms per row written.  Policy, data and code changes do not
+-- bump it: they are not decisions.
 
 -- The review journal (ADR-0058): one row per change of `accepted`, only ever
 -- inserted into.  No foreign key to jobs, on purpose: deleting a report must

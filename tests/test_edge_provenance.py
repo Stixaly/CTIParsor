@@ -126,10 +126,13 @@ def test_build_run_config_shape():
     assert set(config.keys()) == expected_keys
 
     # entity_overrides (ADR-0052) must say whether the lists were on and how
-    # many rows acted -- zero on a store without rows, never a missing key.
+    # many rows acted -- zero on a store without rows, never a missing key --
+    # and carry a hash of their content (ADR-0086).
     ov = config["entity_overrides"]
+    assert set(ov) == {"enabled", "deny", "promote", "fingerprint"}
     assert isinstance(ov["enabled"], bool)
     assert isinstance(ov["deny"], int) and isinstance(ov["promote"], int)
+    assert re.fullmatch(r"[0-9a-f]{16}", ov["fingerprint"])
 
     # ner_thresholds (ADR-0051) must name each calibrated stage's default as
     # a real number and the overrides in force -- an empty dict on a store

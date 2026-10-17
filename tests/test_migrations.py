@@ -193,6 +193,24 @@ def test_a_recognised_version_whose_backfill_had_not_run_is_applied(schema):
     assert conn.execute("SELECT decision_origin FROM entities").fetchone()["decision_origin"] == "legacy"
 
 
+def test_version_12_starts_every_job_at_revision_0_and_counts_the_writes_after_it(schema):
+    conn = schema()
+    _legacy_at(conn, 11)
+    conn.execute("INSERT INTO jobs (id, original_filename, created_at, updated_at) VALUES ('j1','r.pdf','t','t')")
+    conn.execute("INSERT INTO entities (id, job_id, value, entity_type, accepted, decision_origin) "
+                 "VALUES ('e1','j1','APT29','threat_actor',1,'human')")
+    assert not history.triggers_exist(conn, "entities_review_revision")
+
+    report = migrate.upgrade(conn)
+
+    assert 12 in report.applied and report.recognised == list(range(1, 12))
+    assert history.triggers_exist(conn, "entities_review_revision", "relationships_review_revision")
+    job = conn.execute("SELECT review_revision, bundle_review_revision, bundle_build_json FROM jobs").fetchone()
+    assert tuple(job) == (0, None, None)                             # no backfill: the rows before it are revision 0
+    conn.execute("UPDATE entities SET accepted = 0 WHERE id = 'e1'")
+    assert conn.execute("SELECT review_revision FROM jobs").fetchone()["review_revision"] == 1
+
+
 # ── Refusals ─────────────────────────────────────────────────────────────────
 
 def test_a_database_newer_than_the_code_is_refused(schema):

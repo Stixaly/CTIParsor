@@ -585,7 +585,7 @@ def test_saving_a_bundle_through_the_storage_clears_the_verdict(db):
     from api.storage import SQLiteJobStorage
 
     _job(db, bundle_json="{}", bundle_ledger_json="{}", bundle_validation="invalid",
-         bundle_validation_errors='["bad"]')
+         bundle_validation_errors='["bad"]', bundle_build_json='{"kind": "run"}', bundle_review_revision=3)
 
     SQLiteJobStorage().save_bundle("j1", '{"type": "bundle"}')
 
@@ -593,6 +593,7 @@ def test_saving_a_bundle_through_the_storage_clears_the_verdict(db):
     assert row["bundle_json"] == '{"type": "bundle"}'
     assert (row["bundle_ledger_json"], row["bundle_validation"], row["bundle_validation_errors"]) == (
         None, None, None)
+    assert (row["bundle_build_json"], row["bundle_review_revision"]) == (None, None)    # no build to name
 
 
 def test_a_finalize_without_a_bundle_keeps_the_stored_verdict(db):
@@ -619,6 +620,33 @@ def test_a_run_stores_the_verdict_with_its_bundle_and_stays_in_review(db, monkey
         "invalid", ["bad", "worse"])
     assert _events(db)[-1] == ("done", {"status": "for_review"})
     assert "failed STIX schema validation" in caplog.text
+
+
+def test_a_run_stores_the_build_that_made_its_bundle(db, monkeypatch):
+    """Stage 4 ran in the run's subprocess, with what its run config captured."""
+    _job(db)
+
+    def run_document(document, options, hooks):
+        hooks.policy_used({"rules": []})
+        return _Result(bundle=_Bundle())
+
+    monkeypatch.setattr(worker, "run_document", run_document)
+    worker._run_pipeline("j1", str(uploads_dir() / "j1.txt"), "APT report.txt")
+
+    row = _row(db)
+    config, build = json.loads(row["run_config_json"]), json.loads(row["bundle_build_json"])
+    assert build["kind"] == "run" and build["policy"] == {"rules": []}
+    for key in ("git_rev", "env", "manifest"):
+        assert build[key] == config[key]
+    assert row["bundle_review_revision"] == row["review_revision"] == 0
+
+
+def test_a_run_whose_config_was_not_built_stores_a_build_with_nothing_to_name(db, monkeypatch):
+    _job(db)
+    _run(monkeypatch, _Result(bundle=_Bundle()))                  # policy_used never ran
+
+    build = json.loads(_row(db)["bundle_build_json"])
+    assert build["kind"] == "run" and build["git_rev"] is None and build["manifest"] is None
 
 
 def test_a_run_whose_stage_5_did_not_run_stores_no_verdict(db, monkeypatch):

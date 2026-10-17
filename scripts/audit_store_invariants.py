@@ -456,6 +456,7 @@ def check_json_columns(conn: DBConnection) -> Finding:
             ("jobs", "bundle_json"),
             ("jobs", "llm_result_json"),
             ("jobs", "run_config_json"),
+            ("jobs", "bundle_build_json"),
             ("detection_rules", "data_sources"),
             ("progress_events", "data"),
             ("figure_reads", "read_json"),
