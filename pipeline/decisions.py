@@ -17,7 +17,8 @@ a journal that is only ever inserted into:
 * `auto_policy` — `apply_auto_accept()` at the end of a job; `policy_version`
                   records the level and control-sample rate it ran with
 * `default`     — accepted at insertion (relationships the pipeline emits)
-* `propagated`  — copied from an analyst decision (the lexicon rescan)
+* `propagated`  — copied from an analyst decision (the lexicon rescan, since
+                  removed: only older rows carry it, with source `report_lexicon`)
 * `legacy`      — decided before this column existed; cannot be told apart
 
 Readers that learn from decisions ask for `HUMAN_ORIGINS` (or only `human`).

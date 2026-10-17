@@ -6,7 +6,10 @@ answer is known by construction; the database half runs on the isolated
 """
 from __future__ import annotations
 
+import random
 from uuid import uuid4
+
+import pytest
 
 import pipeline.thresholds as thresholds
 from pipeline import calibration as cal
@@ -56,6 +59,69 @@ def test_calibrated_rate_reads_the_block_a_score_falls_in():
     assert cal.calibrated_rate(blocks, 0.45) == 0.5
     assert cal.calibrated_rate(blocks, 0.75) == 0.95
     assert cal.calibrated_rate(blocks, 0.99) == 0.95     # past the last block
+
+
+def _orders(points: list[tuple[float, bool]]) -> list[list[tuple[float, bool]]]:
+    """The same sample as the rows might come back: refused first, accepted
+    first, reversed, and a few seeded shuffles."""
+    orders = [
+        sorted(points, key=lambda p: (p[0], p[1])),
+        sorted(points, key=lambda p: (p[0], not p[1])),
+        list(reversed(points)),
+    ]
+    for seed in range(5):
+        shuffled = list(points)
+        random.Random(seed).shuffle(shuffled)
+        orders.append(shuffled)
+    return orders
+
+
+# Ties and distinct scores together: _SPLIT_AT_060 plus a refusal-heavy tie at
+# 0.5, a lone low refusal and a tied high tail.
+_TIED = _SPLIT_AT_060 + [(0.5, False)] * 7 + [(0.31, False)] + [(0.93, True)] * 4
+
+
+def test_the_fit_does_not_depend_on_the_order_of_the_rows():
+    orders = _orders(_TIED)
+    blocks = cal.isotonic_blocks(orders[0])
+    proposal = cal.propose("gliner", "malware", 0.40, orders[0], target_precision=0.9, min_samples=100)
+    assert proposal.status == "ok"
+    for points in orders[1:]:
+        assert cal.isotonic_blocks(points) == blocks
+        again = cal.propose("gliner", "malware", 0.40, points, target_precision=0.9, min_samples=100)
+        assert again.as_dict() == proposal.as_dict()
+
+
+@pytest.mark.parametrize("refused_first", [True, False])
+def test_observations_at_one_score_are_one_block_in_either_order(refused_first):
+    refused, accepted = [(0.6, False)] * 100, [(0.6, True)] * 100
+    points = refused + accepted if refused_first else accepted + refused
+
+    blocks = cal.isotonic_blocks(points)
+    assert blocks == [cal.Block(lo=0.6, hi=0.6, n=200, accepted=100)]
+    assert cal.calibrated_rate(blocks, 0.6) == 0.5
+
+    p = cal.propose("gliner", "malware", 0.40, points, target_precision=0.9)
+    assert p.status == "target_unreachable"
+    assert p.proposed is None and p.unclamped is None
+
+
+def test_a_cutoff_never_lands_inside_a_tie():
+    # 0.70 holds 20 refusals and 20 acceptances: a cutoff there keeps both.  The
+    # first band that reaches 90 % is the distinct scores above it.
+    points = ([(0.5, False)] * 30 + [(0.5, True)] * 10
+              + [(0.7, False)] * 20 + [(0.7, True)] * 20
+              + [(s / 100, True) for s in range(71, 81)]
+              + [(0.85, True)] * 20)
+    for ordered in _orders(points):
+        p = cal.propose("gliner", "malware", 0.40, ordered, target_precision=0.9, min_samples=100)
+        assert p.status == "ok" and p.proposed == 0.71
+        assert p.precision_at_proposed >= p.target_precision
+
+
+def test_one_score_all_accepted_or_all_refused_is_one_block():
+    assert cal.isotonic_blocks([(0.5, True)] * 7) == [cal.Block(lo=0.5, hi=0.5, n=7, accepted=7)]
+    assert cal.isotonic_blocks([(0.5, False)] * 7) == [cal.Block(lo=0.5, hi=0.5, n=7, accepted=0)]
 
 
 # ── Proposal rule ────────────────────────────────────────────────────────────

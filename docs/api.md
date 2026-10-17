@@ -12,14 +12,39 @@ by the running app at `http://localhost:8000/docs`.
 | `POST` | `/api/ingest/url` | Render a URL with headless Chromium (JSON `url`, optional `enable_js`). Writes `{job_id}.pdf` (archive, shown in Review) and `{job_id}.txt` (rendered DOM text, ingested). 400 policy refusal · 502 unreachable or blank render · 503 Playwright absent · 504 timeout. |
 | `GET` | `/api/jobs` | List all jobs |
 | `GET` | `/api/jobs/{id}` | Get a single job (includes entity/relationship counts) |
-| `PATCH` | `/api/jobs/{id}` | Update status |
+| `PATCH` | `/api/jobs/{id}` | Update status. 409 for `completed` while the stored bundle is one Stage 5 refused (below) |
 | `DELETE` | `/api/jobs/{id}` | Delete job, all DB rows, and all associated files |
-| `POST` | `/api/jobs/{id}/finalize` | Re-run lexicon re-scan + Stages 4–5; sets status `completed`. `?quick=true` skips the re-scan (the rebuild the UI schedules after each edit) |
-| `GET` | `/api/jobs/{id}/bundle` | Download the STIX 2.1 bundle JSON |
+| `POST` | `/api/jobs/{id}/finalize` | Re-run Stages 4–5 on the accepted rows and store the bundle; sets status `completed`. `?quick=true` rebuilds the bundle and leaves the status alone (the rebuild the UI schedules after each edit). Returns `{ status, bundle_size, validation }`, `validation` being `validated` or `unverified`. 409 when Stage 5 refuses the rebuilt bundle (below) |
+| `GET` | `/api/jobs/{id}/bundle` | Download the STIX 2.1 bundle JSON. The header `X-Bundle-Validation` carries Stage 5's verdict: `validated`, `unverified` (the JSON schemas were missing) or `unknown` (built before the verdict was stored). 409 when Stage 5 refused the bundle (below) |
 | `GET` | `/api/jobs/{id}/bundle/ledger` | What Stage 4 did with each entity and relationship row when it built the stored bundle (ADR-0061): what each became, what was rewritten or dropped and why, why each generated object exists. 404 when the bundle predates the ledger — a quick finalize writes one |
 | `GET` | `/api/jobs/{id}/source` | Stream the original uploaded file |
 
 Job status lifecycle: `uploaded` → `queued` → `processing` → `for_review` → `reviewing` → `completed` / `failed`. A job whose worker stops heartbeating goes back to `queued` (ADR-0046).
+
+### A bundle Stage 5 refuses (ADR-0084)
+
+Stage 5's verdict is stored with the bundle (`jobs.bundle_validation`,
+`jobs.bundle_validation_errors`). When it is `invalid`, three routes answer
+**409** with the same body, and no route completes the job:
+
+```json
+{ "detail": { "validation": "invalid", "errors": ["…", "…"] } }
+```
+
+`errors` are the validator's first 20 messages, each cut to 500 characters. The
+code is 409 and not 422, which FastAPI keeps for a request that fails
+validation, with a list as `detail`.
+
+| Route | On an invalid bundle |
+|---|---|
+| `GET /api/jobs/{id}/bundle` | 409: the bundle is not served, by the graph view or the download |
+| `POST /api/jobs/{id}/finalize` (`quick` or not) | 409. The rebuilt bundle is stored with its verdict, and the job is not completed: a `completed` job goes back to `for_review`, any other status stays |
+| `PATCH /api/jobs/{id}` with `{"status": "completed"}` | 409. Every other status is accepted |
+
+`GET /api/jobs/{id}/bundle/ledger` ignores the verdict. A finalize whose
+bundle Stage 5 accepts replaces it. A bundle built before the verdict was
+stored (or when Stage 5 did not run) has none: it is served as before, with
+`X-Bundle-Validation: unknown`.
 
 ## Entities
 

@@ -29,6 +29,8 @@ For Review  ──►  Reviewing  ──►  Completed
   (Kanban)       (Review page)   (Graph + Download)
 ```
 
+A report whose bundle Stage 5 refuses (the STIX 2.1 JSON schemas, ADR-0084) does not reach Completed, and its bundle is not served. Finalize, the Graph page and the download show the refusal and its first errors, where they used to show a bundle that was not built yet. A rebuild that passes clears it.
+
 ## Review page
 
 Four view modes toggled at the top of the document pane:

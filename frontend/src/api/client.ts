@@ -2,6 +2,48 @@ import type { Job, Entity, Relationship, StixBundle, BundleLedger, CoverageResul
 
 const BASE = '/api'
 
+/** The STIX 2.1 schemas refused the bundle (409 from GET /bundle, POST /finalize
+ *  and PATCH /jobs/{id}).  It exists, so it is not "not built yet"; and it is
+ *  not served, so it is not a server fault either. */
+export class BundleRefusedError extends Error {
+  readonly errors: string[]
+
+  constructor(status: number, errors: string[]) {
+    super(`${status}: ${refusalText(errors)}`)
+    this.name = 'BundleRefusedError'
+    this.errors = errors
+  }
+
+  /** What to tell the analyst: the verdict and the first errors. */
+  summary(max = 3): string {
+    const shown = this.errors.slice(0, max)
+    const more = this.errors.length - shown.length
+    return [
+      'The STIX 2.1 schemas refused this bundle:',
+      ...shown.map(e => `• ${e}`),
+      ...(more > 0 ? [`… and ${more} more`] : []),
+    ].join('\n')
+  }
+}
+
+function refusalText(errors: string[]): string {
+  return `the STIX 2.1 schemas refused this bundle${errors.length > 0 ? ` — ${errors[0]}` : ''}`
+}
+
+/** The errors of a `{"detail": {"validation": "invalid", "errors": [...]}}` body, or null. */
+function refusedErrors(body: string): string[] | null {
+  try {
+    const detail: unknown = (JSON.parse(body) as { detail?: unknown } | null)?.detail
+    if (detail !== null && typeof detail === 'object' && (detail as { validation?: unknown }).validation === 'invalid') {
+      const errors = (detail as { errors?: unknown }).errors
+      return Array.isArray(errors) ? errors.filter((e): e is string => typeof e === 'string') : []
+    }
+  } catch {
+    // Not JSON — an ordinary error
+  }
+  return null
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...init?.headers },
@@ -9,6 +51,8 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   })
   if (!res.ok) {
     const msg = await res.text().catch(() => res.statusText)
+    const refused = refusedErrors(msg)
+    if (refused) throw new BundleRefusedError(res.status, refused)
     throw new Error(`${res.status}: ${msg}`)
   }
   return res.json()
@@ -19,13 +63,13 @@ export const fetchJobs = () => req<Job[]>('/jobs')
 export const fetchJob = (id: string) => req<Job>(`/jobs/${id}`)
 export const updateJobStatus = (id: string, status: string) =>
   req<{ status: string }>(`/jobs/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) })
-/** Full finalize — runs lexicon re-scan + Stages 4-5.  Used by the manual Finalize button. */
+/** Full finalize — Stages 4-5, then the job is completed.  Used by the manual Finalize button. */
 export const finalizeJob = (id: string) =>
   req<{ status: string; bundle_size: number }>(`/jobs/${id}/finalize`, { method: 'POST' })
 
-/** Quick finalize — skips lexicon re-scan, used by the debounced auto-finalize.
- *  Keeps the bundle up-to-date after every entity/relationship change without
- *  the extra latency of the full re-scan. */
+/** Quick finalize — Stages 4-5 without completing the job, used by the debounced
+ *  auto-finalize.  Keeps the bundle up-to-date after every entity/relationship
+ *  change; the report keeps its status. */
 export const finalizeJobQuick = (id: string) =>
   req<{ status: string; bundle_size: number }>(`/jobs/${id}/finalize?quick=true`, { method: 'POST' })
 export const deleteJob = (id: string) =>
@@ -246,17 +290,26 @@ export const ingestUrl = (body: {
  * `req` throws `Error("<status>: <raw body>")` and FastAPI's body is
  * `{"detail": "..."}`, so a raw message reaches the user as
  * `400: {"detail":"Port 11434 is not allowed."}`.  This unwraps both layers and
- * falls back to the original message when the body is not FastAPI JSON.
+ * falls back to the original message when the body is not FastAPI JSON.  A
+ * bundle the schemas refused carries an object `detail`: it reads as the
+ * refusal and its first error.
  */
 export function errorDetail(err: unknown): string {
   if (!(err instanceof Error)) {
     return String(err)
+  }
+  if (err instanceof BundleRefusedError) {
+    return refusalText(err.errors)
   }
   const idx = err.message.indexOf(': ')
   if (idx === -1) {
     return err.message
   }
   const body = err.message.slice(idx + 2)
+  const refused = refusedErrors(body)
+  if (refused) {
+    return refusalText(refused)
+  }
   try {
     const parsed: unknown = JSON.parse(body)
     if (

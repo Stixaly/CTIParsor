@@ -82,6 +82,49 @@ decisions; nothing is implemented by this entry. The document quotes AnnoCTR
 
 ### Changed
 
+#### The report lexicon re-scan on Finalize is removed, 2026-10-17
+
+`_lexicon_rescan` in `api/worker.py`, run by a full Finalize, could never
+insert a row (audit of 2026-10-17, Q03): it skipped every value already
+accepted, which is every value it scanned. The only exception, a stored value
+with surrounding whitespace, would have been a duplicate. It is removed, and the docs
+that announced it (`docs/pipeline.md`, `docs/api.md`, `docs/architecture.md`) no
+longer do.
+`re_run_final_stages(job_id, skip_rescan=...)` becomes
+`re_run_final_stages(job_id, quick=...)`: `quick` now only decides whether the
+rebuild completes the job (the manual Finalize does, the debounced
+auto-finalize does not). Rows already stored with `source = report_lexicon`
+and `decision_origin = propagated` stay readable; nothing writes them now.
+ADR-0058 gets a dated amendment; ADR-0058 and ADR-0062 keep their historical
+mentions of the rescan.
+
+#### The run manifest records the settings, data and packages that shape a bundle, 2026-10-17
+
+The run config (ADR-0059, `api/run_config.py`) did not record several things a
+run reads (audit of 2026-10-17, Q04). It now captures, in addition:
+
+- **Settings** (`_CAPTURED_ENV`): `STIX_TLP`, `STIX_AUTHOR_NAME`,
+  `GAZETTEER_POLICY`, `BENIGN_IOC_FILTER`, `GLINER_ENABLED`,
+  `GLINER_CHUNK_CHARS`, `CYNER_CHUNK_CHARS`, `LLM_MAX_PROMPT_LENGTH`,
+  `LLM_DOC_MAX_PROMPT_LENGTH`, `LLM_MAX_RESPONSE_LENGTH`,
+  `LLM_MAX_OUTPUT_TOKENS`, `LLM_TIMEOUT`, `STIX_VERIFY_MIN_RELS`,
+  `STIX_VERIFY_BATCH_SIZE`, `TTP_VERIFY_MIN`, `VISION_PROVIDER`,
+  `VISION_MODEL`, `VISION_ASSUME_CAPABLE`, `VISION_TIMEOUT_S`, and each
+  provider's model name (`ANTHROPIC_MODEL`, `GEMINI_MODEL`, `MISTRAL_MODEL`,
+  `OLLAMA_MODEL`, `LMSTUDIO_MODEL`, `VLLM_MODEL`). Names only, never a key or
+  a base URL.
+- **Data files** (`_DATA_FILES`, hashed): `warninglists.json`,
+  `attack_revoked.json`, `gazetteer_policy.json`,
+  `gazetteer_context_rules.json`, `mitre_embeddings_manifest.json`. A test now
+  fails when a file in `pipeline/data/` is not fingerprinted.
+- **Packages** (`_PACKAGES`): `yara-python`, `pysigma`, `parsuricata`,
+  `lark-parser`, `lark`, `stix2-validator`, `spacy`, `rapidfuzz`.
+
+Not done, left to a later lot: a manifest per finalize or rebuild (a rebuild
+reads the current policy and data without recording a new configuration), and
+analyst overrides recorded by content instead of by count. ADR-0059 gets a
+dated amendment.
+
 #### An IoC's Indicator is valid from the report's date, 2026-10-11
 
 `valid_from` was the time the bundle was built, with no `valid_until`: an IoC
@@ -96,6 +139,65 @@ in OpenCTI, as the maintainer chose. A detection rule quoted in a report
 keeps the build time: it still detects its family years later.
 
 ### Fixed
+
+#### A bundle Stage 5 refuses is no longer served, nor does it complete a job (ADR-0084), 2026-10-17
+
+Stage 5's verdict (`validated`, `unverified`, `invalid`) stopped at the stage
+(audit of 2026-10-17, Q01, reproduced on `88bd1d7`). The initial run stored the
+bundle without reading it, `re_run_final_stages` ignored it, a full finalize
+marked the job `completed` even for an invalid bundle, and
+`GET /api/jobs/{id}/bundle` served whatever was stored. Only the file on disk
+got an `_invalid` suffix.
+
+Migration v0011 adds `jobs.bundle_validation` and
+`jobs.bundle_validation_errors` (a JSON list: the first 20 errors, 500
+characters each), written in the same `UPDATE` as the bundle and its ledger.
+`NULL`, for a bundle built before v11 or when Stage 5 did not run, means
+unknown: served as before, with no backfill.
+
+- An invalid bundle never completes a job. A full finalize leaves the status
+  alone, and a job that was `completed` goes back to `for_review`. The initial
+  run still stores the job `for_review`: nothing is published at that stage.
+- `GET /api/jobs/{id}/bundle` answers 409
+  `{"detail": {"validation": "invalid", "errors": [...]}}` for an invalid
+  bundle; otherwise the bundle, with the header
+  `X-Bundle-Validation: validated | unverified | unknown`.
+- `POST /api/jobs/{id}/finalize` answers 409 with the same detail when the
+  rebuilt bundle is invalid, and its success response gains `"validation"`.
+- `PATCH /api/jobs/{id}` refuses `status="completed"` with 409 while the stored
+  bundle is invalid. The ledger route is unchanged.
+- The frontend shows a refused bundle as refused, with the first errors,
+  instead of "not built yet": in the graph view, on Finalize and on download.
+- The CLI already returned failure on an invalid bundle; unchanged.
+
+409 and not 422, which FastAPI keeps for request validation. Finalizing the
+same job twice at once is not made safe by this change.
+
+#### The NER cutoff no longer depends on the order of the rows, 2026-10-17
+
+`isotonic_blocks` (ADR-0051) fitted one observation at a time, so a refusal and
+an acceptance at the same score could stay in separate blocks, and the
+proposed cutoff depended on the order the rows came back from SQL (audit of
+2026-10-17, Q02). 100 rejections then 100 acceptances at 0.60 proposed 0.60
+with status `ok` and an empirical precision of 0.50 for a 0.90 target; the
+reverse order proposed nothing. Observations with the same score are now pooled
+into one weighted point before the pool-adjacent-violators fit (de Leeuw's
+"secondary" treatment of ties, as scikit-learn does). Ties are common: Stages
+2d and 2e store `round(score, 4)`. The policy of `propose()` is unchanged:
+statuses, sample guards and the auto-accept ceiling. A stored
+`model_thresholds` row keeps its value until the next `--apply`. ADR-0051 gets
+a dated amendment.
+
+#### A bundle built at the fix is not stale for it, 2026-10-17
+
+`stale_entries` (ADR-0035) used `git merge-base --is-ancestor`, which is true
+for a commit and itself, so a bundle built at a fix's own commit was reported
+stale for that fix (audit of 2026-10-17, Q05, reproduced on the real
+repository). A new `resolve_commit` (`git rev-parse`) excludes the equal case,
+short and long ids alike; when either id cannot be resolved, the ancestor
+verdict stands. Known limit, unchanged: `BUNDLE_AFFECTING` has two entries, the
+last from 2026-09-29, so "not stale" does not mean that every output change
+since is present. ADR-0035 gets a dated amendment.
 
 #### A revoked ATT&CK id is its replacement; a shared name is the Enterprise technique, 2026-10-11
 

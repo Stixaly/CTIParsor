@@ -268,7 +268,7 @@ CTIParsor/
 │   ├── db.py                      # Job store + rule store, both PostgreSQL via DATABASE_URL — ADR-0045, ADR-0053
 │   ├── db_backend.py              # PostgreSQL adapter: `?`→`%s`, sqlite3.Row-like rows, non-closing `with`
 │   ├── worker.py                  # The pipeline subprocess: spawn, crash-to-`failed`, SSE emitter
-│   │                              #   └─ _lexicon_rescan() on Finalize
+│   │                              #   └─ re_run_final_stages(): Finalize, Stages 4–5 on the accepted rows
 │   ├── queue_loop.py              # Claims queued jobs, heartbeats, requeues orphans (ADR-0046)
 │   ├── run_config.py              # Capture a job's execution config so its bundle is reproducible (ADR-0024)
 │   ├── storage.py                 # Storage abstraction for pipeline job state

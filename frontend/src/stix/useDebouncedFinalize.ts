@@ -8,7 +8,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { finalizeJobQuick } from '../api/client'
+import { BundleRefusedError, finalizeJobQuick } from '../api/client'
 
 export const FINALIZE_DEBOUNCE_MS = 4000
 
@@ -31,9 +31,15 @@ export function useDebouncedFinalize(jobId: string | undefined) {
       qc.invalidateQueries({ queryKey: ['bundle', jobId] })
       qc.invalidateQueries({ queryKey: ['bundle-ledger', jobId] })
       qc.invalidateQueries({ queryKey: ['jobs'] })
-    } catch {
+    } catch (e) {
       // Keep `pending`: the stored bundle is still behind the edits.
       setFailed(true)
+      // A refused rebuild is stored all the same: the view must say so rather
+      // than keep drawing the previous build.
+      if (e instanceof BundleRefusedError) {
+        qc.invalidateQueries({ queryKey: ['bundle', jobId] })
+        qc.invalidateQueries({ queryKey: ['bundle-ledger', jobId] })
+      }
     } finally {
       setRunning(false)
     }

@@ -130,3 +130,43 @@ CVE descriptions.
   * stage-internal settings (thresholds, verification flags) are still read
     from the environment inside each stage; `RunOptions` covers only the
     choices the orchestrator makes.
+
+## Amendment (2026-10-17): the manifest records what a run reads
+
+Decision 3 gave the run config a `manifest` of the model ids, the prompts, the
+data files and the packages that shape a bundle. The audit of 2026-10-17 (Q04)
+found settings, data files and packages a run reads that neither the manifest
+nor `env` recorded. `api/run_config.py` now captures, in addition:
+
+- **Settings** (`_CAPTURED_ENV`, recorded when set):
+  - the bundle's marking and author: `STIX_TLP`, `STIX_AUTHOR_NAME`;
+  - Stage 2: `GAZETTEER_POLICY`, `BENIGN_IOC_FILTER`, `GLINER_ENABLED`,
+    `GLINER_CHUNK_CHARS`, `CYNER_CHUNK_CHARS`;
+  - Stage 3's bounds and verification gates: `LLM_MAX_PROMPT_LENGTH`,
+    `LLM_DOC_MAX_PROMPT_LENGTH`, `LLM_MAX_RESPONSE_LENGTH`,
+    `LLM_MAX_OUTPUT_TOKENS`, `LLM_TIMEOUT`, `STIX_VERIFY_MIN_RELS`,
+    `STIX_VERIFY_BATCH_SIZE`, `TTP_VERIFY_MIN`;
+  - the vision provider: `VISION_PROVIDER`, `VISION_MODEL`,
+    `VISION_ASSUME_CAPABLE`, `VISION_TIMEOUT_S`;
+  - the model each provider would use: `ANTHROPIC_MODEL`, `GEMINI_MODEL`,
+    `MISTRAL_MODEL`, `OLLAMA_MODEL`, `LMSTUDIO_MODEL`, `VLLM_MODEL`. Names
+    only, never a key or a base URL.
+- **Data files** (`_DATA_FILES`, hashed): `warninglists.json`,
+  `attack_revoked.json`, `gazetteer_policy.json`,
+  `gazetteer_context_rules.json`, `mitre_embeddings_manifest.json`.
+  `tests/test_run_config.py` now fails when a file in `pipeline/data/` is not
+  fingerprinted. It lists files only: the `stix2_json_schemas/` directory is
+  not hashed.
+- **Packages** (`_PACKAGES`, versions): `yara-python`, `pysigma`,
+  `parsuricata`, `lark-parser`, `lark`, `stix2-validator`, `spacy`,
+  `rapidfuzz`. They decide whether a quoted rule leaves as an Indicator
+  (ADR-0067, ADR-0070) and the validation status. `parsuricata` runs on
+  `lark`, the module actually imported: lark 1.x overwrites lark-parser's files
+  and leaves its metadata behind, so both versions are read.
+
+**Still not done** (a later lot):
+
+- A manifest per finalize or rebuild. A rebuild reads the current policy and
+  data without recording a new configuration.
+- Overrides recorded by content. `entity_overrides` (ADR-0052) counts the
+  analyst's deny and promote rows; it does not say which.

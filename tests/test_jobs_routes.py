@@ -10,6 +10,7 @@ import pytest
 
 from api.paths import output_dir, uploads_dir
 from api.routes import jobs as jobs_routes
+from api.worker import BundleInvalidError
 
 
 @pytest.fixture()
@@ -84,6 +85,21 @@ def test_the_status_can_be_set_to_a_known_value_only(temp_db_client, temp_db):
     assert temp_db_client.patch("/api/jobs/nope", json={"status": "failed"}).status_code == 404
 
 
+def test_a_job_whose_bundle_was_refused_cannot_be_completed(temp_db_client, temp_db):
+    _add_job(temp_db, "j1", status="for_review", bundle_json="{}", bundle_validation="invalid",
+             bundle_validation_errors=json.dumps(["bad id", "bad ref"]))
+
+    resp = temp_db_client.patch("/api/jobs/j1", json={"status": "completed"})
+
+    assert resp.status_code == 409
+    assert resp.json() == {"detail": {"validation": "invalid", "errors": ["bad id", "bad ref"]}}
+    assert temp_db_client.get("/api/jobs/j1").json()["status"] == "for_review"
+    # Any other status is still the analyst's to set; so is completing a bundle that passed.
+    assert temp_db_client.patch("/api/jobs/j1", json={"status": "reviewing"}).json() == {"status": "reviewing"}
+    _add_job(temp_db, "j2", status="reviewing", bundle_json="{}", bundle_validation="unverified")
+    assert temp_db_client.patch("/api/jobs/j2", json={"status": "completed"}).json() == {"status": "completed"}
+
+
 # ── Finalize ─────────────────────────────────────────────────────────────────
 
 def test_finalize_rebuilds_the_bundle_and_reports_its_size(temp_db_client, temp_db):
@@ -92,15 +108,46 @@ def test_finalize_rebuilds_the_bundle_and_reports_its_size(temp_db_client, temp_
     with patch("api.routes.jobs.re_run_final_stages", return_value='{"type": "bundle"}') as rerun:
         resp = temp_db_client.post("/api/jobs/j1/finalize?quick=true")
 
-    assert resp.json() == {"status": "reviewing", "bundle_size": 18}
-    rerun.assert_called_once_with("j1", skip_rescan=True)
+    assert resp.json() == {"status": "reviewing", "bundle_size": 18, "validation": "unknown"}
+    rerun.assert_called_once_with("j1", quick=True)
+
+
+def test_finalize_reports_the_validation_of_the_bundle_it_built(temp_db_client, temp_db):
+    _add_job(temp_db, "j1", status="completed", bundle_validation="unverified")
+
+    with patch("api.routes.jobs.re_run_final_stages", return_value="{}"):
+        resp = temp_db_client.post("/api/jobs/j1/finalize")
+
+    assert resp.json() == {"status": "completed", "bundle_size": 2, "validation": "unverified"}
+
+
+@pytest.mark.parametrize("quick", ["true", "false"])
+def test_a_finalize_the_schemas_refuse_is_a_409_with_the_errors(temp_db_client, temp_db, quick):
+    _add_job(temp_db, "j1", status="reviewing")
+    errors = [f"{i}: " + "x" * 600 for i in range(30)]
+
+    with patch("api.routes.jobs.re_run_final_stages", side_effect=BundleInvalidError(errors)):
+        resp = temp_db_client.post(f"/api/jobs/j1/finalize?quick={quick}")
+
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert detail["validation"] == "invalid"
+    assert len(detail["errors"]) == 20 and all(len(e) <= 500 for e in detail["errors"])    # as stored
+    assert detail["errors"][0] == errors[0][:500]
+
+
+def test_the_refusal_is_declared_in_the_openapi_schema_as_a_409(temp_db_client):
+    paths = temp_db_client.get("/openapi.json").json()["paths"]
+    for path, method in [("/api/jobs/{job_id}/bundle", "get"), ("/api/jobs/{job_id}/finalize", "post"),
+                         ("/api/jobs/{job_id}", "patch")]:
+        assert "refused the bundle" in paths[path][method]["responses"]["409"]["description"]
 
 
 def test_a_failed_finalize_is_a_500(temp_db_client, temp_db):
     _add_job(temp_db, "j1")
     with patch("api.routes.jobs.re_run_final_stages", return_value=None) as rerun:
         assert temp_db_client.post("/api/jobs/j1/finalize").status_code == 500
-    rerun.assert_called_once_with("j1", skip_rescan=False)
+    rerun.assert_called_once_with("j1", quick=False)
 
 
 def test_finalizing_an_unknown_job_is_a_404(temp_db_client):
@@ -239,6 +286,43 @@ def test_the_bundle_is_returned_as_json(temp_db_client, temp_db):
     bundle = {"type": "bundle", "id": "bundle--1", "objects": []}
     _add_job(temp_db, "j1", bundle_json=json.dumps(bundle))
     assert temp_db_client.get("/api/jobs/j1/bundle").json() == bundle
+
+
+@pytest.mark.parametrize("stored,header", [
+    ("validated", "validated"),
+    ("unverified", "unverified"),
+    (None, "unknown"),                    # built before the verdict was stored
+])
+def test_the_bundle_carries_its_validation_in_a_header(temp_db_client, temp_db, stored, header):
+    bundle = {"type": "bundle", "id": "bundle--1", "objects": []}
+    _add_job(temp_db, "j1", bundle_json=json.dumps(bundle), bundle_validation=stored)
+
+    resp = temp_db_client.get("/api/jobs/j1/bundle")
+
+    assert resp.status_code == 200 and resp.json() == bundle
+    assert resp.headers["x-bundle-validation"] == header
+
+
+@pytest.mark.parametrize("stored,errors", [
+    (json.dumps(["bad id", "bad ref"]), ["bad id", "bad ref"]),
+    (None, []),
+    ("{oops", []),
+])
+def test_an_invalid_bundle_is_not_served(temp_db_client, temp_db, stored, errors):
+    _add_job(temp_db, "j1", status="for_review", bundle_json=json.dumps({"type": "bundle"}),
+             bundle_validation="invalid", bundle_validation_errors=stored)
+
+    resp = temp_db_client.get("/api/jobs/j1/bundle")
+
+    assert resp.status_code == 409
+    assert resp.json() == {"detail": {"validation": "invalid", "errors": errors}}
+    assert "x-bundle-validation" not in resp.headers
+
+
+def test_the_ledger_route_ignores_the_validation(temp_db_client, temp_db):
+    _add_job(temp_db, "j1", bundle_json="{}", bundle_ledger_json='{"entities": []}',
+             bundle_validation="invalid")
+    assert temp_db_client.get("/api/jobs/j1/bundle/ledger").json() == {"entities": []}
 
 
 @pytest.mark.parametrize("cols,status", [

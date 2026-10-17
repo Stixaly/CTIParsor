@@ -97,8 +97,8 @@ def test_finalize_same_filename_jobs_do_not_collide(temp_db):
     _insert_job(temp_db, job_id="job-b")
     worker._save_entities("job-a", [], _llm_result_with_label(EvidenceLabel.OBSERVED))
     worker._save_entities("job-b", [], _llm_result_with_label(EvidenceLabel.OBSERVED))
-    worker.re_run_final_stages("job-a", skip_rescan=True)
-    worker.re_run_final_stages("job-b", skip_rescan=True)
+    worker.re_run_final_stages("job-a", quick=True)
+    worker.re_run_final_stages("job-b", quick=True)
 
     pa = worker.bundle_output_path("job-a", "report")
     pb = worker.bundle_output_path("job-b", "report")
@@ -118,7 +118,7 @@ def test_bundles_are_written_where_the_output_dir_setting_says(temp_db, tmp_path
 
     job_id = _insert_job(temp_db, job_id="job-out")
     worker._save_entities(job_id, [], _llm_result_with_label(EvidenceLabel.OBSERVED))
-    worker.re_run_final_stages(job_id, skip_rescan=True)
+    worker.re_run_final_stages(job_id, quick=True)
 
     path = worker.bundle_output_path(job_id, "report")
     assert path.parent == tmp_path / "output"
@@ -174,13 +174,13 @@ def test_quick_finalize_rebuilds_the_bundle_but_keeps_the_status(temp_db):
 
     job_id = _insert_job(temp_db, job_id="job-quick")
     worker._save_entities(job_id, [], _llm_result_with_label(EvidenceLabel.OBSERVED))
-    assert worker.re_run_final_stages(job_id, skip_rescan=True)
+    assert worker.re_run_final_stages(job_id, quick=True)
     assert _job_status(temp_db, job_id) == "reviewing"
     with temp_db.get_conn() as conn:
         assert conn.execute("SELECT bundle_json FROM jobs WHERE id=?",
                             (job_id,)).fetchone()["bundle_json"]
 
-    assert worker.re_run_final_stages(job_id, skip_rescan=False)
+    assert worker.re_run_final_stages(job_id, quick=False)
     assert _job_status(temp_db, job_id) == "completed"
 
 
@@ -192,7 +192,7 @@ def test_finalize_carries_evidence_label_into_bundle(temp_db):
     job_id = _insert_job(temp_db)
     worker._save_entities(job_id, [], _llm_result_with_label(EvidenceLabel.OBSERVED))
 
-    bundle_json = worker.re_run_final_stages(job_id, skip_rescan=True)
+    bundle_json = worker.re_run_final_stages(job_id, quick=True)
     assert bundle_json, "finalize returned no bundle"
     bundle = json.loads(bundle_json)
 
@@ -212,7 +212,7 @@ def test_finalize_defaults_missing_label_to_reported(temp_db):
         conn.execute("UPDATE relationships SET evidence_label=NULL WHERE job_id=?", (job_id,))
         conn.commit()
 
-    bundle_json = worker.re_run_final_stages(job_id, skip_rescan=True)
+    bundle_json = worker.re_run_final_stages(job_id, quick=True)
     bundle = json.loads(bundle_json)
     rels = [o for o in bundle["objects"] if o.get("type") == "relationship"]
     assert rels and all(r.get("x_evidence_label") == "reported" for r in rels)
@@ -249,7 +249,7 @@ def test_finalize_carries_dates_into_bundle(temp_db):
     job_id = _insert_job(temp_db, job_id="job-dates-finalize")
     worker._save_entities(job_id, [], _llm_result_with_dates(_MONTH_START, _INSTANT_END))
 
-    bundle_json = worker.re_run_final_stages(job_id, skip_rescan=True)
+    bundle_json = worker.re_run_final_stages(job_id, quick=True)
     bundle = json.loads(bundle_json)
     rels = [o for o in bundle["objects"] if o.get("type") == "relationship"]
     assert rels, "no relationship object in the finalized bundle"
@@ -278,7 +278,7 @@ def test_a_legacy_row_is_kept_but_never_reinterpreted(temp_db):
                      "times_json=NULL WHERE job_id=?", (job_id,))
         conn.commit()
 
-    bundle = json.loads(worker.re_run_final_stages(job_id, skip_rescan=True))
+    bundle = json.loads(worker.re_run_final_stages(job_id, quick=True))
     rel = next(o for o in bundle["objects"] if o.get("type") == "relationship"
                and o.get("x_temporal_assertions"))
     assert "start_time" not in rel
@@ -300,5 +300,5 @@ def test_finalize_survives_malformed_stored_date(temp_db):
         conn.execute("UPDATE relationships SET start_time='not-a-date' WHERE job_id=?", (job_id,))
         conn.commit()
 
-    bundle_json = worker.re_run_final_stages(job_id, skip_rescan=True)
+    bundle_json = worker.re_run_final_stages(job_id, quick=True)
     assert bundle_json, "finalize must not raise on a malformed stored date"

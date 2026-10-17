@@ -76,15 +76,48 @@ def is_ancestor(rev: str, descendant: str, repo_root: Path | None = None) -> boo
         return None
 
 
+def resolve_commit(sha: str, repo_root: Path | None = None) -> str | None:
+    """The full id of the commit `sha` names, or None when git cannot say.
+
+    Same guard as `is_ancestor`: `sha` must be a commit id.  A short and a long
+    id of one commit resolve to the same string.
+    """
+    if not _SHA.fullmatch(sha or ""):
+        return None
+    cwd = repo_root or Path(__file__).resolve().parent.parent
+    try:
+        result = subprocess.run(  # noqa: S603 — a commit id checked above
+            ["git", "rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}"],  # noqa: S607 — git from PATH
+            cwd=cwd,
+            timeout=10,
+            capture_output=True,
+            text=True
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
 def stale_entries(rev: str | None, repo_root: Path | None = None) -> list[tuple[str, str, str]]:
-    """Return list of BUNDLE_AFFECTING entries for which rev is an ancestor."""
+    """Return list of BUNDLE_AFFECTING entries for which rev is an ancestor.
+
+    A strict ancestor: `git merge-base --is-ancestor X X` succeeds, but a bundle
+    built at the entry's own commit already has its fix.  When either id cannot
+    be resolved, the ancestor verdict stands.
+    """
     if rev is None:
         return []
     stale = []
     for entry in BUNDLE_AFFECTING:
         entry_sha = entry[0]
-        if is_ancestor(rev, entry_sha, repo_root) is True:
-            stale.append(entry)
+        if is_ancestor(rev, entry_sha, repo_root) is not True:
+            continue
+        resolved = resolve_commit(rev, repo_root)
+        if resolved is not None and resolved == resolve_commit(entry_sha, repo_root):
+            continue
+        stale.append(entry)
     return stale
 
 

@@ -72,9 +72,41 @@ def _current_owner(job_id: str) -> str | None:
     return row["worker_id"] if row else None
 
 
+# What is stored of Stage 5's errors: a bundle with thousands of objects can
+# fail on thousands of them, and the first few tell the analyst what is wrong.
+_MAX_VALIDATION_ERRORS = 20
+_MAX_VALIDATION_ERROR_CHARS = 500
+
+
+def _stored_validation_errors(errors: list[str] | None) -> list[str]:
+    """The errors as the job store keeps and the API returns them: the first
+    few, each cut short."""
+    return [e[:_MAX_VALIDATION_ERROR_CHARS] for e in (errors or [])[:_MAX_VALIDATION_ERRORS]]
+
+
+def _validation_errors_json(errors: list[str] | None) -> str | None:
+    """`jobs.bundle_validation_errors`: the stored errors as a JSON list; NULL
+    when there are none."""
+    return json.dumps(_stored_validation_errors(errors)) if errors else None
+
+
+class BundleInvalidError(RuntimeError):
+    """Stage 5's JSON schemas refused the bundle `re_run_final_stages` just built.
+
+    The bundle is stored with its verdict, but the job is not completed and the
+    API does not serve the bundle (409 on GET /bundle).  `errors` are the
+    validator's messages as stored: 20 at most, 500 characters each."""
+
+    def __init__(self, errors: list[str]) -> None:
+        self.errors = _stored_validation_errors(errors)
+        super().__init__("the rebuilt bundle failed STIX schema validation"
+                         + (f": {self.errors[0]}" if self.errors else ""))
+
+
 def _finalize_job(
     job_id: str, status: str, owner_worker_id: str | None, *, bundle_json: str | None = None,
-    ledger_json: str | None = None,
+    ledger_json: str | None = None, validation: str | None = None,
+    validation_errors: list[str] | None = None,
 ) -> bool:
     """Set a job's terminal status, but only if `owner_worker_id` still owns it.
 
@@ -93,15 +125,18 @@ def _finalize_job(
 
     `ledger_json` is written with the bundle it describes (ADR-0061), never
     on its own: a ledger left over from an earlier build would misreport this one.
+    So are `validation` (Stage 5's status) and `validation_errors`: a verdict left
+    over from an earlier build would clear or condemn this one.
     """
+    errors_json = _validation_errors_json(validation_errors)
     with _lock:
         with get_conn() as conn:
             if owner_worker_id is None:
                 if bundle_json is not None:
                     conn.execute(
-                        "UPDATE jobs SET bundle_json=?, bundle_ledger_json=?, status=?, "
-                        "updated_at=? WHERE id=?",
-                        (bundle_json, ledger_json, status, now_iso(), job_id),
+                        "UPDATE jobs SET bundle_json=?, bundle_ledger_json=?, bundle_validation=?, "
+                        "bundle_validation_errors=?, status=?, updated_at=? WHERE id=?",
+                        (bundle_json, ledger_json, validation, errors_json, status, now_iso(), job_id),
                     )
                 else:
                     conn.execute(
@@ -112,9 +147,10 @@ def _finalize_job(
                 return True
             if bundle_json is not None:
                 cur = conn.execute(
-                    "UPDATE jobs SET bundle_json=?, bundle_ledger_json=?, status=?, updated_at=? "
-                    "WHERE id=? AND worker_id=?",
-                    (bundle_json, ledger_json, status, now_iso(), job_id, owner_worker_id),
+                    "UPDATE jobs SET bundle_json=?, bundle_ledger_json=?, bundle_validation=?, "
+                    "bundle_validation_errors=?, status=?, updated_at=? WHERE id=? AND worker_id=?",
+                    (bundle_json, ledger_json, validation, errors_json, status, now_iso(), job_id,
+                     owner_worker_id),
                 )
             else:
                 cur = conn.execute(
@@ -539,8 +575,15 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
 
         bundle_json = result.bundle.serialize(pretty=True)
         ledger_json = json.dumps(result.ledger) if result.ledger is not None else None
+        if result.validation == "invalid":
+            # Nothing is published at this stage: the job waits for review either
+            # way, and the API refuses to serve this bundle until a rebuild is valid.
+            logger.warning(f"[Worker] job {job_id}: the bundle failed STIX schema validation "
+                           f"({len(result.validation_errors)} error(s)); it is not served until "
+                           "a rebuild passes")
         if not _finalize_job(job_id, "for_review", _owner_worker_id,
-                             bundle_json=bundle_json, ledger_json=ledger_json):
+                             bundle_json=bundle_json, ledger_json=ledger_json,
+                             validation=result.validation, validation_errors=result.validation_errors):
             return
 
         emit_progress(job_id, "done", {"status": "for_review"})
@@ -736,137 +779,23 @@ def run_pipeline_async(job_id: str, file_path: str, original_filename: str) -> s
     row = get_conn().execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
     return "started" if row and row["status"] == "processing" else "queued"
 
-def _lexicon_rescan(job_id: str, report_text: str) -> int:
-    """
-    Report Lexicon Re-scan — per-report few-shot adaptation (Approach 1).
 
-    After the reviewer accepts entities in the UI, those accepted values form a
-    domain-specific lexicon for this document.  This function scans the full
-    report text for every occurrence of each accepted entity value that the
-    initial pipeline passes (regex, NER, LLM) may have missed.
-
-    Why this matters:
-      The LLM might extract "GREYVIBE" once from the executive summary, but the
-      same name appears 12 more times in the body.  Stage 2 regex won't catch
-      named malware families; Stage 2e (GLiNER) may miss low-confidence spans.
-      The reviewer's accept decision is the highest-quality signal available —
-      propagating it back over the full text closes the coverage gap at zero
-      ML cost (pure string matching, O(text × entities)).
-
-    Returns the number of new entity rows inserted.
-    """
-    from uuid import uuid4
-
-    if not report_text:
-        return 0
-
-    text_lower = report_text.lower()
-
-    with _lock:
-        with get_conn() as conn:
-            # Load accepted entities that are suitable for text-span matching.
-            # Exclude generic SCO types (IPs, hashes) whose value is already
-            # found exactly by regex — focus on named SDO entities.
-            _SDO_TYPES = {
-                "malware", "threat_actor", "intrusion_set", "tool",
-                "campaign", "identity", "location", "infrastructure",
-                "technique", "tactic", "procedure", "ttp",
-                "vulnerability", "cve", "indicator", "incident",
-            }
-            rows = conn.execute(
-                "SELECT id, value, entity_type, confidence, mitre_id, source "
-                "FROM entities WHERE job_id=? AND accepted=1",
-                (job_id,),
-            ).fetchall()
-
-            # Build a deduplicated lookup of existing (value_lower, entity_type) pairs
-            existing_keys: set[tuple[str, str]] = {
-                (r["value"].lower(), r["entity_type"]) for r in rows
-            }
-
-            to_insert: list[tuple] = []
-            seen_new: set[tuple[str, str]] = set()
-
-            for row in rows:
-                etype = row["entity_type"]
-                if etype not in _SDO_TYPES:
-                    continue   # skip regex-handled SCOs
-                value = row["value"].strip()
-                if len(value) < 4:
-                    continue   # too short — too many false positives
-                value_lower = value.lower()
-
-                # Scan the full text for ALL occurrences of this value
-                pos = 0
-                found_new = False
-                while True:
-                    idx = text_lower.find(value_lower, pos)
-                    if idx == -1:
-                        break
-                    # Word-boundary check — don't match mid-word
-                    before_ok = (idx == 0 or not text_lower[idx - 1].isalnum())
-                    after_ok  = (
-                        idx + len(value_lower) >= len(text_lower)
-                        or not text_lower[idx + len(value_lower)].isalnum()
-                    )
-                    if before_ok and after_ok:
-                        found_new = True   # at least one span found (even if original)
-                    pos = idx + 1
-
-                if not found_new:
-                    continue
-
-                # The entity appears in the text.  Insert a "report_lexicon" copy
-                # only if not already present as a different source.
-                new_key = (value_lower, etype)
-                if new_key in existing_keys or new_key in seen_new:
-                    continue
-                seen_new.add(new_key)
-
-                # Context: first 200 chars around first occurrence
-                first_idx = text_lower.find(value_lower)
-                ctx_start = max(0, first_idx - 60)
-                ctx_end   = min(len(report_text), first_idx + len(value) + 60)
-                context   = report_text[ctx_start:ctx_end].strip()
-
-                to_insert.append((
-                    str(uuid4()), job_id, value, etype,
-                    context, row["confidence"], row["mitre_id"],
-                    1,                  # accepted=True (reviewer already validated the label)
-                    "report_lexicon",   # source tag — distinguishable from pipeline sources
-                    "propagated",       # ADR-0058: a copy of that decision, not a new one
-                ))
-
-            if to_insert:
-                conn.executemany(
-                    "INSERT INTO entities "
-                    "(id,job_id,value,entity_type,context,confidence,mitre_id,accepted,source,"
-                    "decision_origin) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?) "
-                    "ON CONFLICT (id) DO NOTHING",
-                    to_insert,
-                )
-                conn.commit()
-                logger.info(
-                    f"[lexicon_rescan] +{len(to_insert)} entity rows "
-                    f"(source=report_lexicon, from {len(rows)} accepted SDO entities)"
-                )
-
-    return len(to_insert)
-
-
-def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
+def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
     """
     Re-runs Stage 4+5 using the accepted entities currently in the DB.
     Returns the new bundle JSON, or None on failure.
 
-    skip_rescan=True  — used by the auto-finalize (background debounce) to
-                        skip the lexicon re-scan for speed.  The manual Finalize
-                        button always passes skip_rescan=False (full re-scan).
-                        It also leaves the job's status alone: the
-                        auto-finalize runs 4 s after every review edit, and it
-                        used to mark the report completed, so a report left
-                        "Reviewing" after its analyst's first click.
+    quick=True  — used by the auto-finalize (background debounce): it leaves the
+                  job's status alone.  The auto-finalize runs 4 s after every
+                  review edit, and it used to mark the report completed, so a
+                  report left "Reviewing" after its analyst's first click.
+                  The manual Finalize button passes quick=False: the rebuild
+                  also completes the job.
+
+    The bundle is stored with Stage 5's verdict (`bundle_validation`).  One the
+    schemas refuse ("invalid") never completes a job, whatever `quick` says: a
+    `completed` job goes back to `for_review`, and `BundleInvalidError` is
+    raised.  "unverified" (schemas missing) completes as before.
 
     Entity sources stored during the pipeline:
       ioc       – regex-extracted IoC (Stage 2)
@@ -889,33 +818,17 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
 
     from models.schemas import EntityType, RawEntity
     from pipeline.stage3_llm import LLMEnrichmentResult, RelationshipExtracted
-    from pipeline.stage5_validation import validate_and_export
+    from pipeline.stage5_validation import INVALID, validate_and_export
 
     with _lock:
         with get_conn() as conn:
             job = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
             if not job:
                 return None
-    # The id the database holds (a uuid the server generated), not the
-    # request's string: it names the bundle file and goes into the log.
-    job_id = job["id"]
-
-    # ── Report lexicon re-scan — runs BEFORE rebuilding the bundle ────────────
-    # Uses the reviewer's accepted entities as a per-report domain lexicon and
-    # scans the full text for additional occurrences of known named entities
-    # that the initial NER/LLM passes may have missed.
-    # Skipped when skip_rescan=True (auto-finalize path) to keep latency low.
-    report_text = job["report_text"] or ""
-    if not skip_rescan:
-        new_count = _lexicon_rescan(job_id, report_text)
-        if new_count:
-            logger.info(f"[finalize] Lexicon re-scan added {new_count} new entity rows")
-
-    with _lock:
-        with get_conn() as conn:
-            job = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
-            if not job:
-                return None
+            # The id the database holds (a uuid the server generated), not the
+            # request's string: it names the bundle file and goes into the log.
+            job_id = job["id"]
+            report_text = job["report_text"] or ""
 
             # ALL accepted/unreviewed entities regardless of source
             all_entity_rows = conn.execute(
@@ -1152,21 +1065,36 @@ def re_run_final_stages(job_id: str, skip_rescan: bool = False) -> str | None:
 
     out_path = str(bundle_output_path(job_id, report_name))
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    validate_and_export(bundle, out_path)
+    validation = validate_and_export(bundle, out_path)
+    invalid = validation.status == INVALID
+    verdict = (validation.status, _validation_errors_json(validation.errors))
 
     with _lock:
         with get_conn() as conn:
-            if skip_rescan:
+            # The verdict is stored with the bundle it judged (like the ledger).
+            # An invalid one never completes the job, and a job that was
+            # completed no longer is: its bundle is no longer served.
+            if quick or invalid:
                 conn.execute(
-                    "UPDATE jobs SET bundle_json=?, bundle_ledger_json=?, updated_at=? WHERE id=?",
-                    (bundle_json, ledger_json, now_iso(), job_id),
+                    "UPDATE jobs SET bundle_json=?, bundle_ledger_json=?, bundle_validation=?, "
+                    "bundle_validation_errors=?, updated_at=? WHERE id=?",
+                    (bundle_json, ledger_json, *verdict, now_iso(), job_id),
                 )
+                if invalid:
+                    conn.execute("UPDATE jobs SET status='for_review' WHERE id=? AND status='completed'",
+                                 (job_id,))
             else:
                 conn.execute(
-                    "UPDATE jobs SET bundle_json=?, bundle_ledger_json=?, status='completed', "
-                    "updated_at=? WHERE id=?",
-                    (bundle_json, ledger_json, now_iso(), job_id),
+                    "UPDATE jobs SET bundle_json=?, bundle_ledger_json=?, bundle_validation=?, "
+                    "bundle_validation_errors=?, status='completed', updated_at=? WHERE id=?",
+                    (bundle_json, ledger_json, *verdict, now_iso(), job_id),
                 )
             conn.commit()
+
+    if invalid:
+        logger.error(f"[finalize] job {job_id}: the rebuilt bundle failed STIX schema validation "
+                     f"({len(validation.errors)} error(s)); the job is not completed and the bundle "
+                     "is not served")
+        raise BundleInvalidError(validation.errors)
 
     return bundle_json

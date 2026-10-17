@@ -84,12 +84,27 @@ def isotonic_blocks(points: list[tuple[float, bool]]) -> list[Block]:
 
     Returns the non-decreasing step function closest (least squares) to the
     observed accept rate, as blocks ordered by score.  Empty input → no blocks.
+
+    Observations at the same score are pooled into one weighted point before
+    the fit (the "secondary" treatment of ties, de Leeuw 1977; scikit-learn's
+    too).  A cutoff keeps every observation at its score, so they share one
+    rate and no step may fall between them: taken one by one, a refusal then
+    its acceptances stay in blocks of their own, and the fit would depend on
+    the order the rows came back in.  Stages 2d/2e store `round(score, 4)`, so
+    ties are the rule.
     """
+    # score → [n, accepted]
+    tied: dict[float, list[int]] = {}
+    for score, ok in points:
+        counts = tied.setdefault(score, [0, 0])
+        counts[0] += 1
+        counts[1] += 1 if ok else 0
+
     # [lo, hi, n, accepted]; means compared by cross-multiplication so the
     # merge test never divides.
     blocks: list[list] = []
-    for score, ok in sorted(points, key=lambda p: p[0]):
-        blocks.append([score, score, 1, 1 if ok else 0])
+    for score in sorted(tied):
+        blocks.append([score, score, *tied[score]])
         while len(blocks) >= 2:
             prev, last = blocks[-2], blocks[-1]
             if prev[3] * last[2] <= last[3] * prev[2]:

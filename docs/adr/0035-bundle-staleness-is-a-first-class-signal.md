@@ -151,3 +151,23 @@ the result differs only by the listed defect.
 - **Nothing detects a defect that was never diagnosed.** The list records fixes
   the maintainer knew to record. It shortens the distance between finding a bug
   and knowing which artefacts carry it; it does not find bugs.
+
+## Amendment (2026-10-17): a bundle built at the fix is not stale for it
+
+The audit of 2026-10-17 (Q05) reproduced a false positive on the real
+repository. `stale_entries` listed an entry when `git merge-base
+--is-ancestor <rev> <entry>` succeeded, and it succeeds when the two are the
+same commit: a bundle built at the commit that carries a fix was reported
+stale for that fix.
+
+The decision's "an ancestor of" is now a strict ancestor. `stale_entries`
+also resolves both ids with `git rev-parse` (`resolve_commit`) and skips the
+entry when they name one commit, whatever the length each id is written in.
+When either id cannot be resolved, the ancestor verdict stands.
+`tests/test_bundle_staleness.py` checks it on a throwaway three-commit
+repository, since a shallow CI clone does not have the real history.
+
+Known limit, unchanged: `BUNDLE_AFFECTING` has two entries (`eaee534`,
+2026-08-28; `3a25f45`, 2026-09-29). "Not stale" says that no listed fix is
+missing, not that every output change since is present: none from October is
+listed.

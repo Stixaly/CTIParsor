@@ -5,8 +5,8 @@ import { fetchBundle } from '../api/client'
  * pretty-printed JSON file named `<report>_stix.json`.
  *
  * Shared by the Review and Graph pages so the download behaviour stays in one
- * place. Throws if the bundle isn't available yet; callers handle the error
- * (e.g. surface an alert).
+ * place. Throws if the bundle isn't available yet, or a `BundleRefusedError` when
+ * the STIX schemas refused it; callers handle the error (e.g. surface an alert).
  *
  * @param jobId            The job whose bundle to download.
  * @param originalFilename The job's source filename; its extension is stripped

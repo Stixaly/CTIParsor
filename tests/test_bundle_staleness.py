@@ -1,9 +1,17 @@
 # tests/test_bundle_staleness.py
 import sqlite3
+import subprocess
 
 import pytest
 
-from pipeline.bundle_revisions import BUNDLE_AFFECTING, audit_staleness, git_rev_of, is_ancestor, stale_entries
+from pipeline.bundle_revisions import (
+    BUNDLE_AFFECTING,
+    audit_staleness,
+    git_rev_of,
+    is_ancestor,
+    resolve_commit,
+    stale_entries,
+)
 
 
 def test_git_rev_of_none():
@@ -91,7 +99,56 @@ def test_is_ancestor_code_0_and_1(monkeypatch):
     assert is_ancestor("deadbeef", "cafe1234") is False
 
 
-def test_audit_staleness():
+def _git(repo, *args):
+    return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
+
+
+@pytest.fixture()
+def history(tmp_path):
+    """A -> B -> C in a throwaway repository: a shallow CI clone does not have
+    the real history, so nothing here depends on it."""
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.name", "Test")
+    _git(tmp_path, "config", "user.email", "test@example.invalid")
+    _git(tmp_path, "config", "commit.gpgsign", "false")
+    shas = []
+    for message in "ABC":
+        _git(tmp_path, "commit", "-q", "--no-verify", "--allow-empty", "-m", message)
+        shas.append(_git(tmp_path, "rev-parse", "HEAD"))
+    return tmp_path, *shas
+
+
+@pytest.mark.parametrize("entry_is_short", [False, True])
+def test_a_bundle_built_at_the_fix_is_not_stale(history, monkeypatch, entry_is_short):
+    """`merge-base --is-ancestor X X` succeeds: the commit that carries the fix
+    must not be judged stale for lacking it."""
+    repo, a, b, c = history
+    entry = b[:7] if entry_is_short else b
+    monkeypatch.setattr("pipeline.bundle_revisions.BUNDLE_AFFECTING", ((entry, "2026-01-01", "x"),))
+
+    assert [e[0] for e in stale_entries(a, repo)] == [entry]     # before the fix
+    assert stale_entries(b, repo) == []                          # at it, long id
+    assert stale_entries(b[:7], repo) == []                      # at it, short id
+    assert stale_entries(c, repo) == []                          # after it
+
+
+def test_resolve_commit(history):
+    repo, a, b, _ = history
+    assert resolve_commit(b[:7], repo) == resolve_commit(b, repo) == b
+    assert resolve_commit(a, repo) != resolve_commit(b, repo)
+    assert resolve_commit("deadbeef", repo) is None              # no such commit
+    for bad in ("--output=/tmp/x", "HEAD", "", "deadbeef;rm"):
+        assert resolve_commit(bad, repo) is None
+
+
+def test_resolve_commit_git_missing(monkeypatch):
+    def raise_error(*args, **kwargs):
+        raise FileNotFoundError("git not found")
+    monkeypatch.setattr("pipeline.bundle_revisions.subprocess.run", raise_error)
+    assert resolve_commit("deadbeef") is None
+
+
+def test_audit_staleness(monkeypatch):
     conn = sqlite3.connect(":memory:")
     conn.execute("CREATE TABLE jobs (id TEXT PRIMARY KEY, run_config_json TEXT)")
     conn.execute("INSERT INTO jobs (id, run_config_json) VALUES ('job1', '{\"git_rev\": \"abc123\"}')")
@@ -99,7 +156,6 @@ def test_audit_staleness():
     conn.execute("INSERT INTO jobs (id, run_config_json) VALUES ('job3', 'invalid json')")
     conn.commit()
 
-    monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr("pipeline.bundle_revisions.is_ancestor", lambda *args, **kwargs: False)
 
     results = audit_staleness(conn)
