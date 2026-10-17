@@ -163,7 +163,9 @@ CREATE TRIGGER entities_review_revision AFTER INSERT OR UPDATE OR DELETE ON enti
 CREATE TRIGGER relationships_review_revision AFTER INSERT OR UPDATE OR DELETE ON relationships
     FOR EACH ROW EXECUTE FUNCTION bump_review_revision();
 -- Cost: about 0.1 ms per row written.  Policy, data and code changes do not
--- bump it: they are not decisions.
+-- bump it: they are not decisions.  A statement-level trigger was measured
+-- slower on the run's executemany write and not adopted (ADR-0086, amendment
+-- of 2026-10-18).
 
 -- The review journal (ADR-0058): one row per change of `accepted`, only ever
 -- inserted into.  No foreign key to jobs, on purpose: deleting a report must
