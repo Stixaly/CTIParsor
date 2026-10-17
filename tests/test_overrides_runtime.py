@@ -92,3 +92,50 @@ def test_reload_forgets_the_gazetteer_built_on_the_promoted_terms(temp_db):
     assert "arguepatch" not in {e["name"] for e in gaz._load()}     # still the cached view
     ov.reload()
     assert "arguepatch" in {e["name"] for e in gaz._load()}
+
+
+# ── The fingerprint the run config records ───────────────────────────────────
+
+def test_the_fingerprint_follows_the_content_of_the_active_rows_not_their_order(temp_db):
+    conn = temp_db.get_conn()
+    ov.reload()
+    empty = ov.overrides_fingerprint()
+    assert len(empty) == 16 and empty == ov.overrides_fingerprint()
+
+    now = temp_db.now_iso()
+    pm.add_manual(conn, "Microsoft", "threat_actor", "deny", now)
+    pm.add_manual(conn, "ArguePatch", "malware", "promote", now, display="ARGUEPATCH")
+    ov.reload()
+    both = ov.overrides_fingerprint()
+    assert both != empty
+
+    other = temp_db.get_conn()
+    other.execute("DELETE FROM entity_overrides")
+    pm.add_manual(other, "ArguePatch", "malware", "promote", now, display="ARGUEPATCH")   # the other order
+    pm.add_manual(other, "Microsoft", "threat_actor", "deny", now)
+    ov.reload()
+    assert ov.overrides_fingerprint() == both
+
+    other.execute("DELETE FROM entity_overrides")
+    pm.add_manual(other, "ArguePatch", "malware", "promote", now, display="ArguePatch")   # one display changed
+    pm.add_manual(other, "Microsoft", "threat_actor", "deny", now)
+    ov.reload()
+    assert ov.overrides_fingerprint() not in (both, empty)
+
+    other.execute("DELETE FROM entity_overrides")
+    pm.add_manual(other, "ArguePatch", "malware", "promote", now, display="ARGUEPATCH")
+    pm.add_manual(other, "Microsoft", "identity", "deny", now)                            # one deny type changed
+    ov.reload()
+    assert ov.overrides_fingerprint() != both
+
+
+def test_the_fingerprint_ignores_rows_that_do_not_act(temp_db):
+    conn = temp_db.get_conn()
+    now = temp_db.now_iso()
+    ov.reload()
+    empty = ov.overrides_fingerprint()
+
+    row = pm.add_manual(conn, "Microsoft", "threat_actor", "deny", now)
+    pm.set_status(conn, row["id"], "candidate", now)
+    ov.reload()
+    assert ov.overrides_fingerprint() == empty

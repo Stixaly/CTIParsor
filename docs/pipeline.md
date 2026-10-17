@@ -235,7 +235,9 @@ the [README](../README.md#how-it-works); this page is the detail.
 └──────────────────────────────────────────────────────────────────────┘
 
 On Finalize (web UI): Stages 4–5 run again on the accepted rows
-(`re_run_final_stages`), and the rebuilt bundle is stored with Stage 5's verdict.
+(`re_run_final_stages`), and the rebuilt bundle is stored with Stage 5's verdict
+and the record of the build that made it (`jobs.bundle_build_json`), unless a
+bundle built from newer rows is already stored (ADR-0086).
 ```
 
 **The API worker, the `main.py` CLI and the `--stage full` benchmark run the
@@ -254,6 +256,21 @@ job: a full finalize leaves the status alone, and a `completed` job goes back to
 `for_review`. The initial run still stores the job `for_review`. A bundle built
 before the verdict was stored has none and is served as before. The CLI already
 returned failure on an invalid bundle.
+
+**A stored bundle names the build that made it** (ADR-0086). The run config
+(`jobs.run_config_json`) describes the run. A finalize rebuilds Stages 4–5 with
+the policy, data and code of the process that serves it, so it writes its own
+record, `jobs.bundle_build_json`: kind (`run`, `finalize` or `quick`), time,
+`git_rev`, policy, the captured environment variables (an allow-list, never a
+scan) and the manifest. A run writes a `run` record copied from its run config.
+Freshness against `BUNDLE_AFFECTING` (ADR-0035) follows the fix's scope: a
+`mapping` fix (Stages 4–5 only) is judged on the build's revision, so a finalize
+clears it; an `extraction` fix (Stages 1–3) is judged on the run's revision as
+well, so only a new run clears it. A finalize reads the job's rows in one
+snapshot and does not replace a bundle built from newer rows (a slower finalize
+cannot overwrite a faster one that read later). The run config's
+`entity_overrides` gains `fingerprint`, a hash of the active deny and promote
+rows; the build record carries no overrides, since Stages 4–5 never read them.
 
 Stage order note: 3b, 3d, 3f and 3e run **per chunk**; 3doc reads the whole
 document once and its result joins the per-chunk ones; 3c runs **once per

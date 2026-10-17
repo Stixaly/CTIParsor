@@ -149,7 +149,7 @@ CTIParsor/
 │   ├── stage4c_long_distance.py   # LLM long-distance relation inferer (opt-in)
 │   ├── stix_rel_spec.py           # STIX 2.1 suggested-relationship table (spec guard)
 │   ├── stage5_validation.py       # Bundle validation + export
-│   ├── bundle_revisions.py        # Which stored bundles predate an output fix (ADR-0035)
+│   ├── bundle_revisions.py        # Which stored bundles predate an output fix, judged on the run or the build by the fix's scope (ADR-0035, ADR-0086)
 │   ├── mitre_db.py                # Lazy-loaded MITRE index (techniques + tactics)
 │   ├── vlm.py                     # Provider-agnostic vision backends + capability probe (ADR-0033)
 │   ├── vllm_options.py            # vLLM request options shared by Stage 3 and Stage 1f
@@ -270,9 +270,11 @@ CTIParsor/
 │   ├── db.py                      # Job store + rule store, both PostgreSQL via DATABASE_URL — ADR-0045, ADR-0053
 │   ├── db_backend.py              # PostgreSQL adapter: `?`→`%s`, sqlite3.Row-like rows, non-closing `with`
 │   ├── worker.py                  # The pipeline subprocess: spawn, crash-to-`failed`, SSE emitter
-│   │                              #   └─ re_run_final_stages(): Finalize, Stages 4–5 on the accepted rows
+│   │                              #   └─ re_run_final_stages(): Finalize, Stages 4–5 on the accepted rows,
+│   │                              #      read in one snapshot, published by one conditional UPDATE (ADR-0086)
 │   ├── queue_loop.py              # Claims queued jobs, heartbeats, requeues orphans (ADR-0046)
-│   ├── run_config.py              # Capture a job's execution config so its bundle is reproducible (ADR-0024)
+│   ├── run_config.py              # Capture a job's execution config so its bundle is reproducible (ADR-0024),
+│   │                              #   and the record of each build, run or finalize (ADR-0086)
 │   ├── storage.py                 # Storage abstraction for pipeline job state
 │   ├── paths.py                   # Where uploads and bundles live (CTIPARSOR_UPLOADS_DIR / _OUTPUT_DIR)
 │   ├── logging_config.py          # Centralized logging configuration
@@ -407,8 +409,8 @@ To add version N:
    `version`, `name`, `store` (`jobs` or `rules`), `statements` (SQL, run in
    order inside one transaction), and `is_applied(conn)` — the check that
    finds this version's changes in a database (`column_exists`,
-   `table_exists`, `index_exists`, `constraint_exists`, or a query on the
-   data). The runner runs it after applying, and rolls the version back if it
+   `table_exists`, `index_exists`, `constraint_exists`, `trigger_exists`, or a
+   query on the data). The runner runs it after applying, and rolls the version back if it
    does not see the changes; it also recognises with it how far a database
    created before versioning had got.
 2. Data: a `data(conn)` function for what SQL alone does not express —

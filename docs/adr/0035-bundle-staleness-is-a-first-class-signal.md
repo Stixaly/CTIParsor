@@ -3,6 +3,10 @@
 **Status:** Accepted
 **Date:** 2026-08-30
 **Deciders:** maintainer
+**Amended by:** [0086](0086-a-bundle-names-its-build-and-a-slower-build-does-not-overwrite-it.md)
+(2026-10-17). The staleness of a Stage 4/5 fix is judged on the revision that
+built the stored bundle, which a finalize now records; a fix in Stages 1 to 3
+is still judged on the run's.
 
 ## Context
 
@@ -171,3 +175,29 @@ Known limit, unchanged: `BUNDLE_AFFECTING` has two entries (`eaee534`,
 2026-08-28; `3a25f45`, 2026-09-29). "Not stale" says that no listed fix is
 missing, not that every output change since is present: none from October is
 listed.
+
+## Amendment (2026-10-17, second): a rebuild clears a Stage 4/5 fix, judged on the build
+
+The decision judged a bundle on the `git_rev` of the run that made it, and
+named the finalize as the repair. A finalize did not change that `git_rev`: it
+rebuilt Stages 4 and 5 with its own code and recorded nothing, so a stale bundle
+stayed stale after the repair the audit script recommended (audit of
+2026-10-17, lot L1).
+
+ADR-0086 stores the build with the bundle (`jobs.bundle_build_json`, with its
+`git_rev`) and gives each `BUNDLE_AFFECTING` entry a fourth field, its scope:
+
+- **`mapping`**: the fix changes Stages 4 and 5 only. The entry is judged on the
+  revision that built the stored bundle (the build's, or the run's when no
+  build is recorded). A finalize at a revision that has the fix clears it.
+  `eaee534` is `mapping`.
+- **`extraction`**: the fix changes Stages 1 to 3, maybe 4 too. The entry is
+  judged on the run's revision and on the build's: stale when either predates
+  it. A finalize rereads the rows a run wrote and cannot add what the run never
+  extracted, so only a new run clears it. `3a25f45` (ADR-0063) is `extraction`.
+
+When in doubt, a new entry is `extraction`. `audit_staleness` returns the
+build's revision as `build_rev`, and `unknown` only when neither revision is
+known. A bundle built before v12 has no build record and is judged on the run's
+revision, as before. The strict-ancestor rule of the previous amendment applies
+to both revisions.

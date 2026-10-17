@@ -24,6 +24,8 @@ a store as a side effect of being asked.
 from __future__ import annotations
 
 import functools
+import hashlib
+import json
 
 from api.logging_config import get_logger
 from models.schemas import RawEntity
@@ -96,6 +98,17 @@ def denied_keys() -> frozenset[tuple[str, str]]:
 def promoted_entries() -> list[dict]:
     """Gazetteer entries (the shape `pipeline/data/gazetteer.json` uses) for every active promote row."""
     return [dict(e) for e in _load_active()[1]]
+
+
+def overrides_fingerprint() -> str:
+    """A content hash of the active rows, for the run config: the counts alone
+    cannot tell that one deny row was swapped for another.  Independent of row
+    order; changes with any row's content."""
+    payload = {
+        "deny": sorted([term, entity_type] for term, entity_type in denied_keys()),
+        "promote": sorted(promoted_entries(), key=lambda e: json.dumps(e, sort_keys=True)),
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:16]
 
 
 def is_denied(value: str, entity_type: str) -> bool:

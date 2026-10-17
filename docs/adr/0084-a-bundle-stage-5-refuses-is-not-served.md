@@ -8,6 +8,8 @@
 **Relates to:** ADR-0035 (a stored bundle says which pipeline built it), ADR-0061
 (the ledger is written with the bundle it describes), ADR-0077 (versioned
 migrations)
+**Amended by:** [0086](0086-a-bundle-names-its-build-and-a-slower-build-does-not-overwrite-it.md)
+(concurrent finalizations)
 
 ## Context
 
@@ -111,7 +113,8 @@ diagnosis.
   header on every 200.
 - **Finalizing the same job twice at once is not made safe here.** Each build
   writes its bundle and verdict in one statement, but nothing serialises two
-  finalizations: the last write wins. This ADR does not change that.
+  finalizations: the last write wins. This ADR does not change that;
+  ADR-0086 does (a build never replaces a bundle built from newer rows).
 - The CLI is unchanged: it returned failure on an invalid bundle already.
 
 ## Validation

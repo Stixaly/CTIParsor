@@ -12,19 +12,30 @@ if TYPE_CHECKING:  # the job-store connection type (ADR-0045); annotation only
 
 #: Revisions after which Stage 4/5 can emit different objects for the same input.
 #:
-#: A bundle whose recorded `git_rev` is an ANCESTOR of one of these entries was
+#: A bundle built at a revision that is an ANCESTOR of one of these entries was
 #: built by a pipeline that lacked the fix, and is stale with respect to it.
 #:
 #: Append one entry per output-affecting fix (CONTRIBUTING.md carries the rule).
 #: Do NOT add commits that only touch the frontend, tests, docs or tooling:
 #: comparing against HEAD instead was rejected in ADR-0035 precisely because it
 #: marks every commit as invalidating and so never returns to green.
-BUNDLE_AFFECTING: tuple[tuple[str, str, str], ...] = (
+#:
+#: The fourth field is the fix's scope, which decides whose revision is judged
+#: (ADR-0086).  "mapping": the fix changes Stages 4/5 only, so a finalize at a
+#: revision that has it rebuilds the bundle with it; the revision that built
+#: the stored bundle counts, not the run's.  "extraction": the fix changes
+#: Stages 1-3, maybe 4 too; a finalize rereads the rows a run wrote and cannot
+#: add what the run never extracted, so both the run's revision and the
+#: build's must have it, and only a new run clears it.  When in doubt, pick
+#: "extraction": it never claims a rebuild fixed what it cannot.
+BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
     ("eaee534", "2026-08-28",
-     "Stage 4 no longer emits a relationship whose endpoints resolve to the same object"),
+     "Stage 4 no longer emits a relationship whose endpoints resolve to the same object",
+     "mapping"),
     ("3a25f45", "2026-09-29",
      "Relationship dates keep their precision: month/year dates move from start_time/stop_time "
-     "to x_temporal_assertions (ADR-0063)"),
+     "to x_temporal_assertions (ADR-0063)",
+     "extraction"),
 )
 
 
@@ -100,40 +111,55 @@ def resolve_commit(sha: str, repo_root: Path | None = None) -> str | None:
     return result.stdout.strip() or None
 
 
-def stale_entries(rev: str | None, repo_root: Path | None = None) -> list[tuple[str, str, str]]:
-    """Return list of BUNDLE_AFFECTING entries for which rev is an ancestor.
+def _predates(rev: str | None, entry_sha: str, repo_root: Path | None) -> bool:
+    """Is `rev` a strict ancestor of the entry's commit?
 
     A strict ancestor: `git merge-base --is-ancestor X X` succeeds, but a bundle
     built at the entry's own commit already has its fix.  When either id cannot
-    be resolved, the ancestor verdict stands.
+    be resolved, the ancestor verdict stands.  A None revision judges nothing.
     """
-    if rev is None:
-        return []
+    if rev is None or is_ancestor(rev, entry_sha, repo_root) is not True:
+        return False
+    resolved = resolve_commit(rev, repo_root)
+    return resolved is None or resolved != resolve_commit(entry_sha, repo_root)
+
+
+def stale_entries(rev: str | None, repo_root: Path | None = None, *,
+                  build_rev: str | None = None) -> list[tuple[str, str, str, str]]:
+    """Return the BUNDLE_AFFECTING entries the stored bundle lacks.
+
+    `rev` is the run's revision, `build_rev` the revision that built the stored
+    bundle (None: the run's own).  A "mapping" entry is judged on `build_rev`
+    only; an "extraction" entry on both (stale when either predates it).
+    """
+    built = rev if build_rev is None else build_rev
     stale = []
     for entry in BUNDLE_AFFECTING:
-        entry_sha = entry[0]
-        if is_ancestor(rev, entry_sha, repo_root) is not True:
-            continue
-        resolved = resolve_commit(rev, repo_root)
-        if resolved is not None and resolved == resolve_commit(entry_sha, repo_root):
-            continue
-        stale.append(entry)
+        entry_sha, scope = entry[0], entry[3]
+        judged = (built,) if scope == "mapping" else (rev, built)
+        if any(_predates(r, entry_sha, repo_root) for r in dict.fromkeys(judged)):
+            stale.append(entry)
     return stale
 
 
 def audit_staleness(conn: DBConnection, repo_root: Path | None = None) -> list[dict]:
-    """Audit all jobs for bundle staleness, returning a list of status dicts."""
-    cursor = conn.execute("SELECT id, run_config_json FROM jobs ORDER BY id")
+    """Audit all jobs for bundle staleness, returning a list of status dicts.
+
+    `git_rev` is the run's revision, `build_rev` the revision that built the
+    stored bundle (None when no build record was stored); `unknown` is True
+    only when neither is known."""
+    cursor = conn.execute("SELECT id, run_config_json, bundle_build_json FROM jobs ORDER BY id")
     results = []
     for row in cursor:
         job_id = row[0]
-        run_config_json = row[1]
-        git_rev = git_rev_of(run_config_json)
-        stale = stale_entries(git_rev, repo_root)
-        unknown = git_rev is None
+        git_rev = git_rev_of(row[1])
+        build_rev = git_rev_of(row[2])
+        stale = stale_entries(git_rev, repo_root, build_rev=build_rev)
+        unknown = git_rev is None and build_rev is None
         results.append({
             "job_id": job_id,
             "git_rev": git_rev,
+            "build_rev": build_rev,
             "stale": stale,
             "unknown": unknown
         })

@@ -14,7 +14,7 @@ by the running app at `http://localhost:8000/docs`.
 | `GET` | `/api/jobs/{id}` | Get a single job (includes entity/relationship counts) |
 | `PATCH` | `/api/jobs/{id}` | Update status. 409 for `completed` while the stored bundle is one Stage 5 refused (below) |
 | `DELETE` | `/api/jobs/{id}` | Delete job, all DB rows, and all associated files |
-| `POST` | `/api/jobs/{id}/finalize` | Re-run Stages 4–5 on the accepted rows and store the bundle; sets status `completed`. `?quick=true` rebuilds the bundle and leaves the status alone (the rebuild the UI schedules after each edit). Returns `{ status, bundle_size, validation }`, `validation` being `validated` or `unverified`. 409 when Stage 5 refuses the rebuilt bundle (below) |
+| `POST` | `/api/jobs/{id}/finalize` | Re-run Stages 4–5 on the accepted rows and store the bundle; sets status `completed`. `?quick=true` rebuilds the bundle and leaves the status alone (the rebuild the UI schedules after each edit). Returns `{ status, bundle_size, validation }`, `validation` being `validated`, `unverified` or `unknown` (Stage 5 did not run). 409 when Stage 5 refuses the rebuilt bundle (below). Two finalizes of one job can overlap: a build never replaces a bundle built from newer rows (below) |
 | `GET` | `/api/jobs/{id}/bundle` | Download the STIX 2.1 bundle JSON. The header `X-Bundle-Validation` carries Stage 5's verdict: `validated`, `unverified` (the JSON schemas were missing) or `unknown` (built before the verdict was stored). 409 when Stage 5 refused the bundle (below) |
 | `GET` | `/api/jobs/{id}/bundle/ledger` | What Stage 4 did with each entity and relationship row when it built the stored bundle (ADR-0061): what each became, what was rewritten or dropped and why, why each generated object exists. 404 when the bundle predates the ledger — a quick finalize writes one |
 | `GET` | `/api/jobs/{id}/source` | Stream the original uploaded file |
@@ -45,6 +45,26 @@ validation, with a list as `detail`.
 bundle Stage 5 accepts replaces it. A bundle built before the verdict was
 stored (or when Stage 5 did not run) has none: it is served as before, with
 `X-Bundle-Validation: unknown`.
+
+### Two finalizes of one job (ADR-0086)
+
+The review page schedules a quick finalize 4 s after each edit, and the
+Finalize button runs another, so two can overlap. Each reads the job's rows in
+one snapshot, with the job's `review_revision` (a counter bumped by every write
+to its entities and relationships), and publishes its bundle, ledger, verdict
+and build record in one conditional `UPDATE`. A build whose rows are older than
+the stored bundle's is refused:
+
+- nothing is published, and the response describes the **stored** bundle
+  (`bundle_size`, `status`, `validation`);
+- a full finalize completes the job with that stored bundle, unless its verdict
+  is `invalid`; in that case the 409 above carries the **stored** errors;
+- the refused build's own verdict acts on nothing.
+
+The status codes and the shape of the response do not change. Each stored
+bundle names the build that made it in `jobs.bundle_build_json` (kind `run`,
+`finalize` or `quick`, time, `git_rev`, policy, the captured environment
+variables, manifest).
 
 ## Entities
 

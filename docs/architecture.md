@@ -112,7 +112,7 @@ secret (`.dockerignore`).
 
 | Container | Image | What runs in it | Listens on |
 |---|---|---|---|
-| `app` | the application image, command `serve` | `run_api.py`: the API (`api/main.py`, `api/routes/`) and the built UI; URL capture in Chromium (`pipeline/web_capture.py`); the corpus sync and the rule-store rebuild from the Settings page (`pipeline/detection/`); finalize, which re-runs Stages 4–5 in this process (`api/worker.py::re_run_final_stages`). It loads no model (`CTIPARSOR_ROLE=api`). | 8000/tcp, HTTP |
+| `app` | the application image, command `serve` | `run_api.py`: the API (`api/main.py`, `api/routes/`) and the built UI; URL capture in Chromium (`pipeline/web_capture.py`); the corpus sync and the rule-store rebuild from the Settings page (`pipeline/detection/`); finalize, which re-runs Stages 4–5 in this process (`api/worker.py::re_run_final_stages`), reads the job's rows in one snapshot and does not replace a bundle built from newer rows (ADR-0086). It loads no model (`CTIPARSOR_ROLE=api`). | 8000/tcp, HTTP |
 | `worker` | the application image, command `worker` | `api/queue_loop.py` claims queued reports. Each one runs in its own subprocess: every stage, with the models loaded there (`api/worker.py`, `pipeline/orchestrator.py`). | nothing |
 | `bootstrap` | the application image, command `bootstrap` | Runs once: the schema (`api.db.init_db`), the models (`docker/warm_models.py`), the corpora (`scripts/sync_corpora.py`), the rule store (`scripts/build_detection_index.py`) and the stage report (`scripts/check_stages.py`). | nothing |
 | `postgres` | `postgres:18-alpine`, upstream | PostgreSQL. No project code: the other containers apply the schema (`api/migrations/`, ADR-0077). | 5432/tcp, `backend` only |

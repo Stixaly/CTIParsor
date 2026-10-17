@@ -124,7 +124,7 @@ def test_a_bundle_built_at_the_fix_is_not_stale(history, monkeypatch, entry_is_s
     must not be judged stale for lacking it."""
     repo, a, b, c = history
     entry = b[:7] if entry_is_short else b
-    monkeypatch.setattr("pipeline.bundle_revisions.BUNDLE_AFFECTING", ((entry, "2026-01-01", "x"),))
+    monkeypatch.setattr("pipeline.bundle_revisions.BUNDLE_AFFECTING", ((entry, "2026-01-01", "x", "mapping"),))
 
     assert [e[0] for e in stale_entries(a, repo)] == [entry]     # before the fix
     assert stale_entries(b, repo) == []                          # at it, long id
@@ -148,9 +148,69 @@ def test_resolve_commit_git_missing(monkeypatch):
     assert resolve_commit("deadbeef") is None
 
 
+def test_the_known_fixes_name_their_scope():
+    assert {e[3] for e in BUNDLE_AFFECTING} <= {"mapping", "extraction"}
+    assert [e[3] for e in BUNDLE_AFFECTING if e[0] == "eaee534"] == ["mapping"]
+    assert [e[3] for e in BUNDLE_AFFECTING if e[0] == "3a25f45"] == ["extraction"]
+
+
+def test_a_mapping_fix_is_judged_on_the_build_that_made_the_bundle(history, monkeypatch):
+    """A finalize at a revision that has the fix rebuilds the bundle with it,
+    whatever revision the run had; the reverse is not true."""
+    repo, a, b, c = history
+    monkeypatch.setattr("pipeline.bundle_revisions.BUNDLE_AFFECTING", ((b, "2026-01-01", "x", "mapping"),))
+
+    assert stale_entries(a, repo, build_rev=c) == []                   # the run predates it, the rebuild has it
+    assert stale_entries(a, repo, build_rev=b) == []
+    assert [e[0] for e in stale_entries(c, repo, build_rev=a)] == [b]  # rebuilt by older code
+    assert [e[0] for e in stale_entries(a, repo)] == [b]               # no build record: the run's
+    assert stale_entries(a, repo, build_rev=None) == stale_entries(a, repo)
+
+
+def test_an_extraction_fix_stays_stale_after_a_rebuild(history, monkeypatch):
+    """A finalize rereads what the run extracted: only a new run clears it."""
+    repo, a, b, c = history
+    monkeypatch.setattr("pipeline.bundle_revisions.BUNDLE_AFFECTING", ((b, "2026-01-01", "x", "extraction"),))
+
+    assert [e[0] for e in stale_entries(a, repo, build_rev=c)] == [b]  # rebuilt at a revision that has it
+    assert [e[0] for e in stale_entries(c, repo, build_rev=a)] == [b]  # either revision predating it counts
+    assert stale_entries(c, repo, build_rev=c) == []                   # a new run at a revision that has it
+    assert stale_entries(c, repo) == []
+
+
+def test_a_missing_revision_judges_nothing(history, monkeypatch):
+    repo, a, b, _ = history
+    monkeypatch.setattr("pipeline.bundle_revisions.BUNDLE_AFFECTING",
+                        ((b, "2026-01-01", "x", "mapping"), (b, "2026-01-01", "y", "extraction")))
+    assert stale_entries(None, repo) == [] and stale_entries(None, repo, build_rev=None) == []
+    assert [e[2] for e in stale_entries(None, repo, build_rev=a)] == ["x", "y"]   # the build alone speaks
+    assert [e[2] for e in stale_entries(a, repo, build_rev=b)] == ["y"]
+
+
+def test_audit_staleness_reads_the_build_record(history, monkeypatch):
+    repo, a, b, c = history
+    monkeypatch.setattr("pipeline.bundle_revisions.BUNDLE_AFFECTING", ((b, "2026-01-01", "x", "mapping"),))
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE jobs (id TEXT PRIMARY KEY, run_config_json TEXT, bundle_build_json TEXT)")
+    rows = [("rebuilt", f'{{"git_rev": "{a}"}}', f'{{"kind": "finalize", "git_rev": "{c}"}}'),
+            ("not rebuilt", f'{{"git_rev": "{a}"}}', None),
+            ("build only", None, f'{{"kind": "finalize", "git_rev": "{a}"}}'),
+            ("nothing", None, None)]
+    conn.executemany("INSERT INTO jobs VALUES (?, ?, ?)", rows)
+
+    by_id = {r["job_id"]: r for r in audit_staleness(conn, repo)}
+
+    assert (by_id["rebuilt"]["git_rev"], by_id["rebuilt"]["build_rev"]) == (a, c)
+    assert by_id["rebuilt"]["stale"] == [] and by_id["rebuilt"]["unknown"] is False
+    assert (by_id["not rebuilt"]["build_rev"], [e[0] for e in by_id["not rebuilt"]["stale"]]) == (None, [b])
+    assert by_id["build only"]["unknown"] is False and [e[0] for e in by_id["build only"]["stale"]] == [b]
+    assert (by_id["nothing"]["unknown"], by_id["nothing"]["stale"]) == (True, [])
+    conn.close()
+
+
 def test_audit_staleness(monkeypatch):
     conn = sqlite3.connect(":memory:")
-    conn.execute("CREATE TABLE jobs (id TEXT PRIMARY KEY, run_config_json TEXT)")
+    conn.execute("CREATE TABLE jobs (id TEXT PRIMARY KEY, run_config_json TEXT, bundle_build_json TEXT)")
     conn.execute("INSERT INTO jobs (id, run_config_json) VALUES ('job1', '{\"git_rev\": \"abc123\"}')")
     conn.execute("INSERT INTO jobs (id, run_config_json) VALUES ('job2', NULL)")
     conn.execute("INSERT INTO jobs (id, run_config_json) VALUES ('job3', 'invalid json')")
@@ -161,10 +221,11 @@ def test_audit_staleness(monkeypatch):
     results = audit_staleness(conn)
     assert len(results) == 3
 
-    expected_keys = {"job_id", "git_rev", "stale", "unknown"}
+    expected_keys = {"job_id", "git_rev", "build_rev", "stale", "unknown"}
 
     for r in results:
         assert set(r.keys()) == expected_keys
+        assert r["build_rev"] is None                    # no build record stored: the run's revision stands
 
     job1 = next(r for r in results if r["job_id"] == "job1")
     assert job1["git_rev"] == "abc123"
@@ -182,3 +243,28 @@ def test_audit_staleness(monkeypatch):
     assert job3["stale"] == []
 
     conn.close()
+
+
+def test_the_audit_names_both_revisions_when_they_differ(monkeypatch, capsys):
+    """An "extraction" fix can be missing from the run while a finalize has it:
+    saying only where the bundle was built would blame the wrong revision."""
+    from scripts.audit_bundle_invariants import _report_staleness
+
+    fix = ("3a25f45", "2026-09-29", "x", "extraction")
+    mapping = ("eaee534", "2026-08-28", "y", "mapping")
+    rows = [
+        {"job_id": "aaaaaaaa-1", "git_rev": "a" * 40, "build_rev": "c" * 40, "stale": [fix], "unknown": False},
+        {"job_id": "bbbbbbbb-2", "git_rev": "a" * 40, "build_rev": None, "stale": [mapping], "unknown": False},
+        {"job_id": "cccccccc-3", "git_rev": "a" * 40, "build_rev": "a" * 40, "stale": [fix], "unknown": False},
+        {"job_id": "dddddddd-4", "git_rev": None, "build_rev": "c" * 40, "stale": [mapping], "unknown": False},
+    ]
+    monkeypatch.setattr("pipeline.bundle_revisions.audit_staleness", lambda conn: rows)
+
+    _report_staleness(None)
+
+    out = capsys.readouterr().out
+    assert "  aaaaaaaa  run aaaaaaaaa, built ccccccccc  predates 3a25f45" in out
+    assert "  bbbbbbbb  built at aaaaaaaaa  predates eaee534" in out          # no build record
+    assert "  cccccccc  built at aaaaaaaaa  predates 3a25f45" in out          # the same revision
+    assert "  dddddddd  built at ccccccccc  predates eaee534" in out          # no run revision
+    assert "only a new run" in out and "rebuild with POST" in out

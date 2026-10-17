@@ -116,7 +116,7 @@ def reset_connections() -> None:
 
 
 @contextmanager
-def transaction(conn: DBConnection) -> Iterator[DBConnection]:
+def transaction(conn: DBConnection, *, snapshot: bool = False) -> Iterator[DBConnection]:
     """Run a block as ONE transaction, rolling back on any exception.
 
     `get_conn()`/`get_rule_conn()` are autocommit, so under autocommit
@@ -124,8 +124,12 @@ def transaction(conn: DBConnection) -> Iterator[DBConnection]:
     has already been committed individually, so a rollback on exception has
     nothing left to undo. Every multi-statement write that must be
     all-or-nothing uses this instead.
+
+    `snapshot=True` is for reads that must agree with each other: the block is
+    READ ONLY at REPEATABLE READ, so every statement sees the database as it
+    stood at the first one, whatever commits meanwhile.
     """
-    conn.execute("BEGIN")
+    conn.execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY" if snapshot else "BEGIN")
     try:
         yield conn
     except BaseException:

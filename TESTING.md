@@ -201,7 +201,8 @@ current truth.
 | Validation/export | `test_stage5.py` | 8 | bundle validation, file writing, nested directories |
 | **Provenance** | `test_provenance.py` | 5 | authoring identity, TLP marking, created_by_ref |
 | **Provenance** | `test_edge_provenance.py` | 10 | relationship properties, pinned edges, run config |
-| **Provenance** | `test_bundle_staleness.py` | 15 | `git_rev` extraction from malformed run configs, ancestry verdicts, an undecidable git result never marking a bundle stale (ADR-0035) |
+| **Provenance** | `test_bundle_staleness.py` | 26 | `git_rev` extraction from malformed run configs, ancestry verdicts, an undecidable git result never marking a bundle stale (ADR-0035); a `mapping` fix judged on the build's revision, an `extraction` fix on the run's and the build's, the audit line naming both (ADR-0086) |
+| **Provenance** | `test_bundle_builds.py` | 30 | which build is stored (ADR-0086): two overlapping finalizes publish in the order of their reads, never in the order they finish (the race reproduced first); a refused build returns the stored bundle and acts on nothing of its own; every read inside one snapshot; the trigger bumping `review_revision` on every write; the build record of a finalize and of a run, without secrets, and when it cannot be built |
 | **Relationship policy** | `test_pin_budget.py` | 23 | fair share allocation, edge key validation, materialization, observable routing |
 | **Relationship policy** | `test_pin_evidence.py` | 31 | term extraction, sentence indexing, grounding gates, pins on listed observable pairs |
 | **Relationship policy** | `test_policy_last_run.py` | 17 | stats extraction, database queries, bundle handling |
@@ -238,7 +239,7 @@ current truth.
 | Persistence | `test_persistence.py` | 7 | backup consistency, migration idempotency, label persistence |
 | Persistence | `test_db_transaction.py` | 6 | transaction rollback, commit, exception handling |
 | Persistence | `test_container_env.py` | 4 | `CTIPARSOR_GIT_REV` fallback when `git` is absent or fails (ADR-0044) — `_path_from_env`/`BACKUP_DIR` and `CTIPARSOR_DB_PATH` were removed along with SQLite (ADR-0053) |
-| Queue | `test_worker.py` | 30 | the worker's terminal states (no bundle, timeout, abort, reclaimed, failed backup), hook guards, subprocess thread caps, the crash watcher, the finalize rebuild applying reviewer rejections and reading legacy/ADR-0063 dates |
+| Queue | `test_worker.py` | 47 | the worker's terminal states (no bundle, timeout, abort, reclaimed, failed backup), hook guards, subprocess thread caps, the crash watcher, the finalize rebuild applying reviewer rejections and reading legacy/ADR-0063 dates, Stage 5's verdict deciding what a rebuild may complete (ADR-0084), a run storing its build record (ADR-0086) |
 | Queue | `test_job_queue.py` | 14 | the queue loop (ADR-0046): atomic claim under 8 threads, lease-based orphan requeue, heartbeat scoping, slot accounting with a fake spawn, `run_pipeline_async` under roles `api` and `all`, `--once` |
 | Persistence | `test_db_backend.py` | 12 | the PostgreSQL adapter without a server: `?`→`%s` outside literals, `%`→`%%`, the `Row` type, `backend()`/`get_conn()` requiring `DATABASE_URL` (ADR-0053), a fake psycopg connection proving `with` never closes and `transaction()` issues plain `BEGIN` (ADR-0045) |
 | Persistence | `test_db_postgres.py` | 10 | skipped unless `CTIPARSOR_TEST_DATABASE_URL` is set (every other DB-touching test needs it too, via `temp_db` — ADR-0053): round trips, SSE resume ids, upserts, cascade, the coverage call without `jobs_conn`, the API through `temp_db_client`, and both migration scripts end to end (ADR-0045, ADR-0053) |

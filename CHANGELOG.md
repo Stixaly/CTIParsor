@@ -9,6 +9,105 @@ theme.
 
 ## [Unreleased]
 
+### Changed
+
+#### A freshness entry names its scope: a finalize clears a Stage 4/5 fix, only a new run clears an earlier one (ADR-0086), 2026-10-17
+
+Each `BUNDLE_AFFECTING` entry (`pipeline/bundle_revisions.py`) gains a fourth
+field. `mapping`: the fix changes Stages 4 and 5 only, and is judged on the
+revision that built the stored bundle, so a finalize at a revision that has it
+clears it. `extraction`: the fix changes Stages 1 to 3, maybe 4 too, and is
+judged on the run's revision and the build's; a finalize rereads the rows a run
+wrote and cannot add what the run never extracted, so only a new run clears it.
+`eaee534` (the self-edge guard) is `mapping`; `3a25f45` (ADR-0063's dates) is
+`extraction`.
+
+`stale_entries(rev, repo_root, *, build_rev=None)` and `audit_staleness` take
+and return the build's revision (`build_rev`); `unknown` is true only when
+neither revision is known. `scripts/audit_bundle_invariants.py` prints the
+run's and the build's revisions when they differ, and the remedy for each scope: `POST /api/jobs/{id}/finalize`
+for a `mapping` fix, a new run for an `extraction` fix. `CONTRIBUTING.md`
+carries the rule for choosing the scope: when in doubt, `extraction`. ADR-0035
+gets a dated amendment.
+
+### Fixed
+
+#### A finalize records the build it made, and a rebuild clears a Stage 4/5 staleness (ADR-0086), 2026-10-17
+
+A finalize (`POST /api/jobs/{id}/finalize`, quick or full) rebuilds Stages 4 and
+5 with the current policy, data and code, but `jobs.run_config_json` kept
+describing the initial run (audit of 2026-10-17, lot L1). The staleness check
+(ADR-0035) judged the bundle on the run's `git_rev`, so a rebuild never cleared
+a Stage 4 staleness, although `scripts/audit_bundle_invariants.py` told people
+to rebuild. Entity overrides were recorded only as counts.
+
+Migration v12 adds `jobs.bundle_build_json`, written in the same `UPDATE` as the
+bundle, its ledger and its verdict:
+
+- A finalize records its `kind` (`finalize` for the button, `quick` for the
+  auto-finalize), `built_at`, `git_rev`, the policy it passed to `build_bundle`
+  (read once), `env` and `manifest`. `env` is the `_CAPTURED_ENV` allow-list,
+  never a scan of the environment, so no key can appear. It records no
+  overrides: Stages 4 and 5 never read them. A record that cannot be built
+  never fails the finalize: it is stored as `kind`, `built_at` and the `error`,
+  without `git_rev`, and freshness falls back to the run's revision.
+- A run writes its own record (`run`), copied from its run config. Stage 4 ran
+  in the run's subprocess with the code and data that run config captured.
+- `api/storage.py::save_bundle` clears the record, as it clears the ledger and
+  the verdict.
+- `entity_overrides` in the run config gains `fingerprint`: 16 hex characters of
+  the SHA-256 of the canonical JSON of the active deny and promote rows,
+  independent of their order. It says whether the same rows applied, not which.
+- `NULL` means the bundle was built before v12, and `run_config_json` describes
+  it. There is no backfill.
+
+ADR-0059 and ADR-0035 get dated amendments.
+
+#### A slower finalize no longer overwrites a newer one (ADR-0086), 2026-10-17
+
+`re_run_final_stages` read the job's rows under `_lock`, released it for the
+mapping, then wrote the bundle unconditionally (audit of 2026-10-17, lot L1).
+The review page schedules a quick finalize 4 s after each edit and the Finalize
+button starts another, so a slow finalize A and a fast B, started after one more
+decision, could publish in the reverse order of their reads. A test reproduced it
+first: `test_a_slow_finalize_does_not_publish_over_a_newer_one` failed on the old
+code, the stored bundle being A's, without the entity the analyst had just
+added. `_lock` is per process, so holding it longer would not have covered
+several API processes or the workers.
+
+Migration v12 adds `jobs.review_revision`, `jobs.bundle_review_revision` and
+the trigger that links them:
+
+- `review_revision` counts the writes to a job's `entities` and `relationships`
+  rows. A row-level `AFTER INSERT OR UPDATE OR DELETE` trigger
+  (`bump_review_revision()`) bumps it in the transaction of each write, whichever
+  route, worker step or script writes; a row moved to another job bumps both.
+  Every job starts at 0.
+- A finalize reads the job row, the shipped entities, the relationships and the
+  rejected entities in one `REPEATABLE READ READ ONLY` transaction
+  (`api.db.transaction(conn, snapshot=True)`), so the rows match the revision read
+  with them. The rejected rows used to be read in a second, separate block.
+- One conditional `UPDATE` publishes the bundle, ledger, Stage 5 verdict, build
+  record, revision and status together, `WHERE bundle_review_revision IS NULL OR
+  bundle_review_revision <= R`. A build never replaces a bundle built from newer
+  rows; an equal or newer one publishes (equal: the same rows, the last writer
+  wins). The run's own write sets `bundle_review_revision` to the job's current
+  revision, so a finalize that read the rows before the run's write is refused.
+- A refused build publishes nothing and returns the stored bundle. A full
+  finalize then completes the job with that bundle unless its verdict is
+  `invalid`; if it is, the call raises `BundleInvalidError` with the stored
+  errors (409, as in ADR-0084). The refused build's own verdict acts on nothing.
+  The HTTP contract of `/finalize` is unchanged.
+
+Limits. Every entity or relationship write now also updates its job row, about
+0.1 ms per row: 5,000 entity `INSERT`s took 0.66 s with the trigger and 0.16 s
+without, on a throwaway schema. Policy, data and code changes are not decisions
+and do not bump the revision: two builds from the same rows under different
+policies both publish, and the last to finish wins until the next finalize.
+During a rolling restart, a finalize by an old-image process leaves
+`bundle_build_json` describing the previous build. The export file in `output/`
+is written by every build, including a refused one; it is never served.
+
 ## [0.1.0] - 2026-10-17
 
 CTIParsor 0.1.0 is the first release. It reads a threat-intelligence report

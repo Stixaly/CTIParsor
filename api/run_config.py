@@ -11,6 +11,7 @@ import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 from api.logging_config import get_logger
 from pipeline.env_flags import env_bool
@@ -178,6 +179,58 @@ def _resolve_git_rev() -> str | None:
     return None
 
 
+# Who built a stored bundle: the run itself, or a finalize (manual or automatic).
+BuildKind = Literal["run", "finalize", "quick"]
+
+
+def utc_stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def captured_env() -> dict[str, str]:
+    """The allow-listed environment variables that are set, with their values."""
+    env = {}
+    for var_name in _CAPTURED_ENV:
+        val = os.getenv(var_name)
+        if val is not None:
+            env[var_name] = val
+    return env
+
+
+def build_record(policy: dict | None, *, kind: BuildKind) -> dict:
+    """What built a stored bundle outside a run (ADR-0086): a finalize (`kind`
+    "finalize") or the auto-finalize ("quick") rebuilds Stages 4+5 with the
+    code, data, policy and environment of the process that serves it, not
+    those the run captured.  `jobs.bundle_build_json`.
+
+    No entity overrides here: Stages 4/5 never read them — they act in
+    Stages 2-3, and a finalize reads rows the run already filtered.
+    """
+    return {
+        "kind": kind,
+        "built_at": utc_stamp(),
+        "git_rev": _resolve_git_rev(),
+        "policy": policy,
+        "env": captured_env(),
+        "manifest": build_manifest(),
+    }
+
+
+def run_build_record(run_config: dict | None) -> dict:
+    """The build record of a run's own bundle: Stage 4 ran in the run's
+    subprocess, with the code and data its run config captured at the start.
+    None values when the run config could not be built."""
+    rc = run_config or {}
+    return {
+        "kind": "run",
+        "built_at": utc_stamp(),
+        "git_rev": rc.get("git_rev"),
+        "policy": rc.get("policy"),
+        "env": rc.get("env"),
+        "manifest": rc.get("manifest"),
+    }
+
+
 def build_run_config(policy: dict | None = None) -> dict:
     """Build a JSON-serializable dict capturing the run configuration.
 
@@ -190,7 +243,7 @@ def build_run_config(policy: dict | None = None) -> dict:
         manifest.  The worker adds stage_report once the run is over.
     """
     # recorded_at
-    recorded_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    recorded_at = utc_stamp()
 
     # git_rev
     git_rev = _resolve_git_rev()
@@ -225,15 +278,17 @@ def build_run_config(policy: dict | None = None) -> dict:
         ner_thresholds = {"error": f"{type(exc).__name__}: {exc}"}
 
     # entity_overrides (ADR-0052) — how many analyst-grown deny / promote rows
-    # were active for this run.  The rows themselves are in the store; the
-    # counts say whether any applied at all.
+    # were active for this run, and a hash of their content.  The rows
+    # themselves are in the store and change afterwards; the counts say whether
+    # any applied at all, the fingerprint whether the same ones did.
     entity_overrides: dict | None
     try:
-        from pipeline.overrides import denied_keys, overrides_enabled, promoted_entries
+        from pipeline.overrides import denied_keys, overrides_enabled, overrides_fingerprint, promoted_entries
         entity_overrides = {
             "enabled": overrides_enabled(),
             "deny": len(denied_keys()),
             "promote": len(promoted_entries()),
+            "fingerprint": overrides_fingerprint(),
         }
     except Exception as exc:
         entity_overrides = {"error": f"{type(exc).__name__}: {exc}"}
@@ -279,13 +334,6 @@ def build_run_config(policy: dict | None = None) -> dict:
         "skip_heavy_models": _skip_heavy,
     }
 
-    # env
-    env = {}
-    for var_name in _CAPTURED_ENV:
-        val = os.getenv(var_name)
-        if val is not None:
-            env[var_name] = val
-
     return {
         "recorded_at": recorded_at,
         "git_rev": git_rev,
@@ -295,6 +343,6 @@ def build_run_config(policy: dict | None = None) -> dict:
         "ner_thresholds": ner_thresholds,
         "entity_overrides": entity_overrides,
         "stages": stages,
-        "env": env,
+        "env": captured_env(),
         "manifest": build_manifest(),
     }
