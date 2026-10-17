@@ -4,6 +4,9 @@
 **Date:** 2026-10-03
 **Deciders:** maintainer
 **Amends:** ADR-0047 (the GHCR image), ADR-0071 (CI blocks on every deterministic check)
+**Amended by:** [0085](0085-releases-promote-the-image-main-built.md) (2026-10-17). A
+release promotes the image item 6 attests, by digest, and its own files carry
+an SLSA provenance signed by the release workflow.
 
 ## Context
 

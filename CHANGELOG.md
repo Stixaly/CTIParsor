@@ -1,12 +1,47 @@
 # Changelog
 
 All notable changes to CTIParsor are documented here. Format follows
-[Keep a Changelog](https://keepachangelog.com/); this project is pre-1.0 so
-sections group by theme rather than strict semver.
+[Keep a Changelog](https://keepachangelog.com/). Versions follow
+[Semantic Versioning](https://semver.org/) from 0.1.0;
+`scripts/release.py prepare` turns `[Unreleased]` into the release's section
+([docs/releasing.md](docs/releasing.md)). Within a section, entries group by
+theme.
 
 ## [Unreleased]
 
 ### Added
+
+#### Releases: a tag vX.Y.Z publishes the image main built, with its provenance, 2026-10-17
+
+ADR-0085. A release is a tag `vX.Y.Z` on a commit of `main` whose CI passed.
+`.github/workflows/release.yml` rebuilds nothing: it gives the image main's CI
+already built and attested for that commit the name `X.Y.Z` (and `X.Y`), from its
+digest, and checks the digest is unchanged. It signs an SLSA provenance of the
+source archive and of the image's SBOM, then publishes the GitHub Release
+(draft, files, public) with the CHANGELOG section as its notes. A section longer
+than 100 000 characters is replaced by its opening paragraph and the list of
+its entry titles; that is the case for 0.1.0. `scripts/release.py` prepares the release pull request (`prepare`),
+checks the tag against the version files and the CHANGELOG (`check`) and writes
+the notes. `scripts/release_files.sh` finds the image and verifies its
+attestations against `ci.yml` on `main` before anything is written. The verify
+commands in the notes, SECURITY.md and `docs/releasing.md` pin the signer
+workflow and the source ref: with `-R` alone, an attestation signed by any
+workflow of the repository would pass. A pull request that changes this
+machinery, and a weekly run, get a dry run with a read-only token, and publish
+nothing. The workflow's checks catch mistakes, not a person who can push a tag;
+a tag ruleset on `v*` does, and `docs/releasing.md` gives the clicks. No release
+has been cut yet.
+
+The version has one source, `pipeline.__version__`, `0.0.0` until the first
+release. FastAPI's `version` and `frontend/package.json` said `1.0.0`, which
+nothing backed; both now follow it (`0.0.0`), and `tests/test_release.py` fails
+if the files disagree or the first `##` heading of this file is not
+`## [Unreleased]`. `ci.yml` loses the two `type=semver` lines of
+`publish-image`, which never applied (that workflow never runs on a tag).
+SECURITY.md gains a "Supported versions" section, and
+`docs/openssf-best-practices.md` says the four criteria that wait for a release
+(`version_unique`, `version_semver`, `version_tags`, `release_notes`) are met
+once v0.1.0 is published, not before.
 
 #### The ordinary-word policy recognises naming constructions, 2026-10-12
 

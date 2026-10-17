@@ -616,6 +616,7 @@ update them.
 | [docs/deployment.md](docs/deployment.md) | Serving several analysts: bind address, what "no authentication" means, TLS proxy, systemd |
 | [docs/architecture.md](docs/architecture.md) | Processes, stores, the life of a report, sizing |
 | [docs/upgrading.md](docs/upgrading.md) | Moving an existing install to PostgreSQL and workers |
+| [docs/releasing.md](docs/releasing.md) | Versions, cutting a release, verifying a released image and its files |
 | [SECURITY.md](SECURITY.md) | Security model, its limits, and reporting a vulnerability |
 
 ---

@@ -221,6 +221,8 @@ CTIParsor/
 │   ├── check_offline_bundle_docker.sh # Verify an air-gap bundle restores and runs
 │   ├── offline_lib_docker.sh      # Functions shared by check_offline_bundle_docker.sh and setup.sh --offline
 │   ├── docker_smoke.sh            # Build, start and verify the container stack (make docker-smoke)
+│   ├── release.py                 # Release process: the version, the tag check, the notes, the release PR (ADR-0085, docs/releasing.md)
+│   ├── release_files.sh           # A release's files and notes, from the image main's CI built and attested (ADR-0085)
 │   ├── migrate_jobs_to_postgres.py # One-shot copy of a cti_stix.db job store into PostgreSQL (ADR-0045)
 │   ├── migrate_rules_to_postgres.py # The same for the rule store (ADR-0053)
 │   │  ── checks and diagnostics ──

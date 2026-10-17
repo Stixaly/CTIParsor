@@ -245,6 +245,7 @@ current truth.
 | Shared helpers | `test_shared_helpers.py` | 27 | environment parsing, claim extraction, unescaping logic |
 | Fuzzing | `test_fuzz_targets.py` | 5 | every Atheris target (ADR-0081) over its seed corpus, `fuzz/corpus/<target>/`, and the empty input: a target that stops importing, or whose invariant a seed breaks, fails here between fuzzing runs; skipped off Linux x86_64 (no Atheris wheel) |
 | Docs | `test_doc_claims.py` | 2 | every number `scripts/check_doc_claims.py` checks in README.md and docs/pipeline.md still matches its source, and is still found (what `make check-docs` did on demand only) |
+| Release | `test_release.py` | 83 | the version is one number in `pipeline/__init__.py`, `frontend/package.json` and `frontend/package-lock.json`, and the CHANGELOG opens with `## [Unreleased]`; `scripts/release.py` (`version`, `check`, `notes`, `unreleased`, `prepare`, `predicate`) on throwaway trees: every refusal, every mismatch reported, the notes' length limit, no file written when `prepare` refuses, only the standard library imported (ADR-0085) |
 | Benchmarks | `eval_pipeline.py` | 10 | NER F1, ATE precision, grounding metrics, adversarial tests |
 
 `CTIPARSOR_TEST_DATABASE_URL=postgresql://user:pw@host/db` is **required**,
@@ -462,9 +463,13 @@ the first four pass:
 7. **publish-image** (pushes to main only): pushes the image to GHCR with its
    SBOM and signed attestations, after jobs 1 to 4.
 
-Three more workflows run beside it. **Fuzzing** (`fuzz.yml`) runs the four
+Four more workflows run beside it. **Fuzzing** (`fuzz.yml`) runs the four
 targets above, and its four jobs are required checks. **CodeQL**
 (`codeql.yml`) analyses Python, TypeScript and the workflows. **Scorecard**
 (`scorecard.yml`) rates the repository's practices; it tests nothing.
+**Release** (`release.yml`) publishes a GitHub Release when a tag `v*` is
+pushed. A pull request that changes it, `scripts/release.py` or
+`scripts/release_files.sh`, and a weekly run (Monday), get a dry run instead,
+with nothing published (ADR-0085, `docs/releasing.md`).
 
 `make ci` runs jobs 1 and 2 locally, in the `dev` and `frontend-dev` containers.

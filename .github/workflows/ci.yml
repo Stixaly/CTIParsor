@@ -345,6 +345,10 @@ jobs:
   # to GHCR next to it. A consumer checks them with
   # `gh attestation verify oci://ghcr.io/stixaly/ctiparsor@<digest> -R Stixaly/CTIParsor`.
   # No storage record: those exist for organisation-owned repositories only.
+  #
+  # ADR-0085: a release (tag vX.Y.Z, release.yml) rebuilds nothing.  It gives
+  # the image this job pushed for the tagged commit the version as a second
+  # name, by digest, so this job's attestations are the release's too.
   publish-image:
     name: Publish image to GHCR
     needs: [fast-tests, frontend-tests, container-image, dependency-audit]
@@ -373,7 +377,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute tags (sha-<full sha>, latest, and semver if triggered by a v*.*.* tag)
+      # Version names (X.Y.Z, X.Y) come from release.yml (ADR-0085): this
+      # workflow never runs on a tag.
+      - name: Compute tags (sha-<full sha>, latest)
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
@@ -381,8 +387,6 @@ jobs:
           tags: |
             type=sha,format=long,prefix=sha-
             type=raw,value=latest,enable={{is_default_branch}}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
 
       - name: Build and push
         id: push

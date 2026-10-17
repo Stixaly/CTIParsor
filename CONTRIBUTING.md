@@ -169,6 +169,9 @@ bash scripts/docker_smoke.sh --no-build --job   # also process a sample report e
   [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). `reuse lint` checks it
   in CI's fast tests.
 - **Commits** — branch off `main`; keep a change + its tests + doc update together.
+- **Releases** are cut by the maintainer, following [`docs/releasing.md`](docs/releasing.md).
+  A change adds its CHANGELOG entry under `## [Unreleased]` and leaves the
+  version alone.
 
 ## Docs to keep current
 When a feature lands, update: the reference page in [`docs/`](docs/) it touches
