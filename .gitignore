@@ -11,6 +11,8 @@ output/
 .ruff_cache/
 dist/
 build/
+# scripts/release_files.sh writes the notes and files of a release here (ADR-0085)
+/release/
 # Reports dropped in input/ stay local — never commit sensitive CTI docs
 input/*.pdf
 input/*.docx

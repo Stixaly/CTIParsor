@@ -1,0 +1,238 @@
+name: Release
+
+# A tag vX.Y.Z, pushed by the maintainer, publishes a GitHub Release
+# (ADR-0085; the procedure is docs/releasing.md).
+#
+# Nothing is rebuilt.  The tagged commit must be on main and main's CI must
+# have passed on it: that run built, tested and attested the image
+# (ci.yml, publish-image).  The release gives that image the version as a
+# second name, same digest, so the provenance signed on main still applies.
+# The Release carries the source archive, the image's attested SBOM,
+# SHA256SUMS, and the SLSA provenance of those files signed by this run
+# (ctiparsor-X.Y.Z.intoto.jsonl, which Scorecard's Signed-Releases reads).
+#
+# These checks catch mistakes.  They do not stop someone who can push a tag
+# and edit this file on that tag's commit; the v* tag ruleset does
+# (docs/releasing.md, one-time settings).
+#
+# A pull request that changes this machinery, and a weekly run, get a dry run
+# instead: the same checks and files for the next minor version, prepared on
+# the runner, with a read-only token.  Nothing is published, tagged or
+# attested.  The weekly run catches what the paths filter cannot see: a change
+# to ci.yml, to gh, or to the registry.
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - scripts/release.py
+      - scripts/release_files.sh
+  schedule:
+    - cron: "37 5 * * 1"
+
+permissions:
+  contents: read
+
+# Two runs for the same tag never publish side by side.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  dry-run:
+    name: Release dry run (notes and files, nothing published)
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read            # main's last CI run that passed
+      attestations: read       # the image's provenance and SBOM
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # On the runner only: what `prepare` commits in a release pull request.
+      # Right after a release [Unreleased] is empty and `prepare` refuses it;
+      # one placeholder line keeps the rehearsal going (a Dependabot bump of
+      # this file, the weekly run).
+      - name: Prepare the next minor version
+        id: version
+        run: |
+          if [ -z "$(python3 scripts/release.py unreleased)" ]; then
+            sed -i '0,/^## \[Unreleased\]$/s//## [Unreleased]\n\n- Dry run placeholder: [Unreleased] is empty./' CHANGELOG.md
+          fi
+          version=$(python3 scripts/release.py version --next minor)
+          python3 scripts/release.py prepare "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Main's last commit whose CI passed (its image is published)
+        id: main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=1" \
+            --jq '.workflow_runs[0].head_sha // empty')
+          [ -n "$sha" ] || { echo "::error::no CI run on main has passed"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Notes and files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          SHA: ${{ steps.main.outputs.sha }}
+        run: |
+          bash scripts/release_files.sh "v$VERSION" "$SHA"
+          (cd release/dist && sha256sum -c SHA256SUMS)
+          cat release/notes.md >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    name: Publish the release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write          # the Release and its files
+      packages: write          # the version names on the image
+      id-token: write          # Sigstore certificate for the provenance
+      attestations: write
+      actions: read            # main's CI run on the tagged commit
+    env:
+      GH_REPO: ${{ github.repository }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0       # origin/main and the v* tags
+          persist-credentials: false
+
+      # First, so that a wrong version file fails now, not after the wait.
+      - name: The tag states the tree's version, on a commit of main
+        id: tag
+        run: |
+          python3 scripts/release.py check "$GITHUB_REF_NAME"
+          commit=$(git rev-parse HEAD)
+          git merge-base --is-ancestor "$commit" origin/main \
+            || { echo "::error::$GITHUB_REF_NAME ($commit) is not on main"; exit 1; }
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+      # A version is released once.  A draft a failed run left behind is
+      # deleted by hand (it may be a Release whose tag was deleted, which
+      # GitHub turns back into a draft); the message says how.
+      - name: No Release exists for this tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The tag passed `release.py check`: vX.Y.Z, nothing to escape.
+          found=$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"$GITHUB_REF_NAME\") | \"draft=\(.draft) \(.html_url)\"")
+          if [ -n "$found" ]; then
+            echo "::error::A Release for $GITHUB_REF_NAME exists: $found"
+            echo "A draft from a failed run: gh release delete $GITHUB_REF_NAME --yes (the tag stays), then re-run."
+            echo "A published Release: release the next patch version instead."
+            exit 1
+          fi
+
+      # The tag usually follows the release PR's merge within minutes, while
+      # main's CI still runs on the merge commit: wait for it, up to an hour.
+      # Only a run that passed has published the image this release names.
+      - name: Main's CI passed on the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ steps.tag.outputs.commit }}
+        run: |
+          url="repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$COMMIT&branch=main&event=push&per_page=1"
+          missing=0
+          for _ in $(seq 60); do
+            run=$(gh api "$url" --jq '.workflow_runs[0] // empty | "\(.status) \(.conclusion) \(.html_url)"') \
+              || run="api-error"
+            case "$run" in
+              "completed success "*) echo "main's CI passed: ${run##* }"; exit 0 ;;
+              completed*) echo "::error::main's CI did not pass on $COMMIT: ${run##* }"; exit 1 ;;
+              "") missing=$((missing + 1))
+                  if [ "$missing" -ge 5 ]; then
+                    echo "::error::main's CI never ran on $COMMIT. Tag a commit it ran on: the release PR's merge commit."
+                    exit 1
+                  fi ;;
+            esac
+            echo "Waiting for main's CI on $COMMIT (${run:-no run yet})"
+            sleep 60
+          done
+          echo "::error::main's CI on $COMMIT did not finish within an hour"
+          exit 1
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Before the image is read: anonymous reads work only while the GHCR
+      # package is public.
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Notes and files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ steps.tag.outputs.commit }}
+        run: bash scripts/release_files.sh "$GITHUB_REF_NAME" "$COMMIT"
+
+      # One source, an image index: imagetools pushes a carbon copy under the
+      # new names, so the digest, and the attestations bound to it, stay.
+      # X.Y.Z never moves to another image; X.Y follows the highest X.Y.*.
+      - name: Version names on the image (same digest)
+        run: |
+          image=$(cat release/image)
+          version=$(cat release/version)
+          name=${image%@*}
+          digest=${image#*@}
+          digest_of() {
+            docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' 2>/dev/null \
+              | python3 -c 'import json, sys; print(json.load(sys.stdin)["digest"])' 2>/dev/null
+          }
+          existing=$(digest_of "$name:$version") || existing=""
+          if [ -n "$existing" ] && [ "$existing" != "$digest" ]; then
+            echo "::error::$name:$version already names $existing, not $digest"
+            exit 1
+          fi
+          semver='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          line_top=$(git tag --list "v${version%.*}.*" | grep -E "$semver" | sort -V | tail -n 1)
+          names=("$name:$version")
+          if [ "$line_top" = "v$version" ]; then names+=("$name:${version%.*}"); fi
+          args=()
+          for ref in "${names[@]}"; do args+=(--tag "$ref"); done
+          docker buildx imagetools create "${args[@]}" "$image"
+          for ref in "${names[@]}"; do
+            got=$(digest_of "$ref") || got=""
+            [ "$got" = "$digest" ] || { echo "::error::$ref is ${got:-missing}, not $digest"; exit 1; }
+            echo "$ref -> $digest"
+          done
+
+      - name: SLSA provenance of the files
+        id: provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: release/dist/SHA256SUMS
+          create-storage-record: false
+
+      # Draft first, files next, public last: with immutable releases, a
+      # published Release takes no more files.
+      - name: Publish the Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
+        run: |
+          version=$(cat release/version)
+          jq -c . "$BUNDLE" > "release/dist/ctiparsor-$version.intoto.jsonl"
+          gh release create "$GITHUB_REF_NAME" --verify-tag --draft \
+            --title "CTIParsor $version" --notes-file release/notes.md
+          gh release upload "$GITHUB_REF_NAME" release/dist/*
+          # "Latest" only for the highest release tag: a fix to an older line
+          # is not, and a stray tag (v0.1.0-rc.1, vfoo) does not count.
+          semver='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          top=$(git tag --list 'v*' | grep -E "$semver" | sort -V | tail -n 1)
+          if [ "$top" = "$GITHUB_REF_NAME" ]; then latest=true; else latest=false; fi
+          gh release edit "$GITHUB_REF_NAME" --draft=false --latest="$latest"
+          gh release view "$GITHUB_REF_NAME" --json url --jq '"Published: \(.url)"' | tee -a "$GITHUB_STEP_SUMMARY"

@@ -2,6 +2,11 @@
 
 **Status:** Accepted (implemented 2026-09-16)
 **Date:** 2026-09-16
+**Amended by:** [0085](0085-releases-promote-the-image-main-built.md) (2026-10-17). The
+two `type=semver` lines of the tag list below are gone from `ci.yml`: that
+workflow never runs on a tag, so they never applied. The version names
+`X.Y.Z` and `X.Y` come from `release.yml`, which gives the image main published
+for the tagged commit those names, with the same digest.
 **Relates to:** [0044](0044-container-images.md) (the image this publishes), [0040](0040-offline-installation-bundle.md)
 (a separate, unrelated build path — see its 2026-09-16 status review)
 

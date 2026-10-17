@@ -4,6 +4,10 @@
 **Date:** 2026-10-04
 **Deciders:** maintainer
 **Amends:** ADR-0075 (a verifiable supply chain)
+**Amended by:** [0085](0085-releases-promote-the-image-main-built.md) (2026-10-17). The
+amendment on Signed-Releases ("a Release, if there is ever one, attaches SLSA
+provenance"): a Release now attaches `ctiparsor-X.Y.Z.intoto.jsonl`. No Release
+had been published on 2026-10-17, so the check was not scored.
 
 ## Context
 

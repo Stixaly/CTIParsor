@@ -147,7 +147,28 @@ pipeline still produces valid STIX. ML models are downloaded once and cached.
   an input slower than 10 s or a memory blow-up fails the run.
 - **Verifiable image.** Each image pushed to GHCR carries a CycloneDX SBOM and
   two signed attestations bound to its digest, build provenance and that SBOM:
-  `gh attestation verify oci://ghcr.io/stixaly/ctiparsor@sha256:<digest> -R Stixaly/CTIParsor`.
+
+  ```
+  gh attestation verify oci://ghcr.io/stixaly/ctiparsor@sha256:<digest> -R Stixaly/CTIParsor \
+    --signer-workflow Stixaly/CTIParsor/.github/workflows/ci.yml --source-ref refs/heads/main
+  ```
+
+  Without `--signer-workflow`, an attestation signed by any workflow of the
+  repository would pass.
+- **Releases (ADR-0085).** A release is a tag `vX.Y.Z` on a commit of `main`
+  whose CI passed. Its image is the one that run built and attested, named by
+  digest in the Release notes: nothing is rebuilt. The Release's files carry
+  their SLSA build provenance, signed by the release workflow:
+
+  ```
+  gh attestation verify ctiparsor-X.Y.Z.tar.gz -R Stixaly/CTIParsor \
+    --signer-workflow Stixaly/CTIParsor/.github/workflows/release.yml --source-ref refs/tags/vX.Y.Z
+  ```
+
+  The release workflow's checks catch mistakes. What stops a person who can
+  push a tag is a tag ruleset on `v*`, a repository setting described in
+  [docs/releasing.md](docs/releasing.md). No release has been published yet
+  (2026-10-17).
 
 ### Not shipped
 **diskcache** (PYSEC-2026-2447 / CVE-2025-69872 / GHSA-w8v5-vhqr-4h9v,
@@ -178,6 +199,11 @@ added together.
 |---|---|---|---|
 | CVE-2025-15367, CVE-2026-12345 (Grype, Code scanning) | CPython 3.14.8, fixed in 3.15 only | `poplib` command injection: CTIParsor never imports `poplib`. `tempfile.TemporaryDirectory` cleanup race: needs a local attacker who can write to the temporary directory. The only use is in `scripts/measure_web_capture.py`, a measurement script the application never runs, and the container's `/tmp` is its own. Revisit when the image moves to Python 3.15 (ADR-0079). | 2026-10-04 |
 | CVE-2026-87910 (Grype, Code scanning) | CPython 3.14.8, fixed in 3.12.15 and 3.13.16, not yet in a 3.14 release | `tarfile` falls back to extracting another member when it extracts a link on a system without links. The image runs Linux, which has links. CTIParsor's only tar extraction, the corpus sync (`pipeline/detection/sync.py::_safe_members`), keeps regular files and directories only, so no link is ever extracted. The next 3.14 image digest, which Dependabot proposes weekly, brings the fix. | 2026-10-04 |
+
+## Supported versions
+Fixes land on `main` and ship in the next release. Only the latest release is
+supported. Until the first release, `main` (the `latest` image) is the only
+supported version.
 
 ## Reporting a vulnerability
 Report it privately:

@@ -14,6 +14,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 # Initialize logging before importing other modules
 from api.logging_config import clear_request_id, get_logger, set_request_id, setup_logging
+from pipeline import __version__
 from pipeline.regex_safety import compile_pattern
 
 setup_logging()
@@ -101,7 +102,7 @@ async def lifespan(app: FastAPI):
     _ql.stop_embedded()
 
 
-app = FastAPI(title="CTI to STIX", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="CTI to STIX", version=__version__, lifespan=lifespan)
 
 # Add rate limiting middleware
 app.state.limiter = limiter
