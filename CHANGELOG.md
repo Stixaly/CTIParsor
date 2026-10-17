@@ -9,6 +9,24 @@ theme.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-17
+
+CTIParsor 0.1.0 is the first release. It reads a threat-intelligence report
+(PDF, DOCX, HTML, TXT, Markdown, pasted text or a URL) and produces a validated
+STIX 2.1 bundle ready for OpenCTI, MISP or a SIEM. Regex and NER extract the
+indicators and names; an optional LLM stage adds actors, malware, relationships
+and ATT&CK techniques, each backed by a verbatim quote from the report. Bundles
+carry TLP markings that are never guessed and OpenCTI's standard ids, and a
+bundle that fails validation is not served. Analysts review and edit the result
+in a web UI, which also matches the report against local Sigma, Suricata and
+YARA rules. It runs as a Docker Compose stack (API, workers, PostgreSQL), with a
+hosted or local LLM, and installs air-gapped. Known limits: there is no
+authentication, so everyone who reaches the port shares one workspace
+(docs/deployment.md); on AnnoCTR's test split, technique F1 is 0.690 and named
+entities have high recall but low precision (docs/eval/baseline-2026-10.md), so
+a bundle is a draft for an analyst; and before 1.0 a minor version may change
+the API, the bundle output or the configuration.
+
 ### Added
 
 #### Releases: a tag vX.Y.Z publishes the image main built, with its provenance, 2026-10-17
