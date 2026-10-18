@@ -177,3 +177,54 @@ fails on a refused pattern it does not list, and runs each listed one under
 `re` on 50,000 characters of 14 adversarial inputs within 1 s. The domain
 pattern, the slowest, scales linearly: 42, 83, 168 and 337 ms on 25, 50,
 100 and 200 thousand `a.` pairs.
+
+## Amendment (2026-10-18): `\s` means Python's whitespace under both engines
+
+The rewrites above respected RE2's ASCII `\s`; the patterns RE2 accepted as
+written did not. The review of the NER precision filters (ADR-0088, on its own
+branch) found the gap: their `[\s\-]+` tokeniser dropped "Chinese\xa0threat
+actors" in a local run (no re2, `re`'s Unicode `\s`) and kept it in production
+(RE2). PDF extraction and HTML pages put no-break, thin and narrow no-break
+spaces between words, and nothing before Stage 2 normalises them.
+
+Audit of every `compile_pattern` call in `pipeline/` and `api/`: 72
+module-level patterns used `\s` or `\S`.
+
+- **21 rewritten**: the class says `PY_WHITESPACE`, or the code splits with
+  `str.split()` where the pattern only collapsed blanks. Stage 2's ASN, Windows
+  path and spaced-defang patterns; Stage 2g's alias markers; Stage 2c's
+  list-item and table-caption tests and the retrieval passages' list-item test
+  and blank collapse; Stage 3f's quote check; ADR-0050's generic-vocabulary
+  tokeniser, which ADR-0052's promote gate also uses; the six patterns of
+  `detection/yara_atoms.py`, whose `split_rules` reads the report itself in
+  Stage 4 (an `import\xa0"pe"` outside the rule was not added to it, and the
+  rule failed to compile); Stage 4's Sigma title scan (a next rule opening
+  with `title\xa0:` did not end the one before, and both shipped as one
+  pattern); the network-traffic port; the observables' `[dot]`. Under `re`
+  each rewrite matches what it matched before.
+- **51 left on `\s`**, each for a reason `tests/test_unicode_whitespace.py`
+  lists: the 24 date patterns read `fold()`ed text, where any
+  `str.isspace()` is already a space; four lookbehind patterns always run on
+  `re`; the 17 upload sniffing patterns follow HTML and CommonMark, whose
+  blanks are ASCII; Stage 1's IoC-shaped cell test runs only on text without
+  blanks; CyNER's three span checks read spans an NFKC tokenizer decoded, and
+  a non-ASCII span is dropped anyway; Stage 4 reads a number in the STIX
+  patterns it wrote; the ATT&CK link cleaner runs on ATT&CK's text at corpus
+  build.
+
+Matching more blanks exposed one Python-side gap: Stage 2g's `_clean_alias`
+stripped ASCII blanks only, so `Berserk Bear\xa0and\xa0Dragonfly` gave
+`Berserk Bear\xa0` and lost `Dragonfly`, under both engines. It strips every
+`str.isspace()` character now.
+
+The test runs 42 cases with three blanks; they pass with re2 and without it,
+and under RE2 every one failed before the rewrites. It also imports each
+module that calls `compile_pattern` and fails on a module-level pattern that
+uses `\s` without being listed, and on a listed one that no longer does. A
+pattern compiled inside a function is not seen by the test; the audit found
+none that uses `\s`. `PY_WHITESPACE` is a class body, not a set of
+characters: it writes the run U+2000 to U+200A as a range, so
+`str.strip(PY_WHITESPACE)` would strip `-`.
+
+`\w`, `\d` and `\b` are ASCII under RE2 too, and Unicode under `re`; they were
+not audited here.

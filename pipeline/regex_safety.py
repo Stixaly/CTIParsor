@@ -42,7 +42,10 @@ _RE2_MAPPABLE_FLAGS = re.IGNORECASE | re.MULTILINE | re.DOTALL
 #: pattern moved from `re` to RE2 says this instead of `\s` to keep matching what
 #: it matched: a no-break space (U+00A0) between two words of an HTML page is
 #: whitespace to both.  Literal characters, not escapes: `\uXXXX` is Python's
-#: syntax and `\x{XXXX}` RE2's.  `tests/test_regex_safety.py` checks the list.
+#: syntax and `\x{XXXX}` RE2's.  `tests/test_re2_fallbacks.py` checks the list.
+#: A class body, not a set of characters: it writes U+2000..U+200A as a range,
+#: so `str.strip(PY_WHITESPACE)` would strip "-".  `tests/test_unicode_whitespace.py`
+#: fails on a module-level pattern that says `\s` without a reason.
 PY_WHITESPACE = ("\t\n\x0b\x0c\r\x1c\x1d\x1e\x1f \x85\xa0  - "
                  "    　")
 
