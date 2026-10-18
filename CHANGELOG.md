@@ -41,6 +41,71 @@ the history kept for the SQLite import scripts.
 
 ### Changed
 
+#### A CyNER threat actor and a spaCy place must look like a name (ADR-0088), 2026-10-18
+
+The audit of 2026-10-17 named entity precision as the main quality defect of the
+shipped bundle. On AnnoCTR dev, CyNER gave 87 of the 97 threat-actor false
+positives ("cybercriminals", "underground forums", "Chinese threat actors",
+"Iran"), and spaCy's `GPE` label gave most of the location ones ("C&C", "XSS",
+"GitHub"). It also returned "the United States" with its article, which Stage
+4's ISO country table does not know. Two filters in the new
+`pipeline/ner_precision.py` now run in Stages 2d and 2:
+
+- **CyNER `Threat_group` only.** A fragment is dropped when it has no capital
+  letter and no digit in a report written with capitals, when it is a country
+  ("United States", "Hong Kong"), or when every word of 3 or more letters is a
+  category word, a software name, a nationality or a country. The words are
+  ADR-0050's 141 plus 178 read in the AnnoCTR train false positives, Stage 2's
+  93 software names (with six added), 21 nationality words and the countries of
+  Stage 4's table. Words that form real names (agent, crew, circles, miner) stay
+  out; "Agent", "Crew" and "Miner" alone are dropped. The capital-letter test is
+  skipped for a text with fewer than 0.5% capital letters. Malware is untouched.
+- **spaCy `GPE` → location.** The value is put on one line, a leading "the" and
+  a trailing apostrophe are dropped ("the United States" is now "United
+  States"), and it is kept only if it can be a place name: a country or a known
+  abbreviation, or letters (accented ones too), spaces, periods, hyphens and
+  apostrophes, with a capital first letter, not an acronym of five capitals or
+  fewer (XSS, SCADA), not camel case (GitHub, DocuSign; McLean is kept), not
+  made only of category or software words (Payload, Linux). Two-letter values
+  stay dropped, "the US" included.
+
+Both filters run before the case-insensitive dedup, so a capitalised spelling
+outlives a lowercase one. They are on by default. `NER_PRECISION_FILTERS=false`
+restores the previous output exactly: replayed on recorded model outputs, Stage
+2 gives the same entities on 70 of 70 train and 16 of 16 dev documents. Stages 2
+and 2d record "precision filters on (ADR-0088)" in the stage report, and
+`NER_PRECISION_FILTERS` joins the captured environment of the run config (it
+appears only when set). The CLI's stage table (`main.py`) now prints a stage's
+note and its counts together; it printed the note instead of the counts.
+
+Measured on AnnoCTR dev, strict, in a real run with the LLM against a baseline of
+the same commit (10,000-resample paired bootstrap; criteria fixed before any dev
+figure; test split not read). Threat actors: precision 0.134 → 0.326 (+19.2
+points, 95% interval [+11.4, +30.9]), recall 0.938 unchanged, 15 TP / 97 FP →
+15 / 31, F1 0.234 → 0.484. Locations: precision 0.406 → 0.526 (+12.0 [+5.1,
++18.9]), recall 0.402 → 0.412 (one gold entity gained, none lost), 39 / 57 →
+40 / 36, F1 0.404 → 0.462. Malware and identity are unchanged; tool precision
++1.1. On train (no LLM): threat actors 0.132 → 0.320 with none of 63 true
+positives lost, locations 0.440 → 0.602 with 1 of 143 lost ("The United States",
+annotated with a capital "The").
+
+Not adopted, each under the +5-point gate on its own and losing nothing on dev:
+the same rule for CyNER's malware (+2.6 points), reducing "Ryuk ransomware" or
+"hacking group TA505" to the name and splitting on brackets (+1.2 actors, +3.0
+malware), and dropping spaCy's PRODUCT → malware (+3.5). With all four leads in
+place malware precision rose by 13.2 points offline, but that was read after the
+measurement: it would have to be registered as one lead and measured on data this
+study has not read. Malware precision stays 0.205. Known losses: an actor
+written only in lowercase in a report written with capitals, "Iranian Cyber
+Army", "Pakistan Cyber Army"; vendor names that look like towns remain places.
+
+The bundle gets fewer Threat Actor objects named after ordinary language, and
+Locations such as "United States" that Stage 4 now finds in its ISO table. A
+follow-up commit lists this change in `BUNDLE_AFFECTING` with the `extraction`
+scope (ADR-0086). Measurement:
+[docs/eval/ner-precision-2026-10.md](docs/eval/ner-precision-2026-10.md).
+ADR-0050 gets a dated amendment.
+
 #### A freshness entry names its scope: a finalize clears a Stage 4/5 fix, only a new run clears an earlier one (ADR-0086), 2026-10-17
 
 Each `BUNDLE_AFFECTING` entry (`pipeline/bundle_revisions.py`) gains a fourth
