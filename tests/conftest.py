@@ -28,6 +28,12 @@ from models.config import PipelineConfig
 from models.schemas import EntityType, RawEntity
 from pipeline import attack_data
 
+# api.storage has loaded .env (api.db), and three test modules ask Stage 2b
+# whether the gazetteer exists while they are collected, before any fixture
+# runs: the shipped ATT&CK track from the start, whatever .env says (ADR-0087).
+os.environ.pop("ATTACK_RELEASE", None)
+attack_data.reset()
+
 # ── Input fixtures ─────────────────────────────────────────────────────────────
 
 @pytest.fixture()

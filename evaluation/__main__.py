@@ -768,6 +768,8 @@ def cmd_retrieval(args) -> None:
     _write(OUT / f"{name}.json", {
         "split": args.split, "documents": len(docs), "excluded_cited_reports": len(excl),
         "attack_mapping": cat.summary(),
+        # The corpus follows ATTACK_RELEASE, the mapping --attack-release.
+        "corpus_release": attack_data.current().version,
         "unit": "passage = Stage 2c sentence; k = distinct technique ids per passage",
         "results": results})
     print(f"written to {OUT / (name + '.json')}")
