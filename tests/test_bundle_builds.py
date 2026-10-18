@@ -11,14 +11,15 @@ import logging
 import re
 import threading
 from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
 import api.worker as worker
 from api.db_backend import PgConnection
-from api.paths import uploads_dir
+from api.paths import output_dir, uploads_dir
 from pipeline.bundle_revisions import git_rev_of
-from pipeline.stage5_validation import INVALID, VALIDATED, ValidationResult
+from pipeline.stage5_validation import INVALID, VALIDATED, ValidationResult, export_path
 
 
 @pytest.fixture()
@@ -117,13 +118,14 @@ def test_a_slow_finalize_does_not_publish_over_a_newer_one(db, monkeypatch):
 # ── Which build is stored ────────────────────────────────────────────────────
 
 def _stage5(monkeypatch, refuses=lambda text: []):
-    """Stage 5 stands in: INVALID with the errors `refuses(bundle text)` returns,
-    if any.  Writes no file."""
-    def fake(bundle, path):
-        errors = refuses(bundle.serialize())
+    """Stage 5's validation stands in: INVALID with the errors `refuses(bundle
+    text)` returns, if any.  It writes nothing: the export file is written by
+    the real `export_bundle`, under tmp_path (conftest)."""
+    def fake(text):
+        errors = refuses(text)
         return ValidationResult(INVALID if errors else VALIDATED, errors)
 
-    monkeypatch.setattr("pipeline.stage5_validation.validate_and_export", fake)
+    monkeypatch.setattr("pipeline.stage5_validation.validate_bundle", fake)
 
 
 def _outcome(call):
@@ -221,6 +223,7 @@ def test_two_builds_from_the_same_rows_both_publish(db, monkeypatch):
     assert row["bundle_json"] == a                                    # same rows: the last writer wins
     assert _kind(row) == "finalize" and row["status"] == "completed"
     assert row["bundle_review_revision"] == row["review_revision"] == 1
+    assert worker.bundle_output_path("j1", "APT_report").read_text(encoding="utf-8") == a   # its file too
 
 
 def test_a_build_from_newer_rows_replaces_the_stored_one(db, monkeypatch):
@@ -234,6 +237,7 @@ def test_a_build_from_newer_rows_replaces_the_stored_one(db, monkeypatch):
     worker.re_run_final_stages("j1", quick=True)
     row = _row(db)
     assert _names(row["bundle_json"], "malware") == ["SUNBURST"] and row["bundle_review_revision"] == 2
+    assert worker.bundle_output_path("j1", "APT_report").read_text(encoding="utf-8") == row["bundle_json"]
 
 
 def test_a_job_deleted_while_it_is_built_is_not_an_error(db, monkeypatch):
@@ -254,6 +258,52 @@ def test_a_job_deleted_while_it_is_built_is_not_an_error(db, monkeypatch):
 
     assert not slow.is_alive() and not errors
     assert isinstance(a[0], str)                                      # nothing stored, nothing raised
+    assert list(output_dir().glob("*j1*")) == []                      # and no orphan export file
+
+
+# ── The export file ──────────────────────────────────────────────────────────
+
+def test_a_refused_build_writes_no_export_file(db, monkeypatch):
+    """A, built from APT29 alone, is refused and finishes last: the file stays
+    B's, the build that published."""
+    _stage5(monkeypatch)
+    a, b = _overlap(db, monkeypatch, a_quick=True, b_quick=True)
+
+    path = worker.bundle_output_path("j1", "APT_report")
+    assert path.read_text(encoding="utf-8") == _row(db)["bundle_json"] == b == a
+    assert _names(b, "malware") == ["SUNBURST"]
+
+
+def test_an_export_that_cannot_be_written_publishes_nothing(db, monkeypatch):
+    _stage5(monkeypatch)
+
+    def full(content, path):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("pipeline.stage5_validation._write_file", full)
+    _job(db, report_text="APT29 used SUNBURST.")
+    _entity(db, "j1", "APT29", "threat_actor")
+
+    with pytest.raises(OSError, match="disk full"):
+        worker.re_run_final_stages("j1", quick=False)
+
+    row = _row(db)
+    assert (row["bundle_json"], row["bundle_build_json"], row["bundle_review_revision"]) == (None, None, None)
+    assert row["status"] == "reviewing"
+
+
+def test_a_published_invalid_build_writes_only_the_invalid_file(db, monkeypatch):
+    _stage5(monkeypatch, lambda text: ["bad"])
+    _job(db, report_text="APT29 used SUNBURST.")
+    _entity(db, "j1", "APT29", "threat_actor")
+
+    with pytest.raises(worker.BundleInvalidError):
+        worker.re_run_final_stages("j1", quick=False)
+
+    path = worker.bundle_output_path("j1", "APT_report")
+    invalid = export_path(str(path), ValidationResult(INVALID))
+    assert Path(invalid).read_text(encoding="utf-8") == _row(db)["bundle_json"]
+    assert not path.exists()
 
 
 @pytest.mark.parametrize(("stored", "errors"), [
