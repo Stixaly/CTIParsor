@@ -45,6 +45,11 @@ Usage:
     python scripts/build_indexes.py --only embeddings
     python scripts/build_indexes.py --only retrieval [--keep-names] [--retrieval-out DIR]
 
+    # Write to another directory (a release track, ADR-0087) instead of
+    # pipeline/data/; --capec-index carries the CAPEC entries of an existing
+    # mitre_index.json over when no CAPEC bundle is given
+    python scripts/build_indexes.py --out-dir DIR [--capec-index mitre_index.json]
+
 Prerequisites:
     pip install sentence-transformers numpy
 
@@ -68,13 +73,14 @@ from pathlib import Path
 _REPO_ROOT   = Path(__file__).parent.parent
 _DATA_DIR    = _REPO_ROOT / "pipeline" / "data"
 
-_INDEX_PATH      = _DATA_DIR / "mitre_index.json"
-_GAZ_PATH        = _DATA_DIR / "gazetteer.json"
-_ATTACK_REL_PATH = _DATA_DIR / "attack_relationships.json"
-_REVOKED_PATH    = _DATA_DIR / "attack_revoked.json"
-_EMB_PATH       = _DATA_DIR / "mitre_embeddings.npy"
-_META_PATH      = _DATA_DIR / "mitre_embeddings_meta.json"
-_MANIFEST_PATH  = _DATA_DIR / "mitre_embeddings_manifest.json"
+# File names; each builder writes them under its `out_dir` (default _DATA_DIR).
+_INDEX_NAME      = "mitre_index.json"
+_GAZ_NAME        = "gazetteer.json"
+_ATTACK_REL_NAME = "attack_relationships.json"
+_REVOKED_NAME    = "attack_revoked.json"
+_EMB_NAME       = "mitre_embeddings.npy"
+_META_NAME      = "mitre_embeddings_meta.json"
+_MANIFEST_NAME  = "mitre_embeddings_manifest.json"
 
 # Default bundle locations to search (in priority order)
 _DEFAULT_SEARCH_DIRS = [
@@ -125,8 +131,15 @@ def _domain_from_path(path: Path) -> str:
     return "unknown"
 
 
-def build_mitre_index(bundles: dict[str, Path | None]) -> None:
-    """Build pipeline/data/mitre_index.json from MITRE STIX bundles."""
+def build_mitre_index(bundles: dict[str, Path | None], out_dir: Path | None = None,
+                      capec_index: Path | None = None) -> None:
+    """Build mitre_index.json (in `out_dir`, default pipeline/data/) from MITRE STIX bundles.
+
+    Without a CAPEC bundle, `capec_index` (an existing mitre_index.json) gives
+    the CAPEC techniques, taken over as they are.
+    """
+    out_dir = out_dir or _DATA_DIR
+    index_path = out_dir / _INDEX_NAME
     print("\n[1/3] Building mitre_index.json…")
 
     techniques: list[dict] = []
@@ -203,26 +216,34 @@ def build_mitre_index(bundles: dict[str, Path | None]) -> None:
                 "shortname":       obj.get("name", "").lower().replace(" ", "-"),
             })
 
+    if capec_index is not None and bundles.get("capec") is None:
+        carried = [t for t in json.loads(capec_index.read_text(encoding="utf-8")).get("techniques", [])
+                   if t.get("domain") == "capec"]
+        techniques += carried
+        print(f"  Carried over {len(carried)} CAPEC techniques from {capec_index}")
+
     # Sort for determinism
     techniques.sort(key=lambda x: x["id"])
     tactics.sort(key=lambda x: x["id"])
 
     index = {"techniques": techniques, "tactics": tactics}
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
-    _INDEX_PATH.write_text(json.dumps(index, ensure_ascii=False, separators=(",", ":")),
-                           encoding="utf-8")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    index_path.write_text(json.dumps(index, ensure_ascii=False, separators=(",", ":")),
+                          encoding="utf-8")
 
-    size_kb = _INDEX_PATH.stat().st_size / 1024
+    size_kb = index_path.stat().st_size / 1024
     print(f"  DONE  {len(techniques)} techniques + {len(tactics)} tactics "
-          f"→ {_INDEX_PATH.name} ({size_kb:.0f} KB)")
+          f"→ {index_path.name} ({size_kb:.0f} KB)")
 
 
 # ---------------------------------------------------------------------------
 # Gazetteer builder
 # ---------------------------------------------------------------------------
 
-def build_gazetteer(bundles: dict[str, Path | None]) -> None:
-    """Build pipeline/data/gazetteer.json from MITRE STIX bundles."""
+def build_gazetteer(bundles: dict[str, Path | None], out_dir: Path | None = None) -> None:
+    """Build gazetteer.json (in `out_dir`, default pipeline/data/) from MITRE STIX bundles."""
+    out_dir = out_dir or _DATA_DIR
+    gaz_path = out_dir / _GAZ_NAME
     print("\n[2/3] Building gazetteer.json…")
 
     entries: list[dict] = []
@@ -295,14 +316,14 @@ def build_gazetteer(bundles: dict[str, Path | None]) -> None:
     # Sort longest-first so longer names match before shorter overlapping names
     entries.sort(key=lambda e: len(e["name"]), reverse=True)
 
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
-    _GAZ_PATH.write_text(json.dumps(entries, ensure_ascii=False, indent=2),
-                         encoding="utf-8")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    gaz_path.write_text(json.dumps(entries, ensure_ascii=False, indent=2),
+                        encoding="utf-8")
 
-    size_kb = _GAZ_PATH.stat().st_size / 1024
+    size_kb = gaz_path.stat().st_size / 1024
     n_unique = len({e["canonical"].lower() for e in entries})
     print(f"  DONE  {len(entries)} name variants ({n_unique} unique entities) "
-          f"→ {_GAZ_PATH.name} ({size_kb:.0f} KB)")
+          f"→ {gaz_path.name} ({size_kb:.0f} KB)")
 
 
 # ---------------------------------------------------------------------------
@@ -319,8 +340,8 @@ _REL_KEEP_VERBS = frozenset({"uses", "attributed-to", "targets", "delivers", "va
 _REL_ID_TYPES = frozenset({"intrusion-set", "malware", "tool", "campaign", "attack-pattern"})
 
 
-def build_attack_relationships(bundles: dict[str, Path | None]) -> None:
-    """Build pipeline/data/attack_relationships.json from MITRE STIX bundles.
+def build_attack_relationships(bundles: dict[str, Path | None], out_dir: Path | None = None) -> None:
+    """Build attack_relationships.json (in `out_dir`, default pipeline/data/) from MITRE STIX bundles.
 
     Emits the *curated* ATT&CK edge list as ATT&CK-ID triples:
         {"pairs": [["G0016", "uses", "S0154"], ...]}
@@ -328,6 +349,8 @@ def build_attack_relationships(bundles: dict[str, Path | None]) -> None:
     bundle when BOTH endpoints appear in the report — an expert-maintained link,
     not an inference.
     """
+    out_dir = out_dir or _DATA_DIR
+    rel_path = out_dir / _ATTACK_REL_NAME
     print("\n[4/4] Building attack_relationships.json…")
 
     # Pass 1 — map STIX object id → ATT&CK external_id per bundle set.
@@ -371,19 +394,24 @@ def build_attack_relationships(bundles: dict[str, Path | None]) -> None:
         "generated_from": sorted(set(domains)),
         "pairs": sorted(pairs),
     }
-    _ATTACK_REL_PATH.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
-    size_kb = _ATTACK_REL_PATH.stat().st_size / 1024
+    out_dir.mkdir(parents=True, exist_ok=True)
+    rel_path.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
+    size_kb = rel_path.stat().st_size / 1024
     print(f"  DONE  {len(pairs)} curated ATT&CK edges "
-          f"→ {_ATTACK_REL_PATH.name} ({size_kb:.0f} KB)")
+          f"→ {rel_path.name} ({size_kb:.0f} KB)")
 
 
 # ---------------------------------------------------------------------------
 # Embedding builder
 # ---------------------------------------------------------------------------
 
-def build_embeddings(bundles: dict[str, Path | None]) -> None:
+def build_embeddings(bundles: dict[str, Path | None], out_dir: Path | None = None,
+                     write_manifest: bool = True) -> None:
     """
-    Build mitre_embeddings.npy + mitre_embeddings_meta.json + manifest.
+    Build mitre_embeddings.npy + mitre_embeddings_meta.json + manifest, in
+    `out_dir` (default pipeline/data/), from the mitre_index.json found there.
+    The default release track has no manifest (ADR-0087): `write_manifest=False`
+    builds a track that behaves the same in stage2c.
 
     The embedding model is read from the TTP_EMBEDDING_MODEL environment variable
     (or .env file).  Defaults to all-MiniLM-L6-v2 for backward compatibility.
@@ -396,6 +424,12 @@ def build_embeddings(bundles: dict[str, Path | None]) -> None:
 
     from dotenv import load_dotenv
     load_dotenv()
+
+    out_dir = out_dir or _DATA_DIR
+    index_path = out_dir / _INDEX_NAME
+    emb_path = out_dir / _EMB_NAME
+    meta_path = out_dir / _META_NAME
+    manifest_path = out_dir / _MANIFEST_NAME
 
     model_id = os.getenv("TTP_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
     print(f"\n[3/3] Building mitre_embeddings.npy  (model: {model_id})…")
@@ -414,11 +448,11 @@ def build_embeddings(bundles: dict[str, Path | None]) -> None:
         return
 
     # Load mitre_index.json (must already exist — built in step 1)
-    if not _INDEX_PATH.exists():
+    if not index_path.exists():
         print("  SKIP  mitre_index.json not found — build the MITRE index first.")
         return
 
-    index = json.loads(_INDEX_PATH.read_text(encoding="utf-8"))
+    index = json.loads(index_path.read_text(encoding="utf-8"))
     techniques: list[dict] = index.get("techniques", [])
 
     if not techniques:
@@ -466,35 +500,37 @@ def build_embeddings(bundles: dict[str, Path | None]) -> None:
         convert_to_numpy=True,
     )
 
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
-    np.save(str(_EMB_PATH), embeddings)
-    _META_PATH.write_text(json.dumps(meta, ensure_ascii=False, separators=(",", ":")),
-                          encoding="utf-8")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    np.save(str(emb_path), embeddings)
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, separators=(",", ":")),
+                         encoding="utf-8")
 
     # Write manifest — records which model built this cache so stage2c can detect
     # stale caches when TTP_EMBEDDING_MODEL changes (ADR-004 P1-A), plus the
     # cosine thresholds calibrated for this model so the gate travels with the
     # cache instead of being hardcoded in stage2c (ADR precision §2).
     dims = int(embeddings.shape[1])
-    # Keep in sync with pipeline.stage2c_ttp_semantic._MODEL_THRESHOLDS
-    _MODEL_THRESHOLDS = {
-        "all-MiniLM-L6-v2":            (0.62, 0.48),
-        "ehsanaghaei/SecureBERT-Plus": (0.70, 0.58),
-    }
-    high, medium = _MODEL_THRESHOLDS.get(model_id, (0.62, 0.48))
-    manifest = {
-        "model": model_id,
-        "dims": dims,
-        "num_techniques": len(texts),
-        "thresholds": {"high": high, "medium": medium},
-    }
-    _MANIFEST_PATH.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    if write_manifest:
+        # Keep in sync with pipeline.stage2c_ttp_semantic._MODEL_THRESHOLDS
+        _MODEL_THRESHOLDS = {
+            "all-MiniLM-L6-v2":            (0.62, 0.48),
+            "ehsanaghaei/SecureBERT-Plus": (0.70, 0.58),
+        }
+        high, medium = _MODEL_THRESHOLDS.get(model_id, (0.62, 0.48))
+        manifest = {
+            "model": model_id,
+            "dims": dims,
+            "num_techniques": len(texts),
+            "thresholds": {"high": high, "medium": medium},
+        }
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
-    size_mb = _EMB_PATH.stat().st_size / 1e6
+    size_mb = emb_path.stat().st_size / 1e6
     print(f"  DONE  shape={embeddings.shape}  dims={dims}")
-    print(f"        {_EMB_PATH.name}       ({size_mb:.1f} MB)")
-    print(f"        {_META_PATH.name}  ({_META_PATH.stat().st_size / 1024:.0f} KB)")
-    print(f"        {_MANIFEST_PATH.name}  (model={model_id})")
+    print(f"        {emb_path.name}       ({size_mb:.1f} MB)")
+    print(f"        {meta_path.name}  ({meta_path.stat().st_size / 1024:.0f} KB)")
+    if write_manifest:
+        print(f"        {manifest_path.name}  (model={model_id})")
 
 
 # ---------------------------------------------------------------------------
@@ -502,7 +538,7 @@ def build_embeddings(bundles: dict[str, Path | None]) -> None:
 # ---------------------------------------------------------------------------
 
 def build_retrieval(bundles: dict[str, Path | None], *, neutralise: bool = True,
-                    out_dir: Path | None = None) -> None:
+                    out_dir: Path | None = None, embed: bool = True) -> None:
     """Build attack_retrieval_corpus.json + attack_retrieval_embeddings.npy.
 
     Entries: one `description` per active technique (name + full description,
@@ -513,6 +549,7 @@ def build_retrieval(bundles: dict[str, Path | None], *, neutralise: bool = True,
     the example the selector is shown then names no other report's actor.
     The manifest records the bundles' sha256 and ATT&CK version, the model and
     the options, so a result can always be tied to the corpus it came from.
+    `embed=False` writes the corpus only (build_attack_release --skip-embeddings).
     """
     if str(_REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(_REPO_ROOT))
@@ -560,6 +597,8 @@ def build_retrieval(bundles: dict[str, Path | None], *, neutralise: bool = True,
                                       ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     print(f"  {counts} over {manifest['techniques']} techniques → {corpus_path}")
 
+    if not embed:
+        return
     try:
         import numpy as np
         from sentence_transformers import SentenceTransformer
@@ -578,14 +617,16 @@ def build_retrieval(bundles: dict[str, Path | None], *, neutralise: bool = True,
 # Revoked techniques → their replacement
 # ---------------------------------------------------------------------------
 
-def build_revoked(bundles: dict[str, Path | None]) -> None:
-    """Build pipeline/data/attack_revoked.json: each revoked ATT&CK technique id
-    and the active id its `revoked-by` chain ends on.
+def build_revoked(bundles: dict[str, Path | None], out_dir: Path | None = None) -> None:
+    """Build attack_revoked.json (in `out_dir`, default pipeline/data/): each
+    revoked ATT&CK technique id and the active id its `revoked-by` chain ends on.
 
     The MITRE index leaves revoked techniques out, so an id a report still
     writes (T1562, revoked for T1685 in 2026) used to be resolved by its name
     instead, and "Impair Defenses" now only names the Mobile technique T1629.
     """
+    out_dir = out_dir or _DATA_DIR
+    revoked_path = out_dir / _REVOKED_NAME
     print("\n[revoked] Building attack_revoked.json…")
     revoked_by: dict[str, str] = {}
     revoked_names: dict[str, str] = {}
@@ -626,9 +667,10 @@ def build_revoked(bundles: dict[str, Path | None]) -> None:
     # A revoked name another active technique of these bundles still bears
     # keeps resolving to that one.
     names_out = {n: i for n, i in sorted(revoked_names.items()) if n and n not in active_names}
-    _REVOKED_PATH.write_text(json.dumps({"sources": sources, "revoked_by": dict(sorted(revoked_by.items())),
-                                         "names": names_out}, indent=1) + "\n", encoding="utf-8")
-    print(f"  DONE  {len(revoked_by)} revoked techniques → {_REVOKED_PATH.name}")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    revoked_path.write_text(json.dumps({"sources": sources, "revoked_by": dict(sorted(revoked_by.items())),
+                                        "names": names_out}, indent=1) + "\n", encoding="utf-8")
+    print(f"  DONE  {len(revoked_by)} revoked techniques → {revoked_path.name}")
 
 
 # ---------------------------------------------------------------------------
@@ -653,8 +695,15 @@ def main() -> None:
                         help="retrieval: keep actor/software/campaign names in procedures "
                              "(default: replaced by placeholders)")
     parser.add_argument("--retrieval-out", type=Path,
-                        help="retrieval: write the corpus here instead of pipeline/data/")
+                        help="retrieval: write the corpus here instead of pipeline/data/ "
+                             "(default: --out-dir)")
+    parser.add_argument("--out-dir", type=Path,
+                        help="write every index here instead of pipeline/data/")
+    parser.add_argument("--capec-index", type=Path,
+                        help="mitre: without a CAPEC bundle, take the CAPEC techniques of this "
+                             "mitre_index.json")
     args = parser.parse_args()
+    out_dir = args.out_dir or _DATA_DIR
 
     # Resolve bundle paths
     bundles: dict[str, Path | None] = {
@@ -683,24 +732,25 @@ def main() -> None:
         print("  python scripts/build_indexes.py --enterprise /path/to/enterprise-attack.json")
         sys.exit(1)
 
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     only = args.only
     if only is None or only == "mitre":
-        build_mitre_index(bundles)
+        build_mitre_index(bundles, out_dir, args.capec_index)
     if only is None or only == "gazetteer":
-        build_gazetteer(bundles)
+        build_gazetteer(bundles, out_dir)
     if only is None or only == "embeddings":
-        build_embeddings(bundles)
+        build_embeddings(bundles, out_dir)
     if only is None or only == "relationships":
-        build_attack_relationships(bundles)
+        build_attack_relationships(bundles, out_dir)
     if only is None or only == "revoked":
-        build_revoked(bundles)
+        build_revoked(bundles, out_dir)
     if only == "retrieval":
-        build_retrieval(bundles, neutralise=not args.keep_names, out_dir=args.retrieval_out)
+        build_retrieval(bundles, neutralise=not args.keep_names,
+                        out_dir=args.retrieval_out or out_dir)
 
     print()
-    print("Done.  Index files written to:", _DATA_DIR)
+    print("Done.  Index files written to:", out_dir)
 
 
 if __name__ == "__main__":

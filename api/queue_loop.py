@@ -465,6 +465,9 @@ def main(argv: list[str] | None = None) -> int:
     # A bad STIX_TLP stops the worker here, not at its first bundle (ADR-0073).
     from pipeline.stage4_stix_mapping import tlp_default
     logger.info("[queue] default TLP: %s", tlp_default())
+    # Likewise a bad ATTACK_RELEASE (ADR-0087), which this call fixes for the process.
+    from pipeline import attack_data
+    logger.info("[queue] ATT&CK release: %s", attack_data.current().version)
     parser = argparse.ArgumentParser(description="Job-queue supervisor (role worker)")
     from api.worker import _MAX_CONCURRENT_JOBS
 

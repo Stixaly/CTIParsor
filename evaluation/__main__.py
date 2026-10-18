@@ -5,6 +5,8 @@
   score           score a run: TTPs, entities, evidence
   ttp-errors      where a run's technique errors arise: never retrieved, not selected, origin of FPs
   compare         paired bootstrap between two runs on the same documents
+  attack-diff     what changed between two ATT&CK releases, technique by technique
+  release-effect  two runs' technique differences split into taxonomy and system effects
   retrieval       candidate recall per passage / document at several k (no LLM)
   support-sample  CSV of quotes for a person to judge
   preannotate     draft gold.json for an in-house report (to be corrected by hand)
@@ -15,6 +17,9 @@
 
 Outputs go to data/eval/ (git-ignored).  Tune on `dev`; run `test` once per
 frozen configuration (see docs/eval/README.md).
+
+The gold ids are mapped against one ATT&CK release (ADR-0087): a run's own by
+default, `--attack-release` for another.
 """
 from __future__ import annotations
 
@@ -25,13 +30,17 @@ import sys
 import time
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from evaluation import annoctr, attack, dedup, evidence, inhouse, metrics  # noqa: E402
+from pipeline import attack_data  # noqa: E402
 
-OUT = _ROOT / "data" / "eval"
+DATA = _ROOT / "data"
+OUT = DATA / "eval"
 _LITERAL_ID = __import__("re").compile(r"\bT\d{4}(?:\.\d{3})?\b")
 _TECH_ID = __import__("re").compile(r"^T\d{4}(?:\.\d{3})?$")
 
@@ -53,11 +62,14 @@ def cmd_prepare(args) -> None:
     reg = annoctr.registry(docs)
     _write(OUT / "annoctr-registry.json", reg)
 
-    cat = attack.Catalogue()
+    # The default track unless told otherwise, whatever ATTACK_RELEASE says.
+    cat = attack.Catalogue.for_release(args.attack_release or "", data_dir=DATA)
     gold = {t for d in docs for t in d.technique_ids}
     mapping = cat.mapping(gold)
-    _write(OUT / "attack-mapping.json", {"catalogue": cat.summary(),
-                                         "rows": [r.as_dict() for r in mapping.values()]})
+    version = cat.summary()["release"]
+    _write(OUT / ("attack-mapping.json" if version == attack.default_release()
+                  else f"attack-mapping-{version}.json"),
+           {"catalogue": cat.summary(), "rows": [r.as_dict() for r in mapping.values()]})
 
     groups = {d.doc_id: (d.split, d.text) for d in docs}
     for extra in args.corpus or []:
@@ -152,10 +164,27 @@ def _bundle_relations(bundle) -> list[dict] | None:
             for o in objs if o.get("type") == "relationship"]
 
 
+def _stay_on_the_release(meta_path: Path, name: str) -> None:
+    """The release this process runs on, checked before any document: an
+    unknown ATTACK_RELEASE stops the command here instead of marking every
+    document an error, and a run that already began resumes on the release its
+    run.json recorded, not on another track than the documents already done
+    (ADR-0087)."""
+    version = attack_data.current().version
+    if meta_path.exists():
+        began = run_release(json.loads(meta_path.read_text(encoding="utf-8")))
+        if began != version:
+            sys.exit(f"{name} began on ATT&CK {began} and ATTACK_RELEASE selects {version}: "
+                     f"resume it with ATTACK_RELEASE={began}, or start another run")
+
+
 def cmd_run(args) -> None:
     from api.run_config import build_manifest
     from pipeline.orchestrator import Document, RunOptions, StageRequired, run_document
 
+    run_dir = OUT / "runs" / args.name
+    meta_path = run_dir / "run.json"
+    _stay_on_the_release(meta_path, args.name)
     disabled = {"1f", "4", "5"} | {s.strip() for s in (args.disable or "").split(",") if s.strip()}
     # The procedures MITRE wrote from AnnoCTR reports stay out of the select
     # path's retrieval corpus during an evaluation (ADR-0072).
@@ -166,9 +195,7 @@ def cmd_run(args) -> None:
         os.environ["TTP_RETRIEVAL_EXCLUDE_CITED"] = str(excl)
     options = RunOptions.from_env(disabled=disabled,
                                   required=set() if args.allow_degraded else {"3"})
-    run_dir = OUT / "runs" / args.name
     docs = _docs(args.split, args.limit)
-    meta_path = run_dir / "run.json"
     if not meta_path.exists():
         _write(meta_path, {"name": args.name, "split": args.split, "started": time.strftime("%Y-%m-%dT%H:%M:%S"),
                            "disabled": sorted(options.disabled), "required": sorted(options.required),
@@ -197,6 +224,8 @@ def cmd_run(args) -> None:
                 _write(out, record)
                 print(f"stopped: {exc}", file=sys.stderr)
                 sys.exit(2)
+        except attack_data.UnknownAttackRelease:
+            raise   # the setting is wrong for the whole run, not for this document
         except Exception as exc:   # one bad document must not lose the run
             record = {"doc_id": d.doc_id, "seconds": round(time.monotonic() - t0, 1),
                       "error": f"{type(exc).__name__}: {exc}"}
@@ -208,15 +237,50 @@ def cmd_run(args) -> None:
 
 # ── score ────────────────────────────────────────────────────────────────────
 
+def _read_meta(name: str) -> dict:
+    return json.loads((OUT / "runs" / name / "run.json").read_text(encoding="utf-8"))
+
+
 def _load_run(name: str) -> tuple[dict, dict[str, dict]]:
     run_dir = OUT / "runs" / name
-    meta = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+    meta = _read_meta(name)
     preds = {p.stem: json.loads(p.read_text(encoding="utf-8")) for p in (run_dir / "docs").glob("*.json")}
     return meta, preds
 
 
-def _canonical_fn():
-    cat = attack.Catalogue()
+def run_release(meta: dict) -> str:
+    """The ATT&CK release a run's pipeline ran on.  A run from before the
+    manifest recorded it (no `attack` block) ran on the default track."""
+    recorded = ((meta.get("manifest") or {}).get("attack") or {}).get("release")
+    return str(recorded) if recorded else attack.default_release()
+
+
+def _modified_files(name: str, meta: dict) -> list[str]:
+    """The ATT&CK files that no longer matched their track's manifest when the
+    run began (`attack.modified_files` of its manifest).  They are said on
+    stderr: the release the run announces is then not proven, but the score
+    stands."""
+    files = list(((meta.get("manifest") or {}).get("attack") or {}).get("modified_files") or [])
+    if files:
+        print(f"WARNING: {name} ran on ATT&CK {run_release(meta)} files that differ from its manifest "
+              f"({', '.join(files)}): the release it announces is not proven", file=sys.stderr)
+    return files
+
+
+def _shared_release(a: str, b: str, option: str | None) -> str:
+    """The release two runs are scored against: the one asked for, or the one
+    both ran on.  The gold has to be mapped the same way on both sides."""
+    if option:
+        return option
+    ra, rb = run_release(_read_meta(a)), run_release(_read_meta(b))
+    if ra != rb:
+        sys.exit(f"{a} ran on ATT&CK {ra} and {b} on {rb}: pass --attack-release to say which "
+                 "release the gold is mapped against, for both")
+    return ra
+
+
+def _canonical_fn(release: str | None = None):
+    cat = attack.Catalogue.for_release(release, data_dir=DATA)
     cache: dict[str, str | None] = {}
 
     def canonical(tid: str) -> str | None:
@@ -227,9 +291,10 @@ def _canonical_fn():
     return canonical, cat
 
 
-def per_doc_scores(name: str) -> dict:
+def per_doc_scores(name: str, release: str | None = None) -> dict:
+    """`release`: the ATT&CK release to map the gold with; the run's own when None."""
     meta, preds = _load_run(name)
-    canonical, cat = _canonical_fn()
+    canonical, cat = _canonical_fn(release or run_release(meta))
     docs = {d.doc_id: d for d in _docs(meta["split"])}
     rows = {}
     for doc_id, p in sorted(preds.items()):
@@ -256,7 +321,8 @@ def per_doc_scores(name: str) -> dict:
 
 
 def cmd_score(args) -> None:
-    s = per_doc_scores(args.name)
+    s = per_doc_scores(args.name, args.attack_release)
+    modified = _modified_files(args.name, s["meta"])
     rows, preds, docs, canonical = s["rows"], s["preds"], s["docs"], s["canonical"]
     tech = [r["ttp"].technique for r in rows.values()]
     sub = [r["ttp"].subtechnique for r in rows.values()]
@@ -301,6 +367,8 @@ def cmd_score(args) -> None:
         "documents_failed": sorted(k for k, p in preds.items() if "error" in p),
         "config": {k: s["meta"][k] for k in ("disabled", "consensus", "document_relations")},
         "llm": s["meta"]["manifest"].get("llm"),
+        "attack_mapping": s["catalogue"].summary(),
+        **({"attack_modified_files": modified} if modified else {}),
         "ttp": {
             "technique_micro": metrics.micro(tech).as_dict(),
             "technique_per_document": metrics.macro(tech),
@@ -316,10 +384,14 @@ def cmd_score(args) -> None:
         "llm_health": llm_health,
         "seconds_per_document": round(sum(p.get("seconds", 0) for p in preds.values()) / max(1, len(preds)), 1),
     }
-    _write(OUT / "runs" / args.name / "score.json", report)
+    release, own = report["attack_mapping"]["release"], run_release(s["meta"])
+    _write(OUT / "runs" / args.name / ("score.json" if release == own else f"score-attack-{release}.json"),
+           report)
     t = report["ttp"]
     print(f"{args.name} [{report['split']}] {len(rows)} documents "
           f"({len(report['documents_failed'])} failed), {report['seconds_per_document']} s/doc")
+    if release != own:
+        print(f"  gold mapped with ATT&CK {release}; the run used {own}")
     print(f"  TTP technique  micro P/R/F1 {t['technique_micro']['precision']:.3f} "
           f"{t['technique_micro']['recall']:.3f} {t['technique_micro']['f1']:.3f}   "
           f"per-document F1 {t['technique_per_document']['f1']:.3f}")
@@ -344,7 +416,8 @@ def cmd_ttp_errors(args) -> None:
     """Split a run's technique errors by where they arise (ADR-0072): never
     retrieved, retrieved but not selected, and false positives by origin."""
     meta, preds = _load_run(args.name)
-    canonical, _ = _canonical_fn()
+    modified = _modified_files(args.name, meta)
+    canonical, catalogue = _canonical_fn(args.attack_release or run_release(meta))
     docs = {d.doc_id: d for d in _docs(meta["split"])}
     techniques: dict[str, dict[str, int]] = {k: {} for k in metrics.TTP_ERROR_CATEGORIES}
     reasons: dict[str, int] = {}
@@ -366,6 +439,8 @@ def cmd_ttp_errors(args) -> None:
     gold_n = totals["found"] + totals["retrieved_not_selected"] + totals["never_retrieved"]
     report = {
         "run": args.name, "documents": len(per_doc), "totals": totals, "gold": gold_n,
+        "attack_mapping": catalogue.summary(),
+        **({"attack_modified_files": modified} if modified else {}),
         "candidate_ceiling": round((totals["found"] + totals["retrieved_not_selected"]) / gold_n, 4)
         if gold_n else None,
         "review_reasons_of_missed_gold": reasons,
@@ -373,7 +448,9 @@ def cmd_ttp_errors(args) -> None:
                           for cat, ids in techniques.items() if cat != "found"},
         "per_document": per_doc,
     }
-    _write(OUT / "runs" / args.name / "ttp-errors.json", report)
+    release = report["attack_mapping"]["release"]
+    _write(OUT / "runs" / args.name / ("ttp-errors.json" if release == run_release(meta)
+                                       else f"ttp-errors-attack-{release}.json"), report)
     print(f"{args.name}: {len(per_doc)} documents, {gold_n} gold parent techniques")
     for cat in metrics.TTP_ERROR_CATEGORIES:
         print(f"  {cat:<24} {totals[cat]}")
@@ -385,7 +462,9 @@ def cmd_ttp_errors(args) -> None:
 # ── compare ──────────────────────────────────────────────────────────────────
 
 def cmd_compare(args) -> None:
-    a, b = per_doc_scores(args.a), per_doc_scores(args.b)
+    release = _shared_release(args.a, args.b, args.attack_release)
+    a, b = per_doc_scores(args.a, release), per_doc_scores(args.b, release)
+    modified = {"a": _modified_files(args.a, a["meta"]), "b": _modified_files(args.b, b["meta"])}
     common = sorted(set(a["rows"]) & set(b["rows"]))
     if not common:
         sys.exit("no document scored in both runs")
@@ -395,15 +474,166 @@ def cmd_compare(args) -> None:
             return [s["rows"][d]["ttp"].technique for d in doc_ids]
         return [s["rows"][d]["entities_strict"].get(args.task, metrics.Counts()) for d in doc_ids]
 
-    out = {"a": args.a, "b": args.b, "task": args.task, "documents": len(common), "results": {}}
+    out = {"a": args.a, "b": args.b, "task": args.task, "documents": len(common),
+           "attack_mapping": a["catalogue"].summary(),
+           **({"attack_modified_files": modified} if modified["a"] or modified["b"] else {}), "results": {}}
     for m in ("f1", "precision", "recall"):
         out["results"][m] = metrics.paired_bootstrap(series(a, common), series(b, common), metric=m,
                                                      n=args.resamples)
-    _write(OUT / "compare" / f"{args.a}__vs__{args.b}__{args.task}.json", out)
+    suffix = f"__attack-{out['attack_mapping']['release']}" if args.attack_release else ""
+    _write(OUT / "compare" / f"{args.a}__vs__{args.b}__{args.task}{suffix}.json", out)
     print(f"{args.b} − {args.a} on {len(common)} documents ({args.task}):")
     for m, r in out["results"].items():
         print(f"  {m:<9} {r['observed_diff']:+.4f}  95% CI [{r['ci95'][0]:+.4f}, {r['ci95'][1]:+.4f}]  "
               f"P(not better) {r['p_not_better']}")
+
+
+# ── attack-diff, release-effect ──────────────────────────────────────────────
+
+def cmd_attack_diff(args) -> None:
+    old, new = attack.release_version(args.old), attack.release_version(args.new)
+    diff = attack.release_diff(attack.release_dir(old, DATA), attack.release_dir(new, DATA))
+    path = OUT / f"attack-diff-{old}-{new}.json"
+    _write(path, diff)
+    print(f"ATT&CK {old} -> {new}")
+    for domain, r in diff.items():
+        print(f"  {domain:<18} active {r['active']['old']} -> {r['active']['new']}, "
+              f"new {len(r['new_active'])}, no longer active {len(r['no_longer_active'])}, "
+              f"renamed {len(r['renamed'])}, description changed {len(r['description_changed'])}, "
+              f"procedures {r['procedures']['old']} -> {r['procedures']['new']}")
+        if r["new_active"]:
+            print(f"    new: {', '.join(r['new_active'])}")
+        if r["no_longer_active"]:
+            print(f"    no longer active: {', '.join(r['no_longer_active'])}")
+    print(f"written to {path}")
+
+
+_NAMED_TYPES = ("malware", "threat_actor", "tool")
+
+
+def _ttp_parents(ids, canonical) -> set[str]:
+    """The parent-level ids of one document in the scoring taxonomy, as
+    `metrics.score_ttps` builds them."""
+    return {c.split(".", 1)[0] for i in ids if (c := canonical(i)) is not None}
+
+
+def _gazetteer_entities(pred: dict, by_source: bool) -> set[tuple]:
+    """What the gazetteer gave one document: the entities it sourced or, for
+    runs that record no entity source, every malware, threat actor and tool."""
+    return {(e["type"], e["value"].lower(), e.get("mitre_id")) for e in pred["entities"]
+            if (e.get("source") == "gazetteer" if by_source else e["type"] in _NAMED_TYPES)}
+
+
+def _only(a: set, b: set) -> dict | None:
+    """What one side has and the other has not; None when they agree."""
+    return None if a == b else {"only_a": sorted(a - b, key=str), "only_b": sorted(b - a, key=str)}
+
+
+def _compared_releases(a: str, b: str, old: str | None, new: str | None) -> tuple[str, str]:
+    """The two releases `release-effect` compares: those the runs ran on.  Two
+    runs on the same release say nothing about which two to compare, so `--old`
+    and `--new` are required then; otherwise an option has to be the release of
+    the run it stands for."""
+    ra, rb = run_release(_read_meta(a)), run_release(_read_meta(b))
+    if ra == rb:
+        if not (old and new):
+            sys.exit(f"{a} and {b} both ran on ATT&CK {ra}: pass --old and --new to say which two "
+                     "releases to compare")
+        return attack.release_version(old), attack.release_version(new)
+    for option, value, expected, run in (("--old", old, ra, a), ("--new", new, rb, b)):
+        if value and attack.release_version(value) != expected:
+            sys.exit(f"{option} {value} but {run} ran on ATT&CK {expected}")
+    return ra, rb
+
+
+def cmd_release_effect(args) -> None:
+    """Two runs on two ATT&CK releases: how much of their parent-level technique
+    differences the taxonomy explains (ADR-0087).  Each id of Pa △ Pb is classed
+    by what changed between the releases (`attack.release_change`); per class,
+    the change in TP / FP / FN, and the F1 A would have if only that class came
+    from B.  Documents whose gazetteer entities or candidates differ are listed:
+    the rest of the difference is not the taxonomy's."""
+    old, new = _compared_releases(args.a, args.b, args.old, args.new)
+    release = _shared_release(args.a, args.b, args.attack_release)
+    a, b = per_doc_scores(args.a, release), per_doc_scores(args.b, release)
+    modified = {"a": _modified_files(args.a, a["meta"]), "b": _modified_files(args.b, b["meta"])}
+    common = sorted(set(a["rows"]) & set(b["rows"]))
+    if not common:
+        sys.exit("no document scored in both runs")
+    classify = attack.release_change(
+        attack.release_diff(attack.release_dir(old, DATA), attack.release_dir(new, DATA)))
+    by_source = all("source" in e for s in (a, b) for d in common for e in s["preds"][d]["entities"])
+
+    counts_a, counts_b = [], []
+    classes: dict[str, dict] = {c: {"ids": set(), "differences": 0, "hybrid": []} for c in attack.CHANGE_CLASSES}
+    detail = []
+    for doc_id in common:
+        gold = _ttp_parents(a["docs"][doc_id].technique_kinds(), a["canonical"])
+        pa, pb = (_ttp_parents(s["preds"][doc_id]["ttp_ids"], s["canonical"]) for s in (a, b))
+        for s, ids in ((a, pa), (b, pb)):
+            if metrics.set_counts(ids, gold) != s["rows"][doc_id]["ttp"].technique:
+                raise RuntimeError(f"{doc_id}: parent-level sets differ from metrics.score_ttps")
+        counts_a.append(metrics.set_counts(pa, gold))
+        counts_b.append(metrics.set_counts(pb, gold))
+        why = {t: classify(t) for t in pa | pb}
+        for t in pa ^ pb:
+            classes[why[t]]["ids"].add(t)
+            classes[why[t]]["differences"] += 1
+        for c, row in classes.items():
+            row["hybrid"].append(metrics.set_counts(
+                {t for t in pa if why[t] != c} | {t for t in pb if why[t] == c}, gold))
+        gazetteer = _only(*(_gazetteer_entities(s["preds"][doc_id], by_source) for s in (a, b)))
+        candidates = _only(*(set(s["preds"][doc_id].get("ttp_candidates") or []) for s in (a, b)))
+        if pa != pb or gazetteer or candidates:
+            detail.append({"doc_id": doc_id,
+                           "ttp_differences": [{"id": t, "class": why[t], "in": "a" if t in pa else "b",
+                                                "gold": t in gold} for t in sorted(pa ^ pb)],
+                           "gazetteer_entities": gazetteer, "candidates": candidates})
+
+    total_a, total_b = metrics.micro(counts_a), metrics.micro(counts_b)
+    per_class = {}
+    for c, row in classes.items():
+        h = metrics.micro(row["hybrid"])
+        per_class[c] = {"n_ids": len(row["ids"]), "n_differences": row["differences"],
+                        "delta_tp": h.tp - total_a.tp, "delta_fp": h.fp - total_a.fp,
+                        "delta_fn": h.fn - total_a.fn, "f1_hybrid": round(h.f1, 4),
+                        "ids": sorted(row["ids"])}
+    differ = [d for d in detail if d["ttp_differences"]]
+    report = {
+        "a": args.a, "b": args.b, "releases": {"a": run_release(a["meta"]), "b": run_release(b["meta"]),
+                                               "old": old, "new": new},
+        "attack_mapping": a["catalogue"].summary(), "level": "parent technique",
+        **({"attack_modified_files": modified} if modified["a"] or modified["b"] else {}),
+        "documents": len(common),
+        "f1_micro": {"a": round(total_a.f1, 4), "b": round(total_b.f1, 4)},
+        "delta_total": {"tp": total_b.tp - total_a.tp, "fp": total_b.fp - total_a.fp,
+                        "fn": total_b.fn - total_a.fn},
+        "classes": per_class,
+        "entities_compared": "entities whose source is the gazetteer" if by_source else
+        "malware, threat_actor and tool entities: the runs record no entity source",
+        "documents_with_ttp_difference": len(differ),
+        "documents_gazetteer_differs": sum(1 for d in detail if d["gazetteer_entities"]),
+        "documents_candidates_differ": sum(1 for d in detail if d["candidates"]),
+        "documents_ttp_difference_and_upstream_difference": sum(
+            1 for d in differ if d["gazetteer_entities"] or d["candidates"]),
+        "documents_detail": detail,
+    }
+    path = OUT / "compare" / f"{args.a}__vs__{args.b}__release-effect.json"
+    _write(path, report)
+    print(f"{args.b} − {args.a} on {len(common)} documents, parent techniques, gold mapped with ATT&CK "
+          f"{report['attack_mapping']['release']} (releases {old} -> {new})")
+    print(f"  micro F1  a {report['f1_micro']['a']:.4f}  b {report['f1_micro']['b']:.4f}   "
+          f"TP {report['delta_total']['tp']:+d}  FP {report['delta_total']['fp']:+d}  "
+          f"FN {report['delta_total']['fn']:+d}")
+    print(f"  {'class':<18} {'ids':>4} {'diffs':>6} {'dTP':>5} {'dFP':>5} {'dFN':>5}  F1 if only this from b")
+    for c, r in per_class.items():
+        print(f"  {c:<18} {r['n_ids']:>4} {r['n_differences']:>6} {r['delta_tp']:>+5d} {r['delta_fp']:>+5d} "
+              f"{r['delta_fn']:>+5d}  {r['f1_hybrid']:.4f}")
+    print(f"  documents: technique differs {report['documents_with_ttp_difference']}, gazetteer entities differ "
+          f"{report['documents_gazetteer_differs']}, candidates differ {report['documents_candidates_differ']}; "
+          f"technique and upstream both differ {report['documents_ttp_difference_and_upstream_difference']}")
+    print(f"  compared entities: {report['entities_compared']}")
+    print(f"written to {path}")
 
 
 # ── retrieval ────────────────────────────────────────────────────────────────
@@ -462,7 +692,7 @@ def cmd_retrieval(args) -> None:
     from pipeline import stage2c_ttp_semantic as s2c
     from pipeline import ttp_retrieval as tr
 
-    canonical, cat = _canonical_fn()
+    canonical, cat = _canonical_fn(args.attack_release)
 
     def cand_id(t: str) -> str:
         # Candidates may come from a newer bundle than the pipeline index:
@@ -537,6 +767,7 @@ def cmd_retrieval(args) -> None:
     name = f"retrieval-{args.split}" + (f"-{args.name}" if args.name else "")
     _write(OUT / f"{name}.json", {
         "split": args.split, "documents": len(docs), "excluded_cited_reports": len(excl),
+        "attack_mapping": cat.summary(),
         "unit": "passage = Stage 2c sentence; k = distinct technique ids per passage",
         "results": results})
     print(f"written to {OUT / (name + '.json')}")
@@ -593,6 +824,7 @@ def cmd_inhouse_run(args) -> None:
 
     disabled = {s.strip() for s in (args.disable or "").split(",") if s.strip()}
     run_dir = OUT / "inhouse-runs" / args.name
+    _stay_on_the_release(run_dir / "run.json", args.name)
     if not (run_dir / "run.json").exists():
         _write(run_dir / "run.json", {"name": args.name, "disabled": sorted(disabled),
                                       "manifest": build_manifest()})
@@ -605,6 +837,8 @@ def cmd_inhouse_run(args) -> None:
             result = _run_file(d.source, disabled)
             record = {"doc_id": d.doc_id, "seconds": round(time.monotonic() - t0, 1),
                       "stages": result.stage_report(), **_predictions(result)}
+        except attack_data.UnknownAttackRelease:
+            raise   # the setting is wrong for the whole run, not for this document
         except Exception as exc:
             record = {"doc_id": d.doc_id, "error": f"{type(exc).__name__}: {exc}"}
         _write(out, record)
@@ -612,8 +846,9 @@ def cmd_inhouse_run(args) -> None:
 
 
 def cmd_inhouse_score(args) -> None:
-    canonical, _ = _canonical_fn()
     run_dir = OUT / "inhouse-runs" / args.name
+    meta = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+    canonical, _ = _canonical_fn(run_release(meta))
     docs = {d.doc_id: d for d in inhouse.load()}
     totals: dict[str, metrics.Counts] = {}
     negatives = [0, 0]
@@ -703,7 +938,15 @@ def _two_columns(page) -> bool:
     return min(left, right) > 0.3 * len(words)
 
 
+def _attack_release_option(p, default: str) -> None:
+    p.add_argument("--attack-release", help="ATT&CK release the gold ids are mapped with, e.g. 20.0 "
+                   f"(default: {default})")
+
+
 def main() -> None:
+    # Before the first ATT&CK file is read: ATTACK_RELEASE may be set in .env,
+    # and a variable already set in the environment still wins (as in main.py).
+    load_dotenv(_ROOT / ".env")
     ap = argparse.ArgumentParser(prog="python -m evaluation", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -711,6 +954,7 @@ def main() -> None:
     p = sub.add_parser("prepare")
     p.add_argument("--corpus", action="append", help="extra folder of .txt reports to check for copies")
     p.add_argument("--threshold", type=float, default=0.5)
+    _attack_release_option(p, "the default track; another one is written to attack-mapping-<release>.json")
     p.set_defaults(fn=cmd_prepare)
 
     p = sub.add_parser("run")
@@ -723,10 +967,12 @@ def main() -> None:
 
     p = sub.add_parser("score")
     p.add_argument("--name", required=True)
+    _attack_release_option(p, "the run's; another one is written to score-attack-<release>.json")
     p.set_defaults(fn=cmd_score)
 
     p = sub.add_parser("ttp-errors")
     p.add_argument("--name", required=True)
+    _attack_release_option(p, "the run's; another one is written to ttp-errors-attack-<release>.json")
     p.set_defaults(fn=cmd_ttp_errors)
 
     p = sub.add_parser("compare")
@@ -734,7 +980,23 @@ def main() -> None:
     p.add_argument("--b", required=True, help="candidate run")
     p.add_argument("--task", default="ttp", help="ttp, or an entity type (malware, threat_actor, ...)")
     p.add_argument("--resamples", type=int, default=2000)
+    _attack_release_option(p, "the release both runs ran on; required when they differ")
     p.set_defaults(fn=cmd_compare)
+
+    p = sub.add_parser("attack-diff")
+    p.add_argument("--old", required=True, help="release of data/attack-stix/v<old>/, e.g. 19.2")
+    p.add_argument("--new", required=True, help="release of data/attack-stix/v<new>/, e.g. 20.0")
+    p.set_defaults(fn=cmd_attack_diff)
+
+    p = sub.add_parser("release-effect")
+    p.add_argument("--a", required=True, help="reference run")
+    p.add_argument("--b", required=True, help="candidate run")
+    p.add_argument("--old", help="the older release (data/attack-stix/v<old>/); default: the one --a ran on, "
+                   "required when both runs ran on the same")
+    p.add_argument("--new", help="the newer release (data/attack-stix/v<new>/); default: the one --b ran on, "
+                   "required when both runs ran on the same")
+    _attack_release_option(p, "the release both runs ran on; required when they differ")
+    p.set_defaults(fn=cmd_release_effect)
 
     p = sub.add_parser("retrieval")
     p.add_argument("--split", choices=annoctr.SPLITS, default="dev")
@@ -750,6 +1012,7 @@ def main() -> None:
                    "comma list of k_per_passage:cap, e.g. 5:25,10:25")
     p.add_argument("--name", help="suffix of the output file")
     p.add_argument("--limit", type=int)
+    _attack_release_option(p, "the release ATTACK_RELEASE selects")
     p.set_defaults(fn=cmd_retrieval)
 
     p = sub.add_parser("support-sample")

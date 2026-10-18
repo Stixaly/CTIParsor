@@ -13,6 +13,7 @@ from pathlib import Path
 
 # Initialize logging
 from api.logging_config import get_logger
+from pipeline import attack_data
 
 logger = get_logger(__name__)
 
@@ -21,10 +22,12 @@ _INDEX_PATH = Path(__file__).parent / "data" / "mitre_index.json"
 
 @functools.lru_cache(maxsize=1)
 def _load() -> dict:
-    if not _INDEX_PATH.exists():
+    # Resolved outside the try: an unknown ATTACK_RELEASE must reach the caller.
+    path = attack_data.resolve(_INDEX_PATH)
+    if not path.exists():
         return {"techniques": [], "tactics": []}
     try:
-        return json.loads(_INDEX_PATH.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except Exception as e:
         logger.error(f"Could not load index: {e}")
         return {"techniques": [], "tactics": []}
@@ -90,10 +93,11 @@ _REVOKED_PATH = Path(__file__).parent / "data" / "attack_revoked.json"
 
 @functools.lru_cache(maxsize=1)
 def _revoked() -> dict:
+    path = attack_data.resolve(_REVOKED_PATH)
     try:
-        return json.loads(_REVOKED_PATH.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        logger.warning(f"[mitre_db] {_REVOKED_PATH.name} unreadable, revoked ids are not "
+        logger.warning(f"[mitre_db] {path.name} unreadable, revoked ids are not "
                        f"replaced: {type(exc).__name__}: {exc}")
         return {}
 
@@ -113,4 +117,4 @@ def revoked_names() -> dict[str, str]:
 
 def available() -> bool:
     """Return True if the index file exists."""
-    return _INDEX_PATH.exists()
+    return attack_data.resolve(_INDEX_PATH).exists()

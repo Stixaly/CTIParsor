@@ -34,7 +34,8 @@ precedence = "override"
 SPDX-FileCopyrightText = "MISP project contributors"
 SPDX-License-Identifier = "CC0-1.0"
 
-# Built from MITRE's ATT&CK STIX bundles (scripts/build_indexes.py).
+# Built from MITRE's ATT&CK STIX bundles (scripts/build_indexes.py), in the
+# default track and in each release track (pipeline/data/attack/<version>/).
 [[annotations]]
 path = [
     "pipeline/data/attack_relationships.json",
@@ -42,6 +43,11 @@ path = [
     "pipeline/data/attack_retrieval_corpus.json",
     "pipeline/data/attack_retrieval_embeddings.npy",
     "pipeline/data/gazetteer.json",
+    "pipeline/data/attack/*/attack_relationships.json",
+    "pipeline/data/attack/*/attack_revoked.json",
+    "pipeline/data/attack/*/attack_retrieval_corpus.json",
+    "pipeline/data/attack/*/attack_retrieval_embeddings.npy",
+    "pipeline/data/attack/*/gazetteer.json",
 ]
 precedence = "override"
 SPDX-FileCopyrightText = "The MITRE Corporation"
@@ -53,6 +59,9 @@ path = [
     "pipeline/data/mitre_index.json",
     "pipeline/data/mitre_embeddings.npy",
     "pipeline/data/mitre_embeddings_meta.json",
+    "pipeline/data/attack/*/mitre_index.json",
+    "pipeline/data/attack/*/mitre_embeddings.npy",
+    "pipeline/data/attack/*/mitre_embeddings_meta.json",
     "frontend/public/mitre_index.json",
 ]
 precedence = "override"

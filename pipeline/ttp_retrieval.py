@@ -45,6 +45,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from api.logging_config import get_logger
+from pipeline import attack_data
 from pipeline.env_flags import env_bool, env_int
 from pipeline.regex_safety import compile_pattern
 
@@ -420,7 +421,8 @@ def load_corpus(kind: str = "both", *, path: Path | None = None, emb_path: Path 
     if kind == "short":
         corpus = _short_corpus()
     else:
-        corpus = _built_corpus(str(path or CORPUS_PATH), str(emb_path or EMBEDDINGS_PATH))
+        corpus = _built_corpus(str(path or attack_data.resolve(CORPUS_PATH)),
+                               str(emb_path or attack_data.resolve(EMBEDDINGS_PATH)))
     if corpus is None:
         return None
     from pipeline.stage2c_ttp_semantic import _enabled_domains

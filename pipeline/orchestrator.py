@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any
 
 from api.logging_config import get_logger
 from models.schemas import EntityType, RawEntity
+from pipeline import attack_data
 from pipeline.env_flags import env_bool, env_int
 from pipeline.temporal import DocumentTime
 
@@ -1169,6 +1170,7 @@ def run_document(document: Document, options: RunOptions | None = None,
                  hooks: Hooks | None = None) -> RunResult:
     """Run Stages 1 → 5 on one document.  See the module docstring."""
     run = _Run(document, options or RunOptions.from_env(), hooks or Hooks())
+    attack_data.current()      # an unknown ATTACK_RELEASE stops the run before any stage (ADR-0087)
     run.ingest()
     run.hooks.check_timeout()
     run.extract()

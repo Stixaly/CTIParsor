@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Literal
 
 from api.logging_config import get_logger
+from pipeline import attack_data
 from pipeline.env_flags import env_bool
 
 logger = get_logger(__name__)
@@ -35,6 +36,8 @@ _CAPTURED_ENV = (
     "TTP_CANDIDATES_PER_CHUNK", "TTP_SELECT_MIN_QUOTE_WORDS", "TTP_RETRIEVAL_EXCLUDE_CITED",
     "TTP_RETRIEVAL_KEYWORD_GATE", "TTP_SELECT_SKIPPED_CHUNKS",
     "TTP_ADVISORY_GATE",
+    # The ATT&CK release the data files below are read from (ADR-0087).
+    "ATTACK_RELEASE",
     # Stage 4: the marking and the author of the bundle.
     "STIX_TLP", "STIX_AUTHOR_NAME",
     # Stage 2 filters and switches.
@@ -61,7 +64,7 @@ _DATA_FILES = (
     "attack_retrieval_corpus.json", "attack_retrieval_embeddings.npy",
     "warninglists.json", "attack_revoked.json",
     "gazetteer_policy.json", "gazetteer_context_rules.json",
-    "mitre_embeddings_manifest.json",
+    "mitre_embeddings_manifest.json", "attack_manifest.json",
 )
 
 # Distributions whose version can change an extraction or a bundle.
@@ -135,10 +138,14 @@ def build_manifest() -> dict:
     except ImportError:
         pass
 
+    # `attack` is not wrapped: an unknown ATTACK_RELEASE must stop the caller
+    # (the evaluation CLI refuses to start a run) instead of pinning another release.
+    # The keys of `data` stay the bare names; the values are those of the files loaded.
     return {
         "llm": llm,
         "models": models,
-        "data": {name: _file_fingerprint(_DATA_DIR / name) for name in _DATA_FILES},
+        "attack": attack_data.describe(),
+        "data": {name: _file_fingerprint(attack_data.resolve(_DATA_DIR / name)) for name in _DATA_FILES},
         "packages": {dist: _version(dist) for dist in _PACKAGES},
     }
 
