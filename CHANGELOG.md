@@ -162,6 +162,7 @@ under both engines: `Berserk Bear\xa0and\xa0Dragonfly` gave `Berserk Bear\xa0`
 and lost `Dragonfly`. `tests/test_unicode_whitespace.py` runs 42 cases that pass
 with re2 and without it (under RE2 all of them failed before the fix), and fails
 on a new module-level `\s` pattern that is not listed.
+
 #### Only a build that publishes writes the export file (ADR-0086), 2026-10-18
 
 `re_run_final_stages` called `validate_and_export`, which writes
