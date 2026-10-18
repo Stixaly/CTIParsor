@@ -500,10 +500,11 @@ def test_finalize_reads_relationship_dates_old_and_new(db):
 # ── Stage 5's verdict decides what a rebuild may complete ────────────────────
 
 def _stage5(monkeypatch, status, errors=()):
-    """`validate_and_export` is imported inside re_run_final_stages: patch the
-    module's attribute.  The fake writes no file."""
-    monkeypatch.setattr("pipeline.stage5_validation.validate_and_export",
-                        lambda bundle, path: ValidationResult(status, list(errors)))
+    """`validate_bundle` is imported inside re_run_final_stages: patch the
+    module's attribute.  The fake writes no file; the export is the real one,
+    under tmp_path (conftest)."""
+    monkeypatch.setattr("pipeline.stage5_validation.validate_bundle",
+                        lambda text: ValidationResult(status, list(errors)))
 
 
 def _reviewed_job(db, status: str = "reviewing") -> None:

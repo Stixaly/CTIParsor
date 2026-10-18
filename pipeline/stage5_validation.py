@@ -109,19 +109,14 @@ def install_schemas(dest: Path | None = None) -> bool:
     return _has_schemas(dest)
 
 
-def validate_and_export(bundle: stix2.Bundle, output_path: str) -> ValidationResult:
+def validate_bundle(bundle_json: str) -> ValidationResult:
     """
-    Validate the STIX 2.1 bundle and write it to disk.
-
-    Args:
-        bundle: STIX bundle to validate.
-        output_path: destination file path.
+    Validate a serialized STIX 2.1 bundle.  Writes nothing.
 
     Returns a `ValidationResult`:
-        validated  — the JSON schemas accepted it; file written at output_path.
-        unverified — the schemas are missing, only the stix2 library checked it;
-                     file written at output_path.
-        invalid    — the schemas refused it; file written with _invalid suffix.
+        validated  — the JSON schemas accepted it.
+        unverified — the schemas are missing, only the stix2 library checked it.
+        invalid    — the schemas refused it.
 
     Schema-validation layer vs. stix2-library validation:
         The stix2 library validates every STIX object at *construction* time
@@ -130,8 +125,6 @@ def validate_and_export(bundle: stix2.Bundle, output_path: str) -> ValidationRes
         extra required properties from the spec not reflected in the model).
         Both layers run when schemas are present; only stix2 runs when absent.
     """
-    bundle_json = bundle.serialize(pretty=True)
-
     if not _schemas_installed() and not install_schemas():
         # Only where the package directory is read-only and lacks them: an image
         # built without the Dockerfile's install step.
@@ -144,7 +137,6 @@ def validate_and_export(bundle: stix2.Bundle, output_path: str) -> ValidationRes
                 "stix2 library only.  The Dockerfile installs them at build time: "
                 "rebuild the image."
             )
-        _write_file(bundle_json, output_path)
         return ValidationResult(UNVERIFIED)
 
     # ── Full JSON-schema validation ───────────────────────────────────────────
@@ -159,13 +151,45 @@ def validate_and_export(bundle: stix2.Bundle, output_path: str) -> ValidationRes
     if not results.is_valid:
         logger.error("STIX 2.1 validation errors detected:")
         print_results(results)
-        p = Path(output_path)
-        invalid_path = str(p.with_stem(p.stem + "_invalid"))
-        _write_file(bundle_json, invalid_path)
         return ValidationResult(INVALID, errors, warnings)
 
-    _write_file(bundle_json, output_path)
     return ValidationResult(VALIDATED, errors, warnings)
+
+
+def export_path(output_path: str, result: ValidationResult) -> str:
+    """Where a bundle with this verdict is written: `output_path`, or the same
+    path with an _invalid suffix when the schemas refused it."""
+    if result.status != INVALID:
+        return output_path
+    p = Path(output_path)
+    return str(p.with_stem(p.stem + "_invalid"))
+
+
+def export_bundle(bundle_json: str, output_path: str, result: ValidationResult) -> str:
+    """Write a serialized bundle to `export_path(output_path, result)`.
+    Returns the path written."""
+    path = export_path(output_path, result)
+    _write_file(bundle_json, path)
+    return path
+
+
+def validate_and_export(bundle: stix2.Bundle, output_path: str) -> ValidationResult:
+    """
+    Validate the STIX 2.1 bundle and write it to disk.
+
+    Args:
+        bundle: STIX bundle to validate.
+        output_path: destination file path.
+
+    Returns a `ValidationResult` (see `validate_bundle`):
+        validated  — file written at output_path.
+        unverified — file written at output_path.
+        invalid    — file written with _invalid suffix.
+    """
+    bundle_json = bundle.serialize(pretty=True)
+    result = validate_bundle(bundle_json)
+    export_bundle(bundle_json, output_path, result)
+    return result
 
 
 def _write_file(content: str, output_path: str) -> None:

@@ -241,7 +241,8 @@ the [README](../README.md#how-it-works); this page is the detail.
 On Finalize (web UI): Stages 4–5 run again on the accepted rows
 (`re_run_final_stages`), and the rebuilt bundle is stored with Stage 5's verdict
 and the record of the build that made it (`jobs.bundle_build_json`), unless a
-bundle built from newer rows is already stored (ADR-0086).
+bundle built from newer rows is already stored (ADR-0086). It writes the export
+file in `output/` only when its build is stored.
 ```
 
 **The API worker, the `main.py` CLI and the `--stage full` benchmark run the
