@@ -170,6 +170,7 @@ current truth.
 | **Figures** | `test_figure_context.py` | 12 | prompt context blocks, the ban on copying context into `verbatim_text`, per-figure bands, cache-key separation |
 | Extraction | `test_stage2.py` | 75 | IoC extraction, refang/defang, hash recovery, filename handling |
 | NER | `test_stage2d_cyner.py` | 4 | CyNER label mapping, entity extraction, model fallback |
+| NER | `test_ner_precision.py` | 85 | ADR-0088 filters: the switch (default on); CyNER threat actors dropped (no capital and no digit, countries, nationalities, platforms, category words) or kept (APT27, Shell Crew, `apt29`); malware untouched; the lowercase-text exception and the hash appendix that must not trigger it; spaCy places (article, wrapped line, acronyms, camel case, "the US"); Stages 2d and 2 with stubbed models, switch on and off, the lowercase copy dropped before the dedup |
 | NER | `test_stage2e_gliner.py` | 16 | per-type cutoffs, model loading (no deprecated `resume_download`), batch fallback, merge precedence |
 | NER | `test_stage_registry.py` | 4 | registry merging, deduplication, case insensitivity |
 | **Aliases** | `test_aliases.py` | 6 | alias resolution, MITRE ID mapping, surface forms |

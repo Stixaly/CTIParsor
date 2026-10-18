@@ -4,6 +4,7 @@ from collections.abc import Iterator
 from urllib.parse import urlparse
 
 from models.schemas import EntityType, RawEntity
+from pipeline import ner_precision
 from pipeline.env_flags import env_bool
 from pipeline.regex_safety import PY_WHITESPACE as _WS
 from pipeline.regex_safety import compile_pattern as _compile_pattern
@@ -886,6 +887,7 @@ def _extract_ner_entities(text: str) -> list[RawEntity]:
 
     doc = _nlp(text[:100_000])
     results = []
+    refine = ner_precision.enabled()
 
     label_map = {
         "PRODUCT": EntityType.MALWARE,
@@ -908,6 +910,10 @@ def _extract_ner_entities(text: str) -> list[RawEntity]:
         # Skip very short tokens (single letters, abbreviations < 3 chars) and pure numbers
         if len(value) <= 2 or value.isdigit():
             continue
+        if refine:
+            value = ner_precision.refine_spacy(value, etype)
+            if len(value) <= 2:         # "the US" -> "US": as short as a bare "US"
+                continue
 
         if etype == EntityType.MALWARE:
             if value.lower() in _NER_PRODUCT_BLOCKLIST:

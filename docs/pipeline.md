@@ -40,6 +40,8 @@ the [README](../README.md#how-it-works); this page is the detail.
 │  IPv4/v6, domains, URLs, emails, MAC, ASN, file paths + filenames   │
 │  Registry keys, MD5/SHA-1/SHA-256 (incl. line-wrapped hashes)        │
 │  CVE IDs, raw MITRE ATT&CK IDs (T1234 / T1234.001) → ttp            │
+│  spaCy GPE → location, if a model is installed; kept only if it can │
+│  be a place name: "C&C", "XSS" go (NER_PRECISION_FILTERS, ADR-0088) │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
@@ -71,6 +73,8 @@ the [README](../README.md#how-it-works); this page is the detail.
 │  DeBERTa-v3 fine-tuned on cybersecurity NER (model card F1 91.88%)  │
 │  Detects: Malware, Threat_group (threat-actor groups)               │
 │  Model: PranavaKailash/CyNER-2.0-DeBERTa-v3-base (CYNER_ENABLED)    │
+│  Threat_group: ordinary language is dropped ("cybercriminals",      │
+│  "Iran", "Chinese threat actors") — NER_PRECISION_FILTERS, ADR-0088 │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
@@ -318,10 +322,10 @@ Each NER stage adds a different capability:
 
 | Stage | Method | Entities found |
 |---|---|---|
-| 2 | Regex | IoCs (IPs, hashes, domains, CVEs, paths…) |
+| 2 | Regex, spaCy | IoCs (IPs, hashes, domains, CVEs, paths…); places, when a spaCy model is installed, kept only if they can be a place name (ADR-0088) |
 | 2b | Aho-Corasick gazetteer | Known malware/tools/APT groups |
 | 2c | Semantic embeddings | MITRE techniques by meaning, not name |
-| 2d | CyNER 2.0 (DeBERTa-v3) | Cybersecurity NER — malware & threat-actor groups |
+| 2d | CyNER 2.0 (DeBERTa-v3) | Cybersecurity NER — malware & threat-actor groups; a threat actor written as ordinary language is dropped (ADR-0088) |
 | 2e | GLiNER zero-shot | Sectors, campaigns, infrastructure, novel actors |
 
 ### 2. Sliding-window chunk overlap (Stage 1)
