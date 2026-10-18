@@ -159,6 +159,13 @@ TTP_EMBEDDING_MODEL=all-MiniLM-L6-v2
 CYNER_ENABLED=true
 # CYNER_MODEL=PranavaKailash/CyNER-2.0-DeBERTa-v3-base   # default; override to swap models
 
+# Stage 2 and 2d, precision filters (ADR-0088, docs/eval/ner-precision-2026-10.md):
+# a CyNER threat actor written as ordinary language ("cybercriminals",
+# "Chinese threat actors", "Iran") is dropped, and a spaCy location is kept
+# only when it can be a place name ("C&C", "XSS" go; "the United States"
+# becomes "United States").  false = the behaviour before the filters.
+# NER_PRECISION_FILTERS=true
+
 # Stage 2e — GLiNER zero-shot NER
 # urchade/gliner_large-v2.1  (recommended, best accuracy, ~800 MB)
 # urchade/gliner_medium-v2.1 (good accuracy/speed balance, ~300 MB)

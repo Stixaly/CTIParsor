@@ -3,6 +3,7 @@ Tests for Stage 5 (STIX validation and export).
 
 Covers:
   - validate_and_export writes a file to disk
+  - validate_bundle judges without writing; export_path/export_bundle say where it goes
   - The written file is valid JSON
   - The written JSON contains the expected STIX type
   - Invalid path → parent directories are created automatically
@@ -14,6 +15,7 @@ from __future__ import annotations
 import json
 import shutil
 import socket
+from pathlib import Path
 
 import pytest
 import stix2
@@ -22,7 +24,17 @@ from models.schemas import EntityType, RawEntity
 from pipeline import stage5_validation
 from pipeline.stage3_llm import LLMEnrichmentResult, RelationshipExtracted, TTPExtracted
 from pipeline.stage4_stix_mapping import build_stix_bundle
-from pipeline.stage5_validation import print_bundle_summary, validate_and_export
+from pipeline.stage5_validation import (
+    INVALID,
+    UNVERIFIED,
+    VALIDATED,
+    ValidationResult,
+    export_bundle,
+    export_path,
+    print_bundle_summary,
+    validate_and_export,
+    validate_bundle,
+)
 
 # ── Fixtures ───────────────────────────────────────────────────────────────────
 
@@ -167,6 +179,44 @@ class TestValidateAndExport:
         validate_and_export(bundle, str(out))
         candidates = list(tmp_path.glob("*.json"))
         assert candidates
+
+
+# ── validate_bundle, export_path, export_bundle ────────────────────────────────
+
+class TestValidateBundle:
+    def test_writes_nothing_and_judges_as_validate_and_export_does(self, tmp_path, monkeypatch, schemas):
+        m = stix2.Malware(name="x", is_family=True)
+        t = stix2.Tool(name="y")
+        refused = stix2.Bundle(m, t, stix2.Relationship(m, "Uses It", t), allow_custom=True)
+        monkeypatch.chdir(tmp_path)
+        for bundle, status in ((_minimal_bundle(), VALIDATED), (refused, INVALID)):
+            result = validate_bundle(bundle.serialize(pretty=True))
+            assert list(tmp_path.iterdir()) == []
+            assert result.status == status == validate_and_export(bundle, str(tmp_path / "export" / "out.json")).status
+            shutil.rmtree(tmp_path / "export")
+
+    def test_missing_schemas_are_unverified(self, tmp_path, monkeypatch, no_network):
+        monkeypatch.setattr(stage5_validation, "_schemas_installed", lambda: False)
+        monkeypatch.setattr(stage5_validation, "install_schemas", lambda dest=None: False)
+        monkeypatch.chdir(tmp_path)
+        assert validate_bundle(_minimal_bundle().serialize(pretty=True)).status == UNVERIFIED
+        assert list(tmp_path.iterdir()) == []
+
+
+class TestExport:
+    def test_only_an_invalid_bundle_is_exported_under_the_invalid_suffix(self, tmp_path):
+        out = str(tmp_path / "a.json")
+        assert export_path(out, ValidationResult(VALIDATED)) == out
+        assert export_path(out, ValidationResult(UNVERIFIED)) == out
+        assert export_path(out, ValidationResult(INVALID)) == str(tmp_path / "a_invalid.json")
+
+    def test_export_bundle_writes_where_the_verdict_says(self, tmp_path):
+        out = tmp_path / "nested" / "out.json"
+        written = export_bundle("{}", str(out), ValidationResult(INVALID))
+        assert written == str(tmp_path / "nested" / "out_invalid.json")
+        assert Path(written).read_text(encoding="utf-8") == "{}" and not out.exists()
+        assert export_bundle("[]", str(out), ValidationResult(VALIDATED)) == str(out)
+        assert out.read_text(encoding="utf-8") == "[]"
 
 
 # ── print_bundle_summary ───────────────────────────────────────────────────────

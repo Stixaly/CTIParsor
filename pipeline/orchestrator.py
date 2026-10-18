@@ -625,10 +625,14 @@ class _Run:
             self.record("1f", FAILED, str(exc), time.monotonic() - t0)
 
     def extract(self) -> None:
+        from pipeline import ner_precision
         from pipeline.base import BaseExtractionStage, resolve_type_conflicts
         from pipeline.stage2_extraction import extract_entities
 
         text = self.r.text
+        # Said in the stage report: the run manifest records the variable only
+        # when it is set, not the default it falls back to.
+        ner_note = "precision filters on (ADR-0088)" if ner_precision.enabled() else ""
 
         # Stage 2 — regex IoCs, per chunk (Stage 3 needs each chunk's own),
         # deduplicated by (value, type) keeping the highest confidence.
@@ -642,7 +646,7 @@ class _Run:
                     key = (e.value.lower(), e.entity_type)
                     if key not in best or e.confidence > best[key].confidence:
                         best[key] = e
-            self.record("2", RAN, "", time.monotonic() - t0, entities=len(best))
+            self.record("2", RAN, ner_note, time.monotonic() - t0, entities=len(best))
 
         # Stage 2b — gazetteer; regex wins a tie (more precise for exact values).
         from pipeline import gazetteer_policy
@@ -697,7 +701,7 @@ class _Run:
             t0 = time.monotonic()
             self.r.cyner = extract_cyner_entities(text)
             entities = BaseExtractionStage.merge_into(entities, self.r.cyner)
-            self.record("2d", RAN, "", time.monotonic() - t0, entities=len(self.r.cyner))
+            self.record("2d", RAN, ner_note, time.monotonic() - t0, entities=len(self.r.cyner))
 
         # Stage 2e — GLiNER zero-shot NER: sectors, campaigns, infrastructure,
         # novel actors and malware ("0-CTI", CY4GATE 2025 — ADR-0004 P2-A).

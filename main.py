@@ -91,7 +91,8 @@ class _ConsoleHooks(Hooks):
 def _print_stages(result: RunResult) -> None:
     print("\n  Étapes :")
     for o in result.stages:
-        detail = o.reason or ", ".join(f"{k}={v}" for k, v in o.counts.items())
+        counts = ", ".join(f"{k}={v}" for k, v in o.counts.items())
+        detail = " — ".join(part for part in (o.reason, counts) if part)
         print(f"    {o.stage:<5}{STAGE_LABELS.get(o.stage, ''):<27}{o.status:<9}{detail}")
 
 
