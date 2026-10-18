@@ -16,7 +16,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 from pipeline.detection.tlds import looks_like_domain
-from pipeline.regex_safety import compile_pattern
+from pipeline.regex_safety import PY_WHITESPACE, compile_pattern
 
 OBS_CLASSES: frozenset[str] = frozenset({
     "hash", "ip", "domain", "url", "file", "image",
@@ -66,7 +66,9 @@ _PSEUDO_FS = ("/dev/", "/proc/", "/sys/")
 
 _HASH_RE = compile_pattern(r"^[0-9a-f]{32,128}$")
 _CVE_RE = compile_pattern(r"^cve-\d{4}-\d{4,7}$")
-_DOT_RE = compile_pattern(r"\[\.\]|\(\.\)|\{\.\}|\s\[dot\]\s|\[dot\]", re.IGNORECASE)
+# PY_WHITESPACE, not `\s`, which RE2 keeps to ASCII: "evil\xa0[dot]\xa0com" is a defang.
+_DOT_RE = compile_pattern(r"\[\.\]|\(\.\)|\{\.\}|[" + PY_WHITESPACE + r"]\[dot\]["
+                          + PY_WHITESPACE + r"]|\[dot\]", re.IGNORECASE)
 _AT_RE = compile_pattern(r"\[@\]|\[at\]", re.IGNORECASE)
 
 

@@ -127,6 +127,41 @@ gets a dated amendment.
 
 ### Fixed
 
+#### A no-break space is a space in production too (ADR-0049), 2026-10-18
+
+google-re2 (CI, the container image) reads `\s` as ASCII whitespace only; the
+stdlib `re` that `compile_pattern` falls back to without it (a dev venv) reads
+it as `str.isspace()`. PDF extraction and HTML pages put no-break (U+00A0),
+thin (U+2009) and narrow no-break (U+202F) spaces between words, so wherever a
+pattern relied on `\s` the container extracted less than a local run:
+
+- Stage 2: `AS\xa015169` gave no ASN; `evil\xa0[.]\xa0com` was refanged to
+  `evil\xa0.\xa0com` and lost its domain; a Windows path ran across a no-break
+  space (`C:\Program\xa0Files\…`). Stage 2g found no alias list whose marker
+  sits next to one (`Static Tundra (aka\xa0Berserk Bear)`).
+- Stage 2c and the retrieval passages joined a `1.\xa0` list item to the line
+  before as a hard wrap and kept `Table\xa03` captions as candidates; passage
+  and ATT&CK text kept the no-break spaces their blank collapse removes.
+- Stage 3f did not find an evidence quote in a report that writes
+  `spear\xa0phishing`, and sent the technique to review.
+- Stage 4: an `import\xa0"pe"` outside a quoted YARA rule was not added to it,
+  so the rule did not compile and was left out (ADR-0067); a rule with a
+  no-break space before its brace was not found, so the ledger did not say why
+  it was missing. A quoted Sigma rule followed by one that opens with
+  `title\xa0:` shipped with the next rule inside its pattern. A port after
+  `port\xa0` in a network-traffic value was lost.
+- ADR-0050's generic-vocabulary test kept `malware\xa0family` as one token, so
+  ADR-0052's promote gate let it through.
+
+The 21 patterns write `regex_safety.PY_WHITESPACE` in their classes, or the code
+splits with `str.split()`; without re2 they match what they matched. The 51
+other module-level patterns that use `\s` are left, each with its reason (dates
+are `fold()`ed first, lookbehinds always run on `re`, HTML and CommonMark blanks
+are ASCII). Stage 2g's alias cleanup also strips every `str.isspace()` now,
+under both engines: `Berserk Bear\xa0and\xa0Dragonfly` gave `Berserk Bear\xa0`
+and lost `Dragonfly`. `tests/test_unicode_whitespace.py` runs 42 cases that pass
+with re2 and without it (under RE2 all of them failed before the fix), and fails
+on a new module-level `\s` pattern that is not listed.
 #### Only a build that publishes writes the export file (ADR-0086), 2026-10-18
 
 `re_run_final_stages` called `validate_and_export`, which writes

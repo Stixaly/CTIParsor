@@ -235,16 +235,18 @@ _MAC_CISCO = _compile_pattern(
 # "as 2024 approached", "increased as 50 percent") generated a flood of bogus
 # AS numbers.  ASNs are conventionally written uppercase, so requiring "AS"/"ASN"
 # in caps removes the prose false positives while keeping every real format.
-_ASN_PATTERN = _compile_pattern(r"\bAS(?:N\s*|\s*)(\d{1,10})\b")
+# `_WS`, not `\s`, here and below: RE2's `\s` is ASCII only, and "AS\xa015169"
+# from an HTML page is a match under `re` (regex_safety.PY_WHITESPACE).
+_ASN_PATTERN = _compile_pattern(r"\bAS(?:N[" + _WS + r"]*|[" + _WS + r"]*)(\d{1,10})\b")
 
 # Windows file paths — drive letter or UNC share, at least one path component,
 # and a file extension.  Spaces are excluded from path components so the match
 # stops at the end of the actual filename (avoids greedy over-matching).
 # Examples: C:\Windows\System32\cmd.exe  \\server\share\payload.dll
 _WIN_PATH_PATTERN = _compile_pattern(
-    r"(?:[A-Za-z]:\\|\\\\[^\\\s]+\\[^\\\s]+\\)"   # drive root or UNC root
-    r"(?:[^\\\s\n\r\t<>:\"|?*\x00-\x1F]+\\)*"      # zero or more directories (no spaces)
-    r"[^\\\s\n\r\t<>:\"|?*\x00-\x1F]+\.[A-Za-z]{2,10}\b",  # filename.ext (no spaces)
+    r"(?:[A-Za-z]:\\|\\\\[^\\" + _WS + r"]+\\[^\\" + _WS + r"]+\\)"   # drive root or UNC root
+    r"(?:[^\\" + _WS + r"\n\r\t<>:\"|?*\x00-\x1F]+\\)*"      # zero or more directories (no spaces)
+    r"[^\\" + _WS + r"\n\r\t<>:\"|?*\x00-\x1F]+\.[A-Za-z]{2,10}\b",  # filename.ext (no spaces)
     re.IGNORECASE,
 )
 
@@ -286,14 +288,16 @@ _REG_KEY_PATTERN = _compile_pattern(
 # Defanging — normalise all common CTI analyst conventions back to live form.
 #
 # Combined into a single regex for O(1) matching passes over large documents.
-# The blanks before a spaced "[.]" are bounded (`\s{1,16}`, not `\s+`): an
+# The blanks before a spaced "[.]" are bounded (`{1,16}`, not `+`): an
 # unbounded leading `\s+` makes backtracking `re` (no re2) rescan a run of
 # blanks from each of its positions — quadratic on report text.  No real
 # defang puts 16 blanks before its dot; past that, `[.]` alone still refangs.
+# The blanks are `_WS`, which a no-break space from an HTML page is.
 # ---------------------------------------------------------------------------
 _DEFANG_PATTERN = _compile_pattern(
     r"hxxps?://|h\[tt\]ps?://|https?\[s\]://|https?\[:\]://|meow://|fxx?p://|"
-    r"\s{1,16}\[\.\]\s+|\s{1,16}\(\.\)\s+|\[\.\]|\(\.\)|\{\.\}|\[dot\]|\(dot\)|"
+    r"[" + _WS + r"]{1,16}\[\.\][" + _WS + r"]+|[" + _WS + r"]{1,16}\(\.\)[" + _WS + r"]+|"
+    r"\[\.\]|\(\.\)|\{\.\}|\[dot\]|\(dot\)|"
     r"\[:\]|\(:\)|"
     r"\[//\]|\[/\]|"
     r"\[@\]|\(@\)|\{@\}|\[at\]|\(at\)",

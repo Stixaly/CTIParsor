@@ -264,6 +264,8 @@ _LEADING: list[tuple[str, str]] = sorted([
     ("fin", "late"),
 ], key=lambda p: -len(p[0]))
 
+# `\s` is ASCII only under RE2, and that is enough here: every string these
+# patterns read went through fold(), which turns any str.isspace() into " ".
 _R_INSTANT = compile_pattern(
     r"^(\d{4})-(\d{2})-(\d{2})[t ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,6}))?)?"
     r"\s*(z|utc|gmt|[+-]\d{2}:?\d{2})?$")

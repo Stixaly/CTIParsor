@@ -204,7 +204,6 @@ _FRAGMENT_RE = compile_pattern(r"^[a-z]\s")
 _VERSION_RE = compile_pattern(r"^\d[\d.\-]*\d$")
 
 # Pre-compiled patterns for text splitting
-_WHITESPACE_HYPHEN_RE = compile_pattern(r"[\s\-]+")
 _COMMA_SLASH_RE = compile_pattern(r"[,/]")
 
 
@@ -258,7 +257,9 @@ def _is_generic_fragment(fragment: str, extra_denylist: frozenset[str] = frozens
     denylisted words: "XAKNET Cyber Army of Russia Reborn" survives despite
     "Russia" being denylisted on its own, because "XAKNET" and "Reborn" are
     not — one denylisted word must not veto an otherwise distinct name."""
-    tokens = _WHITESPACE_HYPHEN_RE.split(fragment.lower())
+    # str.split, not compile_pattern(r"[\s\-]+"): RE2's `\s` is ASCII only, and
+    # "malware\xa0family" would stay one token (promotion.py feeds it such values).
+    tokens = fragment.lower().replace("-", " ").split()
     named_tokens = [
         t for t in tokens
         if len(t) >= 3 and t not in _GENERIC_TOKENS and t not in extra_denylist

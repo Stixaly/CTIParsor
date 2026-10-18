@@ -19,13 +19,14 @@ import re
 from dataclasses import dataclass
 
 from pipeline.detection.tlds import looks_like_domain
-from pipeline.regex_safety import compile_pattern
+from pipeline.regex_safety import PY_WHITESPACE, compile_pattern
 
 # Low to high, as STIX lists protocols (§6.12): transport, then application.
 _TRANSPORT = ("tcp", "udp", "icmp")
 _APPLICATION = ("http", "https", "dns", "tls", "smtp", "ftp", "ssh")
 _WORD = compile_pattern(r"[a-z0-9]+", re.IGNORECASE)
-_PORT = compile_pattern(r"\b(?:port|tcp/|udp/)\s*(\d{1,5})\b", re.IGNORECASE)
+# PY_WHITESPACE, not `\s`, which RE2 keeps to ASCII: "port\xa0443" names a port.
+_PORT = compile_pattern(r"\b(?:port|tcp/|udp/)[" + PY_WHITESPACE + r"]*(\d{1,5})\b", re.IGNORECASE)
 _HOST_PORT = compile_pattern(r"^\[?([0-9A-Za-z.:-]+?)\]?(?::(\d{1,5}))?$")
 
 

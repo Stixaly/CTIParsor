@@ -41,7 +41,7 @@ from __future__ import annotations
 
 from models.schemas import EntityType, RawEntity
 from pipeline.overrides import drop_denied
-from pipeline.regex_safety import compile_pattern
+from pipeline.regex_safety import PY_WHITESPACE, compile_pattern
 from pipeline.thresholds import get_threshold
 
 # ── Patterns ──────────────────────────────────────────────────────────────────
@@ -52,21 +52,26 @@ from pipeline.thresholds import get_threshold
 _WORD = r"[A-Z][\w'&.-]*"
 _ANCHOR = rf"(?:{_WORD}(?:[ \t]+{_WORD}){{0,3}})"
 
+# A blank around the marker: Python's whitespace, not `\s`, which RE2 keeps to
+# ASCII -- "aka" followed by a no-break space from an HTML page is a marker.
+_S = f"[{PY_WHITESPACE}]"
+
 # Marker phrase, matched case-insensitively via a scoped inline flag so it
 # does not loosen the Title-Case requirement on _WORD above.
-_MARKER = r"(?i:also\s+known\s+as|a\.k\.a\.|aka|tracked\s+as|formerly\s+known\s+as|formerly)"
+_MARKER = (rf"(?i:also{_S}+known{_S}+as|a\.k\.a\.|aka|tracked{_S}+as"
+           rf"|formerly{_S}+known{_S}+as|formerly)")
 
 # "Static Tundra (aka Berserk Bear, Ghost Blizzard, ...)"
 _PAREN_PATTERN = compile_pattern(
-    rf"(?P<anchor>{_ANCHOR})\s*\(\s*{_MARKER}\s*[:,]?\s*(?P<aliases>[^)]{{3,200}})\)"
+    rf"(?P<anchor>{_ANCHOR}){_S}*\({_S}*{_MARKER}{_S}*[:,]?{_S}*(?P<aliases>[^)]{{3,200}})\)"
 )
 
 # "Static Tundra, also known as Berserk Bear, Ghost Blizzard and Sandworm."
 # The alias run is capped at 8 repeats -- a generous bound for a real alias
 # list that also keeps the match width fixed rather than unbounded.
 _INLINE_PATTERN = compile_pattern(
-    rf"(?P<anchor>{_ANCHOR}),?\s+{_MARKER}\s+"
-    rf"(?P<aliases>{_ANCHOR}(?:\s*(?:,|/|\band\b|\bor\b)\s*{_ANCHOR}){{0,8}})"
+    rf"(?P<anchor>{_ANCHOR}),?{_S}+{_MARKER}{_S}+"
+    rf"(?P<aliases>{_ANCHOR}(?:{_S}*(?:,|/|\band\b|\bor\b){_S}*{_ANCHOR}){{0,8}})"
 )
 
 _ALIAS_SPLIT_RE = compile_pattern(r",|/|\band\b|\bor\b")
@@ -80,9 +85,13 @@ _STOPWORDS = frozenset({
 
 _DEFAULT_CONFIDENCE = 0.55
 
+# Every str.isspace() character (none is past U+3000), then the punctuation:
+# "Berserk Bear\xa0and\xa0Dragonfly" splits into parts that keep their blanks.
+_STRIP = "".join(c for c in map(chr, range(0x3001)) if c.isspace()) + ".,;:'\"()"
+
 
 def _clean_alias(raw: str) -> str | None:
-    value = raw.strip(" \t\n\r.,;:'\"()")
+    value = raw.strip(_STRIP)
     if len(value) < 3:
         return None
     if value.lower() in _STOPWORDS:
