@@ -36,6 +36,10 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "Relationship dates keep their precision: month/year dates move from start_time/stop_time "
      "to x_temporal_assertions (ADR-0063)",
      "extraction"),
+    ("f64452d", "2026-10-18",
+     "Under RE2 a no-break or thin space is whitespace too: ASNs, spaced defangs, Windows paths, alias "
+     "lists, list items, Stage 3f quotes, YARA imports and Sigma rule boundaries next to one (ADR-0049)",
+     "extraction"),
 )
 
 
