@@ -40,6 +40,10 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "A CyNER threat actor written as ordinary language is dropped, and a spaCy location must be "
      "able to be a place name: \"the United States\" now ships as United States (ADR-0088)",
      "extraction"),
+    ("f64452d", "2026-10-18",
+     "Under RE2 a no-break or thin space is whitespace too: ASNs, spaced defangs, Windows paths, alias "
+     "lists, list items, Stage 3f quotes, YARA imports and Sigma rule boundaries next to one (ADR-0049)",
+     "extraction"),
 )
 
 
