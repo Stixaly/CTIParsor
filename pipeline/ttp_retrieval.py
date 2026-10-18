@@ -97,7 +97,7 @@ class Passage:
 _NEWLINE_RUN = compile_pattern(r"[\r\n]+")
 _BOUNDARY = compile_pattern(r"(?<=[.!?])\s+|\n+|;\s+")      # a lookbehind: always `re`
 # PY_WHITESPACE, not `\s`, which RE2 keeps to ASCII: "1.\xa0Sent" opens a list item.
-_LIST_NUMBER = compile_pattern(r"^\d+[.)][" + PY_WHITESPACE + "]")
+_LIST_NUMBER = compile_pattern(r"^[0-9]+[.)][" + PY_WHITESPACE + "]")
 _BULLETS = ("-", "*", "•", "–", "—")
 
 

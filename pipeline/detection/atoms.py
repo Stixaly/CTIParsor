@@ -160,8 +160,9 @@ WINDOWS_CATEGORIES: frozenset[str] = frozenset({
 _SKIP_KEYS = frozenset({"condition", "timeframe"})
 
 #: Tokens of a Sigma `condition` expression.  Digits are their own token so
-#: `not 1 of filter_*` parses as three operands, not two.
-_COND_TOKEN = compile_pattern(r"[A-Za-z_][\w*.]*|\d+|\(|\)")
+#: `not 1 of filter_*` parses as three operands, not two.  ASCII, as pySigma's
+#: grammar is (and as RE2 reads `\w`).
+_COND_TOKEN = compile_pattern(r"[A-Za-z_][A-Za-z0-9_*.]*|[0-9]+|\(|\)")
 
 #: Condition words that are never a selection name.
 _COND_KEYWORDS: frozenset[str] = frozenset({"and", "or", "not", "of"})

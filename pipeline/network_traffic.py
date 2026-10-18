@@ -19,15 +19,18 @@ import re
 from dataclasses import dataclass
 
 from pipeline.detection.tlds import looks_like_domain
-from pipeline.regex_safety import PY_WHITESPACE, compile_pattern
+from pipeline.regex_safety import PY_WHITESPACE, compile_pattern, glued_to_a_word
 
 # Low to high, as STIX lists protocols (§6.12): transport, then application.
 _TRANSPORT = ("tcp", "udp", "icmp")
 _APPLICATION = ("http", "https", "dns", "tls", "smtp", "ftp", "ssh")
 _WORD = compile_pattern(r"[a-z0-9]+", re.IGNORECASE)
 # PY_WHITESPACE, not `\s`, which RE2 keeps to ASCII: "port\xa0443" names a port.
-_PORT = compile_pattern(r"\b(?:port|tcp/|udp/)[" + PY_WHITESPACE + r"]*(\d{1,5})\b", re.IGNORECASE)
-_HOST_PORT = compile_pattern(r"^\[?([0-9A-Za-z.:-]+?)\]?(?::(\d{1,5}))?$")
+# re.ASCII: `re` reads `\b` as RE2 does, and the caller drops a match glued to a
+# word RE2 cut it out of ("téléport 443").
+_PORT = compile_pattern(r"\b(?:port|tcp/|udp/)[" + PY_WHITESPACE + r"]*([0-9]{1,5})\b",
+                        re.IGNORECASE | re.ASCII)
+_HOST_PORT = compile_pattern(r"^\[?([0-9A-Za-z.:-]+?)\]?(?::([0-9]{1,5}))?$")
 
 
 @dataclass(frozen=True)
@@ -69,7 +72,7 @@ def parse_network_traffic(text: str) -> TrafficDescriptor | None:
         return None
     host, host_type, port = found
     if port is None:
-        m = _PORT.search(text)
+        m = next((m for m in _PORT.finditer(text) if not glued_to_a_word(text, *m.span())), None)
         port = int(m.group(1)) if m else None
     if port is not None and not 0 < port < 65536:
         port = None

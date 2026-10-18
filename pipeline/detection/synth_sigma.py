@@ -109,7 +109,7 @@ TACTIC_BY_KIND: dict[str, str] = {
 #: Fixed namespace for UUIDv5 — do NOT regenerate.
 NAMESPACE_UUID = uuid.UUID("6ba7b811-9dad-11d1-80b4-00c04fd430c8")
 
-_IPV4_RE = compile_pattern(r"^\d{1,3}(\.\d{1,3}){3}$")
+_IPV4_RE = compile_pattern(r"^[0-9]{1,3}(\.[0-9]{1,3}){3}$")
 #: A Windows drive prefix, anchored — "c:/users/..." but not "/usr/bin:/bin".
 _DRIVE_RE = compile_pattern(r"^[a-z]:/")
 

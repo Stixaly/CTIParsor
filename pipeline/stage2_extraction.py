@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 
 from models.schemas import EntityType, RawEntity
 from pipeline.env_flags import env_bool
+from pipeline.regex_safety import PY_DIGIT, continues_a_word, glued_to_a_word
 from pipeline.regex_safety import PY_WHITESPACE as _WS
 from pipeline.regex_safety import compile_pattern as _compile_pattern
 
@@ -19,10 +20,19 @@ try:
 except ImportError:
     _spacy_module = None  # type: ignore[assignment]
 
+# RE2 reads `\d`, `\w` and `\b` as ASCII, `re` (no re2) as Unicode (ADR-0049,
+# 2026-10-18).  An IoC is ASCII: the patterns below say [0-9], and those that
+# say `\b` pass re.ASCII so that `re` cuts the same words RE2 does -- "T1059"
+# glued to Chinese text is found by both.  Where a letter glued to the match
+# means it was cut out of a longer word ("o@evil.com" out of "joão@evil.com"),
+# the caller drops it with regex_safety.glued_to_a_word.
+
 # Regex to detect bare version numbers (e.g. "0.1.16", "1.167.71") that SpaCy
 # sometimes tags as PRODUCT or even ORG and would otherwise pollute entity lists.
-# fullmatch() is used so no anchors are needed in the pattern.
-_VERSION_PATTERN = _compile_pattern(r"\d+[\.\d\-]*\d")
+# fullmatch() is used so no anchors are needed in the pattern.  Digits of any
+# script (PY_DIGIT, Python's `\d`): a number is not a name, and the
+# `value.isdigit()` test beside it reads them all too.
+_VERSION_PATTERN = _compile_pattern(rf"[{PY_DIGIT}]+[.{PY_DIGIT}\-]*[{PY_DIGIT}]")
 
 # Common tokens that SpaCy labels as PRODUCT but are clearly not malware families.
 # Kept intentionally conservative — only entries we're very confident about.
@@ -78,14 +88,14 @@ _CVE_DASH = "\\-‐-―−﹣－­"
 # Zero-width / invisible separators that can appear between CVE components.
 _CVE_ZW = "​‌‍⁠﻿"
 _CVE_PATTERN = _compile_pattern(
-    rf"CVE[{_CVE_ZW}]*[{_CVE_DASH}][{_CVE_ZW}]*\d{{4}}[{_CVE_ZW}]*[{_CVE_DASH}][{_CVE_ZW}]*\d{{4,7}}",
+    rf"CVE[{_CVE_ZW}]*[{_CVE_DASH}][{_CVE_ZW}]*[0-9]{{4}}[{_CVE_ZW}]*[{_CVE_DASH}][{_CVE_ZW}]*[0-9]{{4,7}}",
     re.IGNORECASE,
 )
 _CVE_ZW_PATTERN = _compile_pattern(f"[{_CVE_ZW}]")
 _CVE_DASH_PATTERN = _compile_pattern(f"[{_CVE_DASH}]")
 
 # MITRE ATT&CK IDs — technique (T####[.###]) and tactic (TA####).
-_MITRE_TTP_PATTERN = _compile_pattern(r"\bTA?\d{4}(?:\.\d{3})?\b")
+_MITRE_TTP_PATTERN = _compile_pattern(r"\bTA?[0-9]{4}(?:\.[0-9]{3})?\b", re.ASCII)
 
 # Hash-block pattern — a run of hex fragments separated only by whitespace or
 # line breaks.  A plain contiguous-hex pattern can't read IOC tables, which wrap
@@ -139,10 +149,12 @@ def _hash_blocks(text: str) -> Iterator[tuple[int, str]]:
 # shorter last octet would be followed by a digit too, and no match can start
 # inside a refused one, where every character follows a digit or a dot.  One
 # finditer pass: google-re2 encodes the whole text at each call, so a search
-# restarted after each refusal is quadratic on an IoC appendix.  The guards
-# read `\d` as `re` did (str.isdecimal()); the octets are ASCII under RE2.
+# restarted after each refusal is quadratic on an IoC appendix.  The octets
+# are [0-9] under both engines (an address is ASCII; `\d` let `re` ship
+# "８.８.８.８"); the guards read any digit (str.isdecimal()), so a digit of
+# another script glued to an address still refuses it.
 _IPV4_PATTERN = _compile_pattern(
-    r"(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)"
+    r"(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)"
 )
 
 
@@ -215,18 +227,19 @@ _URL_PATTERN = _compile_pattern(
     re.IGNORECASE,
 )
 
-# Emails
+# Emails.  A letter glued to either end means the address goes on in it: RE2
+# cut "o@evil.com" out of "joão@evil.com", another mailbox.
 _EMAIL_PATTERN = _compile_pattern(
-    r"\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b"
+    r"\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b", re.ASCII
 )
 
 # MAC addresses — colon or hyphen separated (00:1A:2B:3C:4D:5E / 00-1A-2B-3C-4D-5E)
 # Cisco dot notation (001A.2B3C.4D5E) included as a second alternative.
 _MAC_COLON_HYPHEN = _compile_pattern(
-    r"\b(?:[0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}\b"
+    r"\b(?:[0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}\b", re.ASCII
 )
 _MAC_CISCO = _compile_pattern(
-    r"\b[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}\b"
+    r"\b[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}\b", re.ASCII
 )
 
 # ASN — "AS15169", "AS 15169", "ASN15169", "ASN 15169" (1–10 digits).
@@ -235,18 +248,24 @@ _MAC_CISCO = _compile_pattern(
 # AS numbers.  ASNs are conventionally written uppercase, so requiring "AS"/"ASN"
 # in caps removes the prose false positives while keeping every real format.
 # `_WS`, not `\s`, here and below: RE2's `\s` is ASCII only, and "AS\xa015169"
-# from an HTML page is a match under `re` (regex_safety.PY_WHITESPACE).
-_ASN_PATTERN = _compile_pattern(r"\bAS(?:N[" + _WS + r"]*|[" + _WS + r"]*)(\d{1,10})\b")
+# from an HTML page is a match under `re` (regex_safety.PY_WHITESPACE).  The
+# caller drops a match glued to a word: RE2 read "ÚLTIMOS DÍAS 2024" as AS2024.
+_ASN_PATTERN = _compile_pattern(
+    r"\bAS(?:N[" + _WS + r"]*|[" + _WS + r"]*)([0-9]{1,10})\b", re.ASCII)
 
 # Windows file paths — drive letter or UNC share, at least one path component,
 # and a file extension.  Spaces are excluded from path components so the match
 # stops at the end of the actual filename (avoids greedy over-matching).
 # Examples: C:\Windows\System32\cmd.exe  \\server\share\payload.dll
+# The caller drops a path whose extension runs on into a word: RE2 gave
+# "C:\x\relatório.comunica" for "...relatório.comunicação".
+# No IGNORECASE: its letters are [A-Za-z] already, and it added only the Kelvin
+# sign and the long s (and, under `re`, the Turkish dotted and dotless i).
 _WIN_PATH_PATTERN = _compile_pattern(
     r"(?:[A-Za-z]:\\|\\\\[^\\" + _WS + r"]+\\[^\\" + _WS + r"]+\\)"   # drive root or UNC root
     r"(?:[^\\" + _WS + r"\n\r\t<>:\"|?*\x00-\x1F]+\\)*"      # zero or more directories (no spaces)
     r"[^\\" + _WS + r"\n\r\t<>:\"|?*\x00-\x1F]+\.[A-Za-z]{2,10}\b",  # filename.ext (no spaces)
-    re.IGNORECASE,
+    re.ASCII,
 )
 
 # Bare filenames (no path) — _MALWARE_FILE_EXTS is defined earlier (next to
@@ -276,11 +295,14 @@ _UNIX_PATH_PATTERN = _compile_pattern(
 # Windows registry keys — all standard hive abbreviations and full names.
 # Examples: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
 #           HKEY_CURRENT_USER\Software\Classes\...
+# re.ASCII: "HKLM\..." glued to Chinese text is a key to RE2 and to `re` alike.
+# It also keeps `re`'s IGNORECASE to ASCII, where RE2 still folds the Kelvin
+# sign into "K" and the long s into "S": a hive so spelled is a key to RE2 only.
 _REG_KEY_PATTERN = _compile_pattern(
     r"\b(?:HKEY_LOCAL_MACHINE|HKEY_CURRENT_USER|HKEY_CLASSES_ROOT"
     r"|HKEY_USERS|HKEY_CURRENT_CONFIG|HKLM|HKCU|HKCR|HKU|HKCC)"
     r"(?:\\[^\\\n\r\t<>:\"|\x00-\x1F]+)+",
-    re.IGNORECASE,
+    re.IGNORECASE | re.ASCII,
 )
 
 # ---------------------------------------------------------------------------
@@ -575,6 +597,11 @@ def _extract_network_iocs(text: str) -> list[RawEntity]:
 
     # Emails
     for m in _EMAIL_PATTERN.finditer(text):
+        start = m.start()
+        while start and text[start - 1] in "._%+-":    # "josé.perez@": the cut is before the dot
+            start -= 1
+        if glued_to_a_word(text, start, m.end()):
+            continue
         results.append(RawEntity(value=m.group().lower(), entity_type=EntityType.EMAIL))
 
     # Domaines isolés (pas déjà capturés dans une URL)
@@ -687,6 +714,8 @@ def _extract_asns(text: str) -> list[RawEntity]:
     results: list[RawEntity] = []
     seen: set[str] = set()
     for m in _ASN_PATTERN.finditer(text):
+        if glued_to_a_word(text, *m.span()):
+            continue
         v = f"AS{m.group(1)}"
         if v not in seen:
             seen.add(v)
@@ -709,6 +738,8 @@ def _extract_file_paths(text: str) -> list[RawEntity]:
 
     for pattern in (_WIN_PATH_PATTERN, _UNIX_PATH_PATTERN):
         for m in pattern.finditer(text):
+            if pattern is _WIN_PATH_PATTERN and continues_a_word(text[m.end():m.end() + 1]):
+                continue                  # the extension goes on
             v = m.group().strip()
             key = v.lower()
             if key not in seen:

@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 _MAX_FETCH = 25
 _MAX_TOTAL_SECONDS = 30.0
-_CVE_PATTERN = compile_pattern(r"^CVE-\d{4}-\d{4,7}$")
+_CVE_PATTERN = compile_pattern(r"^CVE-[0-9]{4}-[0-9]{4,7}$")
 
 
 def is_valid_cve(cve_id: str) -> bool:
