@@ -488,6 +488,41 @@ def check_json_columns(conn: DBConnection) -> Finding:
         return Finding("json.invalid", "error", 0, 0, str(e)[:160], "SKIP")
 
 
+def check_bundle_revision(conn: DBConnection) -> Finding:
+    """Verify no stored bundle was built from a newer revision than its job's.
+
+    A job's `review_revision` only grows (the v12 trigger bumps it on every write
+    to its rows) and a build stores the one it read, so `bundle_review_revision`
+    never exceeds it.  A bundle "ahead" of its job means a revision written by
+    hand, or restored without its rows: every later finalize of that job would be
+    refused (it reads a lower revision) until enough writes overtake it (ADR-0086).
+    """
+    try:
+        if not _table_exists(conn, "jobs"):
+            return Finding("job.bundle_revision", "error", 0, 0, "table missing", "SKIP")
+        cols = _columns(conn, "jobs")
+        if "review_revision" not in cols or "bundle_review_revision" not in cols:
+            return Finding("job.bundle_revision", "error", 0, 0, "columns missing", "SKIP")
+        total = conn.execute(
+            "SELECT COUNT(*) AS c FROM jobs WHERE bundle_review_revision IS NOT NULL"
+        ).fetchone()["c"]
+        count = conn.execute(
+            "SELECT COUNT(*) AS c FROM jobs WHERE bundle_review_revision > review_revision"
+        ).fetchone()["c"]
+        if count == 0:
+            return Finding("job.bundle_revision", "error", 0, total,
+                           "no bundle ahead of its job's revision", "OK")
+        examples = [f"{r['id'][:8]} {r['bundle_review_revision']}>{r['review_revision']}"
+                    for r in conn.execute(
+                        "SELECT id, bundle_review_revision, review_revision FROM jobs "
+                        "WHERE bundle_review_revision > review_revision LIMIT 3"
+                    ).fetchall()]
+        detail = f"bundles ahead of their job: {_sample(examples)}"
+        return Finding("job.bundle_revision", "error", count, total, detail[:160], "FAIL")
+    except DB_ERRORS as e:
+        return Finding("job.bundle_revision", "error", 0, 0, str(e)[:160], "SKIP")
+
+
 def check_figure_bbox_format(conn: DBConnection) -> Finding:
     """Verify report_figures.bbox has exactly 4 comma-separated floats."""
     try:
@@ -540,6 +575,7 @@ def run_all(conn: DBConnection) -> list[Finding]:
         _check_orphan(conn, "entity.orphan_job"),
         _check_orphan(conn, "relationship.orphan_job"),
         check_json_columns(conn),
+        check_bundle_revision(conn),
         check_figure_bbox_format(conn),
     ]
 

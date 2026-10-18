@@ -33,6 +33,7 @@ import re
 from pathlib import Path
 
 from models.schemas import EntityType, RawEntity
+from pipeline import ner_precision
 from pipeline.env_flags import env_bool, env_int
 from pipeline.overrides import drop_denied
 from pipeline.regex_safety import compile_pattern
@@ -429,6 +430,8 @@ def extract_cyner_entities(text: str) -> list[RawEntity]:
 
     results: list[RawEntity] = []
     seen: set[tuple[str, EntityType]] = set()
+    refine = ner_precision.enabled()
+    cased = refine and ner_precision.text_is_cased(text)
 
     for pred in predictions:
         label     = pred.get("entity_group", "")
@@ -453,6 +456,8 @@ def extract_cyner_entities(text: str) -> list[RawEntity]:
         for fragment in _split_fragments(raw_value):
             value = _normalize_candidate(fragment)
             value = _collapse_repeated_token(value)
+            if refine:      # ADR-0088, before the dedup: a capitalised spelling outlives a lowercase one
+                value = ner_precision.refine_cyner(value, etype, cased)
             if not value or len(value) < 3:
                 continue
             if _has_boundary_artifact(value):

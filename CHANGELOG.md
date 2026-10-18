@@ -9,7 +9,102 @@ theme.
 
 ## [Unreleased]
 
+### Added
+
+#### The store audit checks the build's revision; a script measures the revision trigger (ADR-0086), 2026-10-18
+
+`scripts/audit_store_invariants.py` gains `job.bundle_revision` (severity
+`error`): no job has a `bundle_review_revision` above its `review_revision`. The
+revision only grows and a build stores the one it read, so a bundle ahead of its
+job means a revision written by hand, or restored without its rows; every later
+finalize of that job would be refused until enough writes overtook it.
+`tests/test_audit_store_invariants.py` holds it (3 tests).
+
+`scripts/measure_review_revision_trigger.py` times the same writes under no
+trigger, v12's row trigger and a statement trigger with transition tables, in a
+throwaway schema. On 5,000 entity rows (PostgreSQL 17.11, median of 5 rounds)
+the statement trigger is slower than the row trigger on the run's `executemany`
+write: 1.03 s against 0.78 s, and 0.21 s with no trigger. It is faster only
+where one statement writes many rows: an `UPDATE` of every row took 0.030 s
+against 0.421 s. The row trigger stays and there is no new migration; ADR-0086
+has an amendment with the whole table.
+
+### Documentation
+
+#### CONTRIBUTING.md points to the versioned migrations, 2026-10-18
+
+Two passages still described a schema change as an addition to
+`_JOB_STORE_DDL_POSTGRES` or `_RULE_STORE_DDL_POSTGRES`. They now point to a new
+`api/migrations/vNNNN_<name>.py` (ADR-0077) and to
+`docs/development.md#database-migrations`, and say the two constants are only
+the history kept for the SQLite import scripts.
+
 ### Changed
+
+#### A CyNER threat actor and a spaCy place must look like a name (ADR-0088), 2026-10-18
+
+The audit of 2026-10-17 named entity precision as the main quality defect of the
+shipped bundle. On AnnoCTR dev, CyNER gave 87 of the 97 threat-actor false
+positives ("cybercriminals", "underground forums", "Chinese threat actors",
+"Iran"), and spaCy's `GPE` label gave most of the location ones ("C&C", "XSS",
+"GitHub"). It also returned "the United States" with its article, which Stage
+4's ISO country table does not know. Two filters in the new
+`pipeline/ner_precision.py` now run in Stages 2d and 2:
+
+- **CyNER `Threat_group` only.** A fragment is dropped when it has no capital
+  letter and no digit in a report written with capitals, when it is a country
+  ("United States", "Hong Kong"), or when every word of 3 or more letters is a
+  category word, a software name, a nationality or a country. The words are
+  ADR-0050's 141 plus 178 read in the AnnoCTR train false positives, Stage 2's
+  93 software names (with six added), 21 nationality words and the countries of
+  Stage 4's table. Words that form real names (agent, crew, circles, miner) stay
+  out; "Agent", "Crew" and "Miner" alone are dropped. The capital-letter test is
+  skipped for a text with fewer than 0.5% capital letters. Malware is untouched.
+- **spaCy `GPE` → location.** The value is put on one line, a leading "the" and
+  a trailing apostrophe are dropped ("the United States" is now "United
+  States"), and it is kept only if it can be a place name: a country or a known
+  abbreviation, or letters (accented ones too), spaces, periods, hyphens and
+  apostrophes, with a capital first letter, not an acronym of five capitals or
+  fewer (XSS, SCADA), not camel case (GitHub, DocuSign; McLean is kept), not
+  made only of category or software words (Payload, Linux). Two-letter values
+  stay dropped, "the US" included.
+
+Both filters run before the case-insensitive dedup, so a capitalised spelling
+outlives a lowercase one. They are on by default. `NER_PRECISION_FILTERS=false`
+restores the previous output exactly: replayed on recorded model outputs, Stage
+2 gives the same entities on 70 of 70 train and 16 of 16 dev documents. Stages 2
+and 2d record "precision filters on (ADR-0088)" in the stage report, and
+`NER_PRECISION_FILTERS` joins the captured environment of the run config (it
+appears only when set). The CLI's stage table (`main.py`) now prints a stage's
+note and its counts together; it printed the note instead of the counts.
+
+Measured on AnnoCTR dev, strict, in a real run with the LLM against a baseline of
+the same commit (10,000-resample paired bootstrap; criteria fixed before any dev
+figure; test split not read). Threat actors: precision 0.134 → 0.326 (+19.2
+points, 95% interval [+11.4, +30.9]), recall 0.938 unchanged, 15 TP / 97 FP →
+15 / 31, F1 0.234 → 0.484. Locations: precision 0.406 → 0.526 (+12.0 [+5.1,
++18.9]), recall 0.402 → 0.412 (one gold entity gained, none lost), 39 / 57 →
+40 / 36, F1 0.404 → 0.462. Malware and identity are unchanged; tool precision
++1.1. On train (no LLM): threat actors 0.132 → 0.320 with none of 63 true
+positives lost, locations 0.440 → 0.602 with 1 of 143 lost ("The United States",
+annotated with a capital "The").
+
+Not adopted, each under the +5-point gate on its own and losing nothing on dev:
+the same rule for CyNER's malware (+2.6 points), reducing "Ryuk ransomware" or
+"hacking group TA505" to the name and splitting on brackets (+1.2 actors, +3.0
+malware), and dropping spaCy's PRODUCT → malware (+3.5). With all four leads in
+place malware precision rose by 13.2 points offline, but that was read after the
+measurement: it would have to be registered as one lead and measured on data this
+study has not read. Malware precision stays 0.205. Known losses: an actor
+written only in lowercase in a report written with capitals, "Iranian Cyber
+Army", "Pakistan Cyber Army"; vendor names that look like towns remain places.
+
+The bundle gets fewer Threat Actor objects named after ordinary language, and
+Locations such as "United States" that Stage 4 now finds in its ISO table. A
+follow-up commit lists this change in `BUNDLE_AFFECTING` with the `extraction`
+scope (ADR-0086). Measurement:
+[docs/eval/ner-precision-2026-10.md](docs/eval/ner-precision-2026-10.md).
+ADR-0050 gets a dated amendment.
 
 #### A freshness entry names its scope: a finalize clears a Stage 4/5 fix, only a new run clears an earlier one (ADR-0086), 2026-10-17
 
@@ -67,6 +162,40 @@ under both engines: `Berserk Bear\xa0and\xa0Dragonfly` gave `Berserk Bear\xa0`
 and lost `Dragonfly`. `tests/test_unicode_whitespace.py` runs 42 cases that pass
 with re2 and without it (under RE2 all of them failed before the fix), and fails
 on a new module-level `\s` pattern that is not listed.
+#### Only a build that publishes writes the export file (ADR-0086), 2026-10-18
+
+`re_run_final_stages` called `validate_and_export`, which writes
+`output/{report}_{job_id}_bundle.json` (`..._bundle_invalid.json` when the
+schemas refuse the bundle), before the conditional `UPDATE`. A refused build
+therefore overwrote the file of the newer build that had published, and a
+finalize that ended after `_delete_job` wrote again a file the deletion had just
+removed. Two tests reproduced it and failed on the previous code:
+`test_a_refused_build_writes_no_export_file` and the extended
+`test_a_job_deleted_while_it_is_built_is_not_an_error`.
+
+- Stage 5 is split: `validate_bundle(bundle_json)` returns the verdict and
+  writes nothing; `export_path(output_path, result)` names the file (an
+  `_invalid` suffix on an `invalid` verdict); `export_bundle(bundle_json,
+  output_path, result)` writes it. `validate_and_export` composes them, so the
+  CLI and the run are unchanged.
+- A finalize validates, then in one transaction runs the conditional `UPDATE`
+  and, only if it published, writes the file before the commit. The `UPDATE`
+  holds the job's row until then: concurrent publications write the file in the
+  order they publish, and a refused build or a job deleted meanwhile writes none.
+  A write that fails (`OSError`) rolls the publication back and the finalize
+  fails, as a failed export did before. The file is written in place, so a
+  write that fails part-way leaves it truncated, as before.
+- If the commit fails after the write, the file holds a build that was not
+  stored; it is never served.
+- Not changed: the run's own Stage 5 (the subprocess) still writes its file
+  before `_finalize_job`'s write, which depends on the lease, so a run whose
+  lease was taken over has written its file.
+
+Tests: `test_an_export_that_cannot_be_written_publishes_nothing` and
+`test_a_published_invalid_build_writes_only_the_invalid_file` in
+`tests/test_bundle_builds.py` (30 to 33 tests); `TestValidateBundle` and
+`TestExport` in `tests/test_stage5.py` (19 to 23). ADR-0086 gets a dated
+amendment, which also corrects its decision 4 and its consequences.
 
 #### A finalize records the build it made, and a rebuild clears a Stage 4/5 staleness (ADR-0086), 2026-10-17
 
@@ -142,7 +271,9 @@ and do not bump the revision: two builds from the same rows under different
 policies both publish, and the last to finish wins until the next finalize.
 During a rolling restart, a finalize by an old-image process leaves
 `bundle_build_json` describing the previous build. The export file in `output/`
-is written by every build, including a refused one; it is never served.
+was written by every build, including a refused one; since 2026-10-18 only a
+build that publishes writes it ("Only a build that publishes writes the export
+file", above).
 
 ## [0.1.0] - 2026-10-17
 

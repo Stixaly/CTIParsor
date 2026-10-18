@@ -103,8 +103,9 @@ the status alone.
 - The refused build's own verdict acts on nothing: it neither raises nor
   touches the status.
 - The HTTP contract of `/finalize` is unchanged.
-- The export file in `output/` stays as the refused build wrote it. It is never
-  served: the job store is authoritative.
+- The refused build writes no export file in `output/` (amendment of
+  2026-10-18; this decision first left the file as the refused build wrote
+  it). The file is never served: the job store is authoritative.
 
 **5. A bundle names its build.** `jobs.bundle_build_json` holds:
 
@@ -204,8 +205,10 @@ run for an `extraction` fix.
 - **During a rolling restart, a finalize by an old-image process** writes the
   bundle without the record or the revision, and without the condition. It
   leaves `bundle_build_json` describing the previous build.
-- **The export file is written by every build**, including refused ones.
-  `output/{report}_bundle.json` can be a refused build's. Nothing reads it.
+- **Only a build that publishes writes the export file** (amendment of
+  2026-10-18). This decision first had every build write it, refused ones
+  included, so the file in `output/` could be a refused build's. Nothing reads
+  it.
 
 ## Implementation
 
@@ -251,3 +254,135 @@ Tests:
 - Run locally on 2026-10-17 (PostgreSQL test server, `SKIP_HEAVY_MODELS=1`):
   full suite 2,747 passed, 9 skipped (mostly optional packages absent
   locally: schemathesis, google-re2, atheris), 0 failed; `ruff check .` clean; mypy clean on 134 files.
+
+## Amendment (2026-10-18): only a build that publishes writes the export file; the trigger stays per row
+
+Three follow-ups to the decision above.
+
+### 1. Only a build that publishes writes the export file
+
+Decision 4 left the export file as the refused build wrote it.
+`re_run_final_stages` called `validate_and_export`, which writes
+`output/{report}_{job_id}_bundle.json` (`..._bundle_invalid.json` when the
+schemas refuse the bundle) before the conditional `UPDATE`. Two things followed.
+
+- A refused build overwrote the file of the newer build that had published.
+- A finalize that finished after `_delete_job` wrote again a file the deletion
+  had just removed. Nothing owned it.
+
+Two tests reproduced them first and failed on the previous code:
+`test_a_refused_build_writes_no_export_file` and the extended
+`test_a_job_deleted_while_it_is_built_is_not_an_error`.
+
+`pipeline/stage5_validation.py` is split:
+
+| Function | Does |
+|---|---|
+| `validate_bundle(bundle_json)` | returns the verdict; writes nothing |
+| `export_path(output_path, result)` | the file name: `output_path`, or the same path with an `_invalid` suffix when the verdict is `invalid` |
+| `export_bundle(bundle_json, output_path, result)` | writes the file at `export_path(...)` and returns the path |
+| `validate_and_export(bundle, output_path)` | composes the three; same signature and result |
+
+The CLI and the orchestrator (the run) still call `validate_and_export`.
+`re_run_final_stages` calls `validate_bundle`. Then, in one transaction, it runs
+the conditional `UPDATE` and, only if that published, calls `export_bundle`
+before the commit. The `UPDATE` holds the job's row until the commit, so:
+
+- concurrent publications write the file in the order they publish;
+- a refused build writes none, and neither does a build whose job was deleted
+  meanwhile (the `UPDATE` touches no row);
+- a write that fails (`OSError`) rolls the publication back and the finalize
+  fails, with nothing stored. A failed export failed the finalize before as
+  well, ahead of any write to the database.
+
+Rejected: writing the refused build's file under another name. Nothing reads
+it, `_delete_job` would have one more name to remove, and the files would
+accumulate. The stored row already says which build holds.
+
+Limits:
+
+- The file is written before the commit. If the commit itself fails after the
+  write, the file holds a build that was not stored. It is never served: the job
+  store is authoritative.
+- The file is written in place (`_write_file`), not through a temporary file
+  and a rename. A write that fails part-way leaves it truncated while the
+  rollback restores the row, as a failed export already did before.
+- The run's own Stage 5 (the subprocess: `validate_and_export` in
+  `pipeline/orchestrator.py`) still writes its file before the write of
+  `_finalize_job`, which depends on the lease. A run whose lease was taken over
+  has written its file. Not addressed here.
+
+### 2. The trigger stays per row
+
+Evaluated: a statement-level trigger with transition tables, which adds 1 once
+per statement to each job it touched. A trigger with transition tables takes one
+event, so it needs three triggers per table (`INSERT`, `UPDATE`, `DELETE`).
+
+`scripts/measure_review_revision_trigger.py` times the same writes under no
+trigger, v12's row trigger and the statement trigger, in a throwaway schema it
+drops at the end. 5,000 entity rows, 5 interleaved rounds, median seconds,
+PostgreSQL 17.11 (Docker under WSL2), 2026-10-18:
+
+| Write | no trigger | row trigger (v12) | statement trigger |
+|---|---:|---:|---:|
+| `executemany` `INSERT` (the run's write, `_save_entities`) | 0.213 | 0.777 | 1.029 |
+| the same inside an explicit `BEGIN` | 0.223 | 0.791 | 1.044 |
+| one `UPDATE` of every row (auto-accept, bulk accept) | 0.026 | 0.421 | 0.030 |
+| one `DELETE` of every row (job deletion) | 0.003 | 0.372 | 0.006 |
+| one multi-row `INSERT` (for comparison) | 0.103 | 0.603 | 0.109 |
+
+psycopg's `executemany` sends one statement per row, in one implicit
+transaction: the 5,000 rows share one `xmin`. A statement trigger therefore
+fires 5,000 times and builds its transition tables each time. It is slower than
+the row trigger on the path where the cost was measured, and wins only where a
+single statement writes many rows.
+
+A real job is smaller. In the measurement database (`ctiparsor_measure`, 7 real
+reports) a job holds 88 entities on average, 156 at most, and 21 relationships
+on average. The row trigger costs 0.07 to 0.11 ms per row, so about 10 ms per
+write path for the roughly 110 rows of an average job.
+
+Decision: no change. v12 stays as it is, there is no new migration, and the
+invariant of decision 1 is unchanged. The 0.66 s and 0.16 s of Consequences
+come from the same protocol on another run; they stay as written. If the cost
+ever mattered, the lever is the combination: write the run's rows in one
+statement per table and use a statement trigger (0.109 s for 5,000 rows, less
+than the current run write with no trigger at all, 0.213 s).
+
+### 3. The store audit checks the revision
+
+`scripts/audit_store_invariants.py` gains `job.bundle_revision` (severity
+`error`, `check_bundle_revision`): no job has a `bundle_review_revision` above
+its `review_revision`. The revision only grows and a build stores the one it
+read, so a bundle ahead of its job means a revision written by hand, or
+restored without its rows. Every later finalize of that job would be refused
+until enough writes overtook it. `total` counts the jobs that have a stored
+revision; a failure lists up to three examples, each the first eight characters
+of the job id and the two revisions (`ahead-01 4>1`). The check is skipped when
+the table or either column is missing.
+
+### Implementation and tests
+
+- `pipeline/stage5_validation.py`: `validate_bundle`, `export_path`,
+  `export_bundle`; `validate_and_export` composes them.
+- `api/worker.py`: `re_run_final_stages` (validate, then `UPDATE` and
+  `export_bundle` in one `transaction(conn)`).
+- `scripts/measure_review_revision_trigger.py` (new);
+  `scripts/audit_store_invariants.py::check_bundle_revision`.
+- `tests/test_bundle_builds.py`, 30 to 33 tests: `test_a_refused_build_writes_no_export_file`
+  (a refused build finishing last leaves the published build's file);
+  `test_an_export_that_cannot_be_written_publishes_nothing` (the finalize
+  raises, nothing is stored, the status stays); `test_a_published_invalid_build_writes_only_the_invalid_file`;
+  the extended `test_a_job_deleted_while_it_is_built_is_not_an_error` (no
+  export file is left). Its `_stage5` helper, like `tests/test_worker.py`'s,
+  now replaces `validate_bundle`.
+- `tests/test_stage5.py`, 19 to 23 tests: `TestValidateBundle` (it writes
+  nothing and judges as `validate_and_export` does; missing schemas give
+  `unverified`) and `TestExport` (the file name follows the verdict;
+  `export_bundle` writes where the verdict says).
+- `tests/test_audit_store_invariants.py`, 3 tests: a bundle ahead of its job
+  fails with its example, none ahead passes, the check is part of `run_all`.
+- Counts from `pytest --collect-only` on 2026-10-18. Full suite on this change,
+  run locally on 2026-10-18 (PostgreSQL test server, `SKIP_HEAVY_MODELS=1`):
+  2,757 passed, 9 skipped, 0 failed; `ruff check .` clean; mypy clean on 134
+  files.

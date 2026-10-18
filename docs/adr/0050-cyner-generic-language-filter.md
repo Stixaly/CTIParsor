@@ -2,6 +2,9 @@
 
 **Status:** Accepted (implemented 2026-09-18)
 **Date:** 2026-09-18
+**Amended by:** [0088](0088-cyner-actors-and-spacy-places-must-look-like-names.md)
+(2026-10-18). For `Threat_group`, a second filter follows this one when
+`NER_PRECISION_FILTERS` is on (the default); `Malware` is unchanged.
 **Relates to:** [pipeline/stage2d_cyner.py](../../pipeline/stage2d_cyner.py)
 
 ## Context
@@ -136,3 +139,21 @@ whole-fragment match) is unchanged and still applies to `Threat_group` only.
 | ruff | `pipeline/stage2d_cyner.py`, `tests/test_stage2d_cyner.py` — clean |
 | mypy | `pipeline/stage2d_cyner.py` — clean, no output |
 | Real data (`apt44-unearthing-sandworm.pdf`) | Replayed the job's actual captured CyNER output (255 `malware`/`threat_actor` rows) through the new filter: 162 survived (−36.5%); manually reviewed both the survived list (all genuine names) and the removed list (all generic language, list-join artifacts, or script/OCR garbage) |
+
+## Amendment (2026-10-18): a second filter for `Threat_group` (ADR-0088)
+
+This filter left prose in the threat actors: on AnnoCTR dev, 87 of the 97 false
+positives were CyNER's ("cybercriminals", "underground forums", "Chinese threat
+actors", "Iran"). When `NER_PRECISION_FILTERS` is on, the default,
+`extract_cyner_entities` applies a second filter to each `Threat_group`
+fragment, after the normalisation of decision 2 and before the checks of
+decisions 3 to 5 and the dedup. It drops a fragment with no capital letter and
+no digit in a report written with capitals, a country, and a fragment whose
+words are all category words, software names, nationalities or countries. It
+reads `_GENERIC_TOKENS` as part of those words, so the upkeep described above
+covers both. With the variable set to `false`, only this ADR's filter runs.
+ADR-0088 has the rules and the measurement.
+
+`Malware` is unchanged. The same rule applied to CyNER's malware was measured
+(+2.6 points of precision on dev, 2 of 153 train true positives lost) and not
+adopted.
