@@ -262,6 +262,7 @@ def test_generic_threat_actor_language_is_rejected(monkeypatch):
 
 
 def test_real_named_entities_survive_the_generic_filter(monkeypatch):
+    monkeypatch.setenv("NER_PRECISION_MALWARE", "false")      # ADR-0089 shortens "X malware variants" to "X"
     real = [
         ("Malware", "ARGUEPATCH"),
         ("Malware", "ARGUEPATCH Launcher payload"),

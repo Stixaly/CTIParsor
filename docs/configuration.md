@@ -165,6 +165,13 @@ CYNER_ENABLED=true
 # only when it can be a place name ("C&C", "XSS" go; "the United States"
 # becomes "United States").  false = the behaviour before the filters.
 # NER_PRECISION_FILTERS=true
+#
+# The malware lead (ADR-0089, docs/eval/ner-malware-2026-10.md), on top of
+# the filters above and off whenever they are: CyNER's malware written as
+# ordinary language is dropped too ("banking trojan"), a name with its
+# category around it is reduced to the name ("Ryuk ransomware", "hacking
+# group TA505"), and spaCy's PRODUCT label no longer proposes malware.
+# NER_PRECISION_MALWARE=true
 
 # Stage 2e — GLiNER zero-shot NER
 # urchade/gliner_large-v2.1  (recommended, best accuracy, ~800 MB)

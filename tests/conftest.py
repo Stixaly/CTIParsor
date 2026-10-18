@@ -89,6 +89,7 @@ def _ner_precision_filters_at_their_default(monkeypatch):
     loaded into os.environ at import): the Stage 2 tests pin the names CyNER
     and spaCy return.  A test about the filters sets the variable itself."""
     monkeypatch.delenv("NER_PRECISION_FILTERS", raising=False)
+    monkeypatch.delenv("NER_PRECISION_MALWARE", raising=False)
 
 
 @pytest.fixture()

@@ -129,7 +129,7 @@ CTIParsor/
 │   ├── stage2b_gazetteer.py       # Aho-Corasick gazetteer NER (1 114 entities)
 │   ├── stage2c_ttp_semantic.py    # Sentence-transformer TTP detection
 │   ├── stage2d_cyner.py           # CyNER 2.0 cybersecurity NER (DeBERTa-v3)
-│   ├── ner_precision.py           # CyNER actors and spaCy places must look like names (ADR-0088)
+│   ├── ner_precision.py           # CyNER actors and spaCy places must look like names (ADR-0088); the malware lead (ADR-0089)
 │   ├── stage2e_gliner.py          # GLiNER / NuNER zero-shot NER
 │   ├── stage2g_alias_list.py      # "X (aka Y, Z)" alias lists → threat actors (regex)
 │   ├── stage2f_cve_enrichment.py  # CVE description + CVSS v3 from the cve_cache table / CIRCL (opt-in)

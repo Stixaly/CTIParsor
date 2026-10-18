@@ -16,9 +16,17 @@ D. spaCy's GPE label, mapped to location, fires on products and vendors
    ("C&C", "XSS", "GitHub").  A value is kept only when it can be a place
    name, and a leading "the" is dropped ("the United States").
 
-Three other leads were measured with these and not adopted, each under the
-document's +5-point gate on its own: the same rule A for CyNER's malware,
-reducing "Ryuk ransomware" to "Ryuk", and dropping spaCy's PRODUCT label.
+The malware lead (ADR-0089, docs/eval/ner-malware-2026-10.md), measured as
+one lead on top of A and D, `NER_PRECISION_MALWARE`:
+
+A for malware. Rule A judges CyNER's `Malware` fragments too ("banking
+   trojan", "same malware"); the nationalities and countries added for
+   actors are not added for malware ("China Chopper").
+B. A name with its category around it is reduced to the name ("Ryuk
+   ransomware", "hacking group TA505"), CyNER's spans are split on brackets
+   too ("Winnti Group (APT41"), and a shortened name that meets the same name
+   keeps the higher confidence.  Malware and threat actors.
+C. spaCy's PRODUCT label no longer proposes malware.
 """
 from __future__ import annotations
 
@@ -31,6 +39,11 @@ from pipeline.regex_safety import compile_pattern
 
 def enabled() -> bool:
     return env_bool("NER_PRECISION_FILTERS", default=True)
+
+
+def malware_enabled() -> bool:
+    """ADR-0089's malware lead.  Off whenever the filters are off."""
+    return enabled() and env_bool("NER_PRECISION_MALWARE", default=True)
 
 
 # ── Vocabulary ───────────────────────────────────────────────────────────────
@@ -95,12 +108,24 @@ def _tokens(value: str) -> list[str]:
     return value.lower().replace("-", " ").split()
 
 
+def _is_generic_word(token: str, extra: frozenset[str]) -> bool:
+    from pipeline.stage2d_cyner import _GENERIC_TOKENS
+    return token in _GENERIC_TOKENS or token in _MORE_GENERIC or token in extra
+
+
 def _all_generic(value: str, extra: frozenset[str] = frozenset()) -> bool:
     """True when no token of 3+ characters names anything (ADR-0050's rule,
     with the wider vocabulary)."""
-    from pipeline.stage2d_cyner import _GENERIC_TOKENS
-    return not [t for t in _tokens(value) if len(t) >= 3 and t not in _GENERIC_TOKENS
-                and t not in _MORE_GENERIC and t not in extra]
+    return not [t for t in _tokens(value) if len(t) >= 3 and not _is_generic_word(t, extra)]
+
+
+@functools.lru_cache(maxsize=None)
+def _not_a_name_for(etype: EntityType) -> frozenset[str]:
+    """Words that name nothing for this type besides the category words: a
+    platform, and for a threat actor a nationality or a country."""
+    if etype == EntityType.THREAT_ACTOR:
+        return _platforms() | _DEMONYMS | _countries()
+    return _platforms()
 
 
 # ── A. CyNER threat actors: ordinary language ────────────────────────────────
@@ -126,25 +151,130 @@ def text_is_cased(text: str) -> bool:
 _CVE_RE = compile_pattern(r"^cve-\d{4}-\d+$")
 
 
-def actor_is_ordinary(value: str, cased: bool = True) -> bool:
-    """True when a CyNER threat-actor fragment is not a name: ordinary
-    language, a country or a nationality, a number, a CVE id."""
+def _not_written_as_a_name(value: str, cased: bool) -> bool:
+    """No letter, a CVE id, a word that names nothing alone, or (in a report
+    written with capitals) neither a capital letter nor a digit."""
     low = value.lower()
     if not any(c.isalpha() for c in value) or _CVE_RE.match(low) or low in _NOT_A_NAME_ALONE:
         return True
-    if cased and not any(c.isupper() or c.isdigit() for c in value):
+    return cased and not any(c.isupper() or c.isdigit() for c in value)
+
+
+def actor_is_ordinary(value: str, cased: bool = True) -> bool:
+    """True when a CyNER threat-actor fragment is not a name: ordinary
+    language, a country or a nationality, a number, a CVE id."""
+    if _not_written_as_a_name(value, cased):
         return True
+    low = value.lower()
     if (low[4:] if low.startswith("the ") else low) in _countries():
         return True
-    return _all_generic(value, _platforms() | _DEMONYMS | _countries())
+    return _all_generic(value, _not_a_name_for(EntityType.THREAT_ACTOR))
 
 
-def refine_cyner(value: str, etype: EntityType, cased: bool = True) -> str:
-    """The CyNER fragment to keep, or "" to drop it.  `cased`: whether the
-    report is written with capitals (text_is_cased).  Malware is untouched."""
+def malware_is_ordinary(value: str, cased: bool = True) -> bool:
+    """Rule A for a CyNER malware fragment (ADR-0089): ordinary language, a
+    platform, a number, a CVE id.  The nationalities and countries that
+    count as category words for an actor do not here ("China Chopper");
+    ADR-0050's own list has one ("russian")."""
+    return _not_written_as_a_name(value, cased) or _all_generic(value, _not_a_name_for(EntityType.MALWARE))
+
+
+def refine_cyner(value: str, etype: EntityType, cased: bool = True, malware: bool = False) -> str:
+    """The CyNER fragment to keep (possibly shortened), or "" to drop it.
+    `cased`: whether the report is written with capitals (text_is_cased).
+    `malware`: ADR-0089's lead (malware_enabled); without it, malware is
+    untouched and nothing is shortened."""
+    if malware:
+        value = cyner_normalise(value, etype)
+        if etype == EntityType.MALWARE and malware_is_ordinary(value, cased):
+            return ""
     if etype == EntityType.THREAT_ACTOR and actor_is_ordinary(value, cased):
         return ""
     return value
+
+
+# ── B. CyNER: a name with its category around it (ADR-0089) ────────────────
+
+# A trailing category word that never ends a name: "Ryuk ransomware", "TA575
+# campaign", "TrickBot banking trojan".  "RAT", "loader", "stealer",
+# "dropper" and "kit" are not here: Hallaj Pro RAT, Smoke Loader, Miner
+# Dropper and RIG Exploit Kit are names.
+_TRAILING_HEADS: dict[EntityType, tuple[str, ...]] = {
+    EntityType.MALWARE: (
+        "ransomware", "malware", "malwares", "payload", "payloads", "botnet", "botnets",
+        "bots", "banking trojan", "trojan", "variant", "variants", "sample", "samples",
+        "binary", "binaries", "executable", "executables", "family", "families", "strain",
+        "strains", "infection", "infections", "campaign", "campaigns", "backdoor",
+        "backdoors", "version", "service", "module", "plugin", "spam", "phishing"),
+    EntityType.THREAT_ACTOR: (
+        "campaign", "campaigns", "operation", "operations", "operators", "activity",
+        "members", "affiliates", "threat actor", "threat actors", "threat group",
+        "threat groups", "groups", "actors", "phishing", "spam", "attack", "attacks"),
+}
+
+# The category noun that ends a leading run of category words: "hacking group
+# TA505", "multipurpose trojan QBot".  Per type: an actor keeps "Backdoor" in
+# "Backdoor Diplomacy".
+_LEADING_HEADS: dict[EntityType, frozenset[str]] = {
+    EntityType.MALWARE: frozenset(
+        "malware ransomware trojan rat backdoor botnet family variant tool framework".split()),
+    EntityType.THREAT_ACTOR: frozenset("group groups actor actors hacker hackers gang".split()),
+}
+
+_FRAGMENT_SPLIT_RE = compile_pattern(r"[,/()\[\]]")
+
+
+def split_cyner(raw_value: str) -> list[str]:
+    """Stage 2d's split on commas and slashes, and on brackets: "Winnti Group
+    (APT41" gives "Winnti Group" and "APT41"."""
+    parts = [p.strip() for p in _FRAGMENT_SPLIT_RE.split(raw_value)]
+    return [p for p in parts if p] or [raw_value]
+
+
+def _names_something(value: str, etype: EntityType) -> bool:
+    return any(c.isalpha() for c in value) and not _all_generic(value, _not_a_name_for(etype))
+
+
+def _strip_trailing_heads(value: str, etype: EntityType) -> str:
+    heads = sorted(_TRAILING_HEADS.get(etype, ()), key=len, reverse=True)
+    stripped = True
+    while stripped:
+        stripped = False
+        low = value.lower()
+        for head in heads:
+            if low.endswith(" " + head):
+                rest = value[: len(value) - len(head) - 1].rstrip()
+                if _names_something(rest, etype):
+                    value, stripped = rest, True
+                break
+    return value
+
+
+def _strip_leading_heads(value: str, etype: EntityType) -> str:
+    heads = _LEADING_HEADS.get(etype, frozenset())
+    words = value.split()
+    extra = _not_a_name_for(etype)
+    last_head = -1
+    for i, word in enumerate(words):
+        low = word.lower()
+        if not (len(low) < 3 or all(_is_generic_word(t, extra) for t in _tokens(low))):
+            break
+        if low in heads:
+            last_head = i
+    else:
+        return value        # nothing but category words: rule A judges it whole
+    if last_head >= 0:
+        rest = " ".join(words[last_head + 1:])
+        if _names_something(rest, etype):
+            return rest
+    return value
+
+
+def cyner_normalise(value: str, etype: EntityType) -> str:
+    """`value` without its leading and trailing category words, as long as
+    what remains names something ("Group 123" and "Linux backdoor" stay
+    whole, and rule A then judges them)."""
+    return _strip_trailing_heads(_strip_leading_heads(value, etype), etype)
 
 
 # ── D. spaCy places ──────────────────────────────────────────────────────────
@@ -201,9 +331,12 @@ def place_name(value: str) -> str:
     return value
 
 
-def refine_spacy(value: str, etype: EntityType) -> str:
+def refine_spacy(value: str, etype: EntityType, malware: bool = False) -> str:
     """The spaCy entity value to keep (possibly shortened), or "" to drop it.
-    Only locations are filtered."""
+    Locations are filtered; with `malware` (ADR-0089, lead C), spaCy's
+    PRODUCT label no longer proposes malware."""
     if etype == EntityType.LOCATION:
         return place_name(value)
+    if malware and etype == EntityType.MALWARE:
+        return ""
     return value

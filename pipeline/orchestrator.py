@@ -633,6 +633,8 @@ class _Run:
         # Said in the stage report: the run manifest records the variable only
         # when it is set, not the default it falls back to.
         ner_note = "precision filters on (ADR-0088)" if ner_precision.enabled() else ""
+        if ner_precision.malware_enabled():
+            ner_note += ", malware lead on (ADR-0089)"
 
         # Stage 2 — regex IoCs, per chunk (Stage 3 needs each chunk's own),
         # deduplicated by (value, type) keeping the highest confidence.
