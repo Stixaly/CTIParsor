@@ -46,7 +46,7 @@ from pipeline.ttp_retrieval import TtpCandidate
 
 logger = get_logger(__name__)
 
-_ID_RE = compile_pattern(r"^T\d{4}(?:\.\d{3})?$")
+_ID_RE = compile_pattern(r"^T[0-9]{4}(?:\.[0-9]{3})?$")
 _DEFINITION_CHARS = 180
 _HINT_CHARS = 160
 _MIN_RETRIEVED = 5      # retrieved candidates always offered, prompt limit or not

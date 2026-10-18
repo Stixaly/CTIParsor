@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 from pipeline.detection.textutil import unescape
 from pipeline.detection.tlds import looks_like_domain
-from pipeline.regex_safety import PY_WHITESPACE, compile_pattern
+from pipeline.regex_safety import PY_NON_ASCII_WORD, PY_WHITESPACE, compile_pattern
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -85,21 +85,25 @@ _S = f"[{PY_WHITESPACE}]"
 # stays linear on a long run of tabs: after the tags only a newline can start
 # the whitespace before the brace (the group took the rest of the line), and the
 # tags keep their surrounding blanks — the caller splits them.
+# The name reads Python's word characters (PY_NON_ASCII_WORD), not RE2's ASCII
+# `\w`: YARA refuses "rule café", and a rule that is found is refused with a
+# reason in the ledger, where one that is not found is silently gone.  The
+# lines inside a rule follow YARA's grammar, whose identifiers are ASCII.
 _RE_RULE = compile_pattern(
-    r"(?m)^[ \t]*(?:(private|global)[ \t]+)*rule[ \t]+([A-Za-z_]\w*)"
+    r"(?m)^[ \t]*(?:(private|global)[ \t]+)*rule[ \t]+([A-Za-z_][A-Za-z0-9_" + PY_NON_ASCII_WORD + r"]*)"
     r"(?:[ \t]*:([^\{\n]*)(?:\n" + _S + r"*)?|" + _S + r"*)\{"
 )
 _RE_HASH = compile_pattern(r"^[0-9a-f]{32,128}$")
-_RE_IP = compile_pattern(r"^\d{1,3}(\.\d{1,3}){3}$")
+_RE_IP = compile_pattern(r"^[0-9]{1,3}(\.[0-9]{1,3}){3}$")
 # A path ends in an *alphabetic* extension and contains no spaces.  `[a-z0-9]{1,4}`
 # alone accepted "ufasoft bitcoin-miner/0.20" and " p = document.inde" as files.
 _RE_FILE_EXT = compile_pattern(r"^[^" + PY_WHITESPACE + r"]+\.[a-z]{1,4}$")
 # `=(.+)$`, not `=\s*(.+)$`: the value is stripped by the caller, and `\s*`
 # beside `.+` made backtracking `re` (no re2) quadratic on a run of blanks.
-_RE_META_LINE = compile_pattern(r"^" + _S + r"*([A-Za-z_]\w*)" + _S + r"*=(.+)$")
-# `\w*` not `[A-Za-z_]\w*`: YARA allows an anonymous string, declared bare as `$`.
-_RE_STRING_DECL = compile_pattern(r"^" + _S + r"*\$(\w*)" + _S + r"*=(.+)$")
-_RE_IMPORT = compile_pattern(r"(?m)^" + _S + r'*import' + _S + r'+"(\w+)"')
+_RE_META_LINE = compile_pattern(r"^" + _S + r"*([A-Za-z_][A-Za-z0-9_]*)" + _S + r"*=(.+)$")
+# `[A-Za-z0-9_]*`, first character included: YARA allows an anonymous string, `$`.
+_RE_STRING_DECL = compile_pattern(r"^" + _S + r"*\$([A-Za-z0-9_]*)" + _S + r"*=(.+)$")
+_RE_IMPORT = compile_pattern(r"(?m)^" + _S + r'*import' + _S + r'+"([A-Za-z0-9_]+)"')
 _RE_SPLIT_META = compile_pattern(r"[," + PY_WHITESPACE + r"]+")
 
 

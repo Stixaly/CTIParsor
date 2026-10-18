@@ -36,7 +36,7 @@ from models.schemas import EntityType, RawEntity
 from pipeline import ner_precision
 from pipeline.env_flags import env_bool, env_int
 from pipeline.overrides import drop_denied
-from pipeline.regex_safety import compile_pattern
+from pipeline.regex_safety import PY_DIGIT, compile_pattern
 from pipeline.thresholds import get_threshold
 
 _SKIP_HEAVY = env_bool("SKIP_HEAVY_MODELS")
@@ -201,7 +201,7 @@ _TRAILING_PERIOD_RE = compile_pattern(r"\.$")
 _FRAGMENT_RE = compile_pattern(r"^[a-z]\s")
 
 # Regex: bare version numbers ("1.2.3") — spaCy and some NER models label these
-_VERSION_RE = compile_pattern(r"^\d[\d.\-]*\d$")
+_VERSION_RE = compile_pattern(rf"^[{PY_DIGIT}][{PY_DIGIT}.\-]*[{PY_DIGIT}]$")
 
 # Pre-compiled patterns for text splitting
 _COMMA_SLASH_RE = compile_pattern(r"[,/]")

@@ -198,6 +198,49 @@ Tests: `test_an_export_that_cannot_be_written_publishes_nothing` and
 `TestExport` in `tests/test_stage5.py` (19 to 23). ADR-0086 gets a dated
 amendment, which also corrects its decision 4 and its consequences.
 
+#### `\d`, `\w` and `\b` read the same with RE2 or without (ADR-0049), 2026-10-18
+
+google-re2 reads `\d`, `\w` and `\b` as ASCII; the stdlib `re` that
+`compile_pattern` falls back to without it reads them as Unicode. 73
+module-level patterns that RE2 compiles used them, so a letter or a digit of
+another script split production from local runs:
+
+- In production, a letter glued to a match had cut it out of a word:
+  `joão@evil.com` gave the address `o@evil.com`, another mailbox, and
+  `josé.perez@evil.com` gave `perez@evil.com`; `ÚLTIMOS DÍAS 2024` gave the ASN
+  `AS2024`; `…\relatório.comunicação` gave the Windows path
+  `…\relatório.comunica`; `téléport 443` in a network-traffic value gave port
+  443. A match glued to a letter of a script with case (Latin, Greek,
+  Cyrillic…) or to a digit is dropped now (`regex_safety.glued_to_a_word`), and
+  the address's domain is still extracted. Chinese, Japanese, Korean and Thai
+  write no spaces between words, so an IoC glued to them is kept, as RE2 kept
+  it: `该IP属于AS4134网络` gives `AS4134`.
+- In production, Stage 2g gave `Müller Group (aka Berserk Bear)` the anchor
+  `Group`, lost the alias `Ghøst Blizzard`, and split `Cléand Bear` at `and`.
+  Its patterns now read the text with every non-ASCII word character masked to
+  `z`, a letter none of its words holds, and cut the names from the text itself.
+- In production, a YARA rule named with a non-ASCII letter (`rule café`) was not
+  found. It is now, and Stage 4 leaves it out with `rule_does_not_compile` in
+  the ledger (ADR-0067). A spaCy span of other digits (`١.٢.٣`) was not taken
+  for a version number and could be kept as a name; both version filters read
+  every script's digits now (`regex_safety.PY_DIGIT`).
+- Without re2, IoCs and dates took every script's digits: `T١٠٥٩` and `T１０５９`
+  shipped as ATT&CK ids, `CVE-٢٠٢١-٤٤٢٢٨` as a CVE, `８.８.８.８` as an IPv4
+  address, `AS١٥١٦٩` as an ASN, and `٢٠٢٤-٠٣-١٢` was a date. An IoC glued to
+  Chinese text (`使用T1059技术`, `该IP属于AS4134网络`) was not found. 56 patterns
+  now say `[0-9]` or `[A-Za-z0-9_]`, and the 11 that say `\b` pass `re.ASCII`,
+  which `compile_pattern` now maps to RE2's own reading.
+- The corpus settings refuse every transport helper git reads (`a-b::`,
+  `a.b::`, `x+y::`), not only `\w+::`.
+
+On AnnoCTR's 400 texts (44 hold a letter or a digit outside ASCII), Stage 2's
+entities, the alias lists, the header dates and the YARA rule names are the
+same before and after, under both engines. `tests/test_unicode_word_digit.py`
+runs 68 cases that pass with re2 and without it; before the fix 47 failed under
+`re` and 20 under RE2, and only helper tests, positive controls and three alias
+cases (which guard the mask's letter) passed under both. It also fails on a
+new module-level pattern that says `\w`, `\d` or `\b` without being reviewed.
+
 #### A finalize records the build it made, and a rebuild clears a Stage 4/5 staleness (ADR-0086), 2026-10-17
 
 A finalize (`POST /api/jobs/{id}/finalize`, quick or full) rebuilds Stages 4 and

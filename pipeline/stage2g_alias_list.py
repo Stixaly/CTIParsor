@@ -41,7 +41,7 @@ from __future__ import annotations
 
 from models.schemas import EntityType, RawEntity
 from pipeline.overrides import drop_denied
-from pipeline.regex_safety import PY_WHITESPACE, compile_pattern
+from pipeline.regex_safety import PY_NON_ASCII_WORD, PY_WHITESPACE, compile_pattern
 from pipeline.thresholds import get_threshold
 
 # ── Patterns ──────────────────────────────────────────────────────────────────
@@ -76,6 +76,23 @@ _INLINE_PATTERN = compile_pattern(
 
 _ALIAS_SPLIT_RE = compile_pattern(r",|/|\band\b|\bor\b")
 
+# `\w` and `\b` above are ASCII to RE2 and Unicode to `re` (ADR-0049,
+# 2026-10-18): under RE2 "Müller Group (aka Berserk Bear)" had the anchor
+# "Group", and "Ghøst Blizzard" was no alias.  Python's class written out
+# (PY_NON_ASCII_WORD) is too large for RE2 to repeat 40 times, as _ANCHOR does
+# in _INLINE_PATTERN.  So the patterns read the text with every non-ASCII word
+# character turned into "z": a word character to both engines, never the
+# capital that starts a word, and in none of the patterns' words ("áka" must
+# not read "aka", nor "Ánd" "and").  The names are cut from the text itself at
+# the same offsets: one character stands for one.
+_NON_ASCII_WORDS = compile_pattern(f"[{PY_NON_ASCII_WORD}]+")
+
+
+def _masked(text: str) -> str:
+    """`text` with every non-ASCII word character replaced by "z"."""
+    return _NON_ASCII_WORDS.sub(lambda m: "z" * len(m.group()), text)
+
+
 # Leftover marker fragments that can survive splitting on a malformed match
 # (e.g. the marker phrase itself captured as part of the alias run).
 _STOPWORDS = frozenset({
@@ -101,12 +118,16 @@ def _clean_alias(raw: str) -> str | None:
     return value
 
 
-def _split_aliases(raw: str) -> list[str]:
+def _split_aliases(raw: str, masked: str) -> list[str]:
+    """`raw` split where _ALIAS_SPLIT_RE splits `masked`, its _masked() form."""
     out: list[str] = []
-    for part in _ALIAS_SPLIT_RE.split(raw):
-        cleaned = _clean_alias(part)
+    start = 0
+    for end, after in [*((m.start(), m.end()) for m in _ALIAS_SPLIT_RE.finditer(masked)),
+                       (len(raw), len(raw))]:
+        cleaned = _clean_alias(raw[start:end])
         if cleaned is not None:
             out.append(cleaned)
+        start = after
     return out
 
 
@@ -125,11 +146,16 @@ def extract_alias_list_entities(text: str) -> list[RawEntity]:
 
     seen: set[str] = set()
     results: list[RawEntity] = []
+    masked = _masked(text)
 
     for pattern in (_PAREN_PATTERN, _INLINE_PATTERN):
-        for m in pattern.finditer(text):
-            anchor = _clean_alias(m.group("anchor"))
-            aliases = _split_aliases(m.group("aliases"))
+        # google-re2's span() takes a group's number, not its name
+        anchor_group, aliases_group = pattern.groupindex["anchor"], pattern.groupindex["aliases"]
+        for m in pattern.finditer(masked):
+            a, b = m.span(anchor_group)
+            anchor = _clean_alias(text[a:b])
+            a, b = m.span(aliases_group)
+            aliases = _split_aliases(text[a:b], masked[a:b])
             if anchor is None or not aliases:
                 continue
 

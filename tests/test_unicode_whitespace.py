@@ -18,6 +18,7 @@ import re
 import re._parser as _sre_parse
 from pathlib import Path
 from re import _constants as _sre
+from typing import Any
 
 import pytest
 
@@ -192,29 +193,33 @@ REVIEWED: dict[tuple[str, str | None], str] = {
         "is dropped by _has_boundary_artifact",
     ("pipeline.stage2d_cyner", r"^[a-z]\s"): "as above",
     ("pipeline.stage2d_cyner", r"\.\s"): "as above",
-    ("pipeline.stage4_stix_mapping", r"=\s*(\d+)\s*\]"): "reads the STIX patterns Stage 4 wrote",
+    ("pipeline.stage4_stix_mapping", r"=\s*([0-9]+)\s*\]"): "reads the STIX patterns Stage 4 wrote",
     ("pipeline.ttp_retrieval", r"\[([^\]]{1,200})\]\((https?://attack"):
         "ATT&CK's own text at corpus build; a URL holds no blank",
     ("api.routes.ingest", r"<"): "sniffs HTML, whose blanks are ASCII",
     ("api.routes.ingest", r"^\#{1,6}\s+\S"): "sniffs Markdown, whose blanks are space and tab",
-    ("api.routes.ingest", r"^\s{0,3}([-*+]|\d+\.)\s+\S"): "as above",
+    ("api.routes.ingest", r"^\s{0,3}([-*+]|[0-9]+\.)\s+\S"): "as above",
     ("api.routes.ingest", r"^\s*```"): "as above",
     ("api.routes.ingest", r"^\s*\|.+\|\s*$"): "as above",
 }
 _LEADING_FLAGS = re.compile(r"^(?:\(\?[aiLmsux]+\))+")      # RE2 takes the flags inline
 
 
-def _uses_backslash_s(pattern: str) -> bool:
+def _uses(pattern: str, categories: frozenset = frozenset(), ats: frozenset = frozenset()) -> bool:
+    """`pattern` says one of `categories` (`\\s`, `\\S`, `\\d`... as the parser
+    names them) or one of the zero-width `ats` (`\\b`, `\\B`), at any depth.
+    tests/test_unicode_word_digit.py walks with it too."""
     found = False
 
     def walk(items) -> None:
         nonlocal found
         for op, av in items:
             if op is _sre.IN:
-                found |= any(sop is _sre.CATEGORY and av2 in (_sre.CATEGORY_SPACE, _sre.CATEGORY_NOT_SPACE)
-                             for sop, av2 in av)
+                found |= any(sop is _sre.CATEGORY and av2 in categories for sop, av2 in av)
             elif op is _sre.CATEGORY:
-                found |= av in (_sre.CATEGORY_SPACE, _sre.CATEGORY_NOT_SPACE)
+                found |= av in categories
+            elif op is _sre.AT:
+                found |= av in ats
             elif op is _sre.SUBPATTERN:
                 walk(av[-1])
             elif op in (_sre.MAX_REPEAT, _sre.MIN_REPEAT, getattr(_sre, "POSSESSIVE_REPEAT", None)):
@@ -235,6 +240,10 @@ def _uses_backslash_s(pattern: str) -> bool:
     return found
 
 
+def _uses_backslash_s(pattern: str) -> bool:
+    return _uses(pattern, frozenset({_sre.CATEGORY_SPACE, _sre.CATEGORY_NOT_SPACE}))
+
+
 def _patterns_in(value, depth: int = 0):
     if hasattr(value, "finditer") and isinstance(getattr(value, "pattern", None), str):
         yield value
@@ -246,11 +255,11 @@ def _patterns_in(value, depth: int = 0):
             yield from _patterns_in(item, depth + 1)
 
 
-def _module_level_backslash_s() -> tuple[set[tuple[str, str]], set[str]]:
-    """(module, pattern) of every compiled pattern a module that calls
-    compile_pattern holds at its top level and defines itself, and the modules
-    that could be imported here."""
-    found: set[tuple[str, str]] = set()
+def _module_level_patterns() -> tuple[list[tuple[str, str, Any]], set[str]]:
+    """(module, attribute, compiled pattern) of every compiled pattern a module
+    that calls compile_pattern holds at its top level and defines itself, and the
+    modules that could be imported here."""
+    found: list[tuple[str, str, Any]] = []
     checked: set[str] = set()
     for path in sorted([*(_ROOT / "pipeline").rglob("*.py"), *(_ROOT / "api").rglob("*.py")]):
         source = path.read_text(encoding="utf-8")
@@ -266,11 +275,15 @@ def _module_level_backslash_s() -> tuple[set[tuple[str, str]], set[str]]:
         for attr, value in vars(module).items():
             if not re.search(rf"^{re.escape(attr)}\s*[:=]", source, re.MULTILINE):
                 continue                  # imported from another module
-            for rx in _patterns_in(value):
-                pattern = _LEADING_FLAGS.sub("", rx.pattern)
-                if _uses_backslash_s(pattern):
-                    found.add((name, pattern))
+            found.extend((name, attr, rx) for rx in _patterns_in(value))
     return found, checked
+
+
+def _module_level_backslash_s() -> tuple[set[tuple[str, str]], set[str]]:
+    """(module, pattern) of every module-level pattern that says `\\s`."""
+    patterns, checked = _module_level_patterns()
+    stripped = {(name, _LEADING_FLAGS.sub("", rx.pattern)) for name, _, rx in patterns}
+    return {(name, pattern) for name, pattern in stripped if _uses_backslash_s(pattern)}, checked
 
 
 def _reviewed(module: str, pattern: str) -> bool:

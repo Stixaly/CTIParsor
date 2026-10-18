@@ -45,12 +45,12 @@ _MAX_TEXT_CHARS = 2_000_000
 # blank lines and headings, and a Markdown report that lands in a .txt file
 # keeps its structure either way — but the source viewer renders it.
 _MARKDOWN_PATTERNS = (
-    r"^\#{1,6}\s+\S",              # ATX heading
-    r"^\s{0,3}([-*+]|\d+\.)\s+\S",  # bullet or ordered list item
-    r"^\s*```",                     # fenced code block
-    r"^\s*\|.+\|\s*$",              # table row
-    r"\[[^\]]+\]\([^)]+\)",         # inline link
-    r"\*\*[^*\n]+\*\*",             # bold
+    r"^\#{1,6}\s+\S",                   # ATX heading
+    r"^\s{0,3}([-*+]|[0-9]+\.)\s+\S",  # bullet or ordered list item
+    r"^\s*```",                          # fenced code block
+    r"^\s*\|.+\|\s*$",                   # table row
+    r"\[[^\]]+\]\([^)]+\)",              # inline link
+    r"\*\*[^*\n]+\*\*",                  # bold
 )
 _MARKDOWN_MIN_SIGNALS = 2
 

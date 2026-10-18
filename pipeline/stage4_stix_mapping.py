@@ -2196,7 +2196,7 @@ _SENTENCE_SPLIT_RE = compile_pattern(r"(?<=[.!?])\s+|\n{2,}")
 # [autonomous-system:number = 1234].  An Indicator's `name` is
 # "Indicator: evil.com", which never appears in prose (0/136 measured), while
 # its pattern values do (131/136, 96.3%) — so the pattern is its anchor.
-_PATTERN_NUM_RE = compile_pattern(r"=\s*(\d+)\s*\]")
+_PATTERN_NUM_RE = compile_pattern(r"=\s*([0-9]+)\s*\]")
 
 
 def _pattern_strings(pattern: str) -> list[str]:

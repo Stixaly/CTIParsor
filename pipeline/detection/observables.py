@@ -65,7 +65,7 @@ _PLATFORM_CLASSES = frozenset({"file", "image", "registry"})
 _PSEUDO_FS = ("/dev/", "/proc/", "/sys/")
 
 _HASH_RE = compile_pattern(r"^[0-9a-f]{32,128}$")
-_CVE_RE = compile_pattern(r"^cve-\d{4}-\d{4,7}$")
+_CVE_RE = compile_pattern(r"^cve-[0-9]{4}-[0-9]{4,7}$")
 # PY_WHITESPACE, not `\s`, which RE2 keeps to ASCII: "evil\xa0[dot]\xa0com" is a defang.
 _DOT_RE = compile_pattern(r"\[\.\]|\(\.\)|\{\.\}|[" + PY_WHITESPACE + r"]\[dot\]["
                           + PY_WHITESPACE + r"]|\[dot\]", re.IGNORECASE)

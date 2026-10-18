@@ -44,6 +44,11 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "Under RE2 a no-break or thin space is whitespace too: ASNs, spaced defangs, Windows paths, alias "
      "lists, list items, Stage 3f quotes, YARA imports and Sigma rule boundaries next to one (ADR-0049)",
      "extraction"),
+    ("8c61bd9", "2026-10-18",
+     "RE2 and re read \\d, \\w and \\b alike: no address, ASN, Windows path or port cut out of a word "
+     "(o@evil.com out of joão@evil.com); alias names, version filters and YARA rule names read every "
+     "script (ADR-0049)",
+     "extraction"),
 )
 
 
