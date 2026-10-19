@@ -11,6 +11,34 @@ theme.
 
 ### Added
 
+#### The malware lead, measured once on AnnoCTR test and not adopted (ADR-0089), 2026-10-19
+
+ADR-0088 left malware precision unchanged: three leads each stayed under the
++5-point gate alone. They were registered as one lead (CyNER's malware written
+as ordinary language dropped; "Ryuk ransomware" and "hacking group TA505"
+reduced to the name; spaCy's PRODUCT label no longer proposing malware),
+frozen at `ccb9edf`, and measured once on the AnnoCTR test split against
+criteria fixed before the runs (`docs/eval/ner-malware-2026-10.md`).
+
+- **Malware precision doubled**: 0.194 → 0.389, +19.5 points [+14.5, +24.9],
+  with three gold entities gained and none lost.
+- **Locations lost** 4.2 points of precision and 4.5 of recall. In one report,
+  the LLM, given other CyNER names, listed countries where it had listed the
+  nationality adjectives AnnoCTR annotates. The lead is therefore not adopted,
+  and the pipeline is unchanged.
+- **ADR-0088's first test figures** come from the baseline run: threat-actor
+  precision 0.259, location 0.505.
+
+New: `scripts/measure_ner_precision.py`, the harness:
+
+- `run`: records what spaCy and CyNER returned, with the commit, settings and
+  models, and refuses a run that would measure nothing;
+- `status`: lists the documents to run again after a server failure;
+- `replay`: re-runs Stage 2 on recorded model outputs;
+- `compare` and `gates`: the paired comparison and the registered decision
+  rule.
+
+The decision rule is tested in `tests/test_measure_ner_precision.py`.
 #### An ATT&CK release is a track a run selects, and a v20.0 track ships (ADR-0087), 2026-10-18
 
 ATT&CK v20.0 came out on 2026-10-13. No shipped file said which release it came

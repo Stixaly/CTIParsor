@@ -19,6 +19,10 @@ D. spaCy's GPE label, mapped to location, fires on products and vendors
 Three other leads were measured with these and not adopted, each under the
 document's +5-point gate on its own: the same rule A for CyNER's malware,
 reducing "Ryuk ransomware" to "Ryuk", and dropping spaCy's PRODUCT label.
+Registered as one lead and measured once on AnnoCTR test (ADR-0089), they
+doubled malware precision but cost locations through the LLM's answers, and
+were not adopted either (docs/eval/ner-malware-2026-10.md; the code is at
+commit ccb9edf).
 """
 from __future__ import annotations
 
