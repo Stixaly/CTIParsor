@@ -847,8 +847,8 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
     never overwrites a newer one.  The refused build returns the stored bundle
     instead: the full finalize completes the job with it, and a stored invalid
     verdict raises `BundleInvalidError` with the stored errors; the refused
-    build's own verdict is not acted on.  Its export file in output/ stays as
-    written (never served: the job store is authoritative).
+    build's own verdict is not acted on.  Only a build that publishes writes
+    the export file in output/ (never served: the job store is authoritative).
 
     Entity sources stored during the pipeline:
       ioc       – regex-extracted IoC (Stage 2)
@@ -871,7 +871,7 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
 
     from models.schemas import EntityType, RawEntity
     from pipeline.stage3_llm import LLMEnrichmentResult, RelationshipExtracted
-    from pipeline.stage5_validation import INVALID, validate_and_export
+    from pipeline.stage5_validation import INVALID, export_bundle, validate_bundle
 
     with _lock:
         with get_conn() as conn:
@@ -1121,8 +1121,7 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
     ledger_json = json.dumps(ledger.to_dict())
 
     out_path = str(bundle_output_path(job_id, report_name))
-    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    validation = validate_and_export(bundle, out_path)
+    validation = validate_bundle(bundle_json)
     invalid = validation.status == INVALID
     verdict = (validation.status, _validation_errors_json(validation.errors))
 
@@ -1142,18 +1141,25 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
         logger.warning(f"[finalize] job {job_id}: build record not built: {type(exc).__name__}: {exc}")
         record = {"kind": kind, "built_at": utc_stamp(), "error": f"{type(exc).__name__}: {exc}"}
     build = json.dumps(record)
+    # The export file is written only by a build that publishes, while its UPDATE
+    # holds the job's row: concurrent publications write it in the order they
+    # publish, a refused build or a job deleted meanwhile writes none, and a
+    # write that fails rolls the publication back (as before, when a failed
+    # export failed the finalize ahead of any write to the database).
     with _lock:
         with get_conn() as conn:
-            published = conn.execute(
-                "UPDATE jobs SET bundle_json=?, bundle_ledger_json=?, bundle_validation=?, "
-                "bundle_validation_errors=?, bundle_build_json=?, bundle_review_revision=?, "
-                "status = CASE WHEN ? THEN 'completed' WHEN ? AND status = 'completed' THEN 'for_review' "
-                "ELSE status END, updated_at=? "
-                "WHERE id=? AND (bundle_review_revision IS NULL OR bundle_review_revision <= ?)",
-                (bundle_json, ledger_json, *verdict, build, revision, not quick and not invalid, invalid,
-                 now_iso(), job_id, revision),
-            ).rowcount == 1
-            conn.commit()
+            with transaction(conn):
+                published = conn.execute(
+                    "UPDATE jobs SET bundle_json=?, bundle_ledger_json=?, bundle_validation=?, "
+                    "bundle_validation_errors=?, bundle_build_json=?, bundle_review_revision=?, "
+                    "status = CASE WHEN ? THEN 'completed' WHEN ? AND status = 'completed' THEN 'for_review' "
+                    "ELSE status END, updated_at=? "
+                    "WHERE id=? AND (bundle_review_revision IS NULL OR bundle_review_revision <= ?)",
+                    (bundle_json, ledger_json, *verdict, build, revision, not quick and not invalid, invalid,
+                     now_iso(), job_id, revision),
+                ).rowcount == 1
+                if published:
+                    export_bundle(bundle_json, out_path, validation)
 
     if not published:
         stored = _stored_newer_build(job_id, revision, complete=not quick)

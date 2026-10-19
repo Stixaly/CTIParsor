@@ -264,45 +264,50 @@ _LEADING: list[tuple[str, str]] = sorted([
     ("fin", "late"),
 ], key=lambda p: -len(p[0]))
 
+# `\s` is ASCII only under RE2, and that is enough here: every string these
+# patterns read went through fold(), which turns any str.isspace() into " ".
+# `[0-9]`, not `\d`, here and below: RE2's `\d` is ASCII and `re`'s is every
+# script's, so "٢٠٢٤-٠٣-١٢" was a date only without re2.  fold() keeps digits
+# as they are; a date is read in ASCII digits under both (ADR-0049, 2026-10-18).
 _R_INSTANT = compile_pattern(
-    r"^(\d{4})-(\d{2})-(\d{2})[t ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,6}))?)?"
-    r"\s*(z|utc|gmt|[+-]\d{2}:?\d{2})?$")
-_R_ISO_DAY = compile_pattern(r"^(\d{4})-(\d{2})-(\d{2})$")
-_R_ISO_MONTH = compile_pattern(r"^(\d{4})-(\d{2})$")
-_R_YEAR = compile_pattern(r"^(\d{4})$")
-_R_YMD = compile_pattern(r"^(\d{4})[/.](\d{1,2})[/.](\d{1,2})$")
-_R_NUMERIC = compile_pattern(r"^(\d{1,2})([/.-])(\d{1,2})([/.-])(\d{4})$")
+    r"^([0-9]{4})-([0-9]{2})-([0-9]{2})[t ]([0-9]{2}):([0-9]{2})(?::([0-9]{2})(?:\.([0-9]{1,6}))?)?"
+    r"\s*(z|utc|gmt|[+-][0-9]{2}:?[0-9]{2})?$")
+_R_ISO_DAY = compile_pattern(r"^([0-9]{4})-([0-9]{2})-([0-9]{2})$")
+_R_ISO_MONTH = compile_pattern(r"^([0-9]{4})-([0-9]{2})$")
+_R_YEAR = compile_pattern(r"^([0-9]{4})$")
+_R_YMD = compile_pattern(r"^([0-9]{4})[/.]([0-9]{1,2})[/.]([0-9]{1,2})$")
+_R_NUMERIC = compile_pattern(r"^([0-9]{1,2})([/.-])([0-9]{1,2})([/.-])([0-9]{4})$")
 _R_D_M_Y = compile_pattern(                                                   # 27th of February of 2020
-    r"^(\d{1,2})(?:st|nd|rd|th|er)?\s+(?:of\s+)?([^\s\d]+?)\.?,?(?:\s+of)?\s*(\d{4})$")
-_R_D_MON_Y = compile_pattern(r"^(\d{1,2})[-/]([^\s\d/-]+?)\.?[-/](\d{4})$")          # 24-Apr-2020
-_R_Y_MON_D = compile_pattern(r"^(\d{4})[-/]([^\s\d/-]+?)\.?[-/](\d{1,2})$")          # 2008-May-31
-_R_Y_D_M = compile_pattern(r"^(\d{4}),?\s+(\d{1,2})(?:st|nd|rd|th|er)?\s+([^\s\d]+?)\.?$")  # 2019, 11 March
+    r"^([0-9]{1,2})(?:st|nd|rd|th|er)?\s+(?:of\s+)?([^\s0-9]+?)\.?,?(?:\s+of)?\s*([0-9]{4})$")
+_R_D_MON_Y = compile_pattern(r"^([0-9]{1,2})[-/]([^\s0-9/-]+?)\.?[-/]([0-9]{4})$")          # 24-Apr-2020
+_R_Y_MON_D = compile_pattern(r"^([0-9]{4})[-/]([^\s0-9/-]+?)\.?[-/]([0-9]{1,2})$")          # 2008-May-31
+_R_Y_D_M = compile_pattern(r"^([0-9]{4}),?\s+([0-9]{1,2})(?:st|nd|rd|th|er)?\s+([^\s0-9]+?)\.?$")  # 2019, 11 March
 _R_M_D_Y = compile_pattern(                                                   # December 27th of 2019
-    r"^([^\s\d]+?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,\s*|\s+)(?:of\s+)?(\d{4})$")
-_R_M_Y = compile_pattern(r"^([^\s\d]+?)\.?,?\s+(?:of\s+)?(\d{4})$")
-_R_D_M = compile_pattern(r"^(\d{1,2})(?:st|nd|rd|th|er)?\s+(?:of\s+)?([^\s\d]+?)\.?$")
-_R_M_D = compile_pattern(r"^([^\s\d]+?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?$")
+    r"^([^\s0-9]+?)\.?\s+([0-9]{1,2})(?:st|nd|rd|th)?(?:,\s*|\s+)(?:of\s+)?([0-9]{4})$")
+_R_M_Y = compile_pattern(r"^([^\s0-9]+?)\.?,?\s+(?:of\s+)?([0-9]{4})$")
+_R_D_M = compile_pattern(r"^([0-9]{1,2})(?:st|nd|rd|th|er)?\s+(?:of\s+)?([^\s0-9]+?)\.?$")
+_R_M_D = compile_pattern(r"^([^\s0-9]+?)\.?\s+([0-9]{1,2})(?:st|nd|rd|th)?$")
 # `\s*(?:[-/]\s*)?`, not `\s*[-/]?\s*`: without the separator the two `\s*`
 # share every space, which backtracking `re` (no re2) tries pairwise.
-_R_Q = compile_pattern(r"^q([1-4])\s*(?:[-/]\s*)?(\d{4})$")
-_R_Y_Q = compile_pattern(r"^(\d{4})\s*(?:[-/]\s*)?q([1-4])$")
-_R_QN = compile_pattern(r"^([1-4])q\s*(\d{4})$")
-_R_Q_WORDS = compile_pattern(r"^([^\s]+)\s+(?:quarter|trimestre)\s+(?:of\s+|de\s+|d')?(\d{4})$")
-_R_H = compile_pattern(r"^h([12])\s*(?:[-/]\s*)?(\d{4})$")
-_R_H_WORDS = compile_pattern(r"^([^\s]+)\s+(?:half|semestre)\s+(?:of\s+|de\s+|d')?(\d{4})$")
-_R_AGO = compile_pattern(r"^(\d+|[a-z]+)\s+(day|week|month|year)s?\s+ago$")
-_R_IL_Y_A = compile_pattern(r"^il y a\s+(\d+|[a-z]+)\s+(jours?|semaines?|mois|ans|années?|annees?)$")
+_R_Q = compile_pattern(r"^q([1-4])\s*(?:[-/]\s*)?([0-9]{4})$")
+_R_Y_Q = compile_pattern(r"^([0-9]{4})\s*(?:[-/]\s*)?q([1-4])$")
+_R_QN = compile_pattern(r"^([1-4])q\s*([0-9]{4})$")
+_R_Q_WORDS = compile_pattern(r"^([^\s]+)\s+(?:quarter|trimestre)\s+(?:of\s+|de\s+|d')?([0-9]{4})$")
+_R_H = compile_pattern(r"^h([12])\s*(?:[-/]\s*)?([0-9]{4})$")
+_R_H_WORDS = compile_pattern(r"^([^\s]+)\s+(?:half|semestre)\s+(?:of\s+|de\s+|d')?([0-9]{4})$")
+_R_AGO = compile_pattern(r"^([0-9]+|[a-z]+)\s+(day|week|month|year)s?\s+ago$")
+_R_IL_Y_A = compile_pattern(r"^il y a\s+([0-9]+|[a-z]+)\s+(jours?|semaines?|mois|ans|années?|annees?)$")
 # "the past six months", "over the past year" (a window ending at the anchor —
 # not the previous calendar year, which "last year" is).
 _R_PAST_N = compile_pattern(
     r"^(?:the\s+|over\s+the\s+|in\s+the\s+|during\s+the\s+)?(?:last|past|previous)\s+"
-    r"(?:(\d+|[a-z]+)\s+)?(day|week|month|year)s?$")
+    r"(?:([0-9]+|[a-z]+)\s+)?(day|week|month|year)s?$")
 _R_FR_PAST_N = compile_pattern(
-    r"^(?:au cours )?(?:des|ces|les)\s+(\d+|[a-z]+)\s+(?:derniers|dernières|dernieres)\s+"
+    r"^(?:au cours )?(?:des|ces|les)\s+([0-9]+|[a-z]+)\s+(?:derniers|dernières|dernieres)\s+"
     r"(jours|semaines|mois|ans|années|annees)$")
-_R_LAST_MONTHNAME = compile_pattern(r"^(?:last|previous)\s+([^\s\d]+)$")
-_R_MONTHNAME_REL_YEAR = compile_pattern(r"^([^\s\d]+)\s+(?:of\s+)?(last|this|next)\s+year$")
-_R_FR_MONTH_DERNIER = compile_pattern(r"^(?:en\s+)?([^\s\d]+)\s+dernier$")
+_R_LAST_MONTHNAME = compile_pattern(r"^(?:last|previous)\s+([^\s0-9]+)$")
+_R_MONTHNAME_REL_YEAR = compile_pattern(r"^([^\s0-9]+)\s+(?:of\s+)?(last|this|next)\s+year$")
+_R_FR_MONTH_DERNIER = compile_pattern(r"^(?:en\s+)?([^\s0-9]+)\s+dernier$")
 
 _REL_FIXED: dict[str, tuple[str, int]] = {
     # phrase -> (unit, offset from the anchor's own unit)
@@ -640,7 +645,7 @@ def _year_candidate(rest: str, anchor_day: date) -> str | None:
 
 _RANGE_SEPARATORS = (" and ", " to ", " through ", " thru ", " until ", " till ",
                      " - ", " et ", " à ", " au ", " jusqu'à ", " jusqu'au ")
-_R_YEAR_RANGE = compile_pattern(r"^(\d{4})\s*-\s*(\d{4})$")
+_R_YEAR_RANGE = compile_pattern(r"^([0-9]{4})\s*-\s*([0-9]{4})$")
 
 
 def _split_range(s: str) -> tuple[str, str] | None:
@@ -819,7 +824,7 @@ def mark_conflicts(times: list[TemporalAssertion]) -> list[TemporalAssertion]:
 
 # ── Stage 3: check one relationship's dates against its chunk ────────────────
 
-_R_NUMERIC_ANY = compile_pattern(r"(\d{1,2})([/.-])(\d{1,2})([/.-])(\d{4})")
+_R_NUMERIC_ANY = compile_pattern(r"([0-9]{1,2})([/.-])([0-9]{1,2})([/.-])([0-9]{4})")
 
 
 def numeric_order_hint(chunk: str, span: tuple[int, int], sep: str | None = None) -> str | None:
@@ -1181,8 +1186,8 @@ _R_HEADER_KEY = compile_pattern(
     r"(published|posted|publication date|date published|release date|last updated|updated|"
     r"publié|publie|mis à jour|mis a jour|date)")
 _R_DATE_IN_LINE = compile_pattern(
-    r"(\d{4}-\d{2}-\d{2}|\d{1,2}(?:st|nd|rd|th|er)?\s+[^\s\d,]+\.?,?\s+\d{4}|"
-    r"[^\s\d,]+\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})")
+    r"([0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{1,2}(?:st|nd|rd|th|er)?\s+[^\s0-9,]+\.?,?\s+[0-9]{4}|"
+    r"[^\s0-9,]+\.?\s+[0-9]{1,2}(?:st|nd|rd|th)?,?\s+[0-9]{4})")
 _HEADER_PRIORITY = {"published": 0, "date_line": 1, "updated": 2}
 
 

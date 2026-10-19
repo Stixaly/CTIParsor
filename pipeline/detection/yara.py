@@ -25,7 +25,8 @@ _TECHNIQUE_META_KEYS = frozenset({
     "att&ck", "technique", "techniques",
 })
 
-_TECHNIQUE_RE = compile_pattern(r"\bT\d{4}(?:\.\d{3})?\b", re.IGNORECASE)
+# re.ASCII: `re` reads `\b` as RE2 does (ADR-0049, 2026-10-18).
+_TECHNIQUE_RE = compile_pattern(r"\bT[0-9]{4}(?:\.[0-9]{3})?\b", re.IGNORECASE | re.ASCII)
 
 
 class YaraAdapter(RuleCorpusAdapter):

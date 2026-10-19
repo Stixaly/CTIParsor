@@ -36,6 +36,19 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "Relationship dates keep their precision: month/year dates move from start_time/stop_time "
      "to x_temporal_assertions (ADR-0063)",
      "extraction"),
+    ("51539c2", "2026-10-18",
+     "A CyNER threat actor written as ordinary language is dropped, and a spaCy location must be "
+     "able to be a place name: \"the United States\" now ships as United States (ADR-0088)",
+     "extraction"),
+    ("f64452d", "2026-10-18",
+     "Under RE2 a no-break or thin space is whitespace too: ASNs, spaced defangs, Windows paths, alias "
+     "lists, list items, Stage 3f quotes, YARA imports and Sigma rule boundaries next to one (ADR-0049)",
+     "extraction"),
+    ("8c61bd9", "2026-10-18",
+     "RE2 and re read \\d, \\w and \\b alike: no address, ASN, Windows path or port cut out of a word "
+     "(o@evil.com out of joão@evil.com); alias names, version filters and YARA rule names read every "
+     "script (ADR-0049)",
+     "extraction"),
 )
 
 

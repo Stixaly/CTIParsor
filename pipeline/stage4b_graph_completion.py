@@ -115,8 +115,10 @@ _ALIASABLE_TYPES: frozenset[str] = frozenset(
 
 # Regexes for IOC-shaped names we must never merge even if they look similar
 # (CTINexus' "IOC protection": CVE-2023-23397 vs CVE-2023-23392 are distinct).
+# re.ASCII: `re` reads `\b` as RE2 does, so a name that glues an IoC to a
+# letter of another script is guarded under both (ADR-0049, 2026-10-18).
 _IOC_GUARD = compile_pattern(
-    r"(?i)\b(?:CVE-\d{4}-\d+|[0-9a-f]{32,64}|(?:\d{1,3}\.){3}\d{1,3})\b"
+    r"(?i)\b(?:CVE-[0-9]{4}-[0-9]+|[0-9a-f]{32,64}|(?:[0-9]{1,3}\.){3}[0-9]{1,3})\b", re.ASCII
 )
 
 # ── Deterministic transitive composition table (ADR-0013) ─────────────────────

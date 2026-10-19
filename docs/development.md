@@ -129,6 +129,7 @@ CTIParsor/
 │   ├── stage2b_gazetteer.py       # Aho-Corasick gazetteer NER (1 114 entities)
 │   ├── stage2c_ttp_semantic.py    # Sentence-transformer TTP detection
 │   ├── stage2d_cyner.py           # CyNER 2.0 cybersecurity NER (DeBERTa-v3)
+│   ├── ner_precision.py           # CyNER actors and spaCy places must look like names (ADR-0088)
 │   ├── stage2e_gliner.py          # GLiNER / NuNER zero-shot NER
 │   ├── stage2g_alias_list.py      # "X (aka Y, Z)" alias lists → threat actors (regex)
 │   ├── stage2f_cve_enrichment.py  # CVE description + CVSS v3 from the cve_cache table / CIRCL (opt-in)
@@ -255,6 +256,7 @@ CTIParsor/
 │   ├── measure_normalize_divergence.py # Divergences between the three atom normalizers
 │   ├── measure_pin_allocation.py  # Pin edges under sequential vs fair-share budgets (ADR-0026)
 │   ├── measure_relevance.py       # Proposed-rule relevance on real reports
+│   ├── measure_review_revision_trigger.py # Row vs statement trigger for review_revision, in a throwaway schema (ADR-0086)
 │   ├── measure_stage1f_tradeoffs.py # Crop vs whole page: tokens, latency, kind accuracy
 │   ├── measure_ttp_vs_observable_coverage.py # Technique coverage vs evidence-backed coverage
 │   ├── measure_web_capture.py     # PDF capture and ingestion quality of the URL tab

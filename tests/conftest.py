@@ -103,6 +103,14 @@ def _attack_release_at_its_default(monkeypatch):
     attack_data.reset()
 
 
+@pytest.fixture(autouse=True)
+def _ner_precision_filters_at_their_default(monkeypatch):
+    """The ADR-0088 filters run as their default, whatever `.env` says (it is
+    loaded into os.environ at import): the Stage 2 tests pin the names CyNER
+    and spaCy return.  A test about the filters sets the variable itself."""
+    monkeypatch.delenv("NER_PRECISION_FILTERS", raising=False)
+
+
 @pytest.fixture()
 def mock_llm_response() -> dict:
     """Minimal valid LLM JSON response matching the LLMEnrichmentResult schema."""

@@ -43,7 +43,11 @@ _CORPORA_ROOT = (_ROOT / "corpora").resolve()
 # `fd::`) asks git to run an arbitrary local command as the transport itself.
 # git blocks `ext::` by default today, but that is git's default to change, not
 # a guarantee this app controls — checked here too rather than assumed safe.
-_UNSAFE_REMOTE_RE = compile_pattern(r"^-|^\w+::")
+# The helper name is what git reads as one (transport.c is_urlschemechar:
+# ASCII letters, digits, "+", "-", "."), and what RE2 read as `\w` ("_"): a
+# `\w+` let "a-b::" through, and under `re` refused "é::", which git takes for a
+# path (ADR-0049, 2026-10-18).
+_UNSAFE_REMOTE_RE = compile_pattern(r"^-|^[A-Za-z0-9_][A-Za-z0-9_+.-]*::")
 
 #: Formats this project recognises, independent of whether a parser is compiled in.
 #:

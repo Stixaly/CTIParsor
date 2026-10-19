@@ -44,13 +44,14 @@ from __future__ import annotations
 import functools
 import json
 import os
+import re
 import string
 from pathlib import Path
 
 from models.schemas import EntityType, RawEntity
 from pipeline import attack_data
 from pipeline.env_flags import env_bool, env_float, env_int
-from pipeline.regex_safety import compile_pattern
+from pipeline.regex_safety import PY_WHITESPACE, compile_pattern
 
 _SKIP_HEAVY = env_bool("SKIP_HEAVY_MODELS")
 
@@ -202,7 +203,9 @@ def _etype_from_id(mitre_id: str) -> EntityType:
 
 # Hard-wrap unwrapping (ADR-0023 Phase 2).
 _BULLET_CHARS = ("-", "*", "\u2022", "\u2013", "\u2014")
-_LIST_NUMBER = compile_pattern(r"^\d+[.)]\s")
+# PY_WHITESPACE, not `\s`, here and in the caption pattern: RE2's `\s` is ASCII
+# only, and a PDF writes "1.\xa0Sent" and "Table\xa03".
+_LIST_NUMBER = compile_pattern(r"^[0-9]+[.)][" + PY_WHITESPACE + "]")
 
 # Pre-compiled patterns for text processing
 _CRLF_RE = compile_pattern(r"\r\n|\r")
@@ -300,7 +303,7 @@ _ADVISORY_VERBS: frozenset[str] = frozenset({
 # but lowercase "table" can appear in genuine malware descriptions like "hash
 # table" or "routing table" and must not be excluded) followed by whitespace
 # and one or more digits, as a whole word.
-_TABLE_CAPTION_PATTERN = compile_pattern(r"\bTable\s+\d+\b")
+_TABLE_CAPTION_PATTERN = compile_pattern(r"\bTable[" + PY_WHITESPACE + r"]+[0-9]+\b", re.ASCII)
 
 _ASCII_LETTERS = frozenset(string.ascii_letters)
 
