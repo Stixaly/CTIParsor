@@ -328,6 +328,100 @@ Without an LLM provider, select mode cannot select: Stage 2c falls back to the
 # TTP_RETRIEVAL_EXCLUDE_CITED=
 ```
 
+## ATT&CK release
+
+`ATTACK_RELEASE` (ADR-0087) selects the ATT&CK release the pipeline reads. A
+release is a **track**: the files built from MITRE's bundles
+(`mitre_index.json`, `gazetteer.json`, `attack_relationships.json`,
+`attack_revoked.json`, the embeddings of `mitre_index.json` with their meta file,
+and the retrieval corpus with its embeddings), which Stages 2b, 2c, 3c and 4b
+read, and which the API's ATT&CK search reads through `mitre_index.json`.
+
+| `ATTACK_RELEASE` | Files read |
+|---|---|
+| unset, empty, `19.2`, `v19.2`, `default` | `pipeline/data/` (the default track, release 19.2) |
+| `20.0`, `v20.0` | `pipeline/data/attack/20.0/` (ATT&CK v20.0, released 2026-10-13) |
+
+```env
+# ATTACK_RELEASE=20.0
+```
+
+* **The default track is 19.2.** `pipeline/data/attack_manifest.json` names the
+  release and lists, per file, what was checked against a rebuild from the
+  official v19.2 assets. Two files are older than 19.2 and say so under
+  `exceptions`: `gazetteer.json` (14 name variants of 19.2 missing) and
+  `attack_relationships.json` (237 pairs missing, 1 extra).
+* **An unknown value stops the run.** A value that names no track, or that is
+  not a version number, raises `UnknownAttackRelease` before Stage 1, before
+  Stage 4 (so a finalize too) and when the run manifest is built. The message
+  lists the releases this installation has. There is no fallback to the default:
+  a run is never given another release than the one it asked for (ADR-0073's
+  rule for a TLP level). `python -c "from pipeline import attack_data;
+  print(attack_data.available())"` lists them.
+* **It is read when the process starts.** The loaders cache what they read, like
+  `TTP_EMBEDDING_MODEL`. Set it in `.env` (the `app`, `worker` and `dev`
+  services read that file) and restart. The first use fixes the release for the
+  process: a later call that resolves another version raises, so a value loaded
+  late from `.env` cannot split a process across two tracks. The API and the
+  worker check it at start and log `ATT&CK release: <version>`.
+* **A finalize uses the release of the process that serves it**, which is not
+  necessarily the run's. The build record (ADR-0086) holds the finalize's own
+  manifest.
+* **The interface does not follow.** It reads the static
+  `frontend/public/mitre_index.json`, whichever track a run uses.
+* **Measured on AnnoCTR dev** ([attack-v20-2026-10](eval/attack-v20-2026-10.md)):
+  20.0 against 19.2, technique F1 0.584 → 0.609, a difference that is not
+  significant ([−0.019, +0.076]). No technique new in v20 reaches a candidate
+  list on dev. The default stays 19.2 until a comparison meets ADR-0060's
+  rule.
+
+### Build a track for a new release
+
+```bash
+# from the host: the three bundles of the release, into data/attack-stix/v20.1/
+# (git-ignored; 67 MB for v20.0). Each is checked against the sha256 GitHub
+# publishes for it
+python scripts/download_attack.py --release 20.1
+# pipeline/data/attack/20.1/; needs sentence-transformers for the embeddings
+docker compose run --rm dev python scripts/build_attack_release.py --release 20.1
+make docker-build && docker compose up -d
+```
+
+The build refuses a bundle that is not the file GitHub published or whose
+`x-mitre-collection` says another release, and refuses to overwrite a track
+without `--force`. It writes next to the target and renames, so a failure leaves
+no half-built track. Embeddings use `TTP_EMBEDDING_MODEL`; with a model other
+than the default, the track gets a `mitre_embeddings_manifest.json` (model,
+dimensions, thresholds) for Stage 2c. The CAPEC entries of
+`mitre_index.json` are carried over from the default track
+(`--capec-index` names another file, `--out-dir` another directory, and
+`--stix-dir` another place for the bundles). Commit the directory: a track that
+is not in the repository cannot be selected from the image. Each track is about
+40 MB (v20.0: 39,900,662 bytes).
+
+`scripts/download_attack.py` without `--release` still fetches the master branch
+of mitre/cti, which is the latest release (20.0 on 2026-10-18), not necessarily
+the default track's. The evaluation protocol maps its gold against a bundle it
+finds by sha256 (docs/eval/README.md), so that file is refused for the default
+track.
+
+### What the run manifest records
+
+`api/run_config.build_manifest` (ADR-0059, ADR-0086) holds, for the release:
+
+* an `attack` block: `release`, `default`, `requested` (the raw setting),
+  `directory`, `manifest_sha256`, the sha256 of the source bundles per domain
+  (16 hex characters, like the other hashes), `exceptions`, and
+  `built_with` (how the track was built), and `modified_files`, the files whose
+  hash is no longer the one the track's manifest records, or that it does not
+  know (`<name> (not in the manifest)`). For those, the announced release is no
+  longer proven;
+* `data`: the hash of the files the process actually loads, `attack_manifest.json`
+  included;
+* `ATTACK_RELEASE` in the captured environment;
+* the Stage 3 checkpoint's fingerprint carries `attack_release`, so a checkpoint
+  does not resume on another track.
+
 ## Document-level relations (Stage 3doc)
 
 One extra LLM call per report reads the **whole** document and extracts

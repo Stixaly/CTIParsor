@@ -118,7 +118,7 @@ def test_a_build_record_names_what_built_the_bundle(monkeypatch, kind):
     assert set(record) == {"kind", "built_at", "git_rev", "policy", "env", "manifest"}
     assert (record["kind"], record["git_rev"], record["policy"]) == (kind, "abc1234", policy)
     assert record["built_at"].endswith("Z") and record["env"]["STIX_TLP"] == "amber"
-    assert set(record["manifest"]) == {"llm", "models", "data", "packages"}
+    assert set(record["manifest"]) == {"llm", "models", "attack", "data", "packages"}
     assert "entity_overrides" not in record                      # Stages 4/5 never read them
 
 

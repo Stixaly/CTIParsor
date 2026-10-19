@@ -49,6 +49,7 @@ import string
 from pathlib import Path
 
 from models.schemas import EntityType, RawEntity
+from pipeline import attack_data
 from pipeline.env_flags import env_bool, env_float, env_int
 from pipeline.regex_safety import PY_WHITESPACE, compile_pattern
 
@@ -106,14 +107,15 @@ def _thresholds() -> tuple[float, float]:
     """
     high, medium = _MODEL_THRESHOLDS.get(_TTP_EMBEDDING_MODEL, _DEFAULT_THRESHOLDS)
 
-    if _MANIFEST_PATH.exists():
+    manifest_path = attack_data.resolve(_MANIFEST_PATH)
+    if manifest_path.exists():
         try:
-            manifest = json.loads(_MANIFEST_PATH.read_text(encoding="utf-8"))
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             t = manifest.get("thresholds")
             if isinstance(t, dict) and "high" in t and "medium" in t:
                 high, medium = float(t["high"]), float(t["medium"])
         except (OSError, ValueError, TypeError, AttributeError) as exc:
-            logger.warning(f"[Stage 2c] {_MANIFEST_PATH.name} unreadable ({exc}); "
+            logger.warning(f"[Stage 2c] {manifest_path.name} unreadable ({exc}); "
                            f"default thresholds {high}/{medium}")
 
     hi_env = os.getenv("TTP_HIGH_THRESHOLD")
@@ -525,14 +527,17 @@ def _load_corpus() -> tuple | None:
     Validates the cache against the manifest (mitre_embeddings_manifest.json) to
     detect when the embedding model has changed and a rebuild is needed.
     """
-    if not _EMB_PATH.exists() or not _META_PATH.exists():
+    emb_path = attack_data.resolve(_EMB_PATH)
+    meta_path = attack_data.resolve(_META_PATH)
+    manifest_path = attack_data.resolve(_MANIFEST_PATH)
+    if not emb_path.exists() or not meta_path.exists():
         logger.warning("Embedding cache not found — run: python scripts/build_indexes.py")
         return None
 
     # ── Manifest check — detect stale cache after model change ──────────────
-    if _MANIFEST_PATH.exists():
+    if manifest_path.exists():
         try:
-            manifest = json.loads(_MANIFEST_PATH.read_text(encoding="utf-8"))
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             cache_model = manifest.get("model", _LEGACY_MODEL)
         except (OSError, ValueError, AttributeError) as exc:
             # Read as a pre-manifest cache: the model check below then decides.
@@ -553,8 +558,8 @@ def _load_corpus() -> tuple | None:
 
     try:
         import numpy as np
-        embeddings = np.load(str(_EMB_PATH))
-        meta = json.loads(_META_PATH.read_text(encoding="utf-8"))
+        embeddings = np.load(str(emb_path))
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
     except Exception as e:
         logger.error(f"Could not load embedding cache: {e}")
         return None
@@ -596,16 +601,19 @@ def semantic_available() -> bool:
         return False
     try:
         from sentence_transformers import SentenceTransformer  # noqa: F401
-        if not _EMB_PATH.exists() or not _META_PATH.exists():
+        emb_path = attack_data.resolve(_EMB_PATH)
+        meta_path = attack_data.resolve(_META_PATH)
+        manifest_path = attack_data.resolve(_MANIFEST_PATH)
+        if not emb_path.exists() or not meta_path.exists():
             return False
         # Quick manifest check (no full load)
-        if _MANIFEST_PATH.exists():
+        if manifest_path.exists():
             try:
-                manifest = json.loads(_MANIFEST_PATH.read_text(encoding="utf-8"))
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
                 if manifest.get("model", _LEGACY_MODEL) != _TTP_EMBEDDING_MODEL:
                     return False
             except (OSError, ValueError, AttributeError) as exc:
-                logger.warning(f"[Stage 2c] {_MANIFEST_PATH.name} unreadable ({exc}); "
+                logger.warning(f"[Stage 2c] {manifest_path.name} unreadable ({exc}); "
                                "assuming the embeddings match the configured model")
         return True
     except ImportError:

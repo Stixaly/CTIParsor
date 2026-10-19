@@ -13,6 +13,7 @@ from tenacity import RetryError, retry, retry_if_exception_type, stop_after_atte
 # Initialize logging
 from api.logging_config import get_logger
 from models.schemas import EntityType, EvidenceLabel, RawEntity
+from pipeline import attack_data
 from pipeline.env_flags import env_int
 from pipeline.llm_parse import SPOTLIGHT_RULE, fit_report
 from pipeline.stage3f_ttp_select import TtpReview
@@ -1003,6 +1004,8 @@ def stage3_settings(*, consensus: bool, verify_rels: bool, verify_ttps: bool,
         "verify_ttps": verify_ttps,
         "max_output_tokens": _MAX_OUTPUT_TOKENS,
         "max_prompt_length": _MAX_PROMPT_LENGTH,
+        # 3f reads the technique descriptions of the selected ATT&CK release.
+        "attack_release": attack_data.current().version,
     }
 
 
