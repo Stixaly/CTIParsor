@@ -888,7 +888,6 @@ def _extract_ner_entities(text: str) -> list[RawEntity]:
     doc = _nlp(text[:100_000])
     results = []
     refine = ner_precision.enabled()
-    malware = refine and ner_precision.malware_enabled()
 
     label_map = {
         "PRODUCT": EntityType.MALWARE,
@@ -912,7 +911,7 @@ def _extract_ner_entities(text: str) -> list[RawEntity]:
         if len(value) <= 2 or value.isdigit():
             continue
         if refine:
-            value = ner_precision.refine_spacy(value, etype, malware=malware)
+            value = ner_precision.refine_spacy(value, etype)
             if len(value) <= 2:         # "the US" -> "US": as short as a bare "US"
                 continue
 

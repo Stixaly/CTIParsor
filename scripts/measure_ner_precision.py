@@ -53,7 +53,12 @@ gates    ADR-0089's criteria (docs/eval/ner-malware-2026-10.md, fixed before
          Exit 0 adopt, 1 do not adopt, 2 void (M0), 3 an input is missing.
 
 Variants: off (NER_PRECISION_FILTERS=false), adr0088 (the filters on,
-NER_PRECISION_MALWARE=false), malware (both on).
+NER_PRECISION_MALWARE=false), malware (both on).  ADR-0089's lead was not
+adopted and its switch was removed from the pipeline after the measurement:
+the `malware` variant, and `run` with NER_PRECISION_MALWARE, refuse to run
+without it.  Replay or run them at commit ccb9edf, where the lead and this
+harness were frozen.  `gates` is ADR-0089's rule as registered; a new lead
+registers its own.
 
 Scoring is `evaluation.metrics.score_entities`, strict, on the types AnnoCTR
 annotates in each document, micro-averaged over the documents; the bootstrap
@@ -165,7 +170,14 @@ def _meta(args, models: dict) -> dict:
     return {"commit": commit, "clean": clean, "started": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "split": args.split, "disable": args.disable, "allow_degraded": args.allow_degraded,
             "limit": args.limit, "env": env, "models": models,
-            "filters": ner_precision.enabled(), "malware_lead": ner_precision.malware_enabled()}
+            "filters": ner_precision.enabled(), "malware_lead": _malware_lead()}
+
+
+def _malware_lead() -> bool:
+    """Whether ADR-0089's lead is on; False where the switch no longer exists."""
+    from pipeline import ner_precision
+    enabled = getattr(ner_precision, "malware_enabled", None)
+    return bool(enabled()) if enabled else False
 
 
 def _write_meta(args, models: dict) -> None:
@@ -207,9 +219,13 @@ def cmd_run(args) -> None:
             temperature = -1.0
         if temperature != 0:
             sys.exit("Stage 3 runs: set LLM_TEMPERATURE=0 (docs/eval/README.md, run-to-run spread)")
-    for k in ("NER_PRECISION_FILTERS", "NER_PRECISION_MALWARE"):
+    from pipeline import ner_precision
+    has_lead = hasattr(ner_precision, "malware_enabled")
+    for k in ("NER_PRECISION_FILTERS", "NER_PRECISION_MALWARE") if has_lead else ("NER_PRECISION_FILTERS",):
         if os.environ.get(k, "").strip().lower() not in ("true", "false"):
             sys.exit(f"set {k}=true or {k}=false: a measurement run names the filters it runs with")
+    if not has_lead and os.environ.get("NER_PRECISION_MALWARE", "").strip().lower() in ("1", "true", "yes", "on"):
+        sys.exit("NER_PRECISION_MALWARE=true: this checkout has no malware lead (ADR-0089, removed); run at ccb9edf")
     # The rows analysts saved in the database (deny rows, calibrated cutoffs)
     # change what the models' names become, and can change between two runs.
     for k in ("ENTITY_OVERRIDES_ENABLED", "THRESHOLD_CALIBRATION_ENABLED"):
@@ -525,6 +541,9 @@ def _scored(d, srcs) -> dict:
 
 
 def replay_variant(rows, name: str, check: bool = False) -> dict:
+    from pipeline import ner_precision
+    if name == "malware" and not hasattr(ner_precision, "malware_enabled"):
+        sys.exit("this checkout has no malware lead (ADR-0089, removed after the measurement): replay it at ccb9edf")
     os.environ.update(VARIANTS[name])
     out = {}
     for d, rec in rows:

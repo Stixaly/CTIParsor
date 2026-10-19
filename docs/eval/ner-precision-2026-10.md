@@ -280,7 +280,9 @@ runs' durations differ by the LLM server's latency, not by this change.
   (+13.2 points [+9.1, +18.6] offline) was seen only after the measurement;
   it would have to be registered as one lead and measured on data this
   study has not read: dev has been read, and test is kept for frozen
-  configurations (ADR-0060).
+  configurations (ADR-0060). Registered so and measured once on test on
+  2026-10-19 (ADR-0089, [ner-malware-2026-10.md](ner-malware-2026-10.md)):
+  malware precision +19.5 points, locations −4.2, not adopted.
 - Malware precision on dev therefore stays at 0.205: 93 of its 132 false
   positives come from CyNER and 23 from spaCy (October 18 breakdown).
 

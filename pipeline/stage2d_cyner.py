@@ -428,9 +428,8 @@ def extract_cyner_entities(text: str) -> list[RawEntity]:
     cutoff = {etype: get_threshold("cyner", etype.value, _MEDIUM_THRESH) for etype in _LABEL_MAP.values()}
 
     results: list[RawEntity] = []
-    seen: dict[tuple[str, EntityType], int] = {}      # key -> index in results
+    seen: set[tuple[str, EntityType]] = set()
     refine = ner_precision.enabled()
-    malware = refine and ner_precision.malware_enabled()
     cased = refine and ner_precision.text_is_cased(text)
 
     for pred in predictions:
@@ -453,12 +452,11 @@ def extract_cyner_entities(text: str) -> list[RawEntity]:
         # CyNER occasionally merges a comma-separated list of names into one
         # span ("AZORULT, FORMBOOK, TRICKBOT") — split before filtering so
         # each real name is evaluated (and can survive) on its own.
-        fragments = ner_precision.split_cyner(raw_value) if malware else _split_fragments(raw_value)
-        for fragment in fragments:
+        for fragment in _split_fragments(raw_value):
             value = _normalize_candidate(fragment)
             value = _collapse_repeated_token(value)
             if refine:      # ADR-0088, before the dedup: a capitalised spelling outlives a lowercase one
-                value = ner_precision.refine_cyner(value, etype, cased, malware=malware)
+                value = ner_precision.refine_cyner(value, etype, cased)
             if not value or len(value) < 3:
                 continue
             if _has_boundary_artifact(value):
@@ -478,11 +476,8 @@ def extract_cyner_entities(text: str) -> list[RawEntity]:
             # so this is a dedup by identity, not a ranking).
             key = (value.lower(), etype)
             if key in seen:
-                if malware:     # ADR-0089: "Ryuk ransomware" shortened meets "Ryuk"
-                    kept = results[seen[key]]
-                    kept.confidence = max(kept.confidence, round(score, 4))
                 continue
-            seen[key] = len(results)
+            seen.add(key)
 
             results.append(RawEntity(
                 value=value,

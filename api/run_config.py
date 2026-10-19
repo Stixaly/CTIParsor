@@ -40,7 +40,6 @@ _CAPTURED_ENV = (
     # Stage 2 filters and switches.
     "GAZETTEER_POLICY", "BENIGN_IOC_FILTER", "GLINER_ENABLED",
     "GLINER_CHUNK_CHARS", "CYNER_CHUNK_CHARS", "NER_PRECISION_FILTERS",
-    "NER_PRECISION_MALWARE",
     # Stage 3: prompt and response bounds, and the verification gates.
     "LLM_MAX_PROMPT_LENGTH", "LLM_DOC_MAX_PROMPT_LENGTH", "LLM_MAX_RESPONSE_LENGTH",
     "LLM_MAX_OUTPUT_TOKENS", "LLM_TIMEOUT",
