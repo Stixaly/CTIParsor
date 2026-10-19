@@ -75,6 +75,7 @@ import stix2
 
 from api.logging_config import get_logger
 from models.schemas import STIX_RELATIONSHIP_TYPES
+from pipeline import attack_data
 from pipeline.aliases import mitre_id_for
 from pipeline.regex_safety import compile_pattern
 from pipeline.stix_access import field as stix_field
@@ -480,8 +481,9 @@ def stated_by_the_report(obj) -> bool:
 @functools.lru_cache(maxsize=1)
 def _attack_pairs() -> dict[tuple[str, str], str]:
     """(src_attack_id, tgt_attack_id) → verb, or {} when the index is absent."""
+    path = attack_data.resolve(_ATTACK_REL_PATH)     # outside the try: UnknownAttackRelease is a ValueError
     try:
-        data = json.loads(_ATTACK_REL_PATH.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
         return {(s, t): v for s, v, t in data.get("pairs", [])}
     except (OSError, ValueError):
         return {}

@@ -39,6 +39,7 @@ from pydantic import BaseModel, Field
 
 from api.logging_config import get_logger
 from models.schemas import EvidenceLabel
+from pipeline import attack_data
 from pipeline.env_flags import env_int
 from pipeline.llm_parse import fit_report
 from pipeline.regex_safety import compile_pattern
@@ -135,6 +136,8 @@ def _definitions() -> dict[str, str]:
     try:
         from pipeline import mitre_db
         return {t["id"].upper(): (t.get("description") or "") for t in mitre_db.get_techniques()}
+    except attack_data.UnknownAttackRelease:
+        raise       # an unknown ATTACK_RELEASE reaches the caller; no empty dict is cached (ADR-0087)
     except Exception as exc:
         # Cached: every selection prompt of this process then lists the
         # candidates without their ATT&CK definition.

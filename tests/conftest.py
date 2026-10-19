@@ -26,6 +26,13 @@ os.environ.setdefault("API_ALLOWED_HOSTS", "testserver,localhost,127.0.0.1,[::1]
 from api.storage import InMemoryJobStorage  # noqa: E402
 from models.config import PipelineConfig
 from models.schemas import EntityType, RawEntity
+from pipeline import attack_data
+
+# api.storage has loaded .env (api.db), and three test modules ask Stage 2b
+# whether the gazetteer exists while they are collected, before any fixture
+# runs: the shipped ATT&CK track from the start, whatever .env says (ADR-0087).
+os.environ.pop("ATTACK_RELEASE", None)
+attack_data.reset()
 
 # ── Input fixtures ─────────────────────────────────────────────────────────────
 
@@ -81,6 +88,19 @@ def _llm_checks_at_their_defaults(monkeypatch):
     A test about verification turns it on itself."""
     monkeypatch.setattr("pipeline.stage3d_verify._VERIFY_ENABLED", False)
     monkeypatch.setattr("pipeline.stage3f_ttp_verify._VERIFY_ENABLED", False)
+
+
+@pytest.fixture(autouse=True)
+def _attack_release_at_its_default(monkeypatch):
+    """The shipped ATT&CK track (ADR-0087), whatever the developer's `.env`
+    says: `pipeline.stage3_llm` loads it at import, and a local
+    `ATTACK_RELEASE=20.0` would put every loader on another release's files.
+    A test about a track sets it itself.  The release a process fixes at its
+    first use (`attack_data.current`) is forgotten around each test."""
+    monkeypatch.delenv("ATTACK_RELEASE", raising=False)
+    attack_data.reset()
+    yield
+    attack_data.reset()
 
 
 @pytest.fixture(autouse=True)

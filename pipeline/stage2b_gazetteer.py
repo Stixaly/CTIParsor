@@ -31,7 +31,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from models.schemas import EntityType, RawEntity
-from pipeline import gazetteer_policy
+from pipeline import attack_data, gazetteer_policy
 from pipeline.env_flags import env_bool
 from pipeline.gazetteer_policy import Judgement
 from pipeline.overrides import drop_denied, promoted_entries
@@ -67,11 +67,12 @@ def _load() -> list[dict]:
     promoted (ADR-0052, `entity_overrides` rows with action=promote).
     Entries are sorted longest-first so 'Lazarus Group' matches before 'Lazarus'.
     """
-    if not _INDEX_PATH.exists():
+    path = attack_data.resolve(_INDEX_PATH)
+    if not path.exists():
         logger.warning("gazetteer.json not found — skipping gazetteer NER. Run: python scripts/build_indexes.py")
         return []
     try:
-        entries = json.loads(_INDEX_PATH.read_text(encoding="utf-8"))
+        entries = json.loads(path.read_text(encoding="utf-8"))
     except Exception as e:
         logger.error(f"Could not load gazetteer: {e}")
         return []
@@ -349,7 +350,7 @@ def _match_regex(text: str, judge: _Judge | None = None, apply: bool = False,
 
 def available() -> bool:
     """Return True if the gazetteer index file exists."""
-    return _INDEX_PATH.exists()
+    return attack_data.resolve(_INDEX_PATH).exists()
 
 
 # ---------------------------------------------------------------------------
@@ -368,7 +369,7 @@ class GazetteerStage(BaseExtractionStage):
         pass
 
     def available(self) -> bool:
-        return _INDEX_PATH.exists() and not _SKIP_HEAVY
+        return attack_data.resolve(_INDEX_PATH).exists() and not _SKIP_HEAVY
 
     def extract(self, text: str) -> list[RawEntity]:
         return match_gazetteer(text)

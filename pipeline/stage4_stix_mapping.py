@@ -10,7 +10,7 @@ import yaml
 # Initialize logging
 from api.logging_config import get_logger
 from models.schemas import STIX_RELATIONSHIP_TYPES, EntityType, RawEntity
-from pipeline import stix_ids
+from pipeline import attack_data, stix_ids
 from pipeline.aliases import alias_surface_forms, canonical_name, type_conflict
 from pipeline.benign import benign_reason
 from pipeline.bundle_ledger import ORIGIN_EXTRACTED, MappingLedger
@@ -572,6 +572,9 @@ def build_stix_bundle(
     policy's `temporal_export.mode` allows (`faithful` by default: a verified
     instant; `day`: also a verified day, projected and labelled as such).
     """
+    # A finalize reaches this without run_document, and Stage 4b catches its
+    # own errors: an unknown ATTACK_RELEASE stops the build here (ADR-0087).
+    attack_data.current()
     stix_objects: list = []
     led = ledger if ledger is not None else MappingLedger()
 

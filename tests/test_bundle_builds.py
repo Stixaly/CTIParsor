@@ -501,7 +501,7 @@ def test_a_finalize_records_what_built_its_bundle(db, monkeypatch, quick, kind):
     assert build["git_rev"] == "abc1234"
     assert build["policy"] == policy and passed == [policy] and len(loaded) == 1     # read once, used for both
     assert build["env"]["STIX_TLP"] == "amber"
-    assert set(build["manifest"]) == {"llm", "models", "data", "packages"}
+    assert set(build["manifest"]) == {"llm", "models", "attack", "data", "packages"}
     assert row["bundle_review_revision"] == row["review_revision"] == 1
     assert "sk-secret-value" not in row["bundle_build_json"]
 

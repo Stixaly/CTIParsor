@@ -11,6 +11,99 @@ theme.
 
 ### Added
 
+#### An ATT&CK release is a track a run selects, and a v20.0 track ships (ADR-0087), 2026-10-18
+
+ATT&CK v20.0 came out on 2026-10-13. No shipped file said which release it came
+from (the retrieval corpus's manifest read `attack_version: null`), and
+`scripts/download_attack.py` without an option now fetches 20.0 from the
+mitre/cti master, which would have changed the evaluation's gold mapping while
+the pipeline's index stayed on 19.2. The audit of 2026-10-17 asked for a v20
+track that does not replace the experimental snapshots.
+
+- **The shipped files are 19.2, except two.** Each was rebuilt from the
+  official v19.2 assets and compared. `mitre_index.json`, `attack_revoked.json`,
+  the retrieval corpus (17,350 entries) and both embedding sets match
+  (`attack_retrieval_embeddings.npy` and `mitre_embeddings_meta.json` byte for
+  byte, `mitre_embeddings.npy` to within 2e-7). `gazetteer.json` lacks the 14
+  name variants 19.2 added, and
+  `attack_relationships.json` lacks 237 pairs of 19.2 and keeps 1 it no longer
+  has. The 615 CAPEC entries come from a bundle whose version was not recorded.
+  `pipeline/data/attack_manifest.json` records all of it.
+- **`ATTACK_RELEASE` selects the track**, per process. Unset (or `19.2`,
+  `v19.2`, `default`) is the files of `pipeline/data/`; `20.0` reads
+  `pipeline/data/attack/20.0/`. An unknown value raises `UnknownAttackRelease`:
+  `run_document` checks it before Stage 1, `build_stix_bundle` before Stage 4
+  (a finalize reaches it without `run_document`) and `build_manifest`. There is no
+  fallback (ADR-0073's rule for TLP). A `v` is a prefix only before a digit, and
+  digits are ASCII.
+- **One release per process.** The first `attack_data.current()` that resolves
+  fixes the release: `.env` is loaded when `stage3_llm` or `api.db` is imported,
+  and a process could otherwise read the default track for Stages 2b and 2c and
+  `ATTACK_RELEASE`'s after that. A later call that resolves another version
+  raises `UnknownAttackRelease`. The API, the worker and the evaluation's `run`
+  commands resolve it when they start, so a typo stops them there.
+- **The run manifest records the release.** A new `attack` block (release,
+  `requested`, directory, the manifest's and the source bundles' hashes, the
+  documented `exceptions`, `built_with`, and `modified_files`: files whose hash no
+  longer matches the track's manifest, or that it does not know). `data` hashes
+  the files actually loaded.
+  `ATTACK_RELEASE` is in the captured environment, and `stage3_settings`
+  carries it: the Stage 3 checkpoints that exist are invalidated once.
+- **The v20.0 track** is 39.9 MB in nine files: 706 Enterprise, 125 Mobile, 104
+  ICS and 615 CAPEC entries in `mitre_index.json`, a retrieval corpus of 17,845
+  entries, 20,849 curated pairs, 1,866 gazetteer name variants (1,827 on the
+  default track). It differs from the default track by ATT&CK only, but for the default
+  track's gazetteer and curated relationships, which predate 19.2: the CAPEC
+  entries are carried over, the revoked table and the corpus are Enterprise-only,
+  the embedding model is the same. The default does not change; moving it
+  asks for ADR-0060's paired comparison on dev.
+- **Tools.** `scripts/download_attack.py --release X.Y` downloads the release's
+  three bundles from mitre-attack/attack-stix-data and checks each against the
+  sha256 GitHub publishes (it refuses an asset without a digest, an unexpected
+  URL, a size that differs from the published one and a published digest that
+  differs from the track's manifest). Without `--release` it still fetches the mitre/cti master,
+  and now says that this may not be the default track's release. `scripts/build_attack_release.py --release X.Y` builds
+  a track from those bundles into a neighbouring directory and renames it
+  (`--force` to replace one); another `TTP_EMBEDDING_MODEL` than MiniLM gives the
+  track an embeddings manifest. `scripts/build_indexes.py` takes `--out-dir` and
+  `--capec-index`.
+- **Evaluation.** The gold is mapped against one release: a run's own by
+  default, `--attack-release` on `prepare`, `score`, `ttp-errors`, `compare`,
+  `release-effect` and `retrieval` to name another. `attack-mapping.json` is the
+  default track's mapping, `attack-mapping-<X.Y>.json` another's. `compare`
+  refuses two runs of different releases unless the option names the mapping.
+  A run (`run`, `inhouse-run`) resumes only on the release it began with, and an
+  unknown `ATTACK_RELEASE` stops it before any document; `inhouse-score` follows
+  the run's release. A run whose manifest lists `modified_files` is scored with
+  a warning on stderr and `attack_modified_files` in the report.
+  `Catalogue.for_release` finds the release's Enterprise bundle by sha256, never
+  by file name. `python -m evaluation attack-diff --old 19.2 --new 20.0` writes
+  what changed between two releases (Enterprise 697 → 706 active techniques, none
+  revoked, deprecated or renamed; ICS deprecates T0807 and T0853). `release-effect --a --b` (`--old` and
+  `--new` default to the releases the runs ran on)
+  classes each parent technique on which two runs differ (`new_technique`,
+  `new_subtechnique`, `status_changed`, `content_changed`, `unchanged`), with
+  ΔTP, ΔFP, ΔFN and a hybrid F1 per class.
+- The interface keeps reading `frontend/public/mitre_index.json`, whatever the
+  track. The API's ATT&CK search follows `ATTACK_RELEASE`.
+- **Measured on AnnoCTR dev, at one commit** (docs/eval/attack-v20-2026-10.md).
+  - **The reference reproduces exactly.** The 19.2 run, `sel-dev-a19.2-5b98a49`,
+    gives the same techniques and the same candidates as the historical
+    `sel-dev-revoked-5d1bbe4` on all 16 reports: nothing between the two commits
+    moved the TTP outputs on dev.
+  - **Retrieval alone is unchanged.** The selector's candidate ceiling stays at
+    0.884 and 0.954 on both tracks.
+  - **20.0 against 19.2**: F1 0.584 → 0.609, +0.025 [−0.019, +0.076], not
+    significant. Precision +0.026, recall +0.023.
+  - **The taxonomy effect on ids is nil.** The gold maps the same under both
+    releases, and no technique new in v20 reaches a candidate list.
+  - **Every difference goes through the new descriptions and procedure
+    examples.** About half of the F1 gain (0.011 of 0.025) goes with the one
+    selection answer per run that did not parse, which moved from DarkSide (2 → 8 correct) to TA505.
+    Without those two reports: +0.014 [−0.026, +0.042], and precision
+    +0.041 [−0.015, +0.078].
+  - **The default stays 19.2.** ADR-0060's rule is not met.
+
 #### The store audit checks the build's revision; a script measures the revision trigger (ADR-0086), 2026-10-18
 
 `scripts/audit_store_invariants.py` gains `job.bundle_revision` (severity
