@@ -46,8 +46,7 @@ from pipeline.ttp_retrieval import TtpCandidate
 
 logger = get_logger(__name__)
 
-_ID_RE = compile_pattern(r"^T\d{4}(?:\.\d{3})?$")
-_WS = compile_pattern(r"\s+")
+_ID_RE = compile_pattern(r"^T[0-9]{4}(?:\.[0-9]{3})?$")
 _DEFINITION_CHARS = 180
 _HINT_CHARS = 160
 _MIN_RETRIEVED = 5      # retrieved candidates always offered, prompt limit or not
@@ -126,7 +125,9 @@ def ttp_mode() -> str:
 
 
 def _norm(s: str) -> str:
-    return _WS.sub(" ", s).strip().lower()
+    # str.split, not compile_pattern(r"\s+"): RE2's `\s` is ASCII only, and a
+    # quote would not be found in a report that writes "spear\xa0phishing".
+    return " ".join(s.split()).lower()
 
 
 @functools.lru_cache(maxsize=1)
@@ -143,7 +144,7 @@ def _definitions() -> dict[str, str]:
 
 
 def _clip(s: str, n: int) -> str:
-    s = _WS.sub(" ", s or "").strip()
+    s = " ".join((s or "").split())
     return s if len(s) <= n else s[: n - 1].rstrip() + "…"
 
 

@@ -89,9 +89,9 @@ NOISE_LITERALS: frozenset[str] = frozenset({
 
 # Pre-compiled regexes to avoid recompilation in hot paths.
 _RE_HEX_SEGMENT = compile_pattern(r"\|[^|]*\|")
-_RE_IP = compile_pattern(r"^\d{1,3}(\.\d{1,3}){3}$")
+_RE_IP = compile_pattern(r"^[0-9]{1,3}(\.[0-9]{1,3}){3}$")
 _RE_HASH = compile_pattern(r"^[0-9a-f]{32,128}$")
-_RE_MITRE = compile_pattern(r"^T\d{4}(\.\d{3})?$")
+_RE_MITRE = compile_pattern(r"^T[0-9]{4}(\.[0-9]{3})?$")
 
 
 def _split_options(body: str) -> list[str]:

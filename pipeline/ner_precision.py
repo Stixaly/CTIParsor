@@ -127,7 +127,9 @@ def text_is_cased(text: str) -> bool:
     return letters == 0 or upper >= _CASED_TEXT_SHARE * letters
 
 
-_CVE_RE = compile_pattern(r"^cve-\d{4}-\d+$")
+# ASCII digits, as RE2 reads `\d` in production; `re` would also take other
+# scripts' digits (ADR-0049).
+_CVE_RE = compile_pattern(r"^cve-[0-9]{4}-[0-9]+$")
 
 
 def actor_is_ordinary(value: str, cased: bool = True) -> bool:

@@ -177,3 +177,156 @@ fails on a refused pattern it does not list, and runs each listed one under
 `re` on 50,000 characters of 14 adversarial inputs within 1 s. The domain
 pattern, the slowest, scales linearly: 42, 83, 168 and 337 ms on 25, 50,
 100 and 200 thousand `a.` pairs.
+
+## Amendment (2026-10-18): `\s` means Python's whitespace under both engines
+
+The rewrites above respected RE2's ASCII `\s`; the patterns RE2 accepted as
+written did not. The review of the NER precision filters (ADR-0088, on its own
+branch) found the gap: their `[\s\-]+` tokeniser dropped "Chinese\xa0threat
+actors" in a local run (no re2, `re`'s Unicode `\s`) and kept it in production
+(RE2). PDF extraction and HTML pages put no-break, thin and narrow no-break
+spaces between words, and nothing before Stage 2 normalises them.
+
+Audit of every `compile_pattern` call in `pipeline/` and `api/`: 72
+module-level patterns used `\s` or `\S`.
+
+- **21 rewritten**: the class says `PY_WHITESPACE`, or the code splits with
+  `str.split()` where the pattern only collapsed blanks. Stage 2's ASN, Windows
+  path and spaced-defang patterns; Stage 2g's alias markers; Stage 2c's
+  list-item and table-caption tests and the retrieval passages' list-item test
+  and blank collapse; Stage 3f's quote check; ADR-0050's generic-vocabulary
+  tokeniser, which ADR-0052's promote gate also uses; the six patterns of
+  `detection/yara_atoms.py`, whose `split_rules` reads the report itself in
+  Stage 4 (an `import\xa0"pe"` outside the rule was not added to it, and the
+  rule failed to compile); Stage 4's Sigma title scan (a next rule opening
+  with `title\xa0:` did not end the one before, and both shipped as one
+  pattern); the network-traffic port; the observables' `[dot]`. Under `re`
+  each rewrite matches what it matched before.
+- **51 left on `\s`**, each for a reason `tests/test_unicode_whitespace.py`
+  lists: the 24 date patterns read `fold()`ed text, where any
+  `str.isspace()` is already a space; four lookbehind patterns always run on
+  `re`; the 17 upload sniffing patterns follow HTML and CommonMark, whose
+  blanks are ASCII; Stage 1's IoC-shaped cell test runs only on text without
+  blanks; CyNER's three span checks read spans an NFKC tokenizer decoded, and
+  a non-ASCII span is dropped anyway; Stage 4 reads a number in the STIX
+  patterns it wrote; the ATT&CK link cleaner runs on ATT&CK's text at corpus
+  build.
+
+Matching more blanks exposed one Python-side gap: Stage 2g's `_clean_alias`
+stripped ASCII blanks only, so `Berserk Bear\xa0and\xa0Dragonfly` gave
+`Berserk Bear\xa0` and lost `Dragonfly`, under both engines. It strips every
+`str.isspace()` character now.
+
+The test runs 42 cases with three blanks; they pass with re2 and without it,
+and under RE2 every one failed before the rewrites. It also imports each
+module that calls `compile_pattern` and fails on a module-level pattern that
+uses `\s` without being listed, and on a listed one that no longer does. A
+pattern compiled inside a function is not seen by the test; the audit found
+none that uses `\s`. `PY_WHITESPACE` is a class body, not a set of
+characters: it writes the run U+2000 to U+200A as a range, so
+`str.strip(PY_WHITESPACE)` would strip `-`.
+
+`\w`, `\d` and `\b` are ASCII under RE2 too, and Unicode under `re`; they were
+not audited here.
+
+## Amendment (2026-10-18): `\d`, `\w` and `\b` read one way under both engines
+
+The amendment above left these three. google-re2 reads `\d` as `[0-9]`, `\w`
+as `[0-9A-Za-z_]` and `\b` against that `\w`; `re` reads them as
+`str.isdecimal()`, `str.isalnum()` or `_`, and the boundary between the two.
+
+Audit: every `compile_pattern` call made at import was recorded under RE2 (137
+calls) and its pattern walked with the parser: 76 use `\w`, `\W`, `\d`, `\D`,
+`\b` or `\B`. Three are lookaround fallbacks (the domain, bare-filename and
+Unix-path patterns), on `re` under both engines, so Unicode under both; they
+are unchanged. The two calls made inside functions compile `re.escape`d
+literals. That leaves 73 patterns that RE2 compiles and that read text two
+ways. Probed with real inputs, production had cut `o@evil.com` out of
+`joão@evil.com`, read `ÚLTIMOS DÍAS 2024` as `AS2024`, and given Stage 2g the
+anchor `Group` for `Müller Group (aka Berserk Bear)`; a dev run shipped `T١٠٥٩`,
+`CVE-٢٠٢١-٤٤٢٢٨` and `８.８.８.８`, and missed `T1059` in `使用T1059技术`.
+
+**The rule.** An IoC, an identifier and a grammar are ASCII: ATT&CK and CVE
+ids, addresses, ports, ASNs, hashes, PDF dates, Sigma, YARA and Suricata
+syntax, git's transport-helper names. A date is too: the words around it are
+English or French, and `fold()` keeps digits as they are. Such a pattern
+writes the class it means, `[0-9]` or `[A-Za-z0-9_]`. A `\b` has no class
+spelling, so `compile_pattern` now maps `re.ASCII`: it needs no inline flag,
+since RE2's `\w`, `\d`, `\s` and `\b` are ASCII whatever the flags, and `re`
+gets the flag. Beside an identifier the ASCII `\b` is the right one, because
+Chinese text glues words to it. Where the edge of a match is a run of letters
+that a glued letter continues (the start of an address, its top-level domain,
+the `AS` of an ASN, a path's extension, the word `port`), the caller also drops
+a match glued to a letter of a script with case (Latin, Greek, Cyrillic...),
+which writes spaces between its words, or to a digit
+(`regex_safety.glued_to_a_word`). Chinese, Japanese, Korean and Thai write no
+spaces, so an IoC glued to them stays one: `该IP属于AS4134网络` gives `AS4134`,
+as RE2 gave it. An address is judged before the run of `.`, `%`, `+`, `-` or
+`_` that ends where it starts, so `josé.perez@evil.com` is no `perez@evil.com`.
+Names, and numbers that must not pass for names, read every script, without
+`\w` or `\d`.
+
+| Verdict | Patterns |
+|---|---|
+| ASCII, written `[0-9]` or `[A-Za-z0-9_]` (56) | the 30 date patterns of `temporal.py`; Stage 2's CVE and IPv4 octets (the IPv4 guards still read `str.isdecimal()`, so `8.8.8.8١` is no address); the list-item tests of Stage 2c and of the retrieval passages; Stage 2f's, 3c's and 3f's id checks; Stage 4's STIX pattern number; the network-traffic `host:port`; Stage 1's PDF date and IoC-shaped cell; Sigma's three tag patterns and condition tokens (pySigma's grammar is ASCII); the Suricata, YARA and synthetic-Sigma IPv4 checks, Suricata's ATT&CK id and the observables' CVE; YARA's meta keys, string names and imports; the upload sniffer's ordered list item; the corpus remote check, which now refuses every helper name git reads (`transport.c`: letters, digits, `+`, `-`, `.`), and `_` as RE2's `\w+` did |
+| `\b` with `re.ASCII` (7) | Stage 2's ATT&CK ids, both MAC forms and registry keys; Stage 2c's table caption; Stage 4b's IoC guard; the YARA technique tag |
+| `\b` with `re.ASCII`, and dropped when glued to a word (4) | Stage 2's email address, ASN and Windows path (its extension's end), the network-traffic port |
+| Every script's digits, `regex_safety.PY_DIGIT` (2) | the two version filters (spaCy's spans, CyNER's); `value.isdigit()` beside the first reads them all too |
+| Python's `\w`, `[A-Za-z0-9_` + `PY_NON_ASCII_WORD` + `]` (1) | a YARA rule's name: YARA refuses `rule café`, and a rule that is found is left out with `rule_does_not_compile` in the ledger (ADR-0067), where one that is not found is silently gone |
+| Masked text (3) | Stage 2g's two alias patterns and its splitter |
+
+**Generated classes.** `PY_DIGIT` and `PY_NON_ASCII_WORD` are class bodies of
+literal ranges, as `PY_WHITESPACE` is, read at import from the running
+Python's tables, because a list written out would lag one Python or the other:
+`\w` past ASCII is 744 ranges in 3.12 and 767 in 3.14, `\d` 64 and 71. It
+takes about 20 ms. A test compares both with `re`'s `\d` and `\w` on every
+code point, through RE2 when it is installed, and checks that nothing past
+U+3FFFF, where the reading stops, is a letter or a digit.
+
+**Stage 2g masks.** Python's `\w` written out does not fit Stage 2g's inline
+pattern, which repeats a word 40 times (`_ANCHOR` four times over, ten
+anchors): its RE2 program grew from 971 instructions to 54,451, and RE2 logged
+"DFA out of memory" on test sentences. The stage instead replaces every
+non-ASCII word character with `z`, runs the patterns unchanged on that text,
+and cuts the names from the original at the same offsets: one code point
+stands for one, astral ones included. `z` is a word character to both engines,
+never the capital that starts a Title-Case word, and in none of the patterns'
+words: a first draft masked to `a`, and read `áka` as the marker `aka` and
+`Ánd Ghost Blizzard` as a split at `and`. The mask replaces runs, not
+characters: on 1.9 million characters of Chinese and English, Stage 2g took
+0.38 s before the change, 2.19 s masking one character at a time and 0.54 s by
+runs, under RE2. google-re2's `Match.span()` takes a group's number, not its
+name.
+
+**Measured.** On AnnoCTR's 400 texts, 44 of which hold a letter or a digit
+outside ASCII, Stage 2's 12,350 entities, the alias lists, the header dates and
+the YARA rule names are identical before and after, under both engines: the
+change acts only where a letter or digit of another script meets a pattern.
+`tests/test_unicode_word_digit.py` runs 68 cases that pass with re2 and
+without it. Before the fix 47 failed under `re` and 20 under RE2; the ones that
+passed under both are the helper tests, two positive controls and the three
+cases that guard the mask's letter. It also fails on a module-level
+pattern compiled by `compile_pattern` that says `\w` or `\d`, or `\b` without
+`re.ASCII` (read in the assignment's source), unless it is listed with a
+reason; only Stage 2g's patterns are listed. It refuses `\s` in a `re.ASCII` pattern too,
+since `re.ASCII`'s `\s` has `\v` and RE2's has not.
+
+**What remains.**
+
+- `re.ASCII` also keeps `re`'s case folding to ASCII, where RE2 folds the
+  Kelvin sign into `k` and the long s into `s`: the registry pattern
+  (`IGNORECASE` and `re.ASCII`) reads a hive spelled with them under RE2 only.
+  The Windows path pattern lost `IGNORECASE` instead, whose letters are
+  `[A-Za-z]` anyway.
+- The glued rule reads Unicode categories. Arabic, Hebrew and Devanagari have
+  no case either, though they write spaces: an IoC glued to one of their
+  letters is kept, as RE2 kept it.
+- Digits of other scripts in an IoC or a date are refused by both engines
+  now. Reading them, by folding them to ASCII before Stage 2 (NFKC would also
+  fold fullwidth letters), is a separate decision.
+- Two other divergences are not `\w`, `\d` or `\b`. Under `IGNORECASE`, `re`
+  folds the Turkish İ and ı into `[a-z]` and RE2 does not: the URL pattern
+  ends `http://evil.com/kılavuz` at `http://evil.com/k` under RE2. And `$`
+  matches before a final newline under `re`, not under RE2.
+- google-re2 was run on Python 3.12 only (`~/.cache/ctiparsor-ci312`, as in
+  CI); the 3.14 venv has no re2.

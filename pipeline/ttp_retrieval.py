@@ -46,7 +46,7 @@ from pydantic import BaseModel, Field
 
 from api.logging_config import get_logger
 from pipeline.env_flags import env_bool, env_int
-from pipeline.regex_safety import compile_pattern
+from pipeline.regex_safety import PY_WHITESPACE, compile_pattern
 
 logger = get_logger(__name__)
 
@@ -95,10 +95,10 @@ class Passage:
 
 
 _NEWLINE_RUN = compile_pattern(r"[\r\n]+")
-_BOUNDARY = compile_pattern(r"(?<=[.!?])\s+|\n+|;\s+")
-_LIST_NUMBER = compile_pattern(r"^\d+[.)]\s")
+_BOUNDARY = compile_pattern(r"(?<=[.!?])\s+|\n+|;\s+")      # a lookbehind: always `re`
+# PY_WHITESPACE, not `\s`, which RE2 keeps to ASCII: "1.\xa0Sent" opens a list item.
+_LIST_NUMBER = compile_pattern(r"^[0-9]+[.)][" + PY_WHITESPACE + "]")
 _BULLETS = ("-", "*", "•", "–", "—")
-_WS = compile_pattern(r"\s+")
 
 
 def split_passages(text: str, *, unwrap: bool | None = None, min_chars: int = 21) -> list[Passage]:
@@ -138,7 +138,7 @@ def split_passages(text: str, *, unwrap: bool | None = None, min_chars: int = 21
         body = seg.strip()
         if len(body) >= min_chars:
             start = pos + lead
-            out.append(Passage(start, start + len(body), _WS.sub(" ", body)))
+            out.append(Passage(start, start + len(body), " ".join(body.split())))
         if m is not None:
             pos = m.end()
     return out
@@ -199,7 +199,7 @@ def clean_attack_text(text: str, *, neutral_names: Iterable[str] = (), neutralis
     if neutralise:
         for name in sorted({n for n in neutral_names if n and len(n) >= 3}, key=len, reverse=True):
             out = re.sub(rf"(?<![\w-]){re.escape(name)}(?![\w-])", "the software", out)
-    out = _WS.sub(" ", out).strip()
+    out = " ".join(out.split())
     if neutralise and out[:1].islower():
         out = out[0].upper() + out[1:]
     return out

@@ -21,7 +21,7 @@ from pipeline.detection.suricata_atoms import parse_options, rule_header
 from pipeline.detection.yara_atoms import split_rules
 from pipeline.detection.yara_check import DOES_NOT_COMPILE, prepare_embedded_rule
 from pipeline.network_traffic import parse_network_traffic
-from pipeline.regex_safety import compile_pattern
+from pipeline.regex_safety import PY_WHITESPACE, compile_pattern
 from pipeline.stage3_llm import LLMEnrichmentResult
 from pipeline.stage4b_graph_completion import CompletionStats, complete_graph, stated_by_the_report
 from pipeline.stix_access import field as _field
@@ -1917,8 +1917,11 @@ def _build_stix_pattern(ioc_value: str, sco) -> str | None:
 # ---------------------------------------------------------------------------
 
 _NET_RULE_ACTIONS = ("alert", "drop", "reject", "pass", "log")
-_RE_SIGMA_TITLE = compile_pattern(r"(?m)^title\s*:\s*\S")
-_RE_SIGMA_NEXT_TITLE = compile_pattern(r"^title\s*:")
+# PY_WHITESPACE, not `\s`, which RE2 keeps to ASCII: a next rule that opens with
+# "title\xa0:" must still end the one before, or the two ship as one pattern.
+_RE_SIGMA_TITLE = compile_pattern(r"(?m)^title[" + PY_WHITESPACE + "]*:[" + PY_WHITESPACE + "]*[^"
+                                  + PY_WHITESPACE + "]")
+_RE_SIGMA_NEXT_TITLE = compile_pattern(r"^title[" + PY_WHITESPACE + "]*:")
 
 
 def _add_embedded_rule_indicator(
@@ -2193,7 +2196,7 @@ _SENTENCE_SPLIT_RE = compile_pattern(r"(?<=[.!?])\s+|\n{2,}")
 # [autonomous-system:number = 1234].  An Indicator's `name` is
 # "Indicator: evil.com", which never appears in prose (0/136 measured), while
 # its pattern values do (131/136, 96.3%) — so the pattern is its anchor.
-_PATTERN_NUM_RE = compile_pattern(r"=\s*(\d+)\s*\]")
+_PATTERN_NUM_RE = compile_pattern(r"=\s*([0-9]+)\s*\]")
 
 
 def _pattern_strings(pattern: str) -> list[str]:

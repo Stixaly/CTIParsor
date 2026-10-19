@@ -36,7 +36,7 @@ from models.schemas import EntityType, RawEntity
 from pipeline import ner_precision
 from pipeline.env_flags import env_bool, env_int
 from pipeline.overrides import drop_denied
-from pipeline.regex_safety import compile_pattern
+from pipeline.regex_safety import PY_DIGIT, compile_pattern
 from pipeline.thresholds import get_threshold
 
 _SKIP_HEAVY = env_bool("SKIP_HEAVY_MODELS")
@@ -201,10 +201,9 @@ _TRAILING_PERIOD_RE = compile_pattern(r"\.$")
 _FRAGMENT_RE = compile_pattern(r"^[a-z]\s")
 
 # Regex: bare version numbers ("1.2.3") — spaCy and some NER models label these
-_VERSION_RE = compile_pattern(r"^\d[\d.\-]*\d$")
+_VERSION_RE = compile_pattern(rf"^[{PY_DIGIT}][{PY_DIGIT}.\-]*[{PY_DIGIT}]$")
 
 # Pre-compiled patterns for text splitting
-_WHITESPACE_HYPHEN_RE = compile_pattern(r"[\s\-]+")
 _COMMA_SLASH_RE = compile_pattern(r"[,/]")
 
 
@@ -258,7 +257,9 @@ def _is_generic_fragment(fragment: str, extra_denylist: frozenset[str] = frozens
     denylisted words: "XAKNET Cyber Army of Russia Reborn" survives despite
     "Russia" being denylisted on its own, because "XAKNET" and "Reborn" are
     not — one denylisted word must not veto an otherwise distinct name."""
-    tokens = _WHITESPACE_HYPHEN_RE.split(fragment.lower())
+    # str.split, not compile_pattern(r"[\s\-]+"): RE2's `\s` is ASCII only, and
+    # "malware\xa0family" would stay one token (promotion.py feeds it such values).
+    tokens = fragment.lower().replace("-", " ").split()
     named_tokens = [
         t for t in tokens
         if len(t) >= 3 and t not in _GENERIC_TOKENS and t not in extra_denylist

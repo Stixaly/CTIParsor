@@ -40,6 +40,34 @@ New: `scripts/measure_ner_precision.py`, the harness:
 
 The decision rule is tested in `tests/test_measure_ner_precision.py`.
 
+#### The store audit checks the build's revision; a script measures the revision trigger (ADR-0086), 2026-10-18
+
+`scripts/audit_store_invariants.py` gains `job.bundle_revision` (severity
+`error`): no job has a `bundle_review_revision` above its `review_revision`. The
+revision only grows and a build stores the one it read, so a bundle ahead of its
+job means a revision written by hand, or restored without its rows; every later
+finalize of that job would be refused until enough writes overtook it.
+`tests/test_audit_store_invariants.py` holds it (3 tests).
+
+`scripts/measure_review_revision_trigger.py` times the same writes under no
+trigger, v12's row trigger and a statement trigger with transition tables, in a
+throwaway schema. On 5,000 entity rows (PostgreSQL 17.11, median of 5 rounds)
+the statement trigger is slower than the row trigger on the run's `executemany`
+write: 1.03 s against 0.78 s, and 0.21 s with no trigger. It is faster only
+where one statement writes many rows: an `UPDATE` of every row took 0.030 s
+against 0.421 s. The row trigger stays and there is no new migration; ADR-0086
+has an amendment with the whole table.
+
+### Documentation
+
+#### CONTRIBUTING.md points to the versioned migrations, 2026-10-18
+
+Two passages still described a schema change as an addition to
+`_JOB_STORE_DDL_POSTGRES` or `_RULE_STORE_DDL_POSTGRES`. They now point to a new
+`api/migrations/vNNNN_<name>.py` (ADR-0077) and to
+`docs/development.md#database-migrations`, and say the two constants are only
+the history kept for the SQLite import scripts.
+
 ### Changed
 
 #### A CyNER threat actor and a spaCy place must look like a name (ADR-0088), 2026-10-18
@@ -128,6 +156,120 @@ gets a dated amendment.
 
 ### Fixed
 
+#### A no-break space is a space in production too (ADR-0049), 2026-10-18
+
+google-re2 (CI, the container image) reads `\s` as ASCII whitespace only; the
+stdlib `re` that `compile_pattern` falls back to without it (a dev venv) reads
+it as `str.isspace()`. PDF extraction and HTML pages put no-break (U+00A0),
+thin (U+2009) and narrow no-break (U+202F) spaces between words, so wherever a
+pattern relied on `\s` the container extracted less than a local run:
+
+- Stage 2: `AS\xa015169` gave no ASN; `evil\xa0[.]\xa0com` was refanged to
+  `evil\xa0.\xa0com` and lost its domain; a Windows path ran across a no-break
+  space (`C:\Program\xa0Files\…`). Stage 2g found no alias list whose marker
+  sits next to one (`Static Tundra (aka\xa0Berserk Bear)`).
+- Stage 2c and the retrieval passages joined a `1.\xa0` list item to the line
+  before as a hard wrap and kept `Table\xa03` captions as candidates; passage
+  and ATT&CK text kept the no-break spaces their blank collapse removes.
+- Stage 3f did not find an evidence quote in a report that writes
+  `spear\xa0phishing`, and sent the technique to review.
+- Stage 4: an `import\xa0"pe"` outside a quoted YARA rule was not added to it,
+  so the rule did not compile and was left out (ADR-0067); a rule with a
+  no-break space before its brace was not found, so the ledger did not say why
+  it was missing. A quoted Sigma rule followed by one that opens with
+  `title\xa0:` shipped with the next rule inside its pattern. A port after
+  `port\xa0` in a network-traffic value was lost.
+- ADR-0050's generic-vocabulary test kept `malware\xa0family` as one token, so
+  ADR-0052's promote gate let it through.
+
+The 21 patterns write `regex_safety.PY_WHITESPACE` in their classes, or the code
+splits with `str.split()`; without re2 they match what they matched. The 51
+other module-level patterns that use `\s` are left, each with its reason (dates
+are `fold()`ed first, lookbehinds always run on `re`, HTML and CommonMark blanks
+are ASCII). Stage 2g's alias cleanup also strips every `str.isspace()` now,
+under both engines: `Berserk Bear\xa0and\xa0Dragonfly` gave `Berserk Bear\xa0`
+and lost `Dragonfly`. `tests/test_unicode_whitespace.py` runs 42 cases that pass
+with re2 and without it (under RE2 all of them failed before the fix), and fails
+on a new module-level `\s` pattern that is not listed.
+
+#### Only a build that publishes writes the export file (ADR-0086), 2026-10-18
+
+`re_run_final_stages` called `validate_and_export`, which writes
+`output/{report}_{job_id}_bundle.json` (`..._bundle_invalid.json` when the
+schemas refuse the bundle), before the conditional `UPDATE`. A refused build
+therefore overwrote the file of the newer build that had published, and a
+finalize that ended after `_delete_job` wrote again a file the deletion had just
+removed. Two tests reproduced it and failed on the previous code:
+`test_a_refused_build_writes_no_export_file` and the extended
+`test_a_job_deleted_while_it_is_built_is_not_an_error`.
+
+- Stage 5 is split: `validate_bundle(bundle_json)` returns the verdict and
+  writes nothing; `export_path(output_path, result)` names the file (an
+  `_invalid` suffix on an `invalid` verdict); `export_bundle(bundle_json,
+  output_path, result)` writes it. `validate_and_export` composes them, so the
+  CLI and the run are unchanged.
+- A finalize validates, then in one transaction runs the conditional `UPDATE`
+  and, only if it published, writes the file before the commit. The `UPDATE`
+  holds the job's row until then: concurrent publications write the file in the
+  order they publish, and a refused build or a job deleted meanwhile writes none.
+  A write that fails (`OSError`) rolls the publication back and the finalize
+  fails, as a failed export did before. The file is written in place, so a
+  write that fails part-way leaves it truncated, as before.
+- If the commit fails after the write, the file holds a build that was not
+  stored; it is never served.
+- Not changed: the run's own Stage 5 (the subprocess) still writes its file
+  before `_finalize_job`'s write, which depends on the lease, so a run whose
+  lease was taken over has written its file.
+
+Tests: `test_an_export_that_cannot_be_written_publishes_nothing` and
+`test_a_published_invalid_build_writes_only_the_invalid_file` in
+`tests/test_bundle_builds.py` (30 to 33 tests); `TestValidateBundle` and
+`TestExport` in `tests/test_stage5.py` (19 to 23). ADR-0086 gets a dated
+amendment, which also corrects its decision 4 and its consequences.
+
+#### `\d`, `\w` and `\b` read the same with RE2 or without (ADR-0049), 2026-10-18
+
+google-re2 reads `\d`, `\w` and `\b` as ASCII; the stdlib `re` that
+`compile_pattern` falls back to without it reads them as Unicode. 73
+module-level patterns that RE2 compiles used them, so a letter or a digit of
+another script split production from local runs:
+
+- In production, a letter glued to a match had cut it out of a word:
+  `joão@evil.com` gave the address `o@evil.com`, another mailbox, and
+  `josé.perez@evil.com` gave `perez@evil.com`; `ÚLTIMOS DÍAS 2024` gave the ASN
+  `AS2024`; `…\relatório.comunicação` gave the Windows path
+  `…\relatório.comunica`; `téléport 443` in a network-traffic value gave port
+  443. A match glued to a letter of a script with case (Latin, Greek,
+  Cyrillic…) or to a digit is dropped now (`regex_safety.glued_to_a_word`), and
+  the address's domain is still extracted. Chinese, Japanese, Korean and Thai
+  write no spaces between words, so an IoC glued to them is kept, as RE2 kept
+  it: `该IP属于AS4134网络` gives `AS4134`.
+- In production, Stage 2g gave `Müller Group (aka Berserk Bear)` the anchor
+  `Group`, lost the alias `Ghøst Blizzard`, and split `Cléand Bear` at `and`.
+  Its patterns now read the text with every non-ASCII word character masked to
+  `z`, a letter none of its words holds, and cut the names from the text itself.
+- In production, a YARA rule named with a non-ASCII letter (`rule café`) was not
+  found. It is now, and Stage 4 leaves it out with `rule_does_not_compile` in
+  the ledger (ADR-0067). A spaCy span of other digits (`١.٢.٣`) was not taken
+  for a version number and could be kept as a name; both version filters read
+  every script's digits now (`regex_safety.PY_DIGIT`).
+- Without re2, IoCs and dates took every script's digits: `T١٠٥٩` and `T１０５９`
+  shipped as ATT&CK ids, `CVE-٢٠٢١-٤٤٢٢٨` as a CVE, `８.８.８.８` as an IPv4
+  address, `AS١٥١٦٩` as an ASN, and `٢٠٢٤-٠٣-١٢` was a date. An IoC glued to
+  Chinese text (`使用T1059技术`, `该IP属于AS4134网络`) was not found. 56 patterns
+  now say `[0-9]` or `[A-Za-z0-9_]`, and the 11 that say `\b` pass `re.ASCII`,
+  which `compile_pattern` now maps to RE2's own reading.
+- The corpus settings refuse every transport helper git reads (`a-b::`,
+  `a.b::`, `x+y::`), not only `\w+::`.
+
+On AnnoCTR's 400 texts (44 hold a letter or a digit outside ASCII), Stage 2's
+entities, the alias lists, the header dates and the YARA rule names are the
+same before and after, under both engines. `tests/test_unicode_word_digit.py`
+runs 68 cases that pass with re2 and without it; before the fix 47 failed under
+`re` and 20 under RE2, and only helper tests, positive controls and three alias
+cases (which guard the mask's letter) passed under both. It also fails on a
+new module-level pattern that says `\w`, `\d` or `\b` without being reviewed.
+
 #### A finalize records the build it made, and a rebuild clears a Stage 4/5 staleness (ADR-0086), 2026-10-17
 
 A finalize (`POST /api/jobs/{id}/finalize`, quick or full) rebuilds Stages 4 and
@@ -202,7 +344,9 @@ and do not bump the revision: two builds from the same rows under different
 policies both publish, and the last to finish wins until the next finalize.
 During a rolling restart, a finalize by an old-image process leaves
 `bundle_build_json` describing the previous build. The export file in `output/`
-is written by every build, including a refused one; it is never served.
+was written by every build, including a refused one; since 2026-10-18 only a
+build that publishes writes it ("Only a build that publishes writes the export
+file", above).
 
 ## [0.1.0] - 2026-10-17
 

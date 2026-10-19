@@ -102,7 +102,8 @@ def ingest(file_path: str) -> str:
 # occasionally missing on non-compliant producers, so it is optional here;
 # everything after the seconds field (timezone offset) is ignored — a
 # reference anchor for resolving relative dates only needs day precision.
-_PDF_DATE_RE = compile_pattern(r"^(?:D:)?(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?")
+_PDF_DATE_RE = compile_pattern(
+    r"^(?:D:)?([0-9]{4})([0-9]{2})?([0-9]{2})?([0-9]{2})?([0-9]{2})?([0-9]{2})?")
 
 
 def _plausible_reference_year(dt: datetime) -> bool:
@@ -389,7 +390,7 @@ _MAX_CELLS = 20_000
 _IOC_SHAPED = compile_pattern(
     r"^(?:[0-9a-fA-F]{32,128}"                               # a hash
     r"|[A-Za-z][A-Za-z0-9+.-]*://\S+"                        # a URL
-    r"|(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?"                # an IPv4[:port]
+    r"|(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?::[0-9]{1,5})?"       # an IPv4[:port]
     r"|[^\s@]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+"            # an email address
     r"|[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,24}(?:[/:?#]\S*)?"   # a domain, a file
     r"|[A-Za-z]:\\\S+)$"                                     # a Windows path
