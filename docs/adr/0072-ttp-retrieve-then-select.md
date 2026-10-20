@@ -246,3 +246,52 @@ that weaker configuration, so **the corpus is committed** with the default
 switch (`pipeline/data/attack_retrieval_*`, ~35 MB, the exact file the dev
 run measured), like the other indexes, rather than built at image build or at
 bootstrap: a clone and the published image carry it, offline included.
+
+## Amendment (2026-10-19): an answer cut off keeps its complete choices
+
+Decision 4 kept an answer only if it was JSON of the expected shape. In 5 of
+the 8 select-mode dev runs, one selection answer was refused as unparseable
+(DarkSide in three runs, TA505 and TA544 in one each), its chunk shipped
+nothing and its 36 to 41 candidates went to review. Reproduced at `5b98a49`
+(vLLM Qwen3.8-27B, temperature 0, seed 13), the DarkSide and TA505 answers
+are not malformed: both stop at `finish_reason` "length" after 8,192 tokens
+(`LLM_MAX_OUTPUT_TOKENS`), 322 and 330 seconds. The model wrote five and six
+complete choices, then deliberated inside the next choice's `reason` ("So
+T1498 is the correct one. But T1499 is also a candidate...") and repeated it
+until the ceiling. The list never closed, so the valid choices went to review
+with the rest. The same loop takes a second form: on the Kaseya report the
+model closed a complete answer of eight choices, then started over nine
+times (the copies swap one id, T1110 for T1105) until the ceiling cut the
+last. That answer was read from its first object, which is right: it is the
+answer the model closed.
+
+**Decision.** An answer cut off inside its `selected` list keeps its complete
+choices (`stage3f_ttp_select.salvage_selection`). Each one is validated as in
+decision 4: an id among the candidates, a quote found verbatim in the chunk
+(≥ 3 words), once per id. The choice the cut runs through is not read. Every
+candidate the answer did not decide goes to `ttp_review` with the reason
+"selection answer cut off before a choice for it": a complete answer that
+leaves a candidate out has judged it, a cut one may not have reached it.
+
+What does not change:
+
+- No technique ships without a validated quote.
+- An answer cut before its first complete choice, and one that closes but
+  does not parse, are unparseable as before: every candidate goes to review.
+- An answer whose object closes before the cut is read as before, from its
+  first object; what the model wrote after it is not read.
+- A failed or unparseable call ships nothing, and 3f is `failed` when no
+  answer could be used.
+
+The stage report counts cut answers apart (3f `truncated`, counter
+`ttp_selection_truncated`, `3f_truncated` in the evaluation's LLM health), so
+a cut no longer reads as a format problem. The cut is inferred from the open
+list: the provider's finish reason does not reach the selector.
+
+**Not done.** The loop itself. A prompt that bounds `reason`, a lower output
+ceiling for this call, or a repetition penalty would each change every
+selection answer and need their own dev comparison. The ceiling also costs
+time: a cut answer took about 320 seconds, the other selection calls of the
+reports under 40.
+
+**Measured** on AnnoCTR dev ([selection-cut-off-2026-10](../eval/selection-cut-off-2026-10.md)).

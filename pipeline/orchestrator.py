@@ -954,20 +954,30 @@ class _Run:
                                 ("3f", verify_ttps, "ttp_selection" if select else "ttp_verification")):
             ok, unparsed, failed = (d.get(f"{prefix}_ok", 0), d.get(f"{prefix}_unparsed", 0),
                                     d.get(f"{prefix}_failed", 0))
+            # Select mode only: answers cut off inside their list, whose
+            # complete choices were validated (ADR-0072, amendment of 2026-10-19).
+            cut = d.get("ttp_selection_truncated", 0) if sid == "3f" and select else 0
             # Select mode keeps nothing it could not check (ADR-0072), nor does
             # 3d since ADR-0082; 3f's verify mode keeps the claims its failed
             # calls could not judge.
             lost = ("their candidates sent to review, none kept" if sid == "3f" and select
                     else "those claims held for review" if sid == "3d"
                     else "those claims kept unverified")
-            extra = ({"rejected": d.get("ttp_selection_rejected", 0)} if sid == "3f" and select
+            extra = ({"rejected": d.get("ttp_selection_rejected", 0), "truncated": cut}
+                     if sid == "3f" and select
                      else {"held": d.get("rel_verification_held", 0)} if sid == "3d" else {})
+            answers = ok + cut + unparsed + failed
+            notes = ([f"{unparsed + failed} of {answers} verifications unusable, {lost}"]
+                     if unparsed + failed else [])
+            if cut:
+                notes.append(f"{cut} of {answers} selection answers cut off before their end, "
+                             f"their complete choices validated and the other candidates sent to review")
             if not on:
                 self.record(sid, SKIPPED, "disabled" + (": the LLM's techniques ship unchecked"
                                                         if sid == "3f" and select else ""))
-            elif ok + unparsed + failed == 0:
+            elif answers == 0:
                 self.record(sid, RAN, "nothing to verify", 0.0, ok=0, unparsed=0, failed=0, **extra)
-            elif ok == 0 and unparsed + failed:
+            elif ok + cut == 0:
                 # A verification that never answers checked nothing — the
                 # stage was requested and did nothing.
                 self.record(sid, FAILED, f"no usable verification answer ({unparsed} unparseable, "
@@ -976,8 +986,7 @@ class _Run:
                                                      if sid == "3d" else "every claim kept unverified"),
                             0.0, ok=ok, unparsed=unparsed, failed=failed, **extra)
             else:
-                self.record(sid, RAN, f"{unparsed + failed} of {ok + unparsed + failed} verifications "
-                            f"unusable, {lost}" if unparsed + failed else "",
+                self.record(sid, RAN, "; ".join(notes),
                             0.0, ok=ok, unparsed=unparsed, failed=failed, **extra)
         if consensus:
             self.record("3e", RAN, "", 0.0, chunks=doubled)

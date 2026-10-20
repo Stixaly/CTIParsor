@@ -141,7 +141,8 @@ the [README](../README.md#how-it-works); this page is the detail.
 │  Enable: ENABLE_TTP_VERIFICATION=true in .env                       │
 │  TTP_MODE=select (default): selects among the retrieved candidates  │
 │  and the LLM's own picks, exact quote checked by code; a failed     │
-│  call ships nothing (candidates go to review)                       │
+│  call ships nothing (candidates go to review); an answer cut off    │
+│  at the output-token limit ships its complete, checked choices      │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐

@@ -49,6 +49,10 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "(o@evil.com out of joão@evil.com); alias names, version filters and YARA rule names read every "
      "script (ADR-0049)",
      "extraction"),
+    ("b4ed740", "2026-10-20",
+     "A Stage 3f selection answer cut off at the output-token limit keeps its complete, checked "
+     "choices instead of sending every candidate of the chunk to review (ADR-0072)",
+     "extraction"),
 )
 
 
