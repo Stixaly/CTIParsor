@@ -58,7 +58,9 @@ hashes in its manifest match (`mitre_index.json` 52409d46…, the corpus
 Out of scope, unchanged: `frontend/public/mitre_index.json` is another file
 (the same 1,533 techniques, without `shortname`, and 39 tactics instead of
 41). The
-interface keeps reading that static file whichever track a run uses.
+interface keeps reading that static file whichever track a run uses. (The
+amendment of 2026-10-19 removes it: the interface reads the selected track's
+index from the API.)
 
 ### From 19.2 to 20.0
 
@@ -247,7 +249,7 @@ runs.
 - **+39.9 MB in the repository and in the image** (39,900,662 bytes).
 - **The interface stays on the default track.** `frontend/public/mitre_index.json`
   is static. The API's ATT&CK search (`pipeline/mitre_db.py`) follows
-  `ATTACK_RELEASE`.
+  `ATTACK_RELEASE`. (Both corrected by the amendment of 2026-10-19.)
 - **The ordinary-word policy of the gazetteer** (docs/gazetteer-ordinary-words.md)
   reviewed the forms of the default track only. The forms v20 adds are not
   reviewed. `GAZETTEER_POLICY` is `shadow` by default, so nothing is withheld on
@@ -338,3 +340,57 @@ Tests:
 - Run locally on 2026-10-18 on the code of `5b98a49`: the full suite, 2,937
   passed and 9 skipped (`SKIP_HEAVY_MODELS=1`); `ruff check .`, mypy (135
   files), `reuse lint` and `scripts/check_doc_claims.py` clean.
+
+## Amendment (2026-10-19): the interface reads the index of the selected track
+
+The Consequences above leave the interface on `frontend/public/mitre_index.json`.
+That file was not a track's. It came with the initial commit (2026-06-05), and no
+script writes it. It held the same 1,533 techniques as the default track's
+`mitre_index.json`, with these differences:
+
+- domains spelled `enterprise`, `mobile` and `ics` (not `enterprise-attack`,
+  `mobile-attack` and `ics-attack`);
+- no technique `shortname`;
+- descriptions cut at 161 characters (300 in a track);
+- 39 tactics instead of 41. The two missing are mobile: `TA0038` Network Effects
+  and `TA0039` Remote Service Effects.
+
+The amendment makes these changes:
+
+- **`GET /api/attack/index`** (`api/routes/attack.py`) serves the
+  `mitre_index.json` of the track the API runs, unmodified. Its release is in
+  `X-Attack-Release`. The ETag is the file's sha256 and `Cache-Control` is
+  `no-cache`. A reload gets a 304 while the file is unchanged. After a restart on
+  another `ATTACK_RELEASE`, the browser gets the new track's index, never the one
+  it cached. A track without the file answers 404, not with the default track's
+  file.
+- **The Coverage page and `useMitreSearch` share one query** (`useAttackIndex`).
+  The page shows the release next to the report's name. `useMitreSearch` has had
+  no caller since the initial commit. It is kept on the same index, so a picker
+  built on it would not bring the static file back.
+- **The static file is removed**, along with its entries in `REUSE.toml` and
+  `THIRD_PARTY_NOTICES.md`. A fallback to it would show the default track's names
+  under an API that runs another track: the bug this amendment removes.
+- **The column check runs on every track.**
+  `test_every_enterprise_tactic_in_the_index_has_a_column` reads the index of each
+  track `attack_data.available()` lists, not only the one the process selects.
+  `frontend/src/components/coverage/tactics.test.ts` holds the page's own columns
+  to the same rule. The columns moved to `components/coverage/tactics.ts`. Both
+  tracks have the same fifteen enterprise tactics, so the columns do not change.
+- **The index weighs about 750 KB instead of 440 KB**: 749,660 bytes for 19.2 and
+  758,174 for 20.0, against 440,155. Nothing compresses it. A browser downloads it
+  once per index: later loads get a 304 with no body.
+- **Correction.** The Consequences say the API's ATT&CK search follows
+  `ATTACK_RELEASE` through `pipeline/mitre_db.py`. No route calls
+  `mitre_db.search`. The code that reads `mitre_db` is Stages 3c and 3f, TTP
+  retrieval, the phase band of `/api/jobs/{job_id}/coverage/artifacts`
+  (`pipeline/detection/phases.py`) and the evaluation. `GET /api/attack/index` is
+  the first route that serves the index.
+
+Tests: `tests/test_attack_api.py` (each committed track served unmodified with
+its release, the ETag and the 304, the 19.2 ETag sent to an API on 20.0 gets the
+20.0 index, a track without an index answers 404);
+`tests/test_detection_phases.py` (the column check on each track, and a check
+that both tracks are listed); `frontend/src/components/coverage/tactics.test.ts`,
+`frontend/src/hooks/useMitreSearch.test.tsx` (on 20.0 the search finds `T1698`;
+on 19.2 it does not), `frontend/src/api/client.test.ts` (`fetchAttackIndex`).

@@ -7,7 +7,7 @@ Generates three files under pipeline/data/:
   mitre_index.json        (~430 KB)
     Compact lookup table of all ATT&CK techniques + tactics across Enterprise,
     Mobile, ICS, and CAPEC.  Used by stage3c_mitre.py for TTP normalization
-    and by the React frontend for inline ATT&CK search.
+    and, through GET /api/attack/index, by the React frontend (ADR-0087).
 
   gazetteer.json          (~194 KB)
     Dictionary of 1,700+ known malware families, offensive tools, and APT group

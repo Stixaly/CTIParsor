@@ -28,6 +28,7 @@ from api.paths import output_dir, uploads_dir
 limiter = Limiter(key_func=get_remote_address)
 
 from api.routes import (
+    attack,
     coverage,
     entities,
     ingest,
@@ -229,6 +230,7 @@ app.include_router(settings.router)
 app.include_router(queue.router)
 app.include_router(thresholds.router)
 app.include_router(overrides.router)
+app.include_router(attack.router)
 
 
 @app.get("/api/health")

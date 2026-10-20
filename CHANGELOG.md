@@ -113,7 +113,9 @@ track that does not replace the experimental snapshots.
   `new_subtechnique`, `status_changed`, `content_changed`, `unchanged`), with
   ΔTP, ΔFP, ΔFN and a hybrid F1 per class.
 - The interface keeps reading `frontend/public/mitre_index.json`, whatever the
-  track. The API's ATT&CK search follows `ATTACK_RELEASE`.
+  track. (Since 2026-10-19 it reads the selected track's index from the API:
+  see "The interface reads the index of the selected ATT&CK track" under
+  Changed.)
 - **Measured on AnnoCTR dev, at one commit** (docs/eval/attack-v20-2026-10.md).
   - **The reference reproduces exactly.** The 19.2 run, `sel-dev-a19.2-5b98a49`,
     gives the same techniques and the same candidates as the historical
@@ -161,6 +163,41 @@ Two passages still described a schema change as an addition to
 the history kept for the SQLite import scripts.
 
 ### Changed
+
+#### The interface reads the index of the selected ATT&CK track (ADR-0087, amended), 2026-10-19
+
+The Coverage page took technique names and tactics from
+`frontend/public/mitre_index.json`, whatever `ATTACK_RELEASE` said. That file was
+not one of a track's. It came with the initial commit and no script writes it.
+It had the default track's 1,533 techniques, but 39 tactics instead of 41: the
+two missing are mobile, `TA0038` Network Effects and `TA0039` Remote Service
+Effects. It also spelled the domains `enterprise`, `mobile` and `ics`, had no
+technique `shortname`, and cut descriptions at 161 characters.
+
+- **`GET /api/attack/index`** serves the `mitre_index.json` of the track the API
+  runs, unmodified, with the release in `X-Attack-Release`. The ETag is the
+  file's sha256 and `Cache-Control` is `no-cache`, so a reload gets a 304 while
+  the file is unchanged. After a restart on another track, the browser gets the
+  new index, never the cached one. A track without the file answers 404, not
+  with the default track's file.
+- **The Coverage page and `useMitreSearch` read it** through one query
+  (`useAttackIndex`). The page shows the release (`ATT&CK 20.0`) next to the
+  report's name. On 20.0 the search finds `T1698` Indirect Prompt Injection.
+  `useMitreSearch` still has no caller: nothing has imported it since the initial
+  commit.
+- **The static file is removed**, along with its entries in `REUSE.toml` and
+  `THIRD_PARTY_NOTICES.md`. The index weighs about 750 KB instead of 440 KB
+  (749,660 bytes on 19.2, 758,174 on 20.0). A browser downloads it once per
+  index; later loads get a 304.
+- **The column check covers every track.**
+  `test_every_enterprise_tactic_in_the_index_has_a_column` reads the index of
+  each track `attack_data.available()` lists, not only the one the process
+  selects. The page's columns moved to `frontend/src/components/coverage/tactics.ts`,
+  and `tactics.test.ts` holds them to the same rule. Both tracks have the same
+  fifteen enterprise tactics, so no column changes.
+- **ADR-0087's Consequences said the API's ATT&CK search follows the track.** No
+  route calls `mitre_db.search`. The amendment corrects that sentence, and
+  `docs/configuration.md` no longer repeats it.
 
 #### A CyNER threat actor and a spaCy place must look like a name (ADR-0088), 2026-10-18
 
