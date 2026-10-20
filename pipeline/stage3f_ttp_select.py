@@ -18,6 +18,9 @@ step:
                 one of the candidates, a quote found verbatim in the chunk, one
                 entry per id.  A failed or unparseable call validates nothing:
                 every candidate is returned for review, never kept by default.
+                An answer cut off inside its list (the output-token ceiling)
+                keeps its complete choices, validated the same way; the
+                candidates it never reached are returned for review.
 
 A retrieved procedure example explains what a candidate looks like; the prompt
 says it is never evidence of what happened in the report.  An exact quote only
@@ -47,11 +50,13 @@ from pipeline.ttp_retrieval import TtpCandidate
 logger = get_logger(__name__)
 
 _ID_RE = compile_pattern(r"^T[0-9]{4}(?:\.[0-9]{3})?$")
+# JSON's own whitespace, the same under RE2 and `re`.
+_SELECTED_RE = compile_pattern(r'"selected"[ \t\r\n]*:[ \t\r\n]*\[')
 _DEFINITION_CHARS = 180
 _HINT_CHARS = 160
 _MIN_RETRIEVED = 5      # retrieved candidates always offered, prompt limit or not
 
-OK, FAILED, UNPARSED, NOTHING = "ok", "failed", "unparsed", "nothing_to_select"
+OK, TRUNCATED, FAILED, UNPARSED, NOTHING = "ok", "truncated", "failed", "unparsed", "nothing_to_select"
 
 
 class TtpReview(BaseModel):
@@ -64,7 +69,7 @@ class TtpReview(BaseModel):
 
 
 class Selection(BaseModel):
-    status: str                                   # ok | failed | unparsed | nothing_to_select
+    status: str                                   # ok | truncated | failed | unparsed | nothing_to_select
     selected: list = Field(default_factory=list)  # TTPExtracted, validated
     review: list[TtpReview] = Field(default_factory=list)
     rejected: int = 0                             # model answers that failed validation
@@ -214,6 +219,57 @@ def parse_selection(raw: str) -> list[dict] | None:
     return None
 
 
+def salvage_selection(raw: str) -> list[dict] | None:
+    """The complete choices of an answer cut off inside its `selected` list,
+    or None when the answer was not cut off there.
+
+    A model can reach the output-token ceiling (LLM_MAX_OUTPUT_TOKENS) before
+    it closes the list.  On a DarkSide chunk of AnnoCTR dev, Qwen3.8 wrote five
+    complete choices, then deliberated inside the sixth one's `reason` ("So
+    T1498 is the correct one. But T1499 is also a candidate...") until the
+    8,192nd token.  `parse_selection` finds no answer in that, and the five
+    choices went to review with the rest.  The choices written before the cut
+    are whole objects; the one the cut runs through is not read.
+
+    Only the object form qualifies, and only while the list itself is still
+    open at the end of the answer: an answer that closes it, parseable or not,
+    is `parse_selection`'s, and so is one whose object closes before the cut
+    (the model repeated its answer).  The cut is inferred from the open list,
+    not from the provider's finish reason, which the caller does not see: a
+    quote the model ends with a backslash, or one with an unescaped `"`
+    inside, can look open and is read as cut off (its complete choices are
+    still validated).  The object is the one that opens just before
+    `"selected"`, the only key the prompt asks for."""
+    if not raw:
+        return None
+    # Lazy, like TTPExtracted below: stage3_llm imports this module.
+    from pipeline.stage3_llm import _extract_complete_array_items, _unclosed_stack
+
+    m = _SELECTED_RE.search(raw)
+    start = raw.rfind("{", 0, m.start()) if m else -1
+    if m is None or start < 0:
+        return None
+    try:
+        # The answer closed: what follows it is not read.  On a Kaseya chunk
+        # the model wrote a complete answer, then copies of it until the cut.
+        json.JSONDecoder().raw_decode(raw, start)
+        return None
+    except ValueError:
+        pass
+    stack, _ = _unclosed_stack(raw[start:])
+    if stack[:2] != ["{", "["]:
+        return None
+    out: list[dict] = []
+    for item in _extract_complete_array_items(raw, m.end()):
+        try:
+            obj = json.loads(item)
+        except ValueError:
+            continue
+        if isinstance(obj, dict):
+            out.append(obj)
+    return out
+
+
 def select_ttps(
     text: str,
     candidates: Sequence[TtpCandidate],
@@ -250,12 +306,28 @@ def select_ttps(
         llm_stats.bump("ttp_selection_failed")
         logger.warning("TTP selection call failed — %d candidates sent to review", len(offered))
         return Selection(status=FAILED, review=review_all("selection call failed"))
-    items = parse_selection(raw)
-    if items is None:
+    # A cut answer first: `parse_selection` tries every bracket, those inside
+    # a string too, and would read a looping reason's "[]" as an abstention.
+    items = salvage_selection(raw)
+    cut = items is not None
+    if items == []:
         llm_stats.bump("ttp_selection_unparsed")
-        logger.warning("TTP selection answer unparseable — %d candidates sent to review", len(offered))
-        return Selection(status=UNPARSED, review=review_all("selection answer unparseable"))
-    llm_stats.bump("ttp_selection_ok")
+        logger.warning("TTP selection answer cut off after %d characters, before its first complete "
+                       "choice (LLM_MAX_OUTPUT_TOKENS?) — %d candidates sent to review",
+                       len(raw), len(offered))
+        return Selection(status=UNPARSED, review=review_all("selection answer cut off before a choice for it"))
+    if items is not None:
+        llm_stats.bump("ttp_selection_truncated")
+        logger.warning("TTP selection answer cut off after %d characters (LLM_MAX_OUTPUT_TOKENS?) — "
+                       "its %d complete choices validated, the other candidates sent to review",
+                       len(raw), len(items))
+    else:
+        items = parse_selection(raw)
+        if items is None:
+            llm_stats.bump("ttp_selection_unparsed")
+            logger.warning("TTP selection answer unparseable — %d candidates sent to review", len(offered))
+            return Selection(status=UNPARSED, review=review_all("selection answer unparseable"))
+        llm_stats.bump("ttp_selection_ok")
 
     min_words = env_int("TTP_SELECT_MIN_QUOTE_WORDS", default=3)
     text_n = _norm(text)
@@ -289,9 +361,15 @@ def select_ttps(
         selected.append(TTPExtracted(technique_name=cand.name or tid, mitre_id=cand.attack_id,
                                      description=reason.strip()[:500], evidence_text=q,
                                      evidence_label=label))
+    if cut:
+        # A complete answer that leaves a candidate out has judged it; a cut
+        # one may not have reached it.  `seen`: selected or already in review.
+        review += [TtpReview(attack_id=c.attack_id, name=c.name, sources=c.sources,
+                             reason="selection answer cut off before a choice for it")
+                   for c in offered if c.attack_id.upper() not in seen]
     if rejected:
         llm_stats.bump("ttp_selection_rejected", rejected)
-    return Selection(status=OK, selected=selected, review=review, rejected=rejected)
+    return Selection(status=TRUNCATED if cut else OK, selected=selected, review=review, rejected=rejected)
 
 
 def llm_proposals_as_candidates(ttps: Sequence) -> tuple[list[TtpCandidate], dict[str, EvidenceLabel], int]:

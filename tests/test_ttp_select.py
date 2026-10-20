@@ -112,6 +112,109 @@ def test_a_failed_or_unparseable_call_keeps_nothing_and_reviews_everything(raw, 
     assert {r.attack_id for r in out.review} == {"T1566.001", "T1105"}
 
 
+# The DarkSide chunk of AnnoCTR dev (sel-dev-a19.2-5b98a49): five complete
+# choices, then the model deliberated inside the sixth one's `reason` until
+# LLM_MAX_OUTPUT_TOKENS cut it mid-string (finish_reason "length").
+_LOOP = "So T1105 is the correct one. But T1059.001 is also a candidate [sic]. " * 40
+_CUT = ('{"selected": [\n'
+        '{"attack_id": "T1566.001", "evidence_quote": "sent emails with malicious Word attachments", '
+        '"reason": "spearphishing {attachment}"},\n'
+        '{"attack_id": "T1003.001", "evidence_quote": "dumped LSASS with a tool", "reason": "paraphrase"},\n'
+        '{"attack_id": "T1105", "evidence_quote": "download a second-stage loader", "reason": "' + _LOOP)
+
+
+def test_an_answer_cut_off_keeps_its_complete_validated_choices_and_reviews_the_rest():
+    out = sel.select_ttps(TEXT, _cands("T1566.001", "T1003.001", "T1105", "T1059.001"),
+                          lambda s, u: _CUT)
+    assert out.status == sel.TRUNCATED
+    # A complete choice is validated like any other: id, verbatim quote.
+    assert [(t.mitre_id, t.evidence_text) for t in out.selected] == [
+        ("T1566.001", "sent emails with malicious Word attachments")]
+    assert out.rejected == 1
+    reasons = {r.attack_id: r.reason for r in out.review}
+    assert reasons["T1003.001"] == "quote missing, too short or not found verbatim"
+    # The choice the cut runs through, and what the answer never reached: undecided.
+    assert reasons["T1105"] == reasons["T1059.001"] == "selection answer cut off before a choice for it"
+    assert len(out.review) == 3
+
+
+@pytest.mark.parametrize("raw,n", [
+    (_CUT, 2),
+    ('{"selected": [{"attack_id": "T1105", "evidence_quote": "a ] and a } in a quote"}, {"attack_id": "T1', 1),
+    ('```json\n{"selected": [{"attack_id": "T1105", "reason": "cut before the end', 0),
+], ids=["darkside", "brackets-in-a-string", "cut-in-the-first-choice"])
+def test_salvage_reads_the_complete_choices_of_a_cut_answer(raw, n):
+    assert len(sel.salvage_selection(raw)) == n
+
+
+def test_a_looping_reason_that_writes_an_empty_list_is_not_an_abstention():
+    # parse_selection tries every bracket, those inside a string too: "[]" in
+    # the loop would read as {"selected": []} and lose the complete choice.
+    raw = ('{"selected": [{"attack_id": "T1105", "evidence_quote": "download a second-stage loader"},\n'
+           '{"attack_id": "T1059.001", "reason": "So the list is [] for this. But T1059.001 is')
+    assert sel.parse_selection(raw) == []
+    out = sel.select_ttps(TEXT, _cands("T1105", "T1059.001"), lambda s, u: raw)
+    assert out.status == sel.TRUNCATED
+    assert [t.mitre_id for t in out.selected] == ["T1105"]
+    assert [r.attack_id for r in out.review] == ["T1059.001"]
+
+
+def test_an_answer_cut_before_its_first_choice_is_unparsed():
+    raw = '{"selected": [{"attack_id": "T1105", "reason": "So T1105 is the correct one. But'
+    out = sel.select_ttps(TEXT, _cands("T1105", "T1003.001"), lambda s, u: raw)
+    assert out.status == sel.UNPARSED and out.selected == []
+    assert {r.attack_id: r.reason for r in out.review} == {
+        "T1105": "selection answer cut off before a choice for it",
+        "T1003.001": "selection answer cut off before a choice for it"}
+
+
+def test_an_answer_cut_after_its_list_closed_is_read_whole():
+    raw = '{"selected": [{"attack_id": "T1105", "evidence_quote": "download a second-stage loader"}]'
+    assert sel.salvage_selection(raw) is None
+    out = sel.select_ttps(TEXT, _cands("T1105", "T1003.001"), lambda s, u: raw)
+    assert out.status == sel.OK
+    assert [t.mitre_id for t in out.selected] == ["T1105"] and out.review == []
+
+
+def test_a_complete_answer_repeated_until_the_cut_is_read_whole():
+    # The Kaseya chunk of AnnoCTR dev: a complete answer, then copies of it
+    # until LLM_MAX_OUTPUT_TOKENS cut the tenth.  The first object is the answer.
+    first = json.dumps({"selected": [
+        {"attack_id": "T1105", "evidence_quote": "download a second-stage loader", "reason": "r"}]})
+    raw = first + ("\n" + first) * 8 + '\n{"selected": [{"attack_id": "T1105", "evidence_quote": "down'
+    assert sel.salvage_selection(raw) is None
+    out = sel.select_ttps(TEXT, _cands("T1105", "T1003.001"), lambda s, u: raw)
+    assert out.status == sel.OK
+    assert [t.mitre_id for t in out.selected] == ["T1105"] and out.review == []
+
+
+@pytest.mark.parametrize("raw", [
+    "", "no json here", '{"chosen": [{"attack_id": "T1105"',
+    # Closed but malformed (an unescaped backslash): not cut off, stays unparseable.
+    '{"selected": [{"attack_id": "T1105", "evidence_quote": "C:\\Windows\\Temp"}]}',
+], ids=["empty", "prose", "another-key", "closed-but-malformed"])
+def test_salvage_refuses_an_answer_that_was_not_cut_off(raw):
+    assert sel.salvage_selection(raw) is None
+    assert sel.select_ttps(TEXT, _cands("T1105"), lambda s, u: raw).status in (sel.FAILED, sel.UNPARSED)
+
+
+_COMPLETE = json.dumps({"selected": [
+    {"attack_id": "T1105", "evidence_quote": "download a second-stage loader", "reason": "r"}]})
+
+
+@pytest.mark.parametrize("raw", [
+    _COMPLETE + "\nNote: {I also considered [T1059.001",
+    "```json\n" + _COMPLETE + "\n```",
+    "Here is the {answer}:\n" + _COMPLETE,
+    _COMPLETE + "\n" + json.dumps({"selected": []}),
+], ids=["open-prose-after", "fence", "prose-before", "two-objects"])
+def test_a_complete_answer_is_never_salvaged(raw):
+    assert sel.salvage_selection(raw) is None
+    out = sel.select_ttps(TEXT, _cands("T1105", "T1003.001"), lambda s, u: raw)
+    assert out.status == sel.OK
+    assert [t.mitre_id for t in out.selected] == ["T1105"] and out.review == []
+
+
 def test_no_candidate_no_call():
     called = []
     out = sel.select_ttps(TEXT, [], lambda s, u: called.append(1) or "")
@@ -341,6 +444,36 @@ def test_select_mode_reports_a_selector_that_never_answers(select_pipeline, samp
     assert f.status == "failed" and "review" in f.reason
     assert result.llm_result.ttps == []
     assert {r.attack_id for r in result.llm_result.ttp_review} == {"T1190", "T1566.001"}
+
+
+def test_select_mode_reports_an_answer_cut_off_and_ships_its_validated_choices(
+        select_pipeline, sample_cti_text):
+    from pipeline.orchestrator import Document, run_document
+    answer, _ = select_pipeline
+    quote = "CVE-2020-10148 was exploited for initial access"
+    answer["select"] = lambda excerpt: (
+        '{"selected": [{"attack_id": "T1190", "evidence_quote": "' + quote + '", "reason": "exploit"},\n'
+        '{"attack_id": "T1566.001", "evidence_quote": "spearphishing", "reason": "' + _LOOP
+        if quote in excerpt else '{"selected": []}')
+    result = run_document(Document(text=sample_cti_text, original_filename="r.txt"),
+                          _run_opts(ttp_mode="select", verify_ttps=True))
+    f = result.outcome("3f")
+    assert f.status == "ran" and f.counts["truncated"] >= 1 and f.counts["unparsed"] == 0
+    assert "cut off" in f.reason
+    assert {t.mitre_id for t in result.llm_result.ttps} == {"T1190"}
+    assert {r.attack_id: r.reason for r in result.llm_result.ttp_review} == {
+        "T1566.001": "selection answer cut off before a choice for it"}
+
+
+def test_select_mode_fails_when_every_answer_is_cut_before_a_choice(select_pipeline, sample_cti_text):
+    from pipeline.orchestrator import Document, run_document
+    answer, _ = select_pipeline
+    answer["select"] = lambda excerpt: '{"selected": [{"attack_id": "T1190", "reason": "' + _LOOP
+    result = run_document(Document(text=sample_cti_text, original_filename="r.txt"),
+                          _run_opts(ttp_mode="select", verify_ttps=True))
+    f = result.outcome("3f")
+    assert f.status == "failed" and f.counts["truncated"] == 0 and f.counts["unparsed"] >= 1
+    assert result.llm_result.ttps == []
 
 
 def test_select_mode_without_an_llm_falls_back_and_says_so(monkeypatch, sample_cti_text):

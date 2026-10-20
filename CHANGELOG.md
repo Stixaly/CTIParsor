@@ -127,6 +127,36 @@ gets a dated amendment.
 
 ### Fixed
 
+#### A Stage 3f selection answer cut off at the token limit keeps its checked choices (ADR-0072), 2026-10-19
+
+The selection answer that "did not parse" in five of the eight select-mode
+dev runs (DarkSide, TA505, TA544; one per run) was cut off, not malformed.
+Reproduced with every vLLM call logged, the DarkSide and TA505 answers stop
+at `finish_reason` "length" after 8,192 tokens (`LLM_MAX_OUTPUT_TOKENS`) and
+about 325 seconds. The model wrote five and six complete choices, then
+deliberated inside the next one's `reason` ("So T1498 is the correct one. But
+T1499 is also a candidate...") until the ceiling. The list never closed, so
+the whole chunk shipped nothing and its 36 to 41 candidates went to review.
+
+`stage3f_ttp_select.salvage_selection` keeps the complete choices of an
+answer cut inside its `selected` list. Each is validated as before (an id
+among the candidates, a quote found verbatim, once per id), and every
+candidate the answer did not reach goes to review ("selection answer cut off
+before a choice for it"). An answer cut before its first choice, or one that
+closes but does not parse, is still unparseable. An answer that closes and is
+then repeated until the cut (the Kaseya report) is read from its first
+object, as before. The salvage runs before `parse_selection`, which would read
+a "[]" written inside a looping reason as an empty selection. The stage
+report counts these answers as 3f `truncated`, apart from `unparsed`.
+
+On AnnoCTR dev at `5b98a49` (`sel-dev-salvage-5b98a49p` against
+`sel-dev-a19.2-5b98a49`), 15 of 16 reports are identical; DarkSide gains five
+techniques, all in the gold (TP 2 → 7, FP 1 → 1). Technique F1 0.584 →
+0.610, +0.026 [+0.000, +0.098]; precision 0.565 → 0.580, recall 0.605 →
+0.643, time per report −1%. The loop itself is not addressed and still costs
+its 320 seconds. Detail: `docs/eval/selection-cut-off-2026-10.md`;
+`tests/test_ttp_select.py` holds the cases.
+
 #### A no-break space is a space in production too (ADR-0049), 2026-10-18
 
 google-re2 (CI, the container image) reads `\s` as ASCII whitespace only; the
