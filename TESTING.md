@@ -225,13 +225,14 @@ current truth.
 | **Rule relevance** | `test_observables_domain_guard.py` | 10 | domain validation, filename rejection, URL handling |
 | **Detection coverage** | `test_detection_coverage.py` | 48 | scoring policy, format splitting, export selection, evidence |
 | **Detection coverage** | `test_detection_artifacts.py` | 26 | artifact scoring, evidence capping, folding, vocabulary |
-| **Detection coverage** | `test_detection_phases.py` | 13 | tactic mapping, off-matrix handling, phase counting |
+| **Detection coverage** | `test_detection_phases.py` | 15 | tactic mapping, off-matrix handling, phase counting, a column for every enterprise tactic on every committed ATT&CK track (ADR-0087) |
 | **Detection coverage** | `test_mitre_db.py` | 8 | ATT&CK/CAPEC index lookup and search ranking, missing or corrupt index |
 | **Detection coverage** | `test_coverage_artifacts_api.py` | 5 | artifact coverage routes, payload shape, 404 handling |
 | **Export filters** | `test_export_filters.py` | 13 | facet totals, format filtering, license exclusion, manifest |
 | **Export filters** | `test_rule_lookup.py` | 8 | rule lookup, metadata retrieval, license handling |
 | **Rule synthesis** | `test_synth_sigma.py` | 47 | rule synthesis, value validation, path escaping, stability |
 | API | `test_api_routes.py` | 11 | health checks, job listing, upload validation, progress |
+| API | `test_attack_api.py` | 5 | `GET /api/attack/index`: each committed ATT&CK track served byte for byte with `X-Attack-Release`, the sha256 ETag and its 304, the 19.2 ETag sent to an API on 20.0 gets the 20.0 index, a track without an index answers 404 (ADR-0087) |
 | API | `test_relationships_api.py` | 18 | relationship creation, label coercion, patch validation, dates, `POST /relationships/bulk` (`human_bulk`, journaled, other jobs untouched — ADR-0065) |
 | API | `test_settings_api.py` | 31 | corpus listing, overlay management, rebuild ingestion, formats, unsafe paths/remotes/tarballs, enable/disable, per-corpus sync |
 | API | `test_jobs_routes.py` | 23 | job list/get/status, finalize, delete (rows and every file), retention sweep, source file, bundle and ledger |
@@ -281,7 +282,7 @@ schema FastAPI publishes (`/openapi.json`), with Schemathesis: valid ones,
 and ones that break a declared constraint (wrong types, missing fields,
 odd Unicode, unexpected methods). Each response must not be a server error
 and must match the schema its operation declares. About 20 examples per
-operation and mode; 51 operations in about 30 s.
+operation and mode; 52 operations in about 30 s.
 
 - **Deterministic.** Generation is derandomized: every run sends the same
   requests, so the test is a gate like the others (ADR-0071), and a failure
@@ -335,9 +336,11 @@ failure is fixed before the merge:
 From then on, `test_fuzz_targets.py` replays that input in the fast tests.
 
 ### Frontend (Vitest, ESLint, tsc)
-17 Vitest files (141 tests on 2026-10-03) with Testing Library and jsdom: the
+20 Vitest files (162 tests on 2026-10-19) with Testing Library and jsdom: the
 Review and Dashboard pages, the relationship rail, the document reader, the
-graph builders and layout, the API client, a dependency audit. ESLint runs
+graph builders and layout, the API client, the ATT&CK search, the Coverage
+columns against the index of every committed ATT&CK track (read from
+`pipeline/data/`), a dependency audit. ESLint runs
 the TypeScript rules, `rules-of-hooks` and `exhaustive-deps` as errors, and
 the formatting the code already follows (`frontend/eslint.config.js`).
 `npm run check` runs lint, `tsc` and Vitest, the three steps of CI's frontend

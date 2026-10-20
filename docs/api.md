@@ -285,6 +285,15 @@ produce the same layout — `rules/{format}/{corpus}__{slug}.{ext}`, `MANIFEST.j
                      "weight": 0.68 } ] } ] }
 ```
 
+## ATT&CK index
+
+The index the interface reads technique names and tactics from (ADR-0087,
+amendment of 2026-10-19).
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/attack/index` | The `mitre_index.json` of the ATT&CK track the API runs (`ATTACK_RELEASE`), byte for byte: `{"techniques": [...], "tactics": [...]}`. `X-Attack-Release` names the release (`19.2`, `20.0`). The ETag is the file's sha256 and `Cache-Control` is `no-cache`, so a matching `If-None-Match` gets a 304. A track without the file answers 404; the default track's file is never served in its place |
+
 ## Queue
 
 | Method | Path | Description |

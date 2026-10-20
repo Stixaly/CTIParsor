@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
@@ -16,6 +16,7 @@ import {
   formatLine,
   formatSoft,
 } from '../components/review/tokens'
+import { useAttackIndex } from '../hooks/useAttackIndex'
 import { useCoverage } from '../hooks/useCoverage'
 import { useRuleSelection } from '../hooks/useRuleSelection'
 import type { SelectableRule } from '../hooks/useRuleSelection'
@@ -28,35 +29,7 @@ import CoverageExportPanel from '../components/coverage/CoverageExportPanel'
 import { usePromotedRules } from '../hooks/usePromotedRules'
 import EvidenceGateBanner from '../components/coverage/EvidenceGateBanner'
 import type { TechEntry } from '../components/coverage/model'
-
-// ATT&CK enterprise tactics in kill-chain order (column order).
-//
-// FIFTEEN columns, matching the shipped mitre_index.json — not the fourteen of
-// the classic matrix. That index renames TA0005 to `stealth` (not
-// `defense-evasion`) and adds TA0112 `defense-impairment`. The previous list
-// here used `defense-evasion`, so the 148 techniques tagged `stealth` and the 56
-// tagged `defense-impairment` all fell through to the 'other' bucket — 204
-// enterprise techniques shown as unmapped.
-//
-// Kept in step with TACTIC_ORDER in pipeline/detection/phases.py, which is
-// locked against the index by
-// test_every_enterprise_tactic_in_the_index_has_a_column.
-const TACTIC_ORDER = [
-  'reconnaissance', 'resource-development', 'initial-access', 'execution',
-  'persistence', 'privilege-escalation', 'stealth', 'defense-impairment',
-  'credential-access', 'discovery', 'lateral-movement', 'collection',
-  'command-and-control', 'exfiltration', 'impact',
-]
-const TACTIC_LABEL: Record<string, string> = {
-  'reconnaissance': 'Reconnaissance', 'resource-development': 'Resource Dev',
-  'initial-access': 'Initial Access', 'execution': 'Execution', 'persistence': 'Persistence',
-  'privilege-escalation': 'Priv Esc', 'stealth': 'Stealth',
-  'defense-impairment': 'Defense Impairment',
-  'credential-access': 'Credential Access', 'discovery': 'Discovery',
-  'lateral-movement': 'Lateral Movement', 'collection': 'Collection',
-  'command-and-control': 'Command & Control', 'exfiltration': 'Exfiltration',
-  'impact': 'Impact', 'other': 'Other',
-}
+import { TACTIC_LABEL, TACTIC_ORDER } from '../components/coverage/tactics'
 
 /** Pseudo-technique for rules promoted from the Proposed-detections panel. They
  *  carry none of the report's techniques — that is why the coverage set missed
@@ -64,7 +37,6 @@ const TACTIC_LABEL: Record<string, string> = {
 const PROMOTED_GROUP = '(promoted)'
 
 interface TechMeta { name: string; tactics: string[] }
-interface MitreTech { id?: string; name?: string; tactics?: string[] }
 
 export default function Coverage() {
   const { jobId } = useParams<{ jobId: string }>()
@@ -74,21 +46,17 @@ export default function Coverage() {
     enabled: !!jobId,
   })
   const { data: coverage, isLoading, isError } = useCoverage(jobId)
-  const [meta, setMeta] = useState<Record<string, TechMeta>>({})
 
-  // ATT&CK index (already served to the frontend) → technique → name + tactics.
-  useEffect(() => {
-    fetch('/mitre_index.json')
-      .then(r => r.json() as Promise<{ techniques?: MitreTech[] }>)
-      .then(idx => {
-        const m: Record<string, TechMeta> = {}
-        for (const t of idx.techniques ?? []) {
-          if (t.id) m[t.id.toUpperCase()] = { name: t.name ?? t.id, tactics: t.tactics ?? [] }
-        }
-        setMeta(m)
-      })
-      .catch(() => { /* names degrade to ids — non-fatal */ })
-  }, [])
+  // The ATT&CK index of the release the API runs (ADR-0087) → technique →
+  // name + tactics.  Until it arrives, or if it fails, names degrade to ids.
+  const { data: attack } = useAttackIndex()
+  const meta = useMemo(() => {
+    const m: Record<string, TechMeta> = {}
+    for (const t of attack?.techniques ?? []) {
+      if (t.id) m[t.id.toUpperCase()] = { name: t.name ?? t.id, tactics: t.tactics ?? [] }
+    }
+    return m
+  }, [attack])
 
   const { data: reportRules, isLoading: rulesLoading } = useQuery({
     queryKey: ['coverage-report-rules', jobId],
@@ -252,6 +220,14 @@ export default function Coverage() {
         <Link to={`/graph/${jobId}`} className="link">Graph</Link>
         <h1 style={{ fontSize: 18, margin: 0 }}>Detection Coverage</h1>
         {job && <span style={{ color: 'var(--ink-3)', fontSize: 13 }}>{job.original_filename}</span>}
+        {attack?.release && (
+          <span
+            style={{ color: 'var(--ink-3)', fontSize: 12 }}
+            title="Technique names and tactics come from this ATT&CK release: the one the API runs (ATTACK_RELEASE)"
+          >
+            ATT&CK {attack.release}
+          </span>
+        )}
       </div>
 
       <div style={{

@@ -335,7 +335,7 @@ release is a **track**: the files built from MITRE's bundles
 (`mitre_index.json`, `gazetteer.json`, `attack_relationships.json`,
 `attack_revoked.json`, the embeddings of `mitre_index.json` with their meta file,
 and the retrieval corpus with its embeddings), which Stages 2b, 2c, 3c and 4b
-read, and which the API's ATT&CK search reads through `mitre_index.json`.
+read, and which the interface reads through `GET /api/attack/index`.
 
 | `ATTACK_RELEASE` | Files read |
 |---|---|
@@ -367,8 +367,12 @@ read, and which the API's ATT&CK search reads through `mitre_index.json`.
 * **A finalize uses the release of the process that serves it**, which is not
   necessarily the run's. The build record (ADR-0086) holds the finalize's own
   manifest.
-* **The interface does not follow.** It reads the static
-  `frontend/public/mitre_index.json`, whichever track a run uses.
+* **The interface follows the API's release.** The Coverage page takes technique
+  names and tactics from `GET /api/attack/index`: the `mitre_index.json` of the
+  track the API runs, with its version in `X-Attack-Release`. The page shows
+  that version (`ATT&CK 20.0`) next to the report's name. Like the pipeline, it
+  shows the release of the process that serves it, which may not be the
+  release of the job's run.
 * **Measured on AnnoCTR dev** ([attack-v20-2026-10](eval/attack-v20-2026-10.md)):
   20.0 against 19.2, technique F1 0.584 → 0.609, a difference that is not
   significant ([−0.019, +0.076]). No technique new in v20 reaches a candidate
