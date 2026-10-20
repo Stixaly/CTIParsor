@@ -411,7 +411,12 @@ Measured effect on a 4-report corpus: named-entity relationship hallucination
 
 ## MITRE ATT&CK data
 
-Stages 2b, 2c, 3c, and 4b use pre-built local indexes in `pipeline/data/`.
+Stages 2b, 2c, 3c, and 4b use pre-built local indexes in `pipeline/data/`. That
+directory is the **default track**, ATT&CK 19.2 (named by
+`pipeline/data/attack_manifest.json`). `ATTACK_RELEASE=20.0` makes a process
+read `pipeline/data/attack/20.0/` instead, which holds the same index files built
+from ATT&CK v20.0 and its own `attack_manifest.json` (ADR-0087,
+[configuration](configuration.md#attck-release)).
 
 ### Build the indexes
 
@@ -428,9 +433,24 @@ docker compose run --rm dev python scripts/build_indexes.py --only relationships
 
 # Only on request: the candidate corpus of TTP_MODE=select, the default (ADR-0072)
 docker compose run --rm dev python scripts/build_indexes.py --only retrieval     # attack_retrieval_*
+
+# Write to another directory instead of pipeline/data/ (a release track, ADR-0087);
+# --capec-index carries the CAPEC entries of an existing mitre_index.json over
+# when no CAPEC bundle is given
+docker compose run --rm dev python scripts/build_indexes.py --out-dir DIR --capec-index pipeline/data/mitre_index.json
 ```
 
 The script auto-discovers bundle files in `data/`, `~/Downloads/`, and `~/Documents/`. Accepts `--enterprise`, `--mobile`, `--ics`, `--capec` flags for explicit paths.
+
+To ship a **new ATT&CK release**, build a track rather than rebuilding the
+default files: `python scripts/download_attack.py --release X.Y` fetches the
+bundles and checks each against GitHub's sha256, then
+`scripts/build_attack_release.py --release X.Y` builds `pipeline/data/attack/X.Y/`
+from them (it calls the builders of `build_indexes.py` with an output directory, adds the
+track's own `attack_manifest.json`, and refuses to overwrite a track without
+`--force`). Rebuilding the default files in place changes their hashes: the run
+manifest then lists them under `attack.modified_files`, and the release
+`attack_manifest.json` names is no longer proven for them.
 
 | File | Stage | Size | In git |
 |---|---|---|---|
@@ -442,9 +462,14 @@ The script auto-discovers bundle files in `data/`, `~/Downloads/`, and `~/Docume
 | `pipeline/data/mitre_embeddings_manifest.json` | 2c cache validity + thresholds | ~1 KB | no — written by `--only embeddings` |
 | `pipeline/data/attack_retrieval_corpus.json` | 2c candidate retrieval (`TTP_MODE=select`) | ~7 MB | yes — `--only retrieval` |
 | `pipeline/data/attack_retrieval_embeddings.npy` | 2c candidate retrieval (`TTP_MODE=select`) | ~27 MB | yes — `--only retrieval` |
+| `pipeline/data/attack_revoked.json` | 3c revoked ids and their replacements | ~5 KB | yes — `--only revoked` |
+| `pipeline/data/attack_manifest.json` | the default track's release (19.2), what was checked against a rebuild, the sha256 of its files; read by the run manifest and by `ATTACK_RELEASE` | ~4 KB | yes — no script writes it (ADR-0087) |
+| `pipeline/data/attack/20.0/` | the v20.0 track: the eight index files above (no embeddings manifest) built from ATT&CK v20.0, and its own `attack_manifest.json`; read when `ATTACK_RELEASE=20.0` | ~39.9 MB | yes — `scripts/build_attack_release.py --release 20.0` |
 
-The seven committed files are all a fresh clone needs: rebuild them only after a
-MITRE ATT&CK release, and commit the result to avoid a per-clone rebuild.
+The eight index files and `attack_manifest.json` of the default track are all a
+fresh clone needs. A track under `pipeline/data/attack/` is optional: it is read
+only when `ATTACK_RELEASE` names it. Rebuild a track only after a MITRE ATT&CK
+release, and commit the result to avoid a per-clone rebuild.
 
 > The **manifest** records the model the cache was built with (so Stage 2c can detect a stale cache after `TTP_EMBEDDING_MODEL` changes) and the calibrated `thresholds` (`high`/`medium`) for that model — written by `build_indexes.py --only embeddings` (ADR-0011 Phase A). It is not in git: without it Stage 2c assumes the committed cache was built with the default `all-MiniLM-L6-v2` and uses that model's thresholds, which is true of the committed files. Switching model means rebuilding the embeddings, which writes it.
 

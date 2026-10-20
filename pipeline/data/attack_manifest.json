@@ -1,0 +1,66 @@
+{
+ "release": "19.2",
+ "track": "default",
+ "identified": "2026-10-18, by content (ADR-0087): the files were built before any release was recorded, so each was rebuilt from the attack-stix-data v19.2 release assets with scripts/build_indexes.py and compared; the bundle file names say nothing about a version",
+ "sources": [
+  {
+   "domain": "enterprise-attack",
+   "file": "data/enterprise-attack.json",
+   "origin": "https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack/enterprise-attack.json, fetched 2026-09-27",
+   "sha256": "f7eaf37fe53b50404084fe1fe67237278f7317e61c11ad550295722d13ede259",
+   "equivalent_release_asset": {
+    "url": "https://github.com/mitre-attack/attack-stix-data/releases/download/v19.2/enterprise-attack.json",
+    "sha256": "dc1639caa5501d720e280cf1cbd8fbe009884a0c9b3e6e9ed9d0c25166c3d8f4",
+    "collection_version": "19.2",
+    "checked": "same 26,085 objects with the same modified dates; the mitre/cti copy is serialised as STIX 2.0 (no spec_version on objects, labels and is_family differ), which no index reads"
+   }
+  },
+  {
+   "domain": "mobile-attack",
+   "file": null,
+   "origin": "not kept",
+   "sha256": null,
+   "equivalent_release_asset": {
+    "url": "https://github.com/mitre-attack/attack-stix-data/releases/download/v19.2/mobile-attack.json",
+    "sha256": "acfa5ca2d93484476f79bf38590e2b55bb675fc0ce85e76bffa0af2c82dada64",
+    "collection_version": "19.2",
+    "checked": "the Mobile entries of mitre_index.json equal a rebuild from this asset"
+   }
+  },
+  {
+   "domain": "ics-attack",
+   "file": null,
+   "origin": "not kept",
+   "sha256": null,
+   "equivalent_release_asset": {
+    "url": "https://github.com/mitre-attack/attack-stix-data/releases/download/v19.2/ics-attack.json",
+    "sha256": "08b83d2cea6b6d6752468ef0e62e2ab2a53c9443ef72c439ecccb07ab9e89da9",
+    "collection_version": "19.2",
+    "checked": "the ICS entries of mitre_index.json equal a rebuild from this asset"
+   }
+  }
+ ],
+ "matches_release": {
+  "mitre_index.json": "Enterprise, Mobile and ICS techniques and the 41 tactics equal a 19.2 rebuild",
+  "attack_revoked.json": "revoked_by and names equal a 19.2 rebuild; its sources date is the mitre/cti copy's",
+  "attack_retrieval_corpus.json": "the 17,350 entries equal a 19.2 rebuild",
+  "attack_retrieval_embeddings.npy": "byte-identical to a 19.2 rebuild (all-MiniLM-L6-v2)",
+  "mitre_embeddings_meta.json": "byte-identical to a rebuild from mitre_index.json",
+  "mitre_embeddings.npy": "same entries as mitre_index.json; vectors equal a rebuild within 2e-7"
+ },
+ "exceptions": {
+  "gazetteer.json": "built from a release before 19.2: the 14 name variants 19.2 added (G1056, G1057, S9041-S9044) are missing, nothing else differs",
+  "attack_relationships.json": "built from a release before 19.2 (2026-07-27): 237 curated pairs of 19.2 are missing, and it keeps 1 pair 19.2 no longer has (C0028 uses T1692.001)",
+  "mitre_index.json (CAPEC)": "the 615 CAPEC entries, also in mitre_embeddings*, come from a CAPEC bundle whose version was not recorded; CAPEC is not part of ATT&CK"
+ },
+ "files": {
+  "attack_relationships.json": "76c7aec28a0bc4e85fb188b3cbe85c3b03e564aa0d0c51c597840666f3fe3793",
+  "attack_retrieval_corpus.json": "2c2eceb2e653bae8cd47af04bad920f60c016d187d56887753b965709d38abcb",
+  "attack_retrieval_embeddings.npy": "a9c2797c798e2e1f7898d4bc94695900cd990fc3360c106fdd3ee184d40d38e2",
+  "attack_revoked.json": "7938a9cfb39474783124ddab5755775c33a4a9b622a886333224073c9ebf1709",
+  "gazetteer.json": "04e33f7897a0aa5ee181f9cc43f112992b1ef8794bb6e3f7d04256948d2c77de",
+  "mitre_embeddings.npy": "91a41e8f4e7e83a5a0eaa73af1db2a61b8d5ee9377b6915c92f27f61a8946bd6",
+  "mitre_embeddings_meta.json": "68c991c776cb5e615ea1b93e0bb4940937b9c51a89e034a190ac206b9573dfc6",
+  "mitre_index.json": "52409d46e5a10a56852296f1f412a7611443fb652edb14c4bce9ac6c5f06efe4"
+ }
+}

@@ -55,6 +55,9 @@ async def lifespan(app: FastAPI):
     # marking is never guessed (ADR-0073).
     from pipeline.stage4_stix_mapping import tlp_default
     logger.info("[startup] default TLP: %s", tlp_default())
+    # Likewise a bad ATTACK_RELEASE (ADR-0087), which this call fixes for the process.
+    from pipeline import attack_data
+    logger.info("[startup] ATT&CK release: %s", attack_data.current().version)
     init_db()
     uploads_dir().mkdir(parents=True, exist_ok=True)
     output_dir().mkdir(parents=True, exist_ok=True)

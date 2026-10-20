@@ -42,6 +42,7 @@ import json
 from pathlib import Path
 
 from api.logging_config import get_logger
+from pipeline import attack_data
 
 logger = get_logger(__name__)
 
@@ -85,11 +86,13 @@ def _load() -> tuple[
     id2surfaces: dict[str, set[str]] = {}
     id2entity_type: dict[str, str] = {}
 
+    # Resolved outside the try: an unknown ATTACK_RELEASE is a ValueError too.
+    path = attack_data.resolve(_GAZETTEER)
     try:
-        entries = json.loads(_GAZETTEER.read_text(encoding="utf-8"))
+        entries = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         # Every name then stays as the extractor wrote it, for the whole process.
-        logger.error(f"[aliases] {_GAZETTEER.name} unreadable, no alias is resolved: "
+        logger.error(f"[aliases] {path.name} unreadable, no alias is resolved: "
                      f"{type(exc).__name__}: {exc}")
         return name2ids, id2canonical, id2surfaces, id2entity_type
 
@@ -199,10 +202,11 @@ def _load_techniques() -> tuple[dict[str, str], dict[str, str]]:
     """Return (technique-name->id, id->canonical-name) from mitre_index.json."""
     name2id: dict[str, str] = {}
     id2name: dict[str, str] = {}
+    path = attack_data.resolve(_MITRE_INDEX)
     try:
-        index = json.loads(_MITRE_INDEX.read_text(encoding="utf-8"))
+        index = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        logger.error(f"[aliases] {_MITRE_INDEX.name} unreadable, no technique name is resolved: "
+        logger.error(f"[aliases] {path.name} unreadable, no technique name is resolved: "
                      f"{type(exc).__name__}: {exc}")
         return name2id, id2name
     for t in index.get("techniques", []):

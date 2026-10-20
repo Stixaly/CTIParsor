@@ -1,0 +1,63 @@
+{
+ "release": "20.0",
+ "track": "release",
+ "built_at": "2026-10-17T23:01:41+00:00",
+ "built_with": {
+  "script": "scripts/build_attack_release.py",
+  "git_rev": null,
+  "embedding_model": "all-MiniLM-L6-v2"
+ },
+ "sources": [
+  {
+   "domain": "enterprise-attack",
+   "file": "data/attack-stix/v20.0/enterprise-attack.json",
+   "url": "https://github.com/mitre-attack/attack-stix-data/releases/download/v20.0/enterprise-attack.json",
+   "sha256": "81113ba98afa2928f3dcff62022539f7ce30c315c32e14422f11ff95ce534352",
+   "published_digest": "sha256:81113ba98afa2928f3dcff62022539f7ce30c315c32e14422f11ff95ce534352",
+   "collection_version": "20.0",
+   "collection_modified": "2026-10-13T17:53:10.145Z"
+  },
+  {
+   "domain": "mobile-attack",
+   "file": "data/attack-stix/v20.0/mobile-attack.json",
+   "url": "https://github.com/mitre-attack/attack-stix-data/releases/download/v20.0/mobile-attack.json",
+   "sha256": "824f7d8a37e7893b29e4c6ca6d87b5fbbf3b228ec6384f1a69ee20d523ff59e5",
+   "published_digest": "sha256:824f7d8a37e7893b29e4c6ca6d87b5fbbf3b228ec6384f1a69ee20d523ff59e5",
+   "collection_version": "20.0",
+   "collection_modified": "2026-10-13T17:54:40.393Z"
+  },
+  {
+   "domain": "ics-attack",
+   "file": "data/attack-stix/v20.0/ics-attack.json",
+   "url": "https://github.com/mitre-attack/attack-stix-data/releases/download/v20.0/ics-attack.json",
+   "sha256": "c9ca0ce523a1b5e512060a390415e8aefe8f6d32c5f82d7de81264960c1e1183",
+   "published_digest": "sha256:c9ca0ce523a1b5e512060a390415e8aefe8f6d32c5f82d7de81264960c1e1183",
+   "collection_version": "20.0",
+   "collection_modified": "2026-10-13T17:54:18.154Z"
+  }
+ ],
+ "capec": {
+  "carried_from": "pipeline/data/mitre_index.json",
+  "sha256": "52409d46e5a10a56852296f1f412a7611443fb652edb14c4bce9ac6c5f06efe4",
+  "entries": 615
+ },
+ "retrieval_domains": [
+  "enterprise-attack"
+ ],
+ "revoked_domains": [
+  "enterprise-attack"
+ ],
+ "exceptions": {
+  "mitre_index.json (CAPEC)": "the 615 CAPEC entries are the default track's, carried over: CAPEC is not part of ATT&CK, so the two tracks differ by ATT&CK only"
+ },
+ "files": {
+  "attack_relationships.json": "8fca0e6a9d95fd742f3d774fbe085e04fd05b7d96125eb54b84c2639e2742d03",
+  "attack_retrieval_corpus.json": "833d3cdd273c36abdcf0b7946ea6cbe8205da147cf10487f5087082c8f326856",
+  "attack_retrieval_embeddings.npy": "43c6dd60c636c77c4e9c996121bcd5f10d7f78c2107b6f6e695ace65e97be633",
+  "attack_revoked.json": "eb2119ab798eedb770efd60e81a28cb71036e642a4b1c4a14dde7e69c11b7056",
+  "gazetteer.json": "c5c7010600dcc7b0b11961336ccad3e60516019e4620277062e8341083496d82",
+  "mitre_embeddings.npy": "ba6d9ded472378f7aea6a0c07771345beb0ee33ce14e628f2cad43ff0ed897c2",
+  "mitre_embeddings_meta.json": "e30a5e200f87d4dc64f221170f676fb5c8228ac1b351460b9fc0d692fc9366e8",
+  "mitre_index.json": "cd33303320cb1e91fae0e8c5fe837a8edca143094a05c727aa0f2ceca3a6d4af"
+ }
+}
