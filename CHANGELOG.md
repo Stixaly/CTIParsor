@@ -285,6 +285,15 @@ gets a dated amendment.
 
 ### Fixed
 
+#### certifi and uv move past two new advisories, 2026-10-20
+
+The dependency audit failed every run once two advisories were published:
+certifi 2026.7.22 (GHSA-6q48-6c7w-9gw2, fixed in 2026.10.19), in the image,
+CI and audit locks, and uv 0.12.23 (GHSA-hq85-5cpj-mr62, fixed in 0.13.4), the
+uv `make lock` runs. Both are now at the fixed release. The locks were
+rewritten by `scripts/lock.sh` with `--upgrade-package certifi --upgrade-package uv`,
+so no other pin moved. pip-audit finds nothing in the four locks.
+
 #### A Stage 3f selection answer cut off at the token limit keeps its checked choices (ADR-0072), 2026-10-19
 
 The selection answer that "did not parse" in five of the eight select-mode
