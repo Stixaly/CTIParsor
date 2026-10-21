@@ -243,6 +243,10 @@ runs.
   with precision +0.041 [−0.015, +0.078].
 - **ADR-0060's rule is not met** (the interval includes 0). The default stays
   19.2, and the 20.0 track is selectable.
+- **Re-run on 2026-10-21** at `01aeea6`, with ADR-0072's cut-off salvage on
+  both tracks. Neither run has a cut-off answer, and the difference is +0.003
+  [−0.028, +0.028], with precision −0.001. The rule still fails, and on dev the
+  two tracks cannot be told apart (addendum to docs/eval/attack-v20-2026-10.md).
 
 ## Consequences
 
