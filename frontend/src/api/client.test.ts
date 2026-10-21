@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from 'vitest'
-import { BundleRefusedError, errorDetail, fetchBundle, finalizeJob } from './client'
+import { BundleRefusedError, errorDetail, fetchAttackIndex, fetchBundle, finalizeJob } from './client'
 
 describe('errorDetail', () => {
   it('unwraps a FastAPI detail', () => {
@@ -68,5 +68,26 @@ describe('a bundle the STIX schemas refused', () => {
       .toBe('the STIX 2.1 schemas refused this bundle — bad id')
     expect(errorDetail(new Error(`409: ${REFUSED}`)))
       .toBe('the STIX 2.1 schemas refused this bundle — bad id')
+  })
+})
+
+describe('fetchAttackIndex', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('reads the release from X-Attack-Release (ADR-0087)', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({
+      ok: true, status: 200, headers: new Headers({ 'X-Attack-Release': '20.0' }),
+      json: () => Promise.resolve({ tactics: [], techniques: [{ id: 'T1698', name: 'Indirect Prompt Injection', domain: 'enterprise-attack' }] }),
+    })))
+    const index = await fetchAttackIndex()
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith('/api/attack/index')
+    expect(index.release).toBe('20.0')
+    expect(index.techniques.map(t => t.id)).toEqual(['T1698'])
+  })
+
+  it('throws on an error status, like every other call', async () => {
+    answer(404, '{"detail":"ATT&CK 20.0 has no mitre_index.json"}')
+    expect((await failure(fetchAttackIndex())).message)
+      .toBe('404: {"detail":"ATT&CK 20.0 has no mitre_index.json"}')
   })
 })

@@ -1,55 +1,15 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useCallback } from 'react'
 
-export interface MitreEntry {
-  id: string
-  name: string
-  domain: string
-  tactics?: string[]
-  is_subtechnique?: boolean
-  parent_id?: string | null
-  description?: string
-  shortname?: string
-}
+import type { MitreEntry } from '../types'
+import { useAttackIndex } from './useAttackIndex'
 
-interface MitreIndex {
-  techniques: MitreEntry[]
-  tactics: MitreEntry[]
-}
-
-// Module-level singleton so the index is fetched at most once per page load
-let _cache: MitreIndex | null = null
-let _inflight: Promise<MitreIndex> | null = null
-
-function fetchIndex(): Promise<MitreIndex> {
-  if (_cache) return Promise.resolve(_cache)
-  if (_inflight) return _inflight
-  _inflight = fetch('/mitre_index.json')
-    .then(r => r.json() as Promise<MitreIndex>)
-    .then(data => {
-      // Only cache when we actually received entries.  If we cached the empty
-      // fallback that the catch handler returns, _cache would be truthy forever
-      // and all subsequent calls would short-circuit to the empty object,
-      // permanently breaking MITRE search after any transient network error.
-      if (data.techniques.length || data.tactics.length) {
-        _cache = data
-      }
-      _inflight = null
-      return data
-    })
-    .catch(() => {
-      _inflight = null   // reset so the next call can retry
-      return { techniques: [], tactics: [] } as MitreIndex
-    })
-  return _inflight
-}
-
+/**
+ * Search the ATT&CK index of the release the API runs (ADR-0087): tactics and
+ * techniques by id prefix first, then by name.  `release` is that index's
+ * version; `ready` stays false while it loads or if it could not be fetched.
+ */
 export function useMitreSearch() {
-  const [index, setIndex] = useState<MitreIndex | null>(_cache)
-
-  useEffect(() => {
-    if (_cache) return
-    fetchIndex().then(setIndex)
-  }, [])
+  const { data: index } = useAttackIndex()
 
   const search = useCallback((query: string, limit = 12): MitreEntry[] => {
     if (!index) return []
@@ -77,5 +37,5 @@ export function useMitreSearch() {
     return results.slice(0, limit)
   }, [index])
 
-  return { search, ready: !!index }
+  return { search, ready: !!index, release: index?.release ?? null }
 }

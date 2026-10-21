@@ -41,11 +41,12 @@ from pipeline.mitre_db import get_techniques
 #: `defense-impairment`. Taking the fourteen-column list from
 #: frontend/src/pages/Coverage.tsx sent 148 + 56 enterprise techniques to the
 #: off-matrix bucket -- T1027.004, T1036, T1140, T1620 among them, all of which
-#: are plainly on the enterprise matrix. That frontend list has the same defect
-#: and buckets those techniques as "other".
+#: are plainly on the enterprise matrix. The frontend list had the same defect;
+#: it now has these fifteen columns (frontend/src/components/coverage/tactics.ts).
 #:
 #: `test_every_enterprise_tactic_in_the_index_has_a_column` locks this against
-#: the next ATT&CK version rather than against a hand-copied list.
+#: the index of every committed ATT&CK track (ADR-0087) rather than against a
+#: hand-copied list.
 TACTIC_ORDER: tuple[str, ...] = (
     "reconnaissance", "resource-development", "initial-access", "execution",
     "persistence", "privilege-escalation", "stealth", "defense-impairment",

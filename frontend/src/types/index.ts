@@ -128,6 +128,29 @@ export interface LedgerTime {
   field?: 'start_time' | 'stop_time'
 }
 
+// ── ATT&CK index (ADR-0087) ──────────────────────────────────────────────────
+/** One tactic or technique of `mitre_index.json` (scripts/build_indexes.py). */
+export interface MitreEntry {
+  id: string
+  name: string
+  /** `enterprise-attack`, `mobile-attack`, `ics-attack` or `capec` */
+  domain: string
+  /** A technique's tactics, by shortname */
+  tactics?: string[]
+  is_subtechnique?: boolean
+  parent_id?: string | null
+  description?: string
+  shortname?: string
+}
+
+/** GET /api/attack/index: the index of the ATT&CK release the API runs. */
+export interface AttackIndex {
+  /** Its version (X-Attack-Release): "19.2", "20.0"; null without the header */
+  release: string | null
+  techniques: MitreEntry[]
+  tactics: MitreEntry[]
+}
+
 // ── Detection coverage (ADR-0006) ───────────────────────────────────────────
 // The three detection formats the store can hold, kept in step with
 // DETECTION_FORMATS in pipeline/detection/coverage.py and _EXPORT_EXTENSIONS in

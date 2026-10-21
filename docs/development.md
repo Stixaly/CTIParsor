@@ -297,6 +297,7 @@ CTIParsor/
 │       ├── policy.py              # Relationship policy: pinned rules + completion block
 │       ├── thresholds.py          # /api/thresholds — NER cutoffs, recalibration (ADR-0051)
 │       ├── overrides.py           # /api/overrides — deny / promote lists (ADR-0052)
+│       ├── attack.py              # GET /api/attack/index — the selected ATT&CK track's index (ADR-0087)
 │       └── _common.py             # Guards shared by the job-scoped route modules
 │
 ├── frontend/                      # React 18 + TypeScript + Vite 6
@@ -324,13 +325,15 @@ CTIParsor/
 │   │   │   ├── DrillInStrip.tsx   # A technique's rules in three format columns
 │   │   │   ├── CoverageExportPanel.tsx # Selection table + live archive preview
 │   │   │   ├── TriCheckbox.tsx    # ✓ / – / empty marker used at every scope
+│   │   │   ├── tactics.ts         # The fifteen tactic columns, checked against every ATT&CK track
 │   │   │   └── model.ts           # TechEntry — the shared per-technique shape
 │   │   ├── components/graph/
 │   │   │   ├── GraphCanvas.tsx    # d3-force SVG renderer, STIX icons
 │   │   │   └── graphLayout.ts     # Tier map, radii, static layouts, icon paths
 │   │   ├── hooks/
 │   │   │   ├── useSSE.ts          # EventSource (5-retry on transient error)
-│   │   │   ├── useMitreSearch.ts  # Client-side ATT&CK search
+│   │   │   ├── useAttackIndex.ts  # The ATT&CK index of the release the API runs (ADR-0087)
+│   │   │   ├── useMitreSearch.ts  # Client-side ATT&CK search over that index
 │   │   │   ├── useCoverage.ts     # Coverage data hook (view ↔ source seam)
 │   │   │   ├── useRuleSelection.ts # Rule selection as an exclusion set (ADR-0022)
 │   │   │   ├── usePromotedRules.ts # Rules promoted from the Detections tab into the coverage selection
@@ -341,8 +344,7 @@ CTIParsor/
 │   │   └── types/index.ts         # Shared TS types
 │   └── public/
 │       ├── stix-icons/            # 27 white STIX 2.1 SVG icons, EclecticIQ's stix-icons (CC BY-SA 4.0)
-│       ├── stix-viz/              # OASIS cti-stix-visualization, for the graph view (THIRD_PARTY_NOTICES.md)
-│       └── mitre_index.json       # ATT&CK index served to the frontend
+│       └── stix-viz/              # OASIS cti-stix-visualization, for the graph view (THIRD_PARTY_NOTICES.md)
 │
 ├── tests/                         # 114 test_*.py modules, ~2 100 tests — map and counts in TESTING.md
 │   ├── test_stage1.py             # Ingestion, chunking, overlap, defanging

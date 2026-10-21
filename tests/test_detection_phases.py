@@ -1,7 +1,9 @@
+import json
 import sqlite3
 
 import pytest
 
+from pipeline import attack_data
 from pipeline.detection.phases import (
     TACTIC_ORDER,
     _technique_index,
@@ -197,23 +199,30 @@ def test_gap_juxtaposes_both_rows():
     conn.close()
 
 
-def test_every_enterprise_tactic_in_the_index_has_a_column():
+@pytest.mark.parametrize("release", attack_data.available())
+def test_every_enterprise_tactic_in_the_index_has_a_column(release):
     """The column list must be derived from the shipped ATT&CK index, not copied.
 
     This locks the defect that shipped in the frontend's TACTIC_ORDER: that list
     has fourteen classic columns including `defense-evasion`, while this index
     renamed TA0005 to `stealth` and added TA0112 `defense-impairment`. The
     mismatch silently pushed 204 enterprise techniques off the matrix.
+
+    On every committed ATT&CK track (ADR-0087), not only the one this process
+    selects: a run, and the interface, can be on any of them.  The interface's
+    own list is held to the same rule by
+    frontend/src/components/coverage/tactics.test.ts.
     """
     from pipeline.detection.phases import ENTERPRISE_DOMAIN, TACTIC_LABEL, TACTIC_ORDER
-    from pipeline.mitre_db import get_techniques
 
-    techniques = get_techniques()
-    if not techniques:
-        pytest.skip("MITRE index is empty or unavailable")
+    path = attack_data.release(release).directory / "mitre_index.json"
+    if not path.is_file():
+        pytest.skip(f"{path} not built")
+    index = json.loads(path.read_text(encoding="utf-8"))
 
-    used: set[str] = set()
-    for entry in techniques:
+    used = {t["shortname"] for t in index.get("tactics") or [] if t.get("domain") == ENTERPRISE_DOMAIN}
+    assert used, f"no enterprise tactic in {path}"
+    for entry in index.get("techniques") or []:
         if entry.get("domain") != ENTERPRISE_DOMAIN:
             continue
         for tactic in entry.get("tactics") or []:
@@ -222,3 +231,9 @@ def test_every_enterprise_tactic_in_the_index_has_a_column():
     missing = sorted(used - set(TACTIC_ORDER))
     assert missing == [], f"enterprise tactics with no column: {missing}"
     assert set(TACTIC_ORDER) <= set(TACTIC_LABEL), "every column needs a label"
+
+
+def test_the_column_check_sees_every_track():
+    """The parametrization above reads the tracks this checkout has: the
+    default and 20.0 at least, so it cannot pass on an empty list."""
+    assert {"19.2", "20.0"} <= set(attack_data.available())

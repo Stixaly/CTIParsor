@@ -29,7 +29,7 @@ from schemathesis.checks import not_a_server_error, response_schema_conformance 
 
 import api.main  # noqa: E402
 
-# Per operation and generation mode; 52 operations.
+# Per operation and generation mode; 56 operations in the schema, 52 exercised.
 MAX_EXAMPLES = 20
 
 schema = (

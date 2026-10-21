@@ -62,7 +62,6 @@ path = [
     "pipeline/data/attack/*/mitre_index.json",
     "pipeline/data/attack/*/mitre_embeddings.npy",
     "pipeline/data/attack/*/mitre_embeddings_meta.json",
-    "frontend/public/mitre_index.json",
 ]
 precedence = "override"
 SPDX-FileCopyrightText = "The MITRE Corporation"

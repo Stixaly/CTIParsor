@@ -1,4 +1,4 @@
-import type { Job, Entity, Relationship, StixBundle, BundleLedger, CoverageResult, CoverageRule, CoverageReportRules, DetectionProposals, DetectionCorpus, CorpusConfig, FormatInfo, ExportFacets, ExportSelection, ExportAxis, LastRun, RuleLookupResult, ThresholdsInfo } from '../types'
+import type { Job, Entity, Relationship, StixBundle, BundleLedger, CoverageResult, CoverageRule, CoverageReportRules, DetectionProposals, DetectionCorpus, CorpusConfig, FormatInfo, ExportFacets, ExportSelection, ExportAxis, LastRun, RuleLookupResult, ThresholdsInfo, AttackIndex, MitreEntry } from '../types'
 
 const BASE = '/api'
 
@@ -164,6 +164,19 @@ export const bulkUpdateRelationships = (
   req<{ updated: number; action: string }>(`/jobs/${jobId}/relationships/bulk`, {
     method: 'POST', body: JSON.stringify({ ids, action }),
   })
+
+/** The ATT&CK index of the release the API runs (ADR-0087): the selected
+ *  track's mitre_index.json, its version in the X-Attack-Release header. */
+export async function fetchAttackIndex(): Promise<AttackIndex> {
+  const res = await fetch(`${BASE}/attack/index`)
+  if (!res.ok) throw new Error(`${res.status}: ${await res.text().catch(() => res.statusText)}`)
+  const body = await res.json() as { techniques?: MitreEntry[]; tactics?: MitreEntry[] }
+  return {
+    release: res.headers.get('X-Attack-Release'),
+    techniques: body.techniques ?? [],
+    tactics: body.tactics ?? [],
+  }
+}
 
 // Detection coverage (ADR-0006)
 export const fetchCoverage = (jobId: string) =>
