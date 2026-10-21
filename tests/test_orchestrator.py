@@ -100,7 +100,7 @@ def test_a_stage3_whose_every_call_fails_is_failed_not_empty(sample_cti_text, mo
     returns "", so the run used to look like one where the model found nothing."""
     import pipeline.stage3_llm as s3
 
-    def not_found(system, user):
+    def not_found(system, user, max_tokens=None):
         raise RuntimeError("Error code: 404 - The model `Qwen` does not exist.")
 
     monkeypatch.setattr(s3, "_PROVIDER", "anthropic")
@@ -380,7 +380,7 @@ def test_an_empty_or_unparseable_answer_is_not_nothing_found(sample_cti_text, mo
     import pipeline.stage3_llm as s3
 
     monkeypatch.setattr(s3, "_PROVIDER", "anthropic")
-    monkeypatch.setattr(s3, "_call_anthropic_impl", lambda system, user: answer)
+    monkeypatch.setattr(s3, "_call_anthropic_impl", lambda system, user, max_tokens=None: answer)
 
     stage3 = run_document(Document(text=sample_cti_text), _opts()).outcome("3")
     assert stage3.status == "failed" and f"1 {kind}" in stage3.reason

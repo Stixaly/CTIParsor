@@ -143,6 +143,7 @@ the [README](../README.md#how-it-works); this page is the detail.
 │  and the LLM's own picks, exact quote checked by code; a failed     │
 │  call ships nothing (candidates go to review); an answer cut off    │
 │  at the output-token limit ships its complete, checked choices      │
+│  the call stops at TTP_SELECT_MAX_OUTPUT_TOKENS (vLLM: 4096)        │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐

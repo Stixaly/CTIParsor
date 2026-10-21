@@ -179,7 +179,7 @@ current truth.
 | LLM enrich | `test_stage3.py` | 80 | LLM enrichment, JSON parsing, deduplication, prompt sanitization, the document-level pass reaching the provider whole |
 | Relationship verification | `test_stage3d_verify.py` | 9 | Stage 3d sees the whole text, cuts the text not the claims, batches, document mode (reference sentence yes, chain no) |
 | LLM enrich | `test_stage3_providers.py` | 5 | readiness gating for anthropic, gemini, mistral and the OpenAI-compatible local providers |
-| LLM enrich | `test_stage3_calls.py` | 75 | client construction, provider diagnostics, Anthropic/OpenAI-compatible calls and retries, dispatch, repair of a truncated answer (never collapsed to one nested object), `enrich_chunk`/`enrich_all_chunks`/`enrich_document_relations` branches |
+| LLM enrich | `test_stage3_calls.py` | 84 | client construction, provider diagnostics, Anthropic/OpenAI-compatible calls and retries, the provider's finish reason counted per call (also with no content) and the per-call output ceiling, dispatch, repair of a truncated answer (never collapsed to one nested object), `enrich_chunk`/`enrich_all_chunks`/`enrich_document_relations` branches |
 | **CVE enrichment** | `test_cve_enrichment.py` | 25 | CVE id validation, the path-traversal guard before any URL, opt-in network flag, fetch and time caps, CIRCL CVE 5.x parsing (ADP then CNA scores), the PostgreSQL cache and its remembered misses |
 | Hallucination filter | `test_stage3b.py` | 11 | hallucination filtering, entity presence checks, allow-list bypass |
 | **TTP precision** | `test_ttp_precision.py` | 36 | threshold resolution, semantic confidence, subsumption, verification (whole chunk sent) |

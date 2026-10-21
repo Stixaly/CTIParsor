@@ -20,6 +20,13 @@ TEXT = ("The actor sent emails with malicious Word attachments to finance staff.
         "Credentials were later dumped from LSASS memory with a custom tool.")
 
 
+@pytest.fixture(autouse=True)
+def _forget_the_last_call():
+    """The at-ceiling flag is per thread, and every test here runs on one."""
+    from pipeline import llm_stats
+    llm_stats.reset_last_call()
+
+
 def _cands(*ids):
     return [TtpCandidate(attack_id=i, name=f"name {i}", sources=["dense"], passage="p") for i in ids]
 
@@ -215,6 +222,39 @@ def test_a_complete_answer_is_never_salvaged(raw):
     assert [t.mitre_id for t in out.selected] == ["T1105"] and out.review == []
 
 
+def _at_ceiling(raw):
+    """A selection call whose provider reported finish_reason "length", as
+    stage3_llm's provider wrappers record it."""
+    from pipeline import llm_stats
+
+    def llm(system, user):
+        llm_stats.record_call(at_ceiling=True)
+        return raw
+    return llm
+
+
+@pytest.mark.parametrize("raw,status", [
+    (_CUT, sel.TRUNCATED),
+    (_COMPLETE + ("\n" + _COMPLETE) * 3 + '\n{"selected": [{"attack_id": "T1105", "evidence_quote": "do', sel.OK),
+], ids=["darkside", "kaseya"])
+def test_an_answer_the_provider_stopped_at_the_ceiling_is_counted(raw, status):
+    """The salvage infers a cut from an open list; the provider's finish reason
+    says it.  Kaseya's answer closed before the cut: read whole, yet counted."""
+    from pipeline import llm_stats
+    before = llm_stats.snapshot()
+    out = sel.select_ttps(TEXT, _cands("T1566.001", "T1003.001", "T1105", "T1059.001"), _at_ceiling(raw))
+    assert out.status == status
+    assert llm_stats.delta(before, llm_stats.snapshot())["ttp_selection_at_ceiling"] == 1
+
+
+def test_an_earlier_call_at_the_ceiling_is_not_counted_for_the_selection():
+    from pipeline import llm_stats
+    llm_stats.record_call(at_ceiling=True)       # the chunk's extraction call, say
+    before = llm_stats.snapshot()
+    sel.select_ttps(TEXT, _cands("T1105"), _answer())
+    assert "ttp_selection_at_ceiling" not in llm_stats.delta(before, llm_stats.snapshot())
+
+
 def test_no_candidate_no_call():
     called = []
     out = sel.select_ttps(TEXT, [], lambda s, u: called.append(1) or "")
@@ -309,7 +349,7 @@ def calls(monkeypatch):
     log: list[str] = []
     answers = {"select": '{"selected": []}'}
 
-    def fake(system, user, provider=None):
+    def fake(system, user, provider=None, max_output_tokens=None):
         if system.startswith(sel._SELECT_SYSTEM):
             log.append("select")
             return answers["select"]
@@ -356,6 +396,56 @@ def test_verify_mode_never_calls_the_selector(calls):
     log, _ = calls
     enrich_chunk(TEXT, [], verify_ttps_on=False, verify_rels=False, ttp_candidates=_cands("T1105"))
     assert "select" not in log
+
+
+@pytest.mark.parametrize("provider,env,global_ceiling,expected", [
+    ("vllm", {}, 8192, 4096),
+    ("vllm", {"VLLM_ENABLE_THINKING": "true"}, 8192, 8192),     # it reasons first
+    ("gemini", {}, 8192, 8192),
+    ("anthropic", {}, 8192, 8192),
+    ("gemini", {"TTP_SELECT_MAX_OUTPUT_TOKENS": "1000"}, 8192, 1000),
+    ("vllm", {"TTP_SELECT_MAX_OUTPUT_TOKENS": "1000"}, 8192, 1000),
+    ("vllm", {}, 1024, 1024),                                  # never above LLM_MAX_OUTPUT_TOKENS
+    ("vllm", {"TTP_SELECT_MAX_OUTPUT_TOKENS": "0"}, 8192, 4096),
+    ("vllm", {"TTP_SELECT_MAX_OUTPUT_TOKENS": "-5"}, 8192, 4096),
+    ("vllm", {"TTP_SELECT_MAX_OUTPUT_TOKENS": "lots"}, 8192, 4096),
+], ids=["vllm", "vllm-thinking", "gemini", "anthropic", "gemini-set", "vllm-set", "below-the-global-ceiling",
+        "zero", "negative", "not-a-number"])
+def test_the_selection_call_has_its_own_output_ceiling(monkeypatch, provider, env, global_ceiling, expected):
+    """One that loops runs to the 8,192-token ceiling, 320 s; the longest
+    answer that ended by itself took 3,167 (AnnoCTR train,
+    docs/eval/selection-loop-2026-10.md).  Measured on vLLM with thinking off,
+    the selection call stops at 4,096 there; a model that reasons before it
+    answers keeps the global ceiling unless told otherwise."""
+    from pipeline import stage3_llm as s3
+    seen = []
+    monkeypatch.setattr(s3, "_call_llm", lambda system, user, provider=None, max_output_tokens=None:
+                        seen.append(max_output_tokens) or '{"selected": []}')
+    monkeypatch.setattr(s3, "_MAX_OUTPUT_TOKENS", global_ceiling)
+    monkeypatch.setattr(s3, "_PROVIDER", provider)
+    for key in ("TTP_SELECT_MAX_OUTPUT_TOKENS", "VLLM_ENABLE_THINKING"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+
+    s3.select_chunk_ttps(TEXT, _cands("T1105"))
+    assert seen == [expected]
+    settings = s3.stage3_settings(consensus=False, verify_rels=False, verify_ttps=True, ttp_mode="select")
+    assert settings["ttp_select"]["max_output_tokens"] == expected
+
+
+def test_the_selection_ceiling_follows_the_provider_of_the_call(monkeypatch):
+    """Stage 3e runs the selection again through a second provider."""
+    from pipeline import stage3_llm as s3
+    seen = []
+    monkeypatch.setattr(s3, "_call_llm", lambda system, user, provider=None, max_output_tokens=None:
+                        seen.append((provider, max_output_tokens)) or '{"selected": []}')
+    monkeypatch.setattr(s3, "_PROVIDER", "vllm")
+    monkeypatch.delenv("TTP_SELECT_MAX_OUTPUT_TOKENS", raising=False)
+    monkeypatch.delenv("VLLM_ENABLE_THINKING", raising=False)
+    s3.select_chunk_ttps(TEXT, _cands("T1105"))
+    s3.select_chunk_ttps(TEXT, _cands("T1105"), provider="gemini")
+    assert seen == [(None, 4096), ("gemini", s3._MAX_OUTPUT_TOKENS)]
 
 
 # ── The merge ────────────────────────────────────────────────────────────────
@@ -406,7 +496,7 @@ def select_pipeline(monkeypatch, mock_llm_response):
     answer = {"select": lambda excerpt: '{"selected": []}'}
     prompts: list[str] = []
 
-    def fake(system, user, provider=None):
+    def fake(system, user, provider=None, max_output_tokens=None):
         if system.startswith(sel._SELECT_SYSTEM):
             prompts.append(user)
             excerpt = user.split("---\n", 2)[1].rsplit("\n---", 1)[0]
@@ -465,6 +555,25 @@ def test_select_mode_reports_an_answer_cut_off_and_ships_its_validated_choices(
         "T1566.001": "selection answer cut off before a choice for it"}
 
 
+def test_select_mode_reports_answers_stopped_at_the_output_ceiling(select_pipeline, sample_cti_text):
+    from pipeline import llm_stats
+    from pipeline.orchestrator import Document, run_document
+    answer, _ = select_pipeline
+    closed = '{"selected": []}'
+
+    def kaseya(excerpt):
+        llm_stats.record_call(at_ceiling=True)       # what the provider wrapper records
+        return closed + "\n" + closed + '\n{"selected": [{"attack_id": "T1190", "reason": "' + _LOOP
+    answer["select"] = kaseya
+    result = run_document(Document(text=sample_cti_text, original_filename="r.txt"),
+                          _run_opts(ttp_mode="select", verify_ttps=True))
+    f = result.outcome("3f")
+    assert f.status == "ran" and f.counts["at_ceiling"] == f.counts["ok"] >= 1
+    assert f.counts["truncated"] == 0
+    assert "stopped at the output-token ceiling" in f.reason
+    assert result.outcome("3").counts["provider_at_ceiling"] == f.counts["at_ceiling"]
+
+
 def test_select_mode_fails_when_every_answer_is_cut_before_a_choice(select_pipeline, sample_cti_text):
     from pipeline.orchestrator import Document, run_document
     answer, _ = select_pipeline
@@ -474,6 +583,22 @@ def test_select_mode_fails_when_every_answer_is_cut_before_a_choice(select_pipel
     f = result.outcome("3f")
     assert f.status == "failed" and f.counts["truncated"] == 0 and f.counts["unparsed"] >= 1
     assert result.llm_result.ttps == []
+
+
+def test_a_failed_selection_says_when_its_answers_stopped_at_the_ceiling(select_pipeline, sample_cti_text):
+    from pipeline import llm_stats
+    from pipeline.orchestrator import Document, run_document
+    answer, _ = select_pipeline
+
+    def cut(excerpt):
+        llm_stats.record_call(at_ceiling=True)
+        return '{"selected": [{"attack_id": "T1190", "reason": "' + _LOOP
+    answer["select"] = cut
+    result = run_document(Document(text=sample_cti_text, original_filename="r.txt"),
+                          _run_opts(ttp_mode="select", verify_ttps=True))
+    f = result.outcome("3f")
+    assert f.status == "failed" and f.counts["at_ceiling"] == f.counts["unparsed"] >= 1
+    assert "stopped at the output-token ceiling (TTP_SELECT_MAX_OUTPUT_TOKENS)" in f.reason
 
 
 def test_select_mode_without_an_llm_falls_back_and_says_so(monkeypatch, sample_cti_text):

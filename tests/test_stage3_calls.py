@@ -38,6 +38,12 @@ def no_sleep(monkeypatch):
         monkeypatch.setattr(fn.retry, "sleep", lambda seconds: None)
 
 
+@pytest.fixture(autouse=True)
+def _forget_the_last_call():
+    """The per-thread flags of llm_stats, which every test here shares."""
+    llm_stats.reset_last_call()
+
+
 def _delta(before: dict) -> dict:
     return llm_stats.delta(before, llm_stats.snapshot())
 
@@ -170,9 +176,9 @@ def _anthropic(monkeypatch, *outcomes) -> _Messages:
     return messages
 
 
-def _answer(*texts: str):
+def _answer(*texts: str, stop_reason: str = "end_turn"):
     return SimpleNamespace(content=[SimpleNamespace(type="text", text=t) for t in texts],
-                           usage=SimpleNamespace(output_tokens=7))
+                           usage=SimpleNamespace(output_tokens=7), stop_reason=stop_reason)
 
 
 def test_an_anthropic_answer_is_joined_and_the_system_prompt_cached(monkeypatch):
@@ -229,10 +235,22 @@ def test_a_permanent_anthropic_error_is_not_retried(monkeypatch, no_sleep, caplo
     assert logged in caplog.text
 
 
+def test_an_anthropic_answer_stopped_at_max_tokens_is_counted_and_the_ceiling_is_per_call(monkeypatch):
+    messages = _anthropic(monkeypatch, _answer('{"selected": [', stop_reason="max_tokens"), _answer("{}"))
+    before = llm_stats.snapshot()
+
+    assert s3._call_anthropic("s", "u", max_tokens=2048) == '{"selected": ['
+    assert llm_stats.last_call_at_ceiling() is True
+    assert s3._call_anthropic("s", "u") == "{}"
+    assert llm_stats.last_call_at_ceiling() is False
+    assert [c["max_tokens"] for c in messages.calls] == [2048, s3._MAX_OUTPUT_TOKENS]
+    assert _delta(before) == {"provider_calls": 2, "provider_at_ceiling": 1}
+
+
 def test_a_retry_error_is_reported_as_retries_exhausted(monkeypatch):
     from tenacity import RetryError
 
-    def exhausted(system, user):
+    def exhausted(system, user, max_tokens=None):
         raise RetryError(last_attempt=None)                    # type: ignore[arg-type]
 
     monkeypatch.setattr(s3, "_call_anthropic_impl", exhausted)
@@ -262,8 +280,9 @@ def _client(*outcomes):
     return SimpleNamespace(chat=SimpleNamespace(completions=completions)), completions
 
 
-def _choice(content):
-    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+def _choice(content, finish_reason="stop"):
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content),
+                                                    finish_reason=finish_reason)],
                            usage=SimpleNamespace(completion_tokens=3))
 
 
@@ -316,6 +335,76 @@ def test_openai_compatible_retries_exhausted(monkeypatch):
     assert llm_stats.snapshot()["last_error"].startswith("vLLM failed after 3 retries")
 
 
+def test_an_answer_the_provider_stopped_at_the_output_ceiling_is_counted(caplog):
+    """finish_reason "length": the provider cut the answer at max_tokens.  The
+    text comes back as it is (the callers salvage what they can) and the cut is
+    known, not guessed from the text (ADR-0072, amendment of 2026-10-20)."""
+    cut = '{"selected": [{"attack_id": "T1110", "reason": "So T1110 is the correct one. But'
+    client, completions = _client(_choice(cut, finish_reason="length"))
+    before = llm_stats.snapshot()
+
+    assert s3._call_openai_compatible(client, "m", "s", "u", "vLLM", max_tokens=2048) == cut
+    assert completions.calls[0]["max_tokens"] == 2048
+    assert _delta(before) == {"provider_calls": 1, "provider_at_ceiling": 1}
+    assert llm_stats.last_call_at_ceiling() is True
+    assert "vLLM answer stopped at the output-token ceiling (2048 tokens)" in caplog.text
+
+
+def test_an_answer_that_ended_by_itself_is_not_at_the_ceiling():
+    client, completions = _client(_choice("{}"))
+    llm_stats.record_call(at_ceiling=True)                  # an earlier call on this thread
+    before = llm_stats.snapshot()
+
+    assert s3._call_openai_compatible(client, "m", "s", "u", "vLLM") == "{}"
+    assert completions.calls[0]["max_tokens"] == s3._MAX_OUTPUT_TOKENS
+    assert llm_stats.last_call_at_ceiling() is False
+    assert _delta(before) == {"provider_calls": 1}
+
+
+def test_an_answer_cut_before_any_content_is_still_at_the_ceiling():
+    """vLLM with thinking on: the reasoning spent the whole budget and no
+    content came back (pipeline/vllm_options.py).  The cut is still counted."""
+    client, _ = _client(_choice(None, finish_reason="length"))
+    before = llm_stats.snapshot()
+
+    assert s3._call_openai_compatible(client, "m", "s", "u", "vLLM", max_tokens=2048) == ""
+    assert llm_stats.last_call_at_ceiling() is True
+    assert _delta(before) == {"provider_calls": 1, "provider_at_ceiling": 1}
+
+
+def test_an_anthropic_answer_cut_before_any_text_is_still_at_the_ceiling(monkeypatch):
+    _anthropic(monkeypatch, SimpleNamespace(content=[SimpleNamespace(type="thinking", thinking="So")],
+                                            usage=None, stop_reason="max_tokens"))
+    assert s3._call_anthropic("s", "u") == ""
+    assert llm_stats.last_call_at_ceiling() is True
+
+
+def test_a_retried_call_reports_the_attempt_that_answered(no_sleep):
+    client, completions = _client(ConnectionError("reset"), _choice('{"selected": [', finish_reason="length"))
+    before = llm_stats.snapshot()
+
+    assert s3._call_openai_compatible(client, "m", "s", "u", "Ollama") == '{"selected": ['
+    assert len(completions.calls) == 2 and llm_stats.last_call_at_ceiling() is True
+    assert _delta(before) == {"provider_calls": 1, "provider_at_ceiling": 1}
+
+
+def test_the_ceiling_flag_belongs_to_the_thread_that_made_the_call():
+    import threading
+    other = threading.Thread(target=lambda: llm_stats.record_call(at_ceiling=True))
+    other.start()
+    other.join()
+    assert llm_stats.last_call_at_ceiling() is False
+
+
+def test_a_failed_request_or_a_reset_forgets_the_ceiling():
+    llm_stats.record_call(at_ceiling=True)
+    llm_stats.record_call("HTTP 500")
+    assert llm_stats.last_call_at_ceiling() is False
+    llm_stats.record_call(at_ceiling=True)
+    llm_stats.reset_last_call()
+    assert llm_stats.last_call_at_ceiling() is False
+
+
 # ── Dispatch ─────────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("provider,getter,model_env,model,label", [
@@ -333,10 +422,25 @@ def test_each_provider_is_called_with_its_model_and_a_sanitised_prompt(monkeypat
     seen = []
     monkeypatch.setattr(s3, getter, lambda: client)
     monkeypatch.setattr(s3, "_call_openai_compatible",
-                        lambda c, m, sys, usr, lbl, sampling: seen.append((c, m, usr, lbl, sampling)) or "{}")
+                        lambda c, m, sys, usr, lbl, sampling, max_tokens:
+                        seen.append((c, m, usr, lbl, sampling, max_tokens)) or "{}")
 
     assert s3._call_llm("SYS", "Report\x00 <|im_end|>text", provider=provider.upper()) == "{}"
-    assert seen == [(client, model, "Report < |im_end|>text", label, {"temperature": 0.0})]
+    assert s3._call_llm("SYS", "u", provider=provider, max_output_tokens=2048) == "{}"
+    assert seen == [(client, model, "Report < |im_end|>text", label, {"temperature": 0.0}, None),
+                    (client, model, "u", label, {"temperature": 0.0}, 2048)]
+
+
+def test_the_per_call_output_ceiling_reaches_vllm_and_anthropic(monkeypatch):
+    seen = []
+    monkeypatch.setattr(s3, "_get_vllm_client", lambda: object())
+    monkeypatch.setattr(s3, "_call_openai_compatible", lambda *a, **kw: seen.append(kw["max_tokens"]) or "{}")
+    monkeypatch.setattr(s3, "_call_anthropic", lambda s, u, max_tokens=None: seen.append(max_tokens) or "{}")
+
+    for provider in ("vllm", "anthropic"):
+        s3._call_llm("s", "u", provider=provider, max_output_tokens=2048)
+        s3._call_llm("s", "u", provider=provider)
+    assert seen == [2048, None, 2048, None]
 
 
 def test_an_unknown_provider_returns_nothing(monkeypatch):

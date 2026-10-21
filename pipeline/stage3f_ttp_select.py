@@ -30,6 +30,9 @@ a person on a sample (`python -m evaluation support-sample`).
 Configuration:
   TTP_MODE=select                 — this path, the default (verify: the September baseline)
   TTP_SELECT_MIN_QUOTE_WORDS=3    — shorter quotes are returned for review
+  TTP_SELECT_MAX_OUTPUT_TOKENS    — the selection call's output ceiling, never
+                                    above LLM_MAX_OUTPUT_TOKENS; unset: 4096 on
+                                    vLLM with thinking off, else the global one
 """
 from __future__ import annotations
 
@@ -130,6 +133,37 @@ def ttp_mode() -> str:
     return mode
 
 
+# 1.25 x the longest selection answer that ended by itself, 3,167 tokens on
+# AnnoCTR train (prose first, then the JSON), rounded up to a power of two.
+_SELECT_MAX_OUTPUT_TOKENS = 4096
+
+
+def selection_max_output_tokens(provider: str | None = None) -> int:
+    """The output-token ceiling of a selection call through `provider` (the
+    global LLM_PROVIDER by default), never above LLM_MAX_OUTPUT_TOKENS.
+
+    TTP_SELECT_MAX_OUTPUT_TOKENS when set.  Unset (or not a positive integer),
+    4,096 on vLLM with thinking off, the setup it was measured on: a looping
+    answer stops there, in about half the time, with the complete choices it
+    had (ADR-0072, amendment of 2026-10-20).  Any other provider keeps
+    LLM_MAX_OUTPUT_TOKENS: a model that reasons before it answers (Gemini 2.5,
+    VLLM_ENABLE_THINKING) spends an unmeasured share of it first.  A genuine
+    answer cut at the ceiling keeps its complete choices; its other
+    candidates go to review."""
+    from pipeline import stage3_llm  # lazy: stage3_llm imports this module
+    from pipeline.vllm_options import vllm_extra_body
+
+    ceiling = stage3_llm._MAX_OUTPUT_TOKENS
+    n = env_int("TTP_SELECT_MAX_OUTPUT_TOKENS", default=0)
+    if n > 0:
+        return min(n, ceiling)
+    if n < 0:
+        logger.warning("TTP_SELECT_MAX_OUTPUT_TOKENS=%d is not positive — using the default", n)
+    prov = (provider or stage3_llm._PROVIDER).lower()
+    thinking = vllm_extra_body()["chat_template_kwargs"]["enable_thinking"]
+    return min(_SELECT_MAX_OUTPUT_TOKENS, ceiling) if prov == "vllm" and not thinking else ceiling
+
+
 def _norm(s: str) -> str:
     # str.split, not compile_pattern(r"\s+"): RE2's `\s` is ASCII only, and a
     # quote would not be found in a report that writes "spear\xa0phishing".
@@ -226,8 +260,8 @@ def salvage_selection(raw: str) -> list[dict] | None:
     """The complete choices of an answer cut off inside its `selected` list,
     or None when the answer was not cut off there.
 
-    A model can reach the output-token ceiling (LLM_MAX_OUTPUT_TOKENS) before
-    it closes the list.  On a DarkSide chunk of AnnoCTR dev, Qwen3.8 wrote five
+    A model can reach the output-token ceiling (`selection_max_output_tokens`)
+    before it closes the list.  On a DarkSide chunk of AnnoCTR dev, Qwen3.8 wrote five
     complete choices, then deliberated inside the sixth one's `reason` ("So
     T1498 is the correct one. But T1499 is also a candidate...") until the
     8,192nd token.  `parse_selection` finds no answer in that, and the five
@@ -238,11 +272,11 @@ def salvage_selection(raw: str) -> list[dict] | None:
     open at the end of the answer: an answer that closes it, parseable or not,
     is `parse_selection`'s, and so is one whose object closes before the cut
     (the model repeated its answer).  The cut is inferred from the open list,
-    not from the provider's finish reason, which the caller does not see: a
-    quote the model ends with a backslash, or one with an unescaped `"`
-    inside, can look open and is read as cut off (its complete choices are
-    still validated).  The object is the one that opens just before
-    `"selected"`, the only key the prompt asks for."""
+    so this works on the text alone; `select_ttps` counts the provider's own
+    word apart (`ttp_selection_at_ceiling`).  A quote the model ends with a
+    backslash, or one with an unescaped `"` inside, can look open and is read
+    as cut off (its complete choices are still validated).  The object is the
+    one that opens just before `"selected"`, the only key the prompt asks for."""
     if not raw:
         return None
     # Lazy, like TTPExtracted below: stage3_llm imports this module.
@@ -304,31 +338,38 @@ def select_ttps(
 
     prompt, spotlight = fit_report(_SELECT_USER_TEMPLATE, text, max_prompt_chars,
                                    candidates=format_candidates(offered))
+    llm_stats.reset_last_call()
     raw = llm_fn(f"{_SELECT_SYSTEM}\n\n{spotlight}", prompt)
+    # The provider's word, which the salvage below cannot see: a looping
+    # answer can also close its object first and restart (Kaseya, dev).
+    at_ceiling = llm_stats.last_call_at_ceiling()
+    if at_ceiling:
+        llm_stats.bump("ttp_selection_at_ceiling")
+    at = " at the output-token ceiling (TTP_SELECT_MAX_OUTPUT_TOKENS)" if at_ceiling else ""
     if not raw:
         llm_stats.bump("ttp_selection_failed")
-        logger.warning("TTP selection call failed — %d candidates sent to review", len(offered))
+        logger.warning("TTP selection call failed%s — %d candidates sent to review", at, len(offered))
         return Selection(status=FAILED, review=review_all("selection call failed"))
     # A cut answer first: `parse_selection` tries every bracket, those inside
     # a string too, and would read a looping reason's "[]" as an abstention.
     items = salvage_selection(raw)
     cut = items is not None
+    why = ("at the output-token ceiling, TTP_SELECT_MAX_OUTPUT_TOKENS" if at_ceiling
+           else "with no ceiling reported: malformed?")
     if items == []:
         llm_stats.bump("ttp_selection_unparsed")
-        logger.warning("TTP selection answer cut off after %d characters, before its first complete "
-                       "choice (LLM_MAX_OUTPUT_TOKENS?) — %d candidates sent to review",
-                       len(raw), len(offered))
+        logger.warning("TTP selection answer cut off after %d characters (%s), before its first complete "
+                       "choice — %d candidates sent to review", len(raw), why, len(offered))
         return Selection(status=UNPARSED, review=review_all("selection answer cut off before a choice for it"))
     if items is not None:
         llm_stats.bump("ttp_selection_truncated")
-        logger.warning("TTP selection answer cut off after %d characters (LLM_MAX_OUTPUT_TOKENS?) — "
-                       "its %d complete choices validated, the other candidates sent to review",
-                       len(raw), len(items))
+        logger.warning("TTP selection answer cut off after %d characters (%s) — its %d complete choices "
+                       "validated, the other candidates sent to review", len(raw), why, len(items))
     else:
         items = parse_selection(raw)
         if items is None:
             llm_stats.bump("ttp_selection_unparsed")
-            logger.warning("TTP selection answer unparseable — %d candidates sent to review", len(offered))
+            logger.warning("TTP selection answer unparseable%s — %d candidates sent to review", at, len(offered))
             return Selection(status=UNPARSED, review=review_all("selection answer unparseable"))
         llm_stats.bump("ttp_selection_ok")
 

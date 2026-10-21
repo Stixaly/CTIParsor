@@ -931,6 +931,7 @@ class _Run:
         counts = dict(llm_calls=len(work), selection_only_chunks=len(select_only),
                       provider_calls=d.get("provider_calls", 0),
                       provider_failures=d.get("provider_failures", 0),
+                      provider_at_ceiling=d.get("provider_at_ceiling", 0),
                       **{k: d.get(k, 0) for k in kinds},
                       skipped_chunks=skipped,
                       from_checkpoint=total - len(work) - len(select_only) - skipped, **totals)
@@ -957,13 +958,17 @@ class _Run:
             # Select mode only: answers cut off inside their list, whose
             # complete choices were validated (ADR-0072, amendment of 2026-10-19).
             cut = d.get("ttp_selection_truncated", 0) if sid == "3f" and select else 0
+            # ...and answers the provider stopped at the selection call's
+            # output ceiling, cut or not (amendment of 2026-10-20).
+            ceiling = d.get("ttp_selection_at_ceiling", 0) if sid == "3f" and select else 0
             # Select mode keeps nothing it could not check (ADR-0072), nor does
             # 3d since ADR-0082; 3f's verify mode keeps the claims its failed
             # calls could not judge.
             lost = ("their candidates sent to review, none kept" if sid == "3f" and select
                     else "those claims held for review" if sid == "3d"
                     else "those claims kept unverified")
-            extra = ({"rejected": d.get("ttp_selection_rejected", 0), "truncated": cut}
+            extra = ({"rejected": d.get("ttp_selection_rejected", 0), "truncated": cut,
+                      "at_ceiling": ceiling}
                      if sid == "3f" and select
                      else {"held": d.get("rel_verification_held", 0)} if sid == "3d" else {})
             answers = ok + cut + unparsed + failed
@@ -972,6 +977,9 @@ class _Run:
             if cut:
                 notes.append(f"{cut} of {answers} selection answers cut off before their end, "
                              f"their complete choices validated and the other candidates sent to review")
+            at = (f"{ceiling} of {answers} selection answers stopped at the output-token ceiling "
+                  f"(TTP_SELECT_MAX_OUTPUT_TOKENS)" if ceiling else "")
+            notes += [at] if at else []
             if not on:
                 self.record(sid, SKIPPED, "disabled" + (": the LLM's techniques ship unchecked"
                                                         if sid == "3f" and select else ""))
@@ -983,7 +991,8 @@ class _Run:
                 self.record(sid, FAILED, f"no usable verification answer ({unparsed} unparseable, "
                             f"{failed} failed): " + ("every candidate sent to review" if sid == "3f"
                                                      and select else "every claim held for review"
-                                                     if sid == "3d" else "every claim kept unverified"),
+                                                     if sid == "3d" else "every claim kept unverified")
+                            + (f"; {at}" if at else ""),
                             0.0, ok=ok, unparsed=unparsed, failed=failed, **extra)
             else:
                 self.record(sid, RAN, "; ".join(notes),

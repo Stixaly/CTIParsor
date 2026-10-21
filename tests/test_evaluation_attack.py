@@ -300,6 +300,22 @@ def test_an_old_run_without_an_attack_block_is_scored_on_the_default_track(world
     assert _read(world.out / "runs" / "old-run" / "score.json")["attack_mapping"]["release"] == "19.2"
 
 
+def test_the_llm_health_counts_answers_stopped_at_the_output_ceiling(world, monkeypatch):
+    monkeypatch.setattr(annoctr, "load", lambda *a, **k: _annoctr_docs(_GOLD))
+    _write_run(world, "ceiling-run", "19.2", _RUN_A)
+    doc = world.out / "runs" / "ceiling-run" / "docs" / "d1.json"
+    record = _read(doc)
+    record["stages"] = [
+        {"stage": "3", "status": "ran", "counts": {"provider_calls": 4, "provider_at_ceiling": 2}},
+        {"stage": "3f", "status": "ran", "counts": {"ok": 1, "truncated": 1, "at_ceiling": 2}}]
+    doc.write_text(json.dumps(record), encoding="utf-8")
+
+    _cli(monkeypatch, "score", "--name", "ceiling-run")
+    health = _read(world.out / "runs" / "ceiling-run" / "score.json")["llm_health"]
+    assert {k: health[k] for k in ("provider_at_ceiling", "3f_at_ceiling", "3f_truncated")} == {
+        "provider_at_ceiling": 2, "3f_at_ceiling": 2, "3f_truncated": 1}
+
+
 def test_ttp_errors_follow_the_same_rule_as_score(runs, monkeypatch):
     _cli(monkeypatch, "ttp-errors", "--name", "run-a")
     assert _read(runs.out / "runs" / "run-a" / "ttp-errors.json")["attack_mapping"]["release"] == "19.2"
