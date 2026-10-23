@@ -133,6 +133,11 @@ track that does not replace the experimental snapshots.
     Without those two reports: +0.014 [−0.026, +0.042], and precision
     +0.041 [−0.015, +0.078].
   - **The default stays 19.2.** ADR-0060's rule is not met.
+  - **Re-run on 2026-10-21 at `01aeea6`**, which has the Stage 3f cut-off
+    salvage (ADR-0072): no selection answer is cut off, refused or salvaged on
+    either track. 20.0 against 19.2: F1 0.609 → 0.612, +0.003
+    [−0.028, +0.028], precision −0.001. The earlier gain does not survive, and
+    the default stays 19.2 (addendum to docs/eval/attack-v20-2026-10.md).
 
 #### The store audit checks the build's revision; a script measures the revision trigger (ADR-0086), 2026-10-18
 
