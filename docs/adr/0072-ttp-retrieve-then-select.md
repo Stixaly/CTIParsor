@@ -295,3 +295,98 @@ time: a cut answer took about 320 seconds, the other selection calls of the
 reports under 40.
 
 **Measured** on AnnoCTR dev ([selection-cut-off-2026-10](../eval/selection-cut-off-2026-10.md)).
+
+## Amendment (2026-10-20): the selection call has its own output ceiling
+
+About one selection call in 65 loops until `LLM_MAX_OUTPUT_TOKENS` (8,192)
+cuts it, after about 320 seconds. The amendment of 2026-10-19 keeps the
+complete choices written before the loop, not the time, and it inferred the
+cut from an unclosed list: the provider's finish reason did not reach the
+selector, and an answer like Kaseya's (a closed answer, then nine restarts
+until the ceiling) leaves no list open.
+
+**Decision.** Two changes.
+
+1. The selection call has its own output-token ceiling,
+   `TTP_SELECT_MAX_OUTPUT_TOKENS`
+   (`stage3f_ttp_select.selection_max_output_tokens`), never above
+   `LLM_MAX_OUTPUT_TOKENS`. Unset, or not positive: 4,096 on vLLM with
+   thinking off (`VLLM_ENABLE_THINKING` false), the setup it was measured on;
+   every other provider keeps `LLM_MAX_OUTPUT_TOKENS`, because a model that
+   reasons before it answers (Gemini 2.5, vLLM with thinking) spends an
+   unmeasured share of its budget first. 4,096 is 1.25 times the longest
+   selection answer that ended by itself, 3,167 tokens on AnnoCTR train,
+   rounded up to a power of two (the rule was fixed before the train test was
+   read). The ceiling follows the provider of the
+   call, Stage 3e's second provider included. It is part of the Stage 3
+   checkpoint fingerprint (`stage3_settings()["ttp_select"]`) and of the
+   environment the API records with a job.
+2. The provider's finish reason is recorded for every call: `length`
+   (OpenAI-compatible) or `max_tokens` (Anthropic), also when the answer has
+   no content (a model that spent its budget reasoning). Stage 3's counts
+   gain `provider_at_ceiling`; 3f gains `at_ceiling`, the selection answers
+   the provider stopped at the ceiling, cut inside a list or not, with a note
+   in the 3f reason, also when 3f fails; the evaluation's LLM health gains
+   `provider_at_ceiling` and `3f_at_ceiling`.
+
+What does not change:
+
+- The salvage still infers the cut from the open list, so it works on the
+  text alone. `select_ttps` reads the finish reason and counts it; the
+  salvage does not use it. `truncated` counts the answers the salvage read as
+  cut, `at_ceiling` the ones the provider stopped: Kaseya's is the second and
+  not the first.
+- At temperature 0 the ceiling does not change the tokens before it. Each
+  replayed cut answer, at 2,048 and at 4,096, is the exact prefix of the
+  logged one.
+- Every choice is checked as in decision 4. An answer cut at the ceiling,
+  a long genuine one included, keeps its complete choices and sends the other
+  candidates to review.
+- The prompt, and the ceiling of every other call.
+
+The previous amendment says the finish reason does not reach the selector and
+lists a lower ceiling for this call and a prompt that bounds `reason` as not
+done. It stays as written; what changed is that the finish reason is now
+counted, the ceiling is done, and the prompt was measured and not adopted
+(below).
+
+**Measured** ([selection-loop-2026-10](../eval/selection-loop-2026-10.md)).
+The three logged loops (DarkSide chunk 1, TA505 chunk 4, Kaseya chunk 1) were
+sent again to the same server (vLLM 0.27.1, temperature 0, seed 13, thinking
+off) with only `max_tokens` changed: 322, 330 and 322 seconds became 165,
+172 and 165 at 4,096 (86, 93 and 86 at 2,048), with the same complete choices
+(they end at token 490 for DarkSide and 506 for TA505; Kaseya's first object
+closes at token 834). On AnnoCTR dev at `01aeea6` the run with the ceiling (at
+2,048, the first default) is identical to the reference on 16 of 16 reports:
+technique F1 0.609 in both, 359.7 against 359.3 seconds per report (−0.1%).
+None of its 62 selection answers reached the ceiling, the longest took 1,550
+tokens, so the same holds at 4,096; dev cannot show the time saved: since
+ADR-0088 changed the DarkSide prompt, the loop no longer occurs there at this
+commit. On AnnoCTR train (the selection call alone, 255 calls at 2,048), 12
+answers stopped at the ceiling: 11 after a complete first object (closed at
+1,936 tokens at most), then prose deliberation, a restart or repeated tags;
+one reasoned in prose before any JSON and, sent again at 8,192, ended by
+itself at 3,167 tokens with 6 choices. That answer set the ceiling at 4,096.
+
+**Not adopted: a prompt that decides first.** A prompt asking for the
+decision first, the answer once, and a `reason` of one sentence of at most 25
+words that does not weigh the choice again stopped all three logged loops:
+the answers end by themselves, at 523 to 1,048 tokens. On dev it broke rule 2
+of ADR-0060: precision 0.571 → 0.545 (−0.027, 95% interval [−0.069, +0.015];
+the limit is 0.02); technique F1 0.609 → 0.597 (−0.012, [−0.044, +0.014]),
+so rule 1 is not met either; recall 0.651 → 0.659. Candidate lists, entities
+and relationships are identical on 16 of 16 reports; technique ids differ on
+13. It did what it was written for: the answers restarted after a complete
+object went from 3 to 0. The model also chose more (251 choices against 239,
+one answer of 30 candidates). At parent level it added 16 false-positive
+techniques and dropped 8, over 9 reports, most of them on two reports. Which
+part of the wording did what is not separated. The prompt is not in this
+change; a narrower edit would need its own dev comparison.
+
+**Not done.** The loop itself. The ceiling caps its cost, it does not stop
+it (one train call in 21 ended at 2,048), and a loop that starts in the first
+choice still loses its chunk: every candidate goes to review. A genuine
+answer longer than 4,096 tokens would be cut too, its complete choices kept.
+A repetition penalty is still unmeasured. The default is measured on one
+setup, vLLM with thinking off. ATT&CK 20.0 was not run with the change, which
+does not depend on the release: it acts on answers longer than the ceiling.

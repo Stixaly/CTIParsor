@@ -849,7 +849,8 @@ class TestEnrichDocumentRelationsGuards:
         import pipeline.stage3_llm as s3
         sent = []
         monkeypatch.setattr(s3, "_provider_ready", lambda *a, **k: True)
-        monkeypatch.setattr(s3, "_call_anthropic", lambda system, user: sent.append(user) or '{"relationships": []}')
+        monkeypatch.setattr(s3, "_call_anthropic",
+                            lambda system, user, max_tokens=None: sent.append(user) or '{"relationships": []}')
         monkeypatch.setattr(s3, "_PROVIDER", "anthropic")
         report = "APT29 deployed SUNBURST malware against SolarWinds targets. " * 1_000
         enrich_document_relations(report, sample_entities, provider="anthropic", verify_rels=False)

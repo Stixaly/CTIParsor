@@ -301,6 +301,54 @@ rewritten by `scripts/lock.sh` with `--upgrade-package pillow`, so no other
 pin moved; the torch lock is unchanged. pip-audit finds nothing in the four
 locks.
 
+#### A looping Stage 3f selection call stops at 4,096 tokens and the stage report says so (ADR-0072), 2026-10-20
+
+About one Stage 3f selection call in 65 loops until `LLM_MAX_OUTPUT_TOKENS`
+(8,192) cuts it, after about 320 seconds. The selection call now has its own
+output-token ceiling, `TTP_SELECT_MAX_OUTPUT_TOKENS`, never above
+`LLM_MAX_OUTPUT_TOKENS`. Unset, it is 4,096 on vLLM with thinking off
+(`VLLM_ENABLE_THINKING` false), the setup it was measured on; every other
+provider keeps `LLM_MAX_OUTPUT_TOKENS`, because a model that reasons before it
+answers (Gemini 2.5, vLLM with thinking) spends an unmeasured share of its
+budget first. The ceiling follows the provider of the call (Stage 3e's second
+provider too), is part of the Stage 3 checkpoint fingerprint (a select-mode
+checkpoint saved before this change does not resume), and is among the
+variables the API records with a job.
+
+The provider's finish reason (`length`, or Anthropic's `max_tokens`) is now
+recorded for every call, also when the answer has no content. The Stage 3
+counts gain `provider_at_ceiling`; Stage 3f gains `at_ceiling`, the selection
+answers the provider stopped at the ceiling, cut inside a list or not (a
+closed answer repeated until the cut, as on Kaseya, counts), with a note in
+its reason, also when 3f fails; the evaluation's LLM health gains
+`provider_at_ceiling` and `3f_at_ceiling`. The salvage still infers the cut
+from the open list, so it works on the text alone; the counter states the
+provider's word beside it.
+
+With only `max_tokens` changed, the three logged loops took 322, 330 and 322
+seconds and now take 165, 172 and 165, with the same complete choices (at
+temperature 0 each answer is the exact prefix of the logged one). On AnnoCTR
+dev at `01aeea6` (`sel-dev-ceiling-01aeea6p`, run at 2,048, against
+`sel-dev-a19.2-01aeea6`), 16 of 16 reports are identical, technique F1 is
+0.609 in both and time per report goes from 359.7 to 359.3 seconds (−0.1%).
+No dev answer reaches the ceiling (the longest took 1,550 tokens): since
+ADR-0088 changed the DarkSide prompt the loop no longer occurs there at this
+commit, so the replays show the time saved and dev does not. The ceiling was
+first 2,048. The selection call alone on AnnoCTR train (255 calls) stopped 12
+answers there, 11 after a complete first object; the twelfth reasoned in prose
+before any JSON and, sent again at 8,192, ended by itself at 3,167 tokens with
+6 choices. 4,096 is 1.25 times that answer, rounded up, a rule fixed before
+the train results were read.
+
+A prompt asking for the decision first, the answer once, and a `reason` of at
+most 25 words was measured and is not in this change. It stopped the three
+loops and answers restarted after a complete object went from 3 to 0, but
+dev precision fell from 0.571 to 0.545 (−0.027; ADR-0060 allows 0.02) and
+technique F1 from 0.609 to 0.597. The loop itself still happens, and one that
+starts in the first choice still loses its chunk. Detail:
+`docs/eval/selection-loop-2026-10.md`; `tests/test_stage3_calls.py` and
+`tests/test_ttp_select.py` hold the cases. ADR-0072 gets a dated amendment.
+
 #### certifi and uv move past two new advisories, 2026-10-20
 
 The dependency audit failed every run once two advisories were published:

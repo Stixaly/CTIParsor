@@ -354,7 +354,8 @@ def cmd_score(args) -> None:
             stages[o["stage"]][o["status"]] += 1
             if o["stage"] in ("3", "3d", "3f"):
                 for k, v in o.get("counts", {}).items():
-                    if k.startswith(("extraction_", "provider_", "ok", "unparsed", "failed", "truncated")):
+                    if k.startswith(("extraction_", "provider_", "ok", "unparsed", "failed", "truncated",
+                                     "at_ceiling")):
                         key = k if o["stage"] == "3" else f"{o['stage']}_{k}"
                         llm_health[key] = llm_health.get(key, 0) + v
 

@@ -190,3 +190,11 @@ technique scores are the final run's: the difference was the review list.
   complete choices are then kept and checked, and the rest goes to review,
   where it went before. An answer whose `selected` is not its first key is
   not salvaged. Neither occurred on dev.
+
+*Note, 2026-10-20.* The two limits "The loop remains" and "The cut is
+inferred" describe the state of 2026-10-19 and are left as written. Since then
+the selection call has its own output ceiling (4,096 tokens on vLLM with
+thinking off, which cuts the three logged loops from about 325 to about 167
+seconds) and the provider's finish reason is counted (`provider_at_ceiling`,
+3f `at_ceiling`). The loop itself still happens. See
+[selection-loop-2026-10](selection-loop-2026-10.md).

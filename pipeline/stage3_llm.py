@@ -719,17 +719,39 @@ Return ONLY this JSON shape:
 _LLM_TIMEOUT = env_int("LLM_TIMEOUT", default=120)
 
 
+class _ProviderAnswer(str):
+    """A provider's answer text, and whether the provider stopped it at the
+    output-token ceiling (finish_reason "length", Anthropic "max_tokens")
+    instead of letting it end.  The callers parse the text either way; the
+    flag is for llm_stats, so a cut is known rather than guessed from an
+    unclosed answer (ADR-0072, amendment of 2026-10-20)."""
+    at_ceiling: bool = False
+
+
+def _provider_answer(text: str, at_ceiling: bool, label: str, max_tokens: int) -> str:
+    """`text` as a _ProviderAnswer, the cut logged.  An empty text may be cut
+    too: a model that reasons first can spend the whole budget before it
+    answers (pipeline/vllm_options.py)."""
+    out = _ProviderAnswer(text)
+    out.at_ceiling = at_ceiling
+    if at_ceiling:
+        logger.warning(f"{label} answer stopped at the output-token ceiling ({max_tokens} tokens)")
+    return out
+
+
 @retry(
     retry=retry_if_exception_type(_RETRY_EXCEPTIONS),
     stop=_RETRY_STOP,
     wait=_RETRY_WAIT,
     reraise=True
 )
-def _call_anthropic_impl(system: str, user: str) -> str:
-    """Internal implementation of Anthropic call with retry."""
+def _call_anthropic_impl(system: str, user: str, max_tokens: int | None = None) -> str:
+    """Internal implementation of Anthropic call with retry.  `max_tokens`
+    lowers LLM_MAX_OUTPUT_TOKENS for this call."""
     client = _get_anthropic_client()
     if not client:
         return ""
+    max_tokens = max_tokens or _MAX_OUTPUT_TOKENS
     t0 = time.monotonic()
     try:
         _ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", _DEFAULT_ANTHROPIC_MODEL)
@@ -741,7 +763,7 @@ def _call_anthropic_impl(system: str, user: str) -> str:
         # model-dependent (512-4096 tokens) and _SYSTEM_PROMPT sits at ~1170.
         response = client.messages.create(
             model=_ANTHROPIC_MODEL,
-            max_tokens=_MAX_OUTPUT_TOKENS,
+            max_tokens=max_tokens,
             system=[
                 {
                     "type": "text",
@@ -756,14 +778,15 @@ def _call_anthropic_impl(system: str, user: str) -> str:
         elapsed = time.monotonic() - t0
         tokens_out = getattr(getattr(response, "usage", None), "output_tokens", "?")
         logger.debug(f"Anthropic responded in {elapsed:.1f}s ({tokens_out} output tokens)")
+        at_ceiling = getattr(response, "stop_reason", None) == "max_tokens"
         if not response.content:
             logger.error("Anthropic returned an empty content list (possible content filter)")
-            return ""
+            return _provider_answer("", at_ceiling, "Anthropic", max_tokens)
         text = "".join(b.text for b in response.content if b.type == "text")
         if not text:
             logger.error("Anthropic returned no text block (only thinking?)")
-            return ""
-        return text.strip()
+            return _provider_answer("", at_ceiling, "Anthropic", max_tokens)
+        return _provider_answer(text.strip(), at_ceiling, "Anthropic", max_tokens)
     except anthropic.APITimeoutError:
         logger.error(f"Anthropic timed out after {_LLM_TIMEOUT}s — raise LLM_TIMEOUT in .env if your model is slow")
         raise
@@ -788,12 +811,12 @@ from pipeline import llm_stats  # noqa: E402
 _record_call = llm_stats.record_call
 
 
-def _call_anthropic(system: str, user: str) -> str:
+def _call_anthropic(system: str, user: str, max_tokens: int | None = None) -> str:
     """Call Anthropic with retry logic."""
     try:
-        out = _call_anthropic_impl(system, user)
-        _record_call()
-        return out
+        out = _call_anthropic_impl(system, user, max_tokens)
+        _record_call(at_ceiling=getattr(out, "at_ceiling", False))
+        return str(out)
     except RetryError as e:
         logger.error(f"Anthropic failed after {_MAX_RETRIES} retries: {e}")
         _record_call(f"Anthropic failed after {_MAX_RETRIES} retries: {e}")
@@ -811,19 +834,22 @@ def _call_anthropic(system: str, user: str) -> str:
     reraise=True
 )
 def _call_openai_compatible_impl(client_param, model: str, system: str, user: str, label: str,
-                                 extra_body: dict | None = None, sampling: dict | None = None) -> str:
+                                 extra_body: dict | None = None, sampling: dict | None = None,
+                                 max_tokens: int | None = None) -> str:
     """Internal implementation of OpenAI-compatible call with retry.
 
     `extra_body` carries server-specific fields the OpenAI SDK has no parameter
     for — vLLM's `chat_template_kwargs` (see pipeline.vllm_options).
+    `max_tokens` lowers LLM_MAX_OUTPUT_TOKENS for this call.
     """
     if not client_param:
         return ""
+    max_tokens = max_tokens or _MAX_OUTPUT_TOKENS
     t0 = time.monotonic()
     try:
         response = client_param.chat.completions.create(
             model=model,
-            max_tokens=_MAX_OUTPUT_TOKENS,
+            max_tokens=max_tokens,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -839,11 +865,12 @@ def _call_openai_compatible_impl(client_param, model: str, system: str, user: st
         if not response.choices:
             logger.error(f"{label} returned an empty choices list (possible content filter)")
             return ""
+        at_ceiling = getattr(response.choices[0], "finish_reason", None) == "length"
         content = response.choices[0].message.content
         if content is None:
             logger.error(f"{label} returned null message content")
-            return ""
-        return content.strip()
+            return _provider_answer("", at_ceiling, label, max_tokens)
+        return _provider_answer(content.strip(), at_ceiling, label, max_tokens)
     except Exception as e:
         elapsed = time.monotonic() - t0
         if "timeout" in str(e).lower() or "timed out" in str(e).lower():
@@ -854,13 +881,14 @@ def _call_openai_compatible_impl(client_param, model: str, system: str, user: st
 
 
 def _call_openai_compatible(client_param, model: str, system: str, user: str, label: str,
-                            extra_body: dict | None = None, sampling: dict | None = None) -> str:
+                            extra_body: dict | None = None, sampling: dict | None = None,
+                            max_tokens: int | None = None) -> str:
     """Shared call logic for OpenAI-compatible endpoints (Mistral, Ollama) with retry."""
     try:
         out = _call_openai_compatible_impl(client_param, model, system, user, label, extra_body,
-                                           sampling)
-        _record_call()
-        return out
+                                           sampling, max_tokens)
+        _record_call(at_ceiling=getattr(out, "at_ceiling", False))
+        return str(out)
     except RetryError as e:
         logger.error(f"{label} failed after {_MAX_RETRIES} retries: {e}")
         _record_call(f"{label} failed after {_MAX_RETRIES} retries: {e}")
@@ -872,13 +900,15 @@ def _call_openai_compatible(client_param, model: str, system: str, user: str, la
 
 
 def _call_llm(system: str, user: str, provider: str | None = None,
-              max_prompt_length: int | None = None) -> str:
+              max_prompt_length: int | None = None, max_output_tokens: int | None = None) -> str:
     """Dispatches to an LLM provider with retry logic.
 
     `provider` overrides the global LLM_PROVIDER for this call only — used by the
     Stage 3e consensus pass to run the same prompt through a second model.
     `max_prompt_length` overrides the LLM_MAX_PROMPT_LENGTH cut for this call —
     the document-level pass reads a whole report, not a chunk.
+    `max_output_tokens` overrides the LLM_MAX_OUTPUT_TOKENS ceiling for this
+    call — the Stage 3f selection call stops at its own, lower one.
     """
     # Sanitize ONLY the user message — it embeds untrusted report text, so it is
     # the prompt-injection vector.  The system prompt is developer-controlled;
@@ -897,32 +927,33 @@ def _call_llm(system: str, user: str, provider: str | None = None,
     # differently and Gemini's compatibility layer does not document it.
     sampling = sampling_options(seed_ok=prov in ("vllm", "ollama", "lmstudio"))
     if prov == "anthropic":
-        return _call_anthropic(system, sanitized_user)
+        return _call_anthropic(system, sanitized_user, max_tokens=max_output_tokens)
     elif prov == "gemini":
         client = _get_gemini_client()
         _GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-pro")
         return _call_openai_compatible(client, _GEMINI_MODEL, system, sanitized_user, "Gemini",
-                                       sampling=sampling)
+                                       sampling=sampling, max_tokens=max_output_tokens)
     elif prov == "mistral":
         client = _get_mistral_client()
         _MISTRAL_MODEL = os.environ.get("MISTRAL_MODEL", "mistral-small-latest")
         return _call_openai_compatible(client, _MISTRAL_MODEL, system, sanitized_user, "Mistral",
-                                       sampling=sampling)
+                                       sampling=sampling, max_tokens=max_output_tokens)
     elif prov == "ollama":
         client = _get_ollama_client()
         _OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
         return _call_openai_compatible(client, _OLLAMA_MODEL, system, sanitized_user, "Ollama",
-                                       sampling=sampling)
+                                       sampling=sampling, max_tokens=max_output_tokens)
     elif prov == "lmstudio":
         client = _get_lmstudio_client()
         _LMSTUDIO_MODEL = os.environ.get("LMSTUDIO_MODEL", "lmstudio-model")
         return _call_openai_compatible(client, _LMSTUDIO_MODEL, system, sanitized_user, "LMStudio",
-                                       sampling=sampling)
+                                       sampling=sampling, max_tokens=max_output_tokens)
     elif prov == "vllm":
         client = _get_vllm_client()
         _VLLM_MODEL = os.environ.get("VLLM_MODEL", "vllm-model")
         return _call_openai_compatible(client, _VLLM_MODEL, system, sanitized_user, "vLLM",
-                                       extra_body=vllm_extra_body(), sampling=sampling)
+                                       extra_body=vllm_extra_body(), sampling=sampling,
+                                       max_tokens=max_output_tokens)
     return ""
 
 
@@ -985,6 +1016,7 @@ def stage3_settings(*, consensus: bool, verify_rels: bool, verify_ttps: bool,
     """Every setting that changes what Stage 3 returns for a given input — the
     Stage 3 checkpoint must not resume across a change in any of them."""
     from pipeline.stage3e_consensus import consensus_provider
+    from pipeline.stage3f_ttp_select import selection_max_output_tokens
     from pipeline.ttp_retrieval import retrieval_settings
     from pipeline.vllm_options import vllm_extra_body
 
@@ -993,7 +1025,8 @@ def stage3_settings(*, consensus: bool, verify_rels: bool, verify_ttps: bool,
         "ttp_mode": ttp_mode,
         "ttp_select": ({**retrieval_settings(),
                         "min_quote_words": env_int("TTP_SELECT_MIN_QUOTE_WORDS", default=3),
-                        "skipped_chunks": os.getenv("TTP_SELECT_SKIPPED_CHUNKS", "")}
+                        "skipped_chunks": os.getenv("TTP_SELECT_SKIPPED_CHUNKS", ""),
+                        "max_output_tokens": selection_max_output_tokens()}
                        if ttp_mode == "select" else {}),
         "model": provider_label(),
         "consensus_model": provider_label(second) if second else "",
@@ -1698,7 +1731,12 @@ def select_chunk_ttps(text: str, retrieved: list, llm_ttps: list | None = None,
 
     Also called with no proposals for a chunk Stage 3 skipped (no IoC, no
     known name) that retrieval still found behaviour in."""
-    from pipeline.stage3f_ttp_select import chunk_candidates, llm_proposals_as_candidates, select_ttps
+    from pipeline.stage3f_ttp_select import (
+        chunk_candidates,
+        llm_proposals_as_candidates,
+        select_ttps,
+        selection_max_output_tokens,
+    )
 
     proposals, labels, no_id = llm_proposals_as_candidates(llm_ttps or [])
     if no_id:
@@ -1706,9 +1744,10 @@ def select_chunk_ttps(text: str, retrieved: list, llm_ttps: list | None = None,
     cands = chunk_candidates(retrieved, proposals)
     if not cands:
         return LLMEnrichmentResult()
+    ceiling = selection_max_output_tokens(provider)
 
     def _select_call(s, u):
-        return _call_llm(s, u, provider=provider)
+        return _call_llm(s, u, provider=provider, max_output_tokens=ceiling)
     sel = select_ttps(text, cands, _select_call, llm_labels=labels, max_prompt_chars=_MAX_PROMPT_LENGTH)
     return LLMEnrichmentResult(ttps=sel.selected, ttp_review=sel.review)
 
