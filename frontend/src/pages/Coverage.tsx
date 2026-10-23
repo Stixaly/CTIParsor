@@ -29,14 +29,13 @@ import CoverageExportPanel from '../components/coverage/CoverageExportPanel'
 import { usePromotedRules } from '../hooks/usePromotedRules'
 import EvidenceGateBanner from '../components/coverage/EvidenceGateBanner'
 import type { TechEntry } from '../components/coverage/model'
-import { TACTIC_LABEL, TACTIC_ORDER } from '../components/coverage/tactics'
+import { TACTIC_LABEL, TACTIC_ORDER, techniqueColumns } from '../components/coverage/tactics'
+import type { TechMeta } from '../components/coverage/tactics'
 
 /** Pseudo-technique for rules promoted from the Proposed-detections panel. They
  *  carry none of the report's techniques — that is why the coverage set missed
  *  them — so they need a bucket of their own rather than a real technique id. */
 const PROMOTED_GROUP = '(promoted)'
-
-interface TechMeta { name: string; tactics: string[] }
 
 export default function Coverage() {
   const { jobId } = useParams<{ jobId: string }>()
@@ -48,12 +47,13 @@ export default function Coverage() {
   const { data: coverage, isLoading, isError } = useCoverage(jobId)
 
   // The ATT&CK index of the release the API runs (ADR-0087) → technique →
-  // name + tactics.  Until it arrives, or if it fails, names degrade to ids.
+  // name + domain + tactics.  Until it arrives, or if it fails, names degrade
+  // to ids and every technique sits under Other.
   const { data: attack } = useAttackIndex()
   const meta = useMemo(() => {
     const m: Record<string, TechMeta> = {}
     for (const t of attack?.techniques ?? []) {
-      if (t.id) m[t.id.toUpperCase()] = { name: t.name ?? t.id, tactics: t.tactics ?? [] }
+      if (t.id) m[t.id.toUpperCase()] = { name: t.name ?? t.id, domain: t.domain, tactics: t.tactics ?? [] }
     }
     return m
   }, [attack])
@@ -129,12 +129,12 @@ export default function Coverage() {
   const selection = useRuleSelection(jobId, allRules)
 
   // One TechEntry per coverage cell, in cell order (already sorted by score
-  // desc on the API side).
+  // desc on the API side). Only an enterprise technique gets tactic columns;
+  // mobile, ICS and CAPEC ones go to Other, as in the phase band.
   const techs = useMemo<TechEntry[]>(() => {
     const out: TechEntry[] = []
     for (const cell of coverage?.cells ?? []) {
       const id = cell.technique_id
-      const tactics = (meta[id]?.tactics ?? []).filter(t => TACTIC_ORDER.includes(t))
       const ruleIds = techRuleIds.get(id) ?? []
       const byFormat: Record<string, string[]> = {
         sigma: [], suricata: [], yara: [],
@@ -146,7 +146,7 @@ export default function Coverage() {
       out.push({
         id,
         name: meta[id]?.name ?? id,
-        tactics: tactics.length ? tactics : ['other'],
+        tactics: techniqueColumns(meta[id]),
         score: cell.score,
         ruleIds,
         byFormat: byFormat as TechEntry['byFormat'],

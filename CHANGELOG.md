@@ -301,6 +301,18 @@ rewritten by `scripts/lock.sh` with `--upgrade-package pillow`, so no other
 pin moved; the torch lock is unchanged. pip-audit finds nothing in the four
 locks.
 
+#### The Coverage page files only enterprise techniques under a tactic (ADR-0025), 2026-10-20
+
+The page put a technique in a tactic column on its tactic shortnames alone, so
+T1660 Phishing (`mobile-attack`, `initial-access`) sat in the enterprise
+Initial Access column. The backend's phase band puts mobile, ICS and CAPEC
+techniques off-matrix (`ENTERPRISE_DOMAIN` in `pipeline/detection/phases.py`).
+The page now reads each technique's `domain` from `GET /api/attack/index` and
+files a technique that is not `enterprise-attack` under Other, through
+`techniqueColumns` in `components/coverage/tactics.ts`. Enterprise techniques
+keep their columns: `tactics.test.ts` checks every technique of every committed
+track.
+
 #### A looping Stage 3f selection call stops at 4,096 tokens and the stage report says so (ADR-0072), 2026-10-20
 
 About one Stage 3f selection call in 65 loops until `LLM_MAX_OUTPUT_TOKENS`

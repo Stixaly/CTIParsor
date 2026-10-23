@@ -29,3 +29,22 @@ export const TACTIC_LABEL: Readonly<Record<string, string>> = {
   'command-and-control': 'Command & Control', 'exfiltration': 'Exfiltration',
   'impact': 'Impact', 'other': 'Other',
 }
+
+// The ATT&CK domain whose techniques get a column: ENTERPRISE_DOMAIN in
+// pipeline/detection/phases.py.
+export const ENTERPRISE_DOMAIN = 'enterprise-attack'
+
+/** What the ATT&CK index says about one technique (useAttackIndex). */
+export interface TechMeta { name: string; domain: string; tactics: string[] }
+
+/** The columns a technique is filed under: its tactics that have a column when
+ *  its index entry is an enterprise one, ['other'] otherwise — as the backend's
+ *  phase band does (tactics_for_technique, ADR-0025). A mobile, ICS or CAPEC
+ *  technique is off-matrix even when its tactic shortnames are enterprise ones:
+ *  T1660 Phishing (`mobile-attack`, ['initial-access']) used to land in the
+ *  Initial Access column. An id the index lacks goes to 'other' too. */
+export function techniqueColumns(meta: TechMeta | undefined): string[] {
+  if (meta?.domain !== ENTERPRISE_DOMAIN) return ['other']
+  const tactics = meta.tactics.filter(t => TACTIC_ORDER.includes(t))
+  return tactics.length ? tactics : ['other']
+}
