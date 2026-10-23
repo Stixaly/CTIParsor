@@ -290,6 +290,17 @@ gets a dated amendment.
 
 ### Fixed
 
+#### pillow moves past eight new advisories, 2026-10-23
+
+The dependency audit has failed every run since 2026-10-21, on both open PRs
+and on any new run of main: eight advisories against pillow 12.3.0
+(CVE-2026-112395, -112397, -112400, -112404, -112895, -112896, -112897,
+-112899), all fixed in 13.0.0. pillow comes in through pdfplumber, pdf2image
+and pytesseract, in the image and CI locks. It is now at 13.0.0. The locks were
+rewritten by `scripts/lock.sh` with `--upgrade-package pillow`, so no other
+pin moved; the torch lock is unchanged. pip-audit finds nothing in the four
+locks.
+
 #### certifi and uv move past two new advisories, 2026-10-20
 
 The dependency audit failed every run once two advisories were published:
