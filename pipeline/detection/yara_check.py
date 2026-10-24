@@ -152,7 +152,14 @@ def with_declared_imports(body: str, imports: Iterable[str]) -> tuple[str, tuple
 
 
 def compile_status(source: str) -> tuple[str, str | None]:
-    """Compile `source` the way OpenCTI does: any exception is a refusal."""
+    """Compile `source` the way OpenCTI does: any exception is a refusal.
+
+    One difference: ``include`` directives are disabled.  The rule comes from
+    a report, so its author would pick a path for this server to read, and the
+    compiler's message (the file's first bad line, or "can't open include
+    file") would tell them what is there: the message is stored in the mapping
+    ledger and shown on the Graph page.  A rule that includes a file is not
+    self-contained and cannot be checked on its own, so it is refused."""
     global _warned_unverified
     try:
         import yara
@@ -165,7 +172,7 @@ def compile_status(source: str) -> tuple[str, str | None]:
             )
         return UNVERIFIED, None
     try:
-        yara.compile(source=source)
+        yara.compile(source=source, includes=False)
     except Exception as exc:  # noqa: BLE001 — OpenCTI refuses on any exception
         return DOES_NOT_COMPILE, str(exc)
     return COMPILES, None
