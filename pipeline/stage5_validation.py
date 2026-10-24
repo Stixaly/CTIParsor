@@ -109,7 +109,7 @@ def install_schemas(dest: Path | None = None) -> bool:
     return _has_schemas(dest)
 
 
-def validate_bundle(bundle_json: str) -> ValidationResult:
+def validate_bundle(bundle_json: str, *, quiet: bool = False) -> ValidationResult:
     """
     Validate a serialized STIX 2.1 bundle.  Writes nothing.
 
@@ -124,12 +124,17 @@ def validate_bundle(bundle_json: str) -> ValidationResult:
         defence that catches edge cases the Pydantic models don't cover (e.g.
         extra required properties from the spec not reflected in the model).
         Both layers run when schemas are present; only stix2 runs when absent.
+
+    `quiet` returns the same verdict without printing it and without logging
+    (the missing-schemas error, the warnings count, the errors): a caller that
+    reports the verdict itself, such as a baseline inspection (ADR-0090), does
+    not want a line per bundle it tries.
     """
     if not _schemas_installed() and not install_schemas():
         # Only where the package directory is read-only and lacks them: an image
         # built without the Dockerfile's install step.
         global _missing_reported
-        if not _missing_reported:
+        if not _missing_reported and not quiet:
             _missing_reported = True
             logger.error(
                 f"STIX JSON schemas missing from {_schema_dir()} and not installable "
@@ -145,12 +150,13 @@ def validate_bundle(bundle_json: str) -> ValidationResult:
     found = getattr(results, "object_results", None) or [results]
     errors = [str(e) for r in found for e in (r.errors or [])]
     warnings = [str(w) for r in found for w in (r.warnings or [])]
-    if warnings:
+    if warnings and not quiet:
         logger.info(f"[Stage 5] {len(warnings)} best-practice warning(s), e.g. {warnings[0]}")
 
     if not results.is_valid:
-        logger.error("STIX 2.1 validation errors detected:")
-        print_results(results)
+        if not quiet:
+            logger.error("STIX 2.1 validation errors detected:")
+            print_results(results)
         return ValidationResult(INVALID, errors, warnings)
 
     return ValidationResult(VALIDATED, errors, warnings)

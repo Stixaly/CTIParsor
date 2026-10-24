@@ -11,6 +11,80 @@ theme.
 
 ### Added
 
+#### Enriching an existing STIX 2.1 bundle, lot 1: the module that reads the baseline (ADR-0090), 2026-10-24
+
+The second of ADR-0090's eight lots adds the module that reads the bundle the
+analyst already has (the baseline) and computes the keys the next lots match
+on. It is not wired into the pipeline, the API or the UI yet (lots 2 to 5), and
+the feature will stay behind `STIX_ENRICHMENT_ENABLED` (lot 2): this lot changes
+no output.
+
+- **`pipeline/baseline_stix.py`**, a pure module: no store, no network.
+  `intake(raw, *, report_id=None, preview=False, validate=True)` returns
+  `(BaselineIndex | None, Intake, parsed bundle)` and raises only
+  `BaselineError`, whose message is meant for the analyst. In order:
+  - **Limits**: 20 MB, 10 000 objects, 500 000 JSON objects however nested
+    (a guard on memory, checked while the JSON is read).
+  - **STIX 2.1 only**: a 2.0 bundle or an object without
+    `"spec_version": "2.1"` (an observable may omit it) is refused. A
+    malformed id is excluded, and so is every version of an id but the one
+    modified last.
+  - **Scope** (ADR-0090 D4): the chosen Report and what it references,
+    transitively. With several Reports and none chosen, `preview=True` answers
+    `needs_report_choice` and `preview=False` raises.
+  - **Checks**: each object is parsed by stix2, then the bundle goes through
+    the JSON schemas **once**; the validator's `<id>: ` prefix attributes each
+    error to its object, and each object so named is validated alone to
+    confirm it. The validator also reports, under its own id, a dict nested in
+    another object, so an object could otherwise get an innocent one excluded
+    in its place. When an error is not reproduced by the object it names, or
+    names no object, the rest of the bundle is validated again and searched by
+    halves, within a budget of three times the bytes searched. A STIX pattern
+    of more than 64 KB, 64 nested brackets or 256 `AND`/`OR`/`FOLLOWEDBY`
+    reaches no parser (stix2patterns is recursive: on CI, a 4 000-term `OR`
+    killed the test process): its Indicator is excluded. A quoted
+    detection rule is checked (`check_pattern` for Sigma, Suricata and Snort;
+    the compile status for YARA) and one that is refused is excluded.
+    An object that takes the id of CTIParsor's own author identity or of one of
+    its markings, for something else, is excluded.
+  - **Closure**: whatever references an excluded object is excluded in turn,
+    whole and never pruned, except the chosen Report.
+  - **TLP and PAP**: the minimum over every marking form, that is TLP 1.0 ids,
+    CTIParsor's ids (the TLP 2.0 AMBER+STRICT among them), OpenCTI's markings
+    that carry a name and no `definition`, granular markings, and a `tlp_2_0`
+    extension property. A marking that looks like a level and states none
+    earns a warning.
+  - **Index**: one entry per observable together with its Indicators and the
+    `based-on` between them, one per named SDO, the relations, and the rest
+    copied (`passthrough_ids`). It serialises to JSON and refuses another
+    `INDEX_VERSION`.
+- **Match keys.** `keys_for_row` (a job-store row), `keys_for_object` (a STIX
+  object) and `pattern_keys` (the `=` comparisons of a STIX 2.1 pattern, read by
+  stix2patterns) reduce all three to one key space by one normalisation, so a
+  baseline object and an extracted row meet. A threat-actor and an
+  intrusion-set share a family, and so do a malware and a tool; two names meet
+  only inside a family. `resolve` and `BaselineIndex.lookup` return the
+  candidate, `None`, or `AMBIGUOUS` when several fit and none has the exact
+  STIX type; a weak key (a file name) never merges.
+- **Measured** on a synthetic bundle of 10 000 objects and 4.4 MB (WSL, on
+  `/mnt/c`): intake takes 1.9 s without the schema validation and about 47 s
+  with it. The whole bundle is validated once whatever the number of invalid
+  objects, plus one small validation per object named: 1 and 10 invalid
+  objects took 49.0 and 48.9 s.
+- **`validate_bundle(..., quiet=False)`** (`pipeline/stage5_validation.py`):
+  `quiet=True` returns the same verdict without printing or logging. The
+  default is unchanged, so Stage 5 behaves as before.
+- **Fuzz target `baseline_intake`** (`fuzz/fuzz_baseline_intake.py`): intake as
+  `/inspect` reads it (preview) and as job creation reads it, the preview
+  without the schema validation, and `pattern_keys`. It checks that nothing but
+  `BaselineError` escapes, that every exclusion has four string fields, and
+  that an index survives `to_json` / `from_json`. Its 14 seeds are in
+  `fuzz/corpus/baseline_intake/`. The `Fuzzing` workflow runs it with
+  `-max_len=65536`, the other targets keeping 16384: the largest seed is
+  16.6 KB, and cut short it would no longer be JSON.
+- **Tests**: `tests/test_baseline_stix.py` (399 collected on 2026-10-24),
+  including the `quiet` verdict.
+
 #### Enriching an existing STIX 2.1 bundle: ADR-0090 proposed, reference bundles and baseline fixtures, 2026-10-24
 
 ADR-0090 proposes a second mode at report creation: the analyst gives the

@@ -15,7 +15,7 @@ and points at the seams where most changes go.
    takes changes only through pull requests, and only once every required
    check passes — the fast tests (ruff, `reuse lint`, mypy, pytest with
    coverage floors), the dependency audit and review, the frontend checks,
-   the container build and smoke test, CodeQL, and the four fuzzers. Run
+   the container build and smoke test, CodeQL, and the five fuzzers. Run
    `make ci` before pushing to see the same results.
 4. The maintainer reviews it; review conversations are resolved before the
    merge.
