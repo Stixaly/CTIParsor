@@ -694,6 +694,25 @@ was written by every build, including a refused one; since 2026-10-18 only a
 build that publishes writes it ("Only a build that publishes writes the export
 file", above).
 
+### Security
+
+#### A YARA rule's `include` no longer makes the server read a file, 2026-10-24
+
+Before a quoted YARA rule ships as an Indicator, `compile_status`
+(`pipeline/detection/yara_check.py`) compiles it, as OpenCTI does (ADR-0067).
+It compiled with `include` directives enabled. A report could therefore quote
+`include "/etc/passwd"`, and libyara would read that file on the server. The
+compiler's message went into the mapping ledger, where the Graph page shows
+it: "/etc/passwd(2): unterminated regular expression" for an existing file,
+"can't open include file" for a missing one. Any path could be probed that
+way, and for a readable file the message told the line and the kind of the
+first lexer error in it.
+
+The rule now compiles with `includes=False`. A rule with an `include` is
+refused with the same message whether the file exists or not, and the file is
+never opened. Such a rule is not self-contained, so nothing a reader could use
+is lost.
+
 ## [0.1.0] - 2026-10-17
 
 CTIParsor 0.1.0 is the first release. It reads a threat-intelligence report

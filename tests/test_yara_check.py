@@ -126,7 +126,39 @@ def test_a_rule_the_repairs_cannot_fix_does_not_compile():
 def test_compile_status_mirrors_opencti_any_exception_is_a_refusal(monkeypatch):
     class _Yara:
         @staticmethod
-        def compile(source):
+        def compile(source, **_options):
             raise RuntimeError("boom")
     monkeypatch.setitem(sys.modules, "yara", _Yara)
     assert yara_check.compile_status("rule r { condition: true }") == (DOES_NOT_COMPILE, "boom")
+
+
+def test_compile_status_compiles_with_includes_disabled(monkeypatch):
+    seen = {}
+
+    class _Yara:
+        @staticmethod
+        def compile(source, **options):
+            seen.update(options)
+    monkeypatch.setitem(sys.modules, "yara", _Yara)
+    assert yara_check.compile_status("rule r { condition: true }") == (COMPILES, None)
+    assert seen.get("includes") is False
+
+
+@pytest.mark.parametrize("path", ["/etc/passwd", "/nonexistent/file.yar"])
+def test_a_rule_that_includes_a_file_is_refused_without_reading_it(path):
+    """The compiler must not open the file: its message would be an oracle for
+    what exists on this server, and it reaches the ledger and the Graph page."""
+    pytest.importorskip("yara")
+    status, error = yara_check.compile_status(f'include "{path}"\nrule a {{ condition: true }}')
+    assert status == DOES_NOT_COMPILE
+    assert path not in (error or "")
+    assert "root" not in (error or "")
+    assert "can't open" not in (error or "")
+
+
+def test_an_existing_and_a_missing_include_give_the_same_message():
+    pytest.importorskip("yara")
+    rule = 'include "{}"\nrule a {{ condition: true }}'
+    _, existing = yara_check.compile_status(rule.format("/etc/passwd"))
+    _, missing = yara_check.compile_status(rule.format("/nonexistent/file.yar"))
+    assert existing == missing
