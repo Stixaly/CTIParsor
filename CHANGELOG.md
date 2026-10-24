@@ -159,6 +159,34 @@ has an amendment with the whole table.
 
 ### Documentation
 
+#### A Stage 3f prompt that asks for the answer once, measured on AnnoCTR dev and not adopted (ADR-0072), 2026-10-24
+
+One sentence was added to the selection prompt and measured: "Write that
+object once, then stop: nothing goes after its closing brace." It restates the
+"write the answer once" of the prompt rejected on 2026-10-20, without that
+prompt's decide-first step or 25-word `reason`. On AnnoCTR dev at `7867cd3`, against a baseline
+at the same commit that reproduces the earlier reference on 16 of 16 reports:
+
+- **Rules 1 and 2 of ADR-0060 broken.** Technique F1 fell from 0.609 to
+  0.587 (−0.022) and precision from 0.571 to 0.515 (−0.057).
+- **It did not do its job either.** Answers restarted after a complete
+  answer went from 3 to 4, and 3 answers reached the 4,096 ceiling, against
+  none with the shipped prompt.
+- **The prompt is unchanged.** The train stress test was not run, as fixed
+  before the runs.
+
+The model also chose more (272 choices against 239, 21 parent-and-sub-technique
+pairs against 9), as with the earlier prompt, though `reason` was left alone.
+
+Two findings concern code already merged; neither is changed here:
+
+- A selection answer written as a bare list and cut at the ceiling keeps none
+  of its complete choices: the salvage reads only `{"selected": [...]}`.
+- A genuine train answer closes at 4,011 tokens, above the 3,167 that set the
+  4,096 default.
+
+Detail: `docs/eval/selection-once-2026-10.md`.
+
 #### CONTRIBUTING.md points to the versioned migrations, 2026-10-18
 
 Two passages still described a schema change as an addition to
