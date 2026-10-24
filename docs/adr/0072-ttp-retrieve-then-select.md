@@ -390,3 +390,30 @@ answer longer than 4,096 tokens would be cut too, its complete choices kept.
 A repetition penalty is still unmeasured. The default is measured on one
 setup, vLLM with thinking off. ATT&CK 20.0 was not run with the change, which
 does not depend on the release: it acts on answers longer than the ceiling.
+
+## Note (2026-10-24): the narrower prompt edit, measured and not adopted
+
+The decision is unchanged; this records a measurement
+([selection-once-2026-10](../eval/selection-once-2026-10.md)). The rejected
+prompt's "write the answer once", aimed at restarts, was measured alone, in
+its own words: one sentence appended to the selection prompt, "Write that
+object once, then stop: nothing goes after its closing brace." On AnnoCTR dev at `7867cd3`, against a
+baseline at the same commit (identical to `sel-dev-ceiling-01aeea6p` on 16 of
+16 reports):
+
+- **ADR-0060 broken.** Technique F1 0.609 → 0.587 (−0.022) and precision
+  0.571 → 0.515 (−0.057) break rules 1 and 2 as fixed before the run.
+- **Restarts not stopped.** They went from 3 to 4, and three answers reached
+  the 4,096 ceiling, against none with the shipped prompt.
+- **Extra choices without a short `reason`.** The model wrote 272 choices
+  against 239, with 21 parent-and-sub-technique pairs against 9: as many
+  pairs as the rejected prompt, without its short `reason`.
+
+Two observations bear on the amendments above:
+
+- **A cut bare list loses its choices.** `salvage_selection` reads only a cut
+  `{"selected": [...]}` object, so a cut answer written as a bare list keeps
+  none of its complete choices.
+- **A genuine train answer is longer than the one that set the default.**
+  Read the way `parse_selection` reads it (zscaler 2021-05-05, chunk 4), it
+  closes at 4,011 tokens, against the 3,167 that set the 4,096 default.
