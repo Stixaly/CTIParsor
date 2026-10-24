@@ -7,9 +7,13 @@ from pydantic import BaseModel
 from api.db import _lock, get_conn, now_iso, transaction
 from api.routes._common import require_job
 from models.schemas import EntityType
-from pipeline import decisions
+from pipeline import baseline_stix, decisions
 
 router = APIRouter(prefix="/api/jobs/{job_id}/entities", tags=["entities"])
+
+_IMPORTED_ROW: dict[int | str, dict[str, Any]] = {409: {
+    "description": "A row imported from the analyst's STIX bundle (ADR-0090) cannot be edited or deleted: accept "
+                   "or reject it. Also: a held row cannot be accepted in a bulk (ADR-0082)."}}
 
 # Derived from the EntityType enum so it's always in sync — no need to
 # maintain this list manually as new types are added to the pipeline.
@@ -55,6 +59,9 @@ def _row_to_dict(row) -> dict:
         "control_sample": bool(row["control_sample"]),
         # ADR-0082: why the pipeline held this row back; it ships once accepted.
         "held_reason": row["held_reason"],
+        # ADR-0090: how the row relates to the analyst's STIX bundle; NULL without one.
+        "enrichment_status": row["enrichment_status"],
+        "baseline_stix_id": row["baseline_stix_id"],
     }
 
 
@@ -94,10 +101,10 @@ def create_entity(job_id: str, body: EntityCreate):
     return {"id": eid, "job_id": job_id, "value": body.value, "entity_type": body.entity_type,
             "context": body.context, "confidence": body.confidence, "mitre_id": body.mitre_id,
             "accepted": None, "source": "manual", "decision_origin": None, "control_sample": False,
-            "held_reason": None}
+            "held_reason": None, "enrichment_status": None, "baseline_stix_id": None}
 
 
-@router.patch("/{entity_id}")
+@router.patch("/{entity_id}", responses=_IMPORTED_ROW)
 def update_entity(job_id: str, entity_id: str, patch: EntityPatch):
     _check_origin(patch.decision_origin)
     with get_conn() as conn:
@@ -108,6 +115,13 @@ def update_entity(job_id: str, entity_id: str, patch: EntityPatch):
             raise HTTPException(404, "Entity not found")
     if decisions.held_from_bulk_accept(row, patch.accepted, patch.decision_origin):
         raise HTTPException(409, f"held for review ({row['held_reason']}): accept it on its own card")
+    # A row imported from the analyst's STIX bundle is accepted or rejected, never
+    # edited: its value is the baseline object's (ADR-0090).
+    if row["enrichment_status"] in baseline_stix.IMPORTED and (
+            (patch.entity_type is not None and patch.entity_type != row["entity_type"])
+            or (patch.value is not None and patch.value != row["value"])
+            or ("mitre_id" in patch.model_fields_set and patch.mitre_id != row["mitre_id"])):
+        raise HTTPException(409, "row from the analyst's STIX bundle: accept or reject it")
 
     updates: list[str] = []
     # SQL parameter values are heterogeneous (strings, None for NULL-clearing).
@@ -236,10 +250,16 @@ def bulk_update_entities(job_id: str, body: BulkPatch):
     }
 
 
-@router.delete("/{entity_id}")
+@router.delete("/{entity_id}", responses=_IMPORTED_ROW)
 def delete_entity(job_id: str, entity_id: str):
     with _lock:
         with get_conn() as conn:
+            # A deleted row could no longer say whether the baseline object leaves the bundle.
+            row = conn.execute(
+                "SELECT enrichment_status FROM entities WHERE id=? AND job_id=?", (entity_id, job_id)
+            ).fetchone()
+            if row and row["enrichment_status"] in baseline_stix.IMPORTED:
+                raise HTTPException(409, "row from the analyst's STIX bundle: reject it instead")
             result = conn.execute(
                 "DELETE FROM entities WHERE id=? AND job_id=?", (entity_id, job_id)
             )

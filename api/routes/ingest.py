@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -20,7 +21,15 @@ from pydantic import BaseModel
 from api.logging_config import get_logger
 from api.main import limiter
 from api.paths import uploads_dir
-from api.routes._common import start_job
+from api.routes._common import (
+    BASELINE_REFUSED,
+    StoredBaseline,
+    baseline_markings,
+    baseline_text_bytes,
+    check_baseline_request,
+    read_baseline,
+    start_job,
+)
 from api.routes.upload import clean_pap, clean_tlp
 from pipeline import web_capture
 from pipeline.regex_safety import compile_pattern
@@ -68,6 +77,10 @@ class TextIngestRequest(BaseModel):
     title: str | None = None
     tlp_level: str | None = None
     pap_level: str | None = None
+    # ADR-0090: the STIX 2.1 bundle to enrich, as the TEXT of the file (its
+    # sha256 is of the bytes received), and which of its Reports.
+    baseline_bundle: str | None = None
+    baseline_report_id: str | None = None
 
 
 class UrlIngestRequest(BaseModel):
@@ -75,12 +88,35 @@ class UrlIngestRequest(BaseModel):
     enable_js: bool = False
     tlp_level: str | None = None
     pap_level: str | None = None
+    baseline_bundle: str | None = None
+    baseline_report_id: str | None = None
 
 
 def _clean_marking(value: str | None, field: str) -> str | None:
     """A TLP / PAP marking as stored, or 400 — the rules live in
     api/routes/upload.py so the three entry points agree (ADR-0073)."""
     return clean_tlp(value) if field == "tlp_level" else clean_pap(value)
+
+
+def _check_baseline_request(body: TextIngestRequest | UrlIngestRequest) -> None:
+    """The refusals that cost nothing (the mode is off, a report id without a bundle),
+    before the request is looked at any further.  An empty or blank bundle is none."""
+    check_baseline_request(bool(body.baseline_bundle and body.baseline_bundle.strip()), body.baseline_report_id)
+
+
+# Reading a baseline takes seconds, and may wait up to 30 s for one of the two intake
+# slots (api/routes/_common.py).  It has its own threads: in asyncio's default
+# executor, which also runs `start_job` for every ingest, a few waiting reads would
+# hold up the jobs being created.
+_BASELINE_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="baseline")
+
+
+async def _read_baseline(body: TextIngestRequest | UrlIngestRequest) -> StoredBaseline | None:
+    """The request's baseline, checked before anything is stored or captured.  Off the
+    event loop: reading a large bundle takes seconds."""
+    raw = baseline_text_bytes(body.baseline_bundle) if body.baseline_bundle is not None else None
+    return await asyncio.get_running_loop().run_in_executor(
+        _BASELINE_POOL, read_baseline, raw, body.baseline_report_id)
 
 
 def _looks_like_markdown(text: str) -> bool:
@@ -131,11 +167,12 @@ def _timestamp_slug() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
 
-@router.post("/text")
+@router.post("/text", responses=BASELINE_REFUSED)
 @limiter.limit("20/minute")
 async def ingest_text(request: Request, body: TextIngestRequest):
     tlp = _clean_marking(body.tlp_level, "tlp_level")
     pap = _clean_marking(body.pap_level, "pap_level")
+    _check_baseline_request(body)
 
     text = body.text
     if not isinstance(text, str):
@@ -168,6 +205,10 @@ async def ingest_text(request: Request, body: TextIngestRequest):
                 f"{_MIN_TEXT_CHARS}). Paste the article text instead.",
             )
 
+    # After the checks on the text, which are cheap; before anything is written.
+    baseline = await _read_baseline(body)
+    tlp, pap = baseline_markings(baseline, tlp, pap)
+
     slug = web_capture._slugify(body.title or "")
     if not slug:
         slug = f"pasted-{_timestamp_slug()}"
@@ -188,14 +229,15 @@ async def ingest_text(request: Request, body: TextIngestRequest):
         job_id, suffix, len(text),
     )
 
-    return start_job(job_id, dest, filename, tlp, pap)
+    return await asyncio.to_thread(start_job, job_id, dest, filename, tlp, pap, baseline=baseline)
 
 
-@router.post("/url")
+@router.post("/url", responses=BASELINE_REFUSED)
 @limiter.limit("5/minute")
 async def ingest_url(request: Request, body: UrlIngestRequest):
     tlp = _clean_marking(body.tlp_level, "tlp_level")
     pap = _clean_marking(body.pap_level, "pap_level")
+    _check_baseline_request(body)
 
     if not web_capture._PLAYWRIGHT_AVAILABLE:
         raise HTTPException(
@@ -208,6 +250,10 @@ async def ingest_url(request: Request, body: UrlIngestRequest):
         safe_url = web_capture.validate_url(body.url)
     except web_capture.CaptureError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+    # Before the capture, which takes up to _CAPTURE_DEADLINE_S.
+    baseline = await _read_baseline(body)
+    tlp, pap = baseline_markings(baseline, tlp, pap)
 
     job_id = str(uuid4())
     uploads = uploads_dir()
@@ -297,7 +343,7 @@ async def ingest_url(request: Request, body: UrlIngestRequest):
         result.blocked_requests, result.js_enabled,
     )
 
-    response = start_job(job_id, text_dest, filename, tlp, pap)
+    response = await asyncio.to_thread(start_job, job_id, text_dest, filename, tlp, pap, baseline=baseline)
     response["source_url"] = result.final_url
     response["blocked_requests"] = result.blocked_requests
     response["rendered_chars"] = result.rendered_chars

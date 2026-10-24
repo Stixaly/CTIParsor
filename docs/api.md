@@ -7,11 +7,13 @@ by the running app at `http://localhost:8000/docs`.
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/upload` | Upload a file (multipart `file=`) and queue it. Returns `{ job_id, filename, status }`, `status` being `queued` or `processing`; 503 when the queue is full. |
-| `POST` | `/api/ingest/text` | Ingest pasted text (JSON `text`, optional `title`). Stored `.html`, `.md` or `.txt` by content — pasted markup is stripped, not ingested raw. 20 chars min, 2 MB max. |
-| `POST` | `/api/ingest/url` | Render a URL with headless Chromium (JSON `url`, optional `enable_js`). Writes `{job_id}.pdf` (archive, shown in Review) and `{job_id}.txt` (rendered DOM text, ingested). 400 policy refusal · 502 unreachable or blank render · 503 Playwright absent · 504 timeout. |
-| `GET` | `/api/jobs` | List all jobs |
-| `GET` | `/api/jobs/{id}` | Get a single job (includes entity/relationship counts) |
+| `POST` | `/api/upload` | Upload a file (multipart `file=`) and queue it. Returns `{ job_id, filename, status }`, `status` being `queued` or `processing`; 503 when the queue is full. Optional `baseline_stix` (a file) and `baseline_report_id` (a form field): a STIX 2.1 bundle to enrich (below) |
+| `POST` | `/api/ingest/text` | Ingest pasted text (JSON `text`, optional `title`). Stored `.html`, `.md` or `.txt` by content — pasted markup is stripped, not ingested raw. 20 chars min, 2 MB max. Optional `baseline_bundle` (the TEXT of the STIX file) and `baseline_report_id` |
+| `POST` | `/api/ingest/url` | Render a URL with headless Chromium (JSON `url`, optional `enable_js`). Writes `{job_id}.pdf` (archive, shown in Review) and `{job_id}.txt` (rendered DOM text, ingested). 400 policy refusal · 502 unreachable or blank render · 503 Playwright absent · 504 timeout. Optional `baseline_bundle` and `baseline_report_id`, checked before the capture |
+| `GET` | `/api/jobs` | List all jobs (with `pipeline_mode`) |
+| `GET` | `/api/jobs/{id}` | Get a single job (includes entity/relationship counts, `pipeline_mode`, and for an `enrich` job an `enrichment` block, below) |
+| `GET` | `/api/jobs/{id}/baseline` | The STIX bundle the job was created from, as received, as a JSON download. 404 for a job with none |
+| `GET` | `/api/jobs/{id}/baseline/intake` | What the intake made of that bundle, whole: every object left out and why. 404 for a job with none |
 | `PATCH` | `/api/jobs/{id}` | Update status. 409 for `completed` while the stored bundle is one Stage 5 refused (below) |
 | `DELETE` | `/api/jobs/{id}` | Delete job, all DB rows, and all associated files |
 | `POST` | `/api/jobs/{id}/finalize` | Re-run Stages 4–5 on the accepted rows and store the bundle; sets status `completed`. `?quick=true` rebuilds the bundle and leaves the status alone (the rebuild the UI schedules after each edit). Returns `{ status, bundle_size, validation }`, `validation` being `validated`, `unverified` or `unknown` (Stage 5 did not run). 409 when Stage 5 refuses the rebuilt bundle (below). Two finalizes of one job can overlap: a build never replaces a bundle built from newer rows (below) |
@@ -66,14 +68,84 @@ bundle names the build that made it in `jobs.bundle_build_json` (kind `run`,
 `finalize` or `quick`, time, `git_rev`, policy, the captured environment
 variables, manifest).
 
+### Enriching a STIX bundle the analyst already holds (ADR-0090)
+
+The three ingestion routes accept, besides the report, a STIX 2.1 bundle (the
+*baseline*), and the job starts in `enrich` mode (`jobs.pipeline_mode`). The
+mode is off until `STIX_ENRICHMENT_ENABLED` is set (`docs/configuration.md`):
+with it off, a request that carries a baseline answers **400**
+`STIX enrichment is not enabled on this server`, without reading it, and a
+request without one is unchanged. An `enrich` job already created keeps
+running and serving its baseline when the flag is turned off: the mode is
+stored on the job, and only new requests are refused. In this revision the
+pipeline does not use the baseline yet: an `enrich` job is processed in full
+mode, apart from the worker's validation below, which can fail it.
+
+- `baseline_stix` (`/api/upload`, multipart) or `baseline_bundle`
+  (`/api/ingest/*`, JSON string): the bundle. `baseline_bundle` is the **text**
+  of the file, since the `sha256` kept is of the bytes received. An empty or
+  blank bundle (and an empty `baseline_report_id`) is no baseline. The cheap
+  checks on the report come first (its length for pasted text, its size for an
+  upload, the URL), then the baseline is read; for a URL it is read before the
+  capture, and for an upload a refused baseline removes the report file it
+  came with. Nothing is stored for a request that is refused.
+- `baseline_report_id`: which Report of the bundle to enrich. Required when the
+  bundle holds several (**400** listing them); **400** when the bundle does not
+  hold it, and when it is sent without a baseline. A bundle with no Report is
+  taken whole.
+- **400** when the bundle cannot be used: not UTF-8, not JSON, not a STIX 2.1
+  bundle (a 2.0 one, or objects without `spec_version`), more than 10 000
+  objects, a `baseline_report_id` the bundle lacks, or a chosen Report that
+  stix2 refuses. **413** over 20 MB. **503** when two other bundles are being
+  read already (at most two at a time per server process, whichever route they
+  come by; a request waits up to 30 s for a slot): retry. An invalid *object*
+  does not refuse the bundle: it is left out, with a `WARNING` log line
+  (`[baseline] job <id>: dropped invalid STIX object …`, the first 200 of them,
+  then one line counting the rest) and an entry in the job's intake.
+- **400** when the job's `tlp_level` (or `pap_level`) is lower than the most
+  restrictive marking the baseline carries. With no `tlp_level` the job gets the
+  more restrictive of that minimum and the server's default `STIX_TLP` (AMBER
+  when unset), so a baseline never makes a job less restricted than a job
+  without one; with no `pap_level` it gets the baseline's minimum, PAP having no
+  default.
+- The request checks the bundle against the stix2 library only; it does not
+  run the JSON schemas, so an object only they refuse is still imported at
+  that point. The worker runs them (seconds per thousand objects) when the job
+  starts, once, and leaves out the objects they refuse; if they refuse the
+  chosen Report itself, **the job fails** with that reason (a `WARNING` in the
+  log, no traceback). `enrichment.validated` says whether the worker has done it.
+
+`GET /api/jobs/{id}` of an `enrich` job adds:
+
+```json
+"enrichment": {
+  "intake": { "sha256": "…", "counts": {"malware": 3, "out_of_scope": 0}, "excluded": [{"id": "…", "type": "…", "reason": "baseline_invalid", "detail": "…"}], "excluded_total": 1, "warnings": [], "reports": [], "scope_report_id": "report--…", "min_tlp": "AMBER", "min_pap": null },
+  "validated": false,
+  "counts": { "entities": {"baseline_only": 2}, "relationships": {} }
+}
+```
+
+`excluded` holds the first 200 objects left out and `excluded_total` how many
+there are; `GET /api/jobs/{id}/baseline/intake` returns the whole stored intake
+(404 for a job with no baseline). `counts` is the number of rows by
+`enrichment_status` (`new`, `matched`, `baseline_in_text`, `baseline_only`); it
+is empty until Stage 3r writes them. The bundle itself is not in the response.
+
+### Baselines
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/baselines/status` | `{ "enabled": bool, "max_bytes": int, "max_objects": int }`: whether `STIX_ENRICHMENT_ENABLED` is on, and the limits |
+| `POST` | `/api/baselines/inspect` | What a job would make of a bundle, without creating one. Multipart `file`, optional form field `report_id`; 10 requests a minute. Returns the intake: `sha256`, `bundle_id`, `counts` by STIX type (plus `out_of_scope`, `dangling_refs`), `excluded` (`{id, type, reason, detail}`), `warnings`, `reports` (`{id, name, published, refs}`), `scope_report_id`, `needs_report_choice` (several Reports and no `report_id`: they are in `reports`), `min_tlp`, `min_pap`. 400 when the mode is off or the bundle cannot be used, 413 over 20 MB, 503 when other bundles are being read. Stores and logs nothing; runs the stix2 checks, not the JSON schemas |
+
 ## Entities
 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/jobs/{id}/entities` | List all entities |
 | `POST` | `/api/jobs/{id}/entities` | Create an entity manually |
-| `PATCH` | `/api/jobs/{id}/entities/{eid}` | Update (`accepted`, `entity_type`, `value`, `mitre_id`) |
-| `DELETE` | `/api/jobs/{id}/entities/{eid}` | Remove |
+| `PATCH` | `/api/jobs/{id}/entities/{eid}` | Update (`accepted`, `entity_type`, `value`, `mitre_id`). 409 when it changes `entity_type`, `value` or `mitre_id` of a row imported from the analyst's STIX bundle (`enrichment_status` `baseline_in_text` or `baseline_only`): accept or reject it |
+| `DELETE` | `/api/jobs/{id}/entities/{eid}` | Remove. 409 for a row imported from the analyst's STIX bundle: reject it instead |
 | `POST` | `/api/jobs/{id}/entities/accept-pending` | Accept all NULL-state entities in one query |
 | `POST` | `/api/jobs/{id}/entities/bulk` | Bulk accept / reject / reset entities by type (see below) |
 
@@ -93,8 +165,8 @@ variables, manifest).
 |---|---|---|
 | `GET` | `/api/jobs/{id}/relationships` | List all relationships |
 | `POST` | `/api/jobs/{id}/relationships` | Create a relationship |
-| `PATCH` | `/api/jobs/{id}/relationships/{rid}` | Update (`accepted`, `source_value`, `relationship_type`, `target_value`, `evidence_text`) |
-| `DELETE` | `/api/jobs/{id}/relationships/{rid}` | Remove |
+| `PATCH` | `/api/jobs/{id}/relationships/{rid}` | Update (`accepted`, `source_value`, `relationship_type`, `target_value`, `evidence_text`). 409 when it changes an endpoint or the verb of a row imported from the analyst's STIX bundle, or sends a `start_time` or `stop_time` for it: accept or reject it |
+| `DELETE` | `/api/jobs/{id}/relationships/{rid}` | Remove. 409 for a row imported from the analyst's STIX bundle: reject it instead |
 | `GET` | `/api/jobs/{id}/relationships/valid-types` | List valid STIX relationship type strings |
 | `POST` | `/api/jobs/{id}/relationships/bulk` | Accept, reject or reset several relationships in one call: `{ "ids": [...], "action": "accept" \| "reject" \| "reset" }`, at most 500 ids. Journaled as `human_bulk` (ADR-0058), which threshold calibration does not read. Returns `{ updated, action }` |
 

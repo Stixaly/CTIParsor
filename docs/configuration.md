@@ -516,6 +516,25 @@ Besides `THRESHOLD_CALIBRATION_ENABLED` and `ENTITY_OVERRIDES_ENABLED` above:
 # REVIEW_CONTROL_SAMPLE_RATE=0.10
 ```
 
+## Enriching a STIX bundle
+
+```env
+# ADR-0090: let a report come with a STIX 2.1 bundle the analyst already holds
+# (/api/upload baseline_stix, /api/ingest/* baseline_bundle), and answer
+# POST /api/baselines/inspect.  Off, a request that carries a bundle gets 400.
+# Off until the feature is accepted (ADR-0090, lot 7); read on every request.
+# STIX_ENRICHMENT_ENABLED=false
+```
+
+The limits are not settings: a bundle is at most 20 MB and 10 000 objects
+(`pipeline/baseline_stix.py`; `GET /api/baselines/status` reports them). The
+report and the bundle travel in one multipart request, so the reverse proxy
+(`client_max_body_size` in `docker/nginx/default.conf`) accepts 72 MB, and it is
+72 MB **because of this feature**: a 50 MB report, a 20 MB bundle and the form
+(it was 50 MB). The API itself lets an upload's `Content-Length` exceed the
+report's 50 MB only while `STIX_ENRICHMENT_ENABLED` is on. Behind another proxy,
+allow as much.
+
 ## Worker, queue and retention
 
 ```env

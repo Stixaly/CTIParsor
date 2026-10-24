@@ -6,9 +6,10 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
+from api.baseline_store import EXCLUDED_LISTED
 from api.db import _lock, get_conn, now_iso
 from api.logging_config import get_logger
 from api.paths import output_dir, uploads_dir
@@ -95,7 +96,7 @@ def _stored_errors(raw: str | None) -> list[str]:
 def list_jobs():
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, original_filename, status, tlp_level, pap_level, created_at, updated_at "
+            "SELECT id, original_filename, status, tlp_level, pap_level, pipeline_mode, created_at, updated_at "
             "FROM jobs ORDER BY created_at DESC"
         ).fetchall()
     jobs = []
@@ -106,10 +107,32 @@ def list_jobs():
             "status": row["status"],
             "tlp_level": row["tlp_level"],
             "pap_level": row["pap_level"],
+            "pipeline_mode": row["pipeline_mode"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         })
     return jobs
+
+
+def _enrichment(conn, job_id: str) -> dict:
+    """A job in `enrich` mode (ADR-0090): what the intake made of the baseline, whether the
+    worker has validated it against the JSON schemas, and how many rows have each
+    `enrichment_status` (none until Stage 3r writes them).  Never the bundle itself, and
+    the objects left out are the first EXCLUDED_LISTED with their total: the whole list
+    is GET /api/jobs/{id}/baseline/intake."""
+    base = conn.execute(
+        "SELECT intake_json, validated FROM job_baselines WHERE job_id=?", (job_id,)).fetchone()
+    counts: dict[str, dict[str, int]] = {}
+    for table in ("entities", "relationships"):
+        rows = conn.execute(
+            f"SELECT enrichment_status, COUNT(*) AS n FROM {table} "
+            "WHERE job_id=? AND enrichment_status IS NOT NULL GROUP BY enrichment_status", (job_id,)).fetchall()
+        counts[table] = {r["enrichment_status"]: r["n"] for r in rows}
+    intake = json.loads(base["intake_json"]) if base else None
+    if intake is not None:
+        intake["excluded_total"] = len(intake["excluded"])
+        intake["excluded"] = intake["excluded"][:EXCLUDED_LISTED]
+    return {"intake": intake, "validated": bool(base and base["validated"]), "counts": counts}
 
 
 @router.get("/{job_id}")
@@ -124,8 +147,9 @@ def get_job(job_id: str):
         rel_count = conn.execute(
             "SELECT COUNT(*) FROM relationships WHERE job_id=?", (job_id,)
         ).fetchone()[0]
+        enrichment = _enrichment(conn, job_id) if row["pipeline_mode"] == "enrich" else None
 
-    return {
+    job = {
         "id": row["id"],
         "original_filename": row["original_filename"],
         "status": row["status"],
@@ -134,9 +158,38 @@ def get_job(job_id: str):
         "pap_level": row["pap_level"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
+        "pipeline_mode": row["pipeline_mode"],
         "entity_count": entity_count,
         "relationship_count": rel_count,
     }
+    if enrichment is not None:
+        job["enrichment"] = enrichment
+    return job
+
+
+_NO_BASELINE: dict[int | str, dict[str, Any]] = {404: {"description": "No such job, or a job with no baseline."}}
+
+
+@router.get("/{job_id}/baseline", responses=_NO_BASELINE)
+def get_baseline(job_id: str):
+    """The STIX bundle the job was created from (ADR-0090), byte for byte, as a download."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT bundle_json FROM job_baselines WHERE job_id=?", (job_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "No baseline for this job")
+    return Response(row["bundle_json"], media_type="application/json",
+                    headers={"Content-Disposition": f"attachment; filename=\"{job_id}_baseline.json\""})
+
+
+@router.get("/{job_id}/baseline/intake", responses=_NO_BASELINE)
+def get_baseline_intake(job_id: str):
+    """What the intake made of the job's baseline, whole: the counts, every object left out and
+    why, the reports, the markings.  `GET /api/jobs/{id}` carries the first of the exclusions."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT intake_json FROM job_baselines WHERE job_id=?", (job_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "No baseline for this job")
+    return Response(row["intake_json"], media_type="application/json")
 
 
 @router.patch("/{job_id}", responses=_BUNDLE_REFUSED)
@@ -233,6 +286,8 @@ def _delete_job(job_id: str) -> bool:
             conn.execute("DELETE FROM entities WHERE job_id=?", (job_id,))
             conn.execute("DELETE FROM relationships WHERE job_id=?", (job_id,))
             conn.execute("DELETE FROM progress_events WHERE job_id=?", (job_id,))
+            # The foreign key would do it; deleting explicitly keeps the order safe, as for the rows above.
+            conn.execute("DELETE FROM job_baselines WHERE job_id=?", (job_id,))
             conn.execute("DELETE FROM jobs WHERE id=?", (job_id,))
             conn.commit()
 

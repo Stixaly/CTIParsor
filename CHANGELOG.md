@@ -11,6 +11,127 @@ theme.
 
 ### Added
 
+#### Enriching an existing STIX 2.1 bundle, lot 2: storage, the flag and the API (ADR-0090), 2026-10-24
+
+The third of ADR-0090's eight lots lets a job carry a baseline: the three
+ingestion routes accept the bundle, check it with lot 1's module, and the job
+stores it. **Jobs still run in full mode**: nothing reads the baseline to
+extract or ship anything yet (lot 3 wires the pipeline), so no bundle changes.
+The one effect on a job is the worker's schema check below, which fails an
+`enrich` job whose chosen Report fails the JSON schemas.
+The whole feature is behind `STIX_ENRICHMENT_ENABLED`, default off.
+
+- **Migration v0013** (`api/migrations/v0013_stix_baseline.py`): `jobs.pipeline_mode`
+  (`full` by default, `enrich` for a job with a baseline); the table
+  `job_baselines` (one row per job, deleted with it: `sha256`, `size_bytes`,
+  `report_id`, the bundle as received in `bundle_json`, its `index_json`, its
+  `intake_json`, `validated`); `enrichment_status` and `baseline_stix_id` on
+  `entities` and `relationships`, NULL in full mode. Every addition is nullable
+  or defaulted and nothing is backfilled, so a worker of the previous revision
+  keeps inserting.
+- **`STIX_ENRICHMENT_ENABLED`** (`.env.example`), default `false`, read at each
+  request. While it is off, a request that carries a baseline and
+  `POST /api/baselines/inspect` answer **400** `STIX enrichment is not enabled on
+  this server`; a request without a baseline is unchanged.
+- **`GET /api/baselines/status`** returns `enabled`, `max_bytes` and
+  `max_objects`. **`POST /api/baselines/inspect`** (multipart `file`, optional
+  `report_id`, 10 requests a minute) returns the intake of lot 1 for a bundle
+  without creating a job: counts by type, the objects left out and why, the
+  reports, `needs_report_choice`, the minimum TLP and PAP. It stores and logs
+  nothing and does not run the JSON schemas.
+- **The three ingestion routes** take the baseline: `baseline_stix` (a file) and
+  `baseline_report_id` on `/api/upload`; `baseline_bundle` (the TEXT of the
+  file, since the `sha256` is of the bytes received) and `baseline_report_id`
+  on `/api/ingest/text` and `/api/ingest/url`. Order of the checks: the flag
+  and a `baseline_report_id` without a baseline (**400**, before a byte of the
+  bundle is read), then the cheap checks on the report (pasted text: its
+  length; upload: its size, streamed to disk; URL: its validation), then the
+  baseline (size, **413** over 20 MB; UTF-8; the intake), **before the
+  Playwright capture** for a URL, which can take up to its capture deadline. A
+  refused baseline leaves no row, and an upload's report file is removed. An
+  empty or blank `baseline_bundle` or `baseline_report_id` is no baseline. The
+  job row and its `job_baselines` row are written in one transaction, before
+  the worker can start; `job_baselines.job_id` is a foreign key to `jobs` with
+  `ON DELETE CASCADE`. The `async` ingest routes run `start_job` off the event
+  loop.
+- **At most two baselines are read at once** per server process, whichever
+  route they come by (a read is CPU and memory, and the four routes have
+  independent rate limits): a request waits up to 30 s for a slot, then
+  answers **503** `Busy reading another STIX bundle, retry in a moment.`
+  Declared in the OpenAPI schema with the 400 and 413, as are the 404 of the
+  baseline routes and the 409 of the entity and relationship routes.
+- **A job that never runs keeps nothing.** When the queue is full and the job
+  is marked failed (503), its `job_baselines` row is deleted with it. An
+  upload that fails for any reason before the job is handed over removes the
+  report file it wrote. A baseline is read on its own four threads, not in
+  asyncio's default executor, which creates the jobs.
+- **Choice of the Report (D4)**: with several Reports and no
+  `baseline_report_id` the request is a 400 that lists them; an id the bundle
+  does not hold is a 400; a bundle with no Report is taken whole.
+- **TLP and PAP minimum (D2)**: a `tlp_level` or `pap_level` lower than the
+  most restrictive marking the baseline carries is a 400, checked before
+  anything is stored or captured. With no `tlp_level` the job gets the more
+  restrictive of that minimum and the server's `STIX_TLP` default (AMBER when
+  unset), never less than a job without a baseline; with no `pap_level`, the
+  baseline's minimum (PAP has no default).
+- **WARNING logs (D3)**: one line per object the baseline leaves out
+  (`[baseline] job <id>: dropped invalid STIX object <id> (<type>): <reason> —
+  <detail>`), written once the job is stored, for the first 200; then one line,
+  `… and K more excluded object(s), listed in the job's intake`. The worker's
+  step caps its lines the same way. `/inspect` logs none.
+- **The JSON schemas run in the worker**, not in the request
+  (`api/baseline_store.py`, `validate_in_worker`, called at the start of
+  `_run_pipeline`). The request runs the stix2 checks only. Lot 1 measured
+  intake at 1.9 s for 10 000 objects without the schemas and about 47 s with
+  them (49.0 s with 1 invalid object); a request cannot wait that long. The
+  worker re-runs the intake with the schemas, stores the index and the report,
+  sets `validated` to 1 and logs one WARNING per object the schemas exclude
+  that the request had not. A job already `validated` (a requeue, a lease
+  reclaimed, a crash-resume) is not validated again.
+- **A `BaselineError` at the worker fails the job** with its message (the chosen
+  Report itself fails the schemas, or an `enrich` job holds no baseline); it
+  does not fall back to full mode. It is logged as a WARNING with the message,
+  without a traceback: the analyst's bundle is at fault, not the code. A `full`
+  job is not touched.
+- **`GET /api/jobs` and `GET /api/jobs/{id}`** carry `pipeline_mode`; an
+  `enrich` job's `GET` adds `enrichment`: the intake, `validated`, and the
+  number of entities and relationships by `enrichment_status` (empty until
+  lot 3). The entity and relationship rows carry `enrichment_status` and
+  `baseline_stix_id`. The bundle is never in these responses, and `excluded`
+  lists the first 200 objects left out with `excluded_total` (a bundle can
+  exclude thousands); **`GET /api/jobs/{id}/baseline/intake`** returns the
+  whole stored intake, 404 for a job with none.
+- **`GET /api/jobs/{id}/baseline`** downloads the bundle as received
+  (`<job_id>_baseline.json`); 404 for a job with none. Deleting a job, and the
+  retention sweep, delete its baseline.
+- **Imported rows are decided, not edited.** A row whose `enrichment_status` is
+  `baseline_in_text` or `baseline_only` answers **409** to a `PATCH` that
+  changes an entity's `entity_type`, `value` or `mitre_id`, or a relationship's
+  endpoints, verb or dates (a date counts as soon as it is sent), and to a
+  `DELETE` (reject it instead: a deleted row could no longer say whether the
+  object leaves the bundle). Accepting and rejecting, one by one or in bulk,
+  work as before. `decisions.BASELINE_STIX` (`baseline_stix`) is a new decision
+  origin that only the server writes: a client sending it gets a 400.
+- **nginx** (`docker/nginx/default.conf`): `client_max_body_size` goes from 50m
+  to **72m**, that is 50 MB of report plus a 20 MB baseline in one multipart,
+  and a little for the form (72m is because of this feature). `/api/upload`
+  accepts a `Content-Length` up to those 70 MB only while the mode is on; the
+  report keeps its own 50 MB limit, checked on the bytes read.
+- **Hostile text.** The bundle's strings come from outside. A baseline sent as
+  text that is not valid UTF-8 (a lone surrogate) or a file that is not UTF-8
+  is a 400, not a 500. A lone surrogate in what the intake returns or stores is
+  replaced by U+FFFD (a JSON response could not encode it); a NUL stays, stored
+  as the escape `\u0000`. In a log line, every character that does not print (a
+  line break, a control character) is replaced by U+FFFD, so a bundle cannot
+  forge a log line.
+- **Docs**: `docs/api.md`, `docs/configuration.md`, `docs/database-schema.md`,
+  `docs/architecture.md`.
+- **Tests**: `tests/test_baseline_api.py` (66 collected on 2026-10-24) and
+  `tests/test_baseline_worker.py` (8), a v0013 test in
+  `tests/test_migrations.py`, `pipeline_mode` in `tests/test_jobs_routes.py`.
+  `tests/test_api_schema.py` now covers 60 operations in the schema, 56
+  exercised (56 and 52 before).
+
 #### Enriching an existing STIX 2.1 bundle, lot 1: the module that reads the baseline (ADR-0090), 2026-10-24
 
 The second of ADR-0090's eight lots adds the module that reads the bundle the
@@ -82,7 +203,7 @@ no output.
   `fuzz/corpus/baseline_intake/`. The `Fuzzing` workflow runs it with
   `-max_len=65536`, the other targets keeping 16384: the largest seed is
   16.6 KB, and cut short it would no longer be JSON.
-- **Tests**: `tests/test_baseline_stix.py` (399 collected on 2026-10-24),
+- **Tests**: `tests/test_baseline_stix.py` (447 collected on 2026-10-24),
   including the `quiet` verdict.
 
 #### Enriching an existing STIX 2.1 bundle: ADR-0090 proposed, reference bundles and baseline fixtures, 2026-10-24

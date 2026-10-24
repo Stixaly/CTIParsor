@@ -24,9 +24,11 @@ from api.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+from api.baseline_store import validate_in_worker
 from api.db import _lock, backup_db, emit_progress, get_conn, now_iso, set_job_status, transaction
 from api.paths import output_dir, uploads_dir
 from api.run_config import BuildKind, build_record, run_build_record, utc_stamp
+from pipeline.baseline_stix import BaselineError
 from pipeline.decisions import SHIPS as _SHIPS
 from pipeline.env_flags import env_int
 from pipeline.orchestrator import (
@@ -566,6 +568,12 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         set_job_status(job_id, "processing")
         _owner_worker_id = _current_owner(job_id)
 
+        # A baseline (ADR-0090) was read without the JSON schemas, which take
+        # seconds per thousand objects; they run here, once.  A bundle that
+        # fails now (the chosen Report itself) fails the job: no silent fallback
+        # to the full mode.
+        validate_in_worker(job_id)
+
         # TLP / PAP markings selected at upload time.
         with get_conn() as conn:
             row = conn.execute("SELECT tlp_level, pap_level FROM jobs WHERE id=?", (job_id,)).fetchone()
@@ -608,6 +616,12 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
 
     except RunAborted:
         return
+    except BaselineError as exc:
+        # The baseline cannot be used (ADR-0090): the analyst's bundle is at fault, not the
+        # code, so the reason is the message and there is no traceback to read.
+        if _finalize_job(job_id, "failed", _owner_worker_id):
+            emit_progress(job_id, "done", {"status": "failed", "error": str(exc)})
+        logger.warning(f"[Worker] job {job_id}: the baseline cannot be used: {exc}")
     except TimeoutError as exc:
         error_msg = str(exc)
         if _finalize_job(job_id, "failed", _owner_worker_id):
@@ -763,6 +777,11 @@ def run_pipeline_async(job_id: str, file_path: str, original_filename: str) -> s
 
     if _QUEUE_MAX_DEPTH > 0 and queue_loop.count_queued() >= _QUEUE_MAX_DEPTH:
         set_job_status(job_id, "failed")
+        # A job that never runs keeps no baseline (up to 20 MB) in the store.
+        with _lock:
+            with get_conn() as conn:
+                conn.execute("DELETE FROM job_baselines WHERE job_id=?", (job_id,))
+                conn.commit()
         emit_progress(job_id, "done", {
             "status": "failed",
             "error": f"Queue is full ({_QUEUE_MAX_DEPTH} jobs waiting) — try again later"
