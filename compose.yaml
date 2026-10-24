@@ -363,7 +363,7 @@ services:
   #             capabilities: [gpu]
   ollama:
     profiles: [ollama]
-    image: ollama/ollama:0.40.5@sha256:5d3a2f25f9825628daba94dc0b1d421c7d57d6c03ae5faa9ba050e058bab8241
+    image: ollama/ollama:0.40.8@sha256:2b8eecdb85aa6ea67c381c8ecffec04b2658496cf2821a8f88b0485bdff198e8
     volumes:
       - ollama-models:/root/.ollama
     networks:
