@@ -1,6 +1,6 @@
 # ADR-0085: Releases promote the image main built, and sign the files they add
 
-**Status:** Accepted — workflow implemented; no release cut yet; tag ruleset and immutable releases to be applied by the maintainer
+**Status:** Accepted — workflow implemented; v0.1.0 released 2026-10-17; release immutability enabled after it; tag ruleset still to be applied by the maintainer (2026-10-24)
 **Date:** 2026-10-17
 **Deciders:** maintainer
 **Amends:** ADR-0047 (version tags), ADR-0075 (a verifiable supply chain), ADR-0078 (Signed-Releases)
@@ -231,13 +231,15 @@ Four things wait for a first release:
   dry run rehearses the checks, the image lookup and its attestations, the files
   and the notes. It cannot rehearse the version names on the image, the
   provenance of the files or the Release itself; the first release is their
-  first test.
+  first test. v0.1.0 passed it (see the amendment below).
 - **Waiting on the first release:**
   - the four OpenSSF criteria stay unmet until v0.1.0 is published, and are met
     once it is;
   - Scorecard's Signed-Releases check starts scoring at the first Release.
     ADR-0078's amendment says a `*.intoto.jsonl` asset is what it looks for. No
     score is predicted here.
+
+  Both came with v0.1.0 (see the amendment below).
 - **To revisit:** pre-releases, a protected environment, and the follow-up
   below.
 
@@ -249,10 +251,14 @@ Four things wait for a first release:
        from `1.0.0` to `0.0.0`); the two inert `type=semver` lines removed from
        `ci.yml`; `docs/releasing.md`.
 2. [ ] Maintainer: the tag ruleset `release tags` (decision 10). Read back with
-       `gh api repos/Stixaly/CTIParsor/rulesets`.
-3. [ ] Maintainer: enable release immutability (decision 10). Read back with
-       `gh api repos/Stixaly/CTIParsor/immutable-releases`.
-4. [ ] Cut v0.1.0: a pull request from `release.py prepare 0.1.0`, then the
+       `gh api repos/Stixaly/CTIParsor/rulesets`. Still open on 2026-10-24: the
+       only ruleset is "basic rules", which targets the branch.
+3. [x] Maintainer: enable release immutability (decision 10). Read back with
+       `gh api repos/Stixaly/CTIParsor/immutable-releases`: `"enabled": true`
+       on 2026-10-24. It was enabled after v0.1.0 was published, so v0.1.0 is
+       not immutable (`isImmutable` is false). The setting applies to the
+       Releases published after it.
+4. [x] Cut v0.1.0: a pull request from `release.py prepare 0.1.0`, then the
        maintainer's tag. Once the Release is published, change every statement
        that says none exists:
        - `SECURITY.md`, the "Releases" bullet;
@@ -262,6 +268,52 @@ Four things wait for a first release:
        - `docs/openssf-best-practices.md`, the paragraph under "What still stands
          between…" and the four rows; then enter the answers on bestpractices.dev;
        - this ADR's status line and action items.
+
+       Done: PR #170, then the tag `v0.1.0` on its merge commit 4bdfa8f; the
+       Release was published on 2026-10-17. The statements were changed on
+       2026-10-24. Entering the answers on bestpractices.dev is item 6.
 5. [ ] Follow-up, not done here: with release tags, `scripts/check_migration_from.py`
        could also start from the last release tag. ADR-0077 §7 takes the pull
        request's base commit because "there are no release tags".
+6. [ ] Maintainer: enter the answers of `docs/openssf-best-practices.md` on
+       bestpractices.dev. Not done on 2026-10-24: Scorecard's
+       CII-Best-Practices check is 0 ("no effort to earn an OpenSSF best
+       practices badge detected").
+
+## Amendment (2026-10-24) — v0.1.0 as published
+
+Read back on 2026-10-23 and 2026-10-24, read-only: the API, `gh attestation
+verify`, the registry and Scorecard's public results.
+
+- **The Release.** "CTIParsor 0.1.0", published on 2026-10-17 at 15:06:52Z
+  and marked Latest: <https://github.com/Stixaly/CTIParsor/releases/tag/v0.1.0>.
+  Its tag `v0.1.0` is annotated and names 4bdfa8f, the merge commit of PR #170.
+  The `publish` job ran once and passed.
+- **Its files.** `ctiparsor-0.1.0.tar.gz`, `ctiparsor-0.1.0-image.cdx.json`,
+  `SHA256SUMS` and `ctiparsor-0.1.0.intoto.jsonl`. `sha256sum -c SHA256SUMS`
+  passes.
+- **The verify commands of the notes pass**, with the signer workflow and the
+  source ref pinned:
+  - the archive and the SBOM: `release.yml`, `refs/tags/v0.1.0`;
+  - the image: `ci.yml`, `refs/heads/main`, commit 4bdfa8f.
+
+  Verifying the archive as signed by `ci.yml` fails, as it should.
+- **The SBOM.** The attached file is the attested predicate, unchanged:
+  CycloneDX 1.7, 7 202 components.
+- **The image.** On GHCR, `0.1.0`, `0.1` and
+  `sha-4bdfa8f9b2b3916486b87019a40148d5d15d9239` name the same digest,
+  `sha256:80aca36a7cf3fbf9319ee828f8d4811bf90e56d94120a99776ba8df4cc71a773`.
+  Nothing was rebuilt (decision 2).
+
+  The three steps the dry run cannot rehearse therefore worked on their first
+  run: the version names on the image, the provenance of the files, and the
+  Release.
+- **The settings.** Release immutability is on, but it was turned on after
+  v0.1.0 was published. That Release is not immutable: its files can still be
+  changed, and GitHub added no release attestation to it. No ruleset covers
+  tags (item 2). Until one does, anyone with write access can create, move or
+  delete a `v*` tag, `v0.1.0` included.
+- **Scorecard.** Signed-Releases scores 10 on 2026-10-23 and 2026-10-24: "1 out
+  of the last 1 releases have a total of 1 signed artifacts". That artifact is
+  `ctiparsor-0.1.0.intoto.jsonl`, the only signature or provenance file among
+  the assets.
