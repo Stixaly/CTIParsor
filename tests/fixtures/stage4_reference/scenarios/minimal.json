@@ -1,0 +1,24 @@
+{
+ "_comment": "Two IoCs and an empty LLM result: SCOs and Indicators only.",
+ "report_name": "Minimal",
+ "original_filename": "minimal.txt",
+ "report_text": "Seen: 185.220.101.45 and evil-update.test.",
+ "tlp": "RED",
+ "pap": "GREEN",
+ "policy": null,
+ "entities": [
+  {
+   "value": "185.220.101.45",
+   "entity_type": "ipv4",
+   "context": "",
+   "confidence": 1.0
+  },
+  {
+   "value": "evil-update.test",
+   "entity_type": "domain",
+   "context": "",
+   "confidence": 1.0
+  }
+ ],
+ "llm_result": {}
+}

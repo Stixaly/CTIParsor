@@ -1,0 +1,46 @@
+{
+  "type": "bundle",
+  "id": "bundle--5bda1e2b-a354-4688-bc11-db4df1276c32",
+  "spec_version": "2.0",
+  "objects": [
+    {
+      "type": "identity",
+      "id": "identity--3aadba2e-629f-4e44-9a60-9507988a819c",
+      "created": "2026-03-02T08:14:55.213Z",
+      "modified": "2026-03-02T08:14:55.213Z",
+      "name": "Legacy Producer",
+      "identity_class": "organization"
+    },
+    {
+      "type": "malware",
+      "id": "malware--15a7a64b-db59-4ca0-a506-a4c4aa2e2cde",
+      "created": "2026-03-02T08:14:55.213Z",
+      "modified": "2026-03-02T08:14:55.213Z",
+      "created_by_ref": "identity--3aadba2e-629f-4e44-9a60-9507988a819c",
+      "name": "OldWare",
+      "labels": [
+        "backdoor"
+      ]
+    },
+    {
+      "type": "indicator",
+      "id": "indicator--1cc1447c-7876-400e-aae2-2c804163960c",
+      "created": "2026-03-02T08:14:55.213Z",
+      "modified": "2026-03-02T08:14:55.213Z",
+      "labels": [
+        "malicious-activity"
+      ],
+      "pattern": "[ipv4-addr:value = '198.18.12.77']",
+      "valid_from": "2026-03-02T08:14:55.213Z"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--98c3d95c-5040-4d4f-a849-f17d7cc005e0",
+      "created": "2026-03-02T08:14:55.213Z",
+      "modified": "2026-03-02T08:14:55.213Z",
+      "relationship_type": "indicates",
+      "source_ref": "indicator--1cc1447c-7876-400e-aae2-2c804163960c",
+      "target_ref": "malware--15a7a64b-db59-4ca0-a506-a4c4aa2e2cde"
+    }
+  ]
+}

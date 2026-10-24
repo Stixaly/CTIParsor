@@ -1,0 +1,5 @@
+ACME Threat Intelligence: weekly note, 1 March 2026
+
+Cozy Bear was active again this week against the ministries of foreign affairs of two European states. The operators sent spearphishing emails with a malicious attachment (T1566.001, Spearphishing Attachment). Opening the attachment installed SUNBURST, a loader that our records did not yet tie to this group.
+
+The dropped file svchost_update.dll has the SHA-256 9f2b6c1d4a7e3085b1d6f4e2a9c37d58e0b4a1f6c2d93e7a5b80c4d1f6e3a972. Defenders should search their endpoints for it and review the mail gateway logs for the same week.

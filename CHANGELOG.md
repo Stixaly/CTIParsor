@@ -11,6 +11,37 @@ theme.
 
 ### Added
 
+#### Enriching an existing STIX 2.1 bundle: ADR-0090 proposed, reference bundles and baseline fixtures, 2026-10-24
+
+ADR-0090 proposes a second mode at report creation: the analyst gives the
+report **and** a STIX 2.1 bundle that already describes part of it, and
+CTIParsor shows what the bundle has, what is new and what only the bundle
+says. It then ships the bundle unchanged plus its additions, the chosen Report
+re-issued the way OpenCTI upserts it. Decisions D1–D5 are taken; nothing of the
+feature is implemented yet (eight lots, one PR each).
+
+This first lot adds only tests:
+
+- **Stage 4 reference bundles** (`tests/test_stage4_reference.py`). Five
+  synthetic scenarios (`tests/fixtures/stage4_reference/`): an APT report
+  (with its source file, publication date and CVE data), a policy pin, rules
+  quoted in the text, a long-distance edge, a minimal one. They are built
+  through `build_bundle` and compared to a frozen canonical form of the bundle
+  and its ledger. The canonical form ignores build-time timestamps, the names of the
+  ids stix2 draws at random (relationships, the Report, an attack-pattern
+  built from a legacy technique row) and object order, none of which means
+  anything in a bundle; every other change to the full-mode output fails a
+  test. `UPDATE_STAGE4_REFERENCE=1` regenerates the
+  references, for a deliberate change that also comes with a
+  `BUNDLE_AFFECTING` entry. The canonical form is the same under two
+  `PYTHONHASHSEED` values.
+- **Baseline fixtures** (`tests/fixtures/baselines/`), checked by
+  `tests/test_baseline_fixtures.py`: an OpenCTI 2.1 export shaped after
+  OpenCTI's converters (property extensions, a TLP marking with `name` and no
+  `definition`), a MISP-style export with indicators only, detection rules (one
+  Sigma rule `check_pattern` refuses), invalid objects, a STIX 2.0 bundle, two
+  Reports, a Report with a confidence, references to objects outside the bundle.
+
 #### The malware lead, measured once on AnnoCTR test and not adopted (ADR-0089), 2026-10-19
 
 ADR-0088 left malware precision unchanged: three leads each stayed under the

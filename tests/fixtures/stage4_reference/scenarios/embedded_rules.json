@@ -1,0 +1,40 @@
+{
+ "_comment": "Detection rules quoted in the report: YARA (one compiles, one does not), Suricata, Snort, Sigma, auto-linked to MidnightFrost by title.",
+ "report_name": "MidnightFrost detection notes",
+ "original_filename": "midnightfrost_rules.md",
+ "report_text": "MidnightFrost detection notes\n\nThe following YARA rule detects the MidnightFrost loader in memory:\n\nrule MidnightFrost_Loader {\n    meta:\n        description = \"MidnightFrost loader strings\"\n    strings:\n        $a = \"FrostSvc\" ascii\n        $b = \"MidnightFrostMtx\" wide\n    condition:\n        any of them\n}\n\nA second rule is broken in the report (its condition names a string that does not exist):\n\nrule Broken_Rule {\n    strings:\n        $a = \"oops\"\n    condition:\n        $nonexistent\n}\n\nThe network side is covered by this Suricata rule:\n\nalert http $HOME_NET any -> $EXTERNAL_NET any (msg:\"MidnightFrost beacon\"; content:\"/stage/payload.bin\"; http.uri; sid:1000001; rev:1;)\n\nSnort users can use the older rule below.\nalert tcp $HOME_NET any -> $EXTERNAL_NET 4444 (msg:\"MidnightFrost reverse shell\"; flow:to_server,established; content:\"|de ad be ef|\"; sid:1000002; rev:1;)\n\nThe host indicators are 91.215.85.17, frostmail-cdn.test and the hash e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.\n\nSigma rule for the registry persistence:\n\ntitle: MidnightFrost Run Key Persistence\nid: 5f1c1d52-3c2b-4a58-9d1f-0b8f9a3c7e11\nstatus: experimental\ndescription: Detects the FrostSvc Run key written by MidnightFrost\nlogsource:\n    category: registry_set\n    product: windows\ndetection:\n    selection:\n        TargetObject|endswith: '\\CurrentVersion\\Run\\FrostSvc'\n    condition: selection\nlevel: high",
+ "tlp": "GREEN",
+ "pap": null,
+ "policy": null,
+ "entities": [
+  {
+   "value": "91.215.85.17",
+   "entity_type": "ipv4",
+   "context": "",
+   "confidence": 1.0
+  },
+  {
+   "value": "frostmail-cdn.test",
+   "entity_type": "domain",
+   "context": "",
+   "confidence": 1.0
+  },
+  {
+   "value": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "entity_type": "sha256",
+   "context": "",
+   "confidence": 1.0
+  }
+ ],
+ "llm_result": {
+  "malware_families": [
+   "MidnightFrost"
+  ],
+  "ioc_associations": [
+   {
+    "ioc_value": "91.215.85.17",
+    "malware_name": "MidnightFrost"
+   }
+  ]
+ }
+}

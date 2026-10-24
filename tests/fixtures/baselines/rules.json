@@ -1,0 +1,62 @@
+{
+  "type": "bundle",
+  "id": "bundle--e316ba63-60a9-40fd-99c4-10cc50691f29",
+  "objects": [
+    {
+      "type": "indicator",
+      "spec_version": "2.1",
+      "id": "indicator--8c1a5e1f-4dc1-4568-9499-bdce0343b500",
+      "created": "2026-03-02T08:14:55.213Z",
+      "modified": "2026-03-02T08:14:55.213Z",
+      "name": "Yara rule: MidnightFrost_Loader",
+      "indicator_types": [
+        "malicious-activity"
+      ],
+      "pattern": "rule MidnightFrost_Loader {\n    meta:\n        description = \"MidnightFrost loader strings\"\n    strings:\n        $a = \"FrostSvc\" ascii\n        $b = \"MidnightFrostMtx\" wide\n    condition:\n        any of them\n}",
+      "pattern_type": "yara",
+      "valid_from": "2026-03-02T08:14:55.213Z"
+    },
+    {
+      "type": "indicator",
+      "spec_version": "2.1",
+      "id": "indicator--19ff742b-6dc2-4781-84c9-a38ff55c76d0",
+      "created": "2026-03-02T08:14:55.213Z",
+      "modified": "2026-03-02T08:14:55.213Z",
+      "name": "Sigma rule: MidnightFrost Run Key Persistence",
+      "indicator_types": [
+        "malicious-activity"
+      ],
+      "pattern": "title: MidnightFrost Run Key Persistence\nid: 5f1c1d52-3c2b-4a58-9d1f-0b8f9a3c7e11\nstatus: experimental\ndescription: Detects the FrostSvc Run key written by MidnightFrost\nlogsource:\n    category: registry_set\n    product: windows\ndetection:\n    selection:\n        TargetObject|endswith: '\\CurrentVersion\\Run\\FrostSvc'\n    condition: selection\nlevel: high",
+      "pattern_type": "sigma",
+      "valid_from": "2026-03-02T08:14:55.213Z"
+    },
+    {
+      "type": "indicator",
+      "spec_version": "2.1",
+      "id": "indicator--0a2e05f8-31f1-48e7-badd-4106c485a811",
+      "created": "2026-03-02T08:14:55.213Z",
+      "modified": "2026-03-02T08:14:55.213Z",
+      "name": "Sigma rule: MidnightFrost Broken Rule",
+      "indicator_types": [
+        "malicious-activity"
+      ],
+      "pattern": "title: MidnightFrost Broken Rule\nid: 0c9d2a11-7a4e-4f3b-8d52-6e1b3f7c9a20\nstatus: experimental\nlogsource:\n    category: process_creation\n    product: windows\ndetection:\n    selection:\n        Image|endswith: '\\powershell.exe'\nlevel: medium",
+      "pattern_type": "sigma",
+      "valid_from": "2026-03-02T08:14:55.213Z"
+    },
+    {
+      "type": "indicator",
+      "spec_version": "2.1",
+      "id": "indicator--161e3f17-13c6-4e53-8bd9-180027e77c6f",
+      "created": "2026-03-02T08:14:55.213Z",
+      "modified": "2026-03-02T08:14:55.213Z",
+      "name": "Suricata rule: MidnightFrost beacon",
+      "indicator_types": [
+        "malicious-activity"
+      ],
+      "pattern": "alert http $HOME_NET any -> $EXTERNAL_NET any (msg:\"MidnightFrost beacon\"; content:\"/stage/payload.bin\"; http.uri; sid:1000001; rev:1;)",
+      "pattern_type": "suricata",
+      "valid_from": "2026-03-02T08:14:55.213Z"
+    }
+  ]
+}

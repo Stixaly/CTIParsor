@@ -271,6 +271,33 @@ One file per stage. Each new stage **must** ship a `test_stageN.py` covering:
 input validation, the transform's correctness on a known fixture, idempotency
 (running twice = same result), and the empty/malformed-input path.
 
+### Stage 4 reference bundles (ADR-0090)
+`tests/test_stage4_reference.py` builds five scenarios
+(`tests/fixtures/stage4_reference/scenarios/`) through `build_bundle` and
+compares the result, bundle and ledger, to a frozen canonical form in
+`expected/`. The canonical form (`tests/stage4_reference.py`) replaces the
+timestamps that fall within the build window by `<build-time>`, renames by
+content the ids stix2 draws at random (relationships, the Report, an
+attack-pattern built from a legacy technique row; any other id, the standard
+TLP marking ids included, is compared as is), and sorts objects. Everything else counts: deterministic ids, verbs, refs, ledger
+outcomes. A failure names the first differing object.
+
+`tests/test_baseline_fixtures.py` checks the STIX bundles of
+`tests/fixtures/baselines/` (README there) that the enrichment lots parse: the
+valid ones pass Stage 5, the invalid ones fail for the intended reason.
+
+A change to Stage 4 or 5 that is meant to change the output regenerates the
+references and adds a `BUNDLE_AFFECTING` entry in the same PR:
+
+```bash
+UPDATE_STAGE4_REFERENCE=1 SKIP_HEAVY_MODELS=1 python -m pytest -q tests/test_stage4_reference.py
+```
+
+The test pins what the output reads from the environment (`ATTACK_RELEASE`,
+`STIX_TLP`, `STIX_AUTHOR_NAME`, `BENIGN_IOC_FILTER`). It also checks that the
+canonical form does not depend on `PYTHONHASHSEED`, in two subprocesses: about
+50 s on `/mnt/c`, most of it import time.
+
 ### API routes (integration via `TestClient`)
 HTTP contract per endpoint: success shape, 404/400 boundaries, and validation
 rejections. `init_db` is patched in `api_client` (no real database — for tests

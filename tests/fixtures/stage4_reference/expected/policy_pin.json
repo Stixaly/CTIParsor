@@ -1,0 +1,618 @@
+{
+ "ledger": {
+  "entities": [
+   {
+    "entity_type": "domain",
+    "outcome": "emitted",
+    "stix_id": "domain-name--715aefaa-5519-58d6-a830-29d86995e7b9",
+    "stix_type": "domain-name",
+    "value": "bell-relay.test"
+   },
+   {
+    "entity_type": "file",
+    "outcome": "emitted",
+    "stix_id": "file--f72ba2a7-8e03-57c2-b39e-62db73673f29",
+    "stix_name": "nightbell.exe",
+    "stix_type": "file",
+    "value": "nightbell.exe"
+   },
+   {
+    "entity_type": "identity",
+    "input": "targeted_sector",
+    "outcome": "emitted",
+    "stix_id": "identity--283d4ea0-b6f1-5421-bdab-117a33fdb2b7",
+    "stix_name": "finance",
+    "stix_type": "identity",
+    "value": "finance"
+   },
+   {
+    "entity_type": "ipv4",
+    "outcome": "emitted",
+    "stix_id": "ipv4-addr--ec68d9ce-b0fc-5614-b166-e9ff09208132",
+    "stix_type": "ipv4-addr",
+    "value": "45.142.212.100"
+   },
+   {
+    "entity_type": "malware",
+    "outcome": "emitted",
+    "stix_id": "malware--78a72f00-0ab0-59dd-a3f6-819fbd76b03a",
+    "stix_name": "Nightbell",
+    "stix_type": "malware",
+    "value": "Nightbell"
+   },
+   {
+    "entity_type": "threat_actor",
+    "outcome": "emitted",
+    "stix_id": "threat-actor--94ca10ea-a248-5958-8331-9af624aa201d",
+    "stix_name": "Frost Spider",
+    "stix_type": "threat-actor",
+    "value": "Frost Spider"
+   },
+   {
+    "entity_type": "threat_actor",
+    "outcome": "merged",
+    "reason": "alias_merge",
+    "stix_id": "threat-actor--94ca10ea-a248-5958-8331-9af624aa201d",
+    "stix_name": "FrostSpider",
+    "stix_type": "threat-actor",
+    "value": "FrostSpider"
+   },
+   {
+    "entity_type": "tool",
+    "outcome": "emitted",
+    "stix_id": "tool--b1368394-5bae-5084-b957-94fd46be0090",
+    "stix_name": "Rclone",
+    "stix_type": "tool",
+    "value": "Rclone"
+   }
+  ],
+  "objects": {
+   "domain-name--715aefaa-5519-58d6-a830-29d86995e7b9": {
+    "origin": "entity"
+   },
+   "file--f72ba2a7-8e03-57c2-b39e-62db73673f29": {
+    "origin": "entity"
+   },
+   "identity--283d4ea0-b6f1-5421-bdab-117a33fdb2b7": {
+    "origin": "targeted_sector"
+   },
+   "identity--df314057-d669-5e4d-aa9c-5257582a7ecd": {
+    "origin": "author_identity"
+   },
+   "indicator--645a0086-d463-5fbe-a5aa-eef115cd8a77": {
+    "ioc_value": "nightbell.exe",
+    "origin": "ioc_indicator",
+    "sco_id": "file--f72ba2a7-8e03-57c2-b39e-62db73673f29",
+    "valid_from_basis": "build_time"
+   },
+   "indicator--6bba8c25-18af-5e88-b7b6-18eebcdfb0a0": {
+    "ioc_value": "bell-relay.test",
+    "origin": "ioc_indicator",
+    "sco_id": "domain-name--715aefaa-5519-58d6-a830-29d86995e7b9",
+    "valid_from_basis": "build_time"
+   },
+   "indicator--f2e3b70d-2ded-5d43-af71-727982887405": {
+    "ioc_value": "45.142.212.100",
+    "origin": "ioc_indicator",
+    "sco_id": "ipv4-addr--ec68d9ce-b0fc-5614-b166-e9ff09208132",
+    "valid_from_basis": "build_time"
+   },
+   "ipv4-addr--ec68d9ce-b0fc-5614-b166-e9ff09208132": {
+    "origin": "entity"
+   },
+   "malware--78a72f00-0ab0-59dd-a3f6-819fbd76b03a": {
+    "origin": "entity"
+   },
+   "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82": {
+    "origin": "marking"
+   },
+   "relationship--R1": {
+    "ioc_value": "45.142.212.100",
+    "malware_name": "Nightbell",
+    "origin": "ioc_association"
+   },
+   "relationship--R2": {
+    "origin": "extracted"
+   },
+   "relationship--R3": {
+    "origin": "extracted"
+   },
+   "relationship--R4": {
+    "origin": "extracted"
+   },
+   "relationship--R5": {
+    "origin": "ioc_based_on"
+   },
+   "relationship--R6": {
+    "origin": "ioc_based_on"
+   },
+   "relationship--R7": {
+    "origin": "ioc_based_on"
+   },
+   "relationship--R8": {
+    "origin": "policy_pin"
+   },
+   "relationship--R9": {
+    "actor": "Frost Spider",
+    "origin": "targeted_location",
+    "target": "finance"
+   },
+   "report--R1": {
+    "origin": "report"
+   },
+   "threat-actor--94ca10ea-a248-5958-8331-9af624aa201d": {
+    "origin": "entity"
+   },
+   "tool--b1368394-5bae-5084-b957-94fd46be0090": {
+    "origin": "entity"
+   }
+  },
+  "relationships": [
+   {
+    "changes": [],
+    "final_type": "communicates-with",
+    "outcome": "emitted",
+    "relationship_type": "communicates-with",
+    "source_ref": "malware--78a72f00-0ab0-59dd-a3f6-819fbd76b03a",
+    "source_value": "Nightbell",
+    "stix_id": "relationship--R3",
+    "target_ref": "domain-name--715aefaa-5519-58d6-a830-29d86995e7b9",
+    "target_value": "bell-relay.test"
+   },
+   {
+    "changes": [
+     {
+      "from": "controls",
+      "kind": "verb",
+      "reason": "policy_pin",
+      "to": "uses"
+     }
+    ],
+    "final_type": "uses",
+    "outcome": "emitted",
+    "relationship_type": "controls",
+    "source_ref": "threat-actor--94ca10ea-a248-5958-8331-9af624aa201d",
+    "source_value": "FrostSpider",
+    "stix_id": "relationship--R4",
+    "target_ref": "tool--b1368394-5bae-5084-b957-94fd46be0090",
+    "target_value": "Rclone"
+   },
+   {
+    "changes": [
+     {
+      "from": "related-to",
+      "kind": "verb",
+      "reason": "policy_pin",
+      "to": "uses"
+     }
+    ],
+    "final_type": "uses",
+    "outcome": "emitted",
+    "relationship_type": "related-to",
+    "source_ref": "threat-actor--94ca10ea-a248-5958-8331-9af624aa201d",
+    "source_value": "Frost Spider",
+    "stix_id": "relationship--R2",
+    "target_ref": "malware--78a72f00-0ab0-59dd-a3f6-819fbd76b03a",
+    "target_value": "Nightbell"
+   }
+  ],
+  "removed": [
+   {
+    "kind": "object",
+    "name": "FrostSpider",
+    "reason": "alias_merge",
+    "replaced_by": "threat-actor--94ca10ea-a248-5958-8331-9af624aa201d",
+    "stix_id": "threat-actor--459a03fe-6dc2-5ffb-a6d4-4498fa21e47c"
+   },
+   {
+    "kind": "relationship",
+    "reason": "duplicate_after_alias_merge",
+    "replaced_by": "relationship--R2",
+    "stix_id": "relationship--R10"
+   },
+   {
+    "kind": "relationship",
+    "reason": "duplicate_after_alias_merge",
+    "replaced_by": "relationship--R4",
+    "stix_id": "relationship--R11"
+   },
+   {
+    "kind": "relationship",
+    "reason": "duplicate_after_alias_merge",
+    "replaced_by": "relationship--R9",
+    "stix_id": "relationship--R12"
+   }
+  ],
+  "version": 1
+ },
+ "objects": [
+  {
+   "id": "domain-name--715aefaa-5519-58d6-a830-29d86995e7b9",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "spec_version": "2.1",
+   "type": "domain-name",
+   "value": "bell-relay.test"
+  },
+  {
+   "id": "file--f72ba2a7-8e03-57c2-b39e-62db73673f29",
+   "name": "nightbell.exe",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "spec_version": "2.1",
+   "type": "file"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "identity--283d4ea0-b6f1-5421-bdab-117a33fdb2b7",
+   "identity_class": "class",
+   "modified": "<build-time>",
+   "name": "finance",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "spec_version": "2.1",
+   "type": "identity"
+  },
+  {
+   "created": "<build-time>",
+   "description": "Automated CTI extraction pipeline. Authored the objects in this bundle. created_by_ref refers to this pipeline as the intelligence author, not to the threat actor.",
+   "id": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "identity_class": "system",
+   "modified": "<build-time>",
+   "name": "CTIParsor",
+   "spec_version": "2.1",
+   "type": "identity"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "indicator--645a0086-d463-5fbe-a5aa-eef115cd8a77",
+   "indicator_types": [
+    "malicious-activity"
+   ],
+   "modified": "<build-time>",
+   "name": "Indicator: nightbell.exe",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "pattern": "[file:name = 'nightbell.exe']",
+   "pattern_type": "stix",
+   "pattern_version": "2.1",
+   "spec_version": "2.1",
+   "type": "indicator",
+   "valid_from": "<build-time>"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "indicator--6bba8c25-18af-5e88-b7b6-18eebcdfb0a0",
+   "indicator_types": [
+    "malicious-activity"
+   ],
+   "modified": "<build-time>",
+   "name": "Indicator: bell-relay.test",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "pattern": "[domain-name:value = 'bell-relay.test']",
+   "pattern_type": "stix",
+   "pattern_version": "2.1",
+   "spec_version": "2.1",
+   "type": "indicator",
+   "valid_from": "<build-time>"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "indicator--f2e3b70d-2ded-5d43-af71-727982887405",
+   "indicator_types": [
+    "malicious-activity"
+   ],
+   "modified": "<build-time>",
+   "name": "Malicious IoC: 45.142.212.100",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "pattern": "[ipv4-addr:value = '45.142.212.100']",
+   "pattern_type": "stix",
+   "pattern_version": "2.1",
+   "spec_version": "2.1",
+   "type": "indicator",
+   "valid_from": "<build-time>"
+  },
+  {
+   "id": "ipv4-addr--ec68d9ce-b0fc-5614-b166-e9ff09208132",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "spec_version": "2.1",
+   "type": "ipv4-addr",
+   "value": "45.142.212.100"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "malware--78a72f00-0ab0-59dd-a3f6-819fbd76b03a",
+   "is_family": true,
+   "modified": "<build-time>",
+   "name": "Nightbell",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "spec_version": "2.1",
+   "type": "malware"
+  },
+  {
+   "created": "2017-01-20T00:00:00.000Z",
+   "definition": {
+    "tlp": "amber"
+   },
+   "definition_type": "tlp",
+   "id": "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+   "name": "TLP:AMBER",
+   "spec_version": "2.1",
+   "type": "marking-definition"
+  },
+  {
+   "confidence": 80,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R1",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "relationship_type": "indicates",
+   "source_ref": "indicator--f2e3b70d-2ded-5d43-af71-727982887405",
+   "spec_version": "2.1",
+   "target_ref": "malware--78a72f00-0ab0-59dd-a3f6-819fbd76b03a",
+   "type": "relationship",
+   "x_evidence_label": "reported"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "Frost Spider operates the Nightbell backdoor.",
+   "id": "relationship--R2",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "relationship_type": "uses",
+   "source_ref": "threat-actor--94ca10ea-a248-5958-8331-9af624aa201d",
+   "spec_version": "2.1",
+   "target_ref": "malware--78a72f00-0ab0-59dd-a3f6-819fbd76b03a",
+   "type": "relationship",
+   "x_evidence_label": "reported"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "Nightbell talks to bell-relay.test",
+   "id": "relationship--R3",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "relationship_type": "communicates-with",
+   "source_ref": "malware--78a72f00-0ab0-59dd-a3f6-819fbd76b03a",
+   "spec_version": "2.1",
+   "target_ref": "domain-name--715aefaa-5519-58d6-a830-29d86995e7b9",
+   "type": "relationship",
+   "x_evidence_label": "reported"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "The group also uses the tool Rclone",
+   "id": "relationship--R4",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "relationship_type": "uses",
+   "source_ref": "threat-actor--94ca10ea-a248-5958-8331-9af624aa201d",
+   "spec_version": "2.1",
+   "target_ref": "tool--b1368394-5bae-5084-b957-94fd46be0090",
+   "type": "relationship",
+   "x_evidence_label": "reported"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R5",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "relationship_type": "based-on",
+   "source_ref": "indicator--645a0086-d463-5fbe-a5aa-eef115cd8a77",
+   "spec_version": "2.1",
+   "target_ref": "file--f72ba2a7-8e03-57c2-b39e-62db73673f29",
+   "type": "relationship",
+   "x_evidence_label": "observed"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R6",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "relationship_type": "based-on",
+   "source_ref": "indicator--6bba8c25-18af-5e88-b7b6-18eebcdfb0a0",
+   "spec_version": "2.1",
+   "target_ref": "domain-name--715aefaa-5519-58d6-a830-29d86995e7b9",
+   "type": "relationship",
+   "x_evidence_label": "observed"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R7",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "relationship_type": "based-on",
+   "source_ref": "indicator--f2e3b70d-2ded-5d43-af71-727982887405",
+   "spec_version": "2.1",
+   "target_ref": "ipv4-addr--ec68d9ce-b0fc-5614-b166-e9ff09208132",
+   "type": "relationship",
+   "x_evidence_label": "observed"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R8",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "relationship_type": "drops",
+   "source_ref": "malware--78a72f00-0ab0-59dd-a3f6-819fbd76b03a",
+   "spec_version": "2.1",
+   "target_ref": "file--f72ba2a7-8e03-57c2-b39e-62db73673f29",
+   "type": "relationship",
+   "x_evidence_label": "assessed",
+   "x_pin_evidence": "cosentence",
+   "x_policy_rule": "malware drops file"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R9",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "relationship_type": "targets",
+   "source_ref": "threat-actor--94ca10ea-a248-5958-8331-9af624aa201d",
+   "spec_version": "2.1",
+   "target_ref": "identity--283d4ea0-b6f1-5421-bdab-117a33fdb2b7",
+   "type": "relationship",
+   "x_evidence_label": "reported"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "Frost Spider and the Nightbell backdoor\n\nFrost Spider operates the Nightbell backdoor. Nightbell talks to bell-relay.test and to 45.142.212.100. The group also uses the tool Rclone to copy files out of the victim network.\n\nAnalysts saw the dropper write the file nightbell.exe. The actor targets the finance sector.",
+   "external_references": [
+    {
+     "description": "Original CTI report: nightbell.txt",
+     "source_name": "original_document"
+    }
+   ],
+   "id": "report--R1",
+   "modified": "<build-time>",
+   "name": "Frost Spider and Nightbell",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "object_refs": [
+    "domain-name--715aefaa-5519-58d6-a830-29d86995e7b9",
+    "ipv4-addr--ec68d9ce-b0fc-5614-b166-e9ff09208132",
+    "file--f72ba2a7-8e03-57c2-b39e-62db73673f29",
+    "threat-actor--94ca10ea-a248-5958-8331-9af624aa201d",
+    "malware--78a72f00-0ab0-59dd-a3f6-819fbd76b03a",
+    "tool--b1368394-5bae-5084-b957-94fd46be0090",
+    "identity--283d4ea0-b6f1-5421-bdab-117a33fdb2b7",
+    "indicator--f2e3b70d-2ded-5d43-af71-727982887405",
+    "relationship--R1",
+    "relationship--R7",
+    "indicator--6bba8c25-18af-5e88-b7b6-18eebcdfb0a0",
+    "relationship--R6",
+    "indicator--645a0086-d463-5fbe-a5aa-eef115cd8a77",
+    "relationship--R5",
+    "relationship--R9",
+    "relationship--R2",
+    "relationship--R4",
+    "relationship--R3",
+    "relationship--R8"
+   ],
+   "published": "<build-time>",
+   "spec_version": "2.1",
+   "type": "report",
+   "x_synthesis_stats": {
+    "completion": {
+     "aliases_merged": 1,
+     "capped": false,
+     "long_distance_added": 0,
+     "notes": [],
+     "reference_added": 0,
+     "skipped_not_suggested": 0,
+     "transitive_added": 0
+    },
+    "pin": {
+     "budget": 50,
+     "mode": "fair-share",
+     "rules": [
+      {
+       "blocked": 0,
+       "candidates": 1,
+       "emitted": 1,
+       "rule": "malware drops file",
+       "truncated": 0
+      },
+      {
+       "blocked": 0,
+       "candidates": 1,
+       "emitted": 1,
+       "rule": "threat-actor uses malware",
+       "truncated": 0
+      },
+      {
+       "blocked": 0,
+       "candidates": 1,
+       "emitted": 1,
+       "rule": "threat-actor uses tool",
+       "truncated": 0
+      }
+     ],
+     "total_blocked": 0,
+     "total_candidates": 3,
+     "total_emitted": 3,
+     "total_truncated": 0
+    }
+   }
+  },
+  {
+   "aliases": [
+    "FrostSpider"
+   ],
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "threat-actor--94ca10ea-a248-5958-8331-9af624aa201d",
+   "modified": "<build-time>",
+   "name": "Frost Spider",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "spec_version": "2.1",
+   "type": "threat-actor"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "tool--b1368394-5bae-5084-b957-94fd46be0090",
+   "modified": "<build-time>",
+   "name": "Rclone",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "spec_version": "2.1",
+   "type": "tool"
+  }
+ ]
+}

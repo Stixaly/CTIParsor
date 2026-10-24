@@ -1,0 +1,134 @@
+{
+ "_comment": "Enforce-mode policy: a pin rewrites the verb of an extracted edge, another materialises edges, one is disabled, one is a non-spec verb.",
+ "report_name": "Frost Spider and Nightbell",
+ "original_filename": "nightbell.txt",
+ "report_text": "Frost Spider and the Nightbell backdoor\n\nFrost Spider operates the Nightbell backdoor. Nightbell talks to bell-relay.test and to 45.142.212.100. The group also uses the tool Rclone to copy files out of the victim network.\n\nAnalysts saw the dropper write the file nightbell.exe. The actor targets the finance sector.",
+ "tlp": null,
+ "pap": null,
+ "policy": {
+  "version": 1,
+  "global": "enforce",
+  "rules": [
+   {
+    "src": "threat-actor",
+    "verb": "uses",
+    "tgt": "malware",
+    "mode": "pin",
+    "enabled": true
+   },
+   {
+    "src": "threat-actor",
+    "verb": "uses",
+    "tgt": "tool",
+    "mode": "pin",
+    "enabled": true
+   },
+   {
+    "src": "malware",
+    "verb": "drops",
+    "tgt": "file",
+    "mode": "pin",
+    "enabled": true
+   },
+   {
+    "src": "malware",
+    "verb": "communicates-with",
+    "tgt": "domain-name",
+    "mode": "pin",
+    "enabled": false
+   },
+   {
+    "src": "threat-actor",
+    "verb": "targets",
+    "tgt": "identity",
+    "mode": "auto",
+    "enabled": true
+   },
+   {
+    "src": "tool",
+    "verb": "frobnicates",
+    "tgt": "malware",
+    "mode": "pin",
+    "enabled": true
+   }
+  ],
+  "max_pinned_edges": 50,
+  "pin_budget_mode": "fair-share",
+  "pin_evidence": {
+   "mode": "cooccurrence",
+   "window": 3
+  },
+  "completion": {
+   "alias": true,
+   "reference": true,
+   "transitive": true
+  }
+ },
+ "entities": [
+  {
+   "value": "bell-relay.test",
+   "entity_type": "domain",
+   "context": "",
+   "confidence": 1.0
+  },
+  {
+   "value": "45.142.212.100",
+   "entity_type": "ipv4",
+   "context": "",
+   "confidence": 1.0
+  },
+  {
+   "value": "nightbell.exe",
+   "entity_type": "file",
+   "context": "",
+   "confidence": 1.0
+  }
+ ],
+ "llm_result": {
+  "threat_actors": [
+   "Frost Spider",
+   "FrostSpider"
+  ],
+  "malware_families": [
+   "Nightbell"
+  ],
+  "tools": [
+   "Rclone"
+  ],
+  "targeted_sectors": [
+   "finance"
+  ],
+  "relationships": [
+   {
+    "source_value": "Frost Spider",
+    "relationship_type": "related-to",
+    "target_value": "Nightbell",
+    "confidence": 0.9,
+    "evidence_label": "reported",
+    "evidence_text": "Frost Spider operates the Nightbell backdoor."
+   },
+   {
+    "source_value": "FrostSpider",
+    "relationship_type": "controls",
+    "target_value": "Rclone",
+    "confidence": 0.9,
+    "evidence_label": "reported",
+    "evidence_text": "The group also uses the tool Rclone"
+   },
+   {
+    "source_value": "Nightbell",
+    "relationship_type": "communicates-with",
+    "target_value": "bell-relay.test",
+    "confidence": 0.9,
+    "evidence_label": "reported",
+    "evidence_text": "Nightbell talks to bell-relay.test"
+   }
+  ],
+  "ioc_associations": [
+   {
+    "ioc_value": "45.142.212.100",
+    "malware_name": "Nightbell"
+   }
+  ]
+ }
+}

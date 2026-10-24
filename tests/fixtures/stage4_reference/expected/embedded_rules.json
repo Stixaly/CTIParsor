@@ -1,0 +1,524 @@
+{
+ "ledger": {
+  "entities": [
+   {
+    "entity_type": "domain",
+    "outcome": "emitted",
+    "stix_id": "domain-name--43264b58-9bdc-59d9-bde0-371299d75349",
+    "stix_type": "domain-name",
+    "value": "frostmail-cdn.test"
+   },
+   {
+    "entity_type": "ipv4",
+    "outcome": "emitted",
+    "stix_id": "ipv4-addr--ab2d6146-cc21-57a2-941a-aaa29f36f27d",
+    "stix_type": "ipv4-addr",
+    "value": "91.215.85.17"
+   },
+   {
+    "entity_type": "malware",
+    "outcome": "emitted",
+    "stix_id": "malware--2d2ddfed-bb36-50d4-a670-2cb6b16e3981",
+    "stix_name": "MidnightFrost",
+    "stix_type": "malware",
+    "value": "MidnightFrost"
+   },
+   {
+    "entity_type": "sha256",
+    "outcome": "emitted",
+    "stix_id": "file--22f8ff52-8f62-5f03-a53a-6f50f54fd74c",
+    "stix_type": "file",
+    "value": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   }
+  ],
+  "objects": {
+   "domain-name--43264b58-9bdc-59d9-bde0-371299d75349": {
+    "origin": "entity"
+   },
+   "file--22f8ff52-8f62-5f03-a53a-6f50f54fd74c": {
+    "origin": "entity"
+   },
+   "identity--df314057-d669-5e4d-aa9c-5257582a7ecd": {
+    "origin": "author_identity"
+   },
+   "indicator--012743a8-0532-5c22-ae59-b0d1348b1880": {
+    "ioc_value": "frostmail-cdn.test",
+    "origin": "ioc_indicator",
+    "sco_id": "domain-name--43264b58-9bdc-59d9-bde0-371299d75349",
+    "valid_from_basis": "build_time"
+   },
+   "indicator--335f1245-a2ae-55a2-b196-5bd0e8a1591e": {
+    "origin": "embedded_rule",
+    "pattern_type": "sigma",
+    "title": "MidnightFrost Run Key Persistence"
+   },
+   "indicator--7a78a943-66f7-5109-a861-dacc91c9a961": {
+    "origin": "embedded_rule",
+    "pattern_type": "snort",
+    "title": "MidnightFrost reverse shell"
+   },
+   "indicator--8d30e978-c6dd-5439-9ed0-bd61238915c3": {
+    "ioc_value": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "origin": "ioc_indicator",
+    "sco_id": "file--22f8ff52-8f62-5f03-a53a-6f50f54fd74c",
+    "valid_from_basis": "build_time"
+   },
+   "indicator--b055c9e7-3851-5609-b419-947271a6f9aa": {
+    "origin": "embedded_rule",
+    "pattern_type": "suricata",
+    "title": "MidnightFrost beacon"
+   },
+   "indicator--c01b6690-fc1b-5607-b6c2-45468815bb67": {
+    "origin": "embedded_rule",
+    "pattern_type": "yara",
+    "title": "MidnightFrost_Loader"
+   },
+   "indicator--fcde9c8c-df4f-52e8-9a02-8941dca6470e": {
+    "ioc_value": "91.215.85.17",
+    "origin": "ioc_indicator",
+    "sco_id": "ipv4-addr--ab2d6146-cc21-57a2-941a-aaa29f36f27d",
+    "valid_from_basis": "build_time"
+   },
+   "ipv4-addr--ab2d6146-cc21-57a2-941a-aaa29f36f27d": {
+    "origin": "entity"
+   },
+   "malware--2d2ddfed-bb36-50d4-a670-2cb6b16e3981": {
+    "origin": "entity"
+   },
+   "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da": {
+    "origin": "marking"
+   },
+   "relationship--R1": {
+    "ioc_value": "91.215.85.17",
+    "malware_name": "MidnightFrost",
+    "origin": "ioc_association"
+   },
+   "relationship--R2": {
+    "origin": "ioc_based_on"
+   },
+   "relationship--R3": {
+    "origin": "ioc_based_on"
+   },
+   "relationship--R4": {
+    "origin": "ioc_based_on"
+   },
+   "relationship--R5": {
+    "name": "MidnightFrost",
+    "origin": "embedded_rule_title",
+    "title": "MidnightFrost Run Key Persistence"
+   },
+   "relationship--R6": {
+    "name": "MidnightFrost",
+    "origin": "embedded_rule_title",
+    "title": "MidnightFrost reverse shell"
+   },
+   "relationship--R7": {
+    "name": "MidnightFrost",
+    "origin": "embedded_rule_title",
+    "title": "MidnightFrost beacon"
+   },
+   "relationship--R8": {
+    "name": "MidnightFrost",
+    "origin": "embedded_rule_title",
+    "title": "MidnightFrost_Loader"
+   },
+   "report--R1": {
+    "origin": "report"
+   }
+  },
+  "relationships": [],
+  "removed": [
+   {
+    "error": "line 6: undefined string \"$nonexistent\"",
+    "kind": "object",
+    "name": "Yara rule: Broken_Rule",
+    "reason": "rule_does_not_compile",
+    "stix_id": "indicator--836388d7-ccd9-5531-9e34-37ec48b79f71"
+   }
+  ],
+  "version": 1
+ },
+ "objects": [
+  {
+   "id": "domain-name--43264b58-9bdc-59d9-bde0-371299d75349",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "spec_version": "2.1",
+   "type": "domain-name",
+   "value": "frostmail-cdn.test"
+  },
+  {
+   "hashes": {
+    "SHA-256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   },
+   "id": "file--22f8ff52-8f62-5f03-a53a-6f50f54fd74c",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "spec_version": "2.1",
+   "type": "file"
+  },
+  {
+   "created": "<build-time>",
+   "description": "Automated CTI extraction pipeline. Authored the objects in this bundle. created_by_ref refers to this pipeline as the intelligence author, not to the threat actor.",
+   "id": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "identity_class": "system",
+   "modified": "<build-time>",
+   "name": "CTIParsor",
+   "spec_version": "2.1",
+   "type": "identity"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "indicator--012743a8-0532-5c22-ae59-b0d1348b1880",
+   "indicator_types": [
+    "malicious-activity"
+   ],
+   "modified": "<build-time>",
+   "name": "Indicator: frostmail-cdn.test",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "pattern": "[domain-name:value = 'frostmail-cdn.test']",
+   "pattern_type": "stix",
+   "pattern_version": "2.1",
+   "spec_version": "2.1",
+   "type": "indicator",
+   "valid_from": "<build-time>"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "indicator--335f1245-a2ae-55a2-b196-5bd0e8a1591e",
+   "indicator_types": [
+    "malicious-activity"
+   ],
+   "modified": "<build-time>",
+   "name": "Sigma rule: MidnightFrost Run Key Persistence",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "pattern": "title: MidnightFrost Run Key Persistence\nid: 5f1c1d52-3c2b-4a58-9d1f-0b8f9a3c7e11\nstatus: experimental\ndescription: Detects the FrostSvc Run key written by MidnightFrost\nlogsource:\n    category: registry_set\n    product: windows\ndetection:\n    selection:\n        TargetObject|endswith: '\\CurrentVersion\\Run\\FrostSvc'\n    condition: selection\nlevel: high",
+   "pattern_type": "sigma",
+   "spec_version": "2.1",
+   "type": "indicator",
+   "valid_from": "<build-time>"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "indicator--7a78a943-66f7-5109-a861-dacc91c9a961",
+   "indicator_types": [
+    "malicious-activity"
+   ],
+   "modified": "<build-time>",
+   "name": "Snort rule: MidnightFrost reverse shell",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "pattern": "alert tcp $HOME_NET any -> $EXTERNAL_NET 4444 (msg:\"MidnightFrost reverse shell\"; flow:to_server,established; content:\"|de ad be ef|\"; sid:1000002; rev:1;)",
+   "pattern_type": "snort",
+   "spec_version": "2.1",
+   "type": "indicator",
+   "valid_from": "<build-time>"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "indicator--8d30e978-c6dd-5439-9ed0-bd61238915c3",
+   "indicator_types": [
+    "malicious-activity"
+   ],
+   "modified": "<build-time>",
+   "name": "Indicator: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "pattern": "[file:hashes.'SHA-256' = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855']",
+   "pattern_type": "stix",
+   "pattern_version": "2.1",
+   "spec_version": "2.1",
+   "type": "indicator",
+   "valid_from": "<build-time>"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "indicator--b055c9e7-3851-5609-b419-947271a6f9aa",
+   "indicator_types": [
+    "malicious-activity"
+   ],
+   "modified": "<build-time>",
+   "name": "Suricata rule: MidnightFrost beacon",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "pattern": "alert http $HOME_NET any -> $EXTERNAL_NET any (msg:\"MidnightFrost beacon\"; content:\"/stage/payload.bin\"; http.uri; sid:1000001; rev:1;)",
+   "pattern_type": "suricata",
+   "spec_version": "2.1",
+   "type": "indicator",
+   "valid_from": "<build-time>"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "indicator--c01b6690-fc1b-5607-b6c2-45468815bb67",
+   "indicator_types": [
+    "malicious-activity"
+   ],
+   "modified": "<build-time>",
+   "name": "Yara rule: MidnightFrost_Loader",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "pattern": "rule MidnightFrost_Loader {\n    meta:\n        description = \"MidnightFrost loader strings\"\n    strings:\n        $a = \"FrostSvc\" ascii\n        $b = \"MidnightFrostMtx\" wide\n    condition:\n        any of them\n}",
+   "pattern_type": "yara",
+   "spec_version": "2.1",
+   "type": "indicator",
+   "valid_from": "<build-time>"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "indicator--fcde9c8c-df4f-52e8-9a02-8941dca6470e",
+   "indicator_types": [
+    "malicious-activity"
+   ],
+   "modified": "<build-time>",
+   "name": "Malicious IoC: 91.215.85.17",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "pattern": "[ipv4-addr:value = '91.215.85.17']",
+   "pattern_type": "stix",
+   "pattern_version": "2.1",
+   "spec_version": "2.1",
+   "type": "indicator",
+   "valid_from": "<build-time>"
+  },
+  {
+   "id": "ipv4-addr--ab2d6146-cc21-57a2-941a-aaa29f36f27d",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "spec_version": "2.1",
+   "type": "ipv4-addr",
+   "value": "91.215.85.17"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "malware--2d2ddfed-bb36-50d4-a670-2cb6b16e3981",
+   "is_family": true,
+   "modified": "<build-time>",
+   "name": "MidnightFrost",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "spec_version": "2.1",
+   "type": "malware"
+  },
+  {
+   "created": "2017-01-20T00:00:00.000Z",
+   "definition": {
+    "tlp": "green"
+   },
+   "definition_type": "tlp",
+   "id": "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da",
+   "name": "TLP:GREEN",
+   "spec_version": "2.1",
+   "type": "marking-definition"
+  },
+  {
+   "confidence": 80,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R1",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "relationship_type": "indicates",
+   "source_ref": "indicator--fcde9c8c-df4f-52e8-9a02-8941dca6470e",
+   "spec_version": "2.1",
+   "target_ref": "malware--2d2ddfed-bb36-50d4-a670-2cb6b16e3981",
+   "type": "relationship",
+   "x_evidence_label": "reported"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R2",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "relationship_type": "based-on",
+   "source_ref": "indicator--012743a8-0532-5c22-ae59-b0d1348b1880",
+   "spec_version": "2.1",
+   "target_ref": "domain-name--43264b58-9bdc-59d9-bde0-371299d75349",
+   "type": "relationship",
+   "x_evidence_label": "observed"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R3",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "relationship_type": "based-on",
+   "source_ref": "indicator--8d30e978-c6dd-5439-9ed0-bd61238915c3",
+   "spec_version": "2.1",
+   "target_ref": "file--22f8ff52-8f62-5f03-a53a-6f50f54fd74c",
+   "type": "relationship",
+   "x_evidence_label": "observed"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R4",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "relationship_type": "based-on",
+   "source_ref": "indicator--fcde9c8c-df4f-52e8-9a02-8941dca6470e",
+   "spec_version": "2.1",
+   "target_ref": "ipv4-addr--ab2d6146-cc21-57a2-941a-aaa29f36f27d",
+   "type": "relationship",
+   "x_evidence_label": "observed"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R5",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "relationship_type": "indicates",
+   "source_ref": "indicator--335f1245-a2ae-55a2-b196-5bd0e8a1591e",
+   "spec_version": "2.1",
+   "target_ref": "malware--2d2ddfed-bb36-50d4-a670-2cb6b16e3981",
+   "type": "relationship",
+   "x_evidence_label": "observed"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R6",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "relationship_type": "indicates",
+   "source_ref": "indicator--7a78a943-66f7-5109-a861-dacc91c9a961",
+   "spec_version": "2.1",
+   "target_ref": "malware--2d2ddfed-bb36-50d4-a670-2cb6b16e3981",
+   "type": "relationship",
+   "x_evidence_label": "observed"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R7",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "relationship_type": "indicates",
+   "source_ref": "indicator--b055c9e7-3851-5609-b419-947271a6f9aa",
+   "spec_version": "2.1",
+   "target_ref": "malware--2d2ddfed-bb36-50d4-a670-2cb6b16e3981",
+   "type": "relationship",
+   "x_evidence_label": "observed"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R8",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "relationship_type": "indicates",
+   "source_ref": "indicator--c01b6690-fc1b-5607-b6c2-45468815bb67",
+   "spec_version": "2.1",
+   "target_ref": "malware--2d2ddfed-bb36-50d4-a670-2cb6b16e3981",
+   "type": "relationship",
+   "x_evidence_label": "observed"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "MidnightFrost detection notes\n\nThe following YARA rule detects the MidnightFrost loader in memory:\n\nrule MidnightFrost_Loader {\n    meta:\n        description = \"MidnightFrost loader strings\"\n    strings:\n        $a = \"FrostSvc\" ascii\n        $b = \"MidnightFrostMtx\" wide\n    condition:\n        any of them\n}\n\nA second rule is broken in the report (its condition names a string that does not exist):\n\nrule Broken_Rule {\n    strings:\n        $a = \"oops\"\n    condition:\n        $nonexistent\n}\n\nThe network side is covered by this Suricata rule:\n\nalert http $HOME_NET any -> $EXTERNAL_NET any (msg:\"MidnightFrost beacon\"; content:\"/stage/payload.bin\"; http.uri; sid:1000001; rev:1;)\n\nSnort users can use the older rule below.\nalert tcp $HOME_NET any -> $EXTERNAL_NET 4444 (msg:\"MidnightFrost reverse shell\"; flow:to_server,established; content:\"|de ad be ef|\"; sid:1000002; rev:1;)\n\nThe host indicators are 91.215.85.17, frostmail-cdn.test and the hash e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.\n\nSigma rule for the registry persistence:\n\ntitle: MidnightFrost Run Key Persistence\nid: 5f1c1d52-3c2b-4a58-9d1f-0b8f9a3c7e11\nstatus: experimental\ndescription: Detects the FrostSvc Run key written by MidnightFrost\nlogsource:\n    category: registry_set\n    product: windows\ndetection:\n    selection:\n        TargetObject|endswith: '\\CurrentVersion\\Run\\FrostSvc'\n    condition: selection\nlevel: high",
+   "external_references": [
+    {
+     "description": "Original CTI report: midnightfrost_rules.md",
+     "source_name": "original_document"
+    }
+   ],
+   "id": "report--R1",
+   "modified": "<build-time>",
+   "name": "MidnightFrost detection notes",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "object_refs": [
+    "ipv4-addr--ab2d6146-cc21-57a2-941a-aaa29f36f27d",
+    "domain-name--43264b58-9bdc-59d9-bde0-371299d75349",
+    "file--22f8ff52-8f62-5f03-a53a-6f50f54fd74c",
+    "malware--2d2ddfed-bb36-50d4-a670-2cb6b16e3981",
+    "indicator--fcde9c8c-df4f-52e8-9a02-8941dca6470e",
+    "relationship--R1",
+    "relationship--R4",
+    "indicator--012743a8-0532-5c22-ae59-b0d1348b1880",
+    "relationship--R2",
+    "indicator--8d30e978-c6dd-5439-9ed0-bd61238915c3",
+    "relationship--R3",
+    "indicator--c01b6690-fc1b-5607-b6c2-45468815bb67",
+    "relationship--R8",
+    "indicator--b055c9e7-3851-5609-b419-947271a6f9aa",
+    "relationship--R7",
+    "indicator--7a78a943-66f7-5109-a861-dacc91c9a961",
+    "relationship--R6",
+    "indicator--335f1245-a2ae-55a2-b196-5bd0e8a1591e",
+    "relationship--R5"
+   ],
+   "published": "<build-time>",
+   "spec_version": "2.1",
+   "type": "report",
+   "x_synthesis_stats": {
+    "completion": {
+     "aliases_merged": 0,
+     "capped": false,
+     "long_distance_added": 0,
+     "notes": [],
+     "reference_added": 0,
+     "skipped_not_suggested": 0,
+     "transitive_added": 0
+    },
+    "pin": {
+     "budget": 0,
+     "mode": "fair-share",
+     "rules": [],
+     "total_blocked": 0,
+     "total_candidates": 0,
+     "total_emitted": 0,
+     "total_truncated": 0
+    }
+   }
+  }
+ ]
+}

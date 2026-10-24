@@ -1,0 +1,46 @@
+{
+ "_comment": "Stage 4c: Rclone is an island of the graph; a stubbed LLM answer links it to the topic node (the real inferer parses it).",
+ "report_name": "Nightbell campaign notes",
+ "original_filename": "nightbell_notes.txt",
+ "report_text": "Nightbell campaign notes\n\nFrost Spider operates the Nightbell backdoor. Separately, the incident response team found the tool Rclone on the file server. Frost Spider staged archives with Rclone before exfiltration.",
+ "tlp": "GREEN",
+ "pap": null,
+ "policy": {
+  "version": 1,
+  "global": "enforce",
+  "rules": [],
+  "completion": {
+   "long_distance": true,
+   "reference": true,
+   "transitive": true
+  }
+ },
+ "long_distance_answer": {
+  "related": true,
+  "source": "a",
+  "verb": "related-to",
+  "quote": "Frost Spider staged archives with Rclone before exfiltration."
+ },
+ "entities": [],
+ "llm_result": {
+  "threat_actors": [
+   "Frost Spider"
+  ],
+  "malware_families": [
+   "Nightbell"
+  ],
+  "tools": [
+   "Rclone"
+  ],
+  "relationships": [
+   {
+    "source_value": "Frost Spider",
+    "relationship_type": "uses",
+    "target_value": "Nightbell",
+    "confidence": 0.9,
+    "evidence_label": "reported",
+    "evidence_text": "Frost Spider operates the Nightbell backdoor."
+   }
+  ]
+ }
+}

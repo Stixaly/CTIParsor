@@ -1,0 +1,137 @@
+{
+  "type": "bundle",
+  "id": "bundle--600a5041-1500-4c9d-81a6-d54eb3c753de",
+  "objects": [
+    {
+      "type": "identity",
+      "spec_version": "2.1",
+      "id": "identity--9ae5d9eb-a316-4365-b3a6-9a04b0e2c564",
+      "created": "2026-02-20T10:02:41.000Z",
+      "modified": "2026-02-20T10:02:41.000Z",
+      "name": "CIRCL-like Org",
+      "identity_class": "organization"
+    },
+    {
+      "type": "marking-definition",
+      "spec_version": "2.1",
+      "id": "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da",
+      "created": "2017-01-20T00:00:00.000Z",
+      "definition_type": "tlp",
+      "name": "TLP:GREEN",
+      "definition": {
+        "tlp": "green"
+      }
+    },
+    {
+      "type": "indicator",
+      "spec_version": "2.1",
+      "id": "indicator--90784ce5-1f16-4909-aa44-9b9e0143b79c",
+      "created_by_ref": "identity--9ae5d9eb-a316-4365-b3a6-9a04b0e2c564",
+      "created": "2026-02-20T10:02:41.000Z",
+      "modified": "2026-02-20T10:02:41.000Z",
+      "name": "Payload hashes",
+      "description": "Loader dropped on the ministry hosts",
+      "labels": [
+        "misp:type=\"filename|md5\"",
+        "misp:category=\"Payload delivery\"",
+        "misp:to_ids=\"True\"",
+        "misp:tool=\"misp2stix2\""
+      ],
+      "indicator_types": [
+        "malicious-activity"
+      ],
+      "pattern": "[file:hashes.MD5 = '5d41402abc4b2a76b9719d911017c592' OR file:hashes.'SHA-256' = '9f2b6c1d4a7e3085b1d6f4e2a9c37d58e0b4a1f6c2d93e7a5b80c4d1f6e3a972']",
+      "pattern_type": "stix",
+      "pattern_version": "2.1",
+      "valid_from": "2026-02-20T10:02:41Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+      ],
+      "x_misp_category": "Payload delivery",
+      "x_misp_type": "filename|md5",
+      "x_misp_comment": "Loader dropped on the ministry hosts"
+    },
+    {
+      "type": "indicator",
+      "spec_version": "2.1",
+      "id": "indicator--fcab54a9-bd3d-40fc-aefd-bf987d909b3e",
+      "created_by_ref": "identity--9ae5d9eb-a316-4365-b3a6-9a04b0e2c564",
+      "created": "2026-02-20T10:02:41.000Z",
+      "modified": "2026-02-20T10:02:41.000Z",
+      "name": "Staging server",
+      "description": "Second stage download",
+      "labels": [
+        "misp:type=\"domain|url\"",
+        "misp:category=\"Network activity\"",
+        "misp:to_ids=\"True\"",
+        "misp:tool=\"misp2stix2\""
+      ],
+      "indicator_types": [
+        "malicious-activity"
+      ],
+      "pattern": "[domain-name:value = 'frostmail-cdn.test'] AND [url:value = 'http://frostmail-cdn.test/stage/payload.bin']",
+      "pattern_type": "stix",
+      "pattern_version": "2.1",
+      "valid_from": "2026-02-20T10:02:41Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+      ],
+      "x_misp_category": "Network activity",
+      "x_misp_type": "domain|url",
+      "x_misp_comment": "Second stage download"
+    },
+    {
+      "type": "indicator",
+      "spec_version": "2.1",
+      "id": "indicator--05e71908-ca3c-4420-a162-aec0658183bf",
+      "created_by_ref": "identity--9ae5d9eb-a316-4365-b3a6-9a04b0e2c564",
+      "created": "2026-02-20T10:02:41.000Z",
+      "modified": "2026-02-20T10:02:41.000Z",
+      "name": "C2 address",
+      "description": "Command-and-control",
+      "labels": [
+        "misp:type=\"ip-dst\"",
+        "misp:category=\"Network activity\"",
+        "misp:to_ids=\"True\"",
+        "misp:tool=\"misp2stix2\""
+      ],
+      "indicator_types": [
+        "malicious-activity"
+      ],
+      "pattern": "[ipv4-addr:value = '198.18.45.100']",
+      "pattern_type": "stix",
+      "pattern_version": "2.1",
+      "valid_from": "2026-02-20T10:02:41Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+      ],
+      "x_misp_category": "Network activity",
+      "x_misp_type": "ip-dst",
+      "x_misp_comment": "Command-and-control"
+    },
+    {
+      "type": "report",
+      "spec_version": "2.1",
+      "id": "report--6825c6a4-b901-4078-8a7a-467e27ad09e2",
+      "created_by_ref": "identity--9ae5d9eb-a316-4365-b3a6-9a04b0e2c564",
+      "created": "2026-02-20T10:02:41.000Z",
+      "modified": "2026-02-20T10:05:13.000Z",
+      "name": "Midnight Frost phishing wave",
+      "published": "2026-02-20T10:05:13Z",
+      "labels": [
+        "Threat-Report",
+        "misp:tool=\"misp2stix2\"",
+        "misp:event-uuid=\"9d989276-d6e0-4e32-9319-a84bf1ac30d1\""
+      ],
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+      ],
+      "object_refs": [
+        "indicator--90784ce5-1f16-4909-aa44-9b9e0143b79c",
+        "indicator--fcab54a9-bd3d-40fc-aefd-bf987d909b3e",
+        "indicator--05e71908-ca3c-4420-a162-aec0658183bf"
+      ],
+      "x_misp_event_info": "Midnight Frost phishing wave"
+    }
+  ]
+}

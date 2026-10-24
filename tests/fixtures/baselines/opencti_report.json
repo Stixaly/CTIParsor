@@ -1,0 +1,472 @@
+{
+  "id": "bundle--a0c68864-df51-4d78-bfcd-a5b44d3b5276",
+  "spec_version": "2.1",
+  "type": "bundle",
+  "objects": [
+    {
+      "id": "identity--7b24b13f-17ba-4194-b6ae-4b1d3423bf15",
+      "spec_version": "2.1",
+      "type": "identity",
+      "created": "2026-03-02T08:14:55.213Z",
+      "modified": "2026-03-09T16:40:02.981Z",
+      "name": "ACME Threat Intelligence",
+      "description": "Threat intelligence team of ACME.",
+      "identity_class": "organization",
+      "extensions": {
+        "extension-definition--ea279b3e-5c71-4632-ac08-831c66a786ba": {
+          "extension_type": "property-extension",
+          "id": "8bbc7318-21a7-48a8-9b1f-e849cf20ddd4",
+          "type": "Organization",
+          "created_at": "2026-03-02T08:14:55.213Z",
+          "updated_at": "2026-03-09T16:40:02.981Z",
+          "is_inferred": false,
+          "creator_ids": [
+            "0de775d8-2e3f-4a9d-86df-fcc3c50af8dc"
+          ],
+          "organization_type": "vendor",
+          "reliability": "B - Usually reliable"
+        }
+      }
+    },
+    {
+      "id": "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+      "spec_version": "2.1",
+      "type": "marking-definition",
+      "created": "2017-01-20T00:00:00.000Z",
+      "modified": "2026-03-02T08:14:55.213Z",
+      "name": "TLP:AMBER",
+      "definition_type": "TLP",
+      "extensions": {
+        "extension-definition--ea279b3e-5c71-4632-ac08-831c66a786ba": {
+          "extension_type": "property-extension",
+          "id": "1f0211d0-0653-4ae7-93b5-4173adea68b3",
+          "type": "Marking-Definition",
+          "created_at": "2026-03-02T08:14:55.213Z",
+          "updated_at": "2026-03-09T16:40:02.981Z",
+          "is_inferred": false,
+          "creator_ids": [
+            "c5168ab4-ed66-44c0-89e2-51a9813b31ac"
+          ],
+          "order": 3,
+          "color": "#ffc000"
+        }
+      }
+    },
+    {
+      "id": "intrusion-set--4f4f0eaf-960c-43f3-9319-4fb9a8d3ae7c",
+      "spec_version": "2.1",
+      "created_by_ref": "identity--7b24b13f-17ba-4194-b6ae-4b1d3423bf15",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "type": "intrusion-set",
+      "created": "2026-03-02T08:14:55.213Z",
+      "modified": "2026-03-09T16:40:02.981Z",
+      "revoked": false,
+      "confidence": 90,
+      "lang": "en",
+      "labels": [
+        "apt",
+        "russia"
+      ],
+      "name": "APT29",
+      "description": "Russian state-sponsored espionage group, tracked since 2008.",
+      "aliases": [
+        "Cozy Bear",
+        "The Dukes",
+        "NOBELIUM"
+      ],
+      "first_seen": "2008-01-01T00:00:00.000Z",
+      "last_seen": "2026-02-11T00:00:00.000Z",
+      "goals": [
+        "Collect diplomatic intelligence"
+      ],
+      "resource_level": "government",
+      "primary_motivation": "organizational-gain",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "url": "https://attack.mitre.org/groups/G0016",
+          "external_id": "G0016"
+        }
+      ],
+      "extensions": {
+        "extension-definition--ea279b3e-5c71-4632-ac08-831c66a786ba": {
+          "extension_type": "property-extension",
+          "id": "a94478a4-1a52-4add-9fb0-ca02367aea5e",
+          "type": "Intrusion-Set",
+          "created_at": "2026-03-02T08:14:55.213Z",
+          "updated_at": "2026-03-09T16:40:02.981Z",
+          "is_inferred": false,
+          "creator_ids": [
+            "00f71fe1-020c-4cb9-9321-70b46c91fea9"
+          ],
+          "score": 80
+        }
+      }
+    },
+    {
+      "id": "malware--ce12e6b1-5ad7-4fc6-a2ed-2a3ca268a445",
+      "spec_version": "2.1",
+      "created_by_ref": "identity--7b24b13f-17ba-4194-b6ae-4b1d3423bf15",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "type": "malware",
+      "created": "2026-03-02T08:14:55.213Z",
+      "modified": "2026-03-09T16:40:02.981Z",
+      "revoked": false,
+      "confidence": 85,
+      "lang": "en",
+      "labels": [
+        "backdoor"
+      ],
+      "name": "WellMess",
+      "description": "Backdoor written in Go and .NET.",
+      "malware_types": [
+        "backdoor"
+      ],
+      "is_family": true,
+      "aliases": [
+        "WellMail"
+      ],
+      "first_seen": "2018-07-01T00:00:00.000Z",
+      "extensions": {
+        "extension-definition--ea279b3e-5c71-4632-ac08-831c66a786ba": {
+          "extension_type": "property-extension",
+          "id": "2916dd01-a6b4-4a82-be62-4c8c1543c9c7",
+          "type": "Malware",
+          "created_at": "2026-03-02T08:14:55.213Z",
+          "updated_at": "2026-03-09T16:40:02.981Z",
+          "is_inferred": false,
+          "creator_ids": [
+            "072513fb-f8f3-41a0-8a49-c586fc161c33"
+          ],
+          "score": 70
+        }
+      }
+    },
+    {
+      "id": "attack-pattern--7d05d478-43c5-4a43-8e80-ca34d16324f6",
+      "spec_version": "2.1",
+      "created_by_ref": "identity--7b24b13f-17ba-4194-b6ae-4b1d3423bf15",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "type": "attack-pattern",
+      "created": "2026-03-02T08:14:55.213Z",
+      "modified": "2026-03-09T16:40:02.981Z",
+      "revoked": false,
+      "confidence": 100,
+      "lang": "en",
+      "name": "PowerShell",
+      "description": "Adversaries may abuse PowerShell commands and scripts for execution.",
+      "kill_chain_phases": [
+        {
+          "kill_chain_name": "mitre-attack",
+          "phase_name": "execution"
+        }
+      ],
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "url": "https://attack.mitre.org/techniques/T1059/001",
+          "external_id": "T1059.001"
+        }
+      ],
+      "extensions": {
+        "extension-definition--ea279b3e-5c71-4632-ac08-831c66a786ba": {
+          "extension_type": "property-extension",
+          "id": "8111601a-6f65-46f3-8c78-846fcf58bdb3",
+          "type": "Attack-Pattern",
+          "created_at": "2026-03-02T08:14:55.213Z",
+          "updated_at": "2026-03-09T16:40:02.981Z",
+          "is_inferred": false,
+          "creator_ids": [
+            "fd1c6e71-bd1b-4d2b-af43-cbe7c88bfaf0"
+          ]
+        },
+        "extension-definition--322b8f77-262a-4cb8-a915-1e441e00329b": {
+          "extension_type": "property-extension",
+          "id": "T1059.001",
+          "platforms": [
+            "Windows"
+          ],
+          "detection": "Monitor PowerShell script block logging."
+        }
+      }
+    },
+    {
+      "id": "indicator--f838c643-e36c-4c0b-9389-1386738617b6",
+      "spec_version": "2.1",
+      "created_by_ref": "identity--7b24b13f-17ba-4194-b6ae-4b1d3423bf15",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "type": "indicator",
+      "created": "2026-03-02T08:14:55.213Z",
+      "modified": "2026-03-09T16:40:02.981Z",
+      "revoked": false,
+      "confidence": 75,
+      "lang": "en",
+      "labels": [
+        "c2"
+      ],
+      "name": "198.18.12.77",
+      "description": "WellMess command-and-control address.",
+      "indicator_types": [
+        "malicious-activity"
+      ],
+      "pattern": "[ipv4-addr:value = '198.18.12.77']",
+      "pattern_type": "stix",
+      "valid_from": "2026-03-02T08:14:55.213Z",
+      "valid_until": "2027-03-02T08:14:55.213Z",
+      "extensions": {
+        "extension-definition--ea279b3e-5c71-4632-ac08-831c66a786ba": {
+          "extension_type": "property-extension",
+          "id": "5247b011-7a42-406b-9097-1dfac46cc812",
+          "type": "Indicator",
+          "created_at": "2026-03-02T08:14:55.213Z",
+          "updated_at": "2026-03-09T16:40:02.981Z",
+          "is_inferred": false,
+          "creator_ids": [
+            "9271cac0-5669-40f0-be84-c109bfb619c3"
+          ],
+          "score": 75,
+          "detection": true,
+          "main_observable_type": "IPv4-Addr"
+        }
+      }
+    },
+    {
+      "id": "ipv4-addr--dac4ca46-8fa0-52fb-94df-2a9acd2636bf",
+      "spec_version": "2.1",
+      "type": "ipv4-addr",
+      "value": "198.18.12.77",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "extensions": {
+        "extension-definition--ea279b3e-5c71-4632-ac08-831c66a786ba": {
+          "extension_type": "property-extension",
+          "id": "9a6e352d-2d0c-42f4-98b5-bbff466b1f45",
+          "type": "IPv4-Addr",
+          "created_at": "2026-03-02T08:14:55.213Z",
+          "updated_at": "2026-03-09T16:40:02.981Z",
+          "is_inferred": false,
+          "creator_ids": [
+            "e846550a-706a-4ad9-8fc1-7b9f5f487b68"
+          ]
+        },
+        "extension-definition--f93e2c80-4231-4f9a-af8b-95c9bd566a82": {
+          "extension_type": "property-extension",
+          "score": 75,
+          "labels": [
+            "c2"
+          ],
+          "created_by_ref": "identity--7b24b13f-17ba-4194-b6ae-4b1d3423bf15"
+        }
+      }
+    },
+    {
+      "id": "file--c7abdbaa-36f3-531e-8ce2-78743f8252dd",
+      "spec_version": "2.1",
+      "type": "file",
+      "hashes": {
+        "MD5": "5d41402abc4b2a76b9719d911017c592",
+        "SHA-256": "9f2b6c1d4a7e3085b1d6f4e2a9c37d58e0b4a1f6c2d93e7a5b80c4d1f6e3a972"
+      },
+      "size": 482304,
+      "name": "svchost_update.dll",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "extensions": {
+        "extension-definition--ea279b3e-5c71-4632-ac08-831c66a786ba": {
+          "extension_type": "property-extension",
+          "id": "f1d0383b-dfff-44f9-aa5e-e1c051c68d24",
+          "type": "StixFile",
+          "created_at": "2026-03-02T08:14:55.213Z",
+          "updated_at": "2026-03-09T16:40:02.981Z",
+          "is_inferred": false,
+          "creator_ids": [
+            "7fe46505-6c7e-4813-9213-eebf883b0f3d"
+          ]
+        },
+        "extension-definition--f93e2c80-4231-4f9a-af8b-95c9bd566a82": {
+          "extension_type": "property-extension",
+          "score": 50,
+          "created_by_ref": "identity--7b24b13f-17ba-4194-b6ae-4b1d3423bf15",
+          "additional_names": [
+            "svchost_update.dll"
+          ]
+        }
+      }
+    },
+    {
+      "id": "relationship--fa5f98bc-0a81-4516-a4d7-cdf4bb46be3f",
+      "spec_version": "2.1",
+      "created_by_ref": "identity--7b24b13f-17ba-4194-b6ae-4b1d3423bf15",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "type": "relationship",
+      "created": "2026-03-02T08:14:55.213Z",
+      "modified": "2026-03-09T16:40:02.981Z",
+      "revoked": false,
+      "confidence": 75,
+      "lang": "en",
+      "relationship_type": "based-on",
+      "source_ref": "indicator--f838c643-e36c-4c0b-9389-1386738617b6",
+      "target_ref": "ipv4-addr--dac4ca46-8fa0-52fb-94df-2a9acd2636bf",
+      "extensions": {
+        "extension-definition--ea279b3e-5c71-4632-ac08-831c66a786ba": {
+          "extension_type": "property-extension",
+          "id": "ed3abb2c-6dca-4ad9-bfa1-3108b0edffee",
+          "type": "stix-core-relationship",
+          "created_at": "2026-03-02T08:14:55.213Z",
+          "updated_at": "2026-03-09T16:40:02.981Z",
+          "is_inferred": false,
+          "creator_ids": [
+            "2e02effd-b9f5-43d8-8bda-d395f5c4502b"
+          ],
+          "source_value": "198.18.12.77",
+          "source_ref": "f2e5d3a9-e2a7-489e-88e5-09faf6071ebd",
+          "source_type": "Indicator",
+          "target_value": "198.18.12.77",
+          "target_ref": "8e7b0ba3-57ab-46a9-bf35-e0c60e7ea233",
+          "target_type": "IPv4-Addr"
+        }
+      }
+    },
+    {
+      "id": "relationship--fd3e7a73-f3b2-485d-a28b-111fadd6bea1",
+      "spec_version": "2.1",
+      "created_by_ref": "identity--7b24b13f-17ba-4194-b6ae-4b1d3423bf15",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "type": "relationship",
+      "created": "2026-03-02T08:14:55.213Z",
+      "modified": "2026-03-09T16:40:02.981Z",
+      "revoked": false,
+      "confidence": 75,
+      "lang": "en",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--4f4f0eaf-960c-43f3-9319-4fb9a8d3ae7c",
+      "target_ref": "malware--ce12e6b1-5ad7-4fc6-a2ed-2a3ca268a445",
+      "extensions": {
+        "extension-definition--ea279b3e-5c71-4632-ac08-831c66a786ba": {
+          "extension_type": "property-extension",
+          "id": "1d93344d-2943-4b25-ba55-0cdd671d8c9f",
+          "type": "stix-core-relationship",
+          "created_at": "2026-03-02T08:14:55.213Z",
+          "updated_at": "2026-03-09T16:40:02.981Z",
+          "is_inferred": false,
+          "creator_ids": [
+            "8fb2aa6c-c4a1-4c23-a7af-2b3b8eb81393"
+          ],
+          "source_value": "APT29",
+          "source_ref": "42a8c8ce-ad8f-43e8-9829-756bee4c7a09",
+          "source_type": "Intrusion-Set",
+          "target_value": "WellMess",
+          "target_ref": "958e5a1d-0e67-4c97-8d0a-faf331f27e52",
+          "target_type": "Malware"
+        }
+      },
+      "start_time": "2018-07-01T00:00:00.000Z"
+    },
+    {
+      "id": "relationship--75b18d1d-5f66-4989-a19f-33ebd8c660f6",
+      "spec_version": "2.1",
+      "created_by_ref": "identity--7b24b13f-17ba-4194-b6ae-4b1d3423bf15",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "type": "relationship",
+      "created": "2026-03-02T08:14:55.213Z",
+      "modified": "2026-03-09T16:40:02.981Z",
+      "revoked": false,
+      "confidence": 75,
+      "lang": "en",
+      "relationship_type": "indicates",
+      "source_ref": "indicator--f838c643-e36c-4c0b-9389-1386738617b6",
+      "target_ref": "malware--ce12e6b1-5ad7-4fc6-a2ed-2a3ca268a445",
+      "extensions": {
+        "extension-definition--ea279b3e-5c71-4632-ac08-831c66a786ba": {
+          "extension_type": "property-extension",
+          "id": "ac8d6a7b-4d18-4700-8efa-1370fe5ebc7c",
+          "type": "stix-core-relationship",
+          "created_at": "2026-03-02T08:14:55.213Z",
+          "updated_at": "2026-03-09T16:40:02.981Z",
+          "is_inferred": false,
+          "creator_ids": [
+            "2da367b8-af0d-4777-b476-96f2ad8522ab"
+          ],
+          "source_value": "198.18.12.77",
+          "source_ref": "e51b5c32-b4ff-43d2-a6b4-a4a28f1811ed",
+          "source_type": "Indicator",
+          "target_value": "WellMess",
+          "target_ref": "39bdb3b6-fe20-4e37-875a-6c6120e3011a",
+          "target_type": "Malware"
+        }
+      }
+    },
+    {
+      "id": "report--8bfd99f1-1304-415f-9ea8-597445d831da",
+      "spec_version": "2.1",
+      "created_by_ref": "identity--7b24b13f-17ba-4194-b6ae-4b1d3423bf15",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "type": "report",
+      "created": "2026-03-02T08:14:55.213Z",
+      "modified": "2026-03-09T16:40:02.981Z",
+      "revoked": false,
+      "confidence": 85,
+      "lang": "en",
+      "labels": [
+        "apt29",
+        "tlp-amber-reviewed"
+      ],
+      "name": "APT29 targets ministries with WellMess",
+      "description": "ACME's analysis of an APT29 intrusion against two ministries.",
+      "report_types": [
+        "threat-report"
+      ],
+      "published": "2026-03-01T00:00:00.000Z",
+      "object_refs": [
+        "intrusion-set--4f4f0eaf-960c-43f3-9319-4fb9a8d3ae7c",
+        "malware--ce12e6b1-5ad7-4fc6-a2ed-2a3ca268a445",
+        "attack-pattern--7d05d478-43c5-4a43-8e80-ca34d16324f6",
+        "indicator--f838c643-e36c-4c0b-9389-1386738617b6",
+        "ipv4-addr--dac4ca46-8fa0-52fb-94df-2a9acd2636bf",
+        "file--c7abdbaa-36f3-531e-8ce2-78743f8252dd",
+        "relationship--fa5f98bc-0a81-4516-a4d7-cdf4bb46be3f",
+        "relationship--fd3e7a73-f3b2-485d-a28b-111fadd6bea1",
+        "relationship--75b18d1d-5f66-4989-a19f-33ebd8c660f6"
+      ],
+      "external_references": [
+        {
+          "source_name": "ACME blog",
+          "url": "https://intel.acme.example/apt29-wellmess",
+          "description": "Original publication"
+        }
+      ],
+      "extensions": {
+        "extension-definition--ea279b3e-5c71-4632-ac08-831c66a786ba": {
+          "extension_type": "property-extension",
+          "id": "458486f8-49dd-44d4-997a-6d06a229e2ec",
+          "type": "Report",
+          "created_at": "2026-03-02T08:14:55.213Z",
+          "updated_at": "2026-03-09T16:40:02.981Z",
+          "is_inferred": false,
+          "creator_ids": [
+            "0d727be0-5b0f-4407-9ebe-b6e761538e66"
+          ],
+          "reliability": "B - Usually reliable"
+        }
+      }
+    }
+  ]
+}
