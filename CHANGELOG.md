@@ -318,6 +318,22 @@ gets a dated amendment.
 
 ### Fixed
 
+#### filelock and setuptools move past four new advisories, 2026-10-24
+
+The dependency audit failed on 2026-10-24 on four advisories published since
+its last pass:
+
+- **filelock**: three (CVE-2026-112940, -112913, -112907), fixed in 4.2.1.
+  filelock comes in through huggingface-hub and torch in the image lock, and
+  through cachecontrol in the audit lock. It is now at 4.2.4 in both.
+- **setuptools**: one (GHSA-xmj3-9gf7-h52w), fixed in 84.1.0. setuptools
+  comes in through spacy, thinc and torch in the image lock. It is now at
+  84.2.1.
+
+The locks were rewritten by `scripts/lock.sh` with `--upgrade-package
+filelock --upgrade-package setuptools`, so no other pin moved; the torch, CI
+and uv locks are unchanged. pip-audit finds nothing in the four locks.
+
 #### pillow moves past eight new advisories, 2026-10-23
 
 The dependency audit has failed every run since 2026-10-21, on both open PRs
