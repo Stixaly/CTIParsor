@@ -7,7 +7,17 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from api.main import limiter
 from api.paths import uploads_dir
-from api.routes._common import start_job
+from api.routes._common import (
+    BASELINE_REFUSED,
+    baseline_markings,
+    check_baseline_request,
+    enrichment_enabled,
+    part_has_content,
+    read_baseline,
+    read_baseline_file,
+    start_job,
+)
+from pipeline.baseline_stix import MAX_BASELINE_BYTES
 from pipeline.stage4_stix_mapping import normalise_tlp
 
 # Explicit annotation needed: this module is part of an import cycle
@@ -60,13 +70,15 @@ def clean_pap(value: str | None) -> str | None:
     return v
 
 
-@router.post("/upload")
+@router.post("/upload", responses=BASELINE_REFUSED)
 @limiter.limit("10/minute")
 def upload_file(
     request: Request,
     file: UploadFile = File(...),
     tlp_level: str | None = Form(None),
     pap_level: str | None = Form(None),
+    baseline_stix: UploadFile | None = File(None),
+    baseline_report_id: str | None = Form(None),
 ):
     """
     Upload a CTI report file for processing.
@@ -78,6 +90,12 @@ def upload_file(
     (RED | AMBER | GREEN | WHITE).  Applied to every object in the generated
     STIX bundle; without a TLP the report gets the STIX_TLP default.
 
+    baseline_stix — optional STIX 2.1 bundle the analyst already holds, to
+    enrich instead of starting from scratch (ADR-0090; 400 unless
+    STIX_ENRICHMENT_ENABLED); baseline_report_id — which of its Reports to
+    enrich, required when it holds several.  The job's TLP and PAP may not be
+    lower than the bundle's.
+
     Declared as a plain `def`, not `async def`: the body does blocking disk I/O
     (`dest.open("wb")`, `f.write`) and a synchronous SQLite insert (`start_job`).
     FastAPI runs a sync path operation in a worker thread automatically, so
@@ -86,6 +104,9 @@ def upload_file(
     """
     tlp_level = clean_tlp(tlp_level)
     pap_level = clean_pap(pap_level)
+    # Refused before a byte of either file is read: the mode is off, or a
+    # baseline_report_id comes without a baseline (an empty part is none).
+    check_baseline_request(baseline_stix is not None and part_has_content(baseline_stix.file), baseline_report_id)
     # Check file extension
     suffix = Path(file.filename or "file").suffix.lower()
     if suffix not in SUPPORTED:
@@ -96,9 +117,11 @@ def upload_file(
 
     # Check file size BEFORE reading content
     # For File objects, we need to read the content to get the size
-    # But we can check Content-Length header first if available
+    # But we can check Content-Length header first if available.  With the
+    # enrichment mode on, a baseline travels in the same multipart: the report's
+    # own limit is checked as it is streamed below.
     content_length = request.headers.get("content-length")
-    if content_length and int(content_length) > _MAX_BYTES:
+    if content_length and int(content_length) > _MAX_BYTES + (MAX_BASELINE_BYTES if enrichment_enabled() else 0):
         raise HTTPException(
             413,
             f"File too large. Maximum allowed size is {_MAX_BYTES // (1024*1024)} MB."
@@ -185,4 +208,18 @@ def upload_file(
         dest.unlink(missing_ok=True)
         raise HTTPException(500, "File upload failed — empty file")
 
-    return start_job(job_id, dest, file.filename or "unknown", tlp_level, pap_level)
+    # The baseline is read last, once the cheap checks on the report have passed
+    # and it is on disk; whatever stops the request before the job is handed to
+    # `start_job` (a refused baseline, a marking that cannot be resolved, a bug)
+    # takes the report file with it.
+    handed_over = False
+    try:
+        baseline = read_baseline(
+            read_baseline_file(baseline_stix.file) if baseline_stix is not None else None, baseline_report_id)
+        tlp_level, pap_level = baseline_markings(baseline, tlp_level, pap_level)
+        handed_over = True
+    finally:
+        if not handed_over:
+            dest.unlink(missing_ok=True)
+
+    return start_job(job_id, dest, file.filename or "unknown", tlp_level, pap_level, baseline=baseline)

@@ -61,8 +61,8 @@ def test_jobs_are_listed_newest_first(temp_db_client, temp_db):
     jobs = temp_db_client.get("/api/jobs").json()
 
     assert [j["id"] for j in jobs] == ["new", "old"]
-    assert jobs[0]["tlp_level"] == "AMBER" and set(jobs[0]) == {
-        "id", "original_filename", "status", "tlp_level", "pap_level", "created_at", "updated_at"}
+    assert jobs[0]["tlp_level"] == "AMBER" and jobs[0]["pipeline_mode"] == "full" and set(jobs[0]) == {
+        "id", "original_filename", "status", "tlp_level", "pap_level", "pipeline_mode", "created_at", "updated_at"}
 
 
 def test_a_job_reports_its_entity_and_relationship_counts(temp_db_client, temp_db):

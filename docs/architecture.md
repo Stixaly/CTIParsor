@@ -117,7 +117,7 @@ secret (`.dockerignore`).
 | `bootstrap` | the application image, command `bootstrap` | Runs once: the schema (`api.db.init_db`), the models (`docker/warm_models.py`), the corpora (`scripts/sync_corpora.py`), the rule store (`scripts/build_detection_index.py`) and the stage report (`scripts/check_stages.py`). | nothing |
 | `postgres` | `postgres:18-alpine`, upstream | PostgreSQL. No project code: the other containers apply the schema (`api/migrations/`, ADR-0077). | 5432/tcp, `backend` only |
 | `capture-proxy` | `ubuntu/squid`, upstream | Squid, configured by `docker/squid/squid.conf` (mounted read-only): public addresses only, ports 80, 443, 8080 and 8443, no cache. | 3128/tcp, `frontend` |
-| `proxy` (profile) | `nginxinc/nginx-unprivileged`, upstream | nginx, configured by `docker/nginx/default.conf`: TLS 1.2 and 1.3, basic auth, uploads up to 50 MB, a reverse proxy to `app:8000`. | 8443/tcp, HTTPS |
+| `proxy` (profile) | `nginxinc/nginx-unprivileged`, upstream | nginx, configured by `docker/nginx/default.conf`: TLS 1.2 and 1.3, basic auth, uploads up to 72 MB (a 50 MB report and a 20 MB STIX baseline), a reverse proxy to `app:8000`. | 8443/tcp, HTTPS |
 | `ollama` (profile) | `ollama/ollama`, upstream | A local LLM. No project code. | 11434/tcp, `llm` |
 | `dev` (profile) | the `Dockerfile`'s `dev` stage, never published | The application image plus CI's tools, with the checkout bind-mounted over `/app`: tests, lint, type check, `cli`. | nothing |
 | `frontend-dev` (profile) | `node:26-bookworm-slim`, upstream | The Vite dev server over the bind-mounted `frontend/`, with the API proxied to `app:8000`. | 5173/tcp, host loopback |

@@ -33,6 +33,7 @@ migrations".
 | 10 | `entities.held_reason`, `relationships.held_reason` | 0082 |
 | 11 | `jobs.bundle_validation`, `jobs.bundle_validation_errors` | 0084 |
 | 12 | `jobs.review_revision`, `jobs.bundle_review_revision`, `jobs.bundle_build_json`; the triggers that bump `review_revision` | 0086 |
+| 13 | `jobs.pipeline_mode`, `job_baselines`, `entities` and `relationships` `.enrichment_status` and `.baseline_stix_id` | 0090 |
 
 ```sql
 CREATE TABLE jobs (
@@ -75,8 +76,35 @@ CREATE TABLE jobs (
                                     -- allow-list), manifest.  Written in the same UPDATE
                                     -- as the bundle.  NULL = built before v12:
                                     -- run_config_json describes it
+    pipeline_mode   TEXT NOT NULL DEFAULT 'full',
+                                    -- ADR-0090: 'full' (the report alone) | 'enrich'
+                                    -- (the report and a STIX 2.1 bundle the analyst
+                                    -- holds, stored in job_baselines)
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
+);
+
+-- The STIX bundle an `enrich` job starts from (ADR-0090): one row per job, deleted
+-- with it (the foreign key cascades, and `_delete_job` in api/routes/jobs.py also
+-- deletes it explicitly, like the other children).  Kept out of `jobs` so that no
+-- `SELECT * FROM jobs` drags up to 20 MB with it.
+CREATE TABLE job_baselines (
+    job_id      TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+    sha256      TEXT NOT NULL,      -- of the bytes received
+    size_bytes  INTEGER NOT NULL,
+    report_id   TEXT,               -- the Report of the bundle the job enriches; NULL
+                                    -- when the bundle holds none
+    bundle_json TEXT NOT NULL,      -- the bundle as received (UTF-8), never rewritten
+    index_json  TEXT NOT NULL,      -- BaselineIndex: ids and matching keys, not objects
+    intake_json TEXT NOT NULL,      -- Intake: counts, objects left out and why, reports,
+                                    -- minimum TLP and PAP.  Both JSON texts are ASCII
+                                    -- (a NUL or a lone surrogate is an escape)
+    validated   INTEGER NOT NULL DEFAULT 0,
+                                    -- 1 once the worker has run the intake again with the
+                                    -- JSON schemas, which the request does not (index_json
+                                    -- and intake_json are then the worker's)
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
 );
 
 CREATE TABLE entities (
@@ -103,15 +131,23 @@ CREATE TABLE entities (
     evidence_end INTEGER,
     -- Who decided `accepted` (ADR-0058), NULL while nobody has:
     decision_origin TEXT,           -- human | human_bulk | auto_policy | default |
+                                    -- baseline_stix (ADR-0090; written by the server,
+                                    -- not a human origin) |
                                     -- propagated (the removed re-scan: older rows
                                     -- only) | legacy (decided before the column)
     decided_at     TEXT,
     policy_version TEXT,            -- the auto-accept policy that decided, if any
     control_sample INTEGER NOT NULL DEFAULT 0, -- 1 = auto-accept left it pending
                                     -- on purpose, to measure its own accuracy
-    held_reason    TEXT             -- ADR-0082: why the pipeline held this row back
+    held_reason    TEXT,            -- ADR-0082: why the pipeline held this row back
                                     -- (a technique Stage 3f could not decide); a
                                     -- pending row with a reason ships only once accepted
+    enrichment_status TEXT,         -- ADR-0090, NULL in full mode and for a row added by
+                                    -- hand: new | matched | baseline_in_text |
+                                    -- baseline_only (pipeline/baseline_stix.py).  A row
+                                    -- imported from the bundle (the last two) is accepted
+                                    -- or rejected, never edited or deleted (409)
+    baseline_stix_id TEXT           -- the id of the baseline object the row is or matches
 );
 
 CREATE TABLE relationships (
@@ -131,8 +167,10 @@ CREATE TABLE relationships (
     decision_origin   TEXT,               -- same three columns as on entities (ADR-0058)
     decided_at        TEXT,
     policy_version    TEXT,
-    held_reason       TEXT                -- ADR-0082: why Stage 3d held this claim back;
+    held_reason       TEXT,               -- ADR-0082: why Stage 3d held this claim back;
                                           -- stored pending, ships only once accepted
+    enrichment_status TEXT,               -- as on entities (ADR-0090)
+    baseline_stix_id  TEXT
 );
 
 -- The revision of a job's review (ADR-0086).  A row-level AFTER trigger on

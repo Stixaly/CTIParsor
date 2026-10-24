@@ -1,3 +1,4 @@
+from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
@@ -6,7 +7,7 @@ from pydantic import BaseModel
 from api.db import _lock, get_conn, now_iso, transaction
 from api.routes._common import require_job
 from models.schemas import STIX_RELATIONSHIP_TYPES
-from pipeline import decisions
+from pipeline import baseline_stix, decisions
 from pipeline.temporal import (
     TemporalAssertion,
     analyst_assertion,
@@ -19,6 +20,10 @@ from pipeline.temporal import (
 )
 
 router = APIRouter(prefix="/api/jobs/{job_id}/relationships", tags=["relationships"])
+
+_IMPORTED_ROW: dict[int | str, dict[str, Any]] = {409: {
+    "description": "A row imported from the analyst's STIX bundle (ADR-0090) cannot be edited or deleted: accept "
+                   "or reject it. Also: a held claim cannot be accepted in a bulk (ADR-0082)."}}
 
 # Sorted list of every STIX 2.1 relationship type the pipeline can emit, so the
 # manual add/edit API accepts the same verbs the builder produces (previously a
@@ -147,6 +152,9 @@ def _row_to_dict(row) -> dict:
         "decision_origin": row["decision_origin"],
         # ADR-0082: why the pipeline held this claim back; it ships once accepted.
         "held_reason": row["held_reason"],
+        # ADR-0090: how the row relates to the analyst's STIX bundle; NULL without one.
+        "enrichment_status": row["enrichment_status"],
+        "baseline_stix_id": row["baseline_stix_id"],
     }
 
 
@@ -209,6 +217,7 @@ def create_relationship(job_id: str, body: RelCreate):
         "start_time": _shown_start, "stop_time": _shown_stop,
         "times": [a.model_dump(mode="json", exclude_none=True) for a in _times],
         "accepted": True, "decision_origin": decisions.HUMAN, "held_reason": None,
+        "enrichment_status": None, "baseline_stix_id": None,
     }
 
 
@@ -246,7 +255,7 @@ def bulk_update_relationships(job_id: str, body: RelBulk):
     return {"updated": updated, "action": body.action}
 
 
-@router.patch("/{rel_id}")
+@router.patch("/{rel_id}", responses=_IMPORTED_ROW)
 def update_relationship(job_id: str, rel_id: str, patch: RelPatch):
     if patch.relationship_type and patch.relationship_type not in VALID_REL_TYPES:
         raise HTTPException(400, f"Unknown relationship_type '{patch.relationship_type}'")
@@ -262,6 +271,23 @@ def update_relationship(job_id: str, rel_id: str, patch: RelPatch):
             ).fetchone()
         if row and decisions.held_from_bulk_accept(row, patch.accepted, patch.decision_origin):
             raise HTTPException(409, f"held for review ({row['held_reason']}): accept it on its own card")
+
+    # A row imported from the analyst's STIX bundle is accepted or rejected, never
+    # edited: its endpoints, verb and dates are the baseline object's (ADR-0090).
+    # A date counts as an edit whenever it is sent.
+    edited = {"source_value", "relationship_type", "target_value", "start_time", "stop_time"}
+    if edited & patch.model_fields_set:
+        with get_conn() as conn:
+            current = conn.execute(
+                "SELECT enrichment_status, source_value, relationship_type, target_value "
+                "FROM relationships WHERE id=? AND job_id=?", (rel_id, job_id)
+            ).fetchone()
+        if current and current["enrichment_status"] in baseline_stix.IMPORTED and (
+                {"start_time", "stop_time"} & patch.model_fields_set
+                or (patch.source_value is not None and patch.source_value.strip() != current["source_value"])
+                or (patch.relationship_type is not None and patch.relationship_type != current["relationship_type"])
+                or (patch.target_value is not None and patch.target_value.strip() != current["target_value"])):
+            raise HTTPException(409, "row from the analyst's STIX bundle: accept or reject it")
 
     # Build dynamic SET clause from whichever fields were sent
     updates: list[str] = []
@@ -363,10 +389,16 @@ def update_relationship(job_id: str, rel_id: str, patch: RelPatch):
     return _row_to_dict(updated)
 
 
-@router.delete("/{rel_id}")
+@router.delete("/{rel_id}", responses=_IMPORTED_ROW)
 def delete_relationship(job_id: str, rel_id: str):
     with _lock:
         with get_conn() as conn:
+            # A deleted row could no longer say whether the baseline object leaves the bundle.
+            row = conn.execute(
+                "SELECT enrichment_status FROM relationships WHERE id=? AND job_id=?", (rel_id, job_id)
+            ).fetchone()
+            if row and row["enrichment_status"] in baseline_stix.IMPORTED:
+                raise HTTPException(409, "row from the analyst's STIX bundle: reject it instead")
             result = conn.execute(
                 "DELETE FROM relationships WHERE id=? AND job_id=?", (rel_id, job_id)
             )

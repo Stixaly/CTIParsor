@@ -211,6 +211,33 @@ def test_version_12_starts_every_job_at_revision_0_and_counts_the_writes_after_i
     assert conn.execute("SELECT review_revision FROM jobs").fetchone()["review_revision"] == 1
 
 
+def test_version_13_leaves_every_existing_job_in_full_mode_and_every_row_without_a_baseline_status(schema):
+    conn = schema()
+    _legacy_at(conn, 12)
+    conn.execute("INSERT INTO jobs (id, original_filename, created_at, updated_at) VALUES ('j1','r.pdf','t','t')")
+    conn.execute("INSERT INTO entities (id, job_id, value, entity_type) VALUES ('e1','j1','APT29','threat_actor')")
+    conn.execute("INSERT INTO relationships (id, job_id, source_value, relationship_type, target_value) "
+                 "VALUES ('r1','j1','APT29','uses','SUNBURST')")
+    assert not history.table_exists(conn, "job_baselines")
+
+    report = migrate.upgrade(conn)
+
+    assert 13 in report.applied
+    assert conn.execute("SELECT pipeline_mode FROM jobs").fetchone()["pipeline_mode"] == "full"
+    for table in ("entities", "relationships"):
+        row = conn.execute(f"SELECT enrichment_status, baseline_stix_id FROM {table}").fetchone()
+        assert tuple(row) == (None, None)
+    conn.execute("INSERT INTO job_baselines (job_id, sha256, size_bytes, bundle_json, index_json, intake_json, "
+                 "created_at, updated_at) VALUES ('j1','abc',2,'{}','{}','{}','t','t')")
+    stored = conn.execute("SELECT report_id, validated FROM job_baselines").fetchone()
+    assert tuple(stored) == (None, 0)                                # a worker of the previous revision still inserts
+    with pytest.raises(Exception, match="job_baselines_job_id_fkey"):
+        conn.execute("INSERT INTO job_baselines (job_id, sha256, size_bytes, bundle_json, index_json, intake_json, "
+                     "created_at, updated_at) VALUES ('nobody','abc',2,'{}','{}','{}','t','t')")
+    conn.execute("DELETE FROM jobs WHERE id='j1'")
+    assert conn.execute("SELECT COUNT(*) AS n FROM job_baselines").fetchone()["n"] == 0     # the key cascades
+
+
 # ── Refusals ─────────────────────────────────────────────────────────────────
 
 def test_a_database_newer_than_the_code_is_refused(schema):

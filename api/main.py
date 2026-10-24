@@ -29,6 +29,7 @@ limiter = Limiter(key_func=get_remote_address)
 
 from api.routes import (
     attack,
+    baselines,
     coverage,
     entities,
     ingest,
@@ -231,6 +232,7 @@ app.include_router(queue.router)
 app.include_router(thresholds.router)
 app.include_router(overrides.router)
 app.include_router(attack.router)
+app.include_router(baselines.router)
 
 
 @app.get("/api/health")
