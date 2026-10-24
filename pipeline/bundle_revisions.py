@@ -53,6 +53,10 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "A Stage 3f selection answer cut off at the output-token limit keeps its complete, checked "
      "choices instead of sending every candidate of the chunk to review (ADR-0072)",
      "extraction"),
+    ("0177c07", "2026-10-24",
+     "A quoted YARA rule with an include directive is refused without the server reading the file; "
+     "it used to compile when the file existed",
+     "mapping"),
 )
 
 
