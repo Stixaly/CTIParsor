@@ -110,7 +110,11 @@ def main(ref: str) -> int:
             if changed:
                 print(f"FAIL row counts changed (table: before, after): {changed}")
                 return 1
-            read = _run([sys.executable, "-c", _READ_BACK], ROOT, url).strip()
+            # The last line is the read-back's own print: importing the API may log
+            # first (Stage 3 warns at import when LLM_PROVIDER has no key, as on CI),
+            # and that says nothing about the data.
+            lines = _run([sys.executable, "-c", _READ_BACK], ROOT, url).strip().splitlines()
+            read = lines[-1] if lines else ""
             if read != "3 1 ['False', 'None', 'True']":
                 print(f"FAIL this code read back: {read}")
                 return 1
