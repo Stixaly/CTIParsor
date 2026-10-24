@@ -80,12 +80,22 @@ starting containers, no build step, in the log). `latest` tracks current
 sha>` tag instead for anything you don't rebuild on every deploy — the same
 tags list at `github.com/Stixaly/CTIParsor/pkgs/container/ctiparsor`.
 
-From the first release (none yet, 2026-10-17), `ghcr.io/stixaly/ctiparsor:X.Y.Z`
+Since the first release, 0.1.0 on 2026-10-17, `ghcr.io/stixaly/ctiparsor:X.Y.Z`
 names a released image: the same digest as the `sha-` tag of the release's
 commit, with nothing rebuilt (ADR-0085). `X.Y` is set too and follows the highest
 patch release of that line. A registry tag name can be pushed again and a digest
 cannot change, so the Release notes give the digest; see
 [releasing.md](releasing.md).
+
+```dotenv
+# .env
+CTI_IMAGE=ghcr.io/stixaly/ctiparsor:0.1.0
+```
+
+0.1.0 is the image of commit 4bdfa8f, digest
+`sha256:80aca36a7cf3fbf9319ee828f8d4811bf90e56d94120a99776ba8df4cc71a773`; on
+2026-10-24 the names `0.1.0`, `0.1` and `sha-4bdfa8f9b2b3916486b87019a40148d5d15d9239`
+all pointed to it.
 
 **One manual step, once:** a new GHCR package is private by default
 regardless of the repository's visibility. After the first push, a

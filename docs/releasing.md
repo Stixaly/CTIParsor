@@ -30,7 +30,15 @@ provenance and the SBOM attestation that main's CI signed stay valid.
 `X.Y.Z`, or better by digest: a workflow with `packages: write` can push a
 registry tag name again. The Release notes give the digest.
 
-No release has been published yet (2026-10-17).
+The first release, [0.1.0](https://github.com/Stixaly/CTIParsor/releases/tag/v0.1.0),
+was published on 2026-10-17 and is marked Latest. Its tag `v0.1.0` is annotated
+and names commit 4bdfa8f, the merge of the release pull request (#170). On GHCR,
+`0.1.0`, `0.1` and `sha-4bdfa8f…` name one digest,
+`sha256:80aca36a7cf3fbf9319ee828f8d4811bf90e56d94120a99776ba8df4cc71a773`. Its
+four files pass `sha256sum -c SHA256SUMS`, and the archive, the SBOM and the
+image pass the commands of [Verifying a release](#verifying-a-release) (checked
+2026-10-23). It is not an immutable Release: immutability was turned on after
+it was published (see [One-time repository settings](#one-time-repository-settings)).
 
 ## Versioning
 
@@ -47,8 +55,8 @@ The dry run (below) is the rehearsal.
 
 ## Where the version lives
 
-One source, `__version__` in `pipeline/__init__.py`. It is `"0.0.0"` until the
-first release.
+One source, `__version__` in `pipeline/__init__.py`. It was `"0.0.0"` until the
+first release, 0.1.0.
 
 | Place | What it holds |
 |---|---|
@@ -175,21 +183,22 @@ newer, nothing to install). Its exit code is `0` when done, `1` when it refuses
       "Latest" is set only if the tag is the highest tag of strict SemVer form
       (`vX.Y.Z`): a stray `v0.1.0-rc.1` or `vfoo` does not count.
 
-7. **After the first release,** the statements that say none has been published
-   must change. Search for them with `grep -rn "2026-10-17" SECURITY.md
-   docs/docker.md docs/releasing.md docs/openssf-best-practices.md`:
+7. **After the first release,** the statements that said none had been
+   published had to change. For 0.1.0 that was done on 2026-10-24:
 
-   - `SECURITY.md`: the "Releases" bullet of *Supply chain*;
+   - `SECURITY.md`: the "Releases" bullet of *Supply chain*, and *Supported
+     versions*;
    - `docs/docker.md`: the paragraph on `X.Y.Z` names (*Pulling a pre-built
      image*);
-   - `docs/releasing.md`: *What a release is*, and, once the maintainer has
-     applied the two settings, the dated paragraph of *One-time repository
-     settings*;
+   - `docs/releasing.md`: *What a release is*, and the dated paragraph of
+     *One-time repository settings*;
    - `docs/openssf-best-practices.md`: the paragraph under *What still stands
      between…* and the four rows `version_unique`, `version_semver`,
-     `version_tags`, `release_notes`. Then enter the answers on
-     bestpractices.dev;
-   - ADR-0085: the status line and the action items.
+     `version_tags`, `release_notes`;
+   - ADR-0085: the status line, the action items and an amendment.
+
+   Entering the answers on bestpractices.dev is left to the maintainer
+   (ADR-0085, action item 6).
 
 ## What the Release contains
 
@@ -300,8 +309,8 @@ It:
 5. puts the notes in the job summary.
 
 It publishes, tags and attests nothing. It cannot rehearse the version names on
-the image, the provenance of the files or the Release itself; the first release
-tests those.
+the image, the provenance of the files or the Release itself; only a tag run
+does. The first one, for 0.1.0, ran once and passed.
 
 ## What the workflow's checks are worth
 
@@ -320,9 +329,18 @@ without them. The repository's Actions settings already allow it, since a job
 may ask for `contents: write`, `packages: write`, `id-token: write` and
 `attestations: write`.
 
-On 2026-10-17, read through the API, neither was set: no rule covers tags, and
-immutable releases were off. Settings are the maintainer's clicks. Read each one
-back afterwards and record the result (ADR-0085, action items 2 and 3).
+On 2026-10-17, read through the API, neither was set. On 2026-10-24:
+
+- **Immutable releases are on** (`"enabled": true`). They were turned on after
+  0.1.0 was published, so that Release is not immutable: `gh release view
+  v0.1.0 --json isImmutable` gives `false`, and `gh release verify v0.1.0`
+  finds no release attestation. Releases published from now on will be
+  immutable.
+- **No ruleset covers tags.** The only ruleset, "basic rules", targets the
+  branch.
+
+Settings are the maintainer's clicks. Read each one back afterwards and record
+the result (ADR-0085, action items 2 and 3).
 
 **1. A tag ruleset.** Without it, anyone with write access can create, move or
 delete a `v*` tag.

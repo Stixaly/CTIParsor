@@ -159,6 +159,33 @@ has an amendment with the whole table.
 
 ### Documentation
 
+#### The pages that said no release existed describe v0.1.0 (ADR-0085), 2026-10-24
+
+`SECURITY.md`, `docs/docker.md`, `docs/releasing.md`,
+`docs/openssf-best-practices.md` and ADR-0085 still said, as of 2026-10-17,
+that no release had been published. They now give what was read back on
+2026-10-23 and 2026-10-24, read-only, through the API, `gh attestation verify`,
+the registry and Scorecard:
+
+- **The Release.** "CTIParsor 0.1.0", published on 2026-10-17 and marked Latest,
+  from the annotated tag `v0.1.0` on 4bdfa8f. Its four files pass
+  `sha256sum -c SHA256SUMS`, and the pinned verify commands of its notes pass.
+  `0.1.0`, `0.1` and `sha-4bdfa8f…` name one image digest.
+- **The OpenSSF criteria** `version_unique`, `version_semver`, `version_tags`
+  and `release_notes` are Met, with the Release, the tag and the notes as
+  evidence. The answers are not entered on bestpractices.dev yet (new action
+  item 6 of ADR-0085).
+- **Release immutability is on**, but it was turned on after v0.1.0 was
+  published: v0.1.0 is not immutable. ADR-0085's action item 3 is done, item 4
+  too.
+- **No tag ruleset exists.** The only ruleset targets the branch, so item 2
+  stays open.
+- **Scorecard's Signed-Releases check scores 10**, from the
+  `ctiparsor-0.1.0.intoto.jsonl` asset.
+
+`SECURITY.md`'s *Supported versions* no longer says `main` is the only supported
+version.
+
 #### A Stage 3f prompt that asks for the answer once, measured on AnnoCTR dev and not adopted (ADR-0072), 2026-10-24
 
 One sentence was added to the selection prompt and measured: "Write that
