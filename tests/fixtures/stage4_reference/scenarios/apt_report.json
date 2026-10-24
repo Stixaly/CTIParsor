@@ -1,0 +1,334 @@
+{
+ "_comment": "Synthetic report: every observable type, an alias-named actor, TTPs with quotes, relationships that get rewritten, dropped and merged.",
+ "report_name": "Operation Midnight Frost",
+ "original_filename": "midnight_frost.pdf",
+ "report_text": "Operation Midnight Frost: a spearphishing campaign against European ministries\n\nCozy Bear sent spearphishing emails with a malicious attachment from alerts@mail-notice-ministry.test to staff of foreign ministries in Germany and Poland. The campaign, tracked as Midnight Frost, targeted the government sector and the energy sector.\n\nThe attachment dropped a loader called SUNBURST. After execution SUNBURST created the mutex Global\\MidnightFrostMtx and wrote a persistence entry under HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run\\FrostSvc. The loader also dropped the file svchost_update.dll, identified by the hashes 3f2504e04f8911d39a0c0305e82c3301 (MD5) and e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 (SHA-256).\n\nSUNBURST contacted the command-and-control server at 91.215.85.17 and resolved frostmail-cdn.test for its second stage, downloaded from http://frostmail-cdn.test/stage/payload.bin. The operators used PowerShell to run commands on the compromised hosts. Cozy Bear dumped credentials from LSASS memory with Mimikatz.\n\nThe intrusion exploited CVE-2023-23397 in Microsoft Outlook to steal NTLM hashes before the attachment was opened. Defenders should block frostmail-cdn.test at the proxy and hunt for the registry key above.",
+ "tlp": "AMBER",
+ "pap": "AMBER",
+ "policy": null,
+ "source_bytes": "Midnight Frost: the original document, as the analyst uploaded it.\n",
+ "source_hash": "adea1fcbba34d4236cba8135c79d7cd3624d9aee917f75ddd879aee86a0bd0d4",
+ "document_anchor": {
+  "value": "2026-02-27",
+  "source": "publication_meta",
+  "detail": "pdf:CreationDate"
+ },
+ "cve_metadata": {
+  "CVE-2023-23397": {
+   "description": "Microsoft Outlook elevation of privilege vulnerability.",
+   "cvss_score": 9.8,
+   "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+  }
+ },
+ "entities": [
+  {
+   "value": "91.215.85.17",
+   "entity_type": "ipv4",
+   "context": "",
+   "confidence": 1.0
+  },
+  {
+   "value": "frostmail-cdn.test",
+   "entity_type": "domain",
+   "context": "",
+   "confidence": 1.0
+  },
+  {
+   "value": "http://frostmail-cdn.test/stage/payload.bin",
+   "entity_type": "url",
+   "context": "",
+   "confidence": 1.0
+  },
+  {
+   "value": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "entity_type": "sha256",
+   "context": "",
+   "confidence": 1.0
+  },
+  {
+   "value": "3f2504e04f8911d39a0c0305e82c3301",
+   "entity_type": "md5",
+   "context": "",
+   "confidence": 1.0
+  },
+  {
+   "value": "svchost_update.dll",
+   "entity_type": "file",
+   "context": "",
+   "confidence": 1.0
+  },
+  {
+   "value": "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run\\FrostSvc",
+   "entity_type": "registry_key",
+   "context": "",
+   "confidence": 1.0
+  },
+  {
+   "value": "Global\\MidnightFrostMtx",
+   "entity_type": "mutex",
+   "context": "",
+   "confidence": 1.0
+  },
+  {
+   "value": "alerts@mail-notice-ministry.test",
+   "entity_type": "email",
+   "context": "",
+   "confidence": 1.0
+  },
+  {
+   "value": "CVE-2023-23397",
+   "entity_type": "cve",
+   "context": "",
+   "confidence": 1.0
+  },
+  {
+   "value": "Germany",
+   "entity_type": "location",
+   "context": "",
+   "confidence": 1.0
+  },
+  {
+   "value": "Poland",
+   "entity_type": "location",
+   "context": "",
+   "confidence": 1.0
+  },
+  {
+   "value": "SUNBURST",
+   "entity_type": "malware",
+   "context": "",
+   "confidence": 0.9,
+   "source": "gazetteer"
+  },
+  {
+   "value": "Cozy Bear",
+   "entity_type": "threat_actor",
+   "context": "",
+   "confidence": 0.9,
+   "source": "gazetteer"
+  },
+  {
+   "value": "T1566.001",
+   "entity_type": "ttp",
+   "context": "",
+   "confidence": 0.8,
+   "mitre_id": "T1566.001",
+   "source": "gazetteer"
+  }
+ ],
+ "llm_result": {
+  "threat_actors": [
+   "Cozy Bear"
+  ],
+  "malware_families": [
+   "SUNBURST"
+  ],
+  "tools": [
+   "Mimikatz"
+  ],
+  "campaign_name": "Midnight Frost",
+  "targeted_countries": [
+   "Germany",
+   "Poland",
+   "Atlantis"
+  ],
+  "targeted_sectors": [
+   "government",
+   "energy"
+  ],
+  "course_of_action": [
+   "Block frostmail-cdn.test at the proxy"
+  ],
+  "ttps": [
+   {
+    "technique_name": "Spearphishing Attachment",
+    "mitre_id": "T1566.001",
+    "description": "Spearphishing emails with a malicious attachment.",
+    "evidence_text": "Cozy Bear sent spearphishing emails with a malicious attachment",
+    "evidence_label": "reported"
+   },
+   {
+    "technique_name": "PowerShell",
+    "mitre_id": "T1059.001",
+    "description": "Commands run through PowerShell.",
+    "evidence_text": "The operators used PowerShell to run commands on the compromised hosts",
+    "evidence_label": "reported"
+   },
+   {
+    "technique_name": "Registry Run Keys / Startup Folder",
+    "mitre_id": "T1547.001",
+    "description": "Persistence through a Run key.",
+    "evidence_text": "wrote a persistence entry under HKLM",
+    "evidence_label": "reported"
+   },
+   {
+    "technique_name": "Web Protocols",
+    "mitre_id": "T1071.001",
+    "description": "Second stage fetched over HTTP.",
+    "evidence_text": "resolved frostmail-cdn.test for its second stage",
+    "evidence_label": "reported"
+   },
+   {
+    "technique_name": "LSASS Memory",
+    "mitre_id": "T1003.001",
+    "description": "Credential dumping from LSASS.",
+    "evidence_text": "Cozy Bear dumped credentials from LSASS memory with Mimikatz",
+    "evidence_label": "reported"
+   }
+  ],
+  "relationships": [
+   {
+    "source_value": "Cozy Bear",
+    "relationship_type": "uses",
+    "target_value": "SUNBURST",
+    "confidence": 0.9,
+    "evidence_label": "reported",
+    "evidence_text": "The attachment dropped a loader called SUNBURST.",
+    "times": [
+     {
+      "id": "t-start-01",
+      "role": "start",
+      "time_text": "in March 2024",
+      "value": "2024-03-15",
+      "precision": "day",
+      "status": "verified"
+     }
+    ]
+   },
+   {
+    "source_value": "Cozy Bear",
+    "relationship_type": "uses",
+    "target_value": "Mimikatz",
+    "confidence": 0.9,
+    "evidence_label": "reported",
+    "evidence_text": "Cozy Bear dumped credentials from LSASS memory with Mimikatz."
+   },
+   {
+    "source_value": "Cozy Bear",
+    "relationship_type": "uses",
+    "target_value": "LSASS Memory",
+    "confidence": 0.9,
+    "evidence_label": "reported"
+   },
+   {
+    "source_value": "Midnight Frost",
+    "relationship_type": "attributed-to",
+    "target_value": "Cozy Bear",
+    "confidence": 0.9,
+    "evidence_label": "reported",
+    "evidence_text": "The campaign, tracked as Midnight Frost"
+   },
+   {
+    "source_value": "Midnight Frost",
+    "relationship_type": "uses",
+    "target_value": "SUNBURST",
+    "confidence": 0.9,
+    "evidence_label": "reported"
+   },
+   {
+    "source_value": "SUNBURST",
+    "relationship_type": "communicates-with",
+    "target_value": "91.215.85.17",
+    "confidence": 0.9,
+    "evidence_label": "observed",
+    "evidence_text": "SUNBURST contacted the command-and-control server at 91.215.85.17"
+   },
+   {
+    "source_value": "SUNBURST",
+    "relationship_type": "drops",
+    "target_value": "svchost_update.dll",
+    "confidence": 0.9,
+    "evidence_label": "reported",
+    "evidence_text": "The loader also dropped the file svchost_update.dll"
+   },
+   {
+    "source_value": "SUNBURST",
+    "relationship_type": "uses",
+    "target_value": "Registry Run Keys / Startup Folder",
+    "confidence": 0.9,
+    "evidence_label": "reported",
+    "evidence_text": "wrote a persistence entry under HKLM"
+   },
+   {
+    "source_value": "SUNBURST",
+    "relationship_type": "exploits",
+    "target_value": "CVE-2023-23397",
+    "confidence": 0.9,
+    "evidence_label": "reported"
+   },
+   {
+    "source_value": "Cozy Bear",
+    "relationship_type": "targets",
+    "target_value": "Germany",
+    "confidence": 0.9,
+    "evidence_label": "reported"
+   },
+   {
+    "source_value": "Cozy Bear",
+    "relationship_type": "deploys",
+    "target_value": "SUNBURST",
+    "confidence": 0.9,
+    "evidence_label": "reported"
+   },
+   {
+    "source_value": "Cozy Bear",
+    "relationship_type": "uses",
+    "target_value": "SUNBURST",
+    "confidence": 0.9,
+    "evidence_label": "reported"
+   },
+   {
+    "source_value": "frostmail-cdn.test",
+    "relationship_type": "communicates-with",
+    "target_value": "Web Protocols",
+    "confidence": 0.9,
+    "evidence_label": "reported"
+   },
+   {
+    "source_value": "91.215.85.17",
+    "relationship_type": "indicates",
+    "target_value": "Midnight Frost",
+    "confidence": 0.9,
+    "evidence_label": "reported"
+   },
+   {
+    "source_value": "APT29",
+    "relationship_type": "related-to",
+    "target_value": "Cozy Bear",
+    "confidence": 0.9,
+    "evidence_label": "reported"
+   },
+   {
+    "source_value": "Cozy Bear",
+    "relationship_type": "uses",
+    "target_value": "Ghost Loader",
+    "confidence": 0.9,
+    "evidence_label": "reported"
+   }
+  ],
+  "ioc_associations": [
+   {
+    "ioc_value": "91.215.85.17",
+    "malware_name": "SUNBURST",
+    "relationship_type": "indicates"
+   },
+   {
+    "ioc_value": "frostmail-cdn.test",
+    "malware_name": "SUNBURST",
+    "relationship_type": "indicates"
+   },
+   {
+    "ioc_value": "http://frostmail-cdn.test/stage/payload.bin",
+    "malware_name": "SUNBURST"
+   },
+   {
+    "ioc_value": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "malware_name": "SUNBURST"
+   },
+   {
+    "ioc_value": "91.215.85.17",
+    "malware_name": "SUNBURST"
+   }
+  ]
+ }
+}

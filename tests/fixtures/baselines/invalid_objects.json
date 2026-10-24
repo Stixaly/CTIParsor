@@ -1,0 +1,68 @@
+{
+  "type": "bundle",
+  "id": "bundle--74bedcfa-0f9d-4efc-8f93-0464dcf005fa",
+  "objects": [
+    {
+      "type": "identity",
+      "spec_version": "2.1",
+      "id": "identity--7b28d56c-da18-46b3-bbee-cf475d85a9dc",
+      "created": "2026-03-02T08:14:55.213Z",
+      "modified": "2026-03-02T08:14:55.213Z",
+      "name": "Fixture Author",
+      "identity_class": "organization"
+    },
+    {
+      "type": "malware",
+      "spec_version": "2.1",
+      "id": "malware--cf8c668a-2b0d-49f0-a0d4-e114bc59ce62",
+      "created": "2026-03-02T08:14:55.213Z",
+      "modified": "2026-03-02T08:14:55.213Z",
+      "name": "GoodWare",
+      "is_family": true
+    },
+    {
+      "type": "malware",
+      "spec_version": "2.1",
+      "id": "malware--70a37c2b-7744-47d8-aa16-709466f8fa9a",
+      "created": "2026-03-02T08:14:55.213Z",
+      "modified": "2026-03-02T08:14:55.213Z",
+      "name": "NoFamilyFlag"
+    },
+    {
+      "type": "indicator",
+      "spec_version": "2.1",
+      "id": "indicator--not-a-uuid",
+      "created": "2026-03-02T08:14:55.213Z",
+      "modified": "2026-03-02T08:14:55.213Z",
+      "name": "Malformed id",
+      "pattern": "[ipv4-addr:value = '198.18.12.77']",
+      "pattern_type": "stix",
+      "valid_from": "2026-03-02T08:14:55.213Z"
+    },
+    {
+      "type": "threat-actor",
+      "spec_version": "2.1",
+      "id": "threat-actor--0c97ffd8-353d-4bba-a64f-649161105b6e",
+      "created": "2026-03-02T08:14:55.213Z",
+      "modified": "2026-03-02T08:14:55.213Z",
+      "name": "TwiceSeen",
+      "threat_actor_types": [
+        "crime-syndicate"
+      ]
+    },
+    {
+      "type": "threat-actor",
+      "spec_version": "2.1",
+      "id": "threat-actor--0c97ffd8-353d-4bba-a64f-649161105b6e",
+      "created": "2026-03-02T08:14:55.213Z",
+      "modified": "2026-03-09T16:40:02.981Z",
+      "name": "TwiceSeen",
+      "threat_actor_types": [
+        "crime-syndicate"
+      ],
+      "aliases": [
+        "Seen Twice"
+      ]
+    }
+  ]
+}

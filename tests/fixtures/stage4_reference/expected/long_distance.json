@@ -1,0 +1,213 @@
+{
+ "ledger": {
+  "entities": [
+   {
+    "entity_type": "malware",
+    "outcome": "emitted",
+    "stix_id": "malware--78a72f00-0ab0-59dd-a3f6-819fbd76b03a",
+    "stix_name": "Nightbell",
+    "stix_type": "malware",
+    "value": "Nightbell"
+   },
+   {
+    "entity_type": "threat_actor",
+    "outcome": "emitted",
+    "stix_id": "threat-actor--94ca10ea-a248-5958-8331-9af624aa201d",
+    "stix_name": "Frost Spider",
+    "stix_type": "threat-actor",
+    "value": "Frost Spider"
+   },
+   {
+    "entity_type": "tool",
+    "outcome": "emitted",
+    "stix_id": "tool--b1368394-5bae-5084-b957-94fd46be0090",
+    "stix_name": "Rclone",
+    "stix_type": "tool",
+    "value": "Rclone"
+   }
+  ],
+  "objects": {
+   "identity--df314057-d669-5e4d-aa9c-5257582a7ecd": {
+    "origin": "author_identity"
+   },
+   "malware--78a72f00-0ab0-59dd-a3f6-819fbd76b03a": {
+    "origin": "entity"
+   },
+   "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da": {
+    "origin": "marking"
+   },
+   "relationship--R1": {
+    "origin": "completion_long_distance"
+   },
+   "relationship--R2": {
+    "origin": "extracted"
+   },
+   "report--R1": {
+    "origin": "report"
+   },
+   "threat-actor--94ca10ea-a248-5958-8331-9af624aa201d": {
+    "origin": "entity"
+   },
+   "tool--b1368394-5bae-5084-b957-94fd46be0090": {
+    "origin": "entity"
+   }
+  },
+  "relationships": [
+   {
+    "changes": [],
+    "final_type": "uses",
+    "outcome": "emitted",
+    "relationship_type": "uses",
+    "source_ref": "threat-actor--94ca10ea-a248-5958-8331-9af624aa201d",
+    "source_value": "Frost Spider",
+    "stix_id": "relationship--R2",
+    "target_ref": "malware--78a72f00-0ab0-59dd-a3f6-819fbd76b03a",
+    "target_value": "Nightbell"
+   }
+  ],
+  "removed": [],
+  "version": 1
+ },
+ "objects": [
+  {
+   "created": "<build-time>",
+   "description": "Automated CTI extraction pipeline. Authored the objects in this bundle. created_by_ref refers to this pipeline as the intelligence author, not to the threat actor.",
+   "id": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "identity_class": "system",
+   "modified": "<build-time>",
+   "name": "CTIParsor",
+   "spec_version": "2.1",
+   "type": "identity"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "malware--78a72f00-0ab0-59dd-a3f6-819fbd76b03a",
+   "is_family": true,
+   "modified": "<build-time>",
+   "name": "Nightbell",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "spec_version": "2.1",
+   "type": "malware"
+  },
+  {
+   "created": "2017-01-20T00:00:00.000Z",
+   "definition": {
+    "tlp": "green"
+   },
+   "definition_type": "tlp",
+   "id": "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da",
+   "name": "TLP:GREEN",
+   "spec_version": "2.1",
+   "type": "marking-definition"
+  },
+  {
+   "confidence": 60,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R1",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "relationship_type": "related-to",
+   "source_ref": "tool--b1368394-5bae-5084-b957-94fd46be0090",
+   "spec_version": "2.1",
+   "target_ref": "threat-actor--94ca10ea-a248-5958-8331-9af624aa201d",
+   "type": "relationship",
+   "x_evidence_label": "inferred",
+   "x_evidence_text": "Frost Spider staged archives with Rclone before exfiltration.",
+   "x_inference_rule": "long-distance"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "Frost Spider operates the Nightbell backdoor.",
+   "id": "relationship--R2",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "relationship_type": "uses",
+   "source_ref": "threat-actor--94ca10ea-a248-5958-8331-9af624aa201d",
+   "spec_version": "2.1",
+   "target_ref": "malware--78a72f00-0ab0-59dd-a3f6-819fbd76b03a",
+   "type": "relationship",
+   "x_evidence_label": "reported"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "Nightbell campaign notes\n\nFrost Spider operates the Nightbell backdoor. Separately, the incident response team found the tool Rclone on the file server. Frost Spider staged archives with Rclone before exfiltration.",
+   "external_references": [
+    {
+     "description": "Original CTI report: nightbell_notes.txt",
+     "source_name": "original_document"
+    }
+   ],
+   "id": "report--R1",
+   "modified": "<build-time>",
+   "name": "Nightbell campaign notes",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "object_refs": [
+    "threat-actor--94ca10ea-a248-5958-8331-9af624aa201d",
+    "malware--78a72f00-0ab0-59dd-a3f6-819fbd76b03a",
+    "tool--b1368394-5bae-5084-b957-94fd46be0090",
+    "relationship--R2",
+    "relationship--R1"
+   ],
+   "published": "<build-time>",
+   "spec_version": "2.1",
+   "type": "report",
+   "x_synthesis_stats": {
+    "completion": {
+     "aliases_merged": 0,
+     "capped": false,
+     "long_distance_added": 1,
+     "notes": [],
+     "reference_added": 0,
+     "skipped_not_suggested": 0,
+     "transitive_added": 0
+    },
+    "pin": {
+     "budget": 200,
+     "mode": "fair-share",
+     "rules": [],
+     "total_blocked": 0,
+     "total_candidates": 0,
+     "total_emitted": 0,
+     "total_truncated": 0
+    }
+   }
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "threat-actor--94ca10ea-a248-5958-8331-9af624aa201d",
+   "modified": "<build-time>",
+   "name": "Frost Spider",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "spec_version": "2.1",
+   "type": "threat-actor"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "tool--b1368394-5bae-5084-b957-94fd46be0090",
+   "modified": "<build-time>",
+   "name": "Rclone",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "spec_version": "2.1",
+   "type": "tool"
+  }
+ ]
+}

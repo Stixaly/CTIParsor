@@ -1,0 +1,237 @@
+{
+ "ledger": {
+  "entities": [
+   {
+    "entity_type": "domain",
+    "outcome": "emitted",
+    "stix_id": "domain-name--45b3ff11-8acf-5e73-9d0d-4888fd6a4249",
+    "stix_type": "domain-name",
+    "value": "evil-update.test"
+   },
+   {
+    "entity_type": "ipv4",
+    "outcome": "emitted",
+    "stix_id": "ipv4-addr--baba264e-d558-5d92-bd06-385a02755e25",
+    "stix_type": "ipv4-addr",
+    "value": "185.220.101.45"
+   }
+  ],
+  "objects": {
+   "domain-name--45b3ff11-8acf-5e73-9d0d-4888fd6a4249": {
+    "origin": "entity"
+   },
+   "identity--df314057-d669-5e4d-aa9c-5257582a7ecd": {
+    "origin": "author_identity"
+   },
+   "indicator--8e8354cb-f2f9-5e91-9027-16f761042512": {
+    "ioc_value": "185.220.101.45",
+    "origin": "ioc_indicator",
+    "sco_id": "ipv4-addr--baba264e-d558-5d92-bd06-385a02755e25",
+    "valid_from_basis": "build_time"
+   },
+   "indicator--c53bd0a6-5d96-5b5e-91cc-1282a6330c93": {
+    "ioc_value": "evil-update.test",
+    "origin": "ioc_indicator",
+    "sco_id": "domain-name--45b3ff11-8acf-5e73-9d0d-4888fd6a4249",
+    "valid_from_basis": "build_time"
+   },
+   "ipv4-addr--baba264e-d558-5d92-bd06-385a02755e25": {
+    "origin": "entity"
+   },
+   "marking-definition--5e57c739-391a-4eb3-b6be-7d15ca92d5ed": {
+    "origin": "marking"
+   },
+   "marking-definition--89484dde-e3d2-547f-a6c6-d14824429eb1": {
+    "origin": "marking"
+   },
+   "relationship--R1": {
+    "origin": "ioc_based_on"
+   },
+   "relationship--R2": {
+    "origin": "ioc_based_on"
+   },
+   "report--R1": {
+    "origin": "report"
+   }
+  },
+  "relationships": [],
+  "removed": [],
+  "version": 1
+ },
+ "objects": [
+  {
+   "id": "domain-name--45b3ff11-8acf-5e73-9d0d-4888fd6a4249",
+   "object_marking_refs": [
+    "marking-definition--5e57c739-391a-4eb3-b6be-7d15ca92d5ed",
+    "marking-definition--89484dde-e3d2-547f-a6c6-d14824429eb1"
+   ],
+   "spec_version": "2.1",
+   "type": "domain-name",
+   "value": "evil-update.test"
+  },
+  {
+   "created": "<build-time>",
+   "description": "Automated CTI extraction pipeline. Authored the objects in this bundle. created_by_ref refers to this pipeline as the intelligence author, not to the threat actor.",
+   "id": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "identity_class": "system",
+   "modified": "<build-time>",
+   "name": "CTIParsor",
+   "spec_version": "2.1",
+   "type": "identity"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "indicator--8e8354cb-f2f9-5e91-9027-16f761042512",
+   "indicator_types": [
+    "malicious-activity"
+   ],
+   "modified": "<build-time>",
+   "name": "Indicator: 185.220.101.45",
+   "object_marking_refs": [
+    "marking-definition--5e57c739-391a-4eb3-b6be-7d15ca92d5ed",
+    "marking-definition--89484dde-e3d2-547f-a6c6-d14824429eb1"
+   ],
+   "pattern": "[ipv4-addr:value = '185.220.101.45']",
+   "pattern_type": "stix",
+   "pattern_version": "2.1",
+   "spec_version": "2.1",
+   "type": "indicator",
+   "valid_from": "<build-time>"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "indicator--c53bd0a6-5d96-5b5e-91cc-1282a6330c93",
+   "indicator_types": [
+    "malicious-activity"
+   ],
+   "modified": "<build-time>",
+   "name": "Indicator: evil-update.test",
+   "object_marking_refs": [
+    "marking-definition--5e57c739-391a-4eb3-b6be-7d15ca92d5ed",
+    "marking-definition--89484dde-e3d2-547f-a6c6-d14824429eb1"
+   ],
+   "pattern": "[domain-name:value = 'evil-update.test']",
+   "pattern_type": "stix",
+   "pattern_version": "2.1",
+   "spec_version": "2.1",
+   "type": "indicator",
+   "valid_from": "<build-time>"
+  },
+  {
+   "id": "ipv4-addr--baba264e-d558-5d92-bd06-385a02755e25",
+   "object_marking_refs": [
+    "marking-definition--5e57c739-391a-4eb3-b6be-7d15ca92d5ed",
+    "marking-definition--89484dde-e3d2-547f-a6c6-d14824429eb1"
+   ],
+   "spec_version": "2.1",
+   "type": "ipv4-addr",
+   "value": "185.220.101.45"
+  },
+  {
+   "created": "2017-01-20T00:00:00.000Z",
+   "definition": {
+    "tlp": "red"
+   },
+   "definition_type": "tlp",
+   "id": "marking-definition--5e57c739-391a-4eb3-b6be-7d15ca92d5ed",
+   "name": "TLP:RED",
+   "spec_version": "2.1",
+   "type": "marking-definition"
+  },
+  {
+   "created": "<build-time>",
+   "definition": {
+    "statement": "PAP:GREEN"
+   },
+   "definition_type": "statement",
+   "id": "marking-definition--89484dde-e3d2-547f-a6c6-d14824429eb1",
+   "spec_version": "2.1",
+   "type": "marking-definition"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R1",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--5e57c739-391a-4eb3-b6be-7d15ca92d5ed",
+    "marking-definition--89484dde-e3d2-547f-a6c6-d14824429eb1"
+   ],
+   "relationship_type": "based-on",
+   "source_ref": "indicator--8e8354cb-f2f9-5e91-9027-16f761042512",
+   "spec_version": "2.1",
+   "target_ref": "ipv4-addr--baba264e-d558-5d92-bd06-385a02755e25",
+   "type": "relationship",
+   "x_evidence_label": "observed"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R2",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--5e57c739-391a-4eb3-b6be-7d15ca92d5ed",
+    "marking-definition--89484dde-e3d2-547f-a6c6-d14824429eb1"
+   ],
+   "relationship_type": "based-on",
+   "source_ref": "indicator--c53bd0a6-5d96-5b5e-91cc-1282a6330c93",
+   "spec_version": "2.1",
+   "target_ref": "domain-name--45b3ff11-8acf-5e73-9d0d-4888fd6a4249",
+   "type": "relationship",
+   "x_evidence_label": "observed"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "Seen: 185.220.101.45 and evil-update.test.",
+   "external_references": [
+    {
+     "description": "Original CTI report: minimal.txt",
+     "source_name": "original_document"
+    }
+   ],
+   "id": "report--R1",
+   "modified": "<build-time>",
+   "name": "Minimal",
+   "object_marking_refs": [
+    "marking-definition--5e57c739-391a-4eb3-b6be-7d15ca92d5ed",
+    "marking-definition--89484dde-e3d2-547f-a6c6-d14824429eb1"
+   ],
+   "object_refs": [
+    "ipv4-addr--baba264e-d558-5d92-bd06-385a02755e25",
+    "domain-name--45b3ff11-8acf-5e73-9d0d-4888fd6a4249",
+    "indicator--8e8354cb-f2f9-5e91-9027-16f761042512",
+    "relationship--R1",
+    "indicator--c53bd0a6-5d96-5b5e-91cc-1282a6330c93",
+    "relationship--R2"
+   ],
+   "published": "<build-time>",
+   "spec_version": "2.1",
+   "type": "report",
+   "x_synthesis_stats": {
+    "completion": {
+     "aliases_merged": 0,
+     "capped": false,
+     "long_distance_added": 0,
+     "notes": [],
+     "reference_added": 0,
+     "skipped_not_suggested": 0,
+     "transitive_added": 0
+    },
+    "pin": {
+     "budget": 0,
+     "mode": "fair-share",
+     "rules": [],
+     "total_blocked": 0,
+     "total_candidates": 0,
+     "total_emitted": 0,
+     "total_truncated": 0
+    }
+   }
+  }
+ ]
+}

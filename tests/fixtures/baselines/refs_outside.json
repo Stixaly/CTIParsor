@@ -1,0 +1,49 @@
+{
+  "type": "bundle",
+  "id": "bundle--8f1decdc-511e-412a-a4c6-4f8cd4dfdafc",
+  "objects": [
+    {
+      "type": "malware",
+      "spec_version": "2.1",
+      "id": "malware--62d1b93a-6ec8-429a-b783-9b0d7f3c3803",
+      "created": "2026-03-02T08:14:55.213Z",
+      "modified": "2026-03-02T08:14:55.213Z",
+      "created_by_ref": "identity--162f1952-0391-4078-99c2-9a8a9ed31a6d",
+      "object_marking_refs": [
+        "marking-definition--59e2cafc-8007-4757-810f-73dc7a06c8b7"
+      ],
+      "name": "WellMess",
+      "is_family": true
+    },
+    {
+      "type": "intrusion-set",
+      "spec_version": "2.1",
+      "id": "intrusion-set--22fa7a0e-2acd-492f-9eba-4173d34572a7",
+      "created": "2026-03-02T08:14:55.213Z",
+      "modified": "2026-03-02T08:14:55.213Z",
+      "created_by_ref": "identity--162f1952-0391-4078-99c2-9a8a9ed31a6d",
+      "object_marking_refs": [
+        "marking-definition--59e2cafc-8007-4757-810f-73dc7a06c8b7",
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "name": "APT29"
+    },
+    {
+      "type": "report",
+      "spec_version": "2.1",
+      "id": "report--ce047fe2-0b3e-4f26-869d-dbe53f10b9d9",
+      "created": "2026-03-02T08:14:55.213Z",
+      "modified": "2026-03-02T08:14:55.213Z",
+      "created_by_ref": "identity--162f1952-0391-4078-99c2-9a8a9ed31a6d",
+      "object_marking_refs": [
+        "marking-definition--59e2cafc-8007-4757-810f-73dc7a06c8b7"
+      ],
+      "name": "Report whose author is elsewhere",
+      "published": "2026-03-01T00:00:00.000Z",
+      "object_refs": [
+        "malware--62d1b93a-6ec8-429a-b783-9b0d7f3c3803",
+        "intrusion-set--22fa7a0e-2acd-492f-9eba-4173d34572a7"
+      ]
+    }
+  ]
+}

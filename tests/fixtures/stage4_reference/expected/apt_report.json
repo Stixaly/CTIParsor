@@ -1,0 +1,2188 @@
+{
+ "ledger": {
+  "entities": [
+   {
+    "entity_type": "campaign",
+    "outcome": "emitted",
+    "stix_id": "campaign--b365b2d3-5581-5c02-b2d8-46f954ee7dd3",
+    "stix_name": "Midnight Frost",
+    "stix_type": "campaign",
+    "value": "Midnight Frost"
+   },
+   {
+    "entity_type": "cve",
+    "outcome": "emitted",
+    "stix_id": "vulnerability--1060aa6d-d4be-5f85-b0a9-a725b3025f74",
+    "stix_name": "CVE-2023-23397",
+    "stix_type": "vulnerability",
+    "value": "CVE-2023-23397"
+   },
+   {
+    "entity_type": "domain",
+    "outcome": "emitted",
+    "stix_id": "domain-name--43264b58-9bdc-59d9-bde0-371299d75349",
+    "stix_type": "domain-name",
+    "value": "frostmail-cdn.test"
+   },
+   {
+    "entity_type": "email",
+    "outcome": "emitted",
+    "stix_id": "email-addr--70046747-644f-5cc9-8f30-9c440f662609",
+    "stix_type": "email-addr",
+    "value": "alerts@mail-notice-ministry.test"
+   },
+   {
+    "entity_type": "file",
+    "outcome": "emitted",
+    "stix_id": "file--2e454e4a-0165-5c28-a2a9-c07c4f2d2eb5",
+    "stix_name": "svchost_update.dll",
+    "stix_type": "file",
+    "value": "svchost_update.dll"
+   },
+   {
+    "entity_type": "identity",
+    "input": "targeted_sector",
+    "outcome": "emitted",
+    "stix_id": "identity--166544e2-ba1f-5a6c-89cf-a63d0c01e91c",
+    "stix_name": "energy",
+    "stix_type": "identity",
+    "value": "energy"
+   },
+   {
+    "entity_type": "identity",
+    "input": "targeted_sector",
+    "outcome": "emitted",
+    "stix_id": "identity--f67fbf06-f3cd-58b3-bad9-ed0b4582e8d8",
+    "stix_name": "government",
+    "stix_type": "identity",
+    "value": "government"
+   },
+   {
+    "entity_type": "ipv4",
+    "outcome": "emitted",
+    "stix_id": "ipv4-addr--ab2d6146-cc21-57a2-941a-aaa29f36f27d",
+    "stix_type": "ipv4-addr",
+    "value": "91.215.85.17"
+   },
+   {
+    "entity_type": "location",
+    "input": "targeted_country",
+    "outcome": "dropped",
+    "reason": "no_iso_country",
+    "value": "Atlantis"
+   },
+   {
+    "entity_type": "location",
+    "input": "targeted_country",
+    "outcome": "merged",
+    "reason": "same_value",
+    "stix_id": "location--1b912957-41a5-55bf-a3ae-547612b0fda2",
+    "stix_name": "Poland",
+    "stix_type": "location",
+    "value": "Poland"
+   },
+   {
+    "entity_type": "location",
+    "input": "targeted_country",
+    "outcome": "merged",
+    "reason": "same_value",
+    "stix_id": "location--7215cb31-5700-55b2-81b3-633c09c0351d",
+    "stix_name": "Germany",
+    "stix_type": "location",
+    "value": "Germany"
+   },
+   {
+    "entity_type": "location",
+    "outcome": "emitted",
+    "stix_id": "location--1b912957-41a5-55bf-a3ae-547612b0fda2",
+    "stix_name": "Poland",
+    "stix_type": "location",
+    "value": "Poland"
+   },
+   {
+    "entity_type": "location",
+    "outcome": "emitted",
+    "stix_id": "location--7215cb31-5700-55b2-81b3-633c09c0351d",
+    "stix_name": "Germany",
+    "stix_type": "location",
+    "value": "Germany"
+   },
+   {
+    "entity_type": "malware",
+    "outcome": "emitted",
+    "stix_id": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
+    "stix_name": "SUNBURST",
+    "stix_type": "malware",
+    "value": "SUNBURST"
+   },
+   {
+    "entity_type": "malware",
+    "outcome": "merged",
+    "reason": "same_value",
+    "stix_id": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
+    "stix_name": "SUNBURST",
+    "stix_type": "malware",
+    "value": "SUNBURST"
+   },
+   {
+    "entity_type": "md5",
+    "outcome": "emitted",
+    "stix_id": "file--d8b240e8-76bc-51b8-8106-05feb4d42c05",
+    "stix_type": "file",
+    "value": "3f2504e04f8911d39a0c0305e82c3301"
+   },
+   {
+    "entity_type": "mutex",
+    "outcome": "emitted",
+    "stix_id": "mutex--5c7d87aa-eae2-55f7-86ab-4fab27548fcb",
+    "stix_name": "Global\\MidnightFrostMtx",
+    "stix_type": "mutex",
+    "value": "Global\\MidnightFrostMtx"
+   },
+   {
+    "entity_type": "registry_key",
+    "outcome": "emitted",
+    "stix_id": "windows-registry-key--7876efa9-c029-5942-bdaa-9c952d452350",
+    "stix_type": "windows-registry-key",
+    "value": "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run\\FrostSvc"
+   },
+   {
+    "entity_type": "sha256",
+    "outcome": "emitted",
+    "stix_id": "file--22f8ff52-8f62-5f03-a53a-6f50f54fd74c",
+    "stix_type": "file",
+    "value": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   },
+   {
+    "entity_type": "threat_actor",
+    "outcome": "emitted",
+    "reason": "alias_canonical",
+    "stix_id": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+    "stix_name": "APT29",
+    "stix_type": "threat-actor",
+    "value": "Cozy Bear"
+   },
+   {
+    "entity_type": "threat_actor",
+    "outcome": "merged",
+    "reason": "alias_canonical",
+    "stix_id": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+    "stix_name": "APT29",
+    "stix_type": "threat-actor",
+    "value": "Cozy Bear"
+   },
+   {
+    "entity_type": "tool",
+    "outcome": "emitted",
+    "stix_id": "tool--dae20ca4-ebdf-5248-83ac-0f7a52f94fcc",
+    "stix_name": "Mimikatz",
+    "stix_type": "tool",
+    "value": "Mimikatz"
+   },
+   {
+    "entity_type": "ttp",
+    "mitre_id": "T1003.001",
+    "outcome": "emitted",
+    "stix_id": "attack-pattern--daf76c9d-477a-5004-be6c-73dc129b5e4d",
+    "stix_name": "LSASS Memory",
+    "stix_type": "attack-pattern",
+    "value": "LSASS Memory"
+   },
+   {
+    "entity_type": "ttp",
+    "mitre_id": "T1059.001",
+    "outcome": "emitted",
+    "stix_id": "attack-pattern--b4d20430-6a7e-59fd-b2e4-8d3f6be56a6a",
+    "stix_name": "PowerShell",
+    "stix_type": "attack-pattern",
+    "value": "PowerShell"
+   },
+   {
+    "entity_type": "ttp",
+    "mitre_id": "T1071.001",
+    "outcome": "emitted",
+    "stix_id": "attack-pattern--8cf0bccc-5d41-5ed4-b706-835efb7b8ee4",
+    "stix_name": "Web Protocols",
+    "stix_type": "attack-pattern",
+    "value": "Web Protocols"
+   },
+   {
+    "entity_type": "ttp",
+    "mitre_id": "T1547.001",
+    "outcome": "emitted",
+    "stix_id": "attack-pattern--21379509-09c4-57a1-82c8-0c126fbf60ff",
+    "stix_name": "Registry Run Keys / Startup Folder",
+    "stix_type": "attack-pattern",
+    "value": "Registry Run Keys / Startup Folder"
+   },
+   {
+    "entity_type": "ttp",
+    "mitre_id": "T1566.001",
+    "outcome": "emitted",
+    "stix_id": "attack-pattern--8180a360-cca4-5911-850e-07d17893cbf8",
+    "stix_name": "Spearphishing Attachment",
+    "stix_type": "attack-pattern",
+    "value": "Spearphishing Attachment"
+   },
+   {
+    "entity_type": "ttp",
+    "mitre_id": "T1566.001",
+    "outcome": "merged",
+    "reason": "same_value",
+    "stix_id": "attack-pattern--8180a360-cca4-5911-850e-07d17893cbf8",
+    "stix_name": "Spearphishing Attachment",
+    "stix_type": "attack-pattern",
+    "value": "T1566.001"
+   },
+   {
+    "entity_type": "url",
+    "outcome": "emitted",
+    "stix_id": "url--07657056-ef32-5f66-9287-5549cb3337c7",
+    "stix_type": "url",
+    "value": "http://frostmail-cdn.test/stage/payload.bin"
+   }
+  ],
+  "objects": {
+   "artifact--180a8609-538b-582f-85b8-eb48ee03a382": {
+    "origin": "source_artifact"
+   },
+   "attack-pattern--21379509-09c4-57a1-82c8-0c126fbf60ff": {
+    "origin": "entity"
+   },
+   "attack-pattern--8180a360-cca4-5911-850e-07d17893cbf8": {
+    "origin": "entity"
+   },
+   "attack-pattern--8cf0bccc-5d41-5ed4-b706-835efb7b8ee4": {
+    "origin": "entity"
+   },
+   "attack-pattern--b4d20430-6a7e-59fd-b2e4-8d3f6be56a6a": {
+    "origin": "entity"
+   },
+   "attack-pattern--daf76c9d-477a-5004-be6c-73dc129b5e4d": {
+    "origin": "entity"
+   },
+   "campaign--b365b2d3-5581-5c02-b2d8-46f954ee7dd3": {
+    "origin": "entity"
+   },
+   "course-of-action--226626e0-b1d6-5107-9d0c-f1ec2f82a741": {
+    "origin": "course_of_action"
+   },
+   "domain-name--43264b58-9bdc-59d9-bde0-371299d75349": {
+    "origin": "entity"
+   },
+   "email-addr--70046747-644f-5cc9-8f30-9c440f662609": {
+    "origin": "entity"
+   },
+   "file--22f8ff52-8f62-5f03-a53a-6f50f54fd74c": {
+    "origin": "entity"
+   },
+   "file--2e454e4a-0165-5c28-a2a9-c07c4f2d2eb5": {
+    "origin": "entity"
+   },
+   "file--d8b240e8-76bc-51b8-8106-05feb4d42c05": {
+    "origin": "entity"
+   },
+   "identity--166544e2-ba1f-5a6c-89cf-a63d0c01e91c": {
+    "origin": "targeted_sector"
+   },
+   "identity--df314057-d669-5e4d-aa9c-5257582a7ecd": {
+    "origin": "author_identity"
+   },
+   "identity--f67fbf06-f3cd-58b3-bad9-ed0b4582e8d8": {
+    "origin": "targeted_sector"
+   },
+   "indicator--012743a8-0532-5c22-ae59-b0d1348b1880": {
+    "ioc_value": "frostmail-cdn.test",
+    "origin": "ioc_indicator",
+    "sco_id": "domain-name--43264b58-9bdc-59d9-bde0-371299d75349",
+    "valid_from_basis": "report_published"
+   },
+   "indicator--6d244288-aebd-58ed-85dc-41f1b6286f64": {
+    "ioc_value": "Global\\MidnightFrostMtx",
+    "origin": "ioc_indicator",
+    "sco_id": "mutex--5c7d87aa-eae2-55f7-86ab-4fab27548fcb",
+    "valid_from_basis": "report_published"
+   },
+   "indicator--8d30e978-c6dd-5439-9ed0-bd61238915c3": {
+    "ioc_value": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "origin": "ioc_indicator",
+    "sco_id": "file--22f8ff52-8f62-5f03-a53a-6f50f54fd74c",
+    "valid_from_basis": "report_published"
+   },
+   "indicator--d3878cdc-a378-528e-b647-2e32f5fbaba4": {
+    "ioc_value": "svchost_update.dll",
+    "origin": "ioc_indicator",
+    "sco_id": "file--2e454e4a-0165-5c28-a2a9-c07c4f2d2eb5",
+    "valid_from_basis": "report_published"
+   },
+   "indicator--d97e1047-aaf6-5971-9401-b2fb9efa2b93": {
+    "ioc_value": "3f2504e04f8911d39a0c0305e82c3301",
+    "origin": "ioc_indicator",
+    "sco_id": "file--d8b240e8-76bc-51b8-8106-05feb4d42c05",
+    "valid_from_basis": "report_published"
+   },
+   "indicator--ed78c78e-753b-5156-9ff9-085a1edd5604": {
+    "ioc_value": "http://frostmail-cdn.test/stage/payload.bin",
+    "origin": "ioc_indicator",
+    "sco_id": "url--07657056-ef32-5f66-9287-5549cb3337c7",
+    "valid_from_basis": "report_published"
+   },
+   "indicator--f54ded35-bf73-558f-acc2-a6a740bc28b3": {
+    "ioc_value": "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run\\FrostSvc",
+    "origin": "ioc_indicator",
+    "sco_id": "windows-registry-key--7876efa9-c029-5942-bdaa-9c952d452350",
+    "valid_from_basis": "report_published"
+   },
+   "indicator--fcde9c8c-df4f-52e8-9a02-8941dca6470e": {
+    "ioc_value": "91.215.85.17",
+    "origin": "ioc_indicator",
+    "sco_id": "ipv4-addr--ab2d6146-cc21-57a2-941a-aaa29f36f27d",
+    "valid_from_basis": "report_published"
+   },
+   "indicator--fdd54cfa-a477-52a7-b6a7-e7a7c3606b0e": {
+    "ioc_value": "alerts@mail-notice-ministry.test",
+    "origin": "ioc_indicator",
+    "sco_id": "email-addr--70046747-644f-5cc9-8f30-9c440f662609",
+    "valid_from_basis": "report_published"
+   },
+   "ipv4-addr--ab2d6146-cc21-57a2-941a-aaa29f36f27d": {
+    "origin": "entity"
+   },
+   "location--1b912957-41a5-55bf-a3ae-547612b0fda2": {
+    "origin": "entity"
+   },
+   "location--7215cb31-5700-55b2-81b3-633c09c0351d": {
+    "origin": "entity"
+   },
+   "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa": {
+    "origin": "entity"
+   },
+   "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1": {
+    "origin": "marking"
+   },
+   "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82": {
+    "origin": "marking"
+   },
+   "mutex--5c7d87aa-eae2-55f7-86ab-4fab27548fcb": {
+    "origin": "entity"
+   },
+   "relationship--R1": {
+    "origin": "completion_transitive",
+    "outside_report": true
+   },
+   "relationship--R10": {
+    "origin": "completion_transitive",
+    "outside_report": true
+   },
+   "relationship--R11": {
+    "origin": "completion_transitive",
+    "outside_report": true
+   },
+   "relationship--R12": {
+    "origin": "completion_transitive",
+    "outside_report": true
+   },
+   "relationship--R13": {
+    "origin": "completion_transitive",
+    "outside_report": true
+   },
+   "relationship--R14": {
+    "origin": "completion_reference",
+    "outside_report": true
+   },
+   "relationship--R15": {
+    "origin": "completion_reference",
+    "outside_report": true
+   },
+   "relationship--R16": {
+    "origin": "completion_reference",
+    "outside_report": true
+   },
+   "relationship--R17": {
+    "origin": "completion_reference",
+    "outside_report": true
+   },
+   "relationship--R18": {
+    "origin": "extracted"
+   },
+   "relationship--R19": {
+    "origin": "extracted"
+   },
+   "relationship--R2": {
+    "origin": "completion_transitive",
+    "outside_report": true
+   },
+   "relationship--R20": {
+    "origin": "extracted"
+   },
+   "relationship--R21": {
+    "origin": "extracted"
+   },
+   "relationship--R22": {
+    "origin": "extracted"
+   },
+   "relationship--R23": {
+    "origin": "extracted"
+   },
+   "relationship--R24": {
+    "origin": "ioc_based_on"
+   },
+   "relationship--R25": {
+    "origin": "ioc_based_on"
+   },
+   "relationship--R26": {
+    "origin": "ioc_based_on"
+   },
+   "relationship--R27": {
+    "origin": "ioc_based_on"
+   },
+   "relationship--R28": {
+    "origin": "ioc_based_on"
+   },
+   "relationship--R29": {
+    "origin": "ioc_based_on"
+   },
+   "relationship--R3": {
+    "origin": "completion_transitive",
+    "outside_report": true
+   },
+   "relationship--R30": {
+    "origin": "ioc_based_on"
+   },
+   "relationship--R31": {
+    "origin": "ioc_based_on"
+   },
+   "relationship--R32": {
+    "origin": "ioc_based_on"
+   },
+   "relationship--R33": {
+    "origin": "extracted"
+   },
+   "relationship--R34": {
+    "origin": "extracted"
+   },
+   "relationship--R35": {
+    "origin": "extracted"
+   },
+   "relationship--R36": {
+    "origin": "extracted"
+   },
+   "relationship--R37": {
+    "origin": "extracted"
+   },
+   "relationship--R38": {
+    "actor": "Cozy Bear",
+    "origin": "targeted_location",
+    "target": "energy"
+   },
+   "relationship--R39": {
+    "actor": "Cozy Bear",
+    "origin": "targeted_location",
+    "target": "government"
+   },
+   "relationship--R4": {
+    "origin": "completion_transitive",
+    "outside_report": true
+   },
+   "relationship--R40": {
+    "actor": "Cozy Bear",
+    "origin": "targeted_location",
+    "target": "Poland"
+   },
+   "relationship--R41": {
+    "actor": "Cozy Bear",
+    "origin": "targeted_location",
+    "target": "Germany"
+   },
+   "relationship--R5": {
+    "origin": "completion_transitive",
+    "outside_report": true
+   },
+   "relationship--R6": {
+    "ioc_value": "frostmail-cdn.test",
+    "malware_name": "SUNBURST",
+    "origin": "ioc_association"
+   },
+   "relationship--R7": {
+    "ioc_value": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "malware_name": "SUNBURST",
+    "origin": "ioc_association"
+   },
+   "relationship--R8": {
+    "ioc_value": "http://frostmail-cdn.test/stage/payload.bin",
+    "malware_name": "SUNBURST",
+    "origin": "ioc_association"
+   },
+   "relationship--R9": {
+    "ioc_value": "91.215.85.17",
+    "malware_name": "SUNBURST",
+    "origin": "ioc_association"
+   },
+   "report--R1": {
+    "origin": "report"
+   },
+   "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884": {
+    "origin": "entity"
+   },
+   "tool--dae20ca4-ebdf-5248-83ac-0f7a52f94fcc": {
+    "origin": "entity"
+   },
+   "url--07657056-ef32-5f66-9287-5549cb3337c7": {
+    "origin": "entity"
+   },
+   "vulnerability--1060aa6d-d4be-5f85-b0a9-a725b3025f74": {
+    "origin": "entity"
+   },
+   "windows-registry-key--7876efa9-c029-5942-bdaa-9c952d452350": {
+    "origin": "entity"
+   }
+  },
+  "relationships": [
+   {
+    "changes": [],
+    "final_type": "attributed-to",
+    "outcome": "emitted",
+    "relationship_type": "attributed-to",
+    "source_ref": "campaign--b365b2d3-5581-5c02-b2d8-46f954ee7dd3",
+    "source_value": "Midnight Frost",
+    "stix_id": "relationship--R21",
+    "target_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+    "target_value": "Cozy Bear"
+   },
+   {
+    "changes": [],
+    "final_type": "communicates-with",
+    "outcome": "emitted",
+    "relationship_type": "communicates-with",
+    "source_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
+    "source_value": "SUNBURST",
+    "stix_id": "relationship--R19",
+    "target_ref": "ipv4-addr--ab2d6146-cc21-57a2-941a-aaa29f36f27d",
+    "target_value": "91.215.85.17"
+   },
+   {
+    "changes": [],
+    "final_type": "drops",
+    "outcome": "emitted",
+    "relationship_type": "drops",
+    "source_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
+    "source_value": "SUNBURST",
+    "stix_id": "relationship--R22",
+    "target_ref": "file--2e454e4a-0165-5c28-a2a9-c07c4f2d2eb5",
+    "target_value": "svchost_update.dll"
+   },
+   {
+    "changes": [],
+    "final_type": "exploits",
+    "outcome": "emitted",
+    "relationship_type": "exploits",
+    "source_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
+    "source_value": "SUNBURST",
+    "stix_id": "relationship--R33",
+    "target_ref": "vulnerability--1060aa6d-d4be-5f85-b0a9-a725b3025f74",
+    "target_value": "CVE-2023-23397"
+   },
+   {
+    "changes": [],
+    "final_type": "targets",
+    "merged_with": "relationship--R41",
+    "outcome": "merged",
+    "relationship_type": "targets",
+    "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+    "source_value": "Cozy Bear",
+    "stix_id": "relationship--R41",
+    "target_ref": "location--7215cb31-5700-55b2-81b3-633c09c0351d",
+    "target_value": "Germany"
+   },
+   {
+    "changes": [],
+    "final_type": "uses",
+    "merged_with": "relationship--R20",
+    "outcome": "merged",
+    "relationship_type": "uses",
+    "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+    "source_value": "Cozy Bear",
+    "stix_id": "relationship--R20",
+    "target_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
+    "target_value": "SUNBURST"
+   },
+   {
+    "changes": [],
+    "final_type": "uses",
+    "outcome": "emitted",
+    "relationship_type": "uses",
+    "source_ref": "campaign--b365b2d3-5581-5c02-b2d8-46f954ee7dd3",
+    "source_value": "Midnight Frost",
+    "stix_id": "relationship--R36",
+    "target_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
+    "target_value": "SUNBURST"
+   },
+   {
+    "changes": [],
+    "final_type": "uses",
+    "outcome": "emitted",
+    "relationship_type": "uses",
+    "source_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
+    "source_value": "SUNBURST",
+    "stix_id": "relationship--R23",
+    "target_ref": "attack-pattern--21379509-09c4-57a1-82c8-0c126fbf60ff",
+    "target_value": "Registry Run Keys / Startup Folder"
+   },
+   {
+    "changes": [],
+    "final_type": "uses",
+    "outcome": "emitted",
+    "relationship_type": "uses",
+    "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+    "source_value": "Cozy Bear",
+    "stix_id": "relationship--R18",
+    "target_ref": "tool--dae20ca4-ebdf-5248-83ac-0f7a52f94fcc",
+    "target_value": "Mimikatz"
+   },
+   {
+    "changes": [],
+    "final_type": "uses",
+    "outcome": "emitted",
+    "relationship_type": "uses",
+    "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+    "source_value": "Cozy Bear",
+    "stix_id": "relationship--R20",
+    "target_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
+    "target_value": "SUNBURST",
+    "times": [
+     {
+      "id": "t-start-01",
+      "kind": "time",
+      "outcome": "withheld",
+      "precision": "day",
+      "reason": "precision_below_policy",
+      "role": "start",
+      "status": "verified",
+      "value": "2024-03-15"
+     }
+    ]
+   },
+   {
+    "changes": [],
+    "final_type": "uses",
+    "outcome": "emitted",
+    "relationship_type": "uses",
+    "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+    "source_value": "Cozy Bear",
+    "stix_id": "relationship--R37",
+    "target_ref": "attack-pattern--daf76c9d-477a-5004-be6c-73dc129b5e4d",
+    "target_value": "LSASS Memory"
+   },
+   {
+    "changes": [],
+    "outcome": "dropped",
+    "reason": "observable_to_attack_pattern",
+    "relationship_type": "communicates-with",
+    "source_ref": "domain-name--43264b58-9bdc-59d9-bde0-371299d75349",
+    "source_value": "frostmail-cdn.test",
+    "target_ref": "attack-pattern--8cf0bccc-5d41-5ed4-b706-835efb7b8ee4",
+    "target_value": "Web Protocols"
+   },
+   {
+    "changes": [],
+    "outcome": "dropped",
+    "reason": "self_loop",
+    "relationship_type": "related-to",
+    "source_value": "APT29",
+    "stix_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+    "target_value": "Cozy Bear"
+   },
+   {
+    "changes": [],
+    "outcome": "dropped",
+    "reason": "unresolved_target",
+    "relationship_type": "uses",
+    "source_value": "Cozy Bear",
+    "target_value": "Ghost Loader"
+   },
+   {
+    "changes": [
+     {
+      "end": "source",
+      "from": "ipv4-addr--ab2d6146-cc21-57a2-941a-aaa29f36f27d",
+      "kind": "reroute",
+      "to": "indicator--fcde9c8c-df4f-52e8-9a02-8941dca6470e"
+     }
+    ],
+    "final_type": "indicates",
+    "outcome": "emitted",
+    "relationship_type": "indicates",
+    "source_ref": "indicator--fcde9c8c-df4f-52e8-9a02-8941dca6470e",
+    "source_value": "91.215.85.17",
+    "stix_id": "relationship--R34",
+    "target_ref": "campaign--b365b2d3-5581-5c02-b2d8-46f954ee7dd3",
+    "target_value": "Midnight Frost"
+   },
+   {
+    "changes": [
+     {
+      "from": "deploys",
+      "kind": "verb",
+      "reason": "unknown_verb",
+      "to": "related-to"
+     }
+    ],
+    "final_type": "related-to",
+    "outcome": "emitted",
+    "relationship_type": "deploys",
+    "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+    "source_value": "Cozy Bear",
+    "stix_id": "relationship--R35",
+    "target_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
+    "target_value": "SUNBURST"
+   }
+  ],
+  "removed": [],
+  "version": 1
+ },
+ "objects": [
+  {
+   "hashes": {
+    "SHA-256": "adea1fcbba34d4236cba8135c79d7cd3624d9aee917f75ddd879aee86a0bd0d4"
+   },
+   "id": "artifact--180a8609-538b-582f-85b8-eb48ee03a382",
+   "mime_type": "application/pdf",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "payload_bin": "TWlkbmlnaHQgRnJvc3Q6IHRoZSBvcmlnaW5hbCBkb2N1bWVudCwgYXMgdGhlIGFuYWx5c3QgdXBsb2FkZWQgaXQuCg==",
+   "spec_version": "2.1",
+   "type": "artifact"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "Persistence through a Run key.",
+   "external_references": [
+    {
+     "external_id": "T1547.001",
+     "source_name": "mitre-attack",
+     "url": "https://attack.mitre.org/techniques/T1547/001/"
+    }
+   ],
+   "id": "attack-pattern--21379509-09c4-57a1-82c8-0c126fbf60ff",
+   "modified": "<build-time>",
+   "name": "Registry Run Keys / Startup Folder",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "spec_version": "2.1",
+   "type": "attack-pattern"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "Spearphishing emails with a malicious attachment.",
+   "external_references": [
+    {
+     "external_id": "T1566.001",
+     "source_name": "mitre-attack",
+     "url": "https://attack.mitre.org/techniques/T1566/001/"
+    }
+   ],
+   "id": "attack-pattern--8180a360-cca4-5911-850e-07d17893cbf8",
+   "modified": "<build-time>",
+   "name": "Spearphishing Attachment",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "spec_version": "2.1",
+   "type": "attack-pattern"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "Second stage fetched over HTTP.",
+   "external_references": [
+    {
+     "external_id": "T1071.001",
+     "source_name": "mitre-attack",
+     "url": "https://attack.mitre.org/techniques/T1071/001/"
+    }
+   ],
+   "id": "attack-pattern--8cf0bccc-5d41-5ed4-b706-835efb7b8ee4",
+   "modified": "<build-time>",
+   "name": "Web Protocols",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "spec_version": "2.1",
+   "type": "attack-pattern"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "Commands run through PowerShell.",
+   "external_references": [
+    {
+     "external_id": "T1059.001",
+     "source_name": "mitre-attack",
+     "url": "https://attack.mitre.org/techniques/T1059/001/"
+    }
+   ],
+   "id": "attack-pattern--b4d20430-6a7e-59fd-b2e4-8d3f6be56a6a",
+   "modified": "<build-time>",
+   "name": "PowerShell",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "spec_version": "2.1",
+   "type": "attack-pattern"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "Credential dumping from LSASS.",
+   "external_references": [
+    {
+     "external_id": "T1003.001",
+     "source_name": "mitre-attack",
+     "url": "https://attack.mitre.org/techniques/T1003/001/"
+    }
+   ],
+   "id": "attack-pattern--daf76c9d-477a-5004-be6c-73dc129b5e4d",
+   "modified": "<build-time>",
+   "name": "LSASS Memory",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "spec_version": "2.1",
+   "type": "attack-pattern"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "campaign--b365b2d3-5581-5c02-b2d8-46f954ee7dd3",
+   "modified": "<build-time>",
+   "name": "Midnight Frost",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "spec_version": "2.1",
+   "type": "campaign"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "course-of-action--226626e0-b1d6-5107-9d0c-f1ec2f82a741",
+   "modified": "<build-time>",
+   "name": "Block frostmail-cdn.test at the proxy",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "spec_version": "2.1",
+   "type": "course-of-action"
+  },
+  {
+   "id": "domain-name--43264b58-9bdc-59d9-bde0-371299d75349",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "spec_version": "2.1",
+   "type": "domain-name",
+   "value": "frostmail-cdn.test"
+  },
+  {
+   "id": "email-addr--70046747-644f-5cc9-8f30-9c440f662609",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "spec_version": "2.1",
+   "type": "email-addr",
+   "value": "alerts@mail-notice-ministry.test"
+  },
+  {
+   "hashes": {
+    "SHA-256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   },
+   "id": "file--22f8ff52-8f62-5f03-a53a-6f50f54fd74c",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "spec_version": "2.1",
+   "type": "file"
+  },
+  {
+   "id": "file--2e454e4a-0165-5c28-a2a9-c07c4f2d2eb5",
+   "name": "svchost_update.dll",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "spec_version": "2.1",
+   "type": "file"
+  },
+  {
+   "hashes": {
+    "MD5": "3f2504e04f8911d39a0c0305e82c3301"
+   },
+   "id": "file--d8b240e8-76bc-51b8-8106-05feb4d42c05",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "spec_version": "2.1",
+   "type": "file"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "identity--166544e2-ba1f-5a6c-89cf-a63d0c01e91c",
+   "identity_class": "class",
+   "modified": "<build-time>",
+   "name": "energy",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "spec_version": "2.1",
+   "type": "identity"
+  },
+  {
+   "created": "<build-time>",
+   "description": "Automated CTI extraction pipeline. Authored the objects in this bundle. created_by_ref refers to this pipeline as the intelligence author, not to the threat actor.",
+   "id": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "identity_class": "system",
+   "modified": "<build-time>",
+   "name": "CTIParsor",
+   "spec_version": "2.1",
+   "type": "identity"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "identity--f67fbf06-f3cd-58b3-bad9-ed0b4582e8d8",
+   "identity_class": "class",
+   "modified": "<build-time>",
+   "name": "government",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "spec_version": "2.1",
+   "type": "identity"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "indicator--012743a8-0532-5c22-ae59-b0d1348b1880",
+   "indicator_types": [
+    "malicious-activity"
+   ],
+   "modified": "<build-time>",
+   "name": "Malicious IoC: frostmail-cdn.test",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "pattern": "[domain-name:value = 'frostmail-cdn.test']",
+   "pattern_type": "stix",
+   "pattern_version": "2.1",
+   "spec_version": "2.1",
+   "type": "indicator",
+   "valid_from": "2026-02-27T00:00:00Z"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "indicator--6d244288-aebd-58ed-85dc-41f1b6286f64",
+   "indicator_types": [
+    "malicious-activity"
+   ],
+   "modified": "<build-time>",
+   "name": "Indicator: Global\\MidnightFrostMtx",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "pattern": "[mutex:name = 'Global\\\\MidnightFrostMtx']",
+   "pattern_type": "stix",
+   "pattern_version": "2.1",
+   "spec_version": "2.1",
+   "type": "indicator",
+   "valid_from": "2026-02-27T00:00:00Z"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "indicator--8d30e978-c6dd-5439-9ed0-bd61238915c3",
+   "indicator_types": [
+    "malicious-activity"
+   ],
+   "modified": "<build-time>",
+   "name": "Malicious IoC: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "pattern": "[file:hashes.'SHA-256' = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855']",
+   "pattern_type": "stix",
+   "pattern_version": "2.1",
+   "spec_version": "2.1",
+   "type": "indicator",
+   "valid_from": "2026-02-27T00:00:00Z"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "indicator--d3878cdc-a378-528e-b647-2e32f5fbaba4",
+   "indicator_types": [
+    "malicious-activity"
+   ],
+   "modified": "<build-time>",
+   "name": "Indicator: svchost_update.dll",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "pattern": "[file:name = 'svchost_update.dll']",
+   "pattern_type": "stix",
+   "pattern_version": "2.1",
+   "spec_version": "2.1",
+   "type": "indicator",
+   "valid_from": "2026-02-27T00:00:00Z"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "indicator--d97e1047-aaf6-5971-9401-b2fb9efa2b93",
+   "indicator_types": [
+    "malicious-activity"
+   ],
+   "modified": "<build-time>",
+   "name": "Indicator: 3f2504e04f8911d39a0c0305e82c3301",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "pattern": "[file:hashes.MD5 = '3f2504e04f8911d39a0c0305e82c3301']",
+   "pattern_type": "stix",
+   "pattern_version": "2.1",
+   "spec_version": "2.1",
+   "type": "indicator",
+   "valid_from": "2026-02-27T00:00:00Z"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "indicator--ed78c78e-753b-5156-9ff9-085a1edd5604",
+   "indicator_types": [
+    "malicious-activity"
+   ],
+   "modified": "<build-time>",
+   "name": "Malicious IoC: http://frostmail-cdn.test/stage/payload.bin",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "pattern": "[url:value = 'http://frostmail-cdn.test/stage/payload.bin']",
+   "pattern_type": "stix",
+   "pattern_version": "2.1",
+   "spec_version": "2.1",
+   "type": "indicator",
+   "valid_from": "2026-02-27T00:00:00Z"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "indicator--f54ded35-bf73-558f-acc2-a6a740bc28b3",
+   "indicator_types": [
+    "malicious-activity"
+   ],
+   "modified": "<build-time>",
+   "name": "Indicator: HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run\\FrostSvc",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "pattern": "[windows-registry-key:key = 'HKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run\\\\FrostSvc']",
+   "pattern_type": "stix",
+   "pattern_version": "2.1",
+   "spec_version": "2.1",
+   "type": "indicator",
+   "valid_from": "2026-02-27T00:00:00Z"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "indicator--fcde9c8c-df4f-52e8-9a02-8941dca6470e",
+   "indicator_types": [
+    "malicious-activity"
+   ],
+   "modified": "<build-time>",
+   "name": "Malicious IoC: 91.215.85.17",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "pattern": "[ipv4-addr:value = '91.215.85.17']",
+   "pattern_type": "stix",
+   "pattern_version": "2.1",
+   "spec_version": "2.1",
+   "type": "indicator",
+   "valid_from": "2026-02-27T00:00:00Z"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "indicator--fdd54cfa-a477-52a7-b6a7-e7a7c3606b0e",
+   "indicator_types": [
+    "malicious-activity"
+   ],
+   "modified": "<build-time>",
+   "name": "Indicator: alerts@mail-notice-ministry.test",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "pattern": "[email-addr:value = 'alerts@mail-notice-ministry.test']",
+   "pattern_type": "stix",
+   "pattern_version": "2.1",
+   "spec_version": "2.1",
+   "type": "indicator",
+   "valid_from": "2026-02-27T00:00:00Z"
+  },
+  {
+   "id": "ipv4-addr--ab2d6146-cc21-57a2-941a-aaa29f36f27d",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "spec_version": "2.1",
+   "type": "ipv4-addr",
+   "value": "91.215.85.17"
+  },
+  {
+   "country": "PL",
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "location--1b912957-41a5-55bf-a3ae-547612b0fda2",
+   "modified": "<build-time>",
+   "name": "Poland",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "spec_version": "2.1",
+   "type": "location"
+  },
+  {
+   "country": "DE",
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "location--7215cb31-5700-55b2-81b3-633c09c0351d",
+   "modified": "<build-time>",
+   "name": "Germany",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "spec_version": "2.1",
+   "type": "location"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
+   "is_family": true,
+   "modified": "<build-time>",
+   "name": "SUNBURST",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "spec_version": "2.1",
+   "type": "malware"
+  },
+  {
+   "created": "<build-time>",
+   "definition": {
+    "statement": "PAP:AMBER"
+   },
+   "definition_type": "statement",
+   "id": "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1",
+   "spec_version": "2.1",
+   "type": "marking-definition"
+  },
+  {
+   "created": "2017-01-20T00:00:00.000Z",
+   "definition": {
+    "tlp": "amber"
+   },
+   "definition_type": "tlp",
+   "id": "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+   "name": "TLP:AMBER",
+   "spec_version": "2.1",
+   "type": "marking-definition"
+  },
+  {
+   "id": "mutex--5c7d87aa-eae2-55f7-86ab-4fab27548fcb",
+   "name": "Global\\MidnightFrostMtx",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "spec_version": "2.1",
+   "type": "mutex"
+  },
+  {
+   "confidence": 76,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R1",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "uses",
+   "source_ref": "campaign--b365b2d3-5581-5c02-b2d8-46f954ee7dd3",
+   "spec_version": "2.1",
+   "target_ref": "attack-pattern--21379509-09c4-57a1-82c8-0c126fbf60ff",
+   "type": "relationship",
+   "x_evidence_label": "inferred",
+   "x_inference_rule": "transitive:attributed-to+uses",
+   "x_inferred_from": [
+    "relationship--R21",
+    "relationship--R15"
+   ]
+  },
+  {
+   "confidence": 81,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R10",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "targets",
+   "source_ref": "campaign--b365b2d3-5581-5c02-b2d8-46f954ee7dd3",
+   "spec_version": "2.1",
+   "target_ref": "vulnerability--1060aa6d-d4be-5f85-b0a9-a725b3025f74",
+   "type": "relationship",
+   "x_evidence_label": "inferred",
+   "x_inference_rule": "transitive:uses+exploits",
+   "x_inferred_from": [
+    "relationship--R36",
+    "relationship--R33"
+   ]
+  },
+  {
+   "confidence": 81,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R11",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "targets",
+   "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+   "spec_version": "2.1",
+   "target_ref": "vulnerability--1060aa6d-d4be-5f85-b0a9-a725b3025f74",
+   "type": "relationship",
+   "x_evidence_label": "inferred",
+   "x_inference_rule": "transitive:uses+exploits",
+   "x_inferred_from": [
+    "relationship--R20",
+    "relationship--R33"
+   ]
+  },
+  {
+   "confidence": 81,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R12",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "uses",
+   "source_ref": "campaign--b365b2d3-5581-5c02-b2d8-46f954ee7dd3",
+   "spec_version": "2.1",
+   "target_ref": "attack-pattern--daf76c9d-477a-5004-be6c-73dc129b5e4d",
+   "type": "relationship",
+   "x_evidence_label": "inferred",
+   "x_inference_rule": "transitive:attributed-to+uses",
+   "x_inferred_from": [
+    "relationship--R21",
+    "relationship--R37"
+   ]
+  },
+  {
+   "confidence": 81,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R13",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "uses",
+   "source_ref": "campaign--b365b2d3-5581-5c02-b2d8-46f954ee7dd3",
+   "spec_version": "2.1",
+   "target_ref": "tool--dae20ca4-ebdf-5248-83ac-0f7a52f94fcc",
+   "type": "relationship",
+   "x_evidence_label": "inferred",
+   "x_inference_rule": "transitive:attributed-to+uses",
+   "x_inferred_from": [
+    "relationship--R21",
+    "relationship--R18"
+   ]
+  },
+  {
+   "confidence": 85,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R14",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "uses",
+   "source_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
+   "spec_version": "2.1",
+   "target_ref": "attack-pattern--8cf0bccc-5d41-5ed4-b706-835efb7b8ee4",
+   "type": "relationship",
+   "x_evidence_label": "external-reference",
+   "x_inference_rule": "attack-reference:S0559>T1071.001"
+  },
+  {
+   "confidence": 85,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R15",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "uses",
+   "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+   "spec_version": "2.1",
+   "target_ref": "attack-pattern--21379509-09c4-57a1-82c8-0c126fbf60ff",
+   "type": "relationship",
+   "x_evidence_label": "external-reference",
+   "x_inference_rule": "attack-reference:G0016>T1547.001"
+  },
+  {
+   "confidence": 85,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R16",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "uses",
+   "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+   "spec_version": "2.1",
+   "target_ref": "attack-pattern--8180a360-cca4-5911-850e-07d17893cbf8",
+   "type": "relationship",
+   "x_evidence_label": "external-reference",
+   "x_inference_rule": "attack-reference:G0016>T1566.001"
+  },
+  {
+   "confidence": 85,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R17",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "uses",
+   "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+   "spec_version": "2.1",
+   "target_ref": "attack-pattern--b4d20430-6a7e-59fd-b2e4-8d3f6be56a6a",
+   "type": "relationship",
+   "x_evidence_label": "external-reference",
+   "x_inference_rule": "attack-reference:G0016>T1059.001"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "Cozy Bear dumped credentials from LSASS memory with Mimikatz.",
+   "id": "relationship--R18",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "uses",
+   "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+   "spec_version": "2.1",
+   "target_ref": "tool--dae20ca4-ebdf-5248-83ac-0f7a52f94fcc",
+   "type": "relationship",
+   "x_evidence_label": "reported"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "SUNBURST contacted the command-and-control server at 91.215.85.17",
+   "id": "relationship--R19",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "communicates-with",
+   "source_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
+   "spec_version": "2.1",
+   "target_ref": "ipv4-addr--ab2d6146-cc21-57a2-941a-aaa29f36f27d",
+   "type": "relationship",
+   "x_evidence_label": "observed"
+  },
+  {
+   "confidence": 76,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R2",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "uses",
+   "source_ref": "campaign--b365b2d3-5581-5c02-b2d8-46f954ee7dd3",
+   "spec_version": "2.1",
+   "target_ref": "attack-pattern--8180a360-cca4-5911-850e-07d17893cbf8",
+   "type": "relationship",
+   "x_evidence_label": "inferred",
+   "x_inference_rule": "transitive:attributed-to+uses",
+   "x_inferred_from": [
+    "relationship--R21",
+    "relationship--R16"
+   ]
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "The attachment dropped a loader called SUNBURST.",
+   "id": "relationship--R20",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "uses",
+   "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+   "spec_version": "2.1",
+   "target_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
+   "type": "relationship",
+   "x_evidence_label": "reported",
+   "x_temporal_assertions": [
+    {
+     "anchor": "explicit",
+     "id": "t-start-01",
+     "origin": "llm",
+     "precision": "day",
+     "qualifier": "none",
+     "role": "start",
+     "status": "verified",
+     "time_text": "in March 2024",
+     "value": "2024-03-15"
+    }
+   ]
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "The campaign, tracked as Midnight Frost",
+   "id": "relationship--R21",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "attributed-to",
+   "source_ref": "campaign--b365b2d3-5581-5c02-b2d8-46f954ee7dd3",
+   "spec_version": "2.1",
+   "target_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+   "type": "relationship",
+   "x_evidence_label": "reported"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "The loader also dropped the file svchost_update.dll",
+   "id": "relationship--R22",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "drops",
+   "source_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
+   "spec_version": "2.1",
+   "target_ref": "file--2e454e4a-0165-5c28-a2a9-c07c4f2d2eb5",
+   "type": "relationship",
+   "x_evidence_label": "reported"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "wrote a persistence entry under HKLM",
+   "id": "relationship--R23",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "uses",
+   "source_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
+   "spec_version": "2.1",
+   "target_ref": "attack-pattern--21379509-09c4-57a1-82c8-0c126fbf60ff",
+   "type": "relationship",
+   "x_evidence_label": "reported"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R24",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "based-on",
+   "source_ref": "indicator--012743a8-0532-5c22-ae59-b0d1348b1880",
+   "spec_version": "2.1",
+   "target_ref": "domain-name--43264b58-9bdc-59d9-bde0-371299d75349",
+   "type": "relationship",
+   "x_evidence_label": "observed"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R25",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "based-on",
+   "source_ref": "indicator--6d244288-aebd-58ed-85dc-41f1b6286f64",
+   "spec_version": "2.1",
+   "target_ref": "mutex--5c7d87aa-eae2-55f7-86ab-4fab27548fcb",
+   "type": "relationship",
+   "x_evidence_label": "observed"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R26",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "based-on",
+   "source_ref": "indicator--8d30e978-c6dd-5439-9ed0-bd61238915c3",
+   "spec_version": "2.1",
+   "target_ref": "file--22f8ff52-8f62-5f03-a53a-6f50f54fd74c",
+   "type": "relationship",
+   "x_evidence_label": "observed"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R27",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "based-on",
+   "source_ref": "indicator--d3878cdc-a378-528e-b647-2e32f5fbaba4",
+   "spec_version": "2.1",
+   "target_ref": "file--2e454e4a-0165-5c28-a2a9-c07c4f2d2eb5",
+   "type": "relationship",
+   "x_evidence_label": "observed"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R28",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "based-on",
+   "source_ref": "indicator--d97e1047-aaf6-5971-9401-b2fb9efa2b93",
+   "spec_version": "2.1",
+   "target_ref": "file--d8b240e8-76bc-51b8-8106-05feb4d42c05",
+   "type": "relationship",
+   "x_evidence_label": "observed"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R29",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "based-on",
+   "source_ref": "indicator--ed78c78e-753b-5156-9ff9-085a1edd5604",
+   "spec_version": "2.1",
+   "target_ref": "url--07657056-ef32-5f66-9287-5549cb3337c7",
+   "type": "relationship",
+   "x_evidence_label": "observed"
+  },
+  {
+   "confidence": 76,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R3",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "uses",
+   "source_ref": "campaign--b365b2d3-5581-5c02-b2d8-46f954ee7dd3",
+   "spec_version": "2.1",
+   "target_ref": "attack-pattern--8cf0bccc-5d41-5ed4-b706-835efb7b8ee4",
+   "type": "relationship",
+   "x_evidence_label": "inferred",
+   "x_inference_rule": "transitive:uses+uses",
+   "x_inferred_from": [
+    "relationship--R36",
+    "relationship--R14"
+   ]
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R30",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "based-on",
+   "source_ref": "indicator--f54ded35-bf73-558f-acc2-a6a740bc28b3",
+   "spec_version": "2.1",
+   "target_ref": "windows-registry-key--7876efa9-c029-5942-bdaa-9c952d452350",
+   "type": "relationship",
+   "x_evidence_label": "observed"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R31",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "based-on",
+   "source_ref": "indicator--fcde9c8c-df4f-52e8-9a02-8941dca6470e",
+   "spec_version": "2.1",
+   "target_ref": "ipv4-addr--ab2d6146-cc21-57a2-941a-aaa29f36f27d",
+   "type": "relationship",
+   "x_evidence_label": "observed"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R32",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "based-on",
+   "source_ref": "indicator--fdd54cfa-a477-52a7-b6a7-e7a7c3606b0e",
+   "spec_version": "2.1",
+   "target_ref": "email-addr--70046747-644f-5cc9-8f30-9c440f662609",
+   "type": "relationship",
+   "x_evidence_label": "observed"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R33",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "exploits",
+   "source_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
+   "spec_version": "2.1",
+   "target_ref": "vulnerability--1060aa6d-d4be-5f85-b0a9-a725b3025f74",
+   "type": "relationship",
+   "x_evidence_label": "reported"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R34",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "indicates",
+   "source_ref": "indicator--fcde9c8c-df4f-52e8-9a02-8941dca6470e",
+   "spec_version": "2.1",
+   "target_ref": "campaign--b365b2d3-5581-5c02-b2d8-46f954ee7dd3",
+   "type": "relationship",
+   "x_evidence_label": "reported"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R35",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "related-to",
+   "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+   "spec_version": "2.1",
+   "target_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
+   "type": "relationship",
+   "x_evidence_label": "reported"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R36",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "uses",
+   "source_ref": "campaign--b365b2d3-5581-5c02-b2d8-46f954ee7dd3",
+   "spec_version": "2.1",
+   "target_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
+   "type": "relationship",
+   "x_evidence_label": "reported"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R37",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "uses",
+   "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+   "spec_version": "2.1",
+   "target_ref": "attack-pattern--daf76c9d-477a-5004-be6c-73dc129b5e4d",
+   "type": "relationship",
+   "x_evidence_label": "reported"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R38",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "targets",
+   "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+   "spec_version": "2.1",
+   "target_ref": "identity--166544e2-ba1f-5a6c-89cf-a63d0c01e91c",
+   "type": "relationship",
+   "x_evidence_label": "reported"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R39",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "targets",
+   "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+   "spec_version": "2.1",
+   "target_ref": "identity--f67fbf06-f3cd-58b3-bad9-ed0b4582e8d8",
+   "type": "relationship",
+   "x_evidence_label": "reported"
+  },
+  {
+   "confidence": 76,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R4",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "uses",
+   "source_ref": "campaign--b365b2d3-5581-5c02-b2d8-46f954ee7dd3",
+   "spec_version": "2.1",
+   "target_ref": "attack-pattern--b4d20430-6a7e-59fd-b2e4-8d3f6be56a6a",
+   "type": "relationship",
+   "x_evidence_label": "inferred",
+   "x_inference_rule": "transitive:attributed-to+uses",
+   "x_inferred_from": [
+    "relationship--R21",
+    "relationship--R17"
+   ]
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R40",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "targets",
+   "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+   "spec_version": "2.1",
+   "target_ref": "location--1b912957-41a5-55bf-a3ae-547612b0fda2",
+   "type": "relationship",
+   "x_evidence_label": "reported"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R41",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "targets",
+   "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+   "spec_version": "2.1",
+   "target_ref": "location--7215cb31-5700-55b2-81b3-633c09c0351d",
+   "type": "relationship",
+   "x_evidence_label": "reported"
+  },
+  {
+   "confidence": 76,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R5",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "uses",
+   "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+   "spec_version": "2.1",
+   "target_ref": "attack-pattern--8cf0bccc-5d41-5ed4-b706-835efb7b8ee4",
+   "type": "relationship",
+   "x_evidence_label": "inferred",
+   "x_inference_rule": "transitive:uses+uses",
+   "x_inferred_from": [
+    "relationship--R20",
+    "relationship--R14"
+   ]
+  },
+  {
+   "confidence": 80,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R6",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "indicates",
+   "source_ref": "indicator--012743a8-0532-5c22-ae59-b0d1348b1880",
+   "spec_version": "2.1",
+   "target_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
+   "type": "relationship",
+   "x_evidence_label": "reported"
+  },
+  {
+   "confidence": 80,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R7",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "indicates",
+   "source_ref": "indicator--8d30e978-c6dd-5439-9ed0-bd61238915c3",
+   "spec_version": "2.1",
+   "target_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
+   "type": "relationship",
+   "x_evidence_label": "reported"
+  },
+  {
+   "confidence": 80,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R8",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "indicates",
+   "source_ref": "indicator--ed78c78e-753b-5156-9ff9-085a1edd5604",
+   "spec_version": "2.1",
+   "target_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
+   "type": "relationship",
+   "x_evidence_label": "reported"
+  },
+  {
+   "confidence": 80,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "relationship--R9",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "indicates",
+   "source_ref": "indicator--fcde9c8c-df4f-52e8-9a02-8941dca6470e",
+   "spec_version": "2.1",
+   "target_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
+   "type": "relationship",
+   "x_evidence_label": "reported"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "Operation Midnight Frost: a spearphishing campaign against European ministries\n\nCozy Bear sent spearphishing emails with a malicious attachment from alerts@mail-notice-ministry.test to staff of foreign ministries in Germany and Poland. The campaign, tracked as Midnight Frost, targeted the government sector and the energy sector.\n\nThe attachment dropped a loader called SUNBURST. After execution SUNBURST created the mutex Global\\MidnightFrostMtx and wrote a persistence entry under HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run\\FrostSvc. The loader also dropped the file svchost_update.dll, identified by the hashes 3f2504e04f8911d39a0c0305e82c3301 (MD5) and e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 (SHA-256).\n\nSUNBURST contacted the command-and-control server at 91.215.85.17 and resolved frostmail-cdn.test for its second stage, downloaded from http://frostmail-cdn.test/stage/payload.bin. The operators used PowerShell to run commands on the compromised hosts. Cozy Bear dumped credentials from LSASS memory with Mimikatz.\n\nThe intrusion exploited CVE-2023-23397 in Microsoft Outlook to steal NTLM hashes before the attachment was opened. Defenders should block frostmail-cdn.test at the proxy and hunt for the registry key above.",
+   "external_references": [
+    {
+     "description": "Original CTI report: midnight_frost.pdf",
+     "hashes": {
+      "SHA-256": "adea1fcbba34d4236cba8135c79d7cd3624d9aee917f75ddd879aee86a0bd0d4"
+     },
+     "source_name": "original_document"
+    }
+   ],
+   "id": "report--R1",
+   "modified": "<build-time>",
+   "name": "Operation Midnight Frost",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "object_refs": [
+    "ipv4-addr--ab2d6146-cc21-57a2-941a-aaa29f36f27d",
+    "domain-name--43264b58-9bdc-59d9-bde0-371299d75349",
+    "url--07657056-ef32-5f66-9287-5549cb3337c7",
+    "file--22f8ff52-8f62-5f03-a53a-6f50f54fd74c",
+    "file--d8b240e8-76bc-51b8-8106-05feb4d42c05",
+    "file--2e454e4a-0165-5c28-a2a9-c07c4f2d2eb5",
+    "windows-registry-key--7876efa9-c029-5942-bdaa-9c952d452350",
+    "mutex--5c7d87aa-eae2-55f7-86ab-4fab27548fcb",
+    "email-addr--70046747-644f-5cc9-8f30-9c440f662609",
+    "location--7215cb31-5700-55b2-81b3-633c09c0351d",
+    "location--1b912957-41a5-55bf-a3ae-547612b0fda2",
+    "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+    "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
+    "tool--dae20ca4-ebdf-5248-83ac-0f7a52f94fcc",
+    "attack-pattern--8180a360-cca4-5911-850e-07d17893cbf8",
+    "attack-pattern--b4d20430-6a7e-59fd-b2e4-8d3f6be56a6a",
+    "attack-pattern--21379509-09c4-57a1-82c8-0c126fbf60ff",
+    "attack-pattern--8cf0bccc-5d41-5ed4-b706-835efb7b8ee4",
+    "attack-pattern--daf76c9d-477a-5004-be6c-73dc129b5e4d",
+    "vulnerability--1060aa6d-d4be-5f85-b0a9-a725b3025f74",
+    "campaign--b365b2d3-5581-5c02-b2d8-46f954ee7dd3",
+    "identity--f67fbf06-f3cd-58b3-bad9-ed0b4582e8d8",
+    "identity--166544e2-ba1f-5a6c-89cf-a63d0c01e91c",
+    "course-of-action--226626e0-b1d6-5107-9d0c-f1ec2f82a741",
+    "indicator--fcde9c8c-df4f-52e8-9a02-8941dca6470e",
+    "relationship--R9",
+    "relationship--R31",
+    "indicator--012743a8-0532-5c22-ae59-b0d1348b1880",
+    "relationship--R6",
+    "relationship--R24",
+    "indicator--ed78c78e-753b-5156-9ff9-085a1edd5604",
+    "relationship--R8",
+    "relationship--R29",
+    "indicator--8d30e978-c6dd-5439-9ed0-bd61238915c3",
+    "relationship--R7",
+    "relationship--R26",
+    "indicator--d97e1047-aaf6-5971-9401-b2fb9efa2b93",
+    "relationship--R28",
+    "indicator--d3878cdc-a378-528e-b647-2e32f5fbaba4",
+    "relationship--R27",
+    "indicator--f54ded35-bf73-558f-acc2-a6a740bc28b3",
+    "relationship--R30",
+    "indicator--6d244288-aebd-58ed-85dc-41f1b6286f64",
+    "relationship--R25",
+    "indicator--fdd54cfa-a477-52a7-b6a7-e7a7c3606b0e",
+    "relationship--R32",
+    "relationship--R41",
+    "relationship--R40",
+    "relationship--R39",
+    "relationship--R38",
+    "relationship--R20",
+    "relationship--R18",
+    "relationship--R37",
+    "relationship--R21",
+    "relationship--R36",
+    "relationship--R19",
+    "relationship--R22",
+    "relationship--R23",
+    "relationship--R33",
+    "relationship--R35",
+    "relationship--R34",
+    "artifact--180a8609-538b-582f-85b8-eb48ee03a382"
+   ],
+   "published": "<build-time>",
+   "spec_version": "2.1",
+   "type": "report",
+   "x_source_published": {
+    "detail": "pdf:CreationDate",
+    "source": "publication_meta",
+    "value": "2026-02-27"
+   },
+   "x_synthesis_stats": {
+    "completion": {
+     "aliases_merged": 0,
+     "capped": false,
+     "long_distance_added": 0,
+     "notes": [],
+     "reference_added": 4,
+     "skipped_not_suggested": 1,
+     "transitive_added": 9
+    },
+    "pin": {
+     "budget": 0,
+     "mode": "fair-share",
+     "rules": [],
+     "total_blocked": 0,
+     "total_candidates": 0,
+     "total_emitted": 0,
+     "total_truncated": 0
+    }
+   }
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+   "modified": "<build-time>",
+   "name": "APT29",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "spec_version": "2.1",
+   "type": "threat-actor"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "id": "tool--dae20ca4-ebdf-5248-83ac-0f7a52f94fcc",
+   "modified": "<build-time>",
+   "name": "Mimikatz",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "spec_version": "2.1",
+   "type": "tool"
+  },
+  {
+   "id": "url--07657056-ef32-5f66-9287-5549cb3337c7",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "spec_version": "2.1",
+   "type": "url",
+   "value": "http://frostmail-cdn.test/stage/payload.bin"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "Microsoft Outlook elevation of privilege vulnerability.",
+   "external_references": [
+    {
+     "external_id": "CVE-2023-23397",
+     "source_name": "cve",
+     "url": "https://nvd.nist.gov/vuln/detail/CVE-2023-23397"
+    }
+   ],
+   "id": "vulnerability--1060aa6d-d4be-5f85-b0a9-a725b3025f74",
+   "modified": "<build-time>",
+   "name": "CVE-2023-23397",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "spec_version": "2.1",
+   "type": "vulnerability",
+   "x_cvss_v3_score": 9.8,
+   "x_cvss_v3_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+  },
+  {
+   "id": "windows-registry-key--7876efa9-c029-5942-bdaa-9c952d452350",
+   "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run\\FrostSvc",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "spec_version": "2.1",
+   "type": "windows-registry-key"
+  }
+ ]
+}
