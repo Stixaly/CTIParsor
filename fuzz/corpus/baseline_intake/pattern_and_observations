@@ -1,0 +1,1 @@
+[domain-name:value = 'frostmail-cdn.test'] AND [url:value = 'http://frostmail-cdn.test/stage/payload.bin']

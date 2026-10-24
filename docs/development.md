@@ -62,10 +62,12 @@ make ci                                    # every check CI runs: lint, types, t
 
 ## Fuzzing
 
-`fuzz/` holds four Atheris targets for the code that reads attacker-controlled
+`fuzz/` holds five Atheris targets for the code that reads attacker-controlled
 input (ADR-0081): report text (`fuzz_report_text`), dates (`fuzz_dates`), the
-gates quoted rules go through (`fuzz_rule_gates`), and the prompt enclosure
-(`fuzz_spotlight`). The `Fuzzing` workflow runs each for 60 s on a pull
+gates quoted rules go through (`fuzz_rule_gates`), the prompt enclosure
+(`fuzz_spotlight`), and the baseline STIX bundle an analyst supplies
+(`fuzz_baseline_intake`, ADR-0090; the workflow gives it `-max_len=65536`, the
+others 16384). The `Fuzzing` workflow runs each for 60 s on a pull
 request and 10 minutes weekly; `tests/test_fuzz_targets.py` runs them over
 their seeds in the ordinary suite. Atheris installs on Linux x86_64 only
 (`requirements/requirements-dev.txt`). To fuzz locally, give libFuzzer a *copy* of the
@@ -150,6 +152,7 @@ CTIParsor/
 │   ├── stage4c_long_distance.py   # LLM long-distance relation inferer (opt-in)
 │   ├── stix_rel_spec.py           # STIX 2.1 suggested-relationship table (spec guard)
 │   ├── stage5_validation.py       # Bundle validation + export
+│   ├── baseline_stix.py           # Reads an analyst's STIX 2.1 baseline bundle and computes the match keys; not wired in yet (ADR-0090, lot 1)
 │   ├── bundle_revisions.py        # Which stored bundles predate an output fix, judged on the run or the build by the fix's scope (ADR-0035, ADR-0086)
 │   ├── mitre_db.py                # Lazy-loaded MITRE index (techniques + tactics)
 │   ├── vlm.py                     # Provider-agnostic vision backends + capability probe (ADR-0033)

@@ -130,7 +130,7 @@ Everything else is **Met** or **N/A** as of 2026-10-10.
 | static_analysis_common_vulnerabilities | Met | CodeQL `security-extended`, ruff `S`. |
 | static_analysis_fixed | Met | 0 open code-scanning alerts. |
 | static_analysis_often | Met | Every pull request and push. |
-| dynamic_analysis | Met | Atheris fuzzes the attacker-facing parsers on every pull request (four targets, ADR-0081); the container smoke test runs the stack end to end. |
+| dynamic_analysis | Met | Atheris fuzzes the attacker-facing parsers on every pull request (five targets, ADR-0081 and ADR-0090); the container smoke test runs the stack end to end. |
 | dynamic_analysis_unsafe | N/A | Python and TypeScript, memory-safe languages. |
 | dynamic_analysis_enable_assertions | Met | The fuzz targets assert invariants; the tests run with assertions on. |
 | dynamic_analysis_fixed | Met | A fuzzer failure blocks the merge (required check); the input joins `fuzz/corpus/` and the fast tests replay it. |

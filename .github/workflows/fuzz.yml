@@ -7,10 +7,12 @@ name: Fuzzing
 # blow-up past -rss_limit_mb fails the job and uploads the input that did it.
 # 60 s a target on pull requests, 10 minutes in the weekly run.
 #
-# The four jobs are required checks on main (ADR-0078, amendment of
+# The first four jobs are required checks on main (ADR-0078, amendment of
 # 2026-10-10), so pull_request has no path filter: a required check that never
-# reports blocks the merge.  A failure is fixed before the merge, and its input
-# added to fuzz/corpus/<target>/, where tests/test_fuzz_targets.py replays it.
+# reports blocks the merge.  Fuzz (baseline_intake) is not required until it is
+# added to the ruleset (a settings click).  A failure is fixed before the merge,
+# and its input added to fuzz/corpus/<target>/, where tests/test_fuzz_targets.py
+# replays it.
 on:
   pull_request:
   push:
@@ -28,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [report_text, dates, rule_gates, spotlight]
+        target: [report_text, dates, rule_gates, spotlight, baseline_intake]
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -54,11 +56,14 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
           SECONDS_PER_TARGET: ${{ github.event_name == 'schedule' && '600' || '60' }}
+          # The baseline_intake seeds are STIX bundles, the largest 16.6 KB: cut at 16384 bytes
+          # they would no longer be JSON.
+          MAX_LEN: ${{ matrix.target == 'baseline_intake' && '65536' || '16384' }}
         run: |
           mkdir -p "$RUNNER_TEMP/corpus" "$RUNNER_TEMP/crashes"
           cp -r "fuzz/corpus/$TARGET/." "$RUNNER_TEMP/corpus/"
           python "fuzz/fuzz_$TARGET.py" \
-            -max_total_time="$SECONDS_PER_TARGET" -timeout=10 -rss_limit_mb=2048 -max_len=16384 \
+            -max_total_time="$SECONDS_PER_TARGET" -timeout=10 -rss_limit_mb=2048 -max_len="$MAX_LEN" \
             -artifact_prefix="$RUNNER_TEMP/crashes/" "$RUNNER_TEMP/corpus"
 
       - name: Upload the input that failed

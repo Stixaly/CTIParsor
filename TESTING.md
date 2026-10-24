@@ -201,6 +201,7 @@ current truth.
 | **Graph completion** | `test_stage4c_long_distance.py` | 16 | long-distance inference, direction swap, evidence recording, passages naming the entities in a long report |
 | **Graph completion** | `test_grounding_by_label.py` | 8 | STIX display names, edge scoring, bundle validation |
 | Validation/export | `test_stage5.py` | 23 | bundle validation (the three verdicts, the schemas shipped with the repository and their install), file writing, nested directories; `validate_bundle` writes nothing and judges as `validate_and_export` does, `export_path` names the file by verdict (`_invalid` suffix), `export_bundle` writes where the verdict says (ADR-0086) |
+| Baseline STIX (ADR-0090) | `test_baseline_stix.py` | 434 | `pipeline/baseline_stix.py`: the entity-type table against what Stage 4 builds, normalisation, the keys of a row, an object and a STIX pattern, families, `resolve` / `lookup` (exact-type tie-break, `AMBIGUOUS`), intake (limits, 2.0 refusal, ids and versions, scope by Report, rules, id collisions, reference closure, TLP/PAP minimum, the index), the bounded search for objects the schemas refuse, hostile input, and `validate_bundle(quiet=True)` returning the verdict silently |
 | **Provenance** | `test_provenance.py` | 5 | authoring identity, TLP marking, created_by_ref |
 | **Provenance** | `test_edge_provenance.py` | 10 | relationship properties, pinned edges, run config |
 | **Provenance** | `test_bundle_staleness.py` | 26 | `git_rev` extraction from malformed run configs, ancestry verdicts, an undecidable git result never marking a bundle stale (ADR-0035); a `mapping` fix judged on the build's revision, an `extraction` fix on the run's and the build's, the audit line naming both (ADR-0086) |
@@ -248,7 +249,7 @@ current truth.
 | Persistence | `test_db_backend.py` | 12 | the PostgreSQL adapter without a server: `?`→`%s` outside literals, `%`→`%%`, the `Row` type, `backend()`/`get_conn()` requiring `DATABASE_URL` (ADR-0053), a fake psycopg connection proving `with` never closes and `transaction()` issues plain `BEGIN` (ADR-0045) |
 | Persistence | `test_db_postgres.py` | 10 | skipped unless `CTIPARSOR_TEST_DATABASE_URL` is set (every other DB-touching test needs it too, via `temp_db` — ADR-0053): round trips, SSE resume ids, upserts, cascade, the coverage call without `jobs_conn`, the API through `temp_db_client`, and both migration scripts end to end (ADR-0045, ADR-0053) |
 | Shared helpers | `test_shared_helpers.py` | 27 | environment parsing, claim extraction, unescaping logic |
-| Fuzzing | `test_fuzz_targets.py` | 5 | every Atheris target (ADR-0081) over its seed corpus, `fuzz/corpus/<target>/`, and the empty input: a target that stops importing, or whose invariant a seed breaks, fails here between fuzzing runs; skipped off Linux x86_64 (no Atheris wheel) |
+| Fuzzing | `test_fuzz_targets.py` | 6 | every Atheris target (ADR-0081) over its seed corpus, `fuzz/corpus/<target>/`, and the empty input: a target that stops importing, or whose invariant a seed breaks, fails here between fuzzing runs; skipped off Linux x86_64 (no Atheris wheel) |
 | Docs | `test_doc_claims.py` | 2 | every number `scripts/check_doc_claims.py` checks in README.md and docs/pipeline.md still matches its source, and is still found (what `make check-docs` did on demand only) |
 | Release | `test_release.py` | 83 | the version is one number in `pipeline/__init__.py`, `frontend/package.json` and `frontend/package-lock.json`, and the CHANGELOG opens with `## [Unreleased]`; `scripts/release.py` (`version`, `check`, `notes`, `unreleased`, `prepare`, `predicate`) on throwaway trees: every refusal, every mismatch reported, the notes' length limit, no file written when `prepare` refuses, only the standard library imported (ADR-0085) |
 | Benchmarks | `eval_pipeline.py` | 10 | NER F1, ATE precision, grounding metrics, adversarial tests |
@@ -338,13 +339,18 @@ The write→read round-trip through PostgreSQL (`worker._save_entities` →
 `re_run_final_stages`) and schema migrations. **Currently the weakest layer** (see §6).
 
 ### Attacker-facing parsers (fuzzing, ADR-0081)
-Four Atheris targets in `fuzz/` mutate their seeds for 60 s on every pull
+Five Atheris targets in `fuzz/` mutate their seeds for 60 s on every pull
 request and push to `main`, and for 10 minutes weekly:
 
 - `report_text`: refang and extraction;
 - `dates`: date parsing;
 - `rule_gates`: the Sigma, Suricata, Snort, YARA and STIX-literal gates;
-- `spotlight`: the prompt enclosure.
+- `spotlight`: the prompt enclosure;
+- `baseline_intake`: the reading of an analyst's STIX bundle and of the
+  patterns in it (`pipeline/baseline_stix.py`, ADR-0090). Only
+  `BaselineError` may escape `intake`, and `pattern_keys` never raises. Its
+  seeds are bundles, the largest 16.6 KB, so the workflow gives this target
+  `-max_len=65536` where the others keep 16384.
 
 A failure is one of:
 
@@ -354,8 +360,10 @@ A failure is one of:
 - an input slower than 10 s;
 - more than 2 GB of memory.
 
-The four jobs are required checks (ADR-0078, amendment of 2026-10-10), so a
-failure is fixed before the merge:
+The jobs of the first four targets are required checks (ADR-0078, amendment of
+2026-10-10), so a failure is fixed before the merge. Whether the
+`baseline_intake` job is one is a repository setting, not something the
+workflow file decides. To fix a failure:
 
 1. Reproduce it from the uploaded artifact: `python fuzz/fuzz_<target>.py <file>`.
 2. Fix it.
@@ -497,8 +505,8 @@ the first four pass:
 7. **publish-image** (pushes to main only): pushes the image to GHCR with its
    SBOM and signed attestations, after jobs 1 to 4.
 
-Four more workflows run beside it. **Fuzzing** (`fuzz.yml`) runs the four
-targets above, and its four jobs are required checks. **CodeQL**
+Four more workflows run beside it. **Fuzzing** (`fuzz.yml`) runs the five
+targets above, and the jobs of the first four are required checks. **CodeQL**
 (`codeql.yml`) analyses Python, TypeScript and the workflows. **Scorecard**
 (`scorecard.yml`) rates the repository's practices; it tests nothing.
 **Release** (`release.yml`) publishes a GitHub Release when a tag `v*` is
