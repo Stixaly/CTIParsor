@@ -165,6 +165,12 @@ def normalize_value(entity_type: str, value: str) -> str:
     """The form of `value` that keys are made of.  `entity_type` is an EntityType value."""
     et = _entity_type_value(entity_type)
     v = value.strip()
+    try:
+        v.encode("utf-8")
+    except UnicodeEncodeError:
+        # A lone surrogate ("\ud800", which JSON can carry): no value matches it,
+        # and re2, which refang runs on where it is installed (CI), cannot read it.
+        return ""
     if et in OBSERVABLE_ENTITY_TYPES:
         v = refang(v).strip()              # a defanged SCO value, or a defanged report one
     if et in ("ipv4", "ipv6"):
@@ -372,16 +378,66 @@ def _literal(raw: str) -> str:
     return raw
 
 
+# stix2patterns' parser is recursive: a pattern of a thousand terms or of a few
+# hundred nested brackets exhausts it.  Measured: 1 200 OR terms raise
+# RecursionError on 3.14, and on CI (3.12, the full suite under coverage) a
+# 4 000-term OR killed the test process without a word.  A pattern beyond these
+# bounds never reaches a parser, the stix2 library's included; real indicators
+# (MISP, OpenCTI, CTIParsor's own) stay far below them.
+_MAX_PATTERN_CHARS = 65_536
+_MAX_PATTERN_JOINERS = 256          # AND, OR, FOLLOWEDBY outside literals
+_MAX_PATTERN_DEPTH = 64             # brackets and parentheses outside literals
+_PATTERN_JOINERS = frozenset({"AND", "OR", "FOLLOWEDBY"})
+
+
+def pattern_too_complex(pattern: str) -> bool:
+    """True when `pattern` is too long, too deeply nested or joins too many terms
+    to be handed to a parser.  One linear pass; what is quoted is skipped."""
+    if len(pattern) > _MAX_PATTERN_CHARS:
+        return True
+    depth = joiners = 0
+    word: list[str] = []
+    in_literal = escaped = False
+    for ch in pattern + " ":
+        if in_literal:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == "'":
+                in_literal = False
+            continue
+        if ch.isalpha():
+            word.append(ch)
+            continue
+        if word:
+            if "".join(word).upper() in _PATTERN_JOINERS:
+                joiners += 1
+                if joiners > _MAX_PATTERN_JOINERS:
+                    return True
+            word.clear()
+        if ch == "'":
+            in_literal = True
+        elif ch in "([":
+            depth += 1
+            if depth > _MAX_PATTERN_DEPTH:
+                return True
+        elif ch in ")]":
+            depth -= 1
+    return False
+
+
 def pattern_keys(pattern: str) -> tuple[set[Key], set[Key]]:
     """The keys a STIX 2.1 pattern states with `=`.  A pattern that does not parse,
-    or states nothing but MATCHES, LIKE, IN, NOT = and the like, has none: it is
-    copied without matching.  Never raises."""
+    is too complex to be parsed (`pattern_too_complex`), or states nothing but
+    MATCHES, LIKE, IN, NOT = and the like, has none: it is copied without
+    matching.  Never raises."""
     strong: set[Key] = set()
     weak: set[Key] = set()
-    if not isinstance(pattern, str):
+    if not isinstance(pattern, str) or pattern_too_complex(pattern):
         return strong, weak
     try:
-        # RecursionError: a pattern of thousands of terms, or of nested parentheses.
+        # RecursionError: kept as a last resort below the bounds above.
         comparisons = Pattern(pattern).inspect().comparisons
     except (ParseException, RecursionError):
         return strong, weak
@@ -1013,6 +1069,12 @@ def _check(in_scope: list[dict], warnings: list[str],
     parsed: dict[str, Any] = {}
     dropped: list[tuple[dict, str, str]] = []
     for obj in in_scope:
+        pattern = obj.get("pattern")
+        if (obj.get("type") == "indicator" and obj.get("pattern_type") == "stix"
+                and isinstance(pattern, str) and pattern_too_complex(pattern)):
+            # stix2 would parse the pattern to check it: refused before it does.
+            dropped.append((obj, INVALID, _PATTERN_TOO_LONG))
+            continue
         try:
             parsed[obj["id"]] = stix2.parse(obj, allow_custom=True)
         except RecursionError:

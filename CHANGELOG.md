@@ -39,7 +39,10 @@ no output.
     another object, so an object could otherwise get an innocent one excluded
     in its place. When an error is not reproduced by the object it names, or
     names no object, the rest of the bundle is validated again and searched by
-    halves, within a budget of three times the bytes searched. A quoted
+    halves, within a budget of three times the bytes searched. A STIX pattern
+    of more than 64 KB, 64 nested brackets or 256 `AND`/`OR`/`FOLLOWEDBY`
+    reaches no parser (stix2patterns is recursive: on CI, a 4 000-term `OR`
+    killed the test process): its Indicator is excluded. A quoted
     detection rule is checked (`check_pattern` for Sigma, Suricata and Snort;
     the compile status for YARA) and one that is refused is excluded.
     An object that takes the id of CTIParsor's own author identity or of one of

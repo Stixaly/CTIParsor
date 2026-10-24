@@ -571,12 +571,52 @@ def test_a_path_that_is_no_key_gives_none():
     assert bs.pattern_keys("[autonomous-system:number = 0]") == ({("obs", "autonomous-system", "0")}, set())
 
 
-@pytest.mark.parametrize("pattern", ["garbage", "", "[ipv4-addr:value = '1", None, 7,
-                                     "[" + "(" * 3000 + "a:b = 'x'" + ")" * 3000 + "]",
-                                     "[" + " OR ".join(f"ipv4-addr:value = '198.18.0.{i % 250}'"
-                                                       for i in range(4000)) + "]"])
+def _or_of(n: int) -> str:
+    return "[" + " OR ".join(f"ipv4-addr:value = '198.18.{i // 250}.{i % 250}'" for i in range(n)) + "]"
+
+
+def _nested(depth: int) -> str:
+    return "[" + "(" * (depth - 1) + "file:name = 'x'" + ")" * (depth - 1) + "]"
+
+
+@pytest.mark.parametrize("pattern", ["garbage", "", "[ipv4-addr:value = '1", None, 7])
 def test_a_pattern_that_does_not_parse_gives_no_key_and_never_raises(pattern):
     assert bs.pattern_keys(pattern) == (set(), set())
+
+
+@pytest.mark.parametrize("pattern", [_nested(3000), _or_of(4000), _or_of(258), _nested(65),
+                                     "[file:name = '" + "x" * 70_000 + "']"])
+def test_a_pattern_too_complex_gives_no_key_and_reaches_no_parser(pattern, monkeypatch):
+    def no_parser(*args, **kwargs):
+        raise AssertionError("the parser was called")
+    monkeypatch.setattr(bs, "Pattern", no_parser)
+    assert bs.pattern_too_complex(pattern)
+    assert bs.pattern_keys(pattern) == (set(), set())
+
+
+def test_the_complexity_bounds_are_inclusive():
+    assert not bs.pattern_too_complex(_or_of(bs._MAX_PATTERN_JOINERS + 1))  # 256 joiners
+    assert bs.pattern_too_complex(_or_of(bs._MAX_PATTERN_JOINERS + 2))      # 257 joiners
+    assert not bs.pattern_too_complex(_nested(bs._MAX_PATTERN_DEPTH))
+    assert bs.pattern_too_complex(_nested(bs._MAX_PATTERN_DEPTH + 1))
+    assert not bs.pattern_too_complex("[file:name = '" + "x" * (bs._MAX_PATTERN_CHARS - 16) + "']")
+
+
+def test_what_is_quoted_counts_neither_as_a_term_nor_as_a_bracket():
+    literal = "'" + " OR ".join(["(["] * 300) + " \\' OR AND ((" + "'"
+    assert not bs.pattern_too_complex(f"[file:name = {literal}]")
+    assert not bs.pattern_too_complex("[file:name = 'a\\\\'] OR [file:name = 'b']")
+
+
+@pytest.mark.parametrize("entity_type", ["ipv4", "domain", "url", "registry_key", "asn", "malware", "cve"])
+def test_a_value_with_a_lone_surrogate_has_no_key(entity_type):
+    assert bs.normalize_value(entity_type, "evil\ud800.test") == ""
+    assert bs.keys_for_row(entity_type, "evil\ud800.test") == (set(), set())
+
+
+def test_a_hundred_term_or_is_still_read():
+    strong, _ = bs.pattern_keys(_or_of(100))
+    assert len(strong) == 100
 
 
 def test_a_pattern_and_the_row_of_its_value_meet():
