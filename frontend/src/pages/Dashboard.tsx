@@ -7,6 +7,8 @@ import type { Job, JobStatus } from '../types'
 import { JOB_STATUS_LABEL } from '../components/jobStatus'
 import ProgressModal from '../components/ProgressModal'
 import NewReportModal from '../components/NewReportModal'
+import { splitDrop } from '../components/dropFiles'
+import type { IgnoredFile } from '../components/dropFiles'
 import KanbanCard from '../components/dashboard/KanbanCard'
 import ActivityCard from '../components/dashboard/ActivityCard'
 
@@ -131,6 +133,8 @@ export default function Dashboard() {
   const [selectedId, setSelectedId]         = useState<string | null>(null)
   const [modalOpen, setModalOpen]           = useState(false)
   const [pendingFile, setPendingFile]       = useState<File | null>(null)
+  const [pendingBundle, setPendingBundle]   = useState<File | null>(null)
+  const [pendingIgnored, setPendingIgnored] = useState<IgnoredFile[]>([])
   const [pageDrag, setPageDrag]             = useState(false)
   // The report being moved to Reviewing before it opens, and the last failure.
   const [openingId, setOpeningId]           = useState<string | null>(null)
@@ -160,16 +164,20 @@ export default function Dashboard() {
 
   // ── Handlers (existing logic, unchanged) ─────────────────────────────────
 
-  const openModal = useCallback((file?: File | null) => {
+  const openModal = useCallback((file?: File | null, bundle?: File | null, ignored?: IgnoredFile[]) => {
     setPendingFile(file ?? null)
+    setPendingBundle(bundle ?? null)
+    setPendingIgnored(ignored ?? [])
     setModalOpen(true)
   }, [])
 
-  // Closing always clears pendingFile: without it, a file dropped once would be
-  // re-attached by the modal's initialFile effect the next time it opens.
+  // Closing always clears the pending files: without it, a file dropped once
+  // would be re-attached by the modal's initial-file effect the next time it opens.
   const closeModal = useCallback(() => {
     setModalOpen(false)
     setPendingFile(null)
+    setPendingBundle(null)
+    setPendingIgnored([])
   }, [])
 
   // Escape clears the drag overlay.  The modal owns its own Escape handling,
@@ -200,11 +208,16 @@ export default function Dashboard() {
     if (e.relatedTarget === null) setPageDrag(false)
   }
 
+  // A report and a STIX bundle dropped together open the modal with both (ADR-0090).
+  // A .json that is not a bundle opens it too, so the modal can say the file was not used.
+  // The files are taken before the first await: the drop's list is gone once the event returns.
   const handlePageDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setPageDrag(false)
-    const f = e.dataTransfer.files?.[0]
-    if (f) openModal(f)
+    const files = Array.from(e.dataTransfer.files ?? [])
+    splitDrop(files).then(({ report, bundle, ignored }) => {
+      if (report || bundle || ignored.length > 0) openModal(report, bundle, ignored)
+    })
   }
 
   // A report "for review" is moved to Reviewing before it opens.  That update
@@ -609,6 +622,8 @@ export default function Dashboard() {
       <NewReportModal
         open={modalOpen}
         initialFile={pendingFile}
+        initialBundle={pendingBundle}
+        initialIgnored={pendingIgnored}
         onClose={closeModal}
         onJobCreated={(jobId, filename) => {
           setActiveJobId(jobId)

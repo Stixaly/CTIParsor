@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { buildBundleGraph, stixLabel } from './buildBundleGraph'
 import { buildGraphData } from './buildGraphData'
 import type {
-  BundleLedger, Entity, LedgerEntity, LedgerRelationship, Relationship, StixBundle, StixObject,
+  BundleLedger, Entity, LedgerEntity, LedgerRelationship, Relationship, StixBundle,
+  StixObject,
 } from '../../types'
 
 let _id = 0
@@ -202,6 +203,36 @@ describe('buildBundleGraph', () => {
     expect(g.edges.find(e => e.id === 'relationship--1')?.kind).toBe('unknown')
     expect(g.diff).toEqual([])
   })
+
+  it('flags the objects the analyst’s STIX bundle supplied (ADR-0090)', () => {
+    const { bundle, entities, relations, ledger } = fixture()
+    bundle.objects.push(obj('threat-actor--b', 'threat-actor', { name: 'APT28' }))
+    ledger.objects['threat-actor--b'] = { origin: 'baseline', status: 'only' }
+    const g = buildBundleGraph(bundle, ledger, entities, relations)
+    const flag = Object.fromEntries(g.nodes.filter(n => !n.ghost).map(n => [n.id, !!n.baseline]))
+    expect(flag['threat-actor--b']).toBe(true)
+    expect(flag['threat-actor--a']).toBe(false)
+    expect(g.nodes.filter(n => n.ghost).every(n => !n.baseline)).toBe(true)
+  })
+
+  it('draws a relationship of the analyst’s STIX bundle as from the bundle, not unclassified (ADR-0090)', () => {
+    const { bundle, entities, relations, ledger } = fixture()
+    ledger.objects['relationship--1'] = { origin: 'baseline' }
+    const g = buildBundleGraph(bundle, ledger, entities, relations)
+    expect(g.edges.find(e => e.id === 'relationship--1')?.kind).toBe('baseline')
+    expect(g.kindCounts.baseline).toBe(1)
+    expect(g.kindCounts.unknown).toBeUndefined()
+  })
+
+  it('lists an object the analyst’s STIX bundle lost as an object, with its reason (ADR-0090)', () => {
+    const { bundle, entities, relations, ledger } = fixture()
+    ledger.removed = [{ stix_id: 'indicator--gone', reason: 'baseline_rejected', kind: 'baseline' }]
+    const g = buildBundleGraph(bundle, ledger, entities, relations)
+    const item = g.diff.find(d => d.reason === 'baseline_rejected')!
+    expect(item.kind).toBe('removed')
+    expect(item.subject).toBe('object')
+    expect(item.nodeId).toBeUndefined()
+  })
 })
 
 describe('stixLabel', () => {
@@ -227,5 +258,109 @@ describe('buildGraphData with a ledger', () => {
   it('has no fate map without a ledger', () => {
     const { entities, relations } = fixture()
     expect(buildGraphData(entities, relations).fate).toBeUndefined()
+  })
+})
+
+describe('buildBundleGraph — rows imported from the analyst’s bundle (ADR-0090)', () => {
+  // The analyst's malware ships as received; their IP left with a rejection;
+  // neither row went through Stage 4, so the ledger has no entity entry for them.
+  const imported = (value: string, entity_type: string, baseline_stix_id: string,
+                    enrichment_status: 'baseline_only' | 'baseline_in_text', accepted = true): Entity =>
+    ({ ...entity(value, entity_type, accepted), enrichment_status, baseline_stix_id })
+  const bundle: StixBundle = {
+    id: 'bundle--1', type: 'bundle',
+    objects: [
+      obj('malware--w', 'malware', { name: 'WellMess' }),
+      obj('intrusion-set--a', 'intrusion-set', { name: 'APT29' }),
+      sro('relationship--k', 'intrusion-set--a', 'uses', 'malware--w'),
+    ],
+  }
+  const ledger: BundleLedger = {
+    version: 1,
+    objects: {
+      'malware--w': { origin: 'baseline', status: 'only' },
+      'intrusion-set--a': { origin: 'baseline', status: 'only' },
+      'relationship--k': { origin: 'baseline', status: 'only' },
+    },
+    entities: [], relationships: [],
+    removed: [{ stix_id: 'ipv4-addr--ip', kind: 'baseline', reason: 'baseline_rejected' }],
+  }
+  const importedRel = (accepted: boolean): Relationship => ({
+    ...rel('APT29', 'uses', 'WellMess', accepted), enrichment_status: 'baseline_only', baseline_stix_id: 'relationship--k',
+  })
+
+  it('joins an imported row to its bundle object by id: no ghost, nothing stale', () => {
+    const g = buildBundleGraph(bundle, ledger,
+      [imported('WellMess', 'malware', 'malware--w', 'baseline_only')], [importedRel(true)])!
+    expect(g.nodes.some(n => n.ghost)).toBe(false)
+    expect(g.diff.filter(d => d.kind === 'stale')).toEqual([])
+  })
+
+  it('leaves an imported object the ledger removed to the removed list, not a ghost', () => {
+    const g = buildBundleGraph(bundle, ledger,
+      [imported('198.18.12.77', 'ipv4', 'ipv4-addr--ip', 'baseline_only', false)], [])!
+    expect(g.nodes.some(n => n.ghost)).toBe(false)
+    expect(g.diff.filter(d => d.kind === 'stale')).toEqual([])
+    expect(g.diff.filter(d => d.kind === 'removed').map(d => d.reason)).toEqual(['baseline_rejected'])
+  })
+
+  it('calls an imported row rejected after the build stale while its object still ships', () => {
+    const g = buildBundleGraph(bundle, ledger,
+      [imported('WellMess', 'malware', 'malware--w', 'baseline_only', false)], [importedRel(false)])!
+    const stale = g.diff.filter(d => d.kind === 'stale')
+    expect(stale.map(d => [d.subject, d.reason])).toEqual([
+      ['entity', 'removed_since_build'], ['relationship', 'removed_since_build']])
+    expect(stale[1].edgeId).toBe('relationship--k')
+  })
+
+  it('leaves an accepted imported row the ledger removed by closure to the removed list, not a ghost', () => {
+    const closed: BundleLedger = { ...ledger, removed: [
+      { stix_id: 'ipv4-addr--ip', kind: 'baseline', reason: 'baseline_refs_closure:indicator--x' }] }
+    const g = buildBundleGraph(bundle, closed,
+      [imported('198.18.12.77', 'ipv4', 'ipv4-addr--ip', 'baseline_only')], [])!
+    expect([...g.nodeInfo.values()].some(i => i.object === null)).toBe(false)
+    expect(g.nodes.some(n => n.ghost)).toBe(false)
+    expect(g.diff.filter(d => d.kind === 'stale')).toEqual([])
+    const removed = g.diff.filter(d => d.kind === 'removed')
+    expect(removed).toHaveLength(1)
+    expect(removed[0]).toMatchObject({ reason: 'baseline_refs_closure:indicator--x', title: '198.18.12.77' })
+  })
+
+  it('calls an imported row re-accepted after a rejection stale, drawn as a ghost (a rebuild would ship it)', () => {
+    const g = buildBundleGraph(bundle, ledger,
+      [imported('198.18.12.77', 'ipv4', 'ipv4-addr--ip', 'baseline_only')], [])!
+    const ghost = g.nodes.find(n => n.ghost)!
+    expect(ghost.name).toBe('198.18.12.77')
+    expect(g.nodeInfo.get(ghost.id)?.ghostReason).toBe('added_since_build')
+    const stale = g.diff.filter(d => d.kind === 'stale')
+    expect(stale).toEqual([expect.objectContaining({
+      subject: 'entity', reason: 'added_since_build', title: '198.18.12.77', nodeId: ghost.id })])
+    expect(g.diff.filter(d => d.kind === 'removed').map(d => d.reason)).toEqual(['baseline_rejected'])
+  })
+
+  it('calls an accepted imported relationship the bundle does not ship stale, with no ledger record', () => {
+    const unshipped: Relationship = { ...importedRel(true), baseline_stix_id: 'relationship--gone' }
+    const g = buildBundleGraph(bundle, ledger, [], [unshipped])!
+    expect(g.diff.filter(d => d.kind === 'stale')).toEqual([expect.objectContaining({
+      subject: 'relationship', reason: 'added_since_build', title: 'APT29 uses WellMess' })])
+  })
+
+  it('titles removed objects of the analyst’s bundle from their row, else by type and id (ADR-0090)', () => {
+    const removedLedger: BundleLedger = { ...ledger, removed: [
+      { stix_id: 'ipv4-addr--ip', kind: 'baseline', reason: 'baseline_rejected' },
+      { stix_id: 'relationship--9f8e7d6c-aaaa', kind: 'baseline', reason: 'baseline_refs_closure:x' },
+      { stix_id: 'ipv4-addr--0123456789abcdef', kind: 'baseline', reason: 'baseline_rejected' },
+      { stix_id: 'relationship--ffeeddcc-bbbb', kind: 'baseline', reason: 'baseline_rejected' },
+    ] }
+    const withRow = { ...importedRel(true), baseline_stix_id: 'relationship--9f8e7d6c-aaaa' }
+    const g = buildBundleGraph(bundle, removedLedger,
+      [imported('198.18.12.77', 'ipv4', 'ipv4-addr--ip', 'baseline_only', false)], [withRow])!
+    const removed = g.diff.filter(d => d.kind === 'removed')
+    expect(removed.map(d => [d.subject, d.title])).toEqual([
+      ['object', '198.18.12.77'],
+      ['relationship', 'APT29 uses WellMess'],
+      ['object', 'IPv4 01234567'],
+      ['relationship', 'relationship ffeeddcc'],
+    ])
   })
 })

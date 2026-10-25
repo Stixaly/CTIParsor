@@ -386,8 +386,8 @@ workflow file decides. To fix a failure:
 From then on, `test_fuzz_targets.py` replays that input in the fast tests.
 
 ### Frontend (Vitest, ESLint, tsc)
-23 Vitest files (224 tests on 2026-10-25, `npm test` in `frontend/`; 162
-in 20 files on 2026-10-19) with Testing Library and jsdom: the
+27 Vitest files (285 tests on 2026-10-25 after lot 6, `npm test` in `frontend/`;
+224 after lot 5; 162 in 20 files on 2026-10-19) with Testing Library and jsdom: the
 Review and Dashboard pages, the New report modal, the relationship rail, the
 margin notes and their ribbon, the document reader, the
 graph builders and layout, the API client, the ATT&CK search, the Coverage
@@ -396,7 +396,15 @@ columns against the index of every committed ATT&CK track (read from
 `NewReportModal.test.tsx` (18 tests), `review/Marginalia.test.tsx` (9) and
 `review/PipelineRibbon.test.tsx` (4), and ADR-0090 cases to `api/client.test.ts`
 (18 tests in the file), `review/RelationshipRail.test.tsx` (22) and
-`pages/Review.test.tsx` (16). ESLint runs
+`pages/Review.test.tsx` (16). Lot 6 of ADR-0090 (2026-10-25) adds four files:
+`components/graph/BaselinePanel.test.tsx` (7 tests), `components/dropFiles.test.ts`
+(12), `pages/Graph.test.tsx` (6, the relationship editor's Delete) and
+`components/review/InlineHoverChip.test.tsx` (3). It adds ADR-0090 cases to
+`NewReportModal.test.tsx` (31 tests in the file, 18 before lot 6),
+`components/graph/buildBundleGraph.test.ts` (22, 12 before),
+`components/graph/provenance.test.ts` (10, 3 before) and `pages/Dashboard.test.tsx`
+(7, 4 before); `pages/Review.test.tsx` (16) keeps its count and one case now
+checks the disabled Change type. ESLint runs
 the TypeScript rules, `rules-of-hooks` and `exhaustive-deps` as errors, and
 the formatting the code already follows (`frontend/eslint.config.js`).
 `npm run check` runs lint, `tsc` and Vitest, the three steps of CI's frontend

@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { BaselineIntake, BaselineReport, BaselineStatus } from '../types'
+import type { IgnoredFile } from './dropFiles'
 import NewReportModal from './NewReportModal'
 
 // The New report modal in enrich mode (ADR-0090): the analyst's STIX 2.1 bundle
@@ -76,7 +77,21 @@ function bundleFile(name = 'apt29-bundle.json') {
   return new File([BUNDLE_TEXT], name, { type: 'application/json' })
 }
 
-function renderModal(props: { initialFile?: File | null } = {}) {
+function configFile() {
+  return new File(['{"type":"settings"}'], 'config.json', { type: 'application/json' })
+}
+
+// A status read that answers when the test says so: the modal waits for it.
+function holdStatus() {
+  let answer!: (s: BaselineStatus) => void
+  api.fetchBaselineStatus.mockReturnValue(new Promise<BaselineStatus>(r => { answer = r }))
+  return (s: BaselineStatus) => act(async () => answer(s))
+}
+
+// Lets a drop's file reads finish before the test looks at the modal.
+const settle = () => act(async () => { await new Promise(r => setTimeout(r, 20)) })
+
+function renderModal(props: { initialFile?: File | null; initialBundle?: File | null; initialIgnored?: IgnoredFile[] } = {}) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
     <QueryClientProvider client={qc}>
@@ -84,6 +99,15 @@ function renderModal(props: { initialFile?: File | null } = {}) {
     </QueryClientProvider>,
   )
   return qc
+}
+
+// The modal as the Dashboard mounts it, so a test can close and reopen it.
+function modal(qc: QueryClient, open: boolean, initialBundle: File | null = null) {
+  return (
+    <QueryClientProvider client={qc}>
+      <NewReportModal open={open} initialBundle={initialBundle} onClose={vi.fn()} onJobCreated={vi.fn()} />
+    </QueryClientProvider>
+  )
 }
 
 type User = ReturnType<typeof userEvent.setup>
@@ -433,5 +457,171 @@ describe('New report — enrich mode (ADR-0090)', () => {
 
     await setMarks(user, 'GREEN', 'RED')
     await waitFor(() => expect(screen.getByRole('button', { name: 'Create job' })).toBeEnabled())
+  })
+})
+
+describe('New report — a bundle dropped with the modal (ADR-0090)', () => {
+  it('opens in enrich mode with the dropped bundle, and reads it', async () => {
+    api.inspectBaseline.mockResolvedValue(INTAKE)
+    const bundle = bundleFile()
+    renderModal({ initialBundle: bundle })
+
+    await waitFor(() => expect(screen.getByRole('radio', { name: /Enrich an existing STIX 2.1 bundle/ })).toHaveAttribute('aria-checked', 'true'))
+    await waitFor(() => expect(api.inspectBaseline).toHaveBeenCalledWith(bundle, undefined))
+    expect(await screen.findByText('5 objects kept from the bundle')).toBeInTheDocument()
+    expect(screen.queryByText(/STIX enrichment is off/)).not.toBeInTheDocument()
+  })
+
+  it('does not read the dropped bundle when the flag is off, and says so', async () => {
+    api.fetchBaselineStatus.mockResolvedValue(OFF)
+    renderModal({ initialBundle: bundleFile() })
+
+    expect(await screen.findByText('STIX enrichment is off on this server: the bundle was not used')).toBeInTheDocument()
+    expect(screen.queryByRole('radiogroup', { name: 'Pipeline mode' })).not.toBeInTheDocument()
+    expect(api.inspectBaseline).not.toHaveBeenCalled()
+  })
+
+  it('keeps the pasted text when a bundle alone is dropped on the modal', async () => {
+    api.inspectBaseline.mockResolvedValue(INTAKE)
+    const user = userEvent.setup()
+    renderModal()
+    await user.type(screen.getByPlaceholderText(/Paste the report text/), TEXT)
+    await screen.findByRole('radio', { name: /Enrich an existing STIX 2.1 bundle/ })
+    const bundle = bundleFile()
+
+    fireEvent.drop(screen.getByRole('dialog'), { dataTransfer: { files: [bundle] } })
+
+    await waitFor(() => expect(api.inspectBaseline).toHaveBeenCalledWith(bundle, undefined))
+    expect(screen.getByRole('radio', { name: /Enrich an existing STIX 2.1 bundle/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByPlaceholderText(/Paste the report text/)).toHaveValue(TEXT)
+  })
+
+  it('takes a report and a bundle dropped together into their own zones', async () => {
+    api.inspectBaseline.mockResolvedValue(INTAKE)
+    renderModal()
+    await screen.findByRole('radio', { name: /Enrich an existing STIX 2.1 bundle/ })
+    const report = new File(['report'], 'report.pdf', { type: 'application/pdf' })
+    const bundle = bundleFile()
+
+    fireEvent.drop(screen.getByRole('dialog'), { dataTransfer: { files: [report, bundle] } })
+
+    expect(await screen.findByText('report.pdf')).toBeInTheDocument()
+    await waitFor(() => expect(api.inspectBaseline).toHaveBeenCalledWith(bundle, undefined))
+  })
+
+  it('names a dropped .json that is not a bundle, and still takes the report', async () => {
+    renderModal()
+    const report = new File(['report'], 'report.pdf', { type: 'application/pdf' })
+
+    fireEvent.drop(screen.getByRole('dialog'), { dataTransfer: { files: [configFile(), report] } })
+
+    expect(await screen.findByText('config.json is not a STIX 2.1 bundle: not used')).toBeInTheDocument()
+    expect(await screen.findByText('report.pdf')).toBeInTheDocument()
+    expect(api.inspectBaseline).not.toHaveBeenCalled()
+  })
+
+  it('names the dropped .json that the dashboard hands in with the modal', async () => {
+    renderModal({ initialIgnored: [{ file: configFile(), why: 'not_a_bundle' }] })
+
+    expect(await screen.findByText('config.json is not a STIX 2.1 bundle: not used')).toBeInTheDocument()
+  })
+
+  it('names a second bundle as one per job, and a bundle-less .json as not a bundle', async () => {
+    renderModal({ initialIgnored: [
+      { file: bundleFile('second.json'), why: 'second_bundle' },
+      { file: configFile(), why: 'not_a_bundle' },
+    ] })
+
+    expect(await screen.findByText('second.json: only one STIX bundle per job, not used')).toBeInTheDocument()
+    expect(screen.getByText('config.json is not a STIX 2.1 bundle: not used')).toBeInTheDocument()
+  })
+
+  it('takes the bundle and the report of a drop on the bundle zone, and names what is not used', async () => {
+    api.inspectBaseline.mockResolvedValue(INTAKE)
+    const user = userEvent.setup()
+    renderModal()
+    await user.click(await screen.findByRole('radio', { name: /Enrich an existing STIX 2.1 bundle/ }))
+    const zone = screen.getByText('Drop the bundle here, or').closest('div')!
+    const report = new File(['report'], 'report.pdf', { type: 'application/pdf' })
+    const bundle = bundleFile()
+
+    fireEvent.drop(zone, { dataTransfer: { files: [configFile(), report, bundle] } })
+
+    expect(await screen.findByText('config.json is not a STIX 2.1 bundle: not used')).toBeInTheDocument()
+    expect(await screen.findByText('report.pdf')).toBeInTheDocument()
+    await waitFor(() => expect(api.inspectBaseline).toHaveBeenCalledWith(bundle, undefined))
+  })
+
+  it('says the status could not be read, not that the flag is off, for a bundle that waited on a failed status', async () => {
+    api.fetchBaselineStatus.mockRejectedValue(new Error('503: Service Unavailable'))
+    renderModal({ initialBundle: bundleFile() })
+
+    expect(await screen.findByText('Could not read the server’s STIX enrichment status: the bundle was not used')).toBeInTheDocument()
+    expect(screen.queryByText(/STIX enrichment is off/)).not.toBeInTheDocument()
+    expect(api.inspectBaseline).not.toHaveBeenCalled()
+  })
+
+  it('holds a bundle dropped before the status answers, and does not say the flag is off', async () => {
+    api.inspectBaseline.mockResolvedValue(INTAKE)
+    const answer = holdStatus()
+    renderModal()
+    const bundle = bundleFile()
+
+    fireEvent.drop(screen.getByRole('dialog'), { dataTransfer: { files: [bundle] } })
+    await settle()
+    expect(screen.queryByText(/STIX enrichment is off/)).not.toBeInTheDocument()
+    expect(api.inspectBaseline).not.toHaveBeenCalled()
+
+    await answer(ON)
+    await waitFor(() => expect(api.inspectBaseline).toHaveBeenCalledWith(bundle, undefined))
+    expect(screen.queryByText(/STIX enrichment is off/)).not.toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /Enrich an existing STIX 2.1 bundle/ })).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('says the flag is off once the status answers, for a bundle dropped before it', async () => {
+    const answer = holdStatus()
+    renderModal()
+
+    fireEvent.drop(screen.getByRole('dialog'), { dataTransfer: { files: [bundleFile()] } })
+    await settle()
+    expect(screen.queryByText(/STIX enrichment is off/)).not.toBeInTheDocument()
+
+    await answer(OFF)
+    expect(await screen.findByText('STIX enrichment is off on this server: the bundle was not used')).toBeInTheDocument()
+    expect(api.inspectBaseline).not.toHaveBeenCalled()
+  })
+
+  it('forgets a bundle dropped while the status was pending, once the modal closes and reopens with none', async () => {
+    api.inspectBaseline.mockResolvedValue(INTAKE)
+    const answer = holdStatus()
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { rerender } = render(modal(qc, true))
+    fireEvent.drop(screen.getByRole('dialog'), { dataTransfer: { files: [bundleFile()] } })
+    await settle()
+
+    rerender(modal(qc, false))
+    rerender(modal(qc, true))
+    await answer(ON)
+    await settle()
+
+    expect(api.inspectBaseline).not.toHaveBeenCalled()
+    expect(screen.queryByText('apt29-bundle.json')).not.toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /Enrich an existing STIX 2.1 bundle/ })).toHaveAttribute('aria-checked', 'false')
+  })
+
+  it('does not take a bundle given with the modal while the status was pending, once it is closed and reopened with none', async () => {
+    api.inspectBaseline.mockResolvedValue(INTAKE)
+    const answer = holdStatus()
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { rerender } = render(modal(qc, true, bundleFile()))
+
+    rerender(modal(qc, false))
+    rerender(modal(qc, true))
+    await answer(ON)
+    await settle()
+
+    expect(api.inspectBaseline).not.toHaveBeenCalled()
+    expect(screen.queryByText('apt29-bundle.json')).not.toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /Enrich an existing STIX 2.1 bundle/ })).toHaveAttribute('aria-checked', 'false')
   })
 })

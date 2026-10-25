@@ -12,7 +12,9 @@
  *
  * Joins between review rows and the ledger go by value, the way Stage 4 itself
  * receives them: relationships by (source, verb, target), entities by
- * (type, value), all case-insensitive.
+ * (type, value), all case-insensitive.  A row an enrich job imported from the
+ * analyst's STIX bundle (ADR-0090) is no Stage 4 input: it joins the object it
+ * came from by `baseline_stix_id`.
  */
 import type {
   BundleLedger, Entity, LedgerEntity, LedgerRelationship, Relationship,
@@ -20,7 +22,9 @@ import type {
 } from '../../types'
 import type { EdgeKind, GraphEdge, GraphNode } from './graphLayout'
 import type { GraphData } from './buildGraphData'
-import { edgeKindOf } from './provenance'
+import { isImported } from '../../types'
+import { edgeKindOf, isFromBaseline } from './provenance'
+import { typeLabel } from '../review/tokens'
 
 export interface BundleNodeInfo {
   /** null for a ghost node (a review entity that is not in the bundle). */
@@ -146,6 +150,8 @@ export function buildBundleGraph(
       confidence: typeof o.confidence === 'number' ? o.confidence / 100 : 1,
       source: info?.origin ?? 'unknown', mitre_id: externalId(o),
       context: str(o.description) ?? '', accepted: true,
+      // Supplied by the analyst's STIX bundle, not built here (ADR-0090).
+      baseline: isFromBaseline(info?.origin),
     })
     const originInfo: Record<string, unknown> = { ...(info ?? {}) }
     delete originInfo.origin
@@ -172,9 +178,16 @@ export function buildBundleGraph(
   const liveKeys = new Set(live.map(e => entKey(e.entity_type, e.value)))
   const ghostValues = new Map<string, string>()
 
+  // ADR-0090: an imported row ships as its bundle object, or left with the
+  // reason the ledger's removals give; with neither, the bundle predates it.
+  const baselineLeft = new Map<string, string>()
+  for (const r of ledger?.removed ?? []) if (r.kind === 'baseline') baselineLeft.set(r.stix_id, r.reason)
+
   if (hasLedger) {
     for (const ent of live) {
-      const entries = ledgerEntities.get(entKey(ent.entity_type, ent.value)) ?? []
+      const imported = isImported(ent.enrichment_status)
+      if (imported && inBundle(ent.baseline_stix_id ?? undefined)) continue
+      const entries = imported ? [] : ledgerEntities.get(entKey(ent.entity_type, ent.value)) ?? []
       const hit = entries.find(x => x.outcome !== 'dropped' && inBundle(x.stix_id))
       if (hit && hit.stix_id) {
         nodeInfo.get(hit.stix_id)!.rows.push({ entity: ent, ledger: hit })
@@ -188,6 +201,10 @@ export function buildBundleGraph(
         continue
       }
       const dropped = entries.find(x => x.outcome === 'dropped')
+      // An imported object the ledger removed is listed under "removed", not
+      // drawn; re-accepted after a rejection, a rebuild would ship it again.
+      const left = imported ? baselineLeft.get(ent.baseline_stix_id ?? '') : undefined
+      if (left && left !== 'baseline_rejected') continue
       const reason = dropped?.reason ?? (entries.length === 0 ? 'added_since_build' : 'missing_from_bundle')
       const id = `ghost:entity:${ent.id}`
       nodes.push({
@@ -208,6 +225,13 @@ export function buildBundleGraph(
     // Rejected since the build: the row's object may still ship.
     for (const ent of rawEntities) {
       if (ent.accepted !== false) continue
+      if (isImported(ent.enrichment_status)) {
+        const sid = ent.baseline_stix_id ?? undefined
+        if (inBundle(sid) && !live.some(e => e.baseline_stix_id === sid)) {
+          diff.push({ kind: 'stale', subject: 'entity', reason: 'removed_since_build', title: ent.value, nodeId: sid })
+        }
+        continue
+      }
       const k = entKey(ent.entity_type, ent.value)
       if (liveKeys.has(k)) continue
       const hit = (ledgerEntities.get(k) ?? []).find(x => x.outcome !== 'dropped' && inBundle(x.stix_id))
@@ -303,10 +327,22 @@ export function buildBundleGraph(
     }
   }
 
+  // A removed object has no name left to show (ADR-0090): title it from the
+  // review row it came from, else by its type and the start of its id.
+  const removedTitle = (sid: string): string => {
+    const ent = rawEntities.find(e => e.baseline_stix_id === sid)
+    if (ent) return ent.value
+    const rel = rawRelations.find(r => r.baseline_stix_id === sid)
+    if (rel) return `${rel.source_value} ${rel.relationship_type} ${rel.target_value}`
+    const [type, uuid = ''] = sid.split('--')
+    return `${typeLabel(type)} ${uuid.slice(0, 8)}`
+  }
   for (const r of ledger?.removed ?? []) {
+    // 'baseline' removals (ADR-0090) are objects the analyst's bundle held.
+    const isRel = r.kind === 'relationship' || (r.kind === 'baseline' && r.stix_id.startsWith('relationship--'))
     diff.push({
-      kind: 'removed', subject: r.kind === 'object' ? 'object' : 'relationship',
-      title: r.name ?? r.stix_id, reason: r.reason,
+      kind: 'removed', subject: isRel ? 'relationship' : 'object',
+      title: r.name ?? (r.kind === 'object' ? r.stix_id : removedTitle(r.stix_id)), reason: r.reason,
       nodeId: r.kind === 'object' && inBundle(r.replaced_by ?? undefined) ? r.replaced_by ?? undefined : undefined,
       edgeId: r.kind === 'relationship' && r.replaced_by && edgeInfo.has(r.replaced_by) ? r.replaced_by : undefined,
       error: r.error,
@@ -317,6 +353,21 @@ export function buildBundleGraph(
   if (hasLedger) {
     const liveRelKeys = new Set<string>()
     for (const r of rawRelations) {
+      if (isImported(r.enrichment_status)) {
+        // Its SRO ships as received, or left with the objects it joins; left
+        // by a rejection, a re-accepted one is stale (a rebuild would ship it).
+        const sid = r.baseline_stix_id ?? ''
+        const ships = edgeInfo.has(sid)
+        const left = baselineLeft.get(sid)
+        if (r.accepted === false ? ships : !ships && (!left || left === 'baseline_rejected')) {
+          diff.push({ kind: 'stale', subject: 'relationship',
+                      reason: r.accepted === false ? 'removed_since_build' : 'added_since_build',
+                      title: `${r.source_value} ${r.relationship_type} ${r.target_value}`,
+                      edgeId: ships ? sid : undefined,
+                      nodeId: ships ? undefined : nodeForValue(r.source_value) ?? nodeForValue(r.target_value) })
+        }
+        continue
+      }
       if (r.accepted === false) continue
       const k = relKey(r.source_value, r.relationship_type, r.target_value)
       liveRelKeys.add(k)

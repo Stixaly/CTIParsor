@@ -13,6 +13,7 @@ import type { LedgerChange, LedgerTime } from '../../types'
 export function edgeKindOf(origin: string | undefined): EdgeKind {
   switch (origin) {
     case 'extracted':                return 'extracted'
+    case 'baseline':                 return 'baseline'
     case 'ioc_based_on':
     case 'ioc_association':
     case 'embedded_rule_title':
@@ -25,6 +26,13 @@ export function edgeKindOf(origin: string | undefined): EdgeKind {
   }
 }
 
+/** Ledger origin the analyst's own STIX bundle supplied (ADR-0090): a baseline
+ *  object that ships as received, or the analyst's Report re-issued with
+ *  CTIParsor's additions. */
+export function isFromBaseline(origin: string | undefined): boolean {
+  return origin === 'baseline' || origin === 'baseline_report_upsert'
+}
+
 export interface KindStyle {
   label: string
   hint: string
@@ -35,6 +43,8 @@ export interface KindStyle {
 export const EDGE_KIND_STYLE: Record<EdgeKind, KindStyle> = {
   extracted: { label: 'From the report', stroke: 'var(--ink-3)',
     hint: 'A relationship row — extracted by the LLM or drawn by an analyst — as it ships.' },
+  baseline:  { label: 'From your STIX bundle', stroke: 'var(--ink-2)',
+    hint: "A relationship of the analyst's STIX bundle, shipped as received (ADR-0090)." },
   mapping:   { label: 'Stage 4 mapping', stroke: 'var(--rule)',
     hint: 'Built by the STIX mapping from the IoCs and the LLM lists: Indicator based-on its observable, Indicator indicates malware, actor targets country/sector.' },
   policy:    { label: 'Policy rule', stroke: 'var(--accent)', dash: '7 4',
@@ -52,7 +62,7 @@ export const EDGE_KIND_STYLE: Record<EdgeKind, KindStyle> = {
 }
 
 export const EDGE_KIND_ORDER: EdgeKind[] =
-  ['extracted', 'mapping', 'policy', 'reference', 'inferred', 'embedded', 'dropped', 'unknown']
+  ['extracted', 'baseline', 'mapping', 'policy', 'reference', 'inferred', 'embedded', 'dropped', 'unknown']
 
 /** Why an object exists, for the node panel. */
 export const OBJECT_ORIGIN_LABEL: Record<string, string> = {
@@ -67,11 +77,14 @@ export const OBJECT_ORIGIN_LABEL: Record<string, string> = {
   report:            'Report wrapping the bundle',
   author_identity:   'Author identity (CTIParsor)',
   marking:           'Sharing marking (TLP/PAP)',
+  baseline:          'From your STIX bundle, as received',
+  baseline_report_upsert: "Your bundle's report, re-issued with CTIParsor's additions (OpenCTI upsert)",
 }
 
 /** Why an SRO exists, for the edge panel. */
 export const EDGE_ORIGIN_LABEL: Record<string, string> = {
   extracted:                'Relationship row (LLM or analyst)',
+  baseline:                 'Relationship of your STIX bundle, as received',
   ioc_based_on:             'Indicator based-on the observable it was built from',
   ioc_association:          'LLM IoC → malware association',
   embedded_rule_title:      'Rule title names this malware/tool',
@@ -94,6 +107,8 @@ const RELATIONSHIP_REASON: Record<string, string> = {
   invalid:                      'the STIX library rejected the relationship',
   self_loop_after_alias_merge:  'the alias merge made both ends the same object',
   duplicate_after_alias_merge:  'the alias merge made it a duplicate of another edge',
+  self_loop_after_baseline_merge:  'the match with your STIX bundle made both ends the same object',
+  duplicate_after_baseline_merge:  'the match with your STIX bundle made it a duplicate of a relationship the bundle already ships',
 }
 
 const ENTITY_REASON: Record<string, string> = {
@@ -109,6 +124,10 @@ const ENTITY_REASON: Record<string, string> = {
   rule_does_not_compile: 'the YARA rule quoted in the report does not compile, so OpenCTI would refuse its Indicator and every edge to it',
   rule_does_not_parse: 'the parser OpenCTI uses for this rule type refuses the quoted rule (often a line the report’s layout cut), so OpenCTI would refuse its Indicator and every edge to it',
   no_traffic_endpoint: 'a STIX network-traffic needs a destination (an IP, or a domain with a protocol), and this value names none',
+  baseline_match:    'the same object as one in your STIX bundle, which ships in its place',
+  baseline_rejected: 'you rejected every row of it, so it is left out of this bundle',
+  baseline_refs_closure: 'it references an object that is left out, so it cannot ship',
+  baseline_report_empty: 'none of the references of your report ships, and the document adds none, so it is not re-issued',
 }
 
 const VERB_REASON: Record<string, string> = {
@@ -132,7 +151,17 @@ export function benignReason(code: unknown): string {
 }
 
 export function entityReason(code: string | undefined): string {
-  return (code && ENTITY_REASON[code]) || code || 'no reason recorded'
+  return (code && (ENTITY_REASON[code] ?? ENTITY_REASON[reasonBase(code)])) || code || 'no reason recorded'
+}
+
+/** A reason may name the object behind it: `baseline_refs_closure:<id>`
+ *  (pipeline/baseline_stix.ref_closure). */
+export function reasonBase(code: string): string {
+  return code.split(':', 1)[0]
+}
+export function reasonRef(code: string | undefined): string | null {
+  const i = code ? code.indexOf(':') : -1
+  return code && i > 0 ? code.slice(i + 1) : null
 }
 
 /** Why a date stays out of start_time / stop_time (pipeline/temporal.export_plan). */

@@ -93,6 +93,34 @@ export function ProvenanceLegend({
   )
 }
 
+// ── Left rail: where the objects came from (ADR-0090) ─────────────────────────
+
+/** The two node marks of an enrich job's bundle.  The baseline mark is the
+ *  thin outer ring GraphCanvas draws round the analyst's own objects. */
+export function BaselineLegend({ fromBundle, added }: { fromBundle: number; added: number }) {
+  const rows = [
+    { label: 'From your STIX bundle', n: fromBundle, ring: true },
+    { label: 'Added by CTIParsor', n: added, ring: false },
+  ]
+  return (
+    <div>
+      <div style={HEAD}>Objects · origin</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+        {rows.map(r => (
+          <div key={r.label} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 5px', fontSize: 11, color: 'var(--ink-2)' }}>
+            <svg width={22} height={12} style={{ flexShrink: 0 }} aria-hidden>
+              {r.ring && <circle cx={11} cy={6} r={5.5} fill="none" stroke="var(--ink-3)" strokeWidth={1} opacity={0.6} />}
+              <circle cx={11} cy={6} r={3.5} fill="var(--ink-3)" />
+            </svg>
+            <span style={{ flex: 1 }}>{r.label}</span>
+            <span style={{ fontSize: 10, color: 'var(--ink-4)', ...MONO }}>{r.n}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── Left rail: what else the bundle carries ───────────────────────────────────
 
 export function BundleMeta({ meta }: { meta: StixObject[] }) {
@@ -128,7 +156,7 @@ export function BundleMeta({ meta }: { meta: StixObject[] }) {
 
 // ── Shared bits ───────────────────────────────────────────────────────────────
 
-function PanelHeader({ kicker, title, sub, onClose }: {
+export function PanelHeader({ kicker, title, sub, onClose }: {
   kicker: React.ReactNode; title: React.ReactNode; sub?: React.ReactNode; onClose: () => void
 }) {
   return (
@@ -159,7 +187,7 @@ function TypeChip({ type }: { type: string }) {
   )
 }
 
-function Note({ tone, children }: { tone: 'no' | 'warn' | 'ok' | 'info'; children: React.ReactNode }) {
+export function Note({ tone, children }: { tone: 'no' | 'warn' | 'ok' | 'info'; children: React.ReactNode }) {
   const c = tone === 'info' ? 'var(--frost)' : `var(--${tone})`
   return (
     <div style={{
@@ -486,7 +514,7 @@ const DIFF_GROUPS: Array<{ kind: DiffKind; title: string; hint: string; tone: 'n
   { kind: 'merged',  title: 'Merged', tone: 'info',
     hint: 'Rows that resolved to an object or an edge that already existed (duplicates, aliases).' },
   { kind: 'removed', title: 'Removed', tone: 'no',
-    hint: 'Objects and edges that do not ship: the Stage 4b alias merge absorbed them, or OpenCTI’s parser refuses a detection rule quoted in the report.' },
+    hint: 'Objects and edges that do not ship: the Stage 4b alias merge absorbed them, OpenCTI’s parser refuses a detection rule quoted in the report, or, on an enrich job, they matched or left the analyst’s STIX bundle.' },
 ]
 
 function diffReason(d: DiffItem, labelOf: (id: string) => string): string {

@@ -4,6 +4,8 @@ import { X, Loader2, AlertTriangle } from 'lucide-react'
 import { uploadFile, ingestText, ingestUrl, inspectBaseline, fetchBaselineStatus, errorDetail } from '../api/client'
 import { TLP_LEVELS, PAP_LEVELS, BASELINE_REASON_LABEL } from '../types'
 import type { MarkingLevel, TlpLevel, PapLevel, PipelineMode, BaselineIntake } from '../types'
+import { splitDrop } from './dropFiles'
+import type { IgnoredFile } from './dropFiles'
 
 const MONO  = "'JetBrains Mono', ui-monospace, monospace"
 const SERIF = "'Source Serif 4', Georgia, serif"
@@ -79,11 +81,15 @@ interface Props {
   open: boolean
   /** A file dropped on the page, handed in when the modal opens. */
   initialFile?: File | null
+  /** A STIX bundle dropped with it: enrich mode, when the flag is on (ADR-0090). */
+  initialBundle?: File | null
+  /** Dropped .json files that are not used, named when the modal opens (ADR-0090). */
+  initialIgnored?: IgnoredFile[]
   onClose: () => void
   onJobCreated: (jobId: string, filename: string) => void
 }
 
-export default function NewReportModal({ open, initialFile, onClose, onJobCreated }: Props) {
+export default function NewReportModal({ open, initialFile, initialBundle, initialIgnored, onClose, onJobCreated }: Props) {
   const [value, setValue]       = useState('')
   const [title, setTitle]       = useState('')
   const [file, setFile]         = useState<File | null>(null)
@@ -97,6 +103,12 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
   const [stixFile, setStixFile] = useState<File | null>(null)
   const [intake, setIntake]     = useState<BaselineIntake | null>(null)
   const [intakeError, setIntakeError] = useState<string | null>(null)
+  // A bundle that was dropped while the flag is off: not used, and the modal says so.
+  const [bundleOff, setBundleOff] = useState(false)
+  // The dropped .json files that are not used, and why: named, and not used.
+  const [notUsed, setNotUsed] = useState<IgnoredFile[]>([])
+  // A bundle dropped on the modal while the status is still loading: it waits, as initialBundle does.
+  const [heldBundle, setHeldBundle] = useState<File | null>(null)
   const [reportId, setReportId] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const bundleRef = useRef<HTMLInputElement>(null)
@@ -108,10 +120,11 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
   const qc = useQueryClient()
 
   // Without the flag, or if its status cannot be read, only full mode is offered.
-  const { data: baselineStatus } = useQuery({
+  const { data: baselineStatus, isPending: statusPending, isError: statusFailed } = useQuery({
     queryKey: ['baselineStatus'],
     queryFn: fetchBaselineStatus,
   })
+  const flagOn = baselineStatus?.enabled === true
   const maxBytes = baselineStatus?.max_bytes ?? 0
   const maxMb = Math.round(maxBytes / 1048576)
   const enriching = pipelineMode === 'enrich'
@@ -134,6 +147,8 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
     },
   })
   const inspecting = inspectMut.isPending
+  // The mutate function is stable across renders, so the memoised pickBundle below can depend on it.
+  const startInspect = inspectMut.mutate
 
   // The bundle's minimum markings, once a scope is known.  A marking below one
   // would weaken what the bundle already says, so those levels are disabled.
@@ -188,7 +203,7 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
     : `${chars.toLocaleString()} chars → stored as a reviewable source`
   const footer = enriching && stixFile ? `${summary}, merged into ${stixFile.name}` : summary
 
-  // Drops the bundle, its report choice and its error.  The ticket goes with it,
+  // Drops the bundle, its report choice, its error and the flag note.  The ticket goes with it,
   // so an inspect still in flight for it is ignored when it answers.
   const clearBundle = useCallback(() => {
     inspectTicket.current += 1
@@ -196,6 +211,7 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
     setIntake(null)
     setIntakeError(null)
     setReportId(null)
+    setBundleOff(false)
   }, [])
 
   const resetAll = useCallback(() => {
@@ -226,11 +242,12 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
     setError(null)
     setPipelineMode('full')
     clearBundle()
+    setNotUsed(initialIgnored ?? [])
     if (initialFile) {
       setFile(initialFile)
       setValue('')
     }
-  }, [open, initialFile, clearBundle])
+  }, [open, initialFile, initialIgnored, clearBundle])
 
   // 2. Autofocus
   useEffect(() => {
@@ -298,15 +315,16 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
   }
 
   // A bundle that is too large is refused here, before anything is read.
-  const pickBundle = (f: File) => {
+  // Memoised: the effect that takes a bundle from the drop depends on it.
+  const pickBundle = useCallback((f: File) => {
     clearBundle()
     if (f.size > maxBytes) {
       setIntakeError(`The STIX bundle is larger than ${maxMb} MB`)
       return
     }
     setStixFile(f)
-    inspectMut.mutate({ file: f, ticket: inspectTicket.current })
-  }
+    startInspect({ file: f, ticket: inspectTicket.current })
+  }, [clearBundle, maxBytes, maxMb, startInspect])
   const pickReport = (id: string) => {
     // The report picked last is read again only when that read failed: it is the retry.
     if (!stixFile || (id === reportId && intakeError === null)) return
@@ -318,27 +336,50 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
     if (m === 'full') clearBundle()
     setPipelineMode(m)
   }
+  // A bundle is picked once the flag is known: the status may still be loading when
+  // the modal opens.  With the flag off it is not used.
+  const takeBundle = useCallback((f: File) => {
+    if (flagOn) { setPipelineMode('enrich'); pickBundle(f) }
+    else setBundleOff(true)
+  }, [flagOn, pickBundle])
+  useEffect(() => {
+    if (!open || !initialBundle || statusPending) return
+    takeBundle(initialBundle)
+  }, [open, initialBundle, statusPending, takeBundle])
+  // A bundle dropped on the modal while the status is loading waits here too.  It is
+  // forgotten when the modal closes, so a later opening cannot pick it up.
+  useEffect(() => {
+    if (!open) { setHeldBundle(null); return }
+    if (!heldBundle || statusPending) return
+    setHeldBundle(null)
+    takeBundle(heldBundle)
+  }, [open, heldBundle, statusPending, takeBundle])
+
   const handleBundleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
     if (f) pickBundle(f)
     e.target.value = ''
   }
-  // A bundle dropped on its own zone is not the report: the modal-wide drop must not take it.
-  const handleBundleDrop = (e: React.DragEvent) => {
-    e.preventDefault(); e.stopPropagation(); setModalDrag(false)
-    const f = e.dataTransfer.files[0]
-    if (f) pickBundle(f)
-  }
-
   const handleBackdropMouseDown = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) onClose()
   }
   const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); setModalDrag(true) }
   const handleDragLeave = (e: React.DragEvent) => { e.preventDefault(); if (e.relatedTarget === null) setModalDrag(false) }
+  // A report goes to the report zone, a STIX bundle to the bundle zone, on the modal
+  // and on the bundle zone alike.  A bundle alone leaves the pasted text and a chosen
+  // report as they are.  The drop stops here, so the page's own drop does not reopen
+  // the modal with the same files.
   const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault(); setModalDrag(false)
-    const f = e.dataTransfer.files[0]
-    if (f) { setFile(f); setValue('') }
+    e.preventDefault(); e.stopPropagation(); setModalDrag(false)
+    splitDrop(Array.from(e.dataTransfer.files)).then(({ report, bundle, ignored }) => {
+      setNotUsed(ignored)
+      if (bundle) {
+        // Until the status answers, the flag is unknown: the bundle waits for it.
+        if (statusPending) setHeldBundle(bundle)
+        else takeBundle(bundle)
+      }
+      if (report) { setFile(report); setValue('') }
+    })
   }
 
   const renderMarkingRow = <L extends MarkingLevel>(
@@ -516,6 +557,21 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
             />
           </div>
 
+          {bundleOff && (
+            <div style={{ fontSize: 11.5, color: 'var(--ink-3)', flexShrink: 0 }}>
+              {statusFailed
+                ? 'Could not read the server’s STIX enrichment status: the bundle was not used'
+                : 'STIX enrichment is off on this server: the bundle was not used'}
+            </div>
+          )}
+          {notUsed.map(({ file: f, why }, i) => (
+            <div key={i} style={{ fontSize: 11.5, color: 'var(--ink-3)', flexShrink: 0 }}>
+              {why === 'second_bundle'
+                ? `${f.name}: only one STIX bundle per job, not used`
+                : `${f.name} is not a STIX 2.1 bundle: not used`}
+            </div>
+          ))}
+
           {/* File state */}
           {mode === 'file' && file && (
             <div style={{
@@ -648,7 +704,7 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
                 </div>
               ) : (
                 <div
-                  onDrop={handleBundleDrop}
+                  onDrop={handleDrop}
                   style={{
                     display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10,
                     border: '1px dashed var(--rule)', borderRadius: 10, padding: '14px 16px',

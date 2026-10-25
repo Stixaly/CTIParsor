@@ -1,7 +1,8 @@
 import { useState, useLayoutEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import type { Entity } from '../../types'
+import { isImported, type Entity } from '../../types'
 import { typeDot, typeLabel, typeSoft, typeInk, TYPE_GROUPS, confPct } from './tokens'
+import { IMPORTED_TITLE } from './MarginaliaCard'
 
 const EDGE = 8   // px kept free between the chip (or its menu) and the window edge
 
@@ -28,6 +29,8 @@ export default function InlineHoverChip({
 }: Props) {
   const [typeMenu, setTypeMenu] = useState(false)
   const accepted = entity.accepted === true
+  // An imported row keeps its type: the server answers 409 (same rule as the margin card).
+  const imported = isImported(entity.enrichment_status)
   const rejected = entity.accepted === false
 
   // The chip sat centred above the mark whatever the window: half of it off
@@ -93,7 +96,9 @@ export default function InlineHoverChip({
         >✗</button>
         <button
           className="chip-btn neutral"
-          title="Change type"
+          title={imported ? IMPORTED_TITLE : 'Change type'}
+          disabled={imported}
+          style={imported ? { opacity: 0.4 } : undefined}
           onClick={() => setTypeMenu(v => !v)}
         >☰</button>
         <button

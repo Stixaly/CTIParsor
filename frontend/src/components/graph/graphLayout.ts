@@ -18,11 +18,14 @@ export interface GraphNode {
   /** Bundle view: a review row that is NOT in the bundle, drawn so it is not
    *  silently missing (ADR-0061). */
   ghost?:     boolean
+  /** Bundle view: the object came from the analyst's own STIX bundle (ADR-0090). */
+  baseline?:  boolean
 }
 
 /** Why an edge is drawn — see provenance.ts for labels and styles. */
 export type EdgeKind =
   | 'extracted'   // a review row (LLM or analyst) that ships
+  | 'baseline'    // a relationship of the analyst's own STIX bundle, as received (ADR-0090)
   | 'mapping'     // made by Stage 4 from the IoCs / LLM lists (based-on, indicates, targets)
   | 'policy'      // a pinned policy rule
   | 'reference'   // ATT&CK-curated (Stage 4b)

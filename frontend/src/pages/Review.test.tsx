@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { Entity, Job, Relationship } from '../types'
 import { ThemeProvider } from '../context/ThemeContext'
 import Review from './Review'
+import { IMPORTED_TITLE } from '../components/review/MarginaliaCard'
 
 // ADR-0058 — opening the review page used to write accepted=true for every
 // entity at or above 90 %, through the same PATCH an analyst's click uses.
@@ -298,7 +299,7 @@ describe('Review — a job enriched from the STIX bundle (ADR-0090)', () => {
 
   // The type chip on a mark is the one entry point that reaches changeType with
   // an imported row (the margin card and the rail disable it).
-  it('refuses a type change on a row from the bundle, and says why', async () => {
+  it('turns Change type off on a row from the bundle, says why, and changes nothing', async () => {
     const IMPORTED_ROW = entity({ id: 'e-imp', value: 'WellMess', enrichment_status: 'baseline_in_text',
                                   accepted: true, decision_origin: 'baseline_stix' })
     api.fetchJob.mockImplementation(() => Promise.resolve(ENRICH_JOB))
@@ -309,11 +310,10 @@ describe('Review — a job enriched from the STIX bundle (ADR-0090)', () => {
 
     fireEvent.mouseEnter(document.querySelector('mark[data-eid="e-imp"]')!)
     const chip = document.querySelector<HTMLElement>('.chip')!
-    fireEvent.click(chip.querySelector('button[title="Change type"]')!)
-    fireEvent.click([...chip.querySelectorAll<HTMLButtonElement>('.type-pill')].find(b => b.textContent === 'Tool')!)
+    const changeType = within(chip).getByTitle(IMPORTED_TITLE)
+    expect(changeType).toBeDisabled()
+    fireEvent.click(changeType)
 
     expect(api.updateEntity).not.toHaveBeenCalled()
-    expect(await screen.findByText('"WellMess" comes from your STIX bundle: accept or reject it; edit it in the source bundle'))
-      .toBeInTheDocument()
   }, 20_000)
 })

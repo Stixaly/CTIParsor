@@ -199,6 +199,25 @@ export default function KanbanCard({ job, selected, relTime, onSelect, onAnalyse
 
         <div style={{ flex: 1 }} />
 
+        {/* An enrich job merges into the analyst's bundle (ADR-0090); a full job has no badge. */}
+        {job.pipeline_mode === 'enrich' && (
+          <span
+            title="Enriches an existing STIX 2.1 bundle (ADR-0090)"
+            style={{
+              fontFamily: MONO,
+              fontSize: 9.5,
+              padding: '1px 4px',
+              borderRadius: 3,
+              letterSpacing: '.03em',
+              whiteSpace: 'nowrap',
+              color: 'var(--ink-3)',
+              border: '1px solid var(--rule-soft)',
+            }}
+          >
+            Enrich
+          </span>
+        )}
+
         {job.tlp_level && (
           <span
             style={{
