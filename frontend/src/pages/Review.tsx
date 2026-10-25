@@ -17,6 +17,7 @@ import {
 } from '../api/client'
 import { downloadBundle } from '../stix/downloadBundle'
 import type { ClientDecisionOrigin, Entity, Job, Relationship } from '../types'
+import { isImported } from '../types'
 
 import TopChrome from '../components/review/TopChrome'
 import PipelineRibbon, { type StageInfo } from '../components/review/PipelineRibbon'
@@ -145,6 +146,20 @@ export default function Review() {
     enabled: !!jobId,
   })
 
+  // Enrich jobs (ADR-0090): a row the analyst added by hand comes back with no
+  // bundle status (null), but it is new to the bundle, so it reads as 'new'.
+  // Full jobs keep null.  These two lists are what every view below is copied
+  // from, so the banner, the margin, the rail and the ribbon all see the same.
+  const enrich = job?.pipeline_mode === 'enrich'
+  const serverEntities = useMemo((): Entity[] => enrich
+    ? remoteEntities.map(e => e.enrichment_status == null ? { ...e, enrichment_status: 'new' as const } : e)
+    : remoteEntities,
+  [remoteEntities, enrich])
+  const serverRels = useMemo((): Relationship[] => enrich
+    ? remoteRels.map(r => r.enrichment_status == null ? { ...r, enrichment_status: 'new' as const } : r)
+    : remoteRels,
+  [remoteRels, enrich])
+
   // The auto-accept level is the server's (pipeline/decisions.py) — shown in
   // the banner only; nothing on this page accepts anything by itself.
   const { data: thresholdsInfo } = useQuery({
@@ -162,14 +177,15 @@ export default function Review() {
   const [localEntities, setLocalEntities] = useState<ClientEntity[]>([])
   const bootstrappedRef = useRef(false)
 
+  // Waits for the job too: the enrich mapping above depends on its pipeline_mode.
   useEffect(() => {
-    if (!remoteEntities.length || bootstrappedRef.current) return
+    if (!job || !serverEntities.length || bootstrappedRef.current) return
     bootstrappedRef.current = true
-    setLocalEntities(remoteEntities.map(e => ({
+    setLocalEntities(serverEntities.map(e => ({
       ...e,
       autoAccepted: e.decision_origin === 'auto_policy' && e.accepted === true,
     })))
-  }, [remoteEntities])
+  }, [job, serverEntities])
 
   // Merge server updates while preserving local accepted/autoAccepted
   useEffect(() => {
@@ -177,9 +193,9 @@ export default function Review() {
     setLocalEntities(prev => {
       const prevMap: Record<string, ClientEntity> = {}
       prev.forEach(e => { prevMap[e.id] = e })
-      return remoteEntities.map(e => prevMap[e.id] ? { ...e, accepted: prevMap[e.id].accepted, autoAccepted: prevMap[e.id].autoAccepted } : e)
+      return serverEntities.map(e => prevMap[e.id] ? { ...e, accepted: prevMap[e.id].accepted, autoAccepted: prevMap[e.id].autoAccepted } : e)
     })
-  }, [remoteEntities])
+  }, [serverEntities])
 
   // ── local relationship state ─────────────────────────────────────────────
   const [localRels, setLocalRels] = useState<ClientRelationship[]>([])
@@ -193,11 +209,12 @@ export default function Review() {
   // accepted (`default`), so the old pass never found a pending row to act on.
   const bootstrappedRelsRef = useRef(false)
 
+  // Waits for the job too, as the entities do.
   useEffect(() => {
-    if (!remoteRels.length || bootstrappedRelsRef.current) return
+    if (!job || !serverRels.length || bootstrappedRelsRef.current) return
     bootstrappedRelsRef.current = true
-    setLocalRels(remoteRels)
-  }, [remoteRels])
+    setLocalRels(serverRels)
+  }, [job, serverRels])
 
   // Subsequent updates: merge server state while preserving the locally-set
   // decision so rapid mutations (accept A then B before the first refetch
@@ -209,13 +226,13 @@ export default function Review() {
     setLocalRels(prev => {
       const prevMap: Record<string, ClientRelationship> = {}
       prev.forEach(r => { prevMap[r.id] = r })
-      return remoteRels.map(r =>
+      return serverRels.map(r =>
         prevMap[r.id]
           ? { ...r, accepted: prevMap[r.id].accepted, decision_origin: prevMap[r.id].decision_origin }
           : r
       )
     })
-  }, [remoteRels])
+  }, [serverRels])
 
   // ── ui state ────────────────────────────────────────────────────────────
   const [viewMode, setViewMode]   = useState<'text' | 'preview' | 'source' | 'detections'>('text')
@@ -267,6 +284,12 @@ export default function Review() {
     rejected: localEntities.filter(e => e.accepted === false).length,
     rels:     localRels.length,
   }), [localEntities, localRels])
+
+  // Enrich jobs (ADR-0090): the supplied bundle already holds everything
+  // CTIParsor found.  Counted from the rows, not the ribbon's counts.
+  const enrichAllCovered = enrich
+    && !serverEntities.some(e => e.enrichment_status === 'new')
+    && !serverRels.some(r => r.enrichment_status === 'new')
 
   // ── stage info for PipelineRibbon ────────────────────────────────────────
   const stageInfo = useMemo((): StageInfo => {
@@ -334,7 +357,21 @@ export default function Review() {
   const reject      = useCallback((id: string, bulk?: boolean) => setAccepted(id, false, bulk), [setAccepted])
   const reset       = useCallback((id: string) => setAccepted(id, null), [setAccepted])
 
+  // A row from the analyst's STIX bundle keeps its fields (ADR-0090): the server
+  // answers 409.  The hint takes the same slot and timer as the "not in text" one.
+  const hintFromBundle = (subject: string) => {
+    if (notInTextTimer.current) clearTimeout(notInTextTimer.current)
+    setNotInTextHint(`${subject} comes from your STIX bundle: accept or reject it; edit it in the source bundle`)
+    notInTextTimer.current = setTimeout(() => setNotInTextHint(null), 3000)
+  }
+
   const changeType = (id: string, entity_type: string) => {
+    // Every entry point (chip, reader, type rail) lands here.
+    const entity = localEntities.find(e => e.id === id)
+    if (entity && isImported(entity.enrichment_status)) {
+      hintFromBundle(`"${entity.value}"`)
+      return
+    }
     setLocalEntities(es => es.map(e => e.id === id ? { ...e, entity_type } : e))
     updateMutation.mutate({ id, patch: { entity_type } })
   }
@@ -427,8 +464,13 @@ export default function Review() {
   }
 
   const setRelType = (id: string, relationship_type: string) => {
+    const rel = localRelsRef.current.find(r => r.id === id)
+    if (rel && isImported(rel.enrichment_status)) {
+      hintFromBundle(`"${rel.source_value} → ${rel.target_value}"`)
+      return
+    }
     setLocalRels(rs => rs.map(r => r.id === id ? { ...r, relationship_type } : r))
-    if (!localRelsRef.current.find(r => r.id === id)?._localOnly) {
+    if (!rel?._localOnly) {
       updateRelMutation.mutate({ id, patch: { relationship_type } })
     }
   }
@@ -436,8 +478,13 @@ export default function Review() {
   // Only the bound that changed is sent (ADR-0063 §9): the API turns each bound
   // it receives into the analyst's date, replacing the model's.
   const setRelDates = (id: string, patch: DatePatch) => {
+    const rel = localRelsRef.current.find(r => r.id === id)
+    if (rel && isImported(rel.enrichment_status)) {
+      hintFromBundle(`"${rel.source_value} → ${rel.target_value}"`)
+      return
+    }
     setLocalRels(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r))
-    if (!localRelsRef.current.find(r => r.id === id)?._localOnly) {
+    if (!rel?._localOnly) {
       updateRelMutation.mutate({ id, patch })
     }
   }
@@ -698,9 +745,20 @@ export default function Review() {
     const entity = localEntities.find(e => e.id === id)
     if (!entity) return
     if (notInTextTimer.current) clearTimeout(notInTextTimer.current)
-    setNotInTextHint(`"${entity.value}" not found verbatim in document text`)
+    // ADR-0090: a row the analyst's own bundle supplied is not in the text by
+    // definition, so the hint says where it comes from instead.
+    setNotInTextHint(entity.enrichment_status === 'baseline_only'
+      ? `"${entity.value}" comes from your STIX bundle; it is not in the report text`
+      : `"${entity.value}" not found verbatim in document text`)
     notInTextTimer.current = setTimeout(() => setNotInTextHint(null), 3000)
   }, [localEntities])
+
+  // The Marginalia's focus.  A bundle-only row gets the same hint here: the PDF
+  // viewer never reports a missing occurrence, so nothing else would say it.
+  const focusFromMargin = (id: string) => {
+    setFocusedId(id)
+    if (localEntities.find(e => e.id === id)?.enrichment_status === 'baseline_only') handleEntityNotInText(id)
+  }
 
   // ── create entity from text selection ────────────────────────────────────
   // value = technique name (ATT&CK) or selected text (other types)
@@ -776,7 +834,22 @@ export default function Review() {
           filename={job?.original_filename ?? ''}
           counts={counts}
           stageInfo={stageInfo}
+          enrichment={job?.pipeline_mode === 'enrich' ? job.enrichment : undefined}
         />
+      )}
+
+      {/* ── enrich: nothing for CTIParsor to add (ADR-0090) ── */}
+      {enrichAllCovered && (
+        <div
+          role="status"
+          style={{
+            padding: '8px 22px', fontSize: 12.5, color: 'var(--ink-3)',
+            background: 'var(--bg-soft)', borderBottom: '1px solid var(--rule)',
+            flexShrink: 0,
+          }}
+        >
+          The supplied STIX bundle already covers everything CTIParsor found in this report.
+        </div>
       )}
 
       {/* ── auto-accept banner ── */}
@@ -929,7 +1002,7 @@ export default function Review() {
           <Marginalia
             entities={docEntities}
             focusedId={focusedId}
-            setFocusedId={setFocusedId}
+            setFocusedId={focusFromMargin}
             onAccept={accept}
             onReject={reject}
             onReset={reset}
@@ -957,6 +1030,11 @@ export default function Review() {
           getEntityType={value =>
             localEntities.find(e => e.value === value)?.entity_type
           }
+          getEntityEnrichment={value => {
+            // ADR-0090: a case-insensitive match, so "apt29" finds "APT29".
+            const v = value.toLowerCase()
+            return localEntities.find(e => e.value.toLowerCase() === v)?.enrichment_status ?? null
+          }}
           onBulk={setRelsBulk}
         />
       </div>

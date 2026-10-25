@@ -386,11 +386,17 @@ workflow file decides. To fix a failure:
 From then on, `test_fuzz_targets.py` replays that input in the fast tests.
 
 ### Frontend (Vitest, ESLint, tsc)
-20 Vitest files (162 tests on 2026-10-19) with Testing Library and jsdom: the
-Review and Dashboard pages, the relationship rail, the document reader, the
+23 Vitest files (224 tests on 2026-10-25, `npm test` in `frontend/`; 162
+in 20 files on 2026-10-19) with Testing Library and jsdom: the
+Review and Dashboard pages, the New report modal, the relationship rail, the
+margin notes and their ribbon, the document reader, the
 graph builders and layout, the API client, the ATT&CK search, the Coverage
 columns against the index of every committed ATT&CK track (read from
-`pipeline/data/`), a dependency audit. ESLint runs
+`pipeline/data/`), a dependency audit. Lot 5 of ADR-0090 (2026-10-25) adds
+`NewReportModal.test.tsx` (18 tests), `review/Marginalia.test.tsx` (9) and
+`review/PipelineRibbon.test.tsx` (4), and ADR-0090 cases to `api/client.test.ts`
+(18 tests in the file), `review/RelationshipRail.test.tsx` (22) and
+`pages/Review.test.tsx` (16). ESLint runs
 the TypeScript rules, `rules-of-hooks` and `exhaustive-deps` as errors, and
 the formatting the code already follows (`frontend/eslint.config.js`).
 `npm run check` runs lint, `tsc` and Vitest, the three steps of CI's frontend

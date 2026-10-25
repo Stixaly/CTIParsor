@@ -17,6 +17,77 @@ export interface Job {
   relationship_count?: number
   tlp_level?: string | null
   pap_level?: string | null
+  pipeline_mode?: PipelineMode
+  /** Only on enrich jobs (ADR-0090). */
+  enrichment?: JobEnrichment
+}
+
+// ── Enrich an existing STIX 2.1 bundle (ADR-0090) ────────────────────────────
+
+export type PipelineMode = 'full' | 'enrich'
+export type EnrichmentStatus = 'new' | 'matched' | 'baseline_in_text' | 'baseline_only'
+/** What the analyst sees: three states for four stored values (ADR-0090). */
+export type EnrichmentView = 'new' | 'in_stix' | 'stix_only'
+export const enrichmentView = (s: EnrichmentStatus | null | undefined): EnrichmentView | null =>
+  s == null ? null : s === 'new' ? 'new' : s === 'baseline_only' ? 'stix_only' : 'in_stix'
+/** Rows the analyst's bundle supplied: the server answers 409 to any edit or delete (accept/reject stay allowed). */
+export const isImported = (s: EnrichmentStatus | null | undefined): boolean => s === 'baseline_in_text' || s === 'baseline_only'
+
+export interface BaselineReport {
+  id: string
+  name: string
+  published: string | null
+  refs: number
+}
+
+export interface BaselineExclusion {
+  id: string
+  type: string
+  reason: string
+  detail: string
+}
+
+export interface BaselineIntake {
+  sha256: string
+  bundle_id: string
+  /** Imported objects by STIX type, plus "out_of_scope" and "dangling_refs". */
+  counts: Record<string, number>
+  /** Reason codes: baseline_invalid, baseline_older_version, baseline_rule_refused,
+   *  baseline_id_collision, baseline_refs_closure. */
+  excluded: BaselineExclusion[]
+  warnings: string[]
+  reports: BaselineReport[]
+  scope_report_id: string | null
+  /** Several reports and none chosen: min_tlp / min_pap / scope are null then. */
+  needs_report_choice: boolean
+  min_tlp: TlpLevel | null
+  min_pap: PapLevel | null
+  /** Only in a job's `enrichment.intake`, where `excluded` is cut at 200. */
+  excluded_total?: number
+}
+
+export interface BaselineStatus {
+  enabled: boolean
+  max_bytes: number
+  max_objects: number
+}
+
+export interface JobEnrichment {
+  intake: BaselineIntake | null
+  validated: boolean
+  counts: {
+    entities: Partial<Record<EnrichmentStatus, number>>
+    relationships: Partial<Record<EnrichmentStatus, number>>
+  }
+}
+
+/** Human label for each reason code in BaselineExclusion.reason. */
+export const BASELINE_REASON_LABEL: Record<string, string> = {
+  baseline_invalid: 'invalid STIX object',
+  baseline_older_version: 'older version of an id given twice',
+  baseline_rule_refused: 'detection rule that does not parse',
+  baseline_id_collision: 'id used by two objects of different types',
+  baseline_refs_closure: 'references an excluded object',
 }
 
 // TLP / PAP marking levels offered at upload time — applied via
@@ -41,17 +112,22 @@ export interface Entity {
   accepted: boolean | null
   source: string
   /** Who decided `accepted` (ADR-0058): 'human' | 'human_bulk' | 'auto_policy'
-   *  | 'default' | 'propagated' | 'legacy', or null while nobody has. */
+   *  | 'default' | 'propagated' | 'legacy' | 'baseline_stix' (the analyst's own
+   *  STIX bundle, ADR-0090), or null while nobody has. */
   decision_origin?: DecisionOrigin | null
   /** Left pending by auto-accept so an analyst's verdict can measure it. */
   control_sample?: boolean
   /** Why the pipeline held this row back (ADR-0082): not in the bundle until
    *  an analyst accepts it, one card at a time. */
   held_reason?: string | null
+  /** Enrich jobs only (ADR-0090): how the row stands against the supplied bundle. */
+  enrichment_status?: EnrichmentStatus | null
+  /** Enrich jobs only (ADR-0090): the id of the STIX object it came from. */
+  baseline_stix_id?: string | null
 }
 
 export type DecisionOrigin =
-  'human' | 'human_bulk' | 'auto_policy' | 'default' | 'propagated' | 'legacy'
+  'human' | 'human_bulk' | 'auto_policy' | 'default' | 'propagated' | 'legacy' | 'baseline_stix'
 
 /** The origins the client may send with a decision; the rest are the server's. */
 export type ClientDecisionOrigin = 'human' | 'human_bulk'
@@ -86,6 +162,10 @@ export interface Relationship {
   /** Why Stage 3d held this claim back (ADR-0082): not in the bundle until an
    *  analyst accepts it, one card at a time. */
   held_reason?: string | null
+  /** Enrich jobs only (ADR-0090): how the row stands against the supplied bundle. */
+  enrichment_status?: EnrichmentStatus | null
+  /** Enrich jobs only (ADR-0090): the id of the STIX relationship it came from. */
+  baseline_stix_id?: string | null
 }
 
 // ── Relationship dates (ADR-0063) ────────────────────────────────────────────

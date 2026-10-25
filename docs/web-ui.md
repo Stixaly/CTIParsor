@@ -78,6 +78,40 @@ Four view modes toggled at the top of the document pane:
 
 **Text selection:** Select text spanning two entities → opens relationship creator with the selected text as evidence.
 
+## Enrich mode (ADR-0090)
+
+The New report modal offers a second pipeline only when the server runs with
+`STIX_ENRICHMENT_ENABLED` on (`GET /api/baselines/status`; off by default):
+
+- **Full extraction** (the default): CTIParsor builds the bundle from the report alone.
+- **Enrich an existing STIX 2.1 bundle**: CTIParsor merges what the report adds
+  into a bundle you already hold. What the bundle holds is shown, not duplicated.
+
+**In the modal.** Add the bundle as a `.json` file, by drop or by browsing. The
+modal reads it at once through `POST /api/baselines/inspect`, which stores
+nothing, and shows what the job would keep: the objects by type, the objects
+outside the report's scope, the dangling references, the excluded objects with
+their reason, and the warnings. The preview does not run the STIX JSON schemas:
+they run when the job starts, and an object they refuse is left out then. A
+bundle with several reports asks which one to enrich. The bundle's minimum TLP
+and PAP are preselected, and a weaker level is disabled, because a lower marking
+would weaken what the bundle already says. Switching back to full extraction
+removes the bundle, and a level the bundle set is unset again.
+
+**On the Review page** (enrich jobs only):
+
+- The ribbon's enrich line counts entities and relationships against the bundle:
+  in STIX (the extracted rows that match a bundle object, plus the bundle objects
+  found in the text), STIX only, and + New.
+- The filter "Any source · + New · In STIX · STIX only" sits in the margin notes
+  and in the relationships rail. A row you add by hand counts as + New.
+- Badges: `+ new` (CTIParsor adds it), `in STIX` (the bundle already holds it),
+  `STIX only` (from the bundle, not in the report text).
+- A row from the bundle can be accepted or rejected. Its type, and for a
+  relationship its verb and dates, are read-only: the server refuses an edit
+  to them with 409, and the change belongs in the source bundle.
+- A banner says when the bundle already covers everything CTIParsor found.
+
 ## Graph page
 
 Custom **d3-force SVG graph** (not the OASIS stix-visualization iframe):

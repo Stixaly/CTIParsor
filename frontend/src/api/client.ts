@@ -1,4 +1,4 @@
-import type { Job, Entity, Relationship, StixBundle, BundleLedger, CoverageResult, CoverageRule, CoverageReportRules, DetectionProposals, DetectionCorpus, CorpusConfig, FormatInfo, ExportFacets, ExportSelection, ExportAxis, LastRun, RuleLookupResult, ThresholdsInfo, AttackIndex, MitreEntry } from '../types'
+import type { Job, Entity, Relationship, StixBundle, BundleLedger, CoverageResult, CoverageRule, CoverageReportRules, DetectionProposals, DetectionCorpus, CorpusConfig, FormatInfo, ExportFacets, ExportSelection, ExportAxis, LastRun, RuleLookupResult, ThresholdsInfo, AttackIndex, MitreEntry, BaselineIntake, BaselineStatus } from '../types'
 
 const BASE = '/api'
 
@@ -92,6 +92,9 @@ export const sourceUrl  = (id: string) => `/api/jobs/${id}/source`
 export interface UploadOptions {
   tlpLevel?: string
   papLevel?: string
+  /** Enrich mode (ADR-0090): the analyst's STIX 2.1 bundle, and the report to scope it to. */
+  baselineStix?: File
+  baselineReportId?: string
 }
 
 export async function uploadFile(file: File, options?: UploadOptions): Promise<{ job_id: string; filename: string }> {
@@ -99,10 +102,29 @@ export async function uploadFile(file: File, options?: UploadOptions): Promise<{
   form.append('file', file)
   if (options?.tlpLevel) form.append('tlp_level', options.tlpLevel)
   if (options?.papLevel) form.append('pap_level', options.papLevel)
+  if (options?.baselineStix) form.append('baseline_stix', options.baselineStix)
+  if (options?.baselineReportId) form.append('baseline_report_id', options.baselineReportId)
   const res = await fetch(`${BASE}/upload`, { method: 'POST', body: form })
-  if (!res.ok) throw new Error(`Upload failed: ${res.statusText}`)
+  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`)
   return res.json()
 }
+
+// Enrich mode (ADR-0090) — the analyst's STIX 2.1 bundle, read before a job exists.
+// Multipart, so not req(): it would force a JSON content type.
+
+/** What an import of this bundle would keep and drop.  `reportId` picks one of
+ *  the bundle's reports when it holds several (`needs_report_choice`). */
+export async function inspectBaseline(file: File, reportId?: string): Promise<BaselineIntake> {
+  const form = new FormData()
+  form.append('file', file)
+  if (reportId) form.append('report_id', reportId)
+  const res = await fetch(`${BASE}/baselines/inspect`, { method: 'POST', body: form })
+  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`)
+  return res.json()
+}
+
+export const fetchBaselineStatus = () => req<BaselineStatus>('/baselines/status')
+export const fetchBaselineIntake = (jobId: string) => req<BaselineIntake>(`/jobs/${jobId}/baseline/intake`)
 
 // NER cutoffs and the server's auto-accept level (ADR-0051, ADR-0058)
 export const fetchThresholds = () => req<ThresholdsInfo>('/thresholds')
@@ -288,6 +310,9 @@ export const ingestText = (body: {
   title?: string | null
   tlp_level?: string | null
   pap_level?: string | null
+  /** Enrich mode (ADR-0090): the text of the analyst's STIX 2.1 bundle. */
+  baseline_bundle?: string | null
+  baseline_report_id?: string | null
 }) => req<IngestResponse>('/ingest/text', { method: 'POST', body: JSON.stringify(body) })
 
 export const ingestUrl = (body: {
@@ -295,6 +320,8 @@ export const ingestUrl = (body: {
   enable_js?: boolean
   tlp_level?: string | null
   pap_level?: string | null
+  baseline_bundle?: string | null
+  baseline_report_id?: string | null
 }) => req<UrlIngestResponse>('/ingest/url', { method: 'POST', body: JSON.stringify(body) })
 
 /**

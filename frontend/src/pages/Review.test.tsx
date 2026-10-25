@@ -212,3 +212,108 @@ describe('Review — what the page says about itself', () => {
     expect(stage).not.toHaveAttribute('data-drawer')
   }, 20_000)
 })
+
+// ADR-0090 — a job enriched from the analyst's own STIX 2.1 bundle.
+describe('Review — a job enriched from the STIX bundle (ADR-0090)', () => {
+  const ENRICH_JOB: Job = {
+    ...JOB, pipeline_mode: 'enrich',
+    enrichment: {
+      intake: null, validated: true,
+      counts: {
+        entities: { matched: 1, baseline_only: 1 },
+        relationships: { baseline_in_text: 1 },
+      },
+    },
+  }
+  const MATCHED = entity({ id: 'e-match', value: 'WellMess', enrichment_status: 'matched' })
+  // Named by the bundle, and not in the report text.
+  const STIX_ONLY = entity({ id: 'e-stix', value: 'Emotet', entity_type: 'malware', accepted: true,
+                             decision_origin: 'baseline_stix', enrichment_status: 'baseline_only' })
+  const COVERED = 'The supplied STIX bundle already covers everything CTIParsor found in this report.'
+
+  it('says the bundle already covers the report when no row is new', async () => {
+    api.fetchJob.mockImplementation(() => Promise.resolve(ENRICH_JOB))
+    api.fetchEntities.mockImplementation(() => Promise.resolve([MATCHED, STIX_ONLY]))
+    api.fetchRelationships.mockImplementation(() => Promise.resolve([
+      { ...RELS[0], enrichment_status: 'baseline_in_text', accepted: true, decision_origin: 'baseline_stix' },
+    ]))
+    renderReview()
+    await opened()
+    expect(screen.getByText(COVERED)).toBeInTheDocument()
+  }, 20_000)
+
+  it('does not say so while a row is new, nor on a full job', async () => {
+    api.fetchJob.mockImplementation(() => Promise.resolve(ENRICH_JOB))
+    api.fetchEntities.mockImplementation(() => Promise.resolve([MATCHED, STIX_ONLY,
+      entity({ id: 'e-new', value: 'WellMail', enrichment_status: 'new' })]))
+    renderReview()
+    await opened()
+    expect(screen.queryByText(COVERED)).not.toBeInTheDocument()
+  }, 20_000)
+
+  it('does not say so on a full job', async () => {
+    renderReview()
+    await opened()
+    expect(screen.queryByText(COVERED)).not.toBeInTheDocument()
+  }, 20_000)
+
+  it('says a bundle-only entity is not in the text when the margin focuses it', async () => {
+    api.fetchJob.mockImplementation(() => Promise.resolve(ENRICH_JOB))
+    api.fetchEntities.mockImplementation(() => Promise.resolve([MATCHED, STIX_ONLY]))
+    api.fetchRelationships.mockImplementation(() => Promise.resolve([]))
+    renderReview()
+    await opened()
+    fireEvent.click(screen.getByRole('button', { name: 'Emotet' }))
+    expect(await screen.findByText('"Emotet" comes from your STIX bundle; it is not in the report text'))
+      .toBeInTheDocument()
+    expect(screen.queryByText(/not found verbatim in document text/)).not.toBeInTheDocument()
+  }, 20_000)
+
+  // A row the analyst added by hand comes back with no bundle status.  It is new
+  // to the bundle, so it counts as new and keeps the banner off.
+  it('reads a row added by hand as new: no banner, and it is on the "+ New" segment', async () => {
+    api.fetchJob.mockImplementation(() => Promise.resolve(ENRICH_JOB))
+    api.fetchEntities.mockImplementation(() => Promise.resolve([MATCHED,
+      entity({ id: 'e-hand', value: 'WellMail', enrichment_status: null })]))
+    api.fetchRelationships.mockImplementation(() => Promise.resolve([
+      { ...RELS[0], enrichment_status: 'baseline_in_text', accepted: true, decision_origin: 'baseline_stix' },
+    ]))
+    renderReview()
+    await opened()
+    expect(screen.queryByText(COVERED)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '+ New 1' })).toBeInTheDocument()
+  }, 20_000)
+
+  it('does not say the bundle covers the report while a relationship is new', async () => {
+    api.fetchJob.mockImplementation(() => Promise.resolve(ENRICH_JOB))
+    api.fetchEntities.mockImplementation(() => Promise.resolve([MATCHED, STIX_ONLY]))
+    api.fetchRelationships.mockImplementation(() => Promise.resolve([
+      { ...RELS[0], enrichment_status: null },
+    ]))
+    renderReview()
+    await opened()
+    expect(screen.queryByText(COVERED)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '+ New 1' })).toBeInTheDocument()
+  }, 20_000)
+
+  // The type chip on a mark is the one entry point that reaches changeType with
+  // an imported row (the margin card and the rail disable it).
+  it('refuses a type change on a row from the bundle, and says why', async () => {
+    const IMPORTED_ROW = entity({ id: 'e-imp', value: 'WellMess', enrichment_status: 'baseline_in_text',
+                                  accepted: true, decision_origin: 'baseline_stix' })
+    api.fetchJob.mockImplementation(() => Promise.resolve(ENRICH_JOB))
+    api.fetchEntities.mockImplementation(() => Promise.resolve([IMPORTED_ROW]))
+    api.fetchRelationships.mockImplementation(() => Promise.resolve([]))
+    renderReview()
+    await opened()
+
+    fireEvent.mouseEnter(document.querySelector('mark[data-eid="e-imp"]')!)
+    const chip = document.querySelector<HTMLElement>('.chip')!
+    fireEvent.click(chip.querySelector('button[title="Change type"]')!)
+    fireEvent.click([...chip.querySelectorAll<HTMLButtonElement>('.type-pill')].find(b => b.textContent === 'Tool')!)
+
+    expect(api.updateEntity).not.toHaveBeenCalled()
+    expect(await screen.findByText('"WellMess" comes from your STIX bundle: accept or reject it; edit it in the source bundle'))
+      .toBeInTheDocument()
+  }, 20_000)
+})

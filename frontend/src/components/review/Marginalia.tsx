@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
-import type { Entity } from '../../types'
-import { heldPending, typeDot, typeLabel } from './tokens'
+import { enrichmentView, type Entity } from '../../types'
+import { ENRICH_FILTERS, heldPending, typeDot, typeLabel, type EnrichFilter } from './tokens'
 import MarginaliaCard from './MarginaliaCard'
 import { toggleInSet } from '../../hooks/sets'
 
@@ -27,6 +27,24 @@ export default function Marginalia({
   onAccept, onReject, onReset, onChangeType,
   sortMode, setSortMode, onClose,
 }: Props) {
+  // ── STIX bundle filter (ADR-0090) ──────────────────────────────────────
+  // It filters what the column lists; the groups, the sort and the selection
+  // all work on what it leaves.  Shown only when some row has a bundle status.
+  const [enrichFilter, setEnrichFilter] = useState<EnrichFilter>('all')
+  const hasEnrich = entities.some(e => e.enrichment_status != null)
+  const enrichCounts: Record<EnrichFilter, number> = {
+    all:       entities.length,
+    new:       entities.filter(e => enrichmentView(e.enrichment_status) === 'new').length,
+    in_stix:   entities.filter(e => enrichmentView(e.enrichment_status) === 'in_stix').length,
+    stix_only: entities.filter(e => enrichmentView(e.enrichment_status) === 'stix_only').length,
+  }
+  const shown = useMemo(
+    () => enrichFilter === 'all'
+      ? entities
+      : entities.filter(e => enrichmentView(e.enrichment_status) === enrichFilter),
+    [entities, enrichFilter],
+  )
+
   // ── card collapse state ────────────────────────────────────────────────
   const [collapsed,    setCollapsed]    = useState<Set<string>>(new Set())
   const [allCollapsed, setAllCollapsed] = useState(false)
@@ -38,7 +56,7 @@ export default function Marginalia({
     if (allCollapsed) {
       setCollapsed(new Set()); setAllCollapsed(false)
     } else {
-      setCollapsed(new Set(entities.map(e => e.id))); setAllCollapsed(true)
+      setCollapsed(new Set(shown.map(e => e.id))); setAllCollapsed(true)
     }
   }
 
@@ -65,8 +83,8 @@ export default function Marginalia({
 
   // Visible entities (flat list for "select all visible")
   const visibleIds = useMemo(
-    () => new Set(entities.map(e => e.id)),
-    [entities],
+    () => new Set(shown.map(e => e.id)),
+    [shown],
   )
 
   const allVisibleSelected =
@@ -111,7 +129,7 @@ export default function Marginalia({
     // incorrect sort order whenever the review panel had been scrolled.
     const wrapper = document.querySelector<HTMLElement>('.stage-wrapper')
     const wrapperScrollTop = wrapper?.scrollTop ?? 0
-    const order = entities
+    const order = shown
       .map(e => {
         const node = document.querySelector<HTMLElement>(`mark[data-eid="${e.id}"]`)
         const y = node
@@ -122,26 +140,26 @@ export default function Marginalia({
       .sort((a, b) => a.y - b.y)
       .map(x => x.id)
     setPositionOrder(order)
-  }, [entities, sortMode])
+  }, [shown, sortMode])
 
   const typeOrder = useMemo(() => {
     const cnts: Record<string, number> = {}
-    entities.forEach(e => { cnts[e.entity_type] = (cnts[e.entity_type] || 0) + 1 })
+    shown.forEach(e => { cnts[e.entity_type] = (cnts[e.entity_type] || 0) + 1 })
     return Object.keys(cnts).sort((a, b) => cnts[b] - cnts[a])
-  }, [entities])
+  }, [shown])
 
   const grouped = useMemo(() => {
     if (sortMode === 'position') {
-      const order = positionOrder.length > 0 ? positionOrder : entities.map(e => e.id)
-      const byId = new Map(entities.map(e => [e.id, e]))
+      const order = positionOrder.length > 0 ? positionOrder : shown.map(e => e.id)
+      const byId = new Map(shown.map(e => [e.id, e]))
       const sorted = order.map(id => byId.get(id)).filter((e): e is Entity => Boolean(e))
       return [{ type: '_all', entities: sorted }]
     }
     return typeOrder.map(t => ({
       type: t,
-      entities: entities.filter(e => e.entity_type === t).sort((a, b) => b.confidence - a.confidence),
+      entities: shown.filter(e => e.entity_type === t).sort((a, b) => b.confidence - a.confidence),
     }))
-  }, [entities, sortMode, typeOrder, positionOrder])
+  }, [shown, sortMode, typeOrder, positionOrder])
 
   const selCount = selectedIds.size
 
@@ -184,6 +202,22 @@ export default function Marginalia({
           <button className="drawer-close" onClick={onClose} aria-label="Close entities panel">×</button>
         )}
       </div>
+
+      {/* ── STIX bundle filter (ADR-0090): enrich jobs only ────────────── */}
+      {hasEnrich && (
+        <div className="marg-sort" role="group" aria-label="Filter by STIX bundle" style={{ marginBottom: 8 }}>
+          {ENRICH_FILTERS.map(f => (
+            <button
+              key={f.value}
+              className={`marg-sort-btn ${enrichFilter === f.value ? 'on' : ''}`}
+              onClick={() => setEnrichFilter(f.value)}
+              aria-pressed={enrichFilter === f.value}
+            >
+              {f.label} {enrichCounts[f.value]}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* ── Bulk selection action bar ──────────────────────────────────── */}
       {selCount > 0 && (
