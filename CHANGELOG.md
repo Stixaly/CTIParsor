@@ -11,6 +11,51 @@ theme.
 
 ### Added
 
+#### Enriching an existing STIX 2.1 bundle, lot 3: Stage 3r, the baseline reconciliation (ADR-0090), 2026-10-25
+
+An `enrich` job (lot 2) now runs Stage 3r. After the extraction, the run's
+entities and relationships are matched against the analyst's bundle, and the
+worker stores each row's status. **A `full` job runs as before**, and the
+feature stays behind `STIX_ENRICHMENT_ENABLED`, default off. Stage 4 does not
+read the baseline yet (lot 4).
+
+- **`reconcile`** (`pipeline/baseline_stix.py`) is pure and runs in four
+  passes: the extracted entities (the rows the run writes, the LLM's names and
+  TTPs, held TTPs included) by match key; the baseline entries no extraction
+  found, searched in the report text as whole words (`baseline_in_text` when
+  found, `baseline_only` when not); the extracted relationships, held ones
+  included, whose two ends and verb are a baseline relation (`matched`); and the
+  baseline relations no extraction found, imported. It returns a
+  `Reconciliation`, whose counts go into the stage's outcome.
+- **Stage 3r** (`pipeline/orchestrator.py`) follows `3doc` in `STAGES`. In full
+  mode it is skipped with the reason `no baseline`. An error fails the run: there
+  is no fall back to full mode, and no entity or relationship is written. The
+  `baseline_reconciled` hook receives the result before `extraction_ready`.
+- **Stored rows** (`api/worker.py`): every entity and relationship row carries
+  `enrichment_status` (`new`, `matched`, `baseline_in_text`, `baseline_only`) and
+  `baseline_stix_id`. A matched row is accepted at once, with `decision_origin`
+  `baseline_stix` and a `decided_at` (ADR-0090 D5). The rows the baseline adds
+  are stored accepted, with origin `baseline_stix`; an entity's `source` is
+  `baseline_stix`. A full job stores these columns NULL, as before.
+- **Learning and grounding**: `load_decisions` (`pipeline/promotion.py`) never
+  reads a `baseline_stix` row: an imported one by its source, a matched one by
+  its origin, which is not a human origin. The grounding harness
+  (`tests/eval_pipeline.py`) reads full jobs only.
+- **`load_index`** (`api/baseline_store.py`) returns the validated index of an
+  `enrich` job, and `None` for a full job or a job with no baseline row.
+- **Known limit, for lot 4**: a Finalize rebuilds the bundle from the rows that
+  ship (`re_run_final_stages` reads `accepted` or pending rows), so an accepted
+  imported row is read by the rebuild and can reach the rebuilt bundle. The run's
+  own Stage 4 does not see it, and no test covers the rebuild with such a row.
+- **API**: the `enrichment` counts of an `enrich` job (`GET /api/jobs/{id}`) now
+  hold the rows' statuses, which lot 2 left empty.
+- **Docs**: `docs/pipeline.md` (Stage 3r and its place in the order),
+  `docs/database-schema.md` (the `baseline_stix` origin and source values).
+- **Tests**: `tests/test_baseline_reconcile.py` (28), `tests/test_orchestrator_baseline.py`
+  (5), `tests/test_baseline_persistence.py` (11) and `tests/test_baseline_exclusions.py`
+  (3): 47 collected on 2026-10-25. `tests/test_orchestrator.py` now expects 3r
+  in the stage order.
+
 #### Enriching an existing STIX 2.1 bundle, lot 2: storage, the flag and the API (ADR-0090), 2026-10-24
 
 The third of ADR-0090's eight lots lets a job carry a baseline: the three

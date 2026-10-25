@@ -180,6 +180,24 @@ the [README](../README.md#how-it-works); this page is the detail.
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
+│  Stage 3r — BASELINE RECONCILIATION            (offline ✅ — ADR-0090)│
+│  Enrich mode only: the job's baseline is the analyst's STIX bundle.  │
+│  Full mode: skipped ("no baseline"). Flag: STIX_ENRICHMENT_ENABLED.  │
+│  Matches what the run is about to write, in four passes:             │
+│  • Extracted entities: by match key, names within a family           │
+│  • Baseline entries nothing extracted: whole-word search in the text │
+│       found → baseline_in_text; not found → baseline_only            │
+│  • Extracted relationships: ends and verb match a baseline relation  │
+│  • Baseline relations nothing extracted: imported                    │
+│       baseline_in_text if both ends are found, else baseline_only    │
+│  Rows get enrichment_status: new, matched, baseline_in_text or       │
+│  baseline_only. A matched row: accepted, origin baseline_stix (D5).  │
+│  Imported rows: source baseline_stix, pre-accepted, same origin.     │
+│  Pure: an error fails the run; there is no fall back to full mode.   │
+│  Stage 4 does not read the baseline yet (ADR-0090 lot 4).            │
+└─────────────────────────────┬────────────────────────────────────────┘
+                              │
+┌─────────────────────────────▼────────────────────────────────────────┐
 │  Stage 2f — CVE ENRICHMENT                  (cache; network opt-in)  │
 │  Adds a description and a CVSS v3 score to each CVE's Vulnerability  │
 │  (x_cvss_v3_score, x_cvss_v3_vector), from the cve_cache table       │
@@ -244,7 +262,10 @@ On Finalize (web UI): Stages 4–5 run again on the accepted rows
 (`re_run_final_stages`), and the rebuilt bundle is stored with Stage 5's verdict
 and the record of the build that made it (`jobs.bundle_build_json`), unless a
 bundle built from newer rows is already stored (ADR-0086). It writes the export
-file in `output/` only when its build is stored.
+file in `output/` only when its build is stored. The rows it reads are the ones
+that ship (`accepted`, or pending without a hold), so the accepted rows an
+`enrich` job's baseline imported (`enrichment_status` `baseline_in_text` or
+`baseline_only`, ADR-0090) are among them.
 ```
 
 **The API worker, the `main.py` CLI and the `--stage full` benchmark run the
@@ -281,10 +302,11 @@ rows; the build record carries no overrides, since Stages 4–5 never read them.
 
 Stage order note: 3b, 3d, 3f and 3e run **per chunk**; 3doc reads the whole
 document once and its result joins the per-chunk ones; 3c runs **once per
-document**, after every result has been merged; 2f runs right before Stage 4,
-whose Vulnerability objects it feeds. The boxes are drawn in that execution
-order, the order of the CLI's stage ids too:
-`1 1f 2 2b 2c 2d 2e 2g 3 3d 3f 3e 3doc 2f 4 4b 4c 5` (3b and 3c have no id of
+document**, after every result has been merged; 3r (enrich mode only, ADR-0090)
+runs once per document after 3c, on the merged result; 2f runs right before
+Stage 4, whose Vulnerability objects it feeds. The boxes are drawn in that
+execution order, the order of the CLI's stage ids too:
+`1 1f 2 2b 2c 2d 2e 2g 3 3d 3f 3e 3doc 3r 2f 4 4b 4c 5` (3b and 3c have no id of
 their own: 3b is part of Stage 3, 3c always runs).
 
 ## Extraction quality layers
@@ -502,6 +524,7 @@ read-only at run time).
 | Stage 3 — Anthropic / Gemini / Mistral | ❌ requires internet |
 | Stage 3 — Ollama / vLLM / LM Studio | ✅ if the server is local |
 | Stage 3doc — document-level relations (opt-in) | ❌ requires an LLM provider |
+| Stage 3r — baseline reconciliation (enrich mode only) | ✅ fully offline (pure; needs the analyst's STIX bundle) |
 | OCR (Tesseract) | ✅ local binary |
 | Web UI (frontend assets) | ✅ served from local dist/ |
 | Detection coverage (Sigma, Suricata, YARA) | ✅ after `sync_corpora` (one-time clone) + `build_detection_index` |

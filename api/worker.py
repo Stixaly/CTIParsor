@@ -24,11 +24,13 @@ from api.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-from api.baseline_store import validate_in_worker
+from api.baseline_store import load_index, validate_in_worker
 from api.db import _lock, backup_db, emit_progress, get_conn, now_iso, set_job_status, transaction
 from api.paths import output_dir, uploads_dir
 from api.run_config import BuildKind, build_record, run_build_record, utc_stamp
-from pipeline.baseline_stix import BaselineError
+from pipeline import baseline_stix
+from pipeline.baseline_stix import BaselineError, Reconciliation
+from pipeline.decisions import BASELINE_STIX
 from pipeline.decisions import SHIPS as _SHIPS
 from pipeline.env_flags import env_int
 from pipeline.orchestrator import (
@@ -221,7 +223,37 @@ def _ttp_ids_covered(llm_result) -> tuple[set[str], set[str]]:
 LLM_NAME_CONFIDENCE = 0.5
 
 
-def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "") -> None:
+def _stage3r_entity(row: tuple, reconciliation: Reconciliation | None, now: str) -> tuple:
+    """An entities row (14 fields) with the four Stage 3r columns appended:
+    enrichment_status, baseline_stix_id, decision_origin, decided_at (ADR-0090).
+    A row the baseline already holds (MATCHED) is accepted with origin
+    `baseline_stix`; its held_reason, if any, stays.  Without a reconciliation
+    the four columns are NULL, as they were before."""
+    if reconciliation is None:
+        return (*row, None, None, None, None)
+    status, bid = reconciliation.entity(row[3], row[2])
+    if status != baseline_stix.MATCHED:
+        return (*row, status, bid, None, None)
+    # accepted is field 7; the rest of the row is unchanged.
+    return (*row[:7], 1, *row[8:], status, bid, BASELINE_STIX, now)
+
+
+def _stage3r_relation(row: tuple, reconciliation: Reconciliation | None, now: str) -> tuple:
+    """A relationships row (12 fields) with enrichment_status, baseline_stix_id and
+    decided_at appended.  A MATCHED one is accepted with origin `baseline_stix`,
+    decided now, as an entity is; its held_reason, if any, stays.  Without a
+    reconciliation the three are NULL, as they were before."""
+    if reconciliation is None:
+        return (*row, None, None, None)
+    status, bid = reconciliation.relation(row[2], row[3], row[4])
+    if status != baseline_stix.MATCHED:
+        return (*row, status, bid, None)
+    # accepted is field 6 and decision_origin field 10.
+    return (*row[:6], 1, *row[7:10], BASELINE_STIX, row[11], status, bid, now)
+
+
+def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "",
+                   reconciliation: Reconciliation | None = None) -> None:
     """Persist Stage 2 IoCs, Stage 2b gazetteer, and Stage 3 LLM entities to the DB.
 
     TTPs additionally carry the verbatim quote the extractor was asked for
@@ -229,6 +261,10 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "")
     stores a NULL offset and demotes the grade — it never drops the technique:
     99.4% of unlocatable evidence was measured to be paraphrase of real report
     content rather than invention.
+
+    With a `reconciliation` (Stage 3r, enrich mode) every row carries its status
+    against the analyst's baseline, and the baseline's own entities and
+    relationships are stored too, pre-accepted (ADR-0090).
     """
     _covered_ids, _covered_parents = _ttp_ids_covered(llm_result)
 
@@ -383,13 +419,32 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "")
                 (*r, None) if len(r) == 13 else (*r, None, None, None, None, None)
                 for r in rows_ioc + rows_llm
             ] + rows_held
+            # Stage 3r (ADR-0090): each row's status against the baseline, then the
+            # rows the baseline adds, pre-accepted with origin baseline_stix.
+            _now = now_iso()
+            _entity_rows = [_stage3r_entity(r, reconciliation, _now) for r in _entity_rows]
+            _rel_rows = [_stage3r_relation(r, reconciliation, _now) for r in rows_rel]
+            if reconciliation is not None:
+                _entity_rows += [
+                    (str(uuid4()), job_id, item.value, item.entity_type, "", 1.0,
+                     item.mitre_id, 1, baseline_stix.SOURCE, item.evidence_text, None,
+                     item.evidence_start, item.evidence_end, None,
+                     item.status, item.baseline_stix_id, BASELINE_STIX, _now)
+                    for item in reconciliation.imported_entities
+                ]
+                _rel_rows += [
+                    (str(uuid4()), job_id, item.source_value, item.relationship_type, item.target_value,
+                     1.0, 1, None, None, None, BASELINE_STIX, None, item.status, item.baseline_stix_id, _now)
+                    for item in reconciliation.imported_relations
+                ]
             # ON CONFLICT DO NOTHING is the portable spelling of INSERT OR IGNORE
             # (SQLite 3.24+ and PostgreSQL, ADR-0045).
             conn.executemany(
                 "INSERT INTO entities "
                 "(id,job_id,value,entity_type,context,confidence,mitre_id,accepted,source,"
-                "evidence_text,evidence_label,evidence_start,evidence_end,held_reason) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                "evidence_text,evidence_label,evidence_start,evidence_end,held_reason,"
+                "enrichment_status,baseline_stix_id,decision_origin,decided_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT (id) DO NOTHING",
                 _entity_rows,
             )
@@ -397,10 +452,10 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "")
                 "INSERT INTO relationships "
                 "(id,job_id,source_value,relationship_type,target_value,"
                 "confidence,accepted,evidence_text,evidence_label,times_json,"
-                "decision_origin,held_reason) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
+                "decision_origin,held_reason,enrichment_status,baseline_stix_id,decided_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT (id) DO NOTHING",
-                rows_rel,
+                _rel_rows,
             )
             conn.commit()
 
@@ -451,6 +506,8 @@ class _WorkerHooks(Hooks):
         self.checkpoint = FileCheckpoint(output_dir() / f"{job_id}_stage3.ckpt.json", job_id)
         # The run config `policy_used` built; None until then, or when it raised.
         self.run_config: dict | None = None
+        # Stage 3r's reconciliation; None in full mode.
+        self.reconciliation: Reconciliation | None = None
 
     def progress(self, event: str, data: dict) -> None:
         emit_progress(self.job_id, event, data)
@@ -487,7 +544,7 @@ class _WorkerHooks(Hooks):
                 f"Stage 3 results could be saved (worker_id={self.owner}) - discarding this run"
             )
             raise RunAborted
-        _save_entities(self.job_id, entities, llm_result, report_text=text)
+        _save_entities(self.job_id, entities, llm_result, report_text=text, reconciliation=self.reconciliation)
         _apply_auto_accept(self.job_id)
         # Persist the LLM result for finalize.
         with _lock:
@@ -495,6 +552,9 @@ class _WorkerHooks(Hooks):
                 conn.execute("UPDATE jobs SET llm_result_json=?, updated_at=? WHERE id=?",
                              (llm_result.model_dump_json(), now_iso(), self.job_id))
                 conn.commit()
+
+    def baseline_reconciled(self, reconciliation: Reconciliation) -> None:
+        self.reconciliation = reconciliation
 
     def policy(self) -> dict | None:
         return _load_policy()
@@ -582,6 +642,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
             original_filename=original_filename,
             tlp_level=row["tlp_level"] if row else None,
             pap_level=row["pap_level"] if row else None,
+            baseline=load_index(job_id),
         )
         document.output_path = str(bundle_output_path(job_id, document.report_name))
 

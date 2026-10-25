@@ -18,7 +18,7 @@ from typing import Any
 from api.db import _lock, get_conn, now_iso, transaction
 from api.logging_config import get_logger
 from pipeline import baseline_stix
-from pipeline.baseline_stix import BaselineError, Intake
+from pipeline.baseline_stix import BaselineError, BaselineIndex, Intake
 
 logger = get_logger(__name__)
 
@@ -98,3 +98,16 @@ def validate_in_worker(job_id: str) -> None:
                     "UPDATE job_baselines SET index_json=?, intake_json=?, validated=1, updated_at=? WHERE job_id=?",
                     (index.to_json(), intake_json(fresh), now_iso(), job_id))
     log_exclusions(job_id, added)
+
+
+def load_index(job_id: str) -> BaselineIndex | None:
+    """The validated index a run reconciles against (Stage 3r, ADR-0090), or None
+    for a job in `full` mode and for one with no baseline row.  Read after
+    `validate_in_worker`, so the index is the one the schemas accepted."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT j.pipeline_mode, b.index_json FROM jobs j "
+            "LEFT JOIN job_baselines b ON b.job_id = j.id WHERE j.id=?", (job_id,)).fetchone()
+    if row is None or row["pipeline_mode"] != "enrich" or row["index_json"] is None:
+        return None
+    return BaselineIndex.from_json(row["index_json"])

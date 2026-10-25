@@ -1876,10 +1876,12 @@ def load_grounding_from_bundle(
 
     conn = get_conn()
 
+    # Full jobs only: an enrich job's bundle holds baseline-only objects that are
+    # not in its report text, and each one would count as a hallucinated edge.
     query = (
         "SELECT id, report_text, bundle_json FROM jobs "
         "WHERE report_text IS NOT NULL AND length(report_text) > 0 "
-        "AND bundle_json IS NOT NULL"
+        "AND bundle_json IS NOT NULL AND pipeline_mode = 'full'"
     )
     params: list = []
     if job_id != "all":

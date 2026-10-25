@@ -48,7 +48,7 @@ RAN, SKIPPED, FAILED = "ran", "skipped", "failed"
 # Every stage the orchestrator knows, in the order it runs them.
 STAGES: tuple[str, ...] = (
     "1", "1f", "2", "2b", "2c", "2d", "2e", "2g",
-    "3", "3d", "3f", "3e", "3doc", "2f", "4", "4b", "4c", "5",
+    "3", "3d", "3f", "3e", "3doc", "3r", "2f", "4", "4b", "4c", "5",
 )
 
 STAGE_LABELS: dict[str, str] = {
@@ -56,6 +56,7 @@ STAGE_LABELS: dict[str, str] = {
     "2c": "semantic TTPs", "2d": "CyNER", "2e": "GLiNER", "2g": "alias lists",
     "3": "LLM enrichment", "3d": "relationship verification", "3f": "TTP verification",
     "3e": "cross-model consensus", "3doc": "document-level relations",
+    "3r": "baseline reconciliation",
     "2f": "CVE enrichment", "4": "STIX mapping", "4b": "graph completion",
     "4c": "long-distance inference", "5": "validation",
 }
@@ -165,6 +166,9 @@ class Document:
     pap_level: str | None = None
     # Where Stage 5 writes the bundle; None = Stage 5 is skipped.
     output_path: str | None = None
+    # The analyst's STIX bundle, indexed (pipeline.baseline_stix.BaselineIndex,
+    # ADR-0090); None = full mode, Stage 3r is skipped.
+    baseline: Any = None
 
     @property
     def name(self) -> str:
@@ -198,6 +202,10 @@ class Hooks:
     def policy(self) -> dict | None:
         """The relationship policy Stage 4 applies (read when Stage 4 starts)."""
         return None
+
+    def baseline_reconciled(self, reconciliation: Any) -> None:
+        """Stage 3r matched the run's extractions to the analyst's STIX bundle
+        (ADR-0090); called just before extraction_ready, only in enrich mode."""
 
     def policy_used(self, policy: dict | None) -> None:
         """Stage 4 is about to run under `policy` — record the run config here."""
@@ -237,6 +245,8 @@ class RunResult:
     validation: str | None = None
     # Stage 5's error messages when the bundle is "invalid" (empty otherwise).
     validation_errors: list[str] = field(default_factory=list)
+    # Stage 3r's result (pipeline.baseline_stix.Reconciliation), None in full mode.
+    reconciliation: Any = None
 
     def outcome(self, stage: str) -> StageOutcome | None:
         return next((o for o in self.stages if o.stage == stage), None)
@@ -772,6 +782,19 @@ class _Run:
             cyner_entities=self.r.cyner,
         )
 
+    def reconcile(self) -> None:
+        """Stage 3r (ADR-0090): match the run's extractions to the analyst's STIX
+        bundle.  Pure; an error fails the run (no silent fall back to full mode)."""
+        r = self.r
+        if r.document.baseline is None:
+            self.record("3r", SKIPPED, "no baseline")
+            return
+        from pipeline.baseline_stix import reconcile
+        t0 = time.monotonic()
+        r.reconciliation = reconcile(r.entities, r.llm_result, r.text, r.document.baseline)
+        self.record("3r", RAN, seconds=time.monotonic() - t0, **r.reconciliation.stats)
+        self.hooks.baseline_reconciled(r.reconciliation)
+
     def _chunks_to_llm(self) -> list[LLMEnrichmentResult]:
         from pipeline import llm_stats
         from pipeline.stage3_llm import LLMEnrichmentResult, enrich_chunk, stage3_settings
@@ -1203,6 +1226,7 @@ def run_document(document: Document, options: RunOptions | None = None,
     run.enrich()
     if run.r.llm_result is None:   # enrich() always sets it
         raise RuntimeError("Stage 3 left no result")
+    run.reconcile()
     run.hooks.extraction_ready(run.r.entities, run.r.llm_result, run.r.text)
     run.map_to_stix()
     run.validate()
