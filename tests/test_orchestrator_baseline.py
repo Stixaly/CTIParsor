@@ -4,8 +4,11 @@ Offline, like test_orchestrator.py: SKIP_HEAVY_MODELS keeps the models out and
 the LLM is the `mock_llm` fixture.  pipeline.baseline_stix.reconcile is always
 replaced by a fake here: its body is tested in its own module.
 """
+from pathlib import Path
+
 import pytest
 
+from pipeline import baseline_stix
 from pipeline import orchestrator as orch
 from pipeline.baseline_stix import Reconciliation
 from pipeline.orchestrator import Document, Hooks, RunOptions, run_document
@@ -16,6 +19,16 @@ def _no_heavy_models(monkeypatch):
     """Same as test_orchestrator.py: the models are not what these tests are about."""
     for module in ("pipeline.stage2c_ttp_semantic", "pipeline.stage2d_cyner", "pipeline.stage2e_gliner"):
         monkeypatch.setattr(f"{module}._SKIP_HEAVY", True)
+
+
+def _index():
+    """A real baseline index: since lot 4 the run's Stage 4 merges it, so a
+    stand-in object no longer gets through.  Its objects are not given to the
+    Document, so the merge keeps nothing and the run's bundle is CTIParsor's."""
+    raw = (Path(__file__).parent / "fixtures" / "baselines" / "opencti_report.json").read_bytes()
+    index, _, _ = baseline_stix.intake(raw, validate=False)
+    assert index is not None
+    return index
 
 
 def _opts() -> RunOptions:
@@ -77,7 +90,7 @@ def test_enrich_mode_reconciles_once_before_extraction_ready(mock_llm, sample_ct
     fake = Reconciliation(stats={"entities_new": 2, "entities_matched": 1})
     _fake_reconcile(monkeypatch, fake)
     hooks = _Order()
-    result = run_document(Document(text=sample_cti_text, baseline=object()), _opts(), hooks)
+    result = run_document(Document(text=sample_cti_text, baseline=_index()), _opts(), hooks)
 
     stage = result.outcome("3r")
     assert stage is not None and stage.status == "ran"
@@ -91,7 +104,7 @@ def test_enrich_mode_reconciles_once_before_extraction_ready(mock_llm, sample_ct
 def test_the_reconciliation_gets_the_extractions_and_the_documents_baseline(mock_llm, sample_cti_text,
                                                                            monkeypatch):
     calls = _fake_reconcile(monkeypatch)
-    baseline = {"index": "sentinel"}
+    baseline = _index()
     result = run_document(Document(text=sample_cti_text, baseline=baseline), _opts())
 
     assert len(calls) == 1
@@ -109,7 +122,7 @@ def test_a_failing_reconciliation_fails_the_run_before_any_write(mock_llm, sampl
     monkeypatch.setattr("pipeline.baseline_stix.reconcile", broken)
     hooks = _Order()
     with pytest.raises(ValueError, match="baseline index corrupt"):
-        run_document(Document(text=sample_cti_text, baseline=object()), _opts(), hooks)
+        run_document(Document(text=sample_cti_text, baseline=_index()), _opts(), hooks)
 
     assert "extraction_ready" not in hooks.events      # no silent fall back to full mode
     assert hooks.reconciled == []

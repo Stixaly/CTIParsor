@@ -11,6 +11,71 @@ theme.
 
 ### Added
 
+#### Enriching an existing STIX 2.1 bundle, lot 4: the merge into the baseline and the re-issued Report (ADR-0090), 2026-10-25
+
+An `enrich` job now ships the analyst's bundle merged with CTIParsor's. Stage 4
+merges the two after Stage 4b. When the baseline has a chosen Report, it is
+re-issued under its own id and CTIParsor builds no Report of its own. **A `full`
+job is built as before**, and the feature stays behind `STIX_ENRICHMENT_ENABLED`,
+default off. The known limit of lot 3 is resolved: a finalize no longer rebuilds
+a `baseline_only` entity or an imported relationship as CTIParsor's own object.
+
+- **`merge_baseline`** (`pipeline/baseline_stix.py`) folds Stage 4's objects into
+  the baseline. A CTIParsor object that a kept baseline entry matches is replaced
+  by the baseline object, and every reference to it is rewritten. A CTIParsor
+  object with the same id as a baseline object is that object. A CTIParsor
+  relationship that becomes a self-loop, or a duplicate of a baseline
+  relationship, is dropped. Baseline objects are never modified: they are written
+  back as received (`serialize_bundle`, the parsed JSON, not a stix2 round trip),
+  and they keep their own markings and author.
+- **Rejection closure**: a baseline object leaves the bundle when all its rows are
+  rejected (a pending row keeps it), and so does everything that references it.
+  Each one is recorded in the mapping ledger as `removed`, kind `baseline`.
+- **`reissue_report`** (ADR-0090 D1, an OpenCTI-style upsert). The chosen Report
+  keeps its `id`, `confidence`, `created`, `created_by_ref` and markings. Its
+  `object_refs` keep the references to kept objects and gain what CTIParsor adds
+  and the document states: its new objects and relationships, and the baseline
+  relationships the Report does not list that CTIParsor built too. An ATT&CK or
+  composed edge is not stated and is not added. `modified` is the build time, or the Report's
+  `modified` + 1 ms when the clock is behind. `external_references` gain
+  CTIParsor's `original_document` once. `x_ctiparsor_enrichment` records the
+  baseline's `baseline_sha256`, its bundle id, the build time and the counts.
+- **Stage 5** validates only what CTIParsor built or re-issued
+  (`validation_json`). The baseline objects were validated once at intake
+  (lot 2), so a 10 000-object baseline is not checked again at every finalize.
+  Lot 1 measured the intake with the JSON schemas at about 47 s for 10 000 objects.
+- **Finalize** (`re_run_final_stages`) does not rebuild the baseline's share:
+  `baseline_only` entity rows and imported relationship rows (`baseline_in_text`
+  and `baseline_only`) are not Stage 4 inputs. A `baseline_in_text` entity row is
+  still read, and the merge replaces it by the object it matches.
+- **Scope**: every relationship between two in-scope objects is in scope, even
+  one the Report does not list. A CTIParsor bundle given back as its own baseline
+  therefore round-trips with the same ids.
+- **Build record**: `jobs.bundle_build_json` names the baseline's SHA-256
+  (`baseline_sha256`) for an `enrich` job, on a run and on a finalize.
+- **`apply_baseline_merge`** (`pipeline/bundle_ledger.py`) records the matches
+  (`baseline_match`), the dropped relationships and the baseline objects left
+  out. It never writes `changes`, which the Graph page reads as a rewrite.
+- **Not yet checked on a running OpenCTI**: the upsert and the confidence rule in
+  `docs/stix-output.md` rest on the reading of OpenCTI's source in ADR-0090. The
+  throwaway-instance import is lot 7.
+- **Edge cases**: an id the baseline gives twice ships in the version the intake
+  indexed (the latest `modified`), not the last one in the file. A lone surrogate a
+  baseline carries as a JSON escape is written back as that escape, so the bundle
+  stays UTF-8. A chosen Report whose references all leave is not re-issued (STIX
+  wants one reference): a WARNING and the ledger (`baseline_report_empty`) say so;
+  with nothing the document states, the bundle has no Report. A kept object the
+  re-issued Report lists is not marked `outside_report`.
+- **Tests**: `tests/test_baseline_merge.py` (24), `tests/test_stage4_baseline.py`
+  (6), `tests/test_baseline_finalize.py` (20), `tests/test_run_baseline.py` (7),
+  `tests/test_baseline_e2e.py` (16: the real merge end to end, a round trip, the
+  verbatim objects, the upsert and a finalize with a rejection). The five files
+  hold 73 tests, collected on 2026-10-25. `tests/test_baseline_stix.py` gains one
+  test for the scope and is 448 on the same day.
+- **Docs**: `docs/stix-output.md` (Enriched bundle: what ships, the upsert, the
+  confidence rule, the rejection), `docs/pipeline.md` (the merge after 4b, Stage 5,
+  the finalize).
+
 #### Enriching an existing STIX 2.1 bundle, lot 3: Stage 3r, the baseline reconciliation (ADR-0090), 2026-10-25
 
 An `enrich` job (lot 2) now runs Stage 3r. After the extraction, the run's

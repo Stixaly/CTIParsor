@@ -88,3 +88,82 @@ Sigma, Suricata and Snort rules go through the parsers OpenCTI uses for them.
 A rule typed `snort` by its context but accepted only by Suricata's parser
 ships as `suricata`
 ([ADR-0070](adr/0070-quoted-sigma-suricata-snort-rules-ship-only-if-opencti-parses-them.md)).
+
+## Enriched bundle (ADR-0090)
+
+A job in `enrich` mode is given the analyst's STIX 2.1 bundle with its report
+(behind `STIX_ENRICHMENT_ENABLED`, off by default). Its exported bundle is the
+analyst's bundle merged with what CTIParsor extracted, and Stage 4 builds it
+after graph completion (Stage 4b). A `full` job's bundle is built as before.
+Design: [ADR-0090](adr/0090-enriching-an-existing-stix-bundle.md).
+
+### What ships
+
+- **Baseline objects, as received.** Every baseline object the bundle keeps is
+  written as it was received, with its own `created_by_ref` and
+  `object_marking_refs`. CTIParsor adds neither its TLP/PAP marking nor its
+  author to them. They are written from their parsed JSON, not through a stix2
+  round trip, which alters foreign objects (invariant I2).
+- **CTIParsor objects that match a baseline object are not shipped.** The
+  baseline object stands in for them, and every reference to them is rewritten.
+  A CTIParsor object with the same id as a baseline object is that baseline
+  object.
+- **Relationships.** A CTIParsor relationship that becomes a self-loop, or that
+  repeats a baseline relationship's source, verb and target, is dropped. The
+  mapping ledger records the reason.
+- **Rejected objects.** A baseline object is left out when every row the analyst
+  linked to it is rejected; a pending row keeps it. Whatever references it leaves
+  too. Each one is recorded in the mapping ledger as `removed`, kind `baseline`.
+- **Report.** With a chosen Report in the baseline, CTIParsor builds no Report of
+  its own and re-issues that one (below). When none of its references ships
+  and the document adds none, it is not re-issued (a STIX Report needs one):
+  the ledger records `baseline_report_empty`. Without a chosen Report, CTIParsor
+  builds its own Report, with `x_ctiparsor_enrichment` recording the baseline's
+  `baseline_sha256`, its bundle id, the build time, the counts and the synthesis
+  statistics.
+- **Scope.** A relationship between two objects in scope is in scope even when
+  the Report does not list it. A CTIParsor bundle given back as its own baseline
+  therefore round-trips with the same ids.
+
+### The re-issued Report (upsert)
+
+The chosen Report keeps its `id`, so OpenCTI's import updates the Report it
+already holds instead of adding a second one. Only four properties change:
+
+- **`object_refs`**: the references to baseline objects that ship, in their
+  order, then what CTIParsor adds and the document states: its new objects and
+  relationships, and the baseline relationships the Report does not list that
+  CTIParsor built too. An ATT&CK or composed edge is not stated, and is not
+  added. A reference to an
+  object that does not ship is not carried into this list; the mapping ledger's
+  entry for the Report lists it under `removed_refs`.
+- **`modified`**: the build time, to the millisecond. When the Report's own
+  `modified` is not earlier than the build time, it is that value + 1 ms, since
+  OpenCTI discards an update that is not newer than the stored object.
+- **`external_references`**: the Report's own, plus CTIParsor's
+  `original_document` reference (file name and SHA-256 of the uploaded file),
+  added once.
+- **`x_ctiparsor_enrichment`**: as described above.
+
+`id`, `created`, `created_by_ref`, `confidence`, `name`, `published` and the
+markings are the Report as received.
+
+### Confidence and the OpenCTI importer
+
+CTIParsor does not change the Report's `confidence`. OpenCTI adds the upsert's
+missing references only when the applied confidence, the import's confidence
+capped by the importing user's maximum, is at least the stored object's
+confidence (ADR-0090 §6, from OpenCTI's source). The importing user's ceiling
+must therefore be at least the Report's confidence. Below it, the additions are
+ignored and no error is raised.
+
+Not checked yet on a running OpenCTI: ADR-0090's check A4 imports an enriched
+bundle into a throwaway instance (lot 7).
+
+### A rejection in OpenCTI
+
+Rejecting a baseline object removes it from CTIParsor's bundle and from the
+Report's `object_refs` in that bundle. OpenCTI never removes a reference on an
+upsert outside a full synchronisation, so a Report OpenCTI already holds keeps
+the reference to the rejected object. Removing it takes an explicit call to
+OpenCTI's API, which CTIParsor does not make.

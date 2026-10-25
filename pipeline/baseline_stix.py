@@ -16,6 +16,7 @@ resolution, references, index types, intake (checks, scope, markings, index).
 """
 from __future__ import annotations
 
+import copy
 import enum
 import hashlib
 import ipaddress
@@ -26,7 +27,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, TypeVar
 
 import stix2
@@ -914,14 +915,25 @@ def _load(raw: bytes) -> tuple[dict, list[dict]]:
 
 
 def _scope(objects: Mapping[str, dict], root: str) -> set[str]:
-    """`root` and, transitively, every object it references that the bundle holds."""
-    seen = {root}
-    stack = [root]
-    while stack:
-        for ref in iter_refs(objects[stack.pop()]):
-            if ref in objects and ref not in seen:
-                seen.add(ref)
-                stack.append(ref)
+    """`root` and, transitively, every object it references that the bundle holds;
+    then every relationship between two of those, even one the Report does not list
+    (CTIParsor keeps ATT&CK and composed edges out of its Report's object_refs: left
+    out of scope, they came back from Stage 4 under new ids), with what it references."""
+    def closure(start: str, seen: set[str]) -> None:
+        seen.add(start)
+        stack = [start]
+        while stack:
+            for ref in iter_refs(objects[stack.pop()]):
+                if ref in objects and ref not in seen:
+                    seen.add(ref)
+                    stack.append(ref)
+
+    seen: set[str] = set()
+    closure(root, seen)
+    for oid, obj in objects.items():
+        if (oid not in seen and isinstance(obj, dict) and obj.get("type") == "relationship"
+                and obj.get("source_ref") in seen and obj.get("target_ref") in seen):
+            closure(oid, seen)
     return seen
 
 
@@ -1494,6 +1506,24 @@ class Reconciliation:
         """(status, baseline_stix_id) of an extracted relationship; (NEW, None) when unknown."""
         return self.relation_status.get(_rel_key(source_value, relationship_type, target_value), (NEW, None))
 
+    def in_text_entities(self) -> list[Any]:
+        """The BASELINE_IN_TEXT imported entities as models.schemas.RawEntity
+        (source SOURCE), for a run's Stage 4 to build what a finalize builds from
+        their rows (ADR-0090 lot 4).  Types RawEntity does not know are skipped."""
+        from models.schemas import EntityType, RawEntity
+
+        out: list[Any] = []
+        for row in self.imported_entities:
+            if row.status != BASELINE_IN_TEXT:
+                continue
+            try:
+                entity_type = EntityType(row.entity_type)
+            except ValueError:
+                continue
+            out.append(RawEntity(value=row.value, entity_type=entity_type, mitre_id=row.mitre_id,
+                                 source=SOURCE, confidence=1.0))
+        return out
+
 
 def _fold(value: str) -> str:
     """The folding `_row_key` and `_rel_key` apply to one value."""
@@ -1638,3 +1668,219 @@ def reconcile(raw_entities: Sequence[Any], llm_result: Any, report_text: str,
         "relations_baseline_only": imported_relation_counts[BASELINE_ONLY],
     }
     return rec
+
+
+# ── Merge (Stage 4, ADR-0090 lot 4) ─────────────────────────────────────────
+
+@dataclass
+class BaselineBuild:
+    """What Stage 4 needs of the baseline (architecture §8).  `verbatim` is filled
+    by Stage 4 (build_stix_bundle): the objects to write exactly as given, by id —
+    every kept baseline object as received, and the chosen Report as re-issued.
+    `serialize_bundle` writes them back; Stage 5 trusts the received ones."""
+    index: BaselineIndex
+    objects: Mapping[str, dict]                  # id -> object as received (job_baselines.bundle_json)
+    excluded: frozenset[str] = frozenset()       # rejected by the analyst (finalize); intake exclusions are
+                                                 # already out of index.imported_ids
+    verbatim: dict[str, dict] = dataclass_field(default_factory=dict)
+    trusted: frozenset[str] = frozenset()        # filled by Stage 4: the verbatim ids validated at intake
+                                                 # (every kept one but the re-issued Report)
+
+
+@dataclass
+class MergeResult:
+    """What `merge_baseline` did to Stage 4's object list."""
+    kept: frozenset[str]                          # baseline ids now in the list (the chosen Report excluded)
+    stated: frozenset[str]                        # kept ids the document states (go into the Report's refs)
+    remap: dict[str, str]                         # CTIParsor object id -> the baseline id it became
+    dropped: dict[str, str]                       # baseline id -> reason, not shipped (rejected / closure)
+    removed_relationships: list[dict]             # CTIParsor SROs dropped: {"id", "reason", "kept"?}
+    remapped_relationships: dict[str, tuple[str, str]]   # CTIParsor SRO id -> (source_ref, target_ref)
+
+
+def _to_millis(moment: datetime) -> datetime:
+    """`moment` in UTC, cut to the millisecond, the precision STIX writes."""
+    moment = moment.astimezone(UTC)
+    return moment.replace(microsecond=moment.microsecond // 1000 * 1000)
+
+
+def _stix_time(moment: datetime) -> str:
+    """`moment` as a STIX timestamp: 2026-10-25T10:00:00.000Z."""
+    return _to_millis(moment).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
+def _remap_target(obj: object, entry: Entry, kept: AbstractSet[str]) -> str | None:
+    """The kept baseline id `obj` becomes, within the entry it matched: the Indicator
+    for an Indicator, the observable for an observable of the entry's type, the
+    entry's own object otherwise.  None when that object is not kept, and for an
+    observable the entry holds no observable of (its id would name an Indicator)."""
+    stix_type = field(obj, "type")
+    if stix_type == "indicator":
+        target = next((i for i in entry.indicator_ids if i in kept), None)
+    elif stix_type == entry.stix_type and entry.sco_id:
+        target = entry.sco_id
+    elif stix_type in _SCO_VALUE_FIELD or stix_type == "file":
+        return None
+    else:
+        target = entry.entry_id
+    return target if target in kept else None
+
+
+def _rewrite_ends(obj: Any, remap: Mapping[str, str]) -> Any:
+    """`obj` with its top-level _ref / _refs properties read through `remap`; the object
+    itself when none of them moves.  Rebuilt through its JSON, as stage4b's _clone_with."""
+    changes: dict[str, Any] = {}
+    for key, value in obj.items():
+        if key.endswith("_ref") and isinstance(value, str) and value in remap:
+            changes[key] = remap[value]
+        elif key.endswith("_refs") and isinstance(value, list):
+            if any(isinstance(v, str) and v in remap for v in value):
+                changes[key] = [remap.get(v, v) if isinstance(v, str) else v for v in value]
+    if not changes:
+        return obj
+    d = json.loads(obj.serialize())
+    d.update(changes)
+    return stix2.parse(d, allow_custom=True)
+
+
+def merge_baseline(stix_objects: list, baseline: BaselineBuild) -> MergeResult:
+    """Fold Stage 4's objects into the baseline, in place (architecture §8.2):
+    the baseline's kept objects join the list, parsed; every CTIParsor object a
+    kept entry matches is replaced by it and every reference to it rewritten;
+    the CTIParsor relationships this makes self-loops or duplicates of a
+    baseline one are dropped.  Baseline objects are never rewritten.  The
+    chosen Report is not added: Stage 4 re-issues it."""
+    index = baseline.index
+    report = index.scope_report_id
+    candidates = set(index.imported_ids) - ({report} if report else set())
+    kept, dropped = ref_closure(baseline.objects, candidates, set(baseline.excluded))
+    dropped.update({oid: "baseline_rejected" for oid in baseline.excluded if oid in index.imported_ids})
+    kept = {oid for oid in kept if oid in baseline.objects}
+
+    remap: dict[str, str] = {}
+    for o in stix_objects:
+        stix_type = field(o, "type")
+        oid = _str(o, "id")
+        if stix_type in {"relationship", "report", "marking-definition"} or oid in baseline.objects:
+            continue
+        strong, _weak = keys_for_object(o)
+        entry = index.lookup(strong, stix_type)
+        if not isinstance(entry, Entry):
+            continue
+        target = _remap_target(o, entry, kept)
+        if target is not None and target != oid:
+            remap[oid] = target
+
+    # A CTIParsor object whose id a kept baseline object holds is that object (SCO ids are
+    # deterministic): the baseline one is written, the CTIParsor one is not.
+    shared = {_str(o, "id") for o in stix_objects if _str(o, "id") in kept}   # stated by the document too
+    rest = [o for o in stix_objects if field(o, "id") not in remap and field(o, "id") not in kept]
+    parsed = [stix2.parse(baseline.objects[oid], allow_custom=True) for oid in sorted(kept)]
+    seen: dict[tuple[Any, Any, Any], str] = {}           # (source, verb, target) -> the relationship kept for it
+    for base in parsed:
+        if field(base, "type") == "relationship":
+            triple = (field(base, "source_ref"), field(base, "relationship_type"), field(base, "target_ref"))
+            seen.setdefault(triple, _str(base, "id"))
+
+    from pipeline.stage4b_graph_completion import stated_by_the_report
+
+    out = list(parsed)
+    removed: list[dict] = []
+    remapped: dict[str, tuple[str, str]] = {}
+    stated_relations: set[str] = set()
+    for o in rest:
+        moved = field(o, "source_ref") in remap or field(o, "target_ref") in remap
+        new = _rewrite_ends(o, remap)
+        if field(new, "type") != "relationship":
+            out.append(new)
+            continue
+        oid = _str(new, "id")
+        source, target = _str(new, "source_ref"), _str(new, "target_ref")
+        triple = (source, field(new, "relationship_type"), target)
+        if source == target:
+            removed.append({"id": oid, "reason": "self_loop_after_baseline_merge"})
+        elif triple in seen:
+            removed.append({"id": oid, "reason": "duplicate_after_baseline_merge", "kept": seen[triple]})
+            if seen[triple] in kept and stated_by_the_report(new):
+                stated_relations.add(seen[triple])      # the document states the baseline's edge
+        else:
+            seen[triple] = oid
+            out.append(new)
+            if moved:
+                remapped[oid] = (source, target)
+    stix_objects[:] = out
+
+    # What the document states of the baseline: the objects CTIParsor's became, by a
+    # match or by sharing the id (a CTIParsor bundle given back as its own baseline),
+    # and the edges CTIParsor built too and holds stated.  Two stated ends do not make
+    # an edge stated: an ATT&CK or composed edge between them is not the report's word.
+    stated = set(remap.values()) | shared | stated_relations
+    return MergeResult(kept=frozenset(kept), stated=frozenset(stated), remap=remap, dropped=dropped,
+                       removed_relationships=removed, remapped_relationships=remapped)
+
+
+def reissue_report(original: dict, kept: AbstractSet[str], added: Sequence[str], enrichment: dict,
+                   source_ref: dict | None, now: datetime) -> dict:
+    """The chosen baseline Report as OpenCTI's upsert expects it (D1, architecture
+    §8.3): only modified, object_refs, external_references and
+    x_ctiparsor_enrichment change; confidence is never touched."""
+    d = copy.deepcopy(original)
+    refs = [r for r in original.get("object_refs", []) if r in kept]
+    listed = set(refs)
+    for r in added:
+        if r not in listed:
+            refs.append(r)
+            listed.add(r)
+    d["object_refs"] = refs
+    stamp = _to_millis(now)
+    prior = _to_millis(_modified(original))
+    if prior >= stamp:                                # the clock is behind the Report: strictly after it
+        stamp = prior + timedelta(milliseconds=1)
+    d["modified"] = _stix_time(stamp)
+    if source_ref is not None and source_ref not in original.get("external_references", []):
+        # Not twice: a Report CTIParsor already re-issued, or built, carries it.
+        d["external_references"] = [*original.get("external_references", []), source_ref]
+    d["x_ctiparsor_enrichment"] = enrichment
+    return d
+
+
+def newest_versions(items: Iterable[Any]) -> dict[str, dict]:
+    """The objects of a bundle by id, one version each: the one the intake keeps
+    (the latest `modified`, the first of a tie)."""
+    out: dict[str, dict] = {}
+    for obj in items:
+        if not isinstance(obj, dict) or not isinstance(obj.get("id"), str):
+            continue
+        known = out.get(obj["id"])
+        if known is None or _modified(obj) > _modified(known):
+            out[obj["id"]] = obj
+    return out
+
+
+def serialize_bundle(bundle: Any, verbatim: Mapping[str, dict] | None = None) -> str:
+    """The bundle's JSON with every object of `verbatim` written as given, by id
+    (invariant I2: a stix2 round trip alters foreign objects).  Without
+    `verbatim`: exactly `bundle.serialize(pretty=True)`."""
+    if not verbatim:
+        return bundle.serialize(pretty=True)
+    data = json.loads(bundle.serialize())
+    data["objects"] = [verbatim.get(o["id"], o) for o in data["objects"]]
+    text = json.dumps(data, indent=4, ensure_ascii=False)
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        # A lone surrogate the baseline carried as a JSON escape has no UTF-8
+        # form: the same JSON with every non-ASCII character escaped.
+        return json.dumps(data, indent=4)
+    return text
+
+
+def validation_json(bundle_json: str, trusted: AbstractSet[str]) -> str:
+    """`bundle_json` without the objects of `trusted` (validated at intake): what
+    Stage 5 checks, so a 10 000-object baseline is not re-validated at every
+    finalize.  Without `trusted`: `bundle_json` itself."""
+    if not trusted:
+        return bundle_json
+    data = json.loads(bundle_json)
+    data["objects"] = [o for o in data["objects"] if o.get("id") not in trusted]
+    return json.dumps(data, indent=4, ensure_ascii=False)
