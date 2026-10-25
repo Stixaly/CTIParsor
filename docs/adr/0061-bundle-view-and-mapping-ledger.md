@@ -52,7 +52,7 @@ and records, as it decides:
 - for each **input entity**: the object it became, the object it was merged
   into (`same_value`, `same_observable`, `same_technique`, `alias_canonical`),
   or why it was dropped (`no_iso_country`, `not_representable`,
-  `not_in_llm_lists`);
+  `not_a_uri`, `not_in_llm_lists`);
 - for each **object and SRO**, why it exists (`entity`, `extracted`,
   `ioc_indicator`, `ioc_based_on`, `ioc_association`, `targeted_location`,
   `embedded_rule`, `policy_pin`, `completion_*`, …);

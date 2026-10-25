@@ -57,6 +57,10 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "A quoted YARA rule with an include directive is refused without the server reading the file; "
      "it used to compile when the file existed",
      "mapping"),
+    ("ffb84c4", "2026-10-25",
+     "A URL that is not a valid URI (a redacted host, a bracket or a space left in it) gets no url "
+     "observable and no Indicator; it used to make the bundle fail Stage 5",
+     "mapping"),
 )
 
 

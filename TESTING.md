@@ -276,7 +276,7 @@ current truth.
 | **Evidence spans** | `test_evidence_span_offsets.py` | 11 | index mapping, coverage calculation, quote matching |
 | **Evidence spans** | `test_merge_keeps_evidence.py` | 10 | evidence preservation, confidence ranking, deduplication |
 | **Evidence labels** | `test_evidence_consensus.py` | 4 | label normalization, STIX properties, consensus boosting |
-| STIX mapping | `test_stage4.py` | 66 | SDO/SCO/SRO build, alias merging, IoC coverage, observable routing (ADR-0041, ADR-0062) |
+| STIX mapping | `test_stage4.py` | 84 | SDO/SCO/SRO build, alias merging, IoC coverage, observable routing (ADR-0041, ADR-0062), a URL that is not a URI left out with its ledger reason |
 | STIX mapping | `test_stage4_paths.py` | 52 | every observable to its SCO and pattern, named SDOs, PAP, embedded-rule Indicators, pin budget/grounding/malformed policies, relationship guards, CVE/CVSS and campaign merges, stix2 refusals |
 | STIX mapping | `test_stix_rel_spec.py` | 4 | listed vs allowed relationships: common verbs, unknown types, direction |
 | STIX mapping | `test_stix_ids.py` | 19 | ids equal to OpenCTI's standard ids: 15 values produced by pycti's own `generate_id` (ADR-0066), case and CAPEC rules |
