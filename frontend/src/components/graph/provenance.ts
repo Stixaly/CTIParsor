@@ -105,6 +105,7 @@ const ENTITY_REASON: Record<string, string> = {
   alias_merge:       'merged into an alias by graph completion (Stage 4b)',
   no_iso_country:    'a STIX Location needs an ISO country code, and this name has none',
   not_representable: 'the value cannot be expressed as this STIX type',
+  not_a_uri:         'a STIX url must be a valid URI, and this value is not one (a redacted host, a bracket or a space left in it)',
   not_in_llm_lists:  'found by NER but not listed by the LLM — the first build maps named objects from the LLM lists only; a rebuild includes it',
   rule_does_not_compile: 'the YARA rule quoted in the report does not compile, so OpenCTI would refuse its Indicator and every edge to it',
   rule_does_not_parse: 'the parser OpenCTI uses for this rule type refuses the quoted rule (often a line the report’s layout cut), so OpenCTI would refuse its Indicator and every edge to it',

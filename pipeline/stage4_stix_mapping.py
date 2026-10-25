@@ -7,6 +7,7 @@ from typing import Any
 
 import stix2
 import yaml
+from jsonschema import Draft202012Validator
 
 # Initialize logging
 from api.logging_config import get_logger
@@ -1818,10 +1819,31 @@ def _map_iocs_to_scos(
             if ledger is not None:
                 ledger.object(sco, "entity")
         else:
-            _record(entity, "dropped", reason="no_traffic_endpoint"
-                    if entity.entity_type == EntityType.NETWORK_TRAFFIC else "not_representable")
+            _record(entity, "dropped", reason=_no_sco_reason(entity))
 
     return scos, value_to_sco
+
+
+def _no_sco_reason(entity: RawEntity) -> str:
+    """The ledger reason for an observable `_entity_to_sco` gave no SCO."""
+    if entity.entity_type == EntityType.NETWORK_TRAFFIC:
+        return "no_traffic_endpoint"
+    if entity.entity_type == EntityType.URL and not _is_uri(entity.value):
+        return "not_a_uri"
+    return "not_representable"
+
+
+def _is_uri(value: str) -> bool:
+    """True if `value` passes the `uri` format check Stage 5 runs on url.value.
+
+    stix2.URL accepts any string, but the url schema declares `"format": "uri"`
+    and stix2-validator checks it with this format checker (RFC 3986): a
+    redacted "https://[REDACTED]/x.exe", a half-refanged "http://evil[.]com/"
+    or a stray "%zz" made the whole bundle invalid at finalize.  Without
+    rfc3986-validator installed the checker has no `uri` rule and lets
+    everything through, as Stage 5 then does.
+    """
+    return Draft202012Validator.FORMAT_CHECKER.conforms(value, "uri")
 
 
 # STIX 2.1 forbids abbreviated hives in windows-registry-key.key: the schema
@@ -1876,7 +1898,9 @@ def _entity_to_sco(entity: RawEntity):
         if t == EntityType.DOMAIN:
             return stix2.DomainName(value=v)
         if t == EntityType.URL:
-            return stix2.URL(value=v)
+            # Dropped, not repaired: a redaction has no URL to recover, and a
+            # rewritten value would be another IoC than the report's.
+            return stix2.URL(value=v) if _is_uri(v) else None
         if t == EntityType.EMAIL:
             return stix2.EmailAddress(value=v)
         if t == EntityType.MAC_ADDR:

@@ -728,6 +728,24 @@ gets a dated amendment.
 
 ### Fixed
 
+#### A URL that is not a valid URI no longer makes the bundle invalid, 2026-10-25
+
+Stage 4 built a `url` observable, and its Indicator, from any URL in the
+report, but the STIX schema requires `url.value` to be a URI (RFC 3986). One
+redacted URL such as `https://[REDACTED]/socktz_v8.exe` made Stage 5 reject the
+whole bundle, and finalize raised `BundleInvalidError`, in full mode as in
+enrich mode. It was the one Stage 5 failure of the ADR-0090 lot 7 round trip
+on the measurement reports.
+
+Stage 4 now checks the value with the same `uri` format check Stage 5 runs. A
+value that fails it gets no `url`, no Indicator and no relationship, and the
+mapping ledger records it as dropped with the reason `not_a_uri`, which the
+Graph page explains. The value is not repaired: a redaction has no URL to
+recover, and a rewritten one would be another IoC. Stage 2 keeps extracting
+it, so the Review screen still shows the mention. Defanged URLs are unchanged:
+Stage 1 refangs `hxxp://` and `[.]` before the URL regex runs, so they ship.
+The round trip now validates 7 of 7 bundles.
+
 #### An upload error shows the server's message, 2026-10-25
 
 `uploadFile` (`frontend/src/api/client.ts`) threw `Upload failed: <statusText>`,

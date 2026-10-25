@@ -836,6 +836,66 @@ def test_network_traffic_with_no_destination_is_left_out_and_says_why():
     assert entry["outcome"] == "dropped" and entry["reason"] == "no_traffic_endpoint"
 
 
+# ── A url whose value is not a URI is left out, and the ledger says why ──────
+# The url schema declares `"format": "uri"` and Stage 5 checks it: one redacted
+# URL in a report made the whole bundle invalid at finalize.
+
+_NOT_URIS = [
+    "https://[REDACTED]/socktz_v8.exe",        # a redaction in the host
+    "http://[actor-controlled-ip]/payload",    # a placeholder, bracketed
+    "http://evil[.]com/a.php",                 # a defang Stage 1 did not undo
+    "https://evil.com/a b.exe",                # a space
+    "https://evil.com/%zz",                    # a broken percent-escape
+]
+
+
+@pytest.mark.parametrize("value", _NOT_URIS)
+def test_url_that_is_not_a_uri_gets_no_sco_and_no_indicator(value):
+    from pipeline.bundle_ledger import MappingLedger
+    from pipeline.stage3_llm import IoCAssociation
+    from pipeline.stage5_validation import UNVERIFIED, VALIDATED, validate_bundle
+
+    led = MappingLedger()
+    entities = [RawEntity(value=value, entity_type=EntityType.URL),
+                RawEntity(value="https://evil.com/ok.exe", entity_type=EntityType.URL)]
+    llm = LLMEnrichmentResult(
+        malware_families=["SockTZ"],
+        ioc_associations=[IoCAssociation(ioc_value=value, malware_name="SockTZ"),
+                          IoCAssociation(ioc_value="https://evil.com/ok.exe", malware_name="SockTZ")])
+    bundle = build_stix_bundle(entities, llm, "url_test", ledger=led)
+
+    urls = [o.value for o in bundle.objects if o.get("type") == "url"]
+    patterns = [o.pattern for o in bundle.objects if o.get("type") == "indicator"]
+    assert urls == ["https://evil.com/ok.exe"]
+    assert patterns == ["[url:value = 'https://evil.com/ok.exe']"]
+    (entry,) = [e for e in led.entities if e["value"] == value]
+    assert entry["outcome"] == "dropped" and entry["reason"] == "not_a_uri"
+
+    result = validate_bundle(bundle.serialize(), quiet=True)
+    if result.status == UNVERIFIED:
+        pytest.skip("the STIX JSON schemas are not installed")
+    assert result.status == VALIDATED, result.errors
+
+
+@pytest.mark.parametrize("value", ["http://[2001:db8::1]:8080/x", "https://evil.com/path?a=b#frag",
+                                   "https://evil.com/a%20b.exe", "ftp://evil.com/drop"])
+def test_url_that_is_a_uri_still_ships(value):
+    bundle = build_stix_bundle([RawEntity(value=value, entity_type=EntityType.URL)],
+                               LLMEnrichmentResult(), "url_test")
+    assert [o.value for o in bundle.objects if o.get("type") == "url"] == [value]
+
+
+def test_defanged_url_in_the_text_is_refanged_before_it_reaches_stage4():
+    # Stage 1 undoes hxxp:// and [.] before its URL regex runs, so a defanged
+    # URL ships; only what refang leaves behind is dropped.
+    from pipeline.stage2_extraction import _extract_network_iocs, refang
+
+    text = refang("Payload at hxxps://evil[.]com/socktz_v8.exe and https://[REDACTED]/socktz_v8.exe")
+    urls = [e for e in _extract_network_iocs(text) if e.entity_type == EntityType.URL]
+    bundle = build_stix_bundle(urls, LLMEnrichmentResult(), "url_test")
+    assert [o.value for o in bundle.objects if o.get("type") == "url"] == ["https://evil.com/socktz_v8.exe"]
+
+
 # ── ADR-0042: embedded detection rules become Indicator SDOs ──────────────────
 
 def test_embedded_yara_rule_becomes_indicator_and_links_to_malware():
