@@ -205,7 +205,7 @@ def captured_env() -> dict[str, str]:
     return env
 
 
-def build_record(policy: dict | None, *, kind: BuildKind) -> dict:
+def build_record(policy: dict | None, *, kind: BuildKind, baseline_sha256: str | None = None) -> dict:
     """What built a stored bundle outside a run (ADR-0086): a finalize (`kind`
     "finalize") or the auto-finalize ("quick") rebuilds Stages 4+5 with the
     code, data, policy and environment of the process that serves it, not
@@ -213,8 +213,11 @@ def build_record(policy: dict | None, *, kind: BuildKind) -> dict:
 
     No entity overrides here: Stages 4/5 never read them — they act in
     Stages 2-3, and a finalize reads rows the run already filtered.
+
+    `baseline_sha256` names the baseline the bundle was merged with (ADR-0090);
+    the key is absent for a bundle built without one (a full job).
     """
-    return {
+    record = {
         "kind": kind,
         "built_at": utc_stamp(),
         "git_rev": _resolve_git_rev(),
@@ -222,14 +225,18 @@ def build_record(policy: dict | None, *, kind: BuildKind) -> dict:
         "env": captured_env(),
         "manifest": build_manifest(),
     }
+    if baseline_sha256 is not None:
+        record["baseline_sha256"] = baseline_sha256
+    return record
 
 
-def run_build_record(run_config: dict | None) -> dict:
+def run_build_record(run_config: dict | None, *, baseline_sha256: str | None = None) -> dict:
     """The build record of a run's own bundle: Stage 4 ran in the run's
     subprocess, with the code and data its run config captured at the start.
-    None values when the run config could not be built."""
+    None values when the run config could not be built.  `baseline_sha256` as
+    for `build_record`."""
     rc = run_config or {}
-    return {
+    record = {
         "kind": "run",
         "built_at": utc_stamp(),
         "git_rev": rc.get("git_rev"),
@@ -237,6 +244,9 @@ def run_build_record(run_config: dict | None) -> dict:
         "env": rc.get("env"),
         "manifest": rc.get("manifest"),
     }
+    if baseline_sha256 is not None:
+        record["baseline_sha256"] = baseline_sha256
+    return record
 
 
 def build_run_config(policy: dict | None = None) -> dict:

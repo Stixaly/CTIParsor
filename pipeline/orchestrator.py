@@ -169,6 +169,9 @@ class Document:
     # The analyst's STIX bundle, indexed (pipeline.baseline_stix.BaselineIndex,
     # ADR-0090); None = full mode, Stage 3r is skipped.
     baseline: Any = None
+    # Its objects as received, by id (job_baselines.bundle_json), for Stage 4's
+    # merge; None in full mode.
+    baseline_objects: Any = None
 
     @property
     def name(self) -> str:
@@ -247,6 +250,10 @@ class RunResult:
     validation_errors: list[str] = field(default_factory=list)
     # Stage 3r's result (pipeline.baseline_stix.Reconciliation), None in full mode.
     reconciliation: Any = None
+    # Stage 4's merge input and output (pipeline.baseline_stix.BaselineBuild:
+    # `verbatim` and `trusted` are filled by Stage 4), None in full mode.  The
+    # bundle is written with baseline_stix.serialize_bundle(bundle, build.verbatim).
+    baseline_build: Any = None
 
     def outcome(self, stage: str) -> StageOutcome | None:
         return next((o for o in self.stages if o.stage == stage), None)
@@ -463,6 +470,7 @@ def build_bundle(
     long_distance: bool = True,
     ledger=None,
     document_anchor=None,
+    baseline=None,
 ):
     """Stage 4 (with the Stage 4c long-distance inferer it needs) — shared by
     a pipeline run and by finalize.  `cve_metadata` comes from lookup_cves().
@@ -486,6 +494,7 @@ def build_bundle(
         graph_completion=graph_completion,
         ledger=ledger,
         document_anchor=document_anchor,
+        baseline=baseline,
     )
 
 
@@ -1092,15 +1101,27 @@ class _Run:
         source_hash, source_bytes = load_file_bytes(self.doc.file_path)
         if r.llm_result is None:   # enrich() always sets it
             raise RuntimeError("Stage 4 reached without a Stage 3 result")
+        from pipeline.baseline_stix import BaselineBuild
         from pipeline.bundle_ledger import MappingLedger
         from pipeline.named_entities import with_named_entities
         ledger = MappingLedger()
+        # Enrich mode (ADR-0090 lot 4): the baseline is merged into Stage 4's
+        # output.  Nothing is rejected at run time, so no exclusion; the rows
+        # Stage 3r found in the text join the run's entities, as a finalize
+        # builds them from the stored rows.
+        build = None
+        entities = r.entities
+        if self.doc.baseline is not None:
+            build = BaselineBuild(index=self.doc.baseline, objects=self.doc.baseline_objects or {})
+            r.baseline_build = build
+            if r.reconciliation is not None:
+                entities = r.entities + r.reconciliation.in_text_entities()
         # Stage 4 maps malware / actors / tools from the LLM's lists; the
         # gazetteer's and NER's names join them here, as the worker's
         # finalisation already did from the job store — the CLI dropped them
         # (audit B 8.1.2).  `r.llm_result` itself is left as Stage 3 made it.
         r.bundle = build_bundle(
-            r.entities, with_named_entities(r.llm_result, r.entities),
+            entities, with_named_entities(r.llm_result, entities),
             report_name=self.doc.report_name,
             report_text=r.text,
             original_filename=self.doc.name,
@@ -1114,6 +1135,7 @@ class _Run:
             long_distance="4c" not in self.opts.disabled,
             ledger=ledger,
             document_anchor=r.anchor,
+            baseline=build,
         )
         r.ledger = ledger.to_dict()
         n_objects = len(list(r.bundle.objects))
@@ -1181,7 +1203,12 @@ class _Run:
 
         t0 = time.monotonic()
         Path(self.doc.output_path).parent.mkdir(parents=True, exist_ok=True)
-        result = validate_and_export(self.r.bundle, self.doc.output_path)
+        build = self.r.baseline_build
+        if build is None:
+            result = validate_and_export(self.r.bundle, self.doc.output_path)
+        else:
+            result = validate_and_export(self.r.bundle, self.doc.output_path,
+                                         verbatim=build.verbatim, trusted=build.trusted)
         self.r.valid, self.r.validation = result.ok, result.status
         self.r.validation_errors = result.errors
         logger.info(f"[Stage 5] Validation complete — {result.status}, "

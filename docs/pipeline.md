@@ -194,7 +194,7 @@ the [README](../README.md#how-it-works); this page is the detail.
 │  baseline_only. A matched row: accepted, origin baseline_stix (D5).  │
 │  Imported rows: source baseline_stix, pre-accepted, same origin.     │
 │  Pure: an error fails the run; there is no fall back to full mode.   │
-│  Stage 4 does not read the baseline yet (ADR-0090 lot 4).            │
+│  Stage 4 merges the baseline after 4b (ADR-0090 lot 4): see below.   │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
@@ -252,6 +252,8 @@ the [README](../README.md#how-it-works); this page is the detail.
 │  Stage 5 — VALIDATION & EXPORT                         (offline ✅)  │
 │  stix2 library validates every object at construction time           │
 │  stix2-validator JSON-schema check (schemas ship with the repo)      │
+│  Enrich mode: the baseline objects, validated at intake, are not     │
+│  checked again here (ADR-0090 lot 4); the file keeps every object.   │
 │  Valid bundle → output/{report}_bundle.json                         │
 │  Invalid bundle → output/{report}_bundle_invalid.json (for debug)   │
 │  The verdict is stored with the bundle (jobs.bundle_validation):     │
@@ -263,10 +265,26 @@ On Finalize (web UI): Stages 4–5 run again on the accepted rows
 and the record of the build that made it (`jobs.bundle_build_json`), unless a
 bundle built from newer rows is already stored (ADR-0086). It writes the export
 file in `output/` only when its build is stored. The rows it reads are the ones
-that ship (`accepted`, or pending without a hold), so the accepted rows an
-`enrich` job's baseline imported (`enrichment_status` `baseline_in_text` or
-`baseline_only`, ADR-0090) are among them.
+that ship (`accepted`, or pending without a hold). In an `enrich` job the rows the
+baseline supplies are not rebuilt: a `baseline_only` entity and an imported
+relationship (`enrichment_status` `baseline_in_text` or `baseline_only`) are left
+out, and the baseline object ships as received (ADR-0090 lot 4). A
+`baseline_in_text` entity is still read, and the merge replaces it by the
+baseline object it matches.
 ```
+
+**Stage 4 in enrich mode (ADR-0090).** Stage 4 builds CTIParsor's objects as in a
+full job, runs Stage 4b on them alone, and then merges the analyst's baseline into
+them (`merge_baseline`, `pipeline/baseline_stix.py`). A CTIParsor object that a
+kept baseline object matches is replaced by it, and a relationship that becomes a
+self-loop or repeats a baseline relationship is dropped. The baseline objects are
+written back as received, with neither CTIParsor's marking nor its author. When the
+baseline has a chosen Report, that Report is re-issued under its own id, as an
+OpenCTI upsert, instead of a CTIParsor Report
+([the enriched bundle](stix-output.md#enriched-bundle-adr-0090)).
+
+**Stage 5 in enrich mode** validates what CTIParsor built or re-issued, not the
+baseline objects, which were validated once at intake. The file keeps every object.
 
 **The API worker, the `main.py` CLI and the `--stage full` benchmark run the
 same sequence of stages** (`pipeline/orchestrator.py`, ADR-0059); they differ

@@ -100,14 +100,38 @@ def validate_in_worker(job_id: str) -> None:
     log_exclusions(job_id, added)
 
 
-def load_index(job_id: str) -> BaselineIndex | None:
-    """The validated index a run reconciles against (Stage 3r, ADR-0090), or None
-    for a job in `full` mode and for one with no baseline row.  Read after
-    `validate_in_worker`, so the index is the one the schemas accepted."""
+def objects_by_id(bundle_json: str) -> dict[str, dict]:
+    """The objects of a stored baseline (`job_baselines.bundle_json`) by id, as
+    received: Stage 4 writes them back verbatim (ADR-0090).  An id given twice
+    is the version the intake indexed, not the last one in the file."""
+    return baseline_stix.newest_versions(json.loads(bundle_json)["objects"])
+
+
+def load_baseline(job_id: str) -> tuple[BaselineIndex, dict[str, dict]] | None:
+    """The validated index a run reconciles against (Stage 3r, ADR-0090) and the
+    baseline's objects as received (Stage 4's merge), or None for a job in `full`
+    mode and for one with no baseline row.  Read after `validate_in_worker`, so
+    the index is the one the schemas accepted."""
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT j.pipeline_mode, b.index_json FROM jobs j "
+            "SELECT j.pipeline_mode, b.index_json, b.bundle_json FROM jobs j "
             "LEFT JOIN job_baselines b ON b.job_id = j.id WHERE j.id=?", (job_id,)).fetchone()
     if row is None or row["pipeline_mode"] != "enrich" or row["index_json"] is None:
         return None
-    return BaselineIndex.from_json(row["index_json"])
+    return BaselineIndex.from_json(row["index_json"]), objects_by_id(row["bundle_json"])
+
+
+def load_index(job_id: str) -> BaselineIndex | None:
+    """The validated index of a job's baseline (see `load_baseline`), or None."""
+    loaded = load_baseline(job_id)
+    return loaded[0] if loaded is not None else None
+
+
+def baseline_sha256(job_id: str) -> str | None:
+    """`job_baselines.sha256` of an enrich job's baseline, or None: what the run
+    and the finalize records name (`api.run_config.build_record`)."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT b.sha256 FROM jobs j JOIN job_baselines b ON b.job_id = j.id "
+            "WHERE j.id=? AND j.pipeline_mode='enrich'", (job_id,)).fetchone()
+    return row["sha256"] if row is not None else None

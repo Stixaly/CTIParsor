@@ -1371,6 +1371,17 @@ def test_the_scope_follows_references_at_any_depth():
     assert summary.counts["out_of_scope"] == 1
 
 
+def test_a_relationship_between_two_objects_in_scope_is_in_scope_though_the_report_omits_it():
+    """CTIParsor keeps ATT&CK and composed edges out of its Report: out of scope, a
+    round trip rebuilt them under new ids (ADR-0090 lot 4)."""
+    a, b, stray = _malware(1, "A"), _malware(2, "B"), _malware(3, "Stray")
+    inside, outside = _rel(4, "related-to", a, b), _rel(5, "related-to", a, stray)
+    index, summary, _ = _read(_report(1, a, b), a, b, stray, inside, outside)
+    assert inside["id"] in index.imported_ids
+    assert outside["id"] not in index.imported_ids and stray["id"] not in index.imported_ids
+    assert summary.counts["out_of_scope"] == 2
+
+
 def test_a_chosen_report_that_fails_validation_stops_the_intake():
     broken = {k: v for k, v in _report(1, _malware(1)).items() if k != "published"}
     with pytest.raises(bs.BaselineError, match="report--00000001.*MissingPropertiesError"):

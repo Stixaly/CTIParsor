@@ -189,6 +189,7 @@ class _Result:
     def __init__(self, bundle=None, ledger=None, validation=None, validation_errors=()):
         self.bundle, self.ledger = bundle, ledger
         self.validation, self.validation_errors = validation, list(validation_errors)
+        self.baseline_build = None          # a full run (RunResult.baseline_build, ADR-0090)
 
     def stage_report(self):
         return [{"stage": "1", "status": "ran"}]

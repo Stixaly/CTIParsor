@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+from collections.abc import Mapping
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -179,21 +181,32 @@ def export_bundle(bundle_json: str, output_path: str, result: ValidationResult) 
     return path
 
 
-def validate_and_export(bundle: stix2.Bundle, output_path: str) -> ValidationResult:
+def validate_and_export(bundle: stix2.Bundle, output_path: str, *,
+                        verbatim: Mapping[str, dict] | None = None,
+                        trusted: AbstractSet[str] = frozenset()) -> ValidationResult:
     """
     Validate the STIX 2.1 bundle and write it to disk.
 
     Args:
         bundle: STIX bundle to validate.
         output_path: destination file path.
+        verbatim: the baseline's objects written as given, by id (ADR-0090
+            lot 4); None = the bundle as stix2 serializes it.
+        trusted: the verbatim ids validated at intake by the worker.  Stage 5
+            checks the bundle without them: the baseline's received objects are
+            not validated again, so Stage 5 checks only what CTIParsor built or
+            re-issued.  The exported file keeps every object.
 
     Returns a `ValidationResult` (see `validate_bundle`):
         validated  — file written at output_path.
         unverified — file written at output_path.
         invalid    — file written with _invalid suffix.
     """
-    bundle_json = bundle.serialize(pretty=True)
-    result = validate_bundle(bundle_json)
+    # Imported here: pipeline.baseline_stix imports this module.
+    from pipeline.baseline_stix import serialize_bundle, validation_json
+
+    bundle_json = serialize_bundle(bundle, verbatim)
+    result = validate_bundle(validation_json(bundle_json, trusted))
     export_bundle(bundle_json, output_path, result)
     return result
 

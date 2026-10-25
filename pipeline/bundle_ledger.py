@@ -22,7 +22,8 @@ Shape of `to_dict()` (version 1):
                      stix_id?, final_type?, source_ref?, target_ref?,
                      changes: [...], reason?, merged_with?}]
     removed        [{stix_id, kind, reason, replaced_by?, name?, ...}]
-                     not shipped: absorbed by an alias merge, or a detection
+                     not shipped: absorbed by an alias merge, a baseline
+                     object left out (kind "baseline"), or a detection
                      rule that does not compile
 
 Outcomes: "emitted" (this input produced the object), "merged" (it resolved to
@@ -164,6 +165,51 @@ class MappingLedger:
             for e in self.relationships:
                 if e.get("stix_id") == rid:
                     e["source_ref"], e["target_ref"] = src, tgt
+
+    # ── Stage 4 baseline merge (ADR-0090) ────────────────────────────────────
+    def apply_baseline_merge(self, result: Any) -> None:
+        """Carry the baseline merge (baseline_stix.merge_baseline) into the ledger,
+        as apply_alias_merge does for Stage 4b: the CTIParsor objects that became
+        a baseline object, the SROs it dropped, the endpoints it rewrote, and the
+        baseline objects it did not ship.  Never writes `changes`: the Graph page
+        paints any `changes` entry as a rewritten verb."""
+        for dup, canon in result.remap.items():
+            # Recorded like an alias merge's absorbed object: not shipped, replaced
+            # by the baseline object (I3: nothing leaves the bundle silently).
+            self.removed.append({"stix_id": dup, "kind": "object", "reason": "baseline_match",
+                                 "replaced_by": canon})
+            for e in self.entities:
+                if e.get("stix_id") == dup:
+                    e["outcome"] = "merged"
+                    e["reason"] = "baseline_match"
+                    e["stix_id"] = canon
+            for e in self.relationships:
+                if e.get("stix_id") == dup:
+                    e["outcome"] = "merged"
+                    e["reason"] = "baseline_match"
+                    e["stix_id"] = canon
+            self.objects.pop(dup, None)
+        for r in result.removed_relationships:
+            self.removed.append({"stix_id": r["id"], "kind": "relationship",
+                                 "reason": r["reason"], "replaced_by": r.get("kept")})
+            self.objects.pop(r["id"], None)
+            for e in self.relationships:
+                if e.get("stix_id") != r["id"]:
+                    continue
+                if r.get("kept"):
+                    e["outcome"] = "merged"
+                    e["merged_with"] = r["kept"]
+                    e["stix_id"] = r["kept"]
+                else:
+                    e["outcome"] = "dropped"
+                    e["reason"] = r["reason"]
+                    e.pop("stix_id", None)
+        for rid, (src, tgt) in result.remapped_relationships.items():
+            for e in self.relationships:
+                if e.get("stix_id") == rid:
+                    e["source_ref"], e["target_ref"] = src, tgt
+        for bid, reason in result.dropped.items():
+            self.left_out(bid, "baseline", reason)
 
     # ── finish ───────────────────────────────────────────────────────────────
     def outside_report(self, obj: Any) -> None:

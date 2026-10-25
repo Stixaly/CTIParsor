@@ -3,6 +3,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
+from typing import Any
 
 import stix2
 import yaml
@@ -291,10 +292,13 @@ def _authoring_identity() -> stix2.Identity:
     )
 
 
-def _stamp_objects(stix_objects: list, author_id: str, marking_refs: list[str]) -> list:
+def _stamp_objects(stix_objects: list, author_id: str, marking_refs: list[str],
+                   skip_ids: frozenset[str] = frozenset()) -> list:
     """Return a copy of `stix_objects` with provenance stamped on each object:
     `object_marking_refs` (all objects) and `created_by_ref` (SDO/SRO only —
     SCOs have neither a `created` timestamp nor a created_by_ref property).
+    An object whose id is in `skip_ids` (a baseline object, ADR-0090) is kept
+    as it is, like a marking-definition.
 
     stix2 objects are immutable and SCOs don't support new_version(), so each is
     round-tripped through JSON — this preserves deterministic IDs (neither
@@ -302,7 +306,7 @@ def _stamp_objects(stix_objects: list, author_id: str, marking_refs: list[str]) 
     """
     result = []
     for obj in stix_objects:
-        if obj.get("type") == "marking-definition":
+        if obj.get("type") == "marking-definition" or obj.get("id") in skip_ids:
             result.append(obj)
             continue
         d = json.loads(obj.serialize())
@@ -502,6 +506,7 @@ def build_stix_bundle(
     graph_completion: bool = True,
     ledger: MappingLedger | None = None,
     document_anchor=None,
+    baseline=None,
 ) -> stix2.Bundle:
     """
     Converts all extracted entities to STIX 2.1 objects and returns a Bundle.
@@ -566,6 +571,13 @@ def build_stix_bundle(
       (pipeline.temporal.Anchor, ADR-0063 §4).  A publication-grade anchor is
       carried on the Report as `x_source_published`; `published` stays the
       build time, the Report being CTIParsor's product.
+
+    baseline — optional baseline_stix.BaselineBuild (ADR-0090), merged after
+      Stage 4b: its kept objects join the bundle as received, the CTIParsor
+      objects they match are replaced by them, and the chosen Report of the
+      baseline, when it has one, is re-issued as an upsert in place of a
+      CTIParsor Report (its `verbatim` and `trusted` are filled).  Without it
+      the bundle is the same as before.
 
     Relationship dates (ADR-0063 §7): each SRO carries every assertion in
     `x_temporal_assertions`; `start_time` / `stop_time` are set only where the
@@ -1429,14 +1441,45 @@ def build_stix_bundle(
                           _completion_stats.remapped_relationships,
                           _completion_stats.merged_names)
 
+    # --- Baseline merge (ADR-0090, lot 4) — only with a baseline ---
+    # After 4b, so graph completion only ever saw CTIParsor's own objects.
+    merge: Any = None
+    if baseline is not None:
+        from pipeline.baseline_stix import merge_baseline, reissue_report
+        merge = merge_baseline(stix_objects, baseline)
+        led.apply_baseline_merge(merge)
+        by_id = {getattr(o, "id", None): o for o in stix_objects}
+        for oid in sorted(merge.kept):
+            led.object(by_id[oid], "baseline", status="matched" if oid in merge.stated else "only")
+        baseline.verbatim.update({i: baseline.objects[i] for i in merge.kept})
+        baseline.trusted = frozenset(merge.kept)
+
     # --- Report SDO wrapping all objects ---
     # description : full extracted text so STIX consumers see the narrative
     # external_references : filename + hash for tracing back to the source file
+    # With a baseline whose chosen Report is in scope, that Report is re-issued
+    # instead (an OpenCTI upsert, ADR-0090 D1) and no CTIParsor Report is built.
+    reissued_id: str | None = None
     if stix_objects:
-        in_report = [obj.id for obj in stix_objects
-                     if hasattr(obj, "id") and stated_by_the_report(obj)]
+        if merge is None:
+            in_report = [obj.id for obj in stix_objects
+                         if hasattr(obj, "id") and stated_by_the_report(obj)]
+        else:
+            in_report = [obj.id for obj in stix_objects
+                         if hasattr(obj, "id") and obj.id not in merge.kept and stated_by_the_report(obj)]
+            in_report += sorted(merge.stated)
+        # The chosen Report, re-issued below when it is in scope and not excluded.
+        chosen = baseline.index.scope_report_id if merge is not None else None
+        if chosen is not None and (chosen not in baseline.objects or chosen in baseline.excluded):
+            chosen = None
+        listed = set(baseline.objects[chosen].get("object_refs", [])) if chosen is not None else set()
         for obj in stix_objects:
-            if hasattr(obj, "id") and not stated_by_the_report(obj):
+            if not hasattr(obj, "id"):
+                continue
+            # A kept baseline object the document does not state is outside the
+            # Report too, unless the re-issued Report already lists it.
+            if not stated_by_the_report(obj) or (merge is not None and obj.id in merge.kept
+                                                 and obj.id not in merge.stated and obj.id not in listed):
                 led.outside_report(obj)
         report_kwargs: dict = {
             "name":        report_name,
@@ -1448,6 +1491,7 @@ def build_stix_bundle(
             report_kwargs["description"] = report_text
 
         ext_refs = []
+        source_ref = None
         if original_filename:
             ref_kwargs: dict = {
                 "source_name": "original_document",
@@ -1456,6 +1500,7 @@ def build_stix_bundle(
             if source_hash:
                 ref_kwargs["hashes"] = {"SHA-256": source_hash}
             ext_refs.append(stix2.ExternalReference(**ref_kwargs))
+            source_ref = json.loads(ext_refs[-1].serialize())
         if ext_refs:
             report_kwargs["external_references"] = ext_refs
 
@@ -1463,8 +1508,7 @@ def build_stix_bundle(
         # carried in the bundle so it survives export.  ADR-0024 made each edge
         # say where it came from; this says what the pass as a whole did, which
         # is the only way to see a rule that produced nothing.
-        report_kwargs["allow_custom"] = True
-        report_kwargs["x_synthesis_stats"] = {
+        synthesis = {
             "pin": _pin_stats.to_dict(),
             "completion": {
                 "aliases_merged":        _completion_stats.aliases_merged,
@@ -1476,6 +1520,8 @@ def build_stix_bundle(
                 "notes":                 list(_completion_stats.notes),
             },
         }
+        report_kwargs["allow_custom"] = True
+        report_kwargs["x_synthesis_stats"] = synthesis
         # The source's own publication date (ADR-0063 §7).  `published` above
         # stays the build time: the Report is CTIParsor's product, and its
         # created_by_ref says so.  A file's print timestamp is not a
@@ -1484,25 +1530,71 @@ def build_stix_bundle(
         if _src_pub:
             report_kwargs["x_source_published"] = _src_pub
 
-        try:
-            report = stix2.Report(**report_kwargs)
-            stix_objects.append(report)
-            led.object(report, "report")
-        except Exception as exc:
-            # Fallback without optional fields if stix2 rejects them.  Every
-            # optional field is lost (description, labels, dates, provenance):
-            # the log and the ledger say which ones and why.
-            dropped = sorted(set(report_kwargs) - {"name", "published", "object_refs"})
-            logger.warning(f"[Stage 4] report built without its optional fields {dropped}: "
-                           f"{type(exc).__name__}: {exc}")
-            report = stix2.Report(
-                name=report_name,
-                published=datetime.now(timezone.utc),
-                object_refs=in_report,
-            )
-            stix_objects.append(report)
-            led.object(report, "report", fallback="optional_fields_dropped",
-                       dropped_fields=dropped, error=f"{type(exc).__name__}: {exc}")
+        now = datetime.now(timezone.utc)
+        enrichment: dict = {}
+        if merge is not None:
+            enrichment = {
+                "baseline_sha256": baseline.index.sha256,
+                "baseline_bundle_id": baseline.index.bundle_id,
+                "built_at": now.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+                "counts": {
+                    "baseline_kept": len(merge.kept),
+                    "baseline_stated": len(merge.stated),
+                    "baseline_dropped": len(merge.dropped),
+                    "merged_into_baseline": len(merge.remap),
+                },
+                "synthesis": synthesis,
+            }
+        d: dict | None = None
+        if chosen is not None:
+            # The chosen Report is re-issued under its own id: what the document
+            # states that is not in it yet is added (D1); only the refs to baseline
+            # objects that no longer ship (an analyst rejection) leave it.
+            added = [i for i in in_report if i not in merge.kept]
+            added += [i for i in sorted(merge.stated) if baseline.objects.get(i, {}).get("type") == "relationship"]
+            d = reissue_report(baseline.objects[chosen], merge.kept, added, enrichment, source_ref, now)
+            if not d["object_refs"]:
+                # Everything it lists was rejected and the document adds nothing:
+                # a Report needs one reference (STIX 2.1), so it does not ship.
+                logger.warning(f"[Stage 4] the chosen Report {chosen} is not re-issued: "
+                               f"none of its references ships")
+                led.left_out(chosen, "baseline", "baseline_report_empty")
+                d = None
+        if d is not None:
+            bundle_ids = {o.id for o in stix_objects}
+            removed_refs = [r for r in baseline.objects[chosen].get("object_refs", [])
+                            if r not in merge.kept and r not in bundle_ids]
+            reissued = stix2.parse(d, allow_custom=True)
+            stix_objects.append(reissued)
+            led.object(reissued, "baseline_report_upsert", added_refs=len(added), removed_refs=removed_refs)
+            baseline.verbatim[chosen] = d
+            reissued_id = chosen
+        elif not in_report:
+            # Only kept baseline objects the document does not state: a Report
+            # with no reference is not STIX, so the bundle has none.
+            logger.warning("[Stage 4] no Report: the document states nothing the bundle holds")
+        else:
+            if merge is not None:
+                report_kwargs["x_ctiparsor_enrichment"] = enrichment
+            try:
+                report = stix2.Report(**report_kwargs)
+                stix_objects.append(report)
+                led.object(report, "report")
+            except Exception as exc:
+                # Fallback without optional fields if stix2 rejects them.  Every
+                # optional field is lost (description, labels, dates, provenance):
+                # the log and the ledger say which ones and why.
+                dropped = sorted(set(report_kwargs) - {"name", "published", "object_refs"})
+                logger.warning(f"[Stage 4] report built without its optional fields {dropped}: "
+                               f"{type(exc).__name__}: {exc}")
+                report = stix2.Report(
+                    name=report_name,
+                    published=datetime.now(timezone.utc),
+                    object_refs=in_report,
+                )
+                stix_objects.append(report)
+                led.object(report, "report", fallback="optional_fields_dropped",
+                           dropped_fields=dropped, error=f"{type(exc).__name__}: {exc}")
 
     # --- Provenance + sharing markings — stamp every object ---
     # Authoring Identity (created_by_ref) + TLP/PAP object markings.  The author
@@ -1524,15 +1616,31 @@ def build_stix_bundle(
         marking_defs.append(pap_marking)
         marking_refs.append(pap_marking.id)
 
-    stamped = _stamp_objects(stix_objects, author.id, marking_refs)
+    # The baseline's kept objects keep their own markings and author, and the
+    # re-issued Report is not stamped either (ADR-0090, §4.5).
+    skip_ids: frozenset[str] = frozenset(merge.kept) if merge is not None else frozenset()
+    if reissued_id is not None:
+        skip_ids |= {reissued_id}
+    stamped = _stamp_objects(stix_objects, author.id, marking_refs, skip_ids=skip_ids)
     led.object(author, "author_identity")
     for _m in marking_defs:
         led.object(_m, "marking")
     led.finalize(stix_objects)
 
+    # A baseline can hold CTIParsor's own identity or marking (the same id, the
+    # same content, checked at intake): the first one stays, and a bundle never
+    # holds two objects of one id.  Only with a baseline: a full build ships
+    # exactly what it shipped before (ADR-0090 I1).
+    shipped: list = [author, *marking_defs, *stamped]
+    if merge is not None:
+        unique: dict[str, Any] = {}
+        for obj in shipped:
+            unique.setdefault(obj.id, obj)
+        shipped = list(unique.values())
+
     # allow_custom so Relationship x_evidence_label (and any x_ props) pass
     # through Bundle construction + serialization without rejection.
-    return stix2.Bundle(objects=[author, *marking_defs, *stamped], allow_custom=True)
+    return stix2.Bundle(objects=shipped, allow_custom=True)
 
 
 def verify_ioc_coverage(raw_entities: list[RawEntity], bundle: stix2.Bundle) -> dict:

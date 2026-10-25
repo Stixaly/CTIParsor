@@ -24,12 +24,12 @@ from api.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-from api.baseline_store import load_index, validate_in_worker
+from api.baseline_store import baseline_sha256, load_baseline, objects_by_id, validate_in_worker
 from api.db import _lock, backup_db, emit_progress, get_conn, now_iso, set_job_status, transaction
 from api.paths import output_dir, uploads_dir
 from api.run_config import BuildKind, build_record, run_build_record, utc_stamp
 from pipeline import baseline_stix
-from pipeline.baseline_stix import BaselineError, Reconciliation
+from pipeline.baseline_stix import BaselineBuild, BaselineError, BaselineIndex, Reconciliation
 from pipeline.decisions import BASELINE_STIX
 from pipeline.decisions import SHIPS as _SHIPS
 from pipeline.env_flags import env_int
@@ -637,12 +637,14 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         # TLP / PAP markings selected at upload time.
         with get_conn() as conn:
             row = conn.execute("SELECT tlp_level, pap_level FROM jobs WHERE id=?", (job_id,)).fetchone()
+        loaded = load_baseline(job_id)
         document = Document(
             file_path=file_path,
             original_filename=original_filename,
             tlp_level=row["tlp_level"] if row else None,
             pap_level=row["pap_level"] if row else None,
-            baseline=load_index(job_id),
+            baseline=loaded[0] if loaded is not None else None,
+            baseline_objects=loaded[1] if loaded is not None else None,
         )
         document.output_path = str(bundle_output_path(job_id, document.report_name))
 
@@ -652,7 +654,9 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         if result.bundle is None:
             raise RuntimeError("the run produced no bundle (Stage 4 did not run)")
 
-        bundle_json = result.bundle.serialize(pretty=True)
+        baseline_build = result.baseline_build
+        bundle_json = baseline_stix.serialize_bundle(
+            result.bundle, baseline_build.verbatim if baseline_build is not None else None)
         ledger_json = json.dumps(result.ledger) if result.ledger is not None else None
         if result.validation == "invalid":
             # Nothing is published at this stage: the job waits for review either
@@ -663,7 +667,9 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         if not _finalize_job(job_id, "for_review", _owner_worker_id,
                              bundle_json=bundle_json, ledger_json=ledger_json,
                              validation=result.validation, validation_errors=result.validation_errors,
-                             build_json=json.dumps(run_build_record(hooks.run_config))):
+                             build_json=json.dumps(run_build_record(
+                                 hooks.run_config,
+                                 baseline_sha256=baseline_sha256(job_id) if loaded is not None else None))):
             return
 
         emit_progress(job_id, "done", {"status": "for_review"})
@@ -987,6 +993,47 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
                     (job_id,),
                 ).fetchall()
 
+                # The analyst's baseline (ADR-0090), for an enrich job: its row, and the
+                # baseline objects the analyst rejected.  An object leaves only when all
+                # its rows are rejected: a pending row keeps it.
+                baseline_row = None
+                baseline_rejected: list = []
+                if job["pipeline_mode"] == "enrich":
+                    baseline_row = conn.execute(
+                        "SELECT sha256, index_json, bundle_json FROM job_baselines WHERE job_id=?",
+                        (job_id,),
+                    ).fetchone()
+                    if baseline_row is None:
+                        # A job the full queue refused keeps no baseline (lot 2): its
+                        # bundle is built without one, and its imported rows still
+                        # stay out (below), so nothing is invented from them.
+                        logger.warning("[finalize] job %s is in enrich mode but holds no baseline: "
+                                       "the bundle is built without it", job_id)
+                    baseline_rejected = conn.execute(
+                        "SELECT baseline_stix_id FROM entities WHERE job_id=? AND baseline_stix_id IS NOT NULL "
+                        "GROUP BY baseline_stix_id HAVING COUNT(*) = SUM(CASE WHEN accepted = 0 THEN 1 ELSE 0 END) "
+                        "UNION "
+                        "SELECT baseline_stix_id FROM relationships WHERE job_id=? AND baseline_stix_id IS NOT NULL "
+                        "GROUP BY baseline_stix_id HAVING COUNT(*) = SUM(CASE WHEN accepted = 0 THEN 1 ELSE 0 END)",
+                        (job_id, job_id),
+                    ).fetchall()
+
+    # ── The baseline's share (ADR-0090, Stage 4 merge) ────────────────────────
+    #
+    # The baseline's imported rows are not written again from the rows: Stage 4
+    # writes the baseline's objects as received.  They are dropped before anything
+    # below reads the rows (raw_entities, the named lists, the relationships).
+    baseline_build: BaselineBuild | None = None
+    if job["pipeline_mode"] == "enrich":
+        all_entity_rows = [row for row in all_entity_rows if row["enrichment_status"] != baseline_stix.BASELINE_ONLY]
+        rel_rows = [row for row in rel_rows if row["enrichment_status"] not in baseline_stix.IMPORTED]
+    if baseline_row is not None:
+        baseline_build = BaselineBuild(
+            index=BaselineIndex.from_json(baseline_row["index_json"]),
+            objects=objects_by_id(baseline_row["bundle_json"]),
+            excluded=frozenset(row["baseline_stix_id"] for row in baseline_rejected),
+        )
+
     # ── Route entities to the correct STIX path ───────────────────────────────
     #
     # build_stix_bundle accepts two inputs:
@@ -1196,12 +1243,16 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
         cve_metadata=lookup_cves(raw_entities),
         ledger=ledger,
         document_anchor=document_anchor,
+        baseline=baseline_build,
     )
-    bundle_json = bundle.serialize(pretty=True)
+    bundle_json = baseline_stix.serialize_bundle(
+        bundle, baseline_build.verbatim if baseline_build is not None else None)
     ledger_json = json.dumps(ledger.to_dict())
 
     out_path = str(bundle_output_path(job_id, report_name))
-    validation = validate_bundle(bundle_json)
+    # The baseline's trusted objects were validated at intake: Stage 5 does not check them again.
+    validation = validate_bundle(baseline_stix.validation_json(
+        bundle_json, baseline_build.trusted if baseline_build is not None else frozenset()))
     invalid = validation.status == INVALID
     verdict = (validation.status, _validation_errors_json(validation.errors))
 
@@ -1213,7 +1264,8 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
     # longer served.
     kind: BuildKind = "quick" if quick else "finalize"
     try:
-        record = build_record(policy, kind=kind)
+        record = build_record(policy, kind=kind,
+                              baseline_sha256=baseline_row["sha256"] if baseline_row is not None else None)
     except Exception as exc:
         # Metadata never fails a finalize (the run does the same with its run
         # config).  No git_rev: freshness falls back to the run's revision, as
