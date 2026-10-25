@@ -11,6 +11,76 @@ theme.
 
 ### Added
 
+#### Enriching an existing STIX 2.1 bundle, lot 7: measured, checked in OpenCTI, and on by default (ADR-0090 accepted), 2026-10-25
+
+An analyst can give CTIParsor a report and a STIX 2.1 bundle that already
+describes it (an OpenCTI or MISP export, or an earlier CTIParsor bundle), and get
+one bundle: the analyst's objects as received, plus what the report adds, attached
+to their ids. The review shows what the bundle already holds and what is new.
+**ADR-0090 is Accepted, and the feature is on by default**;
+`STIX_ENRICHMENT_ENABLED=false` turns it off.
+
+- **Measurements** (ADR-0090 A2 and A3; `scripts/baseline_ablation.py` and
+  `scripts/baseline_round_trip.py`, read only, 7 real reports). Round trip: 0
+  duplicate rows, 596 rows matched, 21 `new` (19 locations the bundle never held,
+  2 ambiguous ledger keys). Object level: 6 of 7 enriched bundles pass Stage 5;
+  the 7th has a `url` that Stage 4 builds invalid, a defect that predates the
+  feature (its stored bundle already had it). 11 objects duplicate a baseline
+  object by name: the CTIParsor author identity in each job, and two
+  attack-patterns in two jobs. Ablation: 30 % of the 601 candidate entries removed
+  (179), 175 recovered as `new` (97.8 %), 196 `new` rows, 0 duplicates (0.0 %,
+  target at most 1 %). External control, the OpenCTI- and MISP-shaped fixtures
+  over 5 seeds: 5 of 5 recovered each, 0 duplicates (one removed entry per seed:
+  a small sample).
+- **OpenCTI** (A4; `scripts/opencti_import_check.py`, `docker/opencti-test/`):
+  OpenCTI 7.260930.0, 12 of 12 expectations hold. Nothing refused; one Report under
+  the baseline's id, holding its references and the additions; no baseline object
+  duplicated; a user whose maximum confidence is below the Report's adds nothing,
+  with no error; a rejected object stays referenced by the Report.
+- **Rejection and real-shaped baselines** (A5, A6): rejection checked end to end
+  (`tests/test_baseline_e2e.py`) and in the browser. The repository's OpenCTI-shaped
+  and MISP-shaped fixtures, and its YARA, Sigma and Suricata rules, go through
+  Stage 5 and OpenCTI (MISP-shaped: audit 16/16, OpenCTI import 10/10). The
+  fixtures stand for real exports; no live export was used.
+- **Matcher fixes** (`pipeline/baseline_stix.py`): a file row with no hash
+  matches through its name when one baseline entry carries that name, and that
+  entry holds a file object (Stage 3r); a name-only Indicator joins the observable
+  its `based-on` names when exactly one such observable is named; a name-only
+  file merges onto the one baseline file of its name (Stage 4); a name-only
+  `[file:name = …]` Indicator becomes the kept Indicator of that file's entry.
+  Stage 4 also merges a course of action and a detection-rule Indicator with a
+  kept baseline object of the same content (two such objects: no merge). Before
+  the first three the same runs gave 35 duplicates on the ablation and 45 on the
+  round trip, all `file`; the course-of-action and rule duplicates were found by
+  the round trip (119 and 6) and are merged now.
+- **File names, decision reversed**: a file known by its name alone merges into
+  the baseline's file when exactly one baseline file carries that name. With two
+  carriers nothing merges and the row stays `new`; a name carried only by a
+  name-only Indicator, with no file object, matches nothing. The A4 run had held a second
+  `svchost_update.dll` beside the baseline's, and the review badge and the bundle
+  disagreed. A file with a hash of its own is never merged on its name.
+- **Audit**: `scripts/audit_bundle_invariants.py` no longer flags an Indicator whose
+  `pattern_type` is a detection-rule type (yara, sigma, suricata, snort, pcre) as
+  a malformed STIX pattern. Such rules ship since ADR-0067 and ADR-0070.
+- **Flag**: `STIX_ENRICHMENT_ENABLED` defaults to `true` (`.env.example`,
+  `docs/configuration.md`).
+- **Scripts and stack**: `scripts/baseline_ablation.py` and
+  `scripts/baseline_round_trip.py` (both read only, no LLM);
+  `scripts/opencti_import_check.py` (runs with pycti in its own venv, never a
+  project requirement, and creates a role, a group, a user and an unlimited token
+  it never revokes: a throwaway instance only); `docker/opencti-test/compose.yaml`
+  and its `.env.example` (every secret is required, RabbitMQ pinned to
+  `4.3.7-management`). How to run them again: `TESTING.md`, "Measuring baseline
+  reconciliation and the OpenCTI import".
+- **Tests**: `tests/test_baseline_ablation.py` (25), `tests/test_baseline_round_trip.py`
+  (8) and `tests/test_audit_bundle_patterns.py` (2) are new; `test_baseline_stix.py`
+  (452), `test_baseline_reconcile.py` (31) and `test_baseline_merge.py` (30)
+  gain cases.
+- **Docs**: ADR-0090 (Accepted, the figures, the file-name decision, the OpenCTI
+  findings), `docs/stix-output.md` (OpenCTI capabilities, the A4 result, the
+  file-name rule), `docs/api.md`, `docs/web-ui.md`, `docs/configuration.md`,
+  `TESTING.md`, the ADR index.
+
 #### Enriching an existing STIX 2.1 bundle, lot 6: the graph, the panel, the badge and the drop (ADR-0090), 2026-10-25
 
 On an `enrich` job the Graph page shows what the analyst's bundle supplied and

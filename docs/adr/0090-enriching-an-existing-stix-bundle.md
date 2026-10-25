@@ -1,8 +1,10 @@
 # ADR-0090: Enriching an existing STIX 2.1 bundle
 
-**Status:** Proposed (2026-10-24). Design decisions D1–D5 taken by the
-maintainer on 2026-10-24; nothing implemented.
-**Date:** 2026-10-24
+**Status:** Accepted (2026-10-25). Proposed 2026-10-24; design decisions D1–D5
+taken by the maintainer on 2026-10-24; acceptance criteria A1–A6 measured and
+passed on 2026-10-25 (lot 7, see "Acceptance criteria" and "Lot 7"). The
+feature is on by default; `STIX_ENRICHMENT_ENABLED=false` turns it off.
+**Date:** 2026-10-24 (proposed), 2026-10-25 (accepted)
 **Deciders:** maintainer
 **Relates to:** ADR-0058 (decision provenance), ADR-0059 (one pipeline for every
 entry point), ADR-0061 (bundle view and mapping ledger), ADR-0066 (STIX ids are
@@ -94,7 +96,9 @@ every read. The quick finalize, which runs 4 s after each review edit, reads
 - **Matching keys**, computed with CTIParsor's own normalisation functions
   (imported, not copied): `id`, `obs` (type, value), `hash` (algorithm, value),
   `mitre`, `cve`, `loc` (ISO-2), `named` (family, name or alias). A file name
-  (`file_name`) is a weak key: it sets a displayed status and never merges ids.
+  (`file_name`) is a weak key: it sets a displayed status. Lot 7 changed its
+  merging: a file known by its name alone merges into the one baseline file of
+  that name (see "Lot 7"). Before lot 7 it never merged ids.
   Two names match only within a family: actor = {`threat-actor`,
   `intrusion-set`}, software = {`malware`, `tool`}, every other type its own.
   Without families, an OpenCTI `intrusion-set` APT29 and CTIParsor's
@@ -226,11 +230,11 @@ baseline without that column being filled.
   check; baseline names would escape it, and the chunks sent to the LLM and the
   Stage 3 fingerprint would change (I8).
 
-**9. A feature flag, off until acceptance.** `STIX_ENRICHMENT_ENABLED=false`
-(lot 2): with it off, `/inspect` and every `baseline_*` field answer 400, and the
-modal hides the mode. Lot 7 sets the default to `true` once A1–A6 pass and this
-ADR is Accepted. The mode is therefore invisible while the lots land one PR at a
-time.
+**9. A feature flag, on by default.** `STIX_ENRICHMENT_ENABLED=false` turns the
+mode off: with it off, `/inspect` and every `baseline_*` field answer 400, and
+the modal hides the mode. Lot 2 added the flag off; lot 7 set the default to
+`true` once A1–A6 passed and this ADR was Accepted (2026-10-25). The mode was
+invisible while the lots landed one PR at a time.
 
 ## Decisions taken on 2026-10-24
 
@@ -245,6 +249,15 @@ time.
 
 Also decided: the OpenCTI import is checked in a throwaway OpenCTI in Docker,
 started on demand (lot 7); the work is done in this repository, one PR per lot.
+
+## Decisions taken on 2026-10-25
+
+| # | Question | Decision |
+|---|---|---|
+| D7 | Targets of A2 and A3 | A2 (round trip): 0 duplicates. A3 (ablation): at most 1 % duplicates. Recovery is measured and reported, with no threshold. |
+| D8 | A6 fixtures | The repository's OpenCTI-shaped and MISP-shaped fixtures and its rules stand for real exports. The ADR says so wherever it cites them. |
+| D9 | File names | **Reverses** the design's B15 and the first text of decision 2 ("a file name is a weak key … never merges ids"). A file known by its name alone (no hash of its own) merges into the baseline's file when exactly one baseline file carries that name; with two carriers, nothing merges and the row stays `new`. A name carried only by an Indicator (a name-only `[file:name = …]` with no file object of its own) matches nothing, in Stage 3r and in Stage 4. See "Lot 7". |
+| D10 | Activation | If A1–A6 pass, the flag is on by default and this ADR is Accepted in the lot 7 PR. |
 
 ## Consequences
 
@@ -264,7 +277,17 @@ started on demand (lot 7); the work is done in this repository, one PR per lot.
 - **Quiet failure on confidence.** If the importing OpenCTI user's ceiling is
   lower than R's confidence, additions are ignored with no error. A4 checks it.
 - **Matching imperfect.** A missed match leaves a duplicate in the bundle (an
-  object CTIParsor builds beside the baseline's). A3 measures the duplicate rate.
+  object CTIParsor builds beside the baseline's). A3 measures the duplicate rate:
+  0 of 196 `new` rows on the ablation (0.0 %), 0 duplicate rows on the round trip
+  (lot 7). At object level the round trip still holds 11 objects that duplicate a
+  baseline object by name: the CTIParsor author identity in each of the 7 jobs,
+  and two attack-patterns in two jobs (A2).
+- **A name-only file can merge onto the wrong sample.** Since lot 7 a file known
+  by its name alone merges into the one baseline file of that name, even when
+  it is another sample (D9). No measurement covers this case.
+- **The mode is on by default** (lot 7). A server that does not set
+  `STIX_ENRICHMENT_ENABLED` accepts a baseline and offers the enrich mode;
+  `STIX_ENRICHMENT_ENABLED=false` restores the 400 answers of lot 2.
 - **Cost on the full mode:** none intended (I1); every lot compares Stage 4's
   output, in the canonical form of I1, against reference bundles frozen before
   any change (`tests/test_stage4_reference.py`).
@@ -308,7 +331,9 @@ started on demand (lot 7); the work is done in this repository, one PR per lot.
   review click; a `COUNT … GROUP BY enrichment_status` is cheap.
 - **Rejecting on `accepted = 0 AND baseline_stix_id IS NOT NULL`:** a partial
   rejection would remove an object other rows still keep.
-- **Merging on file name:** `svchost.exe` identifies no sample.
+- **Merging on file name:** `svchost.exe` identifies no sample. Still rejected
+  for a file with a hash of its own; reversed in lot 7 for a file known by its
+  name alone when exactly one baseline file carries that name (decision D9).
 - **Client-side validation of the STIX:** two parsers would disagree on what is
   recognised, copied or excluded; the server alone decides, and the preview shows
   the same figures as the job.
@@ -320,12 +345,114 @@ here by lot 7.
 
 | # | Criterion | How |
 |---|---|---|
-| A1 | Full mode unchanged (I1) | The reference scenarios of `tests/test_stage4_reference.py`, frozen on `main` before lot 1, still match in canonical form (build-time stamps, random ids and order aside; everything else, TLP marking ids included, compared). |
-| A2 | Round trip | A job's CTIParsor bundle given as baseline to the same document: 0 `new`, identical ids, no baseline object lost, Stage 5 `validated`, `scripts/audit_bundle_invariants.py` with no finding. |
-| A3 | Recovery after ablation | On the 7 real reports of the measurement database (`ctiparsor_measure`, never the main one), with their CTIParsor bundles as baselines, plus the OpenCTI- and MISP-shaped fixtures (CTIParsor's own bundles do not exercise the actor family or indicator-only entries): remove 30 % of the objects (fixed seed), enrich, and measure (a) the share of removed objects found back as `new` and (b) the duplicate rate: `new` objects that designate an object left in the baseline. Proposed targets, to confirm before the runs: 0 duplicates on the round trip (A2), at most 1 % on the ablation. Result: `TODO(chiffre)`. |
-| A4 | OpenCTI import | In a throwaway OpenCTI (Docker, pinned version): import the baseline, then the enriched bundle. Nothing refused, no baseline object duplicated, **one** Report holding the original references and the additions. Counter-test: with a user whose confidence ceiling is below the Report's, the additions are not made. Version and result: `TODO(chiffre)`. |
-| A5 | Rejection | Rejecting a baseline object removes it and everything referencing it; each removal is in the ledger and displayed. |
-| A6 | Real baselines | An OpenCTI export (`intrusion-set`), a MISP export (Indicators with no SCO), a bundle with compound patterns and YARA/Sigma rules. |
+| A1 | Full mode unchanged (I1) | The reference scenarios of `tests/test_stage4_reference.py`, frozen on `main` before lot 1, still match in canonical form (build-time stamps, random ids and order aside; everything else, TLP marking ids included, compared). **Result (2026-10-25): pass.** `tests/test_stage4_reference.py` passes on this branch; full-mode output is identical in canonical form (ids and timestamps normalised) to the output before the feature. |
+| A2 | Round trip | A job's CTIParsor bundle given as baseline to the same document: 0 `new`, identical ids, no baseline object lost, Stage 5 `validated`, `scripts/audit_bundle_invariants.py` with no finding. **Result (2026-10-25), 7 real reports:** the row-level target restated in D7 is met: 0 duplicate rows (596 rows matched, 0 mismatches). The criterion's "0 `new`" is not met: 21 rows are `new`, 19 locations the bundle never held and 2 ambiguous ledger keys, none of them a duplicate. Object level (`scripts/baseline_round_trip.py`, `output/baseline_round_trip.md`), the enriched bundle of each job over its own stored bundle: 6 of 7 pass Stage 5 (`validated`), where the criterion asks for all seven. The 7th (job 07d1fd30) is `invalid` with one error: CTIParsor rebuilds a `url` whose value is not a valid `uri` (a `.exe` download); the same url made that job's stored bundle invalid already, and the intake excluded it with its 4 relationships. A pre-existing Stage 4 defect outside this feature, full mode included, to be fixed separately. Baseline objects lost: 0, except those 4 excluded at intake; altered: only the re-issued Report, by design. Audit (`scripts/audit_bundle_invariants.py` logic, run in memory): 14 invariant checks, 0 failing, on all 7 bundles; `check_orphan_objects` reports no orphan. Objects that duplicate a baseline object by name (the row count does not see them): the CTIParsor author identity in all 7 jobs (these September bundles carry an older author id than today's stable one; OpenCTI merges identities by name and class), and two attack-patterns, "System Binary Proxy Execution" in 4a9b9810 and "Phishing" in 7a318c22, each held twice by its job's baseline, so the matcher cannot pick one. Before the lot 7 review fixes, 119 courses of action and 6 YARA Indicators were rebuilt under new ids; 0 remain. The script reads the measurement database without the worker's `held_reason` and `enrichment_status` columns (reported in its output). Identical ids and no baseline object lost: `tests/test_baseline_e2e.py` (round trip). |
+| A3 | Recovery after ablation | On the 7 real reports of the measurement database (`ctiparsor_measure`, never the main one), with their CTIParsor bundles as baselines, plus the OpenCTI- and MISP-shaped fixtures (CTIParsor's own bundles do not exercise the actor family or indicator-only entries): remove 30 % of the objects (fixed seed), enrich, and measure (a) the share of removed objects found back as `new` and (b) the duplicate rate: `new` objects that designate an object left in the baseline. Targets, confirmed on 2026-10-25 (D7): 0 duplicates on the round trip (A2), at most 1 % on the ablation; the recovery is reported, with no threshold. **Result (2026-10-25): pass on the seven real reports.** Seed 20261025, `scripts/baseline_ablation.py`: 179 of 601 candidate entries removed; 175 came back as `new` (recovery 97.8 %). Four removed entries were reached by a row and not returned as `new`, each with its cause: "NextChat" and "SoftEther" (malware rows matched to a kept `tool` of the same name, the software family); "System Binary Proxy Execution" (the report's own bundle held two attack-patterns of that name, and the row matched the kept one); "BREEZE COMET" (an ambiguous ledger key: a campaign and a malware share the name). 196 `new` rows, 0 duplicates (0.0 %, target at most 1 %); 19 unmapped locations and 2 ambiguous ledger keys counted apart; 2 mismatches, malware rows matched to a kept `tool` of the same name (the software family, accepted by design). Per job: `output/baseline_ablation.json`. Before the two matcher fixes of lot 7 the same runs gave 45 duplicates on A2 and 35 on A3, all `file` rows. The external control, the OpenCTI- and MISP-shaped fixtures in the same mode (`--fixture`, seeds 20261025 to 20261029, 30 %): OpenCTI-shaped, 2 candidate entries, 1 removed per seed, 5 of 5 recovered, 0 duplicates; MISP-shaped, 2 candidate entries, 1 removed per seed, 5 of 5 recovered, 0 duplicates. These are small numbers (one removed entry per seed): they show the path works on both shapes, not a rate. |
+| A4 | OpenCTI import | In a throwaway OpenCTI (Docker, pinned version): import the baseline, then the enriched bundle. Nothing refused, no baseline object duplicated, **one** Report holding the original references and the additions. Counter-test: with a user whose confidence ceiling is below the Report's, the additions are not made. **Result (2026-10-25): pass.** OpenCTI **7.260930.0** (pinned in `docker/opencti-test/compose.yaml`; pycti 7.260930.0 in a separate venv). **12 of 12 expectations hold** on a fresh instance, in the final run with the final code: the baseline imported, nothing refused; as a user with maximum confidence 50 (below the Report's 85) the enriched bundle imported with 0 errors and the Report kept its 9 original references, the additions not made; as admin, nothing refused, one Report (the baseline's id) holding 16 references, each baseline object present once, all 23 objects present; the rejected bundle imported as admin, nothing refused, and WellMess still referenced by the Report (OpenCTI never removes a reference on upsert). A first run, before the file-name decision of lot 7, failed one check: a second `svchost_update.dll` file. |
+| A5 | Rejection | Rejecting a baseline object removes it and everything referencing it; each removal is in the ledger and displayed. **Result (2026-10-25): pass.** `tests/test_baseline_e2e.py` finalizes with a rejection: the object and what references it leave, ledgered. Browser check of lot 6: WellMess rejected, its two relationships leaving with it, named in the "Against your bundle" panel. |
+| A6 | Real baselines | An OpenCTI export (`intrusion-set`), a MISP export (Indicators with no SCO), a bundle with compound patterns and YARA/Sigma rules. **Result (2026-10-25): pass**, on the repository fixtures, which stand for real exports (D8); detail below the table. |
+
+**A6 detail (2026-10-25).** The fixtures are the repository's, which stand for
+real exports (D8); no live OpenCTI or MISP export was used.
+
+- *OpenCTI-shaped* (`tests/fixtures/baselines/opencti_report.json` and `.txt`):
+  the A4 run above; Stage 5 validated.
+- *MISP-shaped* (`misp_indicators_only.json`: Indicators only, compound patterns
+  `… OR …` and `[…] AND […]`), with a short report written for it: MD5 and URL
+  rows matched through the compound patterns, the domain found in the text, the
+  unnamed C2 IP imported as STIX only, a new IP and Rclone added. Stage 5
+  validated; `scripts/audit_bundle_invariants.py` 16/16 OK; OpenCTI import on a
+  fresh instance 10/10.
+- *Rules* (`rules.json`: YARA, two Sigma, Suricata; no Report): the broken Sigma
+  rule is excluded at intake (`baseline_rule_refused`). OpenCTI refuses that
+  same rule when the raw fixture is imported ("Indicator of type sigma is not
+  correctly formatted", INCORRECT_INDICATOR_FORMAT), so the intake agrees with
+  OpenCTI. CTIParsor's enriched bundle (its own Report, the three good rules
+  kept verbatim) imports with 0 refused; Stage 5 validated. The audit's only
+  remaining flag is `check_orphan_objects`, the known conflict with objects
+  outside the Report (`tests/test_baseline_e2e.py`).
+
+## Lot 7 (2026-10-25): the changes, the file-name decision, the OpenCTI findings
+
+**Code (`pipeline/baseline_stix.py`).**
+
+1. Stage 3r `reconcile`: a `file` row with no strong key is matched through its
+   file name when exactly one baseline entry carries that name
+   (`BaselineIndex.lookup_weak`). Before, it never matched, and the same file
+   also came back as an imported `baseline_in_text` row. The one entry must hold
+   a file object: a name carried only by a name-only Indicator matches nothing,
+   in Stage 3r and in Stage 4 alike (I6).
+2. Index build: a STIX-pattern Indicator with no strong key shared with an
+   observable (a name-only `[file:name = '…']`) joins the entry of the observable
+   its `based-on` names, of the same type, and only when exactly one observable
+   of that type is named and that observable carries a key the pattern states.
+   A `based-on` to another value does not move that value onto the entry; the
+   Indicator then keeps an entry of its own. Before, every such Indicator made an
+   entry of its own, so the file name had two carriers and nothing matched.
+3. Stage 4 `merge_baseline`: a CTIParsor `file` whose only strong key is its id
+   (name only) is remapped onto the one baseline file of that name, as Stage 3r
+   shows it. A file with a hash of its own is never merged on its name.
+4. Stage 4 `merge_baseline`: a CTIParsor name-only Indicator `[file:name = …]`
+   becomes the kept baseline Indicator of that file's entry whose pattern states
+   the same name and no hash. Never a hash Indicator.
+5. Stage 4 `merge_baseline`, objects no index entry holds: a course of action
+   (same name, case and spacing folded) and a detection-rule Indicator (same
+   `pattern_type` and text, whitespace folded) become the one kept baseline object
+   of the same content; two such baseline objects, no merge. The round trip found
+   it: 119 courses of action and 6 YARA Indicators were rebuilt under new ids.
+
+Items 1 and 2 are the matcher fixes: before them the same measurement runs gave
+45 duplicates on the round trip and 35 on the ablation, all `file` rows. The
+final pass refined items 1 and 2 (the entry must hold a file object; the
+`based-on` join needs one named observable) and added items 4 and 5. The
+figures of A2 and A3 are measured on this final state.
+
+**The file-name decision (D9), which reverses the first design.** A file name
+was a weak key: a status, never a merge. It is now merged into the baseline's
+file when exactly one baseline file (one index entry holding a file object) carries
+that name. Two carriers: no merge, and the row stays `new`. A name carried only
+by a name-only Indicator, with no file object, matches nothing. Reason: in the
+first A4 run, OpenCTI held a second `svchost_update.dll` (CTIParsor's, name only) beside the
+baseline's (name, MD5 and SHA-256). The review's "in STIX" badge and the bundle
+disagreed, which invariant I6 forbids. Cost: a name-only file that is another
+sample than the baseline's one file of that name is merged onto it (see
+Consequences).
+
+**The OpenCTI findings (A4, 7.260930.0).**
+
+- *Importer capabilities.* Besides knowledge create and update, a non-admin
+  importer needs `SETTINGS_SETMARKINGS` (without it every object carrying a
+  marking is refused: FORBIDDEN_ACCESS, then MISSING_REFERENCE_ERROR "User
+  trying to create the data has missing markings"), `KNOWLEDGE_KNUPLOAD` (the
+  source artifact) and `SETTINGS_SETKILLCHAINPHASES` (attack patterns with kill
+  chain phases). Its maximum confidence must be at least the Report's, or the
+  additions are dropped without an error (the counter-test above).
+- *Aliased standard ids.* OpenCTI gives some objects its own `standard_id` (an
+  intrusion set's, from its name) and keeps the bundle's id in
+  `x_opencti_stix_ids`. References resolve through that alias.
+- *Ids that change between builds.* CTIParsor's relationship and ATT&CK
+  attack-pattern ids differ between two builds of the same job (random ids,
+  ADR-0066). OpenCTI attached the new ids as aliases of the existing entities:
+  no duplicate.
+
+**Other lot 7 changes.**
+
+- `scripts/audit_bundle_invariants.py`: an Indicator whose `pattern_type` is a
+  detection-rule type (`yara`, `sigma`, `suricata`, `snort`, `pcre`) is no
+  longer reported as a malformed STIX pattern or a bad `pattern_type`. Such
+  rules ship since ADR-0067 and ADR-0070. Tests: `tests/test_audit_bundle_patterns.py` (2).
+- `scripts/baseline_ablation.py` (A3, and its external control on the fixtures;
+  read only, on the measurement database), `scripts/baseline_round_trip.py` (A2
+  end to end, read only, offline) and `scripts/opencti_import_check.py` (A4, run
+  with pycti in a separate venv, never a project requirement; it creates a role,
+  a group, a user and an unlimited token it never revokes, so it runs on a
+  throwaway instance only), with `docker/opencti-test/` (`compose.yaml`: every
+  secret required, RabbitMQ pinned to `4.3.7-management`; `.env.example`). How to
+  run them again: `TESTING.md`, "Measuring baseline reconciliation and the OpenCTI
+  import". Tests: `tests/test_baseline_ablation.py` (25) and
+  `tests/test_baseline_round_trip.py` (8).
+- The flag `STIX_ENRICHMENT_ENABLED` defaults to `true` (`api/routes/_common.py`,
+  `enrichment_enabled`); `false` turns the mode off.
 
 ## Implementation
 
@@ -342,6 +469,6 @@ each touches `CHANGELOG.md`, this index and, for lot 4, `BUNDLE_AFFECTING`.
 | 4 | Stage 4 merge, finalize, ledger, marking, Report upsert, faithful serialisation, `BUNDLE_AFFECTING` | A1, A2, A5 green |
 | 5 | Modal (mode, preview, exclusions, Report choice, minimum TLP) and review (ribbon, filters, badges, toast) | full path in the browser |
 | 6 | Graph (legend, *Additions*, *Baseline: excluded* panels), dashboard badge, simultaneous drop of a PDF and a JSON bundle | legend and panels right on the fixtures |
-| 7 | Measures A3, A4, A6, acceptance, flag default `true`, this ADR Accepted with the figures | figures in this ADR |
+| 7 | Measures A3, A4, A6, acceptance, flag default `true`, this ADR Accepted with the figures (done 2026-10-25) | figures in this ADR; see "Lot 7" |
 
 Lot 7 starts the OpenCTI Docker on demand only (about 8 GB of RAM under WSL).

@@ -142,6 +142,91 @@ what turns "no accuracy loss" from a design claim into a measured number.
 Reference point: CTINexus reports ≈ 0.91 relation-prediction precision
 (IEEE EuroS&P 2025).
 
+### Measuring baseline reconciliation and the OpenCTI import (ADR-0090, A2 to A4)
+
+Two on-demand measurements back ADR-0090's acceptance. Neither runs in CI.
+
+**Round trip on the real reports (A2).** `scripts/baseline_round_trip.py` gives
+each job's enriched bundle over its own stored bundle, offline: Stage 4 on the
+job's rows, then Stage 5 and the audit's invariant checks, in memory. It writes
+`output/baseline_round_trip.json` and `.md` (git-ignored), reads the same
+measurement database as the ablation (read only), and calls no LLM. It differs
+from the worker in two places, which its output names: that database has no
+`held_reason` and no `enrichment_status` column.
+
+```bash
+wsl -e bash -lc "cd /mnt/c/Users/parra/Documents/tools-NLP/CTIParsor && .venv/bin/python scripts/baseline_round_trip.py"
+# --db DSN, --out FILE and --jobs ID (repeatable) override the defaults
+```
+
+Reference result, 7 real reports, 2026-10-25: 6 of 7 enriched bundles pass
+Stage 5. The 7th (job 07d1fd30) does not: Stage 4 builds a `url` whose value is
+not a valid `uri`, which its stored bundle already had (a defect of Stage 4 that
+predates the feature, to fix separately). 0 duplicate rows. At object level, 11
+objects duplicate a baseline object by name: the CTIParsor author identity in
+each of the 7 jobs, and two attack-patterns in two jobs. The detail per job is
+in the `.md` file.
+
+**Recovery and duplicates (A2, A3).** `scripts/baseline_ablation.py` takes each
+job of the measurement database as its own baseline, removes 30 % of its index
+entries (seed 20261025 by default), replays the job's stored extraction through
+Stage 3r offline (no LLM, no network), and writes the evidence to
+`output/baseline_ablation.json` (git-ignored). The connection is read only. The
+database is `ctiparsor_measure` on the test PostgreSQL (`cti-pg-test`, port
+5433), never the main one; start it with `wsl -u root -e docker start cti-pg-test`.
+Its jobs must hold their bundle, their baseline index and their extraction rows;
+the script exits 2 when it cannot read them.
+
+```bash
+wsl -e bash -lc "cd /mnt/c/Users/parra/Documents/tools-NLP/CTIParsor && .venv/bin/python scripts/baseline_ablation.py"
+# --ratio, --seed, --out, --jobs ID (repeatable) and --db DSN override the defaults
+```
+
+The external control reads a fixture bundle instead of the measured jobs
+(`--fixture`, one job's extraction from `--fixture-db`, read only, named by
+`--fixture-job`), once per seed (`--seeds 5`, from `--seed` on):
+
+```bash
+wsl -e bash -lc "cd /mnt/c/Users/parra/Documents/tools-NLP/CTIParsor && .venv/bin/python scripts/baseline_ablation.py --fixture tests/fixtures/baselines/opencti_report.json --fixture-db <dsn> --fixture-job <job-id> --seeds 5"
+```
+
+Reference result, 7 real reports, 2026-10-25: 179 of 601 candidate entries
+removed, 175 recovered as `new` (97.8 %), 196 `new` rows, 0 duplicates (0.0 %)
+on the ablation. On the round trip, 0 duplicate rows (A2; object level, see
+above). A later run on other data is compared with these figures; the duplicate
+rate is the one to watch (targets: at most 1 % on the ablation, 0 duplicate rows
+on the round trip).
+
+**OpenCTI import (A4).** `scripts/opencti_import_check.py` imports a baseline,
+then CTIParsor's enriched bundle, into a throwaway OpenCTI and reads back what it
+kept. The stack is `docker/opencti-test/compose.yaml`: OpenCTI 7.260930.0 and its
+backing services, about 8 GB of RAM under WSL, only the platform's port published,
+on `127.0.0.1:4000`.
+
+```bash
+cp docker/opencti-test/.env.example docker/opencti-test/.env   # test values only: fill them in (a UUID v4 token, 32 random bytes in base64)
+wsl -u root -e docker compose -f docker/opencti-test/compose.yaml up -d   # the platform takes minutes to start
+# pycti 7.260930.0 in a venv of its own, never the project's .venv
+<pycti-venv>/bin/python scripts/opencti_import_check.py \
+    --baseline tests/fixtures/baselines/opencti_report.json \
+    --enriched <enriched.json> --rejected <rejected.json> --out <results.json>
+wsl -u root -e docker compose -f docker/opencti-test/compose.yaml down -v   # removes the volumes: the instance is throwaway
+```
+
+`<enriched.json>` is the bundle an `enrich` job on `tests/fixtures/baselines/opencti_report.txt`
+produces with `opencti_report.json` as its baseline; `<rejected.json>` is the same
+job's bundle after rejecting the malware WellMess, exported after the full one.
+The compose file takes every secret as `${VAR:?…}`: it refuses to start while a
+value is missing from `.env`. RabbitMQ is pinned to `4.3.7-management`, OpenCTI
+to `7.260930.0`.
+
+The script reads the admin token from `docker/opencti-test/.env` (`--env-file`)
+and never prints it. It creates a role, a group, a user whose maximum confidence
+is 50 (for the counter-test), and an API token of unlimited duration, and it
+never revokes them. Run it on this throwaway instance only. It exits 0 when every
+expectation holds (12 of 12 on 2026-10-25, OpenCTI 7.260930.0), 1 otherwise. The
+`.env` file is git-ignored.
+
 ---
 
 ## 3. Current coverage map
@@ -201,18 +286,21 @@ current truth.
 | **Graph completion** | `test_stage4c_long_distance.py` | 16 | long-distance inference, direction swap, evidence recording, passages naming the entities in a long report |
 | **Graph completion** | `test_grounding_by_label.py` | 8 | STIX display names, edge scoring, bundle validation |
 | Validation/export | `test_stage5.py` | 23 | bundle validation (the three verdicts, the schemas shipped with the repository and their install), file writing, nested directories; `validate_bundle` writes nothing and judges as `validate_and_export` does, `export_path` names the file by verdict (`_invalid` suffix), `export_bundle` writes where the verdict says (ADR-0086) |
-| Baseline STIX (ADR-0090) | `test_baseline_stix.py` | 448 | `pipeline/baseline_stix.py`: the entity-type table against what Stage 4 builds, normalisation, the keys of a row, an object and a STIX pattern, families, `resolve` / `lookup` (exact-type tie-break, `AMBIGUOUS`), intake (limits, 2.0 refusal, ids and versions, scope by Report, including a relationship between two in-scope objects the Report omits, rules, id collisions, reference closure, TLP/PAP minimum, the index), the bounded search for objects the schemas refuse, hostile input, and `validate_bundle(quiet=True)` returning the verdict silently |
+| Baseline STIX (ADR-0090) | `test_baseline_stix.py` | 452 | `pipeline/baseline_stix.py`: the entity-type table against what Stage 4 builds, normalisation, the keys of a row, an object and a STIX pattern, families, `resolve` / `lookup` (exact-type tie-break, `AMBIGUOUS`), intake (limits, 2.0 refusal, ids and versions, scope by Report, including a relationship between two in-scope objects the Report omits, rules, id collisions, reference closure, TLP/PAP minimum, the index), the bounded search for objects the schemas refuse, hostile input, and `validate_bundle(quiet=True)` returning the verdict silently; since lot 7, the file name as a weak key (`lookup_weak`: one entry holding a file object, none for two carriers or for an Indicator alone) and a name-only Indicator joining the observable its `based-on` names when exactly one such observable is named and shares a key with the pattern |
 | Baseline STIX (ADR-0090) | `test_baseline_api.py` | 66 | the flag (`/api/baselines/status`, 400 on every baseline route while off, a request without a baseline unchanged), `/api/baselines/inspect` (summary, report choice, refusals, 413, stores and logs nothing), the baseline on the three ingestion routes (the `enrich` job and its stored bundle, refusal before the report is written and before the URL capture, the Report choice, the TLP/PAP minimum, one WARNING per excluded object, NUL and lone surrogates, non-UTF-8 as 400), `pipeline_mode` and `enrichment` on the job, the bundle download, deletion and the retention sweep, 409 on editing or deleting an imported entity or relationship while accepting and rejecting still work, and the `baseline_stix` origin a client cannot claim, no TLP never below the server default, the cheap refusals before the baseline is read (short text, report over its limit, mode off), blank baselines, at most two bundles read at once (503), a long list of exclusions logged and shown in part, an upload that fails for any reason leaving no report file, the baseline read on its own threads, and a job the full queue rejects keeping no baseline |
 | Baseline STIX (ADR-0090) | `test_baseline_worker.py` | 8 | the worker runs the JSON schemas before the pipeline starts, excludes with a WARNING an object only they refuse, fails the job with the reason when the baseline cannot be used or is missing, leaves a `full` job alone, does not validate a validated baseline again, logs an unusable baseline as a warning without a traceback, and caps its exclusion lines |
-| Baseline STIX (ADR-0090) | `test_baseline_reconcile.py` | 28 | Stage 3r's `reconcile` (pure): the four passes, a match by key and by alias, families, the whole-word search in the report text with the earliest form as evidence, a relationship matched by its ends and verb, endpoints resolved through the baseline's forms, a value two entries share resolving to none, the stats, blank values, no offset when lowering changes the length, held TTPs matched like extracted ones |
+| Baseline STIX (ADR-0090) | `test_baseline_reconcile.py` | 31 | Stage 3r's `reconcile` (pure): the four passes, a match by key and by alias, families, the whole-word search in the report text with the earliest form as evidence, a relationship matched by its ends and verb, endpoints resolved through the baseline's forms, a value two entries share resolving to none, the stats, blank values, no offset when lowering changes the length, held TTPs matched like extracted ones; since lot 7, a file matched through its name when exactly one baseline entry carries it, and left `new` when two do or when the one carrier is an Indicator alone |
 | Baseline STIX (ADR-0090) | `test_orchestrator_baseline.py` | 5 | Stage 3r in the orchestrator: its place after 3doc and its label, skipped and never called in full mode, reconciled once before `extraction_ready` in enrich mode, given the extractions and the baseline, a failing reconciliation failing the run before any write |
 | Baseline STIX (ADR-0090) | `test_baseline_persistence.py` | 11 | what a run stores against a baseline: the Stage 3r columns NULL in full mode, matched rows pre-accepted with origin `baseline_stix`, imported rows stored pre-accepted with source `baseline_stix`, relationships' status and origin, auto-accept leaving the imported and matched rows alone, `load_index` (none for a full job or a missing row), the worker's hook handing the reconciliation to the save |
 | Baseline STIX (ADR-0090) | `test_baseline_exclusions.py` | 3 | the `baseline_stix` source constant, `load_decisions` never reading a baseline row, the grounding harness reading full jobs only |
-| Baseline STIX (ADR-0090) | `test_baseline_merge.py` | 24 | the merge of Stage 4 (`merge_baseline`, `reissue_report`, pure): a CTIParsor object replaced by the baseline object it matches (an Indicator, an observable through its entry, an object sharing its id), references rewritten, a relationship identical to a baseline one dropped and the baseline kept, two that become one kept first, a self-loop dropped, a rejected object and what refers to it left out, the chosen Report never added or kept, the kept objects written back as received, the re-issued Report's `modified` (+1 ms when the clock is behind, the build time without a valid original), `validation_json` dropping exactly the trusted objects, the in-text entities, `newest_versions` (the version of an id the intake keeps), a lone surrogate in a verbatim object written as an escape, non-ASCII text left unescaped otherwise |
+| Baseline STIX (ADR-0090) | `test_baseline_merge.py` | 30 | the merge of Stage 4 (`merge_baseline`, `reissue_report`, pure): a CTIParsor object replaced by the baseline object it matches (an Indicator, an observable through its entry, an object sharing its id), references rewritten, a relationship identical to a baseline one dropped and the baseline kept, two that become one kept first, a self-loop dropped, a rejected object and what refers to it left out, the chosen Report never added or kept, the kept objects written back as received, the re-issued Report's `modified` (+1 ms when the clock is behind, the build time without a valid original), `validation_json` dropping exactly the trusted objects, the in-text entities, `newest_versions` (the version of an id the intake keeps), a lone surrogate in a verbatim object written as an escape, non-ASCII text left unescaped otherwise; since lot 7, a name-only file remapped onto the one baseline file of its name, and a file with a hash of its own never merged on its name; a name-only `[file:name = …]` Indicator remapped onto the kept Indicator of its file, never onto a hash Indicator; a course of action or a rule Indicator of the same content remapped onto the one kept baseline object of that content, and nothing merged when two such objects exist |
 | Baseline STIX (ADR-0090) | `test_stage4_baseline.py` | 6 | `build_stix_bundle` with a baseline, `merge_baseline` and `reissue_report` replaced by fakes: unchanged without one, the chosen Report re-issued in place of a CTIParsor Report, a CTIParsor Report with its enrichment when there is none, kept objects not stamped, the ledger recording the merge without `changes`, one marking-definition in the bundle |
 | Baseline STIX (ADR-0090) | `test_baseline_finalize.py` | 20 | the baseline's share of `re_run_final_stages` and of a run: a full job finalized as before, Stage 4 given the baseline index and its objects as received, an object left only when all its rows are rejected, the imported rows not Stage 4 inputs, the bundle written with the verbatim objects and checked without the trusted ones, the build record naming the baseline's `sha256` (none for a full job), an `enrich` job without its baseline built without it, the run's verbatim objects and record, `load_baseline` and `baseline_sha256`, `objects_by_id` giving the version of an id the intake kept |
 | Baseline STIX (ADR-0090) | `test_run_baseline.py` | 7 | the orchestrator and Stage 5 with a baseline: a full run builds as before and gets no baseline, an enrich run gives Stage 4 the baseline and the in-text rows, `validate_and_export` exports the trusted objects as received without checking them again, the verbatim objects not trusted are checked as written, `validate` passes the build's `verbatim` and `trusted`, a full run passes no baseline argument |
 | Baseline STIX (ADR-0090) | `test_baseline_e2e.py` | 16 | the real merge end to end (`build_bundle`, `merge_baseline`, `reissue_report`, `serialize_bundle`, on the intake of the bundles they write): a round trip, where a CTIParsor bundle given back as its own baseline keeps its objects and ids, its one Report re-issued with every reference kept, and the objects written as first built; the OpenCTI-style fixture, where a threat actor named in the baseline becomes its intrusion set, the new malware's edge starts at that intrusion set, the kept objects keep their provenance, and the Report re-issued states the new malware; a baseline with no Report; the audit invariants of `scripts/audit_bundle_invariants.py`; and a finalize (`re_run_final_stages`) with a rejected object that leaves with its relationships and is ledgered; a chosen Report whose references all leave not re-issued, no Report when the document states nothing, and `outside_report` left off what the re-issued Report lists |
+| Baseline STIX (ADR-0090) | `test_baseline_ablation.py` | 25 | `scripts/baseline_ablation.py` (A2, A3; read only, no LLM): the draw (a fixed seed per job, so the same job gives the same draw; round of the ratio times the candidate entries), the candidates (entries holding a ledger object, not the Report, identities or markings), an observable and its Indicator leaving together, a removed entry's relationships and Report references dropped, the classification of rows (recovered, duplicate, ambiguous, unmapped, mismatch), the fixture mode and its seeds, and the rates |
+| Baseline STIX (ADR-0090) | `test_baseline_round_trip.py` | 8 | `scripts/baseline_round_trip.py` (A2; read only, offline): which rows ship (accepted or unreviewed, not held; rejected countries and locations kept out of Stage 4), the legacy dates of a relationship row, the malware rows read through the named lists, the folded comparison of names and values, the lost, altered and added objects read against the baseline, canonical JSON, and an offline build over a fixture that keeps every baseline object verbatim but the Report |
+| **Provenance** | `test_audit_bundle_patterns.py` | 2 | `scripts/audit_bundle_invariants.py` (ADR-0090, ADR-0067/0070): an Indicator whose `pattern_type` is a detection-rule type (yara, sigma, suricata, snort, pcre) is neither audited as a STIX pattern nor flagged as a bad `pattern_type`; a `stix` pattern is still checked and an unknown type still flagged |
 | **Provenance** | `test_provenance.py` | 5 | authoring identity, TLP marking, created_by_ref |
 | **Provenance** | `test_edge_provenance.py` | 10 | relationship properties, pinned edges, run config |
 | **Provenance** | `test_bundle_staleness.py` | 26 | `git_rev` extraction from malformed run configs, ancestry verdicts, an undecidable git result never marking a bundle stale (ADR-0035); a `mapping` fix judged on the build's revision, an `extraction` fix on the run's and the build's, the audit line naming both (ADR-0086) |

@@ -521,9 +521,9 @@ Besides `THRESHOLD_CALIBRATION_ENABLED` and `ENTITY_OVERRIDES_ENABLED` above:
 ```env
 # ADR-0090: let a report come with a STIX 2.1 bundle the analyst already holds
 # (/api/upload baseline_stix, /api/ingest/* baseline_bundle), and answer
-# POST /api/baselines/inspect.  Off, a request that carries a bundle gets 400.
-# Off until the feature is accepted (ADR-0090, lot 7); read on every request.
-# STIX_ENRICHMENT_ENABLED=false
+# POST /api/baselines/inspect.  On by default (lot 7); false turns it off, and
+# a request that carries a bundle then gets 400.  Read on every request.
+# STIX_ENRICHMENT_ENABLED=true
 ```
 
 The limits are not settings: a bundle is at most 20 MB and 10 000 objects

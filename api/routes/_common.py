@@ -50,10 +50,11 @@ _INTAKE_SLOTS = threading.BoundedSemaphore(2)
 _INTAKE_WAIT_S = 30.0
 
 
-# Read at each request, not at import: a test (or an operator, after a restart)
-# turns the mode on without reloading the module.
+# On unless STIX_ENRICHMENT_ENABLED=false (ADR-0090 accepted).  Read at each
+# request, not at import: a test (or an operator, after a restart) turns the mode
+# off without reloading the module.
 def enrichment_enabled() -> bool:
-    return env_bool("STIX_ENRICHMENT_ENABLED", default=False)
+    return env_bool("STIX_ENRICHMENT_ENABLED", default=True)
 
 
 def require_enrichment() -> None:

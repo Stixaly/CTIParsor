@@ -274,3 +274,27 @@ def test_a_matched_row_stays_matched_when_a_row_of_its_name_is_new(index):
     )
     rec = bs.reconcile([], llm, "", index)
     assert rec.entity("ttp", "Spearphishing") == (bs.MATCHED, POWERSHELL)
+
+
+# ── A file name: a weak key, for the status only (§5.2) ─────────────────────
+
+def test_a_file_named_like_one_baseline_file_is_matched_to_it(index):
+    rec = bs.reconcile([_raw("svchost_update.dll", "file")], LLMEnrichmentResult(), REPORT, index)
+    assert rec.entity_status[("file", "svchost_update.dll")] == (bs.MATCHED, FILE)
+    assert FILE not in _imported(rec)                 # found: not imported a second time
+
+
+def test_a_file_name_two_baseline_files_share_stays_new():
+    weak = frozenset({("file_name", "setup.exe")})
+    one = bs.Entry("file--1", "file", "file", "setup.exe", None, frozenset(), weak)
+    two = bs.Entry("file--2", "file", "file", "setup.exe", None, frozenset(), weak)
+    rec = bs.reconcile([_raw("setup.exe", "file")], LLMEnrichmentResult(), "", _index(one, two))
+    assert rec.entity_status[("file", "setup.exe")] == (bs.NEW, None)
+
+
+def test_a_name_only_an_indicator_carries_is_no_file_to_match():
+    # No file object to merge into in Stage 4, so Stage 3r shows no match either (I6).
+    alone = bs.Entry("indicator--1", "file", "file", "cmd.exe", None, frozenset(),
+                     frozenset({("file_name", "cmd.exe")}), indicator_ids=("indicator--1",))
+    rec = bs.reconcile([_raw("cmd.exe", "file")], LLMEnrichmentResult(), "", _index(alone))
+    assert rec.entity_status[("file", "cmd.exe")] == (bs.NEW, None)
