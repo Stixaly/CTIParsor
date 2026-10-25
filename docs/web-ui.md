@@ -109,8 +109,47 @@ removes the bundle, and a level the bundle set is unset again.
   `STIX only` (from the bundle, not in the report text).
 - A row from the bundle can be accepted or rejected. Its type, and for a
   relationship its verb and dates, are read-only: the server refuses an edit
-  to them with 409, and the change belongs in the source bundle.
+  to them with 409, and the change belongs in the source bundle. The hover
+  chip's "Change type" is off for them too.
 - A banner says when the bundle already covers everything CTIParsor found.
+
+**On the Graph page** (bundle view of an enrich job; the **Against your bundle**
+button appears only there):
+
+- An object your bundle supplied has a thin outer ring. The origin legend
+  counts them as "From your STIX bundle" and "Added by CTIParsor".
+- A relationship from your bundle is a link kind, "From your STIX bundle".
+- **Against your bundle** opens a panel with four groups:
+  - **Added by CTIParsor**: the objects and links that ship and were not in your
+    bundle.
+  - **Matched to your objects**: a CTIParsor object, and the object of yours that
+    ships in its place.
+  - **Left out of your bundle**: a rejected object, or an object whose reference
+    left, named by that object; the report when none of its references ships, so
+    it is not re-issued; the intake exclusions, with "and N more" past the listed
+    ones. A note says that a rejection removes the object from this bundle only,
+    because OpenCTI's upsert never removes a reference. The Differences panel
+    lists the same objects with their reasons.
+  - **Your report, re-issued**: the Report under its own id, with the references
+    it adds and removes.
+- A row imported from your bundle is joined to its object by STIX id, so a
+  freshly built enrich bundle shows no ghost and no "out of date" for it.
+- A relationship imported from your bundle cannot be deleted here: its Delete
+  button is disabled and says to reject it in the review. If the server refuses a
+  delete, the editor shows "Not deleted:" with the reason.
+
+**On the dashboard**: an enrich job's card carries an **Enrich** badge.
+
+**Dropping files**: a report and a STIX bundle dropped together, on the dashboard
+or in the New report modal, open the modal in enrich mode with both. The bundle
+is told apart by its content: a `.json` object that says `"type": "bundle"` in
+its first 64 KB or its last 4 KB (UTF-8, or UTF-16 with its byte-order mark);
+the modal's size limit (the `max_bytes` the status reports) then applies. A
+bundle alone keeps the pasted text, and a chosen report stays. The modal names
+every `.json` it does not use: one that is not a STIX bundle, and any bundle
+after the first (one per job). With `STIX_ENRICHMENT_ENABLED` off, the modal
+says the bundle was not used; when the server's status cannot be read, it says
+that instead.
 
 ## Graph page
 
@@ -122,11 +161,13 @@ Custom **d3-force SVG graph** (not the OASIS stix-visualization iframe):
 | **Layout modes** | Force (physics simulation) · Hierarchical (tier-based) · Radial (BFS from root) |
 | **Type legend** | Click to toggle visibility · Double-click to solo a type |
 | **Node search** | Search by name or type, jump-animate to result |
-| **Relationship editor** | Accept / Reject / Reset / Delete relationships in the side panel; Add new relationships with evidence text |
+| **Relationship editor** | Accept / Reject / Reset / Delete relationships in the side panel; Add new relationships with evidence text. A relationship from your STIX bundle cannot be deleted (Delete is disabled, with the reason) |
+| **Origin legend** (enrich jobs, bundle view) | Counts the objects from your STIX bundle (thin outer ring) and those added by CTIParsor |
+| **Against your bundle** (enrich jobs, bundle view) | Panel: added by CTIParsor, matched to your objects, left out of your bundle, your report re-issued (see Enrich mode) |
 | **Labels** | Toggle all labels; strategic nodes (tier 0–1) always show labels |
 | **Fit button** | Animate to fit all nodes in viewport |
 | **Download** | Download STIX bundle directly from the graph page (a pending rebuild runs first) |
-| **Bundle view** (default) | The bundle that ships (ADR-0061): links coloured by why they exist — from the report, Stage 4 mapping, policy rule, ATT&CK reference, inferred — rows Stage 4 rewrote in amber, rows and entities it dropped drawn as hollow dashed ghosts with the reason, and a **Differences** panel listing everything dropped, rewritten, merged, or not yet rebuilt |
+| **Bundle view** (default) | The bundle that ships (ADR-0061): links coloured by why they exist — from the report, from your STIX bundle, Stage 4 mapping, policy rule, ATT&CK reference, inferred — rows Stage 4 rewrote in amber, rows and entities it dropped drawn as hollow dashed ghosts with the reason, and a **Differences** panel listing everything dropped, rewritten, merged, or not yet rebuilt |
 | **Review view** | The stored rows the analyst edits, each marked with its fate in the bundle; a link's panel jumps to it in the bundle view |
 | **Auto-rebuild** | Every link edit schedules a quick finalize (4 s debounce), as on the Review page |
 

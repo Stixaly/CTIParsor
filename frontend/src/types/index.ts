@@ -512,12 +512,17 @@ export interface LedgerObjectInfo {
    *  'ioc_based_on', 'ioc_association', 'targeted_location', 'policy_pin',
    *  'completion_reference', 'completion_transitive', … */
   origin: string
+  /** baseline_report_upsert: how many references the re-issued report adds (ADR-0090). */
+  added_refs?: number
+  /** baseline_report_upsert: the ids of the analyst's references it drops. */
+  removed_refs?: string[]
   [key: string]: unknown
 }
 
 export interface LedgerRemoval {
   stix_id: string
-  kind: 'object' | 'relationship'
+  /** 'baseline': an object of the analyst's STIX bundle that this bundle leaves out (ADR-0090). */
+  kind: 'object' | 'relationship' | 'baseline'
   reason: string
   replaced_by?: string | null
   /** An absorbed object's name (it is no longer in the bundle to look up). */

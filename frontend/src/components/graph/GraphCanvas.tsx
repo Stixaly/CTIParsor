@@ -620,6 +620,12 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
                 <circle r={r + 6} fill="none"
                   stroke="var(--accent)" strokeWidth={2} opacity={0.85} />
               )}
+              {/* Baseline ring: an object the analyst's own STIX bundle supplied
+                  (ADR-0090) — a thin outer ring in ink, so it reads in both themes. */}
+              {n.baseline && !ghost && (
+                <circle r={r + 3.5} fill="none"
+                  stroke="var(--ink-3)" strokeWidth={1} opacity={0.6} />
+              )}
               {/* Node circle */}
               <circle
                 r={r}

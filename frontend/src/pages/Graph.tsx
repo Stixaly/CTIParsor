@@ -23,26 +23,27 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, Download, Eye, Link2, X, Search, RotateCcw,
   Maximize2, Tag, Network, AlignCenter, CircleDot, Check, Trash2,
-  Plus, ChevronLeft, GitCompare, RefreshCw,
+  Plus, ChevronLeft, GitCompare, GitMerge, RefreshCw,
 } from 'lucide-react'
 
 import {
   fetchJob, fetchEntities, fetchRelationships, fetchBundle, fetchBundleLedger,
   createRelationship, updateRelationship, deleteRelationship,
-  createEntity, BundleRefusedError,
+  createEntity, BundleRefusedError, errorDetail,
 } from '../api/client'
 import { downloadBundle } from '../stix/downloadBundle'
 import { useDebouncedFinalize } from '../stix/useDebouncedFinalize'
-import type { LedgerRelationship } from '../types'
+import { isImported, type LedgerRelationship } from '../types'
 import { typeDot, typeSoft, typeInk, typeLabel, REL_TYPES, suggestRelType, confPct, TYPE_GROUPS, verbsForPair } from '../components/review/tokens'
 import GraphCanvas, { type GraphCanvasHandle } from '../components/graph/GraphCanvas'
 import { type GraphNode, type GraphEdge, type EdgeKind, getTier } from '../components/graph/graphLayout'
 import { buildGraphData, type GraphData } from '../components/graph/buildGraphData'
 import { buildBundleGraph } from '../components/graph/buildBundleGraph'
 import {
-  BundleMeta, BundleNodeDetail, DiffPanel, EdgeDetail, FateChip, ProvenanceLegend,
+  BaselineLegend, BundleMeta, BundleNodeDetail, DiffPanel, EdgeDetail, FateChip, ProvenanceLegend,
   ReviewEdgeDetail, makeLabelOf,
 } from '../components/graph/BundlePanels'
+import { BaselinePanel } from '../components/graph/BaselinePanel'
 
 // ── Deduped relationship-type list for <select> ───────────────────────────────
 
@@ -318,8 +319,8 @@ function DetailPanel({
 
 // ── Relationship Editor ───────────────────────────────────────────────────────
 
-function RelEditor({
-  nodes, edges, byId, fate, labelOf, onClose, onPick,
+export function RelEditor({
+  nodes, edges, byId, fate, imported, deleteError, labelOf, onClose, onPick,
   onAccept, onReject, onReset, onDelete, onCreate, onAddEntity,
 }: {
   jobId: string
@@ -327,6 +328,9 @@ function RelEditor({
   edges: GraphEdge[]
   byId: Map<string, GraphNode>
   fate?: Map<string, LedgerRelationship>
+  /** Rows the analyst's STIX bundle supplied: the server refuses to delete them (ADR-0090). */
+  imported: Set<string>
+  deleteError: string | null
   labelOf: (id: string) => string
   onClose: () => void
   onPick: (id: string) => void
@@ -403,6 +407,11 @@ function RelEditor({
 
       {/* List */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px' }}>
+        {deleteError && (
+          <p role="alert" style={{ fontSize: 11, color: 'var(--no)', margin: '0 0 8px' }}>
+            Not deleted: {deleteError}
+          </p>
+        )}
         {shown.length === 0 && (
           <p style={{ fontSize: 11, color: 'var(--ink-4)', textAlign: 'center', padding: '24px 0' }}>
             No relationships
@@ -415,6 +424,7 @@ function RelEditor({
             if (!src || !tgt) return null
             const pend = e.accepted === null
             const rej  = e.accepted === false
+            const fromBundle = imported.has(e.id)
             return (
               <div key={e.id} style={{
                 background: pend ? 'color-mix(in oklab, var(--warn) 6%, var(--bg-elev))' : 'var(--bg-elev)',
@@ -465,8 +475,9 @@ function RelEditor({
                         <Check size={9} /> accepted
                       </span>
                     )}
-                    <button onClick={() => onDelete(e.id)} title="Delete"
-                      style={{ width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 5, border: 'none', cursor: 'pointer', background: 'var(--bg-soft)', color: 'var(--no)' }}>
+                    <button onClick={() => onDelete(e.id)} disabled={fromBundle}
+                      title={fromBundle ? 'From your STIX bundle: reject it in the review instead' : 'Delete'}
+                      style={{ width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 5, border: 'none', cursor: fromBundle ? 'not-allowed' : 'pointer', opacity: fromBundle ? 0.35 : 1, background: 'var(--bg-soft)', color: 'var(--no)' }}>
                       <Trash2 size={11} />
                     </button>
                   </div>
@@ -847,6 +858,11 @@ export default function Graph() {
     () => buildGraphData(rawEntities, rawRelations, ledger),
     [rawEntities, rawRelations, ledger],
   )
+  // Rows the analyst's STIX bundle supplied (ADR-0090): the server refuses to delete them.
+  const importedRows = useMemo(
+    () => new Set(rawRelations.filter(r => isImported(r.enrichment_status)).map(r => r.id)),
+    [rawRelations],
+  )
   const bundleData = useMemo(
     () => mode === 'bundle' ? buildBundleGraph(bundle, ledger, rawEntities, rawRelations) : null,
     [mode, bundle, ledger, rawEntities, rawRelations],
@@ -866,6 +882,8 @@ export default function Graph() {
   const [hiddenKinds,  setHiddenKinds]   = useState<Set<EdgeKind>>(new Set())
   const [editMode,     setEditMode]      = useState(false)
   const [diffOpen,     setDiffOpen]      = useState(false)
+  const [baselineOpen, setBaselineOpen]  = useState(false)
+  const [deleteError,  setDeleteError]   = useState<string | null>(null)
   const [showLabels,   setShowLabels]    = useState(false)
   const [focusSignal,  setFocusSignal]   = useState<{ id: string; seq: number } | null>(null)
   const focusSeq = useRef(0)
@@ -882,7 +900,8 @@ export default function Graph() {
   }, [])
 
   // Right panel: an explicit panel (editor, differences) wins over selection.
-  const rightPanel = editMode ? 'editor' : diffOpen ? 'diff' : selectedEdge ? 'edge' : selectedId ? 'detail' : null
+  const rightPanel = editMode ? 'editor' : diffOpen ? 'diff' : baselineOpen && bundleData ? 'baseline'
+                   : selectedEdge ? 'edge' : selectedId ? 'detail' : null
   const selectedNode = selectedId ? byId.get(selectedId) ?? null : null
   const selectedEdgeObj = selectedEdge ? edges.find(e => e.id === selectedEdge) ?? null : null
 
@@ -917,6 +936,7 @@ export default function Graph() {
   const focusNode = useCallback((id: string) => {
     setSelectedEdge(null)
     setDiffOpen(false)
+    setBaselineOpen(false)
     setSelectedId(id)
     focusSeq.current++
     setFocusSignal({ id, seq: focusSeq.current })
@@ -927,6 +947,7 @@ export default function Graph() {
     if (!e) return
     setEditMode(false)
     setDiffOpen(false)
+    setBaselineOpen(false)
     setSelectedId(null)
     setSelectedEdge(id)
     focusSeq.current++
@@ -969,6 +990,8 @@ export default function Graph() {
   const deleteRelMut = useMutation({
     mutationFn: (id: string) => deleteRelationship(jobId!, id),
     onSuccess: onRowsChanged,
+    // The server's reason, e.g. a row from the analyst's bundle (409).
+    onError: err => setDeleteError(errorDetail(err)),
   })
   const createRelMut = useMutation({
     mutationFn: (body: Parameters<typeof createRelationship>[1]) =>
@@ -999,6 +1022,9 @@ export default function Graph() {
   useEffect(() => {
     if (selectedEdge && !edges.some(e => e.id === selectedEdge)) setSelectedEdge(null)
   }, [edges, selectedEdge])
+  // A refused delete is reported where it happened: a new selection or a closed
+  // editor drops it.
+  useEffect(() => { setDeleteError(null) }, [editMode, selectedId, selectedEdge])
 
   // ── Loading state ──────────────────────────────────────────────────────────
 
@@ -1008,6 +1034,8 @@ export default function Graph() {
   const ghostCount   = nodes.filter(n => n.ghost).length
   const droppedCount = edges.filter(e => e.kind === 'dropped').length
   const changedCount = edges.filter(e => e.changed && e.kind !== 'dropped').length
+  const fromBundleCount = nodes.filter(n => n.baseline && !n.ghost).length
+  const addedCount      = nodes.filter(n => !n.ghost && !n.baseline).length
   const bundleRefused = mode === 'bundle' ? refused : null
   const noBundle     = mode === 'bundle' && !bundleLoading && !bundle && !refused
 
@@ -1050,18 +1078,25 @@ export default function Graph() {
           ))}
         </div>
         {mode === 'bundle' && bundleData?.hasLedger && (
-          <button onClick={() => { setDiffOpen(v => !v); setEditMode(false) }}
+          <button onClick={() => { setDiffOpen(v => !v); setBaselineOpen(false); setEditMode(false) }}
             className={diffOpen ? 'btn-primary' : 'btn-ghost'}
             title="Everything Stage 4 dropped, rewrote or merged on the way from the review rows to the bundle">
             <GitCompare size={13} /> <span className="gc-label">Differences</span>
             {diffCount + staleCount > 0 ? ` ${diffCount + staleCount}` : ''}
           </button>
         )}
+        {mode === 'bundle' && bundleData?.hasLedger && job?.pipeline_mode === 'enrich' && (
+          <button onClick={() => { setBaselineOpen(v => !v); setDiffOpen(false); setEditMode(false) }}
+            className={baselineOpen ? 'btn-primary' : 'btn-ghost'}
+            title="What CTIParsor added to your STIX bundle, what matched an object in it, and what was left out">
+            <GitMerge size={13} /> <span className="gc-label">Against your bundle</span>
+          </button>
+        )}
         <button onClick={() => navigate(`/review/${jobId}`)} className="btn-ghost" title="Review">
           <Eye size={13} /> <span className="gc-label">Review</span>
         </button>
         <button
-          onClick={() => { setEditMode(v => !v); setDiffOpen(false); if (selectedId) setSelectedId(null); setSelectedEdge(null) }}
+          onClick={() => { setEditMode(v => !v); setDiffOpen(false); setBaselineOpen(false); if (selectedId) setSelectedId(null); setSelectedEdge(null) }}
           className={editMode ? 'btn-primary' : 'btn-ghost'}
           title="Edit links"
         >
@@ -1151,6 +1186,10 @@ export default function Graph() {
             />
           )}
 
+          {bundleData && fromBundleCount > 0 && (
+            <BaselineLegend fromBundle={fromBundleCount} added={addedCount} />
+          )}
+
           <TypeLegend
             typeCounts={typeCounts}
             hiddenTypes={hiddenTypes}
@@ -1219,7 +1258,7 @@ export default function Graph() {
               onSelect={id => {
                 setSelectedId(id)
                 setSelectedEdge(null)
-                if (id) { setEditMode(false); setDiffOpen(false) }
+                if (id) { setEditMode(false); setDiffOpen(false); setBaselineOpen(false) }
               }}
               onSelectEdge={pickEdge}
               onHover={setHoverId}
@@ -1341,6 +1380,19 @@ export default function Graph() {
                 labelOf={labelOf}
               />
             )}
+            {rightPanel === 'baseline' && bundleData && job && ledger && (
+              <BaselinePanel
+                job={job}
+                ledger={ledger}
+                data={bundleData}
+                labelOf={labelOf}
+                entities={rawEntities}
+                relationships={rawRelations}
+                onClose={() => setBaselineOpen(false)}
+                onPickNode={focusNode}
+                onPickEdge={pickEdge}
+              />
+            )}
             {rightPanel === 'editor' && (
               <RelEditor
                 jobId={jobId!}
@@ -1348,13 +1400,15 @@ export default function Graph() {
                 edges={review.edges}
                 byId={review.byId}
                 fate={review.fate}
+                imported={importedRows}
+                deleteError={deleteError}
                 labelOf={labelOf}
                 onClose={() => setEditMode(false)}
                 onPick={pickEntity}
                 onAccept={id => updateRelMut.mutate({ id, patch: { accepted: true } })}
                 onReject={id => updateRelMut.mutate({ id, patch: { accepted: false } })}
                 onReset={id  => updateRelMut.mutate({ id, patch: { accepted: null } })}
-                onDelete={id => deleteRelMut.mutate(id)}
+                onDelete={id => { setDeleteError(null); deleteRelMut.mutate(id) }}
                 onCreate={(srcValue, tgtValue, rel, evidence) =>
                   createRelMut.mutate({
                     source_value: srcValue,

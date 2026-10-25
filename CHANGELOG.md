@@ -11,6 +11,47 @@ theme.
 
 ### Added
 
+#### Enriching an existing STIX 2.1 bundle, lot 6: the graph, the panel, the badge and the drop (ADR-0090), 2026-10-25
+
+On an `enrich` job the Graph page shows what the analyst's bundle supplied and
+what CTIParsor added to it. **A full job's graph is as before**, and the feature
+stays behind `STIX_ENRICHMENT_ENABLED`, off by default. Still to do: lot 7
+(measures, OpenCTI test, activation). Frontend only.
+
+- **Bundle view**: objects from the analyst's bundle get a thin outer ring, and
+  the legend counts them: "From your STIX bundle" and "Added by CTIParsor". The
+  bundle's relationships are a link kind, "From your STIX bundle".
+- **Against your bundle** (enrich jobs, bundle view) opens
+  `components/graph/BaselinePanel.tsx`: Added by CTIParsor; Matched to your
+  objects (CTIParsor's object, and yours, which ships in its place); Left out of
+  your bundle (rejected objects, and objects whose reference left, named; the
+  report when it is not re-issued; the intake exclusions, with "and N more"; a
+  note that OpenCTI's upsert never removes a reference); Your report, re-issued
+  (references added and removed).
+- **Imported rows** join their bundle object by its STIX id, so a freshly built
+  enrich bundle no longer reads "out of date" and draws no hollow ghosts for
+  them. A row rejected after the build is listed as stale.
+- **Relationships from the bundle** cannot be deleted on the Graph page: the
+  button is disabled with the reason, and a refused delete shows "Not deleted:"
+  with the server's reason.
+- **Dashboard**: an "Enrich" badge on enrich jobs.
+- **Drop**: a report and a STIX bundle dropped together, on the dashboard or in
+  the New report modal, open the modal in enrich mode with both. A bundle alone
+  keeps the pasted text. The modal names each `.json` it does not use (not a
+  STIX bundle, or a second bundle); with the flag off, or the status unreadable,
+  it says the bundle was not used. Bundles are recognised from their first
+  64 KB and last 4 KB, in UTF-8 or UTF-16 with a byte-order mark.
+- **Review**: "Change type" is disabled on imported rows in the hover chip, as on
+  the margin card.
+- **Types**: `LedgerRemoval.kind` takes `'baseline'`; `LedgerObjectInfo` gains
+  `added_refs` and `removed_refs`; `EdgeKind` gains `'baseline'`.
+- **Tests**: `components/graph/BaselinePanel.test.tsx` (7), `components/dropFiles.test.ts`
+  (12), `pages/Graph.test.tsx` (6) and `components/review/InlineHoverChip.test.tsx`
+  (3) are new; `NewReportModal.test.tsx` (31 in the file), `buildBundleGraph.test.ts`
+  (22), `provenance.test.ts` (10) and `pages/Dashboard.test.tsx` (7) gain cases.
+  The frontend has 27 Vitest files and 285 tests on 2026-10-25.
+- **Docs**: `docs/web-ui.md` (enrich mode: graph, panel, badge, drop), `TESTING.md`.
+
 #### Enriching an existing STIX 2.1 bundle, lot 5: the New report modal and the Review screen (ADR-0090), 2026-10-25
 
 The analyst can start an `enrich` job from the New report modal and see on the
