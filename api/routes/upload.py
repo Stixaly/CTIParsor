@@ -91,8 +91,8 @@ def upload_file(
     STIX bundle; without a TLP the report gets the STIX_TLP default.
 
     baseline_stix — optional STIX 2.1 bundle the analyst already holds, to
-    enrich instead of starting from scratch (ADR-0090; 400 unless
-    STIX_ENRICHMENT_ENABLED); baseline_report_id — which of its Reports to
+    enrich instead of starting from scratch (ADR-0090; 400 when
+    STIX_ENRICHMENT_ENABLED=false); baseline_report_id — which of its Reports to
     enrich, required when it holds several.  The job's TLP and PAP may not be
     lower than the bundle's.
 

@@ -80,8 +80,9 @@ Four view modes toggled at the top of the document pane:
 
 ## Enrich mode (ADR-0090)
 
-The New report modal offers a second pipeline only when the server runs with
-`STIX_ENRICHMENT_ENABLED` on (`GET /api/baselines/status`; off by default):
+The New report modal offers a second pipeline when the server runs with
+`STIX_ENRICHMENT_ENABLED` on, which is the default (`GET /api/baselines/status`
+reports it; `STIX_ENRICHMENT_ENABLED=false` turns it off):
 
 - **Full extraction** (the default): CTIParsor builds the bundle from the report alone.
 - **Enrich an existing STIX 2.1 bundle**: CTIParsor merges what the report adds

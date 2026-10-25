@@ -334,8 +334,14 @@ def check_report_object_refs_resolve(bundles: list[tuple[str, dict]]) -> Finding
         return Finding("check_report_object_refs_resolve", "error", 0, 0, 0, str(e)[:200], "SKIP")
 
 
+# STIX 2.1 pattern-type-ov.  Only a `stix` pattern has the bracketed STIX
+# syntax; YARA, Sigma, Suricata and Snort rules ship as such (ADR-0067/0070),
+# and an analyst's bundle may hold any of these (ADR-0090).
+PATTERN_TYPES = frozenset({"stix", "pcre", "sigma", "snort", "suricata", "yara"})
+
+
 def check_indicator_pattern_wellformed(bundles: list[tuple[str, dict]]) -> Finding:
-    """Check indicator patterns are well-formed STIX patterns."""
+    """Check indicator patterns are well-formed STIX patterns (`pattern_type: stix`)."""
     try:
         faulty: set[str] = set()
         examples: list[str] = []
@@ -355,6 +361,8 @@ def check_indicator_pattern_wellformed(bundles: list[tuple[str, dict]]) -> Findi
                     faulty.add(job_id)
                     if len(examples) < 3:
                         examples.append(f"{job_id}: missing")
+                    continue
+                if obj.get("pattern_type", "stix") != "stix":
                     continue
                 if not pat.startswith("[") or not pat.endswith("]"):
                     unbracketed += 1
@@ -413,7 +421,7 @@ def check_indicator_required_fields(bundles: list[tuple[str, dict]]) -> Finding:
                 issues = []
                 if "pattern_type" not in obj:
                     issues.append("no_pattern_type")
-                elif obj.get("pattern_type") != "stix":
+                elif obj.get("pattern_type") not in PATTERN_TYPES:
                     issues.append("bad_pattern_type")
                 if "valid_from" not in obj:
                     issues.append("no_valid_from")

@@ -2468,3 +2468,41 @@ def test_ten_genuine_culprits_cost_one_validation_of_the_bundle_and_one_of_each(
     validations = _count_validations(monkeypatch)
     _, summary, _ = _read(*objects)
     assert len(summary.excluded) == 10 and validations == [40] + [1] * 10
+
+
+# ── A name-only Indicator joins the file its based-on names (lot 7, A3) ─────
+
+def test_a_name_only_indicator_joins_the_file_its_based_on_names():
+    exe = _sco("file", 1, name="cmd.exe")
+    ind = _indicator(2, "[file:name = 'cmd.exe']")
+    index, _, _ = _read(exe, ind, _rel(3, "based-on", ind, exe), validate=False)
+    (entry,) = index.entries
+    assert entry.entry_id == exe["id"] and entry.indicator_ids == (ind["id"],)
+    assert set(entry.object_ids) == {exe["id"], ind["id"], _id("relationship", 3)}
+    assert index.lookup_weak({("file_name", "cmd.exe")}) == entry
+
+
+def test_a_name_only_indicator_with_no_based_on_stays_an_entry_of_its_own():
+    exe = _sco("file", 1, name="cmd.exe")
+    ind = _indicator(2, "[file:name = 'cmd.exe']")
+    index, _, _ = _read(exe, ind, validate=False)
+    assert len(index.entries) == 2
+    assert index.lookup_weak({("file_name", "cmd.exe")}) is None      # two carriers: no status from a name
+
+
+def test_an_indicator_based_on_an_observable_of_another_value_does_not_join_it():
+    ip = _sco("ipv4-addr", 1, value="203.0.113.9")
+    ind = _indicator(2, "[ipv4-addr:value = '198.51.100.7']")
+    index, _, _ = _read(ip, ind, _rel(3, "based-on", ind, ip), validate=False)
+    assert len(index.entries) == 2                                   # each value keeps its own entry
+    assert index.lookup({("obs", "ipv4-addr", "198.51.100.7")}).entry_id == ind["id"]
+
+
+def test_an_indicator_based_on_two_files_of_its_name_joins_neither():
+    one = _sco("file", 1, name="cmd.exe", hashes={"MD5": "1" * 32})
+    two = _sco("file", 2, name="cmd.exe", hashes={"MD5": "2" * 32})
+    ind = _indicator(3, "[file:name = 'cmd.exe']")
+    index, _, _ = _read(one, two, ind, _rel(4, "based-on", ind, one), _rel(5, "based-on", ind, two),
+                        validate=False)
+    assert {e.entry_id for e in index.entries} == {one["id"], two["id"], ind["id"]}
+    assert index.lookup_weak({("file_name", "cmd.exe")}) is None

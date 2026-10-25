@@ -377,3 +377,99 @@ def test_a_bundle_with_no_surrogate_keeps_its_non_ascii_text_unescaped():
 
     assert '"name": "Café"' in text
     assert json.loads(text)["objects"][0]["name"] == "Café"
+
+
+# ── A file known by its name alone (lot 7, A4: one file in OpenCTI) ─────────
+
+def test_a_name_only_file_becomes_the_one_baseline_file_of_that_name():
+    build = _build()
+    named = stix2.File(name="svchost_update.dll")
+    indicator = stix2.Indicator(pattern="[file:name = 'svchost_update.dll']", pattern_type="stix")
+    based_on = stix2.Relationship(source_ref=indicator.id, relationship_type="based-on", target_ref=named.id)
+    objects = [named, indicator, based_on]
+
+    result = bs.merge_baseline(objects, build)
+
+    assert result.remap == {named.id: FILE}                               # the name-only Indicator stays CTIParsor's
+    assert named.id not in _ids(objects) and FILE in result.stated
+    rewired = next(o for o in objects if o.id == based_on.id)
+    assert rewired.target_ref == FILE
+
+
+def test_a_file_with_a_hash_of_its_own_is_never_merged_on_its_name():
+    build = _build()
+    other = stix2.File(name="svchost_update.dll", hashes={"SHA-256": "a" * 64})
+    objects = [other]
+    assert bs.merge_baseline(objects, build).remap == {}
+    assert other.id in _ids(objects)
+
+
+def test_a_name_only_indicator_becomes_the_baseline_one_of_the_same_file_and_pattern():
+    raw = {"type": "bundle", "id": "bundle--00000000-0000-4000-8000-000000000001", "objects": [
+        {"type": "file", "spec_version": "2.1", "id": "file--00000000-0000-4000-8000-000000000002",
+         "name": "cmd.exe"},
+        {"type": "indicator", "spec_version": "2.1", "id": "indicator--00000000-0000-4000-8000-000000000003",
+         "created": "2026-01-01T00:00:00.000Z", "modified": "2026-01-01T00:00:00.000Z",
+         "pattern": "[file:name = 'cmd.exe']", "pattern_type": "stix", "valid_from": "2026-01-01T00:00:00Z"},
+        {"type": "relationship", "spec_version": "2.1", "id": "relationship--00000000-0000-4000-8000-000000000004",
+         "created": "2026-01-01T00:00:00.000Z", "modified": "2026-01-01T00:00:00.000Z",
+         "relationship_type": "based-on", "source_ref": "indicator--00000000-0000-4000-8000-000000000003",
+         "target_ref": "file--00000000-0000-4000-8000-000000000002"},
+    ]}
+    index, _intake, bundle = bs.intake(json.dumps(raw).encode(), validate=False)
+    build = bs.BaselineBuild(index=index, objects={o["id"]: o for o in bundle["objects"]})
+    named = stix2.File(name="cmd.exe")
+    indicator = stix2.Indicator(pattern="[file:name = 'cmd.exe']", pattern_type="stix")
+    objects = [named, indicator]
+
+    result = bs.merge_baseline(objects, build)
+
+    assert result.remap == {named.id: "file--00000000-0000-4000-8000-000000000002",
+                            indicator.id: "indicator--00000000-0000-4000-8000-000000000003"}
+
+
+def test_a_name_only_indicator_is_not_merged_into_a_hash_indicator():
+    build = _build()                                  # the fixture's file has no name-only Indicator
+    indicator = stix2.Indicator(pattern="[file:name = 'svchost_update.dll']", pattern_type="stix")
+    objects = [indicator]
+    assert bs.merge_baseline(objects, build).remap == {}
+    assert indicator.id in _ids(objects)
+
+
+# ── Objects no index entry holds (lot 7, the A2 round trip on real reports) ──
+
+def _passthrough_build(*objects: dict) -> bs.BaselineBuild:
+    raw = {"type": "bundle", "id": "bundle--00000000-0000-4000-8000-0000000000aa", "objects": list(objects)}
+    index, _intake, bundle = bs.intake(json.dumps(raw).encode(), validate=False)
+    return bs.BaselineBuild(index=index, objects={o["id"]: o for o in bundle["objects"]})
+
+
+def _sdo(stix_type: str, n: int, **props) -> dict:
+    return {"type": stix_type, "spec_version": "2.1", "id": f"{stix_type}--00000000-0000-4000-8000-{n:012d}",
+            "created": "2026-01-01T00:00:00.000Z", "modified": "2026-01-01T00:00:00.000Z", **props}
+
+
+RULE = "rule FrostSvc {\n  strings:\n    $a = \"FrostSvc\"\n  condition:\n    $a\n}"
+
+
+def test_a_course_of_action_or_a_rule_of_the_same_content_becomes_the_baseline_one():
+    coa = _sdo("course-of-action", 1, name="Block the C2 domain")
+    yara = _sdo("indicator", 2, name="Yara rule: FrostSvc", pattern=RULE, pattern_type="yara",
+                valid_from="2026-01-01T00:00:00Z")
+    build = _passthrough_build(coa, yara)
+    mine_coa = stix2.CourseOfAction(name="block the  C2 domain")
+    mine_yara = stix2.Indicator(name="Yara rule: FrostSvc", pattern=RULE.replace("\n", "\n\n"), pattern_type="yara")
+    objects = [mine_coa, mine_yara]
+
+    result = bs.merge_baseline(objects, build)
+
+    assert result.remap == {mine_coa.id: coa["id"], mine_yara.id: yara["id"]}
+
+
+def test_two_baseline_twins_or_another_rule_type_merge_nothing():
+    one = _sdo("course-of-action", 1, name="Patch")
+    two = _sdo("course-of-action", 2, name="patch")
+    sigma = _sdo("indicator", 3, pattern=RULE, pattern_type="sigma", valid_from="2026-01-01T00:00:00Z")
+    build = _passthrough_build(one, two, sigma)
+    objects = [stix2.CourseOfAction(name="Patch"), stix2.Indicator(pattern=RULE, pattern_type="yara")]
+    assert bs.merge_baseline(objects, build).remap == {}

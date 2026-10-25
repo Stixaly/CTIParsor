@@ -1,0 +1,88 @@
+# A throwaway OpenCTI for ADR-0090 check A4: import an analyst's bundle, then
+# the bundle CTIParsor enriched from it, and read back what OpenCTI kept
+# (scripts/opencti_import_check.py).  Started by hand, never in CI.
+#
+# The platform is pinned to the release whose sources ADR-0090 §6 was read
+# from (opencti-master, 2026-09-30); the backing services to the versions
+# OpenCTI's own CI uses at that release (scripts/ci/docker-compose.yml).
+# MinIO no longer publishes images: OpenCTI's CI runs the pgsty/silo fork.
+#
+#   cp .env.example .env    # then fill in the values (test values only)
+#   wsl -u root -e docker compose -f docker/opencti-test/compose.yaml up -d
+#   ...                     # about 8 GB of RAM; the platform takes minutes to start
+#   wsl -u root -e docker compose -f docker/opencti-test/compose.yaml down -v
+#
+# Only the platform's port is published, on 127.0.0.1.
+name: ctiparsor-opencti-test
+
+services:
+  redis:
+    image: redis:8.6.4
+    restart: unless-stopped
+  elasticsearch:
+    image: elasticsearch:8.19.22
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.ml.enabled=false
+      - "ES_JAVA_OPTS=-Xms2G -Xmx2G"
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile: { soft: 65536, hard: 65536 }
+    restart: unless-stopped
+  minio:
+    image: pgsty/silo:RELEASE.2026-10-18T00-00-00Z
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set it in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set it in .env}
+    command: server /data
+    restart: unless-stopped
+  rabbitmq:
+    image: rabbitmq:4.3.7-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:?set it in .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?set it in .env}
+    restart: unless-stopped
+  opencti:
+    image: opencti/platform:7.260930.0
+    environment:
+      - NODE_OPTIONS=--max-old-space-size=4096
+      - APP__PORT=8080
+      - APP__BASE_URL=http://localhost:4000
+      - APP__ADMIN__EMAIL=${OPENCTI_ADMIN_EMAIL:?set it in .env}
+      - APP__ADMIN__PASSWORD=${OPENCTI_ADMIN_PASSWORD:?set it in .env}
+      - APP__ADMIN__TOKEN=${OPENCTI_ADMIN_TOKEN:?set it in .env}
+      - APP__ENCRYPTION_KEY=${OPENCTI_ENCRYPTION_KEY:?set it in .env}
+      - APP__APP_LOGS__LOGS_LEVEL=error
+      - APP__HEALTH_ACCESS_KEY=${OPENCTI_HEALTHCHECK_ACCESS_KEY:?set it in .env}
+      - REDIS__HOSTNAME=redis
+      - REDIS__PORT=6379
+      - ELASTICSEARCH__URL=http://elasticsearch:9200
+      - MINIO__ENDPOINT=minio
+      - MINIO__PORT=9000
+      - MINIO__USE_SSL=false
+      - MINIO__ACCESS_KEY=${MINIO_ROOT_USER:?set it in .env}
+      - MINIO__SECRET_KEY=${MINIO_ROOT_PASSWORD:?set it in .env}
+      - RABBITMQ__HOSTNAME=rabbitmq
+      - RABBITMQ__PORT=5672
+      - RABBITMQ__PORT_MANAGEMENT=15672
+      - RABBITMQ__MANAGEMENT_SSL=false
+      - RABBITMQ__USERNAME=${RABBITMQ_DEFAULT_USER:?set it in .env}
+      - RABBITMQ__PASSWORD=${RABBITMQ_DEFAULT_PASS:?set it in .env}
+      - SMTP__HOSTNAME=localhost
+      - SMTP__PORT=25
+      - PROVIDERS__LOCAL__STRATEGY=LocalStrategy
+    ports:
+      - "127.0.0.1:4000:8080"
+    depends_on: [redis, elasticsearch, minio, rabbitmq]
+    restart: unless-stopped
+  worker:
+    image: opencti/worker:7.260930.0
+    environment:
+      - OPENCTI_URL=http://opencti:8080
+      - OPENCTI_TOKEN=${OPENCTI_ADMIN_TOKEN:?set it in .env}
+      - WORKER_LOG_LEVEL=error
+    depends_on: [opencti]
+    deploy:
+      replicas: 1
+    restart: unless-stopped

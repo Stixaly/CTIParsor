@@ -92,7 +92,7 @@ ships as `suricata`
 ## Enriched bundle (ADR-0090)
 
 A job in `enrich` mode is given the analyst's STIX 2.1 bundle with its report
-(behind `STIX_ENRICHMENT_ENABLED`, off by default). Its exported bundle is the
+(on by default; `STIX_ENRICHMENT_ENABLED=false` turns it off). Its exported bundle is the
 analyst's bundle merged with what CTIParsor extracted, and Stage 4 builds it
 after graph completion (Stage 4b). A `full` job's bundle is built as before.
 Design: [ADR-0090](adr/0090-enriching-an-existing-stix-bundle.md).
@@ -108,6 +108,20 @@ Design: [ADR-0090](adr/0090-enriching-an-existing-stix-bundle.md).
   baseline object stands in for them, and every reference to them is rewritten.
   A CTIParsor object with the same id as a baseline object is that baseline
   object.
+- **Files known by their name only.** A CTIParsor `file` with no hash of its own
+  is merged into the baseline's file when exactly one baseline file carries
+  that name, and is then not shipped. When two baseline files carry the name,
+  nothing merges and the CTIParsor file ships as its own object beside them. A
+  name that only a name-only Indicator carries (no file object) merges nothing.
+  A file with a hash of its own is never merged on its name. Before this rule
+  (ADR-0090 lot 7) a name-only file never merged.
+- **Indicators and objects matched by content.** A CTIParsor name-only Indicator
+  `[file:name = …]` is not shipped when the baseline's file of that name has a
+  kept Indicator stating the same name and no hash; that one stands in for it.
+  A CTIParsor course of action with the same name (case and spacing folded), or a
+  detection-rule Indicator (a `pattern_type` other than `stix`) with the same
+  pattern text (whitespace folded), is not shipped when exactly one kept baseline
+  object has that content. With two such baseline objects, nothing merges and the CTIParsor object ships beside them.
 - **Relationships.** A CTIParsor relationship that becomes a self-loop, or that
   repeats a baseline relationship's source, verb and target, is dropped. The
   mapping ledger records the reason.
@@ -157,8 +171,35 @@ confidence (ADR-0090 §6, from OpenCTI's source). The importing user's ceiling
 must therefore be at least the Report's confidence. Below it, the additions are
 ignored and no error is raised.
 
-Not checked yet on a running OpenCTI: ADR-0090's check A4 imports an enriched
-bundle into a throwaway instance (lot 7).
+Checked on a running OpenCTI (ADR-0090, check A4, lot 7): OpenCTI
+**7.260930.0**, in a throwaway instance (`docker/opencti-test/`), **12 of 12
+expectations hold** (the final run, with the final code, on a fresh instance).
+
+- The analyst's bundle, then the enriched one, import as admin with nothing
+  refused. The Report keeps the baseline's id: one Report, holding its 16
+  references, each baseline object
+  present once, and all 23 objects of the bundle present.
+- The enriched bundle imports as a user whose maximum confidence is 50, below
+  the Report's 85, with no error. The additions are not made: the Report keeps
+  its 9 original references.
+- The rejected bundle (WellMess removed) imports as admin with nothing refused,
+  and the Report still references WellMess: OpenCTI never removes a reference
+  on an upsert.
+
+A non-admin importer needs, besides knowledge create and update:
+
+- `SETTINGS_SETMARKINGS`: without it, every object carrying a marking is refused
+  (FORBIDDEN_ACCESS, then MISSING_REFERENCE_ERROR);
+- `KNOWLEDGE_KNUPLOAD`: the source document artifact;
+- `SETTINGS_SETKILLCHAINPHASES`: attack patterns with kill chain phases;
+- a maximum confidence at least the Report's confidence.
+
+OpenCTI gives some objects its own `standard_id` (an intrusion set's, from its
+name) and keeps the bundle's id in `x_opencti_stix_ids`, so an id in the bundle
+and the same object's id in OpenCTI can differ. The attack-pattern and
+relationship ids that CTIParsor draws at random change between two builds of
+one job; OpenCTI attached the new ids to the existing objects as aliases, with
+no duplicate.
 
 ### A rejection in OpenCTI
 

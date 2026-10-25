@@ -77,7 +77,8 @@ Key = tuple[str, ...]          # ("obs", "ipv4-addr", "1.2.3.4"), ("mitre", "T10
 T = TypeVar("T")
 
 # Kinds whose match is certain.  "named" is the one other kind that can merge,
-# and only inside a family; "file_name" never merges (a name identifies no sample).
+# and only inside a family.  "file_name" is weak: it designates a file only when
+# exactly one baseline file carries the name (`BaselineIndex.lookup_weak`).
 _STRONG_KINDS = frozenset({"id", "obs", "hash", "mitre", "cve", "loc"})
 
 # ── Families ────────────────────────────────────────────────────────────────
@@ -191,7 +192,7 @@ def normalize_value(entity_type: str, value: str) -> str:
 # ── Keys ────────────────────────────────────────────────────────────────────
 
 # Both kinds of key are returned as (strong + named keys, weak keys); a weak key
-# sets a displayed status and never merges ids.
+# (a file name) counts only when one baseline file alone carries it (lot 7).
 
 _HASH_ALGOS = {"MD5": "MD5", "SHA1": "SHA-1", "SHA256": "SHA-256"}
 # Stage 4 writes source_name="capec" for a CAPEC id, which a row carries as mitre_id.
@@ -579,7 +580,7 @@ class Entry:
     value: str                         # what the card shows
     mitre_id: str | None
     keys: frozenset[Key]               # strong keys + ("named", family, name)
-    weak_keys: frozenset[Key]          # ("file_name", …): status only, never a merge
+    weak_keys: frozenset[Key]          # ("file_name", …): see BaselineIndex.lookup_weak
     sco_id: str | None = None
     indicator_ids: tuple[str, ...] = ()
     object_ids: tuple[str, ...] = ()   # every object of the entry, based-on SROs included
@@ -625,6 +626,7 @@ class BaselineIndex:
     scope_report_id: str | None = None
     # key -> entries, built by the first `lookup`; neither serialised nor compared
     _by_key: dict[Key, list[Entry]] | None = dataclass_field(default=None, init=False, repr=False, compare=False)
+    _by_weak: dict[Key, list[Entry]] | None = dataclass_field(default=None, init=False, repr=False, compare=False)
 
     def lookup(self, keys: set[Key], stix_type: str | None = None) -> Entry | None | _Ambiguous:
         """The entry `keys` designate (`resolve`'s rule): None, one entry, or AMBIGUOUS."""
@@ -636,6 +638,23 @@ class BaselineIndex:
                         by_key.setdefault(key, []).append(entry)
             self._by_key = by_key
         return resolve(keys, stix_type, self._by_key, lambda entry: entry.stix_type)
+
+    def lookup_weak(self, weak: set[Key]) -> Entry | None:
+        """The one baseline file a file name designates: None when no entry or more
+        than one carries the name, or when the one that does holds no file object
+        (a name-only Indicator alone: Stage 4 has no file to merge into, so Stage 3r
+        must not show the row as that entry either, I6)."""
+        if self._by_weak is None:
+            by_weak: dict[Key, list[Entry]] = {}
+            for entry in self.entries:
+                for key in entry.weak_keys:
+                    by_weak.setdefault(key, []).append(entry)
+            self._by_weak = by_weak
+        found = {e.entry_id: e for key in weak for e in self._by_weak.get(key, ())}
+        if len(found) != 1:
+            return None
+        (carrier,) = found.values()
+        return carrier if carrier.sco_id is not None else None
 
     def to_json(self) -> str:
         return json.dumps({
@@ -1288,7 +1307,13 @@ def _build_index(imported: Mapping[str, Any]) -> tuple[list[Entry], list[Relatio
                 draft = _sco_draft(len(drafts), obj, strong, weak)
                 register(draft, oid, draft.keys)
     # 2. STIX-pattern indicators join, for each observable type they state, the
-    #    entry of that type that shares a key, else make one
+    #    entry of that type that shares a key, or the one their based-on names
+    #    (a name-only `[file:name = …]` shares no strong key with its file),
+    #    else make one
+    based_on: dict[str, list[str]] = {}
+    for obj in imported.values():
+        if field(obj, "type") == "relationship" and field(obj, "relationship_type") == "based-on":
+            based_on.setdefault(_str(obj, "source_ref"), []).append(_str(obj, "target_ref"))
     for oid, obj in imported.items():
         if field(obj, "type") != "indicator" or field(obj, "pattern_type") != "stix":
             continue
@@ -1303,6 +1328,15 @@ def _build_index(imported: Mapping[str, Any]) -> tuple[list[Entry], list[Relatio
         for stix_type in _stix_types_in_order(pattern, groups) if len(groups) > 1 else groups:
             g_strong, g_weak = groups[stix_type]
             found = {id(holder[k]): holder[k] for k in g_strong if k in holder}
+            if not found:
+                # Only the one observable of this type the based-on names, and only
+                # when it carries a key the pattern states (a based-on to another
+                # value would otherwise move that value onto it).
+                targets = {id(d): d for t in based_on.get(oid, ()) for d in members.get(t, ())
+                           if d.stix_type == stix_type and d.sco_id == t}
+                target = next(iter(targets.values())) if len(targets) == 1 else None
+                if target is not None and (g_strong | g_weak) & (target.keys | target.weak_keys):
+                    found = targets
             if found:
                 draft = min(found.values(), key=lambda d: d.order)
                 new_keys = (g_strong | {("id", oid)}) - draft.keys
@@ -1571,8 +1605,12 @@ def reconcile(raw_entities: Sequence[Any], llm_result: Any, report_text: str,
                   for held in getattr(llm_result, "ttp_review", None) or []]
     matched_rows: list[tuple[str, str]] = []       # (folded value, entry_id) of each MATCHED row
     for entity_type, value, mitre_id in extracted:
-        strong, _weak = keys_for_row(entity_type, value, mitre_id)
+        strong, weak = keys_for_row(entity_type, value, mitre_id)
         entry = index.lookup(strong, ENTITY_TO_STIX.get(entity_type)) if strong else None
+        if entry is None and weak:
+            # A file named like exactly one baseline file is shown as that file;
+            # Stage 4 merges it the same way (merge_baseline, I6).
+            entry = index.lookup_weak(weak)
         key = _row_key(entity_type, value)
         if isinstance(entry, Entry):
             rec.entity_status[key] = (MATCHED, entry.entry_id)
@@ -1709,6 +1747,20 @@ def _stix_time(moment: datetime) -> str:
     return _to_millis(moment).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
+def _content_key(obj: object) -> tuple[str, ...] | None:
+    """What makes two objects no index entry holds the same one: a course of
+    action's name, a detection rule's type and text (whitespace folded).  None
+    for any other object."""
+    stix_type = field(obj, "type")
+    if stix_type == "course-of-action":
+        name = " ".join(_str(obj, "name").casefold().split())
+        return (stix_type, name) if name else None
+    if stix_type == "indicator" and field(obj, "pattern_type") not in (None, "stix"):
+        text = " ".join(_str(obj, "pattern").split())
+        return (stix_type, str(field(obj, "pattern_type")), text) if text else None
+    return None
+
+
 def _remap_target(obj: object, entry: Entry, kept: AbstractSet[str]) -> str | None:
     """The kept baseline id `obj` becomes, within the entry it matched: the Indicator
     for an Indicator, the observable for an observable of the entry's type, the
@@ -1763,13 +1815,41 @@ def merge_baseline(stix_objects: list, baseline: BaselineBuild) -> MergeResult:
         oid = _str(o, "id")
         if stix_type in {"relationship", "report", "marking-definition"} or oid in baseline.objects:
             continue
-        strong, _weak = keys_for_object(o)
+        strong, weak = keys_for_object(o)
         entry = index.lookup(strong, stix_type)
+        name_only = entry is None and weak and all(k[0] == "id" for k in strong)
+        if name_only and stix_type == "file":
+            # A file known by its name alone: the one baseline file of that name,
+            # as Stage 3r shows it (I6).  Two files of that name: no merge.
+            entry = index.lookup_weak(weak)
+        elif name_only and stix_type == "indicator":
+            # Its name-only Indicator: the baseline's Indicator of the same pattern
+            # keys in that file's entry, if it has one; a hash Indicator is not it.
+            found = index.lookup_weak(weak)
+            same = [i for i in (found.indicator_ids if found else ()) if i in kept
+                    and pattern_keys(_str(baseline.objects[i], "pattern")) == (set(), set(weak))]
+            if same and same[0] != oid:
+                remap[oid] = same[0]
+            continue
         if not isinstance(entry, Entry):
             continue
         target = _remap_target(o, entry, kept)
         if target is not None and target != oid:
             remap[oid] = target
+
+    # Objects no entry holds: the one kept baseline object of the same content
+    # stands in for CTIParsor's (a course of action, a quoted detection rule:
+    # the round trip of lot 7 rebuilt them under new ids).  Two of them: no merge.
+    twins: dict[tuple[str, ...], list[str]] = {}
+    for oid in sorted(index.passthrough_ids & kept):
+        key = _content_key(baseline.objects[oid])
+        if key is not None:
+            twins.setdefault(key, []).append(oid)
+    for o in stix_objects:
+        oid = _str(o, "id")
+        key = _content_key(o)
+        if key is not None and oid not in remap and oid not in baseline.objects and len(twins.get(key, ())) == 1:
+            remap[oid] = twins[key][0]
 
     # A CTIParsor object whose id a kept baseline object holds is that object (SCO ids are
     # deterministic): the baseline one is written, the CTIParsor one is not.

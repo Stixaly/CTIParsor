@@ -94,12 +94,22 @@ def _bundle(*objects: dict) -> bytes:
 def test_status_says_whether_the_mode_is_on_and_its_limits(client, monkeypatch):
     assert client.get("/api/baselines/status").json() == {
         "enabled": True, "max_bytes": MAX_BASELINE_BYTES, "max_objects": MAX_BASELINE_OBJECTS}
-    monkeypatch.delenv("STIX_ENRICHMENT_ENABLED")
+    monkeypatch.setenv("STIX_ENRICHMENT_ENABLED", "false")
     assert client.get("/api/baselines/status").json()["enabled"] is False
 
 
+@pytest.mark.parametrize("value, on", [(None, True), ("false", False), ("0", False)])
+def test_the_mode_is_on_unless_the_flag_says_false(client, monkeypatch, value, on):
+    """ADR-0090 accepted: on by default, `STIX_ENRICHMENT_ENABLED=false` (or 0) turns it off."""
+    if value is None:
+        monkeypatch.delenv("STIX_ENRICHMENT_ENABLED")
+    else:
+        monkeypatch.setenv("STIX_ENRICHMENT_ENABLED", value)
+    assert client.get("/api/baselines/status").json()["enabled"] is on
+
+
 def test_with_the_mode_off_every_baseline_is_a_400_and_nothing_is_stored(client, temp_db, monkeypatch):
-    monkeypatch.delenv("STIX_ENRICHMENT_ENABLED")
+    monkeypatch.setenv("STIX_ENRICHMENT_ENABLED", "false")
     opencti = _fixture("opencti_report.json")
     for resp in (_inspect(client, opencti), _upload(client, opencti), _text(client, opencti),
                  client.post("/api/ingest/url", json={"url": "https://example.com/", "baseline_bundle": "{}"})):
@@ -110,7 +120,7 @@ def test_with_the_mode_off_every_baseline_is_a_400_and_nothing_is_stored(client,
 
 
 def test_with_the_mode_off_a_request_without_a_baseline_is_unchanged(client, monkeypatch):
-    monkeypatch.delenv("STIX_ENRICHMENT_ENABLED")
+    monkeypatch.setenv("STIX_ENRICHMENT_ENABLED", "false")
     assert _upload(client).status_code == 200
     assert _text(client, None).status_code == 200
 
@@ -624,7 +634,7 @@ def test_a_report_over_its_limit_is_refused_before_the_baseline_is_read(client, 
 
 
 def test_with_the_mode_off_a_baseline_is_refused_without_being_read(client, monkeypatch):
-    monkeypatch.delenv("STIX_ENRICHMENT_ENABLED")
+    monkeypatch.setenv("STIX_ENRICHMENT_ENABLED", "false")
     read = MagicMock()
     monkeypatch.setattr("api.routes.upload.read_baseline_file", read)
     assert _upload(client, _fixture("opencti_report.json")).status_code == 400
@@ -652,7 +662,7 @@ def test_the_content_length_limit_grows_with_the_mode_only(client, monkeypatch):
     monkeypatch.setattr("api.routes.upload._MAX_BYTES", 400)
     files = {"file": ("report.txt", io.BytesIO(_REPORT), "text/plain"), "junk": ("j.bin", io.BytesIO(b"x" * 2000))}
     assert client.post("/api/upload", files=files).status_code == 200
-    monkeypatch.delenv("STIX_ENRICHMENT_ENABLED")
+    monkeypatch.setenv("STIX_ENRICHMENT_ENABLED", "false")
     files = {"file": ("report.txt", io.BytesIO(_REPORT), "text/plain"), "junk": ("j.bin", io.BytesIO(b"x" * 2000))}
     assert client.post("/api/upload", files=files).status_code == 413
 
@@ -661,7 +671,7 @@ def test_the_content_length_limit_grows_with_the_mode_only(client, monkeypatch):
 def test_a_blank_baseline_is_no_baseline(client, temp_db, monkeypatch, blank):
     for flag in (True, False):
         if not flag:
-            monkeypatch.delenv("STIX_ENRICHMENT_ENABLED")
+            monkeypatch.setenv("STIX_ENRICHMENT_ENABLED", "false")
         body = {"text": _TEXT, "baseline_bundle": blank, "baseline_report_id": " "}
         resp = client.post("/api/ingest/text", json=body)
         assert resp.status_code == 200 and _job(temp_db, resp.json()["job_id"])["pipeline_mode"] == "full"

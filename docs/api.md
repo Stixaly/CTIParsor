@@ -72,14 +72,14 @@ variables, manifest).
 
 The three ingestion routes accept, besides the report, a STIX 2.1 bundle (the
 *baseline*), and the job starts in `enrich` mode (`jobs.pipeline_mode`). The
-mode is off until `STIX_ENRICHMENT_ENABLED` is set (`docs/configuration.md`):
-with it off, a request that carries a baseline answers **400**
+mode is on by default; `STIX_ENRICHMENT_ENABLED=false` turns it off
+(`docs/configuration.md`). With it off, a request that carries a baseline answers **400**
 `STIX enrichment is not enabled on this server`, without reading it, and a
 request without one is unchanged. An `enrich` job already created keeps
 running and serving its baseline when the flag is turned off: the mode is
-stored on the job, and only new requests are refused. In this revision the
-pipeline does not use the baseline yet: an `enrich` job is processed in full
-mode, apart from the worker's validation below, which can fail it.
+stored on the job, and only new requests are refused. The pipeline uses the
+baseline: Stage 3r reconciles the extractions with it, and Stage 4 merges it
+into the bundle (ADR-0090).
 
 - `baseline_stix` (`/api/upload`, multipart) or `baseline_bundle`
   (`/api/ingest/*`, JSON string): the bundle. `baseline_bundle` is the **text**
