@@ -1,5 +1,6 @@
 import { afterEach, describe, it, expect, vi } from 'vitest'
-import { BundleRefusedError, errorDetail, fetchAttackIndex, fetchBundle, finalizeJob } from './client'
+import { BundleRefusedError, errorDetail, fetchAttackIndex, fetchBaselineStatus, fetchBundle, finalizeJob, inspectBaseline, uploadFile } from './client'
+import { enrichmentView, isImported } from '../types'
 
 describe('errorDetail', () => {
   it('unwraps a FastAPI detail', () => {
@@ -89,5 +90,90 @@ describe('fetchAttackIndex', () => {
     answer(404, '{"detail":"ATT&CK 20.0 has no mitre_index.json"}')
     expect((await failure(fetchAttackIndex())).message)
       .toBe('404: {"detail":"ATT&CK 20.0 has no mitre_index.json"}')
+  })
+})
+
+describe('enrichment views (ADR-0090)', () => {
+  it('shows the four stored statuses as three views', () => {
+    expect(enrichmentView('new')).toBe('new')
+    expect(enrichmentView('matched')).toBe('in_stix')
+    expect(enrichmentView('baseline_in_text')).toBe('in_stix')
+    expect(enrichmentView('baseline_only')).toBe('stix_only')
+  })
+
+  it('has no view for a row without a status', () => {
+    expect(enrichmentView(null)).toBeNull()
+    expect(enrichmentView(undefined)).toBeNull()
+  })
+
+  it('marks the rows the analyst bundle supplied', () => {
+    expect(isImported('baseline_in_text')).toBe(true)
+    expect(isImported('baseline_only')).toBe(true)
+    expect(isImported('matched')).toBe(false)
+    expect(isImported('new')).toBe(false)
+    expect(isImported(null)).toBe(false)
+    expect(isImported(undefined)).toBe(false)
+  })
+})
+
+describe('baseline intake (ADR-0090)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('reads the baseline status from its own path', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({
+      ok: true, status: 200, json: () => Promise.resolve({ enabled: true, max_bytes: 10, max_objects: 5 }),
+    })))
+    const status = await fetchBaselineStatus()
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/api/baselines/status')
+    expect(status.enabled).toBe(true)
+  })
+
+  it('posts the bundle as multipart, with the report id only when given', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({
+      ok: true, status: 200, json: () => Promise.resolve({ sha256: 'abc' }),
+    })))
+    const file = new File(['{}'], 'bundle.json')
+    await inspectBaseline(file, 'report--1')
+    const [url, init] = vi.mocked(fetch).mock.calls[0]
+    expect(url).toBe('/api/baselines/inspect')
+    expect(init?.method).toBe('POST')
+    expect((init?.body as FormData).get('file')).toBeInstanceOf(File)
+    expect((init?.body as FormData).get('report_id')).toBe('report--1')
+
+    await inspectBaseline(file)
+    const [, bare] = vi.mocked(fetch).mock.calls[1]
+    expect((bare?.body as FormData).has('report_id')).toBe(false)
+  })
+
+  it('gives the server detail as the error text', async () => {
+    answer(400, '{"detail":"x"}')
+    const err = await failure(inspectBaseline(new File(['{}'], 'bundle.json')))
+    expect(errorDetail(err)).toBe('x')
+  })
+})
+
+describe('uploadFile (ADR-0090)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('sends the baseline bundle and its report only when given', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({
+      ok: true, status: 200, json: () => Promise.resolve({ job_id: 'j1', filename: 'r.txt' }),
+    })))
+    const report = new File(['report'], 'r.txt')
+    await uploadFile(report)
+    let body = vi.mocked(fetch).mock.calls[0][1]?.body as FormData
+    expect(body.has('baseline_stix')).toBe(false)
+    expect(body.has('baseline_report_id')).toBe(false)
+
+    await uploadFile(report, { baselineStix: new File(['{}'], 'b.json'), baselineReportId: 'report--1' })
+    body = vi.mocked(fetch).mock.calls[1][1]?.body as FormData
+    expect((body.get('baseline_stix') as File).name).toBe('b.json')
+    expect(body.get('baseline_report_id')).toBe('report--1')
+  })
+
+  it('gives the server detail as the error text', async () => {
+    answer(400, '{"detail":"x"}')
+    const err = await failure(uploadFile(new File(['report'], 'r.txt')))
+    expect(errorDetail(err)).toBe('x')
   })
 })

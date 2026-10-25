@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { X, Loader2, AlertTriangle } from 'lucide-react'
-import { uploadFile, ingestText, ingestUrl, errorDetail } from '../api/client'
-import { TLP_LEVELS, PAP_LEVELS } from '../types'
-import type { MarkingLevel, TlpLevel, PapLevel } from '../types'
+import { uploadFile, ingestText, ingestUrl, inspectBaseline, fetchBaselineStatus, errorDetail } from '../api/client'
+import { TLP_LEVELS, PAP_LEVELS, BASELINE_REASON_LABEL } from '../types'
+import type { MarkingLevel, TlpLevel, PapLevel, PipelineMode, BaselineIntake } from '../types'
 
 const MONO  = "'JetBrains Mono', ui-monospace, monospace"
 const SERIF = "'Source Serif 4', Georgia, serif"
@@ -37,6 +37,12 @@ const HTML_HINT_RE = /<!DOCTYPE\s+html|<html[\s>]|<(div|p|table|tr|td|h[1-6]|ul|
 
 // Below this a paste is a mis-click, not a report — the API rejects it too.
 const MIN_TEXT_CHARS = 20
+/** A bundle is often a few KB: "0.00 MB" said nothing. */
+const fileSize = (bytes: number) =>
+  bytes < 102400 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1048576).toFixed(2)} MB`
+
+// The warning every preview carries (/baselines/inspect never runs the JSON schemas).
+const SCHEMAS_LATER = 'the STIX schemas were not checked'
 
 const MODE_META = {
   empty: { label: 'nothing yet',  tone: 'var(--ink-3)',  bg: 'var(--bg-soft)',     border: 'var(--rule-soft)' },
@@ -44,6 +50,30 @@ const MODE_META = {
   url:   { label: 'url capture',  tone: 'var(--accent)', bg: 'var(--accent-soft)', border: 'color-mix(in oklab, var(--accent) 30%, transparent)' },
   text:  { label: 'pasted text',  tone: 'var(--accent)', bg: 'var(--accent-soft)', border: 'color-mix(in oklab, var(--accent) 30%, transparent)' },
 } as const
+
+// The two pipelines (ADR-0090).  Enrich merges the report into a STIX 2.1 bundle
+// the analyst already holds; the mode selector is shown only when the server has it on.
+const PIPELINE_MODES: { value: PipelineMode; label: string; hint: string }[] = [
+  { value: 'full', label: 'Full extraction', hint: 'CTIParsor builds the bundle from the report alone' },
+  { value: 'enrich', label: 'Enrich an existing STIX 2.1 bundle', hint: 'Merge what the report adds into your bundle; what it already holds is shown, not duplicated' },
+]
+
+// Display order runs weakest first.  While a bundle is in, its minimum raises a
+// missing or weaker marking to itself and never lowers one.  The raise is the
+// bundle's: it ends with the bundle, and a mark the analyst picked is kept.
+function raiseTo<L extends MarkingLevel>(order: readonly L[], current: L | null, min: L): L {
+  return current === null || order.indexOf(current) < order.indexOf(min) ? min : current
+}
+
+// A pick weaker than the bundle's minimum is what the bundle replaces.
+function isWeaker<L extends MarkingLevel>(order: readonly L[], mark: L | null, min: L): boolean {
+  return mark !== null && order.indexOf(mark) < order.indexOf(min)
+}
+
+const countOf = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`
+
+// The uuid part of a STIX id, shortened for a list line.
+const shortId = (id: string) => (id.split('--')[1] ?? id).slice(0, 8)
 
 interface Props {
   open: boolean
@@ -58,25 +88,83 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
   const [title, setTitle]       = useState('')
   const [file, setFile]         = useState<File | null>(null)
   const [enableJs, setEnableJs] = useState(false)
-  const [tlp, setTlp]           = useState<TlpLevel | null>(null)
-  const [pap, setPap]           = useState<PapLevel | null>(null)
+  // The analyst's own picks.  The marks in force are these, raised to the bundle's minimum.
+  const [pickedTlp, setPickedTlp] = useState<TlpLevel | null>(null)
+  const [pickedPap, setPickedPap] = useState<PapLevel | null>(null)
   const [error, setError]       = useState<string | null>(null)
   const [modalDrag, setModalDrag] = useState(false)
+  const [pipelineMode, setPipelineMode] = useState<PipelineMode>('full')
+  const [stixFile, setStixFile] = useState<File | null>(null)
+  const [intake, setIntake]     = useState<BaselineIntake | null>(null)
+  const [intakeError, setIntakeError] = useState<string | null>(null)
+  const [reportId, setReportId] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const bundleRef = useRef<HTMLInputElement>(null)
   const taRef   = useRef<HTMLTextAreaElement>(null)
+  // Every bundle pick, removal and reset takes a new ticket.  An inspect answer
+  // for an older ticket is dropped, so a bundle still being read when the modal
+  // closed cannot set the markings of the next job.
+  const inspectTicket = useRef(0)
   const qc = useQueryClient()
+
+  // Without the flag, or if its status cannot be read, only full mode is offered.
+  const { data: baselineStatus } = useQuery({
+    queryKey: ['baselineStatus'],
+    queryFn: fetchBaselineStatus,
+  })
+  const maxBytes = baselineStatus?.max_bytes ?? 0
+  const maxMb = Math.round(maxBytes / 1048576)
+  const enriching = pipelineMode === 'enrich'
+
+  const inspectMut = useMutation({
+    mutationFn: (args: { file: File; reportId?: string; ticket: number }) => inspectBaseline(args.file, args.reportId),
+    onSuccess: (data, vars) => {
+      if (vars.ticket !== inspectTicket.current) return
+      setIntake(data)
+      setIntakeError(null)
+      // A pick under the bundle's minimum is dropped here: the bundle sets that
+      // mark, so it goes back to null with the bundle.  Picks at or above stay.
+      const bundleTlp = data.min_tlp
+      const bundlePap = data.min_pap
+      if (bundleTlp) setPickedTlp(cur => isWeaker(TLP_DISPLAY_ORDER, cur, bundleTlp) ? null : cur)
+      if (bundlePap) setPickedPap(cur => isWeaker(PAP_DISPLAY_ORDER, cur, bundlePap) ? null : cur)
+    },
+    onError: (e, vars) => {
+      if (vars.ticket === inspectTicket.current) setIntakeError(errorDetail(e))
+    },
+  })
+  const inspecting = inspectMut.isPending
+
+  // The bundle's minimum markings, once a scope is known.  A marking below one
+  // would weaken what the bundle already says, so those levels are disabled.
+  const minTlp = enriching ? (intake?.min_tlp ?? null) : null
+  const minPap = enriching ? (intake?.min_pap ?? null) : null
+  const floor = [minTlp ? `TLP:${minTlp}` : null, minPap ? `PAP:${minPap}` : null].filter(Boolean).join(' and ')
+  // The marks in force: the analyst's pick, raised to the bundle's minimum while it is in.
+  const tlp = minTlp ? raiseTo(TLP_DISPLAY_ORDER, pickedTlp, minTlp) : pickedTlp
+  const pap = minPap ? raiseTo(PAP_DISPLAY_ORDER, pickedPap, minPap) : pickedPap
+  const marksSet = tlp !== null && pap !== null
 
   const trimmed = value.trim()
   const mode: 'empty' | 'file' | 'url' | 'text' =
     file ? 'file' : !trimmed ? 'empty' : URL_RE.test(trimmed) ? 'url' : 'text'
 
   const sourceReady = mode === 'file' || mode === 'url' || (mode === 'text' && trimmed.length >= MIN_TEXT_CHARS)
-  const marksSet = tlp !== null && pap !== null
-  const canSubmit = sourceReady && marksSet
+  // A bundle is usable once it is read for the report choice the analyst made.
+  const bundleReady = stixFile !== null && intake !== null && !intake.needs_report_choice && !inspecting && intakeError === null
+  const canSubmit = sourceReady && marksSet && (!enriching || bundleReady)
   const chars = value.length
   const tooShort = mode === 'text' && trimmed.length < MIN_TEXT_CHARS
 
-  const submitLabel = sourceReady && !marksSet ? 'Set TLP & PAP to continue' : 'Create job'
+  // A bundle that was read and refused is still the one the analyst picked: fix it.
+  const submitLabel =
+    enriching && !bundleReady ? (
+      stixFile && intakeError ? 'Fix the STIX bundle to continue'
+      : intake?.needs_report_choice ? 'Choose the report to enrich'
+      : 'Add the STIX bundle to continue'
+    )
+    : sourceReady && !marksSet ? 'Set TLP & PAP to continue'
+    : 'Create job'
 
   // Pasted markup is a real case — "view source" is the fallback when a page is
   // behind bot protection the URL capture cannot get past.  The server does the
@@ -98,15 +186,28 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
     : mode === 'file' ? 'will be parsed server-side, then queued for extraction'
     : mode === 'url' ? (enableJs ? 'page rendered to PDF with scripts enabled' : 'page rendered to PDF, scripts blocked')
     : `${chars.toLocaleString()} chars → stored as a reviewable source`
+  const footer = enriching && stixFile ? `${summary}, merged into ${stixFile.name}` : summary
+
+  // Drops the bundle, its report choice and its error.  The ticket goes with it,
+  // so an inspect still in flight for it is ignored when it answers.
+  const clearBundle = useCallback(() => {
+    inspectTicket.current += 1
+    setStixFile(null)
+    setIntake(null)
+    setIntakeError(null)
+    setReportId(null)
+  }, [])
 
   const resetAll = useCallback(() => {
     setValue('')
     setTitle('')
     setFile(null)
     setEnableJs(false)
-    setTlp(null)
-    setPap(null)
-  }, [])
+    setPickedTlp(null)
+    setPickedPap(null)
+    setPipelineMode('full')
+    clearBundle()
+  }, [clearBundle])
 
   // 1. Opening resets the markings, and attaches a dropped file if there is one.
   //
@@ -114,20 +215,22 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
   // shared, so a level left from a cancelled job is exactly the silent
   // mis-marking this modal exists to prevent — and resetting only on success
   // would leave TLP/PAP set after a Cancel, so the next report would open with
-  // the submit button already armed.
+  // the submit button already armed.  The pipeline and its bundle reset the same way.
   //
   // The pasted text is deliberately NOT cleared here: an accidental Escape
   // must not destroy a long paste.
   useEffect(() => {
     if (!open) return
-    setTlp(null)
-    setPap(null)
+    setPickedTlp(null)
+    setPickedPap(null)
     setError(null)
+    setPipelineMode('full')
+    clearBundle()
     if (initialFile) {
       setFile(initialFile)
       setValue('')
     }
-  }, [open, initialFile])
+  }, [open, initialFile, clearBundle])
 
   // 2. Autofocus
   useEffect(() => {
@@ -156,18 +259,25 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
   }
   const onFail = (e: unknown) => setError(errorDetail(e))
 
+  // Enrich mode only: the bundle travels with the job request, because the
+  // inspect call keeps nothing (ADR-0090).  Full mode sends none of these keys.
+  const bundleOptions = enriching && stixFile ? { baselineStix: stixFile, baselineReportId: reportId ?? undefined } : {}
+  const bundleBody = async () => (enriching && stixFile
+    ? { baseline_bundle: await stixFile.text(), baseline_report_id: reportId }
+    : {})
+
   const fileMut = useMutation({
-    mutationFn: (f: File) => uploadFile(f, { tlpLevel: tlp ?? undefined, papLevel: pap ?? undefined }),
+    mutationFn: (f: File) => uploadFile(f, { tlpLevel: tlp ?? undefined, papLevel: pap ?? undefined, ...bundleOptions }),
     onSuccess: onDone,
     onError: onFail,
   })
   const textMut = useMutation({
-    mutationFn: () => ingestText({ text: value, title: title.trim() || null, tlp_level: tlp, pap_level: pap }),
+    mutationFn: async () => ingestText({ text: value, title: title.trim() || null, tlp_level: tlp, pap_level: pap, ...(await bundleBody()) }),
     onSuccess: onDone,
     onError: onFail,
   })
   const urlMut = useMutation({
-    mutationFn: () => ingestUrl({ url: trimmed, enable_js: enableJs, tlp_level: tlp, pap_level: pap }),
+    mutationFn: async () => ingestUrl({ url: trimmed, enable_js: enableJs, tlp_level: tlp, pap_level: pap, ...(await bundleBody()) }),
     onSuccess: onDone,
     onError: onFail,
   })
@@ -187,6 +297,39 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
     e.target.value = ''
   }
 
+  // A bundle that is too large is refused here, before anything is read.
+  const pickBundle = (f: File) => {
+    clearBundle()
+    if (f.size > maxBytes) {
+      setIntakeError(`The STIX bundle is larger than ${maxMb} MB`)
+      return
+    }
+    setStixFile(f)
+    inspectMut.mutate({ file: f, ticket: inspectTicket.current })
+  }
+  const pickReport = (id: string) => {
+    // The report picked last is read again only when that read failed: it is the retry.
+    if (!stixFile || (id === reportId && intakeError === null)) return
+    setReportId(id)
+    setIntakeError(null)
+    inspectMut.mutate({ file: stixFile, reportId: id, ticket: inspectTicket.current })
+  }
+  const pickMode = (m: PipelineMode) => {
+    if (m === 'full') clearBundle()
+    setPipelineMode(m)
+  }
+  const handleBundleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]
+    if (f) pickBundle(f)
+    e.target.value = ''
+  }
+  // A bundle dropped on its own zone is not the report: the modal-wide drop must not take it.
+  const handleBundleDrop = (e: React.DragEvent) => {
+    e.preventDefault(); e.stopPropagation(); setModalDrag(false)
+    const f = e.dataTransfer.files[0]
+    if (f) pickBundle(f)
+  }
+
   const handleBackdropMouseDown = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) onClose()
   }
@@ -204,23 +347,28 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
     selected: L | null,
     onPick: (l: L) => void,
     ariaLabel: string,
+    minLevel?: L,
   ) => (
     <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }} role="radiogroup" aria-label={ariaLabel}>
       <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-2)', width: 26, flexShrink: 0 }}>{label}</span>
       {levels.map((level) => {
         const tone = MARKING_TONE[level]
         const isSel = selected === level
+        // Levels run weakest first, so one before the bundle's minimum is weaker than it.
+        const isWeak = minLevel !== undefined && levels.indexOf(level) < levels.indexOf(minLevel)
         return (
           <button
             key={level}
             type="button"
             role="radio"
             aria-checked={isSel}
-            disabled={busy}
+            disabled={busy || isWeak}
+            title={isWeak ? `The supplied STIX bundle carries ${label}:${minLevel}; a lower marking would weaken it` : undefined}
             onClick={() => onPick(level)}
             style={{
               fontFamily: MONO, fontSize: 10.5, fontWeight: 600, letterSpacing: '.04em',
-              padding: '4px 11px', borderRadius: 6, cursor: 'pointer',
+              padding: '4px 11px', borderRadius: 6, cursor: isWeak ? 'not-allowed' : 'pointer',
+              opacity: isWeak ? 0.35 : 1,
               transition: 'background 120ms ease, color 120ms ease, border-color 120ms ease',
               background: isSel ? `color-mix(in oklab, ${tone} 16%, var(--bg-elev))` : 'var(--bg)',
               color: isSel ? tone : 'var(--ink-3)',
@@ -238,6 +386,14 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
 
   const ext = file ? (file.name.split('.').pop()?.toUpperCase() ?? '') : ''
   const meta = MODE_META[mode]
+
+  // The bundle's summary, once its scope is known: no counts while a report is still
+  // to be chosen, nor after a read failed (the last counts were another report's).
+  const scoped = intake !== null && !intake.needs_report_choice && intakeError === null ? intake : null
+  const importedTypes = scoped
+    ? Object.entries(scoped.counts).filter(([type]) => type !== 'out_of_scope' && type !== 'dangling_refs')
+    : []
+  const importedTotal = importedTypes.reduce((n, [, c]) => n + c, 0)
 
   return (
     <div
@@ -310,6 +466,36 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
 
         {/* Body */}
         <div style={{ flex: '1 0 auto', padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {/* Pipeline mode — shown only when the server has the enrich flag on */}
+          {baselineStatus?.enabled && (
+            <div role="radiogroup" aria-label="Pipeline mode" style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+              {PIPELINE_MODES.map((m) => {
+                const isSel = pipelineMode === m.value
+                return (
+                  <button
+                    key={m.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={isSel}
+                    aria-label={m.label}
+                    disabled={busy || inspecting}
+                    onClick={() => pickMode(m.value)}
+                    style={{
+                      flex: 1, minWidth: 0, textAlign: 'left', cursor: 'pointer',
+                      padding: '9px 12px', borderRadius: 8,
+                      transition: 'background 120ms ease, border-color 120ms ease',
+                      background: isSel ? 'color-mix(in oklab, var(--accent) 10%, var(--bg-elev))' : 'var(--bg)',
+                      border: isSel ? '1px solid var(--accent)' : '1px solid var(--rule)',
+                    }}
+                  >
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: isSel ? 'var(--accent)' : 'var(--ink)' }}>{m.label}</div>
+                    <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>{m.hint}</div>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
           {/* Source row */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.1em', textTransform: 'uppercase' as const, color: 'var(--ink-3)' }}>Source</span>
@@ -426,6 +612,149 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
               )}
             </div>
           )}
+
+          {/* STIX bundle — enrich mode only (ADR-0090) */}
+          {enriching && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
+              <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.1em', textTransform: 'uppercase' as const, color: 'var(--ink-3)' }}>STIX bundle</span>
+              <input
+                type="file"
+                ref={bundleRef}
+                aria-label="STIX bundle file"
+                style={{ display: 'none' }}
+                accept=".json,application/json"
+                onChange={handleBundleInput}
+              />
+              {stixFile ? (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 10, minWidth: 0,
+                  border: '1px solid var(--rule)', borderRadius: 10, padding: '9px 12px', background: 'var(--bg)',
+                }}>
+                  <div title={stixFile.name} style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{stixFile.name}</div>
+                  <span style={{ fontFamily: MONO, fontSize: 11, color: 'var(--ink-3)', flexShrink: 0 }}>{fileSize(stixFile.size)}</span>
+                  {inspecting && (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--ink-3)', flexShrink: 0 }}>
+                      <Loader2 size={12} className="animate-spin" />
+                      reading the bundle…
+                    </span>
+                  )}
+                  <div style={{ flex: 1 }} />
+                  <button type="button" className="btn-ghost" style={{ fontSize: 11, flexShrink: 0 }} disabled={busy || inspecting} onClick={() => bundleRef.current?.click()}>
+                    Change
+                  </button>
+                  <button type="button" className="btn-ghost" style={{ fontSize: 11, flexShrink: 0 }} disabled={busy || inspecting} onClick={clearBundle}>
+                    Remove
+                  </button>
+                </div>
+              ) : (
+                <div
+                  onDrop={handleBundleDrop}
+                  style={{
+                    display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10,
+                    border: '1px dashed var(--rule)', borderRadius: 10, padding: '14px 16px',
+                    background: 'var(--bg-soft)', fontSize: 12, color: 'var(--ink-3)',
+                  }}
+                >
+                  <span>Drop the bundle here, or</span>
+                  <button type="button" className="btn-ghost" style={{ fontSize: 11 }} disabled={busy} onClick={() => bundleRef.current?.click()}>
+                    Browse bundle…
+                  </button>
+                  <span style={{ fontFamily: MONO, fontSize: 10.5, color: 'var(--ink-4)' }}>JSON · up to {maxMb} MB</span>
+                </div>
+              )}
+              {intakeError && (
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: 12, color: 'var(--no)' }}>
+                  <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 1 }} />
+                  <span>{intakeError}</span>
+                </div>
+              )}
+              {intake && intake.reports.length > 1 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <span style={{ fontSize: 11.5, color: intake.needs_report_choice ? 'var(--warn)' : 'var(--ink-3)' }}>
+                    {intake.needs_report_choice ? 'This bundle holds several reports: choose the one to enrich' : 'Report to enrich'}
+                  </span>
+                  <div role="radiogroup" aria-label="Report to enrich" style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    {intake.reports.map((r) => {
+                      const isSel = reportId === r.id
+                      return (
+                        <button
+                          key={r.id}
+                          type="button"
+                          role="radio"
+                          aria-checked={isSel}
+                          aria-label={r.name}
+                          disabled={busy || inspecting}
+                          onClick={() => pickReport(r.id)}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left',
+                            padding: '6px 10px', borderRadius: 7, fontSize: 12, cursor: 'pointer', color: 'var(--ink)',
+                            background: isSel ? 'color-mix(in oklab, var(--accent) 10%, var(--bg-elev))' : 'var(--bg)',
+                            border: isSel ? '1px solid var(--accent)' : '1px solid var(--rule)',
+                          }}
+                        >
+                          <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 600 }}>{r.name}</span>
+                          <span style={{ fontFamily: MONO, fontSize: 10.5, color: 'var(--ink-3)', flexShrink: 0 }}>{r.published ? r.published.slice(0, 10) : 'no date'}</span>
+                          <span style={{ fontFamily: MONO, fontSize: 10.5, color: 'var(--ink-3)', flexShrink: 0 }}>{r.refs} refs</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+              {scoped && (
+                <div style={{
+                  display: 'flex', flexDirection: 'column', gap: 7, padding: '10px 12px',
+                  border: '1px solid var(--rule-soft)', borderRadius: 10, background: 'var(--bg-soft)',
+                  fontSize: 12, color: 'var(--ink-2)',
+                }}>
+                  <div style={{ fontFamily: MONO, fontSize: 11.5, color: 'var(--ink)' }}>{countOf(importedTotal, 'object')} kept from the bundle</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {importedTypes.map(([type, n]) => (
+                      <span key={type} style={{
+                        fontFamily: MONO, fontSize: 10.5, padding: '2px 8px', borderRadius: 4,
+                        border: '1px solid var(--rule)', background: 'var(--bg-elev)',
+                      }}>
+                        {type} {n}
+                      </span>
+                    ))}
+                  </div>
+                  {(scoped.counts.out_of_scope ?? 0) > 0 && (
+                    <div>{countOf(scoped.counts.out_of_scope ?? 0, 'object')} outside the report&apos;s scope, left out</div>
+                  )}
+                  {(scoped.counts.dangling_refs ?? 0) > 0 && (
+                    <div>
+                      {countOf(scoped.counts.dangling_refs ?? 0, 'reference')} {(scoped.counts.dangling_refs ?? 0) === 1 ? 'points' : 'point'} at ids the bundle does not hold
+                    </div>
+                  )}
+                  {scoped.excluded.length > 0 && (
+                    <details>
+                      <summary style={{ cursor: 'pointer', color: 'var(--warn)' }}>
+                        {countOf(scoped.excluded.length, 'invalid object')} will be ignored
+                      </summary>
+                      <ul style={{ margin: '6px 0 0', paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 3, fontFamily: MONO, fontSize: 11, color: 'var(--ink-3)' }}>
+                        {scoped.excluded.map((e, i) => (
+                          <li key={i} title={e.detail}>
+                            {e.type} {shortId(e.id)} · {BASELINE_REASON_LABEL[e.reason] ?? e.reason}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                  {scoped.warnings.filter(w => !w.startsWith(SCHEMAS_LATER)).map((w, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, color: 'var(--warn)' }}>
+                      <AlertTriangle size={12} style={{ flexShrink: 0, marginTop: 2 }} />
+                      <span>{w}</span>
+                    </div>
+                  ))}
+                  {/* The preview never runs the JSON schemas (seconds per thousand
+                      objects): the server's note about it is said plainly here. */}
+                  <div style={{ color: 'var(--ink-4)' }}>
+                    The STIX schemas are checked when the job starts: an object they refuse is left out then, and the job's log names it.
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Markings band */}
@@ -443,10 +772,10 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
               background: marksSet ? 'color-mix(in oklab, var(--ok) 12%, transparent)' : 'color-mix(in oklab, var(--warn) 15%, transparent)',
             }}>{marksSet ? 'set' : 'required'}</span>
             <div style={{ flex: 1 }} />
-            <span style={{ fontSize: 10.5, color: 'var(--ink-4)' }}>Applied to every object in the bundle</span>
+            <span style={{ fontSize: 10.5, color: 'var(--ink-4)' }}>{floor ? `at least ${floor}, from the bundle` : 'Applied to every object in the bundle'}</span>
           </div>
-          {renderMarkingRow('TLP', TLP_DISPLAY_ORDER, tlp, setTlp, 'TLP marking')}
-          {renderMarkingRow('PAP', PAP_DISPLAY_ORDER, pap, setPap, 'PAP marking')}
+          {renderMarkingRow('TLP', TLP_DISPLAY_ORDER, tlp, setPickedTlp, 'TLP marking', minTlp ?? undefined)}
+          {renderMarkingRow('PAP', PAP_DISPLAY_ORDER, pap, setPickedPap, 'PAP marking', minPap ?? undefined)}
         </div>
 
         </div>{/* end scrolling region */}
@@ -456,7 +785,7 @@ export default function NewReportModal({ open, initialFile, onClose, onJobCreate
           padding: '11px 18px', borderTop: '1px solid var(--rule)', flexShrink: 0,
           background: 'var(--bg-elev)', display: 'flex', alignItems: 'center', gap: 12,
         }}>
-          <div style={{ flex: 1, fontFamily: MONO, fontSize: 11, color: 'var(--ink-3)' }}>{summary}</div>
+          <div style={{ flex: 1, fontFamily: MONO, fontSize: 11, color: 'var(--ink-3)' }}>{footer}</div>
           <button type="button" className="btn-ghost" style={{ padding: '7px 13px', fontSize: 12, borderRadius: 7 }} disabled={busy} onClick={onClose}>
             Cancel
           </button>

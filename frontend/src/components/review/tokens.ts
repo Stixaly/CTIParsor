@@ -5,7 +5,7 @@
    ============================================================ */
 
 import { pairVerbs, shippedVerbs } from '../../stix/relConstraints'
-import type { DetectionFormat } from '../../types'
+import type { DetectionFormat, EnrichmentView } from '../../types'
 
 export interface TypeStyle {
   hue: number
@@ -106,7 +106,25 @@ export const SOURCE_LABEL: Record<string, { label: string; hint: string }> = {
   llm:       { label: 'LLM',       hint: 'claude-sonnet-4-6' },
   manual:    { label: 'manual',    hint: 'Added by reviewer' },
   ioc:       { label: 'regex',     hint: 'Deterministic pattern match' },
+  baseline_stix: { label: 'STIX', hint: "From the analyst's STIX 2.1 bundle" },
 }
+
+// Enrich mode (ADR-0090): the badge a row carries against the analyst's bundle.
+export const ENRICHMENT_BADGE: Record<EnrichmentView, { label: string; title: string }> = {
+  new:       { label: '+ new',     title: 'Not in the supplied STIX bundle: CTIParsor adds it' },
+  in_stix:   { label: 'in STIX',   title: 'Already in the supplied STIX bundle' },
+  stix_only: { label: 'STIX only', title: 'From the supplied STIX bundle; not found in the report text' },
+}
+
+// The segments of the STIX-bundle filter (ADR-0090), in order: every row, or one
+// view of them.  The margin notes and the relationship rail both filter by these.
+export type EnrichFilter = 'all' | EnrichmentView
+export const ENRICH_FILTERS: { value: EnrichFilter; label: string }[] = [
+  { value: 'all',       label: 'Any source' },
+  { value: 'new',       label: '+ New' },
+  { value: 'in_stix',   label: 'In STIX' },
+  { value: 'stix_only', label: 'STIX only' },
+]
 
 // ── STIX 2.1 Appendix B relationship constraints ─────────────────────────────
 // The table + pairVerbs() now live in src/stix/relConstraints.ts (a shared,

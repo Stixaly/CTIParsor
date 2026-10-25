@@ -11,6 +11,53 @@ theme.
 
 ### Added
 
+#### Enriching an existing STIX 2.1 bundle, lot 5: the New report modal and the Review screen (ADR-0090), 2026-10-25
+
+The analyst can start an `enrich` job from the New report modal and see on the
+Review page what the bundle already holds. **A full job looks as before.** The
+mode choice shows only when the server has `STIX_ENRICHMENT_ENABLED` on
+(`GET /api/baselines/status`), which stays off by default. Still to do: lot 6
+(graph legend and panels, dashboard badge, PDF and JSON dropped together,
+delete on imported graph rows) and lot 7 (measures, OpenCTI test, activation).
+
+- **New report modal**: "Full extraction" or "Enrich an existing STIX 2.1
+  bundle". In enrich mode a `.json` bundle is dropped or browsed, and
+  `POST /api/baselines/inspect` previews it: the objects kept by type, the
+  objects outside the report's scope, the dangling references, the excluded
+  objects with their reason, the warnings, and a note that the STIX schemas run
+  when the job starts. Nothing is stored. A bundle over the size the status
+  reports is refused before it is read. A bundle with several reports asks which
+  one to enrich (ADR-0090 D4) and is previewed again for that report. Submit
+  waits until the bundle is read for its scope.
+- **Markings** (D2): the bundle's minimum TLP and PAP are preselected and the
+  weaker levels are disabled. Switching back to full mode drops the bundle, and
+  a level the bundle set (not one the analyst picked) returns to unset.
+- **Job request**: the bundle goes with it, as `baseline_stix` on upload and
+  `baseline_bundle` on pasted text or a URL, with `baseline_report_id`.
+- **Review screen, enrich job**: the ribbon counts against the bundle (in STIX =
+  matched + found in text, STIX only, + New). A filter "Any source · + New · In
+  STIX · STIX only" sits in the margin notes and in the relationships rail. A row
+  an analyst adds by hand counts as + New. In the margin it combines with the page's
+  type filter; in the rail, with the tabs. Cards carry "+ new", "in STIX" or
+  "STIX only" badges. Focusing a STIX-only card says it comes from the bundle
+  and is not in the report text. A matched relationship whose two ends are
+  STIX-only says its ends were matched through the bundle's names, in the
+  badge's tooltip. A banner shows when no row is new.
+- **Imported rows** can be accepted or rejected. Their type (entities) and verb
+  and dates (relationships) are disabled, because the server answers 409 to an
+  edit.
+- **Types and client**: `PipelineMode`, `EnrichmentStatus`, `EnrichmentView`,
+  `BaselineIntake`, `BaselineStatus` and `JobEnrichment` in
+  `frontend/src/types/index.ts`; `inspectBaseline`, `fetchBaselineStatus` and
+  `fetchBaselineIntake` in `frontend/src/api/client.ts`.
+- **Tests**: `NewReportModal.test.tsx` (18), `review/Marginalia.test.tsx` (9) and
+  `review/PipelineRibbon.test.tsx` (4) are new; `api/client.test.ts` (18),
+  `review/RelationshipRail.test.tsx` (22) and `pages/Review.test.tsx` (16) gain
+  ADR-0090 cases. The frontend has 23 Vitest files and 224 tests on 2026-10-25
+  (`npm test`).
+- **Docs**: `docs/web-ui.md` (enrich mode in the New report modal and on the
+  Review page), `TESTING.md` (the frontend counts).
+
 #### Enriching an existing STIX 2.1 bundle, lot 4: the merge into the baseline and the re-issued Report (ADR-0090), 2026-10-25
 
 An `enrich` job now ships the analyst's bundle merged with CTIParsor's. Stage 4
@@ -680,6 +727,12 @@ carries the rule for choosing the scope: when in doubt, `extraction`. ADR-0035
 gets a dated amendment.
 
 ### Fixed
+
+#### An upload error shows the server's message, 2026-10-25
+
+`uploadFile` (`frontend/src/api/client.ts`) threw `Upload failed: <statusText>`,
+which hid the server's detail. It now throws the status and the server's body,
+which `errorDetail` reads, so the New report modal shows the server's message.
 
 #### filelock and setuptools move past four new advisories, 2026-10-24
 

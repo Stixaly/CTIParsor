@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import RelationshipRail, { type DatePatch } from './RelationshipRail'
+import RelationshipRail, { ENDS_BY_NAME_TITLE, type DatePatch } from './RelationshipRail'
+import { IMPORTED_TITLE } from './MarginaliaCard'
 import type { Relationship, TemporalAssertion } from '../../types'
 
 const rel = (over: Partial<Relationship> = {}): Relationship => ({
@@ -182,5 +183,93 @@ describe('RelationshipRail — claims held for review (ADR-0082)', () => {
     renderRail([rel({ id: 'r1', held_reason: 'verification call failed', accepted: true }),
                 rel({ id: 'r2', target_value: 'SUNBURST' })])
     expect(screen.queryByText('held')).toBeNull()
+  })
+})
+
+// ── ADR-0090 — relationships from the analyst's STIX 2.1 bundle ──────────────
+
+describe('RelationshipRail — the STIX bundle filter (ADR-0090)', () => {
+  it('shows the bundle filter only when some row has a bundle status', () => {
+    renderFull([rel({ id: 'r1' })])
+    expect(screen.queryByRole('group', { name: 'Filter by STIX bundle' })).toBeNull()
+  })
+
+  it('combines the bundle filter with the tabs: both apply', async () => {
+    const user = userEvent.setup()
+    renderFull([
+      rel({ id: 'r1', target_value: 'WellMess', enrichment_status: 'new' }),
+      rel({ id: 'r2', target_value: 'Ukraine', enrichment_status: 'matched' }),
+      rel({ id: 'r3', target_value: 'Emotet', enrichment_status: 'new', accepted: true, decision_origin: 'human' }),
+    ])
+    // "to review" (the default tab) with "+ New": r1 only.
+    await user.click(screen.getByRole('button', { name: /^\+ New/ }))
+    expect(screen.getByRole('button', { name: 'WellMess' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Ukraine' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Emotet' })).toBeNull()
+
+    // "accepted" with "+ New": r3 only.
+    await user.click(screen.getByRole('button', { name: /^accepted/ }))
+    expect(screen.getByRole('button', { name: 'Emotet' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'WellMess' })).toBeNull()
+
+    // "accepted" with "In STIX": nothing, and the rail says so.  The tab has
+    // rows; the bundle segment is what empties the list.
+    await user.click(screen.getByRole('button', { name: /^In STIX/ }))
+    expect(screen.getByText('No relationship matches these filters.')).toBeTruthy()
+    expect(screen.queryByText(/All caught up/)).toBeNull()
+  })
+
+  it('says all is caught up when the tab alone leaves nothing', async () => {
+    const user = userEvent.setup()
+    renderFull([rel({ id: 'r1', enrichment_status: 'new', accepted: true, decision_origin: 'human' })])
+    // "to review" is empty here, and no row is in it for any segment.
+    await user.click(screen.getByRole('button', { name: /^In STIX/ }))
+    expect(screen.getByText('All caught up. Nothing in "to review."')).toBeTruthy()
+    expect(screen.queryByText('No relationship matches these filters.')).toBeNull()
+  })
+})
+
+describe('RelationshipRail — a relationship the bundle supplied (ADR-0090)', () => {
+  const imported = (over: Partial<Relationship> = {}) =>
+    rel({ id: 'r-imp', enrichment_status: 'baseline_in_text', accepted: true,
+          decision_origin: 'baseline_stix', ...over })
+
+  it('keeps its verb and dates read-only, and says why', () => {
+    renderFull([imported({ start_time: '2021', stop_time: null })])
+    fireEvent.click(screen.getByRole('button', { name: /^accepted/ }))
+    const verb = screen.getByRole('button', { name: /^uses/ })
+    expect(verb).toBeDisabled()
+    expect(verb.getAttribute('title')).toBe(IMPORTED_TITLE)
+    const dates = screen.getByRole('button', { name: '2021 → ?' })
+    expect(dates).toBeDisabled()
+    expect(dates.getAttribute('title')).toBe(IMPORTED_TITLE)
+    // Accept and reject stay.
+    expect(screen.getByTitle('Accept')).toBeEnabled()
+    expect(screen.getByTitle('Reject')).toBeEnabled()
+  })
+
+  it('shows no dates control on an imported relationship that has none', () => {
+    renderFull([imported()])
+    fireEvent.click(screen.getByRole('button', { name: /^accepted/ }))
+    expect(screen.queryByText('+ dates')).toBeNull()
+    expect(screen.queryByRole('button', { name: /→/ })).toBeNull()
+  })
+
+  it('leaves the verb and dates of a row that is not imported editable', () => {
+    renderFull([rel({ id: 'r1', enrichment_status: 'new' })])
+    expect(screen.getByRole('button', { name: /^uses/ })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '+ dates' })).toBeEnabled()
+  })
+
+  it('says a matched relationship whose two ends came from the bundle names got them so', () => {
+    renderFull([rel({ id: 'r1', enrichment_status: 'matched', accepted: null })],
+               { getEntityEnrichment: (v: string) => (v === 'APT29' || v === 'WellMess' ? 'baseline_only' : null) })
+    expect(screen.getByText('in STIX').getAttribute('title')).toBe(ENDS_BY_NAME_TITLE)
+  })
+
+  it('keeps the standard title when only one end came from the bundle names', () => {
+    renderFull([rel({ id: 'r1', enrichment_status: 'matched', accepted: null })],
+               { getEntityEnrichment: (v: string) => (v === 'APT29' ? 'baseline_only' : 'matched') })
+    expect(screen.getByText('in STIX').getAttribute('title')).toBe('Already in the supplied STIX bundle')
   })
 })

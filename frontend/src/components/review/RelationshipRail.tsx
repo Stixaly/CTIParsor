@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
-import type { Relationship, TemporalAssertion } from '../../types'
-import { REL_TYPES, confPct, heldPending, heldTitle, relNeedsReview, typeDot, typeLabel, verbsForPair } from './tokens'
+import { enrichmentView, isImported, type EnrichmentStatus, type Relationship, type TemporalAssertion } from '../../types'
+import { ENRICH_FILTERS, REL_TYPES, confPct, heldPending, heldTitle, relNeedsReview, typeDot, typeLabel, verbsForPair, type EnrichFilter } from './tokens'
+import { EnrichmentBadge, IMPORTED_TITLE } from './MarginaliaCard'
 
 export type BulkAction = 'accept' | 'reject' | 'reset'
 
@@ -26,6 +27,9 @@ interface Props {
   /** Decide every relationship of a group in one call (ADR-0065).  Without
    *  it the groups show no group buttons. */
   onBulk?: (ids: string[], action: BulkAction) => void
+  /** Enrich jobs (ADR-0090): the bundle status of the entity with this value.
+   *  Lets a matched relationship say that its ends came from the bundle's names. */
+  getEntityEnrichment?: (value: string) => EnrichmentStatus | null
 }
 
 /** A stored date as the rail shows it: a partial value as it is ("2023",
@@ -118,7 +122,11 @@ function DateField({ value, label, onCommit }: {
 
 type Filter = 'pending' | 'all' | 'accepted' | 'rejected'
 
-function RelCard({ r, onAccept, onReject, onReset, onJump, onChangeType, onChangeDates, getEntityType }: {
+/** The badge of a matched relationship whose two ends the bundle named (ADR-0090). */
+export const ENDS_BY_NAME_TITLE =
+  "Already in the supplied STIX bundle; its ends were matched through the bundle's names, not found in the text"
+
+function RelCard({ r, onAccept, onReject, onReset, onJump, onChangeType, onChangeDates, getEntityType, getEntityEnrichment }: {
   r: Relationship
   onAccept: (id: string) => void
   onReject: (id: string) => void
@@ -127,6 +135,7 @@ function RelCard({ r, onAccept, onReject, onReset, onJump, onChangeType, onChang
   onChangeType: (id: string, t: string) => void
   onChangeDates: (id: string, patch: DatePatch) => void
   getEntityType?: (value: string) => string | undefined
+  getEntityEnrichment?: (value: string) => EnrichmentStatus | null
 }) {
   const [editing, setEditing] = useState(false)
   const [editingDates, setEditingDates] = useState(false)
@@ -141,6 +150,17 @@ function RelCard({ r, onAccept, onReject, onReset, onJump, onChangeType, onChang
   // That is nobody's decision, so ✓ confirms it instead of resetting it.
   const byDefault = r.accepted === true && r.decision_origin === 'default'
   const acceptedByPerson = r.accepted === true && !byDefault
+  // Enrich jobs (ADR-0090): null on a full job.  An imported row keeps its verb
+  // and dates (the server answers 409); a matched one whose two ends the bundle
+  // supplied by name says so.
+  const view = enrichmentView(r.enrichment_status)
+  const imported = isImported(r.enrichment_status)
+  const endsByName = r.enrichment_status === 'matched'
+    && getEntityEnrichment?.(r.source_value) === 'baseline_only'
+    && getEntityEnrichment?.(r.target_value) === 'baseline_only'
+  const datesText = r.start_time || r.stop_time
+    ? `${shortDate(r.start_time) || '?'} → ${shortDate(r.stop_time) || '?'}`
+    : '+ dates'
 
   return (
     <div className={`rel-card ${acceptedByPerson ? 'rok' : ''} ${r.accepted === false ? 'rno' : ''}`}>
@@ -166,7 +186,9 @@ function RelCard({ r, onAccept, onReject, onReset, onJump, onChangeType, onChang
           <button
             className="rel-edge"
             onClick={() => setEditing(true)}
-            title="Click to change relationship type"
+            disabled={imported}
+            style={imported ? { opacity: 0.4 } : undefined}
+            title={imported ? IMPORTED_TITLE : 'Click to change relationship type'}
           >
             {r.relationship_type} <span className="rel-edge-edit">✎</span>
           </button>
@@ -188,6 +210,7 @@ function RelCard({ r, onAccept, onReject, onReset, onJump, onChangeType, onChang
             held
           </span>
         )}
+        {view && <EnrichmentBadge view={view} title={endsByName ? ENDS_BY_NAME_TITLE : undefined} />}
         <div className="rel-actions">
           <button
             className={`mbtn ok ${acceptedByPerson ? 'on' : ''}`}
@@ -201,7 +224,19 @@ function RelCard({ r, onAccept, onReject, onReset, onJump, onChangeType, onChang
           >✗</button>
         </div>
       </div>
-      {editingDates ? (
+      {/* An imported row shows its dates read-only, and only when it has some. */}
+      {imported ? (
+        (r.start_time || r.stop_time) ? (
+          <button
+            className="rel-dates"
+            disabled
+            style={{ opacity: 0.4 }}
+            title={IMPORTED_TITLE}
+          >
+            {datesText}
+          </button>
+        ) : null
+      ) : editingDates ? (
         <div className="rel-dates-edit">
           <DateField value={r.start_time} label="start"
                      onCommit={v => onChangeDates(r.id, { start_time: v })} />
@@ -217,9 +252,7 @@ function RelCard({ r, onAccept, onReject, onReset, onJump, onChangeType, onChang
           onClick={() => setEditingDates(true)}
           title="Click to set when this relationship began and ended, at the precision you know"
         >
-          {r.start_time || r.stop_time
-            ? `${shortDate(r.start_time) || '?'} → ${shortDate(r.stop_time) || '?'}`
-            : '+ dates'}
+          {datesText}
         </button>
       )}
       {r.times && r.times.length > 0 && <TimesList times={r.times} />}
@@ -259,9 +292,11 @@ function groupByTarget(rels: Relationship[]): Array<{ key: string; target: strin
 
 export default function RelationshipRail({
   rels, onAccept, onReject, onReset, onJump, onChangeType, onChangeDates,
-  showInDoc, setShowInDoc, onNewRelationship, getEntityType, onBulk,
+  showInDoc, setShowInDoc, onNewRelationship, getEntityType, onBulk, getEntityEnrichment,
 }: Props) {
   const [filter, setFilter] = useState<Filter>('pending')
+  // ── STIX bundle filter (ADR-0090): combined with `filter`, both apply ──
+  const [enrichFilter, setEnrichFilter] = useState<EnrichFilter>('all')
   const [grouped, setGrouped] = useState(true)
   const [collapsed, setCollapsed] = useState(false)
   // The height asked for (default or dragged); what is shown is that height
@@ -322,7 +357,19 @@ export default function RelationshipRail({
     rejected: rels.filter(r => inFilter(r, 'rejected')).length,
   }
 
-  const filtered = rels.filter(r => inFilter(r, filter))
+  // Enrich jobs only (ADR-0090): the segments show only when a row has a bundle
+  // status.  The tab counts above still count every row.
+  const hasEnrich = rels.some(r => r.enrichment_status != null)
+  const enrichCounts: Record<EnrichFilter, number> = {
+    all:       rels.length,
+    new:       rels.filter(r => enrichmentView(r.enrichment_status) === 'new').length,
+    in_stix:   rels.filter(r => enrichmentView(r.enrichment_status) === 'in_stix').length,
+    stix_only: rels.filter(r => enrichmentView(r.enrichment_status) === 'stix_only').length,
+  }
+  const inEnrichFilter = (r: Relationship) =>
+    enrichFilter === 'all' || enrichmentView(r.enrichment_status) === enrichFilter
+
+  const filtered = rels.filter(r => inFilter(r, filter) && inEnrichFilter(r))
 
   const card = (r: Relationship) => (
     <RelCard
@@ -335,6 +382,7 @@ export default function RelationshipRail({
       onChangeType={onChangeType}
       onChangeDates={onChangeDates}
       getEntityType={getEntityType}
+      getEntityEnrichment={getEntityEnrichment}
     />
   )
 
@@ -394,6 +442,21 @@ export default function RelationshipRail({
           ))}
         </div>
 
+        {hasEnrich && (
+          <div className="rel-tabs" role="group" aria-label="Filter by STIX bundle" style={{ marginLeft: 0 }}>
+            {ENRICH_FILTERS.map(f => (
+              <button
+                key={f.value}
+                className={`rel-tab ${enrichFilter === f.value ? 'on' : ''}`}
+                onClick={() => setEnrichFilter(f.value)}
+                aria-pressed={enrichFilter === f.value}
+              >
+                {f.label} <span className="rel-count">{enrichCounts[f.value]}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         <button
           className={`rel-tab ${grouped ? 'on' : ''}`}
           aria-pressed={grouped}
@@ -452,7 +515,10 @@ export default function RelationshipRail({
               ))
             : filtered.map(card)}
           {filtered.length === 0 && (
-            <div className="rel-empty">All caught up. Nothing in "{FILTER_LABEL[filter]}."</div>
+            // The bundle segment empties the list only when the tab alone would not.
+            enrichFilter !== 'all' && rels.some(r => inFilter(r, filter))
+              ? <div className="rel-empty">No relationship matches these filters.</div>
+              : <div className="rel-empty">All caught up. Nothing in "{FILTER_LABEL[filter]}."</div>
           )}
         </div>
       )}

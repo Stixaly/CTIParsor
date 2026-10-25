@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react'
+import type { JobEnrichment } from '../../types'
 
 /** Stage breakdown derived from the Job + entity/relationship lists.
  *  All fields are optional — the ribbon degrades gracefully when data is partial. */
@@ -30,6 +31,18 @@ interface Props {
   filename: string
   counts: Counts
   stageInfo: StageInfo
+  /** Enrich jobs only (ADR-0090): how the rows stand against the supplied bundle. */
+  enrichment?: JobEnrichment
+}
+
+/** One enrich line (ADR-0090): `lead` says what the first number counts.  A
+ *  status the job does not hold counts 0. */
+function enrichLine(lead: string, c: JobEnrichment['counts']['entities']): string {
+  const m = c.matched ?? 0
+  const t = c.baseline_in_text ?? 0
+  const s = c.baseline_only ?? 0
+  const n = c.new ?? 0
+  return `${lead} ${m + t} (${m} extracted · ${t} found in text) · STIX only: ${s} · + New: ${n}`
 }
 
 interface StageRow {
@@ -84,7 +97,7 @@ function Tally({ n, l, tone }: { n: number; l: string; tone: string }) {
 const STAGE_MODES = ['full', 'labels', 'numbers'] as const
 type StageMode = typeof STAGE_MODES[number]
 
-export default function PipelineRibbon({ filename, counts, stageInfo }: Props) {
+export default function PipelineRibbon({ filename, counts, stageInfo, enrichment }: Props) {
   const stages = buildStages(filename, stageInfo)
 
   // The six stage cards need ~1150 px: below a ~1900 px window the last ones
@@ -142,6 +155,22 @@ export default function PipelineRibbon({ filename, counts, stageInfo }: Props) {
         <Tally n={counts.accepted} l="accepted"  tone="green" />
         <Tally n={counts.rejected} l="rejected"  tone="red"   />
         <Tally n={counts.rels}     l="relations" tone="slate" />
+        {/* Enrich jobs only: the same rows against the analyst's bundle, one
+            line per kind.  It wraps rather than pushing the stages aside. */}
+        {enrichment && (
+          <div
+            className="ribbon-enrich"
+            style={{
+              display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 2,
+              maxWidth: 360, padding: '4px 12px', borderLeft: '1px solid var(--rule-soft)',
+              fontFamily: '"JetBrains Mono", ui-monospace, monospace', fontSize: 10.5,
+              color: 'var(--ink-2)',
+            }}
+          >
+            <span>{enrichLine('Already in STIX:', enrichment.counts.entities)}</span>
+            <span>{enrichLine('Relationships: in STIX', enrichment.counts.relationships)}</span>
+          </div>
+        )}
       </div>
     </div>
   )

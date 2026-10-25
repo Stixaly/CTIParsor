@@ -1,6 +1,9 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
-import type { Entity } from '../../types'
-import { typeDot, typeLabel, typeSoft, typeInk, confPct, heldPending, heldTitle, SOURCE_LABEL, TYPE_GROUPS } from './tokens'
+import { enrichmentView, isImported, type Entity, type EnrichmentView } from '../../types'
+import { typeDot, typeLabel, typeSoft, typeInk, confPct, heldPending, heldTitle, SOURCE_LABEL, TYPE_GROUPS, ENRICHMENT_BADGE } from './tokens'
+
+/** Why an imported row (ADR-0090) cannot be edited here: the server answers 409. */
+export const IMPORTED_TITLE = 'From your STIX bundle: accept or reject it; edit it in the source bundle'
 
 interface Props {
   entity: Entity
@@ -35,6 +38,9 @@ export default function MarginaliaCard({
   const btnRef    = useRef<HTMLButtonElement>(null)
   const popupRef  = useRef<HTMLDivElement>(null)
   const src = SOURCE_LABEL[e.source] ?? { label: e.source, hint: '' }
+  // Enrich jobs only (ADR-0090): null on a full job.
+  const enrichView = enrichmentView(e.enrichment_status)
+  const imported = isImported(e.enrichment_status)
 
   const openMenu = (ev: React.MouseEvent) => {
     ev.stopPropagation()
@@ -148,6 +154,7 @@ export default function MarginaliaCard({
                 auto
               </span>
             )}
+            {enrichView && <EnrichmentBadge view={enrichView} />}
             <span className="marg-conf">{confPct(e.confidence)}</span>
             <span className="marg-collapse-ind">{collapsed ? '›' : '˅'}</span>
           </div>
@@ -180,11 +187,14 @@ export default function MarginaliaCard({
                     onClick={ev => { ev.stopPropagation(); rejected ? onReset() : onReject() }}
                     title="Reject (R)"
                   >✗</button>
+                  {/* An imported row keeps its type: the server answers 409. */}
                   <button
                     ref={btnRef}
                     className="mbtn"
                     onClick={openMenu}
-                    title="Change type"
+                    disabled={imported}
+                    style={imported ? { opacity: 0.4 } : undefined}
+                    title={imported ? IMPORTED_TITLE : 'Change type'}
                   >⋯</button>
                 </div>
               </div>
@@ -225,5 +235,22 @@ export default function MarginaliaCard({
         </div>
       )}
     </div>
+  )
+}
+
+// ADR-0090: the tone of each enrich badge, as the analyst reads it.
+const ENRICH_TONE: Record<EnrichmentView, { color: string }> = {
+  new:       { color: 'var(--accent)' },
+  in_stix:   { color: 'var(--ok)' },
+  stix_only: { color: 'var(--ink-3)' },
+}
+
+/** A row's place against the analyst's bundle (ADR-0090).  `title` replaces
+ *  the standard one where the caller knows more about the row. */
+export function EnrichmentBadge({ view, title }: { view: EnrichmentView; title?: string }) {
+  return (
+    <span className="marg-origin" title={title ?? ENRICHMENT_BADGE[view].title} style={{ ...ENRICH_TONE[view], whiteSpace: 'nowrap' }}>
+      {ENRICHMENT_BADGE[view].label}
+    </span>
   )
 }
