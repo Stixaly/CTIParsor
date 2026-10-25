@@ -58,7 +58,7 @@ def test_a_run_reports_every_stage_and_builds_a_valid_bundle(mock_llm, sample_ct
 
     # 1f is decided before Stage 1 finishes chunking (figures change the text).
     assert [o.stage for o in result.stages] == [
-        "1f", "1", "2", "2b", "2c", "2d", "2e", "2g", "3", "3d", "3f", "3e", "3doc",
+        "1f", "1", "2", "2b", "2c", "2d", "2e", "2g", "3", "3d", "3f", "3e", "3doc", "3r",
         "2f", "4", "4b", "4c", "5"]
     # _opts turns 3d / 3f off; in select mode, the default, that is worth a warning.
     assert result.outcome("3f").reason == "disabled: the LLM's techniques ship unchecked"

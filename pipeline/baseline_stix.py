@@ -1437,3 +1437,204 @@ def _intake(raw: bytes, report_id: str | None, preview: bool,
                           passthrough, tuple(oid for oid, o in imported.items() if field(o, "type") == "report"),
                           chosen)
     return index, summary, bundle
+
+
+# ── Reconciliation (Stage 3r, ADR-0090 lot 3) ───────────────────────────────
+
+# The key of a row in Reconciliation's maps: what `_save_entities` writes, folded.
+def _row_key(entity_type: str, value: str) -> tuple[str, str]:
+    return entity_type, " ".join(value.casefold().split())
+
+
+def _rel_key(source_value: str, relationship_type: str, target_value: str) -> tuple[str, str, str]:
+    return " ".join(source_value.casefold().split()), relationship_type, " ".join(target_value.casefold().split())
+
+
+@dataclass
+class ImportedEntity:
+    """A row the job store gets from the baseline: an entry no extraction found."""
+    value: str                     # Entry.value
+    entity_type: str               # Entry.entity_type
+    mitre_id: str | None           # Entry.mitre_id
+    status: str                    # BASELINE_IN_TEXT or BASELINE_ONLY
+    baseline_stix_id: str          # Entry.entry_id
+    evidence_text: str | None = None   # BASELINE_IN_TEXT: the text found, as the report writes it
+    evidence_start: int | None = None  # its offsets in the report text (None when not computable)
+    evidence_end: int | None = None
+
+
+@dataclass
+class ImportedRelation:
+    """A relationships row the job store gets from the baseline: a SRO no extraction found."""
+    source_value: str              # the source entry's Entry.value
+    relationship_type: str
+    target_value: str              # the target entry's Entry.value
+    status: str                    # BASELINE_IN_TEXT (both ends found in the report) or BASELINE_ONLY
+    baseline_stix_id: str          # Relation.stix_id
+
+
+@dataclass
+class Reconciliation:
+    """What Stage 3r found: the status of each row the run is about to write, and
+    the rows the baseline adds.  The maps are keyed by `_row_key` / `_rel_key`;
+    use the methods."""
+    entity_status: dict[tuple[str, str], tuple[str, str | None]] = dataclass_field(default_factory=dict)
+    relation_status: dict[tuple[str, str, str], tuple[str, str | None]] = dataclass_field(default_factory=dict)
+    imported_entities: list[ImportedEntity] = dataclass_field(default_factory=list)
+    imported_relations: list[ImportedRelation] = dataclass_field(default_factory=list)
+    # entities_new, entities_matched, entities_baseline_in_text, entities_baseline_only,
+    # relations_new, relations_matched, relations_baseline_in_text, relations_baseline_only
+    stats: dict[str, int] = dataclass_field(default_factory=dict)
+
+    def entity(self, entity_type: str, value: str) -> tuple[str, str | None]:
+        """(status, baseline_stix_id) of an extracted row; (NEW, None) when unknown."""
+        return self.entity_status.get(_row_key(entity_type, value), (NEW, None))
+
+    def relation(self, source_value: str, relationship_type: str, target_value: str) -> tuple[str, str | None]:
+        """(status, baseline_stix_id) of an extracted relationship; (NEW, None) when unknown."""
+        return self.relation_status.get(_rel_key(source_value, relationship_type, target_value), (NEW, None))
+
+
+def _fold(value: str) -> str:
+    """The folding `_row_key` and `_rel_key` apply to one value."""
+    return " ".join(value.casefold().split())
+
+
+def _is_word_char(char: str) -> bool:
+    return char.isalnum() or char == "_"
+
+
+def _first_occurrence(low: str, forms: Iterable[str]) -> tuple[int, int] | None:
+    """(start, end) of the earliest place in `low` (the lowercased report) where one of
+    `forms` stands as a whole word: no letter, digit or "_" on either side.  Found with
+    str.find, never with a pattern built from the baseline's text (untrusted)."""
+    best: tuple[int, int] | None = None
+    for form in forms:
+        start = low.find(form)
+        while start != -1:
+            end = start + len(form)
+            before = low[start - 1] if start else ""
+            if not _is_word_char(before) and not _is_word_char(low[end:end + 1]):
+                if best is None or start < best[0]:
+                    best = (start, end)
+                break
+            start = low.find(form, start + 1)
+    return best
+
+
+def reconcile(raw_entities: Sequence[Any], llm_result: Any, report_text: str,
+              index: BaselineIndex) -> Reconciliation:
+    """Stage 3r: match a run's extractions to the analyst's baseline (ADR-0090 §7).
+    Pure: no store, no network, no logging."""
+    rec = Reconciliation()
+    found: dict[str, str] = {}                     # entry_id -> MATCHED or BASELINE_IN_TEXT: the entries reached
+
+    # Pass 1: the rows the run is about to write, with the values the worker stores.
+    extracted: list[tuple[str, str, str | None]] = [(e.entity_type.value, e.value, e.mitre_id) for e in raw_entities]
+    extracted += [("malware", name, None) for name in llm_result.malware_families]
+    extracted += [("threat_actor", name, None) for name in llm_result.threat_actors]
+    extracted += [("tool", name, None) for name in llm_result.tools]
+    if llm_result.campaign_name:
+        extracted.append(("campaign", llm_result.campaign_name, None))
+    extracted += [("ttp", ttp.technique_name, ttp.mitre_id) for ttp in llm_result.ttps]
+    extracted += [("ttp", held.name or held.attack_id, held.attack_id)
+                  for held in getattr(llm_result, "ttp_review", None) or []]
+    matched_rows: list[tuple[str, str]] = []       # (folded value, entry_id) of each MATCHED row
+    for entity_type, value, mitre_id in extracted:
+        strong, _weak = keys_for_row(entity_type, value, mitre_id)
+        entry = index.lookup(strong, ENTITY_TO_STIX.get(entity_type)) if strong else None
+        key = _row_key(entity_type, value)
+        if isinstance(entry, Entry):
+            rec.entity_status[key] = (MATCHED, entry.entry_id)
+            found[entry.entry_id] = MATCHED
+            matched_rows.append((key[1], entry.entry_id))
+        else:
+            rec.entity_status.setdefault(key, (NEW, None))    # never over a MATCHED row of the same key
+
+    # Pass 2: the baseline entries no extraction found, looked for in the report text.
+    low = report_text.lower()
+    offsets_ok = len(low) == len(report_text)      # lower() can change the length: then no offset is given
+    for entry in index.entries:
+        if entry.entry_id in found:
+            continue
+        place = _first_occurrence(low, entry.surface_forms)
+        if place is None:
+            rec.imported_entities.append(ImportedEntity(
+                value=entry.value, entity_type=entry.entity_type, mitre_id=entry.mitre_id,
+                status=BASELINE_ONLY, baseline_stix_id=entry.entry_id,
+            ))
+        else:
+            start, end = place
+            found[entry.entry_id] = BASELINE_IN_TEXT
+            rec.imported_entities.append(ImportedEntity(
+                value=entry.value, entity_type=entry.entity_type, mitre_id=entry.mitre_id,
+                status=BASELINE_IN_TEXT, baseline_stix_id=entry.entry_id,
+                evidence_text=report_text[start:end] if offsets_ok else None,
+                evidence_start=start if offsets_ok else None,
+                evidence_end=end if offsets_ok else None,
+            ))
+
+    # Pass 3: the extracted relationships, their ends resolved to baseline entries.  A
+    # folded value of a MATCHED row names its entry, unless two entries share it; any
+    # other folded surface form names its entry when it names exactly one.
+    value_entry: dict[str, str] = {}
+    clashes: set[str] = set()
+    for folded, entry_id in matched_rows:
+        if value_entry.setdefault(folded, entry_id) != entry_id:
+            clashes.add(folded)
+    for folded in clashes:
+        del value_entry[folded]
+    owners: dict[str, set[str]] = {}
+    for entry in index.entries:
+        for form in (*entry.surface_forms, entry.value):
+            owners.setdefault(_fold(form), set()).add(entry.entry_id)
+    form_entry = {form: next(iter(ids)) for form, ids in owners.items() if len(ids) == 1}
+
+    def endpoint(value: str) -> str | None:
+        folded = _fold(value)
+        return value_entry.get(folded, form_entry.get(folded))
+
+    by_ends: dict[tuple[str, str, str], Relation] = {}
+    for base in index.relations:
+        if base.source_entry is not None and base.target_entry is not None:
+            by_ends.setdefault((base.source_entry, base.target_entry, base.relationship_type), base)
+    found_relations: set[str] = set()
+    for rel in [*llm_result.relationships, *(getattr(llm_result, "rel_review", None) or [])]:
+        rel_key = _rel_key(rel.source_value, rel.relationship_type, rel.target_value)
+        source, target = endpoint(rel.source_value), endpoint(rel.target_value)
+        match: Relation | None = None
+        if source is not None and target is not None:
+            match = by_ends.get((source, target, rel.relationship_type))
+        if match is None:
+            rec.relation_status.setdefault(rel_key, (NEW, None))  # never over a MATCHED relation of the same key
+        else:
+            rec.relation_status[rel_key] = (MATCHED, match.stix_id)
+            found_relations.add(match.stix_id)
+
+    # Pass 4: the baseline relations no extraction found, both ends known.
+    by_id = {entry.entry_id: entry for entry in index.entries}
+    for base in index.relations:
+        if base.stix_id in found_relations or base.source_entry is None or base.target_entry is None:
+            continue
+        both_found = base.source_entry in found and base.target_entry in found
+        rec.imported_relations.append(ImportedRelation(
+            source_value=by_id[base.source_entry].value,
+            relationship_type=base.relationship_type,
+            target_value=by_id[base.target_entry].value,
+            status=BASELINE_IN_TEXT if both_found else BASELINE_ONLY,
+            baseline_stix_id=base.stix_id,
+        ))
+
+    entity_counts = Counter(status for status, _ in rec.entity_status.values())
+    imported_counts = Counter(row.status for row in rec.imported_entities)
+    relation_counts = Counter(status for status, _ in rec.relation_status.values())
+    imported_relation_counts = Counter(row.status for row in rec.imported_relations)
+    rec.stats = {
+        "entities_new": entity_counts[NEW], "entities_matched": entity_counts[MATCHED],
+        "entities_baseline_in_text": imported_counts[BASELINE_IN_TEXT],
+        "entities_baseline_only": imported_counts[BASELINE_ONLY],
+        "relations_new": relation_counts[NEW], "relations_matched": relation_counts[MATCHED],
+        "relations_baseline_in_text": imported_relation_counts[BASELINE_IN_TEXT],
+        "relations_baseline_only": imported_relation_counts[BASELINE_ONLY],
+    }
+    return rec

@@ -48,6 +48,9 @@ DEFAULT_SHARE = 0.8
 # The gazetteer skips shorter keys (stage2b_gazetteer._MIN_NAME_LEN).
 _MIN_TERM_LEN = 4
 
+# pipeline.baseline_stix.SOURCE; not imported, that module pulls Stage 4.
+_BASELINE_SOURCE = "baseline_stix"
+
 
 @dataclass
 class Candidate:
@@ -86,15 +89,19 @@ def load_decisions(conn) -> list[tuple[str, str, str, int | None, str]]:
     lists, stored at 0.9, included — and those accepts would otherwise promote
     the LLM's guesses into the gazetteer.  A `legacy` reject still counts:
     the page never rejected anything, so every stored reject was an analyst's.
+    Rows a STIX baseline imported are never read: an analyst who rejects a
+    baseline object as off-topic must not propose a deny rule for every future
+    extraction.
     """
     marks = ",".join("?" for _ in NAMED_TYPES)
     human = ",".join("?" for _ in HUMAN_ORIGINS)
+    # IS DISTINCT FROM rather than <>: a NULL source is not a baseline row and must still be read.
     rows = conn.execute(
         "SELECT value, entity_type, source, accepted, job_id FROM entities "
-        f"WHERE entity_type IN ({marks}) AND (source = 'manual' "
+        f"WHERE entity_type IN ({marks}) AND source IS DISTINCT FROM ? AND (source = 'manual' "
         f"OR (accepted = 1 AND decision_origin IN ({human})) "
         f"OR (accepted = 0 AND decision_origin IN ({human},?)))",
-        (*sorted(NAMED_TYPES), *HUMAN_ORIGINS, *HUMAN_ORIGINS, LEGACY),
+        (*sorted(NAMED_TYPES), _BASELINE_SOURCE, *HUMAN_ORIGINS, *HUMAN_ORIGINS, LEGACY),
     ).fetchall()
     return [(r["value"], r["entity_type"], r["source"], r["accepted"], r["job_id"]) for r in rows]
 

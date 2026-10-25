@@ -119,7 +119,10 @@ CREATE TABLE entities (
     source      TEXT DEFAULT 'auto' -- ioc | gazetteer | semantic | cyner |
                                     -- gliner | llm | manual | report_lexicon
                                     -- (report_lexicon: rows of the re-scan removed
-                                    -- on 2026-10-17; nothing writes it now)
+                                    -- on 2026-10-17; nothing writes it now) |
+                                    -- baseline_stix (ADR-0090: a row the analyst's
+                                    -- STIX bundle adds; a matched row keeps the
+                                    -- source of its extraction)
     -- Entity evidence (ADR-0028), kept apart from `context`: over 280 stored
     -- TTPs only 36.8% of `context` is findable in the report, against 79.4%
     -- for verbatim quotes.  Both offsets are stored because normalisation
@@ -143,10 +146,13 @@ CREATE TABLE entities (
                                     -- (a technique Stage 3f could not decide); a
                                     -- pending row with a reason ships only once accepted
     enrichment_status TEXT,         -- ADR-0090, NULL in full mode and for a row added by
-                                    -- hand: new | matched | baseline_in_text |
-                                    -- baseline_only (pipeline/baseline_stix.py).  A row
-                                    -- imported from the bundle (the last two) is accepted
-                                    -- or rejected, never edited or deleted (409)
+                                    -- hand: new (extracted, not in the baseline) |
+                                    -- matched (extracted, already in it: accepted at
+                                    -- once, origin baseline_stix) | baseline_in_text |
+                                    -- baseline_only (imported from the bundle, set by
+                                    -- Stage 3r, pipeline/baseline_stix.py).  An imported
+                                    -- row is accepted or rejected, never edited or
+                                    -- deleted (409)
     baseline_stix_id TEXT           -- the id of the baseline object the row is or matches
 );
 
@@ -164,7 +170,8 @@ CREATE TABLE relationships (
                                           -- relationship, as JSON (ADR-0063)
     start_time        TEXT,               -- legacy: written by nothing since ADR-0063,
     stop_time         TEXT,               -- read as dates of unknown precision
-    decision_origin   TEXT,               -- same three columns as on entities (ADR-0058)
+    decision_origin   TEXT,               -- as on entities (ADR-0058), incl. baseline_stix
+                                          -- (ADR-0090): a matched or an imported row
     decided_at        TEXT,
     policy_version    TEXT,
     held_reason       TEXT,               -- ADR-0082: why Stage 3d held this claim back;
