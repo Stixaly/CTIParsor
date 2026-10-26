@@ -528,7 +528,10 @@ class OpenAICompatVisionBackend:
                 **self.extra_body,
             }
             out = _http_json(f"{self.base_url}/chat/completions", payload, self._headers(), self.timeout)
-            text = out["choices"][0]["message"]["content"]
+            choice = out["choices"][0]
+            text = choice["message"].get("content") or ""
+            if not text and choice.get("finish_reason") == "length":
+                raise ValueError("answer cut at max_tokens before any content (finish_reason=length)")
             usage = out.get("usage") or {}
             in_tok = usage.get("prompt_tokens")
             out_tok = usage.get("completion_tokens")

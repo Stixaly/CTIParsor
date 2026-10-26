@@ -377,8 +377,9 @@ def select_ttps(
     text_n = _norm(text)
     labels = {k.upper(): v for k, v in (llm_labels or {}).items()}
     selected: list = []
+    selected_ids: set[str] = set()
     review: list[TtpReview] = []
-    seen: set[str] = set()
+    seen: set[str] = set()         # selected or in review
     rejected = 0
     for it in items:
         tid = str(it.get("attack_id") or it.get("id") or "").strip().upper()
@@ -388,17 +389,23 @@ def select_ttps(
         if not _ID_RE.match(tid) or tid not in by_id:
             rejected += 1          # not one of the candidates: never a technique
             continue
-        if tid in seen:
+        if tid in selected_ids:
             continue
-        seen.add(tid)
         cand = by_id[tid]
         q = quote.strip()
         if not q or len(q.split()) < min_words or _norm(q) not in text_n:
-            rejected += 1
-            review.append(TtpReview(attack_id=cand.attack_id, name=cand.name, sources=cand.sources,
-                                    evidence_quote=q or None,
-                                    reason="quote missing, too short or not found verbatim"))
+            if tid not in seen:   # one review entry per id: a later copy does not add one
+                seen.add(tid)
+                rejected += 1
+                review.append(TtpReview(attack_id=cand.attack_id, name=cand.name, sources=cand.sources,
+                                        evidence_quote=q or None,
+                                        reason="quote missing, too short or not found verbatim"))
             continue
+        if tid in seen:           # a valid copy of an id under review: the id is kept after all
+            review = [r for r in review if r.attack_id.upper() != tid]
+            rejected -= 1
+        seen.add(tid)
+        selected_ids.add(tid)
         label = labels.get(tid, EvidenceLabel.REPORTED)
         if label == EvidenceLabel.GAP:
             label = EvidenceLabel.REPORTED
@@ -422,14 +429,15 @@ def llm_proposals_as_candidates(ttps: Sequence) -> tuple[list[TtpCandidate], dic
     Returns (candidates, their evidence labels by id, proposals without an id).
     A proposal whose name and id resolve to no ATT&CK technique cannot be
     selected: the selector chooses ids."""
-    from pipeline.stage3c_mitre import _resolve
+    from pipeline.stage3c_mitre import _load_index, _resolve
 
     out: list[TtpCandidate] = []
     labels: dict[str, EvidenceLabel] = {}
     no_id = 0
+    index = _load_index()
     for t in ttps:
         name, tid, _ = _resolve(t.technique_name, t.mitre_id)
-        if not tid or not re.match(r"^T\d{4}(\.\d{3})?$", tid.upper()):
+        if not tid or not re.match(r"^T\d{4}(\.\d{3})?$", tid.upper()) or (index and tid.lower() not in index):
             no_id += 1
             continue
         out.append(TtpCandidate(attack_id=tid.upper(), name=name, passage=t.evidence_text or "",

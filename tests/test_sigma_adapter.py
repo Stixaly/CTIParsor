@@ -74,6 +74,53 @@ def test_sigma_adapter_skips_malformed_yaml(tmp_path):
     assert list(SigmaAdapter().parse(tmp_path, corpus="c")) == []
 
 
+def test_sigma_logsource_that_is_not_a_mapping_is_read_without_data_sources(tmp_path):
+    text = _SAMPLE.replace("logsource:\n  category: process_creation\n  product: windows\n",
+                           "logsource: windows\n")
+    (tmp_path / "r.yml").write_text(text, encoding="utf-8")
+    rules = list(SigmaAdapter().parse(tmp_path, corpus="c"))
+    assert len(rules) == 1 and rules[0].data_sources == []
+
+
+def test_sigma_yaml_date_in_detection_still_gets_a_dedup_key(tmp_path):
+    """A YAML date is not JSON: the logic hash must still be computed, not raised."""
+    text = _SAMPLE.replace("    CommandLine|contains: '-EncodedCommand'\n",
+                           "    CommandLine|contains: '-EncodedCommand'\n    CreationDate: 2020-01-01\n")
+    (tmp_path / "date.yml").write_text(text, encoding="utf-8")
+    rules = list(SigmaAdapter().parse(tmp_path, corpus="c"))
+    assert len(rules) == 1
+    assert rules[0].dedup_key and rules[0].dedup_key != rules[0].content_hash
+
+
+def test_sigma_yaml_dates_in_a_list_still_get_a_dedup_key(tmp_path):
+    """Sorting a list compares its items as JSON: dates there must not raise either."""
+    text = _SAMPLE.replace("    CommandLine|contains: '-EncodedCommand'\n",
+                           "    CommandLine|contains: '-EncodedCommand'\n"
+                           "    CreationDate: [2020-01-01, 2021-02-02]\n")
+    (tmp_path / "dates.yml").write_text(text, encoding="utf-8")
+    rules = list(SigmaAdapter().parse(tmp_path, corpus="c"))
+    assert len(rules) == 1 and rules[0].dedup_key != rules[0].content_hash
+
+
+def test_sigma_document_that_fails_to_convert_is_logged_and_the_next_is_read(tmp_path, monkeypatch, caplog):
+    original = SigmaAdapter._to_rule
+
+    def flaky(doc, text, path, corpus, license):
+        if doc.get("title") == "boom":
+            raise RuntimeError("boom")
+        return original(doc, text, path, corpus, license)
+
+    monkeypatch.setattr(SigmaAdapter, "_to_rule", staticmethod(flaky))
+    (tmp_path / "two.yml").write_text(
+        _SAMPLE.replace("Suspicious PowerShell Encoded Command", "boom") + "---\n" + _SAMPLE,
+        encoding="utf-8",
+    )
+    with caplog.at_level("WARNING"):
+        rules = list(SigmaAdapter().parse(tmp_path, corpus="c"))
+    assert [r.title for r in rules] == ["Suspicious PowerShell Encoded Command"]
+    assert any("skipped" in r.getMessage() and "boom" in r.getMessage() for r in caplog.records)
+
+
 def test_registry_loads_enabled_corpora_and_parses(tmp_path):
     # a corpus clone with one rule
     clone = tmp_path / "clone"

@@ -16,6 +16,7 @@ if str(_ROOT) not in sys.path:
 
 from pipeline.stage2c_ttp_semantic import (
     _MAX_CANDIDATES,
+    _apply_candidate_cap,
     _has_ttp_keyword,
     _select_candidates,
     _split_candidate_sentences,
@@ -245,6 +246,13 @@ def test_candidate_cap_binds_only_above_the_cap():
     assert stats["scored"] <= _MAX_CANDIDATES
     if stats["kept_by_keyword"] > _MAX_CANDIDATES:
         assert stats["dropped_by_cap"] > 0
+
+
+def test_candidate_cap_reaches_the_end_of_the_document_just_above_the_cap():
+    # A step of 1 kept the first _MAX_CANDIDATES of 250 and never reached the end.
+    kept = _apply_candidate_cap([f"s{i}" for i in range(250)])
+    assert len(kept) == _MAX_CANDIDATES
+    assert int(kept[-1][1:]) >= 240
 
 
 def test_select_candidates_matches_stats():

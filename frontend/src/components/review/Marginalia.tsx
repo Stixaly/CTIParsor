@@ -68,7 +68,7 @@ export default function Marginalia({
 
   // ── per-group quick bulk ───────────────────────────────────────────────
   const acceptGroup = (grpEntities: Entity[]) =>
-    grpEntities.filter(e => e.accepted !== true).forEach(e => onAccept(e.id, true))
+    grpEntities.filter(e => e.accepted !== true && !heldPending(e)).forEach(e => onAccept(e.id, true))
   const rejectGroup = (grpEntities: Entity[]) =>
     grpEntities.filter(e => e.accepted !== false).forEach(e => onReject(e.id, true))
 
@@ -253,7 +253,8 @@ export default function Marginalia({
           <div key={grp.type} className="marg-group">
             {grp.type !== '_all' && (() => {
               const hidden        = hiddenGroups.has(grp.type)
-              const acceptedCount = grp.entities.filter(e => e.accepted === true).length
+              // What the group accept does: held rows (ADR-0082) wait for their own decision.
+              const acceptableCount = grp.entities.filter(e => e.accepted !== true && !heldPending(e)).length
               const rejectedCount = grp.entities.filter(e => e.accepted === false).length
               return (
                 <div className="marg-group-head">
@@ -268,13 +269,13 @@ export default function Marginalia({
                   <span className="marg-group-name">{typeLabel(grp.type)}</span>
                   <span className="marg-group-n">{grp.entities.length}</span>
 
-                  {!hidden && acceptedCount < grp.entities.length && (
+                  {!hidden && acceptableCount > 0 && (
                     <button
                       className="marg-group-action marg-group-ok"
                       onClick={() => acceptGroup(grp.entities)}
-                      title={`Accept all ${grp.entities.length - acceptedCount} ${typeLabel(grp.type)}`}
+                      title={`Accept all ${acceptableCount} ${typeLabel(grp.type)}`}
                     >
-                      ✓ {grp.entities.length - acceptedCount}
+                      ✓ {acceptableCount}
                     </button>
                   )}
                   {!hidden && rejectedCount < grp.entities.length && (

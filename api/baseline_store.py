@@ -104,7 +104,9 @@ def objects_by_id(bundle_json: str) -> dict[str, dict]:
     """The objects of a stored baseline (`job_baselines.bundle_json`) by id, as
     received: Stage 4 writes them back verbatim (ADR-0090).  An id given twice
     is the version the intake indexed, not the last one in the file."""
-    return baseline_stix.newest_versions(json.loads(bundle_json)["objects"])
+    # The text is stored as received, so a file saved with a BOM keeps it (and its
+    # sha256); json.loads refuses a str that starts with one.
+    return baseline_stix.newest_versions(json.loads(bundle_json.removeprefix("\ufeff"))["objects"])
 
 
 def load_baseline(job_id: str) -> tuple[BaselineIndex, dict[str, dict]] | None:

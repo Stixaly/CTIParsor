@@ -375,6 +375,14 @@ def test_map_verbatim_keeps_every_other_field() -> None:
     assert mapped.provider == original.provider
 
 
+def test_map_verbatim_refangs_the_edges_too() -> None:
+    cand = FigureCandidate(page=1, bbox=(0, 0, 100, 100), area_ratio=0.1)
+    reads = [(cand, _edge_read(edges=[FigureEdge("cdn[.]evil[.]com", "loader[.]dll", "from cdn[.]evil[.]com")]), "s")]
+    mapped = map_verbatim(reads, lambda s: s.replace("[.]", "."))
+    assert mapped[0][1].edges == [FigureEdge("cdn.evil.com", "loader.dll", "from cdn.evil.com")]
+    assert reads[0][1].edges[0].src == "cdn[.]evil[.]com"
+
+
 def _edge_read(kind: str = "attack-chain", edges=None, text=None) -> FigureRead:
     return FigureRead(
         kind=kind,

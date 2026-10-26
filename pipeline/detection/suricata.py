@@ -5,6 +5,7 @@ import json
 from collections.abc import Iterable
 from pathlib import Path
 
+from api.logging_config import get_logger
 from models.detection import DetectionRule, Severity
 from pipeline.detection.base import RuleCorpusAdapter
 from pipeline.detection.suricata_atoms import (
@@ -15,6 +16,8 @@ from pipeline.detection.suricata_atoms import (
     technique_ids,
 )
 from pipeline.regex_safety import compile_pattern
+
+logger = get_logger(__name__)
 
 _SURICATA_GLOBS = ("*.rules",)
 
@@ -82,7 +85,11 @@ class SuricataAdapter(RuleCorpusAdapter):
                         continue
                     if s.split(None, 1)[0].lower() not in _ACTIONS:
                         continue
-                    rule = self._to_rule(s, path, lineno, corpus, license)
+                    try:
+                        rule = self._to_rule(s, path, lineno, corpus, license)
+                    except Exception as e:  # noqa: BLE001 — one bad rule must not stop the corpus
+                        logger.warning(f"[detection] suricata rule {path}:{lineno} skipped: {e}")
+                        continue
                     if rule is not None:
                         yield rule
 
@@ -182,7 +189,7 @@ class SuricataAdapter(RuleCorpusAdapter):
                     if _IP_RE.match(part) and all(0 <= int(o) <= 255 for o in part.split(".")):
                         result.append(("ip", part))
                         kept += 1
-                elif part.isdigit() and 1 <= int(part) <= 65535:
+                elif part.isdecimal() and 1 <= int(part) <= 65535:
                     result.append(("port", part))
                     kept += 1
         return result

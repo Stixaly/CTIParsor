@@ -928,27 +928,33 @@ class _Run:
             futures = [executor.submit(process, i, c, e) for i, c, e in work]
             futures += [executor.submit(selection_only, i, c) for i, c in select_only]
             completed = since_ckpt = 0
-            for future in as_completed(futures):
-                hooks.check_timeout()
-                idx, res, second_run = future.result()
-                chunk_results[idx] = res
-                doubled += second_run
-                completed += 1
-                since_ckpt += 1
-                totals["malware"] += len(res.malware_families)
-                totals["actors"] += len(res.threat_actors)
-                totals["tools"] += len(res.tools)
-                totals["relationships"] += len(res.relationships)
+            try:
+                for future in as_completed(futures):
+                    hooks.check_timeout()
+                    idx, res, second_run = future.result()
+                    chunk_results[idx] = res
+                    doubled += second_run
+                    completed += 1
+                    since_ckpt += 1
+                    totals["malware"] += len(res.malware_families)
+                    totals["actors"] += len(res.threat_actors)
+                    totals["tools"] += len(res.tools)
+                    totals["relationships"] += len(res.relationships)
 
-                if checkpoint is not None and since_ckpt >= self.opts.checkpoint_every:
-                    checkpoint.save(fingerprint, total, chunk_results)
-                    since_ckpt = 0
+                    if checkpoint is not None and since_ckpt >= self.opts.checkpoint_every:
+                        checkpoint.save(fingerprint, total, chunk_results)
+                        since_ckpt = 0
 
-                hooks.progress("stage", {
-                    "stage": 3, "label": "LLM enrichment",
-                    "chunk": completed, "total": len(work) + len(select_only), **totals,
-                })
-                hooks.progress("partial_graph", _partial_graph(res))
+                    hooks.progress("stage", {
+                        "stage": 3, "label": "LLM enrichment",
+                        "chunk": completed, "total": len(work) + len(select_only), **totals,
+                    })
+                    hooks.progress("partial_graph", _partial_graph(res))
+            except BaseException:
+                # Leaving the with-block alone would run every chunk still queued;
+                # the calls already running still finish (at most llm_parallelism).
+                executor.shutdown(wait=False, cancel_futures=True)
+                raise
 
         if checkpoint is not None:
             checkpoint.clear()   # only reached on clean completion

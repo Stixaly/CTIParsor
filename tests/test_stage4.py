@@ -80,6 +80,21 @@ def _only_rel(bundle):
     return next(o for o in bundle.objects if getattr(o, "type", "") == "relationship")
 
 
+def test_confidence_is_rounded_not_truncated():
+    # 0.57 * 100 is 56.99999999999999 in floats: int() would ship 56.
+    from pipeline.stage4_stix_mapping import _add_relationship
+
+    llm = LLMEnrichmentResult(
+        threat_actors=["APT29"], malware_families=["WellMess"],
+        relationships=[RelationshipExtracted(source_value="APT29", relationship_type="uses",
+                                             target_value="WellMess", confidence=0.57)],
+    )
+    assert _only_rel(build_stix_bundle([], llm, "r")).confidence == 57
+
+    actor, malware = stix2.ThreatActor(name="APT29"), stix2.Malware(name="WellMess", is_family=True)
+    assert _add_relationship([], actor, "uses", malware, confidence=0.57).confidence == 57
+
+
 def test_month_precision_dates_ship_as_assertions_not_native_bounds():
     """ADR-0063 §7, `faithful` (the default): a verified month is carried in
     x_temporal_assertions and never padded into start_time / stop_time."""
@@ -563,6 +578,15 @@ def test_ioc_coverage_deduplicates():
     assert cov["total_iocs"] == 1
 
 
+def test_ioc_coverage_skips_a_url_that_is_not_a_uri():
+    # Left out on purpose (_entity_to_sco): not an IoC the bundle can carry, not a gap.
+    entities = [RawEntity(value="https://[REDACTED]/x.exe", entity_type=EntityType.URL)]
+    bundle = build_stix_bundle(entities, LLMEnrichmentResult(), "r")
+    cov = verify_ioc_coverage(entities, bundle)
+    assert cov["ok"] is True and cov["total_iocs"] == 0
+    assert cov["skipped"] == [{"value": "https://[REDACTED]/x.exe", "type": "url", "reason": "not_a_uri"}]
+
+
 def test_cve_becomes_vulnerability():
     entities = [RawEntity(value="CVE-2021-40444", entity_type=EntityType.CVE)]
     bundle = build_stix_bundle(entities, LLMEnrichmentResult(), "test")
@@ -598,6 +622,10 @@ class TestExternalReferenceRouting:
         refs = patterns[0].get("external_references", [])
         assert len(refs) == 1, f"Expected 1 external_reference, got {len(refs)}"
         return refs[0]
+
+    def test_blank_mitre_id_gets_no_external_reference(self):
+        patterns = self._attack_patterns("  ")
+        assert len(patterns) == 1 and not patterns[0].get("external_references")
 
     def test_capec_id_uses_capec_source_name(self):
         """CAPEC IDs must use source_name='capec', not 'mitre-attack'."""
@@ -868,7 +896,7 @@ def test_url_that_is_not_a_uri_gets_no_sco_and_no_indicator(value):
     patterns = [o.pattern for o in bundle.objects if o.get("type") == "indicator"]
     assert urls == ["https://evil.com/ok.exe"]
     assert patterns == ["[url:value = 'https://evil.com/ok.exe']"]
-    (entry,) = [e for e in led.entities if e["value"] == value]
+    (entry,) = [e for e in led.entities if e["value"] == value and e["entity_type"] == "url"]
     assert entry["outcome"] == "dropped" and entry["reason"] == "not_a_uri"
 
     result = validate_bundle(bundle.serialize(), quiet=True)

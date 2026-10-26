@@ -125,6 +125,38 @@ def test_suricata_unreadable_file_is_skipped(tmp_path, monkeypatch):
     assert list(SuricataAdapter().parse(tmp_path, corpus="c")) == []
 
 
+def test_suricata_superscript_digit_is_not_a_port_and_the_next_rule_is_read(tmp_path):
+    """`²` passes str.isdigit() but int() refuses it: no exception, and the rule after it still parses."""
+    rules = _suricata(
+        tmp_path,
+        'alert tcp any any -> any ² (msg:"x"; content:"abcdefgh"; sid:9;)',
+        'alert tcp any any -> any 80 (msg:"ok"; content:"abcdefgh"; sid:10;)',
+    )
+    assert [r.id for r in rules] == ["et-open:9", "et-open:10"]
+    assert not any(c == "port" for c, _ in rules[0].atoms)
+    assert ("port", "80") in rules[1].atoms
+
+
+def test_suricata_rule_that_fails_to_convert_is_logged_and_skipped(tmp_path, monkeypatch, caplog):
+    original = SuricataAdapter._to_rule
+
+    def flaky(self, line, *args):
+        if "sid:9;" in line:
+            raise RuntimeError("boom")
+        return original(self, line, *args)
+
+    monkeypatch.setattr(SuricataAdapter, "_to_rule", flaky)
+    with caplog.at_level("WARNING"):
+        rules = _suricata(
+            tmp_path,
+            'alert tcp any any -> any 80 (msg:"bad"; content:"abcdefgh"; sid:9;)',
+            'alert tcp any any -> any 80 (msg:"ok"; content:"abcdefgh"; sid:10;)',
+        )
+    assert [r.id for r in rules] == ["et-open:10"]
+    [record] = [r for r in caplog.records if "skipped" in r.getMessage()]
+    assert "emerging.rules:1" in record.getMessage() and "boom" in record.getMessage()
+
+
 # ── YARA ─────────────────────────────────────────────────────────────────────
 
 _YARA = """\

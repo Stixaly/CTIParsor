@@ -68,6 +68,26 @@ def test_trailing_sentence_punctuation_is_stripped():
     assert len(entities) == 1
     assert entities[0].value == "HKCU\\Software\\Run"
 
+def test_full_stop_before_a_capitalised_sentence_ends_the_key():
+    text = ("The malware adds the value to HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run. "
+            "It then survives reboots.")
+    entities = _extract_registry_keys(text)
+    assert len(entities) == 1
+    assert entities[0].value == "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+
+def test_full_stop_before_a_short_sentence_ends_the_key():
+    text = "Persistence key HKCU\\Software\\Run. The sample then exits."
+    entities = _extract_registry_keys(text)
+    assert len(entities) == 1
+    assert entities[0].value == "HKCU\\Software\\Run"
+
+
+def test_full_stop_inside_a_segment_before_a_backslash_stays():
+    # A vendor name holds ". " too; only the last segment can end a sentence.
+    entities = _extract_registry_keys("Set HKLM\\SOFTWARE\\Acme Corp. Ltd\\Run as needed.")
+    assert [e.value for e in entities] == ["HKLM\\SOFTWARE\\Acme Corp. Ltd\\Run"]
+
+
 def test_duplicate_keys_are_deduplicated_after_trimming():
     text = "reg save HKLM\\SYSTEM C:\\a.tmp then reg save HKLM\\SYSTEM C:\\b.tmp"
     entities = _extract_registry_keys(text)

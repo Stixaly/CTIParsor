@@ -228,6 +228,7 @@ def start_job(
 
     outcome = run_pipeline_async(job_id, str(dest), filename)
     if outcome == "rejected":
+        dest.unlink(missing_ok=True)
         raise HTTPException(503, "The processing queue is full — try again in a few minutes.")
 
     # "started" keeps reporting "processing" — the value these endpoints have

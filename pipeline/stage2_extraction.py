@@ -305,6 +305,8 @@ _REG_KEY_PATTERN = _compile_pattern(
     r"(?:\\[^\\\n\r\t<>:\"|\x00-\x1F]+)+",
     re.IGNORECASE | re.ASCII,
 )
+# A full stop and a blank: the end of a sentence after a key ("…\Run. It then").
+_SENTENCE_STOP = _compile_pattern(r"\.[" + _WS + r"]")
 
 # ---------------------------------------------------------------------------
 # Defanging — normalise all common CTI analyst conventions back to live form.
@@ -742,6 +744,8 @@ def _extract_file_paths(text: str) -> list[RawEntity]:
             if pattern is _WIN_PATH_PATTERN and continues_a_word(text[m.end():m.end() + 1]):
                 continue                  # the extension goes on
             v = m.group().strip()
+            if v.startswith("/"):
+                v = v.rstrip(".,:;!?")          # sentence punctuation after a Unix path is prose
             key = v.lower()
             if key not in seen:
                 seen.add(key)
@@ -836,6 +840,12 @@ def _extract_registry_keys(text: str) -> list[RawEntity]:
         next_char = text[m.end()] if m.end() < len(text) else None
         v = _trim_trailing_drive_letter(v, next_char)
         v = _trim_trailing_prose(v)
+        # The sentence ends at a full stop and a blank in the last segment only: a
+        # segment before a backslash holds one when a vendor name does ("Acme Corp. Ltd\Run").
+        head, sep, last = v.rpartition("\\")
+        stop = _SENTENCE_STOP.search(last)
+        if stop:
+            v = head + sep + last[:stop.start()]
 
         v = v.rstrip(".,;:!?)]}\"' \\")
 

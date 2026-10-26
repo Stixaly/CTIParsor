@@ -12,6 +12,8 @@ from __future__ import annotations
 import io
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from api import main as api_main
 
@@ -38,6 +40,12 @@ def test_the_configured_hosts_are_served(client):
 
 def test_a_cross_origin_upload_is_refused(client):
     r = client.post("/api/upload", files=_FILE, headers={"Origin": "http://attacker.example"})
+    assert r.status_code == 403
+    assert "origin" in r.json()["detail"]
+
+
+def test_an_origin_that_does_not_parse_is_refused(client):
+    r = client.post("/api/upload", files=_FILE, headers={"Origin": "http://["})
     assert r.status_code == 403
     assert "origin" in r.json()["detail"]
 
@@ -70,3 +78,25 @@ def test_reads_are_not_origin_checked(client):
 def test_allowed_hosts_is_read_from_the_environment(monkeypatch, raw, expected):
     monkeypatch.setenv("API_ALLOWED_HOSTS", raw)
     assert api_main.allowed_hosts() == expected
+
+
+@pytest.fixture()
+def spa(tmp_path):
+    (tmp_path / "index.html").write_text("<html><body>app</body></html>", encoding="utf-8")
+    app = FastAPI()
+    app.mount("/", api_main._SPAStaticFiles(directory=str(tmp_path), html=True), name="static")
+    return TestClient(app)
+
+
+def test_an_unknown_api_path_is_a_json_404_not_the_spa_entry_point(spa):
+    for path in ["/api", "/api/nope"]:
+        r = spa.get(path)
+        assert r.status_code == 404
+        assert r.json() == {"detail": "Not Found"}
+
+
+def test_a_client_route_falls_back_to_index_html(spa):
+    r = spa.get("/jobs/123")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/html")
+    assert "app" in r.text

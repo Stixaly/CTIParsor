@@ -390,8 +390,8 @@ def _apply_candidate_cap(candidates: list[str]) -> list[str]:
     dropped.
     """
     if len(candidates) > _MAX_CANDIDATES:
-        step = max(1, len(candidates) // _MAX_CANDIDATES)
-        return candidates[::step][:_MAX_CANDIDATES]
+        n = len(candidates)
+        return [candidates[i * n // _MAX_CANDIDATES] for i in range(_MAX_CANDIDATES)]
     return candidates
 
 

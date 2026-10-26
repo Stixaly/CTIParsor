@@ -355,6 +355,14 @@ def test_newest_versions_skips_what_is_not_an_object_with_a_string_id():
     assert bs.newest_versions([]) == {}
 
 
+def test_newest_versions_does_not_pick_a_copy_the_intake_refuses():
+    valid = {"type": "malware", "id": WELLMESS, "modified": "2026-03-01T00:00:00.000Z"}
+    refused = {"type": 5, "id": WELLMESS, "modified": "2026-03-10T00:00:00.000Z"}
+
+    assert bs.newest_versions([valid, refused]) == {WELLMESS: valid}
+    assert bs.newest_versions([refused, valid]) == {WELLMESS: valid}
+
+
 def test_a_verbatim_object_with_a_lone_surrogate_is_written_and_read_back_with_it():
     lone = chr(0xD800)
     actor = stix2.ThreatActor(name="APT29")

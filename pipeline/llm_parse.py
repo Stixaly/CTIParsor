@@ -81,7 +81,8 @@ def parse_numbered_claims(raw: str, count: int) -> dict[int, dict] | None:
                         result[int(n)] = item
 
                 # Return even if partial (some claims missing — handled by caller)
-                return result if result else None
+                if result:
+                    return result
 
             except json.JSONDecodeError:
                 continue

@@ -6,6 +6,8 @@ asserting that a duplicated corpus does not inflate coverage.
 """
 from uuid import uuid4
 
+import pytest
+
 from pipeline.detection.coverage import compute_for_job
 from pipeline.detection.dedup import dedupe_store
 from pipeline.detection.registry import corpus_root
@@ -125,6 +127,29 @@ def test_dedup_key_differs_for_different_logic():
     a = _parse(_SIGMAHQ, "sigmahq")
     c = _parse(_INDEPENDENT, "indie")
     assert a.dedup_key != c.dedup_key
+
+
+def _sigma_doc(value, modifier):
+    return {"title": "t", "logsource": {"product": "windows", "category": "process_creation"},
+            "detection": {"selection": {"CommandLine|" + modifier: value}, "condition": "selection"}}
+
+
+def test_dedup_key_keeps_the_case_of_re_and_cased_values():
+    """`|re` and `|cased` match on case: `Foo` and `foo` are different logic."""
+    for modifier in ("re", "cased"):
+        assert (SigmaAdapter._dedup_key(_sigma_doc("Foo.*bar", modifier))
+                != SigmaAdapter._dedup_key(_sigma_doc("foo.*bar", modifier)))
+
+
+def test_dedup_key_folds_the_case_of_a_case_insensitive_regex():
+    # `|re|i` is the regex flag for case-insensitive matching.
+    assert (SigmaAdapter._dedup_key(_sigma_doc("Foo.*bar", "re|i"))
+            == SigmaAdapter._dedup_key(_sigma_doc("foo.*bar", "re|i")))
+
+
+def test_dedup_key_still_folds_the_case_of_contains_values():
+    assert (SigmaAdapter._dedup_key(_sigma_doc("Foo", "contains"))
+            == SigmaAdapter._dedup_key(_sigma_doc("foo", "contains")))
 
 
 # ── dedupe_store election ─────────────────────────────────────────────────────
@@ -269,3 +294,10 @@ def test_corpus_root_applies_subdir(tmp_path):
     assert corpus_root({"path": str(tmp_path)}) == tmp_path
     assert corpus_root({"path": str(tmp_path), "subdir": "sigma"}) == tmp_path / "sigma"
     assert corpus_root({"path": str(tmp_path), "subdir": ""}) == tmp_path
+
+
+def test_corpus_root_refuses_a_missing_path():
+    """Path("") is the current directory: a corpus without `path` must not parse it."""
+    for corpus in ({}, {"path": None}, {"path": ""}):
+        with pytest.raises(ValueError, match="no path configured"):
+            corpus_root(corpus)

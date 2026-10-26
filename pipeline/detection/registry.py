@@ -36,7 +36,9 @@ def corpus_root(corpus: dict) -> Path:
     """Directory the adapter parses for one corpus: `path`, narrowed to `subdir`
     when set. `subdir` scopes a large clone to its rule subtree (e.g. hayabusa's
     `sigma/` Sigma-compatible subset) without re-cloning — ADR-0010."""
-    root = Path(corpus.get("path", ""))
+    root = Path(str(corpus.get("path") or ""))
+    if str(root) in ("", "."):
+        raise ValueError("no path configured")
     subdir = str(corpus.get("subdir") or "").strip()
     return root / subdir if subdir else root
 
@@ -125,7 +127,11 @@ def iter_rules(config_path: str | Path) -> Iterable[DetectionRule]:
         if adapter is None:
             logger.warning(f"[detection] corpus '{name}': unknown adapter '{corpus.get('adapter')}' — skipped")
             continue
-        root = corpus_root(corpus)
+        try:
+            root = corpus_root(corpus)
+        except ValueError as e:
+            logger.warning(f"[detection] corpus '{name}': {e} — skipped")
+            continue
         if not root.exists():
             logger.warning(f"[detection] corpus '{name}': path '{root}' missing — run sync_corpora first")
             continue

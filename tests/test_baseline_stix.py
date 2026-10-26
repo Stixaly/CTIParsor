@@ -1015,6 +1015,16 @@ def test_an_object_whose_id_is_no_uuid_is_excluded_with_a_reason():
     assert summary.counts["malware"] == 1
 
 
+def test_an_invalid_copy_of_an_id_leaves_out_only_itself_and_the_valid_copy_stays():
+    valid, invalid = _malware(1, "Valid"), {**_malware(1), "type": 7}
+    other = _malware(2, "Other")
+    link = _rel(3, "related-to", valid, other)
+    for copies in ([valid, invalid], [invalid, valid]):
+        index, summary, _ = _read(*copies, other, link)
+        assert _reasons(summary) == {valid["id"]: bs.INVALID}
+        assert index.imported_ids == {valid["id"], other["id"], link["id"]}
+
+
 def test_the_greatest_modified_of_two_versions_is_kept():
     older, newer = _malware(1, "Old name"), _malware(1, "New name", modified="2026-03-09T16:40:02.981Z")
     for pair in ([older, newer], [newer, older]):

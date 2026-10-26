@@ -273,6 +273,76 @@ def test_a_named_sdo_already_built_is_merged_not_duplicated():
     assert outcomes.count(("operation ghost", "merged")) == 1 and ("OPERATION GHOST", "merged") in outcomes
 
 
+def test_a_campaign_named_like_a_malware_is_its_own_object():
+    from pipeline.bundle_ledger import MappingLedger
+
+    ledger = MappingLedger()
+    bundle = s4.build_stix_bundle(
+        [], LLMEnrichmentResult(campaign_name="NotPetya", malware_families=["NotPetya"]),
+        "r", ledger=ledger, graph_completion=False)
+
+    (campaign,) = _objects(bundle, "campaign")
+    assert campaign.name == "NotPetya" and [m.name for m in _objects(bundle, "malware")] == ["NotPetya"]
+    (entry,) = [e for e in ledger.entities if e["entity_type"] == "campaign"]
+    assert entry["outcome"] == "emitted" and entry["stix_id"] == campaign.id
+
+
+def test_a_raw_campaign_whose_name_a_malware_took_is_still_the_one_campaign():
+    # The malware takes the bare key over from the raw Campaign: the LLM's campaign_name
+    # must still merge into it, not ship a second Campaign under the same id.
+    bundle = s4.build_stix_bundle(
+        [_e("NotPetya", EntityType.CAMPAIGN)],
+        LLMEnrichmentResult(campaign_name="NotPetya", malware_families=["NotPetya"]),
+        "r", graph_completion=False)
+
+    assert len(_objects(bundle, "campaign")) == 1 and len(_objects(bundle, "malware")) == 1
+
+
+def test_an_indicator_spells_the_ioc_as_the_report_does():
+    # The LLM lower-cased the path; the Indicator must match its SCO and the id verify_ioc_coverage expects.
+    entities = [_e("https://evil.example/Drop.exe", EntityType.URL)]
+    llm = LLMEnrichmentResult(
+        malware_families=["SUNBURST"],
+        ioc_associations=[IoCAssociation(ioc_value="https://evil.example/drop.exe", malware_name="SUNBURST")])
+    bundle = s4.build_stix_bundle(entities, llm, "r", graph_completion=False)
+
+    (indicator,) = _objects(bundle, "indicator")
+    assert "Drop.exe" in indicator.pattern and "drop.exe" not in indicator.pattern
+    assert s4.verify_ioc_coverage(entities, bundle)["ok"] is True
+
+
+@pytest.mark.parametrize("ioc_in_report,malware,reason", [
+    (True, "Ghost", "malware_not_in_bundle"),
+    (False, "SUNBURST", "ioc_not_in_bundle"),
+])
+def test_an_ioc_association_that_ships_nothing_is_in_the_ledger(ioc_in_report, malware, reason):
+    from pipeline.bundle_ledger import MappingLedger
+
+    ledger = MappingLedger()
+    entities = [_e("evil.example", EntityType.DOMAIN)] if ioc_in_report else []
+    llm = LLMEnrichmentResult(
+        malware_families=["SUNBURST"],
+        ioc_associations=[IoCAssociation(ioc_value="evil.example", malware_name=malware)])
+    s4.build_stix_bundle(entities, llm, "r", ledger=ledger, graph_completion=False)
+
+    (entry,) = [e for e in ledger.entities if e["value"] == "evil.example" and e["outcome"] == "dropped"]
+    assert entry["entity_type"] == "indicator" and entry["reason"] == reason
+
+
+def test_an_ioc_association_with_no_pattern_is_in_the_ledger(monkeypatch):
+    from pipeline.bundle_ledger import MappingLedger
+
+    monkeypatch.setattr(s4, "_build_stix_pattern", lambda ioc_value, sco: None)
+    ledger = MappingLedger()
+    llm = LLMEnrichmentResult(
+        malware_families=["SUNBURST"],
+        ioc_associations=[IoCAssociation(ioc_value="evil.example", malware_name="SUNBURST")])
+    s4.build_stix_bundle([_e("evil.example", EntityType.DOMAIN)], llm, "r", ledger=ledger, graph_completion=False)
+
+    (entry,) = [e for e in ledger.entities if e["value"] == "evil.example" and e["outcome"] == "dropped"]
+    assert entry["entity_type"] == "indicator" and entry["reason"] == "no_pattern"
+
+
 def test_one_ioc_indicating_two_families_is_one_indicator_with_two_edges():
     llm = LLMEnrichmentResult(
         malware_families=["SUNBURST", "TEARDROP"],

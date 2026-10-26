@@ -1427,6 +1427,7 @@ def _intake(raw: bytes, report_id: str | None, preview: bool,
         if _modified(obj) > _modified(known):
             objects[obj["id"]], older = obj, known
         excluded.append(_exclusion(older, OLDER_VERSION, "a version of this id modified later is in the bundle"))
+    excluded_ids.difference_update(objects)     # an invalid copy excludes its id only when no valid copy holds it
     excluded_ids.discard("")
 
     reports = [{"id": o["id"], "name": _clip(_text(o.get("name"))),
@@ -1929,7 +1930,7 @@ def newest_versions(items: Iterable[Any]) -> dict[str, dict]:
     (the latest `modified`, the first of a tie)."""
     out: dict[str, dict] = {}
     for obj in items:
-        if not isinstance(obj, dict) or not isinstance(obj.get("id"), str):
+        if not isinstance(obj, dict) or _id_problem(obj):
             continue
         known = out.get(obj["id"])
         if known is None or _modified(obj) > _modified(known):

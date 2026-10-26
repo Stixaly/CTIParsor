@@ -364,6 +364,21 @@ def test_a_nul_and_a_lone_surrogate_in_a_baseline_are_stored_and_read_back(clien
     assert _WARNING in caplog.text
 
 
+def test_a_baseline_with_a_byte_order_mark_is_stored_as_received_and_read_back(client, temp_db):
+    resp = _upload(client, b"\xef\xbb\xbf" + _fixture("opencti_report.json"))
+    assert resp.status_code == 200
+    job_id = resp.json()["job_id"]
+    assert _baseline_row(temp_db, job_id)["bundle_json"].startswith("\ufeff")
+    loaded = baseline_store.load_baseline(job_id)
+    assert loaded is not None and loaded[1]
+
+
+def test_objects_by_id_reads_a_stored_text_that_still_has_its_byte_order_mark():
+    text = _fixture("opencti_report.json").decode("utf-8")
+    objects = baseline_store.objects_by_id(text)
+    assert objects and baseline_store.objects_by_id("\ufeff" + text) == objects
+
+
 def test_a_baseline_that_is_not_text_is_a_400_not_a_500(client, temp_db):
     # A lone surrogate escape in the request's own JSON: the text it makes cannot be a file's content.
     body = rb'{"text": "%s", "baseline_bundle": "{\"type\": \"bundle\"} \ud800"}' % _REPORT.strip()
@@ -702,6 +717,7 @@ def test_a_job_the_queue_rejects_keeps_no_baseline(temp_db_client, temp_db, monk
     (failed,) = _rows(temp_db, "SELECT id, status, pipeline_mode FROM jobs WHERE id <> 'waiting'")
     assert (failed["status"], failed["pipeline_mode"]) == ("failed", "enrich")
     assert not _rows(temp_db, "SELECT job_id FROM job_baselines")
+    assert not list(uploads_dir().iterdir())
 
 
 # ── Reading several bundles at once ──────────────────────────────────────────

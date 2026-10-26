@@ -165,6 +165,25 @@ def test_a_round_trip_bundle_is_not_invalid(apt_round_trip):
     assert validate_bundle(second_json).status in ("validated", "unverified")
 
 
+def test_a_round_trip_ledgers_each_object_it_ships_from_the_baseline_as_the_baselines():
+    scenario = ref.load_scenario("apt_report")
+    first_json = baseline_stix.serialize_bundle(_build(scenario))
+    index, _, _ = baseline_stix.intake(first_json.encode(), validate=False)
+    assert index is not None
+    baseline = BaselineBuild(index=index, objects={o["id"]: o for o in json.loads(first_json)["objects"]})
+    ledger = MappingLedger()
+
+    bundle = _build(scenario, baseline, ledger=ledger)
+
+    shipped = {o.id for o in bundle.objects if hasattr(o, "id")}
+    kept = [oid for oid in baseline.objects if oid in shipped and oid != index.scope_report_id]
+    assert len(kept) > 1
+    led = ledger.to_dict()
+    assert {led["objects"][oid]["origin"] for oid in kept} == {"baseline"}
+    assert [e for e in led["entities"] if e.get("stix_id") in kept and e["outcome"] == "emitted"] == []
+    assert [r for r in led["relationships"] if r.get("stix_id") in kept and r["outcome"] == "emitted"] == []
+
+
 # ── 2. I2 on the OpenCTI fixture ─────────────────────────────────────────────
 
 @pytest.fixture(scope="module")

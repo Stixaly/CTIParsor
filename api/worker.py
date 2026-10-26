@@ -265,6 +265,10 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "",
     With a `reconciliation` (Stage 3r, enrich mode) every row carries its status
     against the analyst's baseline, and the baseline's own entities and
     relationships are stored too, pre-accepted (ADR-0090).
+
+    The job's rows are replaced, not added to: a job requeued after Stage 3
+    (lease expired, worker drained) runs again from Stage 1 and saves again.
+    Only a `processing` job reaches this, so no analyst decision is lost.
     """
     _covered_ids, _covered_parents = _ttp_ids_covered(llm_result)
 
@@ -437,27 +441,30 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "",
                      1.0, 1, None, None, None, BASELINE_STIX, None, item.status, item.baseline_stix_id, _now)
                     for item in reconciliation.imported_relations
                 ]
-            # ON CONFLICT DO NOTHING is the portable spelling of INSERT OR IGNORE
-            # (SQLite 3.24+ and PostgreSQL, ADR-0045).
-            conn.executemany(
-                "INSERT INTO entities "
-                "(id,job_id,value,entity_type,context,confidence,mitre_id,accepted,source,"
-                "evidence_text,evidence_label,evidence_start,evidence_end,held_reason,"
-                "enrichment_status,baseline_stix_id,decision_origin,decided_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
-                "ON CONFLICT (id) DO NOTHING",
-                _entity_rows,
-            )
-            conn.executemany(
-                "INSERT INTO relationships "
-                "(id,job_id,source_value,relationship_type,target_value,"
-                "confidence,accepted,evidence_text,evidence_label,times_json,"
-                "decision_origin,held_reason,enrichment_status,baseline_stix_id,decided_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
-                "ON CONFLICT (id) DO NOTHING",
-                _rel_rows,
-            )
-            conn.commit()
+            with transaction(conn):
+                # A job run again after Stage 3 rewrites its rows instead of doubling them.
+                conn.execute("DELETE FROM entities WHERE job_id=?", (job_id,))
+                conn.execute("DELETE FROM relationships WHERE job_id=?", (job_id,))
+                # ON CONFLICT DO NOTHING is the portable spelling of INSERT OR IGNORE
+                # (SQLite 3.24+ and PostgreSQL, ADR-0045).
+                conn.executemany(
+                    "INSERT INTO entities "
+                    "(id,job_id,value,entity_type,context,confidence,mitre_id,accepted,source,"
+                    "evidence_text,evidence_label,evidence_start,evidence_end,held_reason,"
+                    "enrichment_status,baseline_stix_id,decision_origin,decided_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT (id) DO NOTHING",
+                    _entity_rows,
+                )
+                conn.executemany(
+                    "INSERT INTO relationships "
+                    "(id,job_id,source_value,relationship_type,target_value,"
+                    "confidence,accepted,evidence_text,evidence_label,times_json,"
+                    "decision_origin,held_reason,enrichment_status,baseline_stix_id,decided_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT (id) DO NOTHING",
+                    _rel_rows,
+                )
 
 
 def _apply_auto_accept(job_id: str) -> None:
@@ -592,7 +599,8 @@ def _record_stage_report(job_id: str, stages: list[dict]) -> None:
         logger.warning(f"[run-config] stage report not recorded for job {job_id}: {exc}")
 
 
-def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
+def _run_pipeline(job_id: str, file_path: str, original_filename: str,
+                  owner_worker_id: str | None = None) -> None:
     """
     Run the full pipeline for a job (pipeline/orchestrator.py, ADR-0059) with
     the worker's hooks: timeout, lease, persistence, progress, crash-resume.
@@ -626,7 +634,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         # rather than RLIMIT_AS inside Python.
 
         set_job_status(job_id, "processing")
-        _owner_worker_id = _current_owner(job_id)
+        _owner_worker_id = owner_worker_id if owner_worker_id is not None else _current_owner(job_id)
 
         # A baseline (ADR-0090) was read without the JSON schemas, which take
         # seconds per thousand objects; they run here, once.  A bundle that
@@ -706,7 +714,8 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str) -> None:
         logger.info(f"[Worker] Subprocess finished for job {job_id}")
 
 
-def _subprocess_entry(job_id: str, file_path: str, original_filename: str) -> None:
+def _subprocess_entry(job_id: str, file_path: str, original_filename: str,
+                      owner_worker_id: str | None = None) -> None:
     """
     Entry point for the isolated worker subprocess.
 
@@ -729,7 +738,7 @@ def _subprocess_entry(job_id: str, file_path: str, original_filename: str) -> No
     # for batches of 1 (standard pipeline use case) to save ~200-400 MB.
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
-    _run_pipeline(job_id, file_path, original_filename)
+    _run_pipeline(job_id, file_path, original_filename, owner_worker_id)
 
 
 def _upload_path_for(job_id: str) -> str | None:
@@ -771,7 +780,7 @@ def _spawn_job(job_id: str, file_path: str, original_filename: str,
     ctx = mp.get_context("spawn")
     proc = ctx.Process(
         target=_subprocess_entry,
-        args=(job_id, file_path, original_filename),
+        args=(job_id, file_path, original_filename, owner_worker_id),
         daemon=True,
         name=f"pipeline-{job_id}",
     )
@@ -803,7 +812,8 @@ def _spawn_job(job_id: str, file_path: str, original_filename: str,
                         "error": (
                             f"Pipeline worker process terminated unexpectedly ({reason}). "
                             "The document may require more memory than is available. "
-                            "Try a smaller file, reduce WORKER_MAX_MEMORY_MB, or set "
+                            "Try a smaller file, lower WORKER_MAX_CONCURRENT or raise the container's "
+                            "memory limit, or set "
                             "SKIP_HEAVY_MODELS=1 to disable ML models and use regex-only extraction."
                         ),
                     })

@@ -440,6 +440,8 @@ def _read_absolute(s: str, order_hint: str | None) -> Reading | None:
                 sign = 1 if tz[0] == "+" else -1
                 digits = tz[1:].replace(":", "")
                 offset = timedelta(hours=int(digits[:2]), minutes=int(digits[2:4] or 0))
+                if offset >= timedelta(hours=24):
+                    return _unresolved("invalid_date", "instant")
                 dt = dt.replace(tzinfo=timezone(sign * offset))
         return Reading(value=dt.isoformat(), precision="instant")
     m = _R_ISO_DAY.match(s)
@@ -553,10 +555,16 @@ def _relative(s: str, anchor_day: date) -> Reading | None:
             if n is None:
                 return None
             if unit == "day":
-                d = anchor_day - timedelta(days=n)
+                try:
+                    d = anchor_day - timedelta(days=n)
+                except (OverflowError, ValueError):
+                    return _unresolved("implausible_year", "day")
                 return _day_value(d.year, d.month, d.day)
             if unit == "week":
-                d = anchor_day - timedelta(weeks=n)
+                try:
+                    d = anchor_day - timedelta(weeks=n)
+                except (OverflowError, ValueError):
+                    return _unresolved("implausible_year", "day")
                 r = _day_value(d.year, d.month, d.day)
                 r.qualifier = "approx"
                 return r
@@ -572,10 +580,15 @@ def _relative(s: str, anchor_day: date) -> Reading | None:
             if n is None:
                 return None
             if unit in ("day", "week"):
-                start = anchor_day - timedelta(days=n if unit == "day" else 7 * n)
+                try:
+                    start = anchor_day - timedelta(days=n if unit == "day" else 7 * n)
+                except (OverflowError, ValueError):
+                    return _unresolved("implausible_year", "day")
                 return Reading(value=f"{start.isoformat()}/{anchor_day.isoformat()}", precision="day")
             months = n if unit == "month" else 12 * n
             yy, mm = _shift_month(y, mo, -months)
+            if not _plausible(yy):
+                return _unresolved("implausible_year", "month")
             return Reading(value=f"{yy:04d}-{mm:02d}/{y:04d}-{mo:02d}", precision="month")
     m = _R_LAST_MONTHNAME.match(s) or _R_FR_MONTH_DERNIER.match(s)
     if m and _month(m.group(1)):

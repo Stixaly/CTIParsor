@@ -592,6 +592,7 @@ export default function Review() {
     // Cancel any pending auto-finalize — manual takes precedence and, unlike
     // the quick auto-finalize, completes the report.
     if (autoFinalizeTimer.current) clearTimeout(autoFinalizeTimer.current)
+    autoFinalizeTimer.current = null
     setFinalizing(true)
     try {
       await finalizeJob(jobId)   // full finalize: rebuilds the bundle and completes the report
@@ -680,6 +681,7 @@ export default function Review() {
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      if (e.ctrlKey || e.metaKey || e.altKey) return
       if (e.key === '?')                              { setKbdOpen(true); e.preventDefault() }
       else if (e.key === 'Escape')                    { setKbdOpen(false); setFocusedId(null); setDrawer(null) }
       else if (e.key === 'j' || e.key === 'ArrowDown') { goNextPending(1); e.preventDefault() }
@@ -706,6 +708,8 @@ export default function Review() {
   // On success, bundleStale resets to false → "✓ Bundle current".
 
   const triggerAutoFinalize = async () => {
+    // Fired: nothing is pending any more, so leaving the page rebuilds nothing.
+    autoFinalizeTimer.current = null
     if (!jobId) return
     setAutoFinalizing(true)
     try {
@@ -730,12 +734,16 @@ export default function Review() {
   }
 
   // Cancel all pending timers when the component unmounts to prevent calling
-  // setState after unmount (React 18 Strict Mode logs these as errors).
+  // setState after unmount (React 18 Strict Mode logs these as errors).  A
+  // pending bundle rebuild still runs on the way out, as useDebouncedFinalize does.
   useEffect(() => () => {
-    if (autoFinalizeTimer.current) clearTimeout(autoFinalizeTimer.current)
+    if (autoFinalizeTimer.current) {
+      clearTimeout(autoFinalizeTimer.current)
+      if (jobId) void finalizeJobQuick(jobId).catch(() => {})
+    }
     if (hoverTimerRef.current)     clearTimeout(hoverTimerRef.current)
     if (notInTextTimer.current)    clearTimeout(notInTextTimer.current)
-  }, [])
+  }, [jobId])
 
   // ── "not found verbatim" hint ─────────────────────────────────────────────
   // LLM-extracted entities (malware/actor/TTP/campaign names) are paraphrased

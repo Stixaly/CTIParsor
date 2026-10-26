@@ -207,16 +207,32 @@ def test_circl_answer_without_containers_is_an_empty_record(monkeypatch):
         "description": None, "cvss_score": None, "cvss_vector": None}
 
 
+def test_circl_404_is_an_absence(monkeypatch):
+    _circl(monkeypatch, module.urllib.error.HTTPError("https://cve.circl.lu", 404, "Not Found", None, None))
+    assert module._fetch_from_circl("CVE-2019-0001") is None
+
+
 @pytest.mark.parametrize("body,status", [
     ({"containers": {}}, 404),
-    (b"<html>not json</html>", 200),
     ([1, 2, 3], 200),
-    (module.urllib.error.URLError("unreachable"), 200),
-    (TimeoutError("timed out"), 200),
 ])
-def test_circl_failures_are_none(monkeypatch, body, status):
+def test_circl_answers_that_are_not_a_record_are_none(monkeypatch, body, status):
     _circl(monkeypatch, body, status)
     assert module._fetch_from_circl("CVE-2019-0001") is None
+
+
+@pytest.mark.parametrize("body", [
+    module.urllib.error.HTTPError("https://cve.circl.lu", 500, "Server Error", None, None),
+    module.urllib.error.URLError("unreachable"),
+    TimeoutError("timed out"),
+    module.http.client.IncompleteRead(b"partial"),
+    b"<html>not json</html>",
+    b"\xff",
+])
+def test_circl_outages_raise_circl_unavailable(monkeypatch, body):
+    _circl(monkeypatch, body)
+    with pytest.raises(module.CirclUnavailable):
+        module._fetch_from_circl("CVE-2019-0001")
 
 
 def test_an_invalid_id_never_reaches_circl(monkeypatch):
@@ -258,3 +274,19 @@ def test_enrich_cves_reads_and_fills_the_real_cache(temp_db, monkeypatch):
     second = module.enrich_cves({"CVE-2024-0001"})
 
     assert first == second == {"CVE-2024-0001": {"description": "x", "cvss_score": None, "cvss_vector": None}}
+
+
+def test_a_circl_outage_is_not_remembered_as_a_miss(temp_db, monkeypatch):
+    monkeypatch.setenv("CVE_ENRICHMENT", "1")
+    base = "https://cve.circl.lu/api/cve/"
+    down = _circl(monkeypatch, TimeoutError("timed out"))
+
+    assert module.enrich_cves({"CVE-2024-0001", "CVE-2024-0002"}) == {}
+    assert [u for u, _ in down] == [base + "CVE-2024-0001"]      # no further CVE is tried
+    assert module.get_cached({"CVE-2024-0001", "CVE-2024-0002"}) == ({}, set())
+
+    back = _circl(monkeypatch, {"containers": {"cna": {"descriptions": [{"lang": "en", "value": "x"}]}}})
+    result = module.enrich_cves({"CVE-2024-0001", "CVE-2024-0002"})
+
+    assert [u for u, _ in back] == [base + "CVE-2024-0001", base + "CVE-2024-0002"]
+    assert result["CVE-2024-0001"]["description"] == "x"

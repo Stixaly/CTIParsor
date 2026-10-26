@@ -63,6 +63,8 @@ Four view modes toggled at the top of the document pane:
 | `?` | Show shortcut help |
 | `Esc` | Close the help, the drawer, and clear the focus |
 
+A key pressed with Ctrl, Cmd or Alt held is ignored, so the browser's own shortcuts (Ctrl+C to copy, Ctrl+F to find) keep working. So are keys typed in a form field.
+
 **Entity states:**
 - **Pending** (default) — included in bundle
 - **Accepted** ✓ — explicitly confirmed, included

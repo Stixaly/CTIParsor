@@ -7,14 +7,14 @@ by the running app at `http://localhost:8000/docs`.
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/upload` | Upload a file (multipart `file=`) and queue it. Returns `{ job_id, filename, status }`, `status` being `queued` or `processing`; 503 when the queue is full. Optional `baseline_stix` (a file) and `baseline_report_id` (a form field): a STIX 2.1 bundle to enrich (below) |
-| `POST` | `/api/ingest/text` | Ingest pasted text (JSON `text`, optional `title`). Stored `.html`, `.md` or `.txt` by content — pasted markup is stripped, not ingested raw. 20 chars min, 2 MB max. Optional `baseline_bundle` (the TEXT of the STIX file) and `baseline_report_id` |
+| `POST` | `/api/upload` | Upload a file (multipart `file=`) and queue it. Returns `{ job_id, filename, status }`, `status` being `queued` or `processing`; 503 when the queue is full (the uploaded file is removed, and the job row stays, `failed`). Optional `baseline_stix` (a file) and `baseline_report_id` (a form field): a STIX 2.1 bundle to enrich (below) |
+| `POST` | `/api/ingest/text` | Ingest pasted text (JSON `text`, optional `title`). Stored `.html`, `.md` or `.txt` by content — pasted markup is stripped, not ingested raw. 20 chars min, 2 MB max; 400 for a text that holds a NUL character or one with no UTF-8 form (a lone surrogate), before anything is written. Optional `baseline_bundle` (the TEXT of the STIX file) and `baseline_report_id` |
 | `POST` | `/api/ingest/url` | Render a URL with headless Chromium (JSON `url`, optional `enable_js`). Writes `{job_id}.pdf` (archive, shown in Review) and `{job_id}.txt` (rendered DOM text, ingested). 400 policy refusal · 502 unreachable or blank render · 503 Playwright absent · 504 timeout. Optional `baseline_bundle` and `baseline_report_id`, checked before the capture |
 | `GET` | `/api/jobs` | List all jobs (with `pipeline_mode`) |
 | `GET` | `/api/jobs/{id}` | Get a single job (includes entity/relationship counts, `pipeline_mode`, and for an `enrich` job an `enrichment` block, below) |
 | `GET` | `/api/jobs/{id}/baseline` | The STIX bundle the job was created from, as received, as a JSON download. 404 for a job with none |
 | `GET` | `/api/jobs/{id}/baseline/intake` | What the intake made of that bundle, whole: every object left out and why. 404 for a job with none |
-| `PATCH` | `/api/jobs/{id}` | Update status. 409 for `completed` while the stored bundle is one Stage 5 refused (below) |
+| `PATCH` | `/api/jobs/{id}` | Update status: `for_review`, `reviewing`, `completed` or `failed`. 400 for any other value, `uploaded` and `processing` included: the server sets those. 409 for `completed` while the stored bundle is one Stage 5 refused (below) |
 | `DELETE` | `/api/jobs/{id}` | Delete job, all DB rows, and all associated files |
 | `POST` | `/api/jobs/{id}/finalize` | Re-run Stages 4–5 on the accepted rows and store the bundle; sets status `completed`. `?quick=true` rebuilds the bundle and leaves the status alone (the rebuild the UI schedules after each edit). Returns `{ status, bundle_size, validation }`, `validation` being `validated`, `unverified` or `unknown` (Stage 5 did not run). 409 when Stage 5 refuses the rebuilt bundle (below). Two finalizes of one job can overlap: a build never replaces a bundle built from newer rows (below) |
 | `GET` | `/api/jobs/{id}/bundle` | Download the STIX 2.1 bundle JSON. The header `X-Bundle-Validation` carries Stage 5's verdict: `validated`, `unverified` (the JSON schemas were missing) or `unknown` (built before the verdict was stored). 409 when Stage 5 refused the bundle (below) |
@@ -146,7 +146,7 @@ is empty until Stage 3r writes them. The bundle itself is not in the response.
 | `POST` | `/api/jobs/{id}/entities` | Create an entity manually |
 | `PATCH` | `/api/jobs/{id}/entities/{eid}` | Update (`accepted`, `entity_type`, `value`, `mitre_id`). 409 when it changes `entity_type`, `value` or `mitre_id` of a row imported from the analyst's STIX bundle (`enrichment_status` `baseline_in_text` or `baseline_only`): accept or reject it |
 | `DELETE` | `/api/jobs/{id}/entities/{eid}` | Remove. 409 for a row imported from the analyst's STIX bundle: reject it instead |
-| `POST` | `/api/jobs/{id}/entities/accept-pending` | Accept all NULL-state entities in one query |
+| `POST` | `/api/jobs/{id}/entities/accept-pending` | Accept all NULL-state entities in one query. 404 for an unknown job |
 | `POST` | `/api/jobs/{id}/entities/bulk` | Bulk accept / reject / reset entities by type (see below) |
 
 ### Bulk entity update
@@ -279,7 +279,7 @@ anything inference produces, so completion never contradicts an explicit choice.
 | `alias` | `false` | **Fallback** post-hoc merge of same-object SDOs, rewiring their edges onto one node. Off because [`pipeline/aliases.py`](../pipeline/aliases.py) (ADR-0012) already canonicalises MITRE-known aliases at SDO-creation time — this only adds value for names *absent from the gazetteer*, and it is the one destructive engine. Never merges IOC-shaped names. |
 | `reference` | `true` | Add MITRE-curated ATT&CK edges when both endpoints resolve to ATT&CK IDs. Labelled `reported` — expert fact, not inference. |
 | `transitive` | `true` | Compose two verified edges via a fixed rule table; a composition that is not a *suggested* STIX relationship is skipped. |
-| `long_distance` | `false` | Stage 4c — LLM predicts links between disconnected sub-graphs. Needs a ready LLM provider; the model must quote a supporting sentence. |
+| `long_distance` | `false` | Stage 4c — LLM predicts links between disconnected sub-graphs. Needs a ready LLM provider; the model must quote a supporting sentence, and the quote must be in the report. |
 | `fuzzy_alias` | `false` | Extend the alias merge with rapidfuzz name matching (ratio ≥ 93). |
 | `semantic_alias` | `false` | Extend the alias merge with embedding cosine ≥ 0.6, catching aliases with no character overlap ("the Dukes" ↔ "APT29"). No-ops under `SKIP_HEAVY_MODELS=1`. |
 | `max_new_edges` | `200` | Safety cap on edges added by grounding + inference. |
@@ -392,7 +392,7 @@ Manages the gitignored local overlay only — the committed registry is never ed
 | `GET` | `/api/settings/corpora` | List configured corpora (committed + overlay) with rule counts |
 | `GET` | `/api/settings/formats` | Lists known formats (union of compiled adapters and configured corpora) with `available`, corpus count, and rule count for each, ensuring corpora of uncompiled formats remain visible in the UI instead of disappearing |
 | `POST` | `/api/settings/corpora` | Add a corpus to the local overlay, accepting an `adapter` field (`sigma`, `suricata`, or `yara`); corpora with uncompiled adapters are accepted but marked `adapter_available: false` and contribute no rules until landed (ADR-0019) |
-| `DELETE` | `/api/settings/corpora/{name}` | Remove (or disable, if committed) a corpus |
+| `DELETE` | `/api/settings/corpora/{name}` | Remove (or disable, if committed) a corpus. 404 if the corpus is unknown |
 | `PATCH` | `/api/settings/corpora/{name}` | Enable or disable a corpus without losing its configuration (body: `{"enabled": bool}`), existing because deletion writes a disable for committed registry corpora with no UI reactivation path, as ADR-0015 delivered seven disabled corpora inaccessible without this endpoint; returns 404 if the corpus is unknown |
 | `POST` | `/api/settings/corpora/{name}/sync` | Clone/pull the git repository of a single public corpus and re-ingest the store, exposing the same network step as `scripts/sync_corpora.py` for the "Redownload" button, restricted to PUBLIC corpora so private git credentials never transit the application (ADR-0006), blocking until the git operation completes |
 | `POST` | `/api/settings/corpora/rebuild` | Re-ingest all enabled corpora from their local clones |

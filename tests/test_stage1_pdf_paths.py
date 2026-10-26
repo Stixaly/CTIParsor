@@ -179,6 +179,19 @@ def test_ocr_skips_a_batch_that_cannot_be_rasterised(monkeypatch, tmp_path, ocr)
     assert s1._read_pdf_ocr(tmp_path / "r.pdf") == "ocr p11 [eng]\nocr p12 [eng]"
 
 
+def test_one_page_that_tesseract_cannot_read_keeps_the_rest_of_the_scan(monkeypatch, tmp_path, ocr):
+    _pdfplumber(monkeypatch, [_Page("", image_share=1.0) for _ in range(3)])
+
+    def flaky(img, lang):
+        if img.label == "p2":
+            raise RuntimeError("tesseract crashed")
+        return f"ocr {img.label} [{lang}]"
+
+    monkeypatch.setattr(s1, "pytesseract", SimpleNamespace(image_to_string=flaky))
+    assert s1._read_pdf_ocr(tmp_path / "r.pdf") == "ocr p1 [eng]\nocr p3 [eng]"
+    assert _Image.closed == 3
+
+
 def test_ocr_of_a_pdf_that_cannot_be_opened_is_empty(monkeypatch, tmp_path, ocr):
     _pdfplumber(monkeypatch, fail=OSError("truncated"))
     assert s1._read_pdf_ocr(tmp_path / "r.pdf") == "" and ocr == []

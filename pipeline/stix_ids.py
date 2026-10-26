@@ -71,6 +71,7 @@ def attack_pattern_id(name: str, mitre_id: str | None = None) -> str:
     reference does not.  A CAPEC pattern is therefore identified by its name,
     in OpenCTI and here alike.
     """
+    mitre_id = (mitre_id or "").strip()
     if mitre_id and not mitre_id.strip().upper().startswith("CAPEC-"):
         return _gen("attack-pattern", {"x_mitre_id": _norm(mitre_id)})
     return _gen("attack-pattern", {"name": _norm(name)})
@@ -78,6 +79,7 @@ def attack_pattern_id(name: str, mitre_id: str | None = None) -> str:
 
 def course_of_action_id(name: str, mitre_id: str | None = None) -> str:
     """pycti CourseOfAction: the ATT&CK id when there is one, else the name."""
+    mitre_id = (mitre_id or "").strip()
     if mitre_id:
         return _gen("course-of-action", {"x_mitre_id": _norm(mitre_id)})
     return _gen("course-of-action", {"name": _norm(name)})

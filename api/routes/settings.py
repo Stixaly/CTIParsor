@@ -248,6 +248,8 @@ def create_corpus(body: CorpusIn):
 @router.delete("/corpora/{name}")
 def delete_corpus(name: str):
     """Remove a corpus from the local overlay."""
+    if not any(c.get("name") == name for c in merged_corpora(_CONFIG)):
+        raise HTTPException(404, f"unknown corpus '{name}'")
     remove_corpus(_CONFIG, name)
     return {"ok": True, "corpora": _with_counts()}
 

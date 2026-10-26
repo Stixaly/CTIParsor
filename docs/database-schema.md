@@ -244,7 +244,10 @@ CREATE TABLE relationship_policy (
 
 -- Stage 2f's CVE metadata, fetched from CIRCL when CVE_ENRICHMENT=true.  A row
 -- with NULL description AND NULL cvss_score is a remembered miss, so an
--- unknown CVE is not looked up again on every run.
+-- unknown CVE is not looked up again on every run.  Only a definite answer is
+-- remembered (CIRCL's 404, or a reply that is not a JSON object): a lookup that
+-- fails (timeout, connection error, 5xx, unreadable body) saves nothing, and the
+-- next run asks again.
 CREATE TABLE cve_cache (
     cve_id      TEXT PRIMARY KEY,
     description TEXT,

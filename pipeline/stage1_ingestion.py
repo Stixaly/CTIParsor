@@ -132,6 +132,18 @@ def _parse_pdf_date(raw: str | None) -> datetime | None:
 
 _DOCX_CORE_NS = {"dcterms": "http://purl.org/dc/terms/"}
 
+# A zip bomb inflates a few megabytes of XML into gigabytes.
+_MAX_DOCX_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
+
+
+def _check_docx_size(path: Path) -> None:
+    """Refuse a .docx whose members would inflate past _MAX_DOCX_UNCOMPRESSED_BYTES."""
+    with zipfile.ZipFile(path) as zf:
+        total = sum(info.file_size for info in zf.infolist())
+    if total > _MAX_DOCX_UNCOMPRESSED_BYTES:
+        raise ValueError(f"Document trop volumineux : {total} octets décompressés "
+                         f"(maximum {_MAX_DOCX_UNCOMPRESSED_BYTES})")
+
 
 def _docx_created_date(path: Path) -> datetime | None:
     """Read docProps/core.xml's dcterms:created straight out of the .docx zip.
@@ -143,6 +155,7 @@ def _docx_created_date(path: Path) -> datetime | None:
     with the creation timestamp in its own small XML part, independent of the
     body -- reading that part directly avoids the second full parse.
     """
+    _check_docx_size(path)
     with zipfile.ZipFile(path) as zf:
         try:
             data = zf.read("docProps/core.xml")
@@ -322,7 +335,11 @@ def _read_pdf_ocr(path: Path) -> str:
             logger.warning(f"OCR failed on pages {start}-{end} of {path.name}: {e}")
             continue
         try:
-            pages_text.extend(pytesseract.image_to_string(img, lang=ocr_lang()) for img in images)
+            for page, img in enumerate(images, start):
+                try:
+                    pages_text.append(pytesseract.image_to_string(img, lang=ocr_lang()))
+                except Exception as e:
+                    logger.warning(f"OCR failed on page {page} of {path.name}: {e}")
         finally:
             # Close all PIL images to free resources before the next batch
             for img in images:
@@ -526,6 +543,7 @@ def _read_docx(path: Path) -> str:
     line, its cells joined by " | "; a table nested in a cell is flattened into
     that cell's text.
     """
+    _check_docx_size(path)
     doc = docx.Document(str(path))
     lines: list[str] = []
     _docx_blocks(doc.element.body, doc, lines)

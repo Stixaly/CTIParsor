@@ -243,7 +243,8 @@ the [README](../README.md#how-it-works); this page is the detail.
 │  DFS components → central node per component (degree centrality) →   │
 │  topic node (global max degree) → ask the LLM for the relation.      │
 │  Same evidence bar as 3d: the model must QUOTE the supporting        │
-│  sentence (stored as x_evidence_text) — no quote ⟹ no edge.          │
+│  sentence, found in the report text (stored as x_evidence_text) —    │
+│  no quote, or one the report does not hold ⟹ no edge.                │
 │  Off unless policy completion.long_distance=true AND provider ready  │
 │  (so Stage 4 stays network-free by default).                         │
 └─────────────────────────────┬────────────────────────────────────────┘

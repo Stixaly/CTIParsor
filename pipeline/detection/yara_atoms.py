@@ -80,18 +80,20 @@ _S = f"[{PY_WHITESPACE}]"
 # line is the dominant YARA style, by 7:1 in Yara-Rules/rules (10,720 rules vs
 # 1,492). Requiring it on the `rule` line silently skipped whole files — peid.yar
 # alone holds 7,615 rules and yielded zero.
-# The tag group stays line-bound (`[^\{\n]*`): tags never wrap.
-# No two adjacent quantifiers share a character, so backtracking `re` (no re2)
-# stays linear on a long run of tabs: after the tags only a newline can start
-# the whitespace before the brace (the group took the rest of the line), and the
-# tags keep their surrounding blanks — the caller splits them.
+# The tags may wrap, as YARA allows (`rule X :` / `Trojan` / `{`, MALW_TrickBot.yar).
+# They are identifiers, like the name, so a `:` is never a tag: a header missing
+# its brace does not run into a following `rule X :` line.  The blanks before the
+# tags sit inside the group that needs a tag, so no run of tabs is split between
+# two quantifiers: `re` stays linear on it (test_linear_regexes.py).
 # The name reads Python's word characters (PY_NON_ASCII_WORD), not RE2's ASCII
 # `\w`: YARA refuses "rule café", and a rule that is found is refused with a
 # reason in the ledger, where one that is not found is silently gone.  The
 # lines inside a rule follow YARA's grammar, whose identifiers are ASCII.
+_IDENT = "[A-Za-z_][A-Za-z0-9_" + PY_NON_ASCII_WORD + "]*"
 _RE_RULE = compile_pattern(
-    r"(?m)^[ \t]*(?:(private|global)[ \t]+)*rule[ \t]+([A-Za-z_][A-Za-z0-9_" + PY_NON_ASCII_WORD + r"]*)"
-    r"(?:[ \t]*:([^\{\n]*)(?:\n" + _S + r"*)?|" + _S + r"*)\{"
+    r"(?m)^[ \t]*((?:(?:private|global)[ \t]+)*)rule[ \t]+(" + _IDENT + r")"
+    r"(?:[ \t]*:(?:" + _S + r"*(" + _IDENT + r"(?:" + _S + r"+" + _IDENT + r")*))?" + _S + r"*"
+    r"|" + _S + r"*)\{"
 )
 _RE_HASH = compile_pattern(r"^[0-9a-f]{32,128}$")
 _RE_IP = compile_pattern(r"^[0-9]{1,3}(\.[0-9]{1,3}){3}$")
@@ -130,10 +132,34 @@ class YaraRule:
 # Private helpers
 # ---------------------------------------------------------------------------
 
+def _regex_end(text: str, start: int) -> int:
+    """Index of the ``/`` closing the regex literal opened at ``start``, or ``-1``.
+
+    A regex opens at a ``/`` after ``=`` (blanks aside), as in `_find_rule_end`, and
+    closes at the first unescaped ``/`` on the same line.  A ``/`` followed by ``/``
+    or ``*`` is a comment, never a regex: YARA reads it so.
+    """
+    j = start - 1
+    while j >= 0 and text[j] in " \t":
+        j -= 1
+    if j < 0 or text[j] != "=" or text[start + 1:start + 2] in ("/", "*"):
+        return -1
+    n = len(text)
+    i = start + 1
+    while i < n and text[i] != "\n":
+        if text[i] == "/":
+            return i
+        if text[i] == "\\" and i + 1 < n and text[i + 1] != "\n":
+            i += 2
+        else:
+            i += 1
+    return -1
+
+
 def _strip_comments(text: str) -> str:
     """Replace ``//`` and ``/* */`` comments with spaces, preserving offsets.
 
-    Comments inside double-quoted strings are not stripped.
+    Comments inside double-quoted strings and regex literals are not stripped.
     """
     result: list[str] = []
     i = 0
@@ -155,6 +181,10 @@ def _strip_comments(text: str) -> str:
                 in_string = True
                 result.append(c)
                 i += 1
+            elif c == "/" and (end := _regex_end(text, i)) != -1:
+                # Copied as is: an escaped `\/` in a regex must not open a comment
+                result.append(text[i:end + 1])
+                i = end + 1
             elif c == "/" and i + 1 < n and text[i + 1] == "/":
                 # Line comment: skip to end of line
                 while i < n and text[i] != "\n":
@@ -486,18 +516,25 @@ def split_rules(text: str) -> list[YaraRule]:
     # Imports are file-level and apply to every rule in the file.
     imports = tuple(dict.fromkeys(_RE_IMPORT.findall(clean)))
     rules: list[YaraRule] = []
-    for m in _RE_RULE.finditer(clean):
+    headers = list(_RE_RULE.finditer(clean))
+    for k, m in enumerate(headers):
         # Determine is_private
         prefix = m.group(1)
-        is_private = prefix is not None and prefix.strip() == "private"
+        is_private = "private" in (prefix or "").split()
         name = m.group(2)
         tags_raw = m.group(3)
         tags = tags_raw.split() if tags_raw else []
         # Find the opening brace position
         brace_idx = m.end() - 1
-        end = _find_rule_end(clean, brace_idx)
+        # The closing brace comes before the next header: searching past it is
+        # quadratic when many headers never close.  The slice starts at the brace,
+        # not at 0: a copy of the whole text up to the header is quadratic too, even
+        # when every rule is closed.
+        limit = headers[k + 1].start() if k + 1 < len(headers) else len(clean)
+        end = _find_rule_end(clean[brace_idx:limit], 0)
         if end == -1:
             continue
+        end += brace_idx
         # Body from the original text: from the start of "rule" to end inclusive
         # m.start() is the start of the match (including leading whitespace)
         # We want to start from the "rule" keyword

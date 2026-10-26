@@ -14,10 +14,13 @@ from pathlib import Path
 
 import yaml
 
+from api.logging_config import get_logger
 from models.detection import DetectionRule, Severity
 from pipeline.detection.atoms import extract_atoms, rule_platform
 from pipeline.detection.base import RuleCorpusAdapter
 from pipeline.regex_safety import compile_pattern
+
+logger = get_logger(__name__)
 
 # Sigma technique tag → ATT&CK technique id, e.g. "attack.t1059.001" → "T1059.001"
 _TECHNIQUE_RE = compile_pattern(r"^attack\.t([0-9]{4}(?:\.[0-9]{3})?)$", re.IGNORECASE)
@@ -27,6 +30,8 @@ _GROUP_SOFTWARE_RE = compile_pattern(r"^[gs][0-9]{4}$", re.IGNORECASE)
 # like "defense_evasion", so the numeric ID form is skipped to avoid mixing the
 # two representations in one list.
 _TACTIC_ID_RE = compile_pattern(r"^ta[0-9]{4}$", re.IGNORECASE)
+# `|re` and `|cased` make the case of a value part of the match (see _canonicalize).
+_CASE_SENSITIVE_MODIFIERS = frozenset({"re", "cased"})
 
 _LEVEL_MAP = {
     "informational": Severity.INFORMATIONAL,
@@ -37,6 +42,15 @@ _LEVEL_MAP = {
 }
 
 _SIGMA_GLOBS = ("*.yml", "*.yaml")
+
+
+def _case_sensitive_key(key: object) -> bool:
+    """True when a field key such as `CommandLine|re` carries a case-sensitive modifier.
+    `|re|i` is a case-insensitive regex, so it folds like a plain value."""
+    modifiers = str(key).strip().lower().split("|")[1:]
+    if "i" in modifiers and "cased" not in modifiers:
+        return False
+    return not _CASE_SENSITIVE_MODIFIERS.isdisjoint(modifiers)
 
 
 class SigmaAdapter(RuleCorpusAdapter):
@@ -57,7 +71,11 @@ class SigmaAdapter(RuleCorpusAdapter):
             except (OSError, yaml.YAMLError):
                 continue  # unreadable / malformed file — skip, don't crash the build
             for doc in docs:
-                rule = self._to_rule(doc, text, path, corpus, license)
+                try:
+                    rule = self._to_rule(doc, text, path, corpus, license)
+                except Exception as e:  # noqa: BLE001 — one bad document must not stop the corpus
+                    logger.warning(f"[detection] sigma document in {path} skipped: {e}")
+                    continue
                 if rule is not None:
                     yield rule
 
@@ -86,6 +104,8 @@ class SigmaAdapter(RuleCorpusAdapter):
         dedup_key = SigmaAdapter._dedup_key(doc) or content_hash
 
         ls = doc.get("logsource") or {}
+        if not isinstance(ls, dict):
+            ls = {}
         data_sources = [
             v for v in (ls.get("category"), ls.get("product"), ls.get("service"))
             if isinstance(v, str) and v
@@ -136,25 +156,28 @@ class SigmaAdapter(RuleCorpusAdapter):
         if not detection:
             return ""
         payload = json.dumps({"logsource": logsource, "detection": detection},
-                             sort_keys=True, separators=(",", ":"))
+                             sort_keys=True, separators=(",", ":"), default=str)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     @staticmethod
-    def _canonicalize(node: object) -> object:
+    def _canonicalize(node: object, keep_case: bool = False) -> object:
         """Order-insensitive, case-folded normal form of a detection sub-tree.
 
         Sigma string matching is case-insensitive by default, and selection /
         list order is not semantically meaningful — so we lowercase scalars and
         keys and sort lists, making formatting-only differences hash-identical.
+        Values under a `|re` or `|cased` key keep their case: there it is part
+        of the match, so `Foo.*bar` and `foo.*bar` are different rules.
         """
         if isinstance(node, dict):
-            return {str(k).strip().lower(): SigmaAdapter._canonicalize(v)
+            return {str(k).strip().lower(): SigmaAdapter._canonicalize(
+                        v, keep_case or _case_sensitive_key(k))
                     for k, v in sorted(node.items(), key=lambda kv: str(kv[0]).lower())}
         if isinstance(node, list):
-            items = [SigmaAdapter._canonicalize(v) for v in node]
-            return sorted(items, key=lambda x: json.dumps(x, sort_keys=True))
+            items = [SigmaAdapter._canonicalize(v, keep_case) for v in node]
+            return sorted(items, key=lambda x: json.dumps(x, sort_keys=True, default=str))
         if isinstance(node, str):
-            return node.strip().lower()
+            return node.strip() if keep_case else node.strip().lower()
         return node
 
     @staticmethod

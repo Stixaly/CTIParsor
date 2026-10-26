@@ -76,6 +76,17 @@ def test_api_rejects_non_object_rules(temp_db_client):
         assert "rules[" in r.json()["detail"]
 
 
+@pytest.mark.parametrize("rule", [
+    {"src": ["malware"], "tgt": "malware", "verb": "uses"},
+    {"src": "malware", "tgt": {"type": "malware"}, "verb": "uses"},
+    {"src": "malware", "tgt": "malware", "verb": ["uses"]},
+])
+def test_api_answers_400_to_a_type_that_is_not_a_string(temp_db_client, rule):
+    r = temp_db_client.put("/api/relationship-policy", json={"version": 1, "global": "enforce", "rules": [rule]})
+    assert r.status_code == 400
+    assert "rules[0]" in r.json()["detail"]
+
+
 def test_api_still_accepts_a_valid_policy(temp_db_client):
     good = {"version": 1, "global": "enforce",
             "rules": [{"src": "threat-actor", "tgt": "malware",

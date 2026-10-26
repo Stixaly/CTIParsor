@@ -91,6 +91,10 @@ def test_bulk_on_an_unknown_job_is_a_404(temp_db_client, job):
     assert resp.status_code == 404
 
 
+def test_accept_pending_on_an_unknown_job_is_a_404(temp_db_client, job):
+    assert temp_db_client.post(_url("nope", "/accept-pending")).status_code == 404
+
+
 def test_bulk_reject_all_then_reset_all(temp_db_client, job):
     a = _create(temp_db_client, job, "A")["id"]
     _create(temp_db_client, job, "B")

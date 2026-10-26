@@ -9,6 +9,8 @@ import tarfile
 import urllib.error
 from pathlib import Path
 
+import pytest
+
 import pipeline.detection.sync as sync_mod
 from pipeline.detection.sync import (
     MANIFEST_NAME,
@@ -75,6 +77,14 @@ def test_git_command_clones_when_path_missing_and_pulls_when_present(tmp_path: P
 
     corpus_no_git = {"name": "test", "path": str(path)}
     assert git_command(corpus_no_git) is None
+
+
+def test_git_command_refuses_a_missing_path() -> None:
+    """Without `path`, `git -C .` would pull the repository this code runs from."""
+    for corpus in ({"name": "t", "git": "https://example.com/repo.git"},
+                   {"name": "t", "path": None, "git": "https://example.com/repo.git"}):
+        with pytest.raises(ValueError, match="no path configured"):
+            git_command(corpus)
 
 
 def test_git_is_locked_to_https_on_its_own_command_line(tmp_path: Path) -> None:
