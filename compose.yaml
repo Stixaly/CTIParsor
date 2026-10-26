@@ -453,7 +453,10 @@ services:
     networks:
       - frontend
     healthcheck:
-      test: ["CMD-SHELL", "echo > /dev/tcp/127.0.0.1/3128"]
+      # bash, not CMD-SHELL: that runs /bin/sh, which is dash in this image and
+      # has no /dev/tcp ("Directory nonexistent", exit 2), so the check failed
+      # on every run whether Squid was listening or not.
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/3128"]
       interval: 30s
       timeout: 5s
       start_period: 10s
