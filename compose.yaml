@@ -429,12 +429,14 @@ services:
   # Runs as the image's own `proxy` user (uid/gid 13) rather than root: with
   # `cap_drop: [ALL]` the entrypoint's usual setuid/setgid privilege-drop has
   # no capability to do it with and Squid aborts (measured) — starting
-  # already-unprivileged skips that step entirely. The ICMP pinger also loses
-  # its raw socket under `cap_drop: [ALL]` and logs a startup warning; harmless
-  # here, since nothing in this config defines a `cache_peer` for it to probe.
+  # already-unprivileged skips that step entirely. The ICMP pinger would lose
+  # its raw socket under `cap_drop: [ALL]`, so squid.conf turns it off. One
+  # "WARNING: no_suid: setuid(0): Operation not permitted" stays at startup:
+  # Squid tries to regain root before starting its log helper, and cannot.
   capture-proxy:
-    # 6.6 on Ubuntu 24.04 LTS: `latest` pointed at 25.04, end of life since
-    # January 2026 (audit B 8.2.6).  docker/squid/squid.conf parses on 6.6.
+    # 24.04 LTS: `latest` pointed at 25.04, end of life since January 2026
+    # (audit B 8.2.6).  Despite the `6.6` tag, this digest ships Squid 6.14
+    # (24.04 updates); docker/squid/squid.conf starts clean on it.
     image: ubuntu/squid:6.6-24.04_edge@sha256:8a3baed477e2c282ab8aa5edad442f69873246964f225c5c2ae8364b6610963c
     user: "13:13"
     read_only: true
