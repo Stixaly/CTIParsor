@@ -84,6 +84,10 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "The actor x targeted country/sector product and pinned policy rules no longer build a "
      "relationship the analyst rejected or one held for review (ADR-0013, amended)",
      "mapping"),
+    ("b7030d2", "2026-10-26",
+     "An IoC association no longer builds its Indicator's indicates edge to a malware when the analyst "
+     "rejected that relationship or it is held for review; the Indicator still ships (ADR-0013, amended)",
+     "mapping"),
 )
 
 
