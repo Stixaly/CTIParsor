@@ -885,6 +885,70 @@ such a Campaign, but it rarely reaches Stage 4 now); unlike before the audit, th
 drop is recorded, and the analyst's accept of the campaign row brings the
 Campaign back. Stage 4 is not changed.
 
+#### IoC associations no longer build a rejected or held relationship (ADR-0013, amended), 2026-10-26
+
+Stage 3 links IoCs to malware families in its JSON (`ioc_associations`), and
+Stage 4 builds each IoC's Indicator `indicates` that malware from the link. No
+review row stands for a link, and finalize reads them unfiltered: a rejected
+"185.220.101.5 indicates ZetaLoader" row, which lands on that IP's Indicator,
+came back from its association, and a held one shipped before anyone decided
+it.
+
+Each association now skips the edge a refused row names, with the same rules as
+the targets product and pinned rules (entry below). The rows that do not ship
+are resolved through each observable's Indicator, and the associations build
+those Indicators: so each association, once its Indicator is in place, resolves
+the refused rows that name its IoC. The Indicator and its `based-on` still ship:
+the analyst refused the link, not the IoC. The mapping ledger lists the skipped
+edge under `refused` with origin `ioc_association`, the IoC and the malware. A
+build with no rejection is unchanged. The `BUNDLE_AFFECTING` entry follows in a
+separate commit (scope `mapping`).
+
+#### The targets product and pinned rules no longer build a rejected or held relationship (ADR-0013, amended), 2026-10-26
+
+Stage 4 builds an edge from every threat actor to every country and sector the
+LLM lists as targeted, and a pinned policy rule builds one for every pair of
+its two types. Neither has a review row, and neither looked at the rows an
+analyst rejected: the product filtered rejected locations and sectors, not
+rejected relationships, so a rejected "APT29 targets France" came back from the
+LLM's lists, and a pinned rule could build a rejected row's edge too. A claim
+held for review (ADR-0082) shipped the same way before anyone decided it.
+
+Both now skip the triples graph completion skips (entry below): Stage 4
+resolves the rows that do not ship once, before the product, and the product,
+the pin pass and Stage 4b read the same set, with graph completion on or off.
+A country or sector named only by the LLM's list is found too, and a triple an
+accepted row also names is not refused (the job store can hold both). A refused
+pinned pair takes no `max_pinned_edges` budget. The mapping ledger lists each one
+under `refused` with the origin that would have built it (`targeted_location`,
+`policy_pin`), and every `refused` entry now carries that `origin`, the graph
+completion ones included. A build with no rejection is unchanged. IoC
+associations (`indicator indicates malware` from the LLM's JSON) are covered by
+the entry above. The `BUNDLE_AFFECTING` entry follows in a separate commit
+(scope `mapping`).
+
+#### Graph completion no longer adds back a rejected or held relationship (ADR-0013, amended), 2026-10-26
+
+Finalize gave Stage 4 only the relationships that ship, and Stage 4b skipped a
+triple only when it was already in the bundle. A relationship the analyst had
+rejected came back: two accepted edges "A uses B" and "B uses C" composed
+"A uses C" (`transitive:uses+uses`), and ATT&CK reference grounding re-added a
+rejected edge MITRE also states. A claim held for review (ADR-0082) shipped the
+same way before anyone decided it. Both engines are on by default.
+
+The maintainer decided that a rejection says the relationship is false for this
+report, and that a held claim waits for its analyst. Finalize now also reads the
+rows that do not ship (`decisions.WITHHELD`), Stage 4 resolves them as it
+resolves the rows that ship, and no engine adds their triples back: not the
+transitive step, not reference grounding, not long distance (which may not
+turn a rejected `related-to` around either). A pipeline run
+refuses Stage 3d's held claims the same way. The mapping ledger lists each
+refused edge under `refused`, with the rule it would have carried and the
+reason (`rejected_by_analyst`, `held_for_review`); a build with no rejection
+keeps its ledger unchanged. Other edges Stage 4 builds with no review row (the
+targeted-location product, pinned edges) are covered by the entry above. The
+`BUNDLE_AFFECTING` entry follows in a separate commit (scope `mapping`).
+
 #### A code audit's fixes: a web-capture range, a DOCX zip bomb, doubled rows after a requeue, lost detection rules, 2026-10-26
 
 A code audit read the repository by zone (worker and API, Stage 1 to 4, the

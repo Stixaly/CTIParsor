@@ -76,6 +76,18 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "source's type (analyst, gazetteer, LLM, then CyNER/spaCy; a campaign after all but the analyst's); "
      "the others are dropped as outranked_type",
      "mapping"),
+    ("468880d", "2026-10-26",
+     "Graph completion no longer adds back a relationship the analyst rejected or one held for review: "
+     "not by the transitive step, ATT&CK reference grounding or long distance (ADR-0013, amended)",
+     "mapping"),
+    ("58c5128", "2026-10-26",
+     "The actor x targeted country/sector product and pinned policy rules no longer build a "
+     "relationship the analyst rejected or one held for review (ADR-0013, amended)",
+     "mapping"),
+    ("b4792ae", "2026-10-26",
+     "An IoC association no longer builds its Indicator's indicates edge to a malware when the analyst "
+     "rejected that relationship or it is held for review; the Indicator still ships (ADR-0013, amended)",
+     "mapping"),
 )
 
 

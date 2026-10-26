@@ -25,7 +25,14 @@ from pipeline.detection.yara_check import DOES_NOT_COMPILE, prepare_embedded_rul
 from pipeline.network_traffic import parse_network_traffic
 from pipeline.regex_safety import PY_WHITESPACE, compile_pattern
 from pipeline.stage3_llm import LLMEnrichmentResult
-from pipeline.stage4b_graph_completion import CompletionStats, complete_graph, stated_by_the_report
+from pipeline.stage4b_graph_completion import (
+    REJECTED_BY_ANALYST,
+    CompletionStats,
+    RefusedRelationship,
+    both_directions,
+    complete_graph,
+    stated_by_the_report,
+)
 from pipeline.stix_access import field as _field
 from pipeline.stix_rel_spec import rel_is_allowed, rel_is_listed
 from pipeline.temporal import export_mode, export_plan, merge_times, temporal_identity
@@ -116,6 +123,10 @@ class PinStats:
     budget: int = 0
     mode: str = "fair-share"
     rules: list[PinRuleStat] = field(default_factory=list)
+    # Pairs a rule would have pinned and did not, an analyst having rejected
+    # that triple or holding it for review (ADR-0013, amendment 2026-10-26).
+    # For the mapping ledger; not in to_dict(), which ships in the bundle.
+    refused: list[dict] = field(default_factory=list)
 
     @property
     def total_candidates(self) -> int:
@@ -415,6 +426,20 @@ _EV_OBSERVED = {"x_evidence_label": "observed"}
 _EV_REPORTED = {"x_evidence_label": "reported"}
 
 
+@dataclass
+class _RowEdge:
+    """A relationship row as Stage 4 resolves it (`_resolve_row` in
+    build_stix_bundle): the edge it ships as, or `dropped` with the facts the
+    ledger records beside that reason."""
+
+    source: Any = None
+    rel_type: str = ""
+    target: Any = None
+    changes: list[dict] = field(default_factory=list)
+    dropped: str | None = None
+    info: dict = field(default_factory=dict)
+
+
 def _is_spurious_observable_ttp_edge(source, target) -> bool:
     """True for an observable-SCO ↔ attack-pattern edge (a type error the LLM
     sometimes emits).  STIX permits it as a custom relationship; this project
@@ -546,6 +571,7 @@ def build_stix_bundle(
     ledger: MappingLedger | None = None,
     document_anchor=None,
     baseline=None,
+    refused_relationships: list[RefusedRelationship] | None = None,
 ) -> stix2.Bundle:
     """
     Converts all extracted entities to STIX 2.1 objects and returns a Bundle.
@@ -617,6 +643,13 @@ def build_stix_bundle(
       baseline, when it has one, is re-issued as an upsert in place of a
       CTIParsor Report (its `verbatim` and `trusted` are filled).  Without it
       the bundle is the same as before.
+
+    refused_relationships — the relationship rows that do not ship: rejected
+      by an analyst, or held for review and not yet decided (ADR-0082).  Each
+      is resolved as a shipping row is, and none of their triples is built
+      back — not by the actor × targeted country/sector product, a pinned
+      rule, nor Stage 4b (ADR-0013, amendment 2026-10-26); the ledger's
+      `refused` lists what was not built.
 
     Relationship dates (ADR-0063 §7): each SRO carries every assertion in
     `x_temporal_assertions`; `start_time` / `stop_time` are set only where the
@@ -1033,6 +1066,211 @@ def build_stix_bundle(
         if rel is not None:
             led.object(rel, "ioc_based_on")
 
+    # --- Relationship rows: how each one resolves ---
+    # Defined before the IoC associations, which resolve the rows that do not
+    # ship as each Indicator is built (`_association_refused`, below); the
+    # relationship loop further down resolves every row through the same code.
+    # An end that names objects of several types (two of the LLM's lists, or a
+    # list and a technique or a raw entity) is resolved to the type the verb
+    # expects (stix_rel_spec.rel_is_allowed).  When several types remain
+    # possible, or none, the row is dropped as `ambiguous_name` rather than hung
+    # on whichever object was written last.
+    def _verb_fits(s, verb: str, t) -> bool:
+        # What the loop below does to the pair, so that "fits" means "the verb
+        # would ship as written".  The verb judged is the row's, not a policy
+        # pin: a pin is the operator's override of a pair already resolved.
+        if _is_spurious_observable_ttp_edge(s, t):
+            if verb != "indicates":
+                return False
+            if getattr(s, "type", "") == "attack-pattern":
+                s, t = t, s
+        s, t = _route_observables_through_indicators(s, verb, t, sco_id_to_indicator)
+        return (s is not None and t is not None
+                and rel_is_allowed(getattr(s, "type", ""), verb, getattr(t, "type", "")))
+
+    def _pick_by_verb(src_cands: dict, relationship_type: str, tgt_cands: dict):
+        if len(src_cands) == 1 and len(tgt_cands) == 1:
+            return next(iter(src_cands.values())), next(iter(tgt_cands.values()))
+        asked = relationship_type.strip().lower()
+        verb = asked if asked in VALID_REL_TYPES else "related-to"
+        fits = [(s, t) for s in src_cands.values() for t in tgt_cands.values()
+                if _verb_fits(s, verb, t)]
+        # An object paired with itself says nothing and is dropped below as a
+        # self-loop: it is a reading only when no other pair fits.
+        fits = [(s, t) for s, t in fits if s is not t] or fits[:1]
+        return fits[0] if len(fits) == 1 else (None, None)
+
+    def _targeted_candidates(value: str) -> dict:
+        key = value.lower()
+        obj = (name_to_stix.of_type(f"location:{key}", "location")
+               or name_to_stix.of_type(f"identity:{key}", "identity"))
+        return {} if obj is None else {_field(obj, "type"): obj}
+
+    def _resolve_row(rel, targeted: bool = False) -> _RowEdge:
+        """Where a relationship row lands: its endpoints and verb once resolved,
+        routed and checked, each rewrite in `changes`; or, when it cannot ship,
+        why (`dropped`) with the ledger facts that go with it.  The rows that
+        ship and the ones Stage 4 may not build back (ADR-0013, amendment
+        2026-10-26) go through it alike, so both name one triple.
+
+        `targeted` also finds a name only the targeted-country and -sector
+        lists put in the bundle (keyed `location:` / `identity:`, not by bare
+        name): a row that does not ship is matched against the targets product,
+        which builds edges to those objects."""
+        src_cands = name_to_stix.candidates(rel.source_value.lower())
+        tgt_cands = name_to_stix.candidates(rel.target_value.lower())
+        if targeted:
+            src_cands = src_cands or _targeted_candidates(rel.source_value)
+            tgt_cands = tgt_cands or _targeted_candidates(rel.target_value)
+
+        if not src_cands or not tgt_cands:
+            return _RowEdge(dropped="unresolved_both" if not src_cands and not tgt_cands
+                            else "unresolved_source" if not src_cands else "unresolved_target")
+
+        source, target = _pick_by_verb(src_cands, rel.relationship_type, tgt_cands)
+        if source is None:
+            return _RowEdge(dropped="ambiguous_name",
+                            info={"source_candidates": sorted(o.id for o in src_cands.values()),
+                                  "target_candidates": sorted(o.id for o in tgt_cands.values())})
+
+        # An edge from an object to itself says nothing.  It is not the LLM
+        # inventing one: `name_to_stix` resolves aliases, so two distinct
+        # surface forms in the same sentence collapse onto one id — measured on
+        # the stored bundles, "Sandworm" / "Sandworm Team" and an EXARAMEL alias
+        # pair produced `related-to` and `drops` edges onto themselves.  The
+        # `seen_rel_keys` dedup cannot catch these: each is a single edge, not a
+        # repeat.  `_pin_edge_key` and `_rewrite_refs` already refuse self-pairs;
+        # this is the path that did not.
+        if source.id == target.id:
+            return _RowEdge(dropped="self_loop", info={"stix_ref": source.id})
+
+        changes: list[dict] = []
+
+        # Precision guard: drop spurious observable-SCO ↔ attack-pattern edges
+        # (e.g. "domain communicates-with T1071.001") rather than emitting them
+        # as a noisy `related-to`.  See _is_spurious_observable_ttp_edge.
+        # `indicates` is the exception (ADR-0065): STIX lists `indicator
+        # indicates attack-pattern`, so the observable's Indicator states it —
+        # routed below like any observable opposite an SDO.  It used to be
+        # dropped too, so an analyst's accepted "IoC indicates technique" never
+        # shipped.  Written the other way round, the row is turned around.
+        if _is_spurious_observable_ttp_edge(source, target):
+            if rel.relationship_type.strip().lower() != "indicates":
+                return _RowEdge(dropped="observable_to_attack_pattern",
+                                info={"source_ref": source.id, "target_ref": target.id})
+            if getattr(source, "type", "") == "attack-pattern":
+                changes.append({"kind": "direction", "from": source.id, "to": target.id})
+                source, target = target, source
+
+        # Normalise and validate relationship type against the STIX 2.1 spec
+        asked = rel.relationship_type.strip().lower()
+        rel_type = asked
+        if rel_type not in VALID_REL_TYPES:
+            rel_type = "related-to"   # safe fallback for any LLM hallucination
+            changes.append({"kind": "verb", "from": asked, "to": rel_type,
+                            "reason": "unknown_verb"})
+
+        # ADR-0041, amended by ADR-0062: an observable opposite an SDO is
+        # replaced by its Indicator (or the edge is dropped) unless STIX lists
+        # the verb for the direct pair.  The verb judged is the one the direct
+        # edge would carry: the row's, or the policy's pin for that pair of
+        # types.  A routed edge then takes the policy of the pair it lands on.
+        orig_source, orig_target = source, target
+        source, target = _route_observables_through_indicators(
+            source, _apply_policy(rel_type, source, target, _pol_index), target,
+            sco_id_to_indicator,
+        )
+        if source is None or target is None:
+            benign_end = orig_source.id in benign_sco_ids or orig_target.id in benign_sco_ids
+            return _RowEdge(dropped="benign_observable" if benign_end else "no_indicator",
+                            info={"source_ref": orig_source.id, "target_ref": orig_target.id})
+        if source.id == target.id:
+            return _RowEdge(dropped="self_loop", info={"stix_ref": source.id})
+        if source.id != orig_source.id:
+            changes.append({"kind": "reroute", "end": "source",
+                            "from": orig_source.id, "to": source.id})
+        if target.id != orig_target.id:
+            changes.append({"kind": "reroute", "end": "target",
+                            "from": orig_target.id, "to": target.id})
+
+        # Apply relationship policy (may override the inferred verb)
+        if _pol_index:
+            before = rel_type
+            rel_type = _apply_policy(rel_type, source, target, _pol_index)
+            if rel_type != before:
+                changes.append({"kind": "verb", "from": before, "to": rel_type,
+                                "reason": "policy_pin"})
+
+        # STIX 2.1 best-practice: if the verb is not a *suggested* relationship
+        # for this (source-type → target-type) pair, fall back to the universal
+        # 'related-to' so the bundle stays within the spec's relationship model.
+        if not rel_is_allowed(getattr(source, "type", ""), rel_type, getattr(target, "type", "")):
+            changes.append({"kind": "verb", "from": rel_type, "to": "related-to",
+                            "reason": "not_suggested"})
+            rel_type = "related-to"
+
+        return _RowEdge(source, rel_type, target, changes)
+
+    def _forbidden_triples(refused, shipping) -> dict[tuple[str, str, str], str]:
+        """The triples the `refused` rows resolve to, a rejection outranking a
+        hold on one triple, with the reverse of each whose verb names no
+        direction.  A triple a row of `shipping` also names is not refused:
+        that row says it, and no row's decision outranks another's (the job
+        store can hold two rows with one triple).  Both are resolved
+        `targeted`, so a row whose end only the targeted lists name lets the
+        product build it."""
+        forbidden: dict[tuple[str, str, str], str] = {}
+        for row in refused:
+            edge = _resolve_row(row, targeted=True)
+            if edge.dropped is None:
+                key = (edge.source.id, edge.rel_type, edge.target.id)
+                if forbidden.get(key) != REJECTED_BY_ANALYST:
+                    forbidden[key] = row.reason
+        if forbidden:
+            forbidden = both_directions(forbidden)
+            for row in shipping:
+                edge = _resolve_row(row, targeted=True)
+                if edge.dropped is None:
+                    forbidden.pop((edge.source.id, edge.rel_type, edge.target.id), None)
+        return forbidden
+
+    def _refused_by_review(src, verb: str, tgt, origin: str,
+                           forbidden: dict[tuple[str, str, str], str], **info: Any) -> bool:
+        """True when the edge `_add_relationship` would build from these (the
+        policy's pin applied) is a `forbidden` triple the bundle does not
+        already have.  The ledger lists it under `refused` with `origin`."""
+        if not forbidden:
+            return False
+        key = _pin_edge_key(src, _apply_policy(verb, src, tgt, _pol_index), tgt)
+        if key is None or key not in forbidden or key in seen_rel_keys:
+            return False
+        led.refused_edge(key[0], key[1], key[2], origin=origin, reason=forbidden[key], **info)
+        return True
+
+    def _association_refused(sco, indicator, malware, assoc) -> bool:
+        """True when the `indicates` edge an IoC association would build from
+        `indicator`, the Indicator of `sco`, is the triple of a row that does
+        not ship (ADR-0013, amendment 2026-10-26).  `_forbidden` is computed
+        after the Indicators, since a row naming an observable resolves through
+        its Indicator; this runs while they are being built.  Only a row with
+        `sco` among an end's candidates can land on its Indicator, and its
+        Indicator exists now, so those rows resolve here as they will there."""
+        sco_id = getattr(sco, "id", None)
+        if not refused_relationships or sco_id is None:
+            return False
+
+        def names_it(row) -> bool:
+            return any(_field(obj, "id") == sco_id
+                       for value in (row.source_value, row.target_value)
+                       for obj in name_to_stix.candidates(value.lower()).values())
+
+        refused = [row for row in refused_relationships if names_it(row)]
+        if not refused:
+            return False
+        forbidden = _forbidden_triples(refused, (r for r in llm_result.relationships if names_it(r)))
+        return _refused_by_review(indicator, "indicates", malware, "ioc_association", forbidden,
+                                  ioc_value=assoc.ioc_value, malware_name=assoc.malware_name)
+
     # --- Indicator SDOs for IoCs linked to malware ---
     # Each ioc_association becomes: Indicator (pattern) --indicates--> Malware
     seen_indicators: set[str] = set()
@@ -1096,7 +1334,8 @@ def build_stix_bundle(
         if ioc_key in seen_indicators:
             # Indicator already created for this IoC — just add another indicates rel if needed
             existing_indicator = name_to_stix.of_type(f"indicator:{ioc_key}", "indicator")
-            if existing_indicator:
+            if existing_indicator and not _association_refused(sco, existing_indicator,
+                                                               malware, assoc):
                 rel = _add_relationship(
                     stix_objects, existing_indicator, "indicates", malware,
                     confidence=0.8, pol_index=_pol_index, seen=seen_rel_keys,
@@ -1139,12 +1378,15 @@ def build_stix_bundle(
             led.object(indicator, "ioc_indicator", ioc_value=assoc.ioc_value,
                        sco_id=getattr(sco, "id", None), valid_from_basis=ioc_valid_basis)
 
-            rel = _add_relationship(stix_objects, indicator, "indicates", malware, confidence=0.8,
-                                    pol_index=_pol_index, seen=seen_rel_keys,
-                                    custom=_EV_REPORTED)
-            if rel is not None:
-                led.object(rel, "ioc_association", ioc_value=assoc.ioc_value,
-                           malware_name=assoc.malware_name)
+            # A refused edge leaves the Indicator: the analyst refused the
+            # link to this malware, not the IoC, which its own row decides.
+            if not _association_refused(sco, indicator, malware, assoc):
+                rel = _add_relationship(stix_objects, indicator, "indicates", malware,
+                                        confidence=0.8, pol_index=_pol_index,
+                                        seen=seen_rel_keys, custom=_EV_REPORTED)
+                if rel is not None:
+                    led.object(rel, "ioc_association", ioc_value=assoc.ioc_value,
+                               malware_name=assoc.malware_name)
             _based_on(indicator, sco)
         except Exception as exc:
             logger.warning(f"[Stage 4] indicator not built for {assoc.ioc_value!r}: "
@@ -1244,35 +1486,7 @@ def build_stix_bundle(
             ledger=led, ledger_info=pattern_ledger_info(_status),
         )
 
-    # --- Targets SROs: threat actors → targets → locations and sectors ---
-    # Every actor × every targeted country/sector: the LLM's lists say what the
-    # report targets, not which actor targets it, so this is a product, and the
-    # ledger says so (origin "targeted_location", ADR-0061).
-    for actor_name in llm_result.threat_actors:
-        actor = name_to_stix.of_type(actor_name.lower(), "threat-actor")
-        if not actor:
-            continue
-        for country in llm_result.targeted_countries:
-            location = name_to_stix.of_type(f"location:{country.lower()}", "location")
-            if location:
-                rel = _add_relationship(stix_objects, actor, "targets", location,
-                                        pol_index=_pol_index, seen=seen_rel_keys,
-                                        custom=_EV_REPORTED)
-                if rel is not None:
-                    led.object(rel, "targeted_location", actor=actor_name, target=country)
-        for sector in llm_result.targeted_sectors:
-            identity = name_to_stix.of_type(f"identity:{sector.lower()}", "identity")
-            if identity:
-                rel = _add_relationship(stix_objects, actor, "targets", identity,
-                                        pol_index=_pol_index, seen=seen_rel_keys,
-                                        custom=_EV_REPORTED)
-                if rel is not None:
-                    led.object(rel, "targeted_location", actor=actor_name, target=sector)
-
-    # --- SROs — semantic relationships (deduplicated, spec-validated) ---
-    # Reuses the shared seen_rel_keys set so a semantic edge that duplicates a
-    # targets/indicates edge created above is also collapsed.
-    #
+    # --- Relationship rows: where each one lands ---
     # These are the job store's relationship rows.  Each one's fate — the SRO it
     # became and what was rewritten on the way, the edge it duplicates, or why
     # it is not in the bundle — goes to the ledger (ADR-0061): the review graph
@@ -1285,135 +1499,55 @@ def build_stix_bundle(
                 return o.id
         return None
 
-    # An end that names objects of several types (two of the LLM's lists, or a
-    # list and a technique or a raw entity) is resolved to the type the verb
-    # expects (stix_rel_spec.rel_is_allowed).  When several types remain
-    # possible, or none, the row is dropped as `ambiguous_name` rather than hung
-    # on whichever object was written last.
-    def _verb_fits(s, verb: str, t) -> bool:
-        # What the loop below does to the pair, so that "fits" means "the verb
-        # would ship as written".  The verb judged is the row's, not a policy
-        # pin: a pin is the operator's override of a pair already resolved.
-        if _is_spurious_observable_ttp_edge(s, t):
-            if verb != "indicates":
-                return False
-            if getattr(s, "type", "") == "attack-pattern":
-                s, t = t, s
-        s, t = _route_observables_through_indicators(s, verb, t, sco_id_to_indicator)
-        return (s is not None and t is not None
-                and rel_is_allowed(getattr(s, "type", ""), verb, getattr(t, "type", "")))
+    # A rejected relationship stays rejected, and a held one waits for its
+    # analyst (ADR-0013, amendment 2026-10-26): each row that does not ship is
+    # resolved as if it did, and none of the builders that have no row of
+    # their own — an IoC association (checked in its loop, above), the targets
+    # product, a pinned rule, graph completion — builds its triple, nor the
+    # reverse of one whose verb names no direction.
+    _forbidden = _forbidden_triples(refused_relationships or (), llm_result.relationships)
 
-    def _pick_by_verb(src_cands: dict, relationship_type: str, tgt_cands: dict):
-        if len(src_cands) == 1 and len(tgt_cands) == 1:
-            return next(iter(src_cands.values())), next(iter(tgt_cands.values()))
-        asked = relationship_type.strip().lower()
-        verb = asked if asked in VALID_REL_TYPES else "related-to"
-        fits = [(s, t) for s in src_cands.values() for t in tgt_cands.values()
-                if _verb_fits(s, verb, t)]
-        # An object paired with itself says nothing and is dropped below as a
-        # self-loop: it is a reading only when no other pair fits.
-        fits = [(s, t) for s, t in fits if s is not t] or fits[:1]
-        return fits[0] if len(fits) == 1 else (None, None)
+    # --- Targets SROs: threat actors → targets → locations and sectors ---
+    # Every actor × every targeted country/sector: the LLM's lists say what the
+    # report targets, not which actor targets it, so this is a product, and the
+    # ledger says so (origin "targeted_location", ADR-0061).
+    for actor_name in llm_result.threat_actors:
+        actor = name_to_stix.of_type(actor_name.lower(), "threat-actor")
+        if not actor:
+            continue
+        for country in llm_result.targeted_countries:
+            location = name_to_stix.of_type(f"location:{country.lower()}", "location")
+            if location:
+                if _refused_by_review(actor, "targets", location, "targeted_location", _forbidden,
+                                      actor=actor_name, target=country):
+                    continue
+                rel = _add_relationship(stix_objects, actor, "targets", location,
+                                        pol_index=_pol_index, seen=seen_rel_keys,
+                                        custom=_EV_REPORTED)
+                if rel is not None:
+                    led.object(rel, "targeted_location", actor=actor_name, target=country)
+        for sector in llm_result.targeted_sectors:
+            identity = name_to_stix.of_type(f"identity:{sector.lower()}", "identity")
+            if identity:
+                if _refused_by_review(actor, "targets", identity, "targeted_location", _forbidden,
+                                      actor=actor_name, target=sector):
+                    continue
+                rel = _add_relationship(stix_objects, actor, "targets", identity,
+                                        pol_index=_pol_index, seen=seen_rel_keys,
+                                        custom=_EV_REPORTED)
+                if rel is not None:
+                    led.object(rel, "targeted_location", actor=actor_name, target=sector)
 
+    # --- SROs — semantic relationships (deduplicated, spec-validated) ---
+    # Reuses the shared seen_rel_keys set so a semantic edge that duplicates a
+    # targets/indicates edge created above is also collapsed.
     for rel in llm_result.relationships:
-        src_cands = name_to_stix.candidates(rel.source_value.lower())
-        tgt_cands = name_to_stix.candidates(rel.target_value.lower())
-
-        if not src_cands or not tgt_cands:
-            led.relationship(
-                rel, "dropped",
-                reason="unresolved_both" if not src_cands and not tgt_cands
-                else "unresolved_source" if not src_cands else "unresolved_target",
-            )
+        row_edge = _resolve_row(rel)
+        if row_edge.dropped is not None:
+            led.relationship(rel, "dropped", reason=row_edge.dropped, **row_edge.info)
             continue
-
-        source, target = _pick_by_verb(src_cands, rel.relationship_type, tgt_cands)
-        if source is None:
-            led.relationship(rel, "dropped", reason="ambiguous_name",
-                             source_candidates=sorted(o.id for o in src_cands.values()),
-                             target_candidates=sorted(o.id for o in tgt_cands.values()))
-            continue
-
-        # An edge from an object to itself says nothing.  It is not the LLM
-        # inventing one: `name_to_stix` resolves aliases, so two distinct
-        # surface forms in the same sentence collapse onto one id — measured on
-        # the stored bundles, "Sandworm" / "Sandworm Team" and an EXARAMEL alias
-        # pair produced `related-to` and `drops` edges onto themselves.  The
-        # `seen_rel_keys` dedup cannot catch these: each is a single edge, not a
-        # repeat.  `_pin_edge_key` and `_rewrite_refs` already refuse self-pairs;
-        # this is the path that did not.
-        if source.id == target.id:
-            led.relationship(rel, "dropped", reason="self_loop", stix_ref=source.id)
-            continue
-
-        changes: list[dict] = []
-
-        # Precision guard: drop spurious observable-SCO ↔ attack-pattern edges
-        # (e.g. "domain communicates-with T1071.001") rather than emitting them
-        # as a noisy `related-to`.  See _is_spurious_observable_ttp_edge.
-        # `indicates` is the exception (ADR-0065): STIX lists `indicator
-        # indicates attack-pattern`, so the observable's Indicator states it —
-        # routed below like any observable opposite an SDO.  It used to be
-        # dropped too, so an analyst's accepted "IoC indicates technique" never
-        # shipped.  Written the other way round, the row is turned around.
-        if _is_spurious_observable_ttp_edge(source, target):
-            if rel.relationship_type.strip().lower() != "indicates":
-                led.relationship(rel, "dropped", reason="observable_to_attack_pattern",
-                                 source_ref=source.id, target_ref=target.id)
-                continue
-            if getattr(source, "type", "") == "attack-pattern":
-                changes.append({"kind": "direction", "from": source.id, "to": target.id})
-                source, target = target, source
-
-        # Normalise and validate relationship type against the STIX 2.1 spec
-        asked = rel.relationship_type.strip().lower()
-        rel_type = asked
-        if rel_type not in VALID_REL_TYPES:
-            rel_type = "related-to"   # safe fallback for any LLM hallucination
-            changes.append({"kind": "verb", "from": asked, "to": rel_type,
-                            "reason": "unknown_verb"})
-
-        # ADR-0041, amended by ADR-0062: an observable opposite an SDO is
-        # replaced by its Indicator (or the edge is dropped) unless STIX lists
-        # the verb for the direct pair.  The verb judged is the one the direct
-        # edge would carry: the row's, or the policy's pin for that pair of
-        # types.  A routed edge then takes the policy of the pair it lands on.
-        orig_source, orig_target = source, target
-        source, target = _route_observables_through_indicators(
-            source, _apply_policy(rel_type, source, target, _pol_index), target,
-            sco_id_to_indicator,
-        )
-        if source is None or target is None:
-            benign_end = orig_source.id in benign_sco_ids or orig_target.id in benign_sco_ids
-            led.relationship(rel, "dropped", reason="benign_observable" if benign_end else "no_indicator",
-                             source_ref=orig_source.id, target_ref=orig_target.id)
-            continue
-        if source.id == target.id:
-            led.relationship(rel, "dropped", reason="self_loop", stix_ref=source.id)
-            continue
-        if source.id != orig_source.id:
-            changes.append({"kind": "reroute", "end": "source",
-                            "from": orig_source.id, "to": source.id})
-        if target.id != orig_target.id:
-            changes.append({"kind": "reroute", "end": "target",
-                            "from": orig_target.id, "to": target.id})
-
-        # Apply relationship policy (may override the inferred verb)
-        if _pol_index:
-            before = rel_type
-            rel_type = _apply_policy(rel_type, source, target, _pol_index)
-            if rel_type != before:
-                changes.append({"kind": "verb", "from": before, "to": rel_type,
-                                "reason": "policy_pin"})
-
-        # STIX 2.1 best-practice: if the verb is not a *suggested* relationship
-        # for this (source-type → target-type) pair, fall back to the universal
-        # 'related-to' so the bundle stays within the spec's relationship model.
-        if not rel_is_allowed(getattr(source, "type", ""), rel_type, getattr(target, "type", "")):
-            changes.append({"kind": "verb", "from": rel_type, "to": "related-to",
-                            "reason": "not_suggested"})
-            rel_type = "related-to"
-
+        source, rel_type, target = row_edge.source, row_edge.rel_type, row_edge.target
+        changes = row_edge.changes
         rel_key = (source.id, rel_type, target.id)
 
         try:
@@ -1504,8 +1638,11 @@ def build_stix_bundle(
     # served: see _materialise_pinned_edges and ADR-0026.
     _pin_stats = _materialise_pinned_edges(
         stix_objects, relationship_policy, seen_rel_keys, report_text,
-        sco_id_to_indicator=sco_id_to_indicator,
+        sco_id_to_indicator=sco_id_to_indicator, forbidden=_forbidden,
     )
+    for _r in _pin_stats.refused:
+        led.refused_edge(_r["source_ref"], _r["relationship_type"], _r["target_ref"],
+                         origin="policy_pin", reason=_r["reason"], rule=_r["rule"])
 
     # --- Artifact SCO for the source document (ADR-0043) ---
     # Represents the original ingested file (PDF, DOCX, …) as a STIX 2.1
@@ -1546,11 +1683,13 @@ def build_stix_bundle(
     # B 8.4.2, 8.4.3).  Append-only + spec-guarded: see stage4b_graph_completion
     # and ADR-0013.  Governed by the policy "completion" block; pinned rules win.
     if graph_completion:
+        # No engine adds a forbidden triple back (see `_forbidden` above).
         _completion_stats = complete_graph(
             stix_objects,
             policy=relationship_policy,
             report_text=report_text,
             long_distance_infer=long_distance_infer,
+            forbidden=_forbidden,
         )
     else:
         # Turned off for this run (an ablation, ADR-0059): nothing added.
@@ -1562,6 +1701,7 @@ def build_stix_bundle(
                           _completion_stats.removed_relationships,
                           _completion_stats.remapped_relationships,
                           _completion_stats.merged_names)
+    led.refused_inferences(_completion_stats.refused)
 
     # --- Baseline merge (ADR-0090, lot 4) — only with a baseline ---
     # After 4b, so graph completion only ever saw CTIParsor's own objects.
@@ -2639,6 +2779,7 @@ def _materialise_pinned_edges(
     seen_rel_keys: set,
     report_text: str = "",
     sco_id_to_indicator: dict | None = None,
+    forbidden: dict[tuple[str, str, str], str] | None = None,
 ) -> PinStats:
     """Materialise policy-pinned edges under a per-rule budget (ADR-0026).
 
@@ -2663,6 +2804,12 @@ def _materialise_pinned_edges(
     direct unit tests (test_pin_evidence.py, test_pin_budget.py) call this
     function without an Indicator graph behind their fake objects and must see
     today's unchanged behaviour.
+
+    forbidden: (source_ref, relationship_type, target_ref) -> why that triple
+    does not ship (an analyst rejected it, or it is held for review; ADR-0013,
+    amendment 2026-10-26).  A pair the evidence gate lets through whose edge
+    key is one is not pinned, costs no budget, and is listed in
+    `PinStats.refused` (one the gate blocks stays counted as `blocked`).
     """
     # Guard: no policy, or the whole model is paused.
     if not relationship_policy or relationship_policy.get("global") == "auto":
@@ -2717,6 +2864,7 @@ def _materialise_pinned_edges(
     # time — spends budget on calls that dedup into no-ops.
     plans: list[tuple[str, dict, list[tuple], int]] = []
     claimed: set[tuple[str, str, str]] = set()
+    refused: list[dict] = []
 
     for _rule in relationship_policy.get("rules", []) or []:
         # The policy is operator-supplied JSON; a malformed entry here used to
@@ -2751,6 +2899,11 @@ def _materialise_pinned_edges(
                     if not ok:
                         blocked += 1
                         continue
+                reason = forbidden.get(key) if forbidden else None
+                if reason is not None:
+                    refused.append({"source_ref": key[0], "relationship_type": key[1],
+                                    "target_ref": key[2], "rule": label, "reason": reason})
+                    continue
                 claimed.add(key)
                 candidates.append((_s_obj, _verb, _t_obj, anchor))
 
@@ -2810,7 +2963,7 @@ def _materialise_pinned_edges(
                 label, emitted, candidates_count, _max_pinned, mode,
             )
 
-    return PinStats(budget=_max_pinned, mode=mode, rules=stats_rules)
+    return PinStats(budget=_max_pinned, mode=mode, rules=stats_rules, refused=refused)
 
 
 def _apply_policy(

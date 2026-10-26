@@ -471,12 +471,16 @@ def build_bundle(
     ledger=None,
     document_anchor=None,
     baseline=None,
+    refused_relationships=None,
 ):
     """Stage 4 (with the Stage 4c long-distance inferer it needs) — shared by
     a pipeline run and by finalize.  `cve_metadata` comes from lookup_cves().
     `ledger` is an optional MappingLedger Stage 4 fills (ADR-0061).
     `document_anchor` is the report's publication date and its source
-    (ADR-0063 §7), carried on the Report as `x_source_published`."""
+    (ADR-0063 §7), carried on the Report as `x_source_published`.
+    `refused_relationships` are the rows that do not ship (rejected, or held
+    for review), whose triples graph completion may not add back (ADR-0013,
+    amendment 2026-10-26)."""
     from pipeline.stage4_stix_mapping import build_stix_bundle
     from pipeline.stage4c_long_distance import default_long_distance_inferer
 
@@ -495,6 +499,7 @@ def build_bundle(
         ledger=ledger,
         document_anchor=document_anchor,
         baseline=baseline,
+        refused_relationships=refused_relationships,
     )
 
 
@@ -1110,6 +1115,7 @@ class _Run:
         from pipeline.baseline_stix import MATCHED, BaselineBuild
         from pipeline.bundle_ledger import MappingLedger
         from pipeline.named_entities import with_named_entities
+        from pipeline.stage4b_graph_completion import HELD_FOR_REVIEW, RefusedRelationship
         ledger = MappingLedger()
         # Enrich mode (ADR-0090 lot 4): the baseline is merged into Stage 4's
         # output.  Nothing is rejected at run time, so no exclusion; the rows
@@ -1122,6 +1128,11 @@ class _Run:
             r.baseline_build = build
             if r.reconciliation is not None:
                 entities = r.entities + r.reconciliation.in_text_entities()
+        # What Stage 3d could not decide does not ship, and graph completion
+        # may not add it back (ADR-0013, amendment 2026-10-26), as finalize
+        # refuses the job store's held rows.
+        held = [RefusedRelationship(h.source_value, h.relationship_type, h.target_value, HELD_FOR_REVIEW)
+                for h in r.llm_result.rel_review]
         # Stage 4 maps malware / actors / tools from the LLM's lists; the
         # gazetteer's and NER's names join them here, as the worker's
         # finalisation already did from the job store — the CLI dropped them
@@ -1153,6 +1164,7 @@ class _Run:
             ledger=ledger,
             document_anchor=r.anchor,
             baseline=build,
+            refused_relationships=held,
         )
         r.ledger = ledger.to_dict()
         n_objects = len(list(r.bundle.objects))

@@ -237,6 +237,34 @@ def test_cooccurrence_blocks_unlinked_pairs():
     assert stats.total_blocked == 1
 
 
+def test_a_forbidden_pair_is_refused_only_once_the_gate_lets_it_through():
+    """ADR-0013, amendment 2026-10-26: the gate judges first.  Both pairs are
+    forbidden; the unlinked one stays `blocked`, the linked one is refused,
+    and neither is a candidate."""
+    m1 = _Obj("malware", 1, name="ROOTSAW")
+    d1 = _Obj("domain-name", 1, name="evil.com")
+    d2 = _Obj("domain-name", 2, name="far.example")
+    policy = {
+        "pin_evidence": {"mode": "cooccurrence"},
+        "rules": [
+            {"src": "malware", "verb": "communicates-with", "tgt": "domain-name", "mode": "pin", "enabled": True}
+        ],
+    }
+    report_text = "ROOTSAW contacted evil.com today. " + ("Filler sentence here. " * 10) + "Then far.example appeared."
+    forbidden = {(m1.id, "communicates-with", d1.id): "rejected_by_analyst",
+                 (m1.id, "communicates-with", d2.id): "held_for_review"}
+
+    stix_objects = [m1, d1, d2]
+    stats = _materialise_pinned_edges(stix_objects, policy, set(), report_text, forbidden=forbidden)
+
+    [rule] = stats.rules
+    assert (rule.candidates, rule.emitted, rule.blocked) == (0, 0, 1)
+    assert stats.refused == [{"source_ref": m1.id, "relationship_type": "communicates-with",
+                              "target_ref": d1.id, "rule": "malware communicates-with domain-name",
+                              "reason": "rejected_by_analyst"}]
+    assert stix_objects == [m1, d1, d2]
+
+
 def test_attack_pattern_rule_is_not_gated():
     m1 = _Obj("malware", 1, name="ROOTSAW")
     m2 = _Obj("malware", 2, name="TRICKBOT")

@@ -456,3 +456,31 @@ def test_cli_policy_source(tmp_path, capsys):
     f = tmp_path / "policy.json"
     f.write_text(json.dumps({"global": "enforce", "rules": []}), encoding="utf-8")
     assert cli._ConsoleHooks(str(f)).policy() == {"global": "enforce", "rules": []}
+
+
+def test_a_run_refuses_a_held_claim_to_graph_completion(mock_llm, sample_cti_text):
+    """A claim Stage 3d held does not ship from the run's bundle either, even
+    when two edges that ship compose it (ADR-0013, amendment 2026-10-26)."""
+    from pipeline.stage3_llm import RelationshipExtracted, RelationshipReview
+
+    class HoldOne(Hooks):
+        def extraction_ready(self, entities, llm_result, text):
+            llm_result.threat_actors.append("Zeta Group")
+            llm_result.malware_families.extend(["ZetaRAT", "ZetaLoader"])
+            llm_result.relationships.extend([
+                RelationshipExtracted(source_value="Zeta Group", relationship_type="uses",
+                                      target_value="ZetaRAT", confidence=0.9),
+                RelationshipExtracted(source_value="ZetaRAT", relationship_type="uses",
+                                      target_value="ZetaLoader", confidence=0.9)])
+            llm_result.rel_review.append(RelationshipReview(
+                source_value="Zeta Group", relationship_type="uses", target_value="ZetaLoader",
+                confidence=0.8, reason="verification call failed"))
+
+    result = run_document(Document(text=sample_cti_text), _opts(), HoldOne())
+
+    names = {o.id: o.get("name") for o in result.bundle.objects}
+    assert ("Zeta Group", "ZetaLoader") not in {
+        (names.get(o.source_ref), names.get(o.target_ref))
+        for o in result.bundle.objects if o.type == "relationship"}
+    assert [(r["rule"], r["reason"]) for r in result.ledger["refused"]
+            if names.get(r["target_ref"]) == "ZetaLoader"] == [("transitive:uses+uses", "held_for_review")]

@@ -157,3 +157,10 @@ stage record says so.
 - Not measured on a live run. The LLM server was unreachable on 2026-10-10.
   The next dev run (docs/eval/baseline-2026-10.md, "Next" 1) records
   `rel_review`.
+
+## Amendment (2026-10-26): a held row does not ship as an inference either
+
+Graph completion could ship a held claim before anyone decided it: two edges
+that ship composed it back (ADR-0013, amendment 2026-10-26). A held row, like
+a rejected one, now keeps every completion engine from adding its triple.
+Finalize reads those rows with `decisions.WITHHELD`, beside `SHIPS`.

@@ -55,7 +55,8 @@ def _saved(db):
 
 def _held_rel(db, job):
     return db.get_conn().execute(
-        "SELECT * FROM relationships WHERE job_id=? AND target_value='ZeroLoader'", (job,)).fetchone()
+        "SELECT * FROM relationships WHERE job_id=? AND source_value='APT29' AND target_value='ZeroLoader'",
+        (job,)).fetchone()
 
 
 def _held_ttp(db, job):
@@ -120,6 +121,138 @@ def test_a_held_claim_ships_only_once_an_analyst_accepts_it(temp_db, temp_db_cli
     rid = _held_rel(temp_db, job)["id"]
     temp_db_client.patch(f"/api/jobs/{job}/relationships/{rid}", json={"accepted": True})
     assert ("APT29", "uses", "ZeroLoader") in _shipped_rels(temp_db, job)
+
+
+def test_graph_completion_ships_a_held_claim_neither_while_it_waits_nor_once_rejected(
+        temp_db, temp_db_client):
+    """APT29 uses WellMess and WellMess uses ZeroLoader compose into the held
+    claim APT29 uses ZeroLoader.  Graph completion shipped it while the card
+    waited, and again once rejected (ADR-0013, amendment 2026-10-26)."""
+    from api import worker
+
+    job = _job(temp_db)
+    result = _result()
+    result.relationships.append(RelationshipExtracted(
+        source_value="WellMess", relationship_type="uses", target_value="ZeroLoader",
+        confidence=0.9, evidence_text="WellMess loaded ZeroLoader."))
+    worker._save_entities(job, [], result, _TEXT)
+    claim = ("APT29", "uses", "ZeroLoader")
+
+    def refused_reasons():
+        row = temp_db.get_conn().execute(
+            "SELECT bundle_ledger_json FROM jobs WHERE id=?", (job,)).fetchone()
+        return [(r["rule"], r["reason"]) for r in json.loads(row["bundle_ledger_json"])["refused"]]
+
+    assert claim not in _shipped_rels(temp_db, job)
+    assert refused_reasons() == [("transitive:uses+uses", "held_for_review")]
+
+    rid = _held_rel(temp_db, job)["id"]
+    temp_db_client.patch(f"/api/jobs/{job}/relationships/{rid}", json={"accepted": False})
+    assert claim not in _shipped_rels(temp_db, job)
+    assert refused_reasons() == [("transitive:uses+uses", "rejected_by_analyst")]
+
+
+def test_the_targets_product_ships_a_held_claim_neither_while_it_waits_nor_once_rejected(
+        temp_db, temp_db_client):
+    """The LLM's lists name APT29 and France as targeted, and Stage 4 builds
+    every actor × country pair: it built the held claim "APT29 targets France"
+    while the card waited, and again once rejected (ADR-0013, amendment
+    2026-10-26).  France is no entity row, only a name in that list."""
+    from api import worker
+
+    job = _job(temp_db)
+    result = _result()
+    result.targeted_countries = ["France"]
+    result.rel_review.append(RelationshipReview(
+        source_value="APT29", relationship_type="targets", target_value="France",
+        confidence=0.8, evidence_text="APT29 targeted France.", reason="verification call failed"))
+    worker._save_entities(job, [], result, _TEXT)
+    with temp_db.get_conn() as conn:
+        conn.execute("UPDATE jobs SET llm_result_json=? WHERE id=?", (result.model_dump_json(), job))
+        conn.commit()
+    claim = ("APT29", "targets", "France")
+
+    def refused_reasons():
+        row = temp_db.get_conn().execute(
+            "SELECT bundle_ledger_json FROM jobs WHERE id=?", (job,)).fetchone()
+        return [(r["origin"], r["reason"]) for r in json.loads(row["bundle_ledger_json"])["refused"]]
+
+    assert claim not in _shipped_rels(temp_db, job)
+    assert refused_reasons() == [("targeted_location", "held_for_review")]
+
+    rid = temp_db.get_conn().execute(
+        "SELECT id FROM relationships WHERE job_id=? AND target_value='France'", (job,)).fetchone()["id"]
+    temp_db_client.patch(f"/api/jobs/{job}/relationships/{rid}", json={"accepted": False})
+    assert claim not in _shipped_rels(temp_db, job)
+    assert refused_reasons() == [("targeted_location", "rejected_by_analyst")]
+
+    temp_db_client.patch(f"/api/jobs/{job}/relationships/{rid}", json={"accepted": True})
+    assert claim in _shipped_rels(temp_db, job)
+
+
+def test_an_ioc_association_ships_a_held_claim_neither_while_it_waits_nor_once_rejected(
+        temp_db, temp_db_client):
+    """The LLM's JSON links 185.220.101.5 to WellMess, and Stage 4 builds the
+    IP's Indicator `indicates` WellMess from that link: the held claim
+    "185.220.101.5 indicates WellMess", which lands on that edge (ADR-0041),
+    shipped while the card waited, and again once rejected (ADR-0013,
+    amendment 2026-10-26).  The Indicator itself ships either way."""
+    from api import worker
+    from models.schemas import EntityType, RawEntity
+    from pipeline.stage3_llm import IoCAssociation
+
+    ip = "185.220.101.5"
+    job = _job(temp_db)
+    result = _result()
+    result.ioc_associations = [IoCAssociation(ioc_value=ip, malware_name="WellMess")]
+    result.rel_review.append(RelationshipReview(
+        source_value=ip, relationship_type="indicates", target_value="WellMess",
+        confidence=0.8, evidence_text="WellMess beaconed to 185.220.101.5.",
+        reason="verification call failed"))
+    worker._save_entities(job, [RawEntity(value=ip, entity_type=EntityType.IPV4)], result, _TEXT)
+    with temp_db.get_conn() as conn:
+        conn.execute("UPDATE jobs SET llm_result_json=? WHERE id=?", (result.model_dump_json(), job))
+        conn.commit()
+    claim = (f"Malicious IoC: {ip}", "indicates", "WellMess")
+
+    def refused_reasons():
+        row = temp_db.get_conn().execute(
+            "SELECT bundle_ledger_json FROM jobs WHERE id=?", (job,)).fetchone()
+        return [(r["origin"], r["reason"]) for r in json.loads(row["bundle_ledger_json"])["refused"]]
+
+    shipped = _shipped_rels(temp_db, job)
+    assert claim not in shipped
+    assert (f"Malicious IoC: {ip}", "based-on", ip) in shipped
+    assert refused_reasons() == [("ioc_association", "held_for_review")]
+
+    rid = temp_db.get_conn().execute(
+        "SELECT id FROM relationships WHERE job_id=? AND source_value=?", (job, ip)).fetchone()["id"]
+    temp_db_client.patch(f"/api/jobs/{job}/relationships/{rid}", json={"accepted": False})
+    assert claim not in _shipped_rels(temp_db, job)
+    assert refused_reasons() == [("ioc_association", "rejected_by_analyst")]
+
+    temp_db_client.patch(f"/api/jobs/{job}/relationships/{rid}", json={"accepted": True})
+    assert claim in _shipped_rels(temp_db, job)
+
+
+def test_every_row_either_ships_or_is_withheld(temp_db):
+    """WITHHELD is SHIPS' complement, written out: for a held row `NOT SHIPS`
+    is NULL, and graph completion would not see it."""
+    job = _saved(temp_db)
+    rid = _held_rel(temp_db, job)["id"]
+
+    def matches(predicate):
+        return rid in {r["id"] for r in temp_db.get_conn().execute(
+            f"SELECT id FROM relationships WHERE job_id=? AND {predicate}", (job,))}
+
+    for accepted, reason in ((None, "verification call failed"), (0, "verification call failed"),
+                             (1, "verification call failed"), (None, None), (0, None), (1, None)):
+        with temp_db.get_conn() as conn:
+            conn.execute("UPDATE relationships SET accepted=?, held_reason=? WHERE id=?",
+                         (accepted, reason, rid))
+            conn.commit()
+        withheld = accepted == 0 or (accepted is None and reason is not None)
+        assert (matches(decisions.SHIPS), matches(decisions.WITHHELD)) == (not withheld, withheld)
 
 
 def test_a_held_technique_is_outside_the_report_until_accepted(temp_db, temp_db_client):

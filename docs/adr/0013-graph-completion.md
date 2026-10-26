@@ -137,3 +137,178 @@ same way.
   and stay in the Report.
 - Measuring each transitive rule before it stays on by default waits for the
   in-house set's gold relationships.
+
+## Amendment (2026-10-26): a rejected relationship stays rejected
+
+The code audit of 2026-10-25 found that graph completion adds back a
+relationship an analyst rejected. Finalize hands Stage 4 only the rows that
+ship (`decisions.SHIPS`), and each engine skipped a triple only when it was
+already one of the bundle's edges; a rejected row is not. So "A uses B" and
+"B uses C", both accepted, composed the rejected "A uses C" back
+(`transitive:uses+uses`), and reference grounding re-added a rejected edge that
+MITRE also states. A row held for review (ADR-0082) shipped the same way, as an
+inference, before anyone had decided it. Both engines are on by default.
+
+Decided by the maintainer:
+
+- **A rejection says the relationship is false for this report**, not only that
+  its evidence is weak. No engine adds a rejected triple back: not transitive
+  inference, not reference grounding, not long distance. MITRE stating it does
+  not override the analyst, as an inferred verb does not override a pinned rule.
+- **A held row blocks its triple until an analyst decides it.** Accepted, it
+  ships as the row; rejected, the rule above applies. The bundle does not get
+  ahead of the review.
+- **How.** Finalize also reads the rows that do not ship, `decisions.WITHHELD`:
+  rejected, or pending with a `held_reason`. It is written out because
+  `NOT SHIPS` is NULL for a held row. Stage 4 resolves each of them as it
+  resolves a row that ships (`_resolve_row`: the name and its aliases, the
+  observable's Indicator, the policy pin, the fall back to `related-to`) and
+  gives `complete_graph` the triples as `forbidden`. A pipeline run does the
+  same with Stage 3d's `rel_review`. After an alias merge (step 1), a forbidden
+  triple follows the absorbed node onto the one kept. A refused edge takes none
+  of the `max_new_edges` budget.
+- **The match is the triple, verb included**: rejecting "A uses C" does not
+  forbid "A targets C". `related-to` and `duplicate-of` name no direction, so
+  rejecting "A related-to C" also forbids "C related-to A", the direction the
+  long-distance inferer may answer instead. A row whose endpoint resolves to no
+  object (its entity was rejected too) forbids nothing, since no edge can reach
+  that object.
+- **The mapping ledger** gains `refused`, present only when not empty, so a
+  build with no rejection keeps the ledger it had. One entry per triple and
+  rule: the two ids, the verb, the `x_inference_rule` the edge would have
+  carried, its premises for a transitive one, and the reason,
+  `rejected_by_analyst` or `held_for_review`. After a baseline merge
+  (ADR-0090) the ids follow the baseline objects that replaced them. An engine
+  that reaches `max_new_edges` stops there, so `refused` lists only the
+  candidates examined before the cap.
+
+Not covered here:
+
+- Other edges Stage 4 builds with no review row can recreate a rejected row's
+  triple too: the actor × targeted country and sector product
+  (`targeted_location`, inside the Report) and the policy-pinned edges, both
+  read in the code. IoC associations were not checked. *The product, the
+  pinned edges and the IoC associations are covered by the next amendment.*
+- A deleted row (`DELETE /relationships/{id}`, the Graph page's delete) leaves
+  no trace, so completion may add its triple back. Only a rejection holds.
+- The Graph page does not show `refused` yet.
+- The alias merge, off by default, rewires the rows that ship: an accepted
+  "apt-29 uses X" can land on a rejected "APT29 uses X". It adds no edge, so it
+  is not refused.
+- The measurement scripts that call `build_bundle` from stored rows
+  (`scripts/baseline_round_trip.py`, `rebuild_bundle_provenance.py`,
+  `measure_pin_allocation.py`) do not pass the refused rows yet, so on a job
+  with a rejection they can differ from finalize.
+
+Validation: `tests/test_stage4b_completion.py` (each engine, the held reason,
+the budget, an undirected verb, the alias merge, rows resolved through
+`build_stix_bundle`, through an observable's Indicator, a rejection over a hold,
+a row that resolves to nothing), `tests/test_held_for_review.py` (finalize while
+a claim is held, then once it is rejected; `SHIPS` and `WITHHELD` split every
+row), `tests/test_orchestrator.py` (a run refuses Stage 3d's held claim) and
+`tests/test_bundle_ledger.py` (`refused` after a baseline merge). Each fails
+with its part of the change disabled, except the two that check what must not
+change (a row that resolves to nothing, the split of the rows).
+
+## Amendment (2026-10-26, continued): the targets product, pinned edges and IoC associations
+
+The amendment above kept graph completion from building a rejected or held
+row's triple, and left out two other Stage 4 builders that make edges with no
+review row of their own. The actor × targeted country and sector product
+(origin `targeted_location`, inside the Report) filtered rejected location and
+identity *entities*, not rejected rows: a rejected "APT29 targets France" was
+built again from the LLM's lists, and a held one shipped before anyone decided
+it. A policy-pinned rule (ADR-0024, ADR-0026) materialised the triple of a
+rejected row the same way, since it pins every pair of its two types.
+
+Decided by the maintainer: the same rule, with the same triples.
+
+- **One set of forbidden triples.** Stage 4 resolves the rows that do not ship
+  once, before the targets product, adds the reverse of each triple whose verb
+  names no direction (`related-to`, `duplicate-of`), and the product, the pin
+  pass and `complete_graph` all read that set. It is built whether or not
+  graph completion runs: `graph_completion=False` (an ablation, ADR-0059)
+  turns Stage 4b off, not the analyst's decision.
+- **A row that ships wins over a refused row with the same triple.** The job
+  store can hold two rows with one triple (an analyst adds the edge again after
+  rejecting it); the accepted one ships as a row anyway, and no row's decision
+  outranks another's. Such a triple is taken out of the set, so neither the
+  product nor a pinned rule refuses it, and the ledger does not list as
+  refused an edge that ships.
+- **The edge each builder would make.** The product compares the edge
+  `_add_relationship` would build (the policy pin applied, the fall back to
+  `related-to`), and the pin pass the key `_pin_edge_key` gives, after routing
+  through an Indicator and after the evidence gate (ADR-0027). A refused pair
+  takes none of the `max_pinned_edges` budget and is not one of the rule's
+  candidates in `x_synthesis_stats.pin`, which keeps its shape; a pair the
+  gate blocks is still counted `blocked`. A rule whose every pair is refused
+  therefore drops out of `x_synthesis_stats.pin.rules`, as a rule that matched
+  nothing does; the ledger lists its refusals.
+- **A targeted country or sector is found by its list's key.** Stage 4 keys
+  the objects it makes from the targeted lists `location:<name>` and
+  `identity:<name>`, not by bare name (only an NER entity of the same name has
+  one). When a bare name finds nothing, a row that does not ship is also looked
+  up under those keys, so "France", named only by the LLM's targeted-country
+  list, is the Location the product targets. The rows that ship are looked up
+  the same way for the rule above; in the relationship loop they resolve as
+  before.
+- **The ledger.** Each refusal joins `refused`, which now names on every entry
+  the `origin` the edge would have had: `targeted_location`, `policy_pin`, or
+  `completion_reference` / `completion_transitive` / `completion_long_distance`
+  for the engines' refusals of the amendment above. A pinned edge's entry
+  carries its `rule` (the `x_policy_rule` it would have carried), the
+  product's carries `actor` and `target` as the lists name them. One entry per
+  triple, origin and rule. These refusals are recorded before Stage 4b's alias
+  merge; their ids follow it as they follow a baseline merge, and two entries a
+  merge makes one keep the first.
+
+Covered by a second change the same day:
+
+- **IoC associations.** Each one (`ioc_associations` from the LLM's JSON,
+  origin `ioc_association`) builds `indicator indicates malware` with no review
+  row; finalize reads them from the stored LLM result, unfiltered. That is the
+  triple a rejected "185.220.101.5 indicates ZetaLoader" row resolves to, once
+  routed through the IP's Indicator (ADR-0041). The associations run before
+  the forbidden set exists: that set needs every observable's Indicator, and
+  the associations build the first ones. So each association, once the
+  Indicator it builds or finds is in place, resolves the refused rows that
+  name its IoC (only those can land on that Indicator) with the same rules
+  as the set: a rejection outranks a hold, an undirected verb is refused both
+  ways, a triple an accepted row names is not refused, and the edge compared
+  is the one `_add_relationship` would build, the policy's pin applied. The
+  Indicator and its `based-on` stay: the analyst refused the link to that
+  malware, not the IoC, which its own entity row decides (without the
+  association, the pass over the remaining IoCs would build an Indicator with
+  the same id). The ledger entry carries `ioc_value` and `malware_name` as
+  the association names them. As for the other builders, only that triple
+  is refused: a rejected "185.220.101.5 communicates-with ZetaLoader", or
+  "ZetaLoader indicates 185.220.101.5" (which resolves to `related-to`),
+  leaves the association's `indicates`.
+
+Not covered, because no refused row can name the triple: a detection rule
+quoted in the report (ADR-0042) links its own Indicator to a malware or tool
+its title names, and no row resolves to a rule's Indicator.
+
+A build with no rejection is unchanged: the forbidden set is empty and the
+builders go on as before (`tests/test_stage4_reference.py` does not move).
+
+Validation: `tests/test_stage4_refusals.py` (a rejected and a held row against
+the product, with France from the list alone and from NER too, with graph
+completion off, a country the list names twice, an accepted row with the same
+triple, a policy that rewrites `targets`; against a pinned rule, the pin
+budget and the synthesis stats, a verb the rule rewrites, an undirected verb),
+`tests/test_pin_evidence.py` (the gate judges before the refusal),
+`tests/test_held_for_review.py` (finalize: the product does not ship a held
+claim, nor once rejected, and ships it once accepted) and
+`tests/test_bundle_ledger.py` (one entry per triple, origin and rule; the
+alias merge; `origin` on an engine's refusal). Each fails with its part of the
+change disabled, except the one that checks what must not change (every pair
+built when nothing is refused). For IoC associations,
+`tests/test_stage4_refusals.py` (a rejected and a held row against the link
+that builds the Indicator and one that finds it built, a second IoC linked to
+the same malware, an accepted row with the same triple, a policy that rewrites
+`indicates`, an undirected verb refused the other way round) and
+`tests/test_held_for_review.py` (finalize: neither held nor rejected, the
+Indicator shipping either way, then accepted); each fails with the check
+disabled, except the one with nothing refused and the one with an accepted
+row, which fails when that row does not lift the refusal.
