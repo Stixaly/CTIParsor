@@ -915,6 +915,17 @@ also sets `pinger_enable off`: under `cap_drop: [ALL]` the ICMP pinger had no
 raw socket and logged `FATAL: Unable to open any ICMP sockets` at every start.
 What the proxy lets through is unchanged.
 
+#### The capture proxy no longer reports `unhealthy` while it works, 2026-10-27
+
+`capture-proxy`'s health check ran `echo > /dev/tcp/127.0.0.1/3128` as
+`CMD-SHELL`, that is through `/bin/sh`, which is dash in the Squid image. Dash
+has no `/dev/tcp`, so the check exited 2 ("Directory nonexistent") on every run
+since the proxy was added (2026-09-19), and `docker ps` showed the proxy
+`unhealthy` while it served requests. The check now runs the same line through
+`bash`: healthy at the first check, and it still fails against a closed port.
+Nothing waited on that status (`app` depends on the proxy with
+`service_started`).
+
 #### Stages 1 and 3r can no longer be "disabled" to no effect, 2026-10-26
 
 `PIPELINE_DISABLED_STAGES`, the CLI's `--disable-stage` and `RunOptions(disabled=…)`
