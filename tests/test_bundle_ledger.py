@@ -468,4 +468,27 @@ def test_a_refused_edge_follows_the_baseline_object_that_replaced_its_end():
         remapped_relationships={}, dropped={}))
     assert led.to_dict()["refused"] == [{"source_ref": "intrusion-set--baseline", "relationship_type": "uses",
                                          "target_ref": "malware--c", "rule": "transitive:uses+uses",
+                                         "origin": "completion_transitive",
                                          "reason": "rejected_by_analyst"}]
+
+
+def test_an_edge_stage4_did_not_build_is_listed_once_and_follows_the_alias_merge():
+    """The targets product and pinned rules refuse before Stage 4b merges
+    aliases: the entry follows the absorbed actor onto the one it became, and
+    two entries the merge makes one keep the first."""
+    led = MappingLedger()
+    for target in ("France", "france"):
+        led.refused_edge("threat-actor--dup", "targets", "location--fr", origin="targeted_location",
+                         reason="held_for_review", actor="APT29", target=target)
+    led.refused_edge("malware--m", "uses", "attack-pattern--p", origin="policy_pin",
+                     reason="rejected_by_analyst", rule="malware uses attack-pattern")
+    led.refused_edge("threat-actor--canon", "targets", "location--fr", origin="targeted_location",
+                     reason="rejected_by_analyst", actor="Cozy Bear", target="France")
+    led.apply_alias_merge({"threat-actor--dup": "threat-actor--canon"}, [], {})
+
+    assert led.to_dict()["refused"] == [
+        {"source_ref": "threat-actor--canon", "relationship_type": "targets", "target_ref": "location--fr",
+         "origin": "targeted_location", "reason": "held_for_review", "actor": "APT29", "target": "France"},
+        {"source_ref": "malware--m", "relationship_type": "uses", "target_ref": "attack-pattern--p",
+         "origin": "policy_pin", "reason": "rejected_by_analyst", "rule": "malware uses attack-pattern"},
+    ]

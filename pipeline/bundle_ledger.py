@@ -25,13 +25,16 @@ Shape of `to_dict()` (version 1):
                      not shipped: absorbed by an alias merge, a baseline
                      object left out (kind "baseline"), or a detection
                      rule that does not compile
-    refused        [{source_ref, relationship_type, target_ref, rule, reason,
-                     inferred_from?}]   only when not empty: an edge graph
-                     completion would have added (`rule` is the
-                     x_inference_rule it would have carried) and did not,
+    refused        [{source_ref, relationship_type, target_ref, origin, reason,
+                     rule?, inferred_from?, actor?, target?}]   only when not
+                     empty: an edge Stage 4 would have built and did not,
                      because a row with that triple was rejected
                      ("rejected_by_analyst") or is held for review
-                     ("held_for_review"); ADR-0013, amendment 2026-10-26
+                     ("held_for_review"); ADR-0013, amendment 2026-10-26.
+                     `origin` is the one the edge would have had in
+                     `objects` ("targeted_location", "policy_pin",
+                     "completion_*"); `rule` the x_policy_rule or
+                     x_inference_rule it would have carried
 
 Outcomes: "emitted" (this input produced the object), "merged" (it resolved to
 an object or edge that already existed — `stix_id` / `merged_with` names it),
@@ -50,8 +53,7 @@ LEDGER_VERSION = 1
 ORIGIN_EXTRACTED = "extracted"          # a relationships row (LLM or analyst)
 
 
-def _rel_origin_from_props(rel: Any) -> str:
-    rule = stix_field(rel, "x_inference_rule") or ""
+def _inference_origin(rule: Any) -> str | None:
     if isinstance(rule, str):
         if rule.startswith("attack-reference"):
             return "completion_reference"
@@ -59,6 +61,13 @@ def _rel_origin_from_props(rel: Any) -> str:
             return "completion_transitive"
         if rule == "long-distance":
             return "completion_long_distance"
+    return None
+
+
+def _rel_origin_from_props(rel: Any) -> str:
+    origin = _inference_origin(stix_field(rel, "x_inference_rule"))
+    if origin is not None:
+        return origin
     if stix_field(rel, "x_policy_rule"):
         return "policy_pin"
     return "unknown"
@@ -173,6 +182,9 @@ class MappingLedger:
             for e in self.relationships:
                 if e.get("stix_id") == rid:
                     e["source_ref"], e["target_ref"] = src, tgt
+        # An edge the targets product or a pinned rule did not build names the
+        # objects before the merge: follow each onto the node that absorbed it.
+        self._follow_refused(merged_ids)
 
     # ── Stage 4 baseline merge (ADR-0090) ────────────────────────────────────
     def apply_baseline_merge(self, result: Any) -> None:
@@ -218,9 +230,7 @@ class MappingLedger:
                     e["source_ref"], e["target_ref"] = src, tgt
         # A refused edge names the objects Stage 4b saw: follow each onto the
         # baseline object that replaced it.
-        for e in self.refused:
-            e["source_ref"] = result.remap.get(e["source_ref"], e["source_ref"])
-            e["target_ref"] = result.remap.get(e["target_ref"], e["target_ref"])
+        self._follow_refused(result.remap)
         for bid, reason in result.dropped.items():
             self.left_out(bid, "baseline", reason)
 
@@ -242,12 +252,32 @@ class MappingLedger:
                 r["outcome"] = "merged"
                 r["reason"] = "baseline_match"
 
-    # ── Stage 4b refusals ────────────────────────────────────────────────────
+    # ── Refusals: rejected or held triples not built back ────────────────────
+    def refused_edge(self, source_ref: str, relationship_type: str, target_ref: str,
+                     origin: str, reason: str, **info: Any) -> None:
+        """An edge the targets product or a pinned rule did not build because an
+        analyst rejected that relationship, or it waits for one (ADR-0013,
+        amendment 2026-10-26).  Listed once per triple, origin and rule."""
+        entry = _clean({"source_ref": source_ref, "relationship_type": relationship_type,
+                        "target_ref": target_ref, "origin": origin, "reason": reason, **info})
+        if all(_refused_key(e) != _refused_key(entry) for e in self.refused):
+            self.refused.append(entry)
+
     def refused_inferences(self, refused: list[dict]) -> None:
-        """Edges graph completion did not add because an analyst rejected that
-        relationship, or it waits for one (ADR-0013, amendment 2026-10-26).
-        Never built, so they have no id: the entry names the triple."""
-        self.refused.extend(_clean(r) for r in refused)
+        """Edges graph completion did not add, for the same reason.  Never
+        built, so they have no id: the entry names the triple."""
+        self.refused.extend(_clean({**r, "origin": _inference_origin(r.get("rule"))})
+                            for r in refused)
+
+    def _follow_refused(self, remap: dict[str, str]) -> None:
+        """Point each refused edge at the objects that replaced its ends; two
+        that now name one triple, origin and rule keep the first entry."""
+        kept: dict[tuple, dict] = {}
+        for e in self.refused:
+            e["source_ref"] = remap.get(e["source_ref"], e["source_ref"])
+            e["target_ref"] = remap.get(e["target_ref"], e["target_ref"])
+            kept.setdefault(_refused_key(e), e)
+        self.refused = list(kept.values())
 
     # ── finish ───────────────────────────────────────────────────────────────
     def outside_report(self, obj: Any) -> None:
@@ -279,6 +309,11 @@ class MappingLedger:
         if self.refused:
             out["refused"] = self.refused
         return out
+
+
+def _refused_key(entry: dict) -> tuple:
+    return (entry["source_ref"], entry["relationship_type"], entry["target_ref"],
+            entry.get("origin"), entry.get("rule"))
 
 
 def _clean(info: dict) -> dict:

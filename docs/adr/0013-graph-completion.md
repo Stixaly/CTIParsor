@@ -187,7 +187,8 @@ Not covered here:
 - Other edges Stage 4 builds with no review row can recreate a rejected row's
   triple too: the actor × targeted country and sector product
   (`targeted_location`, inside the Report) and the policy-pinned edges, both
-  read in the code. IoC associations were not checked.
+  read in the code. IoC associations were not checked. *The product and the
+  pinned edges are covered by the next amendment; IoC associations are not.*
 - A deleted row (`DELETE /relationships/{id}`, the Graph page's delete) leaves
   no trace, so completion may add its triple back. Only a rejection holds.
 - The Graph page does not show `refused` yet.
@@ -208,3 +209,79 @@ row), `tests/test_orchestrator.py` (a run refuses Stage 3d's held claim) and
 `tests/test_bundle_ledger.py` (`refused` after a baseline merge). Each fails
 with its part of the change disabled, except the two that check what must not
 change (a row that resolves to nothing, the split of the rows).
+
+## Amendment (2026-10-26, continued): the targets product and pinned edges
+
+The amendment above kept graph completion from building a rejected or held
+row's triple, and left out two other Stage 4 builders that make edges with no
+review row of their own. The actor × targeted country and sector product
+(origin `targeted_location`, inside the Report) filtered rejected location and
+identity *entities*, not rejected rows: a rejected "APT29 targets France" was
+built again from the LLM's lists, and a held one shipped before anyone decided
+it. A policy-pinned rule (ADR-0024, ADR-0026) materialised the triple of a
+rejected row the same way, since it pins every pair of its two types.
+
+Decided by the maintainer: the same rule, with the same triples.
+
+- **One set of forbidden triples.** Stage 4 resolves the rows that do not ship
+  once, before the targets product, adds the reverse of each triple whose verb
+  names no direction (`related-to`, `duplicate-of`), and the product, the pin
+  pass and `complete_graph` all read that set. It is built whether or not
+  graph completion runs: `graph_completion=False` (an ablation, ADR-0059)
+  turns Stage 4b off, not the analyst's decision.
+- **A row that ships wins over a refused row with the same triple.** The job
+  store can hold two rows with one triple (an analyst adds the edge again after
+  rejecting it); the accepted one ships as a row anyway, and no row's decision
+  outranks another's. Such a triple is taken out of the set, so neither the
+  product nor a pinned rule refuses it, and the ledger does not list as
+  refused an edge that ships.
+- **The edge each builder would make.** The product compares the edge
+  `_add_relationship` would build (the policy pin applied, the fall back to
+  `related-to`), and the pin pass the key `_pin_edge_key` gives, after routing
+  through an Indicator and after the evidence gate (ADR-0027). A refused pair
+  takes none of the `max_pinned_edges` budget and is not one of the rule's
+  candidates in `x_synthesis_stats.pin`, which keeps its shape; a pair the
+  gate blocks is still counted `blocked`. A rule whose every pair is refused
+  therefore drops out of `x_synthesis_stats.pin.rules`, as a rule that matched
+  nothing does; the ledger lists its refusals.
+- **A targeted country or sector is found by its list's key.** Stage 4 keys
+  the objects it makes from the targeted lists `location:<name>` and
+  `identity:<name>`, not by bare name (only an NER entity of the same name has
+  one). When a bare name finds nothing, a row that does not ship is also looked
+  up under those keys, so "France", named only by the LLM's targeted-country
+  list, is the Location the product targets. The rows that ship are looked up
+  the same way for the rule above; in the relationship loop they resolve as
+  before.
+- **The ledger.** Each refusal joins `refused`, which now names on every entry
+  the `origin` the edge would have had: `targeted_location`, `policy_pin`, or
+  `completion_reference` / `completion_transitive` / `completion_long_distance`
+  for the engines' refusals of the amendment above. A pinned edge's entry
+  carries its `rule` (the `x_policy_rule` it would have carried), the
+  product's carries `actor` and `target` as the lists name them. One entry per
+  triple, origin and rule. These refusals are recorded before Stage 4b's alias
+  merge; their ids follow it as they follow a baseline merge, and two entries a
+  merge makes one keep the first.
+
+Not covered here:
+
+- **IoC associations** (`ioc_associations` from the LLM's JSON, origin
+  `ioc_association`, read in the code) build `indicator indicates malware`
+  with no review row, the triple a rejected "185.220.101.5 indicates
+  ZetaLoader" row resolves to. They run before the Indicators a refused row is
+  routed through exist, so they need their own change.
+
+A build with no rejection is unchanged: the forbidden set is empty and both
+builders go on as before (`tests/test_stage4_reference.py` does not move).
+
+Validation: `tests/test_stage4_refusals.py` (a rejected and a held row against
+the product, with France from the list alone and from NER too, with graph
+completion off, a country the list names twice, an accepted row with the same
+triple, a policy that rewrites `targets`; against a pinned rule, the pin
+budget and the synthesis stats, a verb the rule rewrites, an undirected verb),
+`tests/test_pin_evidence.py` (the gate judges before the refusal),
+`tests/test_held_for_review.py` (finalize: the product does not ship a held
+claim, nor once rejected, and ships it once accepted) and
+`tests/test_bundle_ledger.py` (one entry per triple, origin and rule; the
+alias merge; `origin` on an engine's refusal). Each fails with its part of the
+change disabled, except the one that checks what must not change (every pair
+built when nothing is refused).

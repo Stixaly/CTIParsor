@@ -29,6 +29,7 @@ from pipeline.stage4b_graph_completion import (
     REJECTED_BY_ANALYST,
     CompletionStats,
     RefusedRelationship,
+    both_directions,
     complete_graph,
     stated_by_the_report,
 )
@@ -122,6 +123,10 @@ class PinStats:
     budget: int = 0
     mode: str = "fair-share"
     rules: list[PinRuleStat] = field(default_factory=list)
+    # Pairs a rule would have pinned and did not, an analyst having rejected
+    # that triple or holding it for review (ADR-0013, amendment 2026-10-26).
+    # For the mapping ledger; not in to_dict(), which ships in the bundle.
+    refused: list[dict] = field(default_factory=list)
 
     @property
     def total_candidates(self) -> int:
@@ -641,9 +646,10 @@ def build_stix_bundle(
 
     refused_relationships — the relationship rows that do not ship: rejected
       by an analyst, or held for review and not yet decided (ADR-0082).  Each
-      is resolved as a shipping row is, and Stage 4b adds none of their
-      triples back (ADR-0013, amendment 2026-10-26); the ledger's `refused`
-      lists what it did not add.
+      is resolved as a shipping row is, and none of their triples is built
+      back — not by the actor × targeted country/sector product, a pinned
+      rule, nor Stage 4b (ADR-0013, amendment 2026-10-26); the ledger's
+      `refused` lists what was not built.
 
     Relationship dates (ADR-0063 §7): each SRO carries every assertion in
     `x_temporal_assertions`; `start_time` / `stop_time` are set only where the
@@ -1271,35 +1277,7 @@ def build_stix_bundle(
             ledger=led, ledger_info=pattern_ledger_info(_status),
         )
 
-    # --- Targets SROs: threat actors → targets → locations and sectors ---
-    # Every actor × every targeted country/sector: the LLM's lists say what the
-    # report targets, not which actor targets it, so this is a product, and the
-    # ledger says so (origin "targeted_location", ADR-0061).
-    for actor_name in llm_result.threat_actors:
-        actor = name_to_stix.of_type(actor_name.lower(), "threat-actor")
-        if not actor:
-            continue
-        for country in llm_result.targeted_countries:
-            location = name_to_stix.of_type(f"location:{country.lower()}", "location")
-            if location:
-                rel = _add_relationship(stix_objects, actor, "targets", location,
-                                        pol_index=_pol_index, seen=seen_rel_keys,
-                                        custom=_EV_REPORTED)
-                if rel is not None:
-                    led.object(rel, "targeted_location", actor=actor_name, target=country)
-        for sector in llm_result.targeted_sectors:
-            identity = name_to_stix.of_type(f"identity:{sector.lower()}", "identity")
-            if identity:
-                rel = _add_relationship(stix_objects, actor, "targets", identity,
-                                        pol_index=_pol_index, seen=seen_rel_keys,
-                                        custom=_EV_REPORTED)
-                if rel is not None:
-                    led.object(rel, "targeted_location", actor=actor_name, target=sector)
-
-    # --- SROs — semantic relationships (deduplicated, spec-validated) ---
-    # Reuses the shared seen_rel_keys set so a semantic edge that duplicates a
-    # targets/indicates edge created above is also collapsed.
-    #
+    # --- Relationship rows: where each one lands ---
     # These are the job store's relationship rows.  Each one's fate — the SRO it
     # became and what was rewritten on the way, the edge it duplicates, or why
     # it is not in the bundle — goes to the ledger (ADR-0061): the review graph
@@ -1342,14 +1320,28 @@ def build_stix_bundle(
         fits = [(s, t) for s, t in fits if s is not t] or fits[:1]
         return fits[0] if len(fits) == 1 else (None, None)
 
-    def _resolve_row(rel) -> _RowEdge:
+    def _targeted_candidates(value: str) -> dict:
+        key = value.lower()
+        obj = (name_to_stix.of_type(f"location:{key}", "location")
+               or name_to_stix.of_type(f"identity:{key}", "identity"))
+        return {} if obj is None else {_field(obj, "type"): obj}
+
+    def _resolve_row(rel, targeted: bool = False) -> _RowEdge:
         """Where a relationship row lands: its endpoints and verb once resolved,
         routed and checked, each rewrite in `changes`; or, when it cannot ship,
         why (`dropped`) with the ledger facts that go with it.  The rows that
-        ship and the ones graph completion may not add back (ADR-0013,
-        amendment 2026-10-26) go through it alike, so both name one triple."""
+        ship and the ones Stage 4 may not build back (ADR-0013, amendment
+        2026-10-26) go through it alike, so both name one triple.
+
+        `targeted` also finds a name only the targeted-country and -sector
+        lists put in the bundle (keyed `location:` / `identity:`, not by bare
+        name): a row that does not ship is matched against the targets product,
+        which builds edges to those objects."""
         src_cands = name_to_stix.candidates(rel.source_value.lower())
         tgt_cands = name_to_stix.candidates(rel.target_value.lower())
+        if targeted:
+            src_cands = src_cands or _targeted_candidates(rel.source_value)
+            tgt_cands = tgt_cands or _targeted_candidates(rel.target_value)
 
         if not src_cands or not tgt_cands:
             return _RowEdge(dropped="unresolved_both" if not src_cands and not tgt_cands
@@ -1439,6 +1431,75 @@ def build_stix_bundle(
 
         return _RowEdge(source, rel_type, target, changes)
 
+    # A rejected relationship stays rejected, and a held one waits for its
+    # analyst (ADR-0013, amendment 2026-10-26): each row that does not ship is
+    # resolved as if it did, and none of the builders that have no row of
+    # their own — the targets product, a pinned rule, graph completion —
+    # builds its triple, nor the reverse of one whose verb names no direction.
+    _forbidden: dict[tuple[str, str, str], str] = {}
+    for _refused in refused_relationships or ():
+        _edge = _resolve_row(_refused, targeted=True)
+        if _edge.dropped is None:
+            _key = (_edge.source.id, _edge.rel_type, _edge.target.id)
+            if _forbidden.get(_key) != REJECTED_BY_ANALYST:
+                _forbidden[_key] = _refused.reason
+    if _forbidden:
+        _forbidden = both_directions(_forbidden)
+        # A triple a row that ships also names is not refused: that row says
+        # it, and no row's decision outranks another's (the job store can hold
+        # two rows with one triple).  Resolved like the refused rows, so a row
+        # whose end only the targeted lists name lets the product build it.
+        for _shipping in llm_result.relationships:
+            _edge = _resolve_row(_shipping, targeted=True)
+            if _edge.dropped is None:
+                _forbidden.pop((_edge.source.id, _edge.rel_type, _edge.target.id), None)
+
+    def _refused_by_review(src, verb: str, tgt, origin: str, **info: Any) -> bool:
+        """True when the edge `_add_relationship` would build from these (the
+        policy's pin applied) is a forbidden triple the bundle does not already
+        have.  The ledger lists it under `refused` with `origin`."""
+        if not _forbidden:
+            return False
+        key = _pin_edge_key(src, _apply_policy(verb, src, tgt, _pol_index), tgt)
+        if key is None or key not in _forbidden or key in seen_rel_keys:
+            return False
+        led.refused_edge(key[0], key[1], key[2], origin=origin, reason=_forbidden[key], **info)
+        return True
+
+    # --- Targets SROs: threat actors → targets → locations and sectors ---
+    # Every actor × every targeted country/sector: the LLM's lists say what the
+    # report targets, not which actor targets it, so this is a product, and the
+    # ledger says so (origin "targeted_location", ADR-0061).
+    for actor_name in llm_result.threat_actors:
+        actor = name_to_stix.of_type(actor_name.lower(), "threat-actor")
+        if not actor:
+            continue
+        for country in llm_result.targeted_countries:
+            location = name_to_stix.of_type(f"location:{country.lower()}", "location")
+            if location:
+                if _refused_by_review(actor, "targets", location, "targeted_location",
+                                      actor=actor_name, target=country):
+                    continue
+                rel = _add_relationship(stix_objects, actor, "targets", location,
+                                        pol_index=_pol_index, seen=seen_rel_keys,
+                                        custom=_EV_REPORTED)
+                if rel is not None:
+                    led.object(rel, "targeted_location", actor=actor_name, target=country)
+        for sector in llm_result.targeted_sectors:
+            identity = name_to_stix.of_type(f"identity:{sector.lower()}", "identity")
+            if identity:
+                if _refused_by_review(actor, "targets", identity, "targeted_location",
+                                      actor=actor_name, target=sector):
+                    continue
+                rel = _add_relationship(stix_objects, actor, "targets", identity,
+                                        pol_index=_pol_index, seen=seen_rel_keys,
+                                        custom=_EV_REPORTED)
+                if rel is not None:
+                    led.object(rel, "targeted_location", actor=actor_name, target=sector)
+
+    # --- SROs — semantic relationships (deduplicated, spec-validated) ---
+    # Reuses the shared seen_rel_keys set so a semantic edge that duplicates a
+    # targets/indicates edge created above is also collapsed.
     for rel in llm_result.relationships:
         row_edge = _resolve_row(rel)
         if row_edge.dropped is not None:
@@ -1536,8 +1597,11 @@ def build_stix_bundle(
     # served: see _materialise_pinned_edges and ADR-0026.
     _pin_stats = _materialise_pinned_edges(
         stix_objects, relationship_policy, seen_rel_keys, report_text,
-        sco_id_to_indicator=sco_id_to_indicator,
+        sco_id_to_indicator=sco_id_to_indicator, forbidden=_forbidden,
     )
+    for _r in _pin_stats.refused:
+        led.refused_edge(_r["source_ref"], _r["relationship_type"], _r["target_ref"],
+                         origin="policy_pin", reason=_r["reason"], rule=_r["rule"])
 
     # --- Artifact SCO for the source document (ADR-0043) ---
     # Represents the original ingested file (PDF, DOCX, …) as a STIX 2.1
@@ -1578,16 +1642,7 @@ def build_stix_bundle(
     # B 8.4.2, 8.4.3).  Append-only + spec-guarded: see stage4b_graph_completion
     # and ADR-0013.  Governed by the policy "completion" block; pinned rules win.
     if graph_completion:
-        # A rejected relationship stays rejected, and a held one waits for its
-        # analyst (ADR-0013, amendment 2026-10-26): each row that does not ship
-        # is resolved as if it did, and no engine adds its triple back.
-        _forbidden: dict[tuple[str, str, str], str] = {}
-        for _refused in refused_relationships or ():
-            _edge = _resolve_row(_refused)
-            if _edge.dropped is None:
-                _key = (_edge.source.id, _edge.rel_type, _edge.target.id)
-                if _forbidden.get(_key) != REJECTED_BY_ANALYST:
-                    _forbidden[_key] = _refused.reason
+        # No engine adds a forbidden triple back (see `_forbidden` above).
         _completion_stats = complete_graph(
             stix_objects,
             policy=relationship_policy,
@@ -2683,6 +2738,7 @@ def _materialise_pinned_edges(
     seen_rel_keys: set,
     report_text: str = "",
     sco_id_to_indicator: dict | None = None,
+    forbidden: dict[tuple[str, str, str], str] | None = None,
 ) -> PinStats:
     """Materialise policy-pinned edges under a per-rule budget (ADR-0026).
 
@@ -2707,6 +2763,12 @@ def _materialise_pinned_edges(
     direct unit tests (test_pin_evidence.py, test_pin_budget.py) call this
     function without an Indicator graph behind their fake objects and must see
     today's unchanged behaviour.
+
+    forbidden: (source_ref, relationship_type, target_ref) -> why that triple
+    does not ship (an analyst rejected it, or it is held for review; ADR-0013,
+    amendment 2026-10-26).  A pair the evidence gate lets through whose edge
+    key is one is not pinned, costs no budget, and is listed in
+    `PinStats.refused` (one the gate blocks stays counted as `blocked`).
     """
     # Guard: no policy, or the whole model is paused.
     if not relationship_policy or relationship_policy.get("global") == "auto":
@@ -2761,6 +2823,7 @@ def _materialise_pinned_edges(
     # time — spends budget on calls that dedup into no-ops.
     plans: list[tuple[str, dict, list[tuple], int]] = []
     claimed: set[tuple[str, str, str]] = set()
+    refused: list[dict] = []
 
     for _rule in relationship_policy.get("rules", []) or []:
         # The policy is operator-supplied JSON; a malformed entry here used to
@@ -2795,6 +2858,11 @@ def _materialise_pinned_edges(
                     if not ok:
                         blocked += 1
                         continue
+                reason = forbidden.get(key) if forbidden else None
+                if reason is not None:
+                    refused.append({"source_ref": key[0], "relationship_type": key[1],
+                                    "target_ref": key[2], "rule": label, "reason": reason})
+                    continue
                 claimed.add(key)
                 candidates.append((_s_obj, _verb, _t_obj, anchor))
 
@@ -2854,7 +2922,7 @@ def _materialise_pinned_edges(
                 label, emitted, candidates_count, _max_pinned, mode,
             )
 
-    return PinStats(budget=_max_pinned, mode=mode, rules=stats_rules)
+    return PinStats(budget=_max_pinned, mode=mode, rules=stats_rules, refused=refused)
 
 
 def _apply_policy(

@@ -157,6 +157,17 @@ HELD_FOR_REVIEW = "held_for_review"
 _UNDIRECTED_VERBS = frozenset({"related-to", "duplicate-of"})
 
 
+def both_directions(forbidden: dict[tuple[str, str, str], str]) -> dict[tuple[str, str, str], str]:
+    """`forbidden` plus the reverse of each triple whose verb names no
+    direction, a rejection outranking a hold on the same triple.  Stage 4's
+    builders and ``complete_graph`` refuse the same triples."""
+    out = dict(forbidden)
+    for (s, v, t), why in forbidden.items():
+        if v in _UNDIRECTED_VERBS and out.get((t, v, s)) != REJECTED_BY_ANALYST:
+            out[(t, v, s)] = why
+    return out
+
+
 @dataclass(frozen=True)
 class RefusedRelationship:
     """A relationship row that does not ship, by its values as the job store
@@ -847,9 +858,7 @@ def complete_graph(
                 if moved.get(key) != REJECTED_BY_ANALYST:
                     moved[key] = why
             forbidden = moved
-    for (s, v, t), why in list(forbidden.items()):
-        if v in _UNDIRECTED_VERBS and forbidden.get((t, v, s)) != REJECTED_BY_ANALYST:
-            forbidden[(t, v, s)] = why
+    forbidden = both_directions(forbidden)
 
     # Reference grounding runs BEFORE transitive inference so curated edges can
     # also serve as premises for compositions.

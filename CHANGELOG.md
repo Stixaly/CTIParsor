@@ -885,6 +885,29 @@ such a Campaign, but it rarely reaches Stage 4 now); unlike before the audit, th
 drop is recorded, and the analyst's accept of the campaign row brings the
 Campaign back. Stage 4 is not changed.
 
+#### The targets product and pinned rules no longer build a rejected or held relationship (ADR-0013, amended), 2026-10-26
+
+Stage 4 builds an edge from every threat actor to every country and sector the
+LLM lists as targeted, and a pinned policy rule builds one for every pair of
+its two types. Neither has a review row, and neither looked at the rows an
+analyst rejected: the product filtered rejected locations and sectors, not
+rejected relationships, so a rejected "APT29 targets France" came back from the
+LLM's lists, and a pinned rule could build a rejected row's edge too. A claim
+held for review (ADR-0082) shipped the same way before anyone decided it.
+
+Both now skip the triples graph completion skips (entry below): Stage 4
+resolves the rows that do not ship once, before the product, and the product,
+the pin pass and Stage 4b read the same set, with graph completion on or off.
+A country or sector named only by the LLM's list is found too, and a triple an
+accepted row also names is not refused (the job store can hold both). A refused
+pinned pair takes no `max_pinned_edges` budget. The mapping ledger lists each one
+under `refused` with the origin that would have built it (`targeted_location`,
+`policy_pin`), and every `refused` entry now carries that `origin`, the graph
+completion ones included. A build with no rejection is unchanged. IoC
+associations (`indicator indicates malware` from the LLM's JSON) are not
+covered yet. The `BUNDLE_AFFECTING` entry follows in a separate commit (scope
+`mapping`).
+
 #### Graph completion no longer adds back a rejected or held relationship (ADR-0013, amended), 2026-10-26
 
 Finalize gave Stage 4 only the relationships that ship, and Stage 4b skipped a
@@ -904,7 +927,7 @@ refuses Stage 3d's held claims the same way. The mapping ledger lists each
 refused edge under `refused`, with the rule it would have carried and the
 reason (`rejected_by_analyst`, `held_for_review`); a build with no rejection
 keeps its ledger unchanged. Other edges Stage 4 builds with no review row (the
-targeted-location product, pinned edges) are not covered yet. The
+targeted-location product, pinned edges) are covered by the entry above. The
 `BUNDLE_AFFECTING` entry follows in a separate commit (scope `mapping`).
 
 #### A code audit's fixes: a web-capture range, a DOCX zip bomb, doubled rows after a requeue, lost detection rules, 2026-10-26
