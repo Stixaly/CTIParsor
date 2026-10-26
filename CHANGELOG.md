@@ -902,6 +902,19 @@ gets a dated amendment.
 
 ### Fixed
 
+#### The capture proxy starts without warnings it could have turned into an outage, 2026-10-26
+
+`docker/squid/squid.conf` listed `::ffff:0:0/96` in `blocked_dst`. Squid stores
+every IPv4 address as an IPv4-mapped IPv6 one, so to Squid that range is
+`0.0.0.0/0`. Listed last, it was dropped with six "'240.0.0.0/4' is a subnetwork
+of '0.0.0.0/0'" warnings at each start. Moved to the top of the list, it drops
+every IPv4 line instead and blocks every IPv4 site (measured on the pinned
+image). The line is gone. A mapped destination is still refused through the
+IPv4 lines: `[::ffff:127.0.0.1]` and `[::ffff:10.0.0.1]` answer 403. The config
+also sets `pinger_enable off`: under `cap_drop: [ALL]` the ICMP pinger had no
+raw socket and logged `FATAL: Unable to open any ICMP sockets` at every start.
+What the proxy lets through is unchanged.
+
 #### Stages 1 and 3r can no longer be "disabled" to no effect, 2026-10-26
 
 `PIPELINE_DISABLED_STAGES`, the CLI's `--disable-stage` and `RunOptions(disabled=…)`
