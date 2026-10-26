@@ -25,6 +25,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from pipeline.orchestrator import (  # noqa: E402
+    MANDATORY_STAGES,
     STAGE_LABELS,
     Document,
     Hooks,
@@ -260,7 +261,8 @@ Exemples :
     parser.add_argument(
         "--disable-stage", action="append", default=[], metavar="ID",
         help="Désactiver une étape (répétable ou séparé par des virgules), p. ex. 2d,2e. "
-             "Identifiants : " + ", ".join(STAGE_LABELS),
+             "Identifiants : " + ", ".join(s for s in STAGE_LABELS if s not in MANDATORY_STAGES)
+             + " ; ne se désactivent pas : " + ", ".join(sorted(MANDATORY_STAGES)),
     )
     parser.add_argument(
         "--require-stage", action="append", default=[], metavar="ID",

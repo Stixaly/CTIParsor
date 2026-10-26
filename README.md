@@ -399,7 +399,8 @@ docker compose run --rm dev cli input/report.pdf --disable-stage 2d,2e    # abla
 docker compose run --rm dev cli input/report.pdf --require-stage 3        # fail if the LLM cannot run
 ```
 
-Stage ids: `1 1f 2 2b 2c 2d 2e 2g 3 3d 3f 3e 3doc 2f 4 4b 4c 5`.
+Stage ids: `1 1f 2 2b 2c 2d 2e 2g 3 3d 3f 3e 3doc 3r 2f 4 4b 4c 5`; `1`
+(ingestion) and `3r` (baseline reconciliation) cannot be disabled.
 `PIPELINE_DISABLED_STAGES` (comma-separated) does the same for every run of a
 process, the API worker included. The CLI applies the relationship policy
 saved in the job store, like the worker (`--policy db`, the default), or

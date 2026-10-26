@@ -902,6 +902,17 @@ gets a dated amendment.
 
 ### Fixed
 
+#### Stages 1 and 3r can no longer be "disabled" to no effect, 2026-10-26
+
+`PIPELINE_DISABLED_STAGES`, the CLI's `--disable-stage` and `RunOptions(disabled=…)`
+accepted every known stage id, but Stage 1 (ingestion) and Stage 3r (baseline
+reconciliation) never read the switch: `PIPELINE_DISABLED_STAGES=3r` was taken
+without an error and both stages still ran. The two ids are now refused with a
+message that says why: Stage 1 makes the text every stage reads, and Stage 4
+merges an enrich job's baseline through Stage 3r's matches (ADR-0090). A worker
+or CLI whose setting names one fails the run, as an unknown id already did.
+`--require-stage` still accepts both. Bundles are unchanged.
+
 #### A name two lists share no longer puts a claim on the wrong object (ADR-0091), 2026-10-26
 
 Stage 4 kept one object per lower-cased name, so a name in two of the LLM's
