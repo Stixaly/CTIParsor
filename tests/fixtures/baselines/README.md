@@ -1,6 +1,6 @@
 # Baseline STIX fixtures (ADR-0090)
 
-Hand-written bundles that the baseline parser (`pipeline/baseline_stix.py`) reads in later lots. Checked by `tests/test_baseline_fixtures.py`.
+Hand-written bundles that the baseline parser (`pipeline/baseline_stix.py`, ADR-0090) reads. Checked by `tests/test_baseline_fixtures.py`.
 
 - `opencti_report.json`: an OpenCTI 2.1 export in the shape of `stix-2-1-converter.ts` (report, author identity, TLP:AMBER marking without `definition`, APT29 intrusion-set with alias Cozy Bear and `G0016`, malware, attack-pattern T1059.001, indicator + ipv4-addr + `based-on`, file SCO, `uses` and `indicates`, `extensions` on every object, bundle `spec_version`); for families, TLP, copied objects and the matching of I2.
 - `opencti_report.txt`: the report text to match against `opencti_report.json`: it names Cozy Bear (matched) and the file's SHA-256 (matched), a malware and a technique the bundle lacks (new: SUNBURST, T1566.001) and not the bundle's IPv4 (baseline only); the bundle's malware and T1059.001 are not named either.

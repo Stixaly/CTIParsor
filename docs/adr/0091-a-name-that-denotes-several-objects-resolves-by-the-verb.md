@@ -3,6 +3,9 @@
 **Status:** Accepted (2026-10-26). It lands with ADR-0092, which answers its
 open question.
 **Date:** 2026-10-26
+**Amended by:** [0092](0092-one-type-per-name-before-stage-4-by-source-rank.md)
+(2026-10-26). Its open question is answered: one type per name before Stage 4,
+ranked by source; the two land together.
 **Deciders:** maintainer
 **Amends:** ADR-0021 (the name table Stage 4 resolves through keeps one object
 per STIX type), ADR-0061 (the mapping ledger gains the reason `ambiguous_name`)

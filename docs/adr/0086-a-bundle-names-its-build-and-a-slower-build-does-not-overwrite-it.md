@@ -7,7 +7,9 @@
 `UPDATE` as the bundle), ADR-0077 (versioned migrations)
 **Amends:** ADR-0059 (decision 2: finalize builds its bundle through the same
 `build_bundle()`; the "still not done" list of its amendment of 2026-10-17),
-ADR-0035 (a bundle is judged on the revision of the run that made it)
+ADR-0035 (a bundle is judged on the revision of the run that made it),
+ADR-0084 (concurrent finalizations: "the last write wins", which 0084 left as it
+was; a build never replaces a bundle built from newer rows)
 **Relates to:** ADR-0024 (the run config), ADR-0052 (entity overrides), ADR-0061
 (the ledger is written with the bundle it describes)
 

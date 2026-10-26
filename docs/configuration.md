@@ -11,7 +11,7 @@ whole file, so a change takes effect at the next `docker compose up -d`.
 - [NLP stages](#nlp-stages)
 - [Vision (Stage 1f)](#vision-stage-1f--figures)
 - [Advanced: checking passes, throughput, STIX output](#advanced)
-- [TTP mode: verify or select](#ttp-mode-verify-or-select)
+- [TTP mode: select or verify](#ttp-mode-select-or-verify)
 - [Document-level relations (Stage 3doc)](#document-level-relations-stage-3doc)
 - [LLM request limits and sampling](#llm-request-limits-and-sampling)
 - [CVE enrichment (Stage 2f)](#cve-enrichment-stage-2f)
@@ -475,7 +475,10 @@ ENABLE_DOCUMENT_LEVEL_RELATIONS=false
 `.env.example` but **have no effect**: the worker picks the chunk size itself
 (3 000 characters, 4 000 above 30k, 5 000 above 60k, with a 400-character
 overlap) and Stage 3 retries a failed call 3 times. They are read into a
-config object nothing uses.
+config object nothing uses. `LLM_MODEL` has no effect either: `models/config.py`
+reads it in `PipelineConfig.from_env()`, which nothing calls, and Stage 3 reads
+`ANTHROPIC_MODEL` directly (`pipeline/stage3_llm.py`). It is not in
+`.env.example`.
 
 ## CVE enrichment (Stage 2f)
 
@@ -582,6 +585,20 @@ feature** (it was 50 MB). Behind another proxy, allow as much: 72 MiB, that is
 `CTIPARSOR_ROLE` (`api`, `worker`, or `all` on a legacy host install) is set
 per service by `compose.yaml`; leave it alone.
 
+Three more folders are set here (`api/paths.py`). Unset, each is a folder of
+that name at the project root:
+
+```env
+# uploads/: uploaded sources and URL-capture metadata.  output/: exported STIX
+# bundles and Stage 3 checkpoints.  state/: what the app keeps between starts
+# (db-identity.json, ADR-0077).  An empty value means the default.  In the
+# image, uploads/ and output/ are links into the cti-state volume, which is
+# mounted at /app/state.
+# CTIPARSOR_UPLOADS_DIR=
+# CTIPARSOR_OUTPUT_DIR=
+# CTIPARSOR_STATE_DIR=
+```
+
 ## OCR
 
 ```env
@@ -605,6 +622,10 @@ and an image rebuild.
 # LOG_FILE=
 # MAX_LOG_SIZE=10485760
 # LOG_BACKUP_COUNT=5
+# Startup diagnostics: only the exact value `development` logs the LLM provider
+# check (a missing key, the endpoint and the model in use).  Any other value
+# skips it.
+# ENV=development
 ```
 
 Under Docker, `docker compose logs -f app worker` reads stdout. The root
@@ -653,8 +674,31 @@ list decides which `Origin` a browser may write from. Cross-site writes
 (`Sec-Fetch-Site: cross-site`, or a foreign `Origin`) are refused with 403;
 curl and scripts send neither header and are not affected.
 
+Two settings govern the URL-capture tab (ADR-0029):
+
+```env
+# URL capture renders the page in Chromium, whose sandbox needs unprivileged
+# user namespaces.  1, true or yes render without the sandbox, for a host or
+# container runtime that cannot grant them: a warning is logged on every
+# capture, and a renderer exploit on a captured page then runs code on this
+# host.  `on` does not count here.  Unset = the sandbox stays on.
+# CTIPARSOR_CAPTURE_UNSANDBOXED=false
+# The capture browser's traffic goes through this proxy; empty = connect
+# directly.  compose sets http://capture-proxy:3128, a Squid egress filter that
+# lets the browser reach public addresses only and resolves and connects in one
+# step, closing the DNS-rebinding gap for subresources and redirects.  Unset,
+# the capture code does not close that gap on its own.
+# CTIPARSOR_CAPTURE_PROXY=
+```
+
 The compose-level settings —
 published ports, image name, `CTI_INSTALL_CAPTURE`, per-container CPU and memory
 (`CTI_<SERVICE>_CPUS`, `CTI_<SERVICE>_MEMORY`) — are in sections 9 and 12 of
 `.env.example`, with what each exposure means in
 [docs/deployment.md](deployment.md) and the sizing in [docs/docker.md](docker.md).
+
+`CTI_GIT_REV` (empty by default) is the build argument `GIT_REV`. The image
+records that revision in its `org.opencontainers.image.revision` label and as
+`CTIPARSOR_GIT_REV`; the run config and the build record report it inside the
+container, which has no repository to read. On a checkout, `git rev-parse HEAD`
+wins.

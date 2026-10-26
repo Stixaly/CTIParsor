@@ -2,6 +2,10 @@
 
 **Status:** Accepted
 **Date:** 2026-10-02
+**Amended by:** [0084](0084-a-bundle-stage-5-refuses-is-not-served.md)
+(2026-10-17). Stage 5's answer is now read: the verdict is stored with the
+bundle, an invalid bundle is not served (409 on the bundle, finalize and
+PATCH) and never completes a job.
 **Deciders:** maintainer
 **Relates to:** the STIX relationship review of 2026-10-02
 (`docs/stix-relationships-review.md`), points 1, 2, 5, 7 and 9; ADR-0041 /

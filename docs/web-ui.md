@@ -91,7 +91,9 @@ reports it; `STIX_ENRICHMENT_ENABLED=false` turns it off):
   into a bundle you already hold. What the bundle holds is shown, not duplicated.
 
 **In the modal.** Add the bundle as a `.json` file, by drop or by browsing. The
-modal reads it at once through `POST /api/baselines/inspect`, which stores
+modal shows its name and size, with **Change** and **Remove** buttons, disabled
+while it reads the bundle (**reading the bundle…**) and while the job is created.
+It reads it at once through `POST /api/baselines/inspect`, which stores
 nothing, and shows what the job would keep: the objects by type, the objects
 outside the report's scope, the dangling references, the excluded objects with
 their reason, and the warnings. The preview does not run the STIX JSON schemas:
@@ -99,17 +101,29 @@ they run when the job starts, and an object they refuse is left out then. A
 bundle with several reports asks which one to enrich. The bundle's minimum TLP
 and PAP are preselected, and a weaker level is disabled, because a lower marking
 would weaken what the bundle already says. Switching back to full extraction
-removes the bundle, and a level the bundle set is unset again.
+removes the bundle, and a level the bundle set is unset again. The submit button
+names the step still missing: **Add the STIX bundle to continue**, **Fix the STIX
+bundle to continue** (its inspection failed), **Choose the report to enrich**,
+or, once the source is ready, **Set TLP & PAP to continue**. Otherwise it reads
+**Create job**.
 
 **On the Review page** (enrich jobs only):
 
-- The ribbon's enrich line counts entities and relationships against the bundle:
+- The ribbon has two enrich lines: `Already in STIX:` counts entities, and
+  `Relationships: in STIX` counts relationships. Both count against the bundle:
   in STIX (the extracted rows that match a bundle object, plus the bundle objects
   found in the text), STIX only, and + New.
 - The filter "Any source · + New · In STIX · STIX only" sits in the margin notes
   and in the relationships rail. A row you add by hand counts as + New.
 - Badges: `+ new` (CTIParsor adds it), `in STIX` (the bundle already holds it),
-  `STIX only` (from the bundle, not in the report text).
+  `STIX only` (from the bundle, not in the report text). A row from the bundle
+  also carries the source chip `STIX` on its expanded margin card, with the
+  tooltip "From the analyst's STIX 2.1 bundle".
+- For a `STIX only` entity, the "not found" hint names the bundle, not the report:
+  `"<value>" comes from your STIX bundle; it is not in the report text`.
+- The `in STIX` badge of a relationship whose two ends are both `STIX only` rows
+  says, in its tooltip, that its ends were matched through the bundle's names, not
+  found in the text.
 - A row from the bundle can be accepted or rejected. Its type, and for a
   relationship its verb and dates, are read-only: the server refuses an edit
   to them with 409, and the change belongs in the source bundle. The hover
@@ -201,7 +215,9 @@ and the last run's per-rule accounting is read back from
 ## Coverage page
 
 Per-report **detection-coverage matrix** (`/coverage/:jobId`). The report's
-extracted ATT&CK techniques are laid out in ATT&CK-tactic columns and coloured by
+extracted ATT&CK techniques are laid out in ATT&CK-tactic columns, but only an
+enterprise-domain technique gets them: a mobile, ICS or CAPEC technique, and an
+id the index lacks, go to the **Other** column (ADR-0025). Cells are coloured by
 a **readiness score** (not lab validation):
 
 | Score | Meaning |
@@ -217,6 +233,11 @@ cell can therefore read *Covered* and list no rule: a rule carries the tag,
 none matches this report. Rules promoted from the Review page's **Detections**
 tab join the selection in a group of their own. A banner makes the
 "readiness ≠ validation" distinction explicit.
+
+The page header shows the ATT&CK release the API runs (`ATTACK_RELEASE`), as
+`ATT&CK {release}`. Technique names and tactics come from that release's index,
+read from `GET /api/attack/index` (ADR-0087; see
+[ATT&CK release](configuration.md#attck-release)).
 
 Below the matrix, the selection table and the export panel build the ZIP of
 rules to deploy. The artifact view of ADR-0025 — coverage scored per hash,

@@ -267,6 +267,19 @@ report can differ — by 0.028 F1 on dev. **Run evaluations with
 provider or model, check it once — run the baseline twice (`--name
 baseline-dev-r2`) and `compare` the two; the interval is the noise floor.
 
+## Measurement notes
+
+Measurement pages that the sections above do not link:
+
+- [baseline-2026-09.md](baseline-2026-09.md) — the shipped pipeline on the AnnoCTR dev split (16 reports), the reference that later changes are compared with.
+- [baseline-2026-10.md](baseline-2026-10.md) — the LLM selector (`TTP_MODE=select`, ADR-0072) against the best configuration measured so far, on dev; the test split is run once.
+- [gazetteer-policy-2026-10.md](gazetteer-policy-2026-10.md) — Stage 2b with and without the gazetteer's ordinary-word policy, on AnnoCTR train and dev.
+- [ner-precision-2026-10.md](ner-precision-2026-10.md) — the CyNER and spaCy precision filters (ADR-0088), designed on train and measured on dev; two adopted.
+- [ner-malware-2026-10.md](ner-malware-2026-10.md) — one malware-precision lead, measured once on AnnoCTR test (2026-10-19): not adopted.
+- [selection-cut-off-2026-10.md](selection-cut-off-2026-10.md) — Stage 3f selection answers cut off at `LLM_MAX_OUTPUT_TOKENS` on dev, and the fix that keeps their complete choices (technique F1 0.584 → 0.610).
+- [selection-loop-2026-10.md](selection-loop-2026-10.md) — the Stage 3f selection loop (about one call in 65 on AnnoCTR dev) and three changes measured against it.
+- [selection-once-2026-10.md](selection-once-2026-10.md) — a sentence added to the selection prompt, "write that object once, then stop", as a follow-up to selection-loop-2026-10.
+
 ## Deferred (second tier)
 
 * a second, independent annotator on 3 to 5 in-house reports (`agreement`);

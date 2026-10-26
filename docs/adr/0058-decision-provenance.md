@@ -2,6 +2,10 @@
 
 **Status:** Accepted (implemented 2026-09-27)
 **Date:** 2026-09-27
+**Amended by:** [0082](0082-what-the-model-could-not-decide-waits-for-an-analyst.md)
+(2026-10-10). What the model could not decide is held pending with a
+`held_reason`: auto-accept, type, group and selection accepts skip it, and a
+`human_bulk` accept is refused.
 **Relates to:** [pipeline/decisions.py](../../pipeline/decisions.py),
 [pipeline/calibration.py](../../pipeline/calibration.py) (ADR-0051),
 [pipeline/promotion.py](../../pipeline/promotion.py) (ADR-0052),

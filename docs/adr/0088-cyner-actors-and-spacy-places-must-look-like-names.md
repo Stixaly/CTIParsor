@@ -2,6 +2,9 @@
 
 **Status:** Accepted
 **Date:** 2026-10-18
+**Amended by:** [0089](0089-the-malware-lead-measured-once-on-test.md)
+(2026-10-19). Rejected: the malware lead it registered on top of these filters,
+measured once on test and not adopted; its code was removed.
 **Deciders:** maintainer
 **Amends:** ADR-0050 (for `Threat_group`, a second filter follows the
 generic-language one; `Malware` is unchanged)

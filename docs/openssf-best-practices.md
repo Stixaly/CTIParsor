@@ -133,4 +133,4 @@ Everything else is **Met** or **N/A** as of 2026-10-10.
 | dynamic_analysis | Met | Atheris fuzzes the attacker-facing parsers on every pull request (five targets, ADR-0081 and ADR-0090); the container smoke test runs the stack end to end. |
 | dynamic_analysis_unsafe | N/A | Python and TypeScript, memory-safe languages. |
 | dynamic_analysis_enable_assertions | Met | The fuzz targets assert invariants; the tests run with assertions on. |
-| dynamic_analysis_fixed | Met | A fuzzer failure blocks the merge (required check); the input joins `fuzz/corpus/` and the fast tests replay it. |
+| dynamic_analysis_fixed | Met | A failure of a required fuzz target blocks the merge; `baseline_intake` runs too, and becomes required once the ruleset lists it. The input joins `fuzz/corpus/` and the fast tests replay it. |

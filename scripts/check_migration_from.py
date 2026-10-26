@@ -4,8 +4,9 @@ intact (ADR-0077 part B, item 7).
     python scripts/check_migration_from.py <git-ref>
 
 CI runs it on every pull request with the PR's base commit — the code running
-in deployments the PR will upgrade (there are no release tags).  On the
-PostgreSQL server CTIPARSOR_TEST_DATABASE_URL names, in a throwaway database:
+in deployments that track main, which the PR will upgrade (starting from the
+last release tag as well is a follow-up of ADR-0085).  On the PostgreSQL
+server CTIPARSOR_TEST_DATABASE_URL names, in a throwaway database:
 
 1. <ref>'s own code builds its schema (`api.db.init_db`, run from a `git
    archive` of <ref>), and a report's rows are written into it;

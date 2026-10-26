@@ -14,7 +14,11 @@
 
 CTIParsor reads a threat-intelligence report — a PDF, DOCX, HTML, TXT or
 Markdown file, pasted text, or a URL — and produces a valid **STIX 2.1 bundle**
-ready for OpenCTI, MISP or a SIEM.
+ready for OpenCTI, MISP or a SIEM. Given a STIX 2.1 bundle you already hold, it
+enriches that bundle instead: the bundle's objects ship as received (what it
+cannot keep is listed with the reason), CTIParsor adds what the report states,
+and the Report object is re-issued under its id
+([enrich mode](docs/web-ui.md#enrich-mode-adr-0090), ADR-0090).
 
 **Deterministic extraction** (regex + multi-layer NER) does the groundwork;
 **LLM enrichment** adds TTPs, relationships and malware attribution. Every LLM
@@ -631,7 +635,7 @@ docker compose --profile dev up frontend-dev           # Vite HMR → http://loc
 ```
 
 `dev` bind-mounts the repo over `/app` (edits need no rebuild); `frontend-dev`
-bind-mounts `frontend/` into a plain `node:24` container and proxies `/api`
+bind-mounts `frontend/` into a plain `node:26` container and proxies `/api`
 to the `app` service. Both are `profiles: [dev]`, so a plain
 `docker compose up -d` never starts them.
 

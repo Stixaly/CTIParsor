@@ -179,6 +179,19 @@ rebuild the corpus from the Settings page. The sizing table is in
   pre-existing packaging problem, tracked separately.
 - The bundle's recorded git revision comes from the image build argument in
   containers (`make docker-build` sets it).
+- Schema versions 12 (ADR-0086, bundle builds) and 13 (ADR-0090, STIX baselines)
+  are new since v0.1.0. They apply at the first start of this code, by the API
+  or by a worker, whichever starts first, with no action on your part. An older
+  image then refuses the database ("an older image was started after a newer one
+  migrated it", `api/migrate.py`). To go back, restore the backup taken before
+  that start ([§1](#1-back-up-first)).
+- STIX enrichment (ADR-0090) is on by default. `STIX_ENRICHMENT_ENABLED=false`
+  turns it off, and the body budget of `POST /api/upload` then drops by the
+  20 MB a baseline may weigh, to 50 MB plus the 64 KB form. The 50 MB limit on
+  the report itself does not change.
+- The ATT&CK 20.0 track ships in the image (`pipeline/data/attack/20.0/`), so
+  `ATTACK_RELEASE=20.0` needs no download. The default stays 19.2 (ADR-0087;
+  [configuration.md](configuration.md#attck-release)).
 
 ## 7. Container stack: a new PostgreSQL major (`make db-upgrade`)
 

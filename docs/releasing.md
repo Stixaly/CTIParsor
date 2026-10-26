@@ -35,7 +35,7 @@ was published on 2026-10-17 and is marked Latest. Its tag `v0.1.0` is annotated
 and names commit 4bdfa8f, the merge of the release pull request (#170). On GHCR,
 `0.1.0`, `0.1` and `sha-4bdfa8f…` name one digest,
 `sha256:80aca36a7cf3fbf9319ee828f8d4811bf90e56d94120a99776ba8df4cc71a773`. Its
-four files pass `sha256sum -c SHA256SUMS`, and the archive, the SBOM and the
+archive and SBOM pass `sha256sum -c SHA256SUMS`, and the archive, the SBOM and the
 image pass the commands of [Verifying a release](#verifying-a-release) (checked
 2026-10-23). It is not an immutable Release: immutability was turned on after
 it was published (see [One-time repository settings](#one-time-repository-settings)).

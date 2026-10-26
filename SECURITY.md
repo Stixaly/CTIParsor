@@ -95,6 +95,14 @@ Every emitted bundle carries a **TLP** marking (and optional **PAP**) plus an
 authoring `Identity`, so downstream OpenCTI/MISP can apply sharing policy. Set
 `STIX_TLP` (or per-job `tlp_level`) before exporting outside your team.
 
+### 7. Reference STIX bundles (ADR-0090)
+A STIX 2.1 bundle sent to enrich a report is untrusted input. A bundle over 20 MB,
+or with more than 10,000 objects, is refused (`pipeline/baseline_stix.py`,
+`api/routes/_common.py`). Each object is checked against the STIX schemas
+when the job runs, and an object that fails is left out, not repaired. A request
+body over its route's budget gets a 413 before the application reads the rest
+(`api/body_limit.py`).
+
 ## Offline by default
 No telemetry, no analytics, no outbound calls except the **optional** LLM provider
 (Anthropic/Mistral) — and Ollama keeps even that local. With no API key the
@@ -143,8 +151,9 @@ pipeline still produces valid STIX. ML models are downloaded once and cached.
   published on a version already shipped is found within a week.
 - **Fuzzing (ADR-0081).** Atheris fuzzes the code that reads
   attacker-controlled input (report text, quoted rules, dates, the prompt
-  enclosure) on every pull request and weekly; a crash, a broken invariant,
-  an input slower than 10 s or a memory blow-up fails the run.
+  enclosure, and a reference STIX bundle, `baseline_intake`) on every pull request
+  and weekly; a crash, a broken invariant, an input slower than 10 s or a memory
+  blow-up fails the run.
 - **Verifiable image.** Each image pushed to GHCR carries a CycloneDX SBOM and
   two signed attestations bound to its digest, build provenance and that SBOM:
 
