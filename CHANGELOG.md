@@ -1183,6 +1183,32 @@ file", above).
 
 ### Security
 
+#### Every other request body is held to 1 MB as it arrives, 2026-10-26
+
+Outside the upload routes (next entry), a request body was read whole with
+nothing to bound it: `PUT /api/relationship-policy` through `request.json()`,
+and every POST, PUT or PATCH with a pydantic body (entities, relationships,
+overrides, thresholds, settings, jobs) through FastAPI. Without the nginx
+`proxy` profile in front, one chunked body of several GB on any of them used up
+the API's memory. Every request without a budget of its own is now held to
+1 MB the same way: a 413 on the `Content-Length`, or as soon as a body sent
+without one passes it. The largest body the UI sends there is the relationship
+policy with a rule for each of the 1,369 pairs of STIX types, 177 KB. The
+detection export (`POST /api/jobs/{id}/detections/export`) sends rule ids, which
+grow with the rule store: the tag join, the rules reached by evidence alone and
+the promotions, at most every rule. On the 15 corpora on disk that is 0.94 MB
+for the 38,059 ATT&CK-tagged rules and 2.1 MB for all 87,407. It gets 8 MB of
+its own
+([docs/api.md](docs/api.md#how-large-a-request-may-be)).
+
+The budgets are now looked up the way the router matches a path. The table
+compared paths exactly, while a Starlette route's pattern ends in `$`, which
+also matches before a trailing newline. So `POST /api/upload%0A` reached the
+upload route without a budget, and its whole form was spooled before the
+route's own 413. It now gets the upload's budget, and a path that matches no
+budget gets the 1 MB rather than nothing. The path in the `[body-limit]` log
+line and in the 413 is quoted, as in uvicorn's access log.
+
 #### An upload is held to its size limit while it arrives, chunked or not, 2026-10-26
 
 `POST /api/upload` checked its size in the handler, and FastAPI runs the

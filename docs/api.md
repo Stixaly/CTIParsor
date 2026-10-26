@@ -25,12 +25,12 @@ Job status lifecycle: `uploaded` → `queued` → `processing` → `for_review` 
 
 ### How large a request may be
 
-The routes that take a report or a STIX bundle hold the whole request body to
-a budget while it arrives (`api/body_limit.py`), before FastAPI reads the form
-and spools its files to disk. A `Content-Length` over the budget is answered
-**413** before a byte is read. A body sent without one (chunked) is answered
-413 as soon as it passes the budget, and nothing more of it is read. The body
-is `{"detail": "Request too large. <path> accepts at most N MB."}`. A
+Every request body is held to a budget while it arrives (`api/body_limit.py`),
+before FastAPI reads a form and spools its files to disk, or reads a JSON body
+whole. A `Content-Length` over the budget is answered **413** before a byte is
+read. A body sent without one (chunked) is answered 413 as soon as it passes
+the budget, and nothing more of it is read. The body is
+`{"detail": "Request too large. <path> accepts at most N MB."}`. A
 `Content-Length` that is not a number is a **400**.
 
 | Route | Budget | With `STIX_ENRICHMENT_ENABLED=false` | Made of |
@@ -39,9 +39,11 @@ is `{"detail": "Request too large. <path> accepts at most N MB."}`. A
 | `POST /api/ingest/text` | 51.5 MB | 11.5 MB | 2,000,000 characters at 6 bytes each, and the bundle at twice its 20 MB |
 | `POST /api/ingest/url` | 40 MB | 64 KB | the bundle at twice its 20 MB |
 | `POST /api/baselines/inspect` | 20 MB | 20 MB (the route answers 400) | the bundle |
+| `POST /api/jobs/{id}/detections/export` | 8 MB | 8 MB | rule ids: 2.1 MB for every rule in the store |
+| any other request | 1 MB | 1 MB | a decision, a setting, the relationship policy: 177 KB at most |
 
-Each budget also counts 64 KB for the form or the JSON fields around what it
-carries; MB here is 2^20 bytes. The JSON routes count what `JSON.stringify`
+The first four budgets also count 64 KB for the form or the JSON fields around
+what they carry; MB here is 2^20 bytes. The JSON routes count what `JSON.stringify`
 writes, as the UI sends it: a character of the text takes at most 6 bytes
 (`\u0001`), and a bundle sent as a string at most doubles (every character a
 quote or a backslash). A client that also escapes non-ASCII as `\uXXXX`
@@ -49,10 +51,22 @@ quote or a backslash). A client that also escapes non-ASCII as `\uXXXX`
 of characters outside the BMP (12 bytes each), or a bundle mostly in a
 non-Latin script, and gets a 413. Within its budget a route keeps its own limits:
 a report over 50 MB is still a 413 (`File too large`), and so is a bundle over
-20 MB; pasted text over 2,000,000 characters is a 413 too. Every other route
-takes a small JSON body and has no budget of its own: behind the nginx `proxy`
-profile it is held to nginx's 72 MB, and without nginx to nothing. nginx
-accepts 72 MB so that it never refuses a request the API takes
+20 MB; pasted text over 2,000,000 characters is a 413 too.
+
+The detection export POSTs the ids of the rules to package, and they grow with
+the rule store rather than with the report: the rules the report's ATT&CK
+techniques select, those reached by its evidence alone (untagged), and the
+analyst's promotions, so at most every rule in the store. On the 15 corpora of
+`detection_corpora.yaml` (87,407 rules, measured 2026-10-26), the ids of the
+38,059 rules that carry an ATT&CK tag weigh 0.94 MB, and those of every rule
+2.1 MB. Every other request is held to 1 MB: the relationship policy (`PUT`,
+read whole by `request.json()`) and the JSON bodies pydantic reads whole. The
+largest of them the UI sends is the policy with a rule for each of the 1,369
+pairs of the 37 STIX types it accepts, 177 KB; a review group's 500
+relationship ids weigh 19 KB. A budget's path is
+matched as the router matches it: `/api/upload%0A` reaches the upload route, so
+it gets the upload's budget. A path that matches no budget gets the 1 MB, not
+nothing. nginx accepts 72 MB so that it never refuses a request the API takes
 (`tests/test_body_limit.py` checks it); behind another proxy, allow as much:
 72 MiB, 75,497,472 bytes.
 
