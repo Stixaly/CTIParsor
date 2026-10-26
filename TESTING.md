@@ -171,8 +171,9 @@ in the `.md` file.
 job of the measurement database as its own baseline, removes 30 % of its index
 entries (seed 20261025 by default), replays the job's stored extraction through
 Stage 3r offline (no LLM, no network), and writes the evidence to
-`output/baseline_ablation.json` (git-ignored). The connection is read only. The
-database is `ctiparsor_measure` on the test PostgreSQL (`cti-pg-test`, port
+`output/baseline_ablation.json` (git-ignored; with `--fixture`,
+`output/baseline_ablation_<fixture stem>.json`). The connection is read only.
+The database is `ctiparsor_measure` on the test PostgreSQL (`cti-pg-test`, port
 5433), never the main one; start it with `wsl -u root -e docker start cti-pg-test`.
 Its jobs must hold their bundle, their baseline index and their extraction rows;
 the script exits 2 when it cannot read them.

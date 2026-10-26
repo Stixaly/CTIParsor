@@ -15,8 +15,9 @@ and points at the seams where most changes go.
    takes changes only through pull requests, and only once every required
    check passes — the fast tests (ruff, `reuse lint`, mypy, pytest with
    coverage floors), the dependency audit and review, the frontend checks,
-   the container build and smoke test, CodeQL, and the five fuzzers. Run
-   `make ci` before pushing to see the same results.
+   the container build and smoke test, CodeQL, and four of the five fuzzers
+   (`Fuzz (baseline_intake)` runs but is not required yet). Run `make ci`
+   before pushing: it runs ruff, mypy, pytest and the frontend checks.
 4. The maintainer reviews it; review conversations are resolved before the
    merge.
 
@@ -51,8 +52,12 @@ CTIParsor no longer supports SQLite (ADR-0053) — every check below needs a
 reachable PostgreSQL server, which the `dev` compose service already points
 at (`CTIPARSOR_TEST_DATABASE_URL`, set in `compose.yaml`):
 
-`make ci` runs every check the pull-request CI runs, with the same scope and
-the same floors; each step also has a target of its own:
+`make ci` runs the lint, type, test, coverage-floor and frontend steps of the
+pull-request CI, with the same scope and the same floors. It does not run
+`reuse lint`, the migration check against the base commit
+(`scripts/check_migration_from.py`, pull requests only, which needs a
+PostgreSQL server), or the other checks: dependency audit and review,
+container image, CodeQL and fuzzing. Each step also has a target of its own:
 
 ```bash
 make ci               # all of the below
@@ -182,6 +187,14 @@ bash scripts/docker_smoke.sh --no-build --job   # also process a sample report e
 
   When in doubt, pick `"extraction"`: it never claims a rebuild fixed what a
   rebuild cannot.
+- **Generated policy data** — `pipeline/data/gazetteer_policy.json` is built
+  from `docs/gazetteer-ordinary-words.md`. After any change to that document,
+  run `docker compose run --rm dev python scripts/build_gazetteer_policy.py`
+  and commit the regenerated JSON with it: `tests/test_gazetteer_policy.py`
+  fails while the two differ. The version is the first 12 hex digits of the
+  SHA-256 of the whole document (CRLF read as LF), so any edit to its text,
+  even a reformatting, changes the version that runs record
+  (`gazetteer_policy.version()`).
 - **Line length** is 120 (ruff). Keep imports sorted (`ruff --fix` handles `I001`).
 - **Files copied from another project** (code, data, icons) keep their
   copyright and licence. Give them a table in [`REUSE.toml`](REUSE.toml),

@@ -104,9 +104,10 @@ jobs:
 
       # ADR-0077 part B: a database the base commit's code wrote — what every
       # deployment runs until this PR — migrates to this PR's schema with its
-      # rows intact, and this code reads them back.  No release tags: the base
-      # commit is the previous release.  The SHA reaches the script through
-      # the environment, never through the command text.
+      # rows intact, and this code reads them back.  The base commit stands for
+      # the previous release (starting from the last release tag as well is a
+      # follow-up of ADR-0085).  The SHA reaches the script through the
+      # environment, never through the command text.
       - name: Migrate a database written by the base commit
         if: github.event_name == 'pull_request'
         env:

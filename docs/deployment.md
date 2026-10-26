@@ -148,10 +148,15 @@ everyone else's reports. Real per-user isolation would need authentication
 inside the application — a `user_id` on jobs and a check on every route. None of
 that exists today.
 
-The full nginx config, the SSE-buffering settings it needs, and the
-`FORWARDED_ALLOW_IPS` reasoning are in
-[docs/docker.md §Reaching it from other machines](docker.md#reaching-it-from-other-machines)
-— this profile is exactly that config, already wired into `compose.yaml`.
+The nginx config, with the SSE-buffering settings it needs (`proxy_buffering off`,
+`proxy_read_timeout 3600s`), is `docker/nginx/default.conf`, already wired into
+`compose.yaml`. The `FORWARDED_ALLOW_IPS` reasoning is in
+[docs/docker.md §Reaching it from other machines](docker.md#reaching-it-from-other-machines).
+
+The proxy accepts a request body of up to 72 MB (`client_max_body_size`). That covers
+the largest upload with enrichment on: a 50 MB report, a 20 MB STIX baseline and the
+64 KB form. A proxy in front of the API must accept at least 70 MB plus 64 KB too
+([api.md](api.md#how-large-a-request-may-be)).
 
 ## 4. Running it as a service
 
@@ -258,8 +263,11 @@ upload is refused with HTTP 503 rather than accepted and quietly discarded — a
 analyst who gets a 503 knows to retry, where a report accepted and never run
 looks finished.
 
-Jobs left `processing` by a crash or a redeploy are returned to the queue when
-the API starts, so a restart mid-report costs the run, not the submission.
+Jobs left `processing` by a crash or a redeploy: on a host install
+(`CTIPARSOR_ROLE=all`), the API requeues those whose lease has expired when it
+starts. In the container stack the API requeues nothing; a worker requeues the job
+once its lease expires (`WORKER_LEASE_TIMEOUT_S`, 180 s by default). Either way, a
+restart mid-report costs the run, not the submission.
 
 ## 6. Before you expose it
 

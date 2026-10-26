@@ -54,7 +54,7 @@ be on the host besides Docker.
 
 ```bash
 docker compose run --rm dev pytest -v      # all tests (make test); no API key needed, the LLM is mocked
-make ci                                    # every check CI runs: lint, types, tests + coverage floors, frontend
+make ci                                    # lint, types, tests + coverage floors, frontend (what it leaves to CI: CONTRIBUTING.md)
 ```
 
 `CTIPARSOR_TEST_DATABASE_URL` is already set for the `dev` service in
@@ -152,7 +152,7 @@ CTIParsor/
 │   ├── stage4c_long_distance.py   # LLM long-distance relation inferer (opt-in)
 │   ├── stix_rel_spec.py           # STIX 2.1 suggested-relationship table (spec guard)
 │   ├── stage5_validation.py       # Bundle validation + export
-│   ├── baseline_stix.py           # Reads an analyst's STIX 2.1 baseline bundle and computes the match keys; not wired in yet (ADR-0090, lot 1)
+│   ├── baseline_stix.py           # Reads an analyst's STIX 2.1 baseline; Stage 3r matches the run to it, Stage 4 merges it into the bundle (ADR-0090)
 │   ├── bundle_revisions.py        # Which stored bundles predate an output fix, judged on the run or the build by the fix's scope (ADR-0035, ADR-0086)
 │   ├── mitre_db.py                # Lazy-loaded MITRE index (techniques + tactics)
 │   ├── vlm.py                     # Provider-agnostic vision backends + capability probe (ADR-0033)
@@ -205,6 +205,7 @@ CTIParsor/
 │   └── data/
 │       ├── mitre_index.json       # Compact ATT&CK index (built by build_indexes.py)
 │       ├── gazetteer.json         # Named-entity dictionary
+│       ├── gazetteer_policy.json  # Decision per gazetteer form (CASE, CONTEXT, RETAIN), built by build_gazetteer_policy.py
 │       ├── attack_relationships.json # 20 015 curated ATT&CK edges (Stage 4b grounding)
 │       ├── attack_manifest.json   # The default track's release (19.2), what was checked against a rebuild, sha256 of its files (ADR-0087)
 │       ├── attack/20.0/           # The v20.0 track: the same index files built from ATT&CK v20.0, with its own attack_manifest.json (ADR-0087)
@@ -216,7 +217,7 @@ CTIParsor/
 ├── scripts/
 │   │  ── build and operate ──
 │   ├── build_indexes.py           # Build the pipeline/data/ indexes (--only retrieval for TTP_MODE=select; --out-dir, --capec-index for a track)
-│   ├── download_attack.py         # Download enterprise-attack.json from mitre/cti master, or with --release X.Y the three bundles of an attack-stix-data release, sha256-checked (ADR-0087)
+│   ├── download_attack.py         # Download enterprise-attack.json from mitre/cti master, or with --release X.Y the three bundles of an attack-stix-data release, sha256-checked; `--out DIR` (with `--release`) picks the folder, default `data/attack-stix/v<X.Y>/` (ADR-0087)
 │   ├── build_attack_release.py    # Build the ATT&CK track pipeline/data/attack/<X.Y>/ from those bundles (ADR-0087)
 │   ├── sync_corpora.py            # Clone/pull rule corpora (ambient git auth) + tarball fetch (ET Open)
 │   ├── build_detection_index.py   # Parse clones → detection-rule store
@@ -233,6 +234,7 @@ CTIParsor/
 │   ├── release_files.sh           # A release's files and notes, from the image main's CI built and attested (ADR-0085)
 │   ├── migrate_jobs_to_postgres.py # One-shot copy of a cti_stix.db job store into PostgreSQL (ADR-0045)
 │   ├── migrate_rules_to_postgres.py # The same for the rule store (ADR-0053)
+│   ├── build_gazetteer_policy.py  # The ordinary-word policy, pipeline/data/gazetteer_policy.json, from docs/gazetteer-ordinary-words.md
 │   │  ── checks and diagnostics ──
 │   ├── check_stages.py            # Diagnostic: which stages are available (make check)
 │   ├── check_doc_claims.py        # Doc drift guard: documented numbers vs source (make check-docs)
@@ -240,6 +242,7 @@ CTIParsor/
 │   ├── check_flag_equivalence.py  # env_bool vs the old per-flag parsing, value by value
 │   ├── check_unescape_equivalence.py # A/B of the atom unescape refactor on real corpus data
 │   ├── check_evidence_gate.py     # Validate the coverage evidence gate on the store (ADR-0030)
+│   ├── opencti_import_check.py    # Check A4 (ADR-0090): what OpenCTI keeps of an enriched bundle, in a throwaway instance (TESTING.md § Measuring baseline reconciliation and the OpenCTI import)
 │   │  ── read-only audits and measurements (the numbers quoted in the ADRs) ──
 │   ├── audit_api_edge_cases.py    # GET-only API edge-case conformance harness
 │   ├── audit_bundle_invariants.py # Invariants over every stored STIX bundle
@@ -249,13 +252,17 @@ CTIParsor/
 │   ├── audit_store_invariants.py  # Invariants over the rule/entity store
 │   ├── audit_yara_escape_impact.py # Impact of the YARA unescape-order defect (ADR-0015)
 │   ├── audit_yara_parsing.py      # The YARA parser against real corpora (ADR-0015)
+│   ├── baseline_ablation.py       # Recovery and duplicates of the baseline reconciliation, read only (ADR-0090; TESTING.md § Measuring baseline reconciliation and the OpenCTI import)
+│   ├── baseline_round_trip.py     # Round trip of the enriched bundles on the real reports, offline (ADR-0090; TESTING.md § Measuring baseline reconciliation and the OpenCTI import)
 │   ├── measure_advisory_gate.py   # What the TTP advisory gate drops on real reports
 │   ├── measure_cold_start.py      # Import + model-load cost of a worker process
 │   ├── measure_corpus_ingest.py   # Ingest chosen corpora into a scratch DB, report per-format stats
 │   ├── measure_figure_iocs.py     # Are the vision model's `iocs` grounded in its own transcription
+│   ├── measure_gazetteer_policy.py # Stage 2b with and without the ordinary-word policy, on AnnoCTR train and dev (docs/eval/gazetteer-policy-2026-10.md)
 │   ├── measure_graph_links.py     # Bundle connectivity and sentence co-mention candidates
 │   ├── measure_image_surface.py   # How much of a corpus is images, and how many survive triage
 │   ├── measure_negated_atoms.py   # Before/after of the ADR-0034 negation fix on the store
+│   ├── measure_ner_precision.py   # Entity precision filters on AnnoCTR: run, status, replay, compare, gates (ADR-0088, ADR-0089)
 │   ├── measure_normalize_divergence.py # Divergences between the three atom normalizers
 │   ├── measure_pin_allocation.py  # Pin edges under sequential vs fair-share budgets (ADR-0026)
 │   ├── measure_relevance.py       # Proposed-rule relevance on real reports
@@ -350,13 +357,14 @@ CTIParsor/
 │       ├── stix-icons/            # 27 white STIX 2.1 SVG icons, EclecticIQ's stix-icons (CC BY-SA 4.0)
 │       └── stix-viz/              # OASIS cti-stix-visualization, for the graph view (THIRD_PARTY_NOTICES.md)
 │
-├── tests/                         # 114 test_*.py modules, ~2 100 tests — map and counts in TESTING.md
+├── tests/                         # test_*.py modules — map and counts in TESTING.md
 │   ├── test_stage1.py             # Ingestion, chunking, overlap, defanging
 │   ├── test_stage2.py             # IoC extraction, refanging, deduplication
 │   ├── test_stage4.py             # STIX mapping
 │   ├── …                          # one module per stage + per ADR feature
 │   ├── eval_pipeline.py           # Offline quality benchmarks (ATE, grounding)
-│   └── fixtures/sample_report.txt
+│   ├── fixtures/sample_report.txt
+│   └── fixtures/baselines/        # Hand-written STIX bundles of the baseline tests (ADR-0090, see the README there)
 │
 ├── input/                         # Drop CTI reports here (gitignored)
 ├── output/                        # Generated STIX bundles (gitignored)
@@ -399,6 +407,7 @@ CTIParsor/
 ├── Dockerfile                     # UI build, venv build, slim runtime, + a `dev` target with the CI tools (ADR-0044, ADR-0054)
 ├── compose.yaml                   # app, worker, postgres, capture-proxy + profiles bootstrap / dev / ollama / proxy, hardened
 └── docker/                        # entrypoint, model warm-up, seccomp profile, nginx + squid config
+    └── opencti-test/              # Throwaway OpenCTI stack for scripts/opencti_import_check.py; no service of compose.yaml uses it (TESTING.md)
 ```
 
 ## Database migrations

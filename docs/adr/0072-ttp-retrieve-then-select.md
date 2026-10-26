@@ -2,6 +2,10 @@
 
 **Status:** Accepted — select mode is **the default** since its dev run of 2026-10-03 (see "Outcome" at the end, and docs/eval/baseline-2026-10.md)
 **Date:** 2026-10-03
+**Amended by:** [0082](0082-what-the-model-could-not-decide-waits-for-an-analyst.md)
+(2026-10-10). Its "Not done" review UI for `ttp_review` is answered: a technique
+the selector could not decide is held pending with a `held_reason`, on its own
+card, out of the bundle until an analyst accepts it.
 **Deciders:** maintainer
 **Implements:** ADR-0023 Phases 4–6 (procedure corpus, BM25 + dense, selector)
 

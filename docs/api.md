@@ -1,15 +1,16 @@
 # REST API
 
 Every route the FastAPI server exposes. The interactive OpenAPI docs are served
-by the running app at `http://localhost:8000/docs`.
+by the running app at `http://localhost:8000/docs`. A path under `/api/` that no
+route matches gets a JSON 404, not the application page (`api/main.py`).
 
 ## Jobs
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/upload` | Upload a file (multipart `file=`) and queue it. Returns `{ job_id, filename, status }`, `status` being `queued` or `processing`; 503 when the queue is full (the uploaded file is removed, and the job row stays, `failed`). Optional `baseline_stix` (a file) and `baseline_report_id` (a form field): a STIX 2.1 bundle to enrich (below) |
-| `POST` | `/api/ingest/text` | Ingest pasted text (JSON `text`, optional `title`). Stored `.html`, `.md` or `.txt` by content — pasted markup is stripped, not ingested raw. 20 chars min, 2 MB max; 400 for a text that holds a NUL character or one with no UTF-8 form (a lone surrogate), before anything is written. Optional `baseline_bundle` (the TEXT of the STIX file) and `baseline_report_id` |
-| `POST` | `/api/ingest/url` | Render a URL with headless Chromium (JSON `url`, optional `enable_js`). Writes `{job_id}.pdf` (archive, shown in Review) and `{job_id}.txt` (rendered DOM text, ingested). 400 policy refusal · 502 unreachable or blank render · 503 Playwright absent · 504 timeout. Optional `baseline_bundle` and `baseline_report_id`, checked before the capture |
+| `POST` | `/api/upload` | Upload a file (multipart `file=`) and queue it. Returns `{ job_id, filename, status }`, `status` being `queued` or `processing`; 503 when the queue is full (the uploaded file and the job's baseline, if any, are removed, and the job row stays, `failed`). Optional `baseline_stix` (a file) and `baseline_report_id` (a form field): a STIX 2.1 bundle to enrich (below) |
+| `POST` | `/api/ingest/text` | Ingest pasted text (JSON `text`, optional `title`). Stored `.html`, `.md` or `.txt` by content — pasted markup is stripped, not ingested raw. 20 chars min, 2 MB max; 400 for a text that holds a NUL character or one with no UTF-8 form (a lone surrogate), before anything is written. 503 when the queue is full, as the upload answers: the written text is removed. Optional `baseline_bundle` (the TEXT of the STIX file) and `baseline_report_id` |
+| `POST` | `/api/ingest/url` | Render a URL with headless Chromium (JSON `url`, optional `enable_js`). Writes `{job_id}.pdf` (archive, shown in Review) and `{job_id}.txt` (rendered DOM text, ingested). 400 policy refusal · 502 unreachable or blank render · 503 Playwright absent, or the queue full (then the `.pdf`, the `.txt` and the metadata file are removed) · 504 timeout. Optional `baseline_bundle` and `baseline_report_id`, checked before the capture |
 | `GET` | `/api/jobs` | List all jobs (with `pipeline_mode`) |
 | `GET` | `/api/jobs/{id}` | Get a single job (includes entity/relationship counts, `pipeline_mode`, and for an `enrich` job an `enrichment` block, below) |
 | `GET` | `/api/jobs/{id}/baseline` | The STIX bundle the job was created from, as received, as a JSON download. 404 for a job with none |
@@ -30,7 +31,7 @@ before FastAPI reads a form and spools its files to disk, or reads a JSON body
 whole. A `Content-Length` over the budget is answered **413** before a byte is
 read. A body sent without one (chunked) is answered 413 as soon as it passes
 the budget, and nothing more of it is read. The body is
-`{"detail": "Request too large. <path> accepts at most N MB."}`. A
+`{"detail": "Request too large. <path> accepts at most N MB."}` (`N KB` under 1 MB). A
 `Content-Length` that is not a number is a **400**.
 
 | Route | Budget | With `STIX_ENRICHMENT_ENABLED=false` | Made of |
@@ -196,6 +197,11 @@ is empty until Stage 3r writes them. The bundle itself is not in the response.
 | `POST` | `/api/jobs/{id}/entities/accept-pending` | Accept all NULL-state entities in one query. 404 for an unknown job |
 | `POST` | `/api/jobs/{id}/entities/bulk` | Bulk accept / reject / reset entities by type (see below) |
 
+Entity rows carry `enrichment_status` (the values listed under `counts` above;
+null in full mode and for an entity added by hand) and `baseline_stix_id` (the
+id of the baseline object the row is or matches; null otherwise), see ADR-0090.
+The columns are described in `docs/database-schema.md`.
+
 ### Bulk entity update
 
 ```json
@@ -212,7 +218,7 @@ is empty until Stage 3r writes them. The bundle itself is not in the response.
 |---|---|---|
 | `GET` | `/api/jobs/{id}/relationships` | List all relationships |
 | `POST` | `/api/jobs/{id}/relationships` | Create a relationship |
-| `PATCH` | `/api/jobs/{id}/relationships/{rid}` | Update (`accepted`, `source_value`, `relationship_type`, `target_value`, `evidence_text`). 409 when it changes an endpoint or the verb of a row imported from the analyst's STIX bundle, or sends a `start_time` or `stop_time` for it: accept or reject it |
+| `PATCH` | `/api/jobs/{id}/relationships/{rid}` | Update (`accepted`, `source_value`, `relationship_type`, `target_value`, `evidence_text`, `evidence_label`, `start_time`, `stop_time`). 409 when it changes an endpoint or the verb of a row imported from the analyst's STIX bundle, or sends a `start_time` or `stop_time` for it: accept or reject it |
 | `DELETE` | `/api/jobs/{id}/relationships/{rid}` | Remove. 409 for a row imported from the analyst's STIX bundle: reject it instead |
 | `GET` | `/api/jobs/{id}/relationships/valid-types` | List valid STIX relationship type strings |
 | `POST` | `/api/jobs/{id}/relationships/bulk` | Accept, reject or reset several relationships in one call: `{ "ids": [...], "action": "accept" \| "reject" \| "reset" }`, at most 500 ids. Journaled as `human_bulk` (ADR-0058), which threshold calibration does not read. Returns `{ updated, action }` |
@@ -232,6 +238,10 @@ is empty until Stage 3r writes them. The bundle itself is not in the response.
   "evidence_label": "observed"
 }
 ```
+
+Relationship rows returned by the list route also carry `enrichment_status` and
+`baseline_stix_id`, as entities do (see Entities above, and
+`docs/database-schema.md`).
 
 Valid `relationship_type` values: `uses`, `attributed-to`, `targets`, `indicates`, `mitigates`, `remediates`, `delivers`, `drops`, `downloads`, `exploits`, `originates-from`, `compromises`, `beacons-to`, `communicates-with`, `exfiltrates-to`, `controls`, `has`, `hosts`, `owns`, `authored-by`, `impersonates`, `located-at`, `resolves-to`, `belongs-to`, `variant-of`, `duplicate-of`, `derived-from`, `related-to`.
 
@@ -267,6 +277,15 @@ Valid `relationship_type` values: `uses`, `attributed-to`, `targets`, `indicates
 
 - `global`: `"enforce"` (apply rules) · `"auto"` (ignore rules)
 - `mode`: `"pin"` (lock relationship type) · `"auto"` (allow free editing)
+
+**Refused rules.** `PUT` answers **400** for a `rules` that is not an array, for a
+rule that is not a JSON object, for a rule whose `src` or `tgt` is not a STIX 2.1
+SDO or SCO type, whose `verb` is not a STIX 2.1 relationship type, whose `mode` is
+neither `pin` nor `auto`, or whose `enabled` is not a boolean. It also refuses a
+pair (`src>tgt`) that an earlier rule already has, disabled or not, and a `pin`
+rule (enabled by default) whose verb STIX 2.1 does not list for that pair, since
+Stage 4 would emit it as `related-to` or drop it. The message names the rule as
+`'rules[i]'`.
 
 **Factory default.** Until a policy is saved, `GET` returns
 `{"version": 1, "global": "enforce", "rules": []}` and Stage 4 runs with **no
@@ -338,7 +357,7 @@ Set `reference: false` for strictly report-scoped bundles: grounding asserts
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/jobs/{id}/progress` | SSE stream. Events: `connected`, `stage`, `done`. |
+| `GET` | `/api/jobs/{id}/progress` | SSE stream. Events: `connected`, `queued`, `stage`, `partial_graph`, `done`. |
 
 ```
 event: stage
@@ -347,6 +366,12 @@ data: {"stage":3,"label":"LLM enrichment","chunk":7,"total":22,"malware":3,"acto
 event: done
 data: {"status":"for_review"}
 ```
+
+`queued` is sent when the job enters the queue, with its `status` and its
+`position`: the number of queued jobs, this one included. `partial_graph` carries
+the nodes and links one Stage 3 LLM chunk found, a preview that never reaches the
+bundle. The stream sends `done` itself too, when a job is in a terminal status
+without one, when the job is not found, and at the stream timeout.
 
 ## Coverage (detection)
 

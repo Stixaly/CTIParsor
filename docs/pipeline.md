@@ -143,7 +143,7 @@ the [README](../README.md#how-it-works); this page is the detail.
 │  and the LLM's own picks, exact quote checked by code; a failed     │
 │  call ships nothing (candidates go to review); an answer cut off    │
 │  at the output-token limit ships its complete, checked choices      │
-│  the call stops at TTP_SELECT_MAX_OUTPUT_TOKENS (vLLM: 4096)        │
+│  the call stops at TTP_SELECT_MAX_OUTPUT_TOKENS (default: see below)│
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
@@ -182,7 +182,7 @@ the [README](../README.md#how-it-works); this page is the detail.
 ┌─────────────────────────────▼────────────────────────────────────────┐
 │  Stage 3r — BASELINE RECONCILIATION            (offline ✅ — ADR-0090)│
 │  Enrich mode only: the job's baseline is the analyst's STIX bundle.  │
-│  Full mode: skipped ("no baseline"). Flag: STIX_ENRICHMENT_ENABLED.  │
+│  Full mode: skipped ("no baseline"). API: STIX_ENRICHMENT_ENABLED.   │
 │  Matches what the run is about to write, in four passes:             │
 │  • Extracted entities: by match key, names within a family           │
 │  • Baseline entries nothing extracted: whole-word search in the text │
@@ -282,7 +282,13 @@ self-loop or repeats a baseline relationship is dropped. The baseline objects ar
 written back as received, with neither CTIParsor's marking nor its author. When the
 baseline has a chosen Report, that Report is re-issued under its own id, as an
 OpenCTI upsert, instead of a CTIParsor Report
-([the enriched bundle](stix-output.md#enriched-bundle-adr-0090)).
+([the enriched bundle](stix-output.md#enriched-bundle-adr-0090)). In a run, the baseline
+entries that nothing extracted but the text names (`baseline_in_text`) join the run's
+entities before Stage 4 maps them, as a finalize builds them from the stored rows
+(`pipeline/orchestrator.py`). Stage 3r runs only when the document has a
+baseline (`pipeline/orchestrator.py`). The API reads `STIX_ENRICHMENT_ENABLED`
+(on by default) and answers 400 to a request that carries a baseline while it is off
+(`api/routes/_common.py`).
 
 **Stage 5 in enrich mode** validates what CTIParsor built or re-issued, not the
 baseline objects, which were validated once at intake. The file keeps every object.
@@ -372,6 +378,22 @@ Each NER stage adds a different capability:
 | 2d | CyNER 2.0 (DeBERTa-v3) | Cybersecurity NER — malware & threat-actor groups; a threat actor written as ordinary language is dropped (ADR-0088) |
 | 2e | GLiNER zero-shot | Sectors, campaigns, infrastructure, novel actors |
 
+The gazetteer's ordinary-word policy (`GAZETTEER_POLICY`; the reviewed forms are in
+[gazetteer-ordinary-words.md](gazetteer-ordinary-words.md)) judges each occurrence of
+a form that is also an ordinary word. In `shadow` (the default) Stage 2b emits what
+it emits without the policy, and its stage report counts, by reason (`policy_*`), the
+occurrences the policy would withhold. In `apply` it withholds every occurrence that
+is not resolved (unresolved or excluded) before it claims a span, so a later
+qualifying mention is still found; a withheld occurrence claims neither its span nor
+its canonical name, and the counts are the withheld occurrences by reason. An
+analyst-promoted term is not judged (ADR-0052). `apply` is for measurement until the
+acceptance gates pass; `off` has no policy and no counts
+([configuration](configuration.md)).
+
+Stage 2 drops an email or ASN match that is glued to a cased letter or a digit on
+either side (`glued_to_a_word`, ADR-0049): `o@evil.com` is not cut out of
+`joão@evil.com`. Chinese, Japanese, Korean and Thai characters do not glue a match.
+
 ### 2. Sliding-window chunk overlap (Stage 1)
 
 ```
@@ -381,6 +403,12 @@ Chunk N+1:       [──── entity ─────────...]
 ```
 
 Named entities at chunk boundaries appear in both adjacent chunks. De-duplicated at merge. Estimated: +5–12% recall on long documents.
+
+Two more Stage 1 limits. A `.docx` whose parts would inflate past 512 MiB is refused
+before it is parsed (`_check_docx_size`, `pipeline/stage1_ingestion.py`). OCR
+runs in batches of ten pages: a Tesseract failure on one page is logged and costs only
+that page, and a batch that cannot be rendered is logged and skipped whole
+(`pipeline/stage1_ingestion.py`).
 
 ### 3. Hallucination filter (Stage 3b)
 
@@ -392,6 +420,16 @@ After every LLM call, each returned name is checked against the source chunk tex
 | 6–9 chars, multi-word, no digit | Exact + fuzzy | 80% |
 | ≥ 10 chars, multi-word, no digit | Exact + fuzzy | 75% |
 | Campaign names | Word-level keyword fallback | — |
+
+Two more rules apply to a Stage 3 answer. An answer that fails the schema loses only
+the items the error points at: `_drop_invalid_entries` removes them (a top-level field
+of the wrong type takes its default), and the answer is validated again, at most five
+times. The log counts the items dropped when the answer then validates. When the error
+points at nothing removable, or the fifth attempt still fails, the answer counts as
+`extraction_invalid` and the chunk gets an empty result (`pipeline/stage3_llm.py`).
+When Stage 3 stops on a timeout or an error, the chunks still queued are
+cancelled and never sent; the calls already running are not awaited and finish on their
+own (`pipeline/orchestrator.py`).
 
 ### 4. MITRE normalisation (Stage 3c)
 
@@ -406,6 +444,15 @@ Second LLM call per chunk quotes the exact supporting sentence for every relatio
 The TTP analogue of Stage 3d (ADR-0011 Phase B). For each LLM-extracted technique, a second LLM call must quote the sentence describing that technique being *used* — annotated with the technique's expected ATT&CK tactic so a behaviour-vs-tactic mismatch is also rejected. Enable with `ENABLE_TTP_VERIFICATION` (recommended on — without it TTPs pass no evidence gate while relationships pass two).
 
 Only a **high-confidence** semantic match (cosine ≥ the model's high cut-point) waives the check. That floor matters: a *medium* match (≥ 0.48) is precisely the nearest-but-wrong tier the Phase A margin gate exists to suppress, so letting it grant a bypass would hand the weakest signal in the pipeline veto power over the strongest check. On a real 12-page report, 13 of 16 corroborators sat below the cut-point and were waving through techniques with no textual support at all.
+
+In `select` mode the stage report counts two kinds of 3f answer apart. `truncated`
+answers were cut off before their end: their complete choices are validated, and their
+other candidates go to review (ADR-0072, amendment of 2026-10-19). `at_ceiling` answers
+were stopped by the provider at the selection call's output ceiling, cut or not
+(amendment of 2026-10-20), so one answer can count in both
+(`pipeline/orchestrator.py`). The ceiling is `TTP_SELECT_MAX_OUTPUT_TOKENS`
+when set, never above `LLM_MAX_OUTPUT_TOKENS`; unset, it is 4,096 on vLLM with thinking
+off and `LLM_MAX_OUTPUT_TOKENS` otherwise (`pipeline/stage3f_ttp_select.py`).
 
 ### 6b. Why TTP counts stay bounded
 
@@ -444,6 +491,21 @@ A full **Finalize** used to re-scan the text for the accepted named entities and
   pairs only — observable↔observable facts (`file related-to ipv4-addr`) are
   left as-is, since the spec's real answer for those is embedded ref
   properties, not a relationship object.
+- **One type per name** (ADR-0092) — a name typed as more than one of malware, threat
+  actor, tool and campaign keeps the type or types of its best-ranked source
+  (`TYPE_PRECEDENCE`, `pipeline/base.py`, lowest rank first: the analyst's own rows
+  −1, `ioc` and `gazetteer` 0, `semantic` and `llm` 1, `cyner` and `gliner` 2,
+  `spacy` and `alias_list` 3, any other source 99). A campaign ranks after every
+  source but the analyst's rows; equal ranks keep all their types. The types left out
+  go to the ledger as `dropped / outranked_type` and do not reach Stage 4
+  (`pipeline/named_entities.py`, `pipeline/orchestrator.py`).
+- **Ends that name several objects** (ADR-0091) — when an end names several candidate
+  objects, the verb picks the pair it accepts (`rel_is_allowed`). When several pairs
+  fit, or none does, the row is not built and the ledger records `ambiguous_name`
+  (`pipeline/stage4_stix_mapping.py`).
+- **URLs** — a value that is not a valid URI gives no `url` SCO. It is not repaired:
+  the ledger records it `dropped` with reason `not_a_uri`
+  (`pipeline/stage4_stix_mapping.py`).
 
 Measured effect on a 4-report corpus: named-entity relationship hallucination
 ≈ 11 % (the tractable target), entity hallucination ≈ 0. See
@@ -451,14 +513,39 @@ Measured effect on a 4-report corpus: named-entity relationship hallucination
 [ADR-0041](adr/0041-observables-route-through-indicators.md) /
 [ADR-0062](adr/0062-observables-keep-their-listed-relationships.md).
 
+### 9. What was rejected or held stays out (Stage 4, 4b)
+
+No later stage adds back a relationship an analyst rejected, or one Stage 3d held that
+nobody has decided yet (ADR-0082). Stage 4 and graph completion both receive the
+triples of these rows as `forbidden`, and each refusal is recorded in the mapping
+ledger with its origin (ADR-0013, amendment of 2026-10-26).
+
+- Graph completion (Stage 4b) refuses such a triple in ATT&CK grounding, in transitive
+  inference and in long-distance prediction (`pipeline/stage4b_graph_completion.py`).
+  A verb that names no direction (`related-to`, `duplicate-of`)
+  refuses the reverse triple too (`both_directions`).
+- Stage 4 applies the same rule to the edges that have no review row of their own: the
+  `targets` product from each threat actor to each targeted location or sector, the
+  policy's pinned rules, and the `indicates` edge of an IoC association. An IoC whose
+  `indicates` edge is refused keeps its Indicator; only the edge is left out
+  (`pipeline/stage4_stix_mapping.py`).
+- The finalize also reads the rejected and held relationship rows, but only to refuse
+  their triples; it never ships them (`api/worker.py`).
+
 ## MITRE ATT&CK data
 
-Stages 2b, 2c, 3c, and 4b use pre-built local indexes in `pipeline/data/`. That
+Stages 2b, 2c, 3c, 3f, 4 and 4b use pre-built local indexes in `pipeline/data/`. That
 directory is the **default track**, ATT&CK 19.2 (named by
 `pipeline/data/attack_manifest.json`). `ATTACK_RELEASE=20.0` makes a process
 read `pipeline/data/attack/20.0/` instead, which holds the same index files built
 from ATT&CK v20.0 and its own `attack_manifest.json` (ADR-0087,
 [configuration](configuration.md#attck-release)).
+
+An unknown `ATTACK_RELEASE` stops the run before Stage 1 (ADR-0087,
+`pipeline/orchestrator.py`). A Stage 3 checkpoint is resumed only when its
+fingerprint matches, and the release is one of the settings that fingerprint hashes
+(`pipeline/stage3_llm.py`, `pipeline/orchestrator.py`): a checkpoint
+written on one track is not resumed on the other.
 
 ### Build the indexes
 
@@ -547,3 +634,7 @@ read-only at run time).
 | OCR (Tesseract) | ✅ local binary |
 | Web UI (frontend assets) | ✅ served from local dist/ |
 | Detection coverage (Sigma, Suricata, YARA) | ✅ after `sync_corpora` (one-time clone) + `build_detection_index` |
+
+Stage 2f stops its CIRCL lookups for a report at the first one that gets no
+answer: that CVE and those not yet looked up stay unenriched, and are asked again
+on the next run (`pipeline/stage2f_cve_enrichment.py`).

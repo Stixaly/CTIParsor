@@ -324,7 +324,7 @@ services:
 
   # Frontend hot-reload (ADR-0054) -- the docker-world equivalent of the old
   # `cd frontend && npm run dev`. Same base image as the Dockerfile's own
-  # `ui` build stage (node:24-bookworm-slim), bind-mounts frontend/ instead
+  # `ui` build stage (node:26-bookworm-slim), bind-mounts frontend/ instead
   # of copying it, so edits show up through Vite's HMR with no rebuild.
   # Talks to `app` over the published API port (same-origin API calls the
   # built frontend already makes; see frontend/vite.config.ts for the dev

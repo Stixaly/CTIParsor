@@ -2,6 +2,10 @@
 
 **Status:** Accepted
 **Date:** 2026-10-01
+**Amended by:** [0082](0082-what-the-model-could-not-decide-waits-for-an-analyst.md)
+(2026-10-10). Review shows what nobody decided, and the claims the model could
+not decide now wait pending on their own card, out of the bundle, until an
+analyst accepts them.
 **Deciders:** maintainer
 **Amends:** ADR-0012 (the observable ↔ attack-pattern guard)
 **Relates to:** ADR-0041 / ADR-0062 (observables route through their

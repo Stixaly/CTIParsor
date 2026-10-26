@@ -653,6 +653,69 @@ has an amendment with the whole table.
 
 ### Documentation
 
+#### The reference pages catch up with two weeks of changes, 2026-10-26
+
+Nine read-only audits compared the reference pages with the code merged since
+2026-10-11 (#166 to #215), and each finding was checked against the code before
+it was written. The CHANGELOG and the ADRs had kept up; the pages they point to
+had not always. What the pages now say:
+
+- **Configuration** (`docs/configuration.md`, `.env.example`). Every variable
+  added in the period was documented. Seven older ones were not, although the
+  page says it lists every setting: `CTIPARSOR_CAPTURE_UNSANDBOXED`,
+  `CTIPARSOR_CAPTURE_PROXY`, `CTIPARSOR_UPLOADS_DIR`, `CTIPARSOR_OUTPUT_DIR`,
+  `CTIPARSOR_STATE_DIR`, `ENV` and `CTI_GIT_REV`. `CTI_DEV_IMAGE` joins
+  `.env.example`, and `LLM_MODEL` joins the variables that have no effect.
+- **API and schema** (`docs/api.md`, `docs/database-schema.md`). Every route was
+  documented. Added: the rows' `enrichment_status` and `baseline_stix_id`; the
+  503 of the two ingest routes when the queue is full, and what it removes; the
+  400s of `PUT /api/relationship-policy`; the `queued` and `partial_graph`
+  progress events; the JSON 404 of an unknown `/api/` path. In the schema:
+  `job_baselines` in the table list, the `baseline_sha256` and `error` forms of
+  `bundle_build_json`, how imported rows are written, and which writer the
+  `bundle_review_revision` guard applies to.
+- **Pipeline** (`docs/pipeline.md`). Stage 2b's ordinary-word policy; one type
+  per name and resolution by the verb (ADR-0091, ADR-0092); a new section on
+  rejected and held relationships (ADR-0013, amendment of 2026-10-26); Stage 3f's
+  cut and ceiling counts; invalid LLM items and the cancelled chunks of an
+  aborted Stage 3; the CIRCL stop; every stage that reads the ATT&CK track.
+- **STIX output** (`docs/stix-output.md`). A section on the mapping ledger's new
+  reasons (`not_a_uri`, `outranked_type`, `ambiguous_name`, the IoC-association
+  reasons, `refused`), what the baseline intake leaves out, the enrich-mode
+  ledger entries, and the YARA `include` rule. Corrected: the markings, the
+  author and `x_synthesis_stats` are on what CTIParsor builds, not on baseline
+  objects; a CTIParsor Report is built when the chosen Report is rejected;
+  attack-pattern ids are computed except for hand-annotated techniques; a quoted
+  rule ships unchecked when its checker is not installed.
+- **Interface** (`docs/web-ui.md`). The Coverage page's ATT&CK release and its
+  Other column; the New report modal's submit labels and bundle card; the
+  Review page's `STIX` chip, hints and ribbon lines.
+- **Operations** (`docs/upgrading.md`, `docs/deployment.md`, `docs/docker.md`,
+  `SECURITY.md`, `README.md`). Upgrading from v0.1.0: schema versions 12 and 13,
+  enrichment on by default, the shipped 20.0 track. The proxy's 72 MB body
+  limit; reference bundles and request budgets as a threat surface; the
+  baseline fuzzer. Corrected: the nginx config is `docker/nginx/default.conf`;
+  only a job whose lease expired is requeued at start; the dev frontend runs on
+  node 26.
+- **Contributors** (`CONTRIBUTING.md`, `docs/development.md`, `TESTING.md`,
+  `docs/eval/README.md`). Four of the five fuzzers are required checks; what
+  `make ci` leaves to CI; the gazetteer policy is rebuilt after any edit to its
+  document; the new scripts in the tree; an index of the measurement notes.
+- **Registers** (`docs/adr/README.md`, ADR headers). The statuses of ADR-0040
+  and ADR-0075 agree with their files; the index gives the latest amendments of
+  ADR-0049 and ADR-0082; ADR-0058, 0065, 0069, 0072, 0088 and 0091 gain their
+  `Amended by` line, ADR-0086's `Amends` gains ADR-0084, and ADR-0021 and
+  ADR-0061 no longer call ADR-0091 proposed.
+
+`docs/releasing.md` said, as the entry of 2026-10-24 below does, that the
+release's four files pass `sha256sum -c SHA256SUMS`; `SHA256SUMS` lists the
+archive and the SBOM. Comments in `scripts/check_migration_from.py` and
+`.github/workflows/ci.yml` no longer say there are no release tags.
+
+Left as found: `docs/gazetteer-ordinary-words.md` still says "not implemented",
+because its SHA-256 is the policy version every run records; and
+`PIPELINE_DISABLED_STAGES=3r` is accepted and then ignored, which is code.
+
 #### The pages that said no release existed describe v0.1.0 (ADR-0085), 2026-10-24
 
 `SECURITY.md`, `docs/docker.md`, `docs/releasing.md`,

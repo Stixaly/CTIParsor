@@ -4,7 +4,7 @@
 **Date:** 2026-09-28
 **Deciders:** maintainer
 **Amended by:** [0091](0091-a-name-that-denotes-several-objects-resolves-by-the-verb.md)
-(2026-10-26, proposed). A relationship row whose end names objects of several
+(2026-10-26). A relationship row whose end names objects of several
 STIX types is dropped with the reason `ambiguous_name` when its verb does not
 settle which one; the ledger row carries `source_candidates` and
 `target_candidates`.

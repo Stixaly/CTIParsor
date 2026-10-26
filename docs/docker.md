@@ -97,6 +97,9 @@ CTI_IMAGE=ghcr.io/stixaly/ctiparsor:0.1.0
 2026-10-24 the names `0.1.0`, `0.1` and `sha-4bdfa8f9b2b3916486b87019a40148d5d15d9239`
 all pointed to it.
 
+To check that a pulled image was built by this repository's CI, run the
+`gh attestation verify` commands in [Verifying a release](releasing.md#verifying-a-release).
+
 **One manual step, once:** a new GHCR package is private by default
 regardless of the repository's visibility. After the first push, a
 maintainer sets it to the visibility you want in the package's own GitHub
@@ -147,7 +150,7 @@ excludes it from `app`/`worker` on purpose). Bind-mounting `.` over `/app`
 also replaces the image's `uploads`/`output`/`corpora` symlinks with this
 repo's own directories, so `docker compose run --rm dev cli` reads/writes
 those host paths directly. `frontend-dev` bind-mounts `frontend/` into a
-plain `node:24-bookworm-slim` container and proxies `/api` to the `app`
+plain `node:26-bookworm-slim` container and proxies `/api` to the `app`
 service (`VITE_API_PROXY_TARGET=http://app:8000`, set in `compose.yaml`).
 Its `node_modules` is a named volume (`frontend-node-modules`), so the
 container's root-run `npm ci` never writes into the checkout's
@@ -247,6 +250,12 @@ chmod 644 docker/nginx/certs/cti.crt docker/nginx/htpasswd
 chmod 640 docker/nginx/certs/cti.key && sudo chown 0:101 docker/nginx/certs/cti.key   # nginx runs as uid 101
 docker compose --profile proxy up -d       # https://<host>:8443
 ```
+
+The `proxy` profile accepts a request body of up to 72 MB (`client_max_body_size`
+in `docker/nginx/default.conf`). That covers the largest upload with enrichment
+on: a 50 MB report, a 20 MB STIX baseline and the 64 KB form. A proxy in front of
+the API must accept at least 70 MB plus 64 KB too. The API then holds each route
+to its own budget and answers 413 past it ([api.md](api.md#how-large-a-request-may-be)).
 
 No `htpasswd` on the host, or an old `$apr1$` (MD5-based) entry: see
 [deployment.md, option C](deployment.md#option-c--tls--password-proxy-in-front).
