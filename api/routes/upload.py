@@ -5,6 +5,7 @@ import filetype
 import magic
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
+from api.body_limit import ENVELOPE_BYTES
 from api.main import limiter
 from api.paths import uploads_dir
 from api.routes._common import (
@@ -37,7 +38,7 @@ SUPPORTED_MIME = {
     ".md": ["text/markdown", "text/plain"],
 }
 
-# 50 MB upload limit
+# 50 MB: a report's own limit, checked as it is copied to uploads/
 _MAX_BYTES = 50 * 1024 * 1024
 # Maximum file size to check in memory for MIME validation (10 MB)
 _MAX_MIME_CHECK = 10 * 1024 * 1024
@@ -46,6 +47,12 @@ _MAX_MIME_CHECK = 10 * 1024 * 1024
 # generated STIX bundle — see stage4_stix_mapping.py).  TLP levels come from
 # the same module, which also owns their spelling (ADR-0073).
 _PAP_LEVELS = {"RED", "AMBER", "GREEN", "WHITE"}
+
+
+def body_budget() -> int:
+    """The most a POST /api/upload body may weigh (api/body_limit.py): the report,
+    the baseline while the enrichment mode is on, and the form around them."""
+    return _MAX_BYTES + (MAX_BASELINE_BYTES if enrichment_enabled() else 0) + ENVELOPE_BYTES
 
 
 def clean_tlp(value: str | None) -> str | None:
@@ -115,17 +122,9 @@ def upload_file(
             f"Unsupported format '{suffix}'. Accepted: {', '.join(SUPPORTED)}"
         )
 
-    # Check file size BEFORE reading content
-    # For File objects, we need to read the content to get the size
-    # But we can check Content-Length header first if available.  With the
-    # enrichment mode on, a baseline travels in the same multipart: the report's
-    # own limit is checked as it is streamed below.
-    content_length = request.headers.get("content-length")
-    if content_length and int(content_length) > _MAX_BYTES + (MAX_BASELINE_BYTES if enrichment_enabled() else 0):
-        raise HTTPException(
-            413,
-            f"File too large. Maximum allowed size is {_MAX_BYTES // (1024*1024)} MB."
-        )
+    # The request as a whole was held to `body_budget()` while it arrived
+    # (api/body_limit.py): FastAPI has the form, both files spooled, before this
+    # runs.  What is left to check is the report's own limit, as it is copied below.
 
     # Read first chunk to validate MIME type.  `file.file` is the underlying
     # SpooledTemporaryFile — read synchronously since this route now runs in

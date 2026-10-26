@@ -1410,6 +1410,33 @@ file", above).
 
 ### Security
 
+#### An upload is held to its size limit while it arrives, chunked or not, 2026-10-26
+
+`POST /api/upload` checked its size in the handler, and FastAPI runs the
+handler only once it has read the whole multipart form and spooled its files
+to disk. The `Content-Length` check therefore came after the body was on disk,
+and a body sent without `Content-Length` (chunked) was bounded by nothing:
+without the nginx `proxy` profile in front, the API wrote whatever it was sent
+to its temporary directory. (uvicorn refuses a `Content-Length` that is not a
+number itself; one that reached the handler made it fail with a 500.)
+
+A middleware (`api/body_limit.py`, pure ASGI, so the SSE stream passes as it
+is) now holds each route that takes a report or a STIX bundle to a budget. A
+`Content-Length` over it gets a 413 before a byte is read; a body without one
+gets a 413 as soon as it passes the budget, and the application never receives
+the rest, and the refusal is logged (`[body-limit]`). A `Content-Length` that
+is not a number is a 400. The budgets
+([docs/api.md](docs/api.md#how-large-a-request-may-be)): `/api/upload` 70 MB,
+the 50 MB report and the 20 MB bundle (50 MB with `STIX_ENRICHMENT_ENABLED=false`);
+`/api/ingest/text` 51.5 MB (11.5 MB); `/api/ingest/url` 40 MB (64 KB);
+`/api/baselines/inspect` 20 MB; each with 64 KB for the form. Within them the
+routes keep their own limits. nginx's 72m lets the largest through, and a test
+keeps it so. Checked against uvicorn, httptools and h11, with curl: a 113 MB
+upload declared in `Content-Length` gets its 413 with nothing sent (curl waits
+on `Expect: 100-continue`), a 2 GB chunked stream is cut after 77 MB in half a
+second, nothing reaches `uploads/`, and the connection then serves the next
+request.
+
 #### A YARA rule's `include` no longer makes the server read a file, 2026-10-24
 
 Before a quoted YARA rule ships as an Indicator, `compile_status`

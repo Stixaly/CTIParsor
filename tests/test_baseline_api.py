@@ -19,6 +19,7 @@ import pytest
 import stix2
 
 from api import baseline_store
+from api.body_limit import ENVELOPE_BYTES
 from api.paths import uploads_dir
 from pipeline import decisions, web_capture
 from pipeline.baseline_stix import MAX_BASELINE_BYTES, MAX_BASELINE_OBJECTS
@@ -673,12 +674,14 @@ def test_a_refused_baseline_takes_the_report_file_with_it(client, temp_db):
 
 
 def test_the_content_length_limit_grows_with_the_mode_only(client, monkeypatch):
-    """The report and the baseline share one multipart: with the mode on the header may hold both."""
+    """The report and the baseline share one multipart: with the mode on the body may hold both
+    (api/body_limit.py, past the form's own room)."""
     monkeypatch.setattr("api.routes.upload._MAX_BYTES", 400)
-    files = {"file": ("report.txt", io.BytesIO(_REPORT), "text/plain"), "junk": ("j.bin", io.BytesIO(b"x" * 2000))}
+    junk = b"x" * (ENVELOPE_BYTES + 2000)
+    files = {"file": ("report.txt", io.BytesIO(_REPORT), "text/plain"), "junk": ("j.bin", io.BytesIO(junk))}
     assert client.post("/api/upload", files=files).status_code == 200
     monkeypatch.setenv("STIX_ENRICHMENT_ENABLED", "false")
-    files = {"file": ("report.txt", io.BytesIO(_REPORT), "text/plain"), "junk": ("j.bin", io.BytesIO(b"x" * 2000))}
+    files = {"file": ("report.txt", io.BytesIO(_REPORT), "text/plain"), "junk": ("j.bin", io.BytesIO(junk))}
     assert client.post("/api/upload", files=files).status_code == 413
 
 

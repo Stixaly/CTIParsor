@@ -23,6 +23,39 @@ by the running app at `http://localhost:8000/docs`.
 
 Job status lifecycle: `uploaded` → `queued` → `processing` → `for_review` → `reviewing` → `completed` / `failed`. A job whose worker stops heartbeating goes back to `queued` (ADR-0046).
 
+### How large a request may be
+
+The routes that take a report or a STIX bundle hold the whole request body to
+a budget while it arrives (`api/body_limit.py`), before FastAPI reads the form
+and spools its files to disk. A `Content-Length` over the budget is answered
+**413** before a byte is read. A body sent without one (chunked) is answered
+413 as soon as it passes the budget, and nothing more of it is read. The body
+is `{"detail": "Request too large. <path> accepts at most N MB."}`. A
+`Content-Length` that is not a number is a **400**.
+
+| Route | Budget | With `STIX_ENRICHMENT_ENABLED=false` | Made of |
+|---|---|---|---|
+| `POST /api/upload` | 70 MB | 50 MB | the report (50 MB) and the bundle (20 MB) |
+| `POST /api/ingest/text` | 51.5 MB | 11.5 MB | 2,000,000 characters at 6 bytes each, and the bundle at twice its 20 MB |
+| `POST /api/ingest/url` | 40 MB | 64 KB | the bundle at twice its 20 MB |
+| `POST /api/baselines/inspect` | 20 MB | 20 MB (the route answers 400) | the bundle |
+
+Each budget also counts 64 KB for the form or the JSON fields around what it
+carries; MB here is 2^20 bytes. The JSON routes count what `JSON.stringify`
+writes, as the UI sends it: a character of the text takes at most 6 bytes
+(`\u0001`), and a bundle sent as a string at most doubles (every character a
+quote or a backslash). A client that also escapes non-ASCII as `\uXXXX`
+(Python's `json.dumps` by default) can pass the budget with a text made mostly
+of characters outside the BMP (12 bytes each), or a bundle mostly in a
+non-Latin script, and gets a 413. Within its budget a route keeps its own limits:
+a report over 50 MB is still a 413 (`File too large`), and so is a bundle over
+20 MB; pasted text over 2,000,000 characters is a 413 too. Every other route
+takes a small JSON body and has no budget of its own: behind the nginx `proxy`
+profile it is held to nginx's 72 MB, and without nginx to nothing. nginx
+accepts 72 MB so that it never refuses a request the API takes
+(`tests/test_body_limit.py` checks it); behind another proxy, allow as much:
+72 MiB, 75,497,472 bytes.
+
 ### A bundle Stage 5 refuses (ADR-0084)
 
 Stage 5's verdict is stored with the bundle (`jobs.bundle_validation`,

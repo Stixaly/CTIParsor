@@ -18,6 +18,7 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from api.body_limit import ENVELOPE_BYTES
 from api.logging_config import get_logger
 from api.main import limiter
 from api.paths import uploads_dir
@@ -27,11 +28,13 @@ from api.routes._common import (
     baseline_markings,
     baseline_text_bytes,
     check_baseline_request,
+    enrichment_enabled,
     read_baseline,
     start_job,
 )
 from api.routes.upload import clean_pap, clean_tlp
 from pipeline import web_capture
+from pipeline.baseline_stix import MAX_BASELINE_BYTES
 from pipeline.regex_safety import compile_pattern
 from pipeline.stage1_ingestion import capture_meta_path, html_to_text
 
@@ -90,6 +93,27 @@ class UrlIngestRequest(BaseModel):
     pap_level: str | None = None
     baseline_bundle: str | None = None
     baseline_report_id: str | None = None
+
+
+# What the two bodies may weigh on the wire (api/body_limit.py), read before
+# pydantic sees them.  As JSON.stringify writes them (the UI), a character of the
+# text takes at most six bytes (`\u0001`), and a bundle at most doubles (every
+# character a quote or a backslash).  A client that also escapes non-ASCII
+# (Python's `json.dumps`) can pass that with text mostly outside the BMP or a
+# bundle mostly in a non-Latin script: a 413, rather than a budget past nginx's.
+# The bundle's room counts only while the enrichment mode is on.
+def _baseline_json_bytes() -> int:
+    return 2 * MAX_BASELINE_BYTES if enrichment_enabled() else 0
+
+
+def text_body_budget() -> int:
+    """The most a POST /api/ingest/text body may weigh."""
+    return 6 * _MAX_TEXT_CHARS + _baseline_json_bytes() + ENVELOPE_BYTES
+
+
+def url_body_budget() -> int:
+    """The most a POST /api/ingest/url body may weigh: a URL is small."""
+    return _baseline_json_bytes() + ENVELOPE_BYTES
 
 
 def _clean_marking(value: str | None, field: str) -> str | None:

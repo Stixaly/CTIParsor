@@ -530,12 +530,15 @@ Besides `THRESHOLD_CALIBRATION_ENABLED` and `ENTITY_OVERRIDES_ENABLED` above:
 
 The limits are not settings: a bundle is at most 20 MB and 10 000 objects
 (`pipeline/baseline_stix.py`; `GET /api/baselines/status` reports them). The
-report and the bundle travel in one multipart request, so the reverse proxy
-(`client_max_body_size` in `docker/nginx/default.conf`) accepts 72 MB, and it is
-72 MB **because of this feature**: a 50 MB report, a 20 MB bundle and the form
-(it was 50 MB). The API itself lets an upload's `Content-Length` exceed the
-report's 50 MB only while `STIX_ENRICHMENT_ENABLED` is on. Behind another proxy,
-allow as much.
+report and the bundle travel in one request, so while `STIX_ENRICHMENT_ENABLED`
+is on, a route's request budget has room for both: 70 MB for an upload, a 50 MB
+report and a 20 MB bundle. The budget is counted as the body arrives, with or
+without `Content-Length`; with the mode off, the bundle's room goes (the
+budgets, route by route: [api.md](api.md#how-large-a-request-may-be)). The
+reverse proxy (`client_max_body_size` in `docker/nginx/default.conf`) accepts
+72 MB, the largest budget and a little more, and it is 72 MB **because of this
+feature** (it was 50 MB). Behind another proxy, allow as much: 72 MiB, that is
+75,497,472 bytes.
 
 ## Worker, queue and retention
 
