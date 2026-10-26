@@ -187,8 +187,8 @@ Not covered here:
 - Other edges Stage 4 builds with no review row can recreate a rejected row's
   triple too: the actor × targeted country and sector product
   (`targeted_location`, inside the Report) and the policy-pinned edges, both
-  read in the code. IoC associations were not checked. *The product and the
-  pinned edges are covered by the next amendment; IoC associations are not.*
+  read in the code. IoC associations were not checked. *The product, the
+  pinned edges and the IoC associations are covered by the next amendment.*
 - A deleted row (`DELETE /relationships/{id}`, the Graph page's delete) leaves
   no trace, so completion may add its triple back. Only a rejection holds.
 - The Graph page does not show `refused` yet.
@@ -210,7 +210,7 @@ row), `tests/test_orchestrator.py` (a run refuses Stage 3d's held claim) and
 with its part of the change disabled, except the two that check what must not
 change (a row that resolves to nothing, the split of the rows).
 
-## Amendment (2026-10-26, continued): the targets product and pinned edges
+## Amendment (2026-10-26, continued): the targets product, pinned edges and IoC associations
 
 The amendment above kept graph completion from building a rejected or held
 row's triple, and left out two other Stage 4 builders that make edges with no
@@ -262,15 +262,34 @@ Decided by the maintainer: the same rule, with the same triples.
   merge; their ids follow it as they follow a baseline merge, and two entries a
   merge makes one keep the first.
 
-Not covered here:
+Covered by a second change the same day:
 
-- **IoC associations** (`ioc_associations` from the LLM's JSON, origin
-  `ioc_association`, read in the code) build `indicator indicates malware`
-  with no review row, the triple a rejected "185.220.101.5 indicates
-  ZetaLoader" row resolves to. They run before the Indicators a refused row is
-  routed through exist, so they need their own change.
+- **IoC associations.** Each one (`ioc_associations` from the LLM's JSON,
+  origin `ioc_association`) builds `indicator indicates malware` with no review
+  row; finalize reads them from the stored LLM result, unfiltered. That is the
+  triple a rejected "185.220.101.5 indicates ZetaLoader" row resolves to, once
+  routed through the IP's Indicator (ADR-0041). The associations run before
+  the forbidden set exists: that set needs every observable's Indicator, and
+  the associations build the first ones. So each association, once the
+  Indicator it builds or finds is in place, resolves the refused rows that
+  name its IoC (only those can land on that Indicator) with the same rules
+  as the set: a rejection outranks a hold, an undirected verb is refused both
+  ways, a triple an accepted row names is not refused, and the edge compared
+  is the one `_add_relationship` would build, the policy's pin applied. The
+  Indicator and its `based-on` stay: the analyst refused the link to that
+  malware, not the IoC, which its own entity row decides (without the
+  association, the pass over the remaining IoCs would build an Indicator with
+  the same id). The ledger entry carries `ioc_value` and `malware_name` as
+  the association names them. As for the other builders, only that triple
+  is refused: a rejected "185.220.101.5 communicates-with ZetaLoader", or
+  "ZetaLoader indicates 185.220.101.5" (which resolves to `related-to`),
+  leaves the association's `indicates`.
 
-A build with no rejection is unchanged: the forbidden set is empty and both
+Not covered, because no refused row can name the triple: a detection rule
+quoted in the report (ADR-0042) links its own Indicator to a malware or tool
+its title names, and no row resolves to a rule's Indicator.
+
+A build with no rejection is unchanged: the forbidden set is empty and the
 builders go on as before (`tests/test_stage4_reference.py` does not move).
 
 Validation: `tests/test_stage4_refusals.py` (a rejected and a held row against
@@ -284,4 +303,12 @@ claim, nor once rejected, and ships it once accepted) and
 `tests/test_bundle_ledger.py` (one entry per triple, origin and rule; the
 alias merge; `origin` on an engine's refusal). Each fails with its part of the
 change disabled, except the one that checks what must not change (every pair
-built when nothing is refused).
+built when nothing is refused). For IoC associations,
+`tests/test_stage4_refusals.py` (a rejected and a held row against the link
+that builds the Indicator and one that finds it built, a second IoC linked to
+the same malware, an accepted row with the same triple, a policy that rewrites
+`indicates`, an undirected verb refused the other way round) and
+`tests/test_held_for_review.py` (finalize: neither held nor rejected, the
+Indicator shipping either way, then accepted); each fails with the check
+disabled, except the one with nothing refused and the one with an accepted
+row, which fails when that row does not lift the refusal.

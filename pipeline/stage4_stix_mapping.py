@@ -1066,230 +1066,10 @@ def build_stix_bundle(
         if rel is not None:
             led.object(rel, "ioc_based_on")
 
-    # --- Indicator SDOs for IoCs linked to malware ---
-    # Each ioc_association becomes: Indicator (pattern) --indicates--> Malware
-    seen_indicators: set[str] = set()
-
-    # sco.id -> its Indicator, for _route_observables_through_indicators below
-    # (ADR-0041). Populated directly at each Indicator's creation, below --
-    # NOT by re-deriving it later from name_to_stix's f"indicator:{key}" /
-    # {key} prefix pairing, which silently picks the wrong SCO whenever an
-    # IOC value and some other entity name normalize to the same lowercase
-    # key.
-    sco_id_to_indicator: dict[str, object] = {}
-    ioc_valid_from, ioc_valid_basis = _ioc_valid_from(document_anchor)
-    # Observables shipped without an Indicator because the report names them
-    # without accusing them (pipeline/benign.py, audit B 8.1.7).
-    benign_sco_ids: set[str] = set()
-    # The IoC as the report spells it, by lower-cased key: an association's
-    # pattern is built on it, as the loop below and verify_ioc_coverage build theirs.
-    ioc_value_by_key: dict[str, str] = {}
-    for entity in raw_entities:
-        if entity.entity_type in _OBSERVABLE_IOC_TYPES:
-            ioc_value_by_key.setdefault(entity.value.lower(), entity.value)
-
-    for assoc in llm_result.ioc_associations:
-        if not assoc.ioc_value or not assoc.malware_name:
-            continue
-        ioc_key = assoc.ioc_value.lower()
-        sco = value_to_sco.get(ioc_key)
-        if not sco and not name_to_stix.candidates(ioc_key):
-            led.entity(assoc.ioc_value, "indicator", "dropped", reason="ioc_not_in_bundle",
-                       input="ioc_association", malware_name=assoc.malware_name)
-            continue
-
-        # The field is "the malware family this IoC belongs to": the malware of
-        # that name when there is one.  Else the object the name stands for; when
-        # it stands for several (an actor and a tool, say), the one an Indicator
-        # can indicate, if only one can be.
-        malware_key = assoc.malware_name.lower()
-        malware = name_to_stix.of_type(malware_key, "malware")
-        if malware is None:
-            cands = name_to_stix.candidates(malware_key)
-            if len(cands) > 1:
-                cands_ok = {t: o for t, o in cands.items() if rel_is_allowed("indicator", "indicates", t)}
-                if len(cands_ok) != 1:
-                    led.entity(assoc.ioc_value, "indicator", "dropped", reason="ambiguous_name",
-                               input="ioc_association", malware_name=assoc.malware_name,
-                               candidates=sorted(o.id for o in cands.values()))
-                    continue
-                cands = cands_ok
-            malware = next(iter(cands.values()), None)
-        if not malware:
-            led.entity(assoc.ioc_value, "indicator", "dropped", reason="malware_not_in_bundle",
-                       input="ioc_association", malware_name=assoc.malware_name)
-            continue
-        if not sco:
-            # The value names an object that is not an observable (a CVE, a
-            # country): no pattern can be built on it.
-            led.entity(assoc.ioc_value, "indicator", "dropped", reason="no_pattern",
-                       input="ioc_association", malware_name=assoc.malware_name)
-            continue
-
-        if ioc_key in seen_indicators:
-            # Indicator already created for this IoC — just add another indicates rel if needed
-            existing_indicator = name_to_stix.of_type(f"indicator:{ioc_key}", "indicator")
-            if existing_indicator:
-                rel = _add_relationship(
-                    stix_objects, existing_indicator, "indicates", malware,
-                    confidence=0.8, pol_index=_pol_index, seen=seen_rel_keys,
-                    custom=_EV_REPORTED,
-                )
-                if rel is not None:
-                    led.object(rel, "ioc_association", ioc_value=assoc.ioc_value,
-                               malware_name=assoc.malware_name)
-            continue
-
-        why = _benign(sco)
-        if why:
-            benign_sco_ids.add(str(_field(sco, "id")))
-            led.annotate(_field(sco, "id"), no_indicator="benign", benign=why)
-            led.entity(assoc.ioc_value, "indicator", "dropped", reason="benign", benign=why,
-                       input="ioc_association", malware_name=assoc.malware_name)
-            continue
-
-        pattern = _build_stix_pattern(ioc_value_by_key.get(ioc_key, assoc.ioc_value), sco)
-        if not pattern:
-            led.entity(assoc.ioc_value, "indicator", "dropped", reason="no_pattern",
-                       input="ioc_association", malware_name=assoc.malware_name)
-            continue
-
-        try:
-            indicator_id = stix_ids.indicator_id(pattern)
-            indicator = stix2.Indicator(
-                name=f"Malicious IoC: {assoc.ioc_value}",
-                pattern=pattern,
-                pattern_type="stix",
-                valid_from=ioc_valid_from,
-                indicator_types=["malicious-activity"],
-                id=indicator_id,
-            )
-            stix_objects.append(indicator)
-            name_to_stix.add(f"indicator:{ioc_key}", indicator)
-            seen_indicators.add(ioc_key)
-            if hasattr(sco, "id"):
-                sco_id_to_indicator[sco.id] = indicator
-            led.object(indicator, "ioc_indicator", ioc_value=assoc.ioc_value,
-                       sco_id=getattr(sco, "id", None), valid_from_basis=ioc_valid_basis)
-
-            rel = _add_relationship(stix_objects, indicator, "indicates", malware, confidence=0.8,
-                                    pol_index=_pol_index, seen=seen_rel_keys,
-                                    custom=_EV_REPORTED)
-            if rel is not None:
-                led.object(rel, "ioc_association", ioc_value=assoc.ioc_value,
-                           malware_name=assoc.malware_name)
-            _based_on(indicator, sco)
-        except Exception as exc:
-            logger.warning(f"[Stage 4] indicator not built for {assoc.ioc_value!r}: "
-                           f"{type(exc).__name__}: {exc}")
-            led.entity(assoc.ioc_value, "indicator", "dropped", reason="build_failed",
-                       input="ioc_association", malware_name=assoc.malware_name,
-                       error=f"{type(exc).__name__}: {exc}")
-
-    # --- Indicator SDOs for remaining IoCs (not already covered by ioc_associations) ---
-    # Research best-practice: every accepted IoC should have a machine-readable pattern
-    for entity in raw_entities:
-        ioc_key = entity.value.lower()
-        if ioc_key in seen_indicators:
-            continue  # already has an indicator
-        sco = value_to_sco.get(ioc_key)
-        if sco is None:
-            continue
-        why = _benign(sco)
-        if why:
-            benign_sco_ids.add(str(_field(sco, "id")))
-            led.annotate(_field(sco, "id"), no_indicator="benign", benign=why)
-            continue
-        pattern = _build_stix_pattern(entity.value, sco)
-        if not pattern:
-            led.annotate(_field(sco, "id"), no_indicator="no_pattern")
-            continue
-        try:
-            indicator_id = stix_ids.indicator_id(pattern)
-            indicator = stix2.Indicator(
-                name=f"Indicator: {entity.value}",
-                pattern=pattern,
-                pattern_type="stix",
-                valid_from=ioc_valid_from,
-                indicator_types=["malicious-activity"],
-                id=indicator_id,
-            )
-            stix_objects.append(indicator)
-            name_to_stix.add(f"indicator:{ioc_key}", indicator)
-            seen_indicators.add(ioc_key)
-            if hasattr(sco, "id"):
-                sco_id_to_indicator[sco.id] = indicator
-            led.object(indicator, "ioc_indicator", ioc_value=entity.value, sco_id=_field(sco, "id"),
-                       valid_from_basis=ioc_valid_basis)
-            _based_on(indicator, sco)
-        except Exception as exc:
-            logger.warning(f"[Stage 4] indicator not built for {entity.value!r}: "
-                           f"{type(exc).__name__}: {exc}")
-            led.entity(entity.value, "indicator", "dropped", reason="build_failed",
-                       input=entity.entity_type.value, sco_id=_field(sco, "id"),
-                       error=f"{type(exc).__name__}: {exc}")
-
-    # --- Indicator SDOs for detection rules embedded verbatim in the report (ADR-0042) ---
-    seen_embedded_rule_ids: set[str] = set()
-
-    # A rule that does not compile is left out (ADR-0067): OpenCTI refuses the
-    # Indicator, then every edge to it.  The layout's damage is repaired first.
-    for _rule in split_rules(report_text):
-        if _rule.is_private:
-            continue
-        _prepared = prepare_embedded_rule(_rule.body, _rule.imports)
-        if _prepared.status == DOES_NOT_COMPILE:
-            led.left_out(stix_ids.indicator_id(_prepared.pattern), "object",
-                         "rule_does_not_compile", name=f"Yara rule: {_rule.name}",
-                         error=_prepared.error, **_prepared.ledger_info())
-            continue
-        _add_embedded_rule_indicator(
-            stix_objects, name_to_stix, seen_embedded_rule_ids,
-            pattern_type="yara", pattern=_prepared.pattern, title=_rule.name,
-            llm_result=llm_result, pol_index=_pol_index, seen_rel_keys=seen_rel_keys,
-            ledger=led, ledger_info=_prepared.ledger_info(),
-        )
-
-    # The same gate for the other formats, with OpenCTI's own parsers (ADR-0070).
-    for _ptype, _pattern, _title in _find_embedded_net_rules(report_text):
-        _ptype, _status, _error, _retyped = net_rule_dialect(_ptype, _pattern)
-        if _status == PATTERN_REFUSED:
-            led.left_out(stix_ids.indicator_id(_pattern), "object", "rule_does_not_parse",
-                         name=f"{_ptype.capitalize()} rule: {_title}", error=_error)
-            continue
-        _add_embedded_rule_indicator(
-            stix_objects, name_to_stix, seen_embedded_rule_ids,
-            pattern_type=_ptype, pattern=_pattern, title=_title,
-            llm_result=llm_result, pol_index=_pol_index, seen_rel_keys=seen_rel_keys,
-            ledger=led, ledger_info=pattern_ledger_info(_status, _retyped),
-        )
-
-    for _yaml_text, _doc in _find_embedded_sigma_rules(report_text):
-        _status, _error = check_pattern("sigma", _yaml_text)
-        if _status == PATTERN_REFUSED:
-            led.left_out(stix_ids.indicator_id(_yaml_text), "object", "rule_does_not_parse",
-                         name=f"Sigma rule: {_doc.get('title', '')}", error=_error)
-            continue
-        _add_embedded_rule_indicator(
-            stix_objects, name_to_stix, seen_embedded_rule_ids,
-            pattern_type="sigma", pattern=_yaml_text, title=str(_doc.get("title", "")),
-            llm_result=llm_result, pol_index=_pol_index, seen_rel_keys=seen_rel_keys,
-            ledger=led, ledger_info=pattern_ledger_info(_status),
-        )
-
-    # --- Relationship rows: where each one lands ---
-    # These are the job store's relationship rows.  Each one's fate — the SRO it
-    # became and what was rewritten on the way, the edge it duplicates, or why
-    # it is not in the bundle — goes to the ledger (ADR-0061): the review graph
-    # draws the rows, and must be able to say which of them ship as drawn.
-    def _existing_rel_id(key: tuple) -> str | None:
-        for o in reversed(stix_objects):
-            if _field(o, "type") == "relationship" and (
-                o.source_ref, o.relationship_type, o.target_ref
-            ) == key:
-                return o.id
-        return None
-
+    # --- Relationship rows: how each one resolves ---
+    # Defined before the IoC associations, which resolve the rows that do not
+    # ship as each Indicator is built (`_association_refused`, below); the
+    # relationship loop further down resolves every row through the same code.
     # An end that names objects of several types (two of the LLM's lists, or a
     # list and a technique or a raw entity) is resolved to the type the verb
     # expects (stix_rel_spec.rel_is_allowed).  When several types remain
@@ -1431,40 +1211,301 @@ def build_stix_bundle(
 
         return _RowEdge(source, rel_type, target, changes)
 
+    def _forbidden_triples(refused, shipping) -> dict[tuple[str, str, str], str]:
+        """The triples the `refused` rows resolve to, a rejection outranking a
+        hold on one triple, with the reverse of each whose verb names no
+        direction.  A triple a row of `shipping` also names is not refused:
+        that row says it, and no row's decision outranks another's (the job
+        store can hold two rows with one triple).  Both are resolved
+        `targeted`, so a row whose end only the targeted lists name lets the
+        product build it."""
+        forbidden: dict[tuple[str, str, str], str] = {}
+        for row in refused:
+            edge = _resolve_row(row, targeted=True)
+            if edge.dropped is None:
+                key = (edge.source.id, edge.rel_type, edge.target.id)
+                if forbidden.get(key) != REJECTED_BY_ANALYST:
+                    forbidden[key] = row.reason
+        if forbidden:
+            forbidden = both_directions(forbidden)
+            for row in shipping:
+                edge = _resolve_row(row, targeted=True)
+                if edge.dropped is None:
+                    forbidden.pop((edge.source.id, edge.rel_type, edge.target.id), None)
+        return forbidden
+
+    def _refused_by_review(src, verb: str, tgt, origin: str,
+                           forbidden: dict[tuple[str, str, str], str], **info: Any) -> bool:
+        """True when the edge `_add_relationship` would build from these (the
+        policy's pin applied) is a `forbidden` triple the bundle does not
+        already have.  The ledger lists it under `refused` with `origin`."""
+        if not forbidden:
+            return False
+        key = _pin_edge_key(src, _apply_policy(verb, src, tgt, _pol_index), tgt)
+        if key is None or key not in forbidden or key in seen_rel_keys:
+            return False
+        led.refused_edge(key[0], key[1], key[2], origin=origin, reason=forbidden[key], **info)
+        return True
+
+    def _association_refused(sco, indicator, malware, assoc) -> bool:
+        """True when the `indicates` edge an IoC association would build from
+        `indicator`, the Indicator of `sco`, is the triple of a row that does
+        not ship (ADR-0013, amendment 2026-10-26).  `_forbidden` is computed
+        after the Indicators, since a row naming an observable resolves through
+        its Indicator; this runs while they are being built.  Only a row with
+        `sco` among an end's candidates can land on its Indicator, and its
+        Indicator exists now, so those rows resolve here as they will there."""
+        sco_id = getattr(sco, "id", None)
+        if not refused_relationships or sco_id is None:
+            return False
+
+        def names_it(row) -> bool:
+            return any(_field(obj, "id") == sco_id
+                       for value in (row.source_value, row.target_value)
+                       for obj in name_to_stix.candidates(value.lower()).values())
+
+        refused = [row for row in refused_relationships if names_it(row)]
+        if not refused:
+            return False
+        forbidden = _forbidden_triples(refused, (r for r in llm_result.relationships if names_it(r)))
+        return _refused_by_review(indicator, "indicates", malware, "ioc_association", forbidden,
+                                  ioc_value=assoc.ioc_value, malware_name=assoc.malware_name)
+
+    # --- Indicator SDOs for IoCs linked to malware ---
+    # Each ioc_association becomes: Indicator (pattern) --indicates--> Malware
+    seen_indicators: set[str] = set()
+
+    # sco.id -> its Indicator, for _route_observables_through_indicators below
+    # (ADR-0041). Populated directly at each Indicator's creation, below --
+    # NOT by re-deriving it later from name_to_stix's f"indicator:{key}" /
+    # {key} prefix pairing, which silently picks the wrong SCO whenever an
+    # IOC value and some other entity name normalize to the same lowercase
+    # key.
+    sco_id_to_indicator: dict[str, object] = {}
+    ioc_valid_from, ioc_valid_basis = _ioc_valid_from(document_anchor)
+    # Observables shipped without an Indicator because the report names them
+    # without accusing them (pipeline/benign.py, audit B 8.1.7).
+    benign_sco_ids: set[str] = set()
+    # The IoC as the report spells it, by lower-cased key: an association's
+    # pattern is built on it, as the loop below and verify_ioc_coverage build theirs.
+    ioc_value_by_key: dict[str, str] = {}
+    for entity in raw_entities:
+        if entity.entity_type in _OBSERVABLE_IOC_TYPES:
+            ioc_value_by_key.setdefault(entity.value.lower(), entity.value)
+
+    for assoc in llm_result.ioc_associations:
+        if not assoc.ioc_value or not assoc.malware_name:
+            continue
+        ioc_key = assoc.ioc_value.lower()
+        sco = value_to_sco.get(ioc_key)
+        if not sco and not name_to_stix.candidates(ioc_key):
+            led.entity(assoc.ioc_value, "indicator", "dropped", reason="ioc_not_in_bundle",
+                       input="ioc_association", malware_name=assoc.malware_name)
+            continue
+
+        # The field is "the malware family this IoC belongs to": the malware of
+        # that name when there is one.  Else the object the name stands for; when
+        # it stands for several (an actor and a tool, say), the one an Indicator
+        # can indicate, if only one can be.
+        malware_key = assoc.malware_name.lower()
+        malware = name_to_stix.of_type(malware_key, "malware")
+        if malware is None:
+            cands = name_to_stix.candidates(malware_key)
+            if len(cands) > 1:
+                cands_ok = {t: o for t, o in cands.items() if rel_is_allowed("indicator", "indicates", t)}
+                if len(cands_ok) != 1:
+                    led.entity(assoc.ioc_value, "indicator", "dropped", reason="ambiguous_name",
+                               input="ioc_association", malware_name=assoc.malware_name,
+                               candidates=sorted(o.id for o in cands.values()))
+                    continue
+                cands = cands_ok
+            malware = next(iter(cands.values()), None)
+        if not malware:
+            led.entity(assoc.ioc_value, "indicator", "dropped", reason="malware_not_in_bundle",
+                       input="ioc_association", malware_name=assoc.malware_name)
+            continue
+        if not sco:
+            # The value names an object that is not an observable (a CVE, a
+            # country): no pattern can be built on it.
+            led.entity(assoc.ioc_value, "indicator", "dropped", reason="no_pattern",
+                       input="ioc_association", malware_name=assoc.malware_name)
+            continue
+
+        if ioc_key in seen_indicators:
+            # Indicator already created for this IoC — just add another indicates rel if needed
+            existing_indicator = name_to_stix.of_type(f"indicator:{ioc_key}", "indicator")
+            if existing_indicator and not _association_refused(sco, existing_indicator,
+                                                               malware, assoc):
+                rel = _add_relationship(
+                    stix_objects, existing_indicator, "indicates", malware,
+                    confidence=0.8, pol_index=_pol_index, seen=seen_rel_keys,
+                    custom=_EV_REPORTED,
+                )
+                if rel is not None:
+                    led.object(rel, "ioc_association", ioc_value=assoc.ioc_value,
+                               malware_name=assoc.malware_name)
+            continue
+
+        why = _benign(sco)
+        if why:
+            benign_sco_ids.add(str(_field(sco, "id")))
+            led.annotate(_field(sco, "id"), no_indicator="benign", benign=why)
+            led.entity(assoc.ioc_value, "indicator", "dropped", reason="benign", benign=why,
+                       input="ioc_association", malware_name=assoc.malware_name)
+            continue
+
+        pattern = _build_stix_pattern(ioc_value_by_key.get(ioc_key, assoc.ioc_value), sco)
+        if not pattern:
+            led.entity(assoc.ioc_value, "indicator", "dropped", reason="no_pattern",
+                       input="ioc_association", malware_name=assoc.malware_name)
+            continue
+
+        try:
+            indicator_id = stix_ids.indicator_id(pattern)
+            indicator = stix2.Indicator(
+                name=f"Malicious IoC: {assoc.ioc_value}",
+                pattern=pattern,
+                pattern_type="stix",
+                valid_from=ioc_valid_from,
+                indicator_types=["malicious-activity"],
+                id=indicator_id,
+            )
+            stix_objects.append(indicator)
+            name_to_stix.add(f"indicator:{ioc_key}", indicator)
+            seen_indicators.add(ioc_key)
+            if hasattr(sco, "id"):
+                sco_id_to_indicator[sco.id] = indicator
+            led.object(indicator, "ioc_indicator", ioc_value=assoc.ioc_value,
+                       sco_id=getattr(sco, "id", None), valid_from_basis=ioc_valid_basis)
+
+            # A refused edge leaves the Indicator: the analyst refused the
+            # link to this malware, not the IoC, which its own row decides.
+            if not _association_refused(sco, indicator, malware, assoc):
+                rel = _add_relationship(stix_objects, indicator, "indicates", malware,
+                                        confidence=0.8, pol_index=_pol_index,
+                                        seen=seen_rel_keys, custom=_EV_REPORTED)
+                if rel is not None:
+                    led.object(rel, "ioc_association", ioc_value=assoc.ioc_value,
+                               malware_name=assoc.malware_name)
+            _based_on(indicator, sco)
+        except Exception as exc:
+            logger.warning(f"[Stage 4] indicator not built for {assoc.ioc_value!r}: "
+                           f"{type(exc).__name__}: {exc}")
+            led.entity(assoc.ioc_value, "indicator", "dropped", reason="build_failed",
+                       input="ioc_association", malware_name=assoc.malware_name,
+                       error=f"{type(exc).__name__}: {exc}")
+
+    # --- Indicator SDOs for remaining IoCs (not already covered by ioc_associations) ---
+    # Research best-practice: every accepted IoC should have a machine-readable pattern
+    for entity in raw_entities:
+        ioc_key = entity.value.lower()
+        if ioc_key in seen_indicators:
+            continue  # already has an indicator
+        sco = value_to_sco.get(ioc_key)
+        if sco is None:
+            continue
+        why = _benign(sco)
+        if why:
+            benign_sco_ids.add(str(_field(sco, "id")))
+            led.annotate(_field(sco, "id"), no_indicator="benign", benign=why)
+            continue
+        pattern = _build_stix_pattern(entity.value, sco)
+        if not pattern:
+            led.annotate(_field(sco, "id"), no_indicator="no_pattern")
+            continue
+        try:
+            indicator_id = stix_ids.indicator_id(pattern)
+            indicator = stix2.Indicator(
+                name=f"Indicator: {entity.value}",
+                pattern=pattern,
+                pattern_type="stix",
+                valid_from=ioc_valid_from,
+                indicator_types=["malicious-activity"],
+                id=indicator_id,
+            )
+            stix_objects.append(indicator)
+            name_to_stix.add(f"indicator:{ioc_key}", indicator)
+            seen_indicators.add(ioc_key)
+            if hasattr(sco, "id"):
+                sco_id_to_indicator[sco.id] = indicator
+            led.object(indicator, "ioc_indicator", ioc_value=entity.value, sco_id=_field(sco, "id"),
+                       valid_from_basis=ioc_valid_basis)
+            _based_on(indicator, sco)
+        except Exception as exc:
+            logger.warning(f"[Stage 4] indicator not built for {entity.value!r}: "
+                           f"{type(exc).__name__}: {exc}")
+            led.entity(entity.value, "indicator", "dropped", reason="build_failed",
+                       input=entity.entity_type.value, sco_id=_field(sco, "id"),
+                       error=f"{type(exc).__name__}: {exc}")
+
+    # --- Indicator SDOs for detection rules embedded verbatim in the report (ADR-0042) ---
+    seen_embedded_rule_ids: set[str] = set()
+
+    # A rule that does not compile is left out (ADR-0067): OpenCTI refuses the
+    # Indicator, then every edge to it.  The layout's damage is repaired first.
+    for _rule in split_rules(report_text):
+        if _rule.is_private:
+            continue
+        _prepared = prepare_embedded_rule(_rule.body, _rule.imports)
+        if _prepared.status == DOES_NOT_COMPILE:
+            led.left_out(stix_ids.indicator_id(_prepared.pattern), "object",
+                         "rule_does_not_compile", name=f"Yara rule: {_rule.name}",
+                         error=_prepared.error, **_prepared.ledger_info())
+            continue
+        _add_embedded_rule_indicator(
+            stix_objects, name_to_stix, seen_embedded_rule_ids,
+            pattern_type="yara", pattern=_prepared.pattern, title=_rule.name,
+            llm_result=llm_result, pol_index=_pol_index, seen_rel_keys=seen_rel_keys,
+            ledger=led, ledger_info=_prepared.ledger_info(),
+        )
+
+    # The same gate for the other formats, with OpenCTI's own parsers (ADR-0070).
+    for _ptype, _pattern, _title in _find_embedded_net_rules(report_text):
+        _ptype, _status, _error, _retyped = net_rule_dialect(_ptype, _pattern)
+        if _status == PATTERN_REFUSED:
+            led.left_out(stix_ids.indicator_id(_pattern), "object", "rule_does_not_parse",
+                         name=f"{_ptype.capitalize()} rule: {_title}", error=_error)
+            continue
+        _add_embedded_rule_indicator(
+            stix_objects, name_to_stix, seen_embedded_rule_ids,
+            pattern_type=_ptype, pattern=_pattern, title=_title,
+            llm_result=llm_result, pol_index=_pol_index, seen_rel_keys=seen_rel_keys,
+            ledger=led, ledger_info=pattern_ledger_info(_status, _retyped),
+        )
+
+    for _yaml_text, _doc in _find_embedded_sigma_rules(report_text):
+        _status, _error = check_pattern("sigma", _yaml_text)
+        if _status == PATTERN_REFUSED:
+            led.left_out(stix_ids.indicator_id(_yaml_text), "object", "rule_does_not_parse",
+                         name=f"Sigma rule: {_doc.get('title', '')}", error=_error)
+            continue
+        _add_embedded_rule_indicator(
+            stix_objects, name_to_stix, seen_embedded_rule_ids,
+            pattern_type="sigma", pattern=_yaml_text, title=str(_doc.get("title", "")),
+            llm_result=llm_result, pol_index=_pol_index, seen_rel_keys=seen_rel_keys,
+            ledger=led, ledger_info=pattern_ledger_info(_status),
+        )
+
+    # --- Relationship rows: where each one lands ---
+    # These are the job store's relationship rows.  Each one's fate — the SRO it
+    # became and what was rewritten on the way, the edge it duplicates, or why
+    # it is not in the bundle — goes to the ledger (ADR-0061): the review graph
+    # draws the rows, and must be able to say which of them ship as drawn.
+    def _existing_rel_id(key: tuple) -> str | None:
+        for o in reversed(stix_objects):
+            if _field(o, "type") == "relationship" and (
+                o.source_ref, o.relationship_type, o.target_ref
+            ) == key:
+                return o.id
+        return None
+
     # A rejected relationship stays rejected, and a held one waits for its
     # analyst (ADR-0013, amendment 2026-10-26): each row that does not ship is
     # resolved as if it did, and none of the builders that have no row of
-    # their own — the targets product, a pinned rule, graph completion —
-    # builds its triple, nor the reverse of one whose verb names no direction.
-    _forbidden: dict[tuple[str, str, str], str] = {}
-    for _refused in refused_relationships or ():
-        _edge = _resolve_row(_refused, targeted=True)
-        if _edge.dropped is None:
-            _key = (_edge.source.id, _edge.rel_type, _edge.target.id)
-            if _forbidden.get(_key) != REJECTED_BY_ANALYST:
-                _forbidden[_key] = _refused.reason
-    if _forbidden:
-        _forbidden = both_directions(_forbidden)
-        # A triple a row that ships also names is not refused: that row says
-        # it, and no row's decision outranks another's (the job store can hold
-        # two rows with one triple).  Resolved like the refused rows, so a row
-        # whose end only the targeted lists name lets the product build it.
-        for _shipping in llm_result.relationships:
-            _edge = _resolve_row(_shipping, targeted=True)
-            if _edge.dropped is None:
-                _forbidden.pop((_edge.source.id, _edge.rel_type, _edge.target.id), None)
-
-    def _refused_by_review(src, verb: str, tgt, origin: str, **info: Any) -> bool:
-        """True when the edge `_add_relationship` would build from these (the
-        policy's pin applied) is a forbidden triple the bundle does not already
-        have.  The ledger lists it under `refused` with `origin`."""
-        if not _forbidden:
-            return False
-        key = _pin_edge_key(src, _apply_policy(verb, src, tgt, _pol_index), tgt)
-        if key is None or key not in _forbidden or key in seen_rel_keys:
-            return False
-        led.refused_edge(key[0], key[1], key[2], origin=origin, reason=_forbidden[key], **info)
-        return True
+    # their own — an IoC association (checked in its loop, above), the targets
+    # product, a pinned rule, graph completion — builds its triple, nor the
+    # reverse of one whose verb names no direction.
+    _forbidden = _forbidden_triples(refused_relationships or (), llm_result.relationships)
 
     # --- Targets SROs: threat actors → targets → locations and sectors ---
     # Every actor × every targeted country/sector: the LLM's lists say what the
@@ -1477,7 +1518,7 @@ def build_stix_bundle(
         for country in llm_result.targeted_countries:
             location = name_to_stix.of_type(f"location:{country.lower()}", "location")
             if location:
-                if _refused_by_review(actor, "targets", location, "targeted_location",
+                if _refused_by_review(actor, "targets", location, "targeted_location", _forbidden,
                                       actor=actor_name, target=country):
                     continue
                 rel = _add_relationship(stix_objects, actor, "targets", location,
@@ -1488,7 +1529,7 @@ def build_stix_bundle(
         for sector in llm_result.targeted_sectors:
             identity = name_to_stix.of_type(f"identity:{sector.lower()}", "identity")
             if identity:
-                if _refused_by_review(actor, "targets", identity, "targeted_location",
+                if _refused_by_review(actor, "targets", identity, "targeted_location", _forbidden,
                                       actor=actor_name, target=sector):
                     continue
                 rel = _add_relationship(stix_objects, actor, "targets", identity,

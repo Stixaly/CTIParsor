@@ -1,7 +1,7 @@
 """A rejected or held relationship is not built back by the Stage 4 builders
-that have no row of their own: the actor × targeted country / sector product
-and policy-pinned edges (ADR-0013, amendment 2026-10-26).  Graph completion's
-side is in test_stage4b_completion.py.
+that have no row of their own: the actor × targeted country / sector product,
+policy-pinned edges and IoC associations (ADR-0013, amendment 2026-10-26).
+Graph completion's side is in test_stage4b_completion.py.
 """
 import json
 
@@ -9,7 +9,7 @@ import pytest
 
 from models.schemas import EntityType, RawEntity
 from pipeline.bundle_ledger import MappingLedger
-from pipeline.stage3_llm import LLMEnrichmentResult, RelationshipExtracted, TTPExtracted
+from pipeline.stage3_llm import IoCAssociation, LLMEnrichmentResult, RelationshipExtracted, TTPExtracted
 from pipeline.stage4_stix_mapping import build_stix_bundle
 from pipeline.stage4b_graph_completion import HELD_FOR_REVIEW, REJECTED_BY_ANALYST, RefusedRelationship
 
@@ -22,7 +22,7 @@ def _build(llm, refused=(), entities=(), **kwargs):
 
 
 def _edges(bundle, **props) -> set[tuple[str, str, str]]:
-    names = {o.id: o.get("name") for o in bundle.objects}
+    names = {o.id: o.get("name") or o.get("value") for o in bundle.objects}
     return {(names.get(o.source_ref), o.relationship_type, names.get(o.target_ref))
             for o in bundle.objects
             if o.get("type") == "relationship" and all(o.get(k) == v for k, v in props.items())}
@@ -207,3 +207,127 @@ def test_an_undirected_verb_is_refused_both_ways_by_a_pinned_rule():
     by_id = {o.id: o for o in bundle.objects}
     assert [(by_id[r["source_ref"]].name, by_id[r["target_ref"]].name)
             for r in _refused(ledger, "policy_pin")] == [("WellMess", "Phishing")]
+
+
+# ── IoC associations (indicator indicates malware) ───────────────────────────
+
+_IP, _OTHER_IP = "185.220.101.5", "185.220.101.6"
+_IOC = f"Malicious IoC: {_IP}"
+
+
+def _iocs(*links, relationships=()) -> LLMEnrichmentResult:
+    """The LLM's JSON links each (IoC, malware) pair; no review row says so."""
+    return LLMEnrichmentResult(
+        malware_families=["ZetaLoader", "WellMess"],
+        ioc_associations=[IoCAssociation(ioc_value=ioc, malware_name=m) for ioc, m in links],
+        relationships=list(relationships))
+
+
+_IPS = [RawEntity(value=_IP, entity_type=EntityType.IPV4),
+        RawEntity(value=_OTHER_IP, entity_type=EntityType.IPV4)]
+
+
+def test_an_ioc_association_builds_its_edge_when_nothing_is_refused():
+    bundle, ledger = _build(_iocs((_IP, "ZetaLoader"), (_IP, "WellMess")), entities=_IPS)
+    assert {(_IOC, "indicates", "ZetaLoader"), (_IOC, "indicates", "WellMess"),
+            (_IOC, "based-on", _IP)} <= _edges(bundle)
+    assert "refused" not in ledger
+
+
+@pytest.mark.parametrize("builds_the_indicator", [True, False], ids=["first_link", "second_link"])
+def test_a_rejected_row_is_not_rebuilt_by_an_ioc_association(builds_the_indicator):
+    """A rejected "185.220.101.5 indicates ZetaLoader" lands on the IP's
+    Indicator (ADR-0041), the edge the association builds: whether that link
+    builds the Indicator or finds it built by the IP's other link."""
+    links = [(_IP, "ZetaLoader"), (_IP, "WellMess")]
+    llm = _iocs(*(links if builds_the_indicator else links[::-1]))
+    bundle, ledger = _build(
+        llm, [RefusedRelationship(_IP, "indicates", "ZetaLoader", REJECTED_BY_ANALYST)], _IPS)
+
+    edges = _edges(bundle)
+    assert (_IOC, "indicates", "ZetaLoader") not in edges
+    # The analyst refused the link, not the IoC: its Indicator stays, with
+    # its other link and what it is based on.
+    assert {(_IOC, "indicates", "WellMess"), (_IOC, "based-on", _IP)} <= edges
+    by_id = {o.id: o for o in bundle.objects}
+    [refused] = ledger["refused"]
+    assert (by_id[refused["source_ref"]].name, refused["relationship_type"],
+            by_id[refused["target_ref"]].name) == (_IOC, "indicates", "ZetaLoader")
+    assert (refused["origin"], refused["reason"], refused["ioc_value"], refused["malware_name"]) == (
+        "ioc_association", REJECTED_BY_ANALYST, _IP, "ZetaLoader")
+
+
+@pytest.mark.parametrize("builds_the_indicator", [True, False], ids=["first_link", "second_link"])
+def test_a_held_row_is_not_built_by_an_ioc_association_while_it_waits(builds_the_indicator):
+    links = [(_IP, "ZetaLoader"), (_IP, "WellMess")]
+    bundle, ledger = _build(
+        _iocs(*(links if builds_the_indicator else links[::-1])),
+        [RefusedRelationship(_IP, "Indicates", "zetaloader", HELD_FOR_REVIEW)], _IPS)
+
+    edges = _edges(bundle)
+    assert (_IOC, "indicates", "ZetaLoader") not in edges
+    assert {(_IOC, "indicates", "WellMess"), (_IOC, "based-on", _IP)} <= edges
+    assert [(r["reason"], r["malware_name"]) for r in _refused(ledger, "ioc_association")] == [
+        (HELD_FOR_REVIEW, "ZetaLoader")]
+
+
+def test_a_refused_row_holds_back_only_the_ioc_it_names():
+    """Two IPs linked to ZetaLoader, one row refused: the other IP's
+    Indicator still indicates ZetaLoader."""
+    bundle, ledger = _build(
+        _iocs((_IP, "ZetaLoader"), (_OTHER_IP, "ZetaLoader")),
+        [RefusedRelationship(_OTHER_IP, "indicates", "ZetaLoader", REJECTED_BY_ANALYST)], _IPS)
+
+    edges = _edges(bundle)
+    assert (_IOC, "indicates", "ZetaLoader") in edges
+    assert (f"Malicious IoC: {_OTHER_IP}", "indicates", "ZetaLoader") not in edges
+    assert [r["ioc_value"] for r in _refused(ledger, "ioc_association")] == [_OTHER_IP]
+
+
+def test_a_row_that_ships_the_same_triple_keeps_the_association_edge():
+    shipping = RelationshipExtracted(source_value=_IP, relationship_type="indicates",
+                                     target_value="ZetaLoader", confidence=0.9)
+    bundle, ledger = _build(
+        _iocs((_IP, "ZetaLoader"), relationships=[shipping]),
+        [RefusedRelationship(_IP, "indicates", "ZetaLoader", REJECTED_BY_ANALYST)], _IPS)
+
+    assert (_IOC, "indicates", "ZetaLoader") in _edges(bundle)
+    assert "refused" not in ledger
+
+
+def test_an_ioc_association_refuses_the_verb_the_policy_gives_the_pair():
+    """A pinned `indicator related-to malware` rewrites the refused row, once
+    routed through the Indicator, and the association's edge alike."""
+    policy = {"version": 1, "global": "enforce",
+              "rules": [{"src": "indicator", "verb": "related-to", "tgt": "malware",
+                         "mode": "pin", "enabled": True}]}
+    bundle, ledger = _build(
+        _iocs((_IP, "ZetaLoader"), (_IP, "WellMess")),
+        [RefusedRelationship(_IP, "indicates", "ZetaLoader", REJECTED_BY_ANALYST)], _IPS,
+        relationship_policy=policy)
+
+    assert not {e for e in _edges(bundle) if e[0] == _IOC and e[2] == "ZetaLoader"}
+    assert (_IOC, "related-to", "WellMess") in _edges(bundle)
+    assert [r["relationship_type"] for r in _refused(ledger, "ioc_association")] == ["related-to"]
+
+
+def test_an_ioc_association_refuses_an_undirected_verb_the_other_way_round():
+    """Under a pinned `indicator related-to malware`, a rejected "ZetaLoader
+    related-to 185.220.101.5" (routed: ZetaLoader related-to the Indicator)
+    rules out the association's "Indicator related-to ZetaLoader"."""
+    policy = {"version": 1, "global": "enforce",
+              "rules": [{"src": "indicator", "verb": "related-to", "tgt": "malware",
+                         "mode": "pin", "enabled": True}]}
+    links = [(_IP, "ZetaLoader"), (_IP, "WellMess")]
+    shipped, _ = _build(_iocs(*links), entities=_IPS, relationship_policy=policy)
+    assert (_IOC, "related-to", "ZetaLoader") in _edges(shipped)
+
+    bundle, ledger = _build(
+        _iocs(*links), [RefusedRelationship("ZetaLoader", "related-to", _IP, REJECTED_BY_ANALYST)],
+        _IPS, relationship_policy=policy)
+
+    assert (_IOC, "related-to", "ZetaLoader") not in _edges(bundle)
+    assert (_IOC, "related-to", "WellMess") in _edges(bundle)
+    by_id = {o.id: o for o in bundle.objects}
+    assert [(by_id[r["source_ref"]].name, by_id[r["target_ref"]].name)
+            for r in _refused(ledger, "ioc_association")] == [(_IOC, "ZetaLoader")]

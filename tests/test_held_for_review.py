@@ -190,6 +190,51 @@ def test_the_targets_product_ships_a_held_claim_neither_while_it_waits_nor_once_
     assert claim in _shipped_rels(temp_db, job)
 
 
+def test_an_ioc_association_ships_a_held_claim_neither_while_it_waits_nor_once_rejected(
+        temp_db, temp_db_client):
+    """The LLM's JSON links 185.220.101.5 to WellMess, and Stage 4 builds the
+    IP's Indicator `indicates` WellMess from that link: the held claim
+    "185.220.101.5 indicates WellMess", which lands on that edge (ADR-0041),
+    shipped while the card waited, and again once rejected (ADR-0013,
+    amendment 2026-10-26).  The Indicator itself ships either way."""
+    from api import worker
+    from models.schemas import EntityType, RawEntity
+    from pipeline.stage3_llm import IoCAssociation
+
+    ip = "185.220.101.5"
+    job = _job(temp_db)
+    result = _result()
+    result.ioc_associations = [IoCAssociation(ioc_value=ip, malware_name="WellMess")]
+    result.rel_review.append(RelationshipReview(
+        source_value=ip, relationship_type="indicates", target_value="WellMess",
+        confidence=0.8, evidence_text="WellMess beaconed to 185.220.101.5.",
+        reason="verification call failed"))
+    worker._save_entities(job, [RawEntity(value=ip, entity_type=EntityType.IPV4)], result, _TEXT)
+    with temp_db.get_conn() as conn:
+        conn.execute("UPDATE jobs SET llm_result_json=? WHERE id=?", (result.model_dump_json(), job))
+        conn.commit()
+    claim = (f"Malicious IoC: {ip}", "indicates", "WellMess")
+
+    def refused_reasons():
+        row = temp_db.get_conn().execute(
+            "SELECT bundle_ledger_json FROM jobs WHERE id=?", (job,)).fetchone()
+        return [(r["origin"], r["reason"]) for r in json.loads(row["bundle_ledger_json"])["refused"]]
+
+    shipped = _shipped_rels(temp_db, job)
+    assert claim not in shipped
+    assert (f"Malicious IoC: {ip}", "based-on", ip) in shipped
+    assert refused_reasons() == [("ioc_association", "held_for_review")]
+
+    rid = temp_db.get_conn().execute(
+        "SELECT id FROM relationships WHERE job_id=? AND source_value=?", (job, ip)).fetchone()["id"]
+    temp_db_client.patch(f"/api/jobs/{job}/relationships/{rid}", json={"accepted": False})
+    assert claim not in _shipped_rels(temp_db, job)
+    assert refused_reasons() == [("ioc_association", "rejected_by_analyst")]
+
+    temp_db_client.patch(f"/api/jobs/{job}/relationships/{rid}", json={"accepted": True})
+    assert claim in _shipped_rels(temp_db, job)
+
+
 def test_every_row_either_ships_or_is_withheld(temp_db):
     """WITHHELD is SHIPS' complement, written out: for a held row `NOT SHIPS`
     is NULL, and graph completion would not see it."""

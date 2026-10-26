@@ -26,14 +26,15 @@ Shape of `to_dict()` (version 1):
                      object left out (kind "baseline"), or a detection
                      rule that does not compile
     refused        [{source_ref, relationship_type, target_ref, origin, reason,
-                     rule?, inferred_from?, actor?, target?}]   only when not
+                     rule?, inferred_from?, actor?, target?, ioc_value?,
+                     malware_name?}]   only when not
                      empty: an edge Stage 4 would have built and did not,
                      because a row with that triple was rejected
                      ("rejected_by_analyst") or is held for review
                      ("held_for_review"); ADR-0013, amendment 2026-10-26.
                      `origin` is the one the edge would have had in
-                     `objects` ("targeted_location", "policy_pin",
-                     "completion_*"); `rule` the x_policy_rule or
+                     `objects` ("ioc_association", "targeted_location",
+                     "policy_pin", "completion_*"); `rule` the x_policy_rule or
                      x_inference_rule it would have carried
 
 Outcomes: "emitted" (this input produced the object), "merged" (it resolved to
@@ -255,9 +256,10 @@ class MappingLedger:
     # ── Refusals: rejected or held triples not built back ────────────────────
     def refused_edge(self, source_ref: str, relationship_type: str, target_ref: str,
                      origin: str, reason: str, **info: Any) -> None:
-        """An edge the targets product or a pinned rule did not build because an
-        analyst rejected that relationship, or it waits for one (ADR-0013,
-        amendment 2026-10-26).  Listed once per triple, origin and rule."""
+        """An edge an IoC association, the targets product or a pinned rule did
+        not build because an analyst rejected that relationship, or it waits
+        for one (ADR-0013, amendment 2026-10-26).  Listed once per triple,
+        origin and rule."""
         entry = _clean({"source_ref": source_ref, "relationship_type": relationship_type,
                         "target_ref": target_ref, "origin": origin, "reason": reason, **info})
         if all(_refused_key(e) != _refused_key(entry) for e in self.refused):

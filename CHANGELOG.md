@@ -885,6 +885,25 @@ such a Campaign, but it rarely reaches Stage 4 now); unlike before the audit, th
 drop is recorded, and the analyst's accept of the campaign row brings the
 Campaign back. Stage 4 is not changed.
 
+#### IoC associations no longer build a rejected or held relationship (ADR-0013, amended), 2026-10-26
+
+Stage 3 links IoCs to malware families in its JSON (`ioc_associations`), and
+Stage 4 builds each IoC's Indicator `indicates` that malware from the link. No
+review row stands for a link, and finalize reads them unfiltered: a rejected
+"185.220.101.5 indicates ZetaLoader" row, which lands on that IP's Indicator,
+came back from its association, and a held one shipped before anyone decided
+it.
+
+Each association now skips the edge a refused row names, with the same rules as
+the targets product and pinned rules (entry below). The rows that do not ship
+are resolved through each observable's Indicator, and the associations build
+those Indicators: so each association, once its Indicator is in place, resolves
+the refused rows that name its IoC. The Indicator and its `based-on` still ship:
+the analyst refused the link, not the IoC. The mapping ledger lists the skipped
+edge under `refused` with origin `ioc_association`, the IoC and the malware. A
+build with no rejection is unchanged. The `BUNDLE_AFFECTING` entry follows in a
+separate commit (scope `mapping`).
+
 #### The targets product and pinned rules no longer build a rejected or held relationship (ADR-0013, amended), 2026-10-26
 
 Stage 4 builds an edge from every threat actor to every country and sector the
@@ -904,9 +923,9 @@ pinned pair takes no `max_pinned_edges` budget. The mapping ledger lists each on
 under `refused` with the origin that would have built it (`targeted_location`,
 `policy_pin`), and every `refused` entry now carries that `origin`, the graph
 completion ones included. A build with no rejection is unchanged. IoC
-associations (`indicator indicates malware` from the LLM's JSON) are not
-covered yet. The `BUNDLE_AFFECTING` entry follows in a separate commit (scope
-`mapping`).
+associations (`indicator indicates malware` from the LLM's JSON) are covered by
+the entry above. The `BUNDLE_AFFECTING` entry follows in a separate commit
+(scope `mapping`).
 
 #### Graph completion no longer adds back a rejected or held relationship (ADR-0013, amended), 2026-10-26
 
