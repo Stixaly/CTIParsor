@@ -80,6 +80,10 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "Graph completion no longer adds back a relationship the analyst rejected or one held for review: "
      "not by the transitive step, ATT&CK reference grounding or long distance (ADR-0013, amended)",
      "mapping"),
+    ("f3cf7f0", "2026-10-26",
+     "The actor x targeted country/sector product and pinned policy rules no longer build a "
+     "relationship the analyst rejected or one held for review (ADR-0013, amended)",
+     "mapping"),
 )
 
 
