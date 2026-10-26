@@ -2,6 +2,10 @@
 
 **Status:** Accepted (implemented)
 **Date:** 2026-08-16
+**Amended by:** [0091](0091-a-name-that-denotes-several-objects-resolves-by-the-verb.md)
+(2026-10-26, proposed). The name table Stage 4 resolves relationships through
+keeps one object per STIX type, so a direct name no longer overwrites another
+type's object, and a row whose end names several types resolves by its verb.
 **Fixes:** [0012](0012-hallucination-measurement-and-canonicalization.md) — canonicalisation collapses aliases that denote *different* objects
 **Affects:** [0013](0013-graph-completion.md) — ATT&CK reference grounding resolves report SDOs through the same index
 

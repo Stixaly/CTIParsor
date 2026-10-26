@@ -839,6 +839,28 @@ gets a dated amendment.
 
 ### Fixed
 
+#### A name two lists share no longer puts a claim on the wrong object (ADR-0091, on hold), 2026-10-26
+
+Stage 4 kept one object per lower-cased name, so a name in two of the LLM's
+lists (or in a list and a technique) kept the last object written, and every
+relationship that named it hung on that object. With `Carbanak` as threat actor
+and malware, the `targets` edge left the malware and none left the actor. With
+`Mimikatz` as malware and tool, "Mimikatz uses OS Credential Dumping" resolved
+on the Tool, and `tool uses attack-pattern` shipped as `related-to`.
+
+`_NameIndex` now keeps one object per name and STIX type. Each end of a row
+resolves to the type its verb expects. When several pairs fit, or none, the row
+is dropped with the ledger reason `ambiguous_name` and the ids of the candidates,
+which the Graph page shows. The `targets` product, raw entities, raw techniques
+(no longer "merged" into a tool of the same name), IoC associations and
+embedded-rule titles read the type they mean. Measured on 7 real reports
+(150 rows): 10 names carry two or three types and touch 75 rows; 55 rows change
+(51 shipped rows now dropped, 3 dropped rows change reason, 1 row now ships with
+its verb); relationship SROs 1,390 → 1,361; 118 `targets` edges move from a
+malware to the actor of the same name; object counts unchanged. The cost is
+recall on reports whose detectors type one name two ways. ADR-0091 is held until a
+type is chosen per name, by source rank, before Stage 4.
+
 #### A code audit's fixes: a web-capture range, a DOCX zip bomb, doubled rows after a requeue, lost detection rules, 2026-10-26
 
 A code audit read the repository by zone (worker and API, Stage 1 to 4, the

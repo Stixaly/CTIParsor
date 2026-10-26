@@ -490,6 +490,44 @@ def verb_ships_as_written(src_type: str, verb: str, tgt_type: str) -> bool:
     return rel_is_allowed(src_type, verb, tgt_type)
 
 
+class _NameIndex:
+    """Lower-cased name -> the STIX objects it denotes, one per STIX type.
+
+    One name can denote objects of several types: "Carbanak" is a threat actor
+    and a malware, "Mimikatz" a malware and a tool, "PowerShell" a tool and a
+    technique.  A bare name -> object table kept only the last one written, so
+    every relationship that named it hung on whichever list came last (the
+    `targets` edges on the malware, a `uses` towards a technique shipped as
+    `related-to` from the tool).  Here each type keeps its own object, and the
+    reader says which type it wants, or asks for all of them.
+
+    Two tiers, as before: a name written directly (the emitted name, a
+    technique's name or id, a raw entity's value) outranks an alias form of
+    another object (the canonical name, the MITRE aliases).
+    """
+
+    def __init__(self) -> None:
+        self._direct: dict[str, dict[str, Any]] = {}   # key -> stix type -> object
+        self._alias: dict[str, dict[str, Any]] = {}
+
+    def add(self, key: str, obj: Any, *, alias: bool = False) -> None:
+        stix_type = _field(obj, "type") or ""
+        if alias:
+            # the first alias form to claim a key keeps it
+            self._alias.setdefault(key, {}).setdefault(stix_type, obj)
+        else:
+            # the last direct write wins within a type
+            self._direct.setdefault(key, {})[stix_type] = obj
+
+    def of_type(self, key: str, stix_type: str) -> Any:
+        return self._direct.get(key, {}).get(stix_type) or self._alias.get(key, {}).get(stix_type)
+
+    def candidates(self, key: str) -> dict[str, Any]:
+        """type -> object: the key's direct names, else its alias forms (a
+        direct name outranks an alias)."""
+        return dict(self._direct.get(key) or self._alias.get(key) or {})
+
+
 def build_stix_bundle(
     raw_entities: list[RawEntity],
     llm_result: LLMEnrichmentResult,
@@ -606,13 +644,15 @@ def build_stix_bundle(
             if _src and _tgt:
                 _pol_index[f"{_src}>{_tgt}"] = _rule
 
-    # Maps name/value (lowercase) → STIX object, used to resolve relationships
-    name_to_stix: dict[str, object] = {}
+    # Maps name/value (lowercase) → the STIX object of each type that bears it,
+    # used to resolve relationships
+    name_to_stix = _NameIndex()
 
     # --- SCOs from technical IoCs ---
     scos, value_to_sco = _map_iocs_to_scos(raw_entities, ledger=led)
     stix_objects.extend(scos)
-    name_to_stix.update(value_to_sco)
+    for _value, _sco in value_to_sco.items():
+        name_to_stix.add(_value, _sco)
 
     # --- SDOs from pipeline-detected entity types (infrastructure, intrusion_set, etc.) ---
     _sdo_entity_types = {
@@ -627,14 +667,15 @@ def build_stix_bundle(
         if entity.entity_type not in _sdo_entity_types:
             continue
         key = entity.value.lower()
-        if key in name_to_stix:
+        existing = name_to_stix.candidates(key)
+        if existing:
             led.entity(entity.value, entity.entity_type.value, "merged",
-                       obj=name_to_stix[key], reason="same_value")
+                       obj=next(iter(existing.values())), reason="same_value")
             continue
         sdo = _entity_to_sdo(entity)
         if sdo is not None:
             stix_objects.append(sdo)
-            name_to_stix[key] = sdo
+            name_to_stix.add(key, sdo)
             led.entity(entity.value, entity.entity_type.value, "emitted", obj=sdo)
             led.object(sdo, "entity")
         else:
@@ -686,11 +727,12 @@ def build_stix_bundle(
             led.entity(name, entity_type, "merged", obj=obj,
                        reason="same_value" if str(_field(obj, "name")).lower() == name.lower()
                        else "alias_canonical")
-        # Resolve this entity by the emitted name, its canonical, and every alias.
-        name_to_stix[name.lower()] = obj
-        name_to_stix.setdefault(canon.lower(), obj)
+        # Resolve this entity by the emitted name, its canonical, and every alias,
+        # under its own STIX type: another type's object of the same name stays.
+        name_to_stix.add(name.lower(), obj)
+        name_to_stix.add(canon.lower(), obj, alias=True)
         for form in alias_surface_forms(name, stix_type):
-            name_to_stix.setdefault(form, obj)
+            name_to_stix.add(form, obj, alias=True)
         return obj
 
     for actor_name in llm_result.threat_actors:
@@ -725,8 +767,8 @@ def build_stix_bundle(
         _want = _named_stix_type.get(entity.entity_type)
         if _want is None:
             continue
-        _hit = name_to_stix.get(entity.value.lower())
-        if _hit is not None and _field(_hit, "type") == _want:
+        _hit = name_to_stix.of_type(entity.value.lower(), _want)
+        if _hit is not None:
             led.entity(entity.value, entity.entity_type.value, "merged", obj=_hit,
                        reason="same_value" if str(_field(_hit, "name")).lower() == entity.value.lower()
                        else "alias_canonical")
@@ -773,9 +815,9 @@ def build_stix_bundle(
             id=ttp_id,
         )
         stix_objects.append(obj)
-        name_to_stix[ttp.technique_name.lower()] = obj
+        name_to_stix.add(ttp.technique_name.lower(), obj)
         if ttp.mitre_id:
-            name_to_stix[ttp.mitre_id.lower()] = obj
+            name_to_stix.add(ttp.mitre_id.lower(), obj)
         led.entity(ttp.technique_name, EntityType.TTP.value, "emitted", obj=obj,
                    mitre_id=ttp.mitre_id)
         led.object(obj, "entity")
@@ -788,11 +830,12 @@ def build_stix_bundle(
                                    EntityType.PROCEDURE, EntityType.TTP):
             key = entity.value.lower()
             id_key = entity.mitre_id.lower() if entity.mitre_id else None
-            if key in name_to_stix or (id_key and id_key in name_to_stix):
+            by_name = name_to_stix.of_type(key, "attack-pattern")
+            by_id = name_to_stix.of_type(id_key, "attack-pattern") if id_key else None
+            if by_name or by_id:
                 # already created from llm_result.ttps
-                existing = name_to_stix.get(key) or name_to_stix.get(id_key or "")
-                led.entity(entity.value, entity.entity_type.value, "merged", obj=existing,
-                           reason="same_value" if key in name_to_stix else "same_technique",
+                led.entity(entity.value, entity.entity_type.value, "merged", obj=by_name or by_id,
+                           reason="same_value" if by_name else "same_technique",
                            mitre_id=entity.mitre_id)
                 continue
             ext_refs = []
@@ -818,9 +861,9 @@ def build_stix_bundle(
                 ))
             obj = stix2.AttackPattern(name=entity.value, external_references=ext_refs)
             stix_objects.append(obj)
-            name_to_stix[key] = obj
+            name_to_stix.add(key, obj)
             if id_key:
-                name_to_stix[id_key] = obj
+                name_to_stix.add(id_key, obj)
             led.entity(entity.value, entity.entity_type.value, "emitted", obj=obj,
                        mitre_id=entity.mitre_id)
             led.object(obj, "entity")
@@ -828,10 +871,11 @@ def build_stix_bundle(
     for entity in raw_entities:
         if entity.entity_type == EntityType.CVE:
             key = entity.value.lower()
-            if key in name_to_stix:
+            existing = name_to_stix.of_type(key, "vulnerability")
+            if existing:
                 # same CVE from a second source — don't create duplicate SDO
                 led.entity(entity.value, EntityType.CVE.value, "merged",
-                           obj=name_to_stix[key], reason="same_value")
+                           obj=existing, reason="same_value")
                 continue
             vuln_id = stix_ids.named_object_id("vulnerability", entity.value)
             # `x_cvss_*`, not `x_mitre_cvss_*`: this comes from CIRCL/NVD, and the
@@ -862,27 +906,24 @@ def build_stix_bundle(
                 **kwargs
             )
             stix_objects.append(obj)
-            name_to_stix[key] = obj
+            name_to_stix.add(key, obj)
             led.entity(entity.value, EntityType.CVE.value, "emitted", obj=obj)
             led.object(obj, "entity")
 
     if llm_result.campaign_name:
         _camp_key = llm_result.campaign_name.lower()
         campaign_id = stix_ids.named_object_id("campaign", llm_result.campaign_name)
-        # A raw Campaign entity of that name may already be in the bundle, its bare
-        # key taken over by a malware or an actor of the same name: find it by id.
-        _camp_existing = next((o for o in stix_objects if getattr(o, "id", None) == campaign_id),
-                              name_to_stix.get(_camp_key))
-        if getattr(_camp_existing, "type", "") != "campaign":
+        # A raw Campaign entity of that name may already be in the bundle, spelt
+        # differently (the id is normalised, the key is not): find it by id too.
+        _camp_existing = (name_to_stix.of_type(_camp_key, "campaign")
+                          or next((o for o in stix_objects if getattr(o, "id", None) == campaign_id), None))
+        if _camp_existing is None:
             obj = stix2.Campaign(name=llm_result.campaign_name, id=campaign_id)
             stix_objects.append(obj)
-            # setdefault: a malware or an actor of the same name keeps the bare key
-            name_to_stix.setdefault(_camp_key, obj)
-            name_to_stix[f"campaign:{_camp_key}"] = obj
+            name_to_stix.add(_camp_key, obj)
             led.entity(llm_result.campaign_name, EntityType.CAMPAIGN.value, "emitted", obj=obj)
             led.object(obj, "entity")
         else:
-            name_to_stix.setdefault(f"campaign:{_camp_key}", _camp_existing)
             led.entity(llm_result.campaign_name, EntityType.CAMPAIGN.value, "merged",
                        obj=_camp_existing, reason="same_value")
 
@@ -907,17 +948,17 @@ def build_stix_bundle(
             # (and a duplicated entry in Report.object_refs), which fails STIX
             # validation.  Reuse the existing object and register it under the
             # "location:" key so the targets SRO below still resolves it.
-            existing = (name_to_stix.get(f"location:{country.lower()}")
-                        or name_to_stix.get(country.lower()))
-            if existing is not None and getattr(existing, "type", "") == "location":
-                name_to_stix.setdefault(f"location:{country.lower()}", existing)
+            existing = (name_to_stix.of_type(f"location:{country.lower()}", "location")
+                        or name_to_stix.of_type(country.lower(), "location"))
+            if existing is not None:
+                name_to_stix.add(f"location:{country.lower()}", existing)
                 led.entity(country, EntityType.LOCATION.value, "merged", obj=existing,
                            reason="same_value", input="targeted_country")
                 continue
             location_id = stix_ids.location_id(country)
             obj = stix2.Location(name=country, country=iso2, id=location_id)
             stix_objects.append(obj)
-            name_to_stix[f"location:{country.lower()}"] = obj
+            name_to_stix.add(f"location:{country.lower()}", obj)
             led.entity(country, EntityType.LOCATION.value, "emitted", obj=obj,
                        input="targeted_country")
             led.object(obj, "targeted_country")
@@ -933,17 +974,17 @@ def build_stix_bundle(
             # pipeline IDENTITY RawEntity (stored under the bare value key) or
             # from an earlier iteration of this loop.  See the targeted_countries
             # dedup above — a duplicate identical-id Identity fails validation.
-            existing = (name_to_stix.get(f"identity:{sector.lower()}")
-                        or name_to_stix.get(sector.lower()))
-            if existing is not None and getattr(existing, "type", "") == "identity":
-                name_to_stix.setdefault(f"identity:{sector.lower()}", existing)
+            existing = (name_to_stix.of_type(f"identity:{sector.lower()}", "identity")
+                        or name_to_stix.of_type(sector.lower(), "identity"))
+            if existing is not None:
+                name_to_stix.add(f"identity:{sector.lower()}", existing)
                 led.entity(sector, EntityType.IDENTITY.value, "merged", obj=existing,
                            reason="same_value", input="targeted_sector")
                 continue
             identity_id = stix_ids.identity_id(sector, "class")
             obj = stix2.Identity(name=sector, identity_class="class", id=identity_id)
             stix_objects.append(obj)
-            name_to_stix[f"identity:{sector.lower()}"] = obj
+            name_to_stix.add(f"identity:{sector.lower()}", obj)
             led.entity(sector, EntityType.IDENTITY.value, "emitted", obj=obj,
                        input="targeted_sector")
             led.object(obj, "targeted_sector")
@@ -957,7 +998,7 @@ def build_stix_bundle(
             coa_id = stix_ids.course_of_action_id(coa)
             obj = stix2.CourseOfAction(name=coa, id=coa_id)
             stix_objects.append(obj)
-            name_to_stix[f"coa:{coa.lower()}"] = obj
+            name_to_stix.add(f"coa:{coa.lower()}", obj)
             led.object(obj, "course_of_action")
         except Exception as exc:
             # Never silently (ADR-0061): the review graph shows the row, the
@@ -1017,19 +1058,44 @@ def build_stix_bundle(
     for assoc in llm_result.ioc_associations:
         if not assoc.ioc_value or not assoc.malware_name:
             continue
-        sco = name_to_stix.get(assoc.ioc_value.lower())
-        malware = name_to_stix.get(assoc.malware_name.lower())
-
-        if not sco or not malware:
-            led.entity(assoc.ioc_value, "indicator", "dropped",
-                       reason="ioc_not_in_bundle" if not sco else "malware_not_in_bundle",
+        ioc_key = assoc.ioc_value.lower()
+        sco = value_to_sco.get(ioc_key)
+        if not sco and not name_to_stix.candidates(ioc_key):
+            led.entity(assoc.ioc_value, "indicator", "dropped", reason="ioc_not_in_bundle",
                        input="ioc_association", malware_name=assoc.malware_name)
             continue
 
-        ioc_key = assoc.ioc_value.lower()
+        # The field is "the malware family this IoC belongs to": the malware of
+        # that name when there is one.  Else the object the name stands for; when
+        # it stands for several (an actor and a tool, say), the one an Indicator
+        # can indicate, if only one can be.
+        malware_key = assoc.malware_name.lower()
+        malware = name_to_stix.of_type(malware_key, "malware")
+        if malware is None:
+            cands = name_to_stix.candidates(malware_key)
+            if len(cands) > 1:
+                cands_ok = {t: o for t, o in cands.items() if rel_is_allowed("indicator", "indicates", t)}
+                if len(cands_ok) != 1:
+                    led.entity(assoc.ioc_value, "indicator", "dropped", reason="ambiguous_name",
+                               input="ioc_association", malware_name=assoc.malware_name,
+                               candidates=sorted(o.id for o in cands.values()))
+                    continue
+                cands = cands_ok
+            malware = next(iter(cands.values()), None)
+        if not malware:
+            led.entity(assoc.ioc_value, "indicator", "dropped", reason="malware_not_in_bundle",
+                       input="ioc_association", malware_name=assoc.malware_name)
+            continue
+        if not sco:
+            # The value names an object that is not an observable (a CVE, a
+            # country): no pattern can be built on it.
+            led.entity(assoc.ioc_value, "indicator", "dropped", reason="no_pattern",
+                       input="ioc_association", malware_name=assoc.malware_name)
+            continue
+
         if ioc_key in seen_indicators:
             # Indicator already created for this IoC — just add another indicates rel if needed
-            existing_indicator = name_to_stix.get(f"indicator:{ioc_key}")
+            existing_indicator = name_to_stix.of_type(f"indicator:{ioc_key}", "indicator")
             if existing_indicator:
                 rel = _add_relationship(
                     stix_objects, existing_indicator, "indicates", malware,
@@ -1066,7 +1132,7 @@ def build_stix_bundle(
                 id=indicator_id,
             )
             stix_objects.append(indicator)
-            name_to_stix[f"indicator:{ioc_key}"] = indicator
+            name_to_stix.add(f"indicator:{ioc_key}", indicator)
             seen_indicators.add(ioc_key)
             if hasattr(sco, "id"):
                 sco_id_to_indicator[sco.id] = indicator
@@ -1116,7 +1182,7 @@ def build_stix_bundle(
                 id=indicator_id,
             )
             stix_objects.append(indicator)
-            name_to_stix[f"indicator:{ioc_key}"] = indicator
+            name_to_stix.add(f"indicator:{ioc_key}", indicator)
             seen_indicators.add(ioc_key)
             if hasattr(sco, "id"):
                 sco_id_to_indicator[sco.id] = indicator
@@ -1183,11 +1249,11 @@ def build_stix_bundle(
     # report targets, not which actor targets it, so this is a product, and the
     # ledger says so (origin "targeted_location", ADR-0061).
     for actor_name in llm_result.threat_actors:
-        actor = name_to_stix.get(actor_name.lower())
+        actor = name_to_stix.of_type(actor_name.lower(), "threat-actor")
         if not actor:
             continue
         for country in llm_result.targeted_countries:
-            location = name_to_stix.get(f"location:{country.lower()}")
+            location = name_to_stix.of_type(f"location:{country.lower()}", "location")
             if location:
                 rel = _add_relationship(stix_objects, actor, "targets", location,
                                         pol_index=_pol_index, seen=seen_rel_keys,
@@ -1195,7 +1261,7 @@ def build_stix_bundle(
                 if rel is not None:
                     led.object(rel, "targeted_location", actor=actor_name, target=country)
         for sector in llm_result.targeted_sectors:
-            identity = name_to_stix.get(f"identity:{sector.lower()}")
+            identity = name_to_stix.of_type(f"identity:{sector.lower()}", "identity")
             if identity:
                 rel = _add_relationship(stix_objects, actor, "targets", identity,
                                         pol_index=_pol_index, seen=seen_rel_keys,
@@ -1219,16 +1285,53 @@ def build_stix_bundle(
                 return o.id
         return None
 
-    for rel in llm_result.relationships:
-        source = name_to_stix.get(rel.source_value.lower())
-        target = name_to_stix.get(rel.target_value.lower())
+    # An end that names objects of several types (two of the LLM's lists, or a
+    # list and a technique or a raw entity) is resolved to the type the verb
+    # expects (stix_rel_spec.rel_is_allowed).  When several types remain
+    # possible, or none, the row is dropped as `ambiguous_name` rather than hung
+    # on whichever object was written last.
+    def _verb_fits(s, verb: str, t) -> bool:
+        # What the loop below does to the pair, so that "fits" means "the verb
+        # would ship as written".  The verb judged is the row's, not a policy
+        # pin: a pin is the operator's override of a pair already resolved.
+        if _is_spurious_observable_ttp_edge(s, t):
+            if verb != "indicates":
+                return False
+            if getattr(s, "type", "") == "attack-pattern":
+                s, t = t, s
+        s, t = _route_observables_through_indicators(s, verb, t, sco_id_to_indicator)
+        return (s is not None and t is not None
+                and rel_is_allowed(getattr(s, "type", ""), verb, getattr(t, "type", "")))
 
-        if not source or not target or not hasattr(source, "id") or not hasattr(target, "id"):
+    def _pick_by_verb(src_cands: dict, relationship_type: str, tgt_cands: dict):
+        if len(src_cands) == 1 and len(tgt_cands) == 1:
+            return next(iter(src_cands.values())), next(iter(tgt_cands.values()))
+        asked = relationship_type.strip().lower()
+        verb = asked if asked in VALID_REL_TYPES else "related-to"
+        fits = [(s, t) for s in src_cands.values() for t in tgt_cands.values()
+                if _verb_fits(s, verb, t)]
+        # An object paired with itself says nothing and is dropped below as a
+        # self-loop: it is a reading only when no other pair fits.
+        fits = [(s, t) for s, t in fits if s is not t] or fits[:1]
+        return fits[0] if len(fits) == 1 else (None, None)
+
+    for rel in llm_result.relationships:
+        src_cands = name_to_stix.candidates(rel.source_value.lower())
+        tgt_cands = name_to_stix.candidates(rel.target_value.lower())
+
+        if not src_cands or not tgt_cands:
             led.relationship(
                 rel, "dropped",
-                reason="unresolved_both" if not source and not target
-                else "unresolved_source" if not source else "unresolved_target",
+                reason="unresolved_both" if not src_cands and not tgt_cands
+                else "unresolved_source" if not src_cands else "unresolved_target",
             )
+            continue
+
+        source, target = _pick_by_verb(src_cands, rel.relationship_type, tgt_cands)
+        if source is None:
+            led.relationship(rel, "dropped", reason="ambiguous_name",
+                             source_candidates=sorted(o.id for o in src_cands.values()),
+                             target_candidates=sorted(o.id for o in tgt_cands.values()))
             continue
 
         # An edge from an object to itself says nothing.  It is not the LLM
@@ -2086,7 +2189,7 @@ _RE_SIGMA_NEXT_TITLE = compile_pattern(r"^title[" + PY_WHITESPACE + "]*:")
 
 def _add_embedded_rule_indicator(
     stix_objects: list,
-    name_to_stix: dict,
+    name_to_stix: _NameIndex,
     seen_ids: set,
     *,
     pattern_type: str,
@@ -2134,12 +2237,16 @@ def _add_embedded_rule_indicator(
 
     # A minimum length guard keeps a short tool name (e.g. "RDP", "SMB") from
     # matching a coincidental substring of an unrelated rule title.
-    for candidate_name in (*llm_result.malware_families, *llm_result.tools):
+    # A name listed as both a malware and a tool indicates both objects.
+    for candidate_name, wanted_type in (
+        *((n, "malware") for n in llm_result.malware_families),
+        *((n, "tool") for n in llm_result.tools),
+    ):
         if len(candidate_name) < 4:
             continue
         if candidate_name.lower() not in title.lower():
             continue
-        target = name_to_stix.get(candidate_name.lower())
+        target = name_to_stix.of_type(candidate_name.lower(), wanted_type)
         if target is None:
             continue
         rel = _add_relationship(

@@ -86,7 +86,7 @@ def test_an_embedded_rule_that_fails_to_build_is_left_out_with_its_reason(monkey
     ledger = MappingLedger()
     objects: list = []
     s4._add_embedded_rule_indicator(
-        objects, {}, set(), pattern_type="yara", pattern="rule Emotet_Loader { condition: true }",
+        objects, s4._NameIndex(), set(), pattern_type="yara", pattern="rule Emotet_Loader { condition: true }",
         title="Emotet_Loader", llm_result=LLMEnrichmentResult(), pol_index=None,
         seen_rel_keys=set(), ledger=ledger,
     )
