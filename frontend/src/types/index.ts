@@ -510,6 +510,11 @@ export interface LedgerEntity {
   mitre_types?: string[]
   /** reason 'ambiguous_name' (an IoC association): every object the malware name could mean */
   candidates?: string[]
+  /** reason 'outranked_type': the sources of this type of the name, the types another source
+   *  gives it that rank higher (kept), and the sources of those */
+  sources?: string[]
+  kept_types?: string[]
+  kept_sources?: string[]
 }
 
 export interface LedgerObjectInfo {

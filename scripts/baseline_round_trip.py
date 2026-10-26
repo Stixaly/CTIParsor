@@ -48,7 +48,7 @@ from api.paths import uploads_dir  # noqa: E402
 from models.schemas import EntityType, RawEntity  # noqa: E402
 from pipeline import baseline_stix as bs  # noqa: E402
 from pipeline.bundle_ledger import MappingLedger  # noqa: E402
-from pipeline.named_entities import with_named_entities  # noqa: E402
+from pipeline.named_entities import stored_row_source, with_named_entities  # noqa: E402
 from pipeline.orchestrator import build_bundle, load_file_bytes  # noqa: E402
 from pipeline.stage1_ingestion import extract_anchor  # noqa: E402
 from pipeline.stage3_llm import LLMEnrichmentResult, RelationshipExtracted  # noqa: E402
@@ -98,8 +98,9 @@ def job_inputs(job: Mapping[str, Any], entity_rows: Sequence[Mapping[str, Any]],
                relationship_rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """The Stage 4 inputs of a job, as `re_run_final_stages` builds them from its rows:
     the raw entities, the named lists, the filtered TTPs, countries, sectors and
-    campaign, and the relationships.  Raises ValueError when the stored LLM result
-    cannot be read (the worker goes on without it; here that would change the bundle)."""
+    campaign, and the relationships, and the `NamedEntities` to record on the ledger.
+    Raises ValueError when the stored LLM result cannot be read (the worker goes on
+    without it; here that would change the bundle)."""
     rows = [r for r in entity_rows if ships(r)]
     relationships = [r for r in relationship_rows if ships(r)]
     rejected = [r for r in entity_rows if r.get("accepted") == 0]
@@ -114,8 +115,6 @@ def job_inputs(job: Mapping[str, Any], entity_rows: Sequence[Mapping[str, Any]],
                                               mitre_id=row.get("mitre_id"), source=row["source"]))
             except ValueError as exc:
                 unreadable.append(f"{row['entity_type']} {row['value']!r}: {str(exc).splitlines()[0]}")
-
-    named = with_named_entities(LLMEnrichmentResult(), ((r["entity_type"], r["value"]) for r in rows))
 
     llm = LLMEnrichmentResult()
     if job["llm_result_json"]:
@@ -147,13 +146,22 @@ def job_inputs(job: Mapping[str, Any], entity_rows: Sequence[Mapping[str, Any]],
     campaign_name = llm.campaign_name
     if campaign_name and campaign_name.lower().strip() in rej_campaigns:
         campaign_name = None
+    # Once the campaign is read, as the worker does (ADR-0092): a name typed several
+    # ways keeps its best-ranked source's type, and an outranked campaign leaves.
+    named = with_named_entities(
+        LLMEnrichmentResult(campaign_name=campaign_name),
+        ((r["entity_type"], r["value"], stored_row_source(r["source"], r["accepted"], r.get("decision_origin")))
+         for r in rows),
+    )
+    raw_entities = [e for e in raw_entities if named.keeps(e)]
+    campaign_name = named.llm_result.campaign_name
     countries = [c for c in llm.targeted_countries if c.lower().strip() not in rej_locations]
     sectors = [s for s in llm.targeted_sectors if s.lower().strip() not in rej_identities]
 
     llm_result = LLMEnrichmentResult(
-        malware_families=named.malware_families,
-        threat_actors=named.threat_actors,
-        tools=named.tools,
+        malware_families=named.llm_result.malware_families,
+        threat_actors=named.llm_result.threat_actors,
+        tools=named.llm_result.tools,
         ttps=ttps,
         ioc_associations=llm.ioc_associations,
         campaign_name=campaign_name,
@@ -168,7 +176,7 @@ def job_inputs(job: Mapping[str, Any], entity_rows: Sequence[Mapping[str, Any]],
             for r in relationships
         ],
     )
-    return {"raw_entities": raw_entities, "llm_result": llm_result, "unreadable": unreadable,
+    return {"raw_entities": raw_entities, "llm_result": llm_result, "named": named, "unreadable": unreadable,
             "entity_rows": len(rows), "relationship_rows": len(relationships)}
 
 
@@ -198,6 +206,7 @@ def build_enriched(job: Mapping[str, Any], inputs: Mapping[str, Any], policy: di
         anchor = None
 
     ledger = MappingLedger()
+    inputs["named"].record(ledger)
     bundle = build_bundle(
         inputs["raw_entities"], inputs["llm_result"],
         report_name=report_name, report_text=job["report_text"] or "",
@@ -291,8 +300,9 @@ def audit_findings(bundles: Sequence[tuple[str, dict]]) -> list[dict[str, Any]]:
 
 def load_inputs(dsn: str, only: Sequence[str]) -> tuple[list[dict[str, Any]], dict | None]:
     """Every job with its rows, and the saved policy (None when none is saved), in one
-    read-only session.  The `held_reason`, `enrichment_status`, `times_json` and
-    `pipeline_mode` columns are absent here: the rows are read as they are."""
+    read-only session.  The `held_reason`, `enrichment_status`, `times_json`,
+    `pipeline_mode` and `decision_origin` columns are absent here: the rows are read
+    as they are, so no accept counts as the analyst's type (ADR-0092)."""
     import psycopg
     from psycopg.rows import dict_row
 

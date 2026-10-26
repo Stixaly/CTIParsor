@@ -1,8 +1,7 @@
 # ADR-0091: A name that denotes several objects resolves by the verb
 
-**Status:** Proposed, on hold (2026-10-26). The code is written and measured.
-The maintainer holds it until a type is chosen per name, by source rank, before
-Stage 4 (see "Open question"): the two land together.
+**Status:** Accepted (2026-10-26). It lands with ADR-0092, which answers its
+open question.
 **Date:** 2026-10-26
 **Deciders:** maintainer
 **Amends:** ADR-0021 (the name table Stage 4 resolves through keeps one object
@@ -183,7 +182,8 @@ Choose one type per name before Stage 4, ranked by source: analyst, then
 gazetteer, then the LLM, then CyNER and spaCy. It would recover most of the rows
 this ADR drops. It needs the source of each name to reach Stage 4, or a dedup in
 `with_named_entities`. It is a separate change. On 2026-10-26 the maintainer
-held this ADR until that change is ready, so that the two land together.
+held this ADR until that change was ready. ADR-0092 is that change, and the
+two land together.
 
 ## Implementation
 

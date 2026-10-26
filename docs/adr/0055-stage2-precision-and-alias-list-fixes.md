@@ -2,6 +2,10 @@
 
 **Status:** Accepted (implemented 2026-09-20)
 **Date:** 2026-09-20
+**Amended by:** [0092](0092-one-type-per-name-before-stage-4-by-source-rank.md)
+(2026-10-26). `_TYPE_PRECEDENCE` is public (`TYPE_PRECEDENCE`) and gains the
+analyst (-1) and the LLM (1), which never occur at Stage 2; the same ranking is
+applied again where the named lists are built, before Stage 4.
 **Relates to:** [pipeline/stage2g_alias_list.py](../../pipeline/stage2g_alias_list.py), [pipeline/stage2d_cyner.py](../../pipeline/stage2d_cyner.py), [pipeline/base.py](../../pipeline/base.py), ADR-0050, ADR-0013
 
 ## Context

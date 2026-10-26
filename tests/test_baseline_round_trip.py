@@ -15,6 +15,7 @@ import json
 from pathlib import Path
 
 from pipeline import baseline_stix as bs
+from pipeline.bundle_ledger import MappingLedger
 from pipeline.stage3_llm import LLMEnrichmentResult
 from scripts.baseline_round_trip import (
     added_objects,
@@ -82,6 +83,26 @@ def test_a_malware_row_goes_through_the_named_lists_not_the_raw_entities():
     inputs = job_inputs(job, [_row("malware", "WellMess")], [])
 
     assert inputs["raw_entities"] == []                                # a malware name goes through the named lists
+
+
+def test_a_campaign_a_malware_outranks_leaves_the_stage_4_inputs_unless_the_analyst_accepted_it():
+    """ADR-0092, as the worker does it: the gazetteer's malware over the LLM's campaign."""
+    job = {"llm_result_json": LLMEnrichmentResult(campaign_name="Industroyer2").model_dump_json(), "id": "job-d"}
+    malware = _row("malware", "Industroyer2", source="gazetteer")
+    campaign = _row("campaign", "Industroyer2", source="llm")
+
+    inputs = job_inputs(job, [malware, campaign], [])
+
+    assert inputs["llm_result"].campaign_name is None and inputs["raw_entities"] == []
+    assert inputs["llm_result"].malware_families == ["Industroyer2"]
+    ledger = MappingLedger()
+    inputs["named"].record(ledger)
+    assert [(e["entity_type"], e["reason"]) for e in ledger.entities] == [("campaign", "outranked_type")]
+
+    inputs = job_inputs(job, [malware, {**campaign, "decision_origin": "human"}], [])
+
+    assert inputs["llm_result"].campaign_name == "Industroyer2" and inputs["llm_result"].malware_families == []
+    assert [e.entity_type.value for e in inputs["raw_entities"]] == ["campaign"]
 
 
 def test_a_name_and_a_value_are_compared_folded_and_relationships_are_not_compared():

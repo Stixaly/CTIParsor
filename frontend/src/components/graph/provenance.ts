@@ -124,6 +124,7 @@ const ENTITY_REASON: Record<string, string> = {
   not_a_uri:         'a STIX url must be a valid URI, and this value is not one (a redacted host, a bracket or a space left in it)',
   not_in_llm_lists:  'found by NER but not listed by the LLM — the first build maps named objects from the LLM lists only; a rebuild includes it',
   ambiguous_name:    'the malware it names is several objects of other types, and it cannot tell which one the IoC indicates',
+  outranked_type:    'another source gives this name another type and ranks higher (you, then the ATT&CK gazetteer and the IoC regexes, then the LLM, then the NER models; a campaign ranks last) — accept this row on its own, not in bulk, to keep this type',
   rule_does_not_compile: 'the YARA rule quoted in the report does not compile, so OpenCTI would refuse its Indicator and every edge to it',
   rule_does_not_parse: 'the parser OpenCTI uses for this rule type refuses the quoted rule (often a line the report’s layout cut), so OpenCTI would refuse its Indicator and every edge to it',
   no_traffic_endpoint: 'a STIX network-traffic needs a destination (an IP, or a domain with a protocol), and this value names none',

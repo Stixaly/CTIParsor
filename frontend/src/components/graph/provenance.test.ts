@@ -70,6 +70,13 @@ describe('baseline vocabulary — the analyst’s STIX bundle (ADR-0090)', () =>
   })
 })
 
+describe('one type per name, by source rank (ADR-0092)', () => {
+  it('explains a type that another source of the same name outranks, and how to keep it', () => {
+    expect(entityReason('outranked_type')).toContain('ranks higher')
+    expect(entityReason('outranked_type')).toContain('on its own')
+  })
+})
+
 describe('reasons that name the object behind them (ADR-0090)', () => {
   it('reads the reason before the colon and keeps the id after it', () => {
     expect(entityReason('baseline_refs_closure:malware--1')).toBe(entityReason('baseline_refs_closure'))

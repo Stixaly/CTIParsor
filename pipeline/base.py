@@ -80,13 +80,18 @@ class BaseExtractionStage:
 # other on the same string. This is a second, deliberately separate pass: it
 # only resolves a genuine type disagreement on the same value, never touches
 # a value only one source reported, and never drops a value outright.
-_TYPE_PRECEDENCE: dict[str, int] = {
+#
+# The analyst's labels and `llm` never occur at Stage 2 (Stage 3 and the review
+# come later), so this pass's output does not change; ADR-0092 applies the same
+# table again where the named lists are built (pipeline/named_entities.py).
+TYPE_PRECEDENCE: dict[str, int] = {
+    "analyst": -1, "manual": -1, "baseline_stix": -1,   # the analyst's own rows
     "ioc": 0, "gazetteer": 0,   # deterministic, whole-word/regex matched
-    "semantic": 1,
+    "semantic": 1, "llm": 1,
     "cyner": 2, "gliner": 2,
     "spacy": 3, "alias_list": 3,
 }
-_DEFAULT_PRECEDENCE = 99
+DEFAULT_PRECEDENCE = 99
 
 
 def resolve_type_conflicts(entities: list[RawEntity]) -> list[RawEntity]:
@@ -111,10 +116,10 @@ def resolve_type_conflicts(entities: list[RawEntity]) -> list[RawEntity]:
         if len({e.entity_type for e in group}) <= 1:
             result.extend(group)
             continue
-        best_rank = min(_TYPE_PRECEDENCE.get(e.source, _DEFAULT_PRECEDENCE) for e in group)
+        best_rank = min(TYPE_PRECEDENCE.get(e.source, DEFAULT_PRECEDENCE) for e in group)
         winning_types = {
             e.entity_type for e in group
-            if _TYPE_PRECEDENCE.get(e.source, _DEFAULT_PRECEDENCE) == best_rank
+            if TYPE_PRECEDENCE.get(e.source, DEFAULT_PRECEDENCE) == best_rank
         }
         result.extend(e for e in group if e.entity_type in winning_types)
     return result
