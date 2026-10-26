@@ -6,6 +6,7 @@ travels with the ingestion routes (api/routes/upload.py, api/routes/ingest.py).
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from api.baseline_store import scrubbed
+from api.body_limit import ENVELOPE_BYTES
 from api.main import limiter
 from api.routes._common import (
     BASELINE_REFUSED,
@@ -21,6 +22,12 @@ from pipeline.baseline_stix import MAX_BASELINE_BYTES, MAX_BASELINE_OBJECTS, Bas
 # Explicit annotation: same import cycle as api/routes/upload.py (`limiter`).
 router: APIRouter = APIRouter(prefix="/api/baselines", tags=["baselines"])
 
+
+
+def body_budget() -> int:
+    """The most a POST /api/baselines/inspect body may weigh (api/body_limit.py): one
+    bundle and its form.  The same with the mode off, which the route answers 400."""
+    return MAX_BASELINE_BYTES + ENVELOPE_BYTES
 
 
 @router.get("/status")

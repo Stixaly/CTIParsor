@@ -20,6 +20,7 @@ from pipeline.regex_safety import compile_pattern
 setup_logging()
 logger = get_logger(__name__)
 
+from api.body_limit import BodyLimitMiddleware
 from api.db import get_conn, init_db
 from api.paths import output_dir, uploads_dir
 
@@ -199,6 +200,18 @@ async def refuse_cross_site_writes(request: Request, call_next):
             return JSONResponse({"detail": "origin not allowed"}, status_code=403)
     return await call_next(request)
 
+
+# What a body may weigh on the routes that take a report or a STIX bundle
+# (api/body_limit.py): 413 on the `Content-Length`, or the moment a body sent
+# without one passes the budget, before FastAPI spools the form to disk.  The
+# nginx `proxy` profile allows the largest of them (docker/nginx/default.conf).
+# Runs second, after the Host check.
+app.add_middleware(BodyLimitMiddleware, budgets={
+    ("POST", "/api/upload"): upload.body_budget,
+    ("POST", "/api/baselines/inspect"): baselines.body_budget,
+    ("POST", "/api/ingest/text"): ingest.text_body_budget,
+    ("POST", "/api/ingest/url"): ingest.url_body_budget,
+})
 
 # Added last, so it runs first: an unknown Host is answered 400 before the
 # request-id middleware or the write guard see it.

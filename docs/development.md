@@ -276,6 +276,7 @@ CTIParsor/
 │
 ├── api/
 │   ├── main.py                    # FastAPI app, SPA static serving
+│   ├── body_limit.py              # Request body budgets per route, counted as the body arrives (413)
 │   ├── db.py                      # Job store + rule store, both PostgreSQL via DATABASE_URL — ADR-0045, ADR-0053
 │   ├── db_backend.py              # PostgreSQL adapter: `?`→`%s`, sqlite3.Row-like rows, non-closing `with`
 │   ├── worker.py                  # The pipeline subprocess: spawn, crash-to-`failed`, SSE emitter

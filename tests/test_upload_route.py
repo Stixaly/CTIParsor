@@ -113,8 +113,8 @@ def test_a_real_pdf_is_accepted(client):
     assert _upload(client, "report.pdf", _PDF).status_code == 200
 
 
-def test_a_request_larger_than_the_limit_is_refused_before_reading(client, monkeypatch, uploads):
-    monkeypatch.setenv("STIX_ENRICHMENT_ENABLED", "false")      # the report's limit alone (no baseline room)
+def test_a_report_larger_than_its_limit_is_refused_and_not_stored(client, monkeypatch, uploads):
+    """Within the request's budget (tests/test_body_limit.py), the report keeps its own limit."""
     monkeypatch.setattr("api.routes.upload._MAX_BYTES", 64)
     resp = _upload(client, "r.txt", _REPORT * 4)
     assert resp.status_code == 413 and "File too large" in resp.json()["detail"]
