@@ -59,6 +59,12 @@ AUTO_ACCEPT_LEVEL = 0.90
 # relevance — filters with this, so they cannot drift apart.
 SHIPS = "(accepted = 1 OR (accepted IS NULL AND held_reason IS NULL))"
 
+# The rows that do not ship: rejected, or held and not yet decided.  Graph
+# completion may not add their triples back (ADR-0013, amendment 2026-10-26).
+# Written out, not `NOT SHIPS`: for a held row `accepted = 1` is NULL, so
+# `SHIPS` is NULL and so is its negation, and the row would be missed.
+WITHHELD = "(accepted = 0 OR (accepted IS NULL AND held_reason IS NOT NULL))"
+
 
 def held_from_bulk_accept(row: Any, accepted: bool | None, origin: str) -> bool:
     """Would this write accept a held, still-pending row as part of a group?

@@ -55,7 +55,8 @@ def _saved(db):
 
 def _held_rel(db, job):
     return db.get_conn().execute(
-        "SELECT * FROM relationships WHERE job_id=? AND target_value='ZeroLoader'", (job,)).fetchone()
+        "SELECT * FROM relationships WHERE job_id=? AND source_value='APT29' AND target_value='ZeroLoader'",
+        (job,)).fetchone()
 
 
 def _held_ttp(db, job):
@@ -120,6 +121,55 @@ def test_a_held_claim_ships_only_once_an_analyst_accepts_it(temp_db, temp_db_cli
     rid = _held_rel(temp_db, job)["id"]
     temp_db_client.patch(f"/api/jobs/{job}/relationships/{rid}", json={"accepted": True})
     assert ("APT29", "uses", "ZeroLoader") in _shipped_rels(temp_db, job)
+
+
+def test_graph_completion_ships_a_held_claim_neither_while_it_waits_nor_once_rejected(
+        temp_db, temp_db_client):
+    """APT29 uses WellMess and WellMess uses ZeroLoader compose into the held
+    claim APT29 uses ZeroLoader.  Graph completion shipped it while the card
+    waited, and again once rejected (ADR-0013, amendment 2026-10-26)."""
+    from api import worker
+
+    job = _job(temp_db)
+    result = _result()
+    result.relationships.append(RelationshipExtracted(
+        source_value="WellMess", relationship_type="uses", target_value="ZeroLoader",
+        confidence=0.9, evidence_text="WellMess loaded ZeroLoader."))
+    worker._save_entities(job, [], result, _TEXT)
+    claim = ("APT29", "uses", "ZeroLoader")
+
+    def refused_reasons():
+        row = temp_db.get_conn().execute(
+            "SELECT bundle_ledger_json FROM jobs WHERE id=?", (job,)).fetchone()
+        return [(r["rule"], r["reason"]) for r in json.loads(row["bundle_ledger_json"])["refused"]]
+
+    assert claim not in _shipped_rels(temp_db, job)
+    assert refused_reasons() == [("transitive:uses+uses", "held_for_review")]
+
+    rid = _held_rel(temp_db, job)["id"]
+    temp_db_client.patch(f"/api/jobs/{job}/relationships/{rid}", json={"accepted": False})
+    assert claim not in _shipped_rels(temp_db, job)
+    assert refused_reasons() == [("transitive:uses+uses", "rejected_by_analyst")]
+
+
+def test_every_row_either_ships_or_is_withheld(temp_db):
+    """WITHHELD is SHIPS' complement, written out: for a held row `NOT SHIPS`
+    is NULL, and graph completion would not see it."""
+    job = _saved(temp_db)
+    rid = _held_rel(temp_db, job)["id"]
+
+    def matches(predicate):
+        return rid in {r["id"] for r in temp_db.get_conn().execute(
+            f"SELECT id FROM relationships WHERE job_id=? AND {predicate}", (job,))}
+
+    for accepted, reason in ((None, "verification call failed"), (0, "verification call failed"),
+                             (1, "verification call failed"), (None, None), (0, None), (1, None)):
+        with temp_db.get_conn() as conn:
+            conn.execute("UPDATE relationships SET accepted=?, held_reason=? WHERE id=?",
+                         (accepted, reason, rid))
+            conn.commit()
+        withheld = accepted == 0 or (accepted is None and reason is not None)
+        assert (matches(decisions.SHIPS), matches(decisions.WITHHELD)) == (not withheld, withheld)
 
 
 def test_a_held_technique_is_outside_the_report_until_accepted(temp_db, temp_db_client):

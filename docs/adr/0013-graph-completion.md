@@ -137,3 +137,74 @@ same way.
   and stay in the Report.
 - Measuring each transitive rule before it stays on by default waits for the
   in-house set's gold relationships.
+
+## Amendment (2026-10-26): a rejected relationship stays rejected
+
+The code audit of 2026-10-25 found that graph completion adds back a
+relationship an analyst rejected. Finalize hands Stage 4 only the rows that
+ship (`decisions.SHIPS`), and each engine skipped a triple only when it was
+already one of the bundle's edges; a rejected row is not. So "A uses B" and
+"B uses C", both accepted, composed the rejected "A uses C" back
+(`transitive:uses+uses`), and reference grounding re-added a rejected edge that
+MITRE also states. A row held for review (ADR-0082) shipped the same way, as an
+inference, before anyone had decided it. Both engines are on by default.
+
+Decided by the maintainer:
+
+- **A rejection says the relationship is false for this report**, not only that
+  its evidence is weak. No engine adds a rejected triple back: not transitive
+  inference, not reference grounding, not long distance. MITRE stating it does
+  not override the analyst, as an inferred verb does not override a pinned rule.
+- **A held row blocks its triple until an analyst decides it.** Accepted, it
+  ships as the row; rejected, the rule above applies. The bundle does not get
+  ahead of the review.
+- **How.** Finalize also reads the rows that do not ship, `decisions.WITHHELD`:
+  rejected, or pending with a `held_reason`. It is written out because
+  `NOT SHIPS` is NULL for a held row. Stage 4 resolves each of them as it
+  resolves a row that ships (`_resolve_row`: the name and its aliases, the
+  observable's Indicator, the policy pin, the fall back to `related-to`) and
+  gives `complete_graph` the triples as `forbidden`. A pipeline run does the
+  same with Stage 3d's `rel_review`. After an alias merge (step 1), a forbidden
+  triple follows the absorbed node onto the one kept. A refused edge takes none
+  of the `max_new_edges` budget.
+- **The match is the triple, verb included**: rejecting "A uses C" does not
+  forbid "A targets C". `related-to` and `duplicate-of` name no direction, so
+  rejecting "A related-to C" also forbids "C related-to A", the direction the
+  long-distance inferer may answer instead. A row whose endpoint resolves to no
+  object (its entity was rejected too) forbids nothing, since no edge can reach
+  that object.
+- **The mapping ledger** gains `refused`, present only when not empty, so a
+  build with no rejection keeps the ledger it had. One entry per triple and
+  rule: the two ids, the verb, the `x_inference_rule` the edge would have
+  carried, its premises for a transitive one, and the reason,
+  `rejected_by_analyst` or `held_for_review`. After a baseline merge
+  (ADR-0090) the ids follow the baseline objects that replaced them. An engine
+  that reaches `max_new_edges` stops there, so `refused` lists only the
+  candidates examined before the cap.
+
+Not covered here:
+
+- Other edges Stage 4 builds with no review row can recreate a rejected row's
+  triple too: the actor × targeted country and sector product
+  (`targeted_location`, inside the Report) and the policy-pinned edges, both
+  read in the code. IoC associations were not checked.
+- A deleted row (`DELETE /relationships/{id}`, the Graph page's delete) leaves
+  no trace, so completion may add its triple back. Only a rejection holds.
+- The Graph page does not show `refused` yet.
+- The alias merge, off by default, rewires the rows that ship: an accepted
+  "apt-29 uses X" can land on a rejected "APT29 uses X". It adds no edge, so it
+  is not refused.
+- The measurement scripts that call `build_bundle` from stored rows
+  (`scripts/baseline_round_trip.py`, `rebuild_bundle_provenance.py`,
+  `measure_pin_allocation.py`) do not pass the refused rows yet, so on a job
+  with a rejection they can differ from finalize.
+
+Validation: `tests/test_stage4b_completion.py` (each engine, the held reason,
+the budget, an undirected verb, the alias merge, rows resolved through
+`build_stix_bundle`, through an observable's Indicator, a rejection over a hold,
+a row that resolves to nothing), `tests/test_held_for_review.py` (finalize while
+a claim is held, then once it is rejected; `SHIPS` and `WITHHELD` split every
+row), `tests/test_orchestrator.py` (a run refuses Stage 3d's held claim) and
+`tests/test_bundle_ledger.py` (`refused` after a baseline merge). Each fails
+with its part of the change disabled, except the two that check what must not
+change (a row that resolves to nothing, the split of the rows).

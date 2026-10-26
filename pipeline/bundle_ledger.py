@@ -25,6 +25,13 @@ Shape of `to_dict()` (version 1):
                      not shipped: absorbed by an alias merge, a baseline
                      object left out (kind "baseline"), or a detection
                      rule that does not compile
+    refused        [{source_ref, relationship_type, target_ref, rule, reason,
+                     inferred_from?}]   only when not empty: an edge graph
+                     completion would have added (`rule` is the
+                     x_inference_rule it would have carried) and did not,
+                     because a row with that triple was rejected
+                     ("rejected_by_analyst") or is held for review
+                     ("held_for_review"); ADR-0013, amendment 2026-10-26
 
 Outcomes: "emitted" (this input produced the object), "merged" (it resolved to
 an object or edge that already existed — `stix_id` / `merged_with` names it),
@@ -65,6 +72,7 @@ class MappingLedger:
         self.entities: list[dict] = []
         self.relationships: list[dict] = []
         self.removed: list[dict] = []
+        self.refused: list[dict] = []
 
     # ── objects ──────────────────────────────────────────────────────────────
     def object(self, obj: Any, origin: str, **info: Any) -> None:
@@ -208,6 +216,11 @@ class MappingLedger:
             for e in self.relationships:
                 if e.get("stix_id") == rid:
                     e["source_ref"], e["target_ref"] = src, tgt
+        # A refused edge names the objects Stage 4b saw: follow each onto the
+        # baseline object that replaced it.
+        for e in self.refused:
+            e["source_ref"] = result.remap.get(e["source_ref"], e["source_ref"])
+            e["target_ref"] = result.remap.get(e["target_ref"], e["target_ref"])
         for bid, reason in result.dropped.items():
             self.left_out(bid, "baseline", reason)
 
@@ -229,6 +242,13 @@ class MappingLedger:
                 r["outcome"] = "merged"
                 r["reason"] = "baseline_match"
 
+    # ── Stage 4b refusals ────────────────────────────────────────────────────
+    def refused_inferences(self, refused: list[dict]) -> None:
+        """Edges graph completion did not add because an analyst rejected that
+        relationship, or it waits for one (ADR-0013, amendment 2026-10-26).
+        Never built, so they have no id: the entry names the triple."""
+        self.refused.extend(_clean(r) for r in refused)
+
     # ── finish ───────────────────────────────────────────────────────────────
     def outside_report(self, obj: Any) -> None:
         """An SRO that ships in the bundle but not in the Report's object_refs:
@@ -247,13 +267,18 @@ class MappingLedger:
                 self.objects[o.id] = {"origin": _rel_origin_from_props(o)}
 
     def to_dict(self) -> dict:
-        return {
+        out = {
             "version": LEDGER_VERSION,
             "objects": self.objects,
             "entities": self.entities,
             "relationships": self.relationships,
             "removed": self.removed,
         }
+        # Only when something was refused: a build without a rejection keeps
+        # the ledger it always had.
+        if self.refused:
+            out["refused"] = self.refused
+        return out
 
 
 def _clean(info: dict) -> dict:

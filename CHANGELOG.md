@@ -885,6 +885,28 @@ such a Campaign, but it rarely reaches Stage 4 now); unlike before the audit, th
 drop is recorded, and the analyst's accept of the campaign row brings the
 Campaign back. Stage 4 is not changed.
 
+#### Graph completion no longer adds back a rejected or held relationship (ADR-0013, amended), 2026-10-26
+
+Finalize gave Stage 4 only the relationships that ship, and Stage 4b skipped a
+triple only when it was already in the bundle. A relationship the analyst had
+rejected came back: two accepted edges "A uses B" and "B uses C" composed
+"A uses C" (`transitive:uses+uses`), and ATT&CK reference grounding re-added a
+rejected edge MITRE also states. A claim held for review (ADR-0082) shipped the
+same way before anyone decided it. Both engines are on by default.
+
+The maintainer decided that a rejection says the relationship is false for this
+report, and that a held claim waits for its analyst. Finalize now also reads the
+rows that do not ship (`decisions.WITHHELD`), Stage 4 resolves them as it
+resolves the rows that ship, and no engine adds their triples back: not the
+transitive step, not reference grounding, not long distance (which may not
+turn a rejected `related-to` around either). A pipeline run
+refuses Stage 3d's held claims the same way. The mapping ledger lists each
+refused edge under `refused`, with the rule it would have carried and the
+reason (`rejected_by_analyst`, `held_for_review`); a build with no rejection
+keeps its ledger unchanged. Other edges Stage 4 builds with no review row (the
+targeted-location product, pinned edges) are not covered yet. The
+`BUNDLE_AFFECTING` entry follows in a separate commit (scope `mapping`).
+
 #### A code audit's fixes: a web-capture range, a DOCX zip bomb, doubled rows after a requeue, lost detection rules, 2026-10-26
 
 A code audit read the repository by zone (worker and API, Stage 1 to 4, the

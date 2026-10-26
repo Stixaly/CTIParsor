@@ -32,6 +32,7 @@ from pipeline import baseline_stix
 from pipeline.baseline_stix import BaselineBuild, BaselineError, BaselineIndex, Reconciliation
 from pipeline.decisions import BASELINE_STIX
 from pipeline.decisions import SHIPS as _SHIPS
+from pipeline.decisions import WITHHELD as _WITHHELD
 from pipeline.env_flags import env_int
 from pipeline.orchestrator import (
     Document,
@@ -967,6 +968,7 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
 
     from models.schemas import EntityType, RawEntity
     from pipeline.stage3_llm import LLMEnrichmentResult, RelationshipExtracted
+    from pipeline.stage4b_graph_completion import HELD_FOR_REVIEW, REJECTED_BY_ANALYST, RefusedRelationship
     from pipeline.stage5_validation import INVALID, export_bundle, validate_bundle
 
     with _lock:
@@ -993,6 +995,16 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
                 # includes every manual addition, edit, or deletion from the UI)
                 rel_rows = conn.execute(
                     "SELECT * FROM relationships WHERE job_id=? AND " + _SHIPS,
+                    (job_id,),
+                ).fetchall()
+
+                # The relationships that do not ship, rejected or held: graph
+                # completion may not add them back (ADR-0013, amendment
+                # 2026-10-26).  Every row, a baseline import's too: whoever
+                # stated it, the analyst ruled it out.
+                withheld_rel_rows = conn.execute(
+                    "SELECT source_value, relationship_type, target_value, accepted "
+                    "FROM relationships WHERE job_id=? AND " + _WITHHELD,
                     (job_id,),
                 ).fetchall()
 
@@ -1206,6 +1218,11 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
         )
         for row in rel_rows
     ]
+    refused_relationships = [
+        RefusedRelationship(row["source_value"], row["relationship_type"], row["target_value"],
+                            REJECTED_BY_ANALYST if row["accepted"] == 0 else HELD_FOR_REVIEW)
+        for row in withheld_rel_rows
+    ]
 
     llm_result = LLMEnrichmentResult(
         # DB is the authoritative source for named SDOs — includes gazetteer,
@@ -1262,6 +1279,7 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
         ledger=ledger,
         document_anchor=document_anchor,
         baseline=baseline_build,
+        refused_relationships=refused_relationships,
     )
     bundle_json = baseline_stix.serialize_bundle(
         bundle, baseline_build.verbatim if baseline_build is not None else None)

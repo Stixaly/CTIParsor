@@ -12,7 +12,10 @@ from models.schemas import EntityType, RawEntity
 from pipeline.stage3_llm import LLMEnrichmentResult, RelationshipExtracted, TTPExtracted
 from pipeline.stage4_stix_mapping import build_stix_bundle
 from pipeline.stage4b_graph_completion import (
+    HELD_FOR_REVIEW,
+    REJECTED_BY_ANALYST,
     InferredEdge,
+    RefusedRelationship,
     _connected_components,
     complete_graph,
 )
@@ -416,3 +419,270 @@ def test_edges_the_report_does_not_state_ship_outside_the_report():
         assert r.id not in report["object_refs"]
         assert ledger.to_dict()["objects"][r.id]["outside_report"] is True
     assert all(r.id in report["object_refs"] for r in extracted)
+
+
+# ── A rejected relationship stays rejected (ADR-0013, amendment 2026-10-26) ───
+
+def _chain():
+    """Zeta Group uses ZetaRAT, ZetaRAT uses ZetaLoader: uses+uses composes
+    Zeta Group uses ZetaLoader."""
+    a = stix2.IntrusionSet(name="Zeta Group")
+    b = stix2.Malware(name="ZetaRAT", is_family=True)
+    c = stix2.Malware(name="ZetaLoader", is_family=True)
+    ab = stix2.Relationship(a, "uses", b, confidence=80)
+    bc = stix2.Relationship(b, "uses", c, confidence=80)
+    return a, b, c, ab, bc
+
+
+def _has_edge(objs, src, verb, tgt) -> bool:
+    return any((r.get("source_ref"), r.get("relationship_type"), r.get("target_ref"))
+               == (src.id, verb, tgt.id) for r in _rels(objs))
+
+
+def test_transitive_does_not_add_back_a_rejected_triple():
+    """The audit's case: the analyst rejected "Zeta Group uses ZetaLoader", so
+    finalize left the row out, and uses+uses composed it back."""
+    a, b, c, ab, bc = _chain()
+    objs = [a, b, c, ab, bc]
+
+    stats = complete_graph(objs, forbidden={(a.id, "uses", c.id): REJECTED_BY_ANALYST})
+
+    assert stats.transitive_added == 0
+    assert not _has_edge(objs, a, "uses", c)
+    assert stats.refused == [{
+        "source_ref": a.id, "relationship_type": "uses", "target_ref": c.id,
+        "rule": "transitive:uses+uses", "reason": REJECTED_BY_ANALYST,
+        "inferred_from": [ab.id, bc.id],
+    }]
+
+
+def test_a_held_triple_is_not_inferred_while_it_waits():
+    a, b, c, ab, bc = _chain()
+    objs = [a, b, c, ab, bc]
+
+    stats = complete_graph(objs, forbidden={(a.id, "uses", c.id): HELD_FOR_REVIEW})
+
+    assert not _has_edge(objs, a, "uses", c)
+    assert [r["reason"] for r in stats.refused] == [HELD_FOR_REVIEW]
+
+
+def test_a_refused_triple_costs_no_budget():
+    """The budget is spent on C2 first; the refused C1 that follows is refused,
+    not counted against the cap."""
+    a = stix2.IntrusionSet(name="A")
+    b = stix2.Malware(name="B", is_family=True)
+    c1 = stix2.AttackPattern(name="C1")
+    c2 = stix2.AttackPattern(name="C2")
+    objs = [a, b, c1, c2, stix2.Relationship(a, "uses", b),
+            stix2.Relationship(b, "uses", c2), stix2.Relationship(b, "uses", c1)]
+
+    stats = complete_graph(objs, policy={"completion": {"max_new_edges": 1, "reference": False}},
+                           forbidden={(a.id, "uses", c1.id): REJECTED_BY_ANALYST})
+
+    assert stats.transitive_added == 1 and not stats.capped
+    assert _has_edge(objs, a, "uses", c2) and not _has_edge(objs, a, "uses", c1)
+    assert [r["target_ref"] for r in stats.refused] == [c1.id]
+
+
+def test_an_undirected_verb_is_refused_both_ways():
+    """Rejecting "APT related-to MW2" rules out "MW2 related-to APT", the
+    direction the long-distance inferer may answer instead."""
+    actor = stix2.IntrusionSet(name="APT")
+    mw = stix2.Malware(name="MW", is_family=True)
+    mw2 = stix2.Malware(name="MW2", is_family=True)
+    ap = stix2.AttackPattern(name="AP")
+    objs = [actor, mw, mw2, ap,
+            stix2.Relationship(actor, "uses", mw), stix2.Relationship(mw2, "uses", ap)]
+
+    stats = complete_graph(
+        objs, policy={"completion": {"long_distance": True, "transitive": False}},
+        report_text="irrelevant",
+        long_distance_infer=lambda central, topic, text: InferredEdge(mw2.id, "related-to", actor.id),
+        forbidden={(actor.id, "related-to", mw2.id): REJECTED_BY_ANALYST},
+    )
+
+    assert stats.long_distance_added == 0
+    assert not _has_edge(objs, mw2, "related-to", actor)
+    assert [(r["source_ref"], r["target_ref"]) for r in stats.refused] == [(mw2.id, actor.id)]
+
+
+def test_reference_grounding_does_not_add_back_a_rejected_triple():
+    """MITRE states APT29 uses Mimikatz; the analyst ruled it out for this
+    report, and the tool does not contradict them."""
+    import pipeline.stage4b_graph_completion as s4b
+    if not s4b._attack_pairs():
+        pytest.skip("attack_relationships.json not built")
+    actor = stix2.ThreatActor(name="APT29")
+    mw = stix2.Malware(name="Mimikatz", is_family=True)
+    objs = [actor, mw]
+
+    stats = complete_graph(objs, policy={"completion": {"transitive": False}},
+                           forbidden={(actor.id, "uses", mw.id): REJECTED_BY_ANALYST})
+
+    assert stats.reference_added == 0
+    assert not _has_edge(objs, actor, "uses", mw)
+    assert [(r["rule"], r["reason"]) for r in stats.refused] == [
+        ("attack-reference:G0016>S0002", REJECTED_BY_ANALYST)]
+
+
+def test_long_distance_does_not_add_back_a_rejected_triple():
+    actor = stix2.IntrusionSet(name="APT")
+    mw = stix2.Malware(name="MW", is_family=True)
+    tool = stix2.Tool(name="TL")
+    mw2 = stix2.Malware(name="MW2", is_family=True)
+    ap = stix2.AttackPattern(name="AP")
+    objs = [actor, mw, tool, mw2, ap,
+            stix2.Relationship(actor, "uses", mw), stix2.Relationship(actor, "uses", tool),
+            stix2.Relationship(mw2, "uses", ap)]
+
+    stats = complete_graph(
+        objs, policy={"completion": {"long_distance": True, "transitive": False}},
+        report_text="irrelevant",
+        long_distance_infer=lambda central, topic, text: InferredEdge(actor.id, "uses", mw2.id),
+        forbidden={(actor.id, "uses", mw2.id): REJECTED_BY_ANALYST},
+    )
+
+    assert stats.long_distance_added == 0
+    assert not _has_edge(objs, actor, "uses", mw2)
+    assert [r["rule"] for r in stats.refused] == ["long-distance"]
+
+
+def test_a_forbidden_triple_follows_an_alias_merge():
+    """The row named "apt-29", which the merge absorbs into "APT29": the
+    triple Stage 4 resolved it to is moved onto the node that survives."""
+    a1 = stix2.ThreatActor(name="APT29")
+    a2 = stix2.ThreatActor(name="apt-29")
+    mw = stix2.Malware(name="WellMess", is_family=True)
+    ap = stix2.AttackPattern(name="Phishing")
+    objs = [a1, a2, mw, ap, stix2.Relationship(a1, "uses", mw), stix2.Relationship(mw, "uses", ap)]
+
+    stats = complete_graph(objs, policy={"completion": {"alias": True, "reference": False}},
+                           forbidden={(a2.id, "uses", ap.id): REJECTED_BY_ANALYST})
+
+    assert stats.merged_ids == {a2.id: a1.id}
+    assert not _has_edge(objs, a1, "uses", ap)
+    assert [r["source_ref"] for r in stats.refused] == [a1.id]
+
+
+def _uses_chain_result() -> LLMEnrichmentResult:
+    return LLMEnrichmentResult(
+        threat_actors=["APT29"],
+        malware_families=["WellMess"],
+        ttps=[TTPExtracted(technique_name="Phishing", mitre_id="T1566")],
+        relationships=[
+            RelationshipExtracted(source_value="APT29", relationship_type="uses",
+                                  target_value="WellMess", confidence=0.9),
+            RelationshipExtracted(source_value="WellMess", relationship_type="uses",
+                                  target_value="Phishing", confidence=0.9),
+        ],
+    )
+
+
+def test_build_stix_bundle_resolves_a_rejected_row_and_refuses_it_to_completion():
+    """The row is resolved as Stage 4 resolves the rows that ship (case,
+    verb), and the ledger says what was not added and why."""
+    from pipeline.bundle_ledger import MappingLedger
+
+    shipped = MappingLedger()
+    build_stix_bundle([], _uses_chain_result(), "rpt", ledger=shipped)
+    assert any(o.get("origin") == "completion_transitive" for o in shipped.to_dict()["objects"].values())
+    assert "refused" not in shipped.to_dict()
+
+    ledger = MappingLedger()
+    bundle = build_stix_bundle(
+        [], _uses_chain_result(), "rpt", ledger=ledger,
+        refused_relationships=[RefusedRelationship("apt29", " Uses ", "phishing", REJECTED_BY_ANALYST)])
+
+    by_name = {o.get("name"): o.id for o in bundle.objects if o.get("name")}
+    assert not [o for o in bundle.objects if o.get("type") == "relationship"
+                and str(o.get("x_inference_rule", "")).startswith("transitive:")]
+    [refused] = ledger.to_dict()["refused"]
+    assert (refused["source_ref"], refused["relationship_type"], refused["target_ref"]) == (
+        by_name["APT29"], "uses", by_name["Phishing"])
+    assert (refused["rule"], refused["reason"]) == ("transitive:uses+uses", REJECTED_BY_ANALYST)
+
+
+def test_build_stix_bundle_refuses_a_rejected_row_to_reference_grounding():
+    import pipeline.stage4b_graph_completion as s4b
+    if not s4b._attack_pairs():
+        pytest.skip("attack_relationships.json not built")
+    from pipeline.bundle_ledger import MappingLedger
+
+    def _reference_edges(bundle):
+        return [o for o in bundle.objects if o.get("type") == "relationship"
+                and str(o.get("x_inference_rule", "")).startswith("attack-reference:G0016>S0002")]
+
+    llm = LLMEnrichmentResult(threat_actors=["APT29"], malware_families=["Mimikatz"])
+    assert _reference_edges(build_stix_bundle([], llm, "rpt"))
+
+    ledger = MappingLedger()
+    bundle = build_stix_bundle(
+        [], llm, "rpt", ledger=ledger,
+        refused_relationships=[RefusedRelationship("APT29", "uses", "Mimikatz", REJECTED_BY_ANALYST)])
+
+    assert not _reference_edges(bundle)
+    assert [(r["rule"], r["reason"]) for r in ledger.to_dict()["refused"]] == [
+        ("attack-reference:G0016>S0002", REJECTED_BY_ANALYST)]
+
+
+def test_a_refused_observable_row_is_routed_through_its_indicator():
+    """"185.220.101.5 indicates ZetaLoader" ships, when it ships, from the
+    address's Indicator; rejected, it forbids that Indicator's edge, which
+    indicates+variant-of would compose."""
+    from pipeline.bundle_ledger import MappingLedger
+
+    llm = LLMEnrichmentResult(
+        malware_families=["ZetaRAT", "ZetaLoader"],
+        relationships=[
+            RelationshipExtracted(source_value="185.220.101.5", relationship_type="indicates",
+                                  target_value="ZetaRAT", confidence=0.9),
+            RelationshipExtracted(source_value="ZetaRAT", relationship_type="variant-of",
+                                  target_value="ZetaLoader", confidence=0.9),
+        ],
+    )
+    ip = [RawEntity(value="185.220.101.5", entity_type=EntityType.IPV4)]
+
+    def composed(bundle):
+        return [o for o in bundle.objects if o.get("type") == "relationship"
+                and o.get("x_inference_rule") == "transitive:indicates+variant-of"]
+
+    assert composed(build_stix_bundle(ip, llm, "rpt"))
+    ledger = MappingLedger()
+    bundle = build_stix_bundle(
+        ip, llm, "rpt", ledger=ledger,
+        refused_relationships=[RefusedRelationship("185.220.101.5", "indicates", "ZetaLoader",
+                                                   REJECTED_BY_ANALYST)])
+
+    assert not composed(bundle)
+    by_id = {o.id: o for o in bundle.objects}
+    [refused] = ledger.to_dict()["refused"]
+    assert by_id[refused["source_ref"]]["type"] == "indicator"
+    assert by_id[refused["target_ref"]]["name"] == "ZetaLoader"
+
+
+def test_a_rejection_outranks_a_hold_on_the_same_triple():
+    from pipeline.bundle_ledger import MappingLedger
+
+    ledger = MappingLedger()
+    build_stix_bundle([], _uses_chain_result(), "rpt", ledger=ledger, refused_relationships=[
+        RefusedRelationship("APT29", "uses", "Phishing", HELD_FOR_REVIEW),
+        RefusedRelationship("APT29", "uses", "Phishing", REJECTED_BY_ANALYST),
+        RefusedRelationship("APT29", "uses", "Phishing", HELD_FOR_REVIEW),
+    ])
+
+    assert [r["reason"] for r in ledger.to_dict()["refused"]] == [REJECTED_BY_ANALYST]
+
+
+def test_a_refused_row_that_resolves_to_nothing_forbids_nothing():
+    """A row whose endpoint is not in the bundle (its entity was rejected too)
+    names no triple; completion runs as without it."""
+    from pipeline.bundle_ledger import MappingLedger
+
+    ledger = MappingLedger()
+    bundle = build_stix_bundle(
+        [], _uses_chain_result(), "rpt", ledger=ledger,
+        refused_relationships=[RefusedRelationship("APT29", "uses", "NoSuchTool", REJECTED_BY_ANALYST)])
+
+    assert any(str(o.get("x_inference_rule", "")).startswith("transitive:")
+               for o in bundle.objects if o.get("type") == "relationship")
+    assert "refused" not in ledger.to_dict()

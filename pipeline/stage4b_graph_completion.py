@@ -61,6 +61,12 @@ Controlled by an optional ``completion`` block on the relationship policy::
 A pinned rule ("mode":"pin") always wins: an inferred verb is overridden by the
 analyst's pinned verb for that type-pair, so the tool never contradicts an
 explicit human decision.
+
+A rejected relationship stays rejected (ADR-0013, amendment 2026-10-26): the
+triples of the rows that do not ship — rejected, or held for review and not yet
+decided (ADR-0082) — reach ``complete_graph`` as ``forbidden``, and no engine
+adds one back.  Each refusal is kept in ``CompletionStats.refused`` for the
+mapping ledger.
 """
 from __future__ import annotations
 
@@ -140,6 +146,29 @@ _TRANSITIVE_RULES: dict[tuple[str, str], str] = {
 }
 
 
+#: Why a relationship row does not ship, and graph completion may not add its
+#: triple back: an analyst rejected it, or Stage 3d held it for review
+#: (ADR-0082) and nobody has decided it yet.
+REJECTED_BY_ANALYST = "rejected_by_analyst"
+HELD_FOR_REVIEW = "held_for_review"
+
+# Verbs that name no direction (STIX 2.1 §3.7): ruling out "A related-to B"
+# rules out "B related-to A" too, which the long-distance inferer may answer.
+_UNDIRECTED_VERBS = frozenset({"related-to", "duplicate-of"})
+
+
+@dataclass(frozen=True)
+class RefusedRelationship:
+    """A relationship row that does not ship, by its values as the job store
+    holds them.  Stage 4 resolves it to STIX ids as it resolves a row that
+    ships, and hands the triple to ``complete_graph`` as forbidden."""
+
+    source_value: str
+    relationship_type: str
+    target_value: str
+    reason: str   # REJECTED_BY_ANALYST or HELD_FOR_REVIEW
+
+
 @dataclass
 class InferredEdge:
     """Return type for a long-distance LLM inferer (step 3)."""
@@ -167,6 +196,9 @@ class CompletionStats:
     merged_names: dict[str, str] = field(default_factory=dict)   # absorbed id -> its name
     removed_relationships: list[dict] = field(default_factory=list)
     remapped_relationships: dict[str, tuple[str, str]] = field(default_factory=dict)
+    # Edges an engine would have added and did not, the triple being forbidden:
+    # one entry per triple and rule, for the mapping ledger.
+    refused: list[dict] = field(default_factory=list)
 
     @property
     def total_added(self) -> int:
@@ -528,7 +560,8 @@ def _attack_id_for(obj) -> Optional[str]:
 
 
 def _ground_reference(
-    stix_objects: list, pol_index: dict, cfg: dict, stats: CompletionStats
+    stix_objects: list, pol_index: dict, cfg: dict, stats: CompletionStats,
+    forbidden: Optional[dict[tuple[str, str, str], str]] = None,
 ) -> None:
     pairs = _attack_pairs()
     if not pairs:
@@ -563,13 +596,15 @@ def _ground_reference(
             key = (a.id, verb, b.id)
             if key in existing:
                 continue
+            rule = f"attack-reference:{aid_a}>{aid_b}"
+            if _refuse(key, rule, [], forbidden or {}, stats):
+                continue
             if stats.total_added >= cfg["max_new_edges"]:
                 stats.capped = True
                 return
             stix_objects.append(
                 _make_inferred_rel(
-                    a, verb, b, 0.85,
-                    f"attack-reference:{aid_a}>{aid_b}", [],
+                    a, verb, b, 0.85, rule, [],
                     label=EXTERNAL_REFERENCE,
                 )
             )
@@ -580,6 +615,24 @@ def _ground_reference(
 # ── Step 2 — deterministic transitive inference ───────────────────────────────
 def _existing_edges(stix_objects: list) -> set[tuple[str, str, str]]:
     return {_rel_triple(o) for o in stix_objects if _is_rel(o)}
+
+
+def _refuse(key: tuple[str, str, str], rule: str, premises: list[str],
+            forbidden: dict[tuple[str, str, str], str], stats: CompletionStats) -> bool:
+    """True when `key` is a triple an analyst ruled out, which no engine adds.
+    The refusal is recorded once per triple and rule; it costs no budget."""
+    reason = forbidden.get(key)
+    if reason is None:
+        return False
+    source_ref, verb, target_ref = key
+    if not any(r["source_ref"] == source_ref and r["relationship_type"] == verb
+               and r["target_ref"] == target_ref and r["rule"] == rule for r in stats.refused):
+        entry: dict[str, Any] = {"source_ref": source_ref, "relationship_type": verb,
+                                 "target_ref": target_ref, "rule": rule, "reason": reason}
+        if premises:
+            entry["inferred_from"] = list(premises)
+        stats.refused.append(entry)
+    return True
 
 
 def _make_inferred_rel(src, verb, tgt, confidence, rule_label, premises,
@@ -600,7 +653,8 @@ def _make_inferred_rel(src, verb, tgt, confidence, rule_label, premises,
 
 
 def _infer_transitive(
-    stix_objects: list, pol_index: dict, cfg: dict, stats: CompletionStats
+    stix_objects: list, pol_index: dict, cfg: dict, stats: CompletionStats,
+    forbidden: Optional[dict[tuple[str, str, str], str]] = None,
 ) -> None:
     id_to_obj = {o.id: o for o in stix_objects if hasattr(o, "id") and not _is_rel(o)}
     rels = [o for o in stix_objects if _is_rel(o)]
@@ -638,6 +692,9 @@ def _infer_transitive(
                 key = (a_id, v_ac, c_id)
                 if key in existing:
                     continue
+                rule = f"transitive:{v_ab}+{v_bc}"
+                if _refuse(key, rule, [r_ab.id, r_bc.id], forbidden or {}, stats):
+                    continue
                 if stats.total_added >= cfg["max_new_edges"]:
                     stats.capped = True
                     stix_objects.extend(new_objs)
@@ -647,8 +704,7 @@ def _infer_transitive(
                 ) / 100.0 * 0.9
                 new_objs.append(
                     _make_inferred_rel(
-                        a, v_ac, c, conf,
-                        f"transitive:{v_ab}+{v_bc}",
+                        a, v_ac, c, conf, rule,
                         [r_ab.id, r_bc.id],
                     )
                 )
@@ -693,6 +749,7 @@ def _infer_long_distance(
     pol_index: dict,
     cfg: dict,
     stats: CompletionStats,
+    forbidden: Optional[dict[tuple[str, str, str], str]] = None,
 ) -> None:
     """CTINexus Phase 3: pick a central node per disconnected sub-graph and ask
     ``infer`` for the relation to the report's topic node."""
@@ -737,6 +794,8 @@ def _infer_long_distance(
         key = (s.id, verb, t.id)
         if key in existing:
             continue
+        if _refuse(key, "long-distance", [], forbidden or {}, stats):
+            continue
         stix_objects.append(
             _make_inferred_rel(
                 s, verb, t, edge.confidence, "long-distance", [],
@@ -756,33 +815,53 @@ def complete_graph(
     long_distance_infer: Optional[
         Callable[[object, object, str], Optional[InferredEdge]]
     ] = None,
+    forbidden: Optional[dict[tuple[str, str, str], str]] = None,
 ) -> CompletionStats:
     """Enrich ``stix_objects`` in place with alias merges + inferred edges.
 
     Runs before the Report SDO is built so new edges are wrapped in object_refs
     and provenance-stamped like any other object.  Returns a CompletionStats.
+
+    ``forbidden`` maps (source_ref, relationship_type, target_ref) to why it
+    does not ship (REJECTED_BY_ANALYST, HELD_FOR_REVIEW): no engine adds such a
+    triple, nor the reverse of one whose verb names no direction, and each
+    refusal lands in ``stats.refused``.
     """
     stats = CompletionStats()
     cfg = _completion_cfg(policy)
     pol_index = _pol_index(policy)
+    forbidden = dict(forbidden or {})
 
     if cfg["alias"]:
         try:
             _merge_aliases(stix_objects, cfg, stats)
         except Exception as exc:   # completion must never break the bundle
             stats.notes.append(f"alias merge failed: {exc}")
+        # A forbidden triple names the objects as Stage 4 built them: follow
+        # each absorbed id to the node it was merged into.
+        if stats.merged_ids:
+            remap = stats.merged_ids
+            moved: dict[tuple[str, str, str], str] = {}
+            for (s, v, t), why in forbidden.items():
+                key = (remap.get(s, s), v, remap.get(t, t))
+                if moved.get(key) != REJECTED_BY_ANALYST:
+                    moved[key] = why
+            forbidden = moved
+    for (s, v, t), why in list(forbidden.items()):
+        if v in _UNDIRECTED_VERBS and forbidden.get((t, v, s)) != REJECTED_BY_ANALYST:
+            forbidden[(t, v, s)] = why
 
     # Reference grounding runs BEFORE transitive inference so curated edges can
     # also serve as premises for compositions.
     if cfg["reference"]:
         try:
-            _ground_reference(stix_objects, pol_index, cfg, stats)
+            _ground_reference(stix_objects, pol_index, cfg, stats, forbidden)
         except Exception as exc:
             stats.notes.append(f"reference grounding failed: {exc}")
 
     if cfg["transitive"]:
         try:
-            _infer_transitive(stix_objects, pol_index, cfg, stats)
+            _infer_transitive(stix_objects, pol_index, cfg, stats, forbidden)
         except Exception as exc:
             stats.notes.append(f"transitive inference failed: {exc}")
 
@@ -790,16 +869,16 @@ def complete_graph(
         try:
             _infer_long_distance(
                 stix_objects, report_text, long_distance_infer,
-                pol_index, cfg, stats,
+                pol_index, cfg, stats, forbidden,
             )
         except Exception as exc:
             stats.notes.append(f"long-distance inference failed: {exc}")
 
     logger.info(
         "[Stage 4b] graph completion: merged=%d, reference=+%d, transitive=+%d, "
-        "long_distance=+%d, skipped_not_suggested=%d%s",
+        "long_distance=+%d, skipped_not_suggested=%d, refused=%d%s",
         stats.aliases_merged, stats.reference_added, stats.transitive_added,
-        stats.long_distance_added, stats.skipped_not_suggested,
+        stats.long_distance_added, stats.skipped_not_suggested, len(stats.refused),
         " (capped)" if stats.capped else "",
     )
     return stats

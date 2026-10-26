@@ -25,7 +25,13 @@ from pipeline.detection.yara_check import DOES_NOT_COMPILE, prepare_embedded_rul
 from pipeline.network_traffic import parse_network_traffic
 from pipeline.regex_safety import PY_WHITESPACE, compile_pattern
 from pipeline.stage3_llm import LLMEnrichmentResult
-from pipeline.stage4b_graph_completion import CompletionStats, complete_graph, stated_by_the_report
+from pipeline.stage4b_graph_completion import (
+    REJECTED_BY_ANALYST,
+    CompletionStats,
+    RefusedRelationship,
+    complete_graph,
+    stated_by_the_report,
+)
 from pipeline.stix_access import field as _field
 from pipeline.stix_rel_spec import rel_is_allowed, rel_is_listed
 from pipeline.temporal import export_mode, export_plan, merge_times, temporal_identity
@@ -415,6 +421,20 @@ _EV_OBSERVED = {"x_evidence_label": "observed"}
 _EV_REPORTED = {"x_evidence_label": "reported"}
 
 
+@dataclass
+class _RowEdge:
+    """A relationship row as Stage 4 resolves it (`_resolve_row` in
+    build_stix_bundle): the edge it ships as, or `dropped` with the facts the
+    ledger records beside that reason."""
+
+    source: Any = None
+    rel_type: str = ""
+    target: Any = None
+    changes: list[dict] = field(default_factory=list)
+    dropped: str | None = None
+    info: dict = field(default_factory=dict)
+
+
 def _is_spurious_observable_ttp_edge(source, target) -> bool:
     """True for an observable-SCO ↔ attack-pattern edge (a type error the LLM
     sometimes emits).  STIX permits it as a custom relationship; this project
@@ -546,6 +566,7 @@ def build_stix_bundle(
     ledger: MappingLedger | None = None,
     document_anchor=None,
     baseline=None,
+    refused_relationships: list[RefusedRelationship] | None = None,
 ) -> stix2.Bundle:
     """
     Converts all extracted entities to STIX 2.1 objects and returns a Bundle.
@@ -617,6 +638,12 @@ def build_stix_bundle(
       baseline, when it has one, is re-issued as an upsert in place of a
       CTIParsor Report (its `verbatim` and `trusted` are filled).  Without it
       the bundle is the same as before.
+
+    refused_relationships — the relationship rows that do not ship: rejected
+      by an analyst, or held for review and not yet decided (ADR-0082).  Each
+      is resolved as a shipping row is, and Stage 4b adds none of their
+      triples back (ADR-0013, amendment 2026-10-26); the ledger's `refused`
+      lists what it did not add.
 
     Relationship dates (ADR-0063 §7): each SRO carries every assertion in
     `x_temporal_assertions`; `start_time` / `stop_time` are set only where the
@@ -1315,24 +1342,24 @@ def build_stix_bundle(
         fits = [(s, t) for s, t in fits if s is not t] or fits[:1]
         return fits[0] if len(fits) == 1 else (None, None)
 
-    for rel in llm_result.relationships:
+    def _resolve_row(rel) -> _RowEdge:
+        """Where a relationship row lands: its endpoints and verb once resolved,
+        routed and checked, each rewrite in `changes`; or, when it cannot ship,
+        why (`dropped`) with the ledger facts that go with it.  The rows that
+        ship and the ones graph completion may not add back (ADR-0013,
+        amendment 2026-10-26) go through it alike, so both name one triple."""
         src_cands = name_to_stix.candidates(rel.source_value.lower())
         tgt_cands = name_to_stix.candidates(rel.target_value.lower())
 
         if not src_cands or not tgt_cands:
-            led.relationship(
-                rel, "dropped",
-                reason="unresolved_both" if not src_cands and not tgt_cands
-                else "unresolved_source" if not src_cands else "unresolved_target",
-            )
-            continue
+            return _RowEdge(dropped="unresolved_both" if not src_cands and not tgt_cands
+                            else "unresolved_source" if not src_cands else "unresolved_target")
 
         source, target = _pick_by_verb(src_cands, rel.relationship_type, tgt_cands)
         if source is None:
-            led.relationship(rel, "dropped", reason="ambiguous_name",
-                             source_candidates=sorted(o.id for o in src_cands.values()),
-                             target_candidates=sorted(o.id for o in tgt_cands.values()))
-            continue
+            return _RowEdge(dropped="ambiguous_name",
+                            info={"source_candidates": sorted(o.id for o in src_cands.values()),
+                                  "target_candidates": sorted(o.id for o in tgt_cands.values())})
 
         # An edge from an object to itself says nothing.  It is not the LLM
         # inventing one: `name_to_stix` resolves aliases, so two distinct
@@ -1343,8 +1370,7 @@ def build_stix_bundle(
         # repeat.  `_pin_edge_key` and `_rewrite_refs` already refuse self-pairs;
         # this is the path that did not.
         if source.id == target.id:
-            led.relationship(rel, "dropped", reason="self_loop", stix_ref=source.id)
-            continue
+            return _RowEdge(dropped="self_loop", info={"stix_ref": source.id})
 
         changes: list[dict] = []
 
@@ -1358,9 +1384,8 @@ def build_stix_bundle(
         # shipped.  Written the other way round, the row is turned around.
         if _is_spurious_observable_ttp_edge(source, target):
             if rel.relationship_type.strip().lower() != "indicates":
-                led.relationship(rel, "dropped", reason="observable_to_attack_pattern",
-                                 source_ref=source.id, target_ref=target.id)
-                continue
+                return _RowEdge(dropped="observable_to_attack_pattern",
+                                info={"source_ref": source.id, "target_ref": target.id})
             if getattr(source, "type", "") == "attack-pattern":
                 changes.append({"kind": "direction", "from": source.id, "to": target.id})
                 source, target = target, source
@@ -1385,12 +1410,10 @@ def build_stix_bundle(
         )
         if source is None or target is None:
             benign_end = orig_source.id in benign_sco_ids or orig_target.id in benign_sco_ids
-            led.relationship(rel, "dropped", reason="benign_observable" if benign_end else "no_indicator",
-                             source_ref=orig_source.id, target_ref=orig_target.id)
-            continue
+            return _RowEdge(dropped="benign_observable" if benign_end else "no_indicator",
+                            info={"source_ref": orig_source.id, "target_ref": orig_target.id})
         if source.id == target.id:
-            led.relationship(rel, "dropped", reason="self_loop", stix_ref=source.id)
-            continue
+            return _RowEdge(dropped="self_loop", info={"stix_ref": source.id})
         if source.id != orig_source.id:
             changes.append({"kind": "reroute", "end": "source",
                             "from": orig_source.id, "to": source.id})
@@ -1414,6 +1437,15 @@ def build_stix_bundle(
                             "reason": "not_suggested"})
             rel_type = "related-to"
 
+        return _RowEdge(source, rel_type, target, changes)
+
+    for rel in llm_result.relationships:
+        row_edge = _resolve_row(rel)
+        if row_edge.dropped is not None:
+            led.relationship(rel, "dropped", reason=row_edge.dropped, **row_edge.info)
+            continue
+        source, rel_type, target = row_edge.source, row_edge.rel_type, row_edge.target
+        changes = row_edge.changes
         rel_key = (source.id, rel_type, target.id)
 
         try:
@@ -1546,11 +1578,22 @@ def build_stix_bundle(
     # B 8.4.2, 8.4.3).  Append-only + spec-guarded: see stage4b_graph_completion
     # and ADR-0013.  Governed by the policy "completion" block; pinned rules win.
     if graph_completion:
+        # A rejected relationship stays rejected, and a held one waits for its
+        # analyst (ADR-0013, amendment 2026-10-26): each row that does not ship
+        # is resolved as if it did, and no engine adds its triple back.
+        _forbidden: dict[tuple[str, str, str], str] = {}
+        for _refused in refused_relationships or ():
+            _edge = _resolve_row(_refused)
+            if _edge.dropped is None:
+                _key = (_edge.source.id, _edge.rel_type, _edge.target.id)
+                if _forbidden.get(_key) != REJECTED_BY_ANALYST:
+                    _forbidden[_key] = _refused.reason
         _completion_stats = complete_graph(
             stix_objects,
             policy=relationship_policy,
             report_text=report_text,
             long_distance_infer=long_distance_infer,
+            forbidden=_forbidden,
         )
     else:
         # Turned off for this run (an ablation, ADR-0059): nothing added.
@@ -1562,6 +1605,7 @@ def build_stix_bundle(
                           _completion_stats.removed_relationships,
                           _completion_stats.remapped_relationships,
                           _completion_stats.merged_names)
+    led.refused_inferences(_completion_stats.refused)
 
     # --- Baseline merge (ADR-0090, lot 4) — only with a baseline ---
     # After 4b, so graph completion only ever saw CTIParsor's own objects.

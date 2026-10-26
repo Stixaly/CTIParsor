@@ -452,3 +452,20 @@ def test_a_baseline_object_keeps_the_annotations_of_the_object_it_stands_for():
     led.baseline_object(obj, status="matched")
     assert led.objects[obj.id] == {"origin": "baseline", "status": "matched",
                                    "no_indicator": "benign", "benign": "vendor"}
+
+
+def test_a_refused_edge_follows_the_baseline_object_that_replaced_its_end():
+    """ADR-0013, amendment 2026-10-26: `refused` names the objects Stage 4b saw;
+    after the baseline merge (ADR-0090) it names the ones that ship."""
+    from types import SimpleNamespace
+
+    led = MappingLedger()
+    led.refused_inferences([{"source_ref": "intrusion-set--a", "relationship_type": "uses",
+                             "target_ref": "malware--c", "rule": "transitive:uses+uses",
+                             "reason": "rejected_by_analyst", "inferred_from": None}])
+    led.apply_baseline_merge(SimpleNamespace(
+        remap={"intrusion-set--a": "intrusion-set--baseline"}, removed_relationships=[],
+        remapped_relationships={}, dropped={}))
+    assert led.to_dict()["refused"] == [{"source_ref": "intrusion-set--baseline", "relationship_type": "uses",
+                                         "target_ref": "malware--c", "rule": "transitive:uses+uses",
+                                         "reason": "rejected_by_analyst"}]
