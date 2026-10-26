@@ -94,7 +94,9 @@ def git_command(corpus: dict) -> list[str] | None:
     remote = corpus.get("git")
     if not remote:
         return None
-    path = Path(corpus.get("path", ""))
+    path = Path(str(corpus.get("path") or ""))
+    if str(path) in ("", "."):
+        raise ValueError("no path configured")
     if path.exists():
         return ["git", *GIT_HARDENING, "-C", str(path), "pull", "--ff-only"]
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -276,7 +278,12 @@ def sync_corpus(corpus: dict, *, timeout: int = 900) -> tuple[bool, str]:
     """Fetch one corpus (git clone/pull, or tarball download), capturing output."""
     if corpus.get("tarball"):
         return fetch_tarball(corpus, timeout=timeout)
-    cmd = git_command(corpus)
+    try:
+        cmd = git_command(corpus)
+    except ValueError:
+        # The one ValueError git_command raises; a fixed text, as fetch_tarball gives,
+        # never the exception's (it reaches the browser: CodeQL py/stack-trace-exposure).
+        return False, "no path configured"
     if cmd is None:
         return False, "no git remote or tarball URL — this corpus's path is managed manually"
     remote = str(corpus.get("git") or "")

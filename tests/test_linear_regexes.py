@@ -50,6 +50,12 @@ def test_the_yara_rule_header_is_linear_under_stdlib_re(text):
     _fast(lambda s: list(rx.finditer(s)), text)
 
 
+def test_split_rules_is_linear_on_headers_that_never_close():
+    """Stage 4 splits a whole report: 4,000 headers with no brace took 22 s."""
+    text = "".join(f'rule r{i} {{\n    strings:\n        $a = "x{i}"\n' for i in range(4000))
+    _fast(yara_atoms.split_rules, text)
+
+
 def test_refang_is_linear_under_stdlib_re():
     rx = _stdlib(s2._DEFANG_PATTERN)
     _fast(lambda s: rx.sub(s2._defang_repl, s), " " * N + "x")

@@ -839,6 +839,233 @@ gets a dated amendment.
 
 ### Fixed
 
+#### A code audit's fixes: a web-capture range, a DOCX zip bomb, doubled rows after a requeue, lost detection rules, 2026-10-26
+
+A code audit read the repository by zone (worker and API, Stage 1 to 4, the
+ADR-0090 enrichment, the detection parsers, the frontend). Each finding was
+read again in the code before it was fixed, and each fix has a test. The audit's
+other findings are not fixed here.
+
+**Security**
+
+- **Web capture, carrier-grade NAT**: `_ip_is_public` (`pipeline/web_capture.py`)
+  took 100.64.0.0/10 (RFC 6598) for a public range. `ipaddress` counts it as
+  neither private nor global, and Alibaba Cloud's metadata endpoint,
+  100.100.100.200, sits in it. The compose deployment's Squid filter already
+  refused the range (`docker/squid/squid.conf`), so a deployment without that
+  proxy was the exposed one. The range is refused now, and
+  `http://100.64.0.1/` and `http://100.100.100.200/` are in the test.
+- **DOCX zip bomb**: `_read_docx` and the creation-date reader opened any
+  `.docx` and inflated it whole. Both now add up the members' declared
+  uncompressed sizes first, and refuse the file with a `ValueError` above
+  512 MiB (`_MAX_DOCX_UNCOMPRESSED_BYTES`).
+
+**Worker and API**
+
+- **A requeued job doubled its rows**: a job put back in the queue after
+  Stage 3 (lease expired, worker drained) runs again from Stage 1, and
+  `_save_entities` inserted its entities and relationships a second time under
+  new ids. It now deletes the job's rows and inserts the new ones in one
+  transaction. The write used to run in autocommit, behind a `commit()` that
+  did nothing, so a failure could leave it half done.
+- **`PATCH /api/jobs/{id}` took `processing` and `uploaded`**: a job set to
+  `processing` with an old heartbeat was requeued, and ran the whole pipeline
+  over a report under review. Only `for_review`, `reviewing`, `completed` and
+  `failed` are accepted now; any other value is a 400. The client only sends
+  `reviewing`.
+- **The worker's owner**: `_run_pipeline` read the job's owner from the
+  database instead of using the one captured when the subprocess was spawned.
+  It is passed as an argument.
+- **A job timeout in Stage 3 cancels the chunks still queued**: the timeout was
+  raised inside a `with ThreadPoolExecutor` block, whose exit waited for every
+  queued chunk to run. The queued chunks are cancelled now; the calls already
+  running still finish (at most `llm_parallelism`).
+- **The crash message** told the operator to reduce `WORKER_MAX_MEMORY_MB`,
+  which nothing reads. It says to lower `WORKER_MAX_CONCURRENT` or raise the
+  container's memory limit.
+- **A full queue left the file behind**: the 503 left the uploaded file on
+  disk. `start_job` removes it; for a URL capture, the PDF archive and its
+  metadata go too. The job row stays, `failed`, as before.
+- **Pasted text**: `POST /api/ingest/text` answered 500 and left an empty file
+  for a text with a lone surrogate, and failed the job at Stage 1 for a NUL
+  character. Both are a 400 before anything is written.
+- **Unknown ids**: `POST /api/jobs/{id}/entities/accept-pending` on an unknown
+  job and `DELETE /api/settings/corpora/{name}` on an unknown corpus answered
+  200. Both are a 404.
+- **Relationship policy**: a list or an object as a rule's `src`, `tgt` or
+  `verb` raised a `TypeError` (500) in `value not in frozenset`. It is a 400
+  that names the rule.
+- **Malformed `Origin`**: `Origin: http://[` made `urlsplit` raise inside the
+  cross-site guard, a 500. It is a 403.
+- **Unknown `/api` path**: the SPA fallback answered `index.html` with a 200 for
+  `/api/unknown`. A path under `api/` stays a JSON 404.
+- **A baseline saved with a byte-order mark**: the stored text keeps the BOM
+  (its sha256 matches the file), and `json.loads` refused it when the enrich job
+  loaded the baseline, so the job failed. The BOM is dropped when the text is
+  read; the stored text and its hash are unchanged.
+
+**Stage 1 and 2**
+
+- **OCR**: one page that Tesseract failed on dropped the whole scan, though
+  `_ocr_page` already caught such a failure. A failing page is logged and the
+  others are kept.
+- **Figures**: an answer with a null `content` raised an `AttributeError`. It
+  is an empty answer now, and one cut at `max_tokens` is reported as such
+  (`finish_reason=length`); the figure reads as `unread` with that error.
+- **Figure edges** were not refanged with the figure's text (Stage 2 caught
+  them later). `map_verbatim` applies the refang to each edge's source,
+  destination and label.
+- **CVE enrichment (Stage 2f)**: a CIRCL timeout, connection error, 5xx or
+  unreadable reply was saved in `cve_cache` as an absence, so the CVE was never
+  asked again. Only a definite answer is saved (CIRCL's 404, or a reply that
+  is not a JSON object). On an outage the report's lookups stop, a warning
+  counts the CVEs left, and the next run asks again.
+- **Registry keys**: `...\Run. It then...` was read as one key. The key ends at
+  a full stop and a blank in its last segment; a vendor name before a backslash
+  (`Acme Corp. Ltd\Run`) is kept.
+- **Unix paths**: `/tmp/x.sh.` and `/usr/bin/updater,` kept the punctuation
+  that follows them. A path that starts with `/` loses trailing `.,:;!?`.
+- **TTP candidates (Stage 2c)**: with between 201 and 399 candidate sentences
+  the cap's stride was 1, so the first 200 were kept and the end of the
+  document was never seen. The cap takes `TTP_MAX_CANDIDATES` (200) sentences
+  evenly spaced across the list.
+- **GLiNER chunks (Stage 2e)**: a long unbroken token pulled each cut back to
+  an early space, one character further on every time (about 70 chunks of a
+  few characters on the test text). A cut is not walked back into the first
+  quarter of the chunk (400 characters at the default `GLINER_CHUNK_CHARS` of
+  1,600), as for CyNER.
+
+**Stage 3**
+
+- **A malformed value lost the whole chunk**: one TTP with `evidence_label`
+  `"Observed"` or a null `description` failed validation of the answer, and
+  every entity and relationship of the chunk went with it. A TTP's label is
+  lower-cased and anything outside observed, reported, assessed, inferred and
+  gap becomes `reported`, as for relationships. When validation still fails, the
+  list items it points at (or a top-level field of the wrong type, which takes
+  its default) are dropped and the answer is validated again, in at most five
+  passes; a warning counts what was dropped.
+- **Prose before the answer**: a `{}` written in the prose before the real
+  object made the result empty. An empty object is skipped.
+- **Verification answers (Stage 3d and 3f)**: a `[]` or `[1]` in the prose
+  before the real array made the whole call unparseable, so every claim went to
+  review. `parse_numbered_claims` goes on to the next array when one holds no
+  numbered claim.
+- **Dates**: a UTC offset of 24 hours or more (`+25:00`) raised a `ValueError`
+  that stopped Stage 3, and a count of days or weeks past the calendar
+  (`1000000 days ago`) an `OverflowError`. Both are `unresolved`, with the
+  reasons `invalid_date` and `implausible_year`. A span of months or years past
+  the calendar (`last 2000 years`) is `unresolved` as well. An analyst entry
+  with such an offset is refused, and page metadata with one is no publication
+  candidate.
+- **Stage 3f proposals**: an ATT&CK-shaped id the index does not hold (`T9999`)
+  became a candidate. It must be in the loaded index.
+- **Stage 3f, a second copy of an id**: a copy with no valid quote put the id in
+  review, and a later copy with a valid one was ignored. The valid copy replaces
+  the review entry.
+
+**Stage 4 and the ADR-0090 enrichment**
+
+- **Stage 4c quotes**: any non-empty `quote` was accepted, one the model wrote
+  itself included. It must be found in the report text (`stated_in`), the bar
+  Stage 3d applies. `related` must be the JSON `true`: the string `"false"`
+  passed.
+- **A campaign named like a malware**: a `campaign_name` equal to a malware or
+  an actor name built no Campaign, and the ledger recorded a merge into the
+  malware (`same_value`). The Campaign is built and found by its own id, and a
+  raw Campaign entity of that name is still the one Campaign.
+- **Indicators of IoC associations** were built on the LLM's spelling of the
+  value: the pattern differed from its observable, and the Indicator's id from
+  the one `verify_ioc_coverage` computes. They use the value of the extracted
+  entity.
+- **Dropped associations left no trace**: an association abandoned because its
+  observable or its malware is not in the bundle, or because no pattern could
+  be built, has a ledger entry now: `dropped`, with the reason
+  `ioc_not_in_bundle`, `malware_not_in_bundle` or `no_pattern`, which the
+  Graph page explains.
+- **IoC coverage**: `verify_ioc_coverage` counted a URL left out on purpose
+  (`not_a_uri`, the entry below) as a missing observable, and a run logged
+  "IoC coverage gaps". The URL is listed under a new `skipped` key, and counts
+  neither in the total nor in the gaps.
+- **Confidence**: `int(confidence * 100)` truncated, so 0.57 shipped as 56. It
+  is rounded: 57.
+- **A blank `mitre_id`**: `"  "` gave `x_mitre_id` `""`, and two different
+  techniques shared one attack-pattern id. The id is built on the stripped value
+  (on the name when it is blank), and a blank id gets no external reference.
+- **A baseline object with a CTIParsor object's id**: the ledger kept Stage 4's
+  origin for it, so the baseline panel listed it under "Added by CTIParsor" and
+  the entity rows stayed `emitted`. The ledger records the origin `baseline`,
+  keeping the object's annotations, and the rows that produced the object are
+  `merged` with the reason `baseline_match`.
+- **An invalid copy of a valid id**: the intake put the id in `excluded_ids`
+  though a valid copy was kept. It does so only when no valid copy holds the id,
+  and `newest_versions` skips a copy the intake refuses instead of choosing it
+  for its later `modified`.
+
+**Detection**
+
+- **YARA regex literals**: a `//` or `/*` inside a regex (`= /…\/…/`) was read
+  as a comment, which lost six rules in `corpora/`, among them
+  `SUSP_JDNIExploit_Indicators_Dec21` and `RCS_Scout`. A regex opened by `/`
+  after `=` is copied as it is, and a comment beside it is still blanked.
+- **YARA tags on the next line**: `rule X :` with its tags on the lines that
+  follow (allowed by YARA; `MALW_TrickBot.yar`) did not match the rule header,
+  and the rule was ignored. Tags may wrap.
+- **`private global rule`** was read as not private, the repeated prefix group
+  keeping only its last word. The prefix is read whole.
+- **`split_rules` was quadratic** on a text with many headers that never close
+  (a report's text in Stage 4): each header searched for its closing brace to
+  the end of the text, on a copy of it. The search stops at the next header.
+- **Coverage facets**: `rule_facets_for_job` left out the rules reached by
+  evidence, which `rule_bodies_for_job` (the export) includes, so the facets
+  counted fewer rules than the packages. Both add them.
+- **Suricata hex segments**: `|2e|` in a `content` became a space (`/gate.php`
+  read `/gate php`) and DNS rules lost their domain. A segment of letters, digits,
+  `.`, `-` and `_` is decoded; any other stays one space, as before, so
+  `seed.nkn.org|3a|` keeps its domain. A leading `../` that decoding produces
+  still yields the path's last segment.
+- **Suricata ports**: `isdigit()` accepts `²`, `int()` then raised, and one such
+  rule stopped the corpus. It is `isdecimal()`, and a rule that fails to convert
+  is logged and skipped.
+- **Sigma**: a `logsource` that is not a mapping, or a YAML date in a detection
+  (not JSON-serialisable), raised and stopped the corpus. The first reads as
+  empty, the dedup key serialises with `default=str`, and a document that fails
+  is logged and skipped.
+- **Sigma dedup keys** folded the case of every value, so `Foo.*bar` and
+  `foo.*bar` under `|re` or `|cased` were one rule. They keep their case; `|re|i`
+  still folds it.
+- **A corpus with no `path`** ran `git -C . pull` and walked the working
+  directory. `rebuild_store`, `iter_rules`, `sync_corpus` and
+  `scripts/sync_corpora.py` skip it.
+
+**Frontend**
+
+- **Review shortcuts** ignored Ctrl, Cmd and Alt: Ctrl+C opened the Coverage
+  page and Ctrl+F finalized the report. A key pressed with one of them held is
+  left alone.
+- **Leaving Review** dropped a pending auto-finalize, so the last edits were
+  missing from the bundle. A pending rebuild now runs when the page unmounts, as
+  `useDebouncedFinalize` does. The timer is cleared once it has fired or a
+  manual finalize has run, so leaving after those rebuilds nothing.
+- **A hash value that is not hexadecimal**: `buildRanges` built a `RegExp` from
+  it, and a character such as `(` threw a `SyntaxError` that took the page
+  down. Each character is escaped.
+- **Group accept (✓ N)** sent the held rows (ADR-0082), which the server refuses
+  with a 409, and left the local state wrong. It skips them. The count and the
+  tooltip count the rows it accepts, and the button is hidden at zero.
+
+**Checks**: the full suite 4121 passed, 0 failed, 9 skipped; ruff clean; mypy,
+141 files; the parser tests on Python 3.12 with re2, 230 passed; the frontend
+289 passed, then two Marginalia tests were added (11 of 11 in that file pass).
+**Docs**: `docs/api.md`, `docs/web-ui.md`, `docs/database-schema.md`,
+`docs/configuration.md` and `docs/pipeline.md` follow the changed statuses,
+keys, cache rule and Stage 4c quote bar.
+
+**To do after this change**: rebuild the detection index
+(`scripts/build_detection_index.py`) so that the corrected Suricata atoms and
+Sigma dedup keys enter it. The `BUNDLE_AFFECTING` entry follows in a separate
+commit (scope `extraction`).
+
 #### A URL that is not a valid URI no longer makes the bundle invalid, 2026-10-25
 
 Stage 4 built a `url` observable, and its Indicator, from any URL in the

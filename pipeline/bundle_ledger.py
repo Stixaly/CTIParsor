@@ -211,6 +211,24 @@ class MappingLedger:
         for bid, reason in result.dropped.items():
             self.left_out(bid, "baseline", reason)
 
+    def baseline_object(self, obj: Any, status: str) -> None:
+        """A baseline object that ships as received (ADR-0090).  It replaces the
+        origin Stage 4 gave the CTIParsor object of its id, which it stands for:
+        the rows that produced that object are merged onto it."""
+        oid = getattr(obj, "id", None)
+        if not oid:
+            return
+        # The annotations stay (an observable with no Indicator, and why); only the origin changes.
+        self.objects[oid] = {**self.objects.get(oid, {}), "origin": "baseline", "status": status}
+        for e in self.entities:
+            if e.get("stix_id") == oid:
+                e["outcome"] = "merged"
+                e["reason"] = "baseline_match"
+        for r in self.relationships:
+            if r.get("stix_id") == oid:
+                r["outcome"] = "merged"
+                r["reason"] = "baseline_match"
+
     # ── finish ───────────────────────────────────────────────────────────────
     def outside_report(self, obj: Any) -> None:
         """An SRO that ships in the bundle but not in the Report's object_refs:

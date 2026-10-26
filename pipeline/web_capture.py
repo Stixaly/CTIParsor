@@ -96,6 +96,10 @@ _BLOCKED_LITERAL_HOSTS = frozenset({
     "fd00:ec2::254",
 })
 
+# Carrier-grade NAT (RFC 6598).  `ipaddress` counts it as neither private nor
+# global, and Alibaba Cloud's metadata endpoint, 100.100.100.200, sits inside it.
+_SHARED_ADDRESS_SPACE = ipaddress.ip_network("100.64.0.0/10")
+
 # Resource types Chromium may fetch while rendering.  `script` is added only
 # when JavaScript is explicitly enabled by the caller.
 _ALLOWED_RESOURCE_TYPES = frozenset({
@@ -355,6 +359,7 @@ def _ip_is_public(ip: str) -> bool:
         or obj.is_reserved
         or obj.is_multicast
         or obj.is_unspecified
+        or obj in _SHARED_ADDRESS_SPACE
     ):
         return False
 

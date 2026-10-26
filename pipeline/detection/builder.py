@@ -43,7 +43,11 @@ def rebuild_store(
         name = corpus.get("name", "?")
         priority[name] = int(corpus.get("priority", 1000))
         adapter = _ADAPTERS.get(corpus.get("adapter", ""))
-        root = corpus_root(corpus)
+        try:
+            root = corpus_root(corpus)
+        except ValueError:          # no path: one bad entry must not stop the rebuild
+            skipped.append(name)
+            continue
         if adapter is None or not root.exists():
             skipped.append(name)
             continue

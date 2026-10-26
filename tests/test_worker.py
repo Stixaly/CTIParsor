@@ -126,6 +126,20 @@ def test_denied_llm_names_are_not_saved(db, monkeypatch):
     assert [r["value"] for r in _entities(db)] == ["Rclone"]
 
 
+def test_a_job_run_again_rewrites_its_rows_instead_of_doubling_them(db):
+    _job(db)
+    llm = LLMEnrichmentResult(tools=["Mimikatz"], relationships=[RelationshipExtracted(
+        source_value="APT29", relationship_type="uses", target_value="Mimikatz", evidence_text="APT29 ran Mimikatz.")])
+    raw = [RawEntity(value="185.220.101.45", entity_type=EntityType.IPV4)]
+
+    worker._save_entities("j1", raw, llm, report_text=_REPORT)
+    worker._save_entities("j1", raw, llm, report_text=_REPORT)
+
+    assert len(_entities(db)) == 2
+    with db.get_conn() as conn:
+        assert conn.execute("SELECT COUNT(*) AS n FROM relationships WHERE job_id='j1'").fetchone()["n"] == 1
+
+
 # ── Hooks ────────────────────────────────────────────────────────────────────
 
 def test_the_timeout_hook_stops_a_run_past_the_limit(monkeypatch):
@@ -248,6 +262,22 @@ def test_a_run_whose_job_was_reclaimed_discards_its_bundle(db, monkeypatch):
     assert not [e for e in _events(db) if e[0] == "done"]
 
 
+def test_a_run_keeps_the_owner_it_was_spawned_with(db, monkeypatch):
+    _job(db, worker_id="w1")
+    reads, seen = [], {}
+
+    def run_document(document, options, hooks):
+        seen["owner"] = hooks.owner
+        return _Result(bundle=_Bundle())
+
+    monkeypatch.setattr(worker, "run_document", run_document)
+    monkeypatch.setattr(worker, "_current_owner", lambda job_id: reads.append(job_id) or "w2")
+    worker._run_pipeline("j1", str(uploads_dir() / "j1.txt"), "APT report.txt", "w1")
+
+    assert reads == [] and seen["owner"] == "w1"
+    assert _row(db)["status"] == "for_review"
+
+
 def test_a_failed_backup_does_not_fail_a_finished_run(db, monkeypatch, caplog):
     _job(db)
 
@@ -275,7 +305,7 @@ def test_the_subprocess_caps_native_threads_before_running(monkeypatch):
 
     worker._subprocess_entry("j1", "/u/j1.pdf", "r.pdf")
 
-    assert ran == [("j1", "/u/j1.pdf", "r.pdf")]
+    assert ran == [("j1", "/u/j1.pdf", "r.pdf", None)]
     assert (os.environ["OMP_NUM_THREADS"], os.environ["MKL_NUM_THREADS"],
             os.environ["TOKENIZERS_PARALLELISM"]) == ("8", "2", "false")
 
@@ -323,9 +353,10 @@ def _spawn(monkeypatch, exit_code, on_exit=None, on_join=None) -> threading.Even
         if on_exit:
             on_exit(job_id)
 
+    owner = worker._current_owner("j1")
     proc = worker._spawn_job("j1", "/u/j1.txt", "r.txt", exit_hook)
-    assert (proc.target, proc.args, proc.name) == (worker._subprocess_entry, ("j1", "/u/j1.txt", "r.txt"),
-                                                   "pipeline-j1")
+    assert (proc.target, proc.args, proc.name) == (worker._subprocess_entry,
+                                                   ("j1", "/u/j1.txt", "r.txt", owner), "pipeline-j1")
     assert done.wait(5)
     return done
 
@@ -349,6 +380,7 @@ def test_a_crashed_subprocess_fails_its_job(db, monkeypatch, code, reason):
     assert _row(db)["status"] == "failed"
     ((event, data),) = _events(db)
     assert event == "done" and reason in data["error"] and "SKIP_HEAVY_MODELS=1" in data["error"]
+    assert "lower WORKER_MAX_CONCURRENT or raise the container's memory limit" in data["error"]
 
 
 def test_a_crash_on_a_reclaimed_job_leaves_the_new_owner_alone(db, monkeypatch):
@@ -477,14 +509,14 @@ def test_finalize_reads_relationship_dates_old_and_new(db):
     start_time: kept as a legacy date, never re-interpreted."""
     text = "APT29 used SUNBURST in 2020. APT29 targeted SolarWinds."
     _job(db, report_text=text)
-    for value, etype in [("APT29", "threat_actor"), ("SUNBURST", "malware"), ("SolarWinds", "identity")]:
-        _entity(db, "j1", value, etype)
     dated = RelationshipExtracted(source_value="APT29", relationship_type="uses", target_value="SUNBURST",
                                   evidence_text="APT29 used SUNBURST in 2020.",
                                   times=[{"role": "within", "time_text": "in 2020", "value": "2020"}])
     dated = LLMEnrichmentResult(relationships=[dated])
     from pipeline.stage3_llm import check_relationship_times
     worker._save_entities("j1", [], check_relationship_times(dated, text, None))
+    for value, etype in [("APT29", "threat_actor"), ("SUNBURST", "malware"), ("SolarWinds", "identity")]:
+        _entity(db, "j1", value, etype)                 # after the save: it rewrites the job's rows
     with db.get_conn() as conn:
         conn.execute("INSERT INTO relationships (id, job_id, source_value, relationship_type, target_value, "
                      "evidence_text, start_time) VALUES ('legacy', 'j1', 'APT29', 'targets', 'SolarWinds', "

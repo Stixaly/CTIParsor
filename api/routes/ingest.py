@@ -186,6 +186,14 @@ async def ingest_text(request: Request, body: TextIngestRequest):
     if len(text) > _MAX_TEXT_CHARS:
         raise HTTPException(413, f"Pasted text is too large ({len(text)} chars, maximum {_MAX_TEXT_CHARS})")
 
+    # Before anything is written: PostgreSQL refuses a NUL in a text field, and a lone surrogate has no UTF-8 form.
+    if "\x00" in text:
+        raise HTTPException(400, "Pasted text contains a NUL character")
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise HTTPException(400, "Pasted text is not valid UTF-8") from exc
+
     # HTML first: a <li> or a <table> would also trip the Markdown list and
     # table patterns, and misfiling markup as Markdown keeps the tags.
     if _looks_like_html(text):
@@ -343,7 +351,14 @@ async def ingest_url(request: Request, body: UrlIngestRequest):
         result.blocked_requests, result.js_enabled,
     )
 
-    response = await asyncio.to_thread(start_job, job_id, text_dest, filename, tlp, pap, baseline=baseline)
+    try:
+        response = await asyncio.to_thread(start_job, job_id, text_dest, filename, tlp, pap, baseline=baseline)
+    except HTTPException as exc:
+        if exc.status_code == 503:
+            # start_job removed the text it was given; the archive and its metadata go too.
+            dest.unlink(missing_ok=True)
+            capture_meta_path(text_dest).unlink(missing_ok=True)
+        raise
     response["source_url"] = result.final_url
     response["blocked_requests"] = result.blocked_requests
     response["rendered_chars"] = result.rendered_chars

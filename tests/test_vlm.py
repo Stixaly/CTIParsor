@@ -186,6 +186,17 @@ def test_openai_compat_read_figure_parses_a_good_response(monkeypatch):
     assert r.input_tokens == 11
     assert r.output_tokens == 22
 
+def test_openai_compat_read_figure_names_a_null_answer_cut_at_max_tokens(monkeypatch):
+    b = OpenAICompatVisionBackend("ollama", "http://x/v1", "qwen3.8", api_key="ollama")
+
+    def fake_post(url, payload, headers, timeout):
+        return {"choices": [{"message": {"content": None}, "finish_reason": "length"}]}
+
+    monkeypatch.setattr("pipeline.vlm._http_json", fake_post)
+    r = b.read_figure(b"notapng")
+    assert r.kind == "unread"
+    assert "finish_reason=length" in r.error
+
 def test_prompt_forbids_inferring_edges_from_adjacency():
     assert "adjacent" in PROMPT
 

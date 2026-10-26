@@ -54,6 +54,22 @@ def test_docx_merged_and_nested_cells_are_read_once(tmp_path):
     assert "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" in text
 
 
+def test_docx_past_the_uncompressed_limit_is_refused(tmp_path, monkeypatch):
+    doc = docx.Document()
+    doc.add_paragraph("APT29 used WellMess.")
+    path = tmp_path / "r.docx"
+    doc.save(str(path))
+
+    monkeypatch.setattr(s1, "_MAX_DOCX_UNCOMPRESSED_BYTES", 1024)
+    with pytest.raises(ValueError, match="trop volumineux"):
+        s1._read_docx(path)
+    with pytest.raises(ValueError, match="trop volumineux"):
+        s1._docx_created_date(path)
+
+    monkeypatch.setattr(s1, "_MAX_DOCX_UNCOMPRESSED_BYTES", 512 * 1024 * 1024)
+    assert "APT29 used WellMess." in s1._read_docx(path)
+
+
 # ── PDF ──────────────────────────────────────────────────────────────────────
 
 def _make_pdf(path, pages):

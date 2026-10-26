@@ -121,3 +121,22 @@ describe('Marginalia — badges and imported rows (ADR-0090)', () => {
     expect(props.setFocusedId).toHaveBeenCalledWith('Ryuk')
   })
 })
+
+describe('Marginalia — held rows (ADR-0082)', () => {
+  it('leaves a held row out of a group accept', () => {
+    const props = renderMarginalia([
+      entity('Held', { held_reason: 'quote not found in the text' }),
+      entity('Plain'),
+    ])
+    const button = screen.getByTitle(/^Accept all/)
+    expect(button.textContent).toBe('✓ 1')
+    fireEvent.click(button)
+    expect(props.onAccept).toHaveBeenCalledTimes(1)
+    expect(props.onAccept).toHaveBeenCalledWith('Plain', true)
+  })
+
+  it('shows no group accept when only held rows are left', () => {
+    renderMarginalia([entity('Held', { held_reason: 'quote not found in the text' })])
+    expect(screen.queryByTitle(/^Accept all/)).toBeNull()
+  })
+})

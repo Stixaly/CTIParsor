@@ -52,14 +52,18 @@ def main() -> int:
     ok = 0
     for corpus in corpora:
         name = corpus.get("name", "?")
-        path = Path(corpus.get("path", ""))
+        path = Path(corpus.get("path") or "")
         if corpus.get("tarball"):
             print(f"[sync] {name} → {path}  (tarball)")
             ok_one, detail = fetch_tarball(corpus)
             print(f"  {'✓' if ok_one else '!'} {detail}")
             ok += int(ok_one)
             continue
-        cmd = git_command(corpus)
+        try:
+            cmd = git_command(corpus)
+        except ValueError as e:
+            print(f"[sync] {name}: {e} — skipped")
+            continue
         if cmd is None:
             print(f"[sync] {name}: no git remote or tarball URL — assuming '{path}' is managed manually — skipped")
             continue

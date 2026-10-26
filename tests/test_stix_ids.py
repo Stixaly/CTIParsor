@@ -62,6 +62,13 @@ def test_an_attack_id_wins_over_the_name_but_capec_does_not():
     assert stix_ids.attack_pattern_id("Abuse", "CAPEC-112") == stix_ids.attack_pattern_id("Abuse")
 
 
+def test_a_blank_mitre_id_is_no_attack_id():
+    # Blank is no id: two objects of different names must not share an empty x_mitre_id.
+    assert stix_ids.attack_pattern_id("PowerShell", "  ") == stix_ids.attack_pattern_id("PowerShell")
+    assert stix_ids.attack_pattern_id("PowerShell", "  ") != stix_ids.attack_pattern_id("Mimikatz", "\t")
+    assert stix_ids.course_of_action_id("Disable macros", "  ") != stix_ids.course_of_action_id("Enable MFA", "\t")
+
+
 def test_ids_are_uuidv5_and_carry_their_type():
     sid = stix_ids.identity_id("Energy", "class")
     assert sid.startswith("identity--")

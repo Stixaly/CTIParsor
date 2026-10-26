@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { Entity, Job, Relationship } from '../types'
+import { finalizeJobQuick } from '../api/client'
 import { ThemeProvider } from '../context/ThemeContext'
 import Review from './Review'
 import { IMPORTED_TITLE } from '../components/review/MarginaliaCard'
@@ -211,6 +212,31 @@ describe('Review — what the page says about itself', () => {
 
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(stage).not.toHaveAttribute('data-drawer')
+  }, 20_000)
+
+  it('ignores Ctrl and Meta shortcuts: Ctrl+F does not finalize the report', async () => {
+    renderReview()
+    await opened()
+    fireEvent.keyDown(window, { key: 'f', ctrlKey: true })
+    fireEvent.keyDown(window, { key: 'f', metaKey: true })
+    expect(api.finalizeJob).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(window, { key: 'f' })
+    expect(api.finalizeJob).toHaveBeenCalledWith('job-1')
+  }, 20_000)
+})
+
+describe('Review — leaving the page with an edit waiting', () => {
+  it('rebuilds the bundle on the way out instead of dropping the pending auto-finalize', async () => {
+    vi.mocked(finalizeJobQuick).mockClear()
+    const { unmount } = renderReview()
+    await opened()
+    fireEvent.click(screen.getAllByTitle('Accept (A)')[0])
+    await screen.findByText(/Bundle outdated/)
+    expect(finalizeJobQuick).not.toHaveBeenCalled()
+
+    unmount()
+    expect(finalizeJobQuick).toHaveBeenCalledWith('job-1')
   }, 20_000)
 })
 

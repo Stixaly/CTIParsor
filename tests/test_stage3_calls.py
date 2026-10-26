@@ -498,6 +498,11 @@ def test_prose_braces_before_the_answer_are_still_skipped():
     assert s3._parse_llm_response(text).threat_actors == ["APT29"]
 
 
+def test_an_empty_object_in_the_prose_is_not_the_answer():
+    text = 'Format {} below. {"threat_actors": ["APT29"]}'
+    assert s3._parse_llm_response(text).threat_actors == ["APT29"]
+
+
 def test_a_truncated_bare_list_is_not_an_answer():
     assert s3._parse_llm_response('["APT29", "FIN') is None
 
@@ -530,9 +535,33 @@ def test_unsalvageable_items_are_skipped():
     assert s3._try_extract_complete_items('{"tools": [{"bad": tru}, ') is None
 
 
-def test_a_payload_that_fails_the_schema_after_normalisation_is_none(caplog):
+def test_a_payload_that_still_fails_after_dropping_is_none(caplog, monkeypatch):
+    monkeypatch.setattr(s3, "_drop_invalid_entries", lambda data, error: 1)
     assert s3._parse_llm_response('{"threat_actors": "APT29", "campaign_name": ["x"]}') is None
     assert "schema validation failed" in caplog.text
+
+
+def test_a_top_level_field_of_the_wrong_type_takes_its_default_and_keeps_the_relations():
+    text = ('{"threat_actors": "APT29", "relationships": [{"source_value": "APT29", '
+            '"relationship_type": "uses", "target_value": "X"}]}')
+    result = s3._parse_llm_response(text)
+    assert result.threat_actors == []
+    assert [r.target_value for r in result.relationships] == ["X"]
+
+
+def test_a_malformed_ttp_is_dropped_and_the_relation_beside_it_kept(caplog):
+    text = ('{"ttps": [{"technique_name": "Phishing", "description": null}], '
+            '"relationships": [{"source_value": "APT29", "relationship_type": "uses", "target_value": "X"}]}')
+    result = s3._parse_llm_response(text)
+    assert result.ttps == []
+    assert [r.target_value for r in result.relationships] == ["X"]
+    assert "dropped 1 item" in caplog.text
+
+
+def test_a_ttp_with_a_capitalised_label_is_kept():
+    text = '{"ttps": [{"technique_name": "Phishing", "mitre_id": "T1566", "evidence_label": "Observed"}]}'
+    result = s3._parse_llm_response(text)
+    assert [(t.mitre_id, t.evidence_label) for t in result.ttps] == [("T1566", "observed")]
 
 
 def test_normalisation_takes_evidence_and_label_aliases_and_drops_junk():

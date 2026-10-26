@@ -67,6 +67,13 @@ def test_parse_numbered_claims_returns_none_without_array() -> None:
     assert result is None
 
 
+@pytest.mark.parametrize("prose", ['Claim ["APT29"] checked.', "Empty [] first.", "Ids [1] first."])
+def test_parse_numbered_claims_skips_a_prose_array_without_claims(prose: str) -> None:
+    raw = prose + ' [{"n": 1, "verified": true, "quote": "x"}]'
+    result = parse_numbered_claims(raw, count=2)
+    assert result == {1: {"n": 1, "verified": True, "quote": "x"}}
+
+
 def test_parse_numbered_claims_ignores_non_finite() -> None:
     raw = '[{"n": NaN, "verified": true}]'
     result = parse_numbered_claims(raw, count=2)

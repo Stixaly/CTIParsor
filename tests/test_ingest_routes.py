@@ -97,6 +97,19 @@ def test_whitespace_only_text_rejected(client):
     assert resp.status_code == 400
 
 
+# The bodies are written by hand: httpx cannot encode a lone surrogate, and a NUL must stay an escape.
+@pytest.mark.parametrize("body", [
+    rb'{"text": "APT29 contacted \u0000 185.220.101.45 for command and control."}',
+    rb'{"text": "APT29 contacted \ud800 185.220.101.45 for command and control."}',
+])
+def test_text_that_cannot_be_stored_is_a_400_and_writes_nothing(client, tmp_path, body):
+    files = {p for p in tmp_path.rglob("*") if p.is_file()}
+    resp = client.post("/api/ingest/text", content=body, headers={"content-type": "application/json"})
+    assert resp.status_code == 400
+    assert {p for p in tmp_path.rglob("*") if p.is_file()} == files
+    assert client.spawn.call_count == 0
+
+
 def test_crlf_is_normalised(client, tmp_path):
     text = _PLAIN.replace(" ", "\r\n", 1)
     resp = client.post("/api/ingest/text", json={"text": text})
@@ -293,6 +306,32 @@ def test_browser_that_cannot_start_is_503_not_a_500(client, monkeypatch):
     assert resp.status_code == 503, f"got {resp.status_code}: {resp.text}"
     assert "could not start" in resp.json()["detail"]
     assert client.spawn.call_count == 0
+
+
+def test_a_capture_the_full_queue_refuses_leaves_no_file_behind(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(web_capture, "_PLAYWRIGHT_AVAILABLE", True)
+    monkeypatch.setattr(web_capture, "validate_url", lambda u: u)
+
+    def _fake(url, dest, **kwargs):
+        dest.write_bytes(b"%PDF-1.4 fake")
+        return web_capture.CaptureResult(
+            pdf_path=dest,
+            final_url="https://example.com/a/",
+            title="Report",
+            bytes_written=13,
+            js_enabled=False,
+            blocked_requests=0,
+            rendered_chars=60,
+            dom_text="APT29 contacted 185.220.101.45 for command and control.",
+            publication=[{"value": "2026-01-01", "source": "publication_meta", "kind": "published", "detail": "date"}],
+        )
+
+    monkeypatch.setattr(web_capture, "capture_url_to_pdf", _fake)
+    client.spawn.return_value = "rejected"
+    files = {p for p in tmp_path.rglob("*") if p.is_file()}
+    resp = client.post("/api/ingest/url", json={"url": "https://example.com/a/"})
+    assert resp.status_code == 503 and "queue is full" in resp.json()["detail"]
+    assert {p for p in tmp_path.rglob("*") if p.is_file()} == files
 
 
 from pipeline.stage1_ingestion import ingest

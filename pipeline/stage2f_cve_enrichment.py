@@ -1,6 +1,7 @@
 # pipeline/stage2f_cve_enrichment.py
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import time
@@ -16,6 +17,10 @@ logger = logging.getLogger(__name__)
 _MAX_FETCH = 25
 _MAX_TOTAL_SECONDS = 30.0
 _CVE_PATTERN = compile_pattern(r"^CVE-[0-9]{4}-[0-9]{4,7}$")
+
+
+class CirclUnavailable(Exception):
+    """CIRCL could not be reached or did not answer: the CVE may exist, so it is no miss."""
 
 
 def is_valid_cve(cve_id: str) -> bool:
@@ -41,7 +46,11 @@ def enrichment_enabled() -> bool:
 
 
 def _fetch_from_circl(cve_id: str) -> dict | None:
-    """Fetch one CVE's description and CVSS v3 score from CIRCL, or None."""
+    """Fetch one CVE's description and CVSS v3 score from CIRCL, or None.
+
+    None means CIRCL has no record of the CVE. A failure to get an answer raises
+    CirclUnavailable instead, so the caller does not remember the CVE as unknown.
+    """
     if not is_valid_cve(cve_id):
         return None
 
@@ -53,9 +62,12 @@ def _fetch_from_circl(cve_id: str) -> dict | None:
             if response.status != 200:
                 return None
             body = json.loads(response.read().decode())
-    except (urllib.error.URLError, json.JSONDecodeError, OSError) as e:
+    except (urllib.error.URLError, json.JSONDecodeError, OSError, http.client.HTTPException,
+            UnicodeDecodeError) as e:
         logger.warning("Failed to fetch %s from CIRCL: %s", cve_id, e)
-        return None
+        if isinstance(e, urllib.error.HTTPError) and e.code == 404:
+            return None
+        raise CirclUnavailable(cve_id) from e
 
     if not isinstance(body, dict):
         return None
@@ -215,7 +227,12 @@ def enrich_cves(cve_ids: set[str]) -> dict[str, dict]:
             skipped = len(missing) - fetch_count
             break
 
-        result = _fetch_from_circl(cve)
+        try:
+            result = _fetch_from_circl(cve)
+        except CirclUnavailable:
+            logger.warning("CIRCL is unavailable: %d CVEs not enriched, asked again on the next run",
+                           len(missing) - fetch_count)
+            break
         save_to_cache(cve, result)
         fetch_count += 1
 

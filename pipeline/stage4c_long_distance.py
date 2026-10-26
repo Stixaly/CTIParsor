@@ -22,6 +22,7 @@ from typing import Callable, Optional
 
 from api.logging_config import get_logger
 from models.schemas import STIX_RELATIONSHIP_TYPES
+from pipeline.evidence_span import stated_in, words
 from pipeline.llm_parse import fit_report
 from pipeline.stage4b_graph_completion import InferredEdge
 from pipeline.stix_access import field
@@ -186,7 +187,7 @@ def build_long_distance_inferer(
         if not raw:
             return None
         data = _parse(raw)
-        if not data or not data.get("related"):
+        if not data or data.get("related") is not True:
             return None
 
         verb = str(data.get("verb") or "").strip().lower()
@@ -195,6 +196,8 @@ def build_long_distance_inferer(
         quote = str(data.get("quote") or "").strip()
         if not quote:
             return None   # evidence bar: a supporting sentence is mandatory
+        if not stated_in(quote, words(report_text or "")):
+            return None   # and it must be in the report, as Stage 3d requires
 
         # "source" picks which entity is the subject of the verb.
         if str(data.get("source") or "a").strip().lower() == "b":

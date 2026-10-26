@@ -10,6 +10,7 @@ from pipeline.detection.coverage import (
     DETECTION_FORMATS,
     compute_for_job,
     rule_bodies_for_job,
+    rule_facets_for_job,
     rules_for_job,
     score_techniques,
 )
@@ -1080,3 +1081,16 @@ def test_an_evidence_reached_rule_is_exportable(temp_db):
 
     assert "yr:y1" in served
     assert served <= exportable, "the panel must never serve a rule the export cannot package"
+
+
+def test_facets_count_an_evidence_reached_rule_without_a_technique(temp_db):
+    """A report with no ATT&CK technique still counts the rules its export packages."""
+    conn = temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "yr", [_fmt_rule("yr", "y1", [], "yara")])
+    _add_atoms(temp_db, [("yr:y1", "strlit", "sandworm2024")])
+    _job_with_techniques(temp_db, "jfac", [])
+    _add_observable(temp_db, "jfac", "Sandworm2024", "malware")
+
+    assert len(rule_bodies_for_job(rconn, "jfac", jobs_conn=conn)) == 1
+    assert rule_facets_for_job(rconn, "jfac", jobs_conn=conn)["total"] == 1

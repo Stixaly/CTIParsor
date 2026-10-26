@@ -440,3 +440,15 @@ def test_finalize_stores_the_ledger_and_the_api_serves_it(temp_db, temp_db_clien
     shipped = {o["id"] for o in bundle["objects"]}
     assert all(e["stix_id"] in shipped for e in led["relationships"] if e["outcome"] == "emitted")
     json.dumps(led)   # plain JSON all the way down
+
+
+def test_a_baseline_object_keeps_the_annotations_of_the_object_it_stands_for():
+    from types import SimpleNamespace
+
+    led = MappingLedger()
+    obj = SimpleNamespace(id="domain-name--3c1c1f7c-6ff4-5c4a-9e8b-0d2a5a4a8f10")
+    led.object(obj, "entity")
+    led.annotate(obj.id, no_indicator="benign", benign="vendor")
+    led.baseline_object(obj, status="matched")
+    assert led.objects[obj.id] == {"origin": "baseline", "status": "matched",
+                                   "no_indicator": "benign", "benign": "vendor"}

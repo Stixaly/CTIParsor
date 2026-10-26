@@ -736,7 +736,7 @@ def build_stix_bundle(
 
     for ttp in llm_result.ttps:
         external_refs = []
-        if ttp.mitre_id:
+        if ttp.mitre_id and ttp.mitre_id.strip():
             mid = ttp.mitre_id
             # Route by ID family:
             #   CAPEC-NNN  → Common Attack Pattern Enumeration and Classification
@@ -868,16 +868,23 @@ def build_stix_bundle(
 
     if llm_result.campaign_name:
         _camp_key = llm_result.campaign_name.lower()
-        if _camp_key not in name_to_stix:  # may already exist from raw_entities Campaign entity
-            campaign_id = stix_ids.named_object_id("campaign", llm_result.campaign_name)
+        campaign_id = stix_ids.named_object_id("campaign", llm_result.campaign_name)
+        # A raw Campaign entity of that name may already be in the bundle, its bare
+        # key taken over by a malware or an actor of the same name: find it by id.
+        _camp_existing = next((o for o in stix_objects if getattr(o, "id", None) == campaign_id),
+                              name_to_stix.get(_camp_key))
+        if getattr(_camp_existing, "type", "") != "campaign":
             obj = stix2.Campaign(name=llm_result.campaign_name, id=campaign_id)
             stix_objects.append(obj)
-            name_to_stix[_camp_key] = obj
+            # setdefault: a malware or an actor of the same name keeps the bare key
+            name_to_stix.setdefault(_camp_key, obj)
+            name_to_stix[f"campaign:{_camp_key}"] = obj
             led.entity(llm_result.campaign_name, EntityType.CAMPAIGN.value, "emitted", obj=obj)
             led.object(obj, "entity")
         else:
+            name_to_stix.setdefault(f"campaign:{_camp_key}", _camp_existing)
             led.entity(llm_result.campaign_name, EntityType.CAMPAIGN.value, "merged",
-                       obj=name_to_stix[_camp_key], reason="same_value")
+                       obj=_camp_existing, reason="same_value")
 
     # --- Location SDOs (targeted countries) ---
     # One stix2.Location per country; linked via targets SRO from threat actors later.
@@ -1000,6 +1007,12 @@ def build_stix_bundle(
     # Observables shipped without an Indicator because the report names them
     # without accusing them (pipeline/benign.py, audit B 8.1.7).
     benign_sco_ids: set[str] = set()
+    # The IoC as the report spells it, by lower-cased key: an association's
+    # pattern is built on it, as the loop below and verify_ioc_coverage build theirs.
+    ioc_value_by_key: dict[str, str] = {}
+    for entity in raw_entities:
+        if entity.entity_type in _OBSERVABLE_IOC_TYPES:
+            ioc_value_by_key.setdefault(entity.value.lower(), entity.value)
 
     for assoc in llm_result.ioc_associations:
         if not assoc.ioc_value or not assoc.malware_name:
@@ -1008,6 +1021,9 @@ def build_stix_bundle(
         malware = name_to_stix.get(assoc.malware_name.lower())
 
         if not sco or not malware:
+            led.entity(assoc.ioc_value, "indicator", "dropped",
+                       reason="ioc_not_in_bundle" if not sco else "malware_not_in_bundle",
+                       input="ioc_association", malware_name=assoc.malware_name)
             continue
 
         ioc_key = assoc.ioc_value.lower()
@@ -1033,8 +1049,10 @@ def build_stix_bundle(
                        input="ioc_association", malware_name=assoc.malware_name)
             continue
 
-        pattern = _build_stix_pattern(assoc.ioc_value, sco)
+        pattern = _build_stix_pattern(ioc_value_by_key.get(ioc_key, assoc.ioc_value), sco)
         if not pattern:
+            led.entity(assoc.ioc_value, "indicator", "dropped", reason="no_pattern",
+                       input="ioc_association", malware_name=assoc.malware_name)
             continue
 
         try:
@@ -1304,7 +1322,7 @@ def build_stix_bundle(
                 relationship_type=rel_type,
                 source_ref=source.id,
                 target_ref=target.id,
-                confidence=max(0, min(100, int(rel.confidence * 100))),
+                confidence=max(0, min(100, round(rel.confidence * 100))),
                 allow_custom=True,
                 x_evidence_label=str(_label),
             )
@@ -1451,7 +1469,7 @@ def build_stix_bundle(
         led.apply_baseline_merge(merge)
         by_id = {getattr(o, "id", None): o for o in stix_objects}
         for oid in sorted(merge.kept):
-            led.object(by_id[oid], "baseline", status="matched" if oid in merge.stated else "only")
+            led.baseline_object(by_id[oid], status="matched" if oid in merge.stated else "only")
         baseline.verbatim.update({i: baseline.objects[i] for i in merge.kept})
         baseline.trusted = frozenset(merge.kept)
 
@@ -1667,6 +1685,7 @@ def verify_ioc_coverage(raw_entities: list[RawEntity], bundle: stix2.Bundle) -> 
           "missing_sco":       [{"value", "type"}, ...],
           "missing_indicator": [{"value", "type"}, ...],
           "benign":            [{"value", "type", "reason"}, ...],  # no Indicator, by design
+          "skipped":           [{"value", "type", "reason"}, ...],  # not counted: no SCO by design
           "ok":                bool,  # True iff every IoC has its SCO, and its Indicator unless benign
         }
     """
@@ -1676,6 +1695,7 @@ def verify_ioc_coverage(raw_entities: list[RawEntity], bundle: stix2.Bundle) -> 
     missing_sco: list[dict] = []
     missing_indicator: list[dict] = []
     benign: list[dict] = []
+    skipped: list[dict] = []
     seen: set[tuple[str, EntityType]] = set()
 
     for entity in raw_entities:
@@ -1685,6 +1705,10 @@ def verify_ioc_coverage(raw_entities: list[RawEntity], bundle: stix2.Bundle) -> 
         if key in seen:
             continue
         seen.add(key)
+        if entity.entity_type == EntityType.URL and not _is_uri(entity.value):
+            skipped.append({"value": entity.value, "type": entity.entity_type.value,
+                            "reason": "not_a_uri"})
+            continue
         total += 1
 
         sco = (_network_traffic_sco(entity.value, [], {}, {}, None)
@@ -1715,6 +1739,7 @@ def verify_ioc_coverage(raw_entities: list[RawEntity], bundle: stix2.Bundle) -> 
         "missing_sco":       missing_sco,
         "missing_indicator": missing_indicator,
         "benign":            benign,
+        "skipped":           skipped,
         "ok":                not missing_sco and not missing_indicator,
     }
 
@@ -2767,7 +2792,7 @@ def _add_relationship(
             "target_ref": target.id,
         }
         if confidence is not None:
-            kwargs["confidence"] = max(0, min(100, int(confidence * 100)))
+            kwargs["confidence"] = max(0, min(100, round(confidence * 100)))
         if isinstance(custom, dict) and custom:
             kwargs.update(custom)
             kwargs["allow_custom"] = True

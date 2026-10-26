@@ -103,6 +103,14 @@ def test_one_entry_per_id():
     assert len(out.selected) == 1
 
 
+def test_a_valid_copy_after_a_failed_one_keeps_the_id():
+    bad = {"attack_id": "T1003.001", "evidence_quote": "dumped the creds with a paraphrase of my own"}
+    good = {"attack_id": "T1003.001", "evidence_quote": "Credentials were later dumped from LSASS memory"}
+    out = sel.select_ttps(TEXT, _cands("T1003.001"), _answer(bad, good))
+    assert [t.mitre_id for t in out.selected] == ["T1003.001"]
+    assert out.review == [] and out.rejected == 0
+
+
 def test_several_techniques_from_one_text():
     out = sel.select_ttps(TEXT, _cands("T1566.001", "T1059.001", "T1003.001", "T1105"), _answer(
         {"attack_id": "T1566.001", "evidence_quote": "emails with malicious Word attachments"},
@@ -310,6 +318,14 @@ def test_llm_proposals_resolve_to_ids_and_unresolvable_ones_are_counted():
     assert [c.attack_id for c in cands] == ["T1059.001", "T1003.001"]
     assert all(c.sources == ["llm"] for c in cands)
     assert labels["T1059.001"] == EvidenceLabel.OBSERVED
+    assert no_id == 1
+
+
+def test_a_proposal_with_an_id_outside_attack_is_not_a_candidate():
+    ttps = [TTPExtracted(technique_name="Zq", mitre_id="T9999", evidence_text="ran it"),
+            TTPExtracted(technique_name="PowerShell", mitre_id="T1059.001", evidence_text="ran PowerShell")]
+    cands, _, no_id = sel.llm_proposals_as_candidates(ttps)
+    assert [c.attack_id for c in cands] == ["T1059.001"]
     assert no_id == 1
 
 

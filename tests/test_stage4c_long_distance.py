@@ -59,6 +59,16 @@ def test_inferer_requires_quote():
     assert infer(a, b, "text") is None   # no supporting sentence → no edge
 
 
+def test_inferer_rejects_a_quote_the_report_does_not_contain():
+    actor = stix2.IntrusionSet(name="APT-X")
+    mw = stix2.Malware(name="MW", is_family=True)
+    infer = build_long_distance_inferer(
+        _fake_llm({"related": True, "source": "a", "verb": "uses",
+                   "quote": "APT-X deployed MW against the energy sector."})
+    )
+    assert infer(actor, mw, "APT-X deployed MW in the campaign.") is None
+
+
 def test_inferer_rejects_unrelated():
     a = stix2.IntrusionSet(name="A")
     b = stix2.Malware(name="B", is_family=True)
@@ -66,6 +76,15 @@ def test_inferer_rejects_unrelated():
         _fake_llm({"related": False, "source": None, "verb": None, "quote": None})
     )
     assert infer(a, b, "text") is None
+
+
+def test_inferer_rejects_related_given_as_a_string():
+    a = stix2.IntrusionSet(name="A")
+    b = stix2.Malware(name="B", is_family=True)
+    infer = build_long_distance_inferer(
+        _fake_llm({"related": "false", "source": "a", "verb": "uses", "quote": "A uses B."})
+    )
+    assert infer(a, b, "A uses B.") is None
 
 
 def test_inferer_rejects_invalid_verb():

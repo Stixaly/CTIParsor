@@ -119,6 +119,14 @@ describe('buildRanges', () => {
     const ranges = buildRanges('No indicators in this narrative report.', [ent('1', hash, 'sha256')])
     expect(ranges).toHaveLength(0)
   })
+
+  it('does not throw on a hash-typed value that is not hex', () => {
+    // The analyst retyped a name as a SHA-256: the hash pattern must still build.
+    const text = 'compiled with C++ today'
+    const ranges = buildRanges(text, [ent('1', 'C++', 'sha256')])
+    expect(ranges).toHaveLength(1)
+    expect(text.slice(ranges[0].start, ranges[0].end)).toBe('C++')
+  })
 })
 
 describe('generateDefangedVariants', () => {

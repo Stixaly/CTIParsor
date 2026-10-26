@@ -179,6 +179,8 @@ def update_entity(job_id: str, entity_id: str, patch: EntityPatch):
 @router.post("/accept-pending")
 def accept_all_pending(job_id: str):
     """Accept all entities whose accepted field is NULL (unreviewed) in one query."""
+    with get_conn() as conn:
+        require_job(conn, job_id)
     with _lock:
         with get_conn() as conn:
             accepted = decisions.record(

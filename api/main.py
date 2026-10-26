@@ -195,8 +195,14 @@ async def refuse_cross_site_writes(request: Request, call_next):
         if site and site not in ("same-origin", "none"):
             return JSONResponse({"detail": "cross-site request refused"}, status_code=403)
         origin = request.headers.get("origin")
-        if origin and origin != "null" and not _host_allowed(urlsplit(origin).hostname):
-            return JSONResponse({"detail": "origin not allowed"}, status_code=403)
+        if origin and origin != "null":
+            try:
+                origin_allowed = _host_allowed(urlsplit(origin).hostname)
+            except ValueError:
+                # urlsplit rejects a malformed IPv6 host such as `http://[`
+                origin_allowed = False
+            if not origin_allowed:
+                return JSONResponse({"detail": "origin not allowed"}, status_code=403)
     return await call_next(request)
 
 
@@ -262,7 +268,8 @@ class _SPAStaticFiles(StaticFiles):
         try:
             return await super().get_response(path, scope)
         except StarletteHTTPException as exc:
-            if exc.status_code == 404:
+            # An unknown /api path is a JSON 404 for the API client, not the SPA page
+            if exc.status_code == 404 and Path(path).parts[:1] != ("api",):
                 # Fall back to the SPA entry point
                 return await super().get_response("index.html", scope)
             raise

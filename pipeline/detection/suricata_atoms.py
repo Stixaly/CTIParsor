@@ -12,6 +12,8 @@ See ADR-0015 for the atom model.
 
 from __future__ import annotations
 
+import string
+
 from pipeline.detection.textutil import unescape
 from pipeline.detection.tlds import looks_like_domain
 from pipeline.regex_safety import compile_pattern
@@ -89,6 +91,8 @@ NOISE_LITERALS: frozenset[str] = frozenset({
 
 # Pre-compiled regexes to avoid recompilation in hot paths.
 _RE_HEX_SEGMENT = compile_pattern(r"\|[^|]*\|")
+_RE_HEX_BYTES = compile_pattern(r"^(?:[0-9a-fA-F]{2})+$")
+_INDICATOR_CHARS = frozenset(string.ascii_letters + string.digits + ".-_")
 _RE_IP = compile_pattern(r"^[0-9]{1,3}(\.[0-9]{1,3}){3}$")
 _RE_HASH = compile_pattern(r"^[0-9a-f]{32,128}$")
 _RE_MITRE = compile_pattern(r"^T[0-9]{4}(\.[0-9]{3})?$")
@@ -181,16 +185,37 @@ def _unescape_content(value: str) -> str:
     return unescape(value, _SURICATA_ESCAPES)
 
 
+def _hex_segment_text(segment: str) -> str:
+    """Decode one `|...|` segment, or make it one space.
+
+    A segment made only of characters an indicator holds (letters, digits,
+    `.`, `-`, `_`) is decoded, so `|2e|` in a path or a domain is a dot.  Any
+    other segment stays a separator, as it always was: a `:` or a `/` glued to
+    a domain (`seed.nkn.org|3a|`) would make it no domain, and binary data is
+    no text.
+    """
+    tokens = segment[1:-1].split()
+    if not tokens or not all(_RE_HEX_BYTES.match(t) for t in tokens):
+        return " "
+    text = "".join(chr(int(t[i:i + 2], 16)) for t in tokens for i in range(0, len(t), 2))
+    return text if all(c in _INDICATOR_CHARS for c in text) else " "
+
+
 def _content_text(value: str) -> str:
     """Extract the textual content from a raw content: value.
 
-    Removes quotes, strips hex segments (|...|), and decodes
-    escape sequences (\\; \\" \\\\ \\:).
+    Removes quotes, decodes hex segments (|...|) byte by byte, and decodes
+    escape sequences (\\; \\" \\\\ \\:) in the text between them.
     """
     s = _unquote(value)
-    # Remove hex segments (binary data, not text)
-    s = _RE_HEX_SEGMENT.sub(" ", s)
-    return _unescape_content(s).strip()
+    parts: list[str] = []
+    last = 0
+    for match in _RE_HEX_SEGMENT.finditer(s):
+        parts.append(_unescape_content(s[last:match.start()]))
+        parts.append(_hex_segment_text(match.group()))
+        last = match.end()
+    parts.append(_unescape_content(s[last:]))
+    return "".join(parts).strip()
 
 
 def _normalize(cls: str, raw: str) -> list[str]:
@@ -243,7 +268,8 @@ def _normalize(cls: str, raw: str) -> list[str]:
         if len(s) < 6 or ("/" not in s and "://" not in s):
             return []
         result = [s]
-        if s.startswith("/") and s.count("/") >= 2:
+        # `|2e 2e|/html/menu2.html` decodes to a leading "../": still a path.
+        if s.lstrip(".").startswith("/") and s.count("/") >= 2:
             last_segment = s.rsplit("/", 1)[-1]
             if len(last_segment) >= 6:
                 result.append(last_segment)

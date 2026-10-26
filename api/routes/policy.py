@@ -168,9 +168,9 @@ def _rule_error(i: int, rule: dict, pairs: dict[str, int]) -> str | None:
     where = f"'rules[{i}]'"
     src, verb, tgt = rule.get("src"), rule.get("verb"), rule.get("tgt")
     for name, value in (("src", src), ("tgt", tgt)):
-        if value not in _OBJECT_TYPES:
+        if not isinstance(value, str) or value not in _OBJECT_TYPES:
             return f"{where}.{name} must be a STIX 2.1 SDO or SCO type, not {value!r}"
-    if verb not in STIX_RELATIONSHIP_TYPES:
+    if not isinstance(verb, str) or verb not in STIX_RELATIONSHIP_TYPES:
         return f"{where}.verb {verb!r} is not a STIX 2.1 relationship type"
     if "mode" in rule and rule["mode"] not in ("pin", "auto"):
         return f"{where}.mode must be 'pin' or 'auto'"

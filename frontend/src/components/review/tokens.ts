@@ -509,9 +509,9 @@ export function buildRanges(text: string, entities: Array<{ id: string; value: s
     // Hashes wrap across lines in PDF/table cells, so the contiguous stored
     // value won't be found by indexOf.  Match the characters with optional
     // whitespace between them so the wrapped occurrence is still located.
-    // (Value is hex-only, so it's safe to embed directly in a RegExp.)
+    // (Each character is escaped: an analyst can type any text as a hash.)
     if (_HASH_TYPES.has(e.entity_type)) {
-      const re = new RegExp(v.split('').join('\\s*'), 'g')
+      const re = new RegExp(v.split('').map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s*'), 'g')
       let m: RegExpExecArray | null
       while ((m = re.exec(lower)) !== null) {
         const idx = m.index

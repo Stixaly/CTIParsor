@@ -1236,6 +1236,12 @@ def _normalize_llm_json(data: dict) -> dict:
                     if isinstance(t.get(k), str) and t[k].strip():
                         t["evidence_label"] = t.pop(k)
                         break
+            # As for relationships below: a malformed label must not discard the technique.
+            if "evidence_label" in t:
+                _lbl = str(t["evidence_label"]).lower().strip()
+                t["evidence_label"] = _lbl if _lbl in {
+                    "observed", "reported", "assessed", "inferred", "gap"
+                } else "reported"
             if "technique_name" in t:
                 norm_ttps.append(t)
         out["ttps"] = norm_ttps
@@ -1421,6 +1427,32 @@ def _try_extract_complete_items(text: str) -> dict | None:
     return result or None
 
 
+def _drop_invalid_entries(data: dict, error: ValidationError) -> int:
+    """
+    Remove from `data` what `error` points at: one list item (`("ttps", 2, ...)`)
+    or a top-level field of the wrong type (`"threat_actors": "APT29"`), which
+    then takes its default.  Returns how many entries were removed.
+    """
+    items: set[tuple[int | str, int]] = set()
+    fields: set[int | str] = set()
+    for err in error.errors():
+        loc = err["loc"]
+        if len(loc) >= 2 and isinstance(loc[1], int) and isinstance(data.get(loc[0]), list):
+            items.add((loc[0], loc[1]))
+        elif len(loc) == 1:
+            fields.add(loc[0])
+    removed = 0
+    # Highest index first, so removing one item does not shift the next.
+    for field, index in sorted(items, reverse=True):
+        del data[field][index]
+        removed += 1
+    for field in fields:
+        if field in data:
+            del data[field]
+            removed += 1
+    return removed
+
+
 # --- Public API ---
 
 def _parse_llm_response(raw_text: str) -> LLMEnrichmentResult | None:
@@ -1450,6 +1482,8 @@ def _parse_llm_response(raw_text: str) -> LLMEnrichmentResult | None:
                 # Repair or salvage the outer object below instead.
                 if i > first and _unclosed_stack(raw_text[first:i])[0]:
                     break
+                if not obj:
+                    continue
                 parsed_json = obj
                 break
 
@@ -1482,11 +1516,22 @@ def _parse_llm_response(raw_text: str) -> LLMEnrichmentResult | None:
     # expected.  Discarding the whole result on a field-name mismatch would lose
     # all real intelligence from the chunk.  Normalise instead, then validate.
     normalized_json = _normalize_llm_json(parsed_json)
-    try:
-        return LLMEnrichmentResult.model_validate(normalized_json)
-    except ValidationError as e:
-        logger.warning(f"JSON schema validation failed after normalization: {e}")
-        return None
+    dropped = 0
+    for _ in range(5):
+        try:
+            result = LLMEnrichmentResult.model_validate(normalized_json)
+        except ValidationError as e:
+            error = e
+            removed = _drop_invalid_entries(normalized_json, e)
+            if not removed:
+                break
+            dropped += removed
+        else:
+            if dropped:
+                logger.warning(f"LLM response: dropped {dropped} item(s) that failed schema validation")
+            return result
+    logger.warning(f"JSON schema validation failed after normalization: {error}")
+    return None
 
 
 def corroborated_ttp_ids(semantic_ttp_entities) -> set[str]:

@@ -71,6 +71,11 @@ def test_remove_committed_corpus_disables_via_overlay(temp_db, temp_db_client, t
     assert demo["enabled"] is False                    # disabled, not deleted from committed
 
 
+def test_deleting_an_unknown_corpus_is_a_404(temp_db, temp_db_client, tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+    assert temp_db_client.delete("/api/settings/corpora/nope").status_code == 404
+
+
 def test_rebuild_ingests_local_clone(temp_db, temp_db_client, tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch)
     summary = temp_db_client.post("/api/settings/corpora/rebuild").json()

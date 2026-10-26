@@ -196,7 +196,7 @@ def get_baseline_intake(job_id: str):
 def update_job_status(job_id: str, patch: StatusPatch):
     """Set a job's status.  409 for `completed` while the stored bundle is one
     the STIX schemas refused (see finalize)."""
-    valid = {"uploaded", "processing", "for_review", "reviewing", "completed", "failed"}
+    valid = {"for_review", "reviewing", "completed", "failed"}
     if patch.status not in valid:
         raise HTTPException(400, f"Invalid status. Valid: {valid}")
     refused: list[str] | None = None

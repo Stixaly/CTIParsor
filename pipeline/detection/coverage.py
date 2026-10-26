@@ -551,6 +551,11 @@ def rule_facets_for_job(
             query_ids.add(parent)
 
     rule_ids = {rid for _tag, rid in canonical_rule_ids_for_techniques(conn, query_ids)}
+    # Evidence-reached rules too, as in rule_bodies_for_job, or the facets count fewer
+    # rules than the export packages.
+    for rid, evs in _evidence_for_job(conn, job_id, jobs_conn=jobs_conn).items():
+        if _admits(evs):
+            rule_ids.add(rid)
     empty = {"total": 0, "bytes": 0,
              "format": [], "corpus": [], "license": [], "severity": []}
     if not rule_ids:

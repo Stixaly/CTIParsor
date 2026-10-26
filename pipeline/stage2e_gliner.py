@@ -97,6 +97,7 @@ _GLINER_LABELS = list(_LABEL_MAP.keys())
 # Configurable via GLINER_CHUNK_CHARS env var if you need to tune.
 _CHUNK_CHARS    = env_int("GLINER_CHUNK_CHARS", default=1600)
 _OVERLAP_CHARS  = 200   # proportionally wider to avoid missing cross-boundary spans
+_MIN_CHUNK_CHARS = _CHUNK_CHARS // 4
 
 # ── Batched inference ─────────────────────────────────────────────────────────
 # GLiNER's predict_entities() accepts a list[str] as well as a single str.
@@ -114,14 +115,14 @@ def _iter_chunks(text: str) -> Iterator[tuple[str, int]]:
         end = min(start + _CHUNK_CHARS, length)
         # Don't cut in the middle of a word
         if end < length:
-            # Walk back to nearest whitespace
-            while end > start and not text[end].isspace():
-                end -= 1
-            # If no whitespace was found (end walked back to start), the entire
-            # chunk is one unbroken token.  Force-advance past it so start always
-            # moves forward and we never produce an empty chunk or a negative start.
-            if end <= start:
-                end = min(start + _CHUNK_CHARS, length)
+            # Walk back to nearest whitespace, but not into the first _MIN_CHUNK_CHARS:
+            # sparse whitespace would make the chunks a crawl of a few characters each.
+            boundary = end
+            while boundary > start and not text[boundary].isspace():
+                boundary -= 1
+            if boundary - start >= _MIN_CHUNK_CHARS:
+                end = boundary
+            # else: a mid-token cut at full width
         yield text[start:end], start
         start = max(start + 1, end - _OVERLAP_CHARS) if end < length else length
 

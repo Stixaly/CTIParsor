@@ -3,6 +3,7 @@ from pipeline.stage1_ingestion import _join_hyphen_linebreaks
 from pipeline.stage2_extraction import (
     _deduplicate,
     _extract_bare_filenames,
+    _extract_file_paths,
     _extract_hashes_regex,
     extract_entities,
     refang,
@@ -546,6 +547,22 @@ class TestBareFilenames:
         # Filenames already captured as part of a full path must be skipped here.
         text = r"Payload staged at C:\Windows\Temp\payload.exe on disk."
         assert _extract_bare_filenames(text) == []
+
+
+class TestUnixPathPunctuation:
+    """A Unix path ends where the sentence's punctuation begins."""
+
+    def test_full_stop_after_a_unix_path_is_not_part_of_it(self):
+        entities = _extract_file_paths("The dropper writes /tmp/x.sh.")
+        assert [e.value for e in entities] == ["/tmp/x.sh"]
+
+    def test_comma_after_a_unix_path_is_not_part_of_it(self):
+        entities = _extract_file_paths("Dropped /usr/bin/updater, then ran it.")
+        assert [e.value for e in entities] == ["/usr/bin/updater"]
+
+    def test_a_unix_path_without_punctuation_is_unchanged(self):
+        entities = _extract_file_paths("The dropper ran /tmp/x.sh at boot")
+        assert [e.value for e in entities] == ["/tmp/x.sh"]
 
 
 class TestDomainFileTypeAmbiguity:

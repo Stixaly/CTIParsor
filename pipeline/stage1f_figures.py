@@ -414,7 +414,7 @@ def render_block(ordinal: int, read: FigureRead) -> str:
 def map_verbatim(reads: list[tuple[FigureCandidate, FigureRead, str]],
                  fn: Callable[[str], str],
                  ) -> list[tuple[FigureCandidate, FigureRead, str]]:
-    """Apply `fn` to every transcribed line, before the blocks are rendered.
+    """Apply `fn` to every transcribed line and every edge, before the blocks are rendered.
 
     Exists so the caller can refang figure text on the same terms as the rest of
     the document.  Order matters and is not negotiable: `refang` rewrites `[.]`
@@ -422,7 +422,11 @@ def map_verbatim(reads: list[tuple[FigureCandidate, FigureRead, str]],
     runs points at the wrong characters afterwards.  Refang first, inject second.
     """
     return [
-        (cand, replace(read, verbatim_text=[fn(line) for line in read.verbatim_text]), sha)
+        (cand, replace(read,
+                       verbatim_text=[fn(line) for line in read.verbatim_text],
+                       edges=[replace(edge, src=fn(edge.src), dst=fn(edge.dst),
+                                      label=fn(edge.label) if edge.label else "")
+                              for edge in read.edges]), sha)
         for cand, read, sha in reads
     ]
 

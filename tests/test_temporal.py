@@ -83,6 +83,13 @@ def test_an_instant_keeps_its_offset():
     assert (r.value, r.precision) == ("2023-06-20T14:32:00+02:00", "instant")
 
 
+@pytest.mark.parametrize("text", ["2024-03-12T10:00:00+24:00", "2024-03-12T10:00:00+25:00",
+                                  "2024-03-12T10:00:00-25:00"])
+def test_an_offset_of_a_day_or_more_is_unresolved_never_raised(text):
+    r = normalize(text)
+    assert (r.value, r.precision, r.status, r.reason) == (None, "instant", "unresolved", "invalid_date")
+
+
 @pytest.mark.parametrize("role,value", [("start", "2026-01"), ("end", "2026-04"),
                                         ("within", "2026-01/2026-04")])
 def test_a_range_gives_each_role_its_end(role, value):
@@ -135,6 +142,19 @@ def test_a16_no_anchor_is_unresolved_never_today():
     assert (r.value, r.status, r.reason) == (None, "unresolved", "no_anchor")
 
 
+@pytest.mark.parametrize("text", ["1000000 days ago", "last 1000000 days",
+                                  "1000000 weeks ago", "last 1000000 weeks"])
+def test_a_day_count_past_the_calendar_is_unresolved_never_raised(text):
+    r = normalize(text, anchor=PUBLISHED)
+    assert (r.value, r.precision, r.status, r.reason) == (None, "day", "unresolved", "implausible_year")
+
+
+@pytest.mark.parametrize("text", ["last 2000 years", "last 3000 years"])
+def test_a_month_or_year_span_past_the_calendar_is_unresolved(text):
+    r = normalize(text, anchor=PUBLISHED)
+    assert (r.value, r.precision, r.status, r.reason) == (None, "month", "unresolved", "implausible_year")
+
+
 # ── locating the quote ───────────────────────────────────────────────────────
 
 def test_a5_a_year_inside_an_identifier_is_not_found():
@@ -179,6 +199,12 @@ def test_a7_an_ocr_quote_found_but_unreadable():
 def test_a_quote_not_in_the_chunk_is_a_conflict():
     (a,) = _check("Nothing dated here.", _llm("start", "since 2020"))
     assert (a.status, a.reason) == ("conflict", "not_found")
+
+
+def test_an_offset_of_a_day_or_more_is_unresolved_in_the_check():
+    (a,) = _check("Attack began on 2024-03-12T10:00:00+25:00 per the log.",
+                  _llm("start", "2024-03-12T10:00:00+25:00", "2024-03-12"))
+    assert (a.status, a.reason) == ("unresolved", "invalid_date")
 
 
 def test_a8_agreement_never_lifts_an_ambiguous_reading():
@@ -400,7 +426,7 @@ def test_an_analyst_keeps_the_precision_they_typed(raw, value, precision):
     assert (a.value, a.precision, a.status, a.origin) == (value, precision, "verified", "analyst")
 
 
-@pytest.mark.parametrize("raw", ["03/04/2023", "last month", "whenever", ""])
+@pytest.mark.parametrize("raw", ["03/04/2023", "last month", "whenever", "", "2024-03-12T10:00:00+25:00"])
 def test_an_analyst_entry_that_is_not_a_date_is_refused(raw):
     with pytest.raises(ValueError):
         analyst_assertion("start", raw)
@@ -471,6 +497,11 @@ def test_publication_candidates_from_page_metadata():
     assert sorted((c["value"], c["kind"]) for c in got) == [
         ("2024-06-14", "published"), ("2024-06-15", "published"),
         ("2024-06-15", "published"), ("2024-07-01", "updated")]
+
+
+def test_an_offset_of_a_day_or_more_is_no_publication_candidate():
+    assert publication_candidates([("article:published_time", "2024-03-12T10:00:00+25:00")]) == []
+    assert header_candidates("2024-03-12T10:00:00+25:00") == []
 
 
 def test_the_anchor_prefers_page_metadata_then_header_then_file():

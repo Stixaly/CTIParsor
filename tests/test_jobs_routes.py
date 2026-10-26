@@ -85,6 +85,14 @@ def test_the_status_can_be_set_to_a_known_value_only(temp_db_client, temp_db):
     assert temp_db_client.patch("/api/jobs/nope", json={"status": "failed"}).status_code == 404
 
 
+@pytest.mark.parametrize("status", ["processing", "uploaded"])
+def test_the_worker_owns_the_processing_and_uploaded_states(temp_db_client, temp_db, status):
+    _add_job(temp_db, "j1")
+
+    assert temp_db_client.patch("/api/jobs/j1", json={"status": status}).status_code == 400
+    assert temp_db_client.get("/api/jobs/j1").json()["status"] == "for_review"
+
+
 def test_a_job_whose_bundle_was_refused_cannot_be_completed(temp_db_client, temp_db):
     _add_job(temp_db, "j1", status="for_review", bundle_json="{}", bundle_validation="invalid",
              bundle_validation_errors=json.dumps(["bad id", "bad ref"]))

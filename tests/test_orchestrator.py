@@ -399,6 +399,35 @@ def test_a_partly_unusable_stage3_runs_and_says_how_much(mock_llm, mock_llm_resp
     assert (stage3.counts["extraction_ok"], stage3.counts["extraction_invalid"]) == (1, 1)
 
 
+def test_a_timeout_mid_stage3_cancels_the_chunks_still_queued(mock_llm, mock_llm_response, sample_cti_text):
+    import time
+
+    class Expired(Hooks):
+        """The job's time runs out once one chunk has come back."""
+        def __init__(self):
+            self.total = 0
+            self.done = 0
+
+        def progress(self, event, data):
+            if event == "stage" and data.get("stage") == 3:
+                self.total = data["total"]
+                self.done += 1
+
+        def check_timeout(self):
+            if self.done:
+                raise TimeoutError("Job timeout exceeded")
+
+    def slow(*args, **kwargs):
+        time.sleep(0.05)
+        return json.dumps(mock_llm_response)
+
+    mock_llm.side_effect = slow
+    hooks = Expired()
+    with pytest.raises(TimeoutError):
+        run_document(Document(text=_long_text(sample_cti_text, 8)), _opts(), hooks)
+    assert hooks.total >= 4 and mock_llm.call_count < hooks.total
+
+
 def test_verification_and_completion_stages_can_be_turned_off(mock_llm, sample_cti_text, monkeypatch):
     # The environment says off (as in CI); the run options say on — the options win.
     monkeypatch.setattr("pipeline.stage3d_verify._VERIFY_ENABLED", False)

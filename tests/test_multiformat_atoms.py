@@ -6,18 +6,20 @@ import pytest
 from pipeline.detection.suricata_atoms import (
     BUFFER_CLASSES,
     LEGACY_MODIFIER_CLASSES,
+    _content_text,
     extract_atoms,
     parse_options,
     rule_header,
     technique_ids,
 )
 from pipeline.detection.tlds import looks_like_domain
-from pipeline.detection.yara_atoms import extract_atoms as yara_extract_atoms
 from pipeline.detection.yara_atoms import (
+    _strip_comments,
     rule_hashes,
     rule_platform,
     split_rules,
 )
+from pipeline.detection.yara_atoms import extract_atoms as yara_extract_atoms
 
 
 def _sur(body: str) -> str:
@@ -101,6 +103,28 @@ class TestSuricataAtoms:
         for _, v in atoms:
             assert "|" not in v
             assert "2a" not in v
+
+    def test_printable_hex_bytes_decode_in_place(self):
+        """A segment of indicator characters is decoded: `|2e|` in a path or a domain is a dot."""
+        assert _content_text('"/gate|2e|php"') == "/gate.php"
+        rule = 'alert dns any any -> any any (msg:"x"; dns.query; content:"evil|2e|example|2e|com"; sid:1;)'
+        assert ("domain", "evil.example.com") in extract_atoms(rule)
+
+    def test_a_separator_byte_stays_a_separator(self):
+        """`:`, `/`, quotes and blanks in hex still split, as before: decoded, they glued
+        onto the value and made `seed.nkn.org:` no domain."""
+        assert _content_text('"User-Agent|3a 20|Mozilla"') == "User-Agent Mozilla"
+        rule = 'alert http any any -> any any (msg:"x"; http.host; content:"seed.nkn.org|3a|"; sid:1;)'
+        assert ("domain", "seed.nkn.org") in extract_atoms(rule)
+
+    def test_a_decoded_leading_dot_dot_keeps_the_path_last_segment(self):
+        rule = 'alert http any any -> any any (msg:"x"; http.uri; content:"|2e 2e|/html/menus/menu2.html"; sid:1;)'
+        assert ("url", "menu2.html") in extract_atoms(rule)
+
+    def test_non_printable_hex_bytes_become_one_space(self):
+        """A run of non-printable bytes, or a malformed segment, is one space."""
+        assert _content_text('"abc|00 01|def"') == "abc def"
+        assert _content_text('"abc|zz|def"') == "abc def"
 
     def test_sql_keyword_in_uri_buffer_is_dropped(self):
         """SQL keyword without slash in uri buffer is not a URL and is dropped."""
@@ -195,6 +219,67 @@ class TestYaraSplit:
     def test_non_string_input_returns_empty(self):
         """Non-string input to split_rules returns empty list."""
         assert split_rules(None) == []
+
+    def test_private_is_read_from_the_whole_prefix(self):
+        """`private global rule` is private: the prefix keeps every modifier."""
+        text = (
+            "private global rule A { condition: true }\n"
+            "global private rule B { condition: true }\n"
+            "private rule C { condition: true }\n"
+            "global rule D { condition: true }\n")
+        assert [(r.name, r.is_private) for r in split_rules(text)] == [
+            ("A", True), ("B", True), ("C", True), ("D", False)]
+
+    def test_tags_may_wrap_onto_the_lines_after_the_colon(self):
+        """YARA takes tags on the lines after the colon (MALW_TrickBot.yar)."""
+        text = (
+            'rule MT1 :\nTrojan\n{\n    strings:\n        $a = "mt1_marker"\n'
+            "    condition:\n        $a\n}\n"
+            "rule MT2 :\n\tapt\n\ttag2\n{\n    condition:\n        true\n}\n")
+        assert [(r.name, r.tags) for r in split_rules(text)] == [
+            ("MT1", ["Trojan"]), ("MT2", ["apt", "tag2"])]
+
+    def test_escaped_slash_in_a_regex_opens_no_comment(self):
+        """A regex ending in an escaped slash does not swallow the rest of the file."""
+        text = (
+            'rule R1 {\n    strings:\n        $re = /a\\//\n        $t = "t1_marker"\n'
+            "    condition:\n        $t\n}\n"
+            'rule R2 {\n    strings:\n        $t = "t2_marker_value"\n    condition:\n        $t\n}\n')
+        rules = split_rules(text)
+        assert [r.name for r in rules] == ["R1", "R2"]
+        assert ("$t", "text", "t1_marker") in rules[0].strings
+
+    def test_escaped_slash_before_a_star_in_a_regex_opens_no_comment(self):
+        """`/\\/*` in a regex is not a block comment: the rules after it are found."""
+        text = (
+            'rule R3 {\n    strings:\n        $re = /\\/*x/\n        $t = "t3_marker"\n'
+            "    condition:\n        $re and $t\n}\n"
+            'rule R4 {\n    strings:\n        $t = "t4_marker_value"\n    condition:\n        $t\n}\n'
+            'rule R5 {\n    strings:\n        $t = "t5_marker_value"\n    condition:\n        $t\n}\n')
+        assert [r.name for r in split_rules(text)] == ["R3", "R4", "R5"]
+
+    def test_comments_beside_a_regex_are_still_blanked(self):
+        """Real `//` and `/* */` comments are blanked; the regexes around them are kept."""
+        text = "$a = /x\\//  // gone\n$b = /\\/*y/ /* gone */ $c"
+        assert _strip_comments(text).split() == ["$a", "=", "/x\\//", "$b", "=", "/\\/*y/", "$c"]
+        assert len(_strip_comments(text)) == len(text)
+
+    def test_a_comment_after_the_equals_sign_is_not_a_regex(self):
+        """`= /* */` and `= //` are comments: a `/` before `/` or `*` never opens a regex."""
+        assert _strip_comments('$s = /* note */ "x"').split() == ["$s", "=", '"x"']
+        assert _strip_comments('$s = // note\n"x"').split() == ["$s", "=", '"x"']
+
+    def test_a_header_with_no_brace_does_not_take_the_next_closing_brace(self):
+        """Unclosed B is skipped; the stray brace after C must not close B around C."""
+        text = (
+            "rule A { condition: true }\n"
+            'rule B {\n    strings:\n        $b = "b_marker"\n'
+            "rule C { condition: true }\n}\n"
+            "rule D { condition: true }\n")
+        rules = split_rules(text)
+        assert [r.name for r in rules] == ["A", "C", "D"]
+        assert [r.body for r in rules] == [
+            "rule A { condition: true }", "rule C { condition: true }", "rule D { condition: true }"]
 
 
 class TestYaraStrings:

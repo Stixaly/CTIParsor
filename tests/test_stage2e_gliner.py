@@ -269,6 +269,24 @@ def test_degenerate_batch_shapes_are_normalised(monkeypatch, raw):
     assert values == [p["text"] for p in raw]
 
 
+def test_a_blob_with_one_early_space_is_not_cut_into_a_crawl_of_tiny_chunks():
+    # The space before the blob used to pull every chunk's cut back to it: one
+    # character further on each time, about 70 chunks of a few characters.
+    prose = "The actor dropped a loader on the host and ran it. "
+    text = prose + "powershell -enc " + "QUJDREVG" * 375 + " " + prose
+    chunks = [c for c, _ in stage2e_gliner._iter_chunks(text)]
+    assert len(chunks) <= 6
+    assert all(len(c) >= stage2e_gliner._MIN_CHUNK_CHARS for c in chunks[:-1])
+
+
+def test_prose_is_still_cut_at_a_word_boundary():
+    text = " ".join(["Emotet dropped a loader on the host."] * 200)
+    chunks = list(stage2e_gliner._iter_chunks(text))
+    assert len(chunks) > 1
+    for chunk, offset in chunks[:-1]:
+        assert text[offset + len(chunk)] == " "
+
+
 def test_the_registry_wrapper_delegates_to_the_module(monkeypatch):
     monkeypatch.setattr(stage2e_gliner, "gliner_available", lambda: True)
     monkeypatch.setattr(stage2e_gliner, "extract_gliner_entities", lambda text: [text])
