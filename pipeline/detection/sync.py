@@ -280,8 +280,10 @@ def sync_corpus(corpus: dict, *, timeout: int = 900) -> tuple[bool, str]:
         return fetch_tarball(corpus, timeout=timeout)
     try:
         cmd = git_command(corpus)
-    except ValueError as e:
-        return False, str(e)
+    except ValueError:
+        # The one ValueError git_command raises; a fixed text, as fetch_tarball gives,
+        # never the exception's (it reaches the browser: CodeQL py/stack-trace-exposure).
+        return False, "no path configured"
     if cmd is None:
         return False, "no git remote or tarball URL — this corpus's path is managed manually"
     remote = str(corpus.get("git") or "")

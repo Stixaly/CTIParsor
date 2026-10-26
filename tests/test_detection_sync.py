@@ -87,6 +87,12 @@ def test_git_command_refuses_a_missing_path() -> None:
             git_command(corpus)
 
 
+def test_sync_of_a_corpus_with_no_path_fails_with_a_fixed_message() -> None:
+    """The settings route sends this text to the browser: never an exception's."""
+    assert sync_mod.sync_corpus({"name": "t", "git": "https://example.com/repo.git"}) == (
+        False, "no path configured")
+
+
 def test_git_is_locked_to_https_on_its_own_command_line(tmp_path: Path) -> None:
     """A remote that gets past the API check still cannot switch transport
     (audit B 8.2.2): the policy travels with the command and the environment,
