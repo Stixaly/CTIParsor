@@ -20,7 +20,7 @@ from pipeline.regex_safety import compile_pattern
 setup_logging()
 logger = get_logger(__name__)
 
-from api.body_limit import BodyLimitMiddleware
+from api.body_limit import DEFAULT_BUDGET_BYTES, BodyLimitMiddleware
 from api.db import get_conn, init_db
 from api.paths import output_dir, uploads_dir
 
@@ -207,17 +207,20 @@ async def refuse_cross_site_writes(request: Request, call_next):
     return await call_next(request)
 
 
-# What a body may weigh on the routes that take a report or a STIX bundle
-# (api/body_limit.py): 413 on the `Content-Length`, or the moment a body sent
-# without one passes the budget, before FastAPI spools the form to disk.  The
-# nginx `proxy` profile allows the largest of them (docker/nginx/default.conf).
-# Runs second, after the Host check.
+# What a body may weigh (api/body_limit.py): 413 on the `Content-Length`, or the
+# moment a body sent without one passes the budget, before FastAPI spools a form
+# to disk or reads a JSON body whole.  The routes that take a report or a STIX
+# bundle, and the export whose rule ids grow with the store, have budgets of
+# their own; every other request has the default.  The nginx `proxy` profile
+# allows the largest of them (docker/nginx/default.conf).  Runs second, after
+# the Host check.
 app.add_middleware(BodyLimitMiddleware, budgets={
     ("POST", "/api/upload"): upload.body_budget,
     ("POST", "/api/baselines/inspect"): baselines.body_budget,
     ("POST", "/api/ingest/text"): ingest.text_body_budget,
     ("POST", "/api/ingest/url"): ingest.url_body_budget,
-})
+    ("POST", "/api/jobs/{job_id}/detections/export"): coverage.export_body_budget,
+}, default=lambda: DEFAULT_BUDGET_BYTES)
 
 # Added last, so it runs first: an unknown Host is answered 400 before the
 # request-id middleware or the write guard see it.

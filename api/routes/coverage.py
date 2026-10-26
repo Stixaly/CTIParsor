@@ -223,6 +223,16 @@ class ExportSelection(BaseModel):
     rule_ids: list[str] = Field(default_factory=list)
 
 
+def export_body_budget() -> int:
+    """The most a POST /api/jobs/{job_id}/detections/export body may weigh
+    (api/body_limit.py).  Its rule ids grow with the rule store, not with the
+    report: the tag join, the rules reached by evidence alone (untagged) and the
+    analyst's promotions, so at most every rule in the store.  On the 15 corpora
+    on disk (2026-10-26), the ids of the 38,059 ATT&CK-tagged rules weigh
+    0.94 MB as JSON, and those of all 87,407 rules 2.1 MB."""
+    return 8 * 1024 * 1024
+
+
 def _zip_export(
     job_id: str,
     report_name: str,

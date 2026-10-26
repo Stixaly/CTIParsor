@@ -9,15 +9,18 @@ application (nothing spooled, nothing stored).
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
+import logging
 from pathlib import Path
 from unittest.mock import patch
+from uuid import uuid4
 
 import httpx
 import pytest
 from starlette.responses import JSONResponse, PlainTextResponse
 
-from api.body_limit import ENVELOPE_BYTES, BodyLimitMiddleware
+from api.body_limit import DEFAULT_BUDGET_BYTES, ENVELOPE_BYTES, BodyLimitMiddleware
 from api.paths import uploads_dir
 
 _REPORT = b"APT29 deployed SUNBURST and contacted 185.220.101.45 for C2.\n"
@@ -125,6 +128,31 @@ def test_a_route_without_a_budget_is_left_alone():
     seen: list[bytes] = []
     pulled, sent = _drive(_limited(_reader(seen), 10), [b"x" * 1000] * 3, path="/other")
     assert pulled == 3 and sum(map(len, seen)) == 3000 and _statuses(sent) == [200]
+
+
+def test_a_route_without_a_budget_of_its_own_is_held_to_the_default():
+    app = BodyLimitMiddleware(_reader([]), budgets={("POST", "/up"): lambda: 3500}, default=lambda: 2048)
+    for headers in ([(b"content-length", b"5000")], None):
+        pulled, sent = _drive(app, [b"x" * 1000] * 5, path="/other", headers=headers)
+        assert pulled == (0 if headers else 3) and _statuses(sent) == [413]
+        assert json.loads(_body(sent)) == {"detail": "Request too large. /other accepts at most 2 KB."}
+    assert _statuses(_drive(app, [b"x" * 3000], path="/up")[1]) == [200]     # its own budget, not the default
+
+
+def test_a_path_is_matched_as_the_router_matches_it(caplog):
+    """`{job_id}` is one segment, and the router's regex ends in `$`, which also
+    takes the path followed by a newline: `/up%0A` reaches the `/up` route.  The
+    path is quoted in the log, or the newline would start a line of its own."""
+    app = BodyLimitMiddleware(_reader([]), budgets={("POST", "/up"): lambda: 3500,
+                                                     ("POST", "/jobs/{job_id}/export"): lambda: 8000})
+    with caplog.at_level(logging.INFO, logger="api.body_limit"):
+        _, sent = _drive(app, [b"x" * 4000], path="/up\n")
+    assert json.loads(_body(sent)) == {"detail": "Request too large. /up%0A accepts at most 3 KB."}
+    assert [r.getMessage() for r in caplog.records] == [
+        "[body-limit] POST /up%0A cut off: past its 3500-byte budget"]
+    assert _statuses(_drive(app, [b"x" * 7000], path="/jobs/j-1/export")[1]) == [200]
+    assert _statuses(_drive(app, [b"x" * 9000], path="/jobs/j-1/export")[1]) == [413]
+    assert _statuses(_drive(app, [b"x" * 9000], path="/jobs/j-1/x/export")[1]) == [200]    # another route
 
 
 def test_an_error_after_the_413_stays_behind_it():
@@ -276,13 +304,110 @@ def test_pasted_text_over_its_budget_is_refused_without_content_length(client, m
     client.spawn.assert_not_called()
 
 
+def test_a_newline_after_the_path_does_not_slip_past_the_budget(client, small_budget, spooled):
+    """`/api/upload%0A` reaches the upload route; it used to miss the budget and
+    have its whole form spooled before the route's own 413."""
+    body, content_type = _form(_REPORT * (2 * small_budget // len(_REPORT)))
+    resp = client.post("/api/upload%0A", content=body, headers={"content-type": content_type})
+    assert resp.status_code == 413
+    assert resp.json()["detail"] == "Request too large. /api/upload%0A accepts at most 68 KB."
+    assert spooled == [] and _stored() == []
+
+
+# ── The default, on every route without a budget of its own ─────────────────
+
+def _make_job(temp_db, job_id: str) -> str:
+    with temp_db.get_conn() as conn:
+        conn.execute(
+            "INSERT INTO jobs (id, original_filename, status, report_text, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (job_id, "r.txt", "reviewing", "APT29 used WellMess.", temp_db.now_iso(), temp_db.now_iso()),
+        )
+        conn.commit()
+    return job_id
+
+
+@pytest.mark.parametrize("declared", [True, False], ids=["content-length", "no-content-length"])
+@pytest.mark.parametrize(("method", "path", "body"), [
+    # read whole by `request.json()`
+    ("PUT", "/api/relationship-policy", {"version": 1, "rules": [], "note": "x" * DEFAULT_BUDGET_BYTES}),
+    # read whole by pydantic
+    ("POST", "/api/jobs/job-big/relationships/bulk", {"ids": ["r" * 40] * (DEFAULT_BUDGET_BYTES // 40),
+                                                      "action": "reject"}),
+], ids=["policy", "bulk"])
+def test_a_json_body_over_the_default_is_refused(client, temp_db, declared, method, path, body):
+    _make_job(temp_db, "job-big")
+    raw = json.dumps(body).encode()
+    resp = client.request(method, path, content=raw if declared else iter([raw]),
+                          headers={"content-type": "application/json"})
+    assert ("content-length" in resp.request.headers) is declared
+    assert resp.status_code == 413
+    assert resp.json()["detail"] == f"Request too large. {path} accepts at most 1 MB."
+    assert "note" not in client.get("/api/relationship-policy").json()
+
+
+def test_the_largest_policy_the_ui_can_send_is_stored(client):
+    """A rule for every pair of the types the PUT accepts (it refuses a second rule
+    for a pair), as the Policy page writes an imported rule."""
+    from api.routes.policy import _OBJECT_TYPES
+    from models.schemas import STIX_RELATIONSHIP_TYPES
+
+    verb = max(STIX_RELATIONSHIP_TYPES, key=len)
+    rules = [{"id": f"rule-imp-{i}-1761500000000", "src": src, "verb": verb, "tgt": tgt,
+              "mode": "auto", "enabled": True}
+             for i, (src, tgt) in enumerate(itertools.product(sorted(_OBJECT_TYPES), repeat=2))]
+    body = json.dumps({"version": 1, "global": "auto", "rules": rules}, separators=(",", ":")).encode()
+    assert 150 * 1024 < len(body) < DEFAULT_BUDGET_BYTES / 4      # 177 KB: the default is 5.8 times it
+    resp = client.put("/api/relationship-policy", content=iter([body]), headers={"content-type": "application/json"})
+    assert resp.status_code == 200, resp.text
+    assert len(client.get("/api/relationship-policy").json()["rules"]) == len(rules)
+
+
+def test_a_review_group_at_its_cap_is_decided(client, temp_db):
+    from api.routes.relationships import _BULK_MAX
+
+    job_id = _make_job(temp_db, "job-group")
+    with temp_db.get_conn() as conn:
+        conn.execute(
+            "INSERT INTO relationships (id, job_id, source_value, relationship_type, target_value, confidence, "
+            "accepted, decision_origin) VALUES (?,?,?,?,?,?,?,?)",
+            ("rel-0", job_id, "APT29", "uses", "WellMess", 0.8, 1, "default"),
+        )
+        conn.commit()
+    ids = ["rel-0"] + [str(uuid4()) for _ in range(_BULK_MAX - 1)]
+    resp = client.post(f"/api/jobs/{job_id}/relationships/bulk", content=iter([json.dumps(
+        {"ids": ids, "action": "reject"}).encode()]), headers={"content-type": "application/json"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"updated": 1, "action": "reject"}
+
+
+def test_a_detection_export_of_every_rule_in_the_store_has_room(client):
+    """The export POSTs rule ids, which grow with the rule store: every one of the
+    87,407 rules on disk, each at the longest id (49 characters), is 4.4 MB."""
+    from api.routes.coverage import export_body_budget
+
+    path = "/api/jobs/no-such-job/detections/export"
+    body = json.dumps({"rule_ids": ["x" * 49] * 87_407}).encode()
+    assert DEFAULT_BUDGET_BYTES < len(body) < export_body_budget()
+    resp = client.post(path, content=iter([body]), headers={"content-type": "application/json"})
+    assert resp.status_code == 404 and resp.json()["detail"] == "Job not found"     # read whole, then answered
+
+    body = json.dumps({"rule_ids": ["x" * 49] * (export_body_budget() // 49)}).encode()
+    resp = client.post(path, content=iter([body]), headers={"content-type": "application/json"})
+    assert resp.status_code == 413 and resp.json()["detail"] == f"Request too large. {path} accepts at most 8 MB."
+
+
 # ── The budgets ──────────────────────────────────────────────────────────────
 
-def _budgets() -> dict:
+def _middleware_kwargs() -> dict:
     import api.main
 
     (middleware,) = [m for m in api.main.app.user_middleware if m.cls is BodyLimitMiddleware]
-    return middleware.kwargs["budgets"]
+    return middleware.kwargs
+
+
+def _budgets() -> dict:
+    return _middleware_kwargs()["budgets"]
 
 
 def test_the_baseline_has_room_only_while_the_mode_is_on(monkeypatch):
@@ -310,7 +435,11 @@ def test_every_route_that_takes_a_file_or_a_baseline_has_a_budget():
         if "multipart/form-data" in operation.get("requestBody", {}).get("content", {})
     }
     assert takes_a_file == {("POST", "/api/upload"), ("POST", "/api/baselines/inspect")}
-    assert set(_budgets()) == takes_a_file | {("POST", "/api/ingest/text"), ("POST", "/api/ingest/url")}
+    assert set(_budgets()) == takes_a_file | {("POST", "/api/ingest/text"), ("POST", "/api/ingest/url"),
+                                              ("POST", "/api/jobs/{job_id}/detections/export")}
+    assert set(_budgets()) <= {(method.upper(), path) for path, operations in api.main.app.openapi()["paths"].items()
+                               for method in operations}            # each written as its route declares it
+    assert _middleware_kwargs()["default"]() == DEFAULT_BUDGET_BYTES
 
 
 def test_nginx_lets_through_whatever_the_api_accepts(monkeypatch):
@@ -320,4 +449,5 @@ def test_nginx_lets_through_whatever_the_api_accepts(monkeypatch):
     conf = (_ROOT / "docker" / "nginx" / "default.conf").read_text(encoding="utf-8")
     (limit,) = [line.split()[1] for line in conf.splitlines() if line.strip().startswith("client_max_body_size")]
     assert limit.endswith("m;")
-    assert max(budget() for budget in _budgets().values()) <= int(limit.removesuffix("m;")) * 1024 * 1024
+    budgets = [*_budgets().values(), _middleware_kwargs()["default"]]
+    assert max(budget() for budget in budgets) <= int(limit.removesuffix("m;")) * 1024 * 1024
