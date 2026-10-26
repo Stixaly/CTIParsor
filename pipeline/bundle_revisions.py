@@ -61,6 +61,11 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "A URL that is not a valid URI (a redacted host, a bracket or a space left in it) gets no url "
      "observable and no Indicator; it used to make the bundle fail Stage 5",
      "mapping"),
+    ("2e6502a", "2026-10-26",
+     "Code audit fixes: a malformed LLM item drops that item, not the chunk; registry keys and Unix "
+     "paths lose the sentence after them; TTP candidates and selection; an association's Indicator "
+     "spells the IoC as the report does; a campaign named like a malware ships; confidence rounds",
+     "extraction"),
 )
 
 
