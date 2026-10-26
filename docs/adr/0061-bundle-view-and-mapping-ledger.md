@@ -3,6 +3,15 @@
 **Status:** Accepted
 **Date:** 2026-09-28
 **Deciders:** maintainer
+**Amended by:** [0091](0091-a-name-that-denotes-several-objects-resolves-by-the-verb.md)
+(2026-10-26, proposed). A relationship row whose end names objects of several
+STIX types is dropped with the reason `ambiguous_name` when its verb does not
+settle which one; the ledger row carries `source_candidates` and
+`target_candidates`.
+**Amended by:** [0092](0092-one-type-per-name-before-stage-4-by-source-rank.md)
+(2026-10-26). An input entity whose name another source types differently,
+and ranks higher, is dropped with the reason `outranked_type`, with `sources`,
+`kept_types` and `kept_sources`.
 **Relates to:** ADR-0009 (trust & provenance — the observable → ObservedData →
 Indicator chain it established, amended here), ADR-0012 (relationship
 precision), ADR-0013 (graph completion), ADR-0024 (edge provenance), ADR-0035
@@ -48,11 +57,12 @@ and records, as it decides:
   verb, each change — verb `not_suggested` / `policy_pin` / `unknown_verb`,
   endpoint `reroute`), `merged` (the edge it duplicates — another row, or a
   Stage 4 edge), or `dropped` with a reason (`unresolved_source|target|both`,
-  `self_loop`, `observable_to_attack_pattern`, `no_indicator`, `invalid`);
+  `self_loop`, `ambiguous_name`, `observable_to_attack_pattern`, `no_indicator`,
+  `invalid`);
 - for each **input entity**: the object it became, the object it was merged
   into (`same_value`, `same_observable`, `same_technique`, `alias_canonical`),
   or why it was dropped (`no_iso_country`, `not_representable`,
-  `not_a_uri`, `not_in_llm_lists`);
+  `not_a_uri`, `not_in_llm_lists`, `outranked_type`);
 - for each **object and SRO**, why it exists (`entity`, `extracted`,
   `ioc_indicator`, `ioc_based_on`, `ioc_association`, `targeted_location`,
   `embedded_rule`, `policy_pin`, `completion_*`, …);

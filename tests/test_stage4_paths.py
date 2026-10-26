@@ -114,11 +114,18 @@ def _embedded(pattern_type="yara", pattern="rule Emotet_Loader { condition: true
               llm=None, name_to_stix=None, seen_ids=None):
     objects: list = []
     s4._add_embedded_rule_indicator(
-        objects, name_to_stix or {}, seen_ids if seen_ids is not None else set(),
+        objects, name_to_stix or s4._NameIndex(), seen_ids if seen_ids is not None else set(),
         pattern_type=pattern_type, pattern=pattern, title=title,
         llm_result=llm or LLMEnrichmentResult(), pol_index=None, seen_rel_keys=set(),
     )
     return objects
+
+
+def _names(*objs) -> s4._NameIndex:
+    index = s4._NameIndex()
+    for o in objs:
+        index.add(o.name.lower(), o)
+    return index
 
 
 def test_an_embedded_rule_links_only_names_long_enough_and_known():
@@ -126,11 +133,23 @@ def test_an_embedded_rule_links_only_names_long_enough_and_known():
     llm = LLMEnrichmentResult(malware_families=["Emotet", "RAT", "Qakbot"], tools=["Mimikatz"])
 
     objects = _embedded(title="Emotet RAT loader", llm=llm,
-                        name_to_stix={"emotet": emotet})          # Qakbot/Mimikatz not in title, RAT too short
+                        name_to_stix=_names(emotet))          # Qakbot/Mimikatz not in title, RAT too short
 
     indicator, rel = objects
     assert indicator.pattern_type == "yara" and indicator.name == "Yara rule: Emotet RAT loader"
     assert (rel.source_ref, rel.relationship_type, rel.target_ref) == (indicator.id, "indicates", emotet.id)
+
+
+def test_an_embedded_rule_titled_with_a_name_two_lists_share_indicates_both_objects():
+    malware = stix2.Malware(name="Mimikatz", is_family=True)
+    tool = stix2.Tool(name="Mimikatz")
+    llm = LLMEnrichmentResult(malware_families=["Mimikatz"], tools=["Mimikatz"])
+
+    objects = _embedded(title="Mimikatz_Loader", llm=llm, name_to_stix=_names(malware, tool))
+
+    indicator, *rels = objects
+    assert [(r.source_ref, r.relationship_type) for r in rels] == [(indicator.id, "indicates")] * 2
+    assert {r.target_ref for r in rels} == {malware.id, tool.id}
 
 
 def test_a_name_in_the_title_without_an_sdo_links_nothing():
@@ -287,15 +306,29 @@ def test_a_campaign_named_like_a_malware_is_its_own_object():
     assert entry["outcome"] == "emitted" and entry["stix_id"] == campaign.id
 
 
-def test_a_raw_campaign_whose_name_a_malware_took_is_still_the_one_campaign():
-    # The malware takes the bare key over from the raw Campaign: the LLM's campaign_name
-    # must still merge into it, not ship a second Campaign under the same id.
+def test_a_raw_campaign_that_shares_a_malware_name_is_still_the_one_campaign():
+    # The raw Campaign and the malware each keep their object under the name: the
+    # LLM's campaign_name must merge into the Campaign, not ship a second one under its id.
     bundle = s4.build_stix_bundle(
         [_e("NotPetya", EntityType.CAMPAIGN)],
         LLMEnrichmentResult(campaign_name="NotPetya", malware_families=["NotPetya"]),
         "r", graph_completion=False)
 
     assert len(_objects(bundle, "campaign")) == 1 and len(_objects(bundle, "malware")) == 1
+
+
+def test_a_raw_campaign_spelt_with_a_trailing_space_is_found_by_its_id():
+    # Its key keeps the space, its id does not (stix_ids normalises the name).
+    from pipeline.bundle_ledger import MappingLedger
+
+    ledger = MappingLedger()
+    bundle = s4.build_stix_bundle(
+        [_e("Operation Foo ", EntityType.CAMPAIGN)], LLMEnrichmentResult(campaign_name="Operation Foo"),
+        "r", ledger=ledger, graph_completion=False)
+
+    (campaign,) = _objects(bundle, "campaign")
+    (entry,) = [e for e in ledger.entities if e["value"] == "Operation Foo"]
+    assert entry["outcome"] == "merged" and entry["stix_id"] == campaign.id
 
 
 def test_an_indicator_spells_the_ioc_as_the_report_does():

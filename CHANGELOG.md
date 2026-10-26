@@ -839,6 +839,52 @@ gets a dated amendment.
 
 ### Fixed
 
+#### A name two lists share no longer puts a claim on the wrong object (ADR-0091), 2026-10-26
+
+Stage 4 kept one object per lower-cased name, so a name in two of the LLM's
+lists (or in a list and a technique) kept the last object written, and every
+relationship that named it hung on that object. With `Carbanak` as threat actor
+and malware, the `targets` edge left the malware and none left the actor. With
+`Mimikatz` as malware and tool, "Mimikatz uses OS Credential Dumping" resolved
+on the Tool, and `tool uses attack-pattern` shipped as `related-to`.
+
+`_NameIndex` now keeps one object per name and STIX type. Each end of a row
+resolves to the type its verb expects. When several pairs fit, or none, the row
+is dropped with the ledger reason `ambiguous_name` and the ids of the candidates,
+which the Graph page shows. The `targets` product, raw entities, raw techniques
+(no longer "merged" into a tool of the same name), IoC associations and
+embedded-rule titles read the type they mean. Measured on 7 real reports
+(150 rows): 10 names carry two or three types and touch 75 rows; 55 rows change
+(51 shipped rows now dropped, 3 dropped rows change reason, 1 row now ships with
+its verb); relationship SROs 1,390 → 1,361; 118 `targets` edges move from a
+malware to the actor of the same name; object counts unchanged. The cost is
+recall on reports whose detectors type one name two ways. It lands with ADR-0092,
+which chooses one type per name by source rank before Stage 4.
+
+#### A name typed several ways keeps the type of its best-ranked source (ADR-0092), 2026-10-26
+
+Stage 2 already kept, for a name two detectors typed differently, the type of
+the better-ranked one (ADR-0055). The LLM's names, its campaign name and the
+analyst's rows come later, so a name could still reach Stage 4 under several
+types, and ADR-0091 dropped its rows as `ambiguous_name`. The same ranking,
+extended, is now applied where the named lists are built, on a run, a finalize
+and `scripts/baseline_round_trip.py`: the analyst (a row added in review, a row
+accepted on its own, a name the baseline holds under that type, whatever found
+it), then the IoC regexes and the gazetteer, then
+the LLM, then CyNER and GLiNER, then spaCy and the alias list. A campaign ranks
+last unless the analyst gave it: the LLM's `campaign_name` reused a malware's or
+an actor's name in all three cases measured. Equal ranks all stay, and ADR-0091
+resolves each row by its verb. Each type left out is recorded in the ledger as
+`dropped / outranked_type`, which the Graph page explains. Measured on the 7
+real reports: of the 54 rows ADR-0091 drops, 13 ship again on main's object
+types, 3 go back to main's `benign_observable`, and 38 stay dropped (37 are
+CyNER typing one name as both malware and threat actor). Four Campaign objects
+named like a malware or an actor leave their bundles. This reverses in practice
+the audit's "A campaign named like a malware" fix below (Stage 4 still builds
+such a Campaign, but it rarely reaches Stage 4 now); unlike before the audit, the
+drop is recorded, and the analyst's accept of the campaign row brings the
+Campaign back. Stage 4 is not changed.
+
 #### A code audit's fixes: a web-capture range, a DOCX zip bomb, doubled rows after a requeue, lost detection rules, 2026-10-26
 
 A code audit read the repository by zone (worker and API, Stage 1 to 4, the

@@ -1096,16 +1096,6 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
         logger.warning("[finalize] job %s: %d stored entity row(s) could not be read and are "
                        "left out of the bundle, e.g. %s", job_id, len(unreadable), unreadable[0])
 
-    # Malware, threat-actor and tool names: the stored rows, every source
-    # (gazetteer, NER, LLM, analyst) minus the rejected ones — through the same
-    # helper a pipeline run uses before Stage 4 (pipeline/named_entities.py).
-    from pipeline.named_entities import with_named_entities
-    _named = with_named_entities(LLMEnrichmentResult(),
-                                 ((row["entity_type"], row["value"]) for row in all_entity_rows))
-    malware_names      = _named.malware_families
-    threat_actor_names = _named.threat_actors
-    tool_names         = _named.tools
-
     # ── Load original LLM JSON for fields that have no individual entity rows ───
     # (TTPs, ioc_associations, campaign_name, targeted_sectors/countries,
     #  course_of_action are stored only as aggregate JSON, not as individual rows)
@@ -1159,6 +1149,23 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
     if campaign_name and campaign_name.lower().strip() in rejected_campaigns:
         campaign_name = None
 
+    # Malware, threat-actor and tool names: the stored rows, every source
+    # (gazetteer, NER, LLM, analyst) minus the rejected ones — through the same
+    # helper a pipeline run uses before Stage 4 (pipeline/named_entities.py).
+    # It runs once campaign_name is read: a name typed several ways keeps its
+    # best-ranked source's type, the analyst's accept counting as the analyst's
+    # (ADR-0092).  A campaign it outranks leaves campaign_name and the raw
+    # entities (the stored campaign row); the ledger records it.
+    from pipeline.named_entities import stored_row_source, with_named_entities
+    named = with_named_entities(
+        LLMEnrichmentResult(campaign_name=campaign_name),
+        ((row["entity_type"], row["value"],
+          stored_row_source(row["source"], row["accepted"], row["decision_origin"]))
+         for row in all_entity_rows),
+    )
+    raw_entities = [e for e in raw_entities if named.keeps(e)]
+    campaign_name = named.llm_result.campaign_name
+
     # Filter targeted countries and sectors — excluded if entity was rejected
     filtered_countries = [
         c for c in llm_result.targeted_countries
@@ -1203,9 +1210,9 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
     llm_result = LLMEnrichmentResult(
         # DB is the authoritative source for named SDOs — includes gazetteer,
         # CyNER, GLiNER, manual additions, and reviewer edits on top of LLM output.
-        malware_families=malware_names,
-        threat_actors=threat_actor_names,
-        tools=tool_names,
+        malware_families=named.llm_result.malware_families,
+        threat_actors=named.llm_result.threat_actors,
+        tools=named.llm_result.tools,
         # JSON-blob fields, now filtered through the reviewer's decisions:
         ttps=filtered_ttps,
         ioc_associations=llm_result.ioc_associations,
@@ -1239,6 +1246,7 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
     # Stage 4 through the same function a pipeline run uses (ADR-0059).
     from pipeline.bundle_ledger import MappingLedger
     ledger = MappingLedger()
+    named.record(ledger)
     policy = _load_policy()
     bundle = build_bundle(
         raw_entities, llm_result,

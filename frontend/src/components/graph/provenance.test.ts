@@ -47,6 +47,11 @@ describe('baseline vocabulary — the analyst’s STIX bundle (ADR-0090)', () =>
     expect(entityReason('baseline_report_empty')).toContain('not re-issued')
   })
 
+  it('explains a name that denotes objects of several types', () => {
+    expect(relationshipReason('ambiguous_name')).toContain('several types')
+    expect(entityReason('ambiguous_name')).toContain('which one the IoC indicates')
+  })
+
   it('explains a relationship that the baseline merge made a loop or a duplicate', () => {
     expect(relationshipReason('self_loop_after_baseline_merge')).toContain('same object')
     expect(relationshipReason('duplicate_after_baseline_merge')).toContain('already ships')
@@ -62,6 +67,13 @@ describe('baseline vocabulary — the analyst’s STIX bundle (ADR-0090)', () =>
 
   it('lists every edge kind once in the legend order', () => {
     expect([...EDGE_KIND_ORDER].sort()).toEqual(Object.keys(EDGE_KIND_STYLE).sort())
+  })
+})
+
+describe('one type per name, by source rank (ADR-0092)', () => {
+  it('explains a type that another source of the same name outranks, and how to keep it', () => {
+    expect(entityReason('outranked_type')).toContain('ranks higher')
+    expect(entityReason('outranked_type')).toContain('on its own')
   })
 })
 

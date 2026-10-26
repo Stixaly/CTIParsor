@@ -487,6 +487,9 @@ export interface LedgerRelationship {
   merged_with?: string
   /** self_loop: the one object both ends resolved to */
   stix_ref?: string
+  /** ambiguous_name: every object each end could mean */
+  source_candidates?: string[]
+  target_candidates?: string[]
   detail?: string
 }
 
@@ -505,6 +508,13 @@ export interface LedgerEntity {
   /** reason 'type_conflict': what MITRE calls this name, in the other family */
   mitre_ids?: string[]
   mitre_types?: string[]
+  /** reason 'ambiguous_name' (an IoC association): every object the malware name could mean */
+  candidates?: string[]
+  /** reason 'outranked_type': the sources of this type of the name, the types another source
+   *  gives it that rank higher (kept), and the sources of those */
+  sources?: string[]
+  kept_types?: string[]
+  kept_sources?: string[]
 }
 
 export interface LedgerObjectInfo {

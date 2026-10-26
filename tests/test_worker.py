@@ -486,6 +486,41 @@ def test_finalize_applies_every_reviewer_rejection_to_the_llm_blob(db):
     assert (output_dir() / "APT_report_j1_bundle.json").exists()
 
 
+def test_finalize_keeps_the_type_of_the_best_ranked_source_and_the_analysts_accept_counts(db):
+    """ADR-0092: the gazetteer's malware outranks the LLM's campaign of the same
+    name; only an accept the analyst made on its own gives the campaign the name."""
+    llm = LLMEnrichmentResult(campaign_name="Industroyer2")
+    _job(db, report_text="Industroyer2 hit the grid.", llm_result_json=llm.model_dump_json())
+    _entity(db, "j1", "Industroyer2", "malware", accepted=None, source="gazetteer")
+    _entity(db, "j1", "Industroyer2", "campaign", accepted=None, source="llm")
+
+    def finalize():
+        bundle = worker.re_run_final_stages("j1", quick=False)
+        ledger = [e for e in json.loads(_row(db)["bundle_ledger_json"])["entities"]
+                  if e.get("reason") == "outranked_type"]
+        return _objects(bundle, "malware"), _objects(bundle, "campaign"), ledger
+
+    malware, campaign, ledger = finalize()                          # unreviewed: the campaign is outranked
+    assert (malware, campaign) == (["Industroyer2"], [])
+    assert [(e["entity_type"], e["outcome"], e["sources"], e["kept_types"], e["kept_sources"]) for e in ledger] == [
+        ("campaign", "dropped", ["llm"], ["malware"], ["gazetteer"])]
+
+    with db.get_conn() as conn:
+        conn.execute("UPDATE entities SET accepted=1, decision_origin='human_bulk' "
+                     "WHERE job_id='j1' AND entity_type='campaign'")
+        conn.commit()
+    malware, campaign, ledger = finalize()                          # a bulk accept is not the analyst's
+    assert (malware, campaign) == (["Industroyer2"], []) and [e["entity_type"] for e in ledger] == ["campaign"]
+
+    with db.get_conn() as conn:
+        conn.execute("UPDATE entities SET decision_origin='human' WHERE job_id='j1' AND entity_type='campaign'")
+        conn.commit()
+    malware, campaign, ledger = finalize()                          # accepted by the analyst: it wins
+    assert (malware, campaign) == ([], ["Industroyer2"])
+    assert [(e["entity_type"], e["sources"], e["kept_types"], e["kept_sources"]) for e in ledger] == [
+        ("malware", ["gazetteer"], ["campaign"], ["analyst", "llm"])]
+
+
 def test_finalize_survives_a_corrupt_llm_blob_and_an_unreadable_anchor(db, monkeypatch, caplog):
     _job(db, status="reviewing", llm_result_json="{not json", report_text="APT29 used SUNBURST.")
     _entity(db, "j1", "APT29", "threat_actor")

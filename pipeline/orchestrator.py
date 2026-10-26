@@ -1107,7 +1107,7 @@ class _Run:
         source_hash, source_bytes = load_file_bytes(self.doc.file_path)
         if r.llm_result is None:   # enrich() always sets it
             raise RuntimeError("Stage 4 reached without a Stage 3 result")
-        from pipeline.baseline_stix import BaselineBuild
+        from pipeline.baseline_stix import MATCHED, BaselineBuild
         from pipeline.bundle_ledger import MappingLedger
         from pipeline.named_entities import with_named_entities
         ledger = MappingLedger()
@@ -1125,9 +1125,20 @@ class _Run:
         # Stage 4 maps malware / actors / tools from the LLM's lists; the
         # gazetteer's and NER's names join them here, as the worker's
         # finalisation already did from the job store — the CLI dropped them
-        # (audit B 8.1.2).  `r.llm_result` itself is left as Stage 3 made it.
+        # (audit B 8.1.2).  A name typed several ways keeps its best-ranked
+        # source's type (ADR-0092): the types left out are recorded in the
+        # ledger, and their raw entities do not reach Stage 4.  A name the
+        # analyst's baseline holds under a type is the analyst's, as its row's
+        # origin `baseline_stix` says on a finalize.  `r.llm_result` itself is
+        # left as Stage 3 made it.
+        rec = r.reconciliation
+        named = with_named_entities(
+            r.llm_result, entities,
+            baseline_holds=None if rec is None else lambda t, v: rec.entity(t, v)[0] == MATCHED,
+        )
+        named.record(ledger)
         r.bundle = build_bundle(
-            entities, with_named_entities(r.llm_result, entities),
+            [e for e in entities if named.keeps(e)], named.llm_result,
             report_name=self.doc.report_name,
             report_text=r.text,
             original_filename=self.doc.name,

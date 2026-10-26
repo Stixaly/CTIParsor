@@ -2,9 +2,11 @@ import pytest
 import stix2
 
 from models.schemas import EntityType, RawEntity
-from pipeline.stage3_llm import LLMEnrichmentResult, RelationshipExtracted, TTPExtracted
+from pipeline.bundle_ledger import MappingLedger
+from pipeline.stage3_llm import IoCAssociation, LLMEnrichmentResult, RelationshipExtracted, TTPExtracted
 from pipeline.stage4_stix_mapping import (
     _entity_to_sdo,
+    _NameIndex,
     build_stix_bundle,
     verify_ioc_coverage,
 )
@@ -519,6 +521,289 @@ def test_forced_edge_for_non_suggested_pair_is_downgraded():
     bundle = build_stix_bundle([], llm, "r", relationship_policy=pol)
     rel = _find_rel(bundle, "tool", "malware")
     assert rel is not None and rel.relationship_type == "related-to"
+
+
+# ── A name that denotes objects of several types ───────────────────────────────
+# "Carbanak" is a threat actor and a malware, "Mimikatz" a malware and a tool,
+# "PowerShell" a tool and a technique.  Each end of a row resolves to the type
+# its verb expects; when that does not settle it, the row is dropped as
+# ambiguous rather than hung on whichever list was written last.
+
+def _of_type(bundle, stix_type):
+    return [o for o in bundle.objects if o.get("type") == stix_type]
+
+
+def _sros(bundle):
+    return [(r.source_ref, r.relationship_type, r.target_ref) for r in _of_type(bundle, "relationship")]
+
+
+def test_name_index_tiers_and_precedence():
+    first = stix2.Malware(name="First", is_family=True)
+    second = stix2.Malware(name="Second", is_family=True)
+    tool = stix2.Tool(name="Tool")
+    index = _NameIndex()
+
+    index.add("x", first, alias=True)
+    assert index.candidates("x") == {"malware": first}
+    index.add("x", tool)                                  # a direct name outranks an alias form
+    assert index.candidates("x") == {"tool": tool}
+    assert index.of_type("x", "tool") is tool
+    assert index.of_type("x", "malware") is first             # no direct malware: the alias tier answers
+
+    index.add("y", first)
+    index.add("y", second)                                # the last direct write wins within a type
+    assert index.of_type("y", "malware") is second
+
+    index.add("z", first, alias=True)
+    index.add("z", second, alias=True)                    # the first alias form to claim a key keeps it
+    assert index.of_type("z", "malware") is first
+
+    assert index.of_type("nope", "malware") is None and index.candidates("nope") == {}
+    index.candidates("y").clear()                         # a copy: the index is not touched
+    assert index.of_type("y", "malware") is second
+
+
+def test_a_name_in_two_lists_keeps_both_objects_and_an_unsettled_row_is_dropped():
+    llm = LLMEnrichmentResult(
+        threat_actors=["Carbanak"], malware_families=["Carbanak"],
+        ttps=[TTPExtracted(technique_name="Phishing", mitre_id="T1566")],
+        relationships=[RelationshipExtracted(
+            source_value="Carbanak", relationship_type="uses", target_value="Phishing")],
+        targeted_countries=["France"],
+    )
+    led = MappingLedger()
+    bundle = build_stix_bundle([], llm, "r", ledger=led, graph_completion=False)
+    [actor] = _of_type(bundle, "threat-actor")
+    [malware] = _of_type(bundle, "malware")
+    [phishing] = _of_type(bundle, "attack-pattern")
+    [france] = _of_type(bundle, "location")
+
+    # the targeted-country edge comes from the actor, none from the malware
+    assert _sros(bundle) == [(actor.id, "targets", france.id)]
+    # "uses" fits an actor and a malware alike: the row cannot say which it means
+    [row] = led.relationships
+    assert row["outcome"] == "dropped" and row["reason"] == "ambiguous_name"
+    assert row["source_candidates"] == sorted([actor.id, malware.id])
+    assert row["target_candidates"] == [phishing.id]
+
+
+def test_a_malware_and_a_tool_of_one_name_the_verb_picks_the_malware():
+    llm = LLMEnrichmentResult(
+        malware_families=["Mimikatz"], tools=["Mimikatz"],
+        ttps=[TTPExtracted(technique_name="OS Credential Dumping", mitre_id="T1003")],
+        relationships=[RelationshipExtracted(
+            source_value="Mimikatz", relationship_type="uses", target_value="OS Credential Dumping")],
+    )
+    led = MappingLedger()
+    bundle = build_stix_bundle([], llm, "r", ledger=led, graph_completion=False)
+    [malware] = _of_type(bundle, "malware")
+    [technique] = _of_type(bundle, "attack-pattern")
+
+    # `tool uses attack-pattern` is not a STIX pair: it is the malware's edge, as written
+    assert _sros(bundle) == [(malware.id, "uses", technique.id)]
+    [row] = led.relationships
+    assert row["outcome"] == "emitted" and row["final_type"] == "uses"
+
+
+def test_a_verb_no_candidate_pair_fits_is_dropped_as_ambiguous():
+    llm = LLMEnrichmentResult(
+        malware_families=["Mimikatz"], tools=["Mimikatz"],
+        ttps=[TTPExtracted(technique_name="OS Credential Dumping", mitre_id="T1003")],
+        relationships=[RelationshipExtracted(
+            source_value="Mimikatz", relationship_type="exploits", target_value="OS Credential Dumping")],
+    )
+    led = MappingLedger()
+    bundle = build_stix_bundle([], llm, "r", ledger=led, graph_completion=False)
+
+    assert _sros(bundle) == []
+    [row] = led.relationships
+    assert row["outcome"] == "dropped" and row["reason"] == "ambiguous_name"
+    assert len(row["source_candidates"]) == 2
+
+
+def test_the_target_end_is_resolved_by_the_verb_too():
+    llm = LLMEnrichmentResult(
+        threat_actors=["Sandworm"], malware_families=["Industroyer2"], campaign_name="Industroyer2",
+        relationships=[
+            RelationshipExtracted(source_value="Sandworm", relationship_type="uses",
+                                  target_value="Industroyer2"),
+            RelationshipExtracted(source_value="Industroyer2", relationship_type="attributed-to",
+                                  target_value="Sandworm"),
+        ],
+    )
+    led = MappingLedger()
+    bundle = build_stix_bundle([], llm, "r", ledger=led, graph_completion=False)
+    [actor] = _of_type(bundle, "threat-actor")
+    [malware] = _of_type(bundle, "malware")
+    [campaign] = _of_type(bundle, "campaign")
+
+    assert _sros(bundle) == [(actor.id, "uses", malware.id), (campaign.id, "attributed-to", actor.id)]
+    assert [r["outcome"] for r in led.relationships] == ["emitted", "emitted"]
+
+
+def test_a_raw_entity_of_a_name_two_lists_share_is_merged_into_its_own_type():
+    entities = [RawEntity(value="Carbanak", entity_type=EntityType.THREAT_ACTOR)]
+    llm = LLMEnrichmentResult(threat_actors=["Carbanak"], malware_families=["Carbanak"])
+    led = MappingLedger()
+    build_stix_bundle(entities, llm, "r", ledger=led, graph_completion=False)
+
+    [row] = [e for e in led.entities
+             if e["entity_type"] == EntityType.THREAT_ACTOR.value and e["outcome"] != "emitted"]
+    assert row["outcome"] == "merged" and row["stix_type"] == "threat-actor"
+
+
+def test_a_raw_technique_is_not_merged_into_a_tool_of_the_same_name():
+    entities = [RawEntity(value="PowerShell", entity_type=EntityType.TECHNIQUE, mitre_id="T1059.001")]
+    llm = LLMEnrichmentResult(tools=["PowerShell"])
+    bundle = build_stix_bundle(entities, llm, "r", graph_completion=False)
+
+    assert [o.name for o in _of_type(bundle, "tool")] == ["PowerShell"]
+    assert [o.name for o in _of_type(bundle, "attack-pattern")] == ["PowerShell"]
+
+
+def test_an_ioc_association_indicates_the_malware_not_the_tool_of_the_same_name():
+    # The tool list is written after the malware list: the tool used to take the name.
+    ip = "185.220.101.45"
+    entities = [RawEntity(value=ip, entity_type=EntityType.IPV4)]
+    llm = LLMEnrichmentResult(
+        malware_families=["Mimikatz"], tools=["Mimikatz"],
+        ioc_associations=[IoCAssociation(ioc_value=ip, malware_name="Mimikatz")],
+    )
+    bundle = build_stix_bundle(entities, llm, "r", graph_completion=False)
+    [malware] = _of_type(bundle, "malware")
+    [indicator] = _of_type(bundle, "indicator")
+
+    assert (indicator.id, "indicates", malware.id) in _sros(bundle)
+    assert [t for _, v, t in _sros(bundle) if v == "indicates"] == [malware.id]
+
+
+def test_an_ioc_association_to_a_name_several_objects_could_indicate_is_dropped():
+    ip = "185.220.101.45"
+    entities = [RawEntity(value=ip, entity_type=EntityType.IPV4)]
+    llm = LLMEnrichmentResult(
+        tools=["PowerShell"],
+        ttps=[TTPExtracted(technique_name="PowerShell", mitre_id="T1059.001")],
+        ioc_associations=[IoCAssociation(ioc_value=ip, malware_name="PowerShell")],
+    )
+    led = MappingLedger()
+    bundle = build_stix_bundle(entities, llm, "r", ledger=led, graph_completion=False)
+
+    [row] = [e for e in led.entities if e["entity_type"] == "indicator" and e["outcome"] == "dropped"]
+    assert row["reason"] == "ambiguous_name"
+    assert row["candidates"] == sorted(o.id for o in bundle.objects
+                                       if o.get("type") in ("tool", "attack-pattern"))
+    assert not [r for r in _sros(bundle) if r[1] == "indicates"]
+
+
+def test_an_ioc_association_takes_the_one_candidate_an_indicator_can_indicate():
+    # An Identity cannot be indicated, the tool of the same name can.
+    ip = "185.220.101.45"
+    entities = [RawEntity(value=ip, entity_type=EntityType.IPV4),
+                RawEntity(value="Cobalt Strike", entity_type=EntityType.IDENTITY)]
+    llm = LLMEnrichmentResult(
+        tools=["Cobalt Strike"],
+        ioc_associations=[IoCAssociation(ioc_value=ip, malware_name="Cobalt Strike")],
+    )
+    bundle = build_stix_bundle(entities, llm, "r", graph_completion=False)
+    [tool] = _of_type(bundle, "tool")
+    [indicator] = _of_type(bundle, "indicator")
+
+    assert [r for r in _sros(bundle) if r[1] == "indicates"] == [(indicator.id, "indicates", tool.id)]
+
+
+def test_an_ioc_association_whose_ioc_is_not_an_observable_has_no_pattern():
+    # The value names a CVE of the bundle, not an observable: the same reason as before.
+    entities = [RawEntity(value="CVE-2021-44228", entity_type=EntityType.CVE)]
+    llm = LLMEnrichmentResult(
+        malware_families=["Emotet"],
+        ioc_associations=[IoCAssociation(ioc_value="CVE-2021-44228", malware_name="Emotet"),
+                          IoCAssociation(ioc_value="203.0.113.99", malware_name="Emotet")],
+    )
+    led = MappingLedger()
+    build_stix_bundle(entities, llm, "r", ledger=led, graph_completion=False)
+
+    reasons = {e["value"]: e["reason"] for e in led.entities if e["entity_type"] == "indicator"}
+    assert reasons == {"CVE-2021-44228": "no_pattern", "203.0.113.99": "ioc_not_in_bundle"}
+
+
+def test_a_name_paired_with_itself_leaves_the_other_reading():
+    llm = LLMEnrichmentResult(
+        threat_actors=["Carbanak"], malware_families=["Carbanak"], tools=["PowerShell"],
+        ttps=[TTPExtracted(technique_name="PowerShell", mitre_id="T1059.001")],
+        relationships=[
+            RelationshipExtracted(source_value="Carbanak", relationship_type="uses", target_value="Carbanak"),
+            RelationshipExtracted(source_value="T1059.001", relationship_type="related-to",
+                                  target_value="PowerShell"),
+        ],
+    )
+    led = MappingLedger()
+    bundle = build_stix_bundle([], llm, "r", ledger=led, graph_completion=False)
+    [actor] = _of_type(bundle, "threat-actor")
+    [malware] = _of_type(bundle, "malware")
+    [tool] = _of_type(bundle, "tool")
+    [technique] = _of_type(bundle, "attack-pattern")
+
+    # actor→actor and malware→malware are self-loops: the one other pair the verb fits is the reading
+    assert _sros(bundle) == [(actor.id, "uses", malware.id), (technique.id, "related-to", tool.id)]
+    assert [r["outcome"] for r in led.relationships] == ["emitted", "emitted"]
+
+
+def test_related_to_and_an_unknown_verb_fit_every_pair():
+    llm = LLMEnrichmentResult(
+        malware_families=["Mimikatz", "Emotet"], tools=["Mimikatz"],
+        relationships=[
+            RelationshipExtracted(source_value="Mimikatz", relationship_type="related-to", target_value="Emotet"),
+            RelationshipExtracted(source_value="Mimikatz", relationship_type="deploys", target_value="Emotet"),
+        ],
+    )
+    led = MappingLedger()
+    bundle = build_stix_bundle([], llm, "r", ledger=led, graph_completion=False)
+
+    assert _sros(bundle) == []
+    assert [(r["outcome"], r["reason"]) for r in led.relationships] == [("dropped", "ambiguous_name")] * 2
+
+
+def test_an_observable_end_is_judged_as_the_loop_routes_it():
+    # PowerShell is a tool and a technique.  "PowerShell indicates <ip>": only the
+    # technique fits, turned round and routed through the IP's Indicator, as the loop
+    # does it.  "<ip> indicates PowerShell": its Indicator can indicate either.
+    ip = "45.77.65.211"
+    llm = LLMEnrichmentResult(
+        tools=["PowerShell"],
+        ttps=[TTPExtracted(technique_name="PowerShell", mitre_id="T1059.001")],
+        relationships=[
+            RelationshipExtracted(source_value="PowerShell", relationship_type="indicates", target_value=ip),
+            RelationshipExtracted(source_value=ip, relationship_type="indicates", target_value="PowerShell"),
+        ],
+    )
+    led = MappingLedger()
+    bundle = build_stix_bundle([RawEntity(value=ip, entity_type=EntityType.IPV4)], llm, "r", ledger=led,
+                               graph_completion=False)
+    [technique] = _of_type(bundle, "attack-pattern")
+    [indicator] = _of_type(bundle, "indicator")
+
+    assert (indicator.id, "indicates", technique.id) in _sros(bundle)
+    turned, ambiguous = led.relationships
+    assert turned["outcome"] == "emitted" and turned["final_type"] == "indicates"
+    assert {c["kind"] for c in turned["changes"]} == {"direction", "reroute"}
+    assert ambiguous["outcome"] == "dropped" and ambiguous["reason"] == "ambiguous_name"
+
+
+def test_a_direct_name_outranks_another_objects_alias_form():
+    # "Snake" is one of Turla's alias forms (ADR-0021) and the name of a listed malware:
+    # the row means the malware, as it did when the direct name overwrote the alias.
+    llm = LLMEnrichmentResult(
+        threat_actors=["Turla"], malware_families=["Snake"],
+        ttps=[TTPExtracted(technique_name="Phishing", mitre_id="T1566")],
+        relationships=[RelationshipExtracted(source_value="Snake", relationship_type="uses",
+                                             target_value="Phishing")],
+    )
+    led = MappingLedger()
+    bundle = build_stix_bundle([], llm, "r", ledger=led, graph_completion=False)
+    [malware] = _of_type(bundle, "malware")
+    [technique] = _of_type(bundle, "attack-pattern")
+
+    assert _sros(bundle) == [(malware.id, "uses", technique.id)]
 
 
 # ── IoC coverage verification ──────────────────────────────────────────────────
