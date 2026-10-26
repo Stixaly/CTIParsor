@@ -66,6 +66,16 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "paths lose the sentence after them; TTP candidates and selection; an association's Indicator "
      "spells the IoC as the report does; a campaign named like a malware ships; confidence rounds",
      "extraction"),
+    ("80b9e84", "2026-10-26",
+     "A name typed two ways keeps one object per type; each relationship end resolves to the type its "
+     "verb fits, else the row is dropped as ambiguous_name; the actor x target edges leave the actor, "
+     "not a malware of the same name",
+     "mapping"),
+    ("3dd9ee5", "2026-10-26",
+     "A name typed as more than one of malware, threat actor, tool and campaign keeps its best-ranked "
+     "source's type (analyst, gazetteer, LLM, then CyNER/spaCy; a campaign after all but the analyst's); "
+     "the others are dropped as outranked_type",
+     "mapping"),
 )
 
 
