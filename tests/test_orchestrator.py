@@ -122,6 +122,20 @@ def test_unknown_stage_ids_are_refused():
         RunOptions(required=frozenset({"llm"}))
 
 
+@pytest.mark.parametrize("stage", sorted(orch.MANDATORY_STAGES))
+def test_mandatory_stages_cannot_be_disabled(monkeypatch, stage):
+    # Stage 1 and Stage 3r do not read `disabled`: accepting their ids would
+    # turn nothing off, without a word.
+    assert orch.MANDATORY_STAGES == {"1", "3r"}
+    with pytest.raises(ValueError, match="cannot be disabled"):
+        RunOptions(disabled=frozenset({stage}))
+    monkeypatch.setenv("PIPELINE_DISABLED_STAGES", f"2d,{stage}")
+    with pytest.raises(ValueError, match=f"stage\\(s\\) {stage} cannot be disabled"):
+        RunOptions.from_env()
+    # Requiring one stays a valid ask.
+    assert RunOptions(required=frozenset({stage})).required == {stage}
+
+
 def test_the_environment_can_turn_stages_off(monkeypatch):
     monkeypatch.setenv("PIPELINE_DISABLED_STAGES", " 2d, 2e ,")
     opts = RunOptions.from_env(disabled={"1f"})

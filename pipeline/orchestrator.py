@@ -51,6 +51,12 @@ STAGES: tuple[str, ...] = (
     "3", "3d", "3f", "3e", "3doc", "3r", "2f", "4", "4b", "4c", "5",
 )
 
+# Stages `disabled` refuses (`required` accepts them).  Stage 1 makes the text
+# every other stage reads.  Stage 3r runs whenever an enrich job has a baseline:
+# Stage 4 merges the analyst's bundle through its matches (ADR-0090), so without
+# it the rows found in the text and the analyst's types would quietly drop out.
+MANDATORY_STAGES: frozenset[str] = frozenset({"1", "3r"})
+
 STAGE_LABELS: dict[str, str] = {
     "1": "ingestion", "1f": "figures", "2": "regex IoCs", "2b": "gazetteer",
     "2c": "semantic TTPs", "2d": "CyNER", "2e": "GLiNER", "2g": "alias lists",
@@ -114,7 +120,7 @@ class RunOptions:
     def from_env(cls, *, disabled=(), required=(), **overrides) -> RunOptions:
         """`PIPELINE_DISABLED_STAGES` (comma-separated ids, e.g. "2d,2e") turns
         stages off for every run of this process — an ablation through the API
-        path itself.  `disabled` adds to it."""
+        path itself.  `disabled` adds to it.  `MANDATORY_STAGES` are refused."""
         from pipeline.stage3_llm import document_level_relations_enabled
         from pipeline.stage3d_verify import verify_enabled as rel_verify_enabled
         from pipeline.stage3e_consensus import consensus_enabled
@@ -141,6 +147,12 @@ class RunOptions:
         if unknown:
             raise ValueError(f"unknown stage id(s): {', '.join(sorted(unknown))}; "
                              f"known: {', '.join(STAGES)}")
+        mandatory = set(self.disabled) & MANDATORY_STAGES
+        if mandatory:
+            raise ValueError(f"stage(s) {', '.join(sorted(mandatory))} cannot be disabled: "
+                             "Stage 1 (ingestion) makes the text every stage reads, and Stage 3r "
+                             "(baseline reconciliation) runs whenever an enrich job has a "
+                             "baseline, which Stage 4 merges through it (ADR-0090)")
         if self.ttp_mode not in ("verify", "select"):
             raise ValueError(f"ttp_mode must be 'verify' or 'select', not {self.ttp_mode!r}")
 

@@ -576,6 +576,7 @@ feature** (it was 50 MB). Behind another proxy, allow as much: 72 MiB, that is
 
 # Stages to skip for every report this process runs (worker and CLI alike), to
 # measure what a stage contributes.  Ids: 1f 2 2b 2c 2d 2e 2g 3 3d 3f 3e 3doc 2f 4 4b 4c 5
+# (1 and 3r cannot be disabled: naming one fails the run)
 # PIPELINE_DISABLED_STAGES=
 ```
 
