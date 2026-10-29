@@ -124,8 +124,8 @@ newer, nothing to install). Its exit code is `0` when done, `1` when it refuses
    section, then lists the section's `####` entry titles under their `###`
    groups, each group once, with a link to CHANGELOG.md at the tag. Older
    entries that are plain bullets, with no `####` title, are only in the
-   CHANGELOG. This is the case for 0.1.0 as `[Unreleased]` stands, so a short
-   summary paragraph is worth writing there.
+   CHANGELOG. A short summary paragraph at the top of the section is therefore
+   worth writing, as 0.1.0's section has.
 
 4. **Open the pull request "Release 0.1.0"** and merge it once the required
    checks pass.

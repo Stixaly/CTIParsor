@@ -47,7 +47,7 @@ compose service already has `CTIPARSOR_TEST_DATABASE_URL` pointed at a
 disposable PostgreSQL schema per run, no manual setup needed:
 
 ```bash
-make ci               # what the pull-request CI runs: lint, types, tests + coverage floors, frontend
+make ci               # lint, types, tests + coverage floors, frontend: the CI's fast tests and frontend checks, without reuse lint and the migration check
 make test             # the whole suite (docker compose run --rm dev pytest -v), no coverage
 make coverage         # the whole suite with branch coverage, then the floors (§8)
 make frontend-check   # eslint + tsc + vitest (npm run check), in the frontend-dev container
@@ -631,4 +631,6 @@ pushed. A pull request that changes it, `scripts/release.py` or
 `scripts/release_files.sh`, and a weekly run (Monday), get a dry run instead,
 with nothing published (ADR-0085, `docs/releasing.md`).
 
-`make ci` runs jobs 1 and 2 locally, in the `dev` and `frontend-dev` containers.
+`make ci` runs jobs 1 and 2 locally, in the `dev` and `frontend-dev` containers,
+except two steps of job 1: `reuse lint`, and the migration check against the
+pull request's base commit (`scripts/check_migration_from.py`).
