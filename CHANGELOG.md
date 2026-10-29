@@ -653,6 +653,28 @@ has an amendment with the whole table.
 
 ### Documentation
 
+#### Seven small gaps the documentation audit left, 2026-10-29
+
+- **`make ci`** does not run `reuse lint` nor the migration check from the base
+  commit: `TESTING.md` and the `Makefile`'s comment no longer say it runs
+  everything the pull-request CI runs, as `CONTRIBUTING.md` already does.
+- **ADR-0023**'s header said Phases 3–6 were open; its status review of
+  2026-10-03 records Phases 4–6 as implemented by ADR-0072, as the index said.
+- **`docs/releasing.md`** no longer speaks of 0.1.0 as not yet released.
+- **`docs/docker.md`**: schema migrations run at the first start of the API or
+  of a worker, not of the API only.
+- **`docs/development.md`**'s project tree gains the modules and data files it
+  lacked: `api/migrate.py`, `api/db_identity.py`, `api/baseline_store.py`,
+  `api/routes/baselines.py`, `pipeline/gazetteer_policy.py`,
+  `pipeline/gazetteer_context.py`, `pipeline/named_entities.py`,
+  `pipeline/benign.py`, `gazetteer_context_rules.json`, `warninglists.json`
+  and `attack_revoked.json`.
+- **`docs/eval/README.md`** gives `hard-docs` and points to the in-house set's
+  commands (`preannotate`, `inhouse-run`, `inhouse-score`, `agreement`).
+- **`docs/api.md`**: entity and relationship rows carry `held_reason`
+  (ADR-0082); a held row is skipped by the bulk and accept-pending routes, and
+  an accepting `PATCH` labelled `human_bulk` gets a 409.
+
 #### The diagrams show both workflows, full extraction and enrich mode (ADR-0090), 2026-10-29
 
 The Mermaid diagrams drew only the full extraction: none showed the STIX 2.1
