@@ -31,7 +31,7 @@ provenance and the SBOM attestation that main's CI signed stay valid.
 registry tag name again. The Release notes give the digest.
 
 The first release, [0.1.0](https://github.com/Stixaly/CTIParsor/releases/tag/v0.1.0),
-was published on 2026-10-17 and is marked Latest. Its tag `v0.1.0` is annotated
+was published on 2026-10-17. Its tag `v0.1.0` is annotated
 and names commit 4bdfa8f, the merge of the release pull request (#170). On GHCR,
 `0.1.0`, `0.1` and `sha-4bdfa8f…` name one digest,
 `sha256:80aca36a7cf3fbf9319ee828f8d4811bf90e56d94120a99776ba8df4cc71a773`. Its
@@ -39,6 +39,15 @@ archive and SBOM pass `sha256sum -c SHA256SUMS`, and the archive, the SBOM and t
 image pass the commands of [Verifying a release](#verifying-a-release) (checked
 2026-10-23). It is not an immutable Release: immutability was turned on after
 it was published (see [One-time repository settings](#one-time-repository-settings)).
+
+The latest, [0.2.0](https://github.com/Stixaly/CTIParsor/releases/tag/v0.2.0),
+was published on 2026-10-29 and is marked Latest. Its tag `v0.2.0` is annotated
+and names commit ce59cfb, the merge of the release pull request (#223). On GHCR,
+`0.2.0`, `0.2` and `sha-ce59cfb…` name one digest,
+`sha256:f7ea0d3f9d44692b8b08ed31dae5b1738ab19a88bc1cce856d7a297320c95526`. The
+same checks pass (2026-10-30). It is the first immutable Release: `gh release
+view v0.2.0 --json isImmutable` gives `true`, and `gh release verify v0.2.0`
+finds GitHub's release attestation.
 
 ## Versioning
 
@@ -310,7 +319,7 @@ It:
 
 It publishes, tags and attests nothing. It cannot rehearse the version names on
 the image, the provenance of the files or the Release itself; only a tag run
-does. The first one, for 0.1.0, ran once and passed.
+does. The tag runs for 0.1.0 and 0.2.0 each ran once and passed.
 
 ## What the workflow's checks are worth
 
@@ -329,13 +338,14 @@ without them. The repository's Actions settings already allow it, since a job
 may ask for `contents: write`, `packages: write`, `id-token: write` and
 `attestations: write`.
 
-On 2026-10-17, read through the API, neither was set. On 2026-10-24:
+On 2026-10-17, read through the API, neither was set. On 2026-10-24, read again
+on 2026-10-30:
 
 - **Immutable releases are on** (`"enabled": true`). They were turned on after
   0.1.0 was published, so that Release is not immutable: `gh release view
   v0.1.0 --json isImmutable` gives `false`, and `gh release verify v0.1.0`
-  finds no release attestation. Releases published from now on will be
-  immutable.
+  finds no release attestation. 0.2.0, the first Release published after,
+  is immutable, and `gh release verify v0.2.0` passes.
 - **No ruleset covers tags.** The only ruleset, "basic rules", targets the
   branch.
 

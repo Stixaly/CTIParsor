@@ -1,6 +1,6 @@
 # ADR-0085: Releases promote the image main built, and sign the files they add
 
-**Status:** Accepted — workflow implemented; v0.1.0 released 2026-10-17; release immutability enabled after it; tag ruleset still to be applied by the maintainer (2026-10-24)
+**Status:** Accepted — workflow implemented; v0.1.0 released 2026-10-17; release immutability enabled after it; v0.2.0 released 2026-10-29, the first immutable Release; tag ruleset still to be applied by the maintainer (2026-10-30)
 **Date:** 2026-10-17
 **Deciders:** maintainer
 **Amends:** ADR-0047 (version tags), ADR-0075 (a verifiable supply chain), ADR-0078 (Signed-Releases)
@@ -251,7 +251,7 @@ Four things wait for a first release:
        from `1.0.0` to `0.0.0`); the two inert `type=semver` lines removed from
        `ci.yml`; `docs/releasing.md`.
 2. [ ] Maintainer: the tag ruleset `release tags` (decision 10). Read back with
-       `gh api repos/Stixaly/CTIParsor/rulesets`. Still open on 2026-10-24: the
+       `gh api repos/Stixaly/CTIParsor/rulesets`. Still open on 2026-10-30: the
        only ruleset is "basic rules", which targets the branch.
 3. [x] Maintainer: enable release immutability (decision 10). Read back with
        `gh api repos/Stixaly/CTIParsor/immutable-releases`: `"enabled": true`
@@ -317,3 +317,30 @@ verify`, the registry and Scorecard's public results.
   of the last 1 releases have a total of 1 signed artifacts". That artifact is
   `ctiparsor-0.1.0.intoto.jsonl`, the only signature or provenance file among
   the assets.
+
+## Amendment (2026-10-30) — v0.2.0, the first immutable Release
+
+Read back on 2026-10-30, read-only, as for v0.1.0. Scorecard was not read again.
+
+- **The Release.** "CTIParsor 0.2.0", published on 2026-10-29 at 23:00:04Z
+  and marked Latest: <https://github.com/Stixaly/CTIParsor/releases/tag/v0.2.0>.
+  Its tag `v0.2.0` is annotated and names ce59cfb, the merge commit of PR #223,
+  whose `ci.yml` push run had passed. The `publish` job ran once and passed.
+- **Its notes.** The CHANGELOG section is 111 KB, so the notes are its opening
+  paragraphs (a summary and upgrade notes from 0.1.0) and its entry titles,
+  6.6 KB (decision 4).
+- **Its files.** `ctiparsor-0.2.0.tar.gz`, `ctiparsor-0.2.0-image.cdx.json`,
+  `SHA256SUMS` and `ctiparsor-0.2.0.intoto.jsonl`. `sha256sum -c SHA256SUMS`
+  passes. The archive and the SBOM pass `gh attestation verify` with
+  `release.yml` and `refs/tags/v0.2.0`; the archive fails with `ci.yml`, as it
+  should. The SBOM is CycloneDX 1.7, 7 200 components.
+- **The image.** On GHCR, `0.2.0`, `0.2` and
+  `sha-ce59cfb7025daf46fcb661b71c1ac7cd23f3f16b` name the same digest,
+  `sha256:f7ea0d3f9d44692b8b08ed31dae5b1738ab19a88bc1cce856d7a297320c95526`,
+  which passes `gh attestation verify` with `ci.yml` and `refs/heads/main`.
+  Nothing was rebuilt.
+- **Immutability.** `isImmutable` is true, and `gh release verify v0.2.0` finds
+  GitHub's release attestation of the four files. Its files cannot change and
+  its tag can be neither moved nor deleted. No ruleset covers tags yet
+  (item 2): anyone with write access can still create a `v*` tag, or move or
+  delete `v0.1.0`.
