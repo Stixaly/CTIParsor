@@ -9,6 +9,38 @@ theme.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-29
+
+CTIParsor 0.2.0 adds enrich mode and fixes much of what 0.1.0 shipped. An
+analyst can now give a report together with a STIX 2.1 bundle that already
+describes it (an OpenCTI or MISP export, or an earlier CTIParsor bundle) and get
+one bundle back: the objects as received, plus what the report adds, attached to
+their ids (ADR-0090). It was measured on 7 real reports and on OpenCTI- and
+MISP-shaped fixtures, and imported into OpenCTI with nothing refused and no
+baseline object duplicated; no live export was used. A run can select an ATT&CK
+release, and a v20.0 track ships beside the default 19.2 (ADR-0087). Entity
+precision improves: a CyNER threat actor or a spaCy place must look like a name
+(ADR-0088), and a name typed several ways no longer lands on the wrong object
+(ADR-0091, ADR-0092). Graph completion, IoC associations, the `targets` product
+and pinned rules no longer build a relationship the analyst rejected or held
+(ADR-0013). A code audit fixed 51 defects across the worker, the API, every
+stage, the detection parsers and the frontend. Security: a YARA rule's `include`
+no longer reads a file on the server, the web capture no longer takes
+100.64.0.0/10 for a public range, a DOCX zip bomb is refused, and request bodies
+are bounded as they arrive (uploads to their limit, every other body to 1 MB).
+
+Upgrading from 0.1.0: back up the database first. At start the API applies two
+migrations, v0012 (the build record of a finalize, ADR-0086) and v0013 (enrich
+mode); both only add columns and a table, and once they ran a 0.1.0 image
+refuses the database (ADR-0077). Enrich mode is on by default;
+`STIX_ENRICHMENT_ENABLED=false` turns it off. Rebuild the detection-rule index
+once (`scripts/build_detection_index.py`) so the corrected Suricata and Sigma
+parsing reaches it. A request body over 1 MB now gets a 413, except on the
+routes that take a report or a STIX bundle and on the detection export, which
+have budgets of their own. The known limits of 0.1.0 stand: there is no
+authentication, a bundle is a draft for an analyst, and before 1.0 a minor
+version may change the API, the bundle output or the configuration.
+
 ### Added
 
 #### Enriching an existing STIX 2.1 bundle, lot 7: measured, checked in OpenCTI, and on by default (ADR-0090 accepted), 2026-10-25
