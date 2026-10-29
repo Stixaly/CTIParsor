@@ -177,15 +177,20 @@ pipeline still produces valid STIX. ML models are downloaded once and cached.
   The release workflow's checks catch mistakes. What stops a person who can
   push a tag is a tag ruleset on `v*`, a repository setting described in
   [docs/releasing.md](docs/releasing.md). That ruleset is not set yet
-  (2026-10-24).
+  (2026-10-30).
 
   The first release,
   [v0.1.0](https://github.com/Stixaly/CTIParsor/releases/tag/v0.1.0), was
   published on 2026-10-17, from the tag `v0.1.0` on commit 4bdfa8f. Its
   archive, its SBOM and its image pass the pinned verify commands of its
   notes (checked 2026-10-23). Release immutability was turned on after
-  v0.1.0 was published, so that Release is not immutable; the ones published
-  from now on will be.
+  v0.1.0 was published, so that Release is not immutable.
+  [v0.2.0](https://github.com/Stixaly/CTIParsor/releases/tag/v0.2.0),
+  published on 2026-10-29 from the tag `v0.2.0` on commit ce59cfb, is the
+  first immutable one: its files and its tag can no longer change, and
+  `gh release verify v0.2.0` checks GitHub's release attestation. Its
+  archive, its SBOM and its image pass the pinned verify commands of its
+  notes (checked 2026-10-30).
 
 ### Not shipped
 **diskcache** (PYSEC-2026-2447 / CVE-2025-69872 / GHSA-w8v5-vhqr-4h9v,
@@ -220,7 +225,7 @@ added together.
 ## Supported versions
 Fixes land on `main` and ship in the next release. Only the latest release is
 supported: [the Releases page](https://github.com/Stixaly/CTIParsor/releases/latest)
-names it (0.1.0 since 2026-10-17).
+names it (0.2.0 since 2026-10-29).
 
 ## Reporting a vulnerability
 Report it privately:

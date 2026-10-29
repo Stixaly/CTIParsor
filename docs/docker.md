@@ -89,13 +89,17 @@ cannot change, so the Release notes give the digest; see
 
 ```dotenv
 # .env
-CTI_IMAGE=ghcr.io/stixaly/ctiparsor:0.1.0
+CTI_IMAGE=ghcr.io/stixaly/ctiparsor:0.2.0
 ```
 
-0.1.0 is the image of commit 4bdfa8f, digest
+0.2.0, the latest release, is the image of commit ce59cfb, digest
+`sha256:f7ea0d3f9d44692b8b08ed31dae5b1738ab19a88bc1cce856d7a297320c95526`; on
+2026-10-30 the names `0.2.0`, `0.2` and `sha-ce59cfb7025daf46fcb661b71c1ac7cd23f3f16b`
+all pointed to it. 0.1.0 is the image of commit 4bdfa8f, digest
 `sha256:80aca36a7cf3fbf9319ee828f8d4811bf90e56d94120a99776ba8df4cc71a773`; on
 2026-10-24 the names `0.1.0`, `0.1` and `sha-4bdfa8f9b2b3916486b87019a40148d5d15d9239`
-all pointed to it.
+all pointed to it. Moving from 0.1.0 migrates the database; back it up first
+([upgrading.md](upgrading.md#1-back-up-first)).
 
 To check that a pulled image was built by this repository's CI, run the
 `gh attestation verify` commands in [Verifying a release](releasing.md#verifying-a-release).

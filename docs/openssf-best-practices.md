@@ -28,6 +28,8 @@ on Signed-Releases): `version_unique`, `version_semver`, `version_tags` and
 - The first release, v0.1.0, was published on 2026-10-17:
   `https://github.com/Stixaly/CTIParsor/releases/tag/v0.1.0`, from the
   annotated tag `v0.1.0` on commit 4bdfa8f. The four are **Met** since then.
+  v0.2.0 followed on 2026-10-29, from the annotated tag `v0.2.0` on commit
+  ce59cfb: `https://github.com/Stixaly/CTIParsor/releases/tag/v0.2.0`.
 - What is left is the maintainer's: entering these answers on
   bestpractices.dev. On 2026-10-24 Scorecard's CII-Best-Practices check was
   still 0, "no effort to earn an OpenSSF best practices badge detected".
@@ -64,10 +66,10 @@ Everything else is **Met** or **N/A** as of 2026-10-10.
 | repo_track | Met | git: every change has its author, date and pull request. |
 | repo_interim | Met | Every change lands on `main` through a pull request, between releases. |
 | repo_distributed | Met | git. |
-| version_unique | Met | SemVer tags (`vX.Y.Z`) and GitHub Releases (`docs/releasing.md`): the first is `v0.1.0`, `https://github.com/Stixaly/CTIParsor/releases/tag/v0.1.0` (2026-10-17). `scripts/release.py prepare` refuses a version not above the current one, and the release workflow refuses a version that already names another image digest. Each published image also carries a unique `sha-<commit>` tag (GHCR). |
+| version_unique | Met | SemVer tags (`vX.Y.Z`) and GitHub Releases (`docs/releasing.md`): the first is `v0.1.0`, `https://github.com/Stixaly/CTIParsor/releases/tag/v0.1.0` (2026-10-17), the latest `v0.2.0` (2026-10-29). `scripts/release.py prepare` refuses a version not above the current one, and the release workflow refuses a version that already names another image digest. Each published image also carries a unique `sha-<commit>` tag (GHCR). |
 | version_semver | Met | Semantic Versioning from 0.1.0 (`docs/releasing.md`, *Versioning*). `scripts/release.py check` refuses a tag that is not `vX.Y.Z`, and `tests/test_release.py` holds the files that state the version to one number. |
-| version_tags | Met | Each release is an annotated git tag `vX.Y.Z` on a commit of `main` (`.github/workflows/release.yml`): `v0.1.0` names 4bdfa8f. `https://github.com/Stixaly/CTIParsor/tags` |
-| release_notes | Met | `CHANGELOG.md` (Keep a Changelog) groups every change. Each Release's notes are that version's CHANGELOG section (`scripts/release.py notes`), or the list of its entries when the section is too long for a GitHub release body. 0.1.0's notes are that list, after a summary, with a link to the full section: `https://github.com/Stixaly/CTIParsor/releases/tag/v0.1.0`, `https://github.com/Stixaly/CTIParsor/blob/v0.1.0/CHANGELOG.md`. |
+| version_tags | Met | Each release is an annotated git tag `vX.Y.Z` on a commit of `main` (`.github/workflows/release.yml`): `v0.1.0` names 4bdfa8f, `v0.2.0` names ce59cfb. `https://github.com/Stixaly/CTIParsor/tags` |
+| release_notes | Met | `CHANGELOG.md` (Keep a Changelog) groups every change. Each Release's notes are that version's CHANGELOG section (`scripts/release.py notes`), or the list of its entries when the section is too long for a GitHub release body. 0.1.0's notes are that list, after a summary, with a link to the full section: `https://github.com/Stixaly/CTIParsor/releases/tag/v0.1.0`, `https://github.com/Stixaly/CTIParsor/blob/v0.1.0/CHANGELOG.md`. So are 0.2.0's, after a summary and upgrade notes: `https://github.com/Stixaly/CTIParsor/releases/tag/v0.2.0`. |
 | release_notes_vulns | N/A | No publicly known vulnerability in CTIParsor itself has had a CVE. Then: the CHANGELOG's *Security* sections name each fix. |
 
 ## Reporting

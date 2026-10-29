@@ -9,6 +9,30 @@ theme.
 
 ## [Unreleased]
 
+### Documentation
+
+#### The pages that describe the latest release name v0.2.0 (ADR-0085), 2026-10-30
+
+`SECURITY.md`, `docs/docker.md`, `docs/releasing.md`,
+`docs/openssf-best-practices.md` and ADR-0085 named v0.1.0 as the latest
+release. They now give what was read back on 2026-10-30, read-only, through the
+API, `gh attestation verify`, `gh release verify` and the registry:
+
+- **The Release.** "CTIParsor 0.2.0", published on 2026-10-29 and marked
+  Latest, from the annotated tag `v0.2.0` on ce59cfb (PR #223). Its four files
+  pass `sha256sum -c SHA256SUMS`, and the pinned verify commands of its notes
+  pass. `0.2.0`, `0.2` and `sha-ce59cfb…` name one image digest, which
+  `docs/docker.md` gives beside 0.1.0's, with a pointer to the backup an upgrade
+  from 0.1.0 needs.
+- **It is the first immutable Release**: `isImmutable` is true and
+  `gh release verify v0.2.0` passes. ADR-0085 records it in a new amendment.
+- **No tag ruleset exists yet**, so ADR-0085's item 2 stays open.
+- `SECURITY.md`'s *Supported versions* names 0.2.0.
+
+The upgrade notes of the 0.2.0 section said the API applies the two migrations;
+the API or a worker does, whichever starts first (docs/upgrading.md). The
+published Release notes keep the first wording.
+
 ## [0.2.0] - 2026-10-29
 
 CTIParsor 0.2.0 adds enrich mode and fixes much of what 0.1.0 shipped. An
@@ -29,8 +53,9 @@ no longer reads a file on the server, the web capture no longer takes
 100.64.0.0/10 for a public range, a DOCX zip bomb is refused, and request bodies
 are bounded as they arrive (uploads to their limit, every other body to 1 MB).
 
-Upgrading from 0.1.0: back up the database first. At start the API applies two
-migrations, v0012 (the build record of a finalize, ADR-0086) and v0013 (enrich
+Upgrading from 0.1.0: back up the database first. At its first start the API or
+a worker, whichever starts first, applies two migrations (docs/upgrading.md),
+v0012 (the build record of a finalize, ADR-0086) and v0013 (enrich
 mode); both only add columns and a table, and once they ran a 0.1.0 image
 refuses the database (ADR-0077). Enrich mode is on by default;
 `STIX_ENRICHMENT_ENABLED=false` turns it off. Rebuild the detection-rule index
