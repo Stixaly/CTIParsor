@@ -200,7 +200,11 @@ is empty until Stage 3r writes them. The bundle itself is not in the response.
 Entity rows carry `enrichment_status` (the values listed under `counts` above;
 null in full mode and for an entity added by hand) and `baseline_stix_id` (the
 id of the baseline object the row is or matches; null otherwise), see ADR-0090.
-The columns are described in `docs/database-schema.md`.
+They also carry `held_reason` (ADR-0082): why the pipeline held a pending row
+back, null otherwise. A held row ships only once accepted on its own: the bulk
+and accept-pending routes skip it, and a `PATCH` labelled `human_bulk` that
+accepts it gets a 409. The columns are described in
+`docs/database-schema.md`.
 
 ### Bulk entity update
 
@@ -239,9 +243,9 @@ The columns are described in `docs/database-schema.md`.
 }
 ```
 
-Relationship rows returned by the list route also carry `enrichment_status` and
-`baseline_stix_id`, as entities do (see Entities above, and
-`docs/database-schema.md`).
+Relationship rows returned by the list route also carry `enrichment_status`,
+`baseline_stix_id` and `held_reason`, as entities do (see Entities above, and
+`docs/database-schema.md`). Stage 3d holds back a claim it could not decide.
 
 Valid `relationship_type` values: `uses`, `attributed-to`, `targets`, `indicates`, `mitigates`, `remediates`, `delivers`, `drops`, `downloads`, `exploits`, `originates-from`, `compromises`, `beacons-to`, `communicates-with`, `exfiltrates-to`, `controls`, `has`, `hosts`, `owns`, `authored-by`, `impersonates`, `located-at`, `resolves-to`, `belongs-to`, `variant-of`, `duplicate-of`, `derived-from`, `related-to`.
 

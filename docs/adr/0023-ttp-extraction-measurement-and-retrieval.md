@@ -1,6 +1,6 @@
 # ADR-0023: TTP extraction — fix the ruler, then retrieve-then-validate
 
-**Status:** Accepted in part (Phases 1–2 implemented; Phases 3–6 open)
+**Status:** Accepted in part (Phases 1–2 implemented; Phases 4–6 implemented by ADR-0072, see the status review of 2026-10-03; Phase 3 not reviewed since 2026-09-02)
 **Date:** 2026-08-22
 **Deciders:** maintainer
 

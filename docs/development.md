@@ -129,6 +129,8 @@ CTIParsor/
 │   ├── stage1f_figures.py         # Figure triage, crop rendering and report_text injection (ADR-0032)
 │   ├── stage2_extraction.py       # Regex IoC extraction + spaCy fallback
 │   ├── stage2b_gazetteer.py       # Aho-Corasick gazetteer NER (1 114 entities)
+│   ├── gazetteer_policy.py        # The ordinary-word policy: RETAIN, CASE, CONTEXT per form, GAZETTEER_POLICY off/shadow/apply
+│   ├── gazetteer_context.py       # Its step 2: the naming constructions that let a CONTEXT form count as a name
 │   ├── stage2c_ttp_semantic.py    # Sentence-transformer TTP detection
 │   ├── stage2d_cyner.py           # CyNER 2.0 cybersecurity NER (DeBERTa-v3)
 │   ├── ner_precision.py           # CyNER actors and spaCy places must look like names (ADR-0088)
@@ -144,6 +146,8 @@ CTIParsor/
 │   ├── stage3f_ttp_select.py      # Choose techniques among retrieved candidates, with a quote (ADR-0072) — TTP_MODE=select
 │   ├── ttp_retrieval.py           # ATT&CK candidate retrieval: BM25 + dense over descriptions and procedures (ADR-0072)
 │   ├── stage4_stix_mapping.py     # STIX 2.1 mapping + TLP/PAP + authoring identity
+│   ├── named_entities.py          # The detectors' names reach the bundle on every path; one type per name (ADR-0092)
+│   ├── benign.py                  # Values a report names without accusing them: their SCO, no Indicator
 │   ├── stix_ids.py                # STIX ids computed the way OpenCTI computes its standard ids (ADR-0066)
 │   ├── bundle_ledger.py           # What Stage 4 did with each row: kept, rewritten, dropped, why (ADR-0061)
 │   ├── temporal.py                # Relationship dates as the source states them (ADR-0063)
@@ -206,6 +210,9 @@ CTIParsor/
 │       ├── mitre_index.json       # Compact ATT&CK index (built by build_indexes.py)
 │       ├── gazetteer.json         # Named-entity dictionary
 │       ├── gazetteer_policy.json  # Decision per gazetteer form (CASE, CONTEXT, RETAIN), built by build_gazetteer_policy.py
+│       ├── gazetteer_context_rules.json # The naming constructions that qualify each CONTEXT form (step 2)
+│       ├── warninglists.json      # MISP warninglists (CC0) behind benign.py: security vendors' blogs, sandboxes, the 10,000 most popular domains
+│       ├── attack_revoked.json    # Revoked ATT&CK ids and what replaced them
 │       ├── attack_relationships.json # 20 015 curated ATT&CK edges (Stage 4b grounding)
 │       ├── attack_manifest.json   # The default track's release (19.2), what was checked against a rebuild, sha256 of its files (ADR-0087)
 │       ├── attack/20.0/           # The v20.0 track: the same index files built from ATT&CK v20.0, with its own attack_manifest.json (ADR-0087)
@@ -286,6 +293,9 @@ CTIParsor/
 │   ├── body_limit.py              # Request body budgets, per route and 1 MB for the rest, counted as the body arrives (413)
 │   ├── db.py                      # Job store + rule store, both PostgreSQL via DATABASE_URL — ADR-0045, ADR-0053
 │   ├── db_backend.py              # PostgreSQL adapter: `?`→`%s`, sqlite3.Row-like rows, non-closing `with`
+│   ├── migrate.py                 # Bring the database to this code's schema version, under an advisory lock (ADR-0077)
+│   ├── db_identity.py             # Which PostgreSQL cluster each database was on, to tell an empty new major from a fresh install (ADR-0077)
+│   ├── baseline_store.py          # The job store's side of a baseline: job_baselines, logged exclusions, the worker's schema check (ADR-0090)
 │   ├── worker.py                  # The pipeline subprocess: spawn, crash-to-`failed`, SSE emitter
 │   │                              #   └─ re_run_final_stages(): Finalize, Stages 4–5 on the accepted rows,
 │   │                              #      read in one snapshot, published by one conditional UPDATE (ADR-0086)
@@ -309,6 +319,7 @@ CTIParsor/
 │       ├── thresholds.py          # /api/thresholds — NER cutoffs, recalibration (ADR-0051)
 │       ├── overrides.py           # /api/overrides — deny / promote lists (ADR-0052)
 │       ├── attack.py              # GET /api/attack/index — the selected ATT&CK track's index (ADR-0087)
+│       ├── baselines.py           # GET /api/baselines/status, POST /api/baselines/inspect — the STIX bundle to enrich (ADR-0090)
 │       └── _common.py             # Guards shared by the job-scoped route modules
 │
 ├── frontend/                      # React 18 + TypeScript + Vite 6

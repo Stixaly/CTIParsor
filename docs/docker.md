@@ -308,7 +308,7 @@ docker compose logs -f app
 ```bash
 git pull && docker compose build && docker compose up -d
 ```
-*(Volumes are preserved; schema migrations run at API startup.)*
+*(Volumes are preserved; schema migrations run at the first start of the API or of a worker, whichever comes first.)*
 
 **CLI Mode (No API):**
 ```bash

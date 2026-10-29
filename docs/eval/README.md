@@ -103,6 +103,13 @@ python -m evaluation ttp-errors --name sel-dev
 
 # 50 quotes for a person to judge (does the passage show the technique used?)
 python -m evaluation support-sample --name baseline-dev
+
+# what makes reports hard to ingest (scanned pages, tables, images, two columns),
+# PDF and DOCX, hardest first -> data/eval/hard-docs.json; to pick in-house reports
+python -m evaluation hard-docs <folder> [<folder> ...]
+
+# the in-house set: preannotate, inhouse-run, inhouse-score and agreement are in
+# docs/eval/inhouse-set.md (commands) and docs/eval/annotation-guide.md
 ```
 
 `retrieval` reports, per corpus × retriever × keyword gate: recall per

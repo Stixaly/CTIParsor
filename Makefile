@@ -82,8 +82,9 @@ coverage: .secrets/db_password
 frontend-check:
 	docker compose run --rm frontend-dev sh -c "npm ci --no-audit --no-fund && npm run check"
 
-## Every check CI runs on a pull request, locally: lint, types, tests with
-## coverage floors, frontend.  (The image build and smoke test: make docker-smoke)
+## The pull-request CI's fast tests and frontend checks, locally: lint, types,
+## tests with coverage floors, frontend.  Not `reuse lint` nor the migration
+## check from the base commit.  (The image build and smoke test: make docker-smoke)
 ci: lint typecheck coverage frontend-check
 
 # ── Pipeline ─────────────────────────────────────────────────────────────────
