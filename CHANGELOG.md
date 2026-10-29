@@ -653,6 +653,17 @@ has an amendment with the whole table.
 
 ### Documentation
 
+#### An enriched bundle can hold the baseline's TLP beside the job's (ADR-0090), 2026-10-29
+
+`docs/stix-output.md` said every bundle holds exactly one TLP
+`marking-definition`. That holds for a `full` bundle only. An enriched bundle
+also ships the baseline's own marking-definitions, which the objects it keeps
+and the re-issued Report still reference (invariant I2), so a TLP:GREEN
+baseline in a TLP:AMBER job ships both: GREEN on the baseline's objects, AMBER
+on CTIParsor's. The *Sharing markings* row now says so, and that the job's TLP
+is at least as restrictive as every TLP a baseline object carries (D2). No code
+or bundle changes. `tests/test_baseline_e2e.py` gains the case, on the OpenCTI
+fixture with its marking turned to TLP:GREEN.
 #### Seven small gaps the documentation audit left, 2026-10-29
 
 - **`make ci`** does not run `reuse lint` nor the migration check from the base
