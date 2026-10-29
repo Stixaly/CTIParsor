@@ -11,6 +11,54 @@ the [README](../README.md#how-it-works); this page is the detail.
 
 ## Stages
 
+Two workflows run the same stages (ADR-0090). **Full extraction** builds the
+bundle from the report alone. **Enrich mode** starts from a STIX 2.1 bundle the
+analyst already holds, the baseline: Stage 3r matches the run to it, and Stage 4
+merges what the report adds into it. Stages 1 to 3c and 2f run the same way in
+both. A full job skips Stage 3r and has no merge; in an enrich job Stage 5 does
+not check the baseline objects again, validated once at intake.
+
+```mermaid
+flowchart TD
+    report(["Report: PDF, DOCX, HTML, text or URL"])
+    bundle(["Enrich mode: a STIX 2.1 bundle the analyst holds"])
+
+    subgraph intake["Baseline intake"]
+        inspect["POST /api/baselines/inspect<br/>preview of what the job keeps, stores nothing"]
+        stored[("job_baselines<br/>the bundle as received + its match index")]
+        schemas["Worker, before Stage 1<br/>the intake again, with the JSON schemas"]
+    end
+
+    subgraph shared["Both workflows"]
+        s1["1, 1f: ingestion, figures"]
+        s2["2 to 2g: IoCs and NER"]
+        s3["3 to 3doc: LLM enrichment and verification"]
+        s3c["3c: ATT&amp;CK normalisation"]
+    end
+
+    hasBaseline{"Does the job have a baseline?"}
+    s3r["3r: baseline reconciliation<br/>each row new, matched, baseline_in_text or baseline_only"]
+    s4["2f, 4, 4b, 4c: STIX mapping and graph completion<br/>CTIParsor's objects"]
+    fullBundle["Full: CTIParsor's Report<br/>its TLP/PAP marking and author on every object"]
+    merged["Enrich: merged into the baseline<br/>its objects as received, matched ones replaced<br/>chosen Report re-issued (OpenCTI upsert)"]
+    s5["5: validation and export<br/>enrich: what CTIParsor built or re-issued"]
+    review["Review, then Finalize<br/>Stages 4 to 5 again on the accepted rows"]
+
+    bundle -->|"in the New report modal"| inspect
+    bundle -->|"POST /api/upload with baseline_stix"| stored
+    stored --> schemas
+    report --> s1 --> s2 --> s3 --> s3c --> hasBaseline
+    hasBaseline -->|"no: full extraction, 3r skipped"| s4
+    hasBaseline -->|"yes: enrich mode"| s3r
+    schemas -->|"validated index"| s3r
+    s3r --> s4
+    s4 -->|"full"| fullBundle --> s5
+    s4 -->|"enrich"| merged --> s5
+    s5 --> review
+```
+
+The boxes below give each stage in detail, in execution order.
+
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │  Stage 1 — INGESTION                                    (offline ✅)  │

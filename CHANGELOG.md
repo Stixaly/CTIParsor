@@ -653,6 +653,27 @@ has an amendment with the whole table.
 
 ### Documentation
 
+#### The diagrams show both workflows, full extraction and enrich mode (ADR-0090), 2026-10-29
+
+The Mermaid diagrams drew only the full extraction: none showed the STIX 2.1
+bundle an analyst can give, Stage 3r or the merge.
+
+- **`docs/pipeline.md`** opens its *Stages* section with a flowchart of the two
+  workflows: the baseline intake (the preview, `job_baselines`, the worker's
+  second intake with the JSON schemas), the stages both share, Stage 3r for an
+  enrich job only, then CTIParsor's own Report or the merge into the baseline
+  with the chosen Report re-issued, and Stage 5.
+- **`README.md`**: the component map gains Baseline Reconciliation
+  (`baseline_stix.py`) and the Baseline Store (`baseline_store.py`), joined by
+  edges labelled *enrich*; the stage table gains the row for **3r**, which it
+  lacked.
+- **`docs/architecture.md`**: *The life of a report* marks with `opt` blocks
+  what an enrich job adds (the preview, the `job_baselines` row written in the
+  `jobs` row's transaction, the second intake, Stage 3r's rows), and the `jobs`
+  row is shown inserted as `uploaded`, then queued, as the code does.
+
+All five Mermaid blocks of these files render with mermaid 11.4.1.
+
 #### The reference pages catch up with two weeks of changes, 2026-10-26
 
 Nine read-only audits compared the reference pages with the code merged since

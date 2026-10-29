@@ -175,6 +175,7 @@ ran, were skipped (disabled, model missing, no LLM provider) or failed.
 | **3e** Cross-model consensus | A second provider re-runs relationship-bearing chunks; agreement raises confidence | opt-in — `ENABLE_CONSENSUS` |
 | **3doc** Document-level relations | One call over the whole report for relationships between facts stated far apart | opt-in — `ENABLE_DOCUMENT_LEVEL_RELATIONS` |
 | **3c** ATT&CK normalisation | Canonical technique names and IDs, once per document; parent dropped when a sub-technique is present | always |
+| **3r** Baseline reconciliation | Matches the run's entities and relationships to the STIX 2.1 bundle the analyst gave, and imports the bundle's entries nothing extracted; Stage 4 then merges what the report adds into that bundle (ADR-0090) | enrich jobs only — `STIX_ENRICHMENT_ENABLED`, on by default |
 | **2f** CVE enrichment | Description and CVSS v3 score for each CVE, from a local cache; the CIRCL lookup that fills it is opt-in | always (cache) — network with `CVE_ENRICHMENT` |
 | **4** STIX mapping | SCOs, SDOs, Indicators, relationships, TLP/PAP markings, authoring identity | always |
 | **4b** Graph completion | ATT&CK-curated edges and transitive inference, each labelled as inferred or reported | on by default — policy `completion` |
@@ -194,7 +195,10 @@ each other and to external services (LLM provider, web sources, rule
 corpora). For the file-by-file layout see
 [Project structure](docs/development.md#project-structure); for deployment
 topology (processes, stores, sizing) see
-[docs/architecture.md](docs/architecture.md).
+[docs/architecture.md](docs/architecture.md). The edges labelled *enrich* exist
+only when the analyst also gives a STIX 2.1 bundle to enrich (ADR-0090);
+[docs/pipeline.md](docs/pipeline.md#stages) draws the two workflows, full
+extraction and enrich mode, side by side.
 
 ```mermaid
 flowchart TD
@@ -212,6 +216,7 @@ subgraph group_pipeline["CTI Pipeline"]
   node_llm_enrichment["LLM Enrichment<br/>[stage3_llm.py]"]
   node_claim_verification["Claim Verification<br/>[stage3d_verify.py]"]
   node_mitre_normalization["MITRE Normalization<br/>[stage3c_mitre.py]"]
+  node_baseline_reconciliation["Baseline Reconciliation<br/>[baseline_stix.py]"]
   node_stix_builder["STIX Builder"]
   node_bundle_validation["Bundle Validation"]
 end
@@ -219,6 +224,7 @@ end
 subgraph group_persistence["State &amp; Storage"]
   node_job_queue["Job Queue<br/>[queue_loop.py]"]
   node_job_store[("Job Store<br/>[db.py]")]
+  node_baseline_store[("Baseline Store<br/>[baseline_store.py]")]
 end
 
 subgraph group_ui["Analyst UI"]
@@ -239,7 +245,8 @@ node_web_source(("Web Source"))
 node_llm_provider(("LLM Provider"))
 node_corpus_sources(("Rule Sources"))
 
-node_analyst -->|"submits report"| node_api_gateway
+node_analyst -->|"submits report (+ STIX bundle)"| node_api_gateway
+node_api_gateway -.->|"enrich: stores the bundle"| node_baseline_store
 node_web_source -.->|"serves page"| node_web_capture
 node_api_gateway -.->|"captures URL"| node_web_capture
 node_web_capture -.->|"returns content"| node_api_gateway
@@ -254,6 +261,9 @@ node_llm_enrichment -.->|"requests enrichment"| node_llm_provider
 node_llm_enrichment -->|"passes claims"| node_claim_verification
 node_claim_verification -->|"passes claims"| node_mitre_normalization
 node_mitre_normalization -->|"maps techniques"| node_stix_builder
+node_mitre_normalization -.->|"enrich: passes rows"| node_baseline_reconciliation
+node_baseline_store -.->|"enrich: validated index"| node_baseline_reconciliation
+node_baseline_reconciliation -.->|"enrich: matched rows, merge"| node_stix_builder
 node_stix_builder -->|"passes bundle"| node_bundle_validation
 node_bundle_validation -->|"saves result"| node_job_store
 node_worker -->|"updates progress"| node_job_store
@@ -282,6 +292,8 @@ click node_claim_verification "https://github.com/stixaly/ctiparsor/blob/main/pi
 click node_mitre_normalization "https://github.com/stixaly/ctiparsor/blob/main/pipeline/stage3c_mitre.py"
 click node_stix_builder "https://github.com/stixaly/ctiparsor/blob/main/pipeline/stage4_stix_mapping.py"
 click node_bundle_validation "https://github.com/stixaly/ctiparsor/blob/main/pipeline/stage5_validation.py"
+click node_baseline_reconciliation "https://github.com/stixaly/ctiparsor/blob/main/pipeline/baseline_stix.py"
+click node_baseline_store "https://github.com/stixaly/ctiparsor/blob/main/api/baseline_store.py"
 click node_review_ui "https://github.com/stixaly/ctiparsor/blob/main/frontend/src/pages/Review.tsx"
 click node_graph_ui "https://github.com/stixaly/ctiparsor/blob/main/frontend/src/pages/Graph.tsx"
 click node_policy_ui "https://github.com/stixaly/ctiparsor/blob/main/frontend/src/pages/Policy.tsx"
@@ -298,8 +310,8 @@ classDef toneRose fill:#ffe4e6,stroke:#e11d48,stroke-width:1.5px,color:#881337
 classDef toneIndigo fill:#e0e7ff,stroke:#4f46e5,stroke-width:1.5px,color:#312e81
 classDef toneTeal fill:#ccfbf1,stroke:#0f766e,stroke-width:1.5px,color:#134e4a
 class node_api_gateway,node_web_capture,node_worker toneBlue
-class node_cli_runner,node_document_ingestion,node_entity_extraction,node_llm_enrichment,node_claim_verification,node_mitre_normalization,node_stix_builder,node_bundle_validation toneAmber
-class node_job_queue,node_job_store toneMint
+class node_cli_runner,node_document_ingestion,node_entity_extraction,node_llm_enrichment,node_claim_verification,node_mitre_normalization,node_baseline_reconciliation,node_stix_builder,node_bundle_validation toneAmber
+class node_job_queue,node_job_store,node_baseline_store toneMint
 class node_review_ui,node_graph_ui,node_policy_ui toneRose
 class node_coverage_ui,node_settings_ui,node_coverage_engine,node_rule_store,node_analyst,node_web_source,node_llm_provider,node_corpus_sources toneIndigo
 ```
