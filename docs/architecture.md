@@ -194,6 +194,10 @@ needs a database of its own.
 
 ## 3. The life of a report
 
+The same sequence serves both workflows. The `opt` blocks are what an enrich
+job adds, when the analyst also gives a STIX 2.1 bundle to enrich (ADR-0090);
+[docs/pipeline.md](pipeline.md#stages) draws the stages of both.
+
 ```mermaid
 sequenceDiagram
     participant U as analyst / UI
@@ -201,20 +205,34 @@ sequenceDiagram
     participant DB as postgres (jobs + rules)
     participant W as worker
     participant P as pipeline subprocess
-    U->>A: POST /api/upload
+    opt enrich mode
+        U->>A: POST /api/baselines/inspect (the STIX 2.1 bundle)
+        A-->>U: what the job would keep, nothing stored
+    end
+    U->>A: POST /api/upload (+ baseline_stix in enrich mode)
     A->>A: write uploads/<id>.pdf on cti-state
-    A->>DB: INSERT jobs (status=queued) + progress event "queued"
+    A->>DB: INSERT jobs (status=uploaded, pipeline_mode full or enrich)
+    opt enrich mode
+        A->>DB: INSERT job_baselines (the bundle as received, its match index), same transaction
+    end
+    A->>DB: status=queued + progress event "queued"
     A-->>U: 202 {job_id, status: queued}
     loop every WORKER_POLL_S
         W->>DB: UPDATE jobs SET status='processing', worker_id, heartbeat_at WHERE status='queued' (atomic claim)
     end
     W->>P: spawn (models load here, ~4.4 GB)
+    opt enrich mode
+        P->>DB: the baseline intake again, with the JSON schemas (job_baselines.validated=1)
+    end
     P->>DB: entities, relationships, progress events per stage
+    opt enrich mode
+        P->>DB: Stage 3r's enrichment_status on each row, and the bundle entries it imports
+    end
     W->>DB: heartbeat_at every WORKER_HEARTBEAT_S
     U->>A: GET /api/jobs/<id>/progress (SSE)
     A->>DB: read progress_events since last id
     A-->>U: events
-    P->>DB: bundle_json + Stage 5 verdict, status=for_review
+    P->>DB: bundle_json (enrich: merged into the baseline) + Stage 5 verdict, status=for_review
     P-->>W: exit 0 (watcher frees the slot)
     U->>A: review, finalize, coverage, export
     A->>DB: read jobs / entities / detection_rules
