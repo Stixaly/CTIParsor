@@ -20,6 +20,7 @@ import stix2
 import api.worker as worker
 from api.baseline_store import intake_json
 from api.paths import uploads_dir
+from api.routes._common import tlp_at_least
 from pipeline import baseline_stix
 from pipeline.baseline_stix import BaselineBuild
 from pipeline.bundle_ledger import MappingLedger
@@ -402,3 +403,43 @@ def test_a_kept_object_the_chosen_report_lists_and_the_document_does_not_state_i
     for oid in (WELLMESS, IP, REL_USES_WELLMESS):                             # listed by the Report, not stated
         assert "outside_report" not in objects[oid], oid
     assert objects[IDENTITY]["outside_report"] is True                        # neither listed nor stated
+
+
+# ── 8. A TLP:GREEN baseline in a TLP:AMBER job ───────────────────────────────
+
+def _green_baseline() -> dict:
+    """The OpenCTI fixture with its TLP:AMBER marking turned into OpenCTI's
+    TLP:GREEN (the standard id, as OpenCTI exports it) on every object."""
+    amber = "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+    raw = json.loads(RAW)
+    for o in raw["objects"]:
+        if o["id"] == amber:
+            o.update(id=stix2.TLP_GREEN.id, name="TLP:GREEN")
+        if "object_marking_refs" in o:
+            o["object_marking_refs"] = [stix2.TLP_GREEN.id if r == amber else r for r in o["object_marking_refs"]]
+    return raw
+
+
+def test_a_green_baseline_in_an_amber_job_ships_both_tlp_definitions_each_on_its_own_objects():
+    """D2 lets a job be more restrictive than its baseline; I2 keeps the baseline's
+    markings on its objects.  The bundle then holds two TLP definitions: the
+    baseline's GREEN on the objects it keeps, the job's AMBER on what CTIParsor
+    builds, never both on one object."""
+    raw = _green_baseline()
+    index, summary, _ = baseline_stix.intake(json.dumps(raw).encode(), validate=False)
+    assert index is not None
+    assert summary.min_tlp == "GREEN" and tlp_at_least("AMBER", summary.min_tlp)   # D2 accepts the job
+    baseline = BaselineBuild(index=index, objects={o["id"]: o for o in raw["objects"]})
+
+    bundle = _build({**OPENCTI_SCENARIO, "tlp": "AMBER"}, baseline)
+    objects = json.loads(baseline_stix.serialize_bundle(bundle, baseline.verbatim))["objects"]
+
+    tlp = {o["id"] for o in _by_type(objects, "marking-definition") if o.get("definition_type", "").casefold() == "tlp"}
+    assert tlp == {stix2.TLP_GREEN.id, stix2.TLP_AMBER.id}
+    received = {o["id"]: o for o in raw["objects"]}
+    marked = [o for o in objects if "object_marking_refs" in o]
+    for o in marked:
+        expected = [stix2.TLP_GREEN.id] if o["id"] in received else [stix2.TLP_AMBER.id]
+        assert o["object_marking_refs"] == expected, o["id"]
+    assert REPORT in {o["id"] for o in marked}                                # re-issued with its own GREEN
+    assert any(o["id"] not in received for o in marked)                       # CTIParsor built something
