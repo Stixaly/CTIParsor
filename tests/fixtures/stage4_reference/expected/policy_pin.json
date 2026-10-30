@@ -118,7 +118,7 @@
     "origin": "extracted"
    },
    "relationship--R4": {
-    "origin": "extracted"
+    "origin": "ioc_based_on"
    },
    "relationship--R5": {
     "origin": "ioc_based_on"
@@ -127,15 +127,15 @@
     "origin": "ioc_based_on"
    },
    "relationship--R7": {
-    "origin": "ioc_based_on"
+    "origin": "extracted"
    },
    "relationship--R8": {
-    "origin": "policy_pin"
-   },
-   "relationship--R9": {
     "actor": "Frost Spider",
     "origin": "targeted_location",
     "target": "finance"
+   },
+   "relationship--R9": {
+    "origin": "policy_pin"
    },
    "report--R1": {
     "origin": "report"
@@ -155,7 +155,7 @@
     "relationship_type": "communicates-with",
     "source_ref": "malware--78a72f00-0ab0-59dd-a3f6-819fbd76b03a",
     "source_value": "Nightbell",
-    "stix_id": "relationship--R3",
+    "stix_id": "relationship--R7",
     "target_ref": "domain-name--715aefaa-5519-58d6-a830-29d86995e7b9",
     "target_value": "bell-relay.test"
    },
@@ -173,7 +173,7 @@
     "relationship_type": "controls",
     "source_ref": "threat-actor--94ca10ea-a248-5958-8331-9af624aa201d",
     "source_value": "FrostSpider",
-    "stix_id": "relationship--R4",
+    "stix_id": "relationship--R3",
     "target_ref": "tool--b1368394-5bae-5084-b957-94fd46be0090",
     "target_value": "Rclone"
    },
@@ -213,13 +213,13 @@
    {
     "kind": "relationship",
     "reason": "duplicate_after_alias_merge",
-    "replaced_by": "relationship--R4",
+    "replaced_by": "relationship--R3",
     "stix_id": "relationship--R11"
    },
    {
     "kind": "relationship",
     "reason": "duplicate_after_alias_merge",
-    "replaced_by": "relationship--R9",
+    "replaced_by": "relationship--R8",
     "stix_id": "relationship--R12"
    }
   ],
@@ -336,6 +336,7 @@
   {
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "Mentioned in *Frost Spider and Nightbell*:\n\n> Frost Spider and the Nightbell backdoor\n\n> Frost Spider operates the Nightbell backdoor.\n\n> Nightbell talks to bell-relay.test and to 45.142.212.100.",
    "id": "malware--78a72f00-0ab0-59dd-a3f6-819fbd76b03a",
    "is_family": true,
    "modified": "<build-time>",
@@ -361,6 +362,7 @@
    "confidence": 80,
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "**Malicious IoC: 45.142.212.100** `indicates` **Nightbell**\n\n**Why:** The report associates the indicator value 45.142.212.100 with **Nightbell**.\n\n**Evidence:** reported · **Confidence:** 80/100",
    "id": "relationship--R1",
    "modified": "<build-time>",
    "object_marking_refs": [
@@ -377,7 +379,7 @@
    "confidence": 90,
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
-   "description": "Frost Spider operates the Nightbell backdoor.",
+   "description": "**Frost Spider** `uses` **Nightbell**\n\n> Frost Spider operates the Nightbell backdoor.\n\n**Why:** The report states this link in the sentence quoted above.\n\n**Evidence:** reported · **Confidence:** 90/100",
    "id": "relationship--R2",
    "modified": "<build-time>",
    "object_marking_refs": [
@@ -388,31 +390,15 @@
    "spec_version": "2.1",
    "target_ref": "malware--78a72f00-0ab0-59dd-a3f6-819fbd76b03a",
    "type": "relationship",
-   "x_evidence_label": "reported"
+   "x_evidence_label": "reported",
+   "x_evidence_text": "Frost Spider operates the Nightbell backdoor."
   },
   {
    "confidence": 90,
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
-   "description": "Nightbell talks to bell-relay.test",
+   "description": "**Frost Spider** `uses` **Rclone**\n\n> The group also uses the tool Rclone\n\n**Why:** The report states this link in the sentence quoted above.\n\n**Evidence:** reported · **Confidence:** 90/100",
    "id": "relationship--R3",
-   "modified": "<build-time>",
-   "object_marking_refs": [
-    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
-   ],
-   "relationship_type": "communicates-with",
-   "source_ref": "malware--78a72f00-0ab0-59dd-a3f6-819fbd76b03a",
-   "spec_version": "2.1",
-   "target_ref": "domain-name--715aefaa-5519-58d6-a830-29d86995e7b9",
-   "type": "relationship",
-   "x_evidence_label": "reported"
-  },
-  {
-   "confidence": 90,
-   "created": "<build-time>",
-   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
-   "description": "The group also uses the tool Rclone",
-   "id": "relationship--R4",
    "modified": "<build-time>",
    "object_marking_refs": [
     "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
@@ -422,12 +408,31 @@
    "spec_version": "2.1",
    "target_ref": "tool--b1368394-5bae-5084-b957-94fd46be0090",
    "type": "relationship",
-   "x_evidence_label": "reported"
+   "x_evidence_label": "reported",
+   "x_evidence_text": "The group also uses the tool Rclone"
   },
   {
    "confidence": 90,
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "**Indicator: bell-relay.test** `based-on` **bell-relay.test**\n\n**Why:** The indicator's pattern is built from this observable, which the report lists.\n\n**Evidence:** observed · **Confidence:** 90/100",
+   "id": "relationship--R4",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "relationship_type": "based-on",
+   "source_ref": "indicator--6bba8c25-18af-5e88-b7b6-18eebcdfb0a0",
+   "spec_version": "2.1",
+   "target_ref": "domain-name--715aefaa-5519-58d6-a830-29d86995e7b9",
+   "type": "relationship",
+   "x_evidence_label": "observed"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "**Indicator: nightbell.exe** `based-on` **nightbell.exe**\n\n**Why:** The indicator's pattern is built from this observable, which the report lists.\n\n**Evidence:** observed · **Confidence:** 90/100",
    "id": "relationship--R5",
    "modified": "<build-time>",
    "object_marking_refs": [
@@ -444,23 +449,8 @@
    "confidence": 90,
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "**Malicious IoC: 45.142.212.100** `based-on` **45.142.212.100**\n\n**Why:** The indicator's pattern is built from this observable, which the report lists.\n\n**Evidence:** observed · **Confidence:** 90/100",
    "id": "relationship--R6",
-   "modified": "<build-time>",
-   "object_marking_refs": [
-    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
-   ],
-   "relationship_type": "based-on",
-   "source_ref": "indicator--6bba8c25-18af-5e88-b7b6-18eebcdfb0a0",
-   "spec_version": "2.1",
-   "target_ref": "domain-name--715aefaa-5519-58d6-a830-29d86995e7b9",
-   "type": "relationship",
-   "x_evidence_label": "observed"
-  },
-  {
-   "confidence": 90,
-   "created": "<build-time>",
-   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
-   "id": "relationship--R7",
    "modified": "<build-time>",
    "object_marking_refs": [
     "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
@@ -473,9 +463,44 @@
    "x_evidence_label": "observed"
   },
   {
+   "confidence": 90,
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "**Nightbell** `communicates-with` **bell-relay.test**\n\n> Nightbell talks to bell-relay.test\n\n**Why:** The report states this link in the sentence quoted above.\n\n**Evidence:** reported · **Confidence:** 90/100",
+   "id": "relationship--R7",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "relationship_type": "communicates-with",
+   "source_ref": "malware--78a72f00-0ab0-59dd-a3f6-819fbd76b03a",
+   "spec_version": "2.1",
+   "target_ref": "domain-name--715aefaa-5519-58d6-a830-29d86995e7b9",
+   "type": "relationship",
+   "x_evidence_label": "reported",
+   "x_evidence_text": "Nightbell talks to bell-relay.test"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "**Frost Spider** `targets` **finance**\n\n**Why:** The report names **Frost Spider** as a threat actor and **finance** as a target. CTIParsor links every threat actor of the report to every target it names, so the report may not say that this actor targets this one.\n\n**Evidence:** reported",
    "id": "relationship--R8",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "relationship_type": "targets",
+   "source_ref": "threat-actor--94ca10ea-a248-5958-8331-9af624aa201d",
+   "spec_version": "2.1",
+   "target_ref": "identity--283d4ea0-b6f1-5421-bdab-117a33fdb2b7",
+   "type": "relationship",
+   "x_evidence_label": "reported"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "**Nightbell** `drops` **nightbell.exe**\n\n**Why:** Added by the relationship policy rule `malware drops file`: the analyst's link model, not a claim the report makes. Both objects are named in one sentence of the report.\n\n**Evidence:** assessed",
+   "id": "relationship--R9",
    "modified": "<build-time>",
    "object_marking_refs": [
     "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
@@ -492,22 +517,7 @@
   {
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
-   "id": "relationship--R9",
-   "modified": "<build-time>",
-   "object_marking_refs": [
-    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
-   ],
-   "relationship_type": "targets",
-   "source_ref": "threat-actor--94ca10ea-a248-5958-8331-9af624aa201d",
-   "spec_version": "2.1",
-   "target_ref": "identity--283d4ea0-b6f1-5421-bdab-117a33fdb2b7",
-   "type": "relationship",
-   "x_evidence_label": "reported"
-  },
-  {
-   "created": "<build-time>",
-   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
-   "description": "Frost Spider and the Nightbell backdoor\n\nFrost Spider operates the Nightbell backdoor. Nightbell talks to bell-relay.test and to 45.142.212.100. The group also uses the tool Rclone to copy files out of the victim network.\n\nAnalysts saw the dropper write the file nightbell.exe. The actor targets the finance sector.",
+   "description": "## Source document\n\n- **File:** nightbell.txt\n\n## What CTIParsor extracted\n\n| Object type | Count |\n|---|---|\n| `relationship` | 9 |\n| `indicator` | 3 |\n| `domain-name` | 1 |\n| `file` | 1 |\n| `identity` | 1 |\n| `ipv4-addr` | 1 |\n| `malware` | 1 |\n| `threat-actor` | 1 |\n| `tool` | 1 |\n\n## Document text\n\nFrost Spider and the Nightbell backdoor\n\nFrost Spider operates the Nightbell backdoor. Nightbell talks to bell-relay.test and to 45.142.212.100. The group also uses the tool Rclone to copy files out of the victim network.\n\nAnalysts saw the dropper write the file nightbell.exe. The actor targets the finance sector.",
    "external_references": [
     {
      "description": "Original CTI report: nightbell.txt",
@@ -530,16 +540,16 @@
     "identity--283d4ea0-b6f1-5421-bdab-117a33fdb2b7",
     "indicator--f2e3b70d-2ded-5d43-af71-727982887405",
     "relationship--R1",
-    "relationship--R7",
-    "indicator--6bba8c25-18af-5e88-b7b6-18eebcdfb0a0",
     "relationship--R6",
+    "indicator--6bba8c25-18af-5e88-b7b6-18eebcdfb0a0",
+    "relationship--R4",
     "indicator--645a0086-d463-5fbe-a5aa-eef115cd8a77",
     "relationship--R5",
-    "relationship--R9",
+    "relationship--R8",
     "relationship--R2",
-    "relationship--R4",
     "relationship--R3",
-    "relationship--R8"
+    "relationship--R7",
+    "relationship--R9"
    ],
    "published": "<build-time>",
    "spec_version": "2.1",
@@ -593,6 +603,7 @@
    ],
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "Mentioned in *Frost Spider and Nightbell*:\n\n> Frost Spider and the Nightbell backdoor\n\n> Frost Spider operates the Nightbell backdoor.",
    "id": "threat-actor--94ca10ea-a248-5958-8331-9af624aa201d",
    "modified": "<build-time>",
    "name": "Frost Spider",
@@ -605,6 +616,7 @@
   {
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "Mentioned in *Frost Spider and Nightbell*:\n\n> The group also uses the tool Rclone to copy files out of the victim network.",
    "id": "tool--b1368394-5bae-5084-b957-94fd46be0090",
    "modified": "<build-time>",
    "name": "Rclone",

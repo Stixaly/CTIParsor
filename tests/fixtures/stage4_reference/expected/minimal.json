@@ -154,6 +154,7 @@
    "confidence": 90,
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "**Indicator: 185.220.101.45** `based-on` **185.220.101.45**\n\n**Why:** The indicator's pattern is built from this observable, which the report lists.\n\n**Evidence:** observed · **Confidence:** 90/100",
    "id": "relationship--R1",
    "modified": "<build-time>",
    "object_marking_refs": [
@@ -171,6 +172,7 @@
    "confidence": 90,
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "**Indicator: evil-update.test** `based-on` **evil-update.test**\n\n**Why:** The indicator's pattern is built from this observable, which the report lists.\n\n**Evidence:** observed · **Confidence:** 90/100",
    "id": "relationship--R2",
    "modified": "<build-time>",
    "object_marking_refs": [
@@ -187,7 +189,7 @@
   {
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
-   "description": "Seen: 185.220.101.45 and evil-update.test.",
+   "description": "## Source document\n\n- **File:** minimal.txt\n\n## What CTIParsor extracted\n\n| Object type | Count |\n|---|---|\n| `indicator` | 2 |\n| `relationship` | 2 |\n| `domain-name` | 1 |\n| `ipv4-addr` | 1 |\n\n## Document text\n\nSeen: 185.220.101.45 and evil-update.test.",
    "external_references": [
     {
      "description": "Original CTI report: minimal.txt",

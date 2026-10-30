@@ -310,6 +310,7 @@
   {
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "Mentioned in *MidnightFrost detection notes*:\n\n> MidnightFrost detection notes\n\n> The following YARA rule detects the MidnightFrost loader in memory:\n\n> rule MidnightFrost\\_Loader { meta: description \\= \"MidnightFrost loader strings\" strings: $a \\= \"FrostSvc\" ascii $b \\= \"MidnightFrostMtx\" wide condition: any of them }",
    "id": "malware--2d2ddfed-bb36-50d4-a670-2cb6b16e3981",
    "is_family": true,
    "modified": "<build-time>",
@@ -335,6 +336,7 @@
    "confidence": 80,
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "**Malicious IoC: 91.215.85.17** `indicates` **MidnightFrost**\n\n**Why:** The report associates the indicator value 91.215.85.17 with **MidnightFrost**.\n\n**Evidence:** reported · **Confidence:** 80/100",
    "id": "relationship--R1",
    "modified": "<build-time>",
    "object_marking_refs": [
@@ -351,23 +353,8 @@
    "confidence": 90,
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "**Indicator: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855** `based-on` **e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855**\n\n**Why:** The indicator's pattern is built from this observable, which the report lists.\n\n**Evidence:** observed · **Confidence:** 90/100",
    "id": "relationship--R2",
-   "modified": "<build-time>",
-   "object_marking_refs": [
-    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
-   ],
-   "relationship_type": "based-on",
-   "source_ref": "indicator--012743a8-0532-5c22-ae59-b0d1348b1880",
-   "spec_version": "2.1",
-   "target_ref": "domain-name--43264b58-9bdc-59d9-bde0-371299d75349",
-   "type": "relationship",
-   "x_evidence_label": "observed"
-  },
-  {
-   "confidence": 90,
-   "created": "<build-time>",
-   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
-   "id": "relationship--R3",
    "modified": "<build-time>",
    "object_marking_refs": [
     "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
@@ -383,6 +370,24 @@
    "confidence": 90,
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "**Indicator: frostmail-cdn.test** `based-on` **frostmail-cdn.test**\n\n**Why:** The indicator's pattern is built from this observable, which the report lists.\n\n**Evidence:** observed · **Confidence:** 90/100",
+   "id": "relationship--R3",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+   ],
+   "relationship_type": "based-on",
+   "source_ref": "indicator--012743a8-0532-5c22-ae59-b0d1348b1880",
+   "spec_version": "2.1",
+   "target_ref": "domain-name--43264b58-9bdc-59d9-bde0-371299d75349",
+   "type": "relationship",
+   "x_evidence_label": "observed"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "**Malicious IoC: 91.215.85.17** `based-on` **91.215.85.17**\n\n**Why:** The indicator's pattern is built from this observable, which the report lists.\n\n**Evidence:** observed · **Confidence:** 90/100",
    "id": "relationship--R4",
    "modified": "<build-time>",
    "object_marking_refs": [
@@ -399,6 +404,7 @@
    "confidence": 90,
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "**Sigma rule: MidnightFrost Run Key Persistence** `indicates` **MidnightFrost**\n\n**Why:** The detection rule **MidnightFrost Run Key Persistence**, quoted in the report, names **MidnightFrost** in its title.\n\n**Evidence:** observed · **Confidence:** 90/100",
    "id": "relationship--R5",
    "modified": "<build-time>",
    "object_marking_refs": [
@@ -415,6 +421,7 @@
    "confidence": 90,
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "**Snort rule: MidnightFrost reverse shell** `indicates` **MidnightFrost**\n\n**Why:** The detection rule **MidnightFrost reverse shell**, quoted in the report, names **MidnightFrost** in its title.\n\n**Evidence:** observed · **Confidence:** 90/100",
    "id": "relationship--R6",
    "modified": "<build-time>",
    "object_marking_refs": [
@@ -431,6 +438,7 @@
    "confidence": 90,
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "**Suricata rule: MidnightFrost beacon** `indicates` **MidnightFrost**\n\n**Why:** The detection rule **MidnightFrost beacon**, quoted in the report, names **MidnightFrost** in its title.\n\n**Evidence:** observed · **Confidence:** 90/100",
    "id": "relationship--R7",
    "modified": "<build-time>",
    "object_marking_refs": [
@@ -447,6 +455,7 @@
    "confidence": 90,
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "**Yara rule: MidnightFrost\\_Loader** `indicates` **MidnightFrost**\n\n**Why:** The detection rule **MidnightFrost\\_Loader**, quoted in the report, names **MidnightFrost** in its title.\n\n**Evidence:** observed · **Confidence:** 90/100",
    "id": "relationship--R8",
    "modified": "<build-time>",
    "object_marking_refs": [
@@ -462,7 +471,7 @@
   {
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
-   "description": "MidnightFrost detection notes\n\nThe following YARA rule detects the MidnightFrost loader in memory:\n\nrule MidnightFrost_Loader {\n    meta:\n        description = \"MidnightFrost loader strings\"\n    strings:\n        $a = \"FrostSvc\" ascii\n        $b = \"MidnightFrostMtx\" wide\n    condition:\n        any of them\n}\n\nA second rule is broken in the report (its condition names a string that does not exist):\n\nrule Broken_Rule {\n    strings:\n        $a = \"oops\"\n    condition:\n        $nonexistent\n}\n\nThe network side is covered by this Suricata rule:\n\nalert http $HOME_NET any -> $EXTERNAL_NET any (msg:\"MidnightFrost beacon\"; content:\"/stage/payload.bin\"; http.uri; sid:1000001; rev:1;)\n\nSnort users can use the older rule below.\nalert tcp $HOME_NET any -> $EXTERNAL_NET 4444 (msg:\"MidnightFrost reverse shell\"; flow:to_server,established; content:\"|de ad be ef|\"; sid:1000002; rev:1;)\n\nThe host indicators are 91.215.85.17, frostmail-cdn.test and the hash e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.\n\nSigma rule for the registry persistence:\n\ntitle: MidnightFrost Run Key Persistence\nid: 5f1c1d52-3c2b-4a58-9d1f-0b8f9a3c7e11\nstatus: experimental\ndescription: Detects the FrostSvc Run key written by MidnightFrost\nlogsource:\n    category: registry_set\n    product: windows\ndetection:\n    selection:\n        TargetObject|endswith: '\\CurrentVersion\\Run\\FrostSvc'\n    condition: selection\nlevel: high",
+   "description": "## Source document\n\n- **File:** midnightfrost\\_rules.md\n\n## What CTIParsor extracted\n\n| Object type | Count |\n|---|---|\n| `relationship` | 8 |\n| `indicator` | 7 |\n| `domain-name` | 1 |\n| `file` | 1 |\n| `ipv4-addr` | 1 |\n| `malware` | 1 |\n\n## Document text\n\nMidnightFrost detection notes\n\nThe following YARA rule detects the MidnightFrost loader in memory:\n\nrule MidnightFrost\\_Loader {  \nmeta:  \ndescription \\= \"MidnightFrost loader strings\"  \nstrings:  \n$a \\= \"FrostSvc\" ascii  \n$b \\= \"MidnightFrostMtx\" wide  \ncondition:  \nany of them  \n}\n\nA second rule is broken in the report (its condition names a string that does not exist):\n\nrule Broken\\_Rule {  \nstrings:  \n$a \\= \"oops\"  \ncondition:  \n$nonexistent  \n}\n\nThe network side is covered by this Suricata rule:\n\nalert http $HOME\\_NET any -\\> $EXTERNAL\\_NET any (msg:\"MidnightFrost beacon\"; content:\"/stage/payload.bin\"; http.uri; sid:1000001; rev:1;)\n\nSnort users can use the older rule below.  \nalert tcp $HOME\\_NET any -\\> $EXTERNAL\\_NET 4444 (msg:\"MidnightFrost reverse shell\"; flow:to\\_server,established; content:\"\\|de ad be ef\\|\"; sid:1000002; rev:1;)\n\nThe host indicators are 91.215.85.17, frostmail-cdn.test and the hash e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.\n\nSigma rule for the registry persistence:\n\ntitle: MidnightFrost Run Key Persistence  \nid: 5f1c1d52-3c2b-4a58-9d1f-0b8f9a3c7e11  \nstatus: experimental  \ndescription: Detects the FrostSvc Run key written by MidnightFrost  \nlogsource:  \ncategory: registry\\_set  \nproduct: windows  \ndetection:  \nselection:  \nTargetObject\\|endswith: '\\\\CurrentVersion\\\\Run\\\\FrostSvc'  \ncondition: selection  \nlevel: high",
    "external_references": [
     {
      "description": "Original CTI report: midnightfrost_rules.md",
@@ -484,9 +493,9 @@
     "relationship--R1",
     "relationship--R4",
     "indicator--012743a8-0532-5c22-ae59-b0d1348b1880",
-    "relationship--R2",
-    "indicator--8d30e978-c6dd-5439-9ed0-bd61238915c3",
     "relationship--R3",
+    "indicator--8d30e978-c6dd-5439-9ed0-bd61238915c3",
+    "relationship--R2",
     "indicator--c01b6690-fc1b-5607-b6c2-45468815bb67",
     "relationship--R8",
     "indicator--b055c9e7-3851-5609-b419-947271a6f9aa",

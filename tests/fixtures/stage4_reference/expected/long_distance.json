@@ -82,6 +82,7 @@
   {
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "Mentioned in *Nightbell campaign notes*:\n\n> Nightbell campaign notes\n\n> Frost Spider operates the Nightbell backdoor.",
    "id": "malware--78a72f00-0ab0-59dd-a3f6-819fbd76b03a",
    "is_family": true,
    "modified": "<build-time>",
@@ -107,6 +108,7 @@
    "confidence": 60,
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "**Rclone** `related-to` **Frost Spider**\n\n> Frost Spider staged archives with Rclone before exfiltration.\n\n**Why:** Inferred by the language model from the report; the quoted sentence was found in its text.\n\n**Evidence:** inferred · **Confidence:** 60/100",
    "id": "relationship--R1",
    "modified": "<build-time>",
    "object_marking_refs": [
@@ -125,7 +127,7 @@
    "confidence": 90,
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
-   "description": "Frost Spider operates the Nightbell backdoor.",
+   "description": "**Frost Spider** `uses` **Nightbell**\n\n> Frost Spider operates the Nightbell backdoor.\n\n**Why:** The report states this link in the sentence quoted above.\n\n**Evidence:** reported · **Confidence:** 90/100",
    "id": "relationship--R2",
    "modified": "<build-time>",
    "object_marking_refs": [
@@ -136,12 +138,13 @@
    "spec_version": "2.1",
    "target_ref": "malware--78a72f00-0ab0-59dd-a3f6-819fbd76b03a",
    "type": "relationship",
-   "x_evidence_label": "reported"
+   "x_evidence_label": "reported",
+   "x_evidence_text": "Frost Spider operates the Nightbell backdoor."
   },
   {
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
-   "description": "Nightbell campaign notes\n\nFrost Spider operates the Nightbell backdoor. Separately, the incident response team found the tool Rclone on the file server. Frost Spider staged archives with Rclone before exfiltration.",
+   "description": "## Source document\n\n- **File:** nightbell\\_notes.txt\n\n## What CTIParsor extracted\n\n| Object type | Count |\n|---|---|\n| `relationship` | 2 |\n| `malware` | 1 |\n| `threat-actor` | 1 |\n| `tool` | 1 |\n\n## Document text\n\nNightbell campaign notes\n\nFrost Spider operates the Nightbell backdoor. Separately, the incident response team found the tool Rclone on the file server. Frost Spider staged archives with Rclone before exfiltration.",
    "external_references": [
     {
      "description": "Original CTI report: nightbell_notes.txt",
@@ -188,6 +191,7 @@
   {
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "Mentioned in *Nightbell campaign notes*:\n\n> Frost Spider operates the Nightbell backdoor.\n\n> Frost Spider staged archives with Rclone before exfiltration.",
    "id": "threat-actor--94ca10ea-a248-5958-8331-9af624aa201d",
    "modified": "<build-time>",
    "name": "Frost Spider",
@@ -200,6 +204,7 @@
   {
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "Mentioned in *Nightbell campaign notes*:\n\n> Separately, the incident response team found the tool Rclone on the file server.\n\n> Frost Spider staged archives with Rclone before exfiltration.",
    "id": "tool--b1368394-5bae-5084-b957-94fd46be0090",
    "modified": "<build-time>",
    "name": "Rclone",

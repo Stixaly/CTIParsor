@@ -110,7 +110,10 @@ def test_month_precision_dates_ship_as_assertions_not_native_bounds():
     assert "start_time" not in rel and "stop_time" not in rel
     assert [(a["role"], a["value"], a["precision"]) for a in rel.x_temporal_assertions] == [
         ("start", "2022-11", "month"), ("end", "2023-03", "month")]
-    assert rel.description == "APT29 used WellMess between November 2022 and March 2023."
+    assert rel.x_evidence_text == "APT29 used WellMess between November 2022 and March 2023."
+    # The quote is also the first thing the description shows, with the reason (ADR-0093).
+    assert "> APT29 used WellMess between November 2022 and March 2023." in rel.description
+    assert "**Why:**" in rel.description
 
 
 def test_a_verified_instant_fills_the_native_bound():

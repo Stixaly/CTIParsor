@@ -33,3 +33,44 @@ describe('MarkdownPreview — images', () => {
     expect(screen.getByRole('link', { name: 'APT29 report' })).toHaveAttribute('href', 'https://example.org/apt29')
   })
 })
+
+// The graph's side panels draw the same Markdown small and tight; the report preview is unchanged.
+describe('MarkdownPreview — compact', () => {
+  it('marks a compact preview md-compact and gives it no page padding', () => {
+    const { container } = render(<MarkdownPreview source="**Why:** reported" compact />)
+
+    const root = container.querySelector('.md-preview')
+    expect(root).toHaveClass('md-compact')
+    expect((root as HTMLElement).style.padding).toBe('')
+  })
+
+  it('leaves the default preview unmarked, with its page padding', () => {
+    const { container } = render(<MarkdownPreview source="**Why:** reported" />)
+
+    const root = container.querySelector('.md-preview')
+    expect(root).not.toHaveClass('md-compact')
+    expect(root).toHaveStyle({ padding: '32px 56px 60px' })
+  })
+})
+
+// The report's text as pipeline/markdown_text.py escapes it (escape_inline, ADR-0093): a URL, a
+// domain and an address are defanged, and `==` is backslash-escaped for OpenCTI's flexible markers.
+// The strings are that function's output, copied as it gives them. The preview shows them as text.
+describe('MarkdownPreview — report text (ADR-0093)', () => {
+  it('shows defanged indicators and == as text, with no link', () => {
+    const source = [
+      'beacons to hxxp://evil.example/gate.php',
+      'see www\\[.\\]evil.example',
+      'mail ops\\[@\\]evil.example',
+      'uint16(0) \\=\\= 0x5A4D and x \\=\\= 1',
+    ].join('\n\n')
+    const { container } = render(<MarkdownPreview compact source={source} />)
+
+    expect(container.querySelector('a')).toBeNull()
+    const text = container.textContent ?? ''
+    expect(text).toContain('hxxp://evil.example/gate.php')
+    expect(text).toContain('www[.]evil.example')
+    expect(text).toContain('ops[@]evil.example')
+    expect(text).toContain('uint16(0) == 0x5A4D and x == 1')
+  })
+})

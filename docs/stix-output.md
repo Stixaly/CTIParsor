@@ -36,22 +36,59 @@ detection rule quoted in the report itself is represented.
 | IoC linked to malware | extra `indicates` SRO Indicator → Malware; an association that cannot be built is recorded in the ledger, not skipped (see below) |
 | Relationship between an SDO and an observable (LLM-extracted or policy-pinned) | kept on the observable when STIX 2.1 defines that verb for the pair (`malware communicates-with domain-name`, `malware drops`/`downloads file`, `infrastructure consists-of <any observable>`); every other claim — `related-to` included — goes through the observable's `indicator` (ADR-0041, ADR-0062) |
 | Detection rule quoted verbatim in the report (YARA, Suricata, Snort, or Sigma) | `indicator` SDO with `pattern_type` set to the format and `pattern` holding the rule text as-is; auto-linked with `indicates` to a malware/tool whose name appears in the rule's own title (ADR-0042) |
-| Source document (PDF, DOCX, …) | `artifact` SCO — `payload_bin` (base64) + SHA-256 hash + MIME type, so the bundle carries the original file, not just a pointer to it (ADR-0043) |
+| Source document (PDF, DOCX, …) | `artifact` SCO — `payload_bin` (base64) + SHA-256 hash + MIME type, so the bundle carries the original file, not just a pointer to it (ADR-0043). The same file is also on the Report as `x_opencti_files`, which OpenCTI attaches to the Report on import (ADR-0093); the bundle holds the file twice |
 | Threat actor → country / sector | `targets` SRO |
-| Semantic relationship | `relationship` SRO (confidence score) |
-| Relationship evidence grade | `x_evidence_label` custom property on each `relationship` (`observed` / `reported` / `assessed` / `inferred` / `gap`) |
+| Semantic relationship | `relationship` SRO (confidence score). Its `description` is Markdown that says why the link exists, with the sentence the report quotes above it when there is one (ADR-0093) |
+| Relationship evidence grade | `x_evidence_label` custom property on each `relationship` (`observed` / `reported` / `assessed` / `inferred` / `gap`), also written in the `description` (ADR-0093). The quoted sentence of an extracted relationship is in `x_evidence_text` (ADR-0093) |
 | TTP evidence (ADR-0028) | each extracted technique carries `evidence_text` — a **verbatim quote** from the report — plus `evidence_label` and `evidence_start`, the resolved character offset. Kept apart from `description`, which is a summary the extractor writes: measured across four reports, quotes locate to a sentence **85.6%** of the time and descriptions **38.9%**. A quote that cannot be located stores a NULL offset and demotes the grade one step; the technique is never dropped |
 | Completed edge (Stage 4b/4c) | `relationship` SRO + `x_inference_rule` (`transitive:uses+uses`, `attack-reference:G0016>S0002`, `long-distance`) and `x_inferred_from` (premise edge ids); long-distance edges also carry `x_evidence_text` (the quoted sentence), and are built only when the model answers `related: true` and that sentence is found in the report text. MITRE's edges are graded `x_evidence_label: "external-reference"`; they and the transitive ones are in the bundle but not in the Report's `object_refs`, since the report does not state them (ADR-0013 amendment) |
 | Policy-materialised edge | `relationship` SRO + `x_evidence_label="assessed"` and `x_policy_rule` (`"malware uses attack-pattern"`) — the analyst's link model, not a claim the document made, so it fails the review auto-accept gate |
 | Synthesis accounting | `x_synthesis_stats` on the `report` SDO that CTIParsor builds (in a re-issued baseline Report, the same figures sit under `x_ctiparsor_enrichment.synthesis`) — per-rule `candidates / emitted / truncated` for the pin pass, plus Stage 4b's completion counters |
 | Sharing markings | the job's TLP `marking-definition` (+ optional PAP statement marking), referenced by `object_marking_refs` on every object CTIParsor builds (not the markings, the author identity, or the baseline objects it keeps); a `full` bundle holds exactly one TLP. An enriched bundle (ADR-0090) also ships the baseline's own marking-definitions, which the objects it keeps and the re-issued Report still reference, so it can hold several TLPs: a TLP:GREEN baseline in a TLP:AMBER job ships GREEN on the baseline's objects and AMBER on CTIParsor's. A baseline marking with the job's id and level ships once. The job's TLP is at least as restrictive as every TLP a baseline object carries, since a lower one is refused (D2). CLEAR, GREEN, AMBER and RED are the spec's objects; AMBER+STRICT is OpenCTI's own (`definition_type: "TLP"`, OpenCTI's extension and static id, two SHOULD warnings accepted by choice). An unknown level is refused, never defaulted (ADR-0073) |
 | Pipeline authorship | one authoring `identity` SDO; `created_by_ref` on every SDO/SRO CTIParsor builds (the pipeline, **not** the threat actor) |
-| Report wrapper | `report` SDO |
+| Report wrapper | `report` SDO. Its `description` is Markdown: a Source document block, a table of the objects by STIX type, then the extracted text, escaped to read as written (ADR-0093). `x_opencti_files` holds the source file |
 
 † **Mappable, but never auto-extracted.** No Stage 2 pattern produces a mutex,
 user account or network-traffic entity — Stage 4 maps them so an analyst who adds
 one by hand in the Review page gets a correct SCO. Everything else in this table
 is produced by the pipeline itself.
+
+## Context in descriptions (ADR-0093)
+
+OpenCTI shows a STIX `description` as GitHub-flavoured Markdown, so the
+descriptions Stage 4 writes are Markdown. The code is in
+`pipeline/edge_justification.py` (relationships), `pipeline/report_markdown.py`
+(the Report), `pipeline/object_mentions.py` (named objects) and
+`pipeline/markdown_text.py` (escaping).
+
+- **Relationships.** A title (the source and target names in bold, the verb in
+  code; no ids, since relationship ids are random), the sentence the report
+  quotes as a blockquote when it states the link, a `**Why:**` sentence that
+  depends on how CTIParsor built the link, then `**Evidence:**` (the grade) and
+  `**Confidence:**` (0–100). A policy rule or a targeted location says that it is
+  CTIParsor's model, not a claim of the report.
+- **The Report.** `## Source document` (file name, SHA-256, the document's
+  publication date and source when it has one, and that the original file is
+  attached), `## What CTIParsor extracted` (the count of each object type), and
+  `## Document text` (the extracted text, one line at a time, escaped). A
+  Markdown source file (`.md`) is made literal too, so its links and images do
+  not become live in OpenCTI.
+- **Named objects.** A malware, threat actor, intrusion set, campaign, tool or
+  infrastructure without a description of its own gets `Mentioned in *<report
+  name>*:` and up to three sentences of the report that name it, one of its
+  aliases, or a form ATT&CK knows for it ("Cozy Bear" for APT29). A name the
+  gazetteer policy reviewed as an ordinary word follows its rule: a CONTEXT form
+  ("ping") is not searched, a CASE form ("Silence") needs an initial capital.
+  Names under three characters are ignored, and a sentence is cut at 400
+  characters. An object kept from a baseline (ADR-0090) keeps its own description.
+- **Escaping.** What GFM would turn into a link is defanged as CTI reports do
+  (`hxxp://`, `www[.]`, `a[@]b.c`): a backslash alone does not stop remark-gfm's
+  autolinks. Every other Markdown character of the report that would act is
+  backslash-escaped, `=` included (OpenCTI highlights `==text==`). Observables
+  and indicators keep the live values.
+- **Upsert.** OpenCTI replaces a stored description when an import of at least
+  the same confidence carries one, so a later report can replace these sentences
+  (ADR-0093, Consequences).
 
 ## Detection rules embedded in the report itself
 
@@ -182,7 +219,7 @@ not listed. A bundle with no Report keeps every object in scope.
 ### The re-issued Report (upsert)
 
 The chosen Report keeps its `id`, so OpenCTI's import updates the Report it
-already holds instead of adding a second one. Only four properties change:
+already holds instead of adding a second one. Only these properties change:
 
 - **`object_refs`**: the references to baseline objects that ship, in their
   order, then what CTIParsor adds and the document states: its new objects and
@@ -198,9 +235,14 @@ already holds instead of adding a second one. Only four properties change:
   `original_document` reference (file name and SHA-256 of the uploaded file),
   added once.
 - **`x_ctiparsor_enrichment`**: as described above.
+- **`x_opencti_files`**: the source file, as an entry with `no_trigger_import:
+  true` (ADR-0093), so OpenCTI attaches it to the Report on import. It is added
+  unless the Report as received already holds a file of the same name, and its
+  other entries are kept. This is an addition to the list ADR-0090 §6 gives.
 
-`id`, `created`, `created_by_ref`, `confidence`, `name`, `published` and the
-markings are the Report as received.
+`id`, `created`, `created_by_ref`, `confidence`, `name`, `description`, `published`
+and the markings are the Report as received. The `description` is the baseline's,
+not CTIParsor's Source document block (ADR-0093).
 
 The ledger records the re-issue with origin `baseline_report_upsert`, with
 `added_refs` (a count) and `removed_refs`.

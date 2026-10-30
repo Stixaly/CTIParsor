@@ -79,6 +79,27 @@ pages now give `run --rm bootstrap bootstrap --no-models`.
 
 ### Changed
 
+#### STIX descriptions carry the context: why each link exists, the report's text and file (ADR-0093), 2026-10-30
+
+- **Relationships** have a Markdown `description` that says why CTIParsor built
+  the link, with the sentence the report quotes above it when the report states
+  it. The quote moves from `description` to `x_evidence_text`.
+- **The Report's `description`** is a Source document block, a table of the
+  objects by type, then the extracted text, escaped so that it reads as written.
+  It was the raw text. The source file is attached to the Report as
+  `x_opencti_files`, next to the `artifact` of ADR-0043, so the bundle holds it
+  twice.
+- **Named objects** without a description of their own (malware, threat actors,
+  intrusion sets, campaigns, tools, infrastructure) get up to three sentences of
+  the report that name them, by name, alias or ATT&CK form ("Cozy Bear" for
+  APT29).
+- **Report text is escaped and defanged** in these descriptions (`hxxp://`,
+  `www[.]`, `a[@]b.c`): no URL, domain or address in an IoC becomes a link in
+  OpenCTI. A Markdown source file is made literal too.
+
+Bundles stored before this change keep their descriptions until a finalize at a
+revision that has it (`BUNDLE_AFFECTING`, scope `mapping`, ADR-0086).
+
 #### An air-gapped bundle carries no reports, and its build and restore refuse what would fail later (ADR-0054), 2026-10-30
 
 - **The bundle's database holds no reports.** The dump covers the `public`

@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Graph, { RelEditor } from './Graph'
 import type { GraphEdge, GraphNode } from '../components/graph/graphLayout'
-import type { Entity, Job, Relationship } from '../types'
+import type { Entity, Job, Relationship, StixBundle } from '../types'
 
 const api = vi.hoisted(() => ({
   fetchJob: vi.fn(),
@@ -145,5 +145,43 @@ describe('Graph page — a refused delete is reported where it happened (ADR-009
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
     fireEvent.click(screen.getByTitle('Edit links'))
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
+
+describe('Graph page — a node’s context is Markdown only from the bundle (ADR-0093)', () => {
+  const BUNDLE: StixBundle = { id: 'bundle--1', type: 'bundle', objects: [
+    { id: 'threat-actor--a', type: 'threat-actor', name: 'APT29', description: 'Mentioned in *R*:\n\n> A sentence.' },
+  ] }
+
+  beforeEach(() => {
+    api.fetchJob.mockResolvedValue(JOB)
+    api.fetchEntities.mockResolvedValue([{ ...ENTITIES[0], context: '*a* and http://x.test' }, ENTITIES[1]])
+    api.fetchRelationships.mockResolvedValue([])
+    api.fetchBundle.mockRejectedValue(new Error('404: no bundle yet'))
+    api.fetchBundleLedger.mockResolvedValue(null)
+  })
+
+  // The LLM's context of a review row is plain text: no emphasis, no link.
+  it('keeps the context of a review row plain text', async () => {
+    renderGraph()
+    fireEvent.click(await screen.findByRole('button', { name: 'Review rows' }))
+    fireEvent.change(await screen.findByPlaceholderText('Search nodes…'), { target: { value: 'APT29' } })
+    fireEvent.mouseDown(await screen.findByRole('button', { name: /APT29/ }))
+
+    const context = await screen.findByText('*a* and http://x.test')
+    expect(context.tagName).toBe('DD')
+    expect(context.querySelector('em, a')).toBeNull()
+  })
+
+  it('draws a bundle object’s description as Markdown in its detail panel', async () => {
+    api.fetchBundle.mockResolvedValue(BUNDLE)
+    renderGraph()
+    fireEvent.click(await screen.findByRole('button', { name: 'STIX bundle' }))
+    fireEvent.change(await screen.findByPlaceholderText('Search nodes…'), { target: { value: 'APT29' } })
+    fireEvent.mouseDown(await screen.findByRole('button', { name: /APT29/ }))
+
+    const section = (await screen.findByText('Description')).parentElement!
+    expect(section.querySelector('blockquote')?.textContent?.trim()).toBe('A sentence.')
+    expect(section.querySelector('em')?.textContent).toBe('R')
   })
 })

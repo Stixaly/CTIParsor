@@ -271,7 +271,8 @@ export function buildBundleGraph(
       id: o.id, source: src, target: tgt, rel: String(o.relationship_type ?? ''),
       confidence: typeof o.confidence === 'number' ? o.confidence / 100 : 1,
       accepted: true,
-      evidence: str(o.description) ?? str(o.x_evidence_text) ?? '',
+      // The quote only: `description` is the Markdown justification (ADR-0093).
+      evidence: str(o.x_evidence_text) ?? '',
       kind: edgeKindOf(origin),
       changed: rows.some(r => r.ledger.changes.length > 0),
     })

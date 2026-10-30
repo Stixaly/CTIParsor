@@ -364,3 +364,30 @@ describe('buildBundleGraph — rows imported from the analyst’s bundle (ADR-00
     ])
   })
 })
+
+describe('buildBundleGraph — an SRO’s quote and justification (ADR-0093)', () => {
+  const bundleWith = (extra: Record<string, unknown>): StixBundle => ({ id: 'bundle--1', type: 'bundle', objects: [
+    obj('threat-actor--a', 'threat-actor', { name: 'APT29' }),
+    obj('malware--w', 'malware', { name: 'WINELOADER', description: 'Mentioned in *report*:\n\n> APT29 deployed WINELOADER' }),
+    sro('relationship--1', 'threat-actor--a', 'uses', 'malware--w', extra),
+  ] })
+
+  it('takes an edge’s evidence from x_evidence_text, never from its Markdown description', () => {
+    const g = buildBundleGraph(bundleWith({
+      x_evidence_text: 'APT29 deployed WINELOADER',
+      description: '### APT29 uses WINELOADER\n\n> APT29 deployed WINELOADER\n\n**Why:** the report names both.',
+    }), null, [], [])
+    expect(g.edges.find(e => e.id === 'relationship--1')?.evidence).toBe('APT29 deployed WINELOADER')
+  })
+
+  it('leaves the evidence empty for an analyst’s relationship that has only a description', () => {
+    const g = buildBundleGraph(bundleWith({ description: 'Analyst note: same actor' }), null, [], [])
+    expect(g.edges.find(e => e.id === 'relationship--1')?.evidence).toBe('')
+  })
+
+  it('keeps an object’s description as its node context', () => {
+    const g = buildBundleGraph(bundleWith({}), null, [], [])
+    const node = g.nodes.find(n => n.id === 'malware--w')
+    expect(node?.context).toBe('Mentioned in *report*:\n\n> APT29 deployed WINELOADER')
+  })
+})

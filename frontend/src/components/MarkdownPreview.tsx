@@ -190,12 +190,30 @@ const STYLES = `
     font-size: 13px;
   }
   .md-preview .md-image-blocked em { color: var(--ink-4); }
+
+  /* ── Compact: the graph's side panels (ADR-0093) ──────────────────── */
+  .md-preview.md-compact { font-size: 11.5px; line-height: 1.5; }
+  .md-preview.md-compact h1, .md-preview.md-compact h2, .md-preview.md-compact h3,
+  .md-preview.md-compact h4, .md-preview.md-compact h5, .md-preview.md-compact h6 {
+    font-size: inherit; font-weight: 600; line-height: 1.5;
+    margin: 6px 0 2px; padding-bottom: 0; border-bottom: none;
+  }
+  .md-preview.md-compact p { margin: 0 0 6px; }
+  .md-preview.md-compact blockquote { margin: 0 0 6px; padding: 4px 8px; }
+  .md-preview.md-compact ul, .md-preview.md-compact ol { margin: 0 0 6px; padding-left: 18px; }
+  .md-preview.md-compact li { margin-bottom: 1px; }
+  .md-preview.md-compact pre { font-size: 10.5px; line-height: 1.5; margin: 0 0 6px; padding: 6px 8px; }
+  .md-preview.md-compact table { font-size: inherit; margin: 0 0 6px; }
+  .md-preview.md-compact th, .md-preview.md-compact td { padding: 3px 6px; }
+  .md-preview.md-compact hr { margin: 8px 0; }
 `
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 interface Props {
   source: string
+  /** Small and tight, for a side panel: the page padding and scroll are the panel's. */
+  compact?: boolean
 }
 
 // ── Images ────────────────────────────────────────────────────────────────────
@@ -213,15 +231,15 @@ const MARKDOWN_COMPONENTS: Components = {
   },
 }
 
-export default function MarkdownPreview({ source }: Props) {
+export default function MarkdownPreview({ source, compact = false }: Props) {
   return (
     <>
       {/* Inject scoped styles once — React deduplicates identical style tags */}
       <style>{STYLES}</style>
 
       <div
-        className="md-preview"
-        style={{
+        className={compact ? 'md-preview md-compact' : 'md-preview'}
+        style={compact ? { minWidth: 0 } : {
           flex: 1,
           overflowY: 'auto',
           padding: '32px 56px 60px',
