@@ -88,6 +88,11 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "An IoC association no longer builds its Indicator's indicates edge to a malware when the analyst "
      "rejected that relationship or it is held for review; the Indicator still ships (ADR-0013, amended)",
      "mapping"),
+    ("c913f51", "2026-10-30",
+     "Each relationship's description says why it exists (its quote moves to x_evidence_text); the "
+     "Report's description is Markdown and the Report attaches the source file (x_opencti_files); a named "
+     "object without a description quotes the report's sentences that name it (ADR-0093)",
+     "mapping"),
 )
 
 
