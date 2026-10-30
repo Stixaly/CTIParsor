@@ -12,7 +12,8 @@ set -euo pipefail
 #   bash scripts/package_offline_docker.sh [--with-llm[=MODEL]] [--output DIR]
 #
 # Produces dist/cti-parsor-offline-docker-<rev>-<arch>.tar (+ .sha256).
-# Install it on the target with: bash setup.sh --offline=<extracted-dir>
+# Install it on the target with the steps the script prints at the end: the
+# bundle plus the source tree at this commit, then bash setup.sh --offline=<dir>
 # =============================================================================
 
 cd "$(dirname "$0")/.."
@@ -68,15 +69,10 @@ if $WITH_LLM; then
 fi
 
 echo "=== [3/8] Saving images → images.tar.gz ==="
-mapfile -t IMAGES < <(docker compose config --images | sort -u)
-IMAGES+=("alpine:latest")
-if $WITH_LLM; then
-    mapfile -t OLLAMA_IMAGES < <(docker compose config --images --profile ollama | sort -u)
-    IMAGES+=("${OLLAMA_IMAGES[@]}")
-fi
-mapfile -t IMAGES < <(printf '%s\n' "${IMAGES[@]}" | sort -u)
+IMAGES_LIST=$(offline_bundle_images "$WITH_LLM")
+mapfile -t IMAGES <<< "$IMAGES_LIST"
 echo "  images: ${IMAGES[*]}"
-docker save "${IMAGES[@]}" | gzip > "$STAGE_DIR/images.tar.gz"
+offline_docker_save_images "$STAGE_DIR/images.tar.gz" "${IMAGES[@]}"
 
 echo "=== [4/8] Running bootstrap locally (populates cti-cache + the rule store) ==="
 docker compose up -d postgres
@@ -91,8 +87,7 @@ docker run --rm \
     alpine tar czf /backup/cti-cache.tar.gz -C /data .
 
 echo "=== [6/8] Exporting the rule store + job store (pg_dump) ==="
-docker compose exec -T postgres \
-    pg_dump -Fc -U "${CTI_DB_USER:-ctiparsor}" -d "${CTI_DB_NAME:-ctiparsor}" \
+offline_pg_exec pg_dump -Fc -U "${CTI_DB_USER:-ctiparsor}" -d "${CTI_DB_NAME:-ctiparsor}" \
     > "$STAGE_DIR/ctiparsor.dump"
 
 if $WITH_LLM; then
@@ -134,4 +129,9 @@ sha256sum "$TARBALL" > "$TARBALL.sha256"
 echo ""
 echo "  Bundle: $TARBALL ($(du -h "$TARBALL" | cut -f1))"
 echo "  Verify in transit with:  sha256sum -c $(basename "$TARBALL").sha256"
-echo "  Install on the target:   tar -xf $(basename "$TARBALL") && bash setup.sh --offline=$STAGE_DIR"
+echo ""
+echo "  On this machine, archive the source tree at this commit ($GIT_REV):"
+echo "      git archive --format=tar.gz -o ctiparsor-src.tar.gz HEAD"
+echo "  Copy both files to the target, then install there:"
+echo "      mkdir ctiparsor && tar xzf ctiparsor-src.tar.gz -C ctiparsor && cd ctiparsor"
+echo "      tar xf ../$(basename "$TARBALL") && bash setup.sh --offline=$STAGE_DIR"

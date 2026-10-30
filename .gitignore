@@ -58,6 +58,9 @@ detection_corpora.local.yaml
 # Air-gap installation bundle (scripts/package_offline.sh, ADR-0040) -- large, rebuilt on demand.
 /offline/
 
+# Written by setup.sh --offline on Docker's classic image store; own overrides stay local too
+compose.override.yaml
+
 # Reverse-proxy secrets for the compose `proxy` profile (docs/docker.md)
 docker/nginx/certs/
 docker/nginx/htpasswd

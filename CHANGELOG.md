@@ -33,6 +33,63 @@ The upgrade notes of the 0.2.0 section said the API applies the two migrations;
 the API or a worker does, whichever starts first (docs/upgrading.md). The
 published Release notes keep the first wording.
 
+### Fixed
+
+#### The air-gapped install works again (ADR-0054), 2026-10-30
+
+ADR-0054 records that the full air-gap round trip was never run, and nothing in
+CI ran the offline scripts. Changes made after them broke the install, and
+nobody noticed:
+
+- **Postgres and the capture proxy came back without a name.** compose.yaml
+  pins images by digest since 2026-10-03. `docker save` of a
+  `name:tag@sha256:…` reference records no name, so after `docker load` the
+  images were `<none>` and `docker compose up` tried to pull them:
+  `setup.sh --offline` stopped at "Starting postgres". The packager now saves
+  them under their plain tag (`offline_docker_save_images`). On Docker's
+  containerd image store, the default of Engine 29 for a new install, the
+  pinned reference then resolves. On the classic store (overlay2) `docker load`
+  never restores a registry digest, so `setup.sh --offline` writes a
+  `compose.override.yaml` that names the plain tag of each service whose pinned
+  image came from the bundle (`offline_write_compose_override`). It never
+  overwrites an override it did not write.
+- **The dump and the restore had no password.** compose.yaml sets
+  `--auth-local=scram-sha-256`, so `docker compose exec -T postgres pg_dump`
+  failed with "fe_sendauth: no password supplied": the packager stopped at its
+  step 6, and the restore would have failed the same way. Both now read the
+  password inside the container from the mounted secret (`offline_pg_exec`, the
+  shape of `in_pg` in `scripts/db_upgrade.sh`). The backup and restore commands
+  of `docs/docker.md` had the same defect and are fixed.
+- **A `--with-llm` bundle had no Ollama image.**
+  `docker compose config --images --profile ollama` fails (`--profile` is a
+  global flag), and the error was lost in a process substitution.
+  `offline_bundle_images` builds the list now and stops on a compose error.
+- **The replay check tested an empty stack.** Since 2026-10-04
+  `scripts/docker_smoke.sh` runs in its own project, `ctiparsor-smoke`.
+  `check_offline_bundle_docker.sh` restored the bundle into `ctiparsor`, then
+  smoke-tested the other, empty stack, whose rule count read 0. It now sets
+  `COMPOSE_PROJECT_NAME=ctiparsor` for the whole run; it never passes `--clean`.
+
+Measured on Docker 29.9.2 with the registry unreachable: the packager built a
+bundle (the application image build and `bootstrap` replaced by stand-ins), and
+`setup.sh --offline` restored it on a wiped host on both image stores, the
+database rows and the `cti-cache` volume included; the services started with
+`--pull never`. The same bundle with the previous scripts failed on the classic
+store when Compose tried to pull postgres. `check_offline_bundle_docker.sh` was
+not run end to end: its smoke test needs the real application image.
+
+- **CI.** A new step of the `container-image` job,
+  `scripts/check_offline_images.sh`, saves the bundle's images, removes them,
+  loads them back, writes the override where the store needs one, and checks
+  that every image Compose asks for resolves with no pull. It passed on both
+  stores before it was added.
+- **Documentation.** The README and `docs/deployment.md` now say that the target
+  needs the source tree at the bundle's revision (`BUNDLE_GIT_REV`), which
+  nothing checks; that the bundle's dump is the whole database, so it is built
+  on an install with no reports; and that running `setup.sh --offline` again
+  over an install replaces its reports. The packager prints the install steps
+  with the source tree.
+
 ## [0.2.0] - 2026-10-29
 
 CTIParsor 0.2.0 adds enrich mode and fixes much of what 0.1.0 shipped. An

@@ -235,6 +235,7 @@ CTIParsor/
 │   ├── promote_overrides.py       # Propose / --apply deny + promote rules from decisions (ADR-0052)
 │   ├── package_offline_docker.sh  # Build the air-gap bundle (ADR-0054)
 │   ├── check_offline_bundle_docker.sh # Verify an air-gap bundle restores and runs
+│   ├── check_offline_images.sh    # Air-gap bundle images resolve by the names Compose uses after save/load (CI)
 │   ├── offline_lib_docker.sh      # Functions shared by check_offline_bundle_docker.sh and setup.sh --offline
 │   ├── docker_smoke.sh            # Build, start and verify the container stack (make docker-smoke)
 │   ├── release.py                 # Release process: the version, the tag check, the notes, the release PR (ADR-0085, docs/releasing.md)

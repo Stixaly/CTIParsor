@@ -598,17 +598,23 @@ host (ADR-0054, supersedes ADR-0040's wheel/deb bundle). Build a bundle on a
 — Docker images are architecture-specific:
 
 ```bash
-# On the connected machine, after a normal `bash setup.sh`:
+# On the connected machine, in a clean checkout (no uncommitted changes),
+# after a normal `bash setup.sh` on a fresh install with no reports:
 bash scripts/package_offline_docker.sh              # add --with-llm[=MODEL] for a local Ollama model
 # → dist/cti-parsor-offline-docker-<rev>-<arch>.tar (+ .sha256)
+git archive --format=tar.gz -o ctiparsor-src.tar.gz HEAD   # the source tree, same commit
 
-# Before transferring it, verify it restores and the stack actually works
-# (run this on a machine you're willing to cut network access to):
+# Before transferring it, verify it restores and the stack actually works.
+# Run this on a machine you're willing to cut network access to, with no
+# reports in its database: the check restores the bundle's database into it.
 tar xf dist/cti-parsor-offline-docker-*.tar
 bash scripts/check_offline_bundle_docker.sh offline
 
-# On the air-gapped host:
-tar xf cti-parsor-offline-docker-*.tar
+# On the air-gapped host, with ctiparsor-src.tar.gz and the bundle in the
+# same directory. Unpack the source tree first, then the bundle inside it:
+mkdir ctiparsor && tar xzf ctiparsor-src.tar.gz -C ctiparsor
+cd ctiparsor
+tar xf ../cti-parsor-offline-docker-*.tar
 bash setup.sh --offline=offline
 docker compose up -d
 ```
@@ -616,14 +622,43 @@ docker compose up -d
 The bundle carries a saved copy of every image the stack needs (`app`,
 `postgres`, `capture-proxy`, and `ollama` if `--with-llm` was used), a tar of
 the `cti-cache` volume (NLP models + corpus clones), and a `pg_dump` export
-of the job/rule store — everything `docker compose --profile bootstrap run
---rm bootstrap` would otherwise fetch over the network. `setup.sh --offline`
-verifies the bundle's checksums and architecture before touching anything,
-`docker load`s the images, restores the volumes and database, and leaves
-`docker compose up -d` as the only remaining step — no `bootstrap` run
-needed, the data is already there. Corpora and models are frozen at the
-bundle's build date (`offline/bundle.env`); rebuild and re-transfer to
-update them.
+of the whole database (job store and rule store) — everything `docker
+compose --profile bootstrap run --rm bootstrap` would otherwise fetch over
+the network. `setup.sh --offline` verifies the bundle's checksums and
+architecture before touching anything, `docker load`s the images, restores
+the volumes and database, and leaves `docker compose up -d` as the only
+remaining step — no `bootstrap` run needed, the data is already there.
+
+On a host with the classic image store (overlay2 without the containerd
+snapshotter), `setup.sh --offline` writes `compose.override.yaml` next to
+`compose.yaml`, naming the plain tag of each service whose pinned image came
+from the bundle, because `docker load` there restores the tag but not the
+digest. Compose reads that file on every `docker compose` run in the
+directory, so pulls use the plain tag until you delete it; delete it once the
+host can pull, to go back to the digest pins. `docker info` tells you which
+store a host uses: `driver-type: io.containerd.snapshotter.v1` under Storage
+Driver means the containerd store, where no override is needed. A
+`compose.override.yaml` that the script did not write is never overwritten;
+setup.sh stops and prints the lines to merge into it.
+
+Two caveats:
+
+- The dump is of the whole database, so the packaging machine's reports go
+  into the bundle. Build it on a fresh install with no reports, not on one
+  that analysts use.
+- The bundle does not include the source tree. The target needs this
+  repository's files at the bundle's revision (`BUNDLE_GIT_REV` in
+  `offline/bundle.env`): `setup.sh` and `compose.yaml` read them, and the
+  images and the database schema come from that revision. Nothing checks the
+  revision today.
+
+Re-running `setup.sh --offline` over an existing install replaces its database
+with the bundle's, so reports that exist only on that host are lost. The
+report files in the `cti-state` volume are not touched. The scripts have no
+way to update an install in place and keep its reports. Back up the database
+first ([docs/docker.md](docs/docker.md#data-and-backups)) and keep that dump:
+nothing merges it back in. Corpora and models are frozen at the bundle's build
+date (`offline/bundle.env`), so an update means a new bundle.
 
 ### Going further
 

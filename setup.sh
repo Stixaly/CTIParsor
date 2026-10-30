@@ -250,6 +250,10 @@ if [ -n "$OFFLINE_DIR" ]; then
 
     offline_validate_bundle "$OFFLINE_DIR"
     offline_docker_load_images "$OFFLINE_DIR"
+    # BUNDLE_IMAGES (bundle.env, set by offline_validate_bundle) is a space-separated
+    # list of references: splitting it into one argument per image is the point.
+    # shellcheck disable=SC2086
+    offline_write_compose_override $BUNDLE_IMAGES
     offline_docker_restore_volume "$OFFLINE_DIR" ctiparsor_cti-cache cti-cache.tar.gz
     if [ -n "${BUNDLE_OLLAMA_MODEL:-}" ]; then
         offline_docker_restore_volume "$OFFLINE_DIR" ctiparsor_ollama-models ollama-models.tar.gz

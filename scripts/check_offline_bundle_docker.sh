@@ -30,6 +30,15 @@ cd "$(dirname "$0")/.."
 # shellcheck source=scripts/offline_lib_docker.sh
 source scripts/offline_lib_docker.sh
 
+# Pin the Compose project for the whole script (restore, smoke test, teardown):
+# the volume names below are hard-coded as ctiparsor_* (compose.yaml's `name:`),
+# so a caller's COMPOSE_PROJECT_NAME must not redirect them. Exported so
+# docker_smoke.sh inherits it, instead of its own default ctiparsor-smoke, which
+# would start an empty stack and never test the restored one. Sharing the
+# project is safe: this script never passes --clean, the only way
+# docker_smoke.sh runs `down -v`.
+export COMPOSE_PROJECT_NAME=ctiparsor
+
 DIR="offline"
 DO_JOB=false
 TEARDOWN=false
@@ -57,6 +66,10 @@ offline_validate_bundle "$DIR"
 
 echo "=== [2/5] Loading images (offline) ==="
 offline_docker_load_images "$DIR"
+# BUNDLE_IMAGES (bundle.env, set by offline_validate_bundle) is a space-separated
+# list of references: splitting it into one argument per image is the point.
+# shellcheck disable=SC2086
+offline_write_compose_override $BUNDLE_IMAGES
 
 echo "=== [3/5] Restoring cti-cache (offline) ==="
 offline_docker_restore_volume "$DIR" ctiparsor_cti-cache cti-cache.tar.gz

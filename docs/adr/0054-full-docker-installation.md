@@ -7,8 +7,8 @@
 [scripts/package_offline_docker.sh](../../scripts/package_offline_docker.sh),
 [scripts/check_offline_bundle_docker.sh](../../scripts/check_offline_bundle_docker.sh);
 supersedes the installation mechanism (not the goal) of
-[ADR-0040](0040-air-gapped-installation.md); builds on
-[ADR-0044](0044-containerize-the-deployment.md), and re-examines the
+[ADR-0040](0040-offline-installation-bundle.md); builds on
+[ADR-0044](0044-container-images.md), and re-examines the
 bind-mount performance measurement from
 [ADR-0037](0037-scaling-to-30-40-users.md); follows
 [ADR-0053](0053-postgresql-only-sqlite-removed.md), which removed the last
@@ -246,3 +246,34 @@ air-gap mechanisms, only one of which anyone tests.
 This record is intentionally honest about what has and has not been run —
 the remaining pending items are tracked as immediate follow-up work, not
 assumed to pass.
+
+## Amendment (2026-10-30) — the air-gap round trip, run
+
+The round trip the validation record left unrun was run on Docker 29.9.2, with
+the registry unreachable. It failed until four defects were fixed (CHANGELOG,
+*The air-gapped install works again*):
+
+- `docker save` of a `name:tag@sha256:…` reference (compose.yaml pins its images
+  that way since 2026-10-03) records no name: after `docker load` postgres and
+  the capture proxy were `<none>`, and Compose tried to pull them. The packager
+  saves them under their plain tag. The containerd image store then resolves
+  the pinned reference; the classic store (overlay2) never restores a registry
+  digest, so `setup.sh --offline` writes a `compose.override.yaml` naming the
+  plain tags of the services whose images came from the bundle.
+- `pg_dump` and `pg_restore` ran without the password, which
+  `--auth-local=scram-sha-256` requires on the local socket too.
+- `--with-llm` lost the Ollama image: `--profile` came after `config`, and the
+  error was hidden in a process substitution.
+- `check_offline_bundle_docker.sh` smoke-tested `docker_smoke.sh`'s own project,
+  `ctiparsor-smoke`, not the restored `ctiparsor`.
+
+What was run: `package_offline_docker.sh` itself, with the application image
+build and `bootstrap` replaced by stand-ins; then, on a wiped host on each image
+store, `setup.sh --offline` from the bundle and the source tree. Both restored
+the database rows and the `cti-cache` volume, and the services started with
+`--pull never`. The previous scripts, on the same bundle, failed on the classic
+store when Compose tried to pull postgres. `check_offline_bundle_docker.sh` was
+not run end to end: its smoke test needs the real application image.
+
+CI now runs the image half of the round trip on every push
+(`scripts/check_offline_images.sh` in the `container-image` job).
