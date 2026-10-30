@@ -1,6 +1,8 @@
 import base64
 import json
 import os
+from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Any
@@ -12,7 +14,7 @@ from jsonschema import Draft202012Validator
 # Initialize logging
 from api.logging_config import get_logger
 from models.schemas import STIX_RELATIONSHIP_TYPES, EntityType, RawEntity
-from pipeline import attack_data, stix_ids
+from pipeline import attack_data, gazetteer_policy, stix_ids
 from pipeline.aliases import alias_surface_forms, canonical_name, type_conflict
 from pipeline.benign import benign_reason
 from pipeline.bundle_ledger import ORIGIN_EXTRACTED, MappingLedger
@@ -22,8 +24,11 @@ from pipeline.detection.pattern_check import ledger_info as pattern_ledger_info
 from pipeline.detection.suricata_atoms import parse_options, rule_header
 from pipeline.detection.yara_atoms import split_rules
 from pipeline.detection.yara_check import DOES_NOT_COMPILE, prepare_embedded_rule
+from pipeline.edge_justification import justify
 from pipeline.network_traffic import parse_network_traffic
+from pipeline.object_mentions import MENTION_TYPES, find_mentions, mention_description
 from pipeline.regex_safety import PY_WHITESPACE, compile_pattern
+from pipeline.report_markdown import opencti_file, report_description
 from pipeline.stage3_llm import LLMEnrichmentResult
 from pipeline.stage4b_graph_completion import (
     REJECTED_BY_ANALYST,
@@ -305,12 +310,15 @@ def _authoring_identity() -> stix2.Identity:
 
 
 def _stamp_objects(stix_objects: list, author_id: str, marking_refs: list[str],
-                   skip_ids: frozenset[str] = frozenset()) -> list:
+                   skip_ids: frozenset[str] = frozenset(),
+                   describe: Callable[[dict], None] | None = None) -> list:
     """Return a copy of `stix_objects` with provenance stamped on each object:
     `object_marking_refs` (all objects) and `created_by_ref` (SDO/SRO only —
     SCOs have neither a `created` timestamp nor a created_by_ref property).
     An object whose id is in `skip_ids` (a baseline object, ADR-0090) is kept
-    as it is, like a marking-definition.
+    as it is, like a marking-definition.  `describe`, when given, writes the
+    context of each other object into its dict (ADR-0093); an error there
+    costs that object its description, never the object.
 
     stix2 objects are immutable and SCOs don't support new_version(), so each is
     round-tripped through JSON — this preserves deterministic IDs (neither
@@ -322,6 +330,11 @@ def _stamp_objects(stix_objects: list, author_id: str, marking_refs: list[str],
             result.append(obj)
             continue
         d = json.loads(obj.serialize())
+        if describe is not None:
+            try:
+                describe(d)
+            except Exception as exc:
+                logger.warning(f"[Stage 4] no context written on {d.get('id')}: {type(exc).__name__}: {exc}")
         if marking_refs:
             existing = list(d.get("object_marking_refs", []))
             for ref in marking_refs:
@@ -334,6 +347,69 @@ def _stamp_objects(stix_objects: list, author_id: str, marking_refs: list[str],
             d.setdefault("created_by_ref", author_id)
         result.append(stix2.parse(d, allow_custom=True))
     return result
+
+
+def _display_names(stix_objects: list) -> dict[str, str]:
+    """The name each object and relationship reads as in a description (ADR-0093).
+
+    An object's name, else its value, key or ASN, else its first hash.  A
+    relationship reads "<source> <verb> <target>" once both its ends have a name.
+    Relationships are read in list order, so a relationship whose end is another
+    relationship gets a name only when that one comes first.
+    """
+    names: dict[str, str] = {}
+    for obj in stix_objects:
+        if _field(obj, "type") == "relationship":
+            continue
+        name = _object_name(obj)
+        if name is not None:
+            names[str(_field(obj, "id"))] = name
+    for obj in stix_objects:
+        if _field(obj, "type") != "relationship":
+            continue
+        # A missing end gives "", which no name is stored under.
+        source = names.get(str(_field(obj, "source_ref") or ""))
+        target = names.get(str(_field(obj, "target_ref") or ""))
+        if source is not None and target is not None:
+            names[str(_field(obj, "id"))] = f"{source} {_field(obj, 'relationship_type')} {target}"
+    return names
+
+
+def _mention_names(obj) -> list[str]:
+    """The names a report may use for a named object: its name, its aliases, and
+    the forms ATT&CK knows for it (a report that says "Cozy Bear" is about APT29).
+
+    A form the gazetteer policy reviewed as an ordinary word that names an
+    object only in a sentence that says so (CONTEXT: "ping", "play") is left
+    out: any sentence with the word would be quoted."""
+    name = _field(obj, "name")
+    found = [n for n in (name, *(_field(obj, "aliases") or [])) if isinstance(n, str)]
+    if isinstance(name, str):
+        found += sorted(alias_surface_forms(name, str(_field(obj, "type"))))
+    decisions = gazetteer_policy.decisions()
+    return [n for n in found if decisions.get(n.strip().lower()) != "CONTEXT"]
+
+
+def _cased_forms() -> frozenset[str]:
+    """The forms the gazetteer policy reviewed as ordinary words that name an
+    object when written with an initial capital (CASE: "Silence", "Tick")."""
+    return frozenset(k for k, v in gazetteer_policy.decisions().items() if v == "CASE")
+
+
+def _object_name(obj) -> str | None:
+    """The first of an object's name, value, key, AS number and hash, or None."""
+    for key in ("name", "value", "key"):
+        text = _field(obj, key)
+        if isinstance(text, str) and text:
+            return text
+    if _field(obj, "type") == "autonomous-system" and _field(obj, "number") is not None:
+        return f"AS{_field(obj, 'number')}"
+    hashes = _field(obj, "hashes")
+    if isinstance(hashes, dict) and hashes:
+        first = next(iter(hashes.values()))
+        return str(first) if first else None
+    return None
+
 
 # ---------------------------------------------------------------------------
 # All valid STIX 2.1 relationship types (Section 4 + Appendix B of the spec).
@@ -578,8 +654,10 @@ def build_stix_bundle(
 
     New optional keyword arguments:
       report_text       — full extracted text of the ingested document.
-                          Stored in report.description so STIX consumers can
-                          read the original narrative alongside the objects.
+                          The Report's description is Markdown built from it
+                          (ADR-0093): the source, the count of each object
+                          type, then the text.  The sentences that describe an
+                          unannotated object are taken from it too.
       original_filename — original filename (e.g. "apt29_report.pdf").
                           Used to determine the artifact MIME type and to
                           add a human-readable external reference.
@@ -592,6 +670,8 @@ def build_stix_bundle(
                           Artifact, so a hash alone is not valid STIX and
                           produces no object. Base64-encoded internally into
                           payload_bin, making the bundle self-contained.
+                          The Report attaches the same file as x_opencti_files
+                          (ADR-0093).
 
     Mapping:
     - IP, domain, URL, hash  → SCO  (Cyber-observable Object)
@@ -600,7 +680,7 @@ def build_stix_bundle(
     - CVE                    → Vulnerability SDO
     - IoC + malware link     → Indicator SDO  + indicates → Malware
     - Semantic relations     → Relationship SRO (deduplicated)
-    - Source document        → artifact SCO + report.description
+    - Source document        → artifact SCO + report.x_opencti_files (+ report.description)
     - Relationship policy    → pinned rules override inferred verbs
 
     relationship_policy — optional dict loaded from the database.
@@ -1563,11 +1643,12 @@ def build_stix_bundle(
                 allow_custom=True,
                 x_evidence_label=str(_label),
             )
-            # `description` IS a native STIX 2.1 SRO property (§5.1.2) — the
-            # verbatim quote the LLM copied to support the claim belongs
-            # there, not in a custom field.
+            # The verbatim quote the LLM copied to support the claim goes in
+            # `x_evidence_text`, the key Stage 4b uses for its long-distance links.
+            # `description` is not set here: every SRO gets one when the bundle
+            # is stamped, and it quotes this sentence (ADR-0093).
             if getattr(rel, "evidence_text", None):
-                _rel_kwargs["description"] = rel.evidence_text
+                _rel_kwargs["x_evidence_text"] = rel.evidence_text
             # start_time / stop_time and x_temporal_assertions are set after
             # the loop, from the union of every row on this edge (ADR-0063).
             relationship = stix2.Relationship(**_rel_kwargs)
@@ -1652,13 +1733,14 @@ def build_stix_bundle(
     # (the previous behaviour) can never produce a valid object —
     # stix2.Artifact(hashes=...) raises MutuallyExclusivePropertiesError,
     # which the try/except below used to swallow silently on every job.
+    # The source's MIME type, for the artifact and for the file the Report attaches.
+    suffix = ("." + original_filename.rsplit(".", 1)[-1].lower()) if "." in original_filename else ""
+    source_mime = _MIME_TYPES.get(suffix, "application/octet-stream")
     artifact_obj = None
     if source_bytes:
-        suffix = ("." + original_filename.rsplit(".", 1)[-1].lower()) if "." in original_filename else ""
-        mime   = _MIME_TYPES.get(suffix, "application/octet-stream")
         try:
             artifact_kwargs: dict = {
-                "mime_type": mime,
+                "mime_type": source_mime,
                 "payload_bin": base64.b64encode(source_bytes).decode("ascii"),
             }
             if source_hash:
@@ -1717,7 +1799,9 @@ def build_stix_bundle(
         baseline.trusted = frozenset(merge.kept)
 
     # --- Report SDO wrapping all objects ---
-    # description : full extracted text so STIX consumers see the narrative
+    # description : the source, the count of each object type and the text, as
+    #               Markdown (ADR-0093)
+    # x_opencti_files : the source file itself (ADR-0093)
     # external_references : filename + hash for tracing back to the source file
     # With a baseline whose chosen Report is in scope, that Report is re-issued
     # instead (an OpenCTI upsert, ADR-0090 D1) and no CTIParsor Report is built.
@@ -1749,8 +1833,20 @@ def build_stix_bundle(
             "object_refs": in_report,
         }
 
-        if report_text:
-            report_kwargs["description"] = report_text
+        # The source document, as the Report's Markdown description and as the
+        # file itself, attached on import (ADR-0093).  The file is the one the
+        # artifact embeds; its MIME type is the artifact's.
+        _src_pub = _source_published(document_anchor)
+        files = ([opencti_file(original_filename or "source-document", source_bytes, source_mime)]
+                 if source_bytes else [])
+        report_md = report_description(
+            report_text, filename=original_filename, source_hash=source_hash, published=_src_pub,
+            counts=Counter(i.split("--", 1)[0] for i in in_report), file_attached=bool(files),
+        )
+        if report_md:
+            report_kwargs["description"] = report_md
+        if files:
+            report_kwargs["x_opencti_files"] = files
 
         ext_refs = []
         source_ref = None
@@ -1788,7 +1884,6 @@ def build_stix_bundle(
         # stays the build time: the Report is CTIParsor's product, and its
         # created_by_ref says so.  A file's print timestamp is not a
         # publication date and is not carried.
-        _src_pub = _source_published(document_anchor)
         if _src_pub:
             report_kwargs["x_source_published"] = _src_pub
 
@@ -1823,12 +1918,22 @@ def build_stix_bundle(
                 led.left_out(chosen, "baseline", "baseline_report_empty")
                 d = None
         if d is not None:
+            attached_file = None
+            if files:
+                # The source file joins the re-issued Report, unless the baseline
+                # already attaches a file of that name (an OpenCTI export has its own).
+                attached = [f for f in d.get("x_opencti_files") or [] if isinstance(f, dict)]
+                if not any(f.get("name") == files[0]["name"] for f in attached):
+                    d["x_opencti_files"] = attached + files
+                    attached_file = files[0]["name"]
             bundle_ids = {o.id for o in stix_objects}
             removed_refs = [r for r in baseline.objects[chosen].get("object_refs", [])
                             if r not in merge.kept and r not in bundle_ids]
             reissued = stix2.parse(d, allow_custom=True)
             stix_objects.append(reissued)
-            led.object(reissued, "baseline_report_upsert", added_refs=len(added), removed_refs=removed_refs)
+            # The one property this ADR adds to the Report as received (ADR-0093).
+            led.object(reissued, "baseline_report_upsert", added_refs=len(added), removed_refs=removed_refs,
+                       attached_file=attached_file)
             baseline.verbatim[chosen] = d
             reissued_id = chosen
         elif not in_report:
@@ -1883,7 +1988,35 @@ def build_stix_bundle(
     skip_ids: frozenset[str] = frozenset(merge.kept) if merge is not None else frozenset()
     if reissued_id is not None:
         skip_ids |= {reissued_id}
-    stamped = _stamp_objects(stix_objects, author.id, marking_refs, skip_ids=skip_ids)
+
+    # The context ADR-0093 writes into each object: a relationship says why it
+    # exists, and a named object the report never describes quotes the report's
+    # sentences about it.  Neither touches a kept baseline object or the re-issued
+    # Report (`skip_ids`), which go out as they are.
+    describe: Callable[[dict], None] | None = None
+    try:
+        names = _display_names(stix_objects)
+        mentions = find_mentions(report_text, {
+            str(_field(o, "id")): _mention_names(o)
+            for o in stix_objects
+            if _field(o, "type") in MENTION_TYPES and _field(o, "id") not in skip_ids
+            and not _field(o, "description")
+        }, cased=_cased_forms())
+        mention_text = {oid: mention_description(report_name, s) for oid, s in mentions.items()}
+
+        def _describe(d: dict) -> None:
+            if d["type"] == "relationship":
+                d["description"] = justify(d, led.objects.get(d["id"]), names)
+            elif mention_text.get(d["id"]) and not d.get("description"):
+                d["description"] = mention_text[d["id"]]
+        describe = _describe
+    except Exception as exc:
+        # Context must never cost the bundle; without names, a description
+        # would show ids, so none is written.
+        logger.warning(f"[Stage 4] no context written: {type(exc).__name__}: {exc}")
+
+    stamped = _stamp_objects(stix_objects, author.id, marking_refs, skip_ids=skip_ids,
+                             describe=describe)
     led.object(author, "author_identity")
     for _m in marking_defs:
         led.object(_m, "marking")

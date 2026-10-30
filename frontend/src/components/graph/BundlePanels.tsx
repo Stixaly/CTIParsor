@@ -13,6 +13,7 @@ import {
   EDGE_KIND_ORDER, EDGE_KIND_STYLE, EDGE_ORIGIN_LABEL, OBJECT_ORIGIN_LABEL,
   benignReason, describeChange, describeTime, entityReason, relationshipReason,
 } from './provenance'
+import MarkdownPreview from '../MarkdownPreview'
 
 /** One row of an SRO's x_temporal_assertions (ADR-0063), as shipped. */
 type ShippedTime = {
@@ -32,6 +33,8 @@ const HEAD: React.CSSProperties = {
   fontSize: 10, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase',
   color: 'var(--ink-3)', marginBottom: 7,
 }
+
+const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v : null)
 
 function KindSwatch({ kind }: { kind: EdgeKind }) {
   const s = EDGE_KIND_STYLE[kind]
@@ -242,7 +245,7 @@ function EdgeLine({ e, fromId, byId, onPick }: {
 // ── Right panel: one object ───────────────────────────────────────────────────
 
 const SHOWN_PROPS = ['value', 'name', 'pattern', 'pattern_type', 'key', 'user_id', 'number',
-                     'country', 'identity_class', 'is_family', 'mime_type', 'description']
+                     'country', 'identity_class', 'is_family', 'mime_type']
 
 export function BundleNodeDetail({
   node, info, edges, byId, onClose, onPickEdge,
@@ -256,6 +259,7 @@ export function BundleNodeDetail({
 }) {
   const incident = edges.filter(e => e.source === node.id || e.target === node.id)
   const o = info?.object ?? null
+  const description = str(o?.description)
   const hashes = o?.hashes && typeof o.hashes === 'object' ? Object.entries(o.hashes) : []
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -336,6 +340,13 @@ export function BundleNodeDetail({
           </div>
         )}
 
+        {description && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={HEAD}>Description</div>
+            <MarkdownPreview source={description} compact />
+          </div>
+        )}
+
         {o && (
           <div style={{ marginBottom: 14 }}>
             <div style={HEAD}>STIX properties</div>
@@ -343,7 +354,7 @@ export function BundleNodeDetail({
               {SHOWN_PROPS.filter(p => o[p] !== undefined && o[p] !== '').map(p => (
                 <Row key={p} k={p}>
                   <span style={p === 'pattern' ? MONO : undefined}>
-                    {p === 'description' ? String(o[p]).slice(0, 400) : String(o[p])}
+                    {String(o[p])}
                   </span>
                 </Row>
               ))}
@@ -382,6 +393,9 @@ export function EdgeDetail({
   const sro = info?.sro ?? null
   const kind = edge.kind ?? 'unknown'
   const premises = Array.isArray(sro?.x_inferred_from) ? sro!.x_inferred_from as string[] : []
+  // The quote is x_evidence_text; `description` is the Markdown justification (ADR-0093).
+  const quote = str(sro?.x_evidence_text) ?? edge.evidence
+  const description = str(sro?.description)
   const endpoint = (n: GraphNode | undefined) => n && (
     <button onClick={() => onPick(n.id)}
       style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 7px', borderRadius: 4, border: 'none',
@@ -460,13 +474,20 @@ export function EdgeDetail({
           </div>
         )}
 
-        {(typeof sro?.description === 'string' || typeof sro?.x_evidence_text === 'string' || edge.evidence) && (
+        {quote && (
           <div style={{ marginBottom: 14 }}>
             <div style={HEAD}>Quoted evidence</div>
             <blockquote style={{ margin: 0, fontSize: 11.5, color: 'var(--ink-2)', lineHeight: 1.5,
                                  borderLeft: '2px solid var(--rule)', paddingLeft: 8, ...SERIF }}>
-              {String(sro?.description ?? sro?.x_evidence_text ?? edge.evidence)}
+              {quote}
             </blockquote>
+          </div>
+        )}
+
+        {description && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={HEAD}>Description</div>
+            <MarkdownPreview source={description} compact />
           </div>
         )}
 
