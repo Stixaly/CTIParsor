@@ -366,6 +366,13 @@ services:
     image: ollama/ollama:0.40.8@sha256:2b8eecdb85aa6ea67c381c8ecffec04b2658496cf2821a8f88b0485bdff198e8
     volumes:
       - ollama-models:/root/.ollama
+    # The pipeline calls the OpenAI-compatible endpoint, which takes no
+    # num_ctx, so this window applies to every request.  The chunk prompt and
+    # its answer (up to LLM_MAX_OUTPUT_TOKENS) must both fit, or Ollama
+    # truncates the prompt silently.  The KV cache grows with the window
+    # (~2 GB per 16384 tokens for a 7B model): raise CTI_OLLAMA_MEMORY too.
+    environment:
+      OLLAMA_CONTEXT_LENGTH: ${CTI_OLLAMA_CONTEXT_LENGTH:-16384}
     networks:
       - llm           # not `backend`: ollama needs egress to pull models, the database must not have any
     cap_drop:

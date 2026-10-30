@@ -39,7 +39,8 @@
 }
 
 /* ===========================================================
-   GOOGLE FONTS (fallback — index.html carries the preconnect link)
+   WEB FONTS — Inter, Source Serif 4 and JetBrains Mono are the
+   @font-face rules in public/fonts/fonts.css, linked from index.html
    =========================================================== */
 
 /* ===========================================================

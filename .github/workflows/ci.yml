@@ -333,6 +333,16 @@ jobs:
           echo "CTI_DB_PASSWORD=$(openssl rand -hex 24)" >> .env
           bash scripts/docker_smoke.sh --no-build --clean
 
+      # The air-gap bundle's images must come back from `docker save` and
+      # `docker load` under names Compose resolves, with no pull in between:
+      # compose.yaml's references, or the plain tags a compose.override.yaml
+      # names on the classic image store. Nothing else in CI runs the offline
+      # installer.
+      - name: Air-gap bundle images (save, load, resolve with no pull)
+        env:
+          CTI_IMAGE: ctiparsor:ci
+        run: bash scripts/check_offline_images.sh --yes
+
   # ── Publish to GHCR (ADR-0047) ────────────────────────────────────────────────
   # Only after the backend tests, the frontend tests and the smoke test pass
   # (an image whose code failed its own tests is never published), and only on main: a PR (including from a

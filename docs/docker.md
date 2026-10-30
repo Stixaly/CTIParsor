@@ -201,15 +201,17 @@ The app receives `DATABASE_URL=postgresql://<CTI_DB_USER>@postgres:5432/<CTI_DB_
 
 Data persists in named volumes. Two of them hold what you cannot rebuild: `cti-state` (uploads, outputs) and `pg-data-18` (every report AND the detection-rule corpus, since ADR-0053).
 
+The database commands below need the password even on the local socket (`compose.yaml` sets `scram-sha-256` for it too). They read it inside the container from the mounted secret, so it never appears on the host's command line.
+
 **Backup:**
 ```bash
 docker run --rm -v ctiparsor_cti-state:/s -v "$PWD":/b alpine tar czf /b/cti-state-$(date +%F).tgz -C /s .
-docker compose exec -T postgres pg_dump -U ctiparsor -d ctiparsor -Fc > ctiparsor-$(date +%F).dump
+docker compose exec -T postgres sh -c 'PGPASSWORD="$(cat /run/secrets/db_password)" exec "$@"' sh pg_dump -U ctiparsor -d ctiparsor -Fc > ctiparsor-$(date +%F).dump
 ```
 
 **Restore both stores** (into a fresh, empty `postgres` service):
 ```bash
-docker compose exec -T postgres pg_restore -U ctiparsor -d ctiparsor --clean --if-exists < ctiparsor-YYYY-MM-DD.dump
+docker compose exec -T postgres sh -c 'PGPASSWORD="$(cat /run/secrets/db_password)" exec "$@"' sh pg_restore -U ctiparsor -d ctiparsor --clean --if-exists < ctiparsor-YYYY-MM-DD.dump
 ```
 
 **Moving an existing SQLite-based install onto PostgreSQL** (one that ran

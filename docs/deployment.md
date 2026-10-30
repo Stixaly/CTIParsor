@@ -293,27 +293,71 @@ used, itself on no external network). What needs the network is the
 wheel/deb bundle):
 
 1. On a connected machine with Docker, the **same CPU architecture** as the
-   target, run `bash scripts/package_offline_docker.sh` (add
-   `--with-llm[=MODEL]` to bundle a local Ollama model). It builds the image,
-   saves every image the stack needs, runs `bootstrap` locally to populate
-   the NLP-model/corpus cache and the rule store, exports both (a volume tar
-   and a `pg_dump`), and packs
-   `dist/cti-parsor-offline-docker-<rev>-<arch>.tar` (+ `.sha256`).
+   target, in a clean checkout (no uncommitted changes), run
+   `bash scripts/package_offline_docker.sh` (add `--with-llm[=MODEL[,MODEL...]]`
+   to bundle local Ollama models, and `--with-proxy` to bundle the TLS front).
+   It builds the image, saves every image the
+   stack needs, runs `bootstrap` locally to populate the NLP-model/corpus
+   cache and the rule store, exports both (a volume tar and a `pg_dump`), and
+   packs `dist/cti-parsor-offline-docker-<rev>-<arch>.tar` (+ `.sha256`).
+   The `pg_dump` covers the whole database, reports included, so use a fresh
+   install with no reports. Then archive the source tree at the same commit:
+   `git archive --format=tar.gz -o ctiparsor-src.tar.gz HEAD`.
 2. Replay it before you carry it over — on a machine you're willing to cut
-   network access to: `tar xf dist/cti-parsor-offline-docker-*.tar && bash
+   network access to, with no reports in its database: `tar xf
+   dist/cti-parsor-offline-docker-*.tar && bash
    scripts/check_offline_bundle_docker.sh offline` loads the images,
    restores the volumes/database, and runs `scripts/docker_smoke.sh` against
    the result plus a rule-count check.
-3. On the target: `tar xf …`, `bash setup.sh --offline=offline`. Checksums
-   and the image architecture are verified before anything is loaded;
-   `docker compose up -d` is the only step left afterward — no `bootstrap`
-   run needed, the data is already restored.
+3. On the target, with `ctiparsor-src.tar.gz` and the bundle in one
+   directory, check the transfer with `sha256sum -c
+   cti-parsor-offline-docker-*.tar.sha256`, then
+   `mkdir ctiparsor && tar xzf ctiparsor-src.tar.gz -C ctiparsor`,
+   `cd ctiparsor`, `tar xf ../cti-parsor-offline-docker-*.tar`, then
+   `bash setup.sh --offline=offline`. Checksums and the image architecture are
+   verified before anything is loaded; `docker compose up -d` is the only step
+   left afterward — no `bootstrap` run needed, the data is already restored.
+   The source tree must be at the bundle's revision (`BUNDLE_GIT_REV` in
+   `offline/bundle.env`); nothing checks it.
+
+On a host with the classic image store (overlay2 without the containerd
+snapshotter), `setup.sh --offline` writes a `compose.override.yaml` next to
+`compose.yaml` that names the plain tag of each service whose pinned image
+came from the bundle, since `docker load` there restores the tag but not the
+digest. Compose reads it on every run in that directory, so delete it once the
+host can pull, to go back to the digest pins. `docker info` shows the store:
+`driver-type: io.containerd.snapshotter.v1` under Storage Driver means the
+containerd store, where no override is needed. A file the script did not write
+is never overwritten; setup.sh stops and prints the lines to merge into it.
+
+`setup.sh --offline` writes `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` into
+`.env` when they are absent. The worker loads two Hugging Face models on every
+report, and without these switches a Hub lookup there fails or stalls. Measured
+on Docker 29.9.2, loading those two models took 20 s online, 156 s with the
+connection refused, over 15 minutes (killed) with packets dropped, and 40 s
+with packets dropped and the switches set.
 
 The bundled Ollama model, if any, runs as the `ollama` compose profile
 (`docker compose --profile ollama up -d`) — no separate systemd unit, no
-host-installed `ollama` binary. Corpora, models and images are frozen at the
-bundle's build date — `offline/bundle.env` says when — so security updates
-mean a new bundle, not an in-place upgrade.
+host-installed `ollama` binary. Its CPU limit, context window and GPU settings
+are in [docs/configuration.md](configuration.md#ollama-local-free). Models and
+images are frozen at the bundle's build date (`offline/bundle.env` says when),
+so a security update needs a new bundle.
+
+`setup.sh --offline` replaces the database with the bundle's, so reports that
+exist only on the target are lost. The `cti-state` volume (uploads and
+outputs) is not touched. Images, models and code have no in-place update that
+keeps the reports; the corpora do (below). Back up first with `pg_dump` (see
+[docs/docker.md](docker.md#data-and-backups)); nothing merges that backup back
+in.
+
+Corpora can be refreshed without losing reports:
+`scripts/package_offline_corpora.sh` on the connected machine, then
+`scripts/update_offline_corpora.sh` on the target
+(the commands are in the README's offline section). It replaces `corpora/` in
+the `cti-cache` volume and rebuilds the rule store from the clones, reading them
+from disk. The models and the job store are not touched. Run it while no report
+is running, because the rebuild commits one statement at a time.
 
 ## 8. PostgreSQL for both stores
 

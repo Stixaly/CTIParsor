@@ -162,14 +162,16 @@ outside the host reaches `postgres`: it publishes no port.
 | Destination | From | When | Turned off by |
 |---|---|---|---|
 | the LLM provider: `api.anthropic.com`, `generativelanguage.googleapis.com` or `api.mistral.ai` | `worker`: Stage 3 and the stages that call the LLM (1f, 3d, 3e, 3f, 3doc, 4c). `app`: Stage 4c on finalize, when the relationship policy enables long-distance links. | every report | a self-hosted provider: `LLM_PROVIDER=ollama`, `lmstudio` or `vllm` |
-| `huggingface.co` | `bootstrap`; `worker`, if the cache lacks a model | once per model: `all-MiniLM-L6-v2`, `CyNER-2.0-DeBERTa-v3-base`, `gliner_large-v2.1` | `HF_HUB_OFFLINE=1`, once the cache is filled |
+| `huggingface.co` | `bootstrap`; `worker`, if the cache lacks a model | once per model: `all-MiniLM-L6-v2`, `CyNER-2.0-DeBERTa-v3-base`, `gliner_large-v2.1` | `HF_HUB_OFFLINE=1` (`setup.sh --offline` sets it), once the cache is filled |
 | `github.com` and `rules.emergingthreats.net`: the corpora listed in `detection_corpora.yaml` | `bootstrap`; `app` (Settings → Redownload) | on demand | `bootstrap --no-corpora` |
 | `cve.circl.lu` | `worker` (Stage 2f); `app` (finalize) | for a CVE not yet in the cache | `CVE_ENRICHMENT`, off by default |
 | any public web address an analyst submits | `app`'s Chromium, through `capture-proxy` | the URL tab | `CTI_INSTALL_CAPTURE=false` |
 | `registry.ollama.ai` | `ollama` | `ollama pull` | — |
 
 Image pulls (GHCR, Docker Hub) are made by the Docker daemon, not by a
-container.
+container. The web UI loads no fonts from Google: Inter, Source Serif 4 and
+JetBrains Mono are served from the app image (`frontend/public/fonts/`), so an
+analyst's browser makes no request to `fonts.googleapis.com`.
 
 **Stage 5 downloads nothing.** The STIX JSON schemas ship with the
 repository (`pipeline/data/stix2_json_schemas/`), and the image installs them

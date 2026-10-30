@@ -133,6 +133,16 @@ OLLAMA_MODEL=mistral
 Pull a model first: `ollama pull mistral`. Models smaller than ~13B may produce malformed JSON.
 If `OLLAMA_MODEL` is left unset the code falls back to `llama3.2`, not `mistral` — set it explicitly.
 
+Inside a container, `localhost` is the container itself: the bundled `ollama` profile is reached at `http://ollama:11434`, which the air-gap install writes. The context window is the server's, because the pipeline calls Ollama's OpenAI-compatible endpoint and that takes no per-request window. Ollama 0.40.8 defaults to 4096 tokens and truncates a longer prompt silently: a 14,322-token prompt was cut to 2,050 tokens and answered wrongly (measured). The bundled service sets the window from `CTI_OLLAMA_CONTEXT_LENGTH` (default 16384); an Ollama you run yourself needs `OLLAMA_CONTEXT_LENGTH` on its server. The KV cache grows with the window (about 2 GB per 16384 tokens for a 7B model), so raise `CTI_OLLAMA_MEMORY` with it.
+
+Ollama 0.40.8 handles one request at a time by default (`OLLAMA_NUM_PARALLEL`, measured), and the air-gap install starts `LLM_PARALLELISM=1` to match. `CTI_OLLAMA_CPUS` (default 8) must not exceed the host's CPUs: Docker refuses to start the container otherwise (measured on a 4-CPU host: `range of CPUs is from 0.01 to 4.00`). On a host with fewer than 8 CPUs, the air-gap install sets it to the host's CPU count in a `.env` it creates.
+
+The bundled service reserves no GPU. The commented `deploy.resources.reservations.devices` block in `compose.yaml` enables one and needs the NVIDIA container toolkit; on an air-gapped host, the driver and that toolkit must be installed from offline packages too.
+
+`.env.example` recommends `mistral-nemo` over `mistral` for JSON adherence. The pipeline's quality was measured with Anthropic models and with Qwen3.8-27B on vLLM only, so evaluate the model you choose on your own reports ([docs/eval/](eval/)).
+
+`--with-llm=MODEL[,MODEL...]` on the packager bundles several models: the first is the text model, and a vision-capable one can serve Stage 1f. `setup.sh --offline` then prints the `VISION_PROVIDER` and `VISION_MODEL` lines to set.
+
 ### Running without an LLM
 Leave `ANTHROPIC_API_KEY` unset. Stage 3 is skipped. The pipeline still produces a valid STIX bundle from the Stage 1, 2, 2b, 2c, 2d and 2e results (every offline stage).
 

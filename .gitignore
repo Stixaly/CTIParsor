@@ -55,8 +55,13 @@ detection_corpora.local.yaml
 # Large local archives (a 278 MB CLAUDE.zip was sitting in the repo root)
 *.zip
 
-# Air-gap installation bundle (scripts/package_offline.sh, ADR-0040) -- large, rebuilt on demand.
+# Air-gap installation bundle (scripts/package_offline_docker.sh, ADR-0054) -- large, rebuilt on demand.
 /offline/
+# Air-gap corpora bundle, unpacked at the repo root (scripts/package_offline_corpora.sh)
+/offline-corpora/
+
+# Written by setup.sh --offline on Docker's classic image store; own overrides stay local too
+compose.override.yaml
 
 # Reverse-proxy secrets for the compose `proxy` profile (docs/docker.md)
 docker/nginx/certs/
