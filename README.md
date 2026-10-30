@@ -775,6 +775,7 @@ read [CONTRIBUTING.md](CONTRIBUTING.md); the test strategy is in
 | Dependencies and how to keep them current | [docs/dependencies.md](docs/dependencies.md) |
 | Evaluation protocol | [docs/eval/README.md](docs/eval/README.md) |
 | Architecture Decision Records | [docs/adr/README.md](docs/adr/README.md) |
+| Plan to take the project from research prototype to production product | [docs/professionalization-plan.md](docs/professionalization-plan.md) |
 | Review of STIX relationship generation (in French) | [docs/stix-relationships-review.md](docs/stix-relationships-review.md) |
 | Tests, security, contributing, changes | [TESTING.md](TESTING.md) · [SECURITY.md](SECURITY.md) · [CONTRIBUTING.md](CONTRIBUTING.md) · [CHANGELOG.md](CHANGELOG.md) |
 
