@@ -272,6 +272,34 @@ def test_the_source_prefers_the_pdf_and_never_serves_a_partial_capture(temp_db_c
     assert resp.content == b"ingested text" and resp.headers["content-type"].startswith("text/plain")
 
 
+@pytest.mark.parametrize("suffix,body", [
+    (".html", b'<html><img src="https://tracker.example/p.gif"></html>'),
+    (".svg", b'<svg xmlns="http://www.w3.org/2000/svg"/>'),
+    (".xml", b'<?xml-stylesheet href="https://tracker.example/s.xsl"?><r/>'),
+])
+def test_a_source_page_is_served_under_a_policy_that_loads_nothing_remote(temp_db_client, temp_db, dirs,
+                                                                         suffix, body):
+    uploads, _ = dirs
+    _add_job(temp_db, "j1", filename=f"report{suffix}")
+    (uploads / f"j1{suffix}").write_bytes(body)
+
+    resp = temp_db_client.get("/api/jobs/j1/source")
+
+    assert resp.status_code == 200
+    assert "default-src 'none'" in resp.headers["content-security-policy"]
+    assert "img-src data:" in resp.headers["content-security-policy"]
+
+
+def test_a_pdf_source_gets_no_content_security_policy(temp_db_client, temp_db, dirs):
+    uploads, _ = dirs
+    _add_job(temp_db, "j1")
+    (uploads / "j1.pdf").write_bytes(b"%PDF-1.4 rendered page")
+
+    resp = temp_db_client.get("/api/jobs/j1/source")
+
+    assert resp.status_code == 200 and "content-security-policy" not in resp.headers
+
+
 def test_an_unknown_suffix_is_served_as_octet_stream(temp_db_client, temp_db, dirs):
     uploads, _ = dirs
     _add_job(temp_db, "j1")

@@ -6,15 +6,18 @@
  *   blockquotes, ordered/unordered/task lists, tables, horizontal rules,
  *   and auto-linked URLs.
  *
+ * Images are drawn only when they are inline data: URIs. Any other image is an
+ * inert placeholder (see markdownImages.ts): the preview never fetches anything.
+ *
  * Styling is injected as a scoped <style> block so no external CSS file is
  * needed, and all values use the app's CSS custom properties so the preview
  * automatically adapts to the current theme (warm / ember / dark / etc.).
- *
- * Using a CSS approach avoids all react-markdown v9 TypeScript type issues
- * with custom component renderers.
+ * The only custom component renderer is the one for images.
  */
 import ReactMarkdown from 'react-markdown'
 import remarkGfm    from 'remark-gfm'
+import type { Components } from 'react-markdown'
+import { isAllowedImageSrc, markdownUrlTransform } from './markdownImages'
 
 // ── Scoped styles ─────────────────────────────────────────────────────────────
 // All selectors are prefixed with .md-preview so they never leak out.
@@ -176,12 +179,38 @@ const STYLES = `
     margin: 8px 0;
     display: block;
   }
+  /* Placeholder for an external image, which is not fetched */
+  .md-preview .md-image-blocked {
+    display: inline-block;
+    border: 1px dashed var(--rule);
+    border-radius: 4px;
+    padding: 1px 6px;
+    margin: 0 2px;
+    color: var(--ink-3);
+    font-size: 13px;
+  }
+  .md-preview .md-image-blocked em { color: var(--ink-4); }
 `
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 interface Props {
   source: string
+}
+
+// ── Images ────────────────────────────────────────────────────────────────────
+
+// An image is a request from the analyst's browser, so only data: images are
+// drawn. Any other src becomes a placeholder that shows the alt text instead.
+const MARKDOWN_COMPONENTS: Components = {
+  img({ src, alt, title }) {
+    if (isAllowedImageSrc(src)) return <img src={src} alt={alt} title={title} />
+    return (
+      <span className="md-image-blocked">
+        {alt} <em>external image not loaded</em>
+      </span>
+    )
+  },
 }
 
 export default function MarkdownPreview({ source }: Props) {
@@ -199,7 +228,11 @@ export default function MarkdownPreview({ source }: Props) {
           minWidth: 0,
         }}
       >
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          urlTransform={markdownUrlTransform}
+          components={MARKDOWN_COMPONENTS}
+        >
           {source}
         </ReactMarkdown>
       </div>

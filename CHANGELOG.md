@@ -34,6 +34,19 @@ After a corpora update, a report row in the database and the model cache were
 unchanged and the new clones were in place; the rule-store rebuild was a stand-in
 for `scripts/build_detection_index.py`, which is unchanged.
 
+#### Local LLM servers that require a key: `OLLAMA_API_KEY`, `LMSTUDIO_API_KEY`, `VLLM_API_KEY`, 2026-10-30
+
+- **Three keys** for a local server started with one, such as
+  `vllm serve --api-key`. The key is sent as a Bearer token. Stage 3 uses it for
+  all three servers; `OLLAMA_API_KEY` and `VLLM_API_KEY` also apply to the
+  vision provider (Stage 1f). Unset, Stage 3 sends the placeholder it always sent
+  (`ollama`, `lmstudio`, `vllm`), and a vLLM figure request carries no
+  `Authorization` header.
+- **`.env.example` says what Ollama does with a long prompt**: it cuts it at its
+  context window, with no error. The window is `OLLAMA_CONTEXT_LENGTH` on your
+  own server, or `CTI_OLLAMA_CONTEXT_LENGTH` for the compose profile. A whole
+  report needs a larger window or a lower `LLM_DOC_MAX_PROMPT_LENGTH`.
+
 ### Documentation
 
 #### The pages that describe the latest release name v0.2.0 (ADR-0085), 2026-10-30
@@ -57,6 +70,55 @@ API, `gh attestation verify`, `gh release verify` and the registry:
 The upgrade notes of the 0.2.0 section said the API applies the two migrations;
 the API or a worker does, whichever starts first (docs/upgrading.md). The
 published Release notes keep the first wording.
+
+#### The bootstrap command in the README and in docs/detection-coverage.md runs (ADR-0054), 2026-10-30
+
+`docker compose --profile bootstrap run --rm bootstrap --no-models` made
+`--no-models` the command, which the entrypoint tried to run as a program. Both
+pages now give `run --rm bootstrap bootstrap --no-models`.
+
+### Changed
+
+#### An air-gapped bundle carries no reports, and its build and restore refuse what would fail later (ADR-0054), 2026-10-30
+
+- **The bundle's database holds no reports.** The dump covers the `public`
+  schema, without large objects. It has the schema of every table, but the data
+  only of the six rule-store tables and of `schema_migrations`. The packager
+  stops when `public` has no table, and checks the table of contents of the dump
+  on any doubt: a data entry for another table, another schema or a large object,
+  or a listing without the rule store's data. The sequence counters (`progress_events_id_seq`,
+  `review_decisions_id_seq`) come with the schema, so the bundle carries the
+  packaging machine's last ids, not its rows. Before, the dump carried the
+  packaging machine's whole database to the target. A bundle built before this
+  change still holds those reports. `tests/test_offline_bundle_rule_tables.py`
+  keeps the list equal to the rule-store migrations.
+- **The build is strict.** The packager runs `bootstrap --strict`
+  (`docker/entrypoint.sh`) with `HF_HUB_OFFLINE=0` and `TRANSFORMERS_OFFLINE=0`,
+  so it downloads even when `.env` says offline. Bootstrap exits 1 when a model
+  does not download, when the models do not load from the cache with
+  `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`, or when a corpus does not sync.
+  The packager also stops when `detection_rules` is empty, and when Ollama does not
+  answer before its models are pulled. Without `--strict`, bootstrap warns and
+  goes on, as before.
+- **Corpus sync reports its failures.** `scripts/sync_corpora.py` exits 1 when a
+  clone or a tarball fails, which `make` and `scripts/package_offline_corpora.sh`
+  see. A corpus that is managed by hand, or has no remote, is still skipped and
+  is not a failure.
+- **The restore does not erase reports.** `setup.sh --offline` refuses to restore
+  over a database that holds a row outside the rule store and `schema_migrations`:
+  a report, a review decision, an override or a cache. The refusal names the
+  tables. `pg_restore --clean` drops and recreates every table, so
+  `OFFLINE_FORCE_RESTORE=1` overrides the refusal. To refresh only the rules of an
+  installation that has reports, use `scripts/update_offline_corpora.sh`. The
+  `cti-cache` archive, and `ollama-models` when the bundle has a model, are now
+  required: a missing one stops the install instead of being skipped. `docker load`
+  runs with pipefail, so a corrupt image archive stops the install too. A failed
+  `pg_restore` or volume extraction now stops `check_offline_bundle_docker.sh` as
+  well, not only `setup.sh`.
+- **No local model, no Stage 3 offline.** `setup.sh --offline` warns when the
+  bundle has no model and `LLM_PROVIDER` is not `ollama`, `vllm` or `lmstudio`
+  (unset means `anthropic`): Stage 3 cannot reach a hosted API from an
+  air-gapped host.
 
 ### Fixed
 
@@ -110,10 +172,7 @@ not run end to end: its smoke test needs the real application image.
   stores before it was added.
 - **Documentation.** The README and `docs/deployment.md` now say that the target
   needs the source tree at the bundle's revision (`BUNDLE_GIT_REV`), which
-  nothing checks; that the bundle's dump is the whole database, so it is built
-  on an install with no reports; and that running `setup.sh --offline` again
-  over an install replaces its reports. The packager prints the install steps
-  with the source tree.
+  nothing checks. The packager prints the install steps with the source tree.
 
 #### An air-gapped install runs its bundled local LLM, and makes no request to the internet (ADR-0054), 2026-10-30
 
@@ -157,6 +216,66 @@ not run end to end: its smoke test needs the real application image.
 Measured end to end on Docker 29.9.2 with the registry unreachable: after
 `setup.sh --offline`, the worker container reached the bundled Ollama at the
 `OLLAMA_BASE_URL` of the written `.env`, with a 16,384-token window.
+
+#### The air-gap check fails when the pipeline did not run (ADR-0054), 2026-10-30
+
+`scripts/docker_smoke.sh --job` passed as soon as the job did not end `failed`
+and the bundle was not empty, so a job whose LLM or models had been skipped
+passed too.
+
+- **The stage report decides.** The check reads the job's stage report
+  (ADR-0059), and `scripts/smoke_stage_report.py` judges it. It fails when a stage
+  is `failed`, or when a stage in `SMOKE_REQUIRED_STAGES` (default `2c 2d 2e 3`)
+  did not run. A stage that the configuration turned off is accepted. A job that
+  times out is no longer a pass, and the worker's log is searched for tracebacks
+  as well as the app's. The judge uses the standard library only, and
+  `tests/test_smoke_stage_report.py` covers it.
+- **The verifier reads `.env` before it starts anything.**
+  `scripts/check_offline_bundle_docker.sh` requires an LLM the air-gapped stack
+  can reach. With a model in the bundle, `.env` must name it
+  (`LLM_PROVIDER=ollama`, `OLLAMA_MODEL`, `OLLAMA_BASE_URL=http://ollama:11434`).
+  Without one, `LLM_PROVIDER` must be `ollama`, `vllm` or `lmstudio`, unless
+  `--allow-no-llm` is given: `--job` then requires 2c, 2d and 2e only. It reads
+  `.env` as compose does (quotes, an inline comment, CRLF, the last line of a key
+  wins), and warns, without failing, when a local server's URL is `localhost` or
+  empty: inside a container that is the container itself. The verifier starts the
+  `ollama` service and checks that each bundled model is in it. It sets
+  `HF_HUB_OFFLINE` and `TRANSFORMERS_OFFLINE` in `.env` when they are absent.
+- **A check with `--job` leaves a job behind.** The second run on the same host
+  stops at the restore, which refuses a database that holds rows outside the rule
+  store (the job is one). Set `OFFLINE_FORCE_RESTORE=1`, or run
+  `docker compose down -v`, first.
+
+Not run in this session: the packager and the verifier under Docker, and an
+air-gap round trip on an isolated machine. The shell functions and the Python
+changes have tests outside a container (`tests/test_offline_bundle_rule_tables.py`,
+`tests/test_sync_corpora.py`, `tests/test_local_llm_providers.py`,
+`tests/test_jobs_routes.py`, `tests/test_smoke_stage_report.py`):
+113 passed on 2026-10-30, and the full suite 4344 passed, 9 skipped.
+
+#### A reasoning block is not read as the Stage 3 answer, 2026-10-30
+
+A reasoning model writes `<think>...</think>` before its answer. Stage 3 took
+the first JSON object of a reply, so a brace inside the reasoning was read as
+the answer, and the real JSON after it was lost. The block is now removed before
+the JSON is read, for every provider that goes through the OpenAI-compatible
+call: Gemini, Mistral, Ollama, LM Studio and vLLM. A reply that starts with `{`,
+`[` or a code fence is an answer: a `</think>` inside its JSON is data, and it is
+not cut. A block with no closing tag, cut at the output limit before any answer,
+is an empty answer that is still flagged as at the limit.
+
+### Security
+
+#### An imported report's HTML and SVG source loads nothing from the network, 2026-10-30
+
+`GET /api/jobs/{id}/source` now sends `Content-Security-Policy: default-src
+'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; base-uri
+'none'; form-action 'none'` for the html, xhtml, svg and xml types. The source is
+shown in a sandboxed frame. The sandbox stops scripts but not image, style or
+font requests: a tracking pixel in an imported page would report the analyst's
+address to its author, and on an air-gapped host those requests would hang. PDFs
+get no policy. The Markdown preview shows an image only when it is a
+`data:image/` URI; any other image shows as "external image not loaded".
 
 ## [0.2.0] - 2026-10-29
 

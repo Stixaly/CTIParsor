@@ -297,18 +297,35 @@ wheel/deb bundle):
    `bash scripts/package_offline_docker.sh` (add `--with-llm[=MODEL[,MODEL...]]`
    to bundle local Ollama models, and `--with-proxy` to bundle the TLS front).
    It builds the image, saves every image the
-   stack needs, runs `bootstrap` locally to populate the NLP-model/corpus
+   stack needs, runs `bootstrap --strict` locally to populate the NLP-model/corpus
    cache and the rule store, exports both (a volume tar and a `pg_dump`), and
    packs `dist/cti-parsor-offline-docker-<rev>-<arch>.tar` (+ `.sha256`).
-   The `pg_dump` covers the whole database, reports included, so use a fresh
-   install with no reports. Then archive the source tree at the same commit:
+   `--strict` stops the build when a model does not download or does not load
+   from the cache with the network off, or when a corpus does not sync. The
+   packager downloads even when `.env` says offline: it runs the build with
+   `HF_HUB_OFFLINE=0` and `TRANSFORMERS_OFFLINE=0`. The `pg_dump` covers the
+   `public` schema, without large objects. It has the schema of every table, but
+   the data only of the six rule-store tables and of `schema_migrations`: the
+   reports stay on the packaging machine. The packager stops if the table of
+   contents of the dump shows the data of any other table, of another schema, or
+   a large object. Then archive the source tree at the same commit:
    `git archive --format=tar.gz -o ctiparsor-src.tar.gz HEAD`.
-2. Replay it before you carry it over — on a machine you're willing to cut
-   network access to, with no reports in its database: `tar xf
+2. Replay it before you carry it over, on a machine you're willing to cut
+   network access to: `tar xf
    dist/cti-parsor-offline-docker-*.tar && bash
    scripts/check_offline_bundle_docker.sh offline` loads the images,
    restores the volumes/database, and runs `scripts/docker_smoke.sh` against
-   the result plus a rule-count check.
+   the result plus a rule-count check. The check reads `.env` first, and it
+   starts the `ollama` service and checks that each bundled model is in it.
+   With a model in the bundle, `.env` must name it (`LLM_PROVIDER=ollama`,
+   `OLLAMA_MODEL`, `OLLAMA_BASE_URL=http://ollama:11434`). Without one,
+   `LLM_PROVIDER` must be `ollama`, `vllm` or `lmstudio`; `--allow-no-llm`
+   lets a bundle with no model through, and then `--job` requires only stages
+   2c, 2d and 2e. With `--job`, the job's stage report must show each stage in
+   `SMOKE_REQUIRED_STAGES` (default `2c 2d 2e 3`) as run, unless the
+   configuration turned it off. The restore refuses a database that holds a row
+   outside the rule store, and `--job` leaves a job: a second run on the same host
+   needs `docker compose down -v` first, or `OFFLINE_FORCE_RESTORE=1`.
 3. On the target, with `ctiparsor-src.tar.gz` and the bundle in one
    directory, check the transfer with `sha256sum -c
    cti-parsor-offline-docker-*.tar.sha256`, then
@@ -317,6 +334,10 @@ wheel/deb bundle):
    `bash setup.sh --offline=offline`. Checksums and the image architecture are
    verified before anything is loaded; `docker compose up -d` is the only step
    left afterward — no `bootstrap` run needed, the data is already restored.
+   The archives `cti-cache.tar.gz` and, when the bundle has a model,
+   `ollama-models.tar.gz` are required: a missing one stops the install. The
+   restore also stops on a database that holds a row outside the rule store (see
+   below).
    The source tree must be at the bundle's revision (`BUNDLE_GIT_REV` in
    `offline/bundle.env`); nothing checks it.
 
@@ -344,10 +365,12 @@ are in [docs/configuration.md](configuration.md#ollama-local-free). Models and
 images are frozen at the bundle's build date (`offline/bundle.env` says when),
 so a security update needs a new bundle.
 
-`setup.sh --offline` replaces the database with the bundle's, so reports that
-exist only on the target are lost. The `cti-state` volume (uploads and
-outputs) is not touched. Images, models and code have no in-place update that
-keeps the reports; the corpora do (below). Back up first with `pg_dump` (see
+`setup.sh --offline` does not restore over a database that holds a row outside the
+rule store (a report, a review decision, an override, a cache): it stops before
+the restore, because `pg_restore --clean` drops and recreates every table.
+`OFFLINE_FORCE_RESTORE=1` overrides that and erases those rows in the database. The `cti-state` volume (uploads and outputs) is not touched. Images,
+models and code have no in-place update that keeps the reports; the corpora do
+(below). Back up first with `pg_dump` (see
 [docs/docker.md](docker.md#data-and-backups)); nothing merges that backup back
 in.
 

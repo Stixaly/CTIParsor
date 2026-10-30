@@ -15,7 +15,7 @@ from api.logging_config import get_logger
 from models.schemas import EntityType, EvidenceLabel, RawEntity
 from pipeline import attack_data
 from pipeline.env_flags import env_int
-from pipeline.llm_parse import SPOTLIGHT_RULE, fit_report
+from pipeline.llm_parse import SPOTLIGHT_RULE, fit_report, strip_reasoning
 from pipeline.stage3f_ttp_select import TtpReview
 from pipeline.temporal import (
     ROLES as _TIME_ROLES,
@@ -235,8 +235,11 @@ def _get_ollama_client():
     if _ollama_client is None:
         _ollama_base = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
         _OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
+        # The SDK needs a value even when the server checks none: the placeholder
+        # stays unless OLLAMA_API_KEY is set.
+        _ollama_key = os.environ.get("OLLAMA_API_KEY", "").strip() or "ollama"
         if _OPENAI_SDK_AVAILABLE and _OpenAIClient is not None:
-            _ollama_client = _OpenAIClient(api_key="ollama", base_url=f"{_ollama_base}/v1")
+            _ollama_client = _OpenAIClient(api_key=_ollama_key, base_url=f"{_ollama_base}/v1")
             return _ollama_client
         return None
     return _ollama_client
@@ -259,8 +262,10 @@ def _get_lmstudio_client():
     global _lmstudio_client
     if _lmstudio_client is None:
         _lmstudio_base = os.environ.get("LMSTUDIO_BASE_URL", "http://localhost:1234").rstrip("/")
+        # The placeholder stays unless LMSTUDIO_API_KEY is set (see _get_ollama_client).
+        _lmstudio_key = os.environ.get("LMSTUDIO_API_KEY", "").strip() or "lmstudio"
         if _OPENAI_SDK_AVAILABLE and _OpenAIClient is not None:
-            _lmstudio_client = _OpenAIClient(api_key="lmstudio", base_url=f"{_lmstudio_base}/v1")
+            _lmstudio_client = _OpenAIClient(api_key=_lmstudio_key, base_url=f"{_lmstudio_base}/v1")
             return _lmstudio_client
         return None
     return _lmstudio_client
@@ -271,8 +276,10 @@ def _get_vllm_client():
     global _vllm_client
     if _vllm_client is None:
         _vllm_base = os.environ.get("VLLM_BASE_URL", "http://localhost:8000").rstrip("/")
+        # The placeholder stays unless VLLM_API_KEY is set (see _get_ollama_client).
+        _vllm_key = os.environ.get("VLLM_API_KEY", "").strip() or "vllm"
         if _OPENAI_SDK_AVAILABLE and _OpenAIClient is not None:
-            _vllm_client = _OpenAIClient(api_key="vllm", base_url=f"{_vllm_base}/v1")
+            _vllm_client = _OpenAIClient(api_key=_vllm_key, base_url=f"{_vllm_base}/v1")
             return _vllm_client
         return None
     return _vllm_client
@@ -870,7 +877,13 @@ def _call_openai_compatible_impl(client_param, model: str, system: str, user: st
         if content is None:
             logger.error(f"{label} returned null message content")
             return _provider_answer("", at_ceiling, label, max_tokens)
-        return _provider_answer(content.strip(), at_ceiling, label, max_tokens)
+        # A reasoning block is not part of the answer: its braces would be read as
+        # JSON ahead of the real one (llm_parse.strip_reasoning).
+        stripped = content.strip()
+        answer = strip_reasoning(stripped)
+        if len(answer) < len(stripped):
+            logger.debug(f"{label} reasoning block removed ({len(stripped) - len(answer)} characters)")
+        return _provider_answer(answer, at_ceiling, label, max_tokens)
     except Exception as e:
         elapsed = time.monotonic() - t0
         if "timeout" in str(e).lower() or "timed out" in str(e).lower():

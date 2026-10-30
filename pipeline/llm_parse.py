@@ -46,6 +46,44 @@ def fit_report(template: str, text: str, max_chars: int | None, **fields: str) -
     return fit_text(marked, text, max_chars, **fields), rule
 
 
+_REASONING_OPEN = "<think>"
+_REASONING_CLOSE = "</think>"
+
+
+def strip_reasoning(text: str) -> str:
+    """Return the answer without the reasoning block some models write first.
+
+    Reasoning models (Qwen3 with thinking on, for one) put their thinking in
+    `<think>...</think>` before the answer.  The parser of a Stage 3 reply takes
+    the first JSON object it finds, so a brace or an example object inside the
+    thinking was read as the answer, and the real JSON after it was lost.
+
+    Two shapes come back from the servers:
+
+    - the reply starts with `<think>`: the block runs to the first `</think>`.
+      A block with no closing tag was cut at the output ceiling before any
+      answer was written, so "" is returned;
+    - the reply has a `</think>` and no `<think>` before it: the chat template
+      put the opening tag in the prompt, and the reasoning ends at that tag.
+      A reply that starts with `{`, `[` or a code fence is an answer: a
+      `</think>` in it is data, so it is never cut.
+
+    In both cases the answer is returned stripped.  Any other text is returned
+    unchanged.
+    """
+    stripped = text.lstrip()
+    if stripped.startswith(_REASONING_OPEN):
+        end = stripped.find(_REASONING_CLOSE)
+        if end == -1:
+            return ""
+        return stripped[end + len(_REASONING_CLOSE):].strip()
+    end = text.find(_REASONING_CLOSE)
+    if (end != -1 and _REASONING_OPEN not in text[:end]
+            and not stripped.startswith(("{", "[", "```"))):
+        return text[end + len(_REASONING_CLOSE):].strip()
+    return text
+
+
 def parse_numbered_claims(raw: str, count: int) -> dict[int, dict] | None:
     """Parse an LLM verification response into {claim_num -> verification}.
 

@@ -492,8 +492,14 @@ things it leaves to you:
 
 ```bash
 docker compose run --rm app python scripts/build_rule_text.py   # rule-title index for brand evidence (ADR-0031) — never built by bootstrap
-docker compose --profile bootstrap run --rm bootstrap --no-models  # later: re-clone every corpus and rebuild the store
+docker compose --profile bootstrap run --rm bootstrap bootstrap --no-models  # later: re-clone every corpus and rebuild the store
 ```
+
+`bootstrap` takes `--no-models` (skip the model downloads), `--no-corpora` (skip
+the corpus clone and the rule store) and `--strict`, which exits 1 when a model
+does not download, when the models do not load from the cache with the network
+off (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`), or when a corpus does not
+sync. The air-gap packager runs it with `--strict`.
 
 Walkthrough, scoring details and troubleshooting:
 [docs/detection-coverage.md](docs/detection-coverage.md).
@@ -510,9 +516,9 @@ All configuration lives in `.env`, which `setup.sh` creates from
 | Anthropic (default) | `anthropic` | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | |
 | Google Gemini | `gemini` | `GEMINI_API_KEY`, `GEMINI_MODEL` | |
 | Mistral AI | `mistral` | `MISTRAL_API_KEY`, `MISTRAL_MODEL` | |
-| Ollama | `ollama` | `OLLAMA_BASE_URL`, `OLLAMA_MODEL` | ✅ (`--profile ollama`) |
-| vLLM | `vllm` | `VLLM_BASE_URL`, `VLLM_MODEL` | ✅ |
-| LM Studio | `lmstudio` | `LMSTUDIO_BASE_URL`, `LMSTUDIO_MODEL` | ✅ |
+| Ollama | `ollama` | `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_API_KEY` (if the server needs a key) | ✅ (`--profile ollama`) |
+| vLLM | `vllm` | `VLLM_BASE_URL`, `VLLM_MODEL`, `VLLM_API_KEY` (if the server needs a key) | ✅ |
+| LM Studio | `lmstudio` | `LMSTUDIO_BASE_URL`, `LMSTUDIO_MODEL`, `LMSTUDIO_API_KEY` (if the server needs a key) | ✅ |
 
 With no provider configured (e.g. `ANTHROPIC_API_KEY` left unset), Stage 3 is
 skipped and the pipeline still produces a valid STIX bundle from every offline
@@ -599,14 +605,16 @@ host (ADR-0054, supersedes ADR-0040's wheel/deb bundle). Build a bundle on a
 
 ```bash
 # On the connected machine, in a clean checkout (no uncommitted changes),
-# after a normal `bash setup.sh` on a fresh install with no reports:
+# after a normal `bash setup.sh`:
 bash scripts/package_offline_docker.sh              # options: --with-llm[=MODEL[,MODEL...]], --with-proxy
 # → dist/cti-parsor-offline-docker-<rev>-<arch>.tar (+ .sha256)
 git archive --format=tar.gz -o ctiparsor-src.tar.gz HEAD   # the source tree, same commit
 
 # Before transferring it, verify it restores and the stack actually works.
-# Run this on a machine you're willing to cut network access to, with no
-# reports in its database: the check restores the bundle's database into it.
+# Run this on a machine you're willing to cut network access to. The check
+# restores the bundle's database into it, and stops if that database holds any
+# row outside the rule store. Its .env must name the LLM the bundle carries (see
+# the caveats below).
 tar xf dist/cti-parsor-offline-docker-*.tar
 bash scripts/check_offline_bundle_docker.sh offline
 
@@ -623,8 +631,12 @@ docker compose up -d
 The bundle carries a saved copy of every image the stack needs (`app`,
 `postgres`, `capture-proxy`; `ollama` with `--with-llm`; the `proxy` nginx
 image with `--with-proxy`), a tar of the `cti-cache` volume (NLP models and
-corpus clones), and a `pg_dump` export of the whole database (job store and
-rule store) — everything `docker compose --profile bootstrap run --rm
+corpus clones), and a `pg_dump` of the `public` schema, without large objects.
+The dump has the schema of every table, but the data only of the rule store and
+of `schema_migrations`: the bundle holds no reports, and the packager stops if the
+dump's table of contents shows another table's data, another schema, or a large
+object.
+Together they are everything `docker compose --profile bootstrap run --rm
 bootstrap` would otherwise fetch over the network. `--with-llm=MODEL[,MODEL...]`
 bundles several Ollama models: the first is the text model, and a
 vision-capable one can serve Stage 1f. `--with-proxy` does not create the
@@ -634,8 +646,11 @@ proxy's certificate, key or htpasswd; those stay on the target
 `setup.sh --offline` verifies the bundle's checksums and architecture before
 touching anything, `docker load`s the images, restores the volumes and
 database, and leaves `docker compose up -d` as the only remaining step — no
-`bootstrap` run needed, the data is already there. It also writes the
-air-gap settings into `.env`: `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`
+`bootstrap` run needed, the data is already there. A missing `cti-cache.tar.gz`,
+or a missing `ollama-models.tar.gz` when the bundle has a model, stops the
+install, and so does a database that already holds a row outside the rule store
+(see below).
+It also writes the air-gap settings into `.env`: `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`
 when absent, so the worker does not wait on the Hugging Face Hub. For a `.env`
 it creates, when the bundle carries a model, it also sets the Ollama starting
 points (`LLM_PROVIDER`, `OLLAMA_MODEL`, `OLLAMA_BASE_URL=http://ollama:11434`,
@@ -655,24 +670,31 @@ Driver means the containerd store, where no override is needed. A
 `compose.override.yaml` that the script did not write is never overwritten;
 setup.sh stops and prints the lines to merge into it.
 
-Two caveats:
+Caveats:
 
-- The dump is of the whole database, so the packaging machine's reports go
-  into the bundle. Build it on a fresh install with no reports, not on one
-  that analysts use.
+- A bundle built before the dump was limited to the rule store still holds the
+  packaging machine's reports. Build a new one.
+- `check_offline_bundle_docker.sh` reads `.env` first. With a model in the bundle, `.env` must name it
+  (`LLM_PROVIDER=ollama`, `OLLAMA_MODEL=<model>`, `OLLAMA_BASE_URL=http://ollama:11434`).
+  Without one, `LLM_PROVIDER` must be `ollama`, `vllm` or `lmstudio`, unless you
+  pass `--allow-no-llm`. A `--job` run leaves a job in the database, and a second
+  run on the same host is then refused at the restore: run `docker compose down -v`
+  first, or set `OFFLINE_FORCE_RESTORE=1`.
 - The bundle does not include the source tree. The target needs this
   repository's files at the bundle's revision (`BUNDLE_GIT_REV` in
   `offline/bundle.env`): `setup.sh` and `compose.yaml` read them, and the
   images and the database schema come from that revision. Nothing checks the
   revision today.
 
-Re-running `setup.sh --offline` over an existing install replaces its database
-with the bundle's, so reports that exist only on that host are lost. The
-report files in the `cti-state` volume are not touched. New images, models or
-code need a new full bundle, which replaces the database the same way. Back up
-first ([docs/docker.md](docs/docker.md#data-and-backups)) and keep that dump:
-nothing merges it back in. Images and models are frozen at the bundle's build
-date (`offline/bundle.env`).
+`setup.sh --offline` refuses to restore over an install whose database holds a
+row outside the rule store (a report, a review decision, an override, a cache),
+because `pg_restore --clean` would drop and recreate every table. The refusal
+names the tables. `OFFLINE_FORCE_RESTORE=1 bash setup.sh --offline=offline`
+restores over them and erases those rows. The report files in the `cti-state`
+volume are not touched. New images, models or code need a new full bundle, which the same guard
+covers. Back up first ([docs/docker.md](docs/docker.md#data-and-backups)) and
+keep that dump: nothing merges it back in. Images and models are frozen at the
+bundle's build date (`offline/bundle.env`).
 
 The corpora can be refreshed without losing reports. On the connected machine,
 `bash scripts/package_offline_corpora.sh` writes

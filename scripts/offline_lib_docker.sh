@@ -4,7 +4,8 @@
 # ADR-0040's venv-based mechanism -- see docs/adr/0054-*.md for why).
 #
 # Sourced by setup.sh (install side) and scripts/package_offline_docker.sh
-# (build side). Function definitions only -- nothing executes at source time.
+# (build side). Definitions only (the functions and OFFLINE_RULE_STORE_TABLES) --
+# nothing executes at source time.
 #
 # What changed from the old offline_lib.sh: a dozen staging functions
 # (offline_stage_models/browsers/data/corpora/frontend, offline_install_debs/
@@ -12,8 +13,8 @@
 # for the image (which already contains Python/Node deps, Chromium, the
 # built frontend, and the committed MITRE data files) and a tar-based named-
 # volume restore for the two things `bootstrap` populates at runtime
-# (cti-cache: HF models + corpus clones; the rule/job store: a pg_dump, not
-# a raw pg-data tar -- see package_offline_docker.sh for why). The
+# (cti-cache: HF models + corpus clones; the rule store: a pg_dump of the schema
+# and the rules, not a raw pg-data tar -- see package_offline_docker.sh for why). The
 # checksum-before-sourcing-config ordering and the zip-slip tar guard carry
 # over unchanged; they were never venv-specific.
 # =============================================================================
@@ -141,7 +142,10 @@ offline_docker_load_images() {
     local dir="$1"
     [ -f "$dir/images.tar.gz" ] || offline_die "$dir/images.tar.gz missing"
     echo "  → docker load < images.tar.gz (this can take a few minutes)…"
-    gunzip -c "$dir/images.tar.gz" | docker load
+    # Subshell with pipefail, as in offline_docker_save_images: a corrupt archive
+    # (gunzip) is not masked by the success of docker load.
+    ( set -o pipefail; gunzip -c "$dir/images.tar.gz" | docker load ) \
+        || offline_die "docker load failed (see above) — $dir/images.tar.gz is corrupt or incomplete"
     echo "  ✔  images loaded"
 }
 
@@ -224,10 +228,18 @@ $body"
 # (see package_offline_docker.sh::export_volume). Creates the volume if it
 # doesn't already exist. `alpine` is loaded as part of images.tar.gz too
 # (package_offline_docker.sh includes it) so this needs no network either.
+# An archive missing from the bundle is skipped, unless the fourth argument is
+# `required`: the caller needs that volume, so an incomplete bundle stops here.
 offline_docker_restore_volume() {
-    local dir="$1" volume_name="$2" archive_name="$3"
+    local dir="$1" volume_name="$2" archive_name="$3" required="${4:-}"
     local archive="$dir/$archive_name"
-    [ -f "$archive" ] || { echo "  –  $archive_name not in bundle — skipping $volume_name"; return 0; }
+    if [ ! -f "$archive" ]; then
+        if [ "$required" = required ]; then
+            offline_die "$archive is missing from the bundle"
+        fi
+        echo "  –  $archive_name not in bundle — skipping $volume_name"
+        return 0
+    fi
 
     offline_check_tar_safe "$archive" -z
 
@@ -236,7 +248,8 @@ offline_docker_restore_volume() {
     docker run --rm \
         -v "${volume_name}:/data" \
         -v "$(cd "$dir" && pwd):/backup:ro" \
-        alpine tar xzf "/backup/$archive_name" -C /data
+        alpine tar xzf "/backup/$archive_name" -C /data \
+        || offline_die "restoring $volume_name from $archive_name failed (see above)"
     echo "  ✔  $volume_name restored"
 }
 
@@ -252,19 +265,103 @@ offline_pg_exec() {
         sh -c 'PGPASSWORD="$(cat /run/secrets/db_password)" exec "$@"' sh "$@"
 }
 
-# Restores the job store + rule store from a pg_dump (custom format, -Fc) --
-# not a raw pg-data volume tar. Binary Postgres data directories are not
-# reliably portable even between two instances of the exact same version;
-# pg_dump/pg_restore is the mechanism this repo already documents and tests
-# for backup/restore (docs/docker.md, ADR-0045/ADR-0053). Requires `postgres`
+# The tables of the rule store: those the migrations with store="rules" create
+# (api/migrations/v0005_rule_store.py). The bundle carries their data, and that of
+# schema_migrations, and nothing else: the rest of the database is the job store,
+# the reports. Keep this line equal to those tables;
+# tests/test_offline_bundle_rule_tables.py fails otherwise.
+OFFLINE_RULE_STORE_TABLES="detection_rules rule_atoms rule_bytes rule_related rule_techniques rule_text"
+
+# Restores the schema + rule store from a pg_dump (custom format, -Fc) --
+# not a raw pg-data volume tar. The dump carries no reports: the packager exports
+# the data of the rule store and of schema_migrations only. Binary Postgres data
+# directories are not reliably portable even between two instances of the exact
+# same version; pg_dump/pg_restore is the mechanism this repo already documents and
+# tests for backup/restore (docs/docker.md, ADR-0045/ADR-0053). Requires `postgres`
 # already up and healthy -- the caller's job (see setup.sh).
+#
+# --clean drops and recreates every table of the dump, so a target that already
+# holds data outside the rule store and schema_migrations (the reports) would lose
+# it: the restore is refused then, unless the caller sets OFFLINE_FORCE_RESTORE=1.
 offline_docker_restore_pg_dump() {
     local dir="$1" compose_project_user="${CTI_DB_USER:-ctiparsor}" compose_project_db="${CTI_DB_NAME:-ctiparsor}"
-    local dump="$dir/ctiparsor.dump"
+    local dump="$dir/ctiparsor.dump" holding="" listed=""
     [ -f "$dump" ] || offline_die "$dir/ctiparsor.dump missing"
-    echo "  → pg_restore (job store + rule store, ADR-0053)…"
-    offline_pg_exec pg_restore -U "$compose_project_user" -d "$compose_project_db" --clean --if-exists < "$dump"
+    # The tables outside the rule store and schema_migrations that hold rows. The query
+    # goes on stdin: psql substitutes :'keep' there, not in a -c string.
+    holding=$(offline_pg_exec psql -U "$compose_project_user" -d "$compose_project_db" -tA -v keep="$OFFLINE_RULE_STORE_TABLES schema_migrations" <<'SQL'
+SELECT table_name FROM information_schema.tables
+WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+  AND table_name <> ALL (string_to_array(:'keep', ' '))
+  AND (xpath('/row/c/text()',
+             query_to_xml(format('SELECT count(*) AS c FROM %I.%I', table_schema, table_name),
+                          false, true, '')))[1]::text::bigint > 0
+ORDER BY 1;
+SQL
+    ) || offline_die "cannot query $compose_project_db before the restore"
+    if [ -n "$holding" ]; then
+        listed="${holding//$'\n'/, }"
+        if [ "${OFFLINE_FORCE_RESTORE:-}" != "1" ]; then
+            offline_die "$compose_project_db already holds data in: $listed. The restore would erase it: pg_restore --clean drops and recreates every table.
+  To refresh only the rules of an existing installation, use scripts/update_offline_corpora.sh with a corpora bundle.
+  To restore over that data anyway: set OFFLINE_FORCE_RESTORE=1 and run again."
+        fi
+        echo "  ⚠  OFFLINE_FORCE_RESTORE=1: restoring over the data of: $listed"
+    fi
+    echo "  → pg_restore (schema + rule store; the bundle carries no reports)…"
+    offline_pg_exec pg_restore -U "$compose_project_user" -d "$compose_project_db" --clean --if-exists < "$dump" \
+        || offline_die "pg_restore failed (see above) — $dump was not restored"
     echo "  ✔  database restored"
+}
+
+# Prints a --exclude-table-data=public.<table> option for each table that is not
+# in KEEP: a pg_dump then leaves out the data of those tables, but keeps their
+# schema. Reads the table names on stdin, one per line (blank lines are ignored):
+#   tables=$(offline_pg_exec psql ... -tAc "SELECT tablename FROM pg_tables WHERE schemaname='public'")
+#   printf '%s\n' "$tables" | offline_exclude_data_args detection_rules schema_migrations
+offline_exclude_data_args() {
+    local keep=" $* " table
+    while IFS= read -r table || [ -n "$table" ]; do
+        [ -n "$table" ] || continue
+        if [[ "$keep" != *" $table "* ]]; then
+            echo "--exclude-table-data=public.$table"
+        fi
+    done
+}
+
+# The check behind the packager's "no reports in the bundle" claim. Reads the
+# table of contents of a dump (`pg_restore -l`, on stdin) and refuses it when it
+# cannot prove that the dump holds no report:
+#   - an empty or unreadable listing, or one without the data of the rule store
+#     (`TABLE DATA public detection_rules`), proves nothing;
+#   - a `TABLE DATA` entry outside the public schema, or for a table that is not in
+#     KEEP, is fatal, and the die names it as schema.table;
+#   - a large object (BLOBS, BLOB, LARGE OBJECT) is fatal: the dump is --no-blobs.
+# `SEQUENCE SET` entries are let through: they hold the counter of a sequence (the
+# last id of a serial column), not rows. The ✔ line comes last, once all of it holds.
+# A data entry of the TOC looks like:
+#   3456; 0 16390 TABLE DATA public detection_rules ctiparsor
+offline_check_dump_data() {
+    local keep=" $* " toc data_entries schema table bad="" blobs=""
+    toc=$(cat)
+    data_entries=$(awk '$4 == "TABLE" && $5 == "DATA" { print $6, $7 }' <<< "$toc")
+    grep -qxF "public detection_rules" <<< "$data_entries" \
+        || offline_die "the table of contents is empty or unreadable, or the rule store is not in it (no TABLE DATA public detection_rules entry)"
+    while read -r schema table; do
+        [ -n "$table" ] || continue
+        if [ "$schema" != public ] || [[ "$keep" != *" $table "* ]]; then
+            bad+=" $schema.$table"
+        fi
+    done <<< "$data_entries"
+    if [ -n "$bad" ]; then
+        offline_die "the dump holds the data of:$bad — only the rule store and schema_migrations may be in the bundle, never reports"
+    fi
+    blobs=$(awk '$4 == "BLOBS" || $4 == "BLOB" || ($4 == "LARGE" && $5 == "OBJECT")' <<< "$toc")
+    if [ -n "$blobs" ]; then
+        offline_die "the dump holds large objects, which the bundle never carries:
+$blobs"
+    fi
+    echo "  ✔  dump holds no report data (schema + rule store only)"
 }
 
 # Waits for the `postgres` compose service to report healthy. Uses `docker
@@ -319,6 +416,26 @@ _offline_host_cpus() {
     fi
 }
 
+# The effective value of KEY in FILE (.env by default), as compose reads it: the
+# text after the first `=` of the last `KEY=` line, without a trailing CR. A value
+# between one pair of matching quotes gives what is inside them; a bare value loses
+# an inline comment (a `#` after a space or tab) and its trailing blanks. Prints
+# nothing, and returns 0, when the key is absent: callers run under `set -e`.
+offline_env_value() {
+    local key="$1" file="${2:-.env}" line value
+    local double_re='^"([^"]*)"' single_re="^'([^']*)'"
+    line=$(grep -E "^${key}=" "$file" 2>/dev/null | tail -n 1) || true
+    value="${line#*=}"
+    value="${value%$'\r'}"
+    if [[ "$value" =~ $double_re || "$value" =~ $single_re ]]; then
+        value="${BASH_REMATCH[1]}"
+    else
+        value="${value%%[[:blank:]]#*}"
+        value="${value%"${value##*[![:blank:]]}"}"
+    fi
+    printf '%s' "$value"
+}
+
 # Writes the air-gap settings into .env (setup.sh --offline, after the restore).
 #
 # HF_HUB_OFFLINE and TRANSFORMERS_OFFLINE are always set, when absent: the worker
@@ -340,7 +457,7 @@ offline_write_env_hints() {
     local env_created="$1"
     local model="${BUNDLE_OLLAMA_MODEL:-}"
     local models="${BUNDLE_OLLAMA_MODELS:-$model}"
-    local key pair value count host_cpus="" cap=""
+    local key pair value count host_cpus="" cap="" provider=""
     local bundled=()
     local llm_pairs=(
         "LLM_PROVIDER=ollama"
@@ -389,6 +506,20 @@ offline_write_env_hints() {
                 echo "       CTI_OLLAMA_CPUS=$cap   # this host has $cap CPUs; Docker refuses compose.yaml's default of 8 here"
             fi
         fi
+    else
+        # No model in the bundle: the LLM is whatever LLM_PROVIDER names. A server on
+        # this host (ollama, vllm, lmstudio) still answers offline; a hosted API (the
+        # code's default, anthropic) does not, and Stage 3 calls it for every report.
+        provider=$(offline_env_value LLM_PROVIDER)
+        provider="${provider,,}"  # the code lowercases LLM_PROVIDER too
+        provider="${provider:-anthropic}"
+        case "$provider" in
+            ollama|vllm|lmstudio) ;;
+            *)
+                echo "  ⚠  .env: LLM_PROVIDER=$provider needs the network: Stage 3 will not run on this air-gapped host."
+                echo "     Point LLM_PROVIDER at a local server (ollama, vllm or lmstudio), or rebuild the bundle with --with-llm."
+                ;;
+        esac
     fi
 
     read -ra bundled <<< "$models" || true

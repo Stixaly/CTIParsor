@@ -648,14 +648,18 @@ def get_backend() -> VisionBackend | None:
         backend: VisionBackend = AnthropicVisionBackend(model, timeout)
     elif provider == "ollama":
         base = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+        # The placeholder is sent when no key is set, as it always was.
         backend = OpenAICompatVisionBackend(
             "ollama", f"{base}/v1", model,
-            api_key="ollama", timeout=timeout, max_concurrency=_ollama_concurrency(),
+            api_key=os.environ.get("OLLAMA_API_KEY", "").strip() or "ollama",
+            timeout=timeout, max_concurrency=_ollama_concurrency(),
         )
     elif provider == "vllm":
         base = os.environ.get("VLLM_BASE_URL", "http://localhost:8000").rstrip("/")
+        # No Authorization header unless VLLM_API_KEY is set (the server was started with a key).
         backend = OpenAICompatVisionBackend(
             "vllm", f"{base}/v1", model,
+            api_key=os.environ.get("VLLM_API_KEY", "").strip() or None,
             timeout=timeout, max_concurrency=_ollama_concurrency(),
             extra_body=vllm_extra_body(),
         )

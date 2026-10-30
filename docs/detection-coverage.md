@@ -98,7 +98,7 @@ containers is the `cti-cache` volume (in the `dev` container, the repo's own
 gitignored `corpora/`). No credentials are stored.
 
 `bootstrap` runs this step and the next one for you; `docker compose --profile
-bootstrap run --rm bootstrap --no-models` repeats both later without
+bootstrap run --rm bootstrap bootstrap --no-models` repeats both later without
 re-downloading the models.
 
 A corpus with a `tarball:` URL instead of `git:` (ET Open, which is not

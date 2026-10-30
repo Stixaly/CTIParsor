@@ -50,6 +50,7 @@ def main() -> int:
         return 0
 
     ok = 0
+    failed = 0
     for corpus in corpora:
         name = corpus.get("name", "?")
         path = Path(corpus.get("path") or "")
@@ -58,6 +59,7 @@ def main() -> int:
             ok_one, detail = fetch_tarball(corpus)
             print(f"  {'✓' if ok_one else '!'} {detail}")
             ok += int(ok_one)
+            failed += int(not ok_one)
             continue
         try:
             cmd = git_command(corpus)
@@ -68,10 +70,14 @@ def main() -> int:
             print(f"[sync] {name}: no git remote or tarball URL — assuming '{path}' is managed manually — skipped")
             continue
         print(f"[sync] {name} → {path}")
-        ok += int(_run(cmd))
+        ok_one = _run(cmd)
+        ok += int(ok_one)
+        failed += int(not ok_one)
 
-    print(f"[sync] {ok}/{len(corpora)} corpora synced. Now run: python scripts/build_detection_index.py")
-    return 0
+    # A skipped corpus (no remote, or a path managed by hand) is not a failure.
+    print(f"[sync] {ok}/{len(corpora)} corpora synced, {failed} failed. "
+          "Now run: python scripts/build_detection_index.py")
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

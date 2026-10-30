@@ -348,6 +348,16 @@ def sweep_expired_jobs(retention_days: int | None = None) -> int:
     return deleted
 
 
+# What an imported report may load: its own data: URIs and nothing else.  The viewer's
+# sandbox stops scripts but not image or style requests, so a tracking pixel would
+# otherwise report the analyst's address to its author (and hang on an air-gapped host).
+_SOURCE_CSP = ("default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; "
+               "base-uri 'none'; form-action 'none'")
+# Types the browser renders as a page (XML through <?xml-stylesheet?>): the policy goes
+# on these, not on a PDF, whose viewer it can break.
+_PAGE_MIMES = {"text/html", "application/xhtml+xml", "image/svg+xml", "application/xml", "text/xml"}
+
+
 @router.get("/{job_id}/source")
 def get_source_file(job_id: str):
     """
@@ -379,11 +389,15 @@ def get_source_file(job_id: str):
     mime, _   = mimetypes.guess_type(str(fpath))
     mime      = mime or "application/octet-stream"
 
+    headers = {"Content-Disposition": f"inline; filename=\"{fpath.name}\""}
+    if mime in _PAGE_MIMES:
+        headers["Content-Security-Policy"] = _SOURCE_CSP
+
     return FileResponse(
         path=str(fpath),
         media_type=mime,
         # inline disposition so PDFs open in the browser instead of downloading
-        headers={"Content-Disposition": f"inline; filename=\"{fpath.name}\""},
+        headers=headers,
     )
 
 
