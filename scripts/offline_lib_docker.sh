@@ -29,8 +29,12 @@ offline_die() {
 # are forwarded to `tar -t` (e.g. --use-compress-program for non-gzip).
 offline_check_tar_safe() {
     local tar_path="$1"; shift
-    local bad
-    bad=$(tar -tf "$tar_path" "$@" 2>/dev/null | grep -E '^(/|.*\.\./)' || true)
+    local listing bad
+    # Tar's exit status is kept: a truncated or corrupt archive must fail here,
+    # not pass because its readable prefix happens to hold no unsafe name.
+    listing=$(tar -tf "$tar_path" "$@" 2>/dev/null) \
+        || offline_die "cannot read $tar_path as a tar (truncated or corrupt) — refusing to extract"
+    bad=$(grep -E '^(/|.*\.\./)' <<< "$listing" || true)
     if [ -n "$bad" ]; then
         offline_die "unsafe path(s) in $tar_path — refusing to extract:
 $bad"
@@ -59,26 +63,35 @@ offline_validate_bundle() {
     if [ "${OFFLINE_FORCE:-}" != "1" ] && [ -n "${BUNDLE_ARCH:-}" ] && [ "$BUNDLE_ARCH" != "$host_arch" ]; then
         offline_die "architecture mismatch: bundle is $BUNDLE_ARCH, this host is $host_arch (set OFFLINE_FORCE=1 to override, at your own risk — Docker images are architecture-specific)"
     fi
-    echo "  ✔  bundle built $BUNDLE_BUILT_AT from git $BUNDLE_GIT_REV ($BUNDLE_ARCH)"
+    # Every BUNDLE_* field is optional here: a bundle may carry no BUNDLE_ARCH (the
+    # corpora bundle does not, on purpose), and a set -u caller must not die on it.
+    local arch_note=""
+    if [ -n "${BUNDLE_ARCH:-}" ]; then arch_note=" ($BUNDLE_ARCH)"; fi
+    echo "  ✔  bundle built ${BUNDLE_BUILT_AT:-(time not recorded)} from git ${BUNDLE_GIT_REV:-(revision not recorded)}${arch_note}"
 }
 
 # Prints every image the bundle carries, one per line, sorted and de-duplicated:
 # the default-profile services (app, worker, postgres, capture-proxy), the
 # alpine image the volume tar steps run (not a compose service, so added by
-# hand), and -- when WITH_LLM is true -- the ollama service. A failing compose
-# command is fatal: the caller reads this through $(...), and a process
-# substitution would hide the error, so the bundle would silently ship without
-# the Ollama image (`docker compose config --images --profile ollama` is not
-# valid -- --profile is a global flag and must come before the subcommand).
+# hand), -- when WITH_LLM is true -- the ollama service, and -- when WITH_PROXY
+# (second argument, default false) is true -- the proxy profile's nginx image.
+# A failing compose command is fatal: the caller reads this through $(...), and
+# a process substitution would hide the error, so the bundle would silently ship
+# without the Ollama image (`docker compose config --images --profile ollama` is
+# not valid -- --profile is a global flag and must come before the subcommand).
 offline_bundle_images() {
-    local with_llm="$1" default_images llm_images=""
+    local with_llm="$1" with_proxy="${2:-false}" default_images llm_images="" proxy_images=""
     default_images=$(docker compose config --images) \
         || offline_die "docker compose config --images failed"
     if [ "$with_llm" = true ]; then
         llm_images=$(docker compose --profile ollama config --images) \
             || offline_die "docker compose --profile ollama config --images failed"
     fi
-    printf '%s\n%s\n%s\n' "$default_images" "$llm_images" "alpine:latest" \
+    if [ "$with_proxy" = true ]; then
+        proxy_images=$(docker compose --profile proxy config --images) \
+            || offline_die "docker compose --profile proxy config --images failed"
+    fi
+    printf '%s\n%s\n%s\n%s\n' "$default_images" "$llm_images" "$proxy_images" "alpine:latest" \
         | grep -v '^$' | sort -u
 }
 
@@ -284,17 +297,107 @@ _offline_set_key() {
     fi
 }
 
-# If the bundle carries an Ollama model, point .env at it -- same fields the
-# old offline_lib.sh set, minus everything HF/pip-offline related (no pip or
-# HF Hub call happens on the host at all any more, so HF_HUB_OFFLINE /
-# TRANSFORMERS_OFFLINE have nothing left to affect).
+# Sets KEY=VALUE only when no KEY= line is present (an empty `KEY=` counts as
+# present). Returns 1 and leaves the file alone when the key is there, so a
+# value the operator chose -- or one .env.example ships -- is never overwritten.
+_offline_set_key_if_absent() {
+    local file="$1" key="$2" value="$3"
+    if grep -qE "^${key}=" "$file" 2>/dev/null; then
+        return 1
+    fi
+    printf '%s=%s\n' "$key" "$value" >> "$file"
+}
+
+# The host's CPU count, for the Ollama container's cpu limit: nproc, else getconf.
+# Prints nothing when neither gives a number, so the caller skips the cap. Always
+# returns 0: a failing command substitution would abort a set -e caller.
+_offline_host_cpus() {
+    local n
+    n=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || true)
+    if [[ "$n" =~ ^[0-9]+$ ]]; then
+        echo "$n"
+    fi
+}
+
+# Writes the air-gap settings into .env (setup.sh --offline, after the restore).
+#
+# HF_HUB_OFFLINE and TRANSFORMERS_OFFLINE are always set, when absent: the worker
+# container loads its HuggingFace models (all-MiniLM-L6-v2 in stage2c, gliner in
+# stage2e) from the cti-cache volume on every report, and a Hub lookup there would
+# fail or stall on an air-gapped host. (ADR-0040's bundle set them; ADR-0054's
+# rewrite dropped them on the claim that nothing on the host calls the Hub -- but
+# the calls happen in the worker container.)
+#
+# The bundled Ollama model is wired up only in a .env this run created from
+# .env.example. An operator's own .env keeps its LLM settings: the lines to set
+# are printed instead. The values are starting points for a CPU or single-GPU
+# Ollama: one request at a time (LLM_PARALLELISM=1 -- the vision section of
+# .env.example measured one in flight better than four on one GPU), a 600 s call
+# timeout (LLM_TIMEOUT=120 is sized for the hosted APIs), and a 3-hour job timeout
+# (WORKER_JOB_TIMEOUT). Tune them for the hardware. OLLAMA_BASE_URL names the
+# compose service: inside a container, localhost is the container itself.
 offline_write_env_hints() {
     local env_created="$1"
+    local model="${BUNDLE_OLLAMA_MODEL:-}"
+    local models="${BUNDLE_OLLAMA_MODELS:-$model}"
+    local key pair value count host_cpus="" cap=""
+    local bundled=()
+    local llm_pairs=(
+        "LLM_PROVIDER=ollama"
+        "OLLAMA_MODEL=$model"
+        "OLLAMA_BASE_URL=http://ollama:11434"
+        "LLM_PARALLELISM=1"
+        "LLM_TIMEOUT=600"
+        "WORKER_JOB_TIMEOUT=10800"
+    )
     [ -f .env ] || offline_die ".env should already exist by this point — internal error"
-    if [ "$env_created" = true ] && [ -n "${BUNDLE_OLLAMA_MODEL:-}" ]; then
-        _offline_set_key .env LLM_PROVIDER ollama
-        _offline_set_key .env OLLAMA_MODEL "$BUNDLE_OLLAMA_MODEL"
-        echo "  ✔  .env pointed at the bundled Ollama model: $BUNDLE_OLLAMA_MODEL"
+
+    for key in HF_HUB_OFFLINE TRANSFORMERS_OFFLINE; do
+        if _offline_set_key_if_absent .env "$key" 1; then
+            echo "  ✔  .env: $key=1"
+        else
+            echo "  –  .env: $key is already set, left as it is"
+        fi
+    done
+
+    if [ -n "$model" ]; then
+        # compose.yaml gives the ollama container cpus "${CTI_OLLAMA_CPUS:-8}", and
+        # Docker refuses a cpu limit above the host's count ("range of CPUs is from
+        # 0.01 to 4.00, as there are only 4 CPUs available"). Below the compose
+        # default of 8, the cap becomes the host's CPU count. Silent if unknown.
+        host_cpus=$(_offline_host_cpus)
+        if [ -n "$host_cpus" ] && [ "$host_cpus" -lt 8 ]; then cap="$host_cpus"; fi
+        if [ "$env_created" = true ]; then
+            for pair in "${llm_pairs[@]}"; do
+                key="${pair%%=*}"; value="${pair#*=}"
+                _offline_set_key .env "$key" "$value"
+                echo "  ✔  .env: $key=$value"
+            done
+            if [ -n "$cap" ]; then
+                if _offline_set_key_if_absent .env CTI_OLLAMA_CPUS "$cap"; then
+                    echo "  ✔  .env: CTI_OLLAMA_CPUS=$cap (this host has $cap CPUs; Docker refuses compose.yaml's default of 8 here)"
+                else
+                    echo "  –  .env: CTI_OLLAMA_CPUS is already set, left as it is"
+                fi
+            fi
+        else
+            echo "  →  .env already existed, so its LLM settings are unchanged. For the bundled model, set in .env:"
+            for pair in "${llm_pairs[@]}"; do
+                echo "       $pair"
+            done
+            if [ -n "$cap" ]; then
+                echo "       CTI_OLLAMA_CPUS=$cap   # this host has $cap CPUs; Docker refuses compose.yaml's default of 8 here"
+            fi
+        fi
+    fi
+
+    read -ra bundled <<< "$models" || true
+    count=${#bundled[@]}
+    if [ "$count" -gt 1 ]; then
+        echo "  →  the bundle carries $count models: ${bundled[*]}"
+        echo "     Stage 1f reads figures only with a vision model. Set in .env:"
+        echo "       VISION_PROVIDER=ollama"
+        echo "       VISION_MODEL=<one of those models that has the vision capability>"
     fi
 }
 
@@ -306,6 +409,11 @@ offline_summary() {
     echo "     docker compose up -d            # app + worker"
     if [ -n "${BUNDLE_OLLAMA_MODEL:-}" ]; then
         echo "     docker compose --profile ollama up -d ollama"
+    fi
+    if [[ " ${BUNDLE_IMAGES:-} " == *" nginxinc/"* ]]; then
+        echo "     # TLS + password front (docs/docker.md): create docker/nginx/certs/cti.crt,"
+        echo "     # docker/nginx/certs/cti.key and docker/nginx/htpasswd first, then:"
+        echo "     docker compose --profile proxy up -d       # https://<host>:8443"
     fi
     echo ""
     echo "  No 'docker compose --profile bootstrap run --rm bootstrap' needed —"

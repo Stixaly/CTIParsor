@@ -237,6 +237,8 @@ CTIParsor/
 │   ├── check_offline_bundle_docker.sh # Verify an air-gap bundle restores and runs
 │   ├── check_offline_images.sh    # Air-gap bundle images resolve by the names Compose uses after save/load (CI)
 │   ├── offline_lib_docker.sh      # Functions shared by check_offline_bundle_docker.sh and setup.sh --offline
+│   ├── package_offline_corpora.sh # Corpora-only refresh bundle (cti-cache's corpora/) for an air-gapped install
+│   ├── update_offline_corpora.sh  # Install a corpora bundle and rebuild the rule store; the job store is not touched
 │   ├── docker_smoke.sh            # Build, start and verify the container stack (make docker-smoke)
 │   ├── release.py                 # Release process: the version, the tag check, the notes, the release PR (ADR-0085, docs/releasing.md)
 │   ├── release_files.sh           # A release's files and notes, from the image main's CI built and attested (ADR-0085)

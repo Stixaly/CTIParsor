@@ -179,18 +179,28 @@ ENVEOF
         warn ".env created with a minimal starter — restore .env.example for the rest"
     fi
     echo ""
-    echo -e "  ${RED}ACTION REQUIRED — set your LLM provider and key in .env:${NC}"
-    echo -e "     ${CYAN}nano .env${NC}"
-    echo -e "     ${YELLOW}ANTHROPIC_API_KEY=sk-ant-...${NC}   ← Anthropic (default)"
-    echo -e "     ${YELLOW}GEMINI_API_KEY=...${NC}             ← or Google Gemini"
-    echo -e "     ${YELLOW}MISTRAL_API_KEY=...${NC}            ← or Mistral"
-    echo -e "     ${YELLOW}LLM_PROVIDER=ollama${NC}            ← or local Ollama (docker compose --profile ollama up -d)"
-    echo -e "     ${YELLOW}LLM_PROVIDER=lmstudio${NC}          ← or local LM Studio"
-    echo -e "     ${YELLOW}LLM_PROVIDER=vllm${NC}              ← or local vLLM"
-    echo ""
-    echo -e "  ${CYAN}Optional, both off by default:${NC}"
-    echo -e "     ${YELLOW}VISION_PROVIDER=${NC}               ← read figures (Stage 1f)"
-    echo -e "     ${YELLOW}CVE_ENRICHMENT=1${NC}               ← CVSS scores from CIRCL"
+    if [ -n "$OFFLINE_DIR" ]; then
+        # Air-gapped: the hosted APIs are unreachable from this host, so the
+        # hosted-provider examples would mislead. The restore below points .env at
+        # the bundled Ollama model when the bundle carries one.
+        echo -e "  ${CYAN}Air-gapped install:${NC} the restore below points .env at the bundled Ollama"
+        echo "     model when the bundle carries one. Otherwise set a self-hosted provider in"
+        echo "     .env: LLM_PROVIDER=ollama, lmstudio or vllm (the hosted APIs are not reachable"
+        echo "     from an air-gapped host)."
+    else
+        echo -e "  ${RED}ACTION REQUIRED — set your LLM provider and key in .env:${NC}"
+        echo -e "     ${CYAN}nano .env${NC}"
+        echo -e "     ${YELLOW}ANTHROPIC_API_KEY=sk-ant-...${NC}   ← Anthropic (default)"
+        echo -e "     ${YELLOW}GEMINI_API_KEY=...${NC}             ← or Google Gemini"
+        echo -e "     ${YELLOW}MISTRAL_API_KEY=...${NC}            ← or Mistral"
+        echo -e "     ${YELLOW}LLM_PROVIDER=ollama${NC}            ← or local Ollama (docker compose --profile ollama up -d)"
+        echo -e "     ${YELLOW}LLM_PROVIDER=lmstudio${NC}          ← or local LM Studio"
+        echo -e "     ${YELLOW}LLM_PROVIDER=vllm${NC}              ← or local vLLM"
+        echo ""
+        echo -e "  ${CYAN}Optional, both off by default:${NC}"
+        echo -e "     ${YELLOW}VISION_PROVIDER=${NC}               ← read figures (Stage 1f)"
+        echo -e "     ${YELLOW}CVE_ENRICHMENT=1${NC}               ← CVSS scores from CIRCL"
+    fi
 else
     ok ".env already present"
     if grep -qE "sk-ant-xxx|xxxx" .env 2>/dev/null; then

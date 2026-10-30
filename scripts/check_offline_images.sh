@@ -23,6 +23,8 @@ set -euo pipefail
 # What this does, with the functions in scripts/offline_lib_docker.sh:
 #   - lists the bundle's images (offline_bundle_images) and checks that the
 #     --with-llm list carries the Ollama image (bug 2);
+#   - checks that the --with-proxy list carries the nginxinc/ proxy image. It is
+#     listed, not round-tripped (CI cost);
 #   - requires the app image (CTI_IMAGE, default ctiparsor:local) to be built.
 #     It is not round-tripped: it is a plain tag, which docker save and load
 #     always carry, and it is several GB;
@@ -70,7 +72,7 @@ for arg in "$@"; do
     case "$arg" in
         --yes) CONFIRMED=true ;;
         -h|--help)
-            sed -n '4,48p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '4,50p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *) offline_die "unknown argument: $arg (see --help)" ;;
@@ -95,6 +97,14 @@ if grep -q '^ollama/' <<< "$WITH_LLM_LIST"; then
     echo "  PASS  --with-llm list carries an ollama/ image"
 else
     echo "  FAIL  --with-llm list carries no ollama/ image (bug 2: the ollama profile is not read)"
+    FAILED=1
+fi
+
+WITH_PROXY_LIST=$(offline_bundle_images false true) || offline_die "offline_bundle_images false true failed (see the compose error above)"
+if grep -q '^nginxinc/' <<< "$WITH_PROXY_LIST"; then
+    echo "  PASS  --with-proxy list carries an nginxinc/ image"
+else
+    echo "  FAIL  --with-proxy list carries no nginxinc/ image (the proxy profile is not read)"
     FAILED=1
 fi
 

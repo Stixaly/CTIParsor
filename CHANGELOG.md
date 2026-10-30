@@ -9,6 +9,31 @@ theme.
 
 ## [Unreleased]
 
+### Added
+
+#### Air-gapped installs: several Ollama models, the TLS proxy, and a corpora refresh that keeps the reports (ADR-0054), 2026-10-30
+
+- **`package_offline_docker.sh --with-llm=MODEL[,MODEL...]`** bundles several
+  Ollama models; the first is the text model. A second, vision-capable one lets
+  Stage 1f read figures: `setup.sh --offline` prints the `VISION_PROVIDER` and
+  `VISION_MODEL` lines to set. A name outside `[A-Za-z0-9._/:-]` is refused,
+  because `bundle.env` is sourced on the target.
+- **`--with-proxy`** bundles the `proxy` profile's nginx image (TLS and a
+  password, `docs/docker.md`). The operator still creates the certificate and
+  the `htpasswd` file.
+- **A corpora-only bundle.** `scripts/package_offline_corpora.sh` packs the
+  corpus clones of `cti-cache`; on the target, `scripts/update_offline_corpora.sh`
+  checks it, replaces only `corpora/` in the volume and rebuilds the rule store
+  from the clones, with no network. The job store and the NLP models are not
+  touched. Until now newer rules meant a full bundle, whose `pg_restore --clean`
+  replaces every report.
+
+Measured on Docker 29.9.2, with the registry unreachable: a bundle with two
+models restored both, and the proxy container was created with `--pull never`.
+After a corpora update, a report row in the database and the model cache were
+unchanged and the new clones were in place; the rule-store rebuild was a stand-in
+for `scripts/build_detection_index.py`, which is unchanged.
+
 ### Documentation
 
 #### The pages that describe the latest release name v0.2.0 (ADR-0085), 2026-10-30
@@ -89,6 +114,49 @@ not run end to end: its smoke test needs the real application image.
   on an install with no reports; and that running `setup.sh --offline` again
   over an install replaces its reports. The packager prints the install steps
   with the source tree.
+
+#### An air-gapped install runs its bundled local LLM, and makes no request to the internet (ADR-0054), 2026-10-30
+
+- **Stage 3 could not reach the bundled model.** `setup.sh --offline` set
+  `LLM_PROVIDER=ollama` and `OLLAMA_MODEL` but left
+  `OLLAMA_BASE_URL=http://localhost:11434`, which inside a container is the
+  container itself. It now writes `OLLAMA_BASE_URL=http://ollama:11434`, with
+  `LLM_PARALLELISM=1`, `LLM_TIMEOUT=600` and `WORKER_JOB_TIMEOUT=10800` as
+  starting points, and `CTI_OLLAMA_CPUS` lowered to the host's CPUs when it has
+  fewer than 8: Docker refuses a container with more CPUs than the host ("range
+  of CPUs is from 0.01 to 4.00", measured). It changes no LLM key in a `.env` the
+  operator wrote; it prints them instead.
+- **The models looked for the Hub on every report.** The worker loads
+  all-MiniLM-L6-v2 and GLiNER for each report. With no network and no
+  `HF_HUB_OFFLINE`, loading them took 156 s when connections were refused, and
+  had not finished after 15 minutes when packets were dropped; with
+  `HF_HUB_OFFLINE=1`, 40 s (20 s online). ADR-0040's bundle set it; the Docker
+  rewrite dropped it on the claim that nothing calls the Hub on the host, but the
+  calls happen in the worker. `setup.sh --offline` sets `HF_HUB_OFFLINE=1` and
+  `TRANSFORMERS_OFFLINE=1` when they are absent.
+- **Ollama cut the prompt.** The pipeline calls Ollama's OpenAI-compatible
+  endpoint, which takes no `num_ctx`. On a host with no GPU, ollama 0.40.8 uses a
+  4,096-token window: a 14,322-token prompt was cut to 2,050 tokens and the answer
+  was wrong. The `ollama` service now sets `OLLAMA_CONTEXT_LENGTH` from
+  `CTI_OLLAMA_CONTEXT_LENGTH` (default 16384): the whole prompt was kept and the
+  answer was right. An Ollama run by the operator needs `OLLAMA_CONTEXT_LENGTH`
+  on its own server.
+- **The web UI asked Google for its fonts** on every page load: render-blocking
+  when unreachable, and each analyst's address sent to Google when online. Inter,
+  Source Serif 4 and JetBrains Mono (OFL-1.1, from the Fontsource packages) are
+  now served from the image. In headless Chromium with every non-local request
+  blocked, the page made none and the three families loaded, Latin and Cyrillic.
+- **The bundle's `.sha256` failed next to the bundle.** It recorded
+  `dist/<name>.tar`, so `sha256sum -c` failed after the transfer; it records the
+  bare name now.
+- **The archive guard passed a truncated archive.** `offline_check_tar_safe`
+  dropped tar's exit status; it fails closed now.
+- `setup.sh --offline` no longer asks for a hosted-API key: those APIs are
+  unreachable from an air-gapped host.
+
+Measured end to end on Docker 29.9.2 with the registry unreachable: after
+`setup.sh --offline`, the worker container reached the bundled Ollama at the
+`OLLAMA_BASE_URL` of the written `.env`, with a 16,384-token window.
 
 ## [0.2.0] - 2026-10-29
 

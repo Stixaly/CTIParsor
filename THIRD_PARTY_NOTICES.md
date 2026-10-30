@@ -8,7 +8,7 @@ same information per file in the [REUSE](https://reuse.software) format,
 which `reuse lint` checks in CI.
 
 Every file listed as unmodified was compared byte for byte with its source
-on 2026-10-10.
+on 2026-10-10, and the web fonts with their Fontsource packages on 2026-10-30.
 
 | Files | Source | Copyright | Licence | Modified |
 |---|---|---|---|---|
@@ -22,6 +22,7 @@ on 2026-10-10.
 | `frontend/public/stix-viz/stix2viz/visjs/vis-network.min.js` | [vis-network](https://github.com/visjs/vis-network), as cti-stix-visualization ships it | 2011-2017 Almende B.V.; 2017-2019 visjs contributors | Apache-2.0 OR MIT | no |
 | `frontend/public/stix-viz/require.js` | [RequireJS](https://github.com/requirejs/requirejs) 2.3.6, as cti-stix-visualization ships it | jQuery Foundation and other contributors | MIT | no |
 | `frontend/public/stix-viz/domReady.js` | [RequireJS domReady](https://github.com/requirejs/domReady) 2.0.1, as cti-stix-visualization ships it | 2010-2012 The Dojo Foundation | MIT OR BSD-3-Clause | no |
+| `frontend/public/fonts/` (15 `*.woff2`, `OFL.txt`) | [Fontsource](https://fontsource.org) variable packages `@fontsource-variable/inter` 5.3.0, `@fontsource-variable/source-serif-4` 5.3.1 and `@fontsource-variable/jetbrains-mono` 5.3.0, of [rsms/inter](https://github.com/rsms/inter), [adobe-fonts/source-serif](https://github.com/adobe-fonts/source-serif) and [JetBrains/JetBrainsMono](https://github.com/JetBrains/JetBrainsMono); the Latin, Latin Extended, Cyrillic, Cyrillic Extended and Greek subsets | 2016 The Inter Project Authors; 2020 The JetBrains Mono Project Authors; 2014-2021 Adobe Systems Incorporated | OFL-1.1 | no |
 | `pipeline/data/warninglists.json` | three lists of [MISP/misp-warninglists](https://github.com/MISP/misp-warninglists), commit `af01b1d` (security-provider-blogpost, automated-malware-analysis, tranco10k; `scripts/build_warninglists.py`) | MISP project contributors | CC0-1.0 | values lower-cased and sorted |
 | `pipeline/data/attack_relationships.json`, `attack_revoked.json`, `attack_retrieval_corpus.json`, `attack_retrieval_embeddings.npy`, `gazetteer.json` | the default ATT&CK track (release 19.2): built from MITRE ATT&CK's STIX bundles in [mitre/cti](https://github.com/mitre/cti) (`scripts/build_indexes.py`; ADR-0087) | The MITRE Corporation | LicenseRef-MITRE-ATTACK | derived |
 | `pipeline/data/mitre_index.json`, `mitre_embeddings.npy`, `mitre_embeddings_meta.json` | the default ATT&CK track: built from ATT&CK and CAPEC's STIX bundles in mitre/cti | The MITRE Corporation | LicenseRef-MITRE-ATTACK AND LicenseRef-MITRE-CAPEC | derived |

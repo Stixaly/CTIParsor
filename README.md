@@ -600,7 +600,7 @@ host (ADR-0054, supersedes ADR-0040's wheel/deb bundle). Build a bundle on a
 ```bash
 # On the connected machine, in a clean checkout (no uncommitted changes),
 # after a normal `bash setup.sh` on a fresh install with no reports:
-bash scripts/package_offline_docker.sh              # add --with-llm[=MODEL] for a local Ollama model
+bash scripts/package_offline_docker.sh              # options: --with-llm[=MODEL[,MODEL...]], --with-proxy
 # → dist/cti-parsor-offline-docker-<rev>-<arch>.tar (+ .sha256)
 git archive --format=tar.gz -o ctiparsor-src.tar.gz HEAD   # the source tree, same commit
 
@@ -611,7 +611,8 @@ tar xf dist/cti-parsor-offline-docker-*.tar
 bash scripts/check_offline_bundle_docker.sh offline
 
 # On the air-gapped host, with ctiparsor-src.tar.gz and the bundle in the
-# same directory. Unpack the source tree first, then the bundle inside it:
+# same directory. Check the transfer, unpack the source tree, then the bundle:
+sha256sum -c cti-parsor-offline-docker-*.tar.sha256
 mkdir ctiparsor && tar xzf ctiparsor-src.tar.gz -C ctiparsor
 cd ctiparsor
 tar xf ../cti-parsor-offline-docker-*.tar
@@ -620,14 +621,27 @@ docker compose up -d
 ```
 
 The bundle carries a saved copy of every image the stack needs (`app`,
-`postgres`, `capture-proxy`, and `ollama` if `--with-llm` was used), a tar of
-the `cti-cache` volume (NLP models + corpus clones), and a `pg_dump` export
-of the whole database (job store and rule store) — everything `docker
-compose --profile bootstrap run --rm bootstrap` would otherwise fetch over
-the network. `setup.sh --offline` verifies the bundle's checksums and
-architecture before touching anything, `docker load`s the images, restores
-the volumes and database, and leaves `docker compose up -d` as the only
-remaining step — no `bootstrap` run needed, the data is already there.
+`postgres`, `capture-proxy`; `ollama` with `--with-llm`; the `proxy` nginx
+image with `--with-proxy`), a tar of the `cti-cache` volume (NLP models and
+corpus clones), and a `pg_dump` export of the whole database (job store and
+rule store) — everything `docker compose --profile bootstrap run --rm
+bootstrap` would otherwise fetch over the network. `--with-llm=MODEL[,MODEL...]`
+bundles several Ollama models: the first is the text model, and a
+vision-capable one can serve Stage 1f. `--with-proxy` does not create the
+proxy's certificate, key or htpasswd; those stay on the target
+([docs/docker.md](docs/docker.md)).
+
+`setup.sh --offline` verifies the bundle's checksums and architecture before
+touching anything, `docker load`s the images, restores the volumes and
+database, and leaves `docker compose up -d` as the only remaining step — no
+`bootstrap` run needed, the data is already there. It also writes the
+air-gap settings into `.env`: `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`
+when absent, so the worker does not wait on the Hugging Face Hub. For a `.env`
+it creates, when the bundle carries a model, it also sets the Ollama starting
+points (`LLM_PROVIDER`, `OLLAMA_MODEL`, `OLLAMA_BASE_URL=http://ollama:11434`,
+`LLM_PARALLELISM=1`, `LLM_TIMEOUT=600`, `WORKER_JOB_TIMEOUT=10800`, and
+`CTI_OLLAMA_CPUS` set to the host's CPU count when it has fewer than 8). An
+existing `.env` keeps its LLM keys; setup.sh prints the lines to set instead.
 
 On a host with the classic image store (overlay2 without the containerd
 snapshotter), `setup.sh --offline` writes `compose.override.yaml` next to
@@ -654,11 +668,28 @@ Two caveats:
 
 Re-running `setup.sh --offline` over an existing install replaces its database
 with the bundle's, so reports that exist only on that host are lost. The
-report files in the `cti-state` volume are not touched. The scripts have no
-way to update an install in place and keep its reports. Back up the database
+report files in the `cti-state` volume are not touched. New images, models or
+code need a new full bundle, which replaces the database the same way. Back up
 first ([docs/docker.md](docs/docker.md#data-and-backups)) and keep that dump:
-nothing merges it back in. Corpora and models are frozen at the bundle's build
-date (`offline/bundle.env`), so an update means a new bundle.
+nothing merges it back in. Images and models are frozen at the bundle's build
+date (`offline/bundle.env`).
+
+The corpora can be refreshed without losing reports. On the connected machine,
+`bash scripts/package_offline_corpora.sh` writes
+`dist/cti-parsor-offline-corpora-<rev>-<YYYYMMDD>.tar` (`--no-sync` ships the
+clones as they are, without the network sync). On the air-gapped host, in a
+checkout at the same revision with the app image built from it:
+
+```bash
+tar xf cti-parsor-offline-corpora-*.tar && bash scripts/update_offline_corpora.sh offline-corpora
+```
+
+This replaces `corpora/` in the `cti-cache` volume and rebuilds the rule store
+from the clones; the rebuild needs no network, since it reads them from disk.
+The models and the job store are not touched. Run it while no report is running:
+the rebuild commits one statement at a time. A private corpus is not in the
+bundle. The rebuild only ingests the corpora that the target's image and its
+own `detection_corpora.local.yaml` list.
 
 ### Going further
 
