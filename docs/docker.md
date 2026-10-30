@@ -131,6 +131,13 @@ works too, but only **one at a time** — each sync rebuilds the whole store
 (`replace_corpus_rules` per corpus, then a global dedup pass), and two
 overlapping ones contend for the same rows.
 
+`bootstrap` takes `--no-models` (skip the model downloads), `--no-corpora` (skip
+the corpus clone and the rule store) and `--strict`. With `--strict` it exits 1
+when a model does not download, when the models do not load from the cache with
+the network off (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`), or when a corpus
+does not sync. The air-gap packager runs it with `--strict`
+([offline section of the README](../README.md#offline-air-gapped-installation)).
+
 ## Development
 
 Two `profiles: [dev]` services replace the old venv-based dev loop (ADR-0054)
@@ -372,12 +379,12 @@ Not supported in the image (torch CPU only).
 ```bash
 make docker-smoke                        # = bash scripts/docker_smoke.sh
 bash scripts/docker_smoke.sh --no-build  # reuse the image you already built
-bash scripts/docker_smoke.sh --job       # also upload tests/fixtures/sample_report.txt and wait for the bundle
+bash scripts/docker_smoke.sh --job       # also upload tests/fixtures/sample_report.txt, wait for the job and check its stages
 bash scripts/docker_smoke.sh --keep      # leave the stack running afterwards
 bash scripts/docker_smoke.sh --clean     # docker compose down -v afterwards (DELETES the volumes)
 ```
 
-`--job` runs the whole pipeline, LLM stage included, with whatever `.env` configures — on a paid provider it costs one small report. CI runs the build and the non-job checks on every push.
+`--job` runs the whole pipeline, LLM stage included, with whatever `.env` configures — on a paid provider it costs one small report. It then reads the job's stage report and fails if a stage failed, or if a stage in `SMOKE_REQUIRED_STAGES` (default `2c 2d 2e 3`) did not run; a stage the configuration turned off is accepted. Set the variable to the stages your `.env` can run: without an LLM, `SMOKE_REQUIRED_STAGES="2c 2d 2e"`. CI runs the build and the non-job checks on every push.
 
 ## See also
 

@@ -240,6 +240,7 @@ CTIParsor/
 │   ├── package_offline_corpora.sh # Corpora-only refresh bundle (cti-cache's corpora/) for an air-gapped install
 │   ├── update_offline_corpora.sh  # Install a corpora bundle and rebuild the rule store; the job store is not touched
 │   ├── docker_smoke.sh            # Build, start and verify the container stack (make docker-smoke)
+│   ├── smoke_stage_report.py      # The --job judge of docker_smoke.sh: reads a job's stage report, standard library only (ADR-0054)
 │   ├── release.py                 # Release process: the version, the tag check, the notes, the release PR (ADR-0085, docs/releasing.md)
 │   ├── release_files.sh           # A release's files and notes, from the image main's CI built and attested (ADR-0085)
 │   ├── migrate_jobs_to_postgres.py # One-shot copy of a cti_stix.db job store into PostgreSQL (ADR-0045)

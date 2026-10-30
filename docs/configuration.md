@@ -110,6 +110,9 @@ LLM_PROVIDER=lmstudio
 LMSTUDIO_BASE_URL=http://localhost:1234
 LMSTUDIO_MODEL=lmstudio-model
 ```
+`LMSTUDIO_API_KEY` is sent as a Bearer token, and only when LM Studio's server
+requires a key. Unset, Stage 3 sends the placeholder `lmstudio`. LM Studio has no
+vision backend, so the key does not apply to figures.
 
 ### vLLM (local)
 ```env
@@ -123,6 +126,9 @@ prefix included (e.g. `Inferact/Qwen3.8-27B-NVFP4`); a wrong name 404s and
 Stage 3 comes back empty. `VLLM_ENABLE_THINKING=false` (the default) turns off
 Qwen3-style thinking, which on the Stage 3 prompt used the whole output budget
 without returning JSON. The same server can read figures: `VISION_PROVIDER=vllm`.
+`VLLM_API_KEY` is sent as a Bearer token when the server was started with a key
+(`vllm serve --api-key`). It applies to Stage 3 and to figures. Unset, Stage 3
+sends the placeholder `vllm`, and figure requests carry no `Authorization` header.
 
 ### Ollama (local, free)
 ```env
@@ -132,6 +138,7 @@ OLLAMA_MODEL=mistral
 ```
 Pull a model first: `ollama pull mistral`. Models smaller than ~13B may produce malformed JSON.
 If `OLLAMA_MODEL` is left unset the code falls back to `llama3.2`, not `mistral` — set it explicitly.
+`OLLAMA_API_KEY` is sent as a Bearer token when the server requires a key, for Stage 3 and for figures (`VISION_PROVIDER=ollama`). Unset, the placeholder `ollama` is sent.
 
 Inside a container, `localhost` is the container itself: the bundled `ollama` profile is reached at `http://ollama:11434`, which the air-gap install writes. The context window is the server's, because the pipeline calls Ollama's OpenAI-compatible endpoint and that takes no per-request window. Ollama 0.40.8 defaults to 4096 tokens and truncates a longer prompt silently: a 14,322-token prompt was cut to 2,050 tokens and answered wrongly (measured). The bundled service sets the window from `CTI_OLLAMA_CONTEXT_LENGTH` (default 16384); an Ollama you run yourself needs `OLLAMA_CONTEXT_LENGTH` on its server. The KV cache grows with the window (about 2 GB per 16384 tokens for a 7B model), so raise `CTI_OLLAMA_MEMORY` with it.
 
@@ -142,6 +149,8 @@ The bundled service reserves no GPU. The commented `deploy.resources.reservation
 `.env.example` recommends `mistral-nemo` over `mistral` for JSON adherence. The pipeline's quality was measured with Anthropic models and with Qwen3.8-27B on vLLM only, so evaluate the model you choose on your own reports ([docs/eval/](eval/)).
 
 `--with-llm=MODEL[,MODEL...]` on the packager bundles several models: the first is the text model, and a vision-capable one can serve Stage 1f. `setup.sh --offline` then prints the `VISION_PROVIDER` and `VISION_MODEL` lines to set.
+
+A reasoning block (`<think>…</think>`) in a reply is removed before Stage 3 reads the JSON. When the opening tag was in the prompt, the reasoning ends at the first `</think>`. A reply that starts with `{`, `[` or a code fence is an answer, and a `</think>` inside it is data, so nothing is cut. A block with no closing tag leaves an empty answer. This holds for every provider that uses the OpenAI-compatible call: Gemini, Mistral, Ollama, LM Studio and vLLM.
 
 ### Running without an LLM
 Leave `ANTHROPIC_API_KEY` unset. Stage 3 is skipped. The pipeline still produces a valid STIX bundle from the Stage 1, 2, 2b, 2c, 2d and 2e results (every offline stage).

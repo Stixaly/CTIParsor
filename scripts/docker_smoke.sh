@@ -15,16 +15,21 @@
 #   - google-re2 availability (warn if missing; ADR-0049)
 #   - Chromium present
 #   - Chromium launches sandboxed (proves seccomp profile grants user namespaces)
-#   - optionally: sample report processed end-to-end (--job)
-#   - no traceback in logs
+#   - optionally: sample report processed end-to-end (--job), and the pipeline
+#     stages it needs ran (SMOKE_REQUIRED_STAGES)
+#   - no traceback in the app and worker logs
 #
 # Usage: bash scripts/docker_smoke.sh [--no-build] [--job] [--keep] [--clean]
 #   --no-build  reuse the existing image instead of building it
-#   --job       upload tests/fixtures/sample_report.txt and wait for the job to finish
+#   --job       upload tests/fixtures/sample_report.txt, wait for the job to finish,
+#               then check that the stages in SMOKE_REQUIRED_STAGES ran (the LLM and
+#               the NLP models ran, not only "the job did not fail")
 #   --keep      leave the stack running afterwards
 #   --clean     `docker compose down -v` afterwards (DELETES the volumes)
 # Environment: DOCKER_BIN (default: docker), CTI_BIND / CTI_PORT (as in compose.yaml),
-#              SMOKE_JOB_TIMEOUT (seconds, default 1800), SMOKE_HEALTH_TIMEOUT (default 180)
+#              SMOKE_JOB_TIMEOUT (seconds, default 1800), SMOKE_HEALTH_TIMEOUT (default 180),
+#              SMOKE_REQUIRED_STAGES (with --job: space-separated stages that must have
+#              run, default "2c 2d 2e 3"; a stage turned off by the configuration is accepted)
 
 set -u
 
@@ -104,6 +109,9 @@ PORT="${CTI_PORT:-8000}"
 BASE="http://$BIND:$PORT"
 SMOKE_HEALTH_TIMEOUT="${SMOKE_HEALTH_TIMEOUT:-180}"
 SMOKE_JOB_TIMEOUT="${SMOKE_JOB_TIMEOUT:-1800}"
+# Stages that must have run for --job to pass: a job that finishes with its LLM or
+# its models missing degrades without an error (ADR-0059 stage report), so it is named.
+SMOKE_REQUIRED_STAGES="${SMOKE_REQUIRED_STAGES:-2c 2d 2e 3}"
 
 # Move to repo root
 cd "$(dirname "$0")/.."
@@ -369,7 +377,7 @@ if [ "$DO_JOB" = true ]; then
                 sleep 5
             done
 
-            if [ -n "$FINAL_STATUS" ] && [ "$FINAL_STATUS" != "failed" ]; then
+            if [ -n "$FINAL_STATUS" ] && [ "$FINAL_STATUS" != "failed" ] && [ "$FINAL_STATUS" != "timeout" ]; then
                 pass "sample report processed (status: $FINAL_STATUS)"
                 # The report must have run in the worker container, not in the API.
                 if $COMPOSE logs worker 2>&1 | grep -q "Spawning isolated subprocess for job $JOB_ID"; then
@@ -381,6 +389,32 @@ if [ "$DO_JOB" = true ]; then
                     fail "API container spawned no pipeline process"
                 else
                     pass "API container spawned no pipeline process"
+                fi
+                # The stage report (ADR-0059) says which stages ran. It is read in the app
+                # container, as step 9b reads the job store, and judged here on the host.
+                STAGE_JSON=$(in_app python -c "
+import json, sys
+from api.db import get_conn
+with get_conn() as conn:
+    row = conn.execute('SELECT run_config_json FROM jobs WHERE id=?', (sys.argv[1],)).fetchone()
+rc = json.loads(row['run_config_json']) if row and row['run_config_json'] else {}
+print(json.dumps(rc.get('stage_report')))
+" "$JOB_ID" 2>/dev/null)
+                # One "stage" line per stage (shown) and one "problem:" line per stage that
+                # does not count; exit status 1 when there is any problem.
+                STAGE_LINES=$(printf '%s' "$STAGE_JSON" | python3 scripts/smoke_stage_report.py "$SMOKE_REQUIRED_STAGES")
+                STAGE_RC=$?
+                STAGE_PROBLEMS=""
+                while IFS= read -r line; do
+                    case "$line" in
+                        "problem: "*) STAGE_PROBLEMS="${STAGE_PROBLEMS:+$STAGE_PROBLEMS; }${line#problem: }" ;;
+                        *) info "$line" ;;
+                    esac
+                done <<< "$STAGE_LINES"
+                if [ "$STAGE_RC" -eq 0 ]; then
+                    pass "pipeline stages ran"
+                else
+                    fail "pipeline stages ran (${STAGE_PROBLEMS:-the stage report could not be checked})"
                 fi
                 # Check bundle export
                 COUNTS=$(echo "$JOB_RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); print(str(d.get('entity_count')) + ' entities, ' + str(d.get('relationship_count')) + ' relationships')" 2>/dev/null)
@@ -402,12 +436,13 @@ if [ "$DO_JOB" = true ]; then
 fi
 
 # ── Step 15: no traceback in the logs ─────────────────────────────────────────
+# The pipeline runs in the worker container (ADR-0046): its log is checked too.
 info "Checking logs for tracebacks..."
-TRACEBACK_COUNT=$($COMPOSE logs app 2>&1 | grep -ci traceback || true)
+TRACEBACK_COUNT=$($COMPOSE logs app worker 2>&1 | grep -ci traceback || true)
 if [ "$TRACEBACK_COUNT" -gt 0 ]; then
-    warn "no traceback in the logs (found $TRACEBACK_COUNT)"
+    warn "tracebacks in the app and worker logs (found $TRACEBACK_COUNT)"
 else
-    pass "no traceback in the logs"
+    pass "no traceback in the app and worker logs"
 fi
 
 # ── Step 16: Teardown ─────────────────────────────────────────────────────────

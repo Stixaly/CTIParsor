@@ -6,8 +6,8 @@ set -euo pipefail
 # air-gapped install (companion of scripts/package_offline_docker.sh).
 #
 # Run on a CONNECTED machine with Docker. The full bundle carries the rule store
-# inside a pg_dump of the whole database, so today the only way to get newer
-# rules onto an air-gapped host is to replace every analyst report with them.
+# in a pg_dump that setup.sh restores with --clean, which recreates every table:
+# on a host that already has reports, it refuses unless told to erase them.
 # This bundle carries only the corpus clones (the corpora/ directory of the
 # cti-cache volume). The target rebuilds its rule store from them and leaves
 # the job store alone: scripts/update_offline_corpora.sh.
@@ -82,8 +82,9 @@ else
     docker compose --profile bootstrap run --rm bootstrap python scripts/sync_corpora.py 2>&1 \
         | tee "$sync_log" \
         || offline_die "sync_corpora.py failed — nothing was packaged"
-    # sync_corpora.py exits 0 even when a clone fails. Each failure prints a line
-    # that starts with "  ! " (its _run() and its tarball branch), so look for those.
+    # sync_corpora.py exits 1 when a clone or a tarball fails, which the pipeline
+    # above turns into offline_die. Each failure also prints a line that starts with
+    # "  ! " (its _run() and its tarball branch): the grep below is a second guard.
     if grep -q '^  ! ' "$sync_log"; then
         offline_die "a corpus did not sync (the '!' lines above) — nothing was packaged. Fix it, or pass --no-sync to ship the clones as they are"
     fi

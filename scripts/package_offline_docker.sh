@@ -107,7 +107,16 @@ echo "=== [4/8] Running bootstrap locally (populates cti-cache + the rule store)
 docker compose up -d postgres
 offline_wait_postgres_healthy 90 \
     || offline_die "postgres did not become healthy — check 'docker compose logs postgres'"
-docker compose --profile bootstrap run --rm bootstrap
+# --strict: a model that does not download or load from the cache, or a corpus that
+# does not sync, fails here instead of shipping an incomplete bundle. The -e pairs
+# undo the offline settings that setup.sh --offline writes into .env (and a later
+# build from this checkout would inherit): building the bundle needs the Hub.
+# bootstrap --strict sets them to 1 itself for its own offline check.
+docker compose --profile bootstrap run --rm -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 bootstrap bootstrap --strict
+rule_count=$(offline_pg_exec psql -U "${CTI_DB_USER:-ctiparsor}" -d "${CTI_DB_NAME:-ctiparsor}" -tAc \
+    "SELECT count(*) FROM detection_rules") \
+    || offline_die "cannot count the rules after bootstrap — check 'docker compose logs postgres'"
+[ "$rule_count" -gt 0 ] || offline_die "the rule store is empty after bootstrap — refusing to build a bundle without rules"
 
 echo "=== [5/8] Exporting cti-cache (NLP models + corpus clones) ==="
 docker run --rm \
@@ -115,9 +124,27 @@ docker run --rm \
     -v "$(pwd)/$STAGE_DIR:/backup" \
     alpine tar czf /backup/cti-cache.tar.gz -C /data .
 
-echo "=== [6/8] Exporting the rule store + job store (pg_dump) ==="
-offline_pg_exec pg_dump -Fc -U "${CTI_DB_USER:-ctiparsor}" -d "${CTI_DB_NAME:-ctiparsor}" \
+echo "=== [6/8] Exporting the schema + the rule store (pg_dump, no reports) ==="
+db_tables=$(offline_pg_exec psql -U "${CTI_DB_USER:-ctiparsor}" -d "${CTI_DB_NAME:-ctiparsor}" -tAc \
+    "SELECT tablename FROM pg_tables WHERE schemaname='public'") \
+    || offline_die "cannot list the tables of ${CTI_DB_NAME:-ctiparsor}"
+[ -n "$db_tables" ] || offline_die "no table in public — wrong database?"
+# The schema of every table is exported, the data only of the rule store and of
+# schema_migrations (the version the bundle is at). The rest is the job store: the
+# analysts' reports, which stay on the machine that made them.
+# shellcheck disable=SC2086  # OFFLINE_RULE_STORE_TABLES is a word list
+mapfile -t args < <(printf '%s\n' "$db_tables" | offline_exclude_data_args $OFFLINE_RULE_STORE_TABLES schema_migrations)
+# --schema=public: the other schemas (the throwaway t_<hex> ones of the test suite
+# share this database) stay out, and --no-blobs leaves out the large objects.
+offline_pg_exec pg_dump -Fc --schema=public --no-blobs -U "${CTI_DB_USER:-ctiparsor}" -d "${CTI_DB_NAME:-ctiparsor}" "${args[@]}" \
     > "$STAGE_DIR/ctiparsor.dump"
+# The table of contents of the dump is checked too: a data entry of any other table
+# stops the packaging here, before the bundle is made, and so does a listing that
+# cannot be read.
+toc=$(offline_pg_exec pg_restore -l < "$STAGE_DIR/ctiparsor.dump") \
+    || offline_die "cannot read the table of contents of $STAGE_DIR/ctiparsor.dump"
+# shellcheck disable=SC2086  # OFFLINE_RULE_STORE_TABLES is a word list
+printf '%s\n' "$toc" | offline_check_dump_data $OFFLINE_RULE_STORE_TABLES schema_migrations
 
 if $WITH_LLM; then
     echo "=== [7/8] Pulling and exporting the Ollama models (${OLLAMA_MODELS[*]}) ==="
@@ -126,6 +153,7 @@ if $WITH_LLM; then
         docker compose exec -T ollama ollama list >/dev/null 2>&1 && break
         sleep 2
     done
+    docker compose exec -T ollama ollama list >/dev/null 2>&1 || offline_die "ollama did not answer within 60 s"
     for model in "${OLLAMA_MODELS[@]}"; do
         docker compose exec -T ollama ollama pull "$model"
     done

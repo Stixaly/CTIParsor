@@ -9,6 +9,8 @@
 #   bootstrap [options]  one-shot: DB schema, NLP model warm-up, corpus sync, rule store
 #                        --no-models   skip the HuggingFace downloads
 #                        --no-corpora  skip the corpus clone + rule store build
+#                        --strict      exit 1 if a model or a corpus is missing, and check
+#                                      that the models load from the cache with no network
 #   cli <args...>        run the batch pipeline (main.py) with the given arguments
 #   check                report which pipeline stages are available
 #   <anything else>      executed as-is (e.g. bash, python -c ...)
@@ -85,11 +87,13 @@ warn_env() {
 bootstrap() {
     local do_models=true
     local do_corpora=true
+    local strict=false
 
     while [ $# -gt 0 ]; do
         case "$1" in
             --no-models)  do_models=false ;;
             --no-corpora) do_corpora=false ;;
+            --strict)     strict=true ;;
             *)
                 echo "unknown option: $1" >&2
                 exit 2
@@ -106,14 +110,31 @@ bootstrap() {
 
     if [ "$do_models" = true ]; then
         echo "[bootstrap] NLP models -> $HF_HOME"
-        python docker/warm_models.py || \
+        if ! python docker/warm_models.py; then
+            if [ "$strict" = true ]; then
+                echo "ERROR: some models did not download - --strict refuses a bundle without them" >&2
+                exit 1
+            fi
             echo "WARNING: some models did not download - they will be fetched on the first report instead" >&2
+        elif [ "$strict" = true ]; then
+            # The air-gapped run has no network: HF_HUB_OFFLINE makes warm_models.py read
+            # the cache and download nothing, so this proves the cache is complete.
+            if ! HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python docker/warm_models.py; then
+                echo "ERROR: the models do not load from the cache without network access - the bundle would not work air-gapped" >&2
+                exit 1
+            fi
+        fi
     fi
 
     if [ "$do_corpora" = true ]; then
         echo "[bootstrap] detection corpora -> $CACHE_DIR/corpora"
-        python scripts/sync_corpora.py || \
+        if ! python scripts/sync_corpora.py; then
+            if [ "$strict" = true ]; then
+                echo "ERROR: corpus sync incomplete - --strict refuses a bundle without its corpora" >&2
+                exit 1
+            fi
             echo "WARNING: corpus sync incomplete - re-run 'bootstrap --no-models' or use Settings > Redownload" >&2
+        fi
 
         echo "[bootstrap] detection-rule store"
         python scripts/build_detection_index.py

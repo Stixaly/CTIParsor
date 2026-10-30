@@ -315,3 +315,87 @@ Not covered: the application image was a stand-in in these runs (its build
 needs the proxy's certificate in every stage), so no report went through the
 pipeline end to end, and the quality of a small local model on CTI reports was
 not measured. GPU passthrough was not tested.
+
+## Amendment (2026-10-30) — no reports in the bundle, a strict build, and a check that fails on what it proves
+
+Several gaps let an incomplete bundle reach an air-gapped host, let a bundle carry
+the reports of the machine that built it, and let the check pass with the
+pipeline not running. The CHANGELOG entries *An air-gapped bundle carries no
+reports* and *The air-gap check fails when the pipeline did not run* record the
+change for operators. The decisions are these:
+
+- **The bundle holds no reports.** The dump is `pg_dump -Fc --schema=public
+  --no-blobs`: the other schemas stay out (the test suite's throwaway `t_<hex>`
+  schemas share the database), and so do large objects. The packager stops if
+  `public` has no table. The schema of every table is exported. The data is
+  exported for the six rule-store tables (`detection_rules`, `rule_atoms`,
+  `rule_bytes`, `rule_related`, `rule_techniques`, `rule_text`) and for
+  `schema_migrations`, and for nothing else: `--exclude-table-data=public.<table>`
+  is given for each other table. The table of contents (`pg_restore -l`) is then
+  checked by `offline_check_dump_data`, which refuses on any doubt: an empty or
+  unreadable listing, a listing without the data of `detection_rules`, the data of
+  a table outside the rule store or of a schema other than `public`, and a large
+  object. `SEQUENCE SET` entries pass. They hold the counters of sequences, not
+  rows, so the bundle carries the packaging machine's last ids of
+  `progress_events_id_seq` and `review_decisions_id_seq`. The dump used to take the
+  whole database, so the reports of the packaging machine went to the target. A
+  bundle is carried to another host, and it should not carry the reports of the
+  machine that built it. `tests/test_offline_bundle_rule_tables.py` keeps the list
+  equal to the rule-store migrations.
+- **The build is strict.** `bootstrap --strict` (`docker/entrypoint.sh`) exits 1
+  when a model does not download, when the models do not load from the cache with
+  `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`, or when a corpus does not sync.
+  `scripts/sync_corpora.py` exits 1 on a failed clone or tarball; a corpus managed
+  by hand, or without a remote, is still skipped. The packager also refuses an
+  empty `detection_rules`, and checks that Ollama answers before a model is
+  pulled. The packager runs bootstrap with `HF_HUB_OFFLINE=0` and
+  `TRANSFORMERS_OFFLINE=0`, so it downloads even when `.env` says offline.
+  `setup.sh --offline` and the verifier write both as 1 into `.env` when they are
+  absent, and a later build from the same checkout would then fail to download.
+  Without `--strict`, bootstrap is as before: it warns and goes on.
+- **The restore refuses to erase reports.** `offline_docker_restore_pg_dump`
+  counts the rows of every table of `public` outside the rule store and
+  `schema_migrations`, and stops when one holds a row: reports, review decisions,
+  overrides and caches among them. The message names the tables. `pg_restore
+  --clean --if-exists` drops and recreates every table of the dump, so
+  `OFFLINE_FORCE_RESTORE=1` overrides the refusal and erases those rows. Refreshing
+  only the rules of an installation that has reports is
+  `scripts/update_offline_corpora.sh` (the corpora amendment above). The
+  `cti-cache` archive, and `ollama-models` when the bundle has a model, are
+  required, and `docker load` runs with pipefail. A failed `pg_restore` or volume
+  extraction stops the verifier as well, not only `setup.sh`.
+- **The verifier checks what it claims.** Before it starts anything,
+  `check_offline_bundle_docker.sh` checks that `.env` names an LLM the air-gapped
+  stack can reach: the bundle's Ollama model at `http://ollama:11434`, or, with no
+  model in the bundle, `ollama`, `vllm` or `lmstudio`. `--allow-no-llm` waives the
+  second case only, and `--job` then requires stages 2c, 2d and 2e. The verifier
+  starts the `ollama` service and checks that each bundled model is in it. The
+  verifier reads `.env` as compose does (quotes, an inline comment, CRLF, and the
+  last line of a key wins), and accepts an `OLLAMA_BASE_URL` with a trailing `/`.
+  A local server whose URL is `localhost`, or empty, is a warning and not a
+  failure: inside a container, `localhost` is the container itself.
+  `docker_smoke.sh --job` reads the job's stage report (ADR-0059) and judges it in
+  `scripts/smoke_stage_report.py`, which uses the standard library only. It fails
+  on a stage with status `failed`, and on a stage of `SMOKE_REQUIRED_STAGES`
+  (default `2c 2d 2e 3`) that did not run. A stage the configuration turned off is
+  accepted. A timed-out job is not a pass, and the tracebacks of the worker's log
+  are searched as well as the app's.
+- **A `--job` check leaves a job behind.** A second verifier run on the same host
+  therefore stops at the restore, until `OFFLINE_FORCE_RESTORE=1` is set or
+  `docker compose down -v` has run.
+
+Measured once, on a real dump: a measurement database that held 7 reports, on
+PostgreSQL 17 (the test container; compose runs PostgreSQL 18). The dump, filtered
+as above, held the data of the six rule-store tables and of `schema_migrations`
+only. `offline_check_dump_data` accepted its table of contents. `pg_restore --clean
+--if-exists` exited 0 on an empty database, and again over itself, and `jobs`
+held 0 rows afterwards. That is the check and `pg_restore`, not the packager under
+Docker.
+
+Not run in this session, and not measured: the packager and the verifier under
+Docker, with these changes; a `--job` run checked against a real stage report; a
+round trip on an isolated machine. The shell functions and the Python changes have
+tests outside a container: `tests/test_offline_bundle_rule_tables.py`,
+`tests/test_sync_corpora.py`, `tests/test_local_llm_providers.py`,
+`tests/test_jobs_routes.py` and `tests/test_smoke_stage_report.py`:
+113 passed on 2026-10-30. The full suite: 4344 passed, 9 skipped.

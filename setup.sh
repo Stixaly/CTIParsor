@@ -18,6 +18,8 @@
 #   bash setup.sh --offline=DIR      # air-gapped install from a bundle built
 #                                     # by scripts/package_offline_docker.sh
 #                                     # (ADR-0054, supersedes ADR-0040)
+#                                     # OFFLINE_FORCE_RESTORE=1 restores over the reports
+#                                     # already in the database, which it erases
 # =============================================================================
 
 set -e
@@ -264,9 +266,9 @@ if [ -n "$OFFLINE_DIR" ]; then
     # list of references: splitting it into one argument per image is the point.
     # shellcheck disable=SC2086
     offline_write_compose_override $BUNDLE_IMAGES
-    offline_docker_restore_volume "$OFFLINE_DIR" ctiparsor_cti-cache cti-cache.tar.gz
+    offline_docker_restore_volume "$OFFLINE_DIR" ctiparsor_cti-cache cti-cache.tar.gz required
     if [ -n "${BUNDLE_OLLAMA_MODEL:-}" ]; then
-        offline_docker_restore_volume "$OFFLINE_DIR" ctiparsor_ollama-models ollama-models.tar.gz
+        offline_docker_restore_volume "$OFFLINE_DIR" ctiparsor_ollama-models ollama-models.tar.gz required
     fi
 
     info "Starting postgres to restore the database…"
