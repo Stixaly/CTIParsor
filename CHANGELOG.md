@@ -324,6 +324,35 @@ is an empty answer that is still flagged as at the limit.
 
 ### Security
 
+#### The image's Python and Playwright's Node carry the fixes Grype reported, 2026-10-31
+
+The image scan had ten open alerts with a fix, all in two binaries.
+
+- **Python 3.14.8 → 3.14.10.** The base image moves to the
+  `python:3.14-slim-bookworm` digest that carries 3.14.10, which fixes
+  CVE-2026-115557 (critical: the `ssl` module's denylist of compromised
+  certificates) and CVE-2026-114583 (medium), and CVE-2026-87910, accepted
+  until now. The bundled pip is 26.2.2.
+- **Node 24.21.0 → 24.22.1.** Playwright's Python package ships its own Node
+  for the driver; `playwright` 1.64.1 brings 24.22.1, which fixes the other
+  eight (CVE-2026-111497 critical, a Brotli decoder overflow; CVE-2026-105482,
+  CVE-2026-105483 and CVE-2026-106069 high; four medium or low). Only that pin
+  moves in `requirements.lock.txt`; `make lock` re-hashed it from PyPI. The
+  image's Chromium follows the package: 153.0.8010.12 → 156.0.8078.4.
+- **Known limitation of that Playwright.** Its driver was built a few minutes
+  before the fix for microsoft/playwright#43242: from Chromium 155, a
+  credentialed, preflighted cross-origin request that is redirected is aborted
+  when a route is registered, and URL capture always registers one. With
+  JavaScript enabled, a page whose content comes from such a request can come
+  back empty. A capture without JavaScript, the default, sends no such request.
+  The next `playwright` release that ships the fixed driver removes it.
+- **The accepted ones were reviewed again for 3.14.10.** CVE-2025-15367
+  (`poplib`, never imported) and CVE-2026-12345
+  (`tempfile.TemporaryDirectory`, which needs write access to the container's
+  `/tmp` or model cache) are fixed in 3.15 only and stay out of reach:
+  `.grype.yaml` now names 3.14.10, and SECURITY.md gives the new reason. The
+  CVE-2026-87910 rule and row are gone.
+
 #### An imported report's HTML and SVG source loads nothing from the network, 2026-10-30
 
 `GET /api/jobs/{id}/source` now sends `Content-Security-Policy: default-src

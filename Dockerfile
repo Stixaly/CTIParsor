@@ -16,7 +16,7 @@ RUN npm run build
 # 3.14, so pip compiles it here, and without the OpenSSL headers that build
 # silently leaves out the `hash` module and PE signature parsing; the Stage 4
 # YARA gate would then refuse rules OpenCTI accepts.
-FROM python:3.14-slim-bookworm@sha256:48b13b003dda20b16f9442b8475aa05fe21bf6579a8c881db92ffb4d8fd20f83 AS builder
+FROM python:3.14-slim-bookworm@sha256:516b51cb9db2ef061e465c803e50f64361b82cefd91e525b889b967b83e83527 AS builder
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential libxml2-dev libxslt1-dev libssl-dev pkg-config \
@@ -35,7 +35,7 @@ WORKDIR /build
 # common packages under PyPI's names, with other bytes.  --no-deps: the lock is
 # the whole closure, and it lets diskcache stay out (pySigma declares it, only
 # its ATT&CK data cache imports it — scripts/lock.sh).  No pip upgrade first:
-# the pip this Python bundles is current (26.2.1 with 3.14.8), and an upgrade
+# the pip this Python bundles is current (26.2.2 with 3.14.10), and an upgrade
 # would be the one download without a hash.
 COPY requirements/requirements.lock.txt requirements/requirements-torch.lock.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip \
@@ -44,7 +44,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     && pip install --require-hashes --no-deps -r requirements.lock.txt
 
 # ── Stage 3: runtime image ────────────────────────────────────────────────────
-FROM python:3.14-slim-bookworm@sha256:48b13b003dda20b16f9442b8475aa05fe21bf6579a8c881db92ffb4d8fd20f83 AS runtime
+FROM python:3.14-slim-bookworm@sha256:516b51cb9db2ef061e465c803e50f64361b82cefd91e525b889b967b83e83527 AS runtime
 
 ARG INSTALL_CAPTURE=true
 ARG GIT_REV=""
