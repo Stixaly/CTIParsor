@@ -81,6 +81,8 @@ first URL-capture request to fail; `/api/ingest/url` responds 503 until then.
 | `react-markdown` + `remark-gfm` | Markdown preview (VS Code-like) |
 | `react-pdf` (bundles `pdfjs-dist`) | The Source tab's PDF viewer: pdf.js renders the uploaded report in the analyst's browser, so a pdf.js advisory concerns the UI |
 | `vite` + TypeScript | Build toolchain |
+| `@playwright/test` (dev) | The browser journey (ADR-0094 item 4, TESTING.md): Chromium against the built UI and the API |
+| `@axe-core/playwright` (dev) | axe-core's WCAG checks in that journey (MPL-2.0, as axe-core) |
 
 ## Keeping dependencies current
 
@@ -130,6 +132,13 @@ is in 11.0.1 only. `npm run check` passes with it. Drop the override once
 both ask for `^11`. The previous one, which forced postcss-selector-parser
 past a Tailwind 3 dependency, went with Tailwind CSS 4 (2026-10-10).
 `npm audit` reports nothing, dev dependencies included.
+
+`@playwright/test` and `@axe-core/playwright` are pinned exactly, without
+`^`: Playwright's Chromium build, CI's cache of it (job `browser-e2e`) and the
+image `scripts/check_browser_e2e.sh --docker` runs
+(`mcr.microsoft.com/playwright:v<version>-noble`) follow the installed
+version, so it moves only on purpose. Raise them with npm 11, then run the
+journey.
 
 Change `frontend/package-lock.json` with npm 11, as `make npm-update`, CI
 and the `Dockerfile` do. npm 10 drops the `libc` fields of the lock's native

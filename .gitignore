@@ -28,6 +28,9 @@ cti_stix.db-wal
 db_backups/
 frontend/node_modules/
 frontend/dist/
+# What a browser-journey run leaves (scripts/check_browser_e2e.sh)
+frontend/test-results/
+frontend/playwright-report/
 # MITRE ATT&CK bundle (downloaded by scripts/download_attack.py — ~12 MB, do not commit)
 /data/
 # Design artefacts — HTML prototypes, not production code

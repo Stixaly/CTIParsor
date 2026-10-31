@@ -702,11 +702,132 @@ columns against the index of every committed ATT&CK track (read from
 `components/graph/buildBundleGraph.test.ts` (22, 12 before),
 `components/graph/provenance.test.ts` (10, 3 before) and `pages/Dashboard.test.tsx`
 (7, 4 before); `pages/Review.test.tsx` (16) keeps its count and one case now
-checks the disabled Change type. ESLint runs
+checks the disabled Change type. The browser journey (2026-10-31) adds
+`components/ProgressModal.test.tsx` (4 tests): the progress dialog's focus
+moves in, stays in under Tab and Shift+Tab, Escape closes it, and on close the
+focus goes back to what had it at the opening, or to New report when that is
+gone. ESLint runs
 the TypeScript rules, `rules-of-hooks` and `exhaustive-deps` as errors, and
 the formatting the code already follows (`frontend/eslint.config.js`).
 `npm run check` runs lint, `tsc` and Vitest, the three steps of CI's frontend
 job. Still untested as a unit: the review-page promotion gate (§6, P1-d).
+
+### Browser journey (ADR-0094 item 4)
+
+Playwright (`@playwright/test`, Chromium) drives the built interface against
+the real API, its worker and PostgreSQL, as an analyst does:
+`frontend/playwright.config.ts` and `frontend/e2e/`, run by
+`scripts/check_browser_e2e.sh` (CI job `browser-e2e` on every push, pull
+request and weekly run; the image is published only after it). Each journey
+works on reports of its own, three at a time; none pauses for a fixed time,
+each waits for a state the page or the API shows, within a bound.
+
+| Spec | What it checks |
+|---|---|
+| `main-journey.spec.ts` | `tests/fixtures/sample_report.txt` imported through "Browse files…" with its TLP and PAP; the progress dialog shows Stage 1's event (its "… chars → … chunks" line, which only an event of the run draws: a dead event stream fails); a reload, after which the dashboard still lists the report, from the server, and its run reaches review (whether it still runs at the reload is recorded, not asserted: on a warm API the run ends 0.6 to 0.8 s after that event); its card in For review; Analyse; one row accepted (APT29, left pending), one rejected (update-service.net, auto-accepted), one retyped (Cobalt Strike, malware → tool); Complete Review; Download STIX. The file is a STIX 2.1 bundle (ids, `spec_version`, one object per id, every `*_ref` and `*_refs` inside it); the accepted actor ships, the rejected domain and its indicator do not, the retyped row ships as a tool. `GET /api/jobs/{id}/bundle` serves the same bundle with `X-Bundle-Validation: validated`; the report is completed and the three decisions are `human` |
+| `enrichment.spec.ts` | `tests/fixtures/baselines/opencti_report.json` and its text in enrich mode (the TLP raised to the bundle's AMBER); completed; the analyst's Report re-issued in the bundle; on the graph, "Differences", then "Against your bundle", whose matched rows are the ledger's `baseline_match` removals, checked one by one (offline: the file name and its SHA-256, merged into the analyst's file, and APT29, into the analyst's intrusion set; every replacement one of the analyst's objects), with SUNBURST added by the report |
+| `failed-job.spec.ts` | the same bundle with its Report's `lang` set to `not a lang!`: the preview accepts it (it does not run the schemas), the worker refuses it, the job fails and the dashboard says "Pipeline failed". The reason, read from the run's last progress event (the page does not show it), is the baseline error: `'not a lang!' is not a valid RFC 5646 language code` |
+| `refused-bundle.spec.ts` | the report `scripts/browser_e2e_db.py seed` writes as the worker stores a run whose Stage 5 refused the bundle: `GET /bundle` answers 409 with `{"validation": "invalid", "errors": [...]}`; the graph says the build was refused and shows the first error; its Download STIX raises the refusal with that error and saves nothing |
+| `keyboard.spec.ts` | the main journey's operations with the keyboard alone (checklist below) |
+| `accessibility.spec.ts` | axe on each page and dialog of the journey (below) |
+
+**The offline profile.** The script starts `python run_api.py` (role `all`:
+the API and its worker, a subprocess per report) on 127.0.0.1:8765 with
+`env -i` and these variables only: `PYTHON_DOTENV_DISABLED=1` (no `.env`),
+`SKIP_HEAVY_MODELS=1`, `PIPELINE_DISABLED_STAGES=1f,2c,2d,2e,3,3d,3f,3e,3doc,2f,4c`
+(every stage of `pipeline/orchestrator.py` that loads a model, calls an LLM
+or reaches the network), `VISION_PROVIDER=none`, `CVE_ENRICHMENT=false`,
+`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`, `REVIEW_CONTROL_SAMPLE_RATE=0`
+(no control sample drawn: the rows a journey decides start in a known
+state), `STIX_ENRICHMENT_ENABLED=true`, `WORKER_MAX_CONCURRENT=3` (as many as
+Playwright's workers), a new database and throwaway directories, and no key.
+Stages 1, 2, 2b, 2g, 3r (enrich jobs), 4, 4b and 5 run. After the journeys
+the script prints every report's stage report (which stage ran, which was
+skipped and why) and fails if a disabled stage ran.
+
+**No external network.** With `--network-guard` (CI), the API, its worker's
+subprocesses and the seed run under a group of their own (gid 64999, through
+`setpriv`), and an `iptables`/`ip6tables` owner match, inserted first in
+`OUTPUT` so that no ACCEPT of the host's firewall comes before it, rejects and
+counts every packet that group sends anywhere but loopback; the run fails
+unless both counts are 0. A canary connection from that group to 192.0.2.1 is
+refused and counted first, so the guard is shown to work. The browser is not
+in the group: its own traffic is not the subject. A DNS lookup is counted
+only when the resolver is off loopback: where it is a local stub
+(systemd-resolved on 127.0.0.53, Ubuntu's default), the lookup goes over
+loopback and the stub sends it on as its own, uncounted; any connection made
+after it is counted. The guard needs root or sudo without a password. Run as
+root, the script builds the interface and runs the API as the checkout's
+owner: nothing in the checkout is left to root, and the API cannot leave the
+guard's group. A chain left by a run that was killed stops the next one
+(exit 2) with the commands that remove it. Turning CVE enrichment on
+(Stage 2f, which calls NVD) makes it fail: 2 packets on 2026-10-31.
+
+**Run it locally** (Linux or WSL; Python with `requirements/requirements-ci.lock.txt`
+or the full one, Node 24 and npm 11, a PostgreSQL server you may create
+databases on):
+
+```bash
+(cd frontend && npm ci)
+CTIPARSOR_TEST_DATABASE_URL=postgresql://ctiparsor:ctitest@127.0.0.1:5433/ctiparsor \
+  PYTHON=.venv/bin/python bash scripts/check_browser_e2e.sh --docker
+```
+
+`--docker` runs Playwright in `mcr.microsoft.com/playwright:v<version>-noble`
+(the version `frontend/node_modules` holds) with `--network host`, so neither
+Chromium nor its system libraries go on the host; without it, run
+`npx playwright install --with-deps chromium` in `frontend/` once.
+`--no-build` reuses `frontend/dist`; arguments after `--` go to
+`npx playwright test` (`-- e2e/keyboard.spec.ts`). `E2E_PORT` moves the API
+off 8765. The HTML report is in `frontend/playwright-report/`; a failed
+journey's trace, screenshot and video, and the API's log, in
+`frontend/test-results/` (CI uploads both, on failure only). Exit 2 means the
+journey could not run (a missing tool or variable, a port in use, the guard's
+chain left by a killed run, a build, database or API that would not start).
+Measured on 2026-10-31 under WSL with the CI lock: the six journeys in 21 s,
+the script in 30 s with `--no-build` and 52 s with the build; three runs in a
+row green.
+
+**Accessibility gate.** `accessibility.spec.ts` runs axe-core
+(`@axe-core/playwright`, tags `wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`) on
+the dashboard (as the run finds it: the seeded refused report and what the
+journeys running beside it have imported so far), the new-report dialog
+(empty, then filled), the progress dialog, the dashboard again with this
+journey's report in review, the review page and the graph, each once its
+finite animations are over. A violation of impact serious or critical fails,
+unless `frontend/e2e/a11y-allowlist.json` names it by its rule, its page and
+its element (axe's target selector), with why and the follow-up: another
+element breaking the same rule on the same page fails. An entry that no
+longer matches fails too, so the list only shrinks. The run attaches every
+finding, any impact. On 2026-10-31 axe found 3
+serious ones: two contrasts in the new-report dialog's markings band (the
+"required" badge and the line beside it, fixed), and the review page's theme
+button, named "Toggle theme" while it shows the theme in force (allowlisted
+as `.theme-toggle`, WCAG 2.5.3). Nothing else, of any impact. Axe is not a
+certification.
+
+**Keyboard checklist.** `keyboard.spec.ts` presses keys only, no click and no
+pointer:
+
+- dashboard: Tab to New report, Enter;
+- new-report dialog: the text area has the focus; Shift+Tab to "Browse
+  files…", Enter (the file chooser is the system's: Playwright stands in for
+  it); Tab to a TLP and a PAP level, Space; Tab to Create job, Enter;
+- progress dialog: its Close button takes the focus, and Tab and Shift+Tab
+  leave it there; Escape closes it, and the focus goes back to New report
+  (Create job, which opened it, closed with the new-report dialog);
+- dashboard: Tab to the report's Analyse, Enter;
+- review: `j` (next pending row), `a` (accept it), `r` (reject the next); Tab
+  to a row's Change type (⋯), Enter, Tab to a type, Enter; `f` (Complete
+  Review), `f` again (Download STIX).
+
+By hand, before a release: the system file chooser; a visible focus on each
+control above and the focus order across the review page's columns; the
+graph page (view switch, Differences, Against your bundle, Download STIX);
+what a screen reader says of the progress (no live region) and of the
+cards' ✓, ✗ and ⋯ buttons (named by those characters, their titles only
+describe them); 200 % zoom, and a window 720 px high, where the relationship
+rail covers part of the review margin.
 
 ---
 
@@ -812,7 +933,7 @@ they stop a slide, they are not targets. Raise one when its area gains tests.
 | Persistence (`api/db*.py`, `api/storage.py`, `api/worker.py`, `api/paths.py`) | 91% (91.8%) | `scripts/check_coverage.py` |
 
 **CI jobs** (`.github/workflows/ci.yml`). The image is published only when
-the first four pass:
+the first five pass:
 1. **fast-tests** (every push and PR): `ruff check .`, `mypy` (scope and flags
    in `pyproject.toml`), every test with `CTIPARSOR_REQUIRE_TEST_DEPS=1`, the
    coverage floors. Installs the OpenCTI pattern parsers, google-re2 and
@@ -829,12 +950,15 @@ the first four pass:
    scans the image with Grype into Code scanning (not a gate, ADR-0078).
 4. **dependency-audit**: `pip-audit` on the Python locks and `npm audit` on the
    UI's production packages (ADR-0075, ADR-0080). It also runs weekly.
-5. **dependency-review** (pull requests only): fails a PR that adds a
+5. **browser-e2e**: the browser journey, offline, with the network guard
+   (`scripts/check_browser_e2e.sh --network-guard`, §4 "Browser journey",
+   ADR-0094 item 4). It also runs weekly.
+6. **dependency-review** (pull requests only): fails a PR that adds a
    dependency with a known high or critical vulnerability (ADR-0078).
-6. **model-tests** (pushes to main only, not a gate): the same suite with the
+7. **model-tests** (pushes to main only, not a gate): the same suite with the
    models downloaded and a live API key; it may fail for reasons outside the code.
-7. **publish-image** (pushes to main only): pushes the image to GHCR with its
-   SBOM and signed attestations, after jobs 1 to 4.
+8. **publish-image** (pushes to main only): pushes the image to GHCR with its
+   SBOM and signed attestations, after jobs 1 to 5.
 
 Four more workflows run beside it. **Fuzzing** (`fuzz.yml`) runs the five
 targets above, and the jobs of the first four are required checks. **CodeQL**

@@ -253,6 +253,8 @@ CTIParsor/
 │   ├── check_doc_claims.py        # Doc drift guard: documented numbers vs source (make check-docs)
 │   ├── check_coverage.py          # Per-area coverage floors on top of the total one (make coverage)
 │   ├── contract.py                # Record (make contract) or check the stable contract in contract/ (ADR-0094 item 1)
+│   ├── check_browser_e2e.sh       # The browser journey: Playwright against the built UI, the API, its worker and PostgreSQL, offline (ADR-0094 item 4, TESTING.md)
+│   ├── browser_e2e_db.py          # Its database: create, seed the refused report, print the stage reports, drop
 │   ├── check_flag_equivalence.py  # env_bool vs the old per-flag parsing, value by value
 │   ├── check_unescape_equivalence.py # A/B of the atom unescape refactor on real corpus data
 │   ├── check_evidence_gate.py     # Validate the coverage evidence gate on the store (ADR-0030)
@@ -371,6 +373,8 @@ CTIParsor/
 │   │   ├── api/client.ts          # Typed fetch wrappers
 │   │   ├── context/ThemeContext.tsx # 5 themes × 7 accent palettes
 │   │   └── types/index.ts         # Shared TS types
+│   ├── e2e/                       # The Playwright browser journeys, their helpers and a11y-allowlist.json (scripts/check_browser_e2e.sh)
+│   ├── playwright.config.ts       # Chromium, the API's address (E2E_BASE_URL), traces and videos on failure only
 │   └── public/
 │       ├── stix-icons/            # 27 white STIX 2.1 SVG icons, EclecticIQ's stix-icons (CC BY-SA 4.0)
 │       └── stix-viz/              # OASIS cti-stix-visualization, for the graph view (THIRD_PARTY_NOTICES.md)

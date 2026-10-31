@@ -824,11 +824,13 @@ export default function NewReportModal({ open, initialFile, initialBundle, initi
             <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.1em', textTransform: 'uppercase' as const, color: 'var(--ink-3)' }}>MARKINGS</span>
             <span style={{
               fontFamily: MONO, fontSize: 10, padding: '1px 6px', borderRadius: 4,
-              color: marksSet ? 'var(--ok)' : 'var(--warn)',
+              // Ink, not --warn, on the amber tint: --warn there read at 3.6:1 (axe, WCAG 1.4.3).
+              color: marksSet ? 'var(--ok)' : 'var(--ink-2)',
               background: marksSet ? 'color-mix(in oklab, var(--ok) 12%, transparent)' : 'color-mix(in oklab, var(--warn) 15%, transparent)',
             }}>{marksSet ? 'set' : 'required'}</span>
             <div style={{ flex: 1 }} />
-            <span style={{ fontSize: 10.5, color: 'var(--ink-4)' }}>{floor ? `at least ${floor}, from the bundle` : 'Applied to every object in the bundle'}</span>
+            {/* --ink-3: the band's amber tint took --ink-4 below 4.5:1. */}
+            <span style={{ fontSize: 10.5, color: 'var(--ink-3)' }}>{floor ? `at least ${floor}, from the bundle` : 'Applied to every object in the bundle'}</span>
           </div>
           {renderMarkingRow('TLP', TLP_DISPLAY_ORDER, tlp, setPickedTlp, 'TLP marking', minTlp ?? undefined)}
           {renderMarkingRow('PAP', PAP_DISPLAY_ORDER, pap, setPickedPap, 'PAP marking', minPap ?? undefined)}

@@ -1,0 +1,9 @@
+[
+  {
+    "rule": "label-content-name-mismatch",
+    "page": "review",
+    "target": ".theme-toggle",
+    "why": "The review page's theme button is named by its action, 'Toggle theme' (aria-label), while it shows the theme in force ('Warm · oxblood'): a speech-input user who says the words on it does not reach it (WCAG 2.5.3). Renaming it changes the name src/pages/Review.test.tsx finds it by, which this ticket does not touch.",
+    "followUp": "ADR-0094 L3 strengthening, accessibility acceptance: name it 'Theme: <theme in force>' and find it by that name in Review.test.tsx; then remove this entry."
+  }
+]
