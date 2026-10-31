@@ -52,8 +52,12 @@ from pipeline.orchestrator import (
 # ---------------------------------------------------------------------------
 # Maximum execution time per job in seconds (0 = unlimited)
 _MAX_JOB_TIMEOUT = env_int("WORKER_JOB_TIMEOUT", default=1800)  # 30 minutes
-# Maximum concurrent jobs (each runs in its own subprocess)
-_MAX_CONCURRENT_JOBS = env_int("WORKER_MAX_CONCURRENT", default=10)
+# Maximum concurrent jobs (each runs in its own subprocess; <= 0 = no limit).
+# 1, as in compose.yaml: a report holds ~4.4 GB (ADR-0037), so the former
+# default of 10 asked for ~44 GB and the OOM killer took the workers below
+# ~48 GB of RAM.  A host with the memory raises it
+# (scripts/measure_cold_start.py suggests a value).
+_MAX_CONCURRENT_JOBS = env_int("WORKER_MAX_CONCURRENT", default=1)
 # Maximum number of jobs allowed to sit in the queue (0 = unbounded).  Beyond
 # this the upload is refused with an explicit error instead of accepting work
 # the server has no intention of doing.

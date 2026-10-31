@@ -169,6 +169,11 @@ rebuild the corpus from the Settings page. The sizing table is in
 ## 6. Things that changed and might surprise you
 
 - `WORKER_MAX_CONCURRENT` now means *per worker container*, not per stack.
+- `WORKER_MAX_CONCURRENT` defaults to 1 in the code, as in `compose.yaml`; it
+  was 10. A process that runs reports with the variable unset now runs one at a
+  time and queues the rest: `python run_api.py`, `python -m api.queue_loop`, the
+  image started without compose. Set the variable to run more
+  ([deployment.md §5](deployment.md#5-workers-and-memory)).
 - `requeue at startup` only happens in role `all`. A container API never
   requeues; a job stuck in `processing` is requeued by a worker once its
   lease expires (180 s by default).

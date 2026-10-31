@@ -629,8 +629,92 @@ def test_inhouse_score_maps_with_the_release_of_the_run(world, monkeypatch):
         (run_dir / "docs").mkdir(parents=True)
         manifest = {"attack": {"release": release}} if release else {"llm": {}}
         (run_dir / "run.json").write_text(json.dumps({"name": name, "manifest": manifest}), encoding="utf-8")
-        _cli(monkeypatch, "inhouse-score", "--name", name)
+        with pytest.raises(SystemExit, match="no document scored"):     # an empty gold set scores nothing
+            _cli(monkeypatch, "inhouse-score", "--name", name)
     assert seen == ["20.0", "19.2"]
+
+
+# ── inhouse-score names what it could not score ──────────────────────────────
+
+def _inhouse_run(world, monkeypatch, golds, records):
+    """An in-house set and a run "h" of it.  golds: doc_id -> the status of its
+    gold.json (IoC layer, one domain); records: doc_id -> True for a result that
+    finds the domain, False for the error record `inhouse-run` writes."""
+    root = world.out / "inhouse"
+    root.mkdir(parents=True, exist_ok=True)
+    for doc_id, status in golds.items():
+        (root / doc_id).mkdir()
+        (root / doc_id / "source.txt").write_text("report", encoding="utf-8")
+        (root / doc_id / "gold.json").write_text(json.dumps(
+            {"status": status, "layers": ["iocs"], "iocs": [{"type": "domain", "value": "evil.com"}]}),
+            encoding="utf-8")
+    load = ev.inhouse.load                                   # the real one, before it is patched
+    monkeypatch.setattr(ev.inhouse, "load", lambda: load(root))
+    run_dir = world.out / "inhouse-runs" / "h"
+    (run_dir / "docs").mkdir(parents=True)
+    (run_dir / "run.json").write_text(json.dumps({"name": "h", "manifest": {"attack": {"release": "19.2"}}}),
+                                      encoding="utf-8")
+    found = {"ttp_ids": [], "entities": [{"type": "domain", "value": "evil.com"}], "relations": []}
+    for doc_id, ok in records.items():
+        record = {"doc_id": doc_id, **found} if ok else {"doc_id": doc_id, "error": "RuntimeError: boom"}
+        (run_dir / "docs" / f"{doc_id}.json").write_text(json.dumps(record), encoding="utf-8")
+    return run_dir
+
+
+def test_inhouse_score_of_a_complete_run_exits_0_and_names_nothing(world, monkeypatch, capsys):
+    run_dir = _inhouse_run(world, monkeypatch, {"h1": "gold", "h2": "gold"}, {"h1": True, "h2": True})
+    _cli(monkeypatch, "inhouse-score", "--name", "h")
+    report = _read(run_dir / "score.json")
+    iocs = {"tp": 2, "fp": 0, "fn": 0, "precision": 1.0, "recall": 1.0, "f1": 1.0}
+    assert report == {"run": "h", "documents": 2, "documents_failed": [], "documents_missing": [],
+                      "micro": {"iocs": iocs}, "negatives": {"cases": 0, "violated": 0}}
+    assert json.loads(capsys.readouterr().out) == report
+
+
+def test_inhouse_score_names_a_failed_report_and_exits_non_zero_after_writing(world, monkeypatch, capsys):
+    run_dir = _inhouse_run(world, monkeypatch, {"h1": "gold", "h2": "gold"}, {"h1": True, "h2": False})
+    with pytest.raises(SystemExit, match=r"^h: incomplete in-house score, failed on h2 \(report written to "):
+        _cli(monkeypatch, "inhouse-score", "--name", "h")
+    report = _read(run_dir / "score.json")
+    assert report["documents_failed"] == ["h2"] and report["documents_missing"] == []
+    assert report["documents"] == 1 and report["micro"]["iocs"]["tp"] == 1
+    assert json.loads(capsys.readouterr().out) == report                  # printed before the exit
+
+
+def test_inhouse_score_names_a_gold_report_the_run_has_no_result_for(world, monkeypatch):
+    run_dir = _inhouse_run(world, monkeypatch, {"h1": "gold", "h2": "gold"}, {"h1": True})
+    with pytest.raises(SystemExit, match=r"no result for h2 \(report written to "):
+        _cli(monkeypatch, "inhouse-score", "--name", "h")
+    report = _read(run_dir / "score.json")
+    assert report["documents_missing"] == ["h2"] and report["documents_failed"] == []
+    assert report["documents"] == 1
+
+
+def test_inhouse_score_with_no_report_scored_exits_non_zero(world, monkeypatch):
+    run_dir = _inhouse_run(world, monkeypatch, {}, {})
+    with pytest.raises(SystemExit, match=(r"no document scored: no report has a source\.\* file "
+                                          r"and a gold\.json with status gold")):
+        _cli(monkeypatch, "inhouse-score", "--name", "h")
+    assert _read(run_dir / "score.json")["documents"] == 0
+
+
+def test_inhouse_score_lists_every_failure_sorted_and_joins_the_reasons(world, monkeypatch):
+    golds = {"h1": "gold", "h2": "gold", "h3": "gold"}
+    run_dir = _inhouse_run(world, monkeypatch, golds, {"h3": False, "h1": False})
+    with pytest.raises(SystemExit, match=(r"failed on h1, h3; no result for h2; "
+                                          r"no document scored \(report written to ")):
+        _cli(monkeypatch, "inhouse-score", "--name", "h")
+    report = _read(run_dir / "score.json")
+    assert (report["documents_failed"], report["documents_missing"], report["documents"]) == (["h1", "h3"], ["h2"], 0)
+
+
+def test_inhouse_score_leaves_drafts_out_without_calling_them_failed(world, monkeypatch):
+    """`inhouse.load` keeps `status: gold` only: a run's record for a draft is not expected."""
+    golds = {"h1": "gold", "d-ok": "pre-annotation", "d-err": "pre-annotation"}
+    run_dir = _inhouse_run(world, monkeypatch, golds, {"h1": True, "d-ok": True, "d-err": False})
+    _cli(monkeypatch, "inhouse-score", "--name", "h")                    # no SystemExit
+    report = _read(run_dir / "score.json")
+    assert (report["documents"], report["documents_failed"], report["documents_missing"]) == (1, [], [])
 
 
 # ── The environment file, before any ATT&CK file is read ─────────────────────

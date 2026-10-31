@@ -849,6 +849,13 @@ def cmd_inhouse_run(args) -> None:
 
 
 def cmd_inhouse_score(args) -> None:
+    """Score an in-house run against the reports `inhouse.load()` returns (a
+    `source.*` file and a `gold.json` with `status: gold`).  A result for any
+    other report (a draft, a folder since removed) is not expected and is left
+    out.  A gold report the run recorded as an error (`documents_failed`) or has
+    no result for (`documents_missing`) is named in the report; then, or when no
+    report was scored, the command exits non-zero once the report is written and
+    printed."""
     run_dir = OUT / "inhouse-runs" / args.name
     meta = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
     canonical, _ = _canonical_fn(run_release(meta))
@@ -856,10 +863,16 @@ def cmd_inhouse_score(args) -> None:
     totals: dict[str, metrics.Counts] = {}
     negatives = [0, 0]
     per_doc = {}
+    recorded: set[str] = set()
+    failed: list[str] = []
     for p in sorted((run_dir / "docs").glob("*.json")):
         pred = json.loads(p.read_text(encoding="utf-8"))
+        recorded.add(p.stem)
         d = docs.get(p.stem)
-        if d is None or "error" in pred:
+        if d is None:
+            continue   # not a gold report (a draft, a folder since removed): not expected
+        if "error" in pred:
+            failed.append(p.stem)
             continue
         s = inhouse.score(d, pred, canonical)
         per_doc[d.doc_id] = s
@@ -874,11 +887,25 @@ def cmd_inhouse_score(args) -> None:
             totals[f"entity:{et}"] = totals.get(f"entity:{et}", metrics.Counts()) + c
         negatives[0] += s["negatives"]["cases"]
         negatives[1] += s["negatives"]["violated"]
+    failed.sort()
+    missing = sorted(set(docs) - recorded)
     report = {"run": args.name, "documents": len(per_doc),
+              "documents_failed": failed, "documents_missing": missing,
               "micro": {k: v.as_dict() for k, v in sorted(totals.items())},
               "negatives": {"cases": negatives[0], "violated": negatives[1]}}
     _write(run_dir / "score.json", report)
-    print(json.dumps(report, indent=2))
+    print(json.dumps(report, indent=2), flush=True)
+    problems: list[str] = []
+    if failed:
+        problems.append(f"failed on {', '.join(failed)}")
+    if missing:
+        problems.append(f"no result for {', '.join(missing)}")
+    if not per_doc:
+        problems.append("no document scored" if docs
+                        else "no document scored: no report has a source.* file and a gold.json with status gold")
+    if problems:
+        sys.exit(f"{args.name}: incomplete in-house score, {'; '.join(problems)} "
+                 f"(report written to {run_dir / 'score.json'})")
 
 
 def cmd_hard_docs(args) -> None:

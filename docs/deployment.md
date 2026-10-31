@@ -237,10 +237,12 @@ when you raise it.
 More workers do not help the common case anyway: each report already runs in its
 own subprocess, so the API process is not where the time goes.
 
-**Set `WORKER_MAX_CONCURRENT` from measured RAM, not from the default.** The
-default of 10 overcommits badly: each concurrent report holds roughly 4.4 GB
-resident, almost all of it the GLiNER weights, so ten in parallel ask for ~44 GB.
-Below about 48 GB of host RAM the OS OOM killer sets the real limit for you.
+**`WORKER_MAX_CONCURRENT` defaults to 1**, for a host install as for the
+compose worker. Each concurrent report holds roughly 4.4 GB resident, almost all
+of it the GLiNER weights: the former default of 10 asked for ~44 GB, and below
+about 48 GB of host RAM the OS OOM killer set the real limit by killing the
+workers. Raise it only from a measurement, and in the compose stack raise
+`CTI_WORKER_MEMORY` by 4.4 GB per extra report.
 `scripts/measure_cold_start.py` measures the figure on your host and suggests a
 value:
 
