@@ -47,7 +47,7 @@ compose service already has `CTIPARSOR_TEST_DATABASE_URL` pointed at a
 disposable PostgreSQL schema per run, no manual setup needed:
 
 ```bash
-make ci               # lint, types, tests + coverage floors, frontend: the CI's fast tests and frontend checks, without reuse lint and the migration check
+make ci               # lint, types, tests + coverage floors, frontend: the CI's fast tests and frontend checks, without reuse lint, the migration check and the backup check
 make test             # the whole suite (docker compose run --rm dev pytest -v), no coverage
 make coverage         # the whole suite with branch coverage, then the floors (§8)
 make frontend-check   # eslint + tsc + vitest (npm run check), in the frontend-dev container
@@ -552,6 +552,92 @@ CTIPARSOR_TEST_DATABASE_URL=postgresql://user:pw@host/db \
   python scripts/check_migration_from.py --last-release origin/main
 ```
 
+### Backup and restore (ADR-0094 item 3)
+`python scripts/check_backup_restore.py [--pg-container NAME]` backs up a used
+install and restores it into an empty one, with the flags of
+[docs/docker.md](docs/docker.md#data-and-backups), on the server
+`CTIPARSOR_TEST_DATABASE_URL` names:
+
+- the source is a new database built by this code's first start
+  (`db-identity.json` recorded) and seeded by `scripts/migration_seed.py`,
+  every table covered, with its state directory;
+- the backup is `pg_dump -U <user> -d <db> -Fc`, which `pg_restore -l` must
+  list whole, and `tar czf - -C <state> .`; `pg_dump` and `pg_restore` run in
+  the server's own container (`docker exec`: `--pg-container` or
+  `CTIPARSOR_TEST_PG_CONTAINER`), as the docs run them in the stack's; without
+  one, on the host, when its `pg_dump` and `pg_restore` are as new as the
+  server (exit 2 otherwise); the dump and the archive are readable by their
+  owner only, as the docs' `umask 077` makes them;
+- the restore goes database first: `pg_restore -U <user> -d <new db>
+  --single-transaction`, which must exit 0 and print nothing, then `tar xzf
+  --keep-old-files` into an empty directory;
+- the comparison is strict (`migration_compare.compare(..., strict=True)`):
+  every table, row, value and column type, and no table, column or row more;
+  each sequence's `last_value` and `is_called`; the definition of every table,
+  column, constraint, index, trigger and function
+  (`migration_compare.schema_objects`); every file and directory of the state
+  directory, byte for byte;
+- this code's app starts on the restored database and directory and reads the
+  seed back (`scripts/migration_readback.py`); the database is compared again
+  after it, and `db-identity.json` keeps the source's entry and gains the
+  target's, on the same cluster.
+
+The fast-tests job runs it against its `postgres:18-alpine` service
+(`CTIPARSOR_TEST_PG_CONTAINER: ${{ job.services.postgres.id }}`); the
+runner's own `pg_dump` is never used. It takes about 70 s under WSL on
+`/mnt/c`. pg_dump writes triggers and foreign keys after the rows, so the
+version 12 triggers do not fire during a restore: a review revision that
+drifted would show as a changed `jobs.review_revision`.
+
+`scripts/check_backup_restore_docker.sh`, which `scripts/docker_smoke.sh
+--backup-restore` runs in the container-image job, runs the commands of
+docs/docker.md themselves, as written there, on the smoke's Compose stack: a
+report written into it, the backup and its check, a restore into a second
+project (`<project>-restored`, empty volumes, `CTI_PORT` + 1), then every
+table's row count and checksum, every file of `cti-state` but
+`db-identity.json`, the report and its source through the API, and the new
+cluster recorded in `db-identity.json`. The restore's `pg_restore` line fails
+it when it prints anything, as the docs require; if it stops after `docker
+compose stop app worker`, it starts the smoke stack's `app` and `worker` again.
+`tests/test_check_backup_restore.py` fails when its copy of the commands and
+docs/docker.md's differ.
+
+Their parts are tested in `tests/test_check_backup_restore.py` (where the
+tools run and with which password, the exit codes, the databases and
+directory removed, and `_check` with `pg_dump` and `pg_restore` replaced by a
+copy of the source database: the documented flags, `pg_restore` the one
+command that must print nothing, and a lost row, a row added in a table
+without a sequence, a dropped trigger, a reset sequence, a changed file and an
+added file each caught) and
+`tests/test_migration_compare.py` (strict mode, sequence states, schema
+objects). Known limits:
+
+- the Python check restores into another database of the same server: a
+  restore onto a new cluster at the same address, what an empty project
+  gets, is run by the Compose check only (and `tests/test_db_identity.py`);
+- the Compose check writes one report with SQL, not the whole seed
+  (`tests/fixtures/`, which the seed reads, is not in the image);
+- a backup taken while `app` or `worker` run, and a restore across
+  PostgreSQL majors (`make db-upgrade`, docs/upgrading.md §7), are not
+  checked;
+- the strict comparison leaves out the ACLs of sequences and functions and
+  the owners of sequences (the tables' ACLs and owners and the functions'
+  owners are compared), comments, types and domains, table options
+  (`reloptions`, `UNLOGGED`), objects outside the app's schema, and
+  file modes and owners: the schema this code creates uses none of the first
+  five (no GRANT, COMMENT, CREATE TYPE or DOMAIN, UNLOGGED in its migrations),
+  and every file is the app user's;
+- not observed, a hypothesis: on a new volume, `docker compose up -d --wait
+  postgres` could report healthy while the image's first-start server still
+  runs (`pg_isready` reaches it on the socket). A `pg_restore` cut short by
+  that restart fails loudly, and `--single-transaction` leaves the database
+  empty: start again, as the docs say for any failed restore.
+
+```bash
+CTIPARSOR_TEST_DATABASE_URL=postgresql://user:pw@host/db \
+  python scripts/check_backup_restore.py --pg-container <the server's container>
+```
+
 ### Persistence / worker (integration)
 The write→read round-trip through PostgreSQL (`worker._save_entities` →
 `re_run_final_stages`) and schema migrations. **Currently the weakest layer** (see §6).
@@ -725,9 +811,13 @@ the first four pass:
    numpy, but not torch/transformers (`SKIP_HEAVY_MODELS=1`). No secrets. It
    also migrates a database written by the last release, and on a PR one
    written by the base commit's code, and compares their content
-   (`scripts/check_migration_from.py`, ADR-0077, ADR-0094 item 2).
+   (`scripts/check_migration_from.py`, ADR-0077, ADR-0094 item 2), and backs
+   up a seeded database and restores it into an empty one
+   (`scripts/check_backup_restore.py`, ADR-0094 item 3).
 2. **frontend-tests**: `npm run lint`, `npm run typecheck`, `npm test`.
-3. **container-image**: builds the image, runs `scripts/docker_smoke.sh`, and
+3. **container-image**: builds the image, runs `scripts/docker_smoke.sh
+   --backup-restore` (with the backup and restore commands of docs/docker.md,
+   ADR-0094 item 3), and
    scans the image with Grype into Code scanning (not a gate, ADR-0078).
 4. **dependency-audit**: `pip-audit` on the Python locks and `npm audit` on the
    UI's production packages (ADR-0075, ADR-0080). It also runs weekly.
@@ -748,6 +838,7 @@ pushed. A pull request that changes it, `scripts/release.py` or
 with nothing published (ADR-0085, `docs/releasing.md`).
 
 `make ci` runs jobs 1 and 2 locally, in the `dev` and `frontend-dev` containers,
-except two steps of job 1: `reuse lint`, and the migration check from the
+except three steps of job 1: `reuse lint`, the migration check from the
 last release and the pull request's base commit
-(`scripts/check_migration_from.py`).
+(`scripts/check_migration_from.py`), and the backup and restore check
+(`scripts/check_backup_restore.py`).

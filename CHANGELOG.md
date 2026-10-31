@@ -11,6 +11,56 @@ theme.
 
 ### Added
 
+#### A backup restores into an empty install with everything in it, checked in CI (ADR-0094 item 3), 2026-10-31
+
+The "Data and backups" section of `docs/docker.md` is now a procedure, and CI
+runs it:
+
+- **One moment for both stores.** `app` and `worker` stop, the database is
+  dumped and `cti-state` archived, then they start again. The files are written
+  under `umask 077`, since they hold every report at its TLP, and carry one
+  date between them. `cti-state` is archived and restored with `tar` in a
+  one-off `app` container
+  (`docker compose run --rm --no-deps -T --entrypoint tar app ...`), so the
+  commands work in any Compose project. The old `docker run ... alpine`
+  commands named the `ctiparsor_` volume.
+- **A check of the backup** (`pg_restore -l`, `tar tzf`).
+- **A restore into an empty project** that cannot overwrite a live one.
+  - `pg_restore --single-transaction` fails and writes nothing into a database
+    that already holds tables. The old `--clean --if-exists` replaced it
+    silently, so a restore aimed at the live project by mistake erased
+    everything since the backup.
+  - `tar --keep-old-files` refuses to overwrite an existing file.
+  - The warning comes before the commands: the same `CTI_DB_USER` and
+    `CTI_DB_NAME`, `.secrets/db_password` on another machine, and the database
+    first (an app started on a restored `cti-state` first refuses to start).
+  - The section also says how to check the restored install, remove a test
+    project, and make a restore the live install.
+- **`scripts/check_backup_restore.py`** (fast-tests) backs up the P05 seed
+  with the documented `pg_dump`, `pg_restore` and `tar` flags, run in the
+  PostgreSQL service's container. Without that container it runs the host's
+  `pg_dump` and `pg_restore`, if their major matches the server's. It
+  restores into an empty database and directory, then compares strictly:
+  every row, column type, sequence state, schema object (tables, columns,
+  constraints, indexes, triggers, functions) and file, with nothing extra. It
+  then reads the restore back through the API.
+- **`scripts/docker_smoke.sh --backup-restore`** (container-image) runs the
+  documented commands as written on the smoke stack and restores into a second
+  project with empty volumes.
+  - It fails if the restore's `pg_restore` prints anything.
+  - It starts the source's `app` and `worker` again if the backup stops
+    partway.
+  - A test fails when the script's copy of the commands differs from the docs.
+- `docs/upgrading.md` §1, `docs/deployment.md`, `docs/configuration.md` and
+  the volume list of `docs/docker.md`: a backup is the dump and the `cti-state`
+  archive, not `pg_dump` alone.
+
+Run against PostgreSQL 17 and 18: 688 values, 249 schema objects (346 on 18)
+and the state files come back unchanged. Restored `review_revision` counters do
+not drift, because the dump creates triggers after the data. Each of these is
+caught: a deleted or changed row, an extra row (with or without a sequence), a
+dropped trigger or index, a reset sequence, a rewritten or added file.
+
 #### A pull request that breaks a stable surface fails: the contract snapshot (ADR-0094 item 1), 2026-10-31
 
 `contract/` records the stable surfaces of `docs/support-policy.md` as the code

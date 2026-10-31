@@ -267,7 +267,21 @@ written). Every column of every table holds a value in at least one seeded
 row. Every value and every column's type is compared before and after the
 migration, then again once the API has started and read the seed back; each
 identity column's sequence must stay above its highest value, and the state
-volume's files must not change. Backup and restore are item 3.
+volume's files must not change.
+
+Evidence for a restore, on the same runs: such a seeded database and its
+state directory are backed up with the `pg_dump`, `pg_restore` and `tar` flags
+of [docker.md](docker.md#data-and-backups) and restored into an empty database
+and directory. Every row, column type, sequence, schema object (tables,
+columns, constraints, indexes, triggers, functions) and file must come back as
+it was, with nothing more, and the API reads the seed back
+(`scripts/check_backup_restore.py`, ADR-0094 item 3). The container-image job
+runs the documented commands themselves on a Compose stack, and restores it
+into a second, empty project (`scripts/docker_smoke.sh --backup-restore`).
+Not compared: the ACLs of sequences and functions and the owners of sequences
+(the tables' ACLs and owners and the functions' owners are), comments, types
+and domains, table options, objects outside the app's schema, and file modes
+and owners; the schema this code creates uses none of the first five.
 
 ### STIX output
 
@@ -411,7 +425,7 @@ evidence.
 | Install with Docker Compose | supported | the only supported install (ADR-0054); Docker Engine 24+, Compose v2.24+; CPU only; about 4.4 GB of RAM per report in flight ([docker.md](docker.md)) | CI builds the image and runs `scripts/docker_smoke.sh` (job `container-image`). A clean install from the published image: not yet, item 9 |
 | Host install (venv, systemd) | not supported | [upgrading.md](upgrading.md) §3 keeps it only to move an old install | — |
 | Upgrade from the previous release | supported | automatic at the first start; no downgrade; a PostgreSQL major needs `make db-upgrade` | CI migrates a database written by the last release tag, and on a pull request one written by the base commit: every value and column type of every table compared after the migration and after the API's first start, identity sequences checked, the seed read back through the API, the state volume's files unchanged (`scripts/check_migration_from.py`, ADR-0094 item 2) |
-| Backup and restore | supported | the `pg_dump` and `cti-state` archive commands of [docker.md](docker.md#data-and-backups) | Documented, never run by a test. Not yet: item 3 |
+| Backup and restore | supported | the commands of [docker.md](docker.md#data-and-backups): `app` and `worker` stopped during the backup; a restore into an empty project, with the same `CTI_DB_USER` and `CTI_DB_NAME`, on the release that took the backup or a newer one; `cti-cache` and `.env` are not in it | CI runs the documented commands on a Compose stack and restores it into a second, empty project, every table and file compared (`scripts/docker_smoke.sh --backup-restore`, job `container-image`); and restores a seeded database and its state directory with the same flags, every row, sequence, schema object and file compared, the seed read back through the API (`scripts/check_backup_restore.py`, job `fast-tests`, ADR-0094 item 3) |
 | Import a file: PDF, DOCX, HTML, TXT, Markdown | supported | 50 MB; a scanned page goes to OCR (experimental, below) | `tests/test_upload_route.py`, `tests/test_stage1.py`, `tests/test_stage1_pdf_paths.py`, `tests/test_pdf_table_cells.py` |
 | Import pasted text | supported | 20 to 2,000,000 characters | `tests/test_ingest_routes.py` |
 | Capture a URL | supported | headless Chromium, JavaScript off by default; public addresses only, through `capture-proxy`; absent from an image built with `CTI_INSTALL_CAPTURE=false` | `tests/test_web_capture.py` (URL policy); `docker_smoke.sh` checks that Chromium starts sandboxed. No live capture in CI |

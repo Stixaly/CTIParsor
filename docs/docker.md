@@ -13,8 +13,8 @@ decisions behind the containerization itself.
 
 - **Image**: `ctiparsor:local` (4.61 GB). Contains the React UI, Python 3.14 venv (torch CPU), and Chromium (optional).
 - **Volumes** (Compose prefixes them with the project name, so `docker volume ls` shows `ctiparsor_cti-state` and so on):
-  - `cti-state`: uploads, outputs, backups — back it up. No database file lives here any more (ADR-0053).
-  - `pg-data-18`: the PostgreSQL 18 job store AND rule store (jobs, entities, relationships, progress, policy, figure and CVE caches, plus the detection-rule corpus since ADR-0053) — back it up with `pg_dump`.
+  - `cti-state`: uploaded sources, exported bundles, `db-identity.json`, the private corpus overlay — back it up together with the database ([Data and backups](#data-and-backups)). No database file lives here any more (ADR-0053).
+  - `pg-data-18`: the PostgreSQL 18 job store AND rule store (jobs, entities, relationships, progress, policy, figure and CVE caches, plus the detection-rule corpus since ADR-0053) — back it up together with `cti-state` ([Data and backups](#data-and-backups)).
   - `cti-cache`: HuggingFace models, Sigma/YARA/Suricata corpora — rebuildable with `bootstrap`.
   - `ollama-models`: (Only if using the `ollama` profile).
 - **Services**: `app`, `worker`, `postgres` and `capture-proxy` always run. `app` only accepts and queues reports (`CTIPARSOR_ROLE=api`) and never loads a model; `worker` claims queued reports from the job store and runs each in an isolated subprocess, heartbeating the rows it owns so several workers can share the queue (ADR-0046) — scale it with `docker compose up -d --scale worker=2`; `postgres` is both stores (ADR-0045, ADR-0053: PostgreSQL 17, on the internal network only, running as the image's `postgres` user with every capability dropped and a read-only root; `CTI_DB_PASSWORD` in `.env` is required). `capture-proxy` is a Squid egress filter the URL-capture tab's Chromium goes through, so it can reach public addresses only (see *Security model*). Three optional profiles:
@@ -206,20 +206,51 @@ The app receives `DATABASE_URL=postgresql://<CTI_DB_USER>@postgres:5432/<CTI_DB_
 
 ## Data and backups
 
-Data persists in named volumes. Two of them hold what you cannot rebuild: `cti-state` (uploads, outputs) and `pg-data-18` (every report AND the detection-rule corpus, since ADR-0053).
+Data persists in named volumes. Two of them hold what you cannot rebuild: `cti-state` (uploaded sources, exported bundles, `db-identity.json`, the private corpus overlay) and `pg-data-18` (every report with its decisions, baseline and bundle, AND the detection-rule corpus, since ADR-0053). A backup is both, taken at one moment: a dump of the database and an archive of `cti-state`. It holds every report at its TLP: keep it as you keep the reports. It holds neither `.env` (your configuration and its secrets) nor, with the `proxy` profile, `docker/nginx/` (certificate, key, htpasswd): keep a copy of those apart, readable by you only. `cti-cache` (models, corpus clones) is not backed up: `bootstrap` downloads it again.
 
-The database commands below need the password even on the local socket (`compose.yaml` sets `scram-sha-256` for it too). They read it inside the container from the mounted secret, so it never appears on the host's command line.
+The database commands below need the password even on the local socket (`compose.yaml` sets `scram-sha-256` for it too). They read it inside the container from the mounted secret, so it never appears on the host's command line. They name the role and the database `ctiparsor`: with another `CTI_DB_USER` or `CTI_DB_NAME`, write yours in their place. The `cti-state` commands run `tar` in a one-off container of the `app` service, as the user the app runs as: Compose mounts the volume of the project it runs in, whatever the project's name, and a bind mount (below) the same way.
 
-**Backup:**
+**Backup**, from the directory of `compose.yaml` and `.env`. `umask 077` makes the two files readable by you only, since they hold every report at its TLP; it stays set in that shell. `day` gives both files the same date, even past midnight. `app` and `worker` stop first, so that no report changes between the dump and the archive; a report in progress goes back to the queue and resumes when they start again. `postgres` keeps running for `pg_dump`. Not while `bootstrap` runs.
+
+<!-- scripts/check_backup_restore_docker.sh: BACKUP_COMMANDS -->
 ```bash
-docker run --rm -v ctiparsor_cti-state:/s -v "$PWD":/b alpine tar czf /b/cti-state-$(date +%F).tgz -C /s .
-docker compose exec -T postgres sh -c 'PGPASSWORD="$(cat /run/secrets/db_password)" exec "$@"' sh pg_dump -U ctiparsor -d ctiparsor -Fc > ctiparsor-$(date +%F).dump
+umask 077
+day=$(date +%F)
+docker compose stop app worker
+docker compose exec -T postgres sh -c 'PGPASSWORD="$(cat /run/secrets/db_password)" exec "$@"' sh pg_dump -U ctiparsor -d ctiparsor -Fc > ctiparsor-$day.dump
+docker compose run --rm --no-deps -T --entrypoint tar app czf - -C /app/state . > cti-state-$day.tgz
+docker compose start app worker
 ```
 
-**Restore both stores** (into a fresh, empty `postgres` service):
+**Check a backup** before you count on it (YYYY-MM-DD: the backup's date). The first command prints how many tables the dump holds the rows of: every table of the database. The second prints how many files and directories the archive holds under `uploads/`. A damaged file stops either one with an error.
+
+<!-- scripts/check_backup_restore_docker.sh: CHECK_COMMANDS -->
 ```bash
-docker compose exec -T postgres sh -c 'PGPASSWORD="$(cat /run/secrets/db_password)" exec "$@"' sh pg_restore -U ctiparsor -d ctiparsor --clean --if-exists < ctiparsor-YYYY-MM-DD.dump
+docker compose exec -T postgres pg_restore -l < ctiparsor-YYYY-MM-DD.dump | grep -c 'TABLE DATA'
+tar tzf cti-state-YYYY-MM-DD.tgz | grep -c '^./uploads/.'
 ```
+
+**Restore** into an empty project: on another machine, or on this one under another project name (`export COMPOSE_PROJECT_NAME=ctiparsor-restored` in the shell that runs the commands; stop the old stack first, or give the new one another `CTI_PORT`). The install you took the backup from stays as it is until the restored one works. Volumes are named after their project (`<project>_pg-data-18`, `<project>_cti-state`), so a new project starts with empty ones. You need `compose.yaml`, `.env` and the two files. On another machine, run `bash setup.sh` in the checkout first, with your `.env` in place (or `make .secrets/db_password`): it writes `.secrets/db_password` from `CTI_DB_PASSWORD`, which every service mounts. Without that file Compose creates a directory in its place and `postgres` does not start: delete that directory, then run `setup.sh`. Keep `CTI_DB_USER` and `CTI_DB_NAME` as they were: the dump recreates its tables under that role. Passwords are not in the dump: the new project's `CTI_DB_PASSWORD` is the one that counts. Run the release that took the backup, or a newer one, which migrates the database at its first start; an older one refuses it.
+
+The database first, then `cti-state`, then the stack. An app started on the restored `cti-state` before its database finds an empty database where `db-identity.json` remembers one with data, and refuses to start; its message suggests `make db-upgrade`, but here the answer is to restore the database, then start the stack again.
+
+**The target must be the new, empty project.** Before the first line, `docker compose ps -a` must list no container: if it lists one, this shell names a project that exists (check `COMPOSE_PROJECT_NAME`). `pg_restore --single-transaction` restores everything or nothing: into a database that already holds tables it stops with errors and writes nothing. It must exit 0 and print nothing; if it does not, stop there and do not run the `tar` line. Remove the new project's volumes (`docker compose down -v`, in that project only) and start again. `tar --keep-old-files` replaces no file that is already there: an error on a file means the volume was not empty. A bind mount for `cti-state` (below) is not named after the project: point the new project's at an empty directory first.
+
+<!-- scripts/check_backup_restore_docker.sh: RESTORE_COMMANDS -->
+```bash
+docker compose up -d --wait postgres
+docker compose exec -T postgres sh -c 'PGPASSWORD="$(cat /run/secrets/db_password)" exec "$@"' sh pg_restore -U ctiparsor -d ctiparsor --single-transaction < ctiparsor-YYYY-MM-DD.dump
+docker compose run --rm --no-deps -T --entrypoint tar app xzf - --keep-old-files -C /app/state < cti-state-YYYY-MM-DD.tgz
+docker compose up -d
+```
+
+Then check the restored install: `curl -fsS http://127.0.0.1:8000/api/health` (your `CTI_BIND` and `CTI_PORT`) answers `{"status":"ok"}`, and the web UI lists your reports. The first start records the new PostgreSQL cluster in `db-identity.json`: `docker compose logs app worker` shows `[db] postgres:5432/ctiparsor/public is now on cluster ... with its data: recorded`. `cti-cache` starts empty: `docker compose --profile bootstrap run --rm bootstrap --no-corpora` downloads the models again; the detection rules came back with the database.
+
+**Remove a test project** once you are done with it: `docker compose -p ctiparsor-restored down -v` removes its containers, its networks and its volumes (`ctiparsor-restored_*`). `-v` deletes the volumes of the project `-p` names and of no other; read the name before you press Enter, since `-p ctiparsor` would delete the install itself.
+
+**Make the restore the live install** on the same machine: restore the backup a second time, under the install's own project name, `ctiparsor`. The offline scripts (`scripts/package_offline_docker.sh`, `scripts/update_offline_corpora.sh`) and these docs name its volumes `ctiparsor_*`, and `scripts/docker_smoke.sh` takes `COMPOSE_PROJECT_NAME` from `.env`, so keep the install under that name rather than setting another one in `.env`. Once the restored project shows your reports, in a new shell where `COMPOSE_PROJECT_NAME` is not set: `docker compose down`, then `docker volume rm ctiparsor_pg-data-18 ctiparsor_cti-state` (the old install's database and files, for good; `cti-cache` stays), then the restore commands above. Until you remove it, the restored project still holds a copy of the data.
+
+CI runs these commands as written here: `scripts/docker_smoke.sh --backup-restore` backs its stack up, checks the backup, restores it into a second, empty project, and compares every table and file (job `container-image`). `scripts/check_backup_restore.py` backs up a used install with the same `pg_dump`, `pg_restore` and `tar` flags, restores it into an empty database and directory, and compares every row, sequence, schema object and file (job `fast-tests`, ADR-0094 item 3).
 
 **Moving an existing SQLite-based install onto PostgreSQL** (one that ran
 before ADR-0045/ADR-0053 keeps its reports and its rule corpus in
@@ -230,12 +261,6 @@ docker compose run --rm app python scripts/migrate_jobs_to_postgres.py --sqlite 
 docker compose run --rm app python scripts/migrate_jobs_to_postgres.py --sqlite /app/state/cti_stix.db
 docker compose run --rm app python scripts/migrate_rules_to_postgres.py --sqlite /app/state/cti_stix.db --dry-run
 docker compose run --rm app python scripts/migrate_rules_to_postgres.py --sqlite /app/state/cti_stix.db
-```
-
-**Restore:**
-*(Stop the app first)*
-```bash
-docker run --rm -v ctiparsor_cti-state:/s -v "$PWD":/b alpine sh -c 'cd /s && tar xzf /b/cti-state-YYYY-MM-DD.tgz'
 ```
 
 **Bind Mounts:**
