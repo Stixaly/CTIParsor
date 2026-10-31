@@ -20,11 +20,12 @@
 # if the check stopped after `docker compose stop app worker`.
 #
 # Usage: bash scripts/check_backup_restore_docker.sh
-# Environment: COMPOSE_PROJECT_NAME (the running stack, default ctiparsor-smoke),
+# Environment: COMPOSE_PROJECT_NAME (the running stack: ctiparsor-smoke, the
+#              default and the only one it runs on; any other exits 2),
 #              DOCKER_BIN (default: docker), CTI_BIND / CTI_PORT (the running
 #              stack's; the restored one listens on CTI_PORT + 1),
 #              SMOKE_HEALTH_TIMEOUT (seconds, default 180).
-# Exit 0 when everything came back, 1 otherwise.
+# Exit 0 when everything came back, 1 otherwise, 2 on another project.
 
 set -u
 set -o pipefail
@@ -43,6 +44,14 @@ umask 077          # the backup files hold every report, as the docs' umask keep
 DOCKER_BIN="${DOCKER_BIN:-docker}"
 SOURCE="${COMPOSE_PROJECT_NAME:-ctiparsor-smoke}"
 TARGET="$SOURCE-restored"
+# The smoke's stack only: the check writes a test report into it, stops its app
+# and worker, and removes `<project>-restored` with its volumes at the end.  An
+# operator's shell may name the install, or a restored one (docs/docker.md).
+if [ "$SOURCE" != ctiparsor-smoke ]; then
+    echo "ERROR: this check runs only on the smoke's project, ctiparsor-smoke," \
+         "and COMPOSE_PROJECT_NAME is $SOURCE." >&2
+    exit 2
+fi
 BIND="${CTI_BIND:-127.0.0.1}"
 PORT="${CTI_PORT:-8000}"
 RESTORED_PORT=$((PORT + 1))
@@ -130,6 +139,22 @@ WHERE s.nspname = current_schema() AND c.relkind = 'r' ORDER BY c.relname;"
 # Every file of cti-state but db-identity.json, which each start rewrites.
 FILES_COMMAND='cd /app/state && find . -type f ! -path ./db-identity.json -exec sha256sum {} + | sort -k 2'
 
+# The restore's project must be empty before anything is written, and before
+# the cleanup below may run `down -v` on it: a project left from another run is
+# never removed by this one.  Captured, not piped into `grep -q` (which, under
+# pipefail, can read an early exit for "empty"); a listing that fails stops it.
+if ! TARGET_CONTAINERS=$(in_project "$TARGET" ps -aq) \
+        || ! TARGET_VOLUMES=$(docker volume ls -q --filter "label=com.docker.compose.project=$TARGET"); then
+    fail "cannot list the containers and volumes of project $TARGET"
+    rm -rf "$WORK"
+    exit 1
+fi
+if [ -n "$TARGET_CONTAINERS$TARGET_VOLUMES" ]; then
+    fail "project $TARGET is not empty (it has containers or volumes: docker compose -p $TARGET down -v)"
+    rm -rf "$WORK"
+    exit 1
+fi
+
 SOURCE_STOPPED=false
 cleanup() {
     if [ "$SOURCE_STOPPED" = true ]; then      # `start` leaves running containers alone
@@ -197,13 +222,6 @@ fi
 
 # ── 3. The restore into an empty project, as docs/docker.md orders it ─────────
 export CTI_PORT="$RESTORED_PORT"
-if in_project "$TARGET" ps -aq 2>/dev/null | grep -q . \
-        || docker volume ls -q --filter "label=com.docker.compose.project=$TARGET" | grep -q .; then
-    fail "project $TARGET is not empty (it has containers or volumes: docker compose -p $TARGET down -v)"
-    trap - EXIT
-    rm -rf "$WORK"
-    exit 1
-fi
 if run_docs "$TARGET" "$DAY" "$RESTORE_COMMANDS"; then
     pass "restored into the empty project $TARGET with the docs' commands"
 else
