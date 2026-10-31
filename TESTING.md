@@ -437,6 +437,51 @@ Its first run found `GET /api/jobs/{job_id}/relationships/valid-types`
 published without its `job_id` parameter: an OpenAPI schema that
 generated clients reject.
 
+### The stable contract (ADR-0094 item 1)
+`docs/support-policy.md` lists the stable surfaces. `contract/` records them,
+one file each, and `tests/test_contract.py` runs
+`python scripts/contract.py check` in the fast-tests job:
+
+- `openapi.json`: the schema the API publishes at `/openapi.json`, one entry
+  per operation, parameter, body field, response and response field (types,
+  whether required, allowed values; on the request side, a default, limits,
+  formats, patterns and whether an object refuses unknown fields). It is
+  built in a subprocess with an empty working directory, no `.env` and only
+  `PATH`, `HOME`, `PYTHONPATH` and `SKIP_HEAVY_MODELS`, so a developer's
+  settings and CI's give the same schema. A path parameter is known by its
+  position.
+- `cli.json`: `main.py`'s arguments (`build_parser()`), the stage ids, the
+  commands and `bootstrap` options of `docker/entrypoint.sh`, `make db-upgrade`.
+- `config.json`: the variables of `.env.example` (set or shown, and their
+  values), the Compose project name, the services with their profiles and the
+  named volumes with their `name:`, the `dev` profile left out.
+- `stix.json`: read from the Stage 4 reference bundles above, the custom
+  properties with their JSON types, and the ids of their objects (`random`
+  for a random one, such as the Report's).
+
+Each difference is `breaking`, `default` or `compatible`, by the rules of the
+support policy (`tests/test_contract_rules.py` checks each rule both ways); any
+difference fails the test. After a deliberate change:
+
+```bash
+make contract                     # record it in contract/, commit it with the change
+make contract ACCEPT_BREAKING=1   # a breaking change: a CHANGELOG entry, and from 1.0 on a major version
+```
+
+The extractors have tests of their own (`tests/test_contract_openapi.py`,
+`tests/test_contract_cli_config.py`, `tests/test_contract_stix.py`). The CLI's
+exit codes are checked by behaviour, not recorded: `tests/test_cli_exit_codes.py`
+runs `main()` for each row of the policy's table. `check` takes about 90 s on
+`/mnt/c`: the OpenAPI subprocess imports the app, the CLI extractor imports
+`main.py`. Not covered: the fields of a response whose schema declares none
+(59 of the 60 operations), the 409 body, the job statuses, the
+`X-Bundle-Validation` values, the SSE event names and the export archive's
+layout (strings in the code, checked by route tests), a variable the code
+stops reading or a code default that no longer matches `.env.example` (only
+the file is read), and `x_ctiparsor_enrichment` (no enriched reference
+bundle). A new alias of an option, or a `case` label that names two
+commands, reads as breaking: record it with `ACCEPT_BREAKING=1`.
+
 ### Persistence / worker (integration)
 The write→read round-trip through PostgreSQL (`worker._save_entities` →
 `re_run_final_stages`) and schema migrations. **Currently the weakest layer** (see §6).

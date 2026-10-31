@@ -1,0 +1,1934 @@
+{
+  "entries": {
+    "DELETE /api/jobs/{}": {
+      "deprecated": false
+    },
+    "DELETE /api/jobs/{} param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "DELETE /api/jobs/{} response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "DELETE /api/jobs/{}/entities/{}": {
+      "deprecated": false
+    },
+    "DELETE /api/jobs/{}/entities/{} param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "DELETE /api/jobs/{}/entities/{} param:path:1": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "DELETE /api/jobs/{}/entities/{} response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "DELETE /api/jobs/{}/entities/{} response:409": {
+      "media": []
+    },
+    "DELETE /api/jobs/{}/relationships/{}": {
+      "deprecated": false
+    },
+    "DELETE /api/jobs/{}/relationships/{} param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "DELETE /api/jobs/{}/relationships/{} param:path:1": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "DELETE /api/jobs/{}/relationships/{} response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "DELETE /api/jobs/{}/relationships/{} response:409": {
+      "media": []
+    },
+    "DELETE /api/overrides/{}": {
+      "deprecated": false
+    },
+    "DELETE /api/overrides/{} param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "DELETE /api/overrides/{} response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "object"
+      ]
+    },
+    "DELETE /api/settings/corpora/{}": {
+      "deprecated": false
+    },
+    "DELETE /api/settings/corpora/{} param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "DELETE /api/settings/corpora/{} response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "DELETE /api/thresholds/{}/{}": {
+      "deprecated": false
+    },
+    "DELETE /api/thresholds/{}/{} param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "DELETE /api/thresholds/{}/{} param:path:1": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "DELETE /api/thresholds/{}/{} response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/attack/index": {
+      "deprecated": false
+    },
+    "GET /api/attack/index response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/attack/index response:200 header:etag": {
+      "required": false,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/attack/index response:200 header:x-attack-release": {
+      "required": false,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/attack/index response:304": {
+      "media": []
+    },
+    "GET /api/attack/index response:404": {
+      "media": []
+    },
+    "GET /api/baselines/status": {
+      "deprecated": false
+    },
+    "GET /api/baselines/status response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/detection-corpora": {
+      "deprecated": false
+    },
+    "GET /api/detection-corpora response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/health": {
+      "deprecated": false
+    },
+    "GET /api/health response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/jobs": {
+      "deprecated": false
+    },
+    "GET /api/jobs response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/jobs/{}": {
+      "deprecated": false
+    },
+    "GET /api/jobs/{} param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{} response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/jobs/{}/baseline": {
+      "deprecated": false
+    },
+    "GET /api/jobs/{}/baseline param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/baseline response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/jobs/{}/baseline response:404": {
+      "media": []
+    },
+    "GET /api/jobs/{}/baseline/intake": {
+      "deprecated": false
+    },
+    "GET /api/jobs/{}/baseline/intake param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/baseline/intake response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/jobs/{}/baseline/intake response:404": {
+      "media": []
+    },
+    "GET /api/jobs/{}/bundle": {
+      "deprecated": false
+    },
+    "GET /api/jobs/{}/bundle param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/jobs/{}/bundle response:409": {
+      "media": []
+    },
+    "GET /api/jobs/{}/bundle/ledger": {
+      "deprecated": false
+    },
+    "GET /api/jobs/{}/bundle/ledger param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/jobs/{}/coverage": {
+      "deprecated": false
+    },
+    "GET /api/jobs/{}/coverage param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts": {
+      "deprecated": false
+    },
+    "GET /api/jobs/{}/coverage/artifacts param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules": {
+      "deprecated": false
+    },
+    "GET /api/jobs/{}/coverage/rules param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/{}/rules": {
+      "deprecated": false
+    },
+    "GET /api/jobs/{}/coverage/{}/rules param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/{}/rules param:path:1": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/{}/rules response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export": {
+      "deprecated": false
+    },
+    "GET /api/jobs/{}/detections/export param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export param:query:corpus": {
+      "required": false,
+      "types": [
+        "array",
+        "null"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export param:query:corpus[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export param:query:format": {
+      "required": false,
+      "types": [
+        "array",
+        "null"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export param:query:format[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export param:query:license": {
+      "required": false,
+      "types": [
+        "array",
+        "null"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export param:query:license[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export param:query:severity": {
+      "required": false,
+      "types": [
+        "array",
+        "null"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export param:query:severity[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export/facets": {
+      "deprecated": false
+    },
+    "GET /api/jobs/{}/detections/export/facets param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export/facets response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals": {
+      "deprecated": false
+    },
+    "GET /api/jobs/{}/detections/proposals param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals param:query:limit": {
+      "default": 200,
+      "required": false,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/jobs/{}/entities": {
+      "deprecated": false
+    },
+    "GET /api/jobs/{}/entities param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/entities response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/jobs/{}/progress": {
+      "deprecated": false
+    },
+    "GET /api/jobs/{}/progress param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/progress response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/jobs/{}/relationships": {
+      "deprecated": false
+    },
+    "GET /api/jobs/{}/relationships param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/jobs/{}/relationships/valid-types": {
+      "deprecated": false
+    },
+    "GET /api/jobs/{}/relationships/valid-types param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships/valid-types response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/jobs/{}/source": {
+      "deprecated": false
+    },
+    "GET /api/jobs/{}/source param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/source response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/overrides": {
+      "deprecated": false
+    },
+    "GET /api/overrides param:query:action": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/overrides param:query:status": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/overrides response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/queue/status": {
+      "deprecated": false
+    },
+    "GET /api/queue/status response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/relationship-policy": {
+      "deprecated": false
+    },
+    "GET /api/relationship-policy response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/relationship-policy/last-run": {
+      "deprecated": false
+    },
+    "GET /api/relationship-policy/last-run response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/settings/corpora": {
+      "deprecated": false
+    },
+    "GET /api/settings/corpora response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/settings/formats": {
+      "deprecated": false
+    },
+    "GET /api/settings/formats response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/thresholds": {
+      "deprecated": false
+    },
+    "GET /api/thresholds response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "object"
+      ]
+    },
+    "PATCH /api/jobs/{}": {
+      "deprecated": false
+    },
+    "PATCH /api/jobs/{} body": {
+      "media": [
+        "application/json"
+      ],
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "PATCH /api/jobs/{} body.status": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{} param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{} response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "PATCH /api/jobs/{} response:409": {
+      "media": []
+    },
+    "PATCH /api/jobs/{}/entities/{}": {
+      "deprecated": false
+    },
+    "PATCH /api/jobs/{}/entities/{} body": {
+      "media": [
+        "application/json"
+      ],
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "PATCH /api/jobs/{}/entities/{} body.accepted": {
+      "required": false,
+      "types": [
+        "boolean",
+        "null"
+      ]
+    },
+    "PATCH /api/jobs/{}/entities/{} body.decision_origin": {
+      "default": "human",
+      "required": false,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/entities/{} body.entity_type": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/entities/{} body.mitre_id": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/entities/{} body.value": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/entities/{} param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/entities/{} param:path:1": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/entities/{} response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "PATCH /api/jobs/{}/entities/{} response:409": {
+      "media": []
+    },
+    "PATCH /api/jobs/{}/relationships/{}": {
+      "deprecated": false
+    },
+    "PATCH /api/jobs/{}/relationships/{} body": {
+      "media": [
+        "application/json"
+      ],
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} body.accepted": {
+      "required": false,
+      "types": [
+        "boolean",
+        "null"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} body.decision_origin": {
+      "default": "human",
+      "required": false,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} body.evidence_label": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} body.evidence_text": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} body.relationship_type": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} body.source_value": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} body.start_time": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} body.stop_time": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} body.target_value": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} param:path:1": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:409": {
+      "media": []
+    },
+    "PATCH /api/overrides/{}": {
+      "deprecated": false
+    },
+    "PATCH /api/overrides/{} body": {
+      "media": [
+        "application/json"
+      ],
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "PATCH /api/overrides/{} body.status": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/overrides/{} param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/overrides/{} response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "object"
+      ]
+    },
+    "PATCH /api/settings/corpora/{}": {
+      "deprecated": false
+    },
+    "PATCH /api/settings/corpora/{} body": {
+      "media": [
+        "application/json"
+      ],
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "PATCH /api/settings/corpora/{} body.enabled": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "PATCH /api/settings/corpora/{} param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/settings/corpora/{} response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "POST /api/baselines/inspect": {
+      "deprecated": false
+    },
+    "POST /api/baselines/inspect body": {
+      "media": [
+        "multipart/form-data"
+      ],
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/baselines/inspect body.file": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/baselines/inspect body.report_id": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/baselines/inspect response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/baselines/inspect response:200.bundle_id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/baselines/inspect response:200.counts": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/baselines/inspect response:200.counts{*}": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/baselines/inspect response:200.excluded": {
+      "required": false,
+      "types": [
+        "array"
+      ]
+    },
+    "POST /api/baselines/inspect response:200.excluded[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/baselines/inspect response:200.min_pap": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/baselines/inspect response:200.min_tlp": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/baselines/inspect response:200.needs_report_choice": {
+      "required": false,
+      "types": [
+        "boolean"
+      ]
+    },
+    "POST /api/baselines/inspect response:200.reports": {
+      "required": false,
+      "types": [
+        "array"
+      ]
+    },
+    "POST /api/baselines/inspect response:200.reports[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/baselines/inspect response:200.scope_report_id": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/baselines/inspect response:200.sha256": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/baselines/inspect response:200.warnings": {
+      "required": false,
+      "types": [
+        "array"
+      ]
+    },
+    "POST /api/baselines/inspect response:200.warnings[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/baselines/inspect response:400": {
+      "media": []
+    },
+    "POST /api/baselines/inspect response:413": {
+      "media": []
+    },
+    "POST /api/baselines/inspect response:503": {
+      "media": []
+    },
+    "POST /api/ingest/text": {
+      "deprecated": false
+    },
+    "POST /api/ingest/text body": {
+      "media": [
+        "application/json"
+      ],
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/ingest/text body.baseline_bundle": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/ingest/text body.baseline_report_id": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/ingest/text body.pap_level": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/ingest/text body.text": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/ingest/text body.title": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/ingest/text body.tlp_level": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/ingest/text response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "POST /api/ingest/text response:400": {
+      "media": []
+    },
+    "POST /api/ingest/text response:413": {
+      "media": []
+    },
+    "POST /api/ingest/text response:503": {
+      "media": []
+    },
+    "POST /api/ingest/url": {
+      "deprecated": false
+    },
+    "POST /api/ingest/url body": {
+      "media": [
+        "application/json"
+      ],
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/ingest/url body.baseline_bundle": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/ingest/url body.baseline_report_id": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/ingest/url body.enable_js": {
+      "default": false,
+      "required": false,
+      "types": [
+        "boolean"
+      ]
+    },
+    "POST /api/ingest/url body.pap_level": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/ingest/url body.tlp_level": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/ingest/url body.url": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/ingest/url response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "POST /api/ingest/url response:400": {
+      "media": []
+    },
+    "POST /api/ingest/url response:413": {
+      "media": []
+    },
+    "POST /api/ingest/url response:503": {
+      "media": []
+    },
+    "POST /api/jobs/{}/detections/export": {
+      "deprecated": false
+    },
+    "POST /api/jobs/{}/detections/export body": {
+      "media": [
+        "application/json"
+      ],
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/jobs/{}/detections/export body.rule_ids": {
+      "required": false,
+      "types": [
+        "array"
+      ]
+    },
+    "POST /api/jobs/{}/detections/export body.rule_ids[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/detections/export param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/detections/export response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "POST /api/jobs/{}/entities": {
+      "deprecated": false
+    },
+    "POST /api/jobs/{}/entities body": {
+      "media": [
+        "application/json"
+      ],
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/jobs/{}/entities body.confidence": {
+      "default": 1.0,
+      "required": false,
+      "types": [
+        "number"
+      ]
+    },
+    "POST /api/jobs/{}/entities body.context": {
+      "default": "",
+      "required": false,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/entities body.entity_type": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/entities body.mitre_id": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/entities body.value": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/entities param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/entities response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "POST /api/jobs/{}/entities/accept-pending": {
+      "deprecated": false
+    },
+    "POST /api/jobs/{}/entities/accept-pending param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/entities/accept-pending response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "POST /api/jobs/{}/entities/bulk": {
+      "deprecated": false
+    },
+    "POST /api/jobs/{}/entities/bulk body": {
+      "media": [
+        "application/json"
+      ],
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/jobs/{}/entities/bulk body.action": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/entities/bulk body.entity_type": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/entities/bulk body.scope": {
+      "default": "pending",
+      "required": false,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/entities/bulk param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/entities/bulk response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "POST /api/jobs/{}/finalize": {
+      "deprecated": false
+    },
+    "POST /api/jobs/{}/finalize param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/finalize param:query:quick": {
+      "default": false,
+      "required": false,
+      "types": [
+        "boolean"
+      ]
+    },
+    "POST /api/jobs/{}/finalize response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "POST /api/jobs/{}/finalize response:409": {
+      "media": []
+    },
+    "POST /api/jobs/{}/relationships": {
+      "deprecated": false
+    },
+    "POST /api/jobs/{}/relationships body": {
+      "media": [
+        "application/json"
+      ],
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/jobs/{}/relationships body.confidence": {
+      "default": 0.8,
+      "required": false,
+      "types": [
+        "number"
+      ]
+    },
+    "POST /api/jobs/{}/relationships body.evidence_label": {
+      "default": "reported",
+      "required": false,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships body.evidence_text": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships body.relationship_type": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships body.source_value": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships body.start_time": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships body.stop_time": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships body.target_value": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "POST /api/jobs/{}/relationships/bulk": {
+      "deprecated": false
+    },
+    "POST /api/jobs/{}/relationships/bulk body": {
+      "media": [
+        "application/json"
+      ],
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/jobs/{}/relationships/bulk body.action": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships/bulk body.ids": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "POST /api/jobs/{}/relationships/bulk body.ids[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships/bulk param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships/bulk response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "POST /api/overrides": {
+      "deprecated": false
+    },
+    "POST /api/overrides body": {
+      "media": [
+        "application/json"
+      ],
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/overrides body.action": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/overrides body.display": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/overrides body.entity_type": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/overrides body.note": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/overrides body.term": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/overrides response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/overrides/promote": {
+      "deprecated": false
+    },
+    "POST /api/overrides/promote body": {
+      "media": [
+        "application/json"
+      ],
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/overrides/promote body.apply": {
+      "default": false,
+      "required": false,
+      "types": [
+        "boolean"
+      ]
+    },
+    "POST /api/overrides/promote body.min_accepts": {
+      "default": 3,
+      "required": false,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/overrides/promote body.min_jobs": {
+      "default": 2,
+      "required": false,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/overrides/promote body.min_rejections": {
+      "default": 3,
+      "required": false,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/overrides/promote body.share": {
+      "default": 0.8,
+      "required": false,
+      "types": [
+        "number"
+      ]
+    },
+    "POST /api/overrides/promote response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/rules/lookup": {
+      "deprecated": false
+    },
+    "POST /api/rules/lookup body": {
+      "media": [
+        "application/json"
+      ],
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/rules/lookup body.include_body": {
+      "default": false,
+      "required": false,
+      "types": [
+        "boolean"
+      ]
+    },
+    "POST /api/rules/lookup body.rule_ids": {
+      "required": false,
+      "types": [
+        "array"
+      ]
+    },
+    "POST /api/rules/lookup body.rule_ids[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/rules/lookup response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "POST /api/settings/corpora": {
+      "deprecated": false
+    },
+    "POST /api/settings/corpora body": {
+      "media": [
+        "application/json"
+      ],
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/settings/corpora body.adapter": {
+      "default": "sigma",
+      "required": false,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora body.enabled": {
+      "default": true,
+      "required": false,
+      "types": [
+        "boolean"
+      ]
+    },
+    "POST /api/settings/corpora body.git": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora body.license": {
+      "default": "unknown",
+      "required": false,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora body.name": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora body.path": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora body.priority": {
+      "required": false,
+      "types": [
+        "integer",
+        "null"
+      ]
+    },
+    "POST /api/settings/corpora body.private": {
+      "default": false,
+      "required": false,
+      "types": [
+        "boolean"
+      ]
+    },
+    "POST /api/settings/corpora body.subdir": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora body.tarball": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild": {
+      "deprecated": false
+    },
+    "POST /api/settings/corpora/rebuild response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "POST /api/settings/corpora/{}/sync": {
+      "deprecated": false
+    },
+    "POST /api/settings/corpora/{}/sync param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora/{}/sync response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "POST /api/thresholds/recalibrate": {
+      "deprecated": false
+    },
+    "POST /api/thresholds/recalibrate body": {
+      "media": [
+        "application/json"
+      ],
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/thresholds/recalibrate body.apply": {
+      "default": false,
+      "required": false,
+      "types": [
+        "boolean"
+      ]
+    },
+    "POST /api/thresholds/recalibrate body.include_bulk": {
+      "default": false,
+      "required": false,
+      "types": [
+        "boolean"
+      ]
+    },
+    "POST /api/thresholds/recalibrate body.include_legacy": {
+      "default": false,
+      "required": false,
+      "types": [
+        "boolean"
+      ]
+    },
+    "POST /api/thresholds/recalibrate body.min_samples": {
+      "default": 200,
+      "required": false,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/thresholds/recalibrate body.target_precision": {
+      "default": 0.9,
+      "required": false,
+      "types": [
+        "number"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/upload": {
+      "deprecated": false
+    },
+    "POST /api/upload body": {
+      "media": [
+        "multipart/form-data"
+      ],
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/upload body.baseline_report_id": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/upload body.baseline_stix": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/upload body.file": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/upload body.pap_level": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/upload body.tlp_level": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/upload response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "any"
+      ]
+    },
+    "POST /api/upload response:400": {
+      "media": []
+    },
+    "POST /api/upload response:413": {
+      "media": []
+    },
+    "POST /api/upload response:503": {
+      "media": []
+    },
+    "PUT /api/relationship-policy": {
+      "deprecated": false
+    },
+    "PUT /api/relationship-policy response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "object"
+      ]
+    },
+    "PUT /api/thresholds/{}/{}": {
+      "deprecated": false
+    },
+    "PUT /api/thresholds/{}/{} body": {
+      "media": [
+        "application/json"
+      ],
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "PUT /api/thresholds/{}/{} body.threshold": {
+      "required": true,
+      "types": [
+        "number"
+      ]
+    },
+    "PUT /api/thresholds/{}/{} param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PUT /api/thresholds/{}/{} param:path:1": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PUT /api/thresholds/{}/{} response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "object"
+      ]
+    }
+  },
+  "generator": "scripts/contract.py",
+  "surface": "openapi"
+}

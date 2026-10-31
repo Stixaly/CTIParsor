@@ -285,12 +285,13 @@ no import test); several users, a GPU and a Python package are not supported.
 
 ## Action plan
 
-None of these items is started on 2026-10-31. Each proves part of a promise;
-`docs/support-policy.md` names the item where a piece of evidence is missing.
+Item 1 is done; none of the others is started on 2026-10-31. Each proves part
+of a promise; `docs/support-policy.md` names the item where a piece of evidence
+is missing.
 
 | # | Work | What it proves | State |
 |---|---|---|---|
-| 1 | Contract snapshot in CI: a reference OpenAPI schema, the CLI's arguments and exit codes, the variables of `.env.example`, STIX fixtures; a semantic diff that fails on a removal, a rename, a changed type, a field made required | the stable contract | not started |
+| 1 | Contract snapshot in CI: a reference OpenAPI schema, the CLI's arguments and exit codes, the variables of `.env.example`, STIX fixtures; a semantic diff that fails on a removal, a rename, a changed type, a field made required | the stable contract | done: `contract/`, `scripts/contract.py` (`make contract`), `tests/test_contract.py`, `tests/test_cli_exit_codes.py`. Not covered: the response fields of the 59 operations whose schema declares none; job statuses, `X-Bundle-Validation` values, SSE event names and the export archive layout (strings in the code); the 409 body (not in the schema; `tests/test_jobs_routes.py` checks it); a variable the code stops reading, or a code default that drifts from `.env.example`; `x_ctiparsor_enrichment` (no enriched reference bundle) |
 | 2 | Migration from the last release: `scripts/check_migration_from.py` from `v0.2.0`, then from each release tag (ADR-0085 item 5), with a seed that holds files, decisions, a baseline, a bundle, its verdict and its ledger; content compared, not only row counts | data survives an upgrade | not started |
 | 3 | Backup and restore: a consistent backup of the database and `cti-state`, a restore into an empty project, a check that reports, decisions, baselines and bundles come back | data survives a restore | not started |
 | 4 | Browser journey: Playwright against the built interface, the API, a worker and PostgreSQL: import, review, export; in CI | the journey is usable (blocker 4) | not started |

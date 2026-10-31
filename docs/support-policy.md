@@ -110,6 +110,25 @@ Not covered:
 - the web interface: its pages, layout and wording. Its journey is covered by
   the [release blockers](#release-blockers), not its screens.
 
+Evidence today: `contract/openapi.json` records each operation of the schema
+by method and path, a path parameter by its position (its name is invisible to
+a client): its parameters, request body and responses, field by field, with
+their types, whether they are required and the values they allow, and on the
+request side the limits, formats and patterns, and whether an object refuses
+unknown fields (321 entries on 2026-10-31). FastAPI's own 422, its
+validation-error body, is left out: the policy does not cover error details.
+`tests/test_contract.py` compares it with the code on every pull request
+([Breaking changes and deprecation](#breaking-changes-and-deprecation)).
+Its limits: 47 of the 60 operations publish no schema for their success
+response and 12 an object without fields, so the fields they return are not
+recorded; only `POST /api/baselines/inspect` declares its own. The 409 body
+above is not in the schema either: its responses declare no content. The job
+statuses, the `X-Bundle-Validation` values, the SSE event names and the layout
+of the export archive are strings in the code, not in the schema: route tests
+check them and the 409 body (`tests/test_jobs_routes.py`,
+`tests/test_api_routes.py`, `tests/test_detection_coverage.py`), the contract
+does not.
+
 ### Command line
 
 - **The container commands** of `docker/entrypoint.sh`: `serve` (the default),
@@ -150,6 +169,18 @@ Not covered:
 - importing `pipeline/`, `api/` or `models/` from your own code. There is no
   Python package ([ADR-0085](adr/0085-releases-promote-the-image-main-built.md)).
 
+Evidence today: `contract/cli.json` records the arguments of `main.py` as
+`build_parser()` declares them (action, type, const, default, choices, whether
+required, the group that makes a file and `--input-dir` exclusive), the stage
+ids and which can be disabled, the commands and `bootstrap` options of
+`docker/entrypoint.sh`, and `make db-upgrade` (36 entries on 2026-10-31).
+`tests/test_cli_exit_codes.py` runs `main()` for each row of the exit-code
+table, with the pipeline and the database replaced where a real run would
+need them. Two changes read as breaking although they are not, and are
+recorded with `make contract ACCEPT_BREAKING=1`: a new alias of an option
+renames its entry (`--output` becoming `-o|--output`), and a command whose
+`case` label also names an alias (`serve|api)`) is no longer read.
+
 ### Configuration
 
 - **Every variable of [`.env.example`](../.env.example)** (141 on 2026-10-31),
@@ -170,8 +201,8 @@ Not covered:
   ([ADR-0087](adr/0087-an-attack-release-is-a-track-a-run-selects.md)).
 - **The Compose layout:** the services `app`, `worker`, `postgres` and
   `capture-proxy`; the profiles `bootstrap`, `ollama` and `proxy`; the volumes
-  `cti-state`, `cti-cache` and `pg-data-18`; the `CTI_*` variables of
-  `.env.example`.
+  `cti-state`, `cti-cache` and `pg-data-18`, and `ollama-models` for the
+  `ollama` profile; the `CTI_*` variables of `.env.example`.
 
 Not covered:
 
@@ -183,6 +214,22 @@ Not covered:
 - the default model of a stage or a provider (`ANTHROPIC_MODEL`,
   `CYNER_MODEL`, `GLINER_MODEL`, `TTP_EMBEDDING_MODEL` and the like). A new
   default is announced in the CHANGELOG.
+
+Evidence today: `contract/config.json` records each variable of
+`.env.example`, whether its line sets it, and the value it shows: 139
+variables, the file's 141 but the two above. A commented variable is a line
+`# NAME=value`, one space, no blank in the value, so the prose lines that look
+like one (the conventions' `KEY=value`, a command line, a heading) are not
+read; a test names these three and fails on any other line that looks like a
+variable but is not read. It also records the Compose layout: the project name
+(`ctiparsor`, which prefixes the name of every volume), each service with its
+profiles, and the named volumes with their own `name:` when one is set, the
+`dev` profile left out (7 services and 4 volumes on 2026-10-31). A changed
+value is reported as a changed default, which the CHANGELOG names: a
+calibrated threshold or a default model changes that way, without breaking
+the contract. Its limit: only `.env.example` is read, not the code. A
+variable the code stops reading, or a default in the code that no longer
+matches the value `.env.example` shows, is not caught.
 
 ### Persistent data
 
@@ -255,6 +302,19 @@ Varies, and is not a breaking change:
 - the names and descriptions of ATT&CK objects, as the selected ATT&CK release
   states them.
 
+Evidence today: `contract/stix.json` is read from the five Stage 4 reference
+bundles (`tests/fixtures/stage4_reference/expected/`, which
+`tests/test_stage4_reference.py` keeps equal to the code): each custom
+property found there with its JSON types, and the id of each object known by
+a name, a value, a key, a pattern, hashes or a definition (not a
+relationship), named by scenario, type and that property; a random id (the
+Report's) is recorded as `random` (79 ids, 5 of them random, and 12
+properties on 2026-10-31). A changed id is a breaking change: an identity rule
+changed. An id that becomes random, or stops being random, is a changed id.
+An object a scenario no longer yields is not a breaking change.
+`x_ctiparsor_enrichment` is in none of these bundles (only an enriched bundle
+carries it, and none is checked in): it is not checked yet.
+
 ## Breaking changes and deprecation
 
 After 1.0, the version number says what changed:
@@ -293,6 +353,20 @@ A database migration goes into a minor version, as before 1.0
   *Fixed* in the CHANGELOG.
 
 A client ignores the fields and events it does not know.
+
+**How a change is caught.** `scripts/contract.py` reads each stable surface
+from the code and compares it with `contract/` (ADR-0094 item 1). It classes
+each difference as `breaking` (a removal or a rename, a type a request no
+longer accepts or a response may now return, a field made required, a value
+removed from a list, a request limit, format or pattern that appears or
+changes, a changed STIX id), `default` (a changed default) or
+`compatible` (an addition, a relaxation, a deprecation flag).
+`tests/test_contract.py` runs `python scripts/contract.py check` on every pull
+request and fails on any difference, a compatible one included, so the
+reference always equals the code. `make contract` records a change; it
+refuses a breaking one unless `ACCEPT_BREAKING=1`, which needs a major version
+and a CHANGELOG entry. Recording a change does not approve it: the version
+number and the CHANGELOG do.
 
 **A deprecation:**
 

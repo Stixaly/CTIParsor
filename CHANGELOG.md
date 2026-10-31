@@ -11,6 +11,51 @@ theme.
 
 ### Added
 
+#### A pull request that breaks a stable surface fails: the contract snapshot (ADR-0094 item 1), 2026-10-31
+
+`contract/` records the stable surfaces of `docs/support-policy.md` as the code
+exposes them, and `tests/test_contract.py` runs `scripts/contract.py check` on
+every pull request:
+
+- **`openapi.json`:** each operation, its parameters, request body and
+  responses, field by field, with their types, whether they are required, the
+  values they allow and, on the request side, their limits, formats and
+  patterns (321 entries). A path parameter is known by its position; FastAPI's
+  own 422 is left out.
+- **`cli.json`:** `main.py`'s arguments with their type and constant, the stage
+  ids and which can be disabled, the container commands and `bootstrap`'s
+  options, `make db-upgrade` (36 entries).
+- **`config.json`:** the 139 variables of `.env.example` with the value it sets
+  or shows, the Compose project name, services and volumes (151 entries).
+- **`stix.json`:** the custom properties and their types, and the id of each
+  object of the five Stage 4 reference scenarios that has a natural key,
+  random ones recorded as `random` (91 entries).
+
+Any difference fails the check. Breaking, and recorded by `make contract` only
+with `ACCEPT_BREAKING=1`:
+
+- a removal, a rename, a changed type or constant, a field or argument made
+  required, a value removed from a list;
+- a request limit, format or pattern added or changed;
+- an argument that joins a mutually exclusive group;
+- a renamed Compose project or volume, which would leave the data volume behind;
+- a new id for the same STIX object, including one that becomes random or stops
+  being random.
+
+A changed default or an addition is recorded with `make contract` (or
+`python scripts/contract.py write` from a venv). An extractor that fails exits
+2, apart from a difference (1). `tests/test_cli_exit_codes.py` checks the CLI's
+exit-code table, 20 cases.
+
+Not covered: the fields of the 59 success responses whose schema declares none;
+the 409 body, which the schema does not hold (`tests/test_jobs_routes.py`
+checks it); the job statuses, SSE event names, `X-Bundle-Validation` values and
+the export archive layout, which are strings in the code; a variable the code
+stops reading, or a code default that drifts from `.env.example`; an argument
+that moves from one exclusive group to another; `x_ctiparsor_enrichment`, which
+no reference bundle carries. A new option alias, or a `case` label that joins
+two commands, reads as a removal and needs `ACCEPT_BREAKING=1`.
+
 #### Air-gapped installs: several Ollama models, the TLS proxy, and a corpora refresh that keeps the reports (ADR-0054), 2026-10-30
 
 - **`package_offline_docker.sh --with-llm=MODEL[,MODEL...]`** bundles several
