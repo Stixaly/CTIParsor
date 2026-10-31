@@ -79,6 +79,43 @@ pages now give `run --rm bootstrap bootstrap --no-models`.
 
 ### Changed
 
+#### `WORKER_MAX_CONCURRENT` defaults to 1 outside compose too (ADR-0037), 2026-10-31
+
+The code's default was 10; it is now 1, the value compose already gave the
+`worker` service. Each report holds ~4.4 GB resident, mostly GLiNER, so ten
+asked for ~44 GB, and below ~48 GB of RAM the OOM killer took the workers: under
+WSL, four reports at once killed all of them.
+
+- **The compose stack does not change.**
+- **Everything else that ran reports with the variable unset now runs one
+  report at a time** and queues the rest: `python run_api.py` (role `all`),
+  `python -m api.queue_loop`, whose `--max-concurrent` takes the same default,
+  and the image started without compose.
+- **A host with the memory sets the value itself**, from
+  `floor((RAM_GB - 4) / 4.4)` or what `scripts/measure_cold_start.py` suggests
+  (`docs/deployment.md`, section 5). In the compose stack, raise
+  `CTI_WORKER_MEMORY` by 4.4 GB per extra report.
+- An invalid value still falls back to the default, now 1, with a warning.
+
+#### `inhouse-score` names the reports it could not score, and exits non-zero, 2026-10-31
+
+`python -m evaluation inhouse-score` skipped, without a word, a gold report the
+run had recorded as an error, and one the run had no result for: the score then
+covered fewer reports than the gold set, and nothing said so. `score` (AnnoCTR)
+already listed its failures under `documents_failed`.
+
+- **The report names them.** `score.json` gains `documents_failed`, the gold
+  reports the run recorded as an error, and `documents_missing`, the gold
+  reports with no file in the run's `docs/`. Both are sorted. A result for a
+  report whose `gold.json` is not `status: gold` (a draft) is left out as
+  before, and counts as neither.
+- **The command fails.** When either list is not empty, or when no report was
+  scored, it still writes and prints the report, then says why on stderr and
+  exits with code 1. The scores and the other keys are unchanged.
+
+`tests/test_evaluation_attack.py` covers a failed report, a missing one, no
+report scored, a complete run and a draft.
+
 #### STIX descriptions carry the context: why each link exists, the report's text and file (ADR-0093), 2026-10-30
 
 - **Relationships** have a Markdown `description` that says why CTIParsor built
