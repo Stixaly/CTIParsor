@@ -62,6 +62,11 @@ A tag is `vX.Y.Z`. The files carry `X.Y.Z`, without the `v`. There are no
 pre-releases: `scripts/release.py check` refuses a tag such as `v0.1.0-rc.1`.
 The dry run (below) is the rehearsal.
 
+What changes from 1.0 is in [support-policy.md](support-policy.md) (ADR-0094,
+proposed): the stable surfaces, what counts as a breaking change and needs a
+major version, how a deprecation is announced, and which version line gets
+fixes.
+
 ## Where the version lives
 
 One source, `__version__` in `pipeline/__init__.py`. It was `"0.0.0"` until the

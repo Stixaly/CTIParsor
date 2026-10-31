@@ -771,6 +771,7 @@ read [CONTRIBUTING.md](CONTRIBUTING.md); the test strategy is in
 | REST API reference | [docs/api.md](docs/api.md) |
 | Database schema | [docs/database-schema.md](docs/database-schema.md) |
 | Containers, deployment, architecture, upgrades | [docker](docs/docker.md) · [deployment](docs/deployment.md) · [architecture](docs/architecture.md) · [upgrading](docs/upgrading.md) |
+| What 1.0 promises: stable surfaces, breaking changes, capability matrix, maintenance | [docs/support-policy.md](docs/support-policy.md) |
 | Development guide: `make` targets, benchmarks, project structure, extending | [docs/development.md](docs/development.md) |
 | Dependencies and how to keep them current | [docs/dependencies.md](docs/dependencies.md) |
 | Evaluation protocol | [docs/eval/README.md](docs/eval/README.md) |
