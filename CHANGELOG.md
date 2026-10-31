@@ -481,6 +481,26 @@ is an empty answer that is still flagged as at the limit.
 
 ### Security
 
+#### The UI's lint tools on fixed `minimatch` and `zod`; a CPython `http.client` flaw reviewed, 2026-10-31
+
+- **`minimatch` 11.0.3** (Dependabot alert #7, medium). 10.2.6 lets a glob
+  pattern multiply its own parts, then compares them pairwise, so CPU and
+  memory grow with the pattern. ESLint 10 and typescript-eslint 8 still ask
+  for `^10`, even in their latest releases, so `frontend/package.json` gains
+  an `"overrides"` entry, `minimatch` `^11.0.1`. Lint, type check and the 311
+  UI tests pass with it. These are dev dependencies: the built UI ships none
+  of them.
+- **`zod` 4.6.7**, which `npm audit` reported (high, below 4.6.6: memory
+  exhaustion validating oversized collections). It comes in through
+  `eslint-plugin-react-hooks`, also at dev time only. `npm audit` now reports
+  nothing.
+- **CVE-2026-103995** (Grype, low): CPython's `http.client` misreads a
+  negative or non-hexadecimal chunk size. It is fixed in 3.16 only, and
+  accepted for 3.14.10 in `SECURITY.md` and `.grype.yaml`. Only the server
+  that answers can trigger it, and that server already chooses the body it
+  sends. CTIParsor's `urllib.request` calls (corpus downloads, the NVD
+  lookup, the vision provider) are the only ones that use it.
+
 #### The image's Python and Playwright's Node carry the fixes Grype reported, 2026-10-31
 
 The image scan had ten open alerts with a fix, all in two binaries.
