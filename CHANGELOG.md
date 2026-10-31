@@ -337,6 +337,33 @@ revision that has it (`BUNDLE_AFFECTING`, scope `mapping`, ADR-0086).
 
 ### Fixed
 
+#### The smoke test can no longer delete an install's volumes, 2026-10-31
+
+`scripts/docker_smoke.sh` sourced `.env` before choosing its Compose project.
+With `COMPOSE_PROJECT_NAME=ctiparsor` in `.env`, `--clean` ran
+`docker compose down -v` on the install itself. It also kept any
+`COMPOSE_PROJECT_NAME` exported in the shell, such as the
+`ctiparsor-restored` the restore procedure of `docs/docker.md` suggests.
+
+- The smoke runs on its own project, `ctiparsor-smoke`. `.env` no longer
+  chooses it, and cannot rewrite the choice: the variables are read-only
+  before `.env` is sourced.
+- A project the shell names exits 2 unless `SMOKE_ALLOW_PROJECT` names it as
+  well. Even without `--clean`, the smoke would start that install on the image
+  under test, migrating its database, write a report into it with `--job`, and
+  stop it at the end. The offline-bundle check allows its restored `ctiparsor`.
+- `--clean` and `--backup-restore` run only on `ctiparsor-smoke`, allowed
+  project or not: one deletes the project's volumes, the other writes a test
+  report into it.
+- `scripts/check_backup_restore_docker.sh` runs only on `ctiparsor-smoke`. It
+  checks that `ctiparsor-smoke-restored` is empty before it writes anything,
+  and before its cleanup can remove that project. A project left from another
+  run is never deleted. A listing that fails stops it, and an early exit of
+  `grep -q` is no longer read as "empty".
+
+`tests/test_smoke_project_guard.py` (16 tests) runs both scripts against a
+fake `docker` that records each call's project.
+
 #### The air-gapped install works again (ADR-0054), 2026-10-30
 
 ADR-0054 records that the full air-gap round trip was never run, and nothing in

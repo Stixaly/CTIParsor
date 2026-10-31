@@ -602,6 +602,14 @@ compose stop app worker`, it starts the smoke stack's `app` and `worker` again.
 `tests/test_check_backup_restore.py` fails when its copy of the commands and
 docs/docker.md's differ.
 
+Neither script touches a Compose project that is not the smoke's own,
+`ctiparsor-smoke`. `docker_smoke.sh` takes another only when the shell names it
+in both `COMPOSE_PROJECT_NAME` and `SMOKE_ALLOW_PROJECT`, never from `.env`,
+and never with `--clean` or `--backup-restore`. `check_backup_restore_docker.sh`
+checks that the restore's project is empty before it writes anything.
+`tests/test_smoke_project_guard.py` runs both against a fake `docker` that
+records the project of each call, in about 10 s, without Docker.
+
 Their parts are tested in `tests/test_check_backup_restore.py` (where the
 tools run and with which password, the exit codes, the databases and
 directory removed, and `_check` with `pg_dump` and `pg_restore` replaced by a

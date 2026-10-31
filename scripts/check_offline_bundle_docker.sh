@@ -41,8 +41,10 @@ source scripts/offline_lib_docker.sh
 # docker_smoke.sh inherits it, instead of its own default ctiparsor-smoke, which
 # would start an empty stack and never test the restored one. Sharing the
 # project is safe: this script never passes --clean, the only way
-# docker_smoke.sh runs `down -v`.
+# docker_smoke.sh runs `down -v`, and the smoke refuses it on any project but
+# its own. SMOKE_ALLOW_PROJECT tells the smoke this project is meant.
 export COMPOSE_PROJECT_NAME=ctiparsor
+export SMOKE_ALLOW_PROJECT=ctiparsor
 
 DIR="offline"
 DO_JOB=false

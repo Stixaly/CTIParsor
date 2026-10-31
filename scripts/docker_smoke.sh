@@ -32,6 +32,10 @@
 #               project is deleted afterwards (ADR-0094 item 3)
 #   --keep      leave the stack running afterwards
 #   --clean     `docker compose down -v` afterwards (DELETES the volumes)
+# The smoke runs in its own Compose project, ctiparsor-smoke. Another one, named
+# by COMPOSE_PROJECT_NAME in the environment (never by .env), needs
+# SMOKE_ALLOW_PROJECT set to the same name, and never takes --clean or
+# --backup-restore; otherwise the script exits 2.
 # Environment: DOCKER_BIN (default: docker), CTI_BIND / CTI_PORT (as in compose.yaml),
 #              SMOKE_JOB_TIMEOUT (seconds, default 1800), SMOKE_HEALTH_TIMEOUT (default 180),
 #              SMOKE_REQUIRED_STAGES (with --job: space-separated stages that must have
@@ -87,6 +91,36 @@ done
 command -v curl >/dev/null 2>&1 || { echo "ERROR: curl is required on the host"; exit 1; }
 command -v python3 >/dev/null 2>&1 || { echo "ERROR: python3 is required on the host"; exit 1; }
 
+# The Compose project: the smoke's own, ctiparsor-smoke, unless the caller's
+# COMPOSE_PROJECT_NAME names another AND SMOKE_ALLOW_PROJECT names the same one.
+# An operator's shell may name the install, or a restored one (docs/docker.md),
+# and the smoke would start that project's app and worker on the image under
+# test (which migrates its database), write a report into it with --job, and
+# stop it at the end.  scripts/check_offline_bundle_docker.sh allows ctiparsor
+# on purpose, to smoke-test a restored install.  --clean (`down -v`) and
+# --backup-restore (a test report written into the stack, its app and worker
+# stopped) run only on the smoke's own project, allowed or not.
+# All of it is settled before .env is sourced below, and read-only from here on:
+# a .env cannot redirect the smoke (Compose would read its COMPOSE_PROJECT_NAME
+# too, hence the export further down).
+SMOKE_OWN_PROJECT=ctiparsor-smoke
+SMOKE_PROJECT="${COMPOSE_PROJECT_NAME:-$SMOKE_OWN_PROJECT}"
+if [ "$SMOKE_PROJECT" != "$SMOKE_OWN_PROJECT" ]; then
+    if [ "${SMOKE_ALLOW_PROJECT:-}" != "$SMOKE_PROJECT" ]; then
+        echo "ERROR: COMPOSE_PROJECT_NAME is $SMOKE_PROJECT, not the smoke's own" \
+             "project, $SMOKE_OWN_PROJECT: the smoke would start that project on this" \
+             "image and stop it afterwards. Unset COMPOSE_PROJECT_NAME, or set" \
+             "SMOKE_ALLOW_PROJECT=$SMOKE_PROJECT to test that install on purpose." >&2
+        exit 2
+    fi
+    if [ "$CLEAN" = true ] || [ "$BACKUP_RESTORE" = true ]; then
+        echo "ERROR: --clean and --backup-restore run only on the smoke's own" \
+             "project, $SMOKE_OWN_PROJECT, and COMPOSE_PROJECT_NAME is $SMOKE_PROJECT." >&2
+        exit 2
+    fi
+fi
+readonly SMOKE_OWN_PROJECT SMOKE_PROJECT CLEAN BACKUP_RESTORE
+
 # compose.yaml bind-mounts .secrets/db_password into every service at
 # /run/secrets/db_password (see its top-of-file comment) so CTI_DB_PASSWORD
 # never appears in `docker inspect`/`docker compose config` output. This
@@ -107,10 +141,11 @@ chmod 644 .secrets/db_password
 
 # ── Variables ─────────────────────────────────────────────────────────────────
 DOCKER_BIN="${DOCKER_BIN:-docker}"
-# Its own compose project, never the operator's stack: compose.yaml names the
+# The project chosen above, whatever .env set: compose.yaml names the install's
 # project `ctiparsor`, so on a machine that runs CTIParsor `--clean` (`down -v`)
-# deleted the real database and state volumes.
-export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-ctiparsor-smoke}"
+# would delete the real database and state volumes.
+export COMPOSE_PROJECT_NAME="$SMOKE_PROJECT"
+info "Compose project: $COMPOSE_PROJECT_NAME"
 COMPOSE="$DOCKER_BIN compose"
 BIND="${CTI_BIND:-127.0.0.1}"
 PORT="${CTI_PORT:-8000}"
