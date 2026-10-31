@@ -16,11 +16,17 @@ updates:
         patterns: ["*"]
 
   # Base images of the Dockerfile and the images compose.yaml pins by digest
-  # (lot 0, D11): a new digest arrives as a PR, never silently.
+  # (lot 0, D11): a new digest arrives as a PR, never silently.  Not a new
+  # Python minor or major: the locks are resolved for the image's Python, so
+  # moving to 3.15 is its own change (ADR-0079), re-resolved with `make lock`;
+  # a 3.14 patch still arrives here.
   - package-ecosystem: docker
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: python
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
 
   - package-ecosystem: docker-compose
     directory: /
