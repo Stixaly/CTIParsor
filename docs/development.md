@@ -465,9 +465,15 @@ To add version N:
 5. A test in `tests/test_migrations.py`, from a database at version N-1 with
    data written the way that version wrote it. `test_a_deployment_stopped_at_any_version_is_brought_up_to_date`
    and the schema-equivalence test cover the whole line.
-6. On the pull request, CI writes a database with the base commit's own code
-   and migrates it with yours (`scripts/check_migration_from.py <ref>`; run it
-   locally against `CTIPARSOR_TEST_DATABASE_URL` with `origin/main`).
+6. On every run, CI writes a database with the last release's own code, and
+   on a pull request one with the base commit's, seeds it, and migrates it with
+   yours (`scripts/check_migration_from.py`; run it locally against
+   `CTIPARSOR_TEST_DATABASE_URL` with `--last-release origin/main`). A new
+   table needs rows in `scripts/migration_seed.py`, and a new column a
+   non-NULL value in at least one of them (`tests/test_migration_seed.py`
+   fails until it has them, or until `NOT_SEEDED` says why); a migration that
+   rewrites or retypes stored values on purpose declares them in
+   `EXPECTED_CHANGES`, in the script.
 
 ## Extending the pipeline
 

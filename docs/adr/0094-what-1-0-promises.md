@@ -47,10 +47,11 @@ What already checks part of it, and what does not:
 - `tests/test_api_schema.py` (Schemathesis) checks each response against the
   schema of the moment. Nothing compares the schema, the CLI or the
   configuration with those of the previous release.
-- On every pull request, CI migrates a database written by the base commit and
-  reads it back (`scripts/check_migration_from.py`). Its seed is one job, three
-  entities and one relationship. Starting from the last release tag is
-  ADR-0085's open item 5.
+- On every pull request, CI migrated a database written by the base commit and
+  read it back (`scripts/check_migration_from.py`). Its seed was one job, three
+  entities and one relationship, and only row counts were compared. Starting
+  from the last release tag was ADR-0085's open item 5. Item 2 below replaced
+  that seed and that comparison on 2026-10-31.
 - `docs/docker.md` gives backup and restore commands. No test runs them.
 - The frontend has unit tests (Vitest). No test drives the interface in a
   browser through import, review and export.
@@ -285,14 +286,14 @@ no import test); several users, a GPU and a Python package are not supported.
 
 ## Action plan
 
-Item 1 is done; none of the others is started on 2026-10-31. Each proves part
-of a promise; `docs/support-policy.md` names the item where a piece of evidence
-is missing.
+Items 1 and 2 are done; none of the others is started on 2026-10-31. Each
+proves part of a promise; `docs/support-policy.md` names the item where a piece
+of evidence is missing.
 
 | # | Work | What it proves | State |
 |---|---|---|---|
 | 1 | Contract snapshot in CI: a reference OpenAPI schema, the CLI's arguments and exit codes, the variables of `.env.example`, STIX fixtures; a semantic diff that fails on a removal, a rename, a changed type, a field made required | the stable contract | done: `contract/`, `scripts/contract.py` (`make contract`), `tests/test_contract.py`, `tests/test_cli_exit_codes.py`. Not covered: the response fields of the 59 operations whose schema declares none; job statuses, `X-Bundle-Validation` values, SSE event names and the export archive layout (strings in the code); the 409 body (not in the schema; `tests/test_jobs_routes.py` checks it); a variable the code stops reading, or a code default that drifts from `.env.example`; `x_ctiparsor_enrichment` (no enriched reference bundle) |
-| 2 | Migration from the last release: `scripts/check_migration_from.py` from `v0.2.0`, then from each release tag (ADR-0085 item 5), with a seed that holds files, decisions, a baseline, a bundle, its verdict and its ledger; content compared, not only row counts | data survives an upgrade | not started |
+| 2 | Migration from the last release: `scripts/check_migration_from.py` from `v0.2.0`, then from each release tag (ADR-0085 item 5), with a seed that holds files, decisions, a baseline, a bundle, its verdict and its ledger; content compared, not only row counts | data survives an upgrade | done: `scripts/check_migration_from.py` (several refs, `--last-release`), `scripts/migration_seed.py`, `scripts/migration_compare.py`, `scripts/migration_readback.py`; CI from the last release tag on every run and from the base commit on a pull request; `tests/test_migration_seed.py`, `tests/test_migration_compare.py`, `tests/test_migration_readback.py`, `tests/test_check_migration_from.py`. Run from `v0.2.0` and from `v0.1.0` (versions 12 and 13 applied): every value kept, the seed read back. Not covered: the tables no route reads (the decision journal, figures, the figure and CVE caches, the rules' side tables) are compared in the database only; `detection_corpora.local.yaml` in `cti-state` (its path is the checkout's); a database older than `v0.1.0` |
 | 3 | Backup and restore: a consistent backup of the database and `cti-state`, a restore into an empty project, a check that reports, decisions, baselines and bundles come back | data survives a restore | not started |
 | 4 | Browser journey: Playwright against the built interface, the API, a worker and PostgreSQL: import, review, export; in CI | the journey is usable (blocker 4) | not started |
 | 5 | In-house gold: the 9 reports annotated on every layer of `LAYERS`, `status: gold` (decision 10) | the denominators of the measurement | not started (9 `pre-annotation` drafts) |

@@ -253,11 +253,21 @@ matches the value `.env.example` shows, is not caught.
   directly is not covered. [database-schema.md](database-schema.md) describes
   them for maintenance.
 
-Evidence today: on every pull request, CI migrates a database written by the
-base commit and reads it back (`scripts/check_migration_from.py`; its seed is
-one job, three entities and one relationship). The upgrade from the last
-release tag, with full content, is ADR-0094 item 2. Backup and restore are
-item 3.
+Evidence today: on every push to main, every pull request and every weekly
+run, CI migrates a database written by the last release (the highest tag
+`vX.Y.Z`) and, on a pull request, one written by the base commit
+(`scripts/check_migration_from.py`, ADR-0094 item 2). Each is built by that
+release's own code and seeded with four reports and what an analyst grows
+beside them: decisions and their journal, bundles with their verdict, ledger
+and build record, a STIX baseline, overrides, thresholds, the relationship
+policy, a detection rule, and the uploaded sources and exported bundles of
+the state volume. Its bundles and ledgers are the release's own Stage 4
+reference builds when its tree has them (`v0.1.0` has none: today's are
+written). Every column of every table holds a value in at least one seeded
+row. Every value and every column's type is compared before and after the
+migration, then again once the API has started and read the seed back; each
+identity column's sequence must stay above its highest value, and the state
+volume's files must not change. Backup and restore are item 3.
 
 ### STIX output
 
@@ -400,7 +410,7 @@ evidence.
 |---|---|---|---|
 | Install with Docker Compose | supported | the only supported install (ADR-0054); Docker Engine 24+, Compose v2.24+; CPU only; about 4.4 GB of RAM per report in flight ([docker.md](docker.md)) | CI builds the image and runs `scripts/docker_smoke.sh` (job `container-image`). A clean install from the published image: not yet, item 9 |
 | Host install (venv, systemd) | not supported | [upgrading.md](upgrading.md) §3 keeps it only to move an old install | — |
-| Upgrade from the previous release | supported | automatic at the first start; no downgrade; a PostgreSQL major needs `make db-upgrade` | CI migrates a database written by the pull request's base commit (`scripts/check_migration_from.py`). From the release tag, with full content: not yet, item 2 |
+| Upgrade from the previous release | supported | automatic at the first start; no downgrade; a PostgreSQL major needs `make db-upgrade` | CI migrates a database written by the last release tag, and on a pull request one written by the base commit: every value and column type of every table compared after the migration and after the API's first start, identity sequences checked, the seed read back through the API, the state volume's files unchanged (`scripts/check_migration_from.py`, ADR-0094 item 2) |
 | Backup and restore | supported | the `pg_dump` and `cti-state` archive commands of [docker.md](docker.md#data-and-backups) | Documented, never run by a test. Not yet: item 3 |
 | Import a file: PDF, DOCX, HTML, TXT, Markdown | supported | 50 MB; a scanned page goes to OCR (experimental, below) | `tests/test_upload_route.py`, `tests/test_stage1.py`, `tests/test_stage1_pdf_paths.py`, `tests/test_pdf_table_cells.py` |
 | Import pasted text | supported | 20 to 2,000,000 characters | `tests/test_ingest_routes.py` |
