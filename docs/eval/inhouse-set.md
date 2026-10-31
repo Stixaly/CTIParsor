@@ -55,3 +55,15 @@ python -m evaluation preannotate "<file>" --doc-id <doc_id>
 python -m evaluation inhouse-run --name inhouse-2026-10
 python -m evaluation inhouse-score --name inhouse-2026-10
 ```
+
+`inhouse-score` scores the reports that have a `source.*` file and a
+`gold.json` with `status: gold`; a run's result for any other report (a draft)
+is left out. It writes
+`data/eval/inhouse-runs/<name>/score.json` and prints it: `documents` (the
+reports scored), `documents_failed` (gold reports the run recorded as an
+error), `documents_missing` (gold reports the run has no result for), `micro`
+and `negatives`. If one of the two lists is not empty, or if no report was
+scored, it then says why on stderr and exits with code 1. `inhouse-run` with
+the same `--name` and `--disable` runs the missing reports; it skips a report
+it already recorded, even as an error, so delete
+`data/eval/inhouse-runs/<name>/docs/<doc_id>.json` to run a failed one again.
