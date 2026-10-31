@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, Loader2, AlertTriangle, RotateCw } from 'lucide-react'
@@ -139,6 +139,8 @@ export default function Dashboard() {
   // The report being moved to Reviewing before it opens, and the last failure.
   const [openingId, setOpeningId]           = useState<string | null>(null)
   const [openError, setOpenError]           = useState<{ job: Job; message: string } | null>(null)
+  // Where the progress dialog sends the focus back when what opened it is gone.
+  const newReportRef = useRef<HTMLButtonElement>(null)
 
   // ── Queries & mutations ──────────────────────────────────────────────────
 
@@ -426,6 +428,7 @@ export default function Dashboard() {
         {/* Action row — the single entry point for ingestion (ADR-0029). */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <button
+            ref={newReportRef}
             className="btn-primary"
             onClick={() => openModal(null)}
             style={{
@@ -661,6 +664,7 @@ export default function Dashboard() {
         <ProgressModal
           jobId={activeJobId}
           filename={activeFilename}
+          returnFocusTo={newReportRef}
           onClose={() => {
             setActiveJobId(null)
             qc.invalidateQueries({ queryKey: ['jobs'] })

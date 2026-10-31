@@ -11,6 +11,60 @@ theme.
 
 ### Added
 
+#### The journey from import to download runs in a browser, offline, in CI (ADR-0094 item 4), 2026-10-31
+
+Playwright's Chromium drives the built interface against the real API, its
+worker and PostgreSQL (`scripts/check_browser_e2e.sh`, `frontend/e2e/`). The CI
+job `browser-e2e` runs it, and `publish-image` now waits for it.
+
+- **The main journey.**
+  - A report is imported through the file chooser with its markings and
+    followed in the progress dialog through the run's events: a dead event
+    stream fails the journey. The page is then reloaded and the report
+    reviewed: one row accepted, one rejected, one retyped.
+  - The review is completed and the bundle downloaded.
+  - The file is checked as a STIX 2.1 bundle: every reference inside it
+    resolves, and the decisions are applied (the rejected domain and its
+    indicator are absent). `GET /bundle` answers `X-Bundle-Validation:
+    validated`.
+- **Enrichment** of `opencti_report.json`, read in the graph's Differences and
+  "Against your bundle", with each match checked: the file and its SHA-256
+  become the analyst's file, and APT29 the analyst's intrusion set.
+- **A failed report** (a Report the schemas refuse) shows as failed on the
+  dashboard, and its last progress event gives the reason: the Report's
+  `lang` is not an RFC 5646 code.
+- **A refused bundle** is answered with a 409, and the graph and its download
+  show the refusal and its first error.
+- **The keyboard alone** for import, decisions, completion and download, with
+  the review page's shortcuts.
+- **axe** (WCAG 2.1 A/AA) on each page and dialog. A serious or critical
+  violation fails the job unless `frontend/e2e/a11y-allowlist.json` lists it by
+  rule, page and element (axe's selector), and an entry that no longer matches
+  fails it too. The list has one entry, the theme button's name
+  (`.theme-toggle`).
+- **Offline, and proven.**
+  - The API runs under `env -i` with every model, LLM, vision and CVE stage
+    disabled (`PIPELINE_DISABLED_STAGES`), and each report's stage report is
+    checked.
+  - In CI, an iptables owner match, first in `OUTPUT`, counts every packet the
+    API and its worker send off loopback, and the job fails unless there is
+    none. A DNS lookup through a resolver on loopback is not counted, but a
+    connection made after it is.
+  - Run as root (the guard, locally), the script builds the interface and runs
+    the API as the checkout's owner. A chain left by a killed run stops it, and
+    it prints the commands that remove the chain.
+- `@playwright/test` 1.64.1 and `@axe-core/playwright` 4.14.0 are added as dev
+  dependencies, pinned exactly.
+
+The two dialogs the journey goes through now meet those checks:
+
+- The progress dialog is a real dialog. Its Close button takes the focus when
+  it opens, Tab and Shift+Tab stay inside it, and Escape closes it. The focus
+  then goes back to what opened it, or to New report when the Create job
+  button that opened it is gone.
+- In the new-report dialog's markings band, the "required" badge and the line
+  beside it now reach a 4.5:1 contrast (they were 3.6:1 and 4.2:1).
+
 #### A backup restores into an empty install with everything in it, checked in CI (ADR-0094 item 3), 2026-10-31
 
 The "Data and backups" section of `docs/docker.md` is now a procedure, and CI

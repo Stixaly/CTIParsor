@@ -1,6 +1,6 @@
 import { X, Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
 import { useSSE } from '../hooks/useSSE'
-import { useMemo, useRef } from 'react'
+import { useEffect, useId, useMemo, useRef, type RefObject } from 'react'
 import GraphCanvas, { type GraphCanvasHandle } from './graph/GraphCanvas'
 import { buildGraphData } from './graph/buildGraphData'
 import type { Entity, PartialGraphEvent, Relationship } from '../types'
@@ -19,13 +19,20 @@ const STAGES = [
   { n: 5, label: 'Validation' },
 ]
 
+// What Tab may reach inside the dialog.
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), '
+  + 'textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
 interface Props {
   jobId: string
   filename: string
   onClose: () => void
+  /** Where the focus goes on close when the element that had it at the opening
+   *  is gone: Create job closes with the new-report dialog. */
+  returnFocusTo?: RefObject<HTMLElement | null>
 }
 
-export default function ProgressModal({ jobId, filename, onClose }: Props) {
+export default function ProgressModal({ jobId, filename, onClose, returnFocusTo }: Props) {
   const { events, done, partialGraphEvents } = useSSE(jobId)
 
   // Accumulate streaming graph
@@ -71,6 +78,43 @@ export default function ProgressModal({ jobId, filename, onClose }: Props) {
   }, [partialGraphEvents, jobId])
 
   const graphRef = useRef<GraphCanvasHandle>(null)
+
+  // A dialog (WCAG 2.4.3): the focus moves to its Close button when it opens
+  // (Create job leaves it on a button that is gone); Tab and Shift+Tab stay
+  // inside it; Escape closes it, as it closes the new-report dialog; on close
+  // the focus goes back to the element that had it at the opening ("View
+  // progress"), or to `returnFocusTo` when that element is gone.
+  const titleId = useId()
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const closeRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    const active = document.activeElement
+    const opener = active instanceof HTMLElement && active !== document.body ? active : null
+    const fallback = returnFocusTo?.current
+    closeRef.current?.focus()
+    return () => {
+      const back = opener?.isConnected ? opener : fallback
+      back?.focus()
+    }
+  }, [returnFocusTo])
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { onClose(); return }
+      const dialog = dialogRef.current
+      if (e.key !== 'Tab' || !dialog) return
+      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE))
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      const inside = dialog.contains(document.activeElement)
+      const leaving = !inside || document.activeElement === (e.shiftKey ? first : last)
+      if (!leaving) return
+      e.preventDefault()
+      const target = e.shiftKey ? last : first
+      target?.focus()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
 
   const completedStages = new Set(events.filter(e => e.stage).map(e => e.stage!))
   const latest = events.filter(e => e.stage !== undefined).slice(-1)[0]
@@ -138,7 +182,7 @@ export default function ProgressModal({ jobId, filename, onClose }: Props) {
       zIndex: 100,
       padding: '24px',
     }}>
-      <div style={{
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} style={{
         background: 'var(--bg-elev)',
         border: '1px solid var(--rule)',
         borderRadius: 16,
@@ -160,12 +204,13 @@ export default function ProgressModal({ jobId, filename, onClose }: Props) {
           padding: '24px 24px 0', flexShrink: 0,
         }}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)' }}>Processing report</div>
+            <div id={titleId} style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)' }}>Processing report</div>
             <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 3, maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {filename}
             </div>
           </div>
           <button
+            ref={closeRef}
             onClick={onClose}
             className="back"
             style={{ width: 28, height: 28, flexShrink: 0 }}

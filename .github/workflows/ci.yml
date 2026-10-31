@@ -243,6 +243,101 @@ jobs:
       - name: Unit tests (vitest)
         run: npm test
 
+  # ── Browser journey — the built UI, the real API, its worker, PostgreSQL ────
+  # ADR-0094 item 4: Playwright's Chromium drives the interface as an analyst
+  # does (scripts/check_browser_e2e.sh, frontend/e2e/): a report imported,
+  # followed through a reload, reviewed, completed and downloaded; a STIX
+  # bundle enriched and its ledger read; a report that fails; a bundle the
+  # schemas refused, answered 409; the same operations by keyboard alone; axe
+  # on each page.  The API runs offline (no model, LLM, vision or CVE stage),
+  # and --network-guard counts with iptables every packet it and its worker
+  # send off loopback: any fails the job.  Traces, screenshots, videos and the
+  # API's log are kept on failure only.
+  browser-e2e:
+    name: Browser journey (Playwright, offline)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ctiparsor
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ctiparsor
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ctiparsor -d ctiparsor"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      # The same lock as fast-tests (yara-python is built there too): the API
+      # and the offline pipeline need nothing else.
+      - name: OpenSSL headers for the yara-python build
+        run: dpkg -s libssl-dev >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y --no-install-recommends libssl-dev; }
+
+      - name: Install dependencies (by hash)
+        run: pip install --require-hashes --no-deps -r requirements/requirements-ci.lock.txt
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install the UI's packages (package-lock.json, exact)
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      # Chromium is Playwright's own build for its version: cached by that version.
+      - name: Playwright's version
+        id: playwright
+        working-directory: frontend
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: browsers
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
+      - name: Chromium and its system libraries
+        if: steps.browsers.outputs.cache-hit != 'true'
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Chromium's system libraries (Chromium from the cache)
+        if: steps.browsers.outputs.cache-hit == 'true'
+        working-directory: frontend
+        run: npx playwright install-deps chromium
+
+      - name: Browser journey (offline, network guard)
+        env:
+          CTIPARSOR_TEST_DATABASE_URL: postgresql://ctiparsor:ci@127.0.0.1:5432/ctiparsor
+        run: bash scripts/check_browser_e2e.sh --network-guard
+
+      - name: Keep the traces, screenshots, videos and the API's log
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-e2e
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 14
+          if-no-files-found: ignore
+
   # ── Model tests — runs only on pushes to main (expensive: ~800 MB downloads) ──
   # Not a gate: it needs model downloads and a live API key, so it may fail for
   # reasons outside the code.  Every deterministic test also runs in
@@ -391,7 +486,7 @@ jobs:
   # name, by digest, so this job's attestations are the release's too.
   publish-image:
     name: Publish image to GHCR
-    needs: [fast-tests, frontend-tests, container-image, dependency-audit]
+    needs: [fast-tests, frontend-tests, browser-e2e, container-image, dependency-audit]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
