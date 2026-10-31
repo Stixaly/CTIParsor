@@ -85,7 +85,12 @@ test('import, follow, review, complete and download a report', async ({ page, re
     bundle.objects.filter(o => o.type === type && (o.name === value || o.value === value))
   expect(named('threat-actor', 'APT29'), 'the accepted actor ships').toHaveLength(1)
   expect(named('domain-name', 'update-service.net'), 'the rejected domain does not ship').toHaveLength(0)
-  expect(bundle.objects.filter(o => typeof o.pattern === 'string' && o.pattern.includes('update-service.net')),
+  // A pattern's string literals, each compared whole: a substring search would
+  // also match another host that contains this one.
+  const literals = (pattern: string) => [...pattern.matchAll(/'((?:[^'\\]|\\.)*)'/g)].map(m => m[1])
+  const patterns = bundle.objects.flatMap(o => (typeof o.pattern === 'string' ? [o.pattern] : []))
+  expect(patterns.some(pattern => literals(pattern).length > 0), 'the indicators\' patterns are read').toBe(true)
+  expect(patterns.filter(pattern => literals(pattern).some(literal => literal === 'update-service.net')),
     'nor an indicator for it').toHaveLength(0)
   expect(named('tool', 'Cobalt Strike'), 'the retyped row ships as a tool').toHaveLength(1)
   expect(named('malware', 'Cobalt Strike'), 'and no longer as malware').toHaveLength(0)
