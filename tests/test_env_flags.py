@@ -72,8 +72,25 @@ def test_a_malformed_setting_no_longer_stops_the_import():
     proc = subprocess.run([sys.executable, "-c", code], cwd=REPO, env=env,
                           capture_output=True, text=True, timeout=300)
     assert proc.returncode == 0, proc.stderr[-2000:]
-    assert _result_line(proc) == ["10", "120"]
+    assert _result_line(proc) == ["1", "120"]
     assert "WORKER_MAX_CONCURRENT='abc' is not an integer" in proc.stdout + proc.stderr
+
+
+def test_worker_max_concurrent_defaults_to_one_when_unset(tmp_path):
+    """Unset, WORKER_MAX_CONCURRENT is 1, as in compose.yaml: each report holds
+    ~4.4 GB, and the former default of 10 overcommitted any host under ~48 GB.
+
+    Run from tmp_path: under `python -c`, api.db's load_dotenv() looks for .env
+    from the working directory, and the repository's .env could set it back.
+    """
+    env = {k: v for k, v in os.environ.items() if k != "WORKER_MAX_CONCURRENT"}
+    env.update({"SKIP_HEAVY_MODELS": "1", "PYTHONPATH": str(REPO)})
+    code = "import api.worker; print('RESULT', api.worker._MAX_CONCURRENT_JOBS)"
+    proc = subprocess.run([sys.executable, "-c", code], cwd=tmp_path, env=env,
+                          capture_output=True, text=True, timeout=300)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert _result_line(proc) == ["1"]
+    assert "WORKER_MAX_CONCURRENT" not in proc.stdout + proc.stderr     # unset: the default, without a warning
 
 
 def test_cli_reads_logging_settings_from_dotenv(tmp_path):
