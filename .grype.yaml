@@ -9,28 +9,18 @@
 ignore:
   # poplib command injection: fixed in 3.15 only.  CTIParsor never imports poplib.
   - vulnerability: CVE-2025-15367
-    reason: "Unreachable: CTIParsor never imports poplib (SECURITY.md, reviewed 2026-10-04)"
+    reason: "Unreachable: CTIParsor never imports poplib (SECURITY.md, reviewed 2026-10-31)"
     package:
       name: python
-      version: 3.14.8
+      version: 3.14.10
       type: binary
 
   # tempfile.TemporaryDirectory cleanup race: fixed in 3.15 only.  Needs a local
-  # attacker writing to the temporary directory; the only use is a measurement
-  # script the application never runs, and the container's /tmp is its own.
+  # attacker who changes the directory tree while it is cleaned up; the
+  # container's /tmp and model cache are written by the application's user only.
   - vulnerability: CVE-2026-12345
-    reason: "Unreachable: only scripts/measure_web_capture.py uses TemporaryDirectory (SECURITY.md, reviewed 2026-10-04)"
+    reason: "Not exploitable: needs write access to the container's /tmp or model cache (SECURITY.md, reviewed 2026-10-31)"
     package:
       name: python
-      version: 3.14.8
-      type: binary
-
-  # tarfile link fallback: fixed in 3.12.15 and 3.13.16, not yet in a 3.14
-  # release.  Linux has links, and the corpus sync extracts regular files and
-  # directories only (pipeline/detection/sync.py::_safe_members).
-  - vulnerability: CVE-2026-87910
-    reason: "Unreachable: the only tar extraction keeps regular files and directories (SECURITY.md, reviewed 2026-10-04)"
-    package:
-      name: python
-      version: 3.14.8
+      version: 3.14.10
       type: binary
