@@ -49,6 +49,30 @@ for `scripts/build_detection_index.py`, which is unchanged.
 
 ### Documentation
 
+#### What 1.0 will promise: a support policy and ADR-0094 (Proposed), 2026-10-31
+
+`docs/support-policy.md` writes down the contract of a 1.0 for one analyst on a
+self-hosted install: a stable contract, data that survives an upgrade and a
+restore, and extraction limits measured on the exported bundle and published
+with each release. No precision threshold blocks a release.
+
+- **Stable surfaces:** the OpenAPI operations under `/api/` (no `/api/v1`), the
+  SSE event names, the container commands and `main.py`'s arguments and exit
+  codes, the variables of `.env.example`, the data kept through migrations, and
+  the STIX mapping with its custom properties and identity rules. Development
+  tools (`scripts/`, `python -m evaluation`) are outside it.
+- **Breaking changes and deprecation**, a capability matrix (supported,
+  experimental, not supported, each with its evidence or the plan item that will
+  provide it), the release blockers, and what 1.x maintenance covers: fixes on
+  the latest minor release only.
+- **LLM providers:** a provider is supported once a run with it is recorded in
+  `docs/eval/`. vLLM with Qwen3.8-27B has one; the default `anthropic` gets
+  one before 1.0; the others are experimental.
+- [ADR-0094](docs/adr/0094-what-1-0-promises.md) records the decisions, the
+  options set aside (a blocking precision threshold, `/api/v1`, N/N-1
+  maintenance, a PyPI package, authentication before 1.0) and the plan of the
+  checks still to build. `releasing.md` and the README link to the page.
+
 #### The pages that describe the latest release name v0.2.0 (ADR-0085), 2026-10-30
 
 `SECURITY.md`, `docs/docker.md`, `docs/releasing.md`,
