@@ -24,3 +24,13 @@ ignore:
       name: python
       version: 3.14.10
       type: binary
+
+  # http.client misreads a chunk size that is negative or not hex: fixed in
+  # 3.16 only.  Only the server that sends the response can trigger it, and it
+  # could send any body it wants instead; urllib3 and h11 parse chunks themselves.
+  - vulnerability: CVE-2026-103995
+    reason: "Not exploitable: only the responding server can trigger it, and it already chooses the body (SECURITY.md, reviewed 2026-10-31)"
+    package:
+      name: python
+      version: 3.14.10
+      type: binary

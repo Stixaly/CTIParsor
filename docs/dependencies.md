@@ -122,12 +122,14 @@ had recorded the PyTorch index's copies for markupsafe, colorama and jinja2.
 
 ### The UI's lock
 
-`frontend/package.json` has no `"overrides"` since Tailwind CSS 4
-(2026-10-10): the one it had forced postcss-selector-parser past a
-Tailwind 3 dependency with a known vulnerability. Tailwind 4 builds through
-`@tailwindcss/vite`, without PostCSS, autoprefixer, braces or
-postcss-selector-parser; `npm audit` reports nothing, dev dependencies
-included.
+`frontend/package.json` has one `"overrides"` entry: `minimatch` `^11.0.1`
+(2026-10-31). ESLint 10 and typescript-eslint 8, even in their latest
+releases, ask for `minimatch` `^10`, and 10.2.6 lets a glob pattern grow
+without bound before matching (Dependabot alert #7); the fix
+is in 11.0.1 only. `npm run check` passes with it. Drop the override once
+both ask for `^11`. The previous one, which forced postcss-selector-parser
+past a Tailwind 3 dependency, went with Tailwind CSS 4 (2026-10-10).
+`npm audit` reports nothing, dev dependencies included.
 
 Change `frontend/package-lock.json` with npm 11, as `make npm-update`, CI
 and the `Dockerfile` do. npm 10 drops the `libc` fields of the lock's native
