@@ -1,0 +1,303 @@
+{
+  "entries": {
+    "id apt_report artifact hashes={\"SHA-256\": \"adea1fcbba34d4236cba8135c79d7cd3624d9aee917f75ddd879aee86a0bd0d4\"}": {
+      "id": "artifact--180a8609-538b-582f-85b8-eb48ee03a382"
+    },
+    "id apt_report attack-pattern name=\"LSASS Memory\"": {
+      "id": "attack-pattern--daf76c9d-477a-5004-be6c-73dc129b5e4d"
+    },
+    "id apt_report attack-pattern name=\"PowerShell\"": {
+      "id": "attack-pattern--b4d20430-6a7e-59fd-b2e4-8d3f6be56a6a"
+    },
+    "id apt_report attack-pattern name=\"Registry Run Keys / Startup Folder\"": {
+      "id": "attack-pattern--21379509-09c4-57a1-82c8-0c126fbf60ff"
+    },
+    "id apt_report attack-pattern name=\"Spearphishing Attachment\"": {
+      "id": "attack-pattern--8180a360-cca4-5911-850e-07d17893cbf8"
+    },
+    "id apt_report attack-pattern name=\"Web Protocols\"": {
+      "id": "attack-pattern--8cf0bccc-5d41-5ed4-b706-835efb7b8ee4"
+    },
+    "id apt_report campaign name=\"Midnight Frost\"": {
+      "id": "campaign--b365b2d3-5581-5c02-b2d8-46f954ee7dd3"
+    },
+    "id apt_report course-of-action name=\"Block frostmail-cdn.test at the proxy\"": {
+      "id": "course-of-action--226626e0-b1d6-5107-9d0c-f1ec2f82a741"
+    },
+    "id apt_report domain-name value=\"frostmail-cdn.test\"": {
+      "id": "domain-name--43264b58-9bdc-59d9-bde0-371299d75349"
+    },
+    "id apt_report email-addr value=\"alerts@mail-notice-ministry.test\"": {
+      "id": "email-addr--70046747-644f-5cc9-8f30-9c440f662609"
+    },
+    "id apt_report file hashes={\"MD5\": \"3f2504e04f8911d39a0c0305e82c3301\"}": {
+      "id": "file--d8b240e8-76bc-51b8-8106-05feb4d42c05"
+    },
+    "id apt_report file hashes={\"SHA-256\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"}": {
+      "id": "file--22f8ff52-8f62-5f03-a53a-6f50f54fd74c"
+    },
+    "id apt_report file name=\"svchost_update.dll\"": {
+      "id": "file--2e454e4a-0165-5c28-a2a9-c07c4f2d2eb5"
+    },
+    "id apt_report identity name=\"CTIParsor\"": {
+      "id": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd"
+    },
+    "id apt_report identity name=\"energy\"": {
+      "id": "identity--166544e2-ba1f-5a6c-89cf-a63d0c01e91c"
+    },
+    "id apt_report identity name=\"government\"": {
+      "id": "identity--f67fbf06-f3cd-58b3-bad9-ed0b4582e8d8"
+    },
+    "id apt_report indicator name=\"Indicator: 3f2504e04f8911d39a0c0305e82c3301\"": {
+      "id": "indicator--d97e1047-aaf6-5971-9401-b2fb9efa2b93"
+    },
+    "id apt_report indicator name=\"Indicator: Global\\\\MidnightFrostMtx\"": {
+      "id": "indicator--6d244288-aebd-58ed-85dc-41f1b6286f64"
+    },
+    "id apt_report indicator name=\"Indicator: HKLM\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run\\\\FrostSvc\"": {
+      "id": "indicator--f54ded35-bf73-558f-acc2-a6a740bc28b3"
+    },
+    "id apt_report indicator name=\"Indicator: alerts@mail-notice-ministry.test\"": {
+      "id": "indicator--fdd54cfa-a477-52a7-b6a7-e7a7c3606b0e"
+    },
+    "id apt_report indicator name=\"Indicator: svchost_update.dll\"": {
+      "id": "indicator--d3878cdc-a378-528e-b647-2e32f5fbaba4"
+    },
+    "id apt_report indicator name=\"Malicious IoC: 91.215.85.17\"": {
+      "id": "indicator--fcde9c8c-df4f-52e8-9a02-8941dca6470e"
+    },
+    "id apt_report indicator name=\"Malicious IoC: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"": {
+      "id": "indicator--8d30e978-c6dd-5439-9ed0-bd61238915c3"
+    },
+    "id apt_report indicator name=\"Malicious IoC: frostmail-cdn.test\"": {
+      "id": "indicator--012743a8-0532-5c22-ae59-b0d1348b1880"
+    },
+    "id apt_report indicator name=\"Malicious IoC: http://frostmail-cdn.test/stage/payload.bin\"": {
+      "id": "indicator--ed78c78e-753b-5156-9ff9-085a1edd5604"
+    },
+    "id apt_report ipv4-addr value=\"91.215.85.17\"": {
+      "id": "ipv4-addr--ab2d6146-cc21-57a2-941a-aaa29f36f27d"
+    },
+    "id apt_report location name=\"Germany\"": {
+      "id": "location--7215cb31-5700-55b2-81b3-633c09c0351d"
+    },
+    "id apt_report location name=\"Poland\"": {
+      "id": "location--1b912957-41a5-55bf-a3ae-547612b0fda2"
+    },
+    "id apt_report malware name=\"SUNBURST\"": {
+      "id": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa"
+    },
+    "id apt_report marking-definition definition={\"statement\": \"PAP:AMBER\"}": {
+      "id": "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+    },
+    "id apt_report marking-definition name=\"TLP:AMBER\"": {
+      "id": "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+    },
+    "id apt_report mutex name=\"Global\\\\MidnightFrostMtx\"": {
+      "id": "mutex--5c7d87aa-eae2-55f7-86ab-4fab27548fcb"
+    },
+    "id apt_report report name=\"Operation Midnight Frost\"": {
+      "id": "random"
+    },
+    "id apt_report threat-actor name=\"APT29\"": {
+      "id": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884"
+    },
+    "id apt_report tool name=\"Mimikatz\"": {
+      "id": "tool--dae20ca4-ebdf-5248-83ac-0f7a52f94fcc"
+    },
+    "id apt_report url value=\"http://frostmail-cdn.test/stage/payload.bin\"": {
+      "id": "url--07657056-ef32-5f66-9287-5549cb3337c7"
+    },
+    "id apt_report vulnerability name=\"CVE-2023-23397\"": {
+      "id": "vulnerability--1060aa6d-d4be-5f85-b0a9-a725b3025f74"
+    },
+    "id apt_report windows-registry-key key=\"HKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run\\\\FrostSvc\"": {
+      "id": "windows-registry-key--7876efa9-c029-5942-bdaa-9c952d452350"
+    },
+    "id embedded_rules domain-name value=\"frostmail-cdn.test\"": {
+      "id": "domain-name--43264b58-9bdc-59d9-bde0-371299d75349"
+    },
+    "id embedded_rules file hashes={\"SHA-256\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"}": {
+      "id": "file--22f8ff52-8f62-5f03-a53a-6f50f54fd74c"
+    },
+    "id embedded_rules identity name=\"CTIParsor\"": {
+      "id": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd"
+    },
+    "id embedded_rules indicator name=\"Indicator: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"": {
+      "id": "indicator--8d30e978-c6dd-5439-9ed0-bd61238915c3"
+    },
+    "id embedded_rules indicator name=\"Indicator: frostmail-cdn.test\"": {
+      "id": "indicator--012743a8-0532-5c22-ae59-b0d1348b1880"
+    },
+    "id embedded_rules indicator name=\"Malicious IoC: 91.215.85.17\"": {
+      "id": "indicator--fcde9c8c-df4f-52e8-9a02-8941dca6470e"
+    },
+    "id embedded_rules indicator name=\"Sigma rule: MidnightFrost Run Key Persistence\"": {
+      "id": "indicator--335f1245-a2ae-55a2-b196-5bd0e8a1591e"
+    },
+    "id embedded_rules indicator name=\"Snort rule: MidnightFrost reverse shell\"": {
+      "id": "indicator--7a78a943-66f7-5109-a861-dacc91c9a961"
+    },
+    "id embedded_rules indicator name=\"Suricata rule: MidnightFrost beacon\"": {
+      "id": "indicator--b055c9e7-3851-5609-b419-947271a6f9aa"
+    },
+    "id embedded_rules indicator name=\"Yara rule: MidnightFrost_Loader\"": {
+      "id": "indicator--c01b6690-fc1b-5607-b6c2-45468815bb67"
+    },
+    "id embedded_rules ipv4-addr value=\"91.215.85.17\"": {
+      "id": "ipv4-addr--ab2d6146-cc21-57a2-941a-aaa29f36f27d"
+    },
+    "id embedded_rules malware name=\"MidnightFrost\"": {
+      "id": "malware--2d2ddfed-bb36-50d4-a670-2cb6b16e3981"
+    },
+    "id embedded_rules marking-definition name=\"TLP:GREEN\"": {
+      "id": "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+    },
+    "id embedded_rules report name=\"MidnightFrost detection notes\"": {
+      "id": "random"
+    },
+    "id long_distance identity name=\"CTIParsor\"": {
+      "id": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd"
+    },
+    "id long_distance malware name=\"Nightbell\"": {
+      "id": "malware--78a72f00-0ab0-59dd-a3f6-819fbd76b03a"
+    },
+    "id long_distance marking-definition name=\"TLP:GREEN\"": {
+      "id": "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"
+    },
+    "id long_distance report name=\"Nightbell campaign notes\"": {
+      "id": "random"
+    },
+    "id long_distance threat-actor name=\"Frost Spider\"": {
+      "id": "threat-actor--94ca10ea-a248-5958-8331-9af624aa201d"
+    },
+    "id long_distance tool name=\"Rclone\"": {
+      "id": "tool--b1368394-5bae-5084-b957-94fd46be0090"
+    },
+    "id minimal domain-name value=\"evil-update.test\"": {
+      "id": "domain-name--45b3ff11-8acf-5e73-9d0d-4888fd6a4249"
+    },
+    "id minimal identity name=\"CTIParsor\"": {
+      "id": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd"
+    },
+    "id minimal indicator name=\"Indicator: 185.220.101.45\"": {
+      "id": "indicator--8e8354cb-f2f9-5e91-9027-16f761042512"
+    },
+    "id minimal indicator name=\"Indicator: evil-update.test\"": {
+      "id": "indicator--c53bd0a6-5d96-5b5e-91cc-1282a6330c93"
+    },
+    "id minimal ipv4-addr value=\"185.220.101.45\"": {
+      "id": "ipv4-addr--baba264e-d558-5d92-bd06-385a02755e25"
+    },
+    "id minimal marking-definition definition={\"statement\": \"PAP:GREEN\"}": {
+      "id": "marking-definition--89484dde-e3d2-547f-a6c6-d14824429eb1"
+    },
+    "id minimal marking-definition name=\"TLP:RED\"": {
+      "id": "marking-definition--5e57c739-391a-4eb3-b6be-7d15ca92d5ed"
+    },
+    "id minimal report name=\"Minimal\"": {
+      "id": "random"
+    },
+    "id policy_pin domain-name value=\"bell-relay.test\"": {
+      "id": "domain-name--715aefaa-5519-58d6-a830-29d86995e7b9"
+    },
+    "id policy_pin file name=\"nightbell.exe\"": {
+      "id": "file--f72ba2a7-8e03-57c2-b39e-62db73673f29"
+    },
+    "id policy_pin identity name=\"CTIParsor\"": {
+      "id": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd"
+    },
+    "id policy_pin identity name=\"finance\"": {
+      "id": "identity--283d4ea0-b6f1-5421-bdab-117a33fdb2b7"
+    },
+    "id policy_pin indicator name=\"Indicator: bell-relay.test\"": {
+      "id": "indicator--6bba8c25-18af-5e88-b7b6-18eebcdfb0a0"
+    },
+    "id policy_pin indicator name=\"Indicator: nightbell.exe\"": {
+      "id": "indicator--645a0086-d463-5fbe-a5aa-eef115cd8a77"
+    },
+    "id policy_pin indicator name=\"Malicious IoC: 45.142.212.100\"": {
+      "id": "indicator--f2e3b70d-2ded-5d43-af71-727982887405"
+    },
+    "id policy_pin ipv4-addr value=\"45.142.212.100\"": {
+      "id": "ipv4-addr--ec68d9ce-b0fc-5614-b166-e9ff09208132"
+    },
+    "id policy_pin malware name=\"Nightbell\"": {
+      "id": "malware--78a72f00-0ab0-59dd-a3f6-819fbd76b03a"
+    },
+    "id policy_pin marking-definition name=\"TLP:AMBER\"": {
+      "id": "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+    },
+    "id policy_pin report name=\"Frost Spider and Nightbell\"": {
+      "id": "random"
+    },
+    "id policy_pin threat-actor name=\"Frost Spider\"": {
+      "id": "threat-actor--94ca10ea-a248-5958-8331-9af624aa201d"
+    },
+    "id policy_pin tool name=\"Rclone\"": {
+      "id": "tool--b1368394-5bae-5084-b957-94fd46be0090"
+    },
+    "property relationship x_evidence_label": {
+      "types": [
+        "string"
+      ]
+    },
+    "property relationship x_evidence_text": {
+      "types": [
+        "string"
+      ]
+    },
+    "property relationship x_inference_rule": {
+      "types": [
+        "string"
+      ]
+    },
+    "property relationship x_inferred_from": {
+      "types": [
+        "array"
+      ]
+    },
+    "property relationship x_pin_evidence": {
+      "types": [
+        "string"
+      ]
+    },
+    "property relationship x_policy_rule": {
+      "types": [
+        "string"
+      ]
+    },
+    "property relationship x_temporal_assertions": {
+      "types": [
+        "array"
+      ]
+    },
+    "property report x_opencti_files": {
+      "types": [
+        "array"
+      ]
+    },
+    "property report x_source_published": {
+      "types": [
+        "object"
+      ]
+    },
+    "property report x_synthesis_stats": {
+      "types": [
+        "object"
+      ]
+    },
+    "property vulnerability x_cvss_v3_score": {
+      "types": [
+        "number"
+      ]
+    },
+    "property vulnerability x_cvss_v3_vector": {
+      "types": [
+        "string"
+      ]
+    }
+  },
+  "generator": "scripts/contract.py",
+  "surface": "stix"
+}

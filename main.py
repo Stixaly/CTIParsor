@@ -218,7 +218,9 @@ def run_directory(input_dir: str, output_dir: str, options: RunOptions | None = 
         sys.exit(1)
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
+    """The pipeline CLI's arguments.  A stable surface (docs/support-policy.md):
+    scripts/contract.py records them in contract/cli.json."""
     parser = argparse.ArgumentParser(
         description="Convertit des rapports CTI en bundles STIX 2.1",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -277,7 +279,11 @@ Exemples :
         "--no-llm", action="store_true",
         help="Ne pas appeler le LLM (équivaut à --disable-stage 3)",
     )
+    return parser
 
+
+def main() -> None:
+    parser = build_parser()
     args = parser.parse_args()
 
     def _ids(values: list[str]) -> set[str]:

@@ -1,0 +1,874 @@
+{
+  "entries": {
+    "compose project": {
+      "name": "ctiparsor"
+    },
+    "compose service app": {
+      "profiles": []
+    },
+    "compose service bootstrap": {
+      "profiles": [
+        "bootstrap"
+      ]
+    },
+    "compose service capture-proxy": {
+      "profiles": []
+    },
+    "compose service ollama": {
+      "profiles": [
+        "ollama"
+      ]
+    },
+    "compose service postgres": {
+      "profiles": []
+    },
+    "compose service proxy": {
+      "profiles": [
+        "proxy"
+      ]
+    },
+    "compose service worker": {
+      "profiles": []
+    },
+    "compose volume cti-cache": {},
+    "compose volume cti-state": {},
+    "compose volume ollama-models": {},
+    "compose volume pg-data-18": {},
+    "env ANTHROPIC_API_KEY": {
+      "set": true,
+      "values": [
+        "sk-ant-xxxxxxxxxxxxxxxxxxxx"
+      ]
+    },
+    "env ANTHROPIC_MODEL": {
+      "set": true,
+      "values": [
+        "claude-sonnet-4-6"
+      ]
+    },
+    "env API_ALLOWED_HOSTS": {
+      "set": false,
+      "values": [
+        "localhost,127.0.0.1,[::1]"
+      ]
+    },
+    "env API_HOST": {
+      "set": false,
+      "values": [
+        "127.0.0.1"
+      ]
+    },
+    "env API_PORT": {
+      "set": false,
+      "values": [
+        "8000"
+      ]
+    },
+    "env API_QUEUE_MAX_DEPTH": {
+      "set": false,
+      "values": [
+        "50"
+      ]
+    },
+    "env API_RELOAD": {
+      "set": false,
+      "values": [
+        "false"
+      ]
+    },
+    "env API_WORKERS": {
+      "set": false,
+      "values": [
+        "1"
+      ]
+    },
+    "env ATTACK_RELEASE": {
+      "set": false,
+      "values": [
+        "20.0"
+      ]
+    },
+    "env BENIGN_IOC_FILTER": {
+      "set": false,
+      "values": [
+        "true"
+      ]
+    },
+    "env CHECKPOINT_EVERY": {
+      "set": true,
+      "values": [
+        "5"
+      ]
+    },
+    "env CHUNK_MAX_CHARS": {
+      "set": false,
+      "values": [
+        "3000"
+      ]
+    },
+    "env CHUNK_OVERLAP": {
+      "set": false,
+      "values": [
+        "400"
+      ]
+    },
+    "env CONSENSUS_PROVIDER": {
+      "set": true,
+      "values": [
+        "mistral"
+      ]
+    },
+    "env CTIPARSOR_CAPTURE_PROXY": {
+      "set": false,
+      "values": [
+        ""
+      ]
+    },
+    "env CTIPARSOR_CAPTURE_UNSANDBOXED": {
+      "set": false,
+      "values": [
+        "false"
+      ]
+    },
+    "env CTIPARSOR_OUTPUT_DIR": {
+      "set": false,
+      "values": [
+        ""
+      ]
+    },
+    "env CTIPARSOR_ROLE": {
+      "set": false,
+      "values": [
+        "all"
+      ]
+    },
+    "env CTIPARSOR_STATE_DIR": {
+      "set": false,
+      "values": [
+        ""
+      ]
+    },
+    "env CTIPARSOR_UPLOADS_DIR": {
+      "set": false,
+      "values": [
+        ""
+      ]
+    },
+    "env CTI_APP_CPUS": {
+      "set": false,
+      "values": [
+        "2"
+      ]
+    },
+    "env CTI_APP_MEMORY": {
+      "set": false,
+      "values": [
+        "3g"
+      ]
+    },
+    "env CTI_BIND": {
+      "set": false,
+      "values": [
+        "127.0.0.1"
+      ]
+    },
+    "env CTI_BOOTSTRAP_CPUS": {
+      "set": false,
+      "values": [
+        "2"
+      ]
+    },
+    "env CTI_BOOTSTRAP_MEMORY": {
+      "set": false,
+      "values": [
+        "4g"
+      ]
+    },
+    "env CTI_DB_CPUS": {
+      "set": false,
+      "values": [
+        "1"
+      ]
+    },
+    "env CTI_DB_MEMORY": {
+      "set": false,
+      "values": [
+        "512m"
+      ]
+    },
+    "env CTI_DB_NAME": {
+      "set": false,
+      "values": [
+        "ctiparsor"
+      ]
+    },
+    "env CTI_DB_PASSWORD": {
+      "set": true,
+      "values": [
+        ""
+      ]
+    },
+    "env CTI_DB_USER": {
+      "set": false,
+      "values": [
+        "ctiparsor"
+      ]
+    },
+    "env CTI_DEV_IMAGE": {
+      "set": false,
+      "values": [
+        "ctiparsor:dev"
+      ]
+    },
+    "env CTI_ENV_FILE": {
+      "set": false,
+      "values": [
+        ".env"
+      ]
+    },
+    "env CTI_GIT_REV": {
+      "set": false,
+      "values": [
+        ""
+      ]
+    },
+    "env CTI_IMAGE": {
+      "set": false,
+      "values": [
+        "ctiparsor:local"
+      ]
+    },
+    "env CTI_INSTALL_CAPTURE": {
+      "set": false,
+      "values": [
+        "true"
+      ]
+    },
+    "env CTI_OLLAMA_CONTEXT_LENGTH": {
+      "set": false,
+      "values": [
+        "16384"
+      ]
+    },
+    "env CTI_OLLAMA_CPUS": {
+      "set": false,
+      "values": [
+        "8"
+      ]
+    },
+    "env CTI_OLLAMA_MEMORY": {
+      "set": false,
+      "values": [
+        "12g"
+      ]
+    },
+    "env CTI_PORT": {
+      "set": false,
+      "values": [
+        "8000"
+      ]
+    },
+    "env CTI_PROXY_CPUS": {
+      "set": false,
+      "values": [
+        "0.5"
+      ]
+    },
+    "env CTI_PROXY_MEMORY": {
+      "set": false,
+      "values": [
+        "128m"
+      ]
+    },
+    "env CTI_TLS_BIND": {
+      "set": false,
+      "values": [
+        "0.0.0.0"
+      ]
+    },
+    "env CTI_TLS_PORT": {
+      "set": false,
+      "values": [
+        "8443"
+      ]
+    },
+    "env CTI_WORKER_CPUS": {
+      "set": false,
+      "values": [
+        "4"
+      ]
+    },
+    "env CTI_WORKER_MEMORY": {
+      "set": false,
+      "values": [
+        "6g"
+      ]
+    },
+    "env CVE_ENRICHMENT": {
+      "set": false,
+      "values": [
+        "false"
+      ]
+    },
+    "env CYNER_BATCH_SIZE": {
+      "set": false,
+      "values": [
+        "4"
+      ]
+    },
+    "env CYNER_CHUNK_CHARS": {
+      "set": false,
+      "values": [
+        "1600"
+      ]
+    },
+    "env CYNER_ENABLED": {
+      "set": true,
+      "values": [
+        "true"
+      ]
+    },
+    "env CYNER_MODEL": {
+      "set": false,
+      "values": [
+        "PranavaKailash/CyNER-2.0-DeBERTa-v3-base"
+      ]
+    },
+    "env DATABASE_URL": {
+      "set": false,
+      "values": [
+        "postgresql://ctiparsor@localhost:5432/ctiparsor"
+      ]
+    },
+    "env DB_MIGRATION_LOCK_TIMEOUT_S": {
+      "set": false,
+      "values": [
+        "600"
+      ]
+    },
+    "env ENABLE_CONSENSUS": {
+      "set": true,
+      "values": [
+        "false"
+      ]
+    },
+    "env ENABLE_DOCUMENT_LEVEL_RELATIONS": {
+      "set": true,
+      "values": [
+        "false"
+      ]
+    },
+    "env ENABLE_STIX_VERIFICATION": {
+      "set": true,
+      "values": [
+        "false"
+      ]
+    },
+    "env ENABLE_TTP_VERIFICATION": {
+      "set": true,
+      "values": [
+        "true"
+      ]
+    },
+    "env ENTITY_OVERRIDES_ENABLED": {
+      "set": true,
+      "values": [
+        "true"
+      ]
+    },
+    "env ENV": {
+      "set": false,
+      "values": [
+        "development"
+      ]
+    },
+    "env FORWARDED_ALLOW_IPS": {
+      "set": false,
+      "values": [
+        "127.0.0.1"
+      ]
+    },
+    "env GAZETTEER_POLICY": {
+      "set": false,
+      "values": [
+        "shadow"
+      ]
+    },
+    "env GEMINI_API_KEY": {
+      "set": true,
+      "values": [
+        ""
+      ]
+    },
+    "env GEMINI_MODEL": {
+      "set": true,
+      "values": [
+        "gemini-2.5-pro"
+      ]
+    },
+    "env GLINER_BATCH_SIZE": {
+      "set": false,
+      "values": [
+        "4"
+      ]
+    },
+    "env GLINER_CHUNK_CHARS": {
+      "set": false,
+      "values": [
+        "1600"
+      ]
+    },
+    "env GLINER_ENABLED": {
+      "set": true,
+      "values": [
+        "true"
+      ]
+    },
+    "env GLINER_MODEL": {
+      "set": true,
+      "values": [
+        "urchade/gliner_large-v2.1"
+      ]
+    },
+    "env GLINER_THRESHOLD": {
+      "set": true,
+      "values": [
+        "0.40"
+      ]
+    },
+    "env HF_TOKEN": {
+      "set": true,
+      "values": [
+        ""
+      ]
+    },
+    "env JOB_RETENTION_DAYS": {
+      "set": false,
+      "values": [
+        "0"
+      ]
+    },
+    "env JOB_RETENTION_SWEEP_S": {
+      "set": false,
+      "values": [
+        "3600"
+      ]
+    },
+    "env LLM_DOC_MAX_PROMPT_LENGTH": {
+      "set": false,
+      "values": [
+        "300000"
+      ]
+    },
+    "env LLM_MAX_OUTPUT_TOKENS": {
+      "set": false,
+      "values": [
+        "8192"
+      ]
+    },
+    "env LLM_MAX_PROMPT_LENGTH": {
+      "set": false,
+      "values": [
+        "32000"
+      ]
+    },
+    "env LLM_MAX_RESPONSE_LENGTH": {
+      "set": false,
+      "values": [
+        "48000"
+      ]
+    },
+    "env LLM_MAX_RETRIES": {
+      "set": false,
+      "values": [
+        "3"
+      ]
+    },
+    "env LLM_PARALLELISM": {
+      "set": true,
+      "values": [
+        "3"
+      ]
+    },
+    "env LLM_PROVIDER": {
+      "set": true,
+      "values": [
+        "anthropic"
+      ]
+    },
+    "env LLM_SEED": {
+      "set": false,
+      "values": [
+        "13"
+      ]
+    },
+    "env LLM_TEMPERATURE": {
+      "set": false,
+      "values": [
+        "0"
+      ]
+    },
+    "env LLM_TIMEOUT": {
+      "set": true,
+      "values": [
+        "120"
+      ]
+    },
+    "env LMSTUDIO_API_KEY": {
+      "set": false,
+      "values": [
+        ""
+      ]
+    },
+    "env LMSTUDIO_BASE_URL": {
+      "set": true,
+      "values": [
+        "http://localhost:1234"
+      ]
+    },
+    "env LMSTUDIO_MODEL": {
+      "set": true,
+      "values": [
+        "lmstudio-model"
+      ]
+    },
+    "env LOG_BACKUP_COUNT": {
+      "set": false,
+      "values": [
+        "5"
+      ]
+    },
+    "env LOG_FILE": {
+      "set": false,
+      "values": [
+        ""
+      ]
+    },
+    "env LOG_FORMAT": {
+      "set": false,
+      "values": [
+        "text"
+      ]
+    },
+    "env LOG_LEVEL": {
+      "set": false,
+      "values": [
+        "INFO"
+      ]
+    },
+    "env MAX_LOG_SIZE": {
+      "set": false,
+      "values": [
+        "10485760"
+      ]
+    },
+    "env MISTRAL_API_KEY": {
+      "set": true,
+      "values": [
+        ""
+      ]
+    },
+    "env MISTRAL_MODEL": {
+      "set": true,
+      "values": [
+        "mistral-small-latest"
+      ]
+    },
+    "env NER_PRECISION_FILTERS": {
+      "set": false,
+      "values": [
+        "true"
+      ]
+    },
+    "env OCR_LANG": {
+      "set": false,
+      "values": [
+        "eng"
+      ]
+    },
+    "env OLLAMA_API_KEY": {
+      "set": false,
+      "values": [
+        ""
+      ]
+    },
+    "env OLLAMA_BASE_URL": {
+      "set": true,
+      "values": [
+        "http://localhost:11434"
+      ]
+    },
+    "env OLLAMA_MODEL": {
+      "set": true,
+      "values": [
+        "mistral"
+      ]
+    },
+    "env PGPASSWORD": {
+      "set": false,
+      "values": [
+        ""
+      ]
+    },
+    "env PIPELINE_DISABLED_STAGES": {
+      "set": false,
+      "values": [
+        ""
+      ]
+    },
+    "env REVIEW_CONTROL_SAMPLE_RATE": {
+      "set": false,
+      "values": [
+        "0.10"
+      ]
+    },
+    "env STIX_AUTHOR_NAME": {
+      "set": true,
+      "values": [
+        "CTIParsor"
+      ]
+    },
+    "env STIX_ENRICHMENT_ENABLED": {
+      "set": false,
+      "values": [
+        "true"
+      ]
+    },
+    "env STIX_TLP": {
+      "set": true,
+      "values": [
+        "amber"
+      ]
+    },
+    "env STIX_VERIFY_BATCH_SIZE": {
+      "set": false,
+      "values": [
+        "40"
+      ]
+    },
+    "env STIX_VERIFY_MIN_RELS": {
+      "set": true,
+      "values": [
+        "1"
+      ]
+    },
+    "env THRESHOLD_CALIBRATION_ENABLED": {
+      "set": true,
+      "values": [
+        "true"
+      ]
+    },
+    "env TTP_ADVISORY_GATE": {
+      "set": false,
+      "values": [
+        "true"
+      ]
+    },
+    "env TTP_CANDIDATES_PER_CHUNK": {
+      "set": false,
+      "values": [
+        "40"
+      ]
+    },
+    "env TTP_CANDIDATES_PER_PASSAGE": {
+      "set": false,
+      "values": [
+        "10"
+      ]
+    },
+    "env TTP_EMBEDDING_MODEL": {
+      "set": true,
+      "values": [
+        "all-MiniLM-L6-v2"
+      ]
+    },
+    "env TTP_HIGH_THRESHOLD": {
+      "set": false,
+      "values": [
+        "0.62"
+      ]
+    },
+    "env TTP_KEYWORD_GATE": {
+      "set": false,
+      "values": [
+        "true"
+      ]
+    },
+    "env TTP_MAX_CANDIDATES": {
+      "set": false,
+      "values": [
+        "200"
+      ]
+    },
+    "env TTP_MEDIUM_THRESHOLD": {
+      "set": false,
+      "values": [
+        "0.48"
+      ]
+    },
+    "env TTP_MODE": {
+      "set": false,
+      "values": [
+        "select"
+      ]
+    },
+    "env TTP_RETRIEVAL_CORPUS": {
+      "set": false,
+      "values": [
+        "both"
+      ]
+    },
+    "env TTP_RETRIEVAL_KEYWORD_GATE": {
+      "set": false,
+      "values": [
+        "true"
+      ]
+    },
+    "env TTP_RETRIEVAL_METHOD": {
+      "set": false,
+      "values": [
+        "rrf"
+      ]
+    },
+    "env TTP_SELECT_MAX_OUTPUT_TOKENS": {
+      "set": false,
+      "values": [
+        ""
+      ]
+    },
+    "env TTP_SELECT_MIN_QUOTE_WORDS": {
+      "set": false,
+      "values": [
+        "3"
+      ]
+    },
+    "env TTP_SELECT_SKIPPED_CHUNKS": {
+      "set": false,
+      "values": [
+        "false"
+      ]
+    },
+    "env TTP_SEMANTIC_DOMAINS": {
+      "set": false,
+      "values": [
+        "enterprise-attack,mobile-attack,ics-attack"
+      ]
+    },
+    "env TTP_TOP2_MARGIN": {
+      "set": false,
+      "values": [
+        "0.05"
+      ]
+    },
+    "env TTP_UNWRAP_LINES": {
+      "set": false,
+      "values": [
+        "true"
+      ]
+    },
+    "env TTP_VERIFY_MIN": {
+      "set": true,
+      "values": [
+        "1"
+      ]
+    },
+    "env VISION_ASSUME_CAPABLE": {
+      "set": false,
+      "values": [
+        "false"
+      ]
+    },
+    "env VISION_CONCURRENCY": {
+      "set": false,
+      "values": [
+        "1"
+      ]
+    },
+    "env VISION_MODEL": {
+      "set": true,
+      "values": [
+        ""
+      ]
+    },
+    "env VISION_PROVIDER": {
+      "set": true,
+      "values": [
+        "none"
+      ]
+    },
+    "env VISION_TIMEOUT_S": {
+      "set": true,
+      "values": [
+        "120"
+      ]
+    },
+    "env VLLM_API_KEY": {
+      "set": false,
+      "values": [
+        ""
+      ]
+    },
+    "env VLLM_BASE_URL": {
+      "set": true,
+      "values": [
+        "http://localhost:8000"
+      ]
+    },
+    "env VLLM_ENABLE_THINKING": {
+      "set": true,
+      "values": [
+        "false"
+      ]
+    },
+    "env VLLM_MODEL": {
+      "set": true,
+      "values": [
+        "vllm-model"
+      ]
+    },
+    "env WORKER_ALIVE_FILE": {
+      "set": false,
+      "values": [
+        "/tmp/ctiparsor-worker.alive"
+      ]
+    },
+    "env WORKER_DRAIN_S": {
+      "set": false,
+      "values": [
+        "60"
+      ]
+    },
+    "env WORKER_HEARTBEAT_S": {
+      "set": false,
+      "values": [
+        "30"
+      ]
+    },
+    "env WORKER_JOB_TIMEOUT": {
+      "set": false,
+      "values": [
+        "1800"
+      ]
+    },
+    "env WORKER_LEASE_TIMEOUT_S": {
+      "set": false,
+      "values": [
+        "180"
+      ]
+    },
+    "env WORKER_MAX_CONCURRENT": {
+      "set": false,
+      "values": [
+        "1"
+      ]
+    },
+    "env WORKER_POLL_S": {
+      "set": false,
+      "values": [
+        "2"
+      ]
+    }
+  },
+  "generator": "scripts/contract.py",
+  "surface": "config"
+}

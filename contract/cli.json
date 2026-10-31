@@ -1,0 +1,164 @@
+{
+  "entries": {
+    "entrypoint bootstrap": {},
+    "entrypoint bootstrap --no-corpora": {},
+    "entrypoint bootstrap --no-models": {},
+    "entrypoint bootstrap --strict": {},
+    "entrypoint check": {},
+    "entrypoint cli": {},
+    "entrypoint serve": {},
+    "entrypoint worker": {},
+    "main.py --disable-stage": {
+      "action": "append",
+      "choices": null,
+      "const": null,
+      "default": [],
+      "group": null,
+      "nargs": null,
+      "required": false,
+      "type": null
+    },
+    "main.py --input-dir": {
+      "action": "store",
+      "choices": null,
+      "const": null,
+      "default": null,
+      "group": {
+        "members": [
+          "--input-dir",
+          "file"
+        ],
+        "required": true
+      },
+      "nargs": null,
+      "required": false,
+      "type": null
+    },
+    "main.py --no-llm": {
+      "action": "store_true",
+      "choices": null,
+      "const": true,
+      "default": false,
+      "group": null,
+      "nargs": 0,
+      "required": false,
+      "type": null
+    },
+    "main.py --output": {
+      "action": "store",
+      "choices": null,
+      "const": null,
+      "default": "output/bundle.json",
+      "group": null,
+      "nargs": null,
+      "required": false,
+      "type": null
+    },
+    "main.py --output-dir": {
+      "action": "store",
+      "choices": null,
+      "const": null,
+      "default": "output",
+      "group": null,
+      "nargs": null,
+      "required": false,
+      "type": null
+    },
+    "main.py --policy": {
+      "action": "store",
+      "choices": null,
+      "const": null,
+      "default": "db",
+      "group": null,
+      "nargs": null,
+      "required": false,
+      "type": null
+    },
+    "main.py --require-stage": {
+      "action": "append",
+      "choices": null,
+      "const": null,
+      "default": [],
+      "group": null,
+      "nargs": null,
+      "required": false,
+      "type": null
+    },
+    "main.py file": {
+      "action": "store",
+      "choices": null,
+      "const": null,
+      "default": null,
+      "group": {
+        "members": [
+          "--input-dir",
+          "file"
+        ],
+        "required": true
+      },
+      "nargs": "?",
+      "required": false,
+      "type": null
+    },
+    "make db-upgrade": {},
+    "stage 1": {
+      "can_disable": false
+    },
+    "stage 1f": {
+      "can_disable": true
+    },
+    "stage 2": {
+      "can_disable": true
+    },
+    "stage 2b": {
+      "can_disable": true
+    },
+    "stage 2c": {
+      "can_disable": true
+    },
+    "stage 2d": {
+      "can_disable": true
+    },
+    "stage 2e": {
+      "can_disable": true
+    },
+    "stage 2f": {
+      "can_disable": true
+    },
+    "stage 2g": {
+      "can_disable": true
+    },
+    "stage 3": {
+      "can_disable": true
+    },
+    "stage 3d": {
+      "can_disable": true
+    },
+    "stage 3doc": {
+      "can_disable": true
+    },
+    "stage 3e": {
+      "can_disable": true
+    },
+    "stage 3f": {
+      "can_disable": true
+    },
+    "stage 3r": {
+      "can_disable": false
+    },
+    "stage 4": {
+      "can_disable": true
+    },
+    "stage 4b": {
+      "can_disable": true
+    },
+    "stage 4c": {
+      "can_disable": true
+    },
+    "stage 5": {
+      "can_disable": true
+    }
+  },
+  "generator": "scripts/contract.py",
+  "surface": "cli"
+}

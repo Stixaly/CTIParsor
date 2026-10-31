@@ -187,6 +187,16 @@ bash scripts/docker_smoke.sh --no-build --job   # also process a sample report e
 
   When in doubt, pick `"extraction"`: it never claims a rebuild fixed what a
   rebuild cannot.
+- **A change to a stable surface is recorded.** `tests/test_contract.py` fails
+  when the API schema, `main.py`'s arguments, the container commands,
+  `.env.example`, the Compose layout or the STIX custom properties and ids
+  differ from `contract/` ([`docs/support-policy.md`](docs/support-policy.md),
+  ADR-0094 item 1). Run `make contract` and commit `contract/` with the change.
+  A breaking change needs `make contract ACCEPT_BREAKING=1`, a CHANGELOG entry
+  and, from 1.0 on, a major version (before 1.0, a minor one:
+  [`docs/releasing.md`](docs/releasing.md#versioning)); a changed default, a
+  CHANGELOG entry that names it.
+  Regenerating to turn the test green does not approve a change.
 - **Generated policy data** — `pipeline/data/gazetteer_policy.json` is built
   from `docs/gazetteer-ordinary-words.md`. After any change to that document,
   run `docker compose run --rm dev python scripts/build_gazetteer_policy.py`

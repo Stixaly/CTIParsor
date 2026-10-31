@@ -36,6 +36,7 @@ be on the host besides Docker.
 | `make run-dir` | Run pipeline on every file in `input/` |
 | `make check` | Diagnostic: list which pipeline stages are available |
 | `make check-docs` | Verify every number claimed in the README and `docs/pipeline.md` against the source of truth (CI runs the same check through `tests/test_doc_claims.py`) |
+| `make contract` | Record the stable contract of `docs/support-policy.md` in `contract/*.json`; refuses a breaking change unless `ACCEPT_BREAKING=1` (`scripts/contract.py`, ADR-0094 item 1). CI checks it through `tests/test_contract.py` |
 | `make audit` | Scan Python + npm deps for known CVEs (`pip-audit` + `npm audit`), no image build needed |
 | `make lock` | Resolve `requirements/requirements*.txt` into the hashed locks the image, CI and the audit install with `pip install --require-hashes` (`scripts/lock.sh`, ADR-0080) |
 | `make update-deps` | Re-resolve to the newest versions the ranges allow, rebuild the image from the new lock, run tests |
@@ -123,6 +124,7 @@ CTIParsor/
 │
 ├── main.py                        # CLI entry point
 ├── evaluation/                    # Evaluation protocol: AnnoCTR, in-house set, paired comparisons (ADR-0060)
+├── contract/                      # The stable contract, recorded by make contract and checked by tests/test_contract.py (ADR-0094 item 1)
 │
 ├── pipeline/
 │   ├── stage1_ingestion.py        # Parsing, defanging, chunking + overlap
@@ -250,6 +252,7 @@ CTIParsor/
 │   ├── check_stages.py            # Diagnostic: which stages are available (make check)
 │   ├── check_doc_claims.py        # Doc drift guard: documented numbers vs source (make check-docs)
 │   ├── check_coverage.py          # Per-area coverage floors on top of the total one (make coverage)
+│   ├── contract.py                # Record (make contract) or check the stable contract in contract/ (ADR-0094 item 1)
 │   ├── check_flag_equivalence.py  # env_bool vs the old per-flag parsing, value by value
 │   ├── check_unescape_equivalence.py # A/B of the atom unescape refactor on real corpus data
 │   ├── check_evidence_gate.py     # Validate the coverage evidence gate on the store (ADR-0030)

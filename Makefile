@@ -5,7 +5,7 @@
 
 .PHONY: setup package-offline setup-offline \
         test test-fast lint typecheck coverage frontend-check ci \
-        run run-dir check check-docs \
+        run run-dir check check-docs contract \
         corpora detection-index backfill-rules \
         audit lock update-deps npm-outdated npm-update clean \
         docker-build docker-up docker-bootstrap docker-smoke docker-logs docker-down db-upgrade \
@@ -106,6 +106,16 @@ check: .secrets/db_password
 ## Verify every number claimed in README.md still matches the source of truth
 check-docs: .secrets/db_password
 	$(DEV_RUN) python scripts/check_doc_claims.py
+
+## Record the stable contract (docs/support-policy.md, ADR-0094 item 1) in
+## contract/*.json: the API's OpenAPI schema, main.py's arguments and the
+## container commands, .env.example and the Compose layout, the STIX custom
+## properties and ids (scripts/contract.py).  Refuses a breaking change unless
+## ACCEPT_BREAKING=1.  Writes into the checkout as the host user, as `make lock` does.
+ACCEPT_BREAKING ?=
+contract: .secrets/db_password
+	docker compose run --rm --user "$$(id -u):$$(id -g)" -e HOME=/tmp dev \
+	    python scripts/contract.py write $(if $(filter 1,$(ACCEPT_BREAKING)),--accept-breaking)
 
 # ── Dependency maintenance ────────────────────────────────────────────────────
 # All Python/Node dependencies live in the image now, not a host venv/
