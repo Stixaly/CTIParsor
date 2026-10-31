@@ -289,6 +289,12 @@ The fast-tests job runs it on every pull request. From `claude/held-for-review`
 It writes the old database with `<ref>`'s code rather than restoring a
 `pg_dump`: the runner's PostgreSQL client is older than the 18 server.
 
+Since 2026-10-31 (ADR-0094 item 2) the check also starts from the last
+release tag, on every push to main, every pull request and every weekly run.
+It compares every value of every table instead of the row counts, reads the
+seed back through the API's routes, and checks the state volume's files. Its
+seed is `scripts/migration_seed.py`.
+
 ## Action items
 
 1. [x] `api/migrate.py`: runner (`status`, `up`, `check`), `schema_migrations`,

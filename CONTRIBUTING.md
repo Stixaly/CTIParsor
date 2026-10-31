@@ -54,9 +54,9 @@ at (`CTIPARSOR_TEST_DATABASE_URL`, set in `compose.yaml`):
 
 `make ci` runs the lint, type, test, coverage-floor and frontend steps of the
 pull-request CI, with the same scope and the same floors. It does not run
-`reuse lint`, the migration check against the base commit
-(`scripts/check_migration_from.py`, pull requests only, which needs a
-PostgreSQL server), or the other checks: dependency audit and review,
+`reuse lint`, the migration check from the last release and the base commit
+(`scripts/check_migration_from.py`, which needs a PostgreSQL server and the
+release tag), or the other checks: dependency audit and review,
 container image, CodeQL and fuzzing. Each step also has a target of its own:
 
 ```bash

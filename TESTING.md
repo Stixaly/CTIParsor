@@ -482,6 +482,76 @@ the file is read), and `x_ctiparsor_enrichment` (no enriched reference
 bundle). A new alias of an option, or a `case` label that names two
 commands, reads as breaking: record it with `ACCEPT_BREAKING=1`.
 
+### Migration from a release (ADR-0094 item 2)
+`python scripts/check_migration_from.py REF [REF ...]` (`--last-release` adds
+the highest tag `vX.Y.Z` reachable from HEAD) runs each ref's own code from a
+`git archive`, in a throwaway database and state directory, then:
+
+- seeds the database that code built (`scripts/migration_seed.py`): four
+  reports (one completed with its decisions, their journal, a held claim and
+  dated relationships; one whose bundle the schemas refused; one enriching a
+  STIX baseline; one that failed), the overrides, thresholds, relationship
+  policy, a detection rule, the figure and CVE caches, and the uploaded sources
+  and exported bundles of the state volume. Only the columns that release had
+  are written; every table gets rows, and every column a non-NULL value in at
+  least one of them, unless `NOT_SEEDED` says why not. The bundles and ledgers
+  are the ref's own Stage 4 reference builds when its tree has them, this
+  code's otherwise (`v0.1.0` has none): the report's `payloads:` line says
+  which;
+- reads every table, migrates with this code (`python -m api.migrate up`),
+  reads them again and compares every row, value and column type, and checks
+  that each identity column's sequence still gives a value above the highest
+  stored (`scripts/migration_compare.py`). A change a migration makes on
+  purpose is declared in `EXPECTED_CHANGES`, in the script;
+- starts this code's app on it (`scripts/migration_readback.py`, in its own
+  process, `CTIPARSOR_ROLE=api`) and reads the seed back through the routes:
+  jobs, entities and relationships with their decisions, bundles with their
+  verdict and ledger, the baseline, the source files, the progress events, the
+  overrides, thresholds, relationship policy and detection rule. A read-back
+  that breaks fails the ref with the end of its stderr;
+- reads every table a third time and compares it with the second, sequences
+  included: the app's first start and its read routes change nothing;
+- checks the state directory's files: unchanged, but `db-identity.json`, which
+  each start rewrites (same cluster, this code's schema version).
+
+Every process of both trees runs with `PYTHON_DOTENV_DISABLED=1`: a
+developer's `.env` changes nothing. A server the script cannot create a
+database on exits 2 with one line.
+
+The fast-tests job runs it from the last release on every run and from the
+base commit on a pull request; it takes about 70 s per ref under WSL on
+`/mnt/c`. Its parts are tested without a `git archive`:
+`tests/test_migration_seed.py` (this code's schema seeded whole, version 11's
+adapted, a table left empty, a column NULL in every row and a required column
+left out refused, a release's own Stage 4 builds seeded),
+`tests/test_migration_compare.py` (from versions 11 and 13 every value kept, a
+lossy migration caught value by value, a retyped column, a restarted
+sequence), `tests/test_migration_readback.py` (every seeded row through the
+routes, a value a route stops returning named, the expectations taken from the
+payloads seeded) and `tests/test_check_migration_from.py` (refs, exit codes,
+an unreachable server, the throwaway database dropped, the files, no `.env`,
+and `_check` itself with its steps stubbed: each difference returned, a
+read-back that breaks). Not covered: the tables no route reads (the decision
+journal, figures, the figure and CVE caches, the rules' side tables) are
+compared in the database only; `detection_corpora.local.yaml`, whose path is
+the checkout's. Known limits:
+
+- `EXPECTED_CHANGES` names a column or a whole table (`table.*`), not rows: a
+  declared change excuses every change there, deleted rows included, and a
+  declared drop or rename stops the comparison of that data.
+- A run killed by a signal other than Ctrl-C (SIGTERM, SIGKILL, a WSL
+  distribution powered off) leaves its `ctiparsor_migcheck_*` database on the
+  server; nothing sweeps them.
+- CI takes the highest `vX.Y.Z` on origin, whether or not the commit under
+  test contains it: a pull request re-run after a release with a newer schema
+  fails ("the database is at schema version N ... this code knows up to M")
+  until it is rebased.
+
+```bash
+CTIPARSOR_TEST_DATABASE_URL=postgresql://user:pw@host/db \
+  python scripts/check_migration_from.py --last-release origin/main
+```
+
 ### Persistence / worker (integration)
 The write→read round-trip through PostgreSQL (`worker._save_entities` →
 `re_run_final_stages`) and schema migrations. **Currently the weakest layer** (see §6).
@@ -652,9 +722,10 @@ the first four pass:
 1. **fast-tests** (every push and PR): `ruff check .`, `mypy` (scope and flags
    in `pyproject.toml`), every test with `CTIPARSOR_REQUIRE_TEST_DEPS=1`, the
    coverage floors. Installs the OpenCTI pattern parsers, google-re2 and
-   numpy, but not torch/transformers (`SKIP_HEAVY_MODELS=1`). No secrets. On
-   a PR, also migrates a database written by the base commit's code
-   (`scripts/check_migration_from.py`, ADR-0077).
+   numpy, but not torch/transformers (`SKIP_HEAVY_MODELS=1`). No secrets. It
+   also migrates a database written by the last release, and on a PR one
+   written by the base commit's code, and compares their content
+   (`scripts/check_migration_from.py`, ADR-0077, ADR-0094 item 2).
 2. **frontend-tests**: `npm run lint`, `npm run typecheck`, `npm test`.
 3. **container-image**: builds the image, runs `scripts/docker_smoke.sh`, and
    scans the image with Grype into Code scanning (not a gate, ADR-0078).
@@ -677,5 +748,6 @@ pushed. A pull request that changes it, `scripts/release.py` or
 with nothing published (ADR-0085, `docs/releasing.md`).
 
 `make ci` runs jobs 1 and 2 locally, in the `dev` and `frontend-dev` containers,
-except two steps of job 1: `reuse lint`, and the migration check against the
-pull request's base commit (`scripts/check_migration_from.py`).
+except two steps of job 1: `reuse lint`, and the migration check from the
+last release and the pull request's base commit
+(`scripts/check_migration_from.py`).

@@ -182,7 +182,13 @@ newer, nothing to install). Its exit code is `0` when done, `1` when it refuses
    3. Waits for main's CI (`ci.yml`, push event) on that commit, up to an
       hour, and requires it to have passed. It retries after a transient API
       error. If five checks, a minute apart, find no CI run, it fails: the wrong
-      commit was tagged.
+      commit was tagged. That CI migrates a database written by the last
+      release (fast-tests, `scripts/check_migration_from.py`): a commit whose
+      migrations lose or change what the last release stored is not released.
+      When that step fails, its log names each table, row and column. Fix the
+      migration in a pull request, or declare a deliberate rewrite in
+      `EXPECTED_CHANGES` (in the script), then tag the commit that passes (see
+      *When the workflow fails*).
    4. Sets up buildx and logs in to GHCR. This comes before the files: reading
       the image anonymously works only while the package is public.
    5. Runs `scripts/release_files.sh`. It checks the tag again, finds the image

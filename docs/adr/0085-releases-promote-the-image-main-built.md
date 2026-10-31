@@ -272,9 +272,13 @@ Four things wait for a first release:
        Done: PR #170, then the tag `v0.1.0` on its merge commit 4bdfa8f; the
        Release was published on 2026-10-17. The statements were changed on
        2026-10-24. Entering the answers on bestpractices.dev is item 6.
-5. [ ] Follow-up, not done here: with release tags, `scripts/check_migration_from.py`
+5. [x] Follow-up, not done here: with release tags, `scripts/check_migration_from.py`
        could also start from the last release tag. ADR-0077 §7 takes the pull
        request's base commit because "there are no release tags".
+
+       Done on 2026-10-31 by ADR-0094 item 2: CI runs it from the highest tag
+       `vX.Y.Z` on origin (fetched at depth 1) on every push to main, every pull
+       request and every weekly run, and from the base commit on a pull request.
 6. [ ] Maintainer: enter the answers of `docs/openssf-best-practices.md` on
        bestpractices.dev. Not done on 2026-10-24: Scorecard's
        CII-Best-Practices check is 0 ("no effort to earn an OpenSSF best

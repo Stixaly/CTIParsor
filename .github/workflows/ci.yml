@@ -102,20 +102,33 @@ jobs:
       - name: Coverage floors per area (STIX mapping and validation, persistence)
         run: python scripts/check_coverage.py
 
-      # ADR-0077 part B: a database the base commit's code wrote — what every
-      # deployment runs until this PR — migrates to this PR's schema with its
-      # rows intact, and this code reads them back.  The base commit stands for
-      # the previous release (starting from the last release tag as well is a
-      # follow-up of ADR-0085).  The SHA reaches the script through the
-      # environment, never through the command text.
-      - name: Migrate a database written by the base commit
-        if: github.event_name == 'pull_request'
+      # ADR-0077 part B, ADR-0094 item 2: a database the last release wrote —
+      # what an upgrading deployment holds — and, on a pull request, one its
+      # base commit wrote — what deployments tracking main run until it merges
+      # — migrate to this code's schema with every row's content and the state
+      # volume's files intact, and this code's routes read them back
+      # (scripts/check_migration_from.py).  On a push to main too, so the CI a
+      # release waits for (docs/releasing.md, job step 3) has run it, and weekly.
+      # actions/checkout fetched one commit and no tag: the last release tag
+      # (the highest vX.Y.Z on origin) and the base commit are fetched at depth
+      # 1.  The refs reach the script through the environment and a shell
+      # variable, never through the command text.
+      - name: Migrate databases written by the last release and the base commit
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           CTIPARSOR_TEST_DATABASE_URL: postgresql://ctiparsor:ci@127.0.0.1:5432/ctiparsor
         run: |
-          git fetch --no-tags --depth=1 origin "$BASE_SHA"
-          python scripts/check_migration_from.py "$BASE_SHA"
+          set -o pipefail
+          tag=$(git ls-remote --tags --refs origin 'v*' | sed 's#.*refs/tags/##' \
+                | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } | sort -V | tail -n 1)
+          if [ -z "$tag" ]; then echo "no release tag vX.Y.Z on origin" >&2; exit 1; fi
+          git fetch --no-tags --depth=1 origin "refs/tags/$tag:refs/tags/$tag"
+          refs=("$tag")
+          if [ -n "$BASE_SHA" ]; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA"
+            refs+=("$BASE_SHA")
+          fi
+          python scripts/check_migration_from.py "${refs[@]}"
 
       - name: Upload coverage report
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1

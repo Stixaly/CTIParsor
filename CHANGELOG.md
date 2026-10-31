@@ -148,6 +148,44 @@ pages now give `run --rm bootstrap bootstrap --no-models`.
 
 ### Changed
 
+#### The migration check starts from the last release and compares every value (ADR-0094 item 2), 2026-10-31
+
+`scripts/check_migration_from.py` builds a database with an older release's own
+code, seeds it, migrates it with the current code, and checks that nothing was
+lost. Until now it seeded one job, three entities and one relationship and
+compared row counts, and CI ran it only on pull requests, from their base.
+
+- **From the last release too.** CI runs it from the highest `vX.Y.Z` tag on
+  every pull request, push to `main` and weekly run, and also from the base
+  commit on a pull request. The push CI that a release depends on
+  (`docs/releasing.md`) now runs it.
+- **A seed that covers what the policy keeps**
+  (`scripts/migration_seed.py`):
+  - four reports, with their uploaded files, decisions and decision journal,
+    bundles, Stage 5 verdicts (one `invalid`), ledgers and a baseline;
+  - entity overrides, thresholds, the relationship policy and a detection rule.
+
+  It adapts to the older schema. Every table must hold a seeded row, and every
+  column a non-NULL value in at least one, unless `NOT_SEEDED` gives the
+  reason. Bundles, ledgers and report texts come from the release's own Stage 4
+  reference builds when its tree has them (v0.2.0 does, v0.1.0 does not).
+- **Content compared** (`scripts/migration_compare.py`): every row, value and
+  column type, before and after the migration and again after the API's first
+  start. Each identity column's sequence must stay above its highest value. A
+  migration that rewrites or retypes data names it in `EXPECTED_CHANGES`.
+- **Read back through the API** (`scripts/migration_readback.py`): jobs,
+  decisions, the bundle served with its `X-Bundle-Validation` header, the 409 of
+  the invalid one, the ledger, the baseline, the source file and the settings.
+  The state directory's files must not change. A read-back that breaks fails
+  with the end of its stderr.
+- **Same result on a laptop and in CI.** Neither tree reads the developer's
+  `.env`. A server it cannot create a database on exits 2. The CI step runs
+  with `pipefail`.
+
+From v0.2.0, 688 values compared and 347 read back; from v0.1.0, which applies
+migrations 12 and 13, 618 and 326: nothing lost. A deliberately lossy test
+migration, a retyped column and a restarted sequence are caught.
+
 #### `WORKER_MAX_CONCURRENT` defaults to 1 outside compose too (ADR-0037), 2026-10-31
 
 The code's default was 10; it is now 1, the value compose already gave the
