@@ -282,8 +282,10 @@ restart mid-report costs the run, not the submission.
       is paid at query time, and no amount of tuning recovers it
 - [ ] You have decided which of options A/B/C applies, and everyone who can
       reach the port is someone you would let delete any report
-- [ ] Backups: `pg_dump` covers both stores now (ADR-0053) — see
-      [docs/docker.md](docker.md#data-and-backups)
+- [ ] Backups: a dump of the database (both stores, ADR-0053) AND an archive
+      of the `cti-state` volume (uploaded sources, exported bundles), taken
+      together with `app` and `worker` stopped, and one restore tried into an
+      empty project — see [docs/docker.md](docker.md#data-and-backups)
 
 ## 7. Air-gapped hosts
 
@@ -372,8 +374,8 @@ rule store (a report, a review decision, an override, a cache): it stops before
 the restore, because `pg_restore --clean` drops and recreates every table.
 `OFFLINE_FORCE_RESTORE=1` overrides that and erases those rows in the database. The `cti-state` volume (uploads and outputs) is not touched. Images,
 models and code have no in-place update that keeps the reports; the corpora do
-(below). Back up first with `pg_dump` (see
-[docs/docker.md](docker.md#data-and-backups)); nothing merges that backup back
+(below). Back up first: the database dump and the `cti-state` archive of
+[docs/docker.md](docker.md#data-and-backups); nothing merges that backup back
 in.
 
 Corpora can be refreshed without losing reports:

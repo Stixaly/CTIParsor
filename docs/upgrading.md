@@ -41,6 +41,12 @@ docker compose down
 docker run --rm -v ctiparsor_cti-state:/s -v "$PWD":/b alpine tar czf /b/cti-state-$(date +%F).tgz -C /s .
 ```
 
+Container stack on PostgreSQL (every install since ADR-0045): the backup of
+[docker.md, Data and backups](docker.md#data-and-backups), the database dump
+and the `cti-state` archive taken together with `app` and `worker` stopped,
+then checked as that section shows. The dump alone leaves out the uploaded
+sources and the exported bundles.
+
 ## 2. Host install: both stores to PostgreSQL (mandatory since ADR-0053)
 
 1. Create a database and a role on your PostgreSQL server, `scram-sha-256`
@@ -178,8 +184,9 @@ rebuild the corpus from the Settings page. The sizing table is in
   requeues; a job stuck in `processing` is requeued by a worker once its
   lease expires (180 s by default).
 - `backup_db()` no longer copies a file — both stores are PostgreSQL now
-  (ADR-0053), so it just logs a reminder to `pg_dump`, which is the command
-  in [docs/docker.md](docker.md#data-and-backups).
+  (ADR-0053), so it just logs a reminder to `pg_dump`. A backup is that dump
+  and an archive of `cti-state`, taken together
+  ([docs/docker.md](docker.md#data-and-backups)).
 - The optional `re2` guard is absent from every current install; it is a
   pre-existing packaging problem, tracked separately.
 - The bundle's recorded git revision comes from the image build argument in

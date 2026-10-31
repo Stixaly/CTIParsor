@@ -130,6 +130,19 @@ jobs:
           fi
           python scripts/check_migration_from.py "${refs[@]}"
 
+      # ADR-0094 item 3: a used install, backed up with the pg_dump, pg_restore
+      # and tar flags of docs/docker.md ("Data and backups") and restored into
+      # an empty database and directory, comes back whole: every row, sequence,
+      # schema object and file, and this code reads it back
+      # (scripts/check_backup_restore.py).  pg_dump and pg_restore run in the
+      # service's own container, as the docs run them in the stack's: the
+      # runner's pg_dump, if any, is not the server's major.
+      - name: Back up a used install and restore it into an empty one
+        env:
+          CTIPARSOR_TEST_DATABASE_URL: postgresql://ctiparsor:ci@127.0.0.1:5432/ctiparsor
+          CTIPARSOR_TEST_PG_CONTAINER: ${{ job.services.postgres.id }}
+        run: python scripts/check_backup_restore.py
+
       - name: Upload coverage report
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         if: always()
@@ -338,13 +351,16 @@ jobs:
           sarif_file: ${{ steps.grype.outputs.sarif }}
           category: container-image
 
-      - name: Smoke test (health, UI, non-root, read-only root, Chromium sandbox, PostgreSQL job store)
+      # --backup-restore (ADR-0094 item 3): the backup and restore commands of
+      # docs/docker.md, as written there, on this stack, restored into a second
+      # project with empty volumes (scripts/check_backup_restore_docker.sh).
+      - name: Smoke test (health, UI, non-root, read-only root, Chromium sandbox, PostgreSQL job store, backup and restore)
         env:
           CTI_IMAGE: ctiparsor:ci
         run: |
           cp .env.example .env
           echo "CTI_DB_PASSWORD=$(openssl rand -hex 24)" >> .env
-          bash scripts/docker_smoke.sh --no-build --clean
+          bash scripts/docker_smoke.sh --no-build --clean --backup-restore
 
       # The air-gap bundle's images must come back from `docker save` and
       # `docker load` under names Compose resolves, with no pull in between:

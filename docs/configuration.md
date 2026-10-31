@@ -58,8 +58,9 @@ docker compose run --rm dev python scripts/migrate_rules_to_postgres.py  # --dry
 ```
 
 The compose stack runs PostgreSQL for you (`docker compose up` starts a
-hardened `postgres` service; set `CTI_DB_PASSWORD` in `.env`). `pg_dump` is
-the backup tool for both stores now.
+hardened `postgres` service; set `CTI_DB_PASSWORD` in `.env`). A backup is a
+`pg_dump` of that database, which holds both stores, and an archive of the
+`cti-state` volume, taken together ([docker.md](docker.md#data-and-backups)).
 
 Every start of the API, of a worker and of `bootstrap` brings the schema up to
 date (ADR-0077). The first process to start migrates, under a PostgreSQL

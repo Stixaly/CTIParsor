@@ -18,12 +18,18 @@
 #   - optionally: sample report processed end-to-end (--job), and the pipeline
 #     stages it needs ran (SMOKE_REQUIRED_STAGES)
 #   - no traceback in the app and worker logs
+#   - optionally: the backup and restore commands of docs/docker.md, as written
+#     (--backup-restore, scripts/check_backup_restore_docker.sh)
 #
-# Usage: bash scripts/docker_smoke.sh [--no-build] [--job] [--keep] [--clean]
+# Usage: bash scripts/docker_smoke.sh [--no-build] [--job] [--backup-restore] [--keep] [--clean]
 #   --no-build  reuse the existing image instead of building it
 #   --job       upload tests/fixtures/sample_report.txt, wait for the job to finish,
 #               then check that the stages in SMOKE_REQUIRED_STAGES ran (the LLM and
 #               the NLP models ran, not only "the job did not fail")
+#   --backup-restore  back this stack up with the commands of docs/docker.md, restore
+#               the backup into a second, empty project (<project>-restored, on
+#               CTI_PORT + 1), and check that its rows and files came back; that
+#               project is deleted afterwards (ADR-0094 item 3)
 #   --keep      leave the stack running afterwards
 #   --clean     `docker compose down -v` afterwards (DELETES the volumes)
 # Environment: DOCKER_BIN (default: docker), CTI_BIND / CTI_PORT (as in compose.yaml),
@@ -62,6 +68,7 @@ info() {
 # ── Argument parsing ──────────────────────────────────────────────────────────
 NO_BUILD=false
 DO_JOB=false
+BACKUP_RESTORE=false
 KEEP=false
 CLEAN=false
 
@@ -69,6 +76,7 @@ for arg in "$@"; do
     case "$arg" in
         --no-build) NO_BUILD=true ;;
         --job)      DO_JOB=true ;;
+        --backup-restore) BACKUP_RESTORE=true ;;
         --keep)     KEEP=true ;;
         --clean)    CLEAN=true ;;
         *)          echo "Unknown option: $arg"; exit 2 ;;
@@ -443,6 +451,20 @@ if [ "$TRACEBACK_COUNT" -gt 0 ]; then
     warn "tracebacks in the app and worker logs (found $TRACEBACK_COUNT)"
 else
     pass "no traceback in the app and worker logs"
+fi
+
+# ── Step 15b: backup and restore (optional) ──────────────────────────────────
+# The commands of docs/docker.md, "Data and backups", as written there: this
+# stack backed up, the backup restored into a second project with empty
+# volumes, its rows and files compared (ADR-0094 item 3).
+if [ "$BACKUP_RESTORE" = true ]; then
+    info "Backing up this stack and restoring it into an empty project..."
+    if CTI_BIND="$BIND" CTI_PORT="$PORT" DOCKER_BIN="$DOCKER_BIN" SMOKE_HEALTH_TIMEOUT="$SMOKE_HEALTH_TIMEOUT" \
+            bash scripts/check_backup_restore_docker.sh; then
+        pass "backup restored into an empty project, with the commands of docs/docker.md"
+    else
+        fail "backup restored into an empty project, with the commands of docs/docker.md"
+    fi
 fi
 
 # ── Step 16: Teardown ─────────────────────────────────────────────────────────
