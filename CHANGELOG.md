@@ -411,7 +411,9 @@ rules of `docs/support-policy.md`.
   `attack_id_named`, with the release), and the Graph page shows the row as
   renamed. A tactic (`TA0002`), a CAPEC pattern and an id the release does not
   hold keep their names. CAPEC and tactic references are routed as before.
-- Two rows that come to the same id ship one object.
+- Two extracted technique rows that reach one id ship one object, and a bare id
+  whose technique is already in the bundle by name merges into it: the
+  relationships that name either row's value or ATT&CK id end on that object.
 
 A new Stage 4 reference scenario, `offline`, exports techniques with no Stage 3
 entry. `contract/stix.json` records their ids: seven additions, none breaking,

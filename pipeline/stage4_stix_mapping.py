@@ -479,7 +479,8 @@ def _technique_identity(value: str, mitre_id: str | None) -> tuple[str, str | No
     the release does not hold keeps the value as its name.
     """
     mid = (mitre_id or "").strip() or None
-    if not _BARE_TECHNIQUE_ID.fullmatch(value.strip()):
+    # isascii first: re2 raises on a lone surrogate, and an id is ASCII anyway.
+    if not (value.isascii() and _BARE_TECHNIQUE_ID.fullmatch(value.strip())):
         return value, mid, False
     mid = mid or value.strip().upper()
     name = technique_name_for(mid)
@@ -973,12 +974,21 @@ def build_stix_bundle(
             key = entity.value.lower()
             id_key = mitre_id.lower() if mitre_id else None
             by_name = name_to_stix.of_type(key, "attack-pattern")
-            by_id = (name_to_stix.of_type(id_key, "attack-pattern") if id_key else None) \
-                or attack_patterns.get(ap_id)
-            if by_name or by_id:
+            by_id = name_to_stix.of_type(id_key, "attack-pattern") if id_key else None
+            # Its standard id under another value ("Foo "), or its ATT&CK name
+            # already here without the id: one object still, which this row's
+            # value and id now resolve to as well.
+            by_identity = attack_patterns.get(ap_id) or (
+                name_to_stix.of_type(name.lower(), "attack-pattern") if renamed else None)
+            hit = by_name or by_id or by_identity
+            if hit:
                 # already created from llm_result.ttps
-                led.entity(entity.value, entity.entity_type.value, "merged", obj=by_name or by_id,
-                           reason="same_value" if by_name else "same_technique",
+                if not (by_name or by_id):
+                    name_to_stix.add(key, hit)
+                    if id_key:
+                        name_to_stix.add(id_key, hit)
+                led.entity(entity.value, entity.entity_type.value, "merged", obj=hit,
+                           reason="same_value" if by_name or not mitre_id else "same_technique",
                            mitre_id=entity.mitre_id)
                 continue
             ext_refs = []

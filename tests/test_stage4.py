@@ -7,6 +7,7 @@ from pipeline.stage3_llm import IoCAssociation, LLMEnrichmentResult, Relationshi
 from pipeline.stage4_stix_mapping import (
     _entity_to_sdo,
     _NameIndex,
+    _technique_identity,
     build_stix_bundle,
     verify_ioc_coverage,
 )
@@ -747,7 +748,48 @@ def test_two_values_of_one_standard_id_ship_one_object():
                                ledger=led)
 
     assert [ap.name for ap in aps] == ["Custom Loader"]
-    assert [e["outcome"] for e in led.entities] == ["emitted", "merged"]
+    assert [(e["outcome"], e.get("reason")) for e in led.entities] == [("emitted", None), ("merged", "same_value")]
+
+
+def test_a_bare_attack_id_merges_into_its_technique_already_here_by_name():
+    # A Stage 3 entry with no ATT&CK id: the bare id must not ship a second PowerShell.
+    led = MappingLedger()
+    llm = LLMEnrichmentResult(
+        threat_actors=["APT29"], ttps=[TTPExtracted(technique_name="PowerShell")],
+        relationships=[RelationshipExtracted(source_value="APT29", relationship_type="uses",
+                                             target_value="T1059.001", confidence=0.9)])
+    bundle = build_stix_bundle([RawEntity(value="T1059.001", entity_type=EntityType.TTP, mitre_id="T1059.001")],
+                               llm, "r", ledger=led, graph_completion=False)
+    [ap] = _of_type(bundle, "attack-pattern")
+    [actor] = _of_type(bundle, "threat-actor")
+
+    assert ap.name == "PowerShell"
+    assert (actor.id, "uses", ap.id) in _sros(bundle)
+    [row] = [e for e in led.entities if e["value"] == "T1059.001"]
+    assert (row["outcome"], row["reason"], row["stix_id"]) == ("merged", "same_technique", ap.id)
+
+
+def test_a_relationship_resolves_a_renamed_technique_by_its_name_and_its_id():
+    llm = LLMEnrichmentResult(
+        threat_actors=["APT29"], malware_families=["WellMess"],
+        relationships=[
+            RelationshipExtracted(source_value="APT29", relationship_type="uses",
+                                  target_value="PowerShell", confidence=0.9),
+            RelationshipExtracted(source_value="WellMess", relationship_type="uses",
+                                  target_value="T1059.001", confidence=0.9),
+        ])
+    bundle = build_stix_bundle([RawEntity(value="T1059.001", entity_type=EntityType.TTP, mitre_id="T1059.001")],
+                               llm, "r", graph_completion=False)
+    [ap] = _of_type(bundle, "attack-pattern")
+    [actor] = _of_type(bundle, "threat-actor")
+    [malware] = _of_type(bundle, "malware")
+
+    assert {(actor.id, "uses", ap.id), (malware.id, "uses", ap.id)} <= set(_sros(bundle))
+
+
+def test_a_value_with_a_lone_surrogate_is_no_bare_id():
+    # re2 raises on a lone surrogate: the value must not reach it.
+    assert _technique_identity("T1059.001\ud800", None) == ("T1059.001\ud800", None, False)
 
 
 def test_an_ioc_association_indicates_the_malware_not_the_tool_of_the_same_name():
