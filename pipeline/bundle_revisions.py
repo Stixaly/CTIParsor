@@ -93,7 +93,7 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "Report's description is Markdown and the Report attaches the source file (x_opencti_files); a named "
      "object without a description quotes the report's sentences that name it (ADR-0093)",
      "mapping"),
-    ("a8b9bee", "2026-11-01",
+    ("afd23ce", "2026-11-01",
      "A technique no Stage 3 entry lists (every technique offline) gets OpenCTI's standard id instead "
      "of a random one, and a bare ATT&CK id is named after its technique: T1059.001 no longer renames "
      "the analyst's PowerShell in OpenCTI (ADR-0066)",
