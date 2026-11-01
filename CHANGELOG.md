@@ -11,6 +11,46 @@ theme.
 
 ### Added
 
+#### An idle worker shows in the queue status, and an operations page (ADR-0094 item 7), 2026-11-01
+
+`GET /api/queue/status` listed only the workers holding a running report, so an
+empty list could mean "idle" as well as "down".
+
+- **Every queue loop keeps a row** in a new table, `worker_heartbeats` (schema
+  version 14, migrated at the first start, so the next release is a minor one).
+  - The loop writes its row when it starts and every `WORKER_HEARTBEAT_S`,
+    busy or idle, and deletes it when it stops cleanly.
+  - A worker that crashed is listed `stale`, and any running worker deletes its
+    row an hour after its last heartbeat.
+- **`workers` lists every running worker**, with its `state` (`busy`, `idle`
+  or `stale`) and its `role` (`worker`, or `all` for the API's own loop). It
+  also gives `max_concurrent`, `app_version`, `started_at` and
+  `heartbeat_seconds_ago`; `running_jobs` is still counted from the jobs.
+  - A worker of an older version, which writes no row, is still listed while
+    it holds a report.
+  - A new `worker_summary` gives `alive`, `busy`, `idle`, `stale`, `capacity`
+    and `idle_slots`.
+  - What changes for a client of the earlier answer:
+    - `workers` is no longer empty while no report runs; read
+      `counts.processing` for "nothing running";
+    - `stale` now compares the latest heartbeat of the worker's row or of its
+      reports with the lease, where it read only the reports;
+    - `oldest_heartbeat_seconds_ago` is `null` for a worker that runs no
+      report.
+
+    The other fields keep their name and meaning.
+- **`docs/operations.md`** says what to watch and what each signal does not say:
+  - health: what 200 and 503 mean, and the worker container's health;
+  - the queue status: no live worker, and when that is expected;
+  - failed reports, whose reason is in the last progress event and the worker
+    log;
+  - disk, sizing and logs.
+- **The checks follow.**
+  - `scripts/docker_smoke.sh` checks that an idle worker container is listed.
+  - The Compose backup and restore check compares `worker_heartbeats` by name
+    only: each stack's own worker writes its row, which is not data to restore.
+  - The migration seed holds a crashed worker's row.
+
 #### The journey from import to download runs in a browser, offline, in CI (ADR-0094 item 4), 2026-10-31
 
 Playwright's Chromium drives the built interface against the real API, its
@@ -422,6 +462,19 @@ since none of the five existing scenarios held a technique with a random id.
 Bundles stored before this change keep their random ids and T-number names until
 a finalize at a revision that has it (`BUNDLE_AFFECTING`, scope `mapping`,
 ADR-0086).
+
+#### The worker container turns unhealthy when the job store does not answer, 2026-11-01
+
+Every database call of the queue loop logged its error and returned, so the
+loop kept touching its liveness file: the `worker` container stayed `healthy`
+with PostgreSQL down.
+
+- The loop now stops touching the file while its last heartbeat write fails
+  (to `worker_heartbeats`, every `WORKER_HEARTBEAT_S`). The container turns
+  `unhealthy` a few minutes into an outage, and `healthy` again after the
+  first write that succeeds.
+- A worker loop that was asked to stop no longer writes back the row that the
+  stop deleted.
 
 #### The smoke test can no longer delete an install's volumes, 2026-10-31
 

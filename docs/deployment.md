@@ -271,6 +271,10 @@ starts. In the container stack the API requeues nothing; a worker requeues the j
 once its lease expires (`WORKER_LEASE_TIMEOUT_S`, 180 s by default). Either way, a
 restart mid-report costs the run, not the submission.
 
+`GET /api/queue/status` lists every worker that runs, busy or idle, and what
+waits in the queue; [operations.md](operations.md) says what to watch, and what
+each signal does not say.
+
 ## 6. Before you expose it
 
 - [ ] `docker compose build` has run — it builds `frontend/dist/` as part of the image

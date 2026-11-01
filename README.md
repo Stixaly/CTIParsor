@@ -718,6 +718,7 @@ own `detection_corpora.local.yaml` list.
 | Guide | For |
 |---|---|
 | [docs/docker.md](docs/docker.md) | Running the stack day to day: volumes, backups, scaling, troubleshooting |
+| [docs/operations.md](docs/operations.md) | What to watch on a running install: health, the queue and its workers, failed reports, disk, sizing |
 | [docs/deployment.md](docs/deployment.md) | Serving several analysts: bind address, what "no authentication" means, TLS proxy, systemd |
 | [docs/architecture.md](docs/architecture.md) | Processes, stores, the life of a report, sizing |
 | [docs/upgrading.md](docs/upgrading.md) | Moving an existing install to PostgreSQL and workers |
@@ -771,6 +772,7 @@ read [CONTRIBUTING.md](CONTRIBUTING.md); the test strategy is in
 | REST API reference | [docs/api.md](docs/api.md) |
 | Database schema | [docs/database-schema.md](docs/database-schema.md) |
 | Containers, deployment, architecture, upgrades | [docker](docs/docker.md) · [deployment](docs/deployment.md) · [architecture](docs/architecture.md) · [upgrading](docs/upgrading.md) |
+| Watching a running install, and what each signal does not say | [docs/operations.md](docs/operations.md) |
 | What 1.0 promises: stable surfaces, breaking changes, capability matrix, maintenance | [docs/support-policy.md](docs/support-policy.md) |
 | Development guide: `make` targets, benchmarks, project structure, extending | [docs/development.md](docs/development.md) |
 | Dependencies and how to keep them current | [docs/dependencies.md](docs/dependencies.md) |

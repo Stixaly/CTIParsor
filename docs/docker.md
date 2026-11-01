@@ -337,6 +337,8 @@ already is `127.0.0.1` and the default applies.
 
 ## Day-to-day operations
 
+What to watch — health, the queue and its workers, failed reports, disk, sizing — and what each signal does not say: [operations.md](operations.md).
+
 **Logs:**
 ```bash
 docker compose logs -f app
@@ -383,10 +385,10 @@ Not supported in the image (torch CPU only).
 | `password authentication failed for user "ctiparsor"` | `CTI_DB_PASSWORD` changed after the `pg-data-18` volume was initialised | Restore the old value, or `docker compose down -v` to start a fresh database (deletes every report) |
 | Reports (or detection rules) processed before the PostgreSQL move are gone from the list | They are still in `cti_stix.db` on `cti-state` | Run the migration commands in *Data and backups* |
 | `docker compose pull` reports `denied` | The GHCR package is still private and you are not authenticated, or the first publish hasn't landed yet | `docker login ghcr.io`, or build locally with `docker compose build` |
-| Backlog is unclear — is the queue actually backing up? | Watching logs is guesswork | `curl -s localhost:8000/api/queue/status \| python3 -m json.tool` — `queue.depth` against `queue.max_depth`, `queue.oldest_queued_seconds`, and each worker's `stale` flag (ADR-0048) |
-| A report stays `queued` forever | No worker container is running (`docker compose ps worker`), or every worker is at `WORKER_MAX_CONCURRENT` | `docker compose up -d worker`, or `--scale worker=2`; watch `docker compose logs -f worker` |
+| Backlog is unclear — is the queue actually backing up? | Watching logs is guesswork | `curl -s localhost:8000/api/queue/status \| python3 -m json.tool` — `queue.depth` against `queue.max_depth`, `queue.oldest_queued_seconds`, each worker's `state` (`busy`, `idle`, `stale`) and `worker_summary` (ADR-0048, [operations.md](operations.md)) |
+| A report stays `queued` forever | No worker container is running (`docker compose ps worker`; `worker_summary.alive` is 0 in the queue status), or every worker is at `WORKER_MAX_CONCURRENT` (`idle_slots` is 0) | `docker compose up -d worker`, or `--scale worker=2`; watch `docker compose logs -f worker` |
 | A report sits in `processing` after a worker crash | The lease has not expired yet | It is requeued automatically after `WORKER_LEASE_TIMEOUT_S` (180 s) and resumes from its Stage 3 checkpoint |
-| `worker` is `unhealthy` | The supervisor loop has not touched its liveness file for two minutes | `docker compose logs worker`; usually the job store is unreachable |
+| `worker` is `unhealthy` | The supervisor loop has not touched its liveness file for two minutes: it hangs, or its heartbeat does not reach the job store | `docker compose logs worker`; usually the job store is unreachable (`Exception in stamp_worker`) |
 | `ERROR: /app/state is not writable by uid 1001` | Bind mount not chowned | `sudo chown -R 1001:1001 ./data/state` |
 | URL tab 503 / logs say `Chromium sandboxing failed` or `sys_chroot` | Seccomp profile not applied (`docker run` without `--security-opt seccomp=docker/seccomp-chromium.json`, or compose invoked from another directory), or the image was built with `INSTALL_CAPTURE=false` | Run compose from the repository root; rebuild with `CTI_INSTALL_CAPTURE=true` |
 | `WARNING: ANTHROPIC_API_KEY is unset` | Missing key in `.env` | Edit `.env`, `docker compose up -d` |
@@ -419,6 +421,7 @@ The smoke runs in a Compose project of its own, `ctiparsor-smoke`, not in your i
 - [SECURITY.md](../SECURITY.md) — threat model
 - [ADR-0044](adr/0044-container-images.md) — why one image and no database container; the hardening findings
 - [ADR-0047](adr/0047-publish-image-to-ghcr.md) — the GHCR publish pipeline
+- [docs/operations.md](operations.md) — what to watch on a running install, and what each signal does not say
 - [ADR-0048](adr/0048-queue-status-endpoint.md) — the queue-status endpoint
 - [ADR-0054](adr/0054-full-docker-installation.md) — Docker-only install/dev/air-gap, and why `setup.sh` shrank
 - [ADR-0040](adr/0040-offline-installation-bundle.md) — the original (superseded) air-gap bundle mechanism

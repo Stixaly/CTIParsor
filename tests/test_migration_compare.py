@@ -58,7 +58,7 @@ def _lossy(version: int) -> history.Migration:
 
 # ── A real migration ─────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("version", [11, history.latest_version()])
+@pytest.mark.parametrize("version", [11, 13, history.latest_version()])
 def test_a_seeded_release_migrates_with_every_value_kept(schema, monkeypatch, version):
     release_at(schema, version, monkeypatch)
     ms.seed(schema)
@@ -68,11 +68,14 @@ def test_a_seeded_release_migrates_with_every_value_kept(schema, monkeypatch, ve
     assert result.ok, "\n".join(mc.summary(result))
     assert result.applied == list(range(version + 1, history.latest_version() + 1))
     assert result.rows == sum(len(t.rows) for t in before.values()) and result.values > result.rows
-    if version == 11:                                       # v0.1.0: versions 12 and 13 apply
-        assert result.new_tables == ["job_baselines"]
+    if version == 11:                                       # v0.1.0: versions 12 to 14 apply
+        assert result.new_tables == ["job_baselines", "worker_heartbeats"]
         assert result.new_columns["jobs"] == ["review_revision", "bundle_review_revision", "bundle_build_json",
                                               "pipeline_mode"]
-        assert result.new_rows == {"schema_migrations": 2}
+        assert result.new_rows == {"schema_migrations": 3}
+    elif version == 13:                                     # v0.2.0: version 14 applies
+        assert (result.new_tables, result.new_columns, result.new_rows) == (
+            ["worker_heartbeats"], {}, {"schema_migrations": 1})
     else:
         assert (result.new_tables, result.new_columns, result.new_rows) == ([], {}, {})
 
