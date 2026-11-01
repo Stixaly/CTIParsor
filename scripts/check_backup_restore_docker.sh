@@ -9,7 +9,10 @@
 # into a second project, `<project>-restored`, whose volumes are empty, by the
 # docs' restore steps, starts it, and checks:
 #   - GET /api/health answers ok;
-#   - every table: the same row count and the same checksum of its rows;
+#   - every table: the same row count and the same checksum of its rows, but
+#     worker_heartbeats, which lists the workers running now (each rewrites
+#     its row every WORKER_HEARTBEAT_S, and the restored stack's adds its own):
+#     compared by name only;
 #   - every file of cti-state but db-identity.json, byte for byte, and the
 #     uploaded one through GET /api/jobs/{id}/source;
 #   - the report through GET /api/jobs/{id};
@@ -129,8 +132,10 @@ run_docs() {       # run_docs <project> <date> <commands>: the lines as written,
 }
 
 # Every table of the database: its name, its row count, the md5 of its rows.
-FINGERPRINT_SQL="SELECT c.relname || ' ' || (xpath('/row/n/text()', q))[1]::text || ' '
-       || (xpath('/row/m/text()', q))[1]::text
+# worker_heartbeats by its name only: the running workers, not data (ADR-0094
+# item 7).
+FINGERPRINT_SQL="SELECT c.relname || CASE WHEN c.relname = 'worker_heartbeats' THEN ' (running workers)'
+       ELSE ' ' || (xpath('/row/n/text()', q))[1]::text || ' ' || (xpath('/row/m/text()', q))[1]::text END
 FROM pg_class c JOIN pg_namespace s ON s.oid = c.relnamespace,
      query_to_xml(format('SELECT count(*) AS n, md5(coalesce(string_agg(t::text, %L ORDER BY t::text), %L)) AS m '
                          'FROM %I t', '|', '', c.relname), false, true, '') AS q

@@ -5,6 +5,10 @@
 **Relates to:** [0046](0046-worker-container.md) (the queue and lease this reports on),
 [0045](0045-postgresql-for-the-job-store.md) (the job store this reads), [0039](0039-per-stage-observability.md)
 (per-stage timing inside one job — a different question from queue-wide state)
+**Amended by:** [0094](0094-what-1-0-promises.md) item 7 (2026-11-01). `workers`
+lists every queue loop that runs, busy or idle, from the `worker_heartbeats`
+table (schema version 14), with a `state` and a `worker_summary`: it is no
+longer empty in role `all`, nor while no report runs ([operations.md](../operations.md)).
 
 ## Context
 

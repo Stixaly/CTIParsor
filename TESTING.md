@@ -345,7 +345,8 @@ current truth.
 | Persistence | `test_db_transaction.py` | 6 | transaction rollback, commit, exception handling |
 | Persistence | `test_container_env.py` | 4 | `CTIPARSOR_GIT_REV` fallback when `git` is absent or fails (ADR-0044) — `_path_from_env`/`BACKUP_DIR` and `CTIPARSOR_DB_PATH` were removed along with SQLite (ADR-0053) |
 | Queue | `test_worker.py` | 47 | the worker's terminal states (no bundle, timeout, abort, reclaimed, failed backup), hook guards, subprocess thread caps, the crash watcher, the finalize rebuild applying reviewer rejections and reading legacy/ADR-0063 dates, Stage 5's verdict deciding what a rebuild may complete (ADR-0084), a run storing its build record (ADR-0086) |
-| Queue | `test_job_queue.py` | 14 | the queue loop (ADR-0046): atomic claim under 8 threads, lease-based orphan requeue, heartbeat scoping, slot accounting with a fake spawn, `run_pipeline_async` under roles `api` and `all`, `--once` |
+| Queue | `test_job_queue.py` | 30 | the queue loop (ADR-0046): atomic claim under 8 threads, lease-based orphan requeue, heartbeat scoping, slot accounting with a fake spawn, `run_pipeline_async` under roles `api` and `all`, `--once`; its `worker_heartbeats` row (ADR-0094 item 7): written at start and while idle (on the first pass, however young the clock), its `started_at` kept, deleted when a worker process or the API loop stops and not written back by a late pass, deleted by a running loop once silent for an hour, a failed write logged while the job still starts; the liveness file left alone while the job store does not answer, touched again after one good write |
+| Queue | `test_queue_status_api.py` | 16 | `GET /api/queue/status` (ADR-0048, ADR-0094 item 7): counts by status, the oldest queued report, `max_depth`, role and backend; every worker listed `busy`, `idle` or `stale`, the latest of its row and job heartbeats deciding, a worker without a row listed from the job it holds, the summary of live workers and free slots, a running loop listed, then gone once it stops |
 | Persistence | `test_db_backend.py` | 12 | the PostgreSQL adapter without a server: `?`→`%s` outside literals, `%`→`%%`, the `Row` type, `backend()`/`get_conn()` requiring `DATABASE_URL` (ADR-0053), a fake psycopg connection proving `with` never closes and `transaction()` issues plain `BEGIN` (ADR-0045) |
 | Persistence | `test_db_postgres.py` | 10 | skipped unless `CTIPARSOR_TEST_DATABASE_URL` is set (every other DB-touching test needs it too, via `temp_db` — ADR-0053): round trips, SSE resume ids, upserts, cascade, the coverage call without `jobs_conn`, the API through `temp_db_client`, and both migration scripts end to end (ADR-0045, ADR-0053) |
 | Shared helpers | `test_shared_helpers.py` | 27 | environment parsing, claim extraction, unescaping logic |
@@ -524,7 +525,7 @@ base commit on a pull request; it takes about 70 s per ref under WSL on
 `tests/test_migration_seed.py` (this code's schema seeded whole, version 11's
 adapted, a table left empty, a column NULL in every row and a required column
 left out refused, a release's own Stage 4 builds seeded),
-`tests/test_migration_compare.py` (from versions 11 and 13 every value kept, a
+`tests/test_migration_compare.py` (from versions 11, 13 and 14 every value kept, a
 lossy migration caught value by value, a retyped column, a restarted
 sequence), `tests/test_migration_readback.py` (every seeded row through the
 routes, a value a route stops returning named, the expectations taken from the

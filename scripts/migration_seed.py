@@ -10,8 +10,9 @@ one whose bundle the STIX schemas refused, one enriching an analyst's STIX
 bundle (ADR-0090: its baseline, rows imported from it), one that failed — and
 what an analyst grows beside them: entity overrides, calibrated thresholds, the
 relationship policy, a detection rule with its side tables, the figure and CVE
-caches.  Uploaded sources and exported bundles are files of the state volume,
-not rows: `files()`.
+caches; and the row a worker that crashed leaves in `worker_heartbeats`
+(ADR-0094 item 7).  Uploaded sources and exported bundles are files of the
+state volume, not rows: `files()`.
 
 The spec is this code's; the schema is the release's.  `seed` reads the
 database's columns first: a column the spec names that the release did not have
@@ -580,6 +581,11 @@ def spec(stage4: Path = STAGE4) -> dict[str, list[dict[str, Any]]]:
              "created_at": _t(21, "16:01:30.000000"), "updated_at": _t(21, "16:01:30.000000")},
         ],
         **_rules(),
+        # A worker that crashed: no clean stop deleted its row (ADR-0094 item 7).
+        "worker_heartbeats": [
+            {"worker_id": "worker-1:7:a1b2c3", "role": "worker", "max_concurrent": 1, "app_version": "0.2.0",
+             "started_at": _t(25, "07:58:00.000000"), "heartbeat_at": _t(25, "09:31:30.000000")},
+        ],
     }
 
 

@@ -397,6 +397,7 @@ CTIParsor/
 ├── docs/
 │   ├── architecture.md            # Deployment architecture: processes, stores, data flow, sizing
 │   ├── docker.md                  # Running the container stack day to day
+│   ├── operations.md              # What to watch on a running install, and what each signal does not say
 │   ├── upgrading.md               # Runbook: moving an existing install to PostgreSQL / workers
 │   ├── deployment.md              # Serving several analysts: bind address, exposure, TLS proxy, systemd
 │   ├── detection-coverage.md      # The coverage matrix, walkthrough
