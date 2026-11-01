@@ -240,7 +240,7 @@ matches the value `.env.example` shows, is not caught.
 - **The promise:** the image of a release, started on the database and the
   `cti-state` volume of the previous release, migrates them at its first start
   and keeps their content. The schema is versioned in `api/migrations/`
-  (13 versions on 2026-10-31). The API, every worker and `bootstrap` apply what
+  (14 versions on 2026-11-01). The API, every worker and `bootstrap` apply what
   is pending at start, under a PostgreSQL advisory lock, one transaction per
   version ([ADR-0077](adr/0077-versioned-database-migrations.md)).
 - **No downgrade.** An older image refuses a database that a newer one

@@ -446,7 +446,7 @@ amendment of 2026-10-19).
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/queue/status` | Backlog and worker liveness (ADR-0048): job counts by status, oldest-queued age, and per-worker heartbeat freshness against `WORKER_LEASE_TIMEOUT_S`. Unauthenticated, like every other GET route (SECURITY.md). |
+| `GET` | `/api/queue/status` | Backlog and worker liveness (ADR-0048, ADR-0094 item 7): job counts by status, oldest-queued age, every queue loop that runs (`busy`, `idle`, or `stale` once its heartbeat is older than `WORKER_LEASE_TIMEOUT_S`) and a summary of the live ones and their free slots ([operations.md](operations.md)). Unauthenticated, like every other GET route (SECURITY.md). |
 | `GET` | `/api/health` | Liveness and readiness of the API: `{"status": "ok"}` with 200, or `{"status": "degraded", "detail": "job store unreachable"}` with **503** when the job store does not answer. The image's `HEALTHCHECK` calls it, and a host monitor should check the status code, not the body. It says nothing about the workers: `/api/queue/status` does. Unauthenticated. |
 
 ```json
@@ -455,9 +455,27 @@ amendment of 2026-10-19).
   "counts": { "queued": 2, "processing": 1, "failed": 0, "for_review": 12, "completed": 40 },
   "queue": { "depth": 2, "max_depth": 50,
              "oldest_queued_job_id": "3f2a...", "oldest_queued_seconds": 42.5 },
-  "workers": [ { "worker_id": "worker-1:7:a1b2c3", "running_jobs": 1,
-                 "oldest_heartbeat_seconds_ago": 3.2, "stale": false } ] }
+  "workers": [ { "worker_id": "worker-1:7:a1b2c3", "state": "busy", "role": "worker",
+                 "max_concurrent": 1, "app_version": "0.2.0",
+                 "started_at": "2026-11-01T08:00:02.512345+00:00", "running_jobs": 1,
+                 "heartbeat_seconds_ago": 3.2, "oldest_heartbeat_seconds_ago": 3.2, "stale": false } ],
+  "worker_summary": { "alive": 1, "busy": 1, "idle": 0, "stale": 0, "capacity": 1, "idle_slots": 0 } }
 ```
+
+Each queue loop writes its row in `worker_heartbeats` at start and every
+`WORKER_HEARTBEAT_S`, busy or idle, and deletes it when it stops cleanly; a row
+silent for an hour is deleted. `running_jobs` is counted from the jobs in
+`processing`. A worker that holds a job but wrote no row (a version before
+schema version 14) is listed with `role`, `max_concurrent`, `app_version` and
+`started_at` at `null`. `capacity` is the sum of `max_concurrent` over the live
+workers, `null` when one is unknown or unlimited.
+
+Changed with schema version 14 (ADR-0094 item 7), for a client of the earlier
+answer: `workers` also lists the idle workers, so it is no longer empty while
+no report runs; `stale` compares with the lease the latest heartbeat of the
+worker's row or of its jobs (before: of its jobs only), which
+`heartbeat_seconds_ago` gives; and `oldest_heartbeat_seconds_ago`, the oldest
+heartbeat of its jobs, is `null` for a worker that runs none.
 
 ## Settings (corpora)
 

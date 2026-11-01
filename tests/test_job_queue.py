@@ -1,13 +1,19 @@
 """Queue-loop contract (ADR-0046).
 
 What these tests lock: the claim is atomic on both engines, the lease-based
-orphan requeue, the loop's slot accounting with a fake spawn, and the three
-answers of `run_pipeline_async` under each role.
+orphan requeue, the loop's slot accounting with a fake spawn, the three
+answers of `run_pipeline_async` under each role, and the loop's row in
+worker_heartbeats (ADR-0094 item 7): written at start and while idle, deleted
+on a clean stop and never written back after it, pruned once silent for an
+hour, never in the way of a job; while it cannot be written, the liveness
+file is left alone.
 """
 
 from __future__ import annotations
 
 import threading
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -322,22 +328,28 @@ def test_the_alive_file_is_never_followed_through_a_symlink(tmp_path: Path):
     assert (tmp_path / "real").exists()
 
 
-def test_run_once_does_not_touch_alive_file_when_a_db_call_fails(
+def test_run_once_does_not_touch_alive_file_while_the_job_store_does_not_answer(
     setup_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
     """The worker container's HEALTHCHECK watches this file's mtime -- it must
     go stale (and the container report unhealthy) when the DB is actually
-    unreachable, not stay fresh forever because touch_alive() doesn't check
-    what the DB calls above it did."""
+    unreachable.  Every DB call of the loop logs its own error and returns, so
+    nothing raises: the failed stamp stops the touches, and the first good
+    stamp once the job store answers again resumes them."""
+    import api.db as db
+
     monkeypatch.setattr(queue_loop, "ALIVE_FILE", tmp_path / "alive")
-
-    def broken_requeue(*, unconditional: bool = False) -> int:
-        raise RuntimeError("DB unreachable")
-
-    monkeypatch.setattr(queue_loop, "requeue_orphans", broken_requeue)
-    loop = queue_loop.WorkerLoop(max_concurrent=1, spawn=FakeSpawn())
+    # heartbeat_s=0: every pass stamps, so the pass after the outage shows the recovery.
+    loop = queue_loop.WorkerLoop(max_concurrent=1, worker_id="w-db", heartbeat_s=0, spawn=FakeSpawn())
+    reachable = db.DATABASE_URL
+    monkeypatch.setattr(db, "DATABASE_URL", "postgresql://nobody:nothing@127.0.0.1:1/none?connect_timeout=2")
     loop.run_once()
     assert not (tmp_path / "alive").exists()
+
+    monkeypatch.setattr(db, "DATABASE_URL", reachable)              # the job store answers again
+    loop.run_once()
+    assert (tmp_path / "alive").exists()
+    assert _loop_row("w-db") is not None
 
 
 def test_terminate_and_requeue(setup_db):
@@ -483,3 +495,123 @@ def test_finalize_job_is_a_noop_when_the_job_was_reclaimed(setup_db):
     row = get_conn().execute("SELECT status, bundle_json FROM jobs WHERE id='j1'").fetchone()
     assert row["status"] == "processing"
     assert row["bundle_json"] != '{"stale": true}'
+
+
+# ── The loop's row in worker_heartbeats (ADR-0094 item 7) ────────────────────
+
+def _loop_row(worker_id: str):
+    return get_conn().execute(
+        "SELECT role, max_concurrent, app_version, started_at, heartbeat_at FROM worker_heartbeats "
+        "WHERE worker_id=?", (worker_id,)).fetchone()
+
+
+def test_a_loop_writes_its_row_at_start_and_while_idle(setup_db):
+    from pipeline import __version__
+
+    loop = queue_loop.WorkerLoop(max_concurrent=2, worker_id="w-idle", spawn=FakeSpawn())
+    loop.run_once()                                   # nothing queued: idle from the start
+    row = _loop_row("w-idle")
+    assert (row["role"], row["max_concurrent"], row["app_version"], row["started_at"]) == (
+        "worker", 2, __version__, loop.started_at)
+
+    get_conn().execute("UPDATE worker_heartbeats SET heartbeat_at='2020-01-01T00:00:00+00:00'")
+    assert loop.heartbeat_if_due(time.monotonic() + loop.heartbeat_s + 1)
+    assert _loop_row("w-idle")["heartbeat_at"] > "2026"      # stamped again, with no job to heartbeat
+    assert _loop_row("w-idle")["started_at"] == loop.started_at
+
+
+def test_rows_silent_for_an_hour_are_deleted_by_a_running_loop(setup_db):
+    def silent_for(seconds: int) -> str:
+        return (datetime.now(timezone.utc) - timedelta(seconds=seconds)).isoformat()
+
+    conn = get_conn()
+    for worker_id, heartbeat_at in (("crashed-long-ago", silent_for(queue_loop.WORKER_ROW_RETENTION_S + 60)),
+                                    ("crashed-recently", silent_for(queue_loop.LEASE_TIMEOUT_S + 60))):
+        conn.execute("INSERT INTO worker_heartbeats (worker_id, role, max_concurrent, app_version, started_at, "
+                     "heartbeat_at) VALUES (?,?,?,?,?,?)", (worker_id, "worker", 1, "0.2.0", heartbeat_at,
+                                                            heartbeat_at))
+
+    assert queue_loop.WorkerLoop(max_concurrent=1, worker_id="w-live", spawn=FakeSpawn()).stamp()
+    left = {r["worker_id"] for r in conn.execute("SELECT worker_id FROM worker_heartbeats").fetchall()}
+    assert left == {"crashed-recently", "w-live"}         # still listed, as stale, until the hour is up
+
+
+def test_a_failed_stamp_is_logged_and_the_loop_goes_on(setup_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                         caplog: pytest.LogCaptureFixture):
+    monkeypatch.setattr(queue_loop, "ALIVE_FILE", tmp_path / "alive")
+    get_conn().execute("DROP TABLE worker_heartbeats")
+    _insert_job("j1", "queued", "2024-01-01T00:00:00Z")
+    _touch_upload("j1")
+
+    spawn = FakeSpawn()
+    loop = queue_loop.WorkerLoop(max_concurrent=1, worker_id="w", spawn=spawn)
+    assert loop.run_once() == 1                       # the job was claimed and started all the same
+    assert [c[0] for c in spawn.calls] == ["j1"]
+    assert not (tmp_path / "alive").exists()          # but the worker no longer reports itself alive
+    assert "Exception in stamp_worker" in caplog.text
+    loop.forget()                                     # never raises either
+
+
+def test_the_api_s_own_loop_says_role_all_and_leaves_with_the_api(setup_db, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(queue_loop, "_default_spawn", FakeSpawn())
+    queue_loop.stop_embedded()
+    try:
+        loop = queue_loop.start_embedded(max_concurrent=1)
+        deadline = time.monotonic() + 10
+        while _loop_row(loop.worker_id) is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert _loop_row(loop.worker_id)["role"] == "all"
+    finally:
+        queue_loop.stop_embedded()
+    assert _loop_row(loop.worker_id) is None
+
+
+def test_a_worker_process_deletes_its_row_when_it_stops(setup_db, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(queue_loop, "_default_spawn", FakeSpawn())
+    monkeypatch.setattr(queue_loop.signal, "signal", lambda *args: None)   # pytest keeps its own handlers
+    monkeypatch.setattr(queue_loop, "DRAIN_S", 0)
+    seen = []
+
+    def one_pass_then_sigterm(self: queue_loop.WorkerLoop) -> None:
+        self.run_once()
+        seen.append(_loop_row(self.worker_id))
+        self.stop()
+
+    monkeypatch.setattr(queue_loop.WorkerLoop, "run_forever", one_pass_then_sigterm)
+    assert queue_loop.main(["--max-concurrent", "2"]) == 0
+    assert (seen[0]["role"], seen[0]["max_concurrent"]) == ("worker", 2)
+    assert _loop_row(queue_loop.WORKER_ID) is None
+
+    assert queue_loop.main(["--once"]) == 0            # a single pass leaves no row either
+    assert get_conn().execute("SELECT COUNT(*) AS n FROM worker_heartbeats").fetchone()["n"] == 0
+
+
+def test_a_stopped_loop_does_not_write_its_row_back(setup_db):
+    """stop_embedded() waits 5 s for the thread, then deletes the row: a pass
+    still running then must not write it back, or a worker that stopped stays
+    listed for an hour."""
+    loop = queue_loop.WorkerLoop(max_concurrent=1, worker_id="w-stopping", spawn=FakeSpawn())
+    loop.run_once()
+    assert _loop_row("w-stopping") is not None
+    loop.stop()
+    loop.forget()
+    assert loop.heartbeat_if_due(time.monotonic() + loop.heartbeat_s + 1)    # the late pass, still due
+    assert _loop_row("w-stopping") is None
+
+
+def test_a_new_stamp_keeps_the_row_s_started_at(setup_db):
+    queue_loop.stamp_worker("w-same", role="worker", max_concurrent=1, started_at="2026-10-31T08:00:00+00:00")
+    get_conn().execute("UPDATE worker_heartbeats SET heartbeat_at='2026-10-31T08:00:00+00:00'")
+    assert queue_loop.stamp_worker("w-same", role="worker", max_concurrent=1,
+                                   started_at="2026-11-01T09:00:00+00:00")
+    row = _loop_row("w-same")
+    assert row["started_at"] == "2026-10-31T08:00:00+00:00"          # when the loop started, not this stamp
+    assert row["heartbeat_at"] > "2026-10-31T08:00:00+00:00"
+
+
+def test_the_first_pass_stamps_however_young_the_clock(setup_db):
+    """time.monotonic() counts from the boot: a worker started a second after
+    it still writes its row on its first pass."""
+    loop = queue_loop.WorkerLoop(max_concurrent=1, worker_id="w-young", spawn=FakeSpawn())
+    assert loop.heartbeat_if_due(1.0)
+    assert _loop_row("w-young") is not None
