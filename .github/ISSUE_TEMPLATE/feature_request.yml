@@ -1,0 +1,47 @@
+name: Feature request
+description: Propose a change to what CTIParsor does, or to what it supports.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        One person maintains CTIParsor. Before you write, check where your idea stands:
+
+        - the [roadmap](https://github.com/Stixaly/CTIParsor/blob/main/ROADMAP.md) separates what 1.0 promises, what comes after it, and what is not planned;
+        - the [support policy](https://github.com/Stixaly/CTIParsor/blob/main/docs/support-policy.md#capability-matrix) marks each capability supported, experimental or not supported, with the reason.
+
+        If your idea is on one of those lists, say what changes the reason given there.
+
+        A security vulnerability does not go in an issue: see
+        [SECURITY.md](https://github.com/Stixaly/CTIParsor/blob/main/SECURITY.md#reporting-a-vulnerability).
+        An issue is public, so leave out report text you may not share and any secret.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do, and what stops you. Describe the need, not yet the solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Your proposal
+      description: What CTIParsor would do differently, as precisely as you can. If it changes a stable surface (the API, the CLI, `.env.example`, the STIX output), say which.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: What you tried or considered instead, a workaround included, and why it does not do. A setting may already cover it ([docs/configuration.md](https://github.com/Stixaly/CTIParsor/blob/main/docs/configuration.md)).
+
+  - type: checkboxes
+    id: checked
+    attributes:
+      label: Before you submit
+      options:
+        - label: I read the roadmap and the capability matrix of the support policy.
+          required: true
+        - label: I would send the pull request myself (CONTRIBUTING.md asks for an issue first for anything larger than a fix).

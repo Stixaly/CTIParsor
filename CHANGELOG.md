@@ -335,6 +335,38 @@ for `scripts/build_detection_index.py`, which is unchanged.
 
 ### Documentation
 
+#### How to report, propose and decide the 1.0 release: issue forms, a roadmap, a readiness checklist, 2026-11-01
+
+- **Issue forms.** A bug report asks for:
+  - the version, with the command that shows it;
+  - the image digest and commit;
+  - how it is installed, the Compose profiles, the host, and the LLM
+    provider and model;
+  - a redacted reproduction. The form says what not to paste (restricted
+    report text, `.env`, keys) and how to reduce a private report to a
+    synthetic text.
+
+  A feature request points to the roadmap and the support policy first.
+  Blank issues are off, and a vulnerability goes to the private advisory of
+  SECURITY.md.
+- **A pull request template.** It links to CONTRIBUTING.md and TESTING.md
+  rather than copying them. It asks for the checks run, the CHANGELOG entry,
+  the docs or ADR touched, `make contract` for a stable surface, and
+  `BUNDLE_AFFECTING` for a bundle change. No rule assumes a team.
+- **`ROADMAP.md`.** It sets out what 1.0 promises, what comes after it (what
+  the support policy marks experimental) and what is not planned, with the
+  reason the documents give. It promises no dates. README and CONTRIBUTING
+  link to it.
+- **`docs/releases/1.0-readiness.md`.** It holds the record the 1.0 release is
+  decided on, still blank because no candidate is frozen. For each gate, it
+  says what shows it, how it is re-run on the candidate, the evidence so far
+  and what is still open. Its Delivery section lists the required checks, as
+  read on 2026-11-01, and two settings still to set: "Browser journey" as a
+  required check, and a ruleset on `v*` tags. It also lists the tasks after
+  the release.
+- **`tests/test_governance_files.py`** checks the forms' syntax, the advisory
+  link and the roadmap's links.
+
 #### What 1.0 will promise: a support policy and ADR-0094 (Proposed), 2026-10-31
 
 `docs/support-policy.md` writes down the contract of a 1.0 for one analyst on a
@@ -388,6 +420,35 @@ published Release notes keep the first wording.
 pages now give `run --rm bootstrap bootstrap --no-models`.
 
 ### Changed
+
+#### The image main publishes is the image CI tested, 2026-11-01
+
+`publish-image` used to build the image a second time, from a cache
+`container-image` never wrote. The image pushed, attested and later promoted
+by a release was therefore not the one the scan and the smoke test ran.
+
+- **`container-image` builds the image once,** into an OCI archive, with the
+  published image's labels and BuildKit's SLSA v1 provenance stated in the
+  workflow. It loads the archive as `ctiparsor:ci` and fails unless the
+  loaded image is the archive's. The scan and the smoke test then run on that
+  image.
+- **On a push to main, the archive goes to `publish-image`,** which builds
+  nothing. It loads the archive and pushes it with `docker push` as
+  `sha-<commit>`. The job fails unless GHCR holds the digest
+  `container-image` reported, and the SBOM and both attestations bind to that
+  digest.
+- **`latest` moves last,** after the attestations, and only while the commit
+  is still main's head. An older run, or a re-run, no longer moves it back.
+- **Both jobs run on `ubuntu-26.04`.** Its containerd image store loads and
+  pushes the image index whole, attestation included. A runner with another
+  image store fails the job with a message naming it. No third-party
+  container runs in either job.
+- **`release.yml` is unchanged,** and its "nothing was rebuilt" now holds back
+  to the smoke test.
+- **Tests and docs.** `tests/test_release.py` holds `ci.yml` to all of this,
+  reading only the lines the scripts run. docs/releasing.md gives the commands
+  that compare the digests after a run; the first push to main after this
+  change is the first real proof. ADR-0047 and ADR-0085 are amended.
 
 #### Licences: unlicensed corpora are opt-in, the image drops Chrome's full build, every third party named, 2026-11-01
 

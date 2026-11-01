@@ -1,0 +1,214 @@
+name: Bug report
+description: Something CTIParsor does is wrong, fails, or contradicts its documentation.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **A security vulnerability does not go in an issue.** Report it privately, as
+        [SECURITY.md](https://github.com/Stixaly/CTIParsor/blob/main/SECURITY.md#reporting-a-vulnerability)
+        describes: [open a security advisory](https://github.com/Stixaly/CTIParsor/security/advisories/new).
+
+        One person maintains CTIParsor. A fix lands on `main` and ships in the next release, and only the latest
+        release is supported
+        ([SECURITY.md](https://github.com/Stixaly/CTIParsor/blob/main/SECURITY.md#supported-versions)).
+        Try the latest release first if you can.
+
+  - type: markdown
+    attributes:
+      value: |
+        ### What not to paste
+
+        An issue is public. Leave out:
+
+        - **report text you do not have the right to share**: anything TLP-restricted, customer data, material under NDA;
+        - **secrets**: your `.env`, API keys (`ANTHROPIC_API_KEY` and the like), the database password (`CTI_DB_PASSWORD`, `.secrets/`), tokens in a URL, internal host names and addresses.
+
+        If the report is private, reproduce the problem on a **synthetic text** instead: cut the report to the
+        shortest passage that still shows the problem, replace every name, address and hash with an invented one
+        of the same shape, and check that the problem still happens on that text. Pasted text takes 20 to
+        2,000,000 characters. The repository's own `tests/fixtures/sample_report.txt` is another starting point:
+        say if the problem happens on it. If it happens only on the original, say so, and describe it.
+
+  - type: input
+    id: version
+    attributes:
+      label: CTIParsor version
+      description: |
+        From the install directory, with the stack running (use your `CTI_BIND` and `CTI_PORT` if you changed them):
+
+        `curl -fsS http://127.0.0.1:8000/openapi.json | grep -o '"info":{[^}]*}'`
+
+        It prints `"info":{"title":"CTI to STIX","version":"X.Y.Z"}`. The version is the last release's: a build
+        between two releases is told apart by its commit, in the next field.
+      placeholder: X.Y.Z
+    validations:
+      required: true
+
+  - type: textarea
+    id: image
+    attributes:
+      label: Image digest and commit
+      description: |
+        The image `app` runs, from the install directory:
+
+        `docker compose ps -q app | xargs docker inspect --format '{{.Config.Image}}'`
+
+        On a release install it prints `ghcr.io/stixaly/ctiparsor@sha256:...`: paste that. If it prints a tag
+        instead, add the digest and the commit of that image:
+
+        `docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' <the tag>`
+
+        `docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' <the tag>`
+
+        Built from source: write the output of `git rev-parse HEAD` in your checkout, and say if you changed any file.
+      render: text
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How it is installed
+      description: The install paths are in the [README's quick start](https://github.com/Stixaly/CTIParsor/blob/main/README.md#quick-start).
+      options:
+        - Release archive, image pinned by digest
+        - Built from source at a release tag
+        - Built from source at another commit (main or a branch)
+        - Air-gapped bundle (experimental)
+        - Other (describe it below)
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: profiles
+    attributes:
+      label: Compose profiles and options
+      description: Tick what applies to your stack.
+      options:
+        - label: Default stack only (`app`, `worker`, `postgres`, `capture-proxy`)
+        - label: "`proxy` profile (TLS and a password in front of `app`)"
+        - label: "`ollama` profile (a local LLM in the stack)"
+        - label: More than one worker (`--scale worker=N`)
+        - label: "Image built with `CTI_INSTALL_CAPTURE=false`"
+        - label: "`dev` or `frontend-dev` services (development; the support policy does not cover them)"
+
+  - type: input
+    id: host
+    attributes:
+      label: Host
+      description: |
+        The operating system (Linux x86-64 or WSL2 are the supported hosts) and your Docker versions:
+
+        `docker version --format '{{.Server.Version}}'` and `docker compose version`
+      placeholder: OS, Docker Engine version, Compose version
+    validations:
+      required: true
+
+  - type: dropdown
+    id: llm_provider
+    attributes:
+      label: LLM provider (LLM_PROVIDER in .env)
+      description: |
+        Which providers are supported and which are experimental is in the
+        [capability matrix](https://github.com/Stixaly/CTIParsor/blob/main/docs/support-policy.md#capability-matrix).
+        Give the model in the next field.
+      options:
+        - anthropic (the default)
+        - gemini
+        - mistral
+        - ollama
+        - vllm
+        - lmstudio
+        - No LLM provider (Stage 3 skipped)
+    validations:
+      required: true
+
+  - type: input
+    id: llm_model
+    attributes:
+      label: LLM model
+      description: The model your provider uses (`ANTHROPIC_MODEL`, `GEMINI_MODEL`, `MISTRAL_MODEL`, `OLLAMA_MODEL`, `VLLM_MODEL` or `LMSTUDIO_MODEL`). Leave empty when there is no provider.
+
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where it happens
+      options:
+        - Web UI
+        - REST API
+        - CLI (`main.py`, run through `cli`)
+        - Install, upgrade, backup or restore
+        - Docker or Compose stack
+        - Other (describe it below)
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened
+      description: What you saw, with the exact error message or status code. Say if it happens every time.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: And, if a page of the documentation says so, which one.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Redacted reproduction
+      description: |
+        The steps from a running stack: the page you used, the CLI command or the API call, and the input.
+        The input is a synthetic or redacted text, never a report you may not share (see above). Paste the
+        text here if it is short, or describe it.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: blocker
+    attributes:
+      label: Does it hit a release blocker?
+      description: The four [release blockers](https://github.com/Stixaly/CTIParsor/blob/main/docs/support-policy.md#release-blockers) hold a release.
+      options:
+        - No, or I do not know
+        - Data loss (an upgrade, a restore or normal use loses a report, a baseline or a bundle)
+        - A lost review decision (an accept or reject does not reach the stored rows or the next bundle)
+        - An invalid export presented as validated
+        - An essential journey is unusable (import, review or export cannot be completed)
+    validations:
+      required: true
+
+  - type: textarea
+    id: checks
+    attributes:
+      label: What you already checked
+      description: |
+        Any of these that applies, with its result:
+
+        - `curl -fsS http://127.0.0.1:8000/api/health` (200 and `{"status": "ok"}`, or 503);
+        - `docker compose run --rm app check` (which pipeline stages are available);
+        - for an export, the `X-Bundle-Validation` header of `GET /api/jobs/{id}/bundle` (`validated`, `unverified` or `unknown`), or the 409 body;
+        - the job's stage report or the exported bundle, only if the report itself can be shared.
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        `docker compose logs app worker postgres` (add `--tail 200` to cut it), around the time of the problem.
+        Read it before pasting: remove secrets and any report text.
+      render: text
+
+  - type: checkboxes
+    id: redaction
+    attributes:
+      label: Before you submit
+      options:
+        - label: I removed secrets and any report text I may not share from everything above.
+          required: true

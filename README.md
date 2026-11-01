@@ -843,6 +843,7 @@ read [CONTRIBUTING.md](CONTRIBUTING.md); the test strategy is in
 | Containers, deployment, architecture, upgrades | [docker](docs/docker.md) · [deployment](docs/deployment.md) · [architecture](docs/architecture.md) · [upgrading](docs/upgrading.md) |
 | Watching a running install, and what each signal does not say | [docs/operations.md](docs/operations.md) |
 | What 1.0 promises: stable surfaces, breaking changes, capability matrix, maintenance | [docs/support-policy.md](docs/support-policy.md) |
+| What 1.0 still needs, what comes after it, what is not planned | [ROADMAP.md](ROADMAP.md) |
 | Development guide: `make` targets, benchmarks, project structure, extending | [docs/development.md](docs/development.md) |
 | Dependencies and how to keep them current | [docs/dependencies.md](docs/dependencies.md) |
 | Evaluation protocol | [docs/eval/README.md](docs/eval/README.md) |
