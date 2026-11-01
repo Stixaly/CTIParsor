@@ -1,4 +1,4 @@
-"""Check A4 of ADR-0090 (lot 7): what OpenCTI keeps of an enriched bundle.
+"""Check A4 of ADR-0090 (lot 7), extended for ADR-0094 item 8: what OpenCTI keeps of CTIParsor's bundles.
 
 CTIParsor's enriched bundle re-issues the analyst's Report under the same id,
 with more object_refs. OpenCTI's import is an upsert, so what the Report holds
@@ -15,7 +15,24 @@ bundles into a running throwaway OpenCTI and reads back what it kept:
    baseline object once (by STIX id and by type and name/value), and every
    object of the bundle present;
 4. optionally the rejected bundle (WellMess removed), as admin: OpenCTI never
-   removes a reference on an upsert, so WellMess must still be referenced.
+   removes a reference on an upsert, so WellMess must still be referenced;
+5. optionally a bundle extracted from scratch (--full), as admin: nothing refused.
+
+Each bundle imported as admin is imported a second time (the baseline, the
+enriched, the rejected and the full one). Then the whole platform is read
+back, every object and relationship with OpenCTI's own STIX export of it, and
+scripts/opencti_expectations.py compares: the second import refuses and adds
+nothing; every object of the bundle is there once, by id or, once OpenCTI
+renamed it, by its name or aliases; no second object of its type answers to
+its name, value or aliases, and no second relationship joins the same
+objects; no two objects or relationships of the bundle merged into one; each
+relationship joins the objects the bundle names; authors and markings are the
+ones the bundles set; no description emptied; the Report holds the bundle's
+references (none merged into another), its description, its attached file and
+its confidence. After the last import, every bundle's objects are looked for
+again (step 6), and every reading of the platform must have settled. What
+OpenCTI holds differently, field by field, is recorded with the whole values,
+not judged; one name held by objects of two types is a WARN.
 
 Import path: the calls the OpenCTI worker makes for a bundle (pycti's
 import_bundle with update=True, after OpenCTIStix2Splitter), but item by item,
@@ -37,6 +54,7 @@ of docker/opencti-test only, never for a real OpenCTI.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import secrets
@@ -51,6 +69,11 @@ from pycti import OpenCTIApiClient
 from pycti.utils.opencti_stix2_splitter import OpenCTIStix2Splitter
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:   # run as a script: the repository root is not on the path
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts import opencti_expectations as expect  # standard library only: no CTIParsor package
+
 DEFAULT_ENV = REPO_ROOT / "docker" / "opencti-test" / ".env"
 
 WELLMESS_ID = "malware--ce12e6b1-5ad7-4fc6-a2ed-2a3ca268a445"
@@ -110,6 +133,20 @@ SEARCH_QUERY = (
     "... on IntrusionSet { name } ... on Indicator { name } ... on Report { name } ... on StixFile { file_name: name } "
     "... on StixCyberObservable { observable_value } } } } }"
 )
+# The whole platform, read back after each import (a throwaway instance holds
+# only what the check imported).
+ALL_OBJECTS_QUERY = (
+    "query All($after: ID) { stixCoreObjects(first: 200, after: $after) { pageInfo { hasNextPage endCursor } "
+    "edges { node { standard_id x_opencti_stix_ids entity_type toStix } } } }"
+)
+ALL_RELATIONSHIPS_QUERY = (
+    "query All($after: ID) { stixCoreRelationships(first: 200, after: $after) { pageInfo { hasNextPage endCursor } "
+    "edges { node { standard_id x_opencti_stix_ids entity_type toStix } } } }"
+)
+ALL_MARKINGS_QUERY = (
+    "{ markingDefinitions(first: 500) { edges { node { "
+    "standard_id x_opencti_stix_ids definition_type definition } } } }"
+)
 REPORT_QUERY = (
     "query Report($id: String!) { report(id: $id) { standard_id name modified "
     "objects(all: true) { edges { node { ... on BasicObject { standard_id entity_type } "
@@ -132,6 +169,11 @@ class Recorder:
         )
         if detail is not None:
             self.details[f"{step}: {name}"] = detail
+
+    def extend(self, checks: list[dict[str, Any]]) -> None:
+        """Record the checks scripts/opencti_expectations.py returned, in order."""
+        for c in checks:
+            self.check(c["step"], c["check"], c["expected"], c["observed"], c["pass"], c.get("detail"))
 
     def table(self) -> str:
         rows = [("step", "check", "expected", "observed", "result")]
@@ -157,6 +199,10 @@ def read_admin_token(env_file: Path) -> str:
 def load_bundle(path: str) -> dict[str, Any]:
     """Read a bundle from disk. Each import gets a fresh copy, because pycti edits the items it imports."""
     return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def file_sha256(path: str) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def single_report(bundle: dict[str, Any]) -> dict[str, Any]:
@@ -293,6 +339,56 @@ def settled_report(client: OpenCTIApiClient, report_id: str) -> dict[str, Any]:
     return poll(lambda: report_state(client, report_id), settled)
 
 
+def read_all(client: OpenCTIApiClient, query: str, key: str) -> list[dict[str, Any]]:
+    nodes: list[dict[str, Any]] = []
+    after = None
+    while True:
+        connection = gql(client, query, {"after": after})[key]
+        nodes += edges(connection)
+        if not connection["pageInfo"]["hasNextPage"]:
+            return nodes
+        after = connection["pageInfo"]["endCursor"]
+
+
+def read_platform(client: OpenCTIApiClient) -> dict[str, Any]:
+    """Every object, relationship and marking the platform holds, objects and relationships with toStix."""
+    return {
+        "objects": read_all(client, ALL_OBJECTS_QUERY, "stixCoreObjects"),
+        "relationships": read_all(client, ALL_RELATIONSHIPS_QUERY, "stixCoreRelationships"),
+        "markings": edges(gql(client, ALL_MARKINGS_QUERY)["markingDefinitions"]),
+    }
+
+
+def settled_platform(client: OpenCTIApiClient, state: dict[str, Any], label: str) -> expect.Platform:
+    """The platform once two readings in a row agree: OpenCTI indexes what it writes a moment later.
+
+    A reading that never settled within POLL_TIMEOUT is used all the same,
+    recorded in state["readings"] and said on stderr: step 6 fails on it.
+    """
+    reading, settled = expect.settle(lambda: read_platform(client), POLL_TIMEOUT, POLL_INTERVAL)
+    state["readings"].append({"label": label, "settled": settled})
+    if not settled:
+        print(f"the platform did not settle within {POLL_TIMEOUT:.0f} s: {label}", file=sys.stderr)
+    return expect.Platform(reading["objects"], reading["relationships"], reading["markings"])
+
+
+def import_again(client: OpenCTIApiClient, step: str, label: str, path: str, rec: Recorder,
+                 state: dict[str, Any]) -> None:
+    """Import a bundle a second time, then check it against the whole platform read back."""
+    before = settled_platform(client, state, f"{label}: before its second import")
+    second = import_per_object(client, load_bundle(path))
+    rec.details[f"import: {label} (admin, second)"] = second
+    state["imports"].append({"label": f"{label} (admin, second)", **second})
+    after = settled_platform(client, state, f"{label}: after its second import")
+    rec.extend(expect.reimport_checks(step, label, second, before.counts(), after.counts()))
+    bundle = load_bundle(path)
+    state["imported"].append(bundle)
+    state["bundles"][label] = {"file": path, "sha256": file_sha256(path), "objects": len(bundle["objects"])}
+    rec.extend(expect.bundle_checks(step, label, bundle, state["imported"], after))
+    state["after_import"][label] = (bundle, expect.transformations(bundle, after))
+    state["counts"][label] = after.counts()
+
+
 def find_named(client: OpenCTIApiClient, kind: str, name: str) -> dict[str, Any] | None:
     """Find a role, group or user by exact name."""
     for node in edges(gql(client, NAMED_QUERY % kind, {"search": name})[kind]):
@@ -370,7 +466,7 @@ def import_per_object(client: OpenCTIApiClient, bundle: dict[str, Any]) -> dict[
     return {"objects": len(bundle["objects"]), "imported": imported, "refused": refused}
 
 
-def run(args: argparse.Namespace, rec: Recorder) -> None:
+def run(args: argparse.Namespace, rec: Recorder, run_state: dict[str, Any]) -> None:
     admin = make_client(args.url, read_admin_token(Path(args.env_file)))
     about = gql(admin, ABOUT_QUERY)["about"]
     rec.details["versions"] = {"opencti": about["version"], "pycti": metadata.version("pycti")}
@@ -388,6 +484,7 @@ def run(args: argparse.Namespace, rec: Recorder) -> None:
     # 1. The analyst's baseline, as admin.
     first = import_per_object(admin, load_bundle(args.baseline))
     rec.details["import: baseline (admin)"] = first
+    run_state["imports"].append({"label": "baseline (admin)", **first})
     rec.check(
         "1",
         "nothing refused: baseline as admin",
@@ -396,6 +493,7 @@ def run(args: argparse.Namespace, rec: Recorder) -> None:
         not first["refused"],
         first["refused"],
     )
+    import_again(admin, "1", "baseline", args.baseline, rec, run_state)
 
     # 2. The enriched bundle, as the low-confidence user.
     baseline_entities = {n["standard_id"] for n in lookup(admin, sorted(base_refs))}
@@ -414,6 +512,7 @@ def run(args: argparse.Namespace, rec: Recorder) -> None:
     )
     low = import_per_object(lowconf, load_bundle(args.enriched))
     rec.details["import: enriched (lowconf)"] = low
+    run_state["imports"].append({"label": "enriched (lowconf)", **low})
     rec.check(
         "2",
         "nothing errored: enriched as lowconf",
@@ -440,6 +539,7 @@ def run(args: argparse.Namespace, rec: Recorder) -> None:
     # 3. The enriched bundle, as admin.
     full = import_per_object(admin, load_bundle(args.enriched))
     rec.details["import: enriched (admin)"] = full
+    run_state["imports"].append({"label": "enriched (admin)", **full})
     rec.check(
         "3",
         "nothing refused: enriched as admin",
@@ -510,12 +610,14 @@ def run(args: argparse.Namespace, rec: Recorder) -> None:
         not absent,
         absent,
     )
+    import_again(admin, "3", "enriched", args.enriched, rec, run_state)
 
     # 4. The enriched bundle after the rejection of WellMess, as admin.
     if args.rejected:
         rejected = load_bundle(args.rejected)
         rej = import_per_object(admin, rejected)
         rec.details["import: rejected (admin)"] = rej
+        run_state["imports"].append({"label": "rejected (admin)", **rej})
         rec.check(
             "4",
             "nothing refused: rejected as admin",
@@ -533,6 +635,37 @@ def run(args: argparse.Namespace, rec: Recorder) -> None:
             WELLMESS_ID in state["refs"],
             {"refs": sorted(state["refs"]), "refs_after_rejected_import": len(state["refs"])},
         )
+        import_again(admin, "4", "rejected", args.rejected, rec, run_state)
+
+    # 5. A bundle extracted from scratch, as admin.
+    if args.full:
+        whole = import_per_object(admin, load_bundle(args.full))
+        rec.details["import: full (admin)"] = whole
+        run_state["imports"].append({"label": "full (admin)", **whole})
+        rec.check(
+            "5",
+            "nothing refused: full as admin",
+            "0 refused",
+            f"{len(whole['refused'])} refused of {whole['objects']}",
+            not whole["refused"],
+            whole["refused"],
+        )
+        import_again(admin, "5", "full", args.full, rec, run_state)
+
+    # What the later imports changed in each bundle's objects: the last reading against the one after its import.
+    final = settled_platform(admin, run_state, "after the last import")
+    bundles = {label: bundle for label, (bundle, _) in run_state["after_import"].items()}
+    for label, (bundle, after_import) in run_state["after_import"].items():
+        run_state["transformations"][label] = {
+            "after_import": after_import,
+            "later": expect.later_changes(after_import, expect.transformations(bundle, final)),
+        }
+    run_state["counts"]["final"] = final.counts()
+
+    # 6. After the last import: every bundle's objects still there, on their own; every reading settled.
+    rec.extend(expect.final_checks("6", bundles, final))
+    rec.extend(expect.reading_checks("6", run_state["readings"]))
+    run_state["warnings"] = expect.cross_type_warnings(bundles, final)
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -542,6 +675,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--baseline", required=True, help="the analyst's bundle")
     parser.add_argument("--enriched", required=True, help="CTIParsor's enriched bundle")
     parser.add_argument("--rejected", help="the enriched bundle after a rejection (optional)")
+    parser.add_argument("--full", help="a bundle extracted without a baseline (optional)")
     parser.add_argument("--out", help="write the JSON results to this path")
     return parser.parse_args(argv)
 
@@ -556,14 +690,19 @@ def jsonable(value: Any) -> Any:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     rec = Recorder()
+    state: dict[str, Any] = {"imports": [], "imported": [], "bundles": {}, "after_import": {},
+                             "transformations": {}, "counts": {}, "readings": [], "warnings": []}
+    started = time.monotonic()
     try:
-        run(args, rec)
+        run(args, rec, state)
     except Exception as exc:  # noqa: BLE001 — OpenCTI unreachable or token refused: one line, not a traceback
         first = next(iter(str(exc).splitlines()), "")
         print(f"the check stopped at {args.url}: {type(exc).__name__}: {first}", file=sys.stderr)
         return 2
     passed = all(c["pass"] for c in rec.checks)
     print(rec.table())
+    for w in state["warnings"]:
+        print("WARN  one name, two types: " + "; ".join(f"{m['name']} ({m['entity_type']})" for m in w["objects"]))
     print("RESULT: " + ("every expectation holds" if passed else "at least one expectation FAILS"))
     if args.out:
         payload = {
@@ -572,6 +711,13 @@ def main(argv: list[str] | None = None) -> int:
             "import_path": IMPORT_PATH,
             "checks": rec.checks,
             "details": rec.details,
+            "bundles": state["bundles"],
+            "imports": state["imports"],
+            "counts": state["counts"],
+            "transformations": state["transformations"],
+            "warnings": state["warnings"],
+            "readings": state["readings"],
+            "seconds": round(time.monotonic() - started, 1),
         }
         Path(args.out).write_text(json.dumps(payload, indent=2, ensure_ascii=True, default=jsonable), encoding="utf-8")
         print(f"JSON written to {args.out}")

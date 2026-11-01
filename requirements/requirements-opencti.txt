@@ -1,0 +1,5 @@
+# The OpenCTI import check (scripts/opencti_import_check.py, ADR-0094 item 8):
+# pycti at the version of the platform docker/opencti-test/compose.yaml runs.
+# Not a project requirement: it goes in a venv of its own, never in the
+# project's (scripts/check_opencti_candidate.sh, TESTING.md).
+pycti==7.260930.0

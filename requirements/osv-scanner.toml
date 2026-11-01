@@ -16,3 +16,22 @@
 id = "PYSEC-2026-2447"
 ignoreUntil = 2027-01-04
 reason = "Not shipped: left out of every lock, and every install is --no-deps (SECURITY.md, Not shipped, reviewed 2026-10-04)"
+
+# requirements-opencti.lock.txt: pycti 7.260930.0 pins opentelemetry-api~=1.35.0
+# and setuptools~=82.0.0.  That lock installs only the OpenCTI check's venv, never
+# the image or CI; the image's lock has setuptools 84.2.1 and no opentelemetry
+# (SECURITY.md, Accepted vulnerabilities).
+[[IgnoredVulns]]
+id = "CVE-2026-114603"
+ignoreUntil = 2027-02-01
+reason = "opentelemetry-api in requirements-opencti.lock.txt only: inbound tracestate parsing, which the check's client never does (SECURITY.md, reviewed 2026-11-01)"
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-3447"
+ignoreUntil = 2027-02-01
+reason = "setuptools in requirements-opencti.lock.txt only: building a source distribution on macOS, which the check's venv never does (SECURITY.md, reviewed 2026-11-01)"
+
+[[IgnoredVulns]]
+id = "GHSA-xmj3-9gf7-h52w"
+ignoreUntil = 2027-02-01
+reason = "setuptools in requirements-opencti.lock.txt only: a legacy egg install on Windows, which the check's venv never does (SECURITY.md, reviewed 2026-11-01)"

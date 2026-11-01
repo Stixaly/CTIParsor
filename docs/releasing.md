@@ -151,6 +151,24 @@ newer, nothing to install). Its exit code is `0` when done, `1` when it refuses
    gh pr create --title "Release 0.1.0" --body "Moves [Unreleased] under 0.1.0 and sets the version (ADR-0085)."
    ```
 
+   From 1.0, before the tag: once main's CI has published the image of the
+   merge commit, run the OpenCTI import of the candidate on it (ADR-0094
+   item 8, TESTING.md, *OpenCTI import (A4)*), and post its report on the
+   release pull request. It must exit 0 (a WARN does not fail it; read it). It
+   takes about two minutes, refuses to start OpenCTI with less than 8 GB of
+   memory available, uses about 6 GB at its peak, and needs the pycti venv
+   TESTING.md creates once.
+
+   ```bash
+   wsl -u root -e bash -lc "cd /mnt/c/Users/parra/Documents/tools-NLP/CTIParsor && bash scripts/check_opencti_candidate.sh --image ghcr.io/stixaly/ctiparsor:sha-<merge commit>"
+   gh pr comment <release pull request> --body-file output/opencti-candidate/<UTC time>/report.md
+   ```
+
+   The Release cannot carry the report: the workflow uploads its own files,
+   and an immutable Release takes no file once published. The row "Import into
+   OpenCTI" of [support-policy.md](support-policy.md) names the date and the
+   digest of the last run: update them in the next pull request.
+
 5. **Tag the merge commit.** Check that `origin/main` is the release merge
    before tagging.
 

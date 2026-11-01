@@ -62,7 +62,9 @@ What already checks part of it, and what does not:
   idle or busy, on 2026-11-01.
 - The OpenCTI import recipe (TESTING.md, *OpenCTI import (A4)*) passed 12 of
   12 expectations on OpenCTI 7.260930.0 on 2026-10-25, before ADR-0093 changed
-  the descriptions. It is not in CI.
+  the descriptions. It is not in CI. Item 8 below ran it on 2026-11-01 on
+  bundles a candidate image produced: the Report's description and attached
+  file compared, and no description of an object or relationship emptied.
 
 Quality, as published today:
 

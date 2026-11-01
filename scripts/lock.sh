@@ -1,5 +1,5 @@
 #!/bin/sh
-# `make lock`: resolve the requirement ranges into five hashed locks (ADR-0080),
+# `make lock`: resolve the requirement ranges into six hashed locks (ADR-0080),
 # all in requirements/:
 #
 #   requirements.lock.txt        every package the image installs, from PyPI
@@ -7,6 +7,7 @@
 #   requirements-ci.lock.txt     what CI's fast tests install, same versions
 #   requirements-audit.lock.txt  pip-audit, for the dependency-audit job
 #   requirements-uv.lock.txt     uv, which this script runs
+#   requirements-opencti.lock.txt pycti, for the OpenCTI check's own venv (TESTING.md)
 #
 # Installed with `pip install --require-hashes` everywhere: a file whose sha256
 # differs from the one recorded here fails the install.  torch is installed
@@ -57,10 +58,11 @@ common /tmp/torch.in --index-url "$TORCH_INDEX" --no-deps -o requirements-torch.
 # CI's fast tests: the light runtime and the dev tools, at the image's versions.
 common requirements.txt requirements-dev.txt -c requirements.lock.txt $NOT_SHIPPED -o requirements-ci.lock.txt
 common requirements-audit.txt -o requirements-audit.lock.txt
+common requirements-opencti.txt -o requirements-opencti.lock.txt
 printf "uv\n" > /tmp/uv.in
 common /tmp/uv.in -o requirements-uv.lock.txt
-$HASHES requirements-ci.lock.txt requirements-audit.lock.txt requirements-uv.lock.txt
+$HASHES requirements-ci.lock.txt requirements-audit.lock.txt requirements-uv.lock.txt requirements-opencti.lock.txt
 
-for f in requirements.lock.txt requirements-torch.lock.txt requirements-ci.lock.txt requirements-audit.lock.txt requirements-uv.lock.txt; do
+for f in requirements.lock.txt requirements-torch.lock.txt requirements-ci.lock.txt requirements-audit.lock.txt requirements-uv.lock.txt requirements-opencti.lock.txt; do
     echo "Locked $(grep -c '==' "$f") packages -> $f"
 done

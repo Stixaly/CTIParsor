@@ -98,6 +98,7 @@ first URL-capture request to fail; `/api/ingest/url` responds 503 until then.
 | `requirements-dev.txt` | Pinned test / lint / type-check / fuzzing tools for CI: ruff, mypy, pytest-cov, reuse, schemathesis, atheris (Linux x86_64 only, ADR-0081), and `httpx` (a test imports it; the image has it through `openai`) | When you upgrade one of them on purpose |
 | `requirements-audit.txt` / `.lock.txt` | pip-audit, pinned, and its hashed lock | When you upgrade pip-audit on purpose |
 | `requirements-uv.lock.txt` | **Machine-generated** — the uv `make lock` installs, by hash, to resolve the other locks | Never by hand — `make lock` keeps it, `make update-deps` upgrades it |
+| `requirements-opencti.txt` / `.lock.txt` | pycti, pinned to the OpenCTI of `docker/opencti-test/compose.yaml`, and its hashed lock (`make lock`): the venv of the OpenCTI check (TESTING.md), never the image or CI | When the check moves to another OpenCTI version: the pin, the lock and the compose file together |
 | `frontend/package.json` | npm semver ranges (`^`) | When you want to allow a new major version |
 | `frontend/package-lock.json` | npm lock file | Never by hand — run `make npm-update` to update it |
 
