@@ -60,10 +60,16 @@ def test_the_smoke_runs_the_commands_of_the_docs_as_written():
     docs, script = _docs_blocks(), _script_blocks()
     assert sorted(docs) == ["BACKUP_COMMANDS", "CHECK_COMMANDS", "RESTORE_COMMANDS"]
     assert docs == script
-    assert docs["BACKUP_COMMANDS"][:3] == [
-        "umask 077",                          # the files hold every report: readable by their owner only
+    assert docs["BACKUP_COMMANDS"][:2] == [
         "day=$(date +%F)",                    # one date for both files
         "docker compose stop app worker"]     # one moment for both
+    # The files hold every report: readable by their owner only.  The umask is
+    # set in a subshell of each command that writes one, so that it does not
+    # stay in the operator's shell (ADR-0094 item 9: a release unpacked there
+    # next came out unreadable by the containers).
+    writers = [line for line in docs["BACKUP_COMMANDS"] if " > " in line]
+    assert len(writers) == 2
+    assert all(line.startswith("(umask 077; docker compose ") and line.endswith(")") for line in writers)
     assert docs["RESTORE_COMMANDS"][0] == "docker compose up -d --wait postgres"    # the database first
 
 

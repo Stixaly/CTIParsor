@@ -11,6 +11,43 @@ theme.
 
 ### Added
 
+#### A clean install from the published image, as the documentation writes it (ADR-0094 item 9), 2026-11-01
+
+The README installs a release:
+- its archive from the Releases page, checked with `SHA256SUMS`;
+- its image pinned by digest in `.env`;
+- then `docker compose pull`, `up -d`, `bootstrap`.
+
+Pinned by digest, the image is never built instead: Compose stops with
+`build tag cannot contain a digest`. Building from source, at a release tag,
+is the alternative. The host's prerequisites are written down: Linux x86-64
+or WSL2 (the image is `linux/amd64` only), Docker Engine 24+ and Compose
+v2.24+, bash, curl, tar, sha256sum.
+
+- **Upgrade.** docs/upgrading.md opens with *From one release to the next*:
+  back up, install the new release beside the old one, `pull`, `up -d`,
+  `bootstrap`, check. Going back means restoring the backup. An install made
+  from a clone, as the README had it until 0.2.0, renames the clone first:
+  the Compose project stays `ctiparsor`, with its volumes. docs/docker.md no
+  longer says `git pull && docker compose build`.
+- **Restart.** docs/docker.md gives `docker compose restart app worker` and
+  `down` / `up -d`, and says what happens to a report in progress: the worker
+  gives it `WORKER_DRAIN_S` (60 s) to finish, then puts it back in the queue,
+  and the next worker runs it again.
+- **The check.** `scripts/check_clean_install.sh --candidate REF` runs those
+  commands as written, read from the documents. It works in a new directory
+  and two Compose projects of its own, under `env -i`, and goes through:
+  1. the previous release installed;
+  2. a report reviewed and exported;
+  3. a restart with a report in flight;
+  4. the upgrade to the candidate;
+  5. the backup restored with the previous release.
+
+  It is a release step (docs/releasing.md), not CI. On 2026-11-01, from 0.2.0
+  to main's image at 248382c, with the models and corpora, every step passed
+  in 14 minutes, the images already pulled. `tests/test_check_clean_install.py`
+  binds it to the documents without Docker.
+
 #### The OpenCTI import runs on the candidate image (ADR-0094 item 8), 2026-11-01
 
 `scripts/check_opencti_candidate.sh` checks what a throwaway OpenCTI 7.260930.0
@@ -63,10 +100,6 @@ and OpenCTI takes about 4 GB.
   longer gives WellMess the alias WellMail (ATT&CK S0514 and S0515 are two
   families). With it, OpenCTI merged the candidate's WellMess and WellMail and
   their relationships, and the first version of the check passed it.
-- **Known bug**, listed in the support policy: a technique found in the text
-  with no Stage 3 entry (every technique, offline) is exported under a random
-  id and named by its T-number. In OpenCTI it renames an analyst's technique
-  that has the same ATT&CK id.
 - **pycti's own lock**, `requirements/requirements-opencti.lock.txt`, is written
   by `make lock` and installs the check's venv only, never the image or CI. It
   is not in CI's audit: pycti 7.260930.0 pins opentelemetry-api 1.35.0 and
@@ -356,6 +389,39 @@ pages now give `run --rm bootstrap bootstrap --no-models`.
 
 ### Changed
 
+#### Licences: unlicensed corpora are opt-in, the image drops Chrome's full build, every third party named, 2026-11-01
+
+- **Corpora with no licence are opt-in.** `russianpanda` and `mthcht` have no
+  LICENSE upstream (all rights reserved). They are now `enabled: false` in
+  `detection_corpora.yaml`, so `bootstrap` no longer clones them. An operator
+  turns one on from Settings (**Enable**, then **Redownload**) or with
+  `enabled: true` in `detection_corpora.local.yaml`
+  ([docs/detection-coverage.md](docs/detection-coverage.md)). An existing
+  store keeps their rules: a rebuild replaces the rules of enabled corpora
+  only. `tests/test_corpus_licences.py` fails if a corpus with licence `none`,
+  `unknown` or none at all is enabled in the committed file.
+- **The image installs only Chromium's headless shell**
+  (`playwright install --only-shell`). Captures launch headless, which runs
+  the shell. The full Chrome for Testing build installed beside it (403 MB)
+  bundles Google's Widevine module, whose licence forbids redistributing it;
+  v0.2.0's image holds it too. The images built before this change are to
+  be deleted from the registry once 1.0 is released. The startup probe now accepts the shell alone, which would otherwise log
+  "Chromium is not installed". In the image at 4df5cbd with the full build
+  removed, the probe passes and a headless launch renders a PDF.
+  `tests/test_web_capture.py` fails if the `Dockerfile` installs the full
+  build again.
+- **`THIRD_PARTY_NOTICES.md`** names, each with its licence and the date it
+  was read:
+  - the three models `bootstrap` downloads, from their Hugging Face cards;
+  - the container images;
+  - the Debian packages the image installs;
+  - Playwright and Chromium;
+  - the corpora, with the redistribution obligations of the GPL and
+    Elastic-2.0 ones (a rule export's `MANIFEST.json` names each rule's
+    licence).
+
+  A licence that could not be read from its source is marked "not verified".
+
 #### The migration check starts from the last release and compares every value (ADR-0094 item 2), 2026-10-31
 
 `scripts/check_migration_from.py` builds a database with an older release's own
@@ -494,6 +560,47 @@ revision that has it (`BUNDLE_AFFECTING`, scope `mapping`, ADR-0086).
   air-gapped host.
 
 ### Fixed
+
+#### An unedited install skips Stage 3 instead of failing it, 2026-11-01
+
+`.env.example` shipped `ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxxxxxxxxx`, which
+counts as a configured key. On an install whose `.env` was not edited, Stage 3
+therefore ran and failed on every report, while the README said it was
+skipped. The key now ships empty. `setup.sh` no longer says "API key
+configured" for an empty key, and the container's start says Stage 3 is
+skipped instead of saying it will fail. The contract records the new default
+(`contract/config.json`).
+
+#### The backup no longer leaves `umask 077` in the shell, 2026-11-01
+
+docs/docker.md's backup block set `umask 077` for the rest of the shell. A
+release unpacked in that shell afterwards, as an upgrade does, came out mode
+600, and the capture proxy (uid 13) could not read `docker/squid/squid.conf`.
+Each command that writes a backup file now sets the umask in a subshell of its
+own.
+
+#### Documentation corrected by the clean install, 2026-11-01
+
+- **Restore command.** docs/docker.md's restore paragraph gave
+  `run --rm bootstrap --no-corpora`, which the entrypoint stops on
+  (`exec: --: invalid option`). The options follow the command:
+  `run --rm bootstrap bootstrap --no-corpora`.
+- **Who migrates the schema.** The first process to start on the new image
+  applies the migration: `app`, `worker`, or the `bootstrap` that follows
+  them. In the clean install it was `bootstrap`.
+- **Versions and sizes.**
+  - docs/docker.md says PostgreSQL 18, not 17.
+  - `up -d` also starts `capture-proxy`.
+  - GLiNER large is 1.8 GB, not 800 MB.
+- **Measured times replace the old estimates.** The bootstrap takes about 6½
+  minutes: 2½ for the models and corpora without an `HF_TOKEN`, 4 for the
+  rule store. The volumes take nearly 5 GB. The docs used to say "10–20 min",
+  "~36 kB/s per file" and 3.5 GB.
+- **The CLI.** The README's `dev cli` and `make run-dir` build an unpublished
+  image from the source tree. The README now says so and gives `app cli` for a
+  release install.
+- **Private paths.** No maintainer's path is left in TESTING.md or
+  docs/releasing.md.
 
 #### A technique no LLM listed keeps OpenCTI's standard id and its ATT&CK name (ADR-0066), 2026-11-01
 

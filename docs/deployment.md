@@ -2,8 +2,9 @@
 
 This page covers putting CTIParsor on a Linux machine that more than one person
 can reach. Docker is the only supported way to run it (ADR-0054) — this page
-assumes `bash setup.sh` has run and `docker compose build` has produced the
-image; see [docs/docker.md](docker.md) for the container reference.
+assumes the stack is installed as the [README's quick start](../README.md#quick-start)
+installs it: a release's image pinned by digest, or one built from a release
+tag; see [docs/docker.md](docker.md) for the container reference.
 
 Read [section 2](#2-what-no-authentication-actually-means) before you change the
 bind address. It is short, and it is the part that decides which of the three
@@ -277,7 +278,8 @@ each signal does not say.
 
 ## 6. Before you expose it
 
-- [ ] `docker compose build` has run — it builds `frontend/dist/` as part of the image
+- [ ] The image is a release's, pinned by digest (`CTI_IMAGE` in `.env`), or built
+      from a release tag; either way the web UI is built into it
 - [ ] `.env` is not world-readable — it holds LLM API keys (`chmod 600 .env`)
 - [ ] `DATABASE_URL` is set and reachable (mandatory since ADR-0053 — no
       SQLite fallback); if PostgreSQL's own data directory sits on a mounted

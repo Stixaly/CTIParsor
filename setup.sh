@@ -9,8 +9,9 @@
 # run. Everything else (Python/Node dependencies, NLP models, MITRE data,
 # detection corpora, the frontend build) happens inside containers:
 #
-#   docker compose build                                   # the image
-#   docker compose up -d                                   # app + worker + postgres
+#   docker compose pull       # the release's image (CTI_IMAGE in .env, README)
+#   docker compose build      # or the image from this source tree
+#   docker compose up -d                                   # app, worker, postgres, capture-proxy
 #   docker compose --profile bootstrap run --rm bootstrap   # models, corpora, rule store
 #
 # Usage:
@@ -176,7 +177,7 @@ if [ ! -f ".env" ]; then
         echo -e "  ${CYAN}git checkout .env.example${NC}   (or re-clone)"
         cat > .env << 'ENVEOF'
 LLM_PROVIDER=anthropic
-ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxxxxxxxxx
+ANTHROPIC_API_KEY=
 ENVEOF
         warn ".env created with a minimal starter — restore .env.example for the rest"
     fi
@@ -190,7 +191,7 @@ ENVEOF
         echo "     .env: LLM_PROVIDER=ollama, lmstudio or vllm (the hosted APIs are not reachable"
         echo "     from an air-gapped host)."
     else
-        echo -e "  ${RED}ACTION REQUIRED — set your LLM provider and key in .env:${NC}"
+        echo -e "  ${YELLOW}Set your LLM provider and key in .env${NC} (left empty, Stage 3 is skipped):"
         echo -e "     ${CYAN}nano .env${NC}"
         echo -e "     ${YELLOW}ANTHROPIC_API_KEY=sk-ant-...${NC}   ← Anthropic (default)"
         echo -e "     ${YELLOW}GEMINI_API_KEY=...${NC}             ← or Google Gemini"
@@ -205,11 +206,15 @@ ENVEOF
     fi
 else
     ok ".env already present"
+    PROVIDER_VALUE=$(grep -E '^LLM_PROVIDER=' .env | tail -1 | cut -d'=' -f2-)
+    KEY_VALUE=$(grep -E '^ANTHROPIC_API_KEY=' .env | tail -1 | cut -d'=' -f2-)
     if grep -qE "sk-ant-xxx|xxxx" .env 2>/dev/null; then
-        warn "API key looks like the default placeholder!"
-        echo -e "  ${RED}  nano .env  →  update ANTHROPIC_API_KEY=sk-ant-...${NC}"
+        warn "API key looks like the old placeholder: Stage 3 will fail on every report."
+        echo -e "  ${RED}  nano .env  →  a real ANTHROPIC_API_KEY=sk-ant-..., or leave it empty${NC}"
+    elif [ "${PROVIDER_VALUE:-anthropic}" = anthropic ] && [ -z "$KEY_VALUE" ]; then
+        info "No LLM provider set: Stage 3 is skipped (set one in .env, section 1)"
     else
-        ok "API key configured"
+        ok "LLM provider: ${PROVIDER_VALUE:-anthropic}"
     fi
 fi
 
@@ -299,22 +304,24 @@ sep
 echo ""
 echo "  Next steps:"
 echo ""
-echo -e "  ${YELLOW}1.${NC}  Build the image (first time, or after a code change):"
+echo -e "  ${YELLOW}1.${NC}  The image: a release's, by digest (CTI_IMAGE in .env, README quick start),"
+echo -e "       ${CYAN}docker compose pull${NC}"
+echo -e "       or built from this source tree (first time, or after a code change):"
 echo -e "       ${CYAN}docker compose build${NC}          (or: make docker-build)"
 echo ""
-echo -e "  ${YELLOW}2.${NC}  Start the stack (API + worker + PostgreSQL):"
+echo -e "  ${YELLOW}2.${NC}  Start the stack (API, worker, PostgreSQL, capture proxy):"
 echo -e "       ${CYAN}docker compose up -d${NC}          (or: make docker-up)"
 echo -e "       → http://127.0.0.1:8000"
 echo ""
-echo -e "  ${YELLOW}3.${NC}  One-time: NLP models, detection corpora, rule store (10-20 min):"
+echo -e "  ${YELLOW}3.${NC}  One-time: NLP models, detection corpora, rule store (about 6 min):"
 echo -e "       ${CYAN}docker compose --profile bootstrap run --rm bootstrap${NC}"
 echo -e "       (or: make docker-bootstrap)"
 echo ""
-echo -e "  ${YELLOW}4.${NC}  Run the test suite (no host Python needed):"
+echo -e "  ${YELLOW}4.${NC}  From a clone: the test suite (builds the dev image the first time):"
 echo -e "       ${CYAN}docker compose run --rm dev pytest tests/ -v${NC}"
 echo -e "       (or: make docker-test)"
 echo ""
-echo -e "  ${YELLOW}5.${NC}  Process a report from the CLI (drop files into input/ first):"
+echo -e "  ${YELLOW}5.${NC}  From a clone: process a report from the CLI (dev image; drop files into input/ first):"
 echo -e "       ${CYAN}make run-dir${NC}                  (or: make run — the bundled sample report)"
 echo ""
 echo -e "  ${YELLOW}6.${NC}  Frontend hot-reload (UI development):"

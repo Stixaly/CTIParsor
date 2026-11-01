@@ -37,7 +37,7 @@
     "env ANTHROPIC_API_KEY": {
       "set": true,
       "values": [
-        "sk-ant-xxxxxxxxxxxxxxxxxxxx"
+        ""
       ]
     },
     "env ANTHROPIC_MODEL": {
