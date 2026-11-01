@@ -61,7 +61,9 @@ What already checks part of it, and what does not:
   does not mean that no worker runs.
 - The OpenCTI import recipe (TESTING.md, *OpenCTI import (A4)*) passed 12 of
   12 expectations on OpenCTI 7.260930.0 on 2026-10-25, before ADR-0093 changed
-  the descriptions. It is not in CI.
+  the descriptions. It is not in CI. Item 8 below ran it on 2026-11-01 on
+  bundles a candidate image produced: the Report's description and attached
+  file compared, and no description of an object or relationship emptied.
 
 Quality, as published today:
 
@@ -287,7 +289,7 @@ no import test); several users, a GPU and a Python package are not supported.
 
 ## Action plan
 
-Items 1 to 4 are done; none of the others is started on 2026-10-31. Each
+Items 1 to 4 and 8 are done; none of the others is started on 2026-11-01. Each
 proves part of a promise; `docs/support-policy.md` names the item where a piece
 of evidence is missing.
 
@@ -300,7 +302,7 @@ of evidence is missing.
 | 5 | In-house gold: the 9 reports annotated on every layer of `LAYERS`, `status: gold` (decision 10) | the denominators of the measurement | not started (9 `pre-annotation` drafts) |
 | 6 | Measurement of the exported bundle: score the bundle Stages 4 and 5 produce, per layer and per document, with every report not scored named; published with each release; compared with the previous release on the same data | published limits | not started |
 | 7 | Worker status: an idle worker visible in `GET /api/queue/status`, or the documentation says that an empty list is not an outage | operations | not started |
-| 8 | OpenCTI import of the candidate: the A4 recipe on bundles the candidate produced, tied to its commit and image digest | the import the matrix supports | not started |
+| 8 | OpenCTI import of the candidate: the A4 recipe on bundles the candidate produced, tied to its commit and image digest | the import the matrix supports | done: `scripts/check_opencti_candidate.sh` (by hand, not in CI: two stacks in turn, about 4 GB for OpenCTI), `scripts/opencti_candidate_bundles.py`, `scripts/opencti_expectations.py`, `scripts/opencti_import_check.py` extended, `requirements/requirements-opencti.lock.txt`; `tests/test_opencti_expectations.py`; a step of `docs/releasing.md` from 1.0. The candidate given by digest, or a tag resolved to it, its commit read from the image's label and checked against each job's `git_rev`; three bundles produced through its API, offline (a report reviewed, an enrichment, the same after a rejection), each `validated`; a throwaway OpenCTI 7.260930.0 with secrets made for the run; A4's 12 expectations, then each bundle imported twice and the whole platform read back: nothing refused or added, every object there once, no two objects or relationships of a bundle merged into one, no second object by type and name, value or alias, no second relationship between the same objects, relationships joined as named, authors and markings (TLP, PAP) as the bundles set them, no description emptied, the Report's references (none merged), description, attached file and confidence; after the last import, every bundle's objects still there on their own, and every reading settled; one name under two types a WARN; what OpenCTI changes recorded with the whole values; a report tied to the digest, to where the bundles come from and to the checkout that ran it. Run on 2026-11-01 on main's image at 4df5cbd: 83 of 83 and 1 WARN (APT29 as Intrusion-Set and Threat Actor), 122 s. The first version (66 expectations) passed a merge of two of the candidate's malware that a wrong alias in the baseline fixture caused; the fixture is corrected and the check fails on it. Not covered: the models, LLM, vision and CVE stages (the offline profile); other OpenCTI versions; the `x_` properties and the `original_document` reference, which OpenCTI drops; the techniques CTIParsor exports under a random id, named by their T-number, which rename an analyst's technique in OpenCTI (a known bug, TESTING.md); OpenCTI's worker queue and connectors (the check makes the worker's calls itself, item by item) |
 | 9 | Clean install from the published image, on a blank machine, following only the public documentation: bootstrap, first report, review, export, restart, upgrade, restore | the install path | not started |
 | 10 | Freeze and real use: the candidate frozen, 5 real reports outside the evaluation corpora, through export and OpenCTI import, incidents logged (decision 2) | the journey on unseen reports | not started |
 | 11 | A recorded evaluation run with `anthropic` and the default `ANTHROPIC_MODEL`: twice at `LLM_TEMPERATURE=0`, on AnnoCTR test (read once for this decision, as ADR-0060 allows) and on the in-house set once it is gold (item 5); the spread between the two runs published | `anthropic` supported (decision 13) | not started |

@@ -11,6 +11,71 @@ theme.
 
 ### Added
 
+#### The OpenCTI import runs on the candidate image (ADR-0094 item 8), 2026-11-01
+
+`scripts/check_opencti_candidate.sh` checks what a throwaway OpenCTI 7.260930.0
+keeps of the bundles a candidate image produces, and ties its report to the
+image's digest and commit. It is not in CI: it runs two Compose stacks in turn,
+and OpenCTI takes about 4 GB.
+
+- **The candidate** is given by digest (used as given), or by a tag resolved to
+  its digest. Its commit is read from the image's label and checked against
+  each job's `git_rev`; a job that recorded none fails.
+  - It runs in a Compose project of its own, with the browser journey's offline
+    profile and a password made for the run.
+  - It makes three bundles through its API (`scripts/opencti_candidate_bundles.py`):
+    a report reviewed (one row accepted, one rejected), an enrichment of
+    `opencti_report.json`, and the same enrichment after WellMess is rejected.
+    Each must be `validated`.
+- **OpenCTI** runs from `docker/opencti-test/compose.yaml`, in a project of its
+  own, with secrets made for the run. Neither stack reads the checkout's
+  `.env`, `.secrets/` or `docker/opencti-test/.env`. Every `docker compose`
+  call runs under `env -i`, so an exported `CTI_IMAGE` or `CTI_ENV_FILE` is not
+  seen either. Both stacks are removed with their volumes on success, failure
+  or Ctrl-C; a killed run's leftovers make the next run refuse, naming the
+  command that removes them.
+- **The expectations.** `scripts/opencti_import_check.py` keeps A4's 12, adds a
+  bundle extracted from scratch (`--full`), and imports each bundle twice. Then
+  it reads the whole platform back and checks:
+  - nothing refused or added, and every object there once;
+  - no second object by type and name, value or alias, and no second
+    relationship between the same objects;
+  - no two objects or relationships of a bundle merged into one OpenCTI
+    object, and no Report reference merged into another;
+  - relationships joined as named;
+  - authors and markings (TLP, PAP) as the bundles set them;
+  - no description of an object or relationship emptied;
+  - the Report's references, description, attached file and confidence;
+  - after the last import, every bundle's objects still there, each on its
+    own, and every reading of the platform settled.
+
+  One name held by two types (APT29 as the analyst's Intrusion-Set and
+  CTIParsor's Threat Actor) is a WARN, not a failure. What OpenCTI holds
+  differently is recorded field by field in `report.json`, with whole values
+  and, for a list, what it lost and gained (`scripts/opencti_expectations.py`,
+  tested without OpenCTI by `tests/test_opencti_expectations.py`).
+- **The report**, `report.md` and `report.json` under `output/opencti-candidate/`.
+  The check passed 83 of 83, with 1 WARN, on main's image at 4df5cbd, in about
+  two minutes. The report also names where the bundles come from (`--bundles
+  DIR` says they are an earlier run's) and the checkout that ran the check
+  (commit, modified or not, and the sha256 of its scripts and fixtures).
+- **Fixed in a test fixture.** `tests/fixtures/baselines/opencti_report.json` no
+  longer gives WellMess the alias WellMail (ATT&CK S0514 and S0515 are two
+  families). With it, OpenCTI merged the candidate's WellMess and WellMail and
+  their relationships, and the first version of the check passed it.
+- **Known bug**, listed in the support policy: a technique found in the text
+  with no Stage 3 entry (every technique, offline) is exported under a random
+  id and named by its T-number. In OpenCTI it renames an analyst's technique
+  that has the same ATT&CK id.
+- **pycti's own lock**, `requirements/requirements-opencti.lock.txt`, is written
+  by `make lock` and installs the check's venv only, never the image or CI. It
+  is not in CI's audit: pycti 7.260930.0 pins opentelemetry-api 1.35.0 and
+  setuptools 82.0.1, whose known vulnerabilities `SECURITY.md` accepts for that
+  venv.
+- **Releases.** From 1.0, the check runs on the merge commit's image before the
+  tag, and its report is posted on the release pull request
+  ([docs/releasing.md](docs/releasing.md)).
+
 #### The journey from import to download runs in a browser, offline, in CI (ADR-0094 item 4), 2026-10-31
 
 Playwright's Chromium drives the built interface against the real API, its

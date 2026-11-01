@@ -145,7 +145,8 @@ audit:
 ## audit install with `pip install --require-hashes` (scripts/lock.sh, ADR-0080):
 ## requirements/: requirements.lock.txt (PyPI), requirements-torch.lock.txt (torch's CPU
 ## build, PyTorch index), requirements-ci.lock.txt, requirements-audit.lock.txt,
-## requirements-uv.lock.txt (the uv this script runs).
+## requirements-uv.lock.txt (the uv this script runs), requirements-opencti.lock.txt
+## (pycti, for the OpenCTI check's venv).
 ## Keeps the current pins that still fit the ranges; LOCK_FLAGS=--upgrade
 ## re-resolves everything to the newest allowed versions.
 LOCK_FLAGS ?=

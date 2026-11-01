@@ -198,35 +198,134 @@ above). A later run on other data is compared with these figures; the duplicate
 rate is the one to watch (targets: at most 1 % on the ablation, 0 duplicate rows
 on the round trip).
 
-**OpenCTI import (A4).** `scripts/opencti_import_check.py` imports a baseline,
-then CTIParsor's enriched bundle, into a throwaway OpenCTI and reads back what it
-kept. The stack is `docker/opencti-test/compose.yaml`: OpenCTI 7.260930.0 and its
-backing services, about 8 GB of RAM under WSL, only the platform's port published,
-on `127.0.0.1:4000`.
+**OpenCTI import (A4).** `scripts/check_opencti_candidate.sh` checks what a
+throwaway OpenCTI keeps of the bundles a candidate image produces (ADR-0094
+item 8). It runs two Compose stacks in turn, never together, and removes each
+with its volumes:
+
+1. the candidate, given by digest or by a tag it resolves to its digest; its
+   commit is the image's label `org.opencontainers.image.revision`;
+2. the candidate's app, worker and database from `compose.yaml`, in the project
+   `ctiparsor-opencti-candidate`, with the browser journey's offline profile and
+   a database password made for the run: the checkout's `.env` and `.secrets/`
+   are not read. Through its API (`scripts/opencti_candidate_bundles.py`), three
+   bundles, all marked TLP:AMBER and PAP:GREEN: `full`,
+   `tests/fixtures/sample_report.txt` with APT29 accepted and
+   update-service.net rejected; `enriched`, an `enrich` job on
+   `tests/fixtures/baselines/opencti_report.txt` with `opencti_report.json` as
+   its baseline; `rejected`, the same job exported again after the malware
+   WellMess is rejected. Each job's `git_rev` is read from the database;
+3. OpenCTI 7.260930.0 and its backing services from
+   `docker/opencti-test/compose.yaml`, in the project `ctiparsor-opencti-check`,
+   only the platform's port published, on `127.0.0.1:4000`, with secrets made for
+   the run: `docker/opencti-test/.env` is not read;
+4. `scripts/opencti_import_check.py`, with pycti 7.260930.0 in a venv of its
+   own: the analyst's baseline, then `enriched` as a user whose maximum
+   confidence is 50, then `enriched`, `rejected` and `full` as admin.
 
 ```bash
-cp docker/opencti-test/.env.example docker/opencti-test/.env   # test values only: fill them in (a UUID v4 token, 32 random bytes in base64)
-wsl -u root -e docker compose -f docker/opencti-test/compose.yaml up -d   # the platform takes minutes to start
-# pycti 7.260930.0 in a venv of its own, never the project's .venv
-<pycti-venv>/bin/python scripts/opencti_import_check.py \
-    --baseline tests/fixtures/baselines/opencti_report.json \
-    --enriched <enriched.json> --rejected <rejected.json> --out <results.json>
-wsl -u root -e docker compose -f docker/opencti-test/compose.yaml down -v   # removes the volumes: the instance is throwaway
+# once: the pycti venv, outside the project's .venv, from its hashed lock
+wsl -e bash -lc "cd /mnt/c/Users/parra/Documents/tools-NLP/CTIParsor && python3 -m venv ~/.cache/ctiparsor-pycti-7.260930.0 && ~/.cache/ctiparsor-pycti-7.260930.0/bin/pip install --require-hashes --no-deps -r requirements/requirements-opencti.lock.txt"
+wsl -u root -e bash -lc "cd /mnt/c/Users/parra/Documents/tools-NLP/CTIParsor && bash scripts/check_opencti_candidate.sh --image ghcr.io/stixaly/ctiparsor:sha-<commit>"
 ```
 
-`<enriched.json>` is the bundle an `enrich` job on `tests/fixtures/baselines/opencti_report.txt`
-produces with `opencti_report.json` as its baseline; `<rejected.json>` is the same
-job's bundle after rejecting the malware WellMess, exported after the full one.
-The compose file takes every secret as `${VAR:?…}`: it refuses to start while a
-value is missing from `.env`. RabbitMQ is pinned to `4.3.7-management`, OpenCTI
-to `7.260930.0`.
+The expectations, 83 on a run:
 
-The script reads the admin token from `docker/opencti-test/.env` (`--env-file`)
-and never prints it. It creates a role, a group, a user whose maximum confidence
-is 50 (for the counter-test), and an API token of unlimited duration, and it
-never revokes them. Run it on this throwaway instance only. It exits 0 when every
-expectation holds (12 of 12 on 2026-10-25, OpenCTI 7.260930.0), 1 otherwise. The
-`.env` file is git-ignored.
+- step 0, the candidate: each job ran on the image's commit (a job that
+  recorded none fails); Stage 5 gave each bundle `validated`
+  (`X-Bundle-Validation`); OpenCTI received the candidate's bytes (sha256);
+- steps 1 to 4, A4's twelve: nothing refused; the low-confidence user's import
+  leaves the Report's 9 references as they are, since OpenCTI adds references on
+  an upsert only at a confidence at least the stored one (ADR-0090 §6); as
+  admin, the Report holds the baseline's references and the additions, one
+  Report, each baseline object once by id and by type and name or value, every
+  object of the bundle present; after the rejection, WellMess still referenced,
+  since OpenCTI never removes a reference;
+- for each bundle imported as admin, after a second import, against the whole
+  platform read back with OpenCTI's own STIX export of each object
+  (`scripts/opencti_expectations.py`): nothing refused and nothing added; every
+  object there once, found by one of its ids or, once OpenCTI renamed it, by its
+  name or aliases; no two objects, and no two relationships, of the bundle on one
+  OpenCTI object (OpenCTI merges an object into another that holds its name as
+  an alias); no second object of its type answering to its name, value or
+  aliases, and no second relationship of its type between the same objects; each
+  relationship joining the objects the bundle names; the author
+  (`created_by_ref`) and the markings, TLP and PAP, that the bundles imported so
+  far set; no description of an object or relationship emptied (a changed one is
+  recorded below); the Report holding each of the bundle's references, none
+  merged into another, its description (ADR-0093), its attached file
+  (`x_opencti_files`: name and MIME type, once) and its confidence;
+- step 6, after the last import: every object of every bundle still there, each
+  on an OpenCTI object of its own, and every reading of the platform settled (two
+  readings in a row agree before the poll's 120 s; one that never settles fails).
+
+A WARN does not fail the run: one name held by OpenCTI objects of two types. On
+2026-11-01, APT29: the analyst's Intrusion-Set and `full`'s Threat-Actor-Group
+(the `full` job extracts APT29 as a `threat_actor` row). Which type CTIParsor
+gives an actor is a product decision, not an import loss; the report lists both
+objects with their types.
+
+What OpenCTI holds differently is recorded with the whole values in
+`report.json` (a changed list with what it lost and gained), not judged. On
+2026-11-01 it drops the `x_` properties, the Report's `original_document`
+reference (it has no URL and no external id: the file name and SHA-256 stay in
+the description's "Source document" block, and the file is attached) and, from
+its export, an artifact's `payload_bin`. It adds a confidence of 100 where the
+bundle sets none, replaces an Indicator's `valid_until` with one it computes (the
+baseline's 2027-03-02 becomes 2026-03-30), and gives the analyst's Report its
+`published` date as `created`. Admin imports at confidence 100, above the
+baseline's 85, so a later bundle rewrites the object it reaches by its standard
+id:
+
+- `full`'s WellMess carries the id OpenCTI gives the analyst's WellMess (both
+  derive it from the name, ADR-0066): it replaces its author, its confidence and
+  its description, adds `full`'s markings, and the analyst's `first_seen`
+  (2018-07-01) is gone;
+- `full`'s technique T1059.001 reaches the analyst's PowerShell by its ATT&CK id
+  and renames it `T1059.001` (PowerShell becomes an alias). That name is
+  CTIParsor's: a technique found in the text with no Stage 3 entry for it
+  (always in the offline profile, and whenever the LLM does not list it) becomes
+  an attack-pattern named as the text writes it (a T-number for T1059.001) under
+  a random id (`pipeline/stage4_stix_mapping.py`, the loop over the extracted
+  technique entities), where the Stage 3 path gives it the ATT&CK-derived id
+  (ADR-0066). A product bug, not fixed here.
+
+A merge is an expectation, not a record: on 2026-11-01 the baseline fixture gave
+the analyst's WellMess the alias WellMail, which ATT&CK does not (WellMess S0514
+and WellMail S0515 are two families). OpenCTI then took `full`'s WellMail and
+WellMess for that one object, and their two `uses` relationships for one: the
+first version of this check passed it. The fixture no longer carries the alias,
+and the check fails on such a merge.
+
+The report goes to `output/opencti-candidate/<UTC time>/`: `report.md` and
+`report.json` (the candidate's digest and commit, where the bundles come from,
+the checkout that ran the check with its commit, whether tracked files are
+modified and the sha256 of the check's scripts and fixtures, the digests of
+OpenCTI's images, pycti's version, each bundle's sha256 and
+`X-Bundle-Validation`, every expectation, the warnings, what OpenCTI refused and
+changed, durations, memory), with the bundles, the run's record and the logs.
+Exit 0 when every expectation holds (a WARN included), 1 otherwise, 2 when the
+check cannot run. Every `docker compose` call runs under `env -i`: an exported
+`CTI_IMAGE`, `CTI_ENV_FILE` or `OPENCTI_*` is not seen. On 2026-11-01, on main's
+image at 4df5cbd, given by digest
+(`ghcr.io/stixaly/ctiparsor@sha256:3301b5c43038a8ef3dcc8948ee8c6c84c2aa1ec5b5cb90fa17047b574ae0408f`):
+83 of 83 and 1 WARN in 122 s (the candidate 35 s, OpenCTI ready 46 s after its
+start with its images present, the check 39 s); memory in use (`free -m`) rose
+from 1.7 to 5.8 GB while OpenCTI ran, and the script refuses to start OpenCTI
+with less than 8000 MB available (`OPENCTI_MIN_AVAILABLE_MB`). The first version
+of the check, 66 expectations, failed 6 on a tampered copy of the bundles (a byte
+added to one, a relationship to a missing object, a second Indicator under an
+existing name); the expectations added since fail on their counter-examples in
+`tests/test_opencti_expectations.py`. It is not in CI: two stacks, and about
+4 GB for OpenCTI.
+
+The check creates in OpenCTI a role, a group, a user and an API token of
+unlimited duration, and never revokes them; the instance is deleted at the end.
+`--bundles DIR` imports the bundles of an earlier run again; its report says
+they were not produced by that run, and names DIR and the run that made them.
+`scripts/opencti_import_check.py` still runs alone against a stack started by
+hand (`--env-file`, by default `docker/opencti-test/.env`, filled in from
+`.env.example`; git-ignored).
 
 ---
 
@@ -352,6 +451,7 @@ current truth.
 | Fuzzing | `test_fuzz_targets.py` | 6 | every Atheris target (ADR-0081) over its seed corpus, `fuzz/corpus/<target>/`, and the empty input: a target that stops importing, or whose invariant a seed breaks, fails here between fuzzing runs; skipped off Linux x86_64 (no Atheris wheel) |
 | Docs | `test_doc_claims.py` | 2 | every number `scripts/check_doc_claims.py` checks in README.md and docs/pipeline.md still matches its source, and is still found (what `make check-docs` did on demand only) |
 | Release | `test_release.py` | 83 | the version is one number in `pipeline/__init__.py`, `frontend/package.json` and `frontend/package-lock.json`, and the CHANGELOG opens with `## [Unreleased]`; `scripts/release.py` (`version`, `check`, `notes`, `unreleased`, `prepare`, `predicate`) on throwaway trees: every refusal, every mismatch reported, the notes' length limit, no file written when `prepare` refuses, only the standard library imported (ADR-0085) |
+| Interoperability | `test_opencti_expectations.py` | 30 | `scripts/opencti_expectations.py` (ADR-0094 item 8) on a platform built as the OpenCTI check reads it back, without pycti or OpenCTI: an object found by any id it answers to, or by its name or aliases once OpenCTI renamed it; each expectation failing on its counter-example (an object missing, two objects or two relationships of a bundle merged into one, a second object under a name or an alias, a second relationship between the same objects, a relationship joined elsewhere, an author or a marking no bundle set, a description emptied, the Report's description, file, references (one merged into another included) or confidence changed, a second import that refuses or adds, an object gone after a later import, a reading that never settled); a marking another bundle set on the same object expected; one name under two types a WARN, not a failure; OpenCTI's defaults and its millisecond timestamps not reported as changes, whole values and list diffs kept; step 0 (the jobs' commit, a job without one failing, `validated`, the sha256 of what was imported); where the bundles and the checkout come from in the report; the report and its exit codes; `scripts/check_opencti_candidate.sh` refusing a run without a candidate, and running Compose without the caller's `CTI_IMAGE`, `CTI_ENV_FILE` and `OPENCTI_*`, with a digest as given (a fake `docker`) |
 | Benchmarks | `eval_pipeline.py` | 10 | NER F1, ATE precision, grounding metrics, adversarial tests |
 
 `CTIPARSOR_TEST_DATABASE_URL=postgresql://user:pw@host/db` is **required**,

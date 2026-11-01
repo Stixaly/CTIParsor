@@ -1,6 +1,8 @@
 # A throwaway OpenCTI for ADR-0090 check A4: import an analyst's bundle, then
 # the bundle CTIParsor enriched from it, and read back what OpenCTI kept
-# (scripts/opencti_import_check.py).  Started by hand, never in CI.
+# (scripts/opencti_import_check.py).  Never in CI.  scripts/check_opencti_candidate.sh
+# starts it as the project ctiparsor-opencti-check, with secrets it makes for the
+# run instead of .env, and removes it (ADR-0094 item 8).  By hand:
 #
 # The platform is pinned to the release whose sources ADR-0090 §6 was read
 # from (opencti-master, 2026-09-30); the backing services to the versions
@@ -9,7 +11,7 @@
 #
 #   cp .env.example .env    # then fill in the values (test values only)
 #   wsl -u root -e docker compose -f docker/opencti-test/compose.yaml up -d
-#   ...                     # about 8 GB of RAM; the platform takes minutes to start
+#   ...                     # 4 GB of RAM measured; ready in about a minute once the images are pulled
 #   wsl -u root -e docker compose -f docker/opencti-test/compose.yaml down -v
 #
 # Only the platform's port is published, on 127.0.0.1.

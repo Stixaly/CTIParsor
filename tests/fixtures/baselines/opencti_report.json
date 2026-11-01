@@ -127,9 +127,6 @@
         "backdoor"
       ],
       "is_family": true,
-      "aliases": [
-        "WellMail"
-      ],
       "first_seen": "2018-07-01T00:00:00.000Z",
       "extensions": {
         "extension-definition--ea279b3e-5c71-4632-ac08-831c66a786ba": {

@@ -1,6 +1,6 @@
 # Python requirements
 
-Four lists you edit, five locks `make lock` writes (ADR-0080). Every install
+Five lists you edit, six locks `make lock` writes (ADR-0080). Every install
 uses a lock, by hash: `pip install --require-hashes`.
 
 | File | What it is | Installed by |
@@ -9,11 +9,13 @@ uses a lock, by hash: `pip install --require-hashes`.
 | `requirements-full.txt` | `-r requirements.txt`, then ML models, OCR, `openai`, spaCy, Playwright | the image |
 | `requirements-dev.txt` | Test, lint, type-check and fuzzing tools, pinned; `httpx` | CI and the `dev` image |
 | `requirements-audit.txt` | pip-audit, pinned | the dependency-audit job, `make audit` |
+| `requirements-opencti.txt` | pycti, pinned to the OpenCTI version `docker/opencti-test/compose.yaml` runs | the OpenCTI check (TESTING.md) |
 | `requirements.lock.txt` | `requirements-full.txt`, resolved, every file's sha256 from PyPI | the image |
 | `requirements-torch.lock.txt` | torch's CPU build, from the PyTorch index | the image, first |
 | `requirements-ci.lock.txt` | `requirements.txt` + `requirements-dev.txt`, at the image's versions | CI, the `dev` image |
 | `requirements-audit.lock.txt` | pip-audit and its dependencies | the dependency-audit job |
 | `requirements-uv.lock.txt` | the uv that `make lock` runs | `make lock` |
+| `requirements-opencti.lock.txt` | pycti and its dependencies | the pycti venv of `scripts/check_opencti_candidate.sh`, never the image or CI. Not in the audit: pycti 7.260930.0 pins two packages with known vulnerabilities (SECURITY.md) |
 | `osv-scanner.toml` | The vulnerabilities SECURITY.md accepts, for Scorecard's scan of these files | OSV-Scanner |
 
 **Adding a package:** to `requirements.txt` when the fast tests need it, to

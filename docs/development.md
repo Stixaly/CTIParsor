@@ -258,7 +258,10 @@ CTIParsor/
 │   ├── check_flag_equivalence.py  # env_bool vs the old per-flag parsing, value by value
 │   ├── check_unescape_equivalence.py # A/B of the atom unescape refactor on real corpus data
 │   ├── check_evidence_gate.py     # Validate the coverage evidence gate on the store (ADR-0030)
-│   ├── opencti_import_check.py    # Check A4 (ADR-0090): what OpenCTI keeps of an enriched bundle, in a throwaway instance (TESTING.md § Measuring baseline reconciliation and the OpenCTI import)
+│   ├── check_opencti_candidate.sh # The OpenCTI import of a candidate image: its bundles, a throwaway OpenCTI, the report (ADR-0094 item 8, TESTING.md § Measuring baseline reconciliation and the OpenCTI import)
+│   ├── opencti_candidate_bundles.py # Its three bundles, produced through the candidate's API
+│   ├── opencti_import_check.py    # Check A4 (ADR-0090), extended: imports the bundles into OpenCTI and reads back what it kept (pycti venv)
+│   ├── opencti_expectations.py    # What that check expects of what OpenCTI kept, and the report: standard library only, tested without OpenCTI
 │   │  ── read-only audits and measurements (the numbers quoted in the ADRs) ──
 │   ├── audit_api_edge_cases.py    # GET-only API edge-case conformance harness
 │   ├── audit_bundle_invariants.py # Invariants over every stored STIX bundle
@@ -423,13 +426,14 @@ CTIParsor/
 │   ├── requirements-full.txt      # -r requirements.txt + ML models, OCR, openai, Playwright: the image
 │   ├── requirements-dev.txt       # ruff, mypy, pytest-cov, reuse, schemathesis, atheris (fuzzing), httpx
 │   ├── requirements-audit.txt     # pip-audit, pinned
-│   ├── requirements*.lock.txt     # Hashed locks: image (PyPI), torch (PyTorch index), CI, audit, uv (make lock)
+│   ├── requirements-opencti.txt   # pycti, pinned to the OpenCTI of docker/opencti-test: the OpenCTI check's venv
+│   ├── requirements*.lock.txt     # Hashed locks: image (PyPI), torch (PyTorch index), CI, audit, uv, pycti (make lock)
 │   └── osv-scanner.toml           # Scorecard's accepted vulnerabilities for these files (SECURITY.md)
 ├── setup.sh                       # Prepares .env + the DB secret, checks Docker; --offline installs a bundle
 ├── Dockerfile                     # UI build, venv build, slim runtime, + a `dev` target with the CI tools (ADR-0044, ADR-0054)
 ├── compose.yaml                   # app, worker, postgres, capture-proxy + profiles bootstrap / dev / ollama / proxy, hardened
 └── docker/                        # entrypoint, model warm-up, seccomp profile, nginx + squid config
-    └── opencti-test/              # Throwaway OpenCTI stack for scripts/opencti_import_check.py; no service of compose.yaml uses it (TESTING.md)
+    └── opencti-test/              # Throwaway OpenCTI stack for scripts/check_opencti_candidate.sh and scripts/opencti_import_check.py; no service of compose.yaml uses it (TESTING.md)
 ```
 
 ## Database migrations
