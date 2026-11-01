@@ -14,9 +14,15 @@
 # `priority` (ADR-0010): dedup precedence — lower wins as the canonical rule when
 # the same detection logic appears in several corpora. `subdir` scopes a large
 # clone to its rule subtree. Licenses are VERIFIED from each repo (2026-06-19);
-# `none` = no LICENSE file upstream (all-rights-reserved) — safe to ingest for
-# coverage, restricted to redistribute. License is carried to drill-down, not
-# auto-enforced, so the operator decides what to export.
+# `none` = no LICENSE file upstream (all-rights-reserved) — restricted to
+# redistribute. License is carried to drill-down, not auto-enforced, so the
+# operator decides what to export.
+#
+# OPT-IN (maintainer's decision, 2026-11-01): a corpus whose licence is `none`
+# or unknown is `enabled: false` here, so bootstrap does not clone it. The
+# operator turns it on by choice: Settings → Enable, or `enabled: true` under
+# its name in detection_corpora.local.yaml. tests/test_corpus_licences.py fails
+# if such a corpus is enabled in this file.
 
 corpora:
   - name: sigmahq
@@ -66,7 +72,7 @@ corpora:
     license: none              # no LICENSE upstream — all rights reserved
     priority: 50
     private: false
-    enabled: true
+    enabled: false             # opt-in: licence none (all rights reserved)
 
   - name: linkedin
     adapter: sigma
@@ -85,7 +91,7 @@ corpora:
     priority: 90              # large, auto-generated; low dedup authority
     subdir: sigma_rules
     private: false
-    enabled: true
+    enabled: false             # opt-in: licence none (all rights reserved)
 
   - name: hayabusa
     adapter: sigma

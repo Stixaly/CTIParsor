@@ -17,7 +17,7 @@ decisions behind the containerization itself.
   - `pg-data-18`: the PostgreSQL 18 job store AND rule store (jobs, entities, relationships, progress, policy, figure and CVE caches, plus the detection-rule corpus since ADR-0053) — back it up together with `cti-state` ([Data and backups](#data-and-backups)).
   - `cti-cache`: HuggingFace models, Sigma/YARA/Suricata corpora — rebuildable with `bootstrap`.
   - `ollama-models`: (Only if using the `ollama` profile).
-- **Services**: `app`, `worker`, `postgres` and `capture-proxy` always run. `app` only accepts and queues reports (`CTIPARSOR_ROLE=api`) and never loads a model; `worker` claims queued reports from the job store and runs each in an isolated subprocess, heartbeating the rows it owns so several workers can share the queue (ADR-0046) — scale it with `docker compose up -d --scale worker=2`; `postgres` is both stores (ADR-0045, ADR-0053: PostgreSQL 17, on the internal network only, running as the image's `postgres` user with every capability dropped and a read-only root; `CTI_DB_PASSWORD` in `.env` is required). `capture-proxy` is a Squid egress filter the URL-capture tab's Chromium goes through, so it can reach public addresses only (see *Security model*). Three optional profiles:
+- **Services**: `app`, `worker`, `postgres` and `capture-proxy` always run. `app` only accepts and queues reports (`CTIPARSOR_ROLE=api`) and never loads a model; `worker` claims queued reports from the job store and runs each in an isolated subprocess, heartbeating the rows it owns so several workers can share the queue (ADR-0046) — scale it with `docker compose up -d --scale worker=2`; `postgres` is both stores (ADR-0045, ADR-0053: PostgreSQL 18, on the internal network only, running as the image's `postgres` user with every capability dropped and a read-only root; `CTI_DB_PASSWORD` in `.env` is required). `capture-proxy` is a Squid egress filter the URL-capture tab's Chromium goes through, so it can reach public addresses only (see *Security model*). Three optional profiles:
   - `bootstrap`: one-shot initialisation (models, corpora, rule store), same image and hardening as `app`.
   - `ollama`: a local LLM with no published port, reachable by `app` at `http://ollama:11434`.
   - `proxy`: TLS + password (`nginx-unprivileged`) in front of `app`; the only thing worth publishing on a network.
@@ -45,7 +45,7 @@ The full map with data flow and the reasoning is in [docs/architecture.md](archi
 
 - Docker Engine 24+ with BuildKit (default).
 - Docker Compose v2.24+ (`docker compose version`).
-- Disk space: ~5 GB for the image, ~3.5 GB for volumes after bootstrap.
+- Disk space: ~5 GB for the image (4.7 GB unpacked, 1.2 GB to download), ~5 GB for volumes after bootstrap (`cti-cache` 3.2 GB, the database with its rule store 1.6 GB); an upgrade pulls the next image beside it.
 - RAM and CPU: every container declares a limit and a reservation in `compose.yaml`; the defaults below are measured for one report at a time and add up to about 10 GB and 8 CPUs for the always-on services. Override any of them in `.env` (`CTI_<SERVICE>_CPUS`, `CTI_<SERVICE>_MEMORY`).
 
 | Service | CPUs | Memory limit | Reserved | Why |
@@ -61,35 +61,37 @@ When the worker hits its limit the kernel's OOM killer takes the largest process
 
 ## Pulling a pre-built image (ADR-0047)
 
-Every push to `main` publishes the image to GHCR — skip the local build:
+The quick start of the [README](../README.md#quick-start) installs a release:
+its archive, and its image pinned by digest in `.env`, which `docker compose
+pull` fetches and nothing builds.
 
 ```dotenv
 # .env
-CTI_IMAGE=ghcr.io/stixaly/ctiparsor:latest
-```
-```bash
-docker compose pull app worker bootstrap
-docker compose up -d
+CTI_IMAGE=ghcr.io/stixaly/ctiparsor@sha256:<digest from the Release notes>
 ```
 
-`docker compose up` only builds a service when its image tag is not already
-present locally — a prior `pull` is what makes it skip the build (verified
-against this repo's own `compose.yaml`: a pre-existing tag went straight to
-starting containers, no build step, in the log). `latest` tracks current
-`main` and can change under you; pin `CTI_IMAGE` to an immutable `sha-<full
-sha>` tag instead for anything you don't rebuild on every deploy — the same
-tags list at `github.com/Stixaly/CTIParsor/pkgs/container/ctiparsor`.
+`docker compose up` builds a service only when its image is not present
+locally. With a digest it cannot build it at all: when the pull fails, `up`
+stops with `build tag cannot contain a digest` instead of starting a build
+from the files beside it (measured on Compose 5.6). A tag such as `0.2.0` or
+`latest`, absent locally and not pulled, would be built from source under that
+name.
+
+Every push to `main` also publishes the image of that commit, as
+`sha-<full commit sha>` and `latest`: images to test, not releases. `latest`
+moves with `main`; the tags list at
+`github.com/Stixaly/CTIParsor/pkgs/container/ctiparsor`.
 
 Since the first release, 0.1.0 on 2026-10-17, `ghcr.io/stixaly/ctiparsor:X.Y.Z`
 names a released image: the same digest as the `sha-` tag of the release's
 commit, with nothing rebuilt (ADR-0085). `X.Y` is set too and follows the highest
 patch release of that line. A registry tag name can be pushed again and a digest
-cannot change, so the Release notes give the digest; see
-[releasing.md](releasing.md).
+cannot change, so the Release notes give the digest, and `.env` pins it, as
+above (see [releasing.md](releasing.md)); for 0.2.0:
 
 ```dotenv
 # .env
-CTI_IMAGE=ghcr.io/stixaly/ctiparsor:0.2.0
+CTI_IMAGE=ghcr.io/stixaly/ctiparsor@sha256:f7ea0d3f9d44692b8b08ed31dae5b1738ab19a88bc1cce856d7a297320c95526
 ```
 
 0.2.0, the latest release, is the image of commit ce59cfb, digest
@@ -112,17 +114,20 @@ does this for you.
 
 ## Quick start
 
+Installing a release, its archive and its image by digest, is the
+[README's quick start](../README.md#quick-start); it also shows how to build
+from source at a release tag. Either way, once `setup.sh` has written `.env`,
+the stack starts the same:
+
 ```bash
-bash setup.sh                   # writes .env + secrets, checks Docker — builds/starts nothing
-nano .env                       # set your LLM provider / key
-docker compose build            # or: make docker-build (stamps the git revision)
 docker compose up -d            # http://127.0.0.1:8000
-docker compose --profile bootstrap run --rm bootstrap   # once, 10-20 min: models, corpora, rule store
+docker compose --profile bootstrap run --rm bootstrap   # once: models, corpora, rule store
 docker compose logs -f app
 ```
 
-`docker compose up -d` only starts `app`, `worker` and `postgres` — starting
-it does not by itself fetch or index the detection-rule corpora, which live
+`docker compose up -d` starts `app`, `worker`, `postgres` and
+`capture-proxy` — starting it does not by itself fetch or index the
+detection-rule corpora, which live
 in the same PostgreSQL database as the job store now (ADR-0045, ADR-0053).
 Skip the `bootstrap` line above and Settings → Detection Corpora will show 0
 rules for every corpus. Bootstrap clones and indexes every corpus in one
@@ -132,7 +137,11 @@ works too, but only **one at a time** — each sync rebuilds the whole store
 overlapping ones contend for the same rows.
 
 `bootstrap` takes `--no-models` (skip the model downloads), `--no-corpora` (skip
-the corpus clone and the rule store) and `--strict`. With `--strict` it exits 1
+the corpus clone and the rule store) and `--strict`, after the command itself:
+whatever follows the service's name replaces its command, so `docker compose
+--profile bootstrap run --rm bootstrap bootstrap --no-models` names it twice
+(without the second `bootstrap`, the entrypoint stops on `exec: --: invalid
+option`). With `--strict` it exits 1
 when a model does not download, when the models do not load from the cache with
 the network off (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`), or when a corpus
 does not sync. The air-gap packager runs it with `--strict`
@@ -210,15 +219,14 @@ Data persists in named volumes. Two of them hold what you cannot rebuild: `cti-s
 
 The database commands below need the password even on the local socket (`compose.yaml` sets `scram-sha-256` for it too). They read it inside the container from the mounted secret, so it never appears on the host's command line. They name the role and the database `ctiparsor`: with another `CTI_DB_USER` or `CTI_DB_NAME`, write yours in their place. The `cti-state` commands run `tar` in a one-off container of the `app` service, as the user the app runs as: Compose mounts the volume of the project it runs in, whatever the project's name, and a bind mount (below) the same way.
 
-**Backup**, from the directory of `compose.yaml` and `.env`. `umask 077` makes the two files readable by you only, since they hold every report at its TLP; it stays set in that shell. `day` gives both files the same date, even past midnight. `app` and `worker` stop first, so that no report changes between the dump and the archive; a report in progress goes back to the queue and resumes when they start again. `postgres` keeps running for `pg_dump`. Not while `bootstrap` runs.
+**Backup**, from the directory of `compose.yaml` and `.env`. `umask 077` makes the two files readable by you only, since they hold every report at its TLP; each command that writes one sets it in a subshell of its own, `( … )`, so that it does not stay set in your shell: files you unpack there later, such as the next release, must stay readable by the containers. `day` gives both files the same date, even past midnight. `app` and `worker` stop first, so that no report changes between the dump and the archive; a report in progress goes back to the queue and resumes when they start again. `postgres` keeps running for `pg_dump`. Not while `bootstrap` runs.
 
 <!-- scripts/check_backup_restore_docker.sh: BACKUP_COMMANDS -->
 ```bash
-umask 077
 day=$(date +%F)
 docker compose stop app worker
-docker compose exec -T postgres sh -c 'PGPASSWORD="$(cat /run/secrets/db_password)" exec "$@"' sh pg_dump -U ctiparsor -d ctiparsor -Fc > ctiparsor-$day.dump
-docker compose run --rm --no-deps -T --entrypoint tar app czf - -C /app/state . > cti-state-$day.tgz
+(umask 077; docker compose exec -T postgres sh -c 'PGPASSWORD="$(cat /run/secrets/db_password)" exec "$@"' sh pg_dump -U ctiparsor -d ctiparsor -Fc > ctiparsor-$day.dump)
+(umask 077; docker compose run --rm --no-deps -T --entrypoint tar app czf - -C /app/state . > cti-state-$day.tgz)
 docker compose start app worker
 ```
 
@@ -244,7 +252,7 @@ docker compose run --rm --no-deps -T --entrypoint tar app xzf - --keep-old-files
 docker compose up -d
 ```
 
-Then check the restored install: `curl -fsS http://127.0.0.1:8000/api/health` (your `CTI_BIND` and `CTI_PORT`) answers `{"status":"ok"}`, and the web UI lists your reports. The first start records the new PostgreSQL cluster in `db-identity.json`: `docker compose logs app worker` shows `[db] postgres:5432/ctiparsor/public is now on cluster ... with its data: recorded`. `cti-cache` starts empty: `docker compose --profile bootstrap run --rm bootstrap --no-corpora` downloads the models again; the detection rules came back with the database.
+Then check the restored install: `curl -fsS http://127.0.0.1:8000/api/health` (your `CTI_BIND` and `CTI_PORT`) answers `{"status":"ok"}`, and the web UI lists your reports. The first start records the new PostgreSQL cluster in `db-identity.json`: `docker compose logs app worker` shows `[db] postgres:5432/ctiparsor/public is now on cluster ... with its data: recorded`. `cti-cache` starts empty: `docker compose --profile bootstrap run --rm bootstrap bootstrap --no-corpora` downloads the models again; the detection rules came back with the database.
 
 **Remove a test project** once you are done with it: `docker compose -p ctiparsor-restored down -v` removes its containers, its networks and its volumes (`ctiparsor-restored_*`). `-v` deletes the volumes of the project `-p` names and of no other; read the name before you press Enter, since `-p ctiparsor` would delete the install itself.
 
@@ -344,11 +352,37 @@ What to watch — health, the queue and its workers, failed reports, disk, sizin
 docker compose logs -f app
 ```
 
-**Update:**
+**Restart**, from the directory of `compose.yaml` and `.env`. The first
+restarts the API and the pipeline; the second stops and removes every
+container and network of the stack, then creates them again. Both keep the
+volumes, so every report and the downloaded models stay. `restart` keeps
+each container as it was created: a changed `.env` or a new image takes
+`docker compose up -d`, which recreates the containers they change.
+
+<!-- scripts/check_clean_install.sh: RESTART_COMMANDS -->
 ```bash
-git pull && docker compose build && docker compose up -d
+docker compose restart app worker
 ```
-*(Volumes are preserved; schema migrations run at the first start of the API or of a worker, whichever comes first.)*
+
+<!-- scripts/check_clean_install.sh: STOP_START_COMMANDS -->
+```bash
+docker compose down
+docker compose up -d
+```
+
+A report in progress survives both: the worker gives it `WORKER_DRAIN_S`
+(60 s) to finish, then puts it back in the queue, and the next worker runs
+it again, from its Stage 3 checkpoint if it had one. `restart` returns once
+the worker has stopped, up to 90 s later (`stop_grace_period`); the API is
+back within seconds. `down -v` would delete the volumes, every report with
+them. After a reboot, Docker starts the
+stack again by itself (`restart: unless-stopped`), unless `docker compose
+stop` or `down` stopped it before.
+
+**Upgrade** to a new release: back up, then install the new release beside
+the old one and start it, as [upgrading.md](upgrading.md#from-one-release-to-the-next)
+shows. The volumes stay; schema migrations run at the first start of the
+API, a worker or `bootstrap` on the new image, whichever comes first.
 
 **CLI Mode (No API):**
 ```bash
@@ -385,6 +419,7 @@ Not supported in the image (torch CPU only).
 | `password authentication failed for user "ctiparsor"` | `CTI_DB_PASSWORD` changed after the `pg-data-18` volume was initialised | Restore the old value, or `docker compose down -v` to start a fresh database (deletes every report) |
 | Reports (or detection rules) processed before the PostgreSQL move are gone from the list | They are still in `cti_stix.db` on `cti-state` | Run the migration commands in *Data and backups* |
 | `docker compose pull` reports `denied` | The GHCR package is still private and you are not authenticated, or the first publish hasn't landed yet | `docker login ghcr.io`, or build locally with `docker compose build` |
+| `up` stops with `build tag cannot contain a digest` | The image `CTI_IMAGE` names by digest is not on this machine and could not be pulled: a mistyped digest, no network, or a host that is not x86-64 (the image is `linux/amd64` only) | Compare the digest with the Release notes; `docker compose pull` shows the registry's answer |
 | Backlog is unclear — is the queue actually backing up? | Watching logs is guesswork | `curl -s localhost:8000/api/queue/status \| python3 -m json.tool` — `queue.depth` against `queue.max_depth`, `queue.oldest_queued_seconds`, each worker's `state` (`busy`, `idle`, `stale`) and `worker_summary` (ADR-0048, [operations.md](operations.md)) |
 | A report stays `queued` forever | No worker container is running (`docker compose ps worker`; `worker_summary.alive` is 0 in the queue status), or every worker is at `WORKER_MAX_CONCURRENT` (`idle_slots` is 0) | `docker compose up -d worker`, or `--scale worker=2`; watch `docker compose logs -f worker` |
 | A report sits in `processing` after a worker crash | The lease has not expired yet | It is requeued automatically after `WORKER_LEASE_TIMEOUT_S` (180 s) and resumes from its Stage 3 checkpoint |

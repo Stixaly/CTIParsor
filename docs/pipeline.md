@@ -131,7 +131,7 @@ The boxes below give each stage in detail, in execution order.
 │  Detects entity types the gazetteer and CyNER cannot:               │
 │    targeted sectors, campaign names, attack infrastructure,          │
 │    novel actors & malware not yet in MITRE ATT&CK                   │
-│  Default model: urchade/gliner_large-v2.1 (~800 MB)                 │
+│  Default model: urchade/gliner_large-v2.1 (~1.8 GB)                 │
 │  Configurable via GLINER_MODEL in .env                              │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
@@ -669,7 +669,7 @@ read-only at run time).
 | Stage 4c — long-distance prediction (opt-in) | ❌ requires an LLM provider |
 | Stage 2b — gazetteer NER | ✅ after `build_indexes.py` |
 | Stage 2c — semantic TTP | ✅ after `build_indexes.py` + model download |
-| Stage 2e — GLiNER | ✅ after first model download (~800 MB cached) |
+| Stage 2e — GLiNER | ✅ after first model download (~1.8 GB cached) |
 | Stage 3b — hallucination filter | ✅ fully offline (rapidfuzz) |
 | Stage 3c — MITRE normalisation + merge precision | ✅ after `build_indexes.py` |
 | Stage 3f — TTP self-verification (opt-in) | ❌ requires an LLM provider |

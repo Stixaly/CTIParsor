@@ -104,18 +104,80 @@ Two ways to use it:
 ## Quick start
 
 Docker is the only supported way to install, develop and run CTIParsor
-(ADR-0054) — nothing needs to be on the host but Docker itself (Engine 24+,
-Compose v2.24+; about 5 GB for the image and 3.5 GB of volumes after
-bootstrap).
+(ADR-0054). The host needs:
+
+- Linux on x86-64, or Windows with WSL2: the image is published for
+  `linux/amd64` only;
+- Docker Engine 24+ and Compose v2.24+ (`docker compose version`), with your
+  user in the `docker` group: the commands below run as that user, not under
+  `sudo` (`setup.sh` stops at its Docker check without access to the daemon,
+  and under `sudo` it writes `.env` and `.secrets/` as root's);
+- `bash`, `curl`, `tar` and `sha256sum`, which every Linux distribution has;
+  `git` and `make` only to build from source;
+- about 5 GB of disk for the image and 5 GB for the volumes after
+  bootstrap, and the memory of [docs/docker.md](docs/docker.md#prerequisites).
+
+**Install a release.** Each release on the
+[Releases page](https://github.com/Stixaly/CTIParsor/releases) has an archive
+of the repository at its tag (`compose.yaml`, `docker/`, `setup.sh`,
+`.env.example`: what Compose needs beside the image) and, in its notes, the
+digest of its image. The first line names 0.2.0, the latest release when this
+was written; for a newer one, take both values from its notes.
+
+<!-- scripts/check_clean_install.sh: INSTALL_FILES -->
+```bash
+version=0.2.0 digest=sha256:f7ea0d3f9d44692b8b08ed31dae5b1738ab19a88bc1cce856d7a297320c95526
+curl -fsSLO https://github.com/Stixaly/CTIParsor/releases/download/v$version/ctiparsor-$version.tar.gz
+curl -fsSLO https://github.com/Stixaly/CTIParsor/releases/download/v$version/SHA256SUMS
+sha256sum -c --ignore-missing SHA256SUMS
+tar xzf ctiparsor-$version.tar.gz
+cd ctiparsor-$version
+bash setup.sh
+echo "CTI_IMAGE=ghcr.io/stixaly/ctiparsor@$digest" >> .env
+```
+
+`sha256sum` must print `ctiparsor-0.2.0.tar.gz: OK` (with your version).
+`setup.sh` writes `.env` from `.env.example` and a database password; it
+downloads and starts nothing. Choose the LLM provider in `.env` now
+([Configuration](#configuration)). With `ANTHROPIC_API_KEY=` empty, Stage 3 is
+skipped and each bundle holds what the other stages found. The `.env` of 0.2.0
+holds a placeholder key instead (`sk-ant-xxxxxxxxxxxxxxxxxxxx`), which turns
+Stage 3 on and makes it fail on every report: empty it unless you set a real
+key (`sed -i 's/^ANTHROPIC_API_KEY=.*/ANTHROPIC_API_KEY=/' .env`). Releases
+after 0.2.0 ship it empty. Then, from the same directory:
+
+<!-- scripts/check_clean_install.sh: INSTALL_START -->
+```bash
+docker compose pull
+docker compose up -d
+docker compose --profile bootstrap run --rm bootstrap
+```
+
+`pull` fetches the image by its digest (1.2 GB to download, 4.7 GB on disk)
+and those of PostgreSQL and the capture proxy. Pinned by digest, the image is
+never built instead: if the pull fails, `up` stops with `build tag cannot
+contain a digest`. `up -d` starts `app`, `worker`, `postgres` and
+`capture-proxy`; the web UI is at <http://127.0.0.1:8000>. `bootstrap`, once,
+downloads the models (2.6 GB) into the `cti-cache` volume, clones the
+detection corpora (0.7 GB) and builds the rule store of 88,000 rules in the
+database (1.6 GB): about 6 minutes on the clean install of
+[TESTING.md](TESTING.md#clean-install-from-the-published-image), the models
+in under 2 of them, without an `HF_TOKEN`. Restarting, upgrading to the next
+release and backing up are in
+[docs/docker.md](docs/docker.md#day-to-day-operations) and
+[docs/upgrading.md](docs/upgrading.md#from-one-release-to-the-next).
+
+**Build from source instead** (to change the code, or for a commit that is not
+a release): a clone at a release tag, with no `CTI_IMAGE` in `.env`, builds
+the image `ctiparsor:local`.
 
 ```bash
 git clone https://github.com/Stixaly/CTIParsor.git && cd CTIParsor
-bash setup.sh                    # writes .env + secrets, checks Docker — builds/starts nothing
-nano .env                        # set ANTHROPIC_API_KEY=sk-ant-...  (or another LLM_PROVIDER)
-
+git checkout v0.2.0              # a release tag; main is where development happens
+bash setup.sh
 docker compose build             # or: make docker-build (stamps the git revision)
-docker compose up -d             # → http://127.0.0.1:8000
-docker compose --profile bootstrap run --rm bootstrap   # once, 10–20 min: models, corpora, rule store
+docker compose up -d
+docker compose --profile bootstrap run --rm bootstrap
 ```
 
 > [!IMPORTANT]
@@ -134,13 +196,19 @@ docker compose --profile bootstrap run --rm bootstrap   # once, 10–20 min: mod
 
 - **Web UI** — open <http://127.0.0.1:8000>, drop a file, paste text or give a
   URL, then review the result and download the bundle.
-- **CLI** — `docker compose run --rm dev` runs the same image as `app`/`worker`
-  with the repo bind-mounted live (ADR-0054):
+- **CLI** — `app cli` runs the pipeline in the installed image, the report
+  read from `input/` and the bundle written to the `cti-state` volume
+  ([docs/docker.md](docs/docker.md#day-to-day-operations), *CLI mode*):
 
   ```bash
-  docker compose run --rm dev cli input/your_report.pdf --output output/your_report.json
-  make run-dir                     # every file already dropped in input/
+  docker compose run --rm -v "$PWD/input":/input:ro app cli /input/your_report.pdf --output /app/output/your_report.json
   ```
+
+  `docker compose run --rm dev cli …` and `make run-dir` (every file dropped in
+  `input/`) use the `dev` image instead, with the repository bind-mounted
+  live (ADR-0054). It is not published: the first call builds it from the
+  source tree (the Dockerfile's `dev` stage), which takes the network and
+  several minutes. They are for development, from a clone.
 
 Supported input formats: `.pdf` `.docx` `.html` `.htm` `.txt` `.md`
 
@@ -520,9 +588,10 @@ All configuration lives in `.env`, which `setup.sh` creates from
 | vLLM | `vllm` | `VLLM_BASE_URL`, `VLLM_MODEL`, `VLLM_API_KEY` (if the server needs a key) | ✅ |
 | LM Studio | `lmstudio` | `LMSTUDIO_BASE_URL`, `LMSTUDIO_MODEL`, `LMSTUDIO_API_KEY` (if the server needs a key) | ✅ |
 
-With no provider configured (e.g. `ANTHROPIC_API_KEY` left unset), Stage 3 is
-skipped and the pipeline still produces a valid STIX bundle from every offline
-stage.
+With no provider configured (`ANTHROPIC_API_KEY` left empty, as
+`.env.example` ships it), Stage 3 is skipped and the pipeline still produces a
+valid STIX bundle from every offline stage. A key that is not a real one is
+worse: Stage 3 then runs and fails on every report.
 
 Other settings worth knowing:
 

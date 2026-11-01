@@ -187,9 +187,9 @@ CYNER_ENABLED=true
 # NER_PRECISION_FILTERS=true
 
 # Stage 2e — GLiNER zero-shot NER
-# urchade/gliner_large-v2.1  (recommended, best accuracy, ~800 MB)
-# urchade/gliner_medium-v2.1 (good accuracy/speed balance, ~300 MB)
-# urchade/gliner_small-v2.1  (fastest, lower recall, ~120 MB)
+# urchade/gliner_large-v2.1  (recommended, best accuracy, ~1.8 GB)
+# urchade/gliner_medium-v2.1 (good accuracy/speed balance, ~0.8 GB)
+# urchade/gliner_small-v2.1  (fastest, lower recall, ~0.6 GB)
 GLINER_MODEL=urchade/gliner_large-v2.1
 GLINER_THRESHOLD=0.40
 GLINER_ENABLED=true

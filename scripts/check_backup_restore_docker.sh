@@ -43,7 +43,7 @@ fail() { echo -e "${RED}FAIL${NC}  $1"; FAILS=$((FAILS + 1)); }
 info() { echo -e "${BLUE}INFO${NC}  $1"; }
 
 REPO=$(cd "$(dirname "$0")/.." && pwd)
-umask 077          # the backup files hold every report, as the docs' umask keeps them
+umask 077          # the files this check writes hold every report; the docs' commands set their own umask
 DOCKER_BIN="${DOCKER_BIN:-docker}"
 SOURCE="${COMPOSE_PROJECT_NAME:-ctiparsor-smoke}"
 TARGET="$SOURCE-restored"
@@ -74,11 +74,10 @@ fi
 # tests/test_check_backup_restore.py fails when the two differ.  YYYY-MM-DD
 # stands for the date of the backup.
 read -r -d '' BACKUP_COMMANDS <<'COMMANDS'
-umask 077
 day=$(date +%F)
 docker compose stop app worker
-docker compose exec -T postgres sh -c 'PGPASSWORD="$(cat /run/secrets/db_password)" exec "$@"' sh pg_dump -U ctiparsor -d ctiparsor -Fc > ctiparsor-$day.dump
-docker compose run --rm --no-deps -T --entrypoint tar app czf - -C /app/state . > cti-state-$day.tgz
+(umask 077; docker compose exec -T postgres sh -c 'PGPASSWORD="$(cat /run/secrets/db_password)" exec "$@"' sh pg_dump -U ctiparsor -d ctiparsor -Fc > ctiparsor-$day.dump)
+(umask 077; docker compose run --rm --no-deps -T --entrypoint tar app czf - -C /app/state . > cti-state-$day.tgz)
 docker compose start app worker
 COMMANDS
 read -r -d '' CHECK_COMMANDS <<'COMMANDS'
@@ -106,8 +105,8 @@ psql_in() {        # psql_in <project>: SQL on stdin, rows on stdout
 }
 
 run_docs() {       # run_docs <project> <date> <commands>: the lines as written, in $WORK
-    # One shell for the block, as an operator's: `umask 077` and `day=` hold
-    # for the lines after them.  The lines come in on fd 3: `docker compose
+    # One shell for the block, as an operator's: `day=` holds for the lines
+    # after it.  The lines come in on fd 3: `docker compose
     # exec` reads its stdin, which is /dev/null unless the line redirects it.
     # Each line's stderr is shown; on the restore's pg_restore line, anything
     # there fails it (the docs: it must exit 0 and print nothing).

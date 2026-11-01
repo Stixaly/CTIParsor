@@ -160,7 +160,7 @@ newer, nothing to install). Its exit code is `0` when done, `1` when it refuses
    TESTING.md creates once.
 
    ```bash
-   wsl -u root -e bash -lc "cd /mnt/c/Users/parra/Documents/tools-NLP/CTIParsor && bash scripts/check_opencti_candidate.sh --image ghcr.io/stixaly/ctiparsor:sha-<merge commit>"
+   bash scripts/check_opencti_candidate.sh --image ghcr.io/stixaly/ctiparsor:sha-<merge commit>
    gh pr comment <release pull request> --body-file output/opencti-candidate/<UTC time>/report.md
    ```
 
@@ -168,6 +168,23 @@ newer, nothing to install). Its exit code is `0` when done, `1` when it refuses
    and an immutable Release takes no file once published. The row "Import into
    OpenCTI" of [support-policy.md](support-policy.md) names the date and the
    digest of the last run: update them in the next pull request.
+
+   Then the clean install on the same image (ADR-0094 item 9, TESTING.md,
+   *Clean install from the published image*): the last release installed as
+   the README writes it, then upgraded to the candidate as docs/upgrading.md
+   writes it, with a report, a restart and a restore. It must exit 0; post its
+   report on the release pull request too. It downloads the models and the
+   corpora (3.3 GB), takes about 20 minutes, and refuses to start with less
+   than 6 GB of memory available or 20 GB free for Docker.
+
+   ```bash
+   bash scripts/check_clean_install.sh --candidate ghcr.io/stixaly/ctiparsor:sha-<merge commit>
+   gh pr comment <release pull request> --body-file output/clean-install/<UTC time>/report.md
+   ```
+
+   The row "Install with Docker Compose" of
+   [support-policy.md](support-policy.md) names the date and the digests of
+   the last run: update them in the next pull request.
 
 5. **Tag the merge commit.** Check that `origin/main` is the release merge
    before tagging.
@@ -221,7 +238,14 @@ newer, nothing to install). Its exit code is `0` when done, `1` when it refuses
       "Latest" is set only if the tag is the highest tag of strict SemVer form
       (`vX.Y.Z`): a stray `v0.1.0-rc.1` or `vfoo` does not count.
 
-7. **After the first release,** the statements that said none had been
+7. **After every release,** in the next pull request: the first line of the
+   README's `INSTALL_FILES` block names the new release and its digest, and
+   the first line of `UPGRADE_COMMANDS` in docs/upgrading.md moves from the
+   previous release to it; docs/docker.md's paragraph on the latest release
+   gives the same digest. `tests/test_check_clean_install.py` holds the three
+   together, and the next clean install starts from that release.
+
+8. **After the first release,** the statements that said none had been
    published had to change. For 0.1.0 that was done on 2026-10-24:
 
    - `SECURITY.md`: the "Releases" bullet of *Supply chain*, and *Supported

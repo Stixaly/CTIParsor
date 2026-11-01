@@ -155,7 +155,7 @@ from the worker in two places, which its output names: that database has no
 `held_reason` and no `enrichment_status` column.
 
 ```bash
-wsl -e bash -lc "cd /mnt/c/Users/parra/Documents/tools-NLP/CTIParsor && .venv/bin/python scripts/baseline_round_trip.py"
+.venv/bin/python scripts/baseline_round_trip.py
 # --db DSN, --out FILE and --jobs ID (repeatable) override the defaults
 ```
 
@@ -179,7 +179,7 @@ Its jobs must hold their bundle, their baseline index and their extraction rows;
 the script exits 2 when it cannot read them.
 
 ```bash
-wsl -e bash -lc "cd /mnt/c/Users/parra/Documents/tools-NLP/CTIParsor && .venv/bin/python scripts/baseline_ablation.py"
+.venv/bin/python scripts/baseline_ablation.py
 # --ratio, --seed, --out, --jobs ID (repeatable) and --db DSN override the defaults
 ```
 
@@ -188,7 +188,7 @@ The external control reads a fixture bundle instead of the measured jobs
 `--fixture-job`), once per seed (`--seeds 5`, from `--seed` on):
 
 ```bash
-wsl -e bash -lc "cd /mnt/c/Users/parra/Documents/tools-NLP/CTIParsor && .venv/bin/python scripts/baseline_ablation.py --fixture tests/fixtures/baselines/opencti_report.json --fixture-db <dsn> --fixture-job <job-id> --seeds 5"
+.venv/bin/python scripts/baseline_ablation.py --fixture tests/fixtures/baselines/opencti_report.json --fixture-db <dsn> --fixture-job <job-id> --seeds 5
 ```
 
 Reference result, 7 real reports, 2026-10-25: 179 of 601 candidate entries
@@ -225,8 +225,10 @@ with its volumes:
 
 ```bash
 # once: the pycti venv, outside the project's .venv, from its hashed lock
-wsl -e bash -lc "cd /mnt/c/Users/parra/Documents/tools-NLP/CTIParsor && python3 -m venv ~/.cache/ctiparsor-pycti-7.260930.0 && ~/.cache/ctiparsor-pycti-7.260930.0/bin/pip install --require-hashes --no-deps -r requirements/requirements-opencti.lock.txt"
-wsl -u root -e bash -lc "cd /mnt/c/Users/parra/Documents/tools-NLP/CTIParsor && bash scripts/check_opencti_candidate.sh --image ghcr.io/stixaly/ctiparsor:sha-<commit>"
+python3 -m venv ~/.cache/ctiparsor-pycti-7.260930.0
+~/.cache/ctiparsor-pycti-7.260930.0/bin/pip install --require-hashes --no-deps -r requirements/requirements-opencti.lock.txt
+# from the checkout, as root when Docker needs root (sudo)
+bash scripts/check_opencti_candidate.sh --image ghcr.io/stixaly/ctiparsor:sha-<commit>
 ```
 
 The expectations, 83 on a run:
@@ -281,14 +283,14 @@ id:
   derive it from the name, ADR-0066): it replaces its author, its confidence and
   its description, adds `full`'s markings, and the analyst's `first_seen`
   (2018-07-01) is gone;
-- `full`'s technique T1059.001 reaches the analyst's PowerShell by its ATT&CK id
-  and renames it `T1059.001` (PowerShell becomes an alias). That name is
-  CTIParsor's: a technique found in the text with no Stage 3 entry for it
-  (always in the offline profile, and whenever the LLM does not list it) becomes
-  an attack-pattern named as the text writes it (a T-number for T1059.001) under
-  a random id (`pipeline/stage4_stix_mapping.py`, the loop over the extracted
-  technique entities), where the Stage 3 path gives it the ATT&CK-derived id
-  (ADR-0066). A product bug, not fixed here.
+- on 2026-11-01, on the image at 4df5cbd, `full`'s technique T1059.001 reached
+  the analyst's PowerShell by its ATT&CK id and renamed it `T1059.001`
+  (PowerShell became an alias). That name was CTIParsor's: a technique found in
+  the text with no Stage 3 entry for it was exported named as the text writes
+  it, under a random id. Fixed since: such a technique takes its standard id
+  and its ATT&CK name (ADR-0066; the ledger records the rename,
+  `attack_id_named`), and a run on an image that has the fix no longer shows
+  this row.
 
 A merge is an expectation, not a record: on 2026-11-01 the baseline fixture gave
 the analyst's WellMess the alias WellMail, which ATT&CK does not (WellMess S0514
@@ -453,6 +455,7 @@ current truth.
 | Docs | `test_doc_claims.py` | 2 | every number `scripts/check_doc_claims.py` checks in README.md and docs/pipeline.md still matches its source, and is still found (what `make check-docs` did on demand only) |
 | Release | `test_release.py` | 83 | the version is one number in `pipeline/__init__.py`, `frontend/package.json` and `frontend/package-lock.json`, and the CHANGELOG opens with `## [Unreleased]`; `scripts/release.py` (`version`, `check`, `notes`, `unreleased`, `prepare`, `predicate`) on throwaway trees: every refusal, every mismatch reported, the notes' length limit, no file written when `prepare` refuses, only the standard library imported (ADR-0085) |
 | Interoperability | `test_opencti_expectations.py` | 30 | `scripts/opencti_expectations.py` (ADR-0094 item 8) on a platform built as the OpenCTI check reads it back, without pycti or OpenCTI: an object found by any id it answers to, or by its name or aliases once OpenCTI renamed it; each expectation failing on its counter-example (an object missing, two objects or two relationships of a bundle merged into one, a second object under a name or an alias, a second relationship between the same objects, a relationship joined elsewhere, an author or a marking no bundle set, a description emptied, the Report's description, file, references (one merged into another included) or confidence changed, a second import that refuses or adds, an object gone after a later import, a reading that never settled); a marking another bundle set on the same object expected; one name under two types a WARN, not a failure; OpenCTI's defaults and its millisecond timestamps not reported as changes, whole values and list diffs kept; step 0 (the jobs' commit, a job without one failing, `validated`, the sha256 of what was imported); where the bundles and the checkout come from in the report; the report and its exit codes; `scripts/check_opencti_candidate.sh` refusing a run without a candidate, and running Compose without the caller's `CTI_IMAGE`, `CTI_ENV_FILE` and `OPENCTI_*`, with a digest as given (a fake `docker`) |
+| Installation | `test_check_clean_install.py` | 28 | `scripts/check_clean_install.sh` (ADR-0094 item 9) bound to the documents it runs, without Docker: the eight blocks found where README.md, docs/docker.md and docs/upgrading.md write them, once, and `--print-blocks` showing the same; a missing, doubled or malformed block refused; the values lines naming the latest release and the digest docker.md gives it; no block deleting data or naming a project; the downloads through the Releases page the check stands in for, `pull` before `up -d`, no `build`; the backup block leaving the shell's umask alone and its files private; the options; a project, volume, directory or port left in use refused, nothing left when the candidate cannot be pulled (a fake `docker`); the `docker` wrapper letting through the run's two projects only; every documented command under `env -i`; the report; no public document naming a checkout in someone's Windows profile |
 | Benchmarks | `eval_pipeline.py` | 10 | NER F1, ATE precision, grounding metrics, adversarial tests |
 
 `CTIPARSOR_TEST_DATABASE_URL=postgresql://user:pw@host/db` is **required**,
@@ -746,6 +749,147 @@ objects). Known limits:
 CTIPARSOR_TEST_DATABASE_URL=postgresql://user:pw@host/db \
   python scripts/check_backup_restore.py --pg-container <the server's container>
 ```
+
+### Clean install from the published image
+
+`scripts/check_clean_install.sh` is the clean install of ADR-0094 item 9: a
+release installed from its archive and its published image as a newcomer
+would, with the commands of the public documentation as they are written,
+then a first report, a restart, the upgrade to the candidate image and a
+restore. It is a release step ([docs/releasing.md](docs/releasing.md), step
+4), not CI: it downloads two images and, in full, the models and corpora.
+
+What it runs, and the only things it changes:
+
+- the blocks marked `<!-- scripts/check_clean_install.sh: NAME -->`:
+  `INSTALL_FILES` and `INSTALL_START` (README, *Quick start*),
+  `RESTART_COMMANDS` and `STOP_START_COMMANDS` (docs/docker.md, *Day-to-day
+  operations*), `UPGRADE_COMMANDS` (docs/upgrading.md), and the three backup
+  and restore blocks of docs/docker.md. It reads them from the documents when
+  it starts: what a page says is what the next run runs;
+- each block in one shell, line after line, stopping at the first that
+  fails; the directory and the umask a block ends with carry over to the next,
+  as in a terminal. Every line runs under `env -i` with a new `HOME` (no
+  Docker login: the images must pull anonymously), through a `docker` wrapper
+  that is an allowlist: `docker compose` on the run's two projects, and the
+  `docker info` and `docker --version` that `setup.sh` calls; anything else is
+  refused, as is any `-p` and `down -v`;
+- the values line of `INSTALL_FILES` and `UPGRADE_COMMANDS` (versions and
+  digests); the candidate's archive, `git archive` of the commit its image
+  names, served from a `file://` stand-in of the Releases page, since a
+  candidate has no Release yet (the previous release's archive comes from
+  GitHub); the prose between the blocks: no LLM provider in `.env`, and the
+  directory each block starts in; `WORKER_DRAIN_S=5` (step 3); with
+  `--quick`, `bootstrap bootstrap --no-models --no-corpora` and the model
+  stages off.
+
+The journey, in projects `ctiparsor-clean-install` and
+`ctiparsor-clean-install-restored` (ports 8795 and 8796):
+
+1. the previous release (by default the one the README installs): archive and
+   `SHA256SUMS` from the Releases page, `setup.sh`, the image by digest,
+   `pull`, `up -d`, `bootstrap`; no image built; `/api/health`;
+2. report A: `tests/fixtures/sample_report.txt` uploaded, APT29 accepted, the
+   review completed, the bundle downloaded with `X-Bundle-Validation:
+   validated`; its stage report with no stage failed and, in full, 2c, 2d and
+   2e run;
+3. report B uploaded and, once `processing`, `docker compose restart app
+   worker`, with `WORKER_DRAIN_S=5` in `.env` so that the restart puts B back
+   in the queue (with the default 60 s, a 20 s report finishes during the
+   drain, as two runs showed): each change of B's status recorded. In full the
+   step fails unless B was `processing` at the restart, was put back in the
+   queue (`queued` after `processing` in its timeline, or the worker's drain
+   timeout in its log) and ends reviewable; a B that only ends reviewable is
+   not a pass. `--quick` reports the same facts as `INFO` when B was not
+   requeued. Then `down` and `up -d`; A, its status and its bundle's sha256
+   unchanged;
+4. the backup and its check from the old directory, the shell's umask
+   unchanged after it, then the upgrade from the parent directory; the new
+   release's `docker/squid/squid.conf` present (its mode is reported, `INFO`:
+   as root `tar` keeps the archive's modes, so the umask step is the check),
+   `/api/health`, `app` on the candidate's image, the schema migrated (`[db]
+   schema version X -> Y` in the logs; a version that cannot be read fails),
+   A, its status and its bundle unchanged; report C on the candidate;
+5. the backup restored with the previous release into the second project,
+   from the old directory: A, its status and its bundle there, the schema the
+   backup's, report C absent.
+
+It refuses to start (exit 2) on a missing tool, a Docker context other than
+`default` or a `DOCKER_HOST` (the documented commands run with a new `HOME`,
+where they reach the default context), a port in use, a project or a
+directory left by an earlier run, less than 6 GB of memory available or
+20 GB free for Docker. It removes both projects with their volumes and its
+directory at the end, on success, failure or Ctrl-C; the pulled images stay.
+The report, `output/clean-install/<UTC time>/report.md` and `report.json`,
+holds both digests and commits, each step PASS or FAIL, each documented
+command with its exit status and duration, sizes, peak memory, report B's
+timeline and the logs.
+
+```bash
+# from the checkout, as root when Docker needs root (sudo); the candidate is main's image of the release commit
+bash scripts/check_clean_install.sh --candidate ghcr.io/stixaly/ctiparsor:sha-<commit>
+bash scripts/check_clean_install.sh --candidate ghcr.io/stixaly/ctiparsor:sha-<commit> --quick   # not the gate
+```
+
+Reference runs, 2026-11-01, WSL2 (16 GB, 12 CPUs), 0.2.0 to main's 248382c
+(`sha256:d3ee078f…`), run as root:
+
+- full, four runs, every step passed; the third on the files before the
+  review fixes of the check, the fourth on the files as written here (their
+  sha256 are in each `report.json`). The third: 827 s with both images present (each is
+  1.19 GB to download: 54 and 59 s on a first run). `bootstrap` took 387 s on
+  the new install: the models (2.5 GB) and the 14 corpora in 2 min 27 s
+  without an `HF_TOKEN`, then the rule store (88,127 rules) in 4 min; and
+  272 s after the upgrade (models kept, corpora pulled, rule store rebuilt),
+  which migrated the schema from 13 to 14 before `app` and `worker` got to
+  it. Reports A and C took 19 and 20 s, `validated`, 2c, 2d and 2e run,
+  Stage 3 skipped. `restart app worker` took 7 s, and B went `processing`,
+  `queued` 5 s later (the drain), `processing` again 5 s after that and
+  `for_review` at 27 s; with the default 60 s drain (the first two runs, which
+  the step as it is now would have failed) B finished during the drain and the
+  restart took 21 and 29 s. `down` and
+  `up -d` 18 s; the backup 10 s (a 56 MB dump); the upgrade block 295 s; the
+  restore 18 s. After bootstrap, `cti-cache` held 3.2 GB and `pg-data-18`
+  1.6 GB; each image 4.4 GiB. Memory in use on the host rose from 1.9 to
+  6.4 GB; the containers' peaks: worker 4.0 GB, bootstrap 3.9 GB, postgres
+  0.45 GB, app 0.35 GB. The fourth: 830 s, 26 `PASS` and 2 `INFO` (`.env`,
+  which says what the run chose, and `files of the new release`, whose mode
+  is reported); `bootstrap` 385 s then 276 s; B `processing`, `queued` at
+  5.2 s, `processing` at 10.3 s and `for_review` at 27.4 s, the worker's log
+  holding `Drain timeout: 1 job(s) still running, requeued`;
+- `--quick`, on the same files: 117 s, 25 `PASS` and 3 `INFO`: `.env`, `files
+  of the new release`, and `report B through restart`: B, a report of 5 s,
+  finishes during the 5 s drain and is not requeued (the gate is the full
+  run).
+
+What the runs found and the documents now say: the backup block left
+`umask 077` in the shell, so a release unpacked there next came out mode 600
+and the capture proxy (uid 13) could not read `docker/squid/squid.conf` (shown
+by hand as a user in the `docker` group: as root `tar` keeps the archive's
+modes, so the check cannot see it, and `tests/test_check_clean_install.py`
+holds it); `run --rm bootstrap --no-corpora` in docs/docker.md stopped on
+`exec: --: invalid option`; the bootstrap that follows `up -d` migrates the
+schema before `app` and `worker`; the volumes hold nearly 5 GB after bootstrap, not
+3.5; and the candidate's `setup.sh` said "API key configured" for an empty
+key.
+
+`tests/test_check_clean_install.py` (67 tests, no Docker, 6 s) holds what
+can drift without a run: every block found where the docs write it, once, and
+`--print-blocks` showing the same; the values lines naming the latest release
+and the digest docker.md gives it; no block deleting data, running under
+`sudo`, calling `docker` by a path or naming a project (`-p X`, `-pX`,
+`-p=X`); the downloads going through the Releases page the check stands in
+for, `pull` before `up -d`, no `build`; the backup block leaving the shell's
+umask as it was and its files private (the block run with a fake `docker`);
+the options; the guards against a Docker context or `DOCKER_HOST` other than
+the default, a project, a directory or a port left in use, and nothing left
+behind when the candidate cannot be pulled (a fake `docker`); the wrapper
+letting through `docker compose` on the run's projects only (and `info`,
+`--version`), refusing `-p` in any spelling, a global option before `compose`,
+`volume remove`, `rm` and `run -v`; the lines that judge report B (requeued or
+not, full and `--quick`) run with a stubbed `step`; report A compared by
+status and sha256; every documented command run under `env -i`; the report;
+and no public document naming a maintainer's machine.
 
 ### Persistence / worker (integration)
 The write→read round-trip through PostgreSQL (`worker._save_entities` →

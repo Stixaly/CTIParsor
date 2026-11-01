@@ -1,6 +1,87 @@
-# Upgrading to the container, PostgreSQL and worker layout
+# Upgrading CTIParsor
 
-Runbook for an install that predates ADR-0044/0045/0046/0053/0054 (September
+An install made from a release, as the [README's quick start](../README.md#quick-start)
+makes it, moves to the next release as [the first section](#from-one-release-to-the-next)
+shows. The sections after it are a runbook for an install that predates
+ADR-0044/0045/0046/0053/0054 (September 2026).
+
+## From one release to the next
+
+Read the new release's notes first: its section of the
+[CHANGELOG](../CHANGELOG.md) says what changed, and the notes give the digest
+of its image.
+
+1. **Back up**, in the directory of the installed release (`ctiparsor-0.1.0`
+   below), with the commands of [docker.md, Data and
+   backups](docker.md#data-and-backups), then check the backup as that section
+   shows. The backup is the way back: the new release migrates the database at
+   its first start, and the old one then refuses to start on it.
+2. **Install the new release beside the old one and start it**, from the
+   directory that holds `ctiparsor-0.1.0`. The first line names the release
+   you have and the one you install, with its digest; the example moves 0.1.0
+   to 0.2.0. An install made from a clone (the README's until 0.2.0) has no
+   such directory: rename the clone first, for one at v0.2.0 `mv CTIParsor
+   ctiparsor-0.2.0`, and work from its parent. `compose.yaml` names the Compose
+   project `ctiparsor` whatever the directory is called, so the containers and
+   volumes stay the same.
+
+<!-- scripts/check_clean_install.sh: UPGRADE_COMMANDS -->
+```bash
+old=0.1.0 new=0.2.0 digest=sha256:f7ea0d3f9d44692b8b08ed31dae5b1738ab19a88bc1cce856d7a297320c95526
+curl -fsSLO https://github.com/Stixaly/CTIParsor/releases/download/v$new/ctiparsor-$new.tar.gz
+curl -fsSLO https://github.com/Stixaly/CTIParsor/releases/download/v$new/SHA256SUMS
+sha256sum -c --ignore-missing SHA256SUMS
+tar xzf ctiparsor-$new.tar.gz
+cp ctiparsor-$old/.env ctiparsor-$new/
+cd ctiparsor-$new
+bash setup.sh
+sed -i '/^CTI_IMAGE=/d' .env
+echo "CTI_IMAGE=ghcr.io/stixaly/ctiparsor@$digest" >> .env
+docker compose pull
+docker compose up -d
+docker compose --profile bootstrap run --rm bootstrap
+```
+
+`cp` brings your settings and the database password; `setup.sh` keeps
+them and writes `.secrets/db_password` in the new directory. It copies `.env`
+only: a `compose.override.yaml` of yours, and the proxy profile's
+`docker/nginx/certs/` and `docker/nginx/htpasswd` (`compose.yaml` mounts both
+from the release's directory), stay in the old one. If you have them, copy
+them into `ctiparsor-$new` before `docker compose pull` (the directory exists
+once `tar` has run), or afterwards and run `docker compose up -d` again
+(`--profile proxy up -d` for the proxy). A setting the
+new release adds takes its default: `diff ctiparsor-$old/.env.example
+ctiparsor-$new/.env.example` lists them. Both directories are the same
+Compose project, `ctiparsor` (the `name:` of `compose.yaml`), so `up -d`
+from the new one replaces the containers and keeps the volumes, every
+report with them. The first process to start on the new image applies the
+new schema versions, under a lock the others wait for: `app`, `worker`, or
+the `bootstrap` that follows them, whose output then shows `[db] schema
+version 13 -> 14` (from 0.2.0) while `docker compose logs app worker` shows
+`schema at version 14, nothing to migrate`. `bootstrap` runs after every
+upgrade: it keeps the models already downloaded, fetches any the new
+release adds, updates the detection corpora and rebuilds the rule store
+(about 5 minutes on the clean install of [TESTING.md](../TESTING.md#clean-install-from-the-published-image),
+most of it the rule store).
+
+3. **Check**: `curl -fsS http://127.0.0.1:8000/api/health` (your `CTI_BIND`
+   and `CTI_PORT`) answers `{"status":"ok"}`, and the web UI lists your
+   reports, each bundle as you exported it. Keep the old directory and the
+   backup until then.
+
+**Going back.** There is no downgrade: the old release refuses a database the
+new one migrated. Restore the backup taken at step 1 instead, from the old
+directory, as [docker.md](docker.md#data-and-backups) shows ("Make the
+restore the live install"); what the new release wrote since is not in it.
+
+**From source**, the same steps with a clone instead of the archive: the
+backup, then `git fetch --tags && git checkout v$new` (a release tag, not
+`git pull` of `main`), `bash setup.sh`, `docker compose build`, `docker
+compose up -d` and `bootstrap`.
+
+---
+
+The rest of this page is the runbook for an install that predates ADR-0044/0045/0046/0053/0054 (September
 2026). Each section says what changes for you, what you must do, and how to
 go back — except §2, which as of ADR-0053 has no way back: CTIParsor no
 longer supports SQLite at all, for either store.
@@ -21,7 +102,8 @@ checkout.
 | a host install (`setup.sh`, `python run_api.py`) on the pre-ADR-0053 single-file layout | move both stores to PostgreSQL (§2), then move to the container stack (§4) — Docker is the only supported end state (ADR-0054) | — |
 | the first compose stack (ADR-0044, before PostgreSQL) | add `CTI_DB_PASSWORD`, rebuild, migrate the reports and rules already in `cti_stix.db` (§4) | scale workers (§5) |
 | the container stack on PostgreSQL 17 (volume `pg-data`, before 2026-10-04) | move the database to PostgreSQL 18 **before** `docker compose up` (§7) | — |
-| nothing yet | follow the quick start in [docs/docker.md](docker.md) | — |
+| a release, 0.1.0 or later | [from one release to the next](#from-one-release-to-the-next) | — |
+| nothing yet | follow the [README's quick start](../README.md#quick-start) | — |
 
 Prerequisites for the container sections: Docker Engine 24+, Compose v2.24+,
 `.env` from `.env.example`, and a backup of what you have (§1).
@@ -51,9 +133,9 @@ sources and the exported bundles.
 
 1. Create a database and a role on your PostgreSQL server, `scram-sha-256`
    authentication. The schema needs `GENERATED … AS IDENTITY` (PostgreSQL 10+)
-   and nothing newer; only PostgreSQL 17 has actually been tested (the
-   version the compose stack runs), so treat an older server as unverified
-   rather than unsupported.
+   and nothing newer; only PostgreSQL 17 and 18 have actually been tested
+   (the compose stack runs 18, CI tests 18), so treat an older server as
+   unverified rather than unsupported.
 2. In `.env`:
 
    ```dotenv

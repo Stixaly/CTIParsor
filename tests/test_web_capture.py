@@ -488,6 +488,43 @@ def test_check_chromium_installed_reports_missing_binary(monkeypatch, tmp_path):
     assert web_capture.check_chromium_installed() == web_capture._CHROMIUM_MISSING_HINT
 
 
+def test_check_chromium_installed_accepts_the_headless_shell_alone(monkeypatch, tmp_path):
+    # The image installs only the headless shell; Playwright still reports the
+    # full build, absent, as `executable_path`.
+    full = tmp_path / "chromium-1248" / "chrome-linux64" / "chrome"
+    shell = (tmp_path / "chromium_headless_shell-1248" / "chrome-headless-shell-linux64"
+             / "chrome-headless-shell")
+    shell.parent.mkdir(parents=True)
+    shell.write_text("x")
+
+    class _FakePlaywright:
+        def __init__(self):
+            self.chromium = self
+            self.executable_path = str(full)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(web_capture, "_PLAYWRIGHT_AVAILABLE", True)
+    monkeypatch.setattr(web_capture, "sync_playwright", lambda: _FakePlaywright(), raising=False)
+    assert web_capture.check_chromium_installed() is None
+    shell.unlink()
+    assert web_capture.check_chromium_installed() == web_capture._CHROMIUM_MISSING_HINT
+
+
+def test_the_image_installs_only_the_headless_shell():
+    # The full Chrome for Testing build bundles Google's Widevine module, which
+    # may not be redistributed (THIRD_PARTY_NOTICES.md); captures run headless.
+    dockerfile = (Path(__file__).resolve().parent.parent / "Dockerfile").read_text(encoding="utf-8")
+    installs = [line for line in dockerfile.splitlines()
+                if "playwright install" in line and not line.lstrip().startswith("#")]
+    assert installs
+    assert all("--only-shell" in line for line in installs), installs
+
+
 def test_check_chromium_installed_reports_a_probe_failure(monkeypatch):
     def _raise():
         raise RuntimeError("Executable doesn't exist")

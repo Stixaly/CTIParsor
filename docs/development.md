@@ -514,9 +514,9 @@ Lower = more permissive (hallucination risk). Higher = stricter (false-negative 
 ### Switch NER model for Stage 2e
 ```env
 # .env — no code change required
-GLINER_MODEL=urchade/gliner_large-v2.1   # default — best accuracy (~800 MB)
-GLINER_MODEL=urchade/gliner_medium-v2.1  # good accuracy/speed balance (~300 MB)
-GLINER_MODEL=urchade/gliner_small-v2.1   # fastest, less accurate (~120 MB)
+GLINER_MODEL=urchade/gliner_large-v2.1   # default — best accuracy (~1.8 GB)
+GLINER_MODEL=urchade/gliner_medium-v2.1  # good accuracy/speed balance (~0.8 GB)
+GLINER_MODEL=urchade/gliner_small-v2.1   # fastest, less accurate (~0.6 GB)
 ```
 
 ### Try another TTP embedding model

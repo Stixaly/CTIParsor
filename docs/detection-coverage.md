@@ -62,7 +62,8 @@ Two controls turn that list into something actionable:
 
 A licence of `none` means ALL RIGHTS RESERVED: use it for local coverage, do not
 redistribute it. The drawer says so on the rule itself, and the export manifest
-repeats it per rule.
+repeats it per rule. Such corpora are opt-in: see [Corpora without a
+licence](#corpora-without-a-licence-are-opt-in).
 
 ## 1. Configure corpora
 
@@ -70,12 +71,38 @@ Two registry files:
 
 | File | Tracked | Holds |
 |---|---|---|
-| `detection_corpora.yaml` | committed | public corpora — Sigma, YARA and Suricata, all enabled by default |
+| `detection_corpora.yaml` | committed | public corpora — Sigma, YARA and Suricata, enabled by default unless they carry no licence (opt-in, below) |
 | `detection_corpora.local.yaml` | gitignored | private corpora + local overrides |
 
 The local overlay is merged over the committed file: an entry with an existing
 `name` overrides it (e.g. `enabled: false` to disable SigmaHQ); a new `name` is
 appended.
+
+### Corpora without a licence are opt-in
+
+A corpus whose licence is `none` (no LICENSE file upstream: all rights
+reserved) or unknown is `enabled: false` in the committed file, so `bootstrap`
+and `sync_corpora.py` do not clone it onto your machine and its rules are not in
+the store. Today that is `russianpanda` and `mthcht`. The entries stay listed so
+that you can turn one on, as your own decision:
+
+- **From the UI:** Settings, the corpus row, **Enable**; then **Redownload**,
+  which clones it and re-ingests the store. This writes `enabled: true` to the
+  local overlay.
+- **By hand:** put this in `detection_corpora.local.yaml`, then run steps 2 and
+  3 below (in the containers the overlay is `/app/state/detection_corpora.local.yaml`,
+  on the `cti-state` volume):
+
+  ```yaml
+  corpora:
+    - name: russianpanda
+      enabled: true
+  ```
+
+Disabling a corpus later does not delete the rules already in the store: a
+rebuild replaces the rules of enabled corpora only. A rule you export from an
+enabled opt-in corpus keeps `license: none` in `MANIFEST.json`, and the export
+panel warns about it (section 5).
 
 **From the UI:** open **Settings** → add a repo (name + git URL + license). It's
 written to the local overlay.
@@ -247,6 +274,10 @@ in two repos collapses to one corpus (score 2), while two **independent** rules 
 a technique corroborate it (score 3). Forks/mirrors never inflate the score.
 
 `license` travels with every rule; honor it before exporting or sharing rules.
+The export's `MANIFEST.json` names the licence of each rule, and its
+`README.txt` lists the licences present with their corpora. Rules under a GPL
+licence or Elastic-2.0 carry obligations when you pass them on
+([THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)).
 
 ## 5. Select and export rules
 

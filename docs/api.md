@@ -58,7 +58,8 @@ The detection export POSTs the ids of the rules to package, and they grow with
 the rule store rather than with the report: the rules the report's ATT&CK
 techniques select, those reached by its evidence alone (untagged), and the
 analyst's promotions, so at most every rule in the store. On the 15 corpora of
-`detection_corpora.yaml` (87,407 rules, measured 2026-10-26), the ids of the
+`detection_corpora.yaml`, the two opt-in ones included (87,407 rules, measured
+2026-10-26), the ids of the
 38,059 rules that carry an ATT&CK tag weigh 0.94 MB, and those of every rule
 2.1 MB. Every other request is held to 1 MB: the relationship policy (`PUT`,
 read whole by `request.json()`) and the JSON bodies pydantic reads whole. The

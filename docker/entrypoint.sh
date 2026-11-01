@@ -74,8 +74,10 @@ banner() {
 warn_env() {
     local provider="${LLM_PROVIDER:-anthropic}"
     local key="${ANTHROPIC_API_KEY:-}"
-    if [ "$provider" = "anthropic" ] && { [ -z "$key" ] || [[ "$key" == *xxxx* ]]; }; then
-        echo "WARNING: ANTHROPIC_API_KEY is unset or still the placeholder - Stage 3 (LLM enrichment) will fail on every report. Set it in .env." >&2
+    if [ "$provider" = "anthropic" ] && [[ "$key" == *xxxx* ]]; then
+        echo "WARNING: ANTHROPIC_API_KEY is still the placeholder - Stage 3 (LLM extraction) will fail on every report. Set a real key in .env, or leave it empty." >&2
+    elif [ "$provider" = "anthropic" ] && [ -z "$key" ]; then
+        echo "NOTE: no LLM provider is set (ANTHROPIC_API_KEY is empty) - Stage 3 (LLM extraction) is skipped. Set one in .env." >&2
     fi
 
     local host="${API_HOST:-}"
