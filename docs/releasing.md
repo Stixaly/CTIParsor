@@ -5,6 +5,7 @@ decision and the options rejected are in
 [ADR-0085](adr/0085-releases-promote-the-image-main-built.md).
 
 - [What a release is](#what-a-release-is)
+- [The image main's CI publishes](#the-image-mains-ci-publishes)
 - [Versioning](#versioning)
 - [Where the version lives](#where-the-version-lives)
 - [Cutting a release](#cutting-a-release)
@@ -20,9 +21,10 @@ decision and the options rejected are in
 A tag `vX.Y.Z` on a commit of `main` whose CI passed. Pushing the tag starts
 `.github/workflows/release.yml`, which publishes a GitHub Release.
 
-**Nothing is rebuilt.** Main's CI (`ci.yml`, job `publish-image`) already built,
-tested and attested the image of that commit, and pushed it as
-`ghcr.io/stixaly/ctiparsor:sha-<commit>`. The release workflow gives that same
+**Nothing is rebuilt.** Main's CI (`ci.yml`) built the image of that commit
+once, scanned and smoke-tested that build, then pushed it unchanged and
+attested it as `ghcr.io/stixaly/ctiparsor:sha-<commit>` (see
+[below](#the-image-mains-ci-publishes)). The release workflow gives that same
 image the name `X.Y.Z`, and `X.Y` when the tag is the highest of its minor line. The digest does not change, so the build
 provenance and the SBOM attestation that main's CI signed stay valid.
 
@@ -48,6 +50,63 @@ and names commit ce59cfb, the merge of the release pull request (#223). On GHCR,
 same checks pass (2026-10-30). It is the first immutable Release: `gh release
 view v0.2.0 --json isImmutable` gives `true`, and `gh release verify v0.2.0`
 finds GitHub's release attestation.
+
+## The image main's CI publishes
+
+Since 2026-11-01 ([ADR-0047](adr/0047-publish-image-to-ghcr.md), amended),
+each commit's image is built once, and the image GHCR serves is the image CI
+tested:
+
+Both jobs run on `ubuntu-26.04`: its Docker keeps images in the containerd
+image store, which loads and pushes an image index whole. They fail if the
+store is another one (Docker 28's classic store cannot load the archive).
+
+1. Job `container-image` builds the image into an OCI archive: an image index
+   holding the linux/amd64 image and BuildKit's SLSA provenance of it. The step
+   "Load the archive as ctiparsor:ci" runs `docker load`, logs the archive's
+   index digest and the loaded image's ID, and fails unless they are the same.
+   The Grype scan, the smoke test and the air-gap check then run that image. On
+   a push to `main`, the archive leaves the job as a workflow artifact
+   (`ctiparsor-image`, kept one day) once every step has passed.
+2. Job `publish-image` builds nothing. It loads the archive, checks that it is
+   the image `container-image` tested, and pushes it as `sha-<commit>` with
+   `docker push`, which sends the index, its attestation manifest and every
+   blob unchanged. It fails unless GHCR then serves the digest
+   `container-image` reported. The SBOM and the two attestations are bound to
+   that digest.
+3. Last, `publish-image` names that digest `latest`, only if the commit is
+   still main's head (`gh api repos/…/commits/main`). A run that finishes after
+   a newer push, or a re-run of an old one, leaves `latest` where it is, with a
+   notice; its `sha-<commit>` image is published and attested all the same.
+
+If `publish-image` fails after its push, `sha-<commit>` may already be on
+GHCR, without attestations: `release.yml` refuses such an image, and `latest`
+has not moved.
+
+To check a commit of `main` by hand (read-only), compare three digests: the
+one `container-image` tested, the one `publish-image` read back, and the one
+GHCR serves for `sha-<commit>`. They must be the same.
+
+```bash
+sha=<full commit of main>
+run=$(gh run list -R Stixaly/CTIParsor -w ci.yml -b main -e push -c "$sha" \
+  --json databaseId -q '.[0].databaseId')
+job() {
+  gh run view "$run" -R Stixaly/CTIParsor --json jobs \
+    -q ".jobs[] | select(.name == \"$1\") | .databaseId"
+}
+gh run view -R Stixaly/CTIParsor --job "$(job 'Container image (build + smoke)')" --log \
+  | grep -oE "image index: sha256:[0-9a-f]{64}"
+gh run view -R Stixaly/CTIParsor --job "$(job 'Publish image to GHCR')" --log \
+  | grep -oE '(sha-[0-9a-f]{40}|latest) -> sha256:[0-9a-f]{64}'
+docker buildx imagetools inspect "ghcr.io/stixaly/ctiparsor:sha-$sha" \
+  --format '{{json .Manifest}}' | python3 -c 'import json, sys; print(json.load(sys.stdin)["digest"])'
+```
+
+`latest` names the same digest, unless the log of `publish-image` shows the
+notice that main had moved on, until the next push to `main` moves it. The
+image then passes `gh attestation verify` as in
+[Verifying a release](#verifying-a-release), with `--source-digest "$sha"`.
 
 ## Versioning
 

@@ -2,7 +2,9 @@
 
 The first block reads the repository's own files, so that a version bumped in
 one place only, or a changelog the script can no longer read, fails here and
-not in the release workflow.  The rest builds small trees in tmp_path.
+not in the release workflow.  The second reads ci.yml: the image a release
+promotes is the one main's CI built once and tested, pushed unchanged
+(ADR-0047 as amended on 2026-11-01).  The rest builds small trees in tmp_path.
 """
 from __future__ import annotations
 
@@ -14,8 +16,10 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
+import yaml
 
 from scripts.release import (
     DEFAULT_MAX_CHARS,
@@ -195,6 +199,201 @@ def test_the_script_runs_as_a_program(tree):
                              capture_output=True, text=True, check=False)
     assert refused.returncode == 1 and refused.stdout == ""
     assert "pipeline/__init__.py __version__ is 0.2.0, the tag says 0.3.0" in refused.stderr
+
+
+# --- ci.yml: one build, tested, then pushed unchanged ------------------------
+
+CI_YML = ROOT / ".github" / "workflows" / "ci.yml"
+ARCHIVE = "${{ runner.temp }}/ctiparsor.oci.tar"
+MAIN_PUSH = "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+#: A build in a run: step: docker build, docker buildx build/bake, docker image build, podman/buildah.
+_BUILD_COMMAND = re.compile(r"\b(?:docker|podman|buildah)\s+(?:buildx\s+|image\s+)?(?:build|bake|bud)\b")
+CONTAINERD = "*'\"io.containerd.snapshotter.v1\"'*) ;;"
+
+
+@pytest.fixture(scope="module")
+def ci_jobs() -> dict[str, Any]:
+    return yaml.safe_load(CI_YML.read_text(encoding="utf-8"))["jobs"]
+
+
+def _action(step: dict[str, Any]) -> str:
+    return str(step.get("uses", "")).partition("@")[0]
+
+
+def _only(job: dict[str, Any], action: str) -> dict[str, Any]:
+    found = [step for step in job["steps"] if _action(step) == action]
+    assert len(found) == 1, f"{len(found)} steps use {action}"
+    return found[0]
+
+
+def _by_id(job: dict[str, Any], step_id: str) -> dict[str, Any]:
+    found = [step for step in job["steps"] if step.get("id") == step_id]
+    assert len(found) == 1, f"{len(found)} steps have the id {step_id}"
+    return found[0]
+
+
+def _code(run: object) -> list[str]:
+    """The lines a run: script executes: stripped, without blank lines and comments."""
+    lines = (line.strip() for line in str(run or "").splitlines())
+    return [line for line in lines if line and not line.startswith("#")]
+
+
+def _script(job: dict[str, Any], step_id: str) -> list[str]:
+    code = _code(_by_id(job, step_id)["run"])
+    assert code[0] == "set -euo pipefail", f"{step_id} does not stop at its first failure"
+    return code
+
+
+def _line(code: list[str], text: str) -> int:
+    found = [i for i, line in enumerate(code) if text in line]
+    assert found, f"no line of the script holds {text!r}"
+    return found[0]
+
+
+def _fails_unless(code: list[str], condition: str) -> int:
+    """``condition`` is an `if` line whose branch reports an error and exits 1."""
+    i = code.index(condition)
+    assert code[i + 1].startswith('echo "::error::') and code[i + 2] == "exit 1", code[i:i + 3]
+    return i
+
+
+def _requires_containerd(code: list[str]) -> int:
+    drivers = code.index("drivers=$(docker info --format '{{json .DriverStatus}}')")
+    assert code[drivers + 1:drivers + 4] == ['case "$drivers" in', CONTAINERD, "*)"]
+    assert code[drivers + 4].startswith("echo \"::error::Docker's image store is ")
+    assert code[drivers + 5:drivers + 7] == ["exit 1 ;;", "esac"]
+    return drivers
+
+
+def test_publish_image_builds_nothing(ci_jobs):
+    steps = ci_jobs["publish-image"]["steps"]
+    for step in steps:
+        assert _action(step) not in {"docker/build-push-action", "docker/bake-action"}, step
+        assert not _BUILD_COMMAND.search(str(step.get("run", ""))), step["run"]
+    # Nothing to build from: the job never checks the repository out.
+    assert not [step for step in steps if _action(step) == "actions/checkout"]
+
+
+def test_the_image_jobs_run_no_container_of_their_own(ci_jobs):
+    # A third-party image (skopeo's is rebuilt daily, its old digests deleted) or the Docker socket in one.
+    assert "SKOPEO_IMAGE" not in CI_YML.read_text(encoding="utf-8")
+    for name in ("container-image", "publish-image"):
+        for step in ci_jobs[name]["steps"]:
+            for line in _code(step.get("run")):
+                assert "docker run" not in line and "docker.sock" not in line and "skopeo" not in line, line
+
+
+def test_the_image_jobs_run_on_ubuntu_26_04_and_require_the_containerd_store(ci_jobs):
+    assert ci_jobs["container-image"]["runs-on"] == "ubuntu-26.04"
+    assert ci_jobs["publish-image"]["runs-on"] == "ubuntu-26.04"
+    for job, step_id in (("container-image", "archive"), ("publish-image", "push")):
+        code = _script(ci_jobs[job], step_id)
+        assert _requires_containerd(code) < code.index('docker load --input "$archive"')
+
+
+def test_container_image_builds_an_oci_archive_with_stated_provenance(ci_jobs):
+    build = _by_id(ci_jobs["container-image"], "build")
+    assert _action(build) == "docker/build-push-action"
+    assert build["with"]["outputs"] == f"type=oci,dest={ARCHIVE}"
+    assert not build["with"].get("push") and not build["with"].get("load")
+    # BuildKit's SLSA v1 provenance, as GHCR holds it, written out rather than an action default.
+    assert build["with"]["provenance"] == (
+        "mode=max,version=v1,builder-id=${{ github.server_url }}/${{ github.repository }}"
+        "/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}")
+    # The labels publish-image used to give, from the same inputs.
+    assert build["with"]["labels"] == "${{ steps.meta.outputs.labels }}"
+    meta = _by_id(ci_jobs["container-image"], "meta")
+    assert _action(meta) == "docker/metadata-action"
+    assert meta["with"]["tags"].split() == ["type=sha,format=long,prefix=sha-",
+                                            "type=raw,value=latest,enable={{is_default_branch}}"]
+
+
+def test_container_image_scans_and_smokes_the_image_loaded_from_its_archive(ci_jobs):
+    steps = ci_jobs["container-image"]["steps"]
+    ids = [step.get("id") for step in steps]
+    load = ids.index("archive")
+    assert load == ids.index("build") + 1
+    assert steps[load]["env"]["BUILT"] == "${{ steps.build.outputs.digest }}"
+    code = _script(ci_jobs["container-image"], "archive")
+    assert code[1] == "archive=$RUNNER_TEMP/ctiparsor.oci.tar"
+    order = [_fails_unless(code, 'if [ "$index" != "$BUILT" ]; then'),
+             code.index('docker load --input "$archive"'),
+             code.index("id=$(docker image inspect ctiparsor:ci --format '{{.Id}}')"),
+             _fails_unless(code, 'if [ "$id" != "$index" ]; then'),   # the loaded image is the archive's
+             code.index('echo "digest=$index" >> "$GITHUB_OUTPUT"')]
+    assert order == sorted(order) and order[-1] == len(code) - 1
+    assert ci_jobs["container-image"]["outputs"]["digest"] == "${{ steps.archive.outputs.digest }}"
+    scan = steps.index(_only(ci_jobs["container-image"], "anchore/scan-action"))
+    assert scan > load and steps[scan]["with"]["image"] == "ctiparsor:ci"
+    runs_the_image = [i for i, step in enumerate(steps) if step.get("env", {}).get("CTI_IMAGE")]
+    assert len(runs_the_image) == 2 and min(runs_the_image) > load  # the smoke test, the air-gap check
+    assert all(steps[i]["env"]["CTI_IMAGE"] == "ctiparsor:ci" for i in runs_the_image)
+
+
+def test_publish_image_pushes_the_archive_container_image_tested(ci_jobs):
+    image, publish = ci_jobs["container-image"], ci_jobs["publish-image"]
+    upload = _only(image, "actions/upload-artifact")
+    assert image["steps"][-1] is upload  # after every step that tests the image
+    assert upload["if"] == MAIN_PUSH and upload["with"]["path"] == ARCHIVE
+    assert "container-image" in publish["needs"] and publish["if"] == MAIN_PUSH
+    download = _only(publish, "actions/download-artifact")
+    assert download["with"] == {"name": upload["with"]["name"], "path": "${{ runner.temp }}"}
+    push = _by_id(publish, "push")
+    assert publish["steps"].index(download) < publish["steps"].index(push)
+    assert push["env"]["TESTED"] == "${{ needs.container-image.outputs.digest }}"
+    code = _script(publish, "push")
+    assert code[1] == "archive=$RUNNER_TEMP/ctiparsor.oci.tar"
+    order = [code.index('docker load --input "$archive"'),
+             code.index("id=$(docker image inspect ctiparsor:ci --format '{{.Id}}')"),
+             _fails_unless(code, 'if [ "$id" != "$TESTED" ]; then'),   # the archive is the image tested
+             code.index('docker tag ctiparsor:ci "$IMAGE:sha-$GITHUB_SHA"'),
+             code.index('docker push "$IMAGE:sha-$GITHUB_SHA"')]
+    assert order == sorted(order)
+
+
+def test_publish_image_fails_unless_the_registry_holds_the_tested_digest(ci_jobs):
+    publish = ci_jobs["publish-image"]
+    code = _script(publish, "push")
+    order = [code.index('docker push "$IMAGE:sha-$GITHUB_SHA"'),
+             _line(code, 'got=$(docker buildx imagetools inspect "$IMAGE:sha-$GITHUB_SHA"'),
+             _fails_unless(code, 'if [ "$got" != "$TESTED" ]; then'),  # what the registry holds, read back
+             code.index('echo "digest=$TESTED" >> "$GITHUB_OUTPUT"')]
+    assert order == sorted(order) and order[-1] == len(code) - 1
+    # The SBOM, both attestations and latest bind to that digest.
+    after = publish["steps"][publish["steps"].index(_by_id(publish, "push")) + 1:]
+    digests = re.findall(r"\$\{\{\s*([\w.-]+\.digest)\s*\}\}", json.dumps(after))
+    assert len(digests) == 4 and set(digests) == {"steps.push.outputs.digest"}
+
+
+def test_latest_moves_only_to_the_attested_image_of_mains_head(ci_jobs):
+    publish = ci_jobs["publish-image"]
+    latest = _by_id(publish, "latest")
+    assert publish["steps"][-1] is latest  # after the SBOM and both attestations
+    assert latest["env"]["TESTED"] == "${{ steps.push.outputs.digest }}"
+    assert latest["env"]["GH_TOKEN"] == "${{ github.token }}"
+    code = _script(publish, "latest")
+    head = code.index('head=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)')
+    guard = code.index('if [ "$head" != "$GITHUB_SHA" ]; then')
+    assert code[guard + 1].startswith('echo "::notice::') and code[guard + 2] == "exit 0"
+    order = [head, guard,
+             code.index('docker tag ctiparsor:ci "$IMAGE:latest"'),
+             code.index('docker push "$IMAGE:latest"'),
+             _line(code, 'got=$(docker buildx imagetools inspect "$IMAGE:latest"'),
+             _fails_unless(code, 'if [ "$got" != "$TESTED" ]; then')]
+    assert order == sorted(order)
+    # No other step of the workflow names latest.
+    for job in ci_jobs.values():
+        for step in job["steps"]:
+            if step is not latest:
+                assert not [line for line in _code(step.get("run")) if ":latest" in line], step
+
+
+def test_every_action_in_ci_yml_is_pinned_to_a_commit_with_its_version():
+    lines = [line.strip() for line in CI_YML.read_text(encoding="utf-8").splitlines()
+             if line.strip().startswith(("uses:", "- uses:"))]
+    assert lines
+    for line in lines:
+        assert re.fullmatch(r"(?:- )?uses: [\w.-]+/[\w./-]+@[0-9a-f]{40} # v\d+(?:\.\d+){1,2}", line), line
 
 
 # --- version ----------------------------------------------------------------

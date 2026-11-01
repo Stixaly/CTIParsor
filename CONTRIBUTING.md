@@ -6,7 +6,8 @@ and points at the seams where most changes go.
 ## How a change gets in
 
 1. Open an issue first for anything larger than a fix, so the approach can be
-   agreed before the work ([GitHub Issues](https://github.com/Stixaly/CTIParsor/issues)).
+   agreed before the work ([GitHub Issues](https://github.com/Stixaly/CTIParsor/issues);
+   [ROADMAP.md](ROADMAP.md) says what is planned and what is not).
    A vulnerability goes to [SECURITY.md](SECURITY.md#reporting-a-vulnerability) instead.
 2. Fork, branch off `main`, and keep one change per pull request: the code,
    **its tests**, and the docs it changes, together (see *Conventions*). New
