@@ -238,6 +238,26 @@ def test_version_13_leaves_every_existing_job_in_full_mode_and_every_row_without
     assert conn.execute("SELECT COUNT(*) AS n FROM job_baselines").fetchone()["n"] == 0     # the key cascades
 
 
+def test_version_14_adds_an_empty_worker_table_and_leaves_a_running_job_with_its_worker(schema):
+    conn = schema()
+    _legacy_at(conn, 13)
+    conn.execute("INSERT INTO jobs (id, original_filename, status, worker_id, heartbeat_at, created_at, updated_at) "
+                 "VALUES ('j1','r.pdf','processing','old-worker:7:a1b2c3','t','t','t')")
+    assert not history.table_exists(conn, "worker_heartbeats")
+
+    report = migrate.upgrade(conn)
+
+    assert report.applied == [14] and report.recognised == list(range(1, 14))
+    assert conn.execute("SELECT COUNT(*) AS n FROM worker_heartbeats").fetchone()["n"] == 0
+    job = conn.execute("SELECT status, worker_id, heartbeat_at FROM jobs").fetchone()
+    assert tuple(job) == ("processing", "old-worker:7:a1b2c3", "t")   # the previous revision's worker keeps it
+    conn.execute("INSERT INTO worker_heartbeats (worker_id, role, max_concurrent, app_version, started_at, "
+                 "heartbeat_at) VALUES ('w1','worker',1,'0.3.0','t','t')")
+    with pytest.raises(Exception, match="worker_heartbeats_pkey"):
+        conn.execute("INSERT INTO worker_heartbeats (worker_id, role, max_concurrent, app_version, started_at, "
+                     "heartbeat_at) VALUES ('w1','worker',1,'0.3.0','t','t')")
+
+
 # ── Refusals ─────────────────────────────────────────────────────────────────
 
 def test_a_database_newer_than_the_code_is_refused(schema):

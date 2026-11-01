@@ -11,6 +11,7 @@
 #   - root filesystem is read-only
 #   - state and cache volumes are writable
 #   - symlinks resolve into the volumes
+#   - an idle worker container listed by GET /api/queue/status (ADR-0094 item 7)
 #   - Python imports (magic, playwright, sentence_transformers, transformers, gliner, stix2validator, fastapi)
 #   - google-re2 availability (warn if missing; ADR-0049)
 #   - Chromium present
@@ -327,6 +328,16 @@ if [ "$QUEUE_ROLE" = "api" ]; then
     pass "queue status endpoint answers (role: $QUEUE_ROLE)"
 else
     fail "queue status endpoint answers (got role: $QUEUE_ROLE)"
+fi
+# The worker is healthy (step 9c): its loop has run a pass, and written its row
+# in worker_heartbeats.  No report yet, so it is listed idle.  At least one, not
+# exactly one: a worker killed in the last hour on this project's database is
+# still listed beside it (stale), and --scale may run more.
+QUEUE_WORKERS=$(printf '%s' "$QUEUE_JSON" | python3 -c 'import json,sys; ws=json.load(sys.stdin)["workers"]; print(sum(w["role"] == "worker" and w["state"] == "idle" for w in ws), " ".join(str(w["role"]) + ":" + w["state"] for w in ws))' 2>/dev/null)
+if [ "${QUEUE_WORKERS%% *}" -ge 1 ] 2>/dev/null; then
+    pass "an idle worker is listed by the queue status (${QUEUE_WORKERS#* })"
+else
+    fail "an idle worker is listed by the queue status (got: $QUEUE_WORKERS)"
 fi
 
 # ── Step 10: python imports ───────────────────────────────────────────────────

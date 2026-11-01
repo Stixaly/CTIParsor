@@ -35,6 +35,7 @@ migrations".
 | 11 | `jobs.bundle_validation`, `jobs.bundle_validation_errors` | 0084 |
 | 12 | `jobs.review_revision`, `jobs.bundle_review_revision`, `jobs.bundle_build_json`; the triggers that bump `review_revision` | 0086 |
 | 13 | `jobs.pipeline_mode`, `job_baselines`, `entities` and `relationships` `.enrichment_status` and `.baseline_stix_id` | 0090 |
+| 14 | `worker_heartbeats` | 0094 (item 7) |
 
 ```sql
 CREATE TABLE jobs (
@@ -254,6 +255,20 @@ CREATE TABLE progress_events (
     event_type TEXT NOT NULL,
     data       TEXT NOT NULL,
     created_at TEXT NOT NULL
+);
+
+-- One row per queue loop that runs now (ADR-0094 item 7), busy or idle: written
+-- when the loop starts and every WORKER_HEARTBEAT_S, deleted when it stops
+-- cleanly; a row silent for an hour is deleted by any loop that runs (a worker
+-- that crashed).  GET /api/queue/status reads it.  Process state, not report
+-- data: no key to jobs.
+CREATE TABLE worker_heartbeats (
+    worker_id      TEXT PRIMARY KEY,  -- host:pid:hex, as jobs.worker_id
+    role           TEXT NOT NULL,     -- worker | all (the API process loop)
+    max_concurrent INTEGER NOT NULL,  -- WORKER_MAX_CONCURRENT; 0 or less = no limit
+    app_version    TEXT NOT NULL,     -- CTIParsor version (pipeline.__version__)
+    started_at     TEXT NOT NULL,
+    heartbeat_at   TEXT NOT NULL
 );
 
 CREATE TABLE relationship_policy (

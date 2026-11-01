@@ -36,7 +36,7 @@ What CTIParsor exposes, read from the code on 2026-10-31 (commit 1c11b87):
   `worker`, `bootstrap`, `cli`, `check`), and `main.py`: eight arguments and
   the exit codes 0, 1 and 2.
 - **Configuration.** 141 variables in `.env.example`.
-- **Data.** A PostgreSQL schema at version 13 (`api/migrations/`, ADR-0077), and
+- **Data.** A PostgreSQL schema at version 14 (`api/migrations/`, ADR-0077), and
   the volume `cti-state`.
 - **STIX output.** The mapping of `docs/stix-output.md`, 13 custom properties
   CTIParsor writes, the identity rules of ADR-0066, and the TLP and PAP
@@ -58,7 +58,8 @@ What already checks part of it, and what does not:
   journey on 2026-10-31.
 - `GET /api/queue/status` lists only the workers that hold a `processing` job
   (`api/routes/queue.py`). An idle worker is not in the list, so an empty list
-  does not mean that no worker runs.
+  does not mean that no worker runs. Item 7 below listed every running worker,
+  idle or busy, on 2026-11-01.
 - The OpenCTI import recipe (TESTING.md, *OpenCTI import (A4)*) passed 12 of
   12 expectations on OpenCTI 7.260930.0 on 2026-10-25, before ADR-0093 changed
   the descriptions. It is not in CI.
@@ -287,7 +288,7 @@ no import test); several users, a GPU and a Python package are not supported.
 
 ## Action plan
 
-Items 1 to 4 are done; none of the others is started on 2026-10-31. Each
+Items 1 to 4 and 7 are done; none of the others is started on 2026-11-01. Each
 proves part of a promise; `docs/support-policy.md` names the item where a piece
 of evidence is missing.
 
@@ -299,7 +300,7 @@ of evidence is missing.
 | 4 | Browser journey: Playwright against the built interface, the API, a worker and PostgreSQL: import, review, export; in CI | the journey is usable (blocker 4) | done: `scripts/check_browser_e2e.sh` (job `browser-e2e`, every run; `publish-image` waits for it), `frontend/playwright.config.ts`, `frontend/e2e/`, `scripts/browser_e2e_db.py`, `tests/test_browser_e2e_db.py`. In Chromium, offline (`PIPELINE_DISABLED_STAGES` turns off every model, LLM and network stage; the stage report is checked): import, progress from the run's events, a reload, accept, reject and retype, completion, download, the bundle checked (STIX 2.1, references inside it, decisions applied) and compared with `GET /bundle` (`validated`); the same by keyboard alone; enrichment with the graph's ledger, each match checked; a failed report and its reason; a refused bundle answered 409; axe (WCAG 2.1 A/AA, serious and critical) on each page, one element allowlisted; an iptables guard counts every packet the API and its worker send off loopback, 0 required (a DNS lookup through a resolver on loopback is not counted, a connection after it is). Not covered: the models, the LLM and the vision and CVE stages (their own track); a PDF or a URL import; the graph and coverage pages by keyboard; a screen reader; whether the report still runs at the reload (recorded, not asserted: the run ends under a second after its first event); the reason a failed report failed, on the page (the journey reads it from the progress events) |
 | 5 | In-house gold: the 9 reports annotated on every layer of `LAYERS`, `status: gold` (decision 10) | the denominators of the measurement | not started (9 `pre-annotation` drafts) |
 | 6 | Measurement of the exported bundle: score the bundle Stages 4 and 5 produce, per layer and per document, with every report not scored named; published with each release; compared with the previous release on the same data | published limits | not started |
-| 7 | Worker status: an idle worker visible in `GET /api/queue/status`, or the documentation says that an empty list is not an outage | operations | not started |
+| 7 | Worker status: an idle worker visible in `GET /api/queue/status`, or the documentation says that an empty list is not an outage | operations | done: `worker_heartbeats` (schema version 14, `api/migrations/v0014_worker_heartbeats.py`): every queue loop writes its row at start and every `WORKER_HEARTBEAT_S`, busy or idle, deletes it on a clean stop, and deletes the rows silent for an hour; while that write fails, the worker stops touching its liveness file, so its container turns `unhealthy` (before, it stayed `healthy` with the job store down); `GET /api/queue/status` lists each worker `busy`, `idle` or `stale`, and `worker_summary` the live ones and their free slots; `docs/operations.md`; `tests/test_queue_status_api.py`, `tests/test_job_queue.py`, `tests/test_migrations.py`; `scripts/docker_smoke.sh` checks that the idle worker container is listed (job `container-image`). Not covered: a worker of a version before 14 is listed only while it holds a report; a worker that crashed is listed as it was until its lease expires (180 s) |
 | 8 | OpenCTI import of the candidate: the A4 recipe on bundles the candidate produced, tied to its commit and image digest | the import the matrix supports | not started |
 | 9 | Clean install from the published image, on a blank machine, following only the public documentation: bootstrap, first report, review, export, restart, upgrade, restore | the install path | not started |
 | 10 | Freeze and real use: the candidate frozen, 5 real reports outside the evaluation corpora, through export and OpenCTI import, incidents logged (decision 2) | the journey on unseen reports | not started |

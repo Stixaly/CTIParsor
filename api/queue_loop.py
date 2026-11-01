@@ -2,7 +2,9 @@
 
 Claims `queued` jobs from the `jobs` table, runs each in the isolated
 subprocess that `api.worker._spawn_job` starts, heartbeats the rows it owns,
-and requeues jobs whose lease expired.  One loop per process: the same loop
+and requeues jobs whose lease expired.  It also keeps its own row in
+`worker_heartbeats`, busy or idle, so that GET /api/queue/status lists every
+loop that runs (ADR-0094 item 7).  One loop per process: the same loop
 serves an API process in role `all` (a background thread, the host-install
 default) and a worker container in role `worker` (foreground,
 `python -m api.queue_loop`).  In role `api` no loop runs and the routes only
@@ -25,6 +27,7 @@ from typing import Any
 
 from api.db import emit_progress, get_conn, now_iso, set_job_status
 from api.logging_config import get_logger, setup_logging
+from pipeline import __version__
 from pipeline.env_flags import env_float, env_int
 
 logger = get_logger(__name__)
@@ -41,6 +44,13 @@ RETENTION_SWEEP_S = env_int("JOB_RETENTION_SWEEP_S", default=3600)
 ALIVE_FILE = Path(os.getenv("WORKER_ALIVE_FILE", "/tmp/ctiparsor-worker.alive"))  # noqa: S108 — see above
 WORKER_ID = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:6]}"
 _VALID_ROLES = ("all", "api", "worker")
+# A loop that stops cleanly deletes its worker_heartbeats row; one that crashed
+# leaves it, listed `stale` by GET /api/queue/status.  Every running loop
+# deletes, at each heartbeat, the rows silent for longer than this: twenty
+# leases at the defaults, so a crash stays listed long after its jobs were
+# requeued, and a worker that crashes over and over (a new id at each restart)
+# leaves at most an hour of rows.  What happened before is in the logs.
+WORKER_ROW_RETENTION_S = 3600
 
 if LEASE_TIMEOUT_S < 3 * HEARTBEAT_S:
     logger.warning("A lease shorter than three heartbeats requeues jobs that are still running")
@@ -200,6 +210,34 @@ def heartbeat(job_ids: Iterable[str], worker_id: str = WORKER_ID) -> int:
         return 0
 
 
+def stamp_worker(worker_id: str, *, role: str, max_concurrent: int, started_at: str) -> bool:
+    """Write this loop's row in worker_heartbeats, then delete the rows silent
+    for WORKER_ROW_RETENTION_S.  Never raises: a failure is logged and returns
+    False; the loop goes on claiming and running jobs, but stops touching its
+    liveness file until a stamp succeeds again (WorkerLoop.run_once)."""
+    try:
+        conn = get_conn()
+        conn.execute(
+            "INSERT INTO worker_heartbeats (worker_id, role, max_concurrent, app_version, started_at, heartbeat_at) "
+            "VALUES (?,?,?,?,?,?) ON CONFLICT (worker_id) DO UPDATE SET heartbeat_at = excluded.heartbeat_at",
+            (worker_id, role, max_concurrent, __version__, started_at, now_iso()),
+        )
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=WORKER_ROW_RETENTION_S)).isoformat()
+        conn.execute("DELETE FROM worker_heartbeats WHERE heartbeat_at < ?", (cutoff,))
+        return True
+    except Exception as exc:
+        logger.error(f"Exception in stamp_worker: {exc}")
+        return False
+
+
+def forget_worker(worker_id: str) -> None:
+    """Delete a loop's worker_heartbeats row when it stops cleanly; never raises."""
+    try:
+        get_conn().execute("DELETE FROM worker_heartbeats WHERE worker_id=?", (worker_id,))
+    except Exception as exc:
+        logger.error(f"Exception in forget_worker: {exc}")
+
+
 def _default_spawn(job_id: str, file_path: str, original_filename: str, on_exit: Callable[[str], None]) -> Any:
     """Start the pipeline subprocess (api.worker._spawn_job); resolved late so tests can replace it."""
     from api.worker import _spawn_job
@@ -225,7 +263,7 @@ def touch_alive(path: Path | None = None) -> None:
 
 
 class WorkerLoop:
-    """Claims, spawns, heartbeats.
+    """Claims, spawns, heartbeats; keeps its worker_heartbeats row, busy or idle.
 
     Thread-safe: kick() is called from the request thread (role all), the poll
     thread and the watcher threads, and is serialised so a free slot is
@@ -237,12 +275,15 @@ class WorkerLoop:
         *,
         max_concurrent: int,
         worker_id: str = WORKER_ID,
+        role: str = "worker",
         poll_s: float = POLL_S,
         heartbeat_s: float = HEARTBEAT_S,
         spawn: Callable[..., Any] | None = None,
     ) -> None:
         self.max_concurrent = max_concurrent
         self.worker_id = worker_id
+        self.role = role                    # `worker`, or `all` for the API's own loop
+        self.started_at = now_iso()
         self.poll_s = poll_s
         self.heartbeat_s = heartbeat_s
         self._handles: dict[str, Any] = {}
@@ -251,7 +292,10 @@ class WorkerLoop:
         # the watcher threads all call it, and has_slot()+claim must be one step.
         self._kick_lock = threading.Lock()
         self._stop = threading.Event()
-        self._last_heartbeat = 0.0
+        # -inf, not 0.0: time.monotonic() counts from the boot, and a loop started
+        # less than heartbeat_s after it must still stamp on its first pass.
+        self._last_heartbeat = float("-inf")
+        self._stamp_ok = True               # did the last stamp reach the database? (run_once)
         self._last_sweep = 0.0
         self._spawn = spawn
 
@@ -310,10 +354,23 @@ class WorkerLoop:
             except Exception as exc:
                 logger.error(f"Exception in _on_exit kick: {exc}")
 
+    def stamp(self) -> bool:
+        """Write this loop's worker_heartbeats row (stamp_worker)."""
+        return stamp_worker(self.worker_id, role=self.role, max_concurrent=self.max_concurrent,
+                            started_at=self.started_at)
+
+    def forget(self) -> None:
+        """Delete this loop's worker_heartbeats row: it stopped cleanly."""
+        forget_worker(self.worker_id)
+
     def heartbeat_if_due(self, now: float | None = None) -> bool:
         now = now or time.monotonic()
         if now - self._last_heartbeat >= self.heartbeat_s:
             heartbeat(self.running_ids, self.worker_id)
+            # A loop asked to stop writes no row: forget() may already have
+            # deleted it (stop_embedded waits 5 s for the thread, then forgets).
+            if not self._stop.is_set():
+                self._stamp_ok = self.stamp()
             self._last_heartbeat = now
             return True
         return False
@@ -336,10 +393,16 @@ class WorkerLoop:
     def run_once(self) -> int:
         # touch_alive() below is what the worker container's HEALTHCHECK
         # watches (a stale file after WORKER_POLL_S x ~60 means "wedged"). It
-        # must not fire when a DB call above it failed -- e.g. a bad
-        # DATABASE_URL, a firewalled Postgres, or a schema that was never
+        # must not fire while the job store does not answer -- a bad
+        # DATABASE_URL, a firewalled Postgres, a schema that was never
         # created -- or the container reports healthy forever while it can
-        # never actually claim or process a job.
+        # never claim or process a job.  The calls below log their own
+        # database errors and return (requeue_orphans, claim_next_queued,
+        # heartbeat, stamp_worker), so the signal is the last stamp: while it
+        # failed, no touch.  A stamp runs every heartbeat_s, so an outage turns
+        # the container unhealthy a few minutes later, and the first good
+        # stamp after it makes the touches resume.  An exception that reaches
+        # this method skips the touch too.
         db_ok = True
         try:
             requeue_orphans()
@@ -357,6 +420,8 @@ class WorkerLoop:
         except Exception as exc:
             logger.error(f"Exception in run_once heartbeat_if_due: {exc}")
             db_ok = False
+        if not self._stamp_ok:
+            db_ok = False
         # Housekeeping, not liveness: a sweep failure is logged (inside
         # sweep_expired_jobs/sweep_if_due) but must not mark the worker
         # unhealthy or skip touch_alive the way a claim/heartbeat failure does.
@@ -365,7 +430,7 @@ class WorkerLoop:
         except Exception as exc:
             logger.error(f"Exception in run_once sweep_if_due: {exc}")
         if not db_ok:
-            logger.warning("run_once: not touching the alive file -- a DB call failed this cycle")
+            logger.warning("run_once: not touching the alive file -- a DB call failed (this pass, or the last stamp)")
             return n
         try:
             touch_alive()
@@ -432,7 +497,7 @@ def start_embedded(*, max_concurrent: int | None = None) -> WorkerLoop:
             from api.worker import _MAX_CONCURRENT_JOBS
 
             max_concurrent = _MAX_CONCURRENT_JOBS
-        _embedded = WorkerLoop(max_concurrent=max_concurrent)
+        _embedded = WorkerLoop(max_concurrent=max_concurrent, role="all")
         _embedded_thread = threading.Thread(target=_embedded.run_forever, name="queue-loop", daemon=True)
         _embedded_thread.start()
         return _embedded
@@ -443,13 +508,16 @@ def embedded() -> WorkerLoop | None:
 
 
 def stop_embedded(timeout_s: float = 5.0) -> None:
-    """Stop the in-process loop and forget it (a no-op when none was started)."""
+    """Stop the in-process loop, delete its worker_heartbeats row and forget it
+    (a no-op when none was started)."""
     global _embedded, _embedded_thread
     with _embedded_lock:
         if _embedded is not None:
             _embedded.stop()
         if _embedded_thread is not None:
             _embedded_thread.join(timeout=timeout_s)
+        if _embedded is not None:
+            _embedded.forget()
         _embedded = None
         _embedded_thread = None
 
@@ -458,8 +526,9 @@ def main(argv: list[str] | None = None) -> int:
     """Entry point of a worker process (`python -m api.queue_loop`).
 
     Runs the loop until SIGTERM/SIGINT, then gives running reports
-    WORKER_DRAIN_S to finish and requeues the rest.  `--once` runs a single
-    pass and exits, for diagnostics and tests.
+    WORKER_DRAIN_S to finish, requeues the rest and deletes its
+    worker_heartbeats row.  `--once` runs a single pass and exits, for
+    diagnostics and tests; it deletes its row too.
     """
     setup_logging()
     # A bad STIX_TLP stops the worker here, not at its first bundle (ADR-0073).
@@ -490,6 +559,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.once:
         loop.run_once()
+        loop.forget()
         return 0
 
     def _signal_handler(signum: int, frame: Any) -> None:
@@ -499,12 +569,15 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGTERM, _signal_handler)
     signal.signal(signal.SIGINT, _signal_handler)
 
-    loop.run_forever()
+    try:
+        loop.run_forever()
 
-    still = loop.drain(DRAIN_S)
-    if still:
-        loop.terminate_and_requeue(still)
-        logger.warning(f"Drain timeout: {len(still)} job(s) still running, requeued")
+        still = loop.drain(DRAIN_S)
+        if still:
+            loop.terminate_and_requeue(still)
+            logger.warning(f"Drain timeout: {len(still)} job(s) still running, requeued")
+    finally:
+        loop.forget()
     return 0
 
 
