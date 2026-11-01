@@ -108,8 +108,11 @@ COPY --from=builder /opt/venv /opt/venv
 # which needs the seccomp profile shipped in docker/ (see compose.yaml).
 # --build-arg INSTALL_CAPTURE=false gives a smaller image whose URL tab
 # answers 503 - the File and Paste tabs are unaffected.
+# --only-shell: captures launch headless, which runs the headless shell; the
+# full Chrome for Testing build bundles Google's Widevine module, whose licence
+# forbids redistributing it (THIRD_PARTY_NOTICES.md).
 RUN if [ "${INSTALL_CAPTURE}" = "true" ]; then \
-        python -m playwright install --with-deps chromium \
+        python -m playwright install --with-deps --only-shell chromium \
         && chmod -R a+rX /ms-playwright \
         && rm -rf /var/lib/apt/lists/*; \
     fi

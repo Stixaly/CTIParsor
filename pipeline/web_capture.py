@@ -507,13 +507,28 @@ def _launch_hint(exc: Exception, *, sandboxed: bool) -> str:
     )
 
 
+def _headless_shell_for(exe_path: str) -> Path | None:
+    """
+    The headless shell Playwright runs for `headless=True`, installed beside the
+    full build it reports as `executable_path`:
+    …/chromium-1248/chrome-linux64/chrome →
+    …/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell.
+    The image installs only the shell (`--only-shell` in the Dockerfile).
+    """
+    build = next((d for d in Path(exe_path).parents if d.name.startswith("chromium-")), None)
+    if build is None:
+        return None
+    shell_dir = build.with_name("chromium_headless_shell-" + build.name.removeprefix("chromium-"))
+    return next(iter(sorted(shell_dir.glob("chrome-headless-shell-*/chrome-headless-shell*"))), None)
+
+
 def check_chromium_installed() -> str | None:
     """
     Non-invasive startup probe, meant to be called once at process boot so a
     missing browser is a log line at startup instead of a 500 on the first
     capture request. Never launches a browser or touches the network — it
     only resolves where Playwright expects Chromium to live and checks the
-    filesystem.
+    filesystem for the full build or the headless shell captures launch.
     """
     if not _PLAYWRIGHT_AVAILABLE:
         return (
@@ -535,7 +550,7 @@ def check_chromium_installed() -> str | None:
             exe_path = p.chromium.executable_path
     except Exception as exc:
         return f"Could not verify the Chromium install: {type(exc).__name__}: {exc}"
-    if not Path(exe_path).exists():
+    if not Path(exe_path).exists() and _headless_shell_for(exe_path) is None:
         return _CHROMIUM_MISSING_HINT
     return None
 

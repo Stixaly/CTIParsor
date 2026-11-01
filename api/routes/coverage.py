@@ -228,7 +228,7 @@ def export_body_budget() -> int:
     (api/body_limit.py).  Its rule ids grow with the rule store, not with the
     report: the tag join, the rules reached by evidence alone (untagged) and the
     analyst's promotions, so at most every rule in the store.  On the 15 corpora
-    on disk (2026-10-26), the ids of the 38,059 ATT&CK-tagged rules weigh
+    on disk, the two opt-in ones included (2026-10-26), the ids of the 38,059 ATT&CK-tagged rules weigh
     0.94 MB as JSON, and those of all 87,407 rules 2.1 MB."""
     return 8 * 1024 * 1024
 

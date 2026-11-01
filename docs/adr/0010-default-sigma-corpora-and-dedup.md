@@ -3,6 +3,9 @@
 **Status:** Accepted (documented alongside implementation)
 **Date:** 2026-06-19
 **Deciders:** maintainer
+**Amended by:** the maintainer's decision of 2026-11-01: `russianpanda` and
+`mthcht`, whose licence is `none`, are opt-in, `enabled: false` in the committed
+registry ([detection-coverage.md](../detection-coverage.md#corpora-without-a-licence-are-opt-in)).
 
 > Ships 8 public Sigma repos in the committed registry (was 1) and adds a global
 > dedup pass so a rule copied across corpora counts once. Builds directly on
