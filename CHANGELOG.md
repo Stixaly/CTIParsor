@@ -391,6 +391,36 @@ revision that has it (`BUNDLE_AFFECTING`, scope `mapping`, ADR-0086).
 
 ### Fixed
 
+#### A technique no LLM listed keeps OpenCTI's standard id and its ATT&CK name (ADR-0066), 2026-11-01
+
+A technique found in the text with no Stage 3 entry for it (every technique in
+the offline profile, and any the LLM does not list) became an attack-pattern
+under a random UUIDv4, named as the text writes it. A bare `T1059.001` was
+exported as an attack-pattern named `T1059.001`. Imported into OpenCTI, it
+reached the analyst's technique by its ATT&CK id and renamed it: PowerShell
+became `T1059.001`. The id also changed at every export, against the identity
+rules of `docs/support-policy.md`.
+
+- The attack-pattern gets the id `pipeline/stix_ids.attack_pattern_id`
+  computes, as for a technique Stage 3 lists: pycti's `generate_id`, from the
+  ATT&CK id when there is one, else from the name (a CAPEC pattern is
+  identified by its name, as in OpenCTI).
+- A value that is a bare ATT&CK technique id is named after the technique, from
+  the ATT&CK release in use (`ATTACK_RELEASE`). A row with no `mitre_id` takes
+  the value as its id. The mapping ledger records the rename (reason
+  `attack_id_named`, with the release), and the Graph page shows the row as
+  renamed. A tactic (`TA0002`), a CAPEC pattern and an id the release does not
+  hold keep their names. CAPEC and tactic references are routed as before.
+- Two rows that come to the same id ship one object.
+
+A new Stage 4 reference scenario, `offline`, exports techniques with no Stage 3
+entry. `contract/stix.json` records their ids: seven additions, none breaking,
+since none of the five existing scenarios held a technique with a random id.
+`tests/stage4_reference.py` no longer treats an attack-pattern id as random.
+Bundles stored before this change keep their random ids and T-number names until
+a finalize at a revision that has it (`BUNDLE_AFFECTING`, scope `mapping`,
+ADR-0086).
+
 #### The smoke test can no longer delete an install's volumes, 2026-10-31
 
 `scripts/docker_smoke.sh` sourced `.env` before choosing its Compose project.

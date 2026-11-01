@@ -373,14 +373,14 @@ input validation, the transform's correctness on a known fixture, idempotency
 (running twice = same result), and the empty/malformed-input path.
 
 ### Stage 4 reference bundles (ADR-0090)
-`tests/test_stage4_reference.py` builds five scenarios
+`tests/test_stage4_reference.py` builds six scenarios
 (`tests/fixtures/stage4_reference/scenarios/`) through `build_bundle` and
 compares the result, bundle and ledger, to a frozen canonical form in
 `expected/`. The canonical form (`tests/stage4_reference.py`) replaces the
 timestamps that fall within the build window by `<build-time>`, renames by
-content the ids stix2 draws at random (relationships, the Report, an
-attack-pattern built from a legacy technique row; any other id, the standard
-TLP marking ids included, is compared as is), and sorts objects. Everything else counts: deterministic ids, verbs, refs, ledger
+content the ids stix2 draws at random (relationships and the Report; any
+other id, an attack-pattern's and the standard TLP marking ids included, is
+compared as is), and sorts objects. Everything else counts: deterministic ids, verbs, refs, ledger
 outcomes. A failure names the first differing object.
 
 `tests/test_baseline_fixtures.py` checks the STIX bundles of

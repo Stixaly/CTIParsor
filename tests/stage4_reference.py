@@ -41,12 +41,11 @@ ATTACK_CACHES = (
 )
 
 # The types for which Stage 4 lets stix2 draw a uuid4 id: a relationship and
-# the Report take none from stix_ids (ADR-0066), and the AttackPattern of a
-# technique/tactic/procedure/ttp entity is built without one (stage4_stix_mapping,
-# the loop after the LLM TTPs).  Every other id is deterministic (uuid5, a fixed
-# standard marking): a uuid4 of another type stays literal, so a random id
-# appearing where there was none fails the reference.
-RANDOM_TYPES = frozenset({"relationship", "report", "attack-pattern"})
+# the Report take none from stix_ids (ADR-0066).  Every other id is
+# deterministic (uuid5, a fixed standard marking), an AttackPattern included:
+# a uuid4 of another type stays literal, so a random id appearing where there
+# was none fails the reference.
+RANDOM_TYPES = frozenset({"relationship", "report"})
 
 _TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})")
 _STIX_ID = re.compile(r"\b([a-z][a-z0-9-]*)--([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b")

@@ -747,8 +747,8 @@ def extract_config() -> Entries:
 # ── Extractor: stix ──────────────────────────────────────────────────────────
 
 # tests/stage4_reference.py writes a random (uuid4) id as `<type>--R<n>`:
-# relationships, the Report, and an AttackPattern built without a standard
-# id.  Every other id in its expected files is the one the code computes.  An
+# relationships and the Report.  Every other id in its expected files is the
+# one the code computes.  An
 # object with a random id and a natural key is recorded with the id RANDOM, so
 # an id that becomes random, or stops being random, is a changed id.
 _RANDOM_ID = re.compile(r"^[a-z][a-z0-9-]*--R\d+$")

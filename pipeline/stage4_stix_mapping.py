@@ -15,7 +15,7 @@ from jsonschema import Draft202012Validator
 from api.logging_config import get_logger
 from models.schemas import STIX_RELATIONSHIP_TYPES, EntityType, RawEntity
 from pipeline import attack_data, gazetteer_policy, stix_ids
-from pipeline.aliases import alias_surface_forms, canonical_name, type_conflict
+from pipeline.aliases import alias_surface_forms, canonical_name, technique_name_for, type_conflict
 from pipeline.benign import benign_reason
 from pipeline.bundle_ledger import ORIGIN_EXTRACTED, MappingLedger
 from pipeline.detection.pattern_check import REFUSED as PATTERN_REFUSED
@@ -463,6 +463,30 @@ _MIME_TYPES: dict[str, str] = {
     ".txt":  "text/plain",
     ".md":   "text/markdown",
 }
+
+# A technique entity written as its bare ATT&CK id ("T1059.001", what Stage 2's
+# regex finds).  Tactics (TA…) and CAPEC ids are not technique ids.
+_BARE_TECHNIQUE_ID = compile_pattern(r"[Tt][0-9]{4}(?:\.[0-9]{3})?")
+
+
+def _technique_identity(value: str, mitre_id: str | None) -> tuple[str, str | None, bool]:
+    """(name, mitre_id, renamed) of the AttackPattern a technique entity becomes.
+
+    A value that is a bare ATT&CK id is that technique: its id when the row
+    has none, and its name from the bundled ATT&CK index (ATTACK_RELEASE).
+    Named after its id instead, the object would rename the technique OpenCTI
+    holds under that id ("PowerShell" became "T1059.001", ADR-0066).  An id
+    the release does not hold keeps the value as its name.
+    """
+    mid = (mitre_id or "").strip() or None
+    if not _BARE_TECHNIQUE_ID.fullmatch(value.strip()):
+        return value, mid, False
+    mid = mid or value.strip().upper()
+    name = technique_name_for(mid)
+    if not name or name == value:
+        return value, mid, False
+    return name, mid, True
+
 
 # Entity types that are technical observables (the regex/defang IoC outputs of
 # Stage 2).  Each should map to a STIX SCO and — via _build_stix_pattern — an
@@ -938,13 +962,19 @@ def build_stix_bundle(
     # Manually annotated technique / tactic / procedure / ttp entities → AttackPattern SDOs.
     # Guard: skip if an AttackPattern with the same name or MITRE ID was already created
     # by the llm_result.ttps loop above — avoids duplicate SDOs in the bundle.
+    # The ids are standard ids too: two values the name keys tell apart ("Foo",
+    # "Foo ") can still be one object, and one id must not ship twice.
+    attack_patterns = {o.id: o for o in stix_objects if _field(o, "type") == "attack-pattern"}
     for entity in raw_entities:
         if entity.entity_type in (EntityType.TECHNIQUE, EntityType.TACTIC,
                                    EntityType.PROCEDURE, EntityType.TTP):
+            name, mitre_id, renamed = _technique_identity(entity.value, entity.mitre_id)
+            ap_id = stix_ids.attack_pattern_id(name, mitre_id)
             key = entity.value.lower()
-            id_key = entity.mitre_id.lower() if entity.mitre_id else None
+            id_key = mitre_id.lower() if mitre_id else None
             by_name = name_to_stix.of_type(key, "attack-pattern")
-            by_id = name_to_stix.of_type(id_key, "attack-pattern") if id_key else None
+            by_id = (name_to_stix.of_type(id_key, "attack-pattern") if id_key else None) \
+                or attack_patterns.get(ap_id)
             if by_name or by_id:
                 # already created from llm_result.ttps
                 led.entity(entity.value, entity.entity_type.value, "merged", obj=by_name or by_id,
@@ -952,8 +982,8 @@ def build_stix_bundle(
                            mitre_id=entity.mitre_id)
                 continue
             ext_refs = []
-            if entity.mitre_id:
-                mid = entity.mitre_id
+            if mitre_id:
+                mid = mitre_id
                 # Same CAPEC / tactic / technique routing as the LLM TTP loop above.
                 # CAPEC IDs require source_name="capec"; mixing them with "mitre-attack"
                 # triggers stix2validator error {104} and marks the bundle Invalid.
@@ -972,13 +1002,19 @@ def build_stix_bundle(
                     external_id=mid,
                     url=ref_url,
                 ))
-            obj = stix2.AttackPattern(name=entity.value, external_references=ext_refs)
+            # OpenCTI's standard id, as for the LLM TTPs above (ADR-0066): the
+            # same technique lands on the same object from one build to the next.
+            obj = stix2.AttackPattern(name=name, external_references=ext_refs, id=ap_id)
             stix_objects.append(obj)
+            attack_patterns[ap_id] = obj
             name_to_stix.add(key, obj)
+            name_to_stix.add(name.lower(), obj)
             if id_key:
                 name_to_stix.add(id_key, obj)
+            # A rename is a rewrite: the ledger says which release named it (ADR-0061).
             led.entity(entity.value, entity.entity_type.value, "emitted", obj=obj,
-                       mitre_id=entity.mitre_id)
+                       reason="attack_id_named" if renamed else None, mitre_id=mitre_id,
+                       attack_release=attack_data.current().version if renamed else None)
             led.object(obj, "entity")
 
     for entity in raw_entities:
