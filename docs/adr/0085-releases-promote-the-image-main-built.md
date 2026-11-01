@@ -4,6 +4,11 @@
 **Date:** 2026-10-17
 **Deciders:** maintainer
 **Amends:** ADR-0047 (version tags), ADR-0075 (a verifiable supply chain), ADR-0078 (Signed-Releases)
+**Amended by:** ADR-0047's amendment of 2026-11-01. The image `sha-<commit>`
+that a release promotes is the very build main's CI scanned and smoke-tested:
+`publish-image` pushes `container-image`'s archive unchanged and fails unless
+GHCR holds the digest `container-image` reported. Before, it was a second
+build. This workflow is unchanged (amendment below).
 **Relates to:** ADR-0035 (a bundle records the commit that built it), ADR-0054
 (Docker is the only supported way to run CTIParsor), ADR-0077 (§7, the previous
 release in CI)
@@ -348,3 +353,26 @@ Read back on 2026-10-30, read-only, as for v0.1.0. Scorecard was not read again.
   its tag can be neither moved nor deleted. No ruleset covers tags yet
   (item 2): anyone with write access can still create a `v*` tag, or move or
   delete `v0.1.0`.
+
+## Amendment (2026-11-01) — the image promoted is the image tested
+
+Decision 2 said main's CI "built, tested and attested the image of every
+commit". Until 2026-11-01 it built it twice: `container-image` built the image
+and smoke-tested it, and `publish-image` built it again and pushed and
+attested that second build. A release therefore promoted a build of the
+right commit that neither the smoke test nor the image scan had run.
+ADR-0047's amendment of 2026-11-01 makes it one build:
+`publish-image` pushes the OCI archive `container-image` tested, byte for
+byte, and fails unless GHCR holds the digest `container-image` reported.
+
+Nothing changes here. `release.yml`, `scripts/release.py` and
+`scripts/release_files.sh` find `sha-<commit>`, verify the two attestations
+signed by `ci.yml` on `main` for that commit, and give its digest the version
+names. None of them depended on the second build. The annex of the notes
+("the image main's CI built and tested from this commit … nothing was
+rebuilt") is now exact. `latest`, which this workflow does not touch, now
+moves only to the attested image of main's head. On 2026-11-01 the naming
+step, verbatim, gave `0.2.0` and `0.2` the digest of an archive loaded and
+pushed that way (`docker load`, `docker push`, containerd image store) to a
+local `registry:2`; the first tag after the change is its first run against
+GHCR.

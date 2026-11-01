@@ -394,15 +394,29 @@ jobs:
           CTIPARSOR_TEST_DATABASE_URL: postgresql://ctiparsor:ci@127.0.0.1:5432/ctiparsor
         run: pytest -v -rs --cov --cov-report=term-missing:skip-covered
 
-  # ── Container image — build it and run the smoke test (ADR-0044) ─────────────
+  # ── Container image — build it once, then test that build (ADR-0044) ────────
   # Keeps the Dockerfile from rotting: a dependency that no longer installs on
   # python:3.14-slim, or a hardening flag Chromium stops tolerating, fails here.
+  #
+  # The only build of the image (ADR-0047 as amended on 2026-11-01).  It goes
+  # into an OCI archive, the image index GHCR will hold; the scan, the smoke
+  # test and the air-gap check run the image loaded from that archive; on a
+  # push to main the archive goes to publish-image, which pushes it unchanged.
+  # The job's output `digest` is the archive's index digest: the digest
+  # publish-image must find in the registry.
+  #
+  # ubuntu-26.04, named rather than ubuntu-latest: its Docker 29 keeps images
+  # in the containerd image store, which loads and pushes an image index
+  # whole.  The classic store of ubuntu-24.04's Docker 28 cannot load the
+  # archive at all.  The load step fails if the store is not containerd.
   container-image:
     name: Container image (build + smoke)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       security-events: write   # the image scan's results go to Code scanning
+    outputs:
+      digest: ${{ steps.archive.outputs.digest }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -411,15 +425,76 @@ jobs:
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      - name: Build the image
+      - name: Lowercase the image name (GHCR requires it; the repo owner is not)
+        id: image
+        run: echo "name=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      # The OCI labels of the published image (title, source, revision,
+      # version...), from the same inputs publish-image used to give them.
+      # Only the labels: publish-image gives the image its names.
+      - name: Labels of the published image
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=sha,format=long,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      # An image index: the linux/amd64 image and BuildKit's SLSA v1
+      # provenance of it (mode=max, builder-id = this run), the structure
+      # GHCR has held since ADR-0075.  Stated here rather than left to the
+      # action's default, which depends on the exporter (none with
+      # `load: true`) and may change with a release of the action.
+      - name: Build the image (an OCI archive)
+        id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          push: false
-          load: true
           tags: ctiparsor:ci
+          labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             GIT_REV=${{ github.sha }}
+          provenance: mode=max,version=v1,builder-id=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
+          outputs: type=oci,dest=${{ runner.temp }}/ctiparsor.oci.tar
+
+      # The steps below run ctiparsor:ci, which must be the archive's image.
+      # In the containerd image store `docker load` keeps the index whole,
+      # attestation included, and the image's ID is the index digest: the log
+      # shows both, and the step fails if they differ.
+      - name: Load the archive as ctiparsor:ci (the image the steps below run)
+        id: archive
+        env:
+          BUILT: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          archive=$RUNNER_TEMP/ctiparsor.oci.tar
+          drivers=$(docker info --format '{{json .DriverStatus}}')
+          case "$drivers" in
+            *'"io.containerd.snapshotter.v1"'*) ;;
+            *)
+              echo "::error::Docker's image store is $(docker info --format '{{.Driver}}') $drivers, not containerd: it cannot load the archive's image index. Run this job on ubuntu-26.04."
+              exit 1 ;;
+          esac
+          index=$(tar -xOf "$archive" index.json | python3 -c '
+          import json, sys
+          images = json.load(sys.stdin)["manifests"]
+          if len(images) != 1:
+              sys.exit(f"index.json names {len(images)} images, not 1")
+          print(images[0]["digest"])')
+          if [ "$index" != "$BUILT" ]; then
+            echo "::error::The archive's image index is $index; the build reported $BUILT"
+            exit 1
+          fi
+          docker load --input "$archive"
+          id=$(docker image inspect ctiparsor:ci --format '{{.Id}}')
+          echo "The archive's image index: $index"
+          echo "ctiparsor:ci, loaded: image ID $id"
+          if [ "$id" != "$index" ]; then
+            echo "::error::ctiparsor:ci is $id, not the archive's image ($index)"
+            exit 1
+          fi
+          echo "digest=$index" >> "$GITHUB_OUTPUT"
 
       # ADR-0078: the operating-system packages of the image (Debian under
       # python:3.14-slim, Chromium, libraries) are seen by no other check —
@@ -467,13 +542,34 @@ jobs:
           CTI_IMAGE: ctiparsor:ci
         run: bash scripts/check_offline_images.sh --yes
 
+      # Last, so only an archive whose image passed every step above leaves
+      # the job.  A pull request, a fork's included, uploads nothing.  The
+      # layers are gzip already: stored, not compressed again.  Kept one day,
+      # long enough to re-run publish-image; overwritten when the whole
+      # workflow is re-run, which builds a new archive.
+      - name: Hand the archive to publish-image (pushes to main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ctiparsor-image
+          path: ${{ runner.temp }}/ctiparsor.oci.tar
+          compression-level: 0
+          retention-days: 1
+          overwrite: true
+          if-no-files-found: error
+
   # ── Publish to GHCR (ADR-0047) ────────────────────────────────────────────────
   # Only after the backend tests, the frontend tests and the smoke test pass
   # (an image whose code failed its own tests is never published), and only on main: a PR (including from a
   # fork) never has packages:write regardless — this `if` is defense in depth,
-  # not the only control. Rebuilds with docker/build-push-action, but
-  # cache-from: type=gha reuses the smoke-test job's layers, so this is a cheap
-  # re-tag-and-push, not a second full build.
+  # not the only control.
+  #
+  # Builds nothing (ADR-0047 as amended on 2026-11-01).  It loads the OCI
+  # archive container-image built, scanned and smoke-tested, pushes it as
+  # sha-<full sha> and fails unless the registry holds the digest
+  # container-image reported.  Last, once the image is attested, it names
+  # that digest latest, if this commit is still main's head.  On
+  # ubuntu-26.04 for the containerd image store, as container-image.
   #
   # ADR-0075: the pushed image gets a CycloneDX SBOM (syft) and two signed
   # attestations bound to its digest, build provenance and that SBOM, pushed
@@ -488,7 +584,7 @@ jobs:
     name: Publish image to GHCR
     needs: [fast-tests, frontend-tests, browser-e2e, container-image, dependency-audit]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: write
@@ -496,10 +592,6 @@ jobs:
       attestations: write
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Lowercase the image name (GHCR requires it; the repo owner is not)
@@ -512,29 +604,48 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Version names (X.Y.Z, X.Y) come from release.yml (ADR-0085): this
-      # workflow never runs on a tag.
-      - name: Compute tags (sha-<full sha>, latest)
-        id: meta
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+      - name: The archive container-image tested
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          images: ${{ steps.image.outputs.name }}
-          tags: |
-            type=sha,format=long,prefix=sha-
-            type=raw,value=latest,enable={{is_default_branch}}
+          name: ctiparsor-image
+          path: ${{ runner.temp }}
 
-      - name: Build and push
+      # The containerd image store pushes the loaded index as it is, the
+      # attestation manifest and every blob with their digests.  The digest
+      # GHCR then serves is read back and compared.  Version names (X.Y.Z,
+      # X.Y) come from release.yml (ADR-0085): this workflow never runs on a
+      # tag.
+      - name: Push the archive as sha-<full sha>, same digest
         id: push
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            GIT_REV=${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          TESTED: ${{ needs.container-image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          archive=$RUNNER_TEMP/ctiparsor.oci.tar
+          drivers=$(docker info --format '{{json .DriverStatus}}')
+          case "$drivers" in
+            *'"io.containerd.snapshotter.v1"'*) ;;
+            *)
+              echo "::error::Docker's image store is $(docker info --format '{{.Driver}}') $drivers, not containerd: it cannot push the archive's image index unchanged. Run this job on ubuntu-26.04."
+              exit 1 ;;
+          esac
+          docker load --input "$archive"
+          id=$(docker image inspect ctiparsor:ci --format '{{.Id}}')
+          if [ "$id" != "$TESTED" ]; then
+            echo "::error::The archive's image is $id, not the image container-image tested ($TESTED)"
+            exit 1
+          fi
+          docker tag ctiparsor:ci "$IMAGE:sha-$GITHUB_SHA"
+          docker push "$IMAGE:sha-$GITHUB_SHA"
+          got=$(docker buildx imagetools inspect "$IMAGE:sha-$GITHUB_SHA" --format '{{json .Manifest}}' \
+            | python3 -c 'import json, sys; print(json.load(sys.stdin)["digest"])') || got=""
+          if [ "$got" != "$TESTED" ]; then
+            echo "::error::$IMAGE:sha-$GITHUB_SHA is ${got:-missing}, not the image container-image tested ($TESTED)"
+            exit 1
+          fi
+          echo "$IMAGE:sha-$GITHUB_SHA -> $got"
+          echo "digest=$TESTED" >> "$GITHUB_OUTPUT"
 
       - name: SBOM of the pushed image (CycloneDX, syft)
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
@@ -560,3 +671,30 @@ jobs:
           sbom-path: sbom.cdx.json
           push-to-registry: true
           create-storage-record: false
+
+      # latest follows main: it moves only to an attested image, and only
+      # while this commit is still main's head.  A run that finishes after a
+      # newer push, or a re-run of an old run, leaves it where it is; its
+      # sha-<full sha> stays published and attested.
+      - name: Name it latest (if this commit is still main's head)
+        id: latest
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          TESTED: ${{ steps.push.outputs.digest }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          head=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          if [ "$head" != "$GITHUB_SHA" ]; then
+            echo "::notice::main is at $head now, not $GITHUB_SHA: latest is left as it is. $IMAGE:sha-$GITHUB_SHA is published and attested."
+            exit 0
+          fi
+          docker tag ctiparsor:ci "$IMAGE:latest"
+          docker push "$IMAGE:latest"
+          got=$(docker buildx imagetools inspect "$IMAGE:latest" --format '{{json .Manifest}}' \
+            | python3 -c 'import json, sys; print(json.load(sys.stdin)["digest"])') || got=""
+          if [ "$got" != "$TESTED" ]; then
+            echo "::error::$IMAGE:latest is ${got:-missing}, not the image container-image tested ($TESTED)"
+            exit 1
+          fi
+          echo "$IMAGE:latest -> $got"

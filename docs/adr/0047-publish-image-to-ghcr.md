@@ -7,6 +7,11 @@ two `type=semver` lines of the tag list below are gone from `ci.yml`: that
 workflow never runs on a tag, so they never applied. The version names
 `X.Y.Z` and `X.Y` come from `release.yml`, which gives the image main published
 for the tagged commit those names, with the same digest.
+**Amended by:** the change of 2026-11-01 ([below](#amendment-2026-11-01--publish-image-pushes-the-build-container-image-tested)).
+`publish-image` builds nothing: it pushes, byte for byte, the OCI archive
+`container-image` built, scanned and smoke-tested, and fails unless GHCR holds
+the digest `container-image` reported. The option rejected below, "reuse the
+`container-image` job's own build", is now the decision.
 **Relates to:** [0044](0044-container-images.md) (the image this publishes), [0040](0040-offline-installation-bundle.md)
 (a separate, unrelated build path — see its 2026-09-16 status review)
 
@@ -128,3 +133,39 @@ everything reachable locally instead:
   containers going straight from `Created` to `Starting`, no `Building`
   step at any point — confirming `up` only builds when the tag is absent
   locally, as documented.
+
+## Amendment (2026-11-01) — publish-image pushes the build container-image tested
+
+**What was wrong.** `publish-image` built the image a second time, with a
+cache `container-image` never wrote. That second build was the one pushed,
+attested (ADR-0075) and promoted by a release (ADR-0085); the scan and the
+smoke test had run the first.
+
+**Decision.** One build per commit, in `container-image`, into an OCI archive:
+an image index holding the linux/amd64 image and BuildKit's SLSA v1
+provenance, stated in the workflow, with the labels `publish-image` gave.
+`docker load` takes the archive into the containerd image store whole, and
+the step fails unless the loaded image's ID is the archive's index digest.
+The scan, the smoke test and the air-gap check run that image. On a push to
+`main` the archive goes to `publish-image` as a workflow artifact. That job
+builds nothing: it loads the archive, pushes it as `sha-<full sha>` with
+`docker push`, which sends the index, its attestation manifest and every blob
+unchanged, and fails unless GHCR returns the digest `container-image`
+reported. After the SBOM and the two attestations, it names that digest
+`latest`, only if the commit is still main's head.
+
+**Consequences.**
+
+- Both jobs run on `ubuntu-26.04`, whose Docker 29 uses the containerd image
+  store, and fail if the store is another one: the classic store of Docker 28
+  cannot load an OCI archive. No third-party container runs in either job.
+- `latest` no longer moves back when an older run, or a re-run, publishes
+  after a newer commit; that commit's `sha-` image is still pushed and attested.
+- The option rejected above, "reuse the `container-image` job's own build", is
+  now the decision, without its drawback: the archive is handed over as an
+  artifact, so `container-image` keeps no `packages: write`.
+- `release.yml` is unchanged. It still finds `sha-<commit>`, verifies the
+  attestations and names that digest.
+- Until the first push to `main` after the merge, GHCR's answer to the push
+  and the artifact's round trip are unproven; `docs/releasing.md` ("The image
+  main's CI publishes") gives the commands that compare the digests.

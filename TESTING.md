@@ -453,7 +453,7 @@ current truth.
 | Shared helpers | `test_shared_helpers.py` | 27 | environment parsing, claim extraction, unescaping logic |
 | Fuzzing | `test_fuzz_targets.py` | 6 | every Atheris target (ADR-0081) over its seed corpus, `fuzz/corpus/<target>/`, and the empty input: a target that stops importing, or whose invariant a seed breaks, fails here between fuzzing runs; skipped off Linux x86_64 (no Atheris wheel) |
 | Docs | `test_doc_claims.py` | 2 | every number `scripts/check_doc_claims.py` checks in README.md and docs/pipeline.md still matches its source, and is still found (what `make check-docs` did on demand only) |
-| Release | `test_release.py` | 83 | the version is one number in `pipeline/__init__.py`, `frontend/package.json` and `frontend/package-lock.json`, and the CHANGELOG opens with `## [Unreleased]`; `scripts/release.py` (`version`, `check`, `notes`, `unreleased`, `prepare`, `predicate`) on throwaway trees: every refusal, every mismatch reported, the notes' length limit, no file written when `prepare` refuses, only the standard library imported (ADR-0085) |
+| Release | `test_release.py` | 92 | the version is one number in `pipeline/__init__.py`, `frontend/package.json` and `frontend/package-lock.json`, and the CHANGELOG opens with `## [Unreleased]`; `scripts/release.py` (`version`, `check`, `notes`, `unreleased`, `prepare`, `predicate`) on throwaway trees: every refusal, every mismatch reported, the notes' length limit, no file written when `prepare` refuses, only the standard library imported (ADR-0085); `ci.yml`, read as the lines its scripts run (comments out, `set -euo pipefail` first): both image jobs on `ubuntu-26.04` and refusing any image store but containerd, no container of their own, the image built once into an OCI archive with its provenance stated, scanned and smoke-tested as loaded from it, `publish-image` building nothing, pushing that archive and failing unless GHCR holds the digest `container-image` reported, `latest` moved last and only for main's head, every action pinned to a commit with its version (ADR-0047) |
 | Interoperability | `test_opencti_expectations.py` | 30 | `scripts/opencti_expectations.py` (ADR-0094 item 8) on a platform built as the OpenCTI check reads it back, without pycti or OpenCTI: an object found by any id it answers to, or by its name or aliases once OpenCTI renamed it; each expectation failing on its counter-example (an object missing, two objects or two relationships of a bundle merged into one, a second object under a name or an alias, a second relationship between the same objects, a relationship joined elsewhere, an author or a marking no bundle set, a description emptied, the Report's description, file, references (one merged into another included) or confidence changed, a second import that refuses or adds, an object gone after a later import, a reading that never settled); a marking another bundle set on the same object expected; one name under two types a WARN, not a failure; OpenCTI's defaults and its millisecond timestamps not reported as changes, whole values and list diffs kept; step 0 (the jobs' commit, a job without one failing, `validated`, the sha256 of what was imported); where the bundles and the checkout come from in the report; the report and its exit codes; `scripts/check_opencti_candidate.sh` refusing a run without a candidate, and running Compose without the caller's `CTI_IMAGE`, `CTI_ENV_FILE` and `OPENCTI_*`, with a digest as given (a fake `docker`) |
 | Installation | `test_check_clean_install.py` | 28 | `scripts/check_clean_install.sh` (ADR-0094 item 9) bound to the documents it runs, without Docker: the eight blocks found where README.md, docs/docker.md and docs/upgrading.md write them, once, and `--print-blocks` showing the same; a missing, doubled or malformed block refused; the values lines naming the latest release and the digest docker.md gives it; no block deleting data or naming a project; the downloads through the Releases page the check stands in for, `pull` before `up -d`, no `build`; the backup block leaving the shell's umask alone and its files private; the options; a project, volume, directory or port left in use refused, nothing left when the candidate cannot be pulled (a fake `docker`); the `docker` wrapper letting through the run's two projects only; every documented command under `env -i`; the report; no public document naming a checkout in someone's Windows profile |
 | Benchmarks | `eval_pipeline.py` | 10 | NER F1, ATE precision, grounding metrics, adversarial tests |
@@ -1189,10 +1189,13 @@ the first five pass:
    up a seeded database and restores it into an empty one
    (`scripts/check_backup_restore.py`, ADR-0094 item 3).
 2. **frontend-tests**: `npm run lint`, `npm run typecheck`, `npm test`.
-3. **container-image**: builds the image, runs `scripts/docker_smoke.sh
-   --backup-restore` (with the backup and restore commands of docs/docker.md,
-   ADR-0094 item 3), and
-   scans the image with Grype into Code scanning (not a gate, ADR-0078).
+3. **container-image** (on `ubuntu-26.04`, containerd image store required):
+   builds the image once, into an OCI archive, and loads it as `ctiparsor:ci`,
+   failing unless the loaded image's ID is the archive's.
+   Then it scans that image with Grype into Code scanning (not a gate,
+   ADR-0078), runs `scripts/docker_smoke.sh --backup-restore` on it (with the
+   backup and restore commands of docs/docker.md, ADR-0094 item 3) and the
+   air-gap image check. On a push to main it hands the archive to job 8.
 4. **dependency-audit**: `pip-audit` on the Python locks and `npm audit` on the
    UI's production packages (ADR-0075, ADR-0080). It also runs weekly.
 5. **browser-e2e**: the browser journey, offline, with the network guard
@@ -1202,8 +1205,11 @@ the first five pass:
    dependency with a known high or critical vulnerability (ADR-0078).
 7. **model-tests** (pushes to main only, not a gate): the same suite with the
    models downloaded and a live API key; it may fail for reasons outside the code.
-8. **publish-image** (pushes to main only): pushes the image to GHCR with its
-   SBOM and signed attestations, after jobs 1 to 5.
+8. **publish-image** (pushes to main only, on `ubuntu-26.04`): after jobs 1
+   to 5, pushes the archive job 3 built and tested to GHCR unchanged, with its
+   SBOM and signed attestations. It builds nothing, fails unless GHCR holds the
+   digest job 3 reported, and moves `latest` only while the commit is main's
+   head (docs/releasing.md, "The image main's CI publishes").
 
 Four more workflows run beside it. **Fuzzing** (`fuzz.yml`) runs the five
 targets above, and the jobs of the first four are required checks. **CodeQL**
