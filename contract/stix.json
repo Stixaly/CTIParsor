@@ -198,6 +198,27 @@
     "id minimal report name=\"Minimal\"": {
       "id": "random"
     },
+    "id offline attack-pattern name=\"PowerShell\"": {
+      "id": "attack-pattern--b4d20430-6a7e-59fd-b2e4-8d3f6be56a6a"
+    },
+    "id offline attack-pattern name=\"SQL Injection\"": {
+      "id": "attack-pattern--95046cf4-b2a1-5a38-b35e-9f9a82b43119"
+    },
+    "id offline attack-pattern name=\"Scheduled Task\"": {
+      "id": "attack-pattern--9cbd6cfe-5c17-5a1f-926e-5c19816d2dcb"
+    },
+    "id offline attack-pattern name=\"TA0002\"": {
+      "id": "attack-pattern--0b50ffd0-c93c-5f57-8f35-49fafb38bfbf"
+    },
+    "id offline identity name=\"CTIParsor\"": {
+      "id": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd"
+    },
+    "id offline marking-definition name=\"TLP:AMBER\"": {
+      "id": "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+    },
+    "id offline report name=\"Offline Techniques\"": {
+      "id": "random"
+    },
     "id policy_pin domain-name value=\"bell-relay.test\"": {
       "id": "domain-name--715aefaa-5519-58d6-a830-29d86995e7b9"
     },

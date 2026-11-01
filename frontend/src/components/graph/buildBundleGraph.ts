@@ -23,7 +23,7 @@ import type {
 import type { EdgeKind, GraphEdge, GraphNode } from './graphLayout'
 import type { GraphData } from './buildGraphData'
 import { isImported } from '../../types'
-import { edgeKindOf, isFromBaseline } from './provenance'
+import { edgeKindOf, isFromBaseline, isRenamed } from './provenance'
 import { typeLabel } from '../review/tokens'
 
 export interface BundleNodeInfo {
@@ -191,7 +191,7 @@ export function buildBundleGraph(
       const hit = entries.find(x => x.outcome !== 'dropped' && inBundle(x.stix_id))
       if (hit && hit.stix_id) {
         nodeInfo.get(hit.stix_id)!.rows.push({ entity: ent, ledger: hit })
-        if (hit.outcome === 'merged' || hit.reason === 'alias_canonical') {
+        if (hit.outcome === 'merged' || isRenamed(hit.reason)) {
           const into = nodeInfo.get(hit.stix_id)!.object
           diff.push({
             kind: 'merged', subject: 'entity', ledgerEntity: hit, reason: hit.reason,

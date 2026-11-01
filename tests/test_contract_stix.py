@@ -113,7 +113,12 @@ def test_the_real_reference_bundles():
     # A relationship has no natural key: no id entry.  The Report of each scenario has a random id.
     assert not [k for k in entries if k.startswith("id ") and k.split(" ")[2] == "relationship"]
     reports = [v for k, v in entries.items() if k.startswith("id ") and k.split(" ")[2] == "report"]
-    assert reports == [{"id": "random"}] * 5
+    assert reports == [{"id": "random"}] * 6
+    # A technique no Stage 3 entry lists carries its standard id too (pycti's, tests/test_stix_ids.py).
+    techniques = {k: v for k, v in entries.items() if k.startswith("id ") and k.split(" ")[2] == "attack-pattern"}
+    assert techniques and {"id": "random"} not in techniques.values()
+    assert entries['id offline attack-pattern name="PowerShell"'] == {
+        "id": "attack-pattern--b4d20430-6a7e-59fd-b2e4-8d3f6be56a6a"}
     # The TLP markings carry the standard ids.
     assert entries['id minimal marking-definition name="TLP:RED"'] == {"id": stix2.TLP_RED.id}
     assert entries['id apt_report marking-definition name="TLP:AMBER"'] == {"id": stix2.TLP_AMBER.id}

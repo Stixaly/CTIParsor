@@ -1,0 +1,52 @@
+{
+ "_comment": "The offline profile: no LLM result, so every technique is a row Stage 2 found. A bare ATT&CK id is named after its technique, a name of the same technique merges into it, a tactic and a CAPEC pattern keep their names; all carry OpenCTI's standard ids.",
+ "report_name": "Offline Techniques",
+ "original_filename": "offline.txt",
+ "report_text": "Offline techniques\n\nThe loader ran its commands through PowerShell (T1059.001) and kept persistence with a scheduled task, T1053.005. These steps belong to the Execution tactic, TA0002. The web front-end had first been reached through SQL Injection.",
+ "tlp": null,
+ "pap": null,
+ "policy": null,
+ "entities": [
+  {
+   "value": "T1059.001",
+   "entity_type": "ttp",
+   "context": "The loader ran its commands through PowerShell (T1059.001)",
+   "confidence": 1.0,
+   "mitre_id": "T1059.001",
+   "source": "regex"
+  },
+  {
+   "value": "PowerShell",
+   "entity_type": "technique",
+   "context": "The loader ran its commands through PowerShell (T1059.001)",
+   "confidence": 0.8,
+   "mitre_id": "T1059.001",
+   "source": "gazetteer"
+  },
+  {
+   "value": "T1053.005",
+   "entity_type": "ttp",
+   "context": "kept persistence with a scheduled task, T1053.005",
+   "confidence": 1.0,
+   "mitre_id": "T1053.005",
+   "source": "regex"
+  },
+  {
+   "value": "TA0002",
+   "entity_type": "ttp",
+   "context": "These steps belong to the Execution tactic, TA0002.",
+   "confidence": 1.0,
+   "mitre_id": "TA0002",
+   "source": "regex"
+  },
+  {
+   "value": "SQL Injection",
+   "entity_type": "technique",
+   "context": "The web front-end had first been reached through SQL Injection.",
+   "confidence": 0.8,
+   "mitre_id": "CAPEC-66",
+   "source": "gazetteer"
+  }
+ ],
+ "llm_result": {}
+}

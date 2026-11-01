@@ -140,6 +140,22 @@ describe('buildBundleGraph', () => {
     expect(item.nodeId).toBeUndefined()
   })
 
+  it('lists a bare ATT&CK id named after its technique as a rename of its row', () => {
+    const { bundle, entities, relations, ledger } = fixture()
+    bundle.objects.push(obj('attack-pattern--p', 'attack-pattern', { name: 'PowerShell' }))
+    ledger.objects['attack-pattern--p'] = { origin: 'entity' }
+    entities.push(entity('T1059.001', 'ttp'))
+    ledger.entities.push(lent('T1059.001', 'ttp', {
+      stix_id: 'attack-pattern--p', stix_name: 'PowerShell', reason: 'attack_id_named',
+    }))
+    const g = buildBundleGraph(bundle, ledger, entities, relations)
+    const item = g.diff.find(d => d.reason === 'attack_id_named')!
+    expect(item.kind).toBe('merged')
+    expect(item.title).toBe('T1059.001 → PowerShell')
+    expect(item.nodeId).toBe('attack-pattern--p')
+    expect(g.nodeInfo.get('attack-pattern--p')?.rows.map(r => r.entity.value)).toEqual(['T1059.001'])
+  })
+
   it('lists a self-loop without drawing it', () => {
     const { bundle, entities, relations, ledger } = fixture()
     const g = buildBundleGraph(bundle, ledger, entities, relations)

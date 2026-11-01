@@ -326,14 +326,15 @@ Varies, and is not a breaking change:
 - the names and descriptions of ATT&CK objects, as the selected ATT&CK release
   states them.
 
-Evidence today: `contract/stix.json` is read from the five Stage 4 reference
+Evidence today: `contract/stix.json` is read from the six Stage 4 reference
 bundles (`tests/fixtures/stage4_reference/expected/`, which
 `tests/test_stage4_reference.py` keeps equal to the code): each custom
 property found there with its JSON types, and the id of each object known by
 a name, a value, a key, a pattern, hashes or a definition (not a
 relationship), named by scenario, type and that property; a random id (the
-Report's) is recorded as `random` (79 ids, 5 of them random, and 12
-properties on 2026-10-31). A changed id is a breaking change: an identity rule
+Report's) is recorded as `random` (86 ids, 6 of them random, and 12
+properties on 2026-11-01). The `offline` scenario holds techniques no Stage 3
+entry lists, as the offline profile exports them. A changed id is a breaking change: an identity rule
 changed. An id that becomes random, or stops being random, is a changed id.
 An object a scenario no longer yields is not a breaking change.
 `x_ctiparsor_enrichment` is in none of these bundles (only an enriched bundle
@@ -434,7 +435,7 @@ evidence.
 | ATT&CK techniques | supported | ATT&CK 19.2 by default, 20.0 selectable (`ATTACK_RELEASE`); without an LLM, Stage 2c's detector replaces the selection ([configuration.md](configuration.md)) | `tests/test_ttp_select.py`, `tests/test_ttp_retrieval.py`; F1 0.690 on AnnoCTR test ([baseline-2026-10.md](eval/baseline-2026-10.md)) |
 | Relationships | supported | needs an LLM (Stage 3) | `tests/test_stage3d_verify.py`, `tests/test_relationships_api.py`. Against a gold set: not yet, items 5 and 6 |
 | Review and finalize | supported | no authentication; built for one analyst | `tests/test_jobs_routes.py`, `tests/test_entities_api.py`, `tests/test_relationships_api.py`, `tests/test_decisions.py`, `tests/test_held_for_review.py`, `tests/test_bundle_builds.py`. The browser journey (`scripts/check_browser_e2e.sh`, job `browser-e2e`, ADR-0094 item 4): in Chromium against the built interface, the API, its worker and PostgreSQL, offline, a report imported, its progress followed from the run's events, the page reloaded, rows accepted, rejected and retyped, the review completed and the bundle downloaded and checked; the same with the keyboard alone; an enrichment and its ledger, a failed report and its reason, a refused bundle (409); axe on each page (TESTING.md) |
-| STIX 2.1 export | supported | a bundle Stage 5 refuses is not served (409); `unverified` when the JSON schemas are missing | `tests/test_stage5.py`, `tests/test_stage4_reference.py` (five reference scenarios), `tests/test_stix_ids.py` |
+| STIX 2.1 export | supported | a bundle Stage 5 refuses is not served (409); `unverified` when the JSON schemas are missing | `tests/test_stage5.py`, `tests/test_stage4_reference.py` (six reference scenarios), `tests/test_stix_ids.py` |
 | Enrich an existing STIX 2.1 bundle ([ADR-0090](adr/0090-enriching-an-existing-stix-bundle.md)) | supported, on by default | STIX 2.1 only (2.0 is refused with 400); 20 MB; `STIX_ENRICHMENT_ENABLED=false` turns it off; OpenCTI- and MISP-shaped baselines checked on repository fixtures, not on live exports | `tests/test_baseline_*.py`; round trip and ablation on 7 real reports, 2026-10-25: 0 duplicate rows, 175 of 179 removed entries recovered ([TESTING.md](../TESTING.md)) |
 | Detection rules quoted in a report (YARA, Sigma, Suricata, Snort) | supported | a rule ships only if the parser OpenCTI uses accepts it; without that parser it ships `unverified` | `tests/test_yara_check.py`, `tests/test_pattern_check.py` |
 | Detection coverage from rule corpora (Sigma, Suricata, YARA): matrix, proposals, ZIP export | supported | corpora downloaded by `bootstrap` from third-party repositories, each under its own licence; no Snort corpus | `tests/test_detection_coverage.py`, `tests/test_sigma_adapter.py`, `tests/test_suricata_yara_adapters.py` |

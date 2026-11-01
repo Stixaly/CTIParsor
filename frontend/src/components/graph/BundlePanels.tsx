@@ -11,7 +11,7 @@ import type { BundleEdgeInfo, BundleNodeInfo, DiffItem, DiffKind } from './build
 import { stixLabel } from './buildBundleGraph'
 import {
   EDGE_KIND_ORDER, EDGE_KIND_STYLE, EDGE_ORIGIN_LABEL, OBJECT_ORIGIN_LABEL,
-  benignReason, describeChange, describeTime, entityReason, relationshipReason,
+  benignReason, describeChange, describeTime, entityReason, isRenamed, relationshipReason,
 } from './provenance'
 import MarkdownPreview from '../MarkdownPreview'
 
@@ -326,7 +326,7 @@ export function BundleNodeDetail({
                   <span style={{ color: 'var(--ink)' }}>{entity.value}</span>
                   <span style={{ color: 'var(--ink-4)' }}> · {typeLabel(entity.entity_type)} · {entity.source}</span>
                   {ledger.outcome === 'merged' && <div style={{ color: 'var(--warn)' }}>merged: {entityReason(ledger.reason)}</div>}
-                  {ledger.outcome === 'emitted' && ledger.reason === 'alias_canonical' && (
+                  {ledger.outcome === 'emitted' && isRenamed(ledger.reason) && (
                     <div style={{ color: 'var(--warn)' }}>renamed “{ledger.stix_name}”: {entityReason(ledger.reason)}</div>
                   )}
                   {ledger.outcome === 'emitted' && ledger.reason === 'type_conflict' && (

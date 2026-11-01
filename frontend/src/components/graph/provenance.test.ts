@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   describeTime, edgeKindOf, EDGE_KIND_ORDER, EDGE_KIND_STYLE, EDGE_ORIGIN_LABEL, entityReason,
-  isFromBaseline, OBJECT_ORIGIN_LABEL, reasonRef, relationshipReason,
+  isFromBaseline, isRenamed, OBJECT_ORIGIN_LABEL, reasonRef, relationshipReason,
 } from './provenance'
 
 describe('describeTime — what the export did with a date (ADR-0063)', () => {
@@ -45,6 +45,14 @@ describe('baseline vocabulary — the analyst’s STIX bundle (ADR-0090)', () =>
     expect(entityReason('baseline_rejected')).toContain('left out of this bundle')
     expect(entityReason('baseline_refs_closure')).toContain('cannot ship')
     expect(entityReason('baseline_report_empty')).toContain('not re-issued')
+  })
+
+  it('explains a bare ATT&CK id named after its technique, and counts it a rename', () => {
+    expect(entityReason('attack_id_named')).toContain('named after its technique')
+    expect(isRenamed('attack_id_named')).toBe(true)
+    expect(isRenamed('alias_canonical')).toBe(true)
+    expect(isRenamed('same_value')).toBe(false)
+    expect(isRenamed(undefined)).toBe(false)
   })
 
   it('explains a name that denotes objects of several types', () => {

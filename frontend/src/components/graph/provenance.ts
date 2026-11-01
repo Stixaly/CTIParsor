@@ -117,6 +117,7 @@ const ENTITY_REASON: Record<string, string> = {
   same_observable:   'same observable once normalised (registry hive)',
   same_technique:    'same ATT&CK technique as another row',
   alias_canonical:   'an alias of a MITRE object, named by its canonical name',
+  attack_id_named:   'a bare ATT&CK id, named after its technique in the ATT&CK release the bundle was built with — under the id alone, OpenCTI would rename the technique it holds',
   type_conflict:     'MITRE files this name under another kind of object (an actor named after a malware, or software after an actor), so it was not renamed — check the type',
   alias_merge:       'merged into an alias by graph completion (Stage 4b)',
   no_iso_country:    'a STIX Location needs an ISO country code, and this name has none',
@@ -159,6 +160,11 @@ export function benignReason(code: unknown): string {
 
 export function entityReason(code: string | undefined): string {
   return (code && (ENTITY_REASON[code] ?? ENTITY_REASON[reasonBase(code)])) || code || 'no reason recorded'
+}
+
+/** An emitted row whose object ships under another name than the row's value. */
+export function isRenamed(code: string | undefined): boolean {
+  return code === 'alias_canonical' || code === 'attack_id_named'
 }
 
 /** A reason may name the object behind it: `baseline_refs_closure:<id>`

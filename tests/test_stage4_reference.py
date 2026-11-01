@@ -208,6 +208,25 @@ def test_minimal_scenario_is_observables_and_indicators_only(forms):
     assert not c["ledger"]["relationships"]
 
 
+def test_offline_scenario_names_the_bare_attack_ids_and_gives_standard_ids(forms):
+    from pipeline import stix_ids
+
+    c = forms["offline"]
+    patterns = {o["name"]: o["id"] for o in _of(c, "attack-pattern")}
+    assert patterns == {
+        "PowerShell": stix_ids.attack_pattern_id("PowerShell", "T1059.001"),
+        "Scheduled Task": stix_ids.attack_pattern_id("Scheduled Task", "T1053.005"),
+        "TA0002": stix_ids.attack_pattern_id("TA0002", "TA0002"),
+        "SQL Injection": stix_ids.attack_pattern_id("SQL Injection"),     # CAPEC: by name
+    }
+    outcomes = {e["value"]: (e["outcome"], e.get("reason")) for e in c["ledger"]["entities"]}
+    assert outcomes == {
+        "T1059.001": ("emitted", "attack_id_named"), "PowerShell": ("merged", "same_value"),
+        "T1053.005": ("emitted", "attack_id_named"), "TA0002": ("emitted", None),
+        "SQL Injection": ("emitted", None),
+    }
+
+
 # ── The canonical form itself ────────────────────────────────────────────────
 
 def test_two_builds_of_a_scenario_have_the_same_canonical_form(forms, stage4_defaults):

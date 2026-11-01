@@ -7,6 +7,7 @@ from pipeline.stage3_llm import IoCAssociation, LLMEnrichmentResult, Relationshi
 from pipeline.stage4_stix_mapping import (
     _entity_to_sdo,
     _NameIndex,
+    _technique_identity,
     build_stix_bundle,
     verify_ioc_coverage,
 )
@@ -662,6 +663,133 @@ def test_a_raw_technique_is_not_merged_into_a_tool_of_the_same_name():
 
     assert [o.name for o in _of_type(bundle, "tool")] == ["PowerShell"]
     assert [o.name for o in _of_type(bundle, "attack-pattern")] == ["PowerShell"]
+
+
+# ── A technique no LLM listed: OpenCTI's standard id (ADR-0066) ───────────────
+# pycti's AttackPattern.generate_id("PowerShell", "T1059.001"), as
+# tests/test_stix_ids.py records it.
+PYCTI_T1059_001 = "attack-pattern--b4d20430-6a7e-59fd-b2e4-8d3f6be56a6a"
+
+
+def _raw_attack_patterns(*entities, ledger=None):
+    bundle = build_stix_bundle(list(entities), LLMEnrichmentResult(), "offline",
+                               ledger=ledger, graph_completion=False)
+    return _of_type(bundle, "attack-pattern")
+
+
+def test_a_raw_technique_has_the_same_standard_id_on_every_export():
+    entity = RawEntity(value="T1059.001", entity_type=EntityType.TTP, mitre_id="T1059.001")
+    [first] = _raw_attack_patterns(entity)
+    [second] = _raw_attack_patterns(entity)
+
+    assert first.id == second.id == PYCTI_T1059_001
+
+
+def test_a_bare_attack_id_is_named_after_its_technique_and_the_ledger_says_so():
+    from pipeline import attack_data
+
+    led = MappingLedger()
+    [ap] = _raw_attack_patterns(
+        RawEntity(value="T1059.001", entity_type=EntityType.TTP, mitre_id="T1059.001"), ledger=led)
+
+    assert ap.name == "PowerShell"
+    assert [(r.source_name, r.external_id) for r in ap.external_references] == [("mitre-attack", "T1059.001")]
+    [row] = [e for e in led.entities if e["value"] == "T1059.001"]
+    assert row["outcome"] == "emitted" and row["stix_id"] == ap.id
+    assert row["reason"] == "attack_id_named" and row["stix_name"] == "PowerShell"
+    assert row["attack_release"] == attack_data.current().version
+
+
+def test_a_bare_attack_id_without_a_mitre_id_is_its_own_id():
+    [ap] = _raw_attack_patterns(RawEntity(value="t1059.001", entity_type=EntityType.TECHNIQUE))
+
+    assert (ap.id, ap.name) == (PYCTI_T1059_001, "PowerShell")
+    assert ap.external_references[0].external_id == "T1059.001"
+
+
+def test_a_named_technique_keeps_its_name_and_the_ledger_records_no_rename():
+    led = MappingLedger()
+    [ap] = _raw_attack_patterns(
+        RawEntity(value="Powershell scripts", entity_type=EntityType.TECHNIQUE, mitre_id="T1059.001"),
+        ledger=led)
+
+    assert (ap.id, ap.name) == (PYCTI_T1059_001, "Powershell scripts")
+    assert "reason" not in led.entities[0]
+
+
+def test_a_capec_pattern_keeps_its_own_name_and_is_identified_by_it():
+    from pipeline import stix_ids
+
+    named, bare = _raw_attack_patterns(
+        RawEntity(value="Leveraging Race Conditions", entity_type=EntityType.TECHNIQUE, mitre_id="CAPEC-26"),
+        RawEntity(value="CAPEC-66", entity_type=EntityType.TECHNIQUE, mitre_id="CAPEC-66"))
+
+    assert named.name == "Leveraging Race Conditions" and bare.name == "CAPEC-66"
+    assert named.id == stix_ids.attack_pattern_id("Leveraging Race Conditions")
+    assert [r.source_name for r in named.external_references] == ["capec"]
+
+
+def test_a_tactic_and_an_unknown_id_keep_their_value_as_name():
+    from pipeline import stix_ids
+
+    tactic, unknown = _raw_attack_patterns(
+        RawEntity(value="TA0002", entity_type=EntityType.TTP, mitre_id="TA0002"),
+        RawEntity(value="T9999", entity_type=EntityType.TTP, mitre_id="T9999"))
+
+    assert (tactic.name, tactic.id) == ("TA0002", stix_ids.attack_pattern_id("TA0002", "TA0002"))
+    assert tactic.external_references[0].url == "https://attack.mitre.org/tactics/TA0002/"
+    assert (unknown.name, unknown.id) == ("T9999", stix_ids.attack_pattern_id("T9999", "T9999"))
+
+
+def test_two_values_of_one_standard_id_ship_one_object():
+    led = MappingLedger()
+    aps = _raw_attack_patterns(RawEntity(value="Custom Loader", entity_type=EntityType.TECHNIQUE),
+                               RawEntity(value="Custom Loader ", entity_type=EntityType.TECHNIQUE),
+                               ledger=led)
+
+    assert [ap.name for ap in aps] == ["Custom Loader"]
+    assert [(e["outcome"], e.get("reason")) for e in led.entities] == [("emitted", None), ("merged", "same_value")]
+
+
+def test_a_bare_attack_id_merges_into_its_technique_already_here_by_name():
+    # A Stage 3 entry with no ATT&CK id: the bare id must not ship a second PowerShell.
+    led = MappingLedger()
+    llm = LLMEnrichmentResult(
+        threat_actors=["APT29"], ttps=[TTPExtracted(technique_name="PowerShell")],
+        relationships=[RelationshipExtracted(source_value="APT29", relationship_type="uses",
+                                             target_value="T1059.001", confidence=0.9)])
+    bundle = build_stix_bundle([RawEntity(value="T1059.001", entity_type=EntityType.TTP, mitre_id="T1059.001")],
+                               llm, "r", ledger=led, graph_completion=False)
+    [ap] = _of_type(bundle, "attack-pattern")
+    [actor] = _of_type(bundle, "threat-actor")
+
+    assert ap.name == "PowerShell"
+    assert (actor.id, "uses", ap.id) in _sros(bundle)
+    [row] = [e for e in led.entities if e["value"] == "T1059.001"]
+    assert (row["outcome"], row["reason"], row["stix_id"]) == ("merged", "same_technique", ap.id)
+
+
+def test_a_relationship_resolves_a_renamed_technique_by_its_name_and_its_id():
+    llm = LLMEnrichmentResult(
+        threat_actors=["APT29"], malware_families=["WellMess"],
+        relationships=[
+            RelationshipExtracted(source_value="APT29", relationship_type="uses",
+                                  target_value="PowerShell", confidence=0.9),
+            RelationshipExtracted(source_value="WellMess", relationship_type="uses",
+                                  target_value="T1059.001", confidence=0.9),
+        ])
+    bundle = build_stix_bundle([RawEntity(value="T1059.001", entity_type=EntityType.TTP, mitre_id="T1059.001")],
+                               llm, "r", graph_completion=False)
+    [ap] = _of_type(bundle, "attack-pattern")
+    [actor] = _of_type(bundle, "threat-actor")
+    [malware] = _of_type(bundle, "malware")
+
+    assert {(actor.id, "uses", ap.id), (malware.id, "uses", ap.id)} <= set(_sros(bundle))
+
+
+def test_a_value_with_a_lone_surrogate_is_no_bare_id():
+    # re2 raises on a lone surrogate: the value must not reach it.
+    assert _technique_identity("T1059.001\ud800", None) == ("T1059.001\ud800", None, False)
 
 
 def test_an_ioc_association_indicates_the_malware_not_the_tool_of_the_same_name():

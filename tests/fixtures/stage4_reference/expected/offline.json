@@ -1,0 +1,227 @@
+{
+ "ledger": {
+  "entities": [
+   {
+    "attack_release": "19.2",
+    "entity_type": "ttp",
+    "mitre_id": "T1053.005",
+    "outcome": "emitted",
+    "reason": "attack_id_named",
+    "stix_id": "attack-pattern--9cbd6cfe-5c17-5a1f-926e-5c19816d2dcb",
+    "stix_name": "Scheduled Task",
+    "stix_type": "attack-pattern",
+    "value": "T1053.005"
+   },
+   {
+    "attack_release": "19.2",
+    "entity_type": "ttp",
+    "mitre_id": "T1059.001",
+    "outcome": "emitted",
+    "reason": "attack_id_named",
+    "stix_id": "attack-pattern--b4d20430-6a7e-59fd-b2e4-8d3f6be56a6a",
+    "stix_name": "PowerShell",
+    "stix_type": "attack-pattern",
+    "value": "T1059.001"
+   },
+   {
+    "entity_type": "technique",
+    "mitre_id": "CAPEC-66",
+    "outcome": "emitted",
+    "stix_id": "attack-pattern--95046cf4-b2a1-5a38-b35e-9f9a82b43119",
+    "stix_name": "SQL Injection",
+    "stix_type": "attack-pattern",
+    "value": "SQL Injection"
+   },
+   {
+    "entity_type": "technique",
+    "mitre_id": "T1059.001",
+    "outcome": "merged",
+    "reason": "same_value",
+    "stix_id": "attack-pattern--b4d20430-6a7e-59fd-b2e4-8d3f6be56a6a",
+    "stix_name": "PowerShell",
+    "stix_type": "attack-pattern",
+    "value": "PowerShell"
+   },
+   {
+    "entity_type": "ttp",
+    "mitre_id": "TA0002",
+    "outcome": "emitted",
+    "stix_id": "attack-pattern--0b50ffd0-c93c-5f57-8f35-49fafb38bfbf",
+    "stix_name": "TA0002",
+    "stix_type": "attack-pattern",
+    "value": "TA0002"
+   }
+  ],
+  "objects": {
+   "attack-pattern--0b50ffd0-c93c-5f57-8f35-49fafb38bfbf": {
+    "origin": "entity"
+   },
+   "attack-pattern--95046cf4-b2a1-5a38-b35e-9f9a82b43119": {
+    "origin": "entity"
+   },
+   "attack-pattern--9cbd6cfe-5c17-5a1f-926e-5c19816d2dcb": {
+    "origin": "entity"
+   },
+   "attack-pattern--b4d20430-6a7e-59fd-b2e4-8d3f6be56a6a": {
+    "origin": "entity"
+   },
+   "identity--df314057-d669-5e4d-aa9c-5257582a7ecd": {
+    "origin": "author_identity"
+   },
+   "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82": {
+    "origin": "marking"
+   },
+   "report--R1": {
+    "origin": "report"
+   }
+  },
+  "relationships": [],
+  "removed": [],
+  "version": 1
+ },
+ "objects": [
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "external_references": [
+    {
+     "external_id": "TA0002",
+     "source_name": "mitre-attack",
+     "url": "https://attack.mitre.org/tactics/TA0002/"
+    }
+   ],
+   "id": "attack-pattern--0b50ffd0-c93c-5f57-8f35-49fafb38bfbf",
+   "modified": "<build-time>",
+   "name": "TA0002",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "spec_version": "2.1",
+   "type": "attack-pattern"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "external_references": [
+    {
+     "external_id": "CAPEC-66",
+     "source_name": "capec",
+     "url": "https://capec.mitre.org/data/definitions/66.html"
+    }
+   ],
+   "id": "attack-pattern--95046cf4-b2a1-5a38-b35e-9f9a82b43119",
+   "modified": "<build-time>",
+   "name": "SQL Injection",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "spec_version": "2.1",
+   "type": "attack-pattern"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "external_references": [
+    {
+     "external_id": "T1053.005",
+     "source_name": "mitre-attack",
+     "url": "https://attack.mitre.org/techniques/T1053/005/"
+    }
+   ],
+   "id": "attack-pattern--9cbd6cfe-5c17-5a1f-926e-5c19816d2dcb",
+   "modified": "<build-time>",
+   "name": "Scheduled Task",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "spec_version": "2.1",
+   "type": "attack-pattern"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "external_references": [
+    {
+     "external_id": "T1059.001",
+     "source_name": "mitre-attack",
+     "url": "https://attack.mitre.org/techniques/T1059/001/"
+    }
+   ],
+   "id": "attack-pattern--b4d20430-6a7e-59fd-b2e4-8d3f6be56a6a",
+   "modified": "<build-time>",
+   "name": "PowerShell",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "spec_version": "2.1",
+   "type": "attack-pattern"
+  },
+  {
+   "created": "<build-time>",
+   "description": "Automated CTI extraction pipeline. Authored the objects in this bundle. created_by_ref refers to this pipeline as the intelligence author, not to the threat actor.",
+   "id": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "identity_class": "system",
+   "modified": "<build-time>",
+   "name": "CTIParsor",
+   "spec_version": "2.1",
+   "type": "identity"
+  },
+  {
+   "created": "2017-01-20T00:00:00.000Z",
+   "definition": {
+    "tlp": "amber"
+   },
+   "definition_type": "tlp",
+   "id": "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+   "name": "TLP:AMBER",
+   "spec_version": "2.1",
+   "type": "marking-definition"
+  },
+  {
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "## Source document\n\n- **File:** offline.txt\n\n## What CTIParsor extracted\n\n| Object type | Count |\n|---|---|\n| `attack-pattern` | 4 |\n\n## Document text\n\nOffline techniques\n\nThe loader ran its commands through PowerShell (T1059.001) and kept persistence with a scheduled task, T1053.005. These steps belong to the Execution tactic, TA0002. The web front-end had first been reached through SQL Injection.",
+   "external_references": [
+    {
+     "description": "Original CTI report: offline.txt",
+     "source_name": "original_document"
+    }
+   ],
+   "id": "report--R1",
+   "modified": "<build-time>",
+   "name": "Offline Techniques",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+   ],
+   "object_refs": [
+    "attack-pattern--b4d20430-6a7e-59fd-b2e4-8d3f6be56a6a",
+    "attack-pattern--9cbd6cfe-5c17-5a1f-926e-5c19816d2dcb",
+    "attack-pattern--0b50ffd0-c93c-5f57-8f35-49fafb38bfbf",
+    "attack-pattern--95046cf4-b2a1-5a38-b35e-9f9a82b43119"
+   ],
+   "published": "<build-time>",
+   "spec_version": "2.1",
+   "type": "report",
+   "x_synthesis_stats": {
+    "completion": {
+     "aliases_merged": 0,
+     "capped": false,
+     "long_distance_added": 0,
+     "notes": [],
+     "reference_added": 0,
+     "skipped_not_suggested": 0,
+     "transitive_added": 0
+    },
+    "pin": {
+     "budget": 0,
+     "mode": "fair-share",
+     "rules": [],
+     "total_blocked": 0,
+     "total_candidates": 0,
+     "total_emitted": 0,
+     "total_truncated": 0
+    }
+   }
+  }
+ ]
+}
