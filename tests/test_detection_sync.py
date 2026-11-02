@@ -15,9 +15,9 @@ import pipeline.detection.sync as sync_mod
 from pipeline.detection.sync import (
     MANIFEST_NAME,
     _parse_md5,
-    check_git_remote,
     fetch_tarball,
     git_command,
+    git_remote_refusal,
     sync_corpus,
 )
 
@@ -120,13 +120,12 @@ def test_sync_refuses_a_registry_remote_that_is_not_https(tmp_path: Path, monkey
 
 @pytest.mark.parametrize("remote", ["ssh://git@h/x.git", "git://h/x.git", "file:///srv/x.git",
                                     "http://h/x.git", "git@h:x.git"])
-def test_check_git_remote_refuses_every_transport_but_https(remote: str) -> None:
-    with pytest.raises(ValueError, match="only https:// remotes are fetched"):
-        check_git_remote(remote)
+def test_git_remote_refusal_refuses_every_transport_but_https(remote: str) -> None:
+    assert "only https:// remotes are fetched" in (git_remote_refusal(remote) or "")
 
 
-def test_check_git_remote_accepts_https() -> None:
-    check_git_remote("https://example.com/repo.git")
+def test_git_remote_refusal_accepts_https() -> None:
+    assert git_remote_refusal("https://example.com/repo.git") is None
 
 
 def test_parse_md5_accepts_bare_hash_and_hash_filename_lines() -> None:
