@@ -1,6 +1,6 @@
 # ADR-0094: What 1.0 promises: a stable contract, data that survives, published limits
 
-**Status:** Proposed
+**Status:** Accepted (2026-11-01)
 **Date:** 2026-10-31
 **Deciders:** maintainer
 **Extends:** ADR-0085 (its decision 8 covers the versions before 1.0 only)
@@ -91,8 +91,10 @@ with a fake client only (`tests/test_stage3_calls.py`,
 
 ## Decision
 
-Decisions 1 to 10, and 13, are the maintainer's. Decisions 11, 12 and 14 are
-proposed by this ADR, for the maintainer's review.
+Decisions 1 to 10, and 13, are the maintainer's. Decisions 11, 12 and 14 were
+proposed by this ADR; on 2026-11-01 the maintainer accepted 11 and 12 as
+written, and 14 with two changes: figure reading is on by default, and an
+import into MISP is a target after 1.0.
 
 **0. What 1.0 promises.** Three things, and only these:
 
@@ -223,12 +225,26 @@ leave the default journey outside the promises. Anthropic takes no seed
 (`LLM_SEED` reaches vLLM, Ollama and LM Studio only), so its run is made twice
 at `LLM_TEMPERATURE=0` and publishes the spread between the two.
 
-**14. The statuses the maintainer did not set,** from what exists in the
-repository: capturing a URL, the detection rules quoted in a report and the
-detection coverage from rule corpora are supported (each has tests and runs in
-the default stack); figure reading (Stage 1f) is experimental (off by default,
-`VISION_PROVIDER=none`); an import into MISP is not supported (no connector,
-no import test); several users, a GPU and a Python package are not supported.
+**14. The other statuses.** Capturing a URL, the detection rules quoted in a
+report and the detection coverage from rule corpora are supported (each has
+tests and runs in the default stack). Several users, a GPU and a Python
+package are not supported. The maintainer changed two of the proposed statuses:
+
+- **Figure reading (Stage 1f) is supported and on by default** (item 12). When
+  `VISION_PROVIDER` is left at its default, the provider chosen for the text
+  (`LLM_PROVIDER`) reads the figures of a PDF, with the model it would use if
+  it were set by name, provided the model passes the image probe Stage 1f
+  already runs. Without a provider able to see, the stage is skipped, as
+  Stage 3 is without a provider. A figure never goes to another provider than
+  the one chosen for the text: an install that moves the text to a local LLM
+  keeps its figures local. `VISION_PROVIDER=none` turns it off, and a named
+  provider still overrides it. Why: figures (screenshots, attack chains) hold
+  evidence the text does not, and an option off by default is one most users
+  never turn on. It costs at most 40 calls per PDF (`stage1f_figures.py`),
+  with `claude-haiku-4-5` by default on `anthropic`.
+- **An import into MISP is not supported in 1.0, and is a target after it.**
+  There is no connector and no import test today; a MISP-shaped STIX 2.1
+  bundle is accepted as a baseline to enrich (decision 3).
 
 ## Options rejected
 
@@ -275,6 +291,9 @@ no import test); several users, a GPU and a Python package are not supported.
 - **A billed run before 1.0.** Decision 13 needs item 11: two runs with
   `anthropic` on AnnoCTR test and two on the in-house set, each one billed
   per call. The in-house runs wait for its gold (item 5).
+- **Figures are read by default (decision 14, item 12).** A PDF with figures
+  costs up to 40 more calls to the text's provider, billed on `anthropic`, and
+  its bundle can hold what the figures show.
 - **`docs/eval/inhouse-set.md` differs from decision 10.** Its *Layers* column
   gives some reports fewer layers, and its *Double* column plans a second
   annotator for three of them. Decision 10 replaces the first. A second
@@ -290,7 +309,8 @@ no import test); several users, a GPU and a Python package are not supported.
 
 ## Action plan
 
-Items 1 to 4 and 7 to 9 are done; none of the others is started on 2026-11-01. Each
+Items 1 to 4, 7 to 9 and 12 are done; none of the others is started on
+2026-11-01 (item 12 was added that day, with decision 14's change). Each
 proves part of a promise; `docs/support-policy.md` names the item where a piece
 of evidence is missing.
 
@@ -306,7 +326,8 @@ of evidence is missing.
 | 8 | OpenCTI import of the candidate: the A4 recipe on bundles the candidate produced, tied to its commit and image digest | the import the matrix supports | done: `scripts/check_opencti_candidate.sh`, `scripts/opencti_candidate_bundles.py`, `scripts/opencti_expectations.py`, `scripts/opencti_import_check.py` (`--full`), `tests/test_opencti_expectations.py`; a release step (`docs/releasing.md`, step 4), not in CI. On 2026-11-01, on main's image at 4df5cbd: 83 of 83 expectations and 1 WARN (one name held by two types). Not covered: OpenCTI versions other than 7.260930.0; bundles made with the models or an LLM (the candidate runs offline); a connector or a live feed (bundles are imported by pycti) |
 | 9 | Clean install from the published image, on a blank machine, following only the public documentation: bootstrap, first report, review, export, restart, upgrade, restore | the install path | done: `scripts/check_clean_install.sh`, `scripts/clean_install_journey.py`, `tests/test_check_clean_install.py`; the commands it runs are the README's, docs/docker.md's and docs/upgrading.md's, read from them; a release step (`docs/releasing.md`, step 4), not in CI. Run on 2026-11-01, WSL2, from 0.2.0 to main's image at 248382c: every step passed, in 827 s with both images present (`bootstrap` 387 s, the models and corpora without an `HF_TOKEN` in 2 min 27 s); the run found and fixed the backup block's `umask 077` left in the shell, a bootstrap command that did not run, and wrong figures (bootstrap time, volume and model sizes). Not covered: a blank machine (a fresh directory, `HOME` and Docker login, but the host's Docker daemon and its image cache); a user in the `docker` group (the run is as root, where `tar` keeps the archive's modes: the backup block's umask, which made the next release unreadable, is tested without Docker); an arm64 host (no image); an LLM provider (the run sets none); the web UI (the API journey stands in for it; item 4 covers the interface); the CLI, the `proxy` and `ollama` profiles; the restore made live under the install's own project, which needs `docker volume rm` |
 | 10 | Freeze and real use: the candidate frozen, 5 real reports outside the evaluation corpora, through export and OpenCTI import, incidents logged (decision 2) | the journey on unseen reports | not started |
-| 11 | A recorded evaluation run with `anthropic` and the default `ANTHROPIC_MODEL`: twice at `LLM_TEMPERATURE=0`, on AnnoCTR test (read once for this decision, as ADR-0060 allows) and on the in-house set once it is gold (item 5); the spread between the two runs published | `anthropic` supported (decision 13) | not started |
+| 11 | A recorded evaluation run with `anthropic` and the default `ANTHROPIC_MODEL`: twice at `LLM_TEMPERATURE=0`, on AnnoCTR test (read once for this decision, as ADR-0060 allows) and on the in-house set once it is gold (item 5), with figure reading on (item 12); the spread between the two runs published | `anthropic` supported (decision 13) | not started |
+| 12 | Figure reading on by default (decision 14): a default `VISION_PROVIDER` that follows `LLM_PROVIDER` when its model passes the image probe, the stage skipped otherwise; tests of each provider's path and of the skip; `.env.example`, the contract snapshot and the docs | figure reading supported, in the default journey | done: `pipeline/vlm.py` (`VISION_PROVIDER` unset, empty or `auto` builds the backend of `LLM_PROVIDER` with the model and the probe a named provider would have; `gemini`, `lmstudio` and any other value are skipped; never another provider; `skip_reason()`; a probe that raised is asked again for the next document; no credentials in a reason; `python -m pipeline.vlm` reads `.env`), `pipeline/orchestrator.py` (the reason goes in the stage report; under `auto` a run with Stage 3 disabled reads no figure, so `--no-llm` still sends nothing; the 1f record names the provider and model), `api/run_config.py` (an unset `VISION_PROVIDER` is recorded as `auto`), `.env.example`, `contract/config.json` (`make contract`: one `default` difference, none breaking), the docs; `tests/test_vlm.py` (each provider's path, the skips, the logging level, the two defaults of `LLM_PROVIDER`), `tests/test_orchestrator.py` (the reason in the stage report; no backend asked, not even a probe, under `auto` with Stage 3 disabled by `--no-llm` or `PIPELINE_DISABLED_STAGES`; a named provider still asked), `tests/test_run_config.py`, `tests/conftest.py` (the suite pins `VISION_PROVIDER=none`). Not covered: no real figure has been read through `auto` yet, the first will be in item 11's in-house runs; the tests fake the probe and the server, no CI job reads a figure |
 
 Done before this ADR, by pull request #229: `WORKER_MAX_CONCURRENT` defaults to
 1 in the code (decision 6), and `python -m evaluation inhouse-score` names the

@@ -11,8 +11,8 @@ documents differ, they win.
   `[Unreleased]` what is merged on `main` and not yet in a release.
 - **1.0 is not released.** What it promises is written in the
   [support policy](docs/support-policy.md); the decision, and the options
-  rejected, are in [ADR-0094](docs/adr/0094-what-1-0-promises.md), whose
-  status is Proposed. Until 1.0, a minor release may change any surface, and
+  rejected, are in [ADR-0094](docs/adr/0094-what-1-0-promises.md), accepted
+  on 2026-11-01. Until 1.0, a minor release may change any surface, and
   the CHANGELOG says what an operator must do
   ([releasing.md](docs/releasing.md#versioning)).
 
@@ -47,12 +47,13 @@ evidence.
 
 1.0 is tagged when no [release blocker](docs/support-policy.md#release-blockers)
 is open (data loss, a lost review decision, an invalid export presented as
-validated, an unusable essential journey) and the eleven work items of
+validated, an unusable essential journey) and the twelve work items of
 ADR-0094 are done: a contract snapshot, the migration from the last release,
 backup and restore, the browser journey, the in-house gold set, the
 measurement of the exported bundle, the worker status, the OpenCTI import of
 the candidate, the clean install from the published image, a freeze with real
-use, and a recorded run with the default provider. The state of each, what it
+use, a recorded run with the default provider, and figure reading on by
+default. The state of each, what it
 proves and what it does not cover are in the ADR's
 [action plan](docs/adr/0094-what-1-0-promises.md#action-plan); the
 [readiness checklist](docs/releases/1.0-readiness.md) records each gate on the
@@ -62,6 +63,8 @@ Supported, with evidence still missing, as the capability matrix says:
 
 - IoC extraction and relationships, against a gold set: items 5 and 6.
 - The `anthropic` provider, a recorded run: item 11.
+- Figure reading (Stage 1f), on by default with the provider chosen for the
+  text: measured with the default provider, item 11.
 
 ## After 1.0
 
@@ -75,7 +78,10 @@ experimental row of the
   another model.** Wired, with no recorded run in the repository. A provider
   is supported only with a recorded run
   ([ADR-0094](docs/adr/0094-what-1-0-promises.md), decision 13).
-- **Figure reading (Stage 1f).** Off by default.
+- **An import into MISP.** A target after 1.0
+  ([ADR-0094](docs/adr/0094-what-1-0-promises.md), decision 14). There is no
+  connector and no import test today; a MISP-shaped STIX 2.1 bundle is
+  accepted as a baseline to enrich.
 - **The air-gapped install.** No commitment in 1.0; CI checks only that the
   bundle's images come back from `docker save` and `docker load`.
 - **Reports in French.** The named-entity models are English, and no gold
@@ -109,8 +115,6 @@ reason given. The documents hold no plan to change any of them.
   ([SECURITY.md](SECURITY.md)). ADR-0094 declines to do it before 1.0:
   [ADR-0036](docs/adr/0036-architecture-service-multi-utilisateur.md)
   (Proposed) treats authentication as a project of several weeks.
-- **An import into MISP.** There is no connector and no import test. A
-  MISP-shaped STIX 2.1 bundle is accepted as a baseline to enrich.
 - **A GPU.** The image carries torch's CPU build.
 - **A Python package, or `pipeline/` as a library.** There is no sdist, wheel
   or PyPI package ([ADR-0085](docs/adr/0085-releases-promote-the-image-main-built.md)):
