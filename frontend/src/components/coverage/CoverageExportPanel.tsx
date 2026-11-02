@@ -319,7 +319,9 @@ export default function CoverageExportPanel({
       a.href = url
       a.download = filename
       a.click()
-      URL.revokeObjectURL(url)
+      // Defer revocation so the browser has time to start the download before
+      // the blob URL is invalidated (revoking synchronously breaks Firefox).
+      setTimeout(() => URL.revokeObjectURL(url), 100)
     } catch {
       setError(true)
     } finally {

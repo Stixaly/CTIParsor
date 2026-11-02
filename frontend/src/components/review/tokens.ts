@@ -222,7 +222,9 @@ export function hashHue(str: string): number {
 
 /** confidence 0-1 or 0-100 → display percentage string */
 export function confPct(c: number): number {
-  return c > 1 ? Math.round(c) : Math.round(c * 100)
+  if (!Number.isFinite(c)) return 0
+  const pct = c > 1 ? Math.round(c) : Math.round(c * 100)
+  return Math.min(100, Math.max(0, pct))
 }
 
 // ── Detection formats (ADR-0022) ─────────────────────────────────────────────

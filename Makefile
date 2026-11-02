@@ -195,11 +195,14 @@ docker-build:
 # checkout; this re-materializes it if .env changed since. World-readable
 # (644, not 600): app/worker/bootstrap read it as uid 1001 and postgres as
 # uid 70 -- none of them is the host user that creates the file, so an
-# owner-only mode makes every container fail to read it. It stays out of the
-# image (.dockerignore) and out of git (.gitignore); the same host access
-# that could read this file could already read .env itself.
+# owner-only mode makes every container fail to read it. The directory is 700
+# instead, so another local account cannot list or traverse it; the Docker
+# daemon bind-mounts the file itself, so the containers still read it. It stays
+# out of the image (.dockerignore) and out of git (.gitignore); the same host
+# access that could read this file could already read .env itself.
 .secrets/db_password: $(CTI_ENV_FILE)
 	mkdir -p .secrets
+	chmod 700 .secrets
 	set -a; case "$(CTI_ENV_FILE)" in /*) . "$(CTI_ENV_FILE)" ;; *) . "./$(CTI_ENV_FILE)" ;; esac; set +a; \
 	: "$${CTI_DB_PASSWORD:?Set CTI_DB_PASSWORD in $(CTI_ENV_FILE) (e.g. openssl rand -hex 24, or just run: bash setup.sh)}"; \
 	printf '%s' "$$CTI_DB_PASSWORD" > .secrets/db_password

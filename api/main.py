@@ -1,9 +1,13 @@
+import math
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter
@@ -120,6 +124,27 @@ async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
         content={"detail": "Too many requests. Please try again later."},
     )
 
+
+def _finite(value: Any) -> Any:
+    """`value` with each NaN or infinity written as its text: JSON has no spelling for them."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return repr(value)
+    if isinstance(value, dict):
+        return {k: _finite(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_finite(v) for v in value]
+    return value
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_handler(request: Request, exc: RequestValidationError):
+    # FastAPI's default answer echoes each refused value back as `input`, and its
+    # JSON encoder refuses NaN and Infinity: a body with one of them would answer 500.
+    return JSONResponse(
+        status_code=422,
+        content={"detail": jsonable_encoder(_finite(exc.errors()))},
+    )
+
 # Request ID middleware for tracing
 _REQUEST_ID_RE = compile_pattern(r"^[a-zA-Z0-9\-_]{1,64}$")
 
@@ -158,7 +183,8 @@ async def add_request_id(request: Request, call_next):
 # (`Sec-Fetch-Site`) or stamps with a foreign `Origin` gets 403.  Neither
 # touches curl, scripts or the nginx `proxy` profile (which forwards Host),
 # and a browser request from this app's own page carries a same-origin
-# `Origin` or no `Origin` at all.
+# `Origin` (or `null` with Sec-Fetch-Site, behind nginx's no-referrer policy)
+# or no `Origin` at all.
 # ---------------------------------------------------------------------------
 
 def allowed_hosts() -> list[str]:
@@ -196,6 +222,11 @@ async def refuse_cross_site_writes(request: Request, call_next):
         if site and site not in ("same-origin", "none"):
             return JSONResponse({"detail": "cross-site request refused"}, status_code=403)
         origin = request.headers.get("origin")
+        # `Origin: null` is also what a same-origin POST carries under nginx's
+        # `Referrer-Policy: no-referrer` (docker/nginx/default.conf), so it is refused
+        # only when no Sec-Fetch-Site vouches for the request.
+        if origin == "null" and not site:
+            return JSONResponse({"detail": "origin not allowed"}, status_code=403)
         if origin and origin != "null":
             try:
                 origin_allowed = _host_allowed(urlsplit(origin).hostname)

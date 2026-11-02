@@ -246,7 +246,9 @@ echo ""
 hdr "[3/3]  DB PASSWORD SECRET"
 
 CTI_DB_PASSWORD_VALUE=$(grep -E '^CTI_DB_PASSWORD=' .env | tail -1 | cut -d'=' -f2-)
+# The directory is 700 (other local accounts cannot traverse it); the file stays 644 for the containers' uids.
 mkdir -p .secrets
+chmod 700 .secrets
 printf '%s' "$CTI_DB_PASSWORD_VALUE" > .secrets/db_password
 chmod 644 .secrets/db_password
 ok ".secrets/db_password written"

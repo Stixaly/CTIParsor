@@ -98,6 +98,11 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "of a random one, and a bare ATT&CK id is named after its technique: T1059.001 no longer renames "
      "the analyst's PowerShell in OpenCTI (ADR-0066)",
      "mapping"),
+    ("92aa06b", "2026-11-02",
+     "A URL capture runs on its DOM text instead of its PDF archive (ADR-0029); Stage 2 keeps a CVE of "
+     "8 to 12 digits and a host name of more than five labels whole, drops a CVE glued to a word, and "
+     "refangs me@[.]evil[.]com to me@evil.com",
+     "extraction"),
 )
 
 

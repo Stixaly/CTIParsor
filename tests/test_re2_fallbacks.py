@@ -26,7 +26,7 @@ from pipeline import regex_safety
 
 # (module, start of the pattern) — the pattern itself is long for the domain.
 LISTED = {
-    ("pipeline.stage2_extraction", r"\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.){1,5}"),
+    ("pipeline.stage2_extraction", r"\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.){1,30}"),
     ("pipeline.stage2_extraction", r"(?<![\w./\\-])([A-Za-z0-9_][\w.-]*\.(?:"),
     ("pipeline.stage2_extraction", r"(?<!\w)/(?:bin|boot|dev|etc|home|lib(?:64)?|opt|proc"),
     ("pipeline.stage2c_ttp_semantic", r"(?<=[.!?])\s+|\n{1,}|;\s+"),

@@ -166,7 +166,8 @@ def upload_file(
                     f"Expected: {', '.join(allowed_mimes)}"
                 ) from None
 
-    # Check total size after reading first chunk
+    # The streaming loop below checks each chunk it reads, not this first one:
+    # under a limit smaller than the 1 MB read, this is the check that refuses it.
     if len(first_chunk) > _MAX_BYTES:
         raise HTTPException(
             413,

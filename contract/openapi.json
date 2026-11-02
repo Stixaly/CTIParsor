@@ -1241,6 +1241,8 @@
     },
     "POST /api/jobs/{}/entities body.confidence": {
       "default": 1.0,
+      "maximum": 1.0,
+      "minimum": 0.0,
       "required": false,
       "types": [
         "number"
@@ -1389,6 +1391,8 @@
     },
     "POST /api/jobs/{}/relationships body.confidence": {
       "default": 0.8,
+      "maximum": 1.0,
+      "minimum": 0.0,
       "required": false,
       "types": [
         "number"
