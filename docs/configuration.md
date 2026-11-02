@@ -642,6 +642,12 @@ that name at the project root:
 # OCR_LANG=eng
 ```
 
+A page is OCR'd when it has almost no text layer (under 50 characters) and
+either an image covers half of it or its text is drawn as glyph outlines
+(100 or more glyph-sized filled paths, as "Microsoft Print to PDF" writes a
+page whose fonts it cannot embed). A PDF whose every page is such a page is
+OCR'd whole; otherwise only those pages are, in place.
+
 The image installs Debian's `tesseract-ocr`, which brings English only. Another
 language needs its `tesseract-ocr-<lang>` package added to the `Dockerfile`
 and an image rebuild.
