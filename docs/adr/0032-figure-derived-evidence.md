@@ -3,6 +3,11 @@
 **Status:** Accepted (implemented)
 **Date:** 2026-08-27
 **Deciders:** maintainer
+**Amended by:** [0094](0094-what-1-0-promises.md) decision 14 (2026-11-01).
+`VISION_PROVIDER` now defaults to `auto`: the provider chosen for the text
+reads the figures when its model can see. The cost measured below still holds
+on a local model, where a 40-figure report can spend tens of minutes in
+Stage 1f; `VISION_PROVIDER=none` turns it off.
 
 ## Context
 

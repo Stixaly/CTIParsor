@@ -5,6 +5,9 @@
 **Deciders:** maintainer
 **Amends:** ADR-0032 §3, which said Stage 1f's model "comes from `LLM_PROVIDER`,
 exactly as Stage 3's does". That is wrong; this ADR says why and what replaces it.
+**Amended by:** [0094](0094-what-1-0-promises.md) decision 14 (2026-11-01). The default
+`VISION_PROVIDER=auto` follows `LLM_PROVIDER` when its model passes the probe; a named
+provider still sets vision apart, with its own model.
 
 ## Context
 

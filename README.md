@@ -64,8 +64,9 @@ Two ways to use it:
 
 - **Hybrid extraction** — regex IoCs (IPs, domains, URLs, hashes, CVEs,
   registry keys, file paths…), an ATT&CK gazetteer, semantic TTP matching,
-  CyNER 2.0 and GLiNER zero-shot NER, then LLM enrichment. A vision model can
-  read the figures of a PDF too (opt-in).
+  CyNER 2.0 and GLiNER zero-shot NER, then LLM enrichment. The figures of a
+  PDF are read too, by the LLM provider chosen for the text when its model can
+  see.
 - **Built against hallucination** — every LLM-returned name is checked against
   the source text, relationships and techniques must be backed by a verbatim
   quote, and each relationship is graded `observed` / `reported` / `assessed` /
@@ -229,7 +230,7 @@ ran, were skipped (disabled, model missing, no LLM provider) or failed.
 | Stage | What it does | Runs |
 |---|---|---|
 | **1** Ingestion | PDF / DOCX / HTML / TXT / MD → normalised text; OCR for scanned PDFs; refangs `hxxps://`, `[.]`, `[at]`…; paragraph-aware chunks with overlap | always |
-| **1f** Figure reading | A vision model transcribes the figures of a PDF (diagrams, screenshots, tables) into the text | opt-in — `VISION_PROVIDER` |
+| **1f** Figure reading | A vision model transcribes the figures of a PDF (diagrams, screenshots, tables) into the text | on by default, with the text's provider if its model can see — `VISION_PROVIDER` |
 | **2** Regex IoCs | IPs, domains, URLs, emails, MACs, ASNs, paths, registry keys, hashes, CVEs, raw ATT&CK IDs | always |
 | **2b** Gazetteer NER | Aho-Corasick scan for the malware, tools and groups ATT&CK knows | always |
 | **2c** TTP candidates | Retrieves ranked ATT&CK candidates per passage (descriptions and procedure examples, BM25 and dense) for 3f to choose from; with `TTP_MODE=verify`, emits techniques by sentence-transformer similarity instead | always |
@@ -474,7 +475,7 @@ docker compose run --rm dev cli input/report.pdf                          # one 
 docker compose run --rm dev cli input/report.pdf --output output/apt29.json
 docker compose run --rm dev cli --input-dir input/ --output-dir output/   # a whole folder
 
-docker compose run --rm dev cli input/report.pdf --no-llm                 # no LLM call
+docker compose run --rm dev cli input/report.pdf --no-llm                 # no LLM call, figures included
 docker compose run --rm dev cli input/report.pdf --disable-stage 2d,2e    # ablation
 docker compose run --rm dev cli input/report.pdf --require-stage 3        # fail if the LLM cannot run
 ```
@@ -482,7 +483,10 @@ docker compose run --rm dev cli input/report.pdf --require-stage 3        # fail
 Stage ids: `1 1f 2 2b 2c 2d 2e 2g 3 3d 3f 3e 3doc 3r 2f 4 4b 4c 5`; `1`
 (ingestion) and `3r` (baseline reconciliation) cannot be disabled.
 `PIPELINE_DISABLED_STAGES` (comma-separated) does the same for every run of a
-process, the API worker included. The CLI applies the relationship policy
+process, the API worker included. `--no-llm` (Stage 3 disabled) sends nothing
+to an LLM, figures included: under the default `VISION_PROVIDER=auto` figures go
+where the text goes, so Stage 1f is skipped too. A `VISION_PROVIDER` that names a
+provider is an explicit choice and still reads them. The CLI applies the relationship policy
 saved in the job store, like the worker (`--policy db`, the default), or
 `--policy none` / `--policy file.json`.
 
@@ -597,7 +601,7 @@ Other settings worth knowing:
 
 | Setting | What it controls |
 |---|---|
-| `VISION_PROVIDER` | Stage 1f figure reading — `none` (default), `anthropic`, `ollama`, `mistral`, `vllm` |
+| `VISION_PROVIDER` | Stage 1f figure reading — `auto` (default: the provider of `LLM_PROVIDER`, if its model can see; never another), `none`, or a provider by name: `anthropic`, `ollama`, `mistral`, `vllm` |
 | `ENABLE_STIX_VERIFICATION` / `ENABLE_TTP_VERIFICATION` | Stages 3d / 3f self-verification |
 | `ENABLE_CONSENSUS` + `CONSENSUS_PROVIDER` | Stage 3e cross-model consensus |
 | `TTP_EMBEDDING_MODEL`, `GLINER_MODEL` | The Stage 2c and 2e models |

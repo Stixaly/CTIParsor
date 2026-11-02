@@ -91,6 +91,16 @@ def _llm_checks_at_their_defaults(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _figure_reading_off(monkeypatch):
+    """Stage 1f is off, whatever the developer's `.env` says.  Its default is
+    `auto`, which reads figures with the provider chosen for the text
+    (ADR-0094): with the key set above, or a LAN vLLM in `.env`, a test that
+    runs a PDF would reach a vision backend.  A test about figure reading sets
+    `VISION_PROVIDER` itself."""
+    monkeypatch.setenv("VISION_PROVIDER", "none")
+
+
+@pytest.fixture(autouse=True)
 def _attack_release_at_its_default(monkeypatch):
     """The shipped ATT&CK track (ADR-0087), whatever the developer's `.env`
     says: `pipeline.stage3_llm` loads it at import, and a local

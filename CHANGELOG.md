@@ -335,6 +335,25 @@ for `scripts/build_detection_index.py`, which is unchanged.
 
 ### Documentation
 
+#### ADR-0094 accepted: figures read by default, MISP after 1.0, 2026-11-01
+
+The maintainer accepted ADR-0094, *What 1.0 promises*:
+
+- **Decision 11 (the stable surfaces)** and **decision 12** (breaking
+  changes, version numbers, deprecation) are accepted as written.
+- **Decision 14 is accepted with two changes:**
+  - **Figure reading (Stage 1f) becomes supported and on by default.** When
+    `VISION_PROVIDER` is left at its default, the provider chosen for the text
+    reads a PDF's figures, provided its model passes the image probe; without
+    one the stage is skipped. A figure never goes to another provider than
+    the text's. The new work item 12 makes it so (below, under *Changed*).
+  - **An import into MISP** stays unsupported in 1.0 and is a target after
+    it.
+
+`docs/support-policy.md`, `ROADMAP.md`, the ADR index and
+`docs/releases/1.0-readiness.md` (a new gate, `figure_reading_default`)
+follow.
+
 #### How to report, propose and decide the 1.0 release: issue forms, a roadmap, a readiness checklist, 2026-11-01
 
 - **Issue forms.** A bug report asks for:
@@ -420,6 +439,40 @@ published Release notes keep the first wording.
 pages now give `run --rm bootstrap bootstrap --no-models`.
 
 ### Changed
+
+#### Figures are read by default, by the provider chosen for the text (ADR-0094 item 12), 2026-11-02
+
+`VISION_PROVIDER` now defaults to `auto`, in the code and in `.env.example`;
+`contract/config.json` records it as a changed default.
+
+- **`auto` is the provider of `LLM_PROVIDER`,** read as Stage 3 reads it
+  (unset means `anthropic`). It covers `anthropic`, `mistral`, `ollama` and
+  `vllm`, each with the model it would use if `VISION_PROVIDER` named it:
+  - `claude-haiku-4-5` on `anthropic`;
+  - `qwen3.8` on `ollama`, not `OLLAMA_MODEL`;
+  - `VLLM_MODEL` on `vllm`;
+  - `mistral` needs `VISION_MODEL`, and is skipped without it.
+
+  `gemini`, `lmstudio` and any other value have no figure reader and are
+  skipped. A figure never goes to another provider, and a provider named in
+  `VISION_PROVIDER` still overrides `LLM_PROVIDER`.
+- **Under `auto`, Stage 1f is skipped whenever Stage 3 is disabled**
+  (`--no-llm`, `PIPELINE_DISABLED_STAGES=3`): no figure leaves the host when
+  no text does.
+- **The image probe runs before any figure is sent.** Under `auto` a skip logs
+  at INFO; a named provider that cannot serve still warns. The 1f reason in
+  the stage report now says why it was skipped, instead of "no vision backend
+  configured", and a run that read figures records the provider and model.
+  `python -m pipeline.vlm` prints `auto -> <provider>` and a `Why:` line.
+- **Cost.** PDFs only, at most 40 figures per report, each read billed on
+  `anthropic`. On a local model a read took about 40 s on one GPU
+  (ADR-0032).
+- **Upgrades.**
+  - A `.env` copied from 0.1.0 or 0.2.0 says `VISION_PROVIDER=none` and
+    keeps figures off until it says `auto`.
+  - An empty `VISION_PROVIDER=`, a missing line, or a process started
+    without a `.env` now reads figures: an empty value used to mean `none`.
+- **To turn it off:** `VISION_PROVIDER=none`, or `PIPELINE_DISABLED_STAGES=1f`.
 
 #### The image main publishes is the image CI tested, 2026-11-01
 

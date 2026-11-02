@@ -92,7 +92,29 @@ def test_they_are_left_out_when_not_set(stages_imported, monkeypatch):
     for name in _OUTPUT_ENV:
         monkeypatch.delenv(name, raising=False)
     env = run_config.build_run_config()["env"]
-    assert not set(_OUTPUT_ENV) & set(env)
+    # VISION_PROVIDER is the exception: see the next test.
+    assert not (set(_OUTPUT_ENV) - {"VISION_PROVIDER"}) & set(env)
+
+
+@pytest.mark.parametrize("setting", [None, "", "  "])
+def test_an_unset_vision_provider_is_recorded_as_the_auto_it_means(stages_imported, monkeypatch, setting):
+    """Unset it is `auto` (ADR-0094): figures go to the text's provider, and a record
+    without the variable would not say so."""
+    from pipeline import vlm
+
+    if setting is None:
+        monkeypatch.delenv("VISION_PROVIDER", raising=False)
+    else:
+        monkeypatch.setenv("VISION_PROVIDER", setting)
+    assert vlm._setting() == "auto"
+    assert run_config.build_run_config()["env"]["VISION_PROVIDER"] == "auto"
+    assert run_config.captured_env()["VISION_PROVIDER"] == "auto"
+
+
+@pytest.mark.parametrize("setting", ["none", "vllm", "Auto"])
+def test_a_set_vision_provider_is_recorded_as_it_was_set(stages_imported, monkeypatch, setting):
+    monkeypatch.setenv("VISION_PROVIDER", setting)
+    assert run_config.captured_env()["VISION_PROVIDER"] == setting
 
 
 # ── The record of a build (ADR-0086) ─────────────────────────────────────────

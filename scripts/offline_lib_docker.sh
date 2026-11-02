@@ -526,8 +526,8 @@ offline_write_env_hints() {
     count=${#bundled[@]}
     if [ "$count" -gt 1 ]; then
         echo "  →  the bundle carries $count models: ${bundled[*]}"
-        echo "     Stage 1f reads figures only with a vision model. Set in .env:"
-        echo "       VISION_PROVIDER=ollama"
+        echo "     Stage 1f reads figures only with a vision model. With LLM_PROVIDER=ollama"
+        echo "     (VISION_PROVIDER=auto, the default) it reads them once .env names that model:"
         echo "       VISION_MODEL=<one of those models that has the vision capability>"
     fi
 }

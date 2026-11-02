@@ -631,10 +631,17 @@ class _Run:
         if pdf is None:
             self.record("1f", SKIPPED, "no PDF")
             return
-        from pipeline.vlm import get_backend
+        from pipeline.vlm import follows_text, get_backend, skip_reason
+        if "3" in self.opts.disabled and follows_text():
+            # Under `auto` a figure goes where the text goes, and no text goes
+            # anywhere: `--no-llm` sends nothing.  Decided before get_backend(),
+            # so not even a probe leaves the host.  A named VISION_PROVIDER is
+            # the operator's explicit choice and is not asked.
+            self.record("1f", SKIPPED, "auto: Stage 3 is disabled, so figures stay local")
+            return
         vision = get_backend()
         if vision is None:
-            self.record("1f", SKIPPED, "no vision backend configured")
+            self.record("1f", SKIPPED, skip_reason() or "no vision backend")
             return
         from pipeline.figure_store import SqliteReadCache
         from pipeline.stage1f_figures import inject_append, map_verbatim, read_figures
@@ -654,8 +661,13 @@ class _Run:
             logger.info(f"[Stage 1f] {len(reads)} figures, {kept} read via "
                         f"{vision.name}/{vision.model}")
             self.hooks.progress("stage", {"stage": "1f", "label": "Figures",
-                                          "figures": len(reads), "read": kept})
-            self.record("1f", RAN, "", time.monotonic() - t0, figures=len(reads), read=kept)
+                                          "figures": len(reads), "read": kept,
+                                          "provider": vision.name, "model": vision.model})
+            # Said in the stage report, as the run manifest cannot: which
+            # provider and model read the figures depends on VISION_PROVIDER
+            # and LLM_PROVIDER together.
+            self.record("1f", RAN, f"{vision.name}/{vision.model}", time.monotonic() - t0,
+                        figures=len(reads), read=kept)
         except Exception as exc:
             # A figure that cannot be read must never cost the report.
             self.r.figure_spans = []

@@ -12,7 +12,9 @@ import urllib.request
 import zlib
 from dataclasses import dataclass
 from typing import Any, Protocol
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
+
+from dotenv import load_dotenv
 
 from pipeline.env_flags import env_float
 from pipeline.vllm_options import vllm_extra_body
@@ -194,11 +196,18 @@ class FigureRead:
     error: str | None = None
 
 
+def _without_credentials(url: str) -> str:
+    """`url` as scheme://host:port/path, with any `user:password@` dropped: a
+    base URL may carry credentials and a reason or a log line must not."""
+    parts = urlsplit(url)
+    return urlunsplit((parts.scheme, parts.netloc.rpartition("@")[2], parts.path, "", ""))
+
+
 def _web_url(url: str) -> str:
     """`url` if it is http(s).  The base URLs come from the operator's settings
     (OLLAMA_BASE_URL, VLLM_BASE_URL); a `file:` one must not read local files."""
     if urlsplit(url).scheme not in ("http", "https"):
-        raise ValueError(f"vision provider URL must be http(s): {url[:80]!r}")
+        raise ValueError(f"vision provider URL must be http(s): {_without_credentials(url)[:80]!r}")
     return url
 
 
@@ -320,11 +329,19 @@ class VisionBackend(Protocol):
 
 
 class AnthropicVisionBackend:
-    def __init__(self, model: str, timeout: float = 120.0):
+    def __init__(self, model: str, timeout: float = 120.0, log_level: int = logging.WARNING):
         self.name = "anthropic"
         self.model = model
         self.timeout = timeout
         self.max_concurrency = 4
+        # How loudly a failed probe is logged: `get_backend` lowers it under
+        # VISION_PROVIDER=auto, where a skip is an expected outcome.
+        self.log_level = log_level
+        # Why available() said no, for the stage report; "" until it has.
+        self.unavailable_reason = ""
+        # True when the probe itself raised (network, server): not an answer
+        # about the model, so `get_backend` does not keep it.
+        self.probe_failed = False
         self._client: Any = None   # anthropic.Anthropic; the SDK is optional
         self._available: bool | None = None
 
@@ -339,6 +356,8 @@ class AnthropicVisionBackend:
         if self._available is not None:
             return self._available
         if anthropic is None or not os.environ.get("ANTHROPIC_API_KEY", "").strip():
+            self.unavailable_reason = ("the anthropic SDK is not installed" if anthropic is None
+                                       else "no ANTHROPIC_API_KEY")
             self._available = False
             return False
         if _assume_capable():
@@ -357,14 +376,19 @@ class AnthropicVisionBackend:
             if not isinstance(caps, dict) and hasattr(caps, "model_dump"):
                 caps = caps.model_dump()
             ok = bool((caps.get("image_input") or {}).get("supported"))
+            if not ok:
+                self.unavailable_reason = "the model reports no image input"
         except Exception as e:
             # The message is the whole value of this probe: without it a
             # misconfiguration reads as "unavailable" and gives no way to tell a
             # wrong model name from a wrong key from a text-only model.
-            logger.warning(
+            logger.log(
+                self.log_level,
                 "Vision capability probe failed for anthropic/%s: %s: %s",
                 self.model, type(e).__name__, e,
             )
+            self.unavailable_reason = f"the capability probe failed ({type(e).__name__}: {str(e)[:120]})"
+            self.probe_failed = True
             ok = False
         self._available = ok
         return ok
@@ -395,13 +419,18 @@ class AnthropicVisionBackend:
 class OpenAICompatVisionBackend:
     def __init__(self, name: str, base_url: str, model: str,
                  api_key: str | None = None, timeout: float = 120.0,
-                 max_concurrency: int = 1, extra_body: dict | None = None):
+                 max_concurrency: int = 1, extra_body: dict | None = None,
+                 log_level: int = logging.WARNING):
         self.name = name
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.api_key = api_key
         self.timeout = timeout
         self.max_concurrency = max_concurrency
+        # See AnthropicVisionBackend.
+        self.log_level = log_level
+        self.unavailable_reason = ""
+        self.probe_failed = False
         # Server-specific request fields, merged into every chat request —
         # vLLM's `chat_template_kwargs` (see pipeline.vllm_options).
         self.extra_body = dict(extra_body or {})
@@ -441,21 +470,26 @@ class OpenAICompatVisionBackend:
                         entry = m
                         break
                 if entry is None:
+                    shown = _without_credentials(root)
                     available_names = [
                         m.get("name") for m in models if isinstance(m, dict)
                     ]
-                    logger.warning(
+                    logger.log(
+                        self.log_level,
                         "Ollama model %s not found at %s — pulled models: %s",
-                        self.model, root, available_names,
+                        self.model, shown, available_names,
                     )
+                    self.unavailable_reason = f"{self.model} is not pulled at {shown}"
                     self._available = False
                     return False
                 ok = "vision" in (entry.get("capabilities") or [])
                 if not ok:
-                    logger.warning(
+                    logger.log(
+                        self.log_level,
                         "Ollama model %s has no `vision` capability (has: %s)",
                         self.model, entry.get("capabilities"),
                     )
+                    self.unavailable_reason = "the model has no `vision` capability"
             elif self.name == "vllm":
                 # vLLM publishes no capability flag, so the probe asks twice.
                 # First the served ids: vLLM matches the name exactly — the
@@ -464,10 +498,13 @@ class OpenAICompatVisionBackend:
                 data = _http_get_json(f"{self.base_url}/models", self._headers(), self.timeout)
                 served = [m.get("id") for m in data.get("data", []) if isinstance(m, dict)]
                 if self.model not in served:
-                    logger.warning(
+                    shown = _without_credentials(self.base_url)
+                    logger.log(
+                        self.log_level,
                         "vLLM at %s does not serve %s — served: %s",
-                        self.base_url, self.model, served,
+                        shown, self.model, served,
                     )
+                    self.unavailable_reason = f"{shown} does not serve {self.model}"
                     self._available = False
                     return False
                 # Then one real image, one output token.  vLLM refuses image
@@ -489,18 +526,24 @@ class OpenAICompatVisionBackend:
                 ok = True
             else:
                 if not self.api_key:
-                    logger.warning("%s vision backend needs an API key", self.name)
+                    logger.log(self.log_level, "%s vision backend needs an API key", self.name)
+                    self.unavailable_reason = f"no {self.name.upper()}_API_KEY"
                     self._available = False
                     return False
                 data = _http_get_json(
                     f"{self.base_url}/models/{self.model}", self._headers(), self.timeout
                 )
                 ok = bool((data.get("capabilities") or {}).get("vision"))
+                if not ok:
+                    self.unavailable_reason = "the model reports no vision capability"
         except Exception as e:
-            logger.warning(
+            logger.log(
+                self.log_level,
                 "Vision capability probe failed for %s/%s: %s: %s",
                 self.name, self.model, type(e).__name__, e,
             )
+            self.unavailable_reason = f"the probe failed ({type(e).__name__}: {str(e)[:120]})"
+            self.probe_failed = True
             ok = False
         self._available = ok
         return ok
@@ -550,6 +593,13 @@ class _Unset:
 
 _UNSET = _Unset()
 _backend_cache: VisionBackend | None | _Unset = _UNSET
+_skip_reason = ""
+
+#: What Stage 3 falls back to when LLM_PROVIDER is unset
+#: (pipeline/stage3_llm.py reads the same default; tests/test_vlm.py keeps the
+#: two equal).  Not imported from there: that module loads the whole LLM stack.
+_TEXT_PROVIDER_DEFAULT = "anthropic"
+_VISION_PROVIDERS = ("anthropic", "mistral", "ollama", "vllm")
 
 
 def _assume_capable() -> bool:
@@ -610,49 +660,79 @@ def _ollama_concurrency() -> int:
     return n
 
 
-def get_backend() -> VisionBackend | None:
-    """Get or create the configured vision backend."""
-    global _backend_cache
-    # isinstance, not `is not`: only a type test lets mypy narrow the union
-    # away from the sentinel. There is exactly one _Unset instance, so the
-    # two are equivalent at runtime.
-    if not isinstance(_backend_cache, _Unset):
-        return _backend_cache
+def _setting() -> str:
+    """VISION_PROVIDER as set: `auto` when it is unset or empty."""
+    return os.environ.get("VISION_PROVIDER", "").strip().lower() or "auto"
 
-    provider = os.environ.get("VISION_PROVIDER", "none").strip().lower()
-    if provider in ("", "none"):
-        logger.info("VISION_PROVIDER not set - Stage 1f disabled")
-        _backend_cache = None
-        return None
 
-    valid_providers = ["anthropic", "mistral", "ollama", "vllm"]
-    if provider not in valid_providers:
-        logger.warning("Unknown VISION_PROVIDER %s. Valid: %s", provider, valid_providers)
-        _backend_cache = None
-        return None
+def follows_text() -> bool:
+    """True when figures go wherever the text goes (VISION_PROVIDER is `auto`).
+    A named provider is the operator's explicit choice and does not."""
+    return _setting() == "auto"
+
+
+def _text_provider() -> str:
+    """The provider chosen for the text, read as Stage 3 reads it (no strip)."""
+    return os.environ.get("LLM_PROVIDER", _TEXT_PROVIDER_DEFAULT).lower()
+
+
+def _resolve_backend() -> tuple[VisionBackend | None, str, bool]:
+    """The backend VISION_PROVIDER asks for, or why there is none, and whether
+    that answer is final.  It is not when the probe itself raised: a network
+    error says nothing about the model, so the next call asks again.
+
+    `auto` (the default) is the provider chosen for the text, LLM_PROVIDER,
+    with the model it would use if VISION_PROVIDER named it, and the same
+    capability probe.  Never another provider: a figure goes where the text
+    goes.  A skip under `auto` is the normal outcome of an install without a
+    vision-capable model, so it is logged at INFO; a named provider that
+    cannot serve is a misconfiguration and warns.
+    """
+    setting = _setting()
+    if setting == "none":
+        logger.info("VISION_PROVIDER=none - Stage 1f disabled")
+        return None, "VISION_PROVIDER=none", True
+
+    auto = setting == "auto"
+    level = logging.INFO if auto else logging.WARNING
+    if auto:
+        provider = _text_provider()
+        if provider not in _VISION_PROVIDERS:
+            reason = f"auto: LLM_PROVIDER={provider or '(empty)'} has no vision backend"
+            logger.info("%s - Stage 1f will be skipped", reason)
+            return None, reason, True
+        label, who = f"VISION_PROVIDER=auto (LLM_PROVIDER={provider})", f"auto: {provider}"
+    else:
+        provider = setting
+        if provider not in _VISION_PROVIDERS:
+            valid = ["auto", "none", *_VISION_PROVIDERS]
+            logger.warning("Unknown VISION_PROVIDER %s. Valid: %s", provider, valid)
+            return None, f"unknown VISION_PROVIDER={provider}", True
+        label, who = f"VISION_PROVIDER={provider}", f"VISION_PROVIDER={provider}"
 
     model = os.environ.get("VISION_MODEL", "").strip()
     if not model:
         model = _default_model(provider)
         if not model:
-            logger.warning(
-                "VISION_PROVIDER=%s requires VISION_MODEL to be set — no default "
-                "vision model is assumed for this provider", provider,
+            logger.log(
+                level,
+                "%s requires VISION_MODEL to be set — no default "
+                "vision model is assumed for this provider", label,
             )
-            _backend_cache = None
-            return None
+            names = "VLLM_MODEL or VISION_MODEL" if provider == "vllm" else "VISION_MODEL"
+            return None, f"{who} has no vision model: set {names}", True
 
     timeout = env_float("VISION_TIMEOUT_S", default=120.0)
 
     if provider == "anthropic":
-        backend: VisionBackend = AnthropicVisionBackend(model, timeout)
+        backend: VisionBackend = AnthropicVisionBackend(model, timeout, log_level=level)
     elif provider == "ollama":
         base = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
         # The placeholder is sent when no key is set, as it always was.
         backend = OpenAICompatVisionBackend(
             "ollama", f"{base}/v1", model,
             api_key=os.environ.get("OLLAMA_API_KEY", "").strip() or "ollama",
-            timeout=timeout, max_concurrency=_ollama_concurrency(),
+            timeout=timeout, max_concurrency=_ollama_concurrency(), log_level=level,
         )
     elif provider == "vllm":
         base = os.environ.get("VLLM_BASE_URL", "http://localhost:8000").rstrip("/")
@@ -661,28 +741,59 @@ def get_backend() -> VisionBackend | None:
             "vllm", f"{base}/v1", model,
             api_key=os.environ.get("VLLM_API_KEY", "").strip() or None,
             timeout=timeout, max_concurrency=_ollama_concurrency(),
-            extra_body=vllm_extra_body(),
+            extra_body=vllm_extra_body(), log_level=level,
         )
     else: # mistral
         api_key = os.environ.get("MISTRAL_API_KEY", "")
         backend = OpenAICompatVisionBackend(
             "mistral", _MISTRAL_BASE, model,
-            api_key=api_key, timeout=timeout, max_concurrency=4,
+            api_key=api_key, timeout=timeout, max_concurrency=4, log_level=level,
         )
 
     if not backend.available():
-        logger.warning("Vision backend %s/%s unavailable - Stage 1f will be skipped", provider, model)
-        _backend_cache = None
-        return None
+        # A backend that cannot say why (a test double, a future provider) gets the generic line.
+        detail = (getattr(backend, "unavailable_reason", "")
+                  or "no key, server unreachable, or the model cannot read images")
+        logger.log(level, "Vision backend %s/%s unavailable (%s) - Stage 1f will be skipped",
+                   provider, model, detail)
+        prefix = "auto: " if auto else ""
+        return (None, f"{prefix}{provider}/{model} unavailable ({detail})",
+                not getattr(backend, "probe_failed", False))
 
     logger.info("Vision backend ready: %s/%s", provider, model)
-    _backend_cache = backend
+    return backend, "", True
+
+
+def get_backend() -> VisionBackend | None:
+    """Get or create the configured vision backend.
+
+    None means Stage 1f is skipped; `skip_reason()` says why.  A definite
+    answer is kept for the process; one that came from a probe that raised is
+    not, so a network error on the first PDF of a batch does not skip the rest."""
+    global _backend_cache, _skip_reason
+    # isinstance, not `is not`: only a type test lets mypy narrow the union
+    # away from the sentinel. There is exactly one _Unset instance, so the
+    # two are equivalent at runtime.
+    if not isinstance(_backend_cache, _Unset):
+        return _backend_cache
+
+    backend, reason, final = _resolve_backend()
+    _skip_reason = reason
+    if final:
+        _backend_cache = backend
     return backend
+
+
+def skip_reason() -> str:
+    """Why the last `get_backend()` found no backend: "" when it found one or has not run."""
+    return _skip_reason
+
 
 def reset_backend_cache() -> None:
     """Reset the backend cache."""
-    global _backend_cache
+    global _backend_cache, _skip_reason
     _backend_cache = _UNSET
+    _skip_reason = ""
 
 
 def _main(argv: list[str] | None = None) -> int:
@@ -694,19 +805,26 @@ def _main(argv: list[str] | None = None) -> int:
     """
     import sys
 
+    # As Stage 3's import does: the check must resolve as the pipeline would,
+    # and `auto` reads LLM_PROVIDER, which a host checkout keeps in .env.
+    load_dotenv()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     argv = sys.argv[1:] if argv is None else argv
 
-    provider = os.environ.get("VISION_PROVIDER", "none").strip().lower() or "none"
+    setting = _setting()
+    provider = setting
+    if setting == "auto":
+        text_provider = _text_provider()
+        provider = text_provider if text_provider in _VISION_PROVIDERS else "none"
     model = os.environ.get("VISION_MODEL", "").strip() or _default_model(provider)
-    print(f"VISION_PROVIDER = {provider}")
+    print(f"VISION_PROVIDER = {setting}" + (f" -> {provider}" if setting == "auto" else ""))
     print(f"VISION_MODEL    = {model or '(unset, no default for this provider)'}")
     print(f"probe waived    = {_assume_capable()}")
 
     backend = get_backend()
     if backend is None:
         print("\nRESULT: no usable vision backend — Stage 1f would be skipped.")
-        print("The warning above says why.")
+        print(f"Why: {skip_reason()}")
         return 1
 
     print(f"\nRESULT: {backend.name}/{backend.model} is ready "

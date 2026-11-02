@@ -39,8 +39,7 @@ def enrichment_enabled() -> bool:
     """Is the CIRCL lookup allowed to reach the network?
 
     Off by default. Stages 1, 2, 4 and 5 are documented as fully offline, and
-    this adds an external call to Stage 2 — so it is opt-in, the same way
-    VISION_PROVIDER=none keeps Stage 1f off until asked.
+    this adds an external call to Stage 2 — so it is opt-in.
     """
     return env_bool("CVE_ENRICHMENT", default=False)
 
