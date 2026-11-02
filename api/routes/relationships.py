@@ -2,7 +2,7 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from api.db import _lock, get_conn, now_iso, transaction
 from api.routes._common import require_job
@@ -64,7 +64,8 @@ class RelCreate(BaseModel):
     source_value: str
     relationship_type: str
     target_value: str
-    confidence: float = 0.8
+    # The scale the store and the STIX export use (0 to 1; the export multiplies by 100).
+    confidence: float = Field(0.8, ge=0, le=1, allow_inf_nan=False)
     evidence_text: str | None = None
     evidence_label: str = "reported"
     start_time: str | None = None
@@ -161,6 +162,7 @@ def _row_to_dict(row) -> dict:
 @router.get("")
 def list_relationships(job_id: str):
     with get_conn() as conn:
+        require_job(conn, job_id)
         rows = conn.execute(
             "SELECT * FROM relationships WHERE job_id=? ORDER BY relationship_type",
             (job_id,),
@@ -384,7 +386,7 @@ def update_relationship(job_id: str, rel_id: str, patch: RelPatch):
                     if decided == 0:
                         raise HTTPException(404, "Relationship not found")
             updated = conn.execute(
-                "SELECT * FROM relationships WHERE id=?", (rel_id,)
+                "SELECT * FROM relationships WHERE id=? AND job_id=?", (rel_id, job_id)
             ).fetchone()
     return _row_to_dict(updated)
 

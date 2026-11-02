@@ -103,6 +103,14 @@ def git_command(corpus: dict) -> list[str] | None:
     return ["git", *GIT_HARDENING, "clone", "--depth", "1", remote, str(path)]
 
 
+def check_git_remote(remote: str) -> None:
+    """Raise ValueError unless `remote` is https://: both the API sync and the CLI
+    call it before git runs. The registry can come from a YAML file nobody
+    validated over the API."""
+    if not remote.lower().startswith("https://"):
+        raise ValueError(f"git remote refused: only https:// remotes are fetched ({remote[:80]!r})")
+
+
 def _download(url: str, dest: Path, *, timeout: int) -> int:
     """Stream `url` into `dest` in _CHUNK-sized blocks; returns the bytes written.
     Raises URLError/OSError — the caller decides what a failure means."""
@@ -286,10 +294,10 @@ def sync_corpus(corpus: dict, *, timeout: int = 900) -> tuple[bool, str]:
         return False, "no path configured"
     if cmd is None:
         return False, "no git remote or tarball URL — this corpus's path is managed manually"
-    remote = str(corpus.get("git") or "")
-    if not remote.lower().startswith("https://"):
-        # The registry can come from a YAML file nobody validated over the API.
-        return False, f"git remote refused: only https:// remotes are fetched ({remote[:80]!r})"
+    try:
+        check_git_remote(str(corpus.get("git") or ""))
+    except ValueError as e:
+        return False, str(e)
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,  # noqa: S603 — https remote
                               env={**os.environ, **GIT_ENV})

@@ -224,6 +224,18 @@ describe('Review — what the page says about itself', () => {
     fireEvent.keyDown(window, { key: 'f' })
     expect(api.finalizeJob).toHaveBeenCalledWith('job-1')
   }, 20_000)
+
+  it('does not act on a letter typed into a contenteditable element', async () => {
+    renderReview()
+    await opened()
+    const editor = document.createElement('div')
+    // jsdom has no layout, so isContentEditable is not computed for us.
+    Object.defineProperty(editor, 'isContentEditable', { value: true })
+    document.body.appendChild(editor)
+    fireEvent.keyDown(editor, { key: 'f' })
+    expect(api.finalizeJob).not.toHaveBeenCalled()
+    editor.remove()
+  }, 20_000)
 })
 
 describe('Review — leaving the page with an edit waiting', () => {

@@ -2,7 +2,7 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from api.db import _lock, get_conn, now_iso, transaction
 from api.routes._common import require_job
@@ -34,7 +34,8 @@ class EntityCreate(BaseModel):
     value: str
     entity_type: str
     context: str = ""
-    confidence: float = 1.0
+    # The scale the store and the STIX export use (0 to 1; the export multiplies by 100).
+    confidence: float = Field(1.0, ge=0, le=1, allow_inf_nan=False)
     mitre_id: str | None = None
 
 
@@ -75,6 +76,7 @@ def _check_origin(origin: str) -> None:
 @router.get("")
 def list_entities(job_id: str):
     with get_conn() as conn:
+        require_job(conn, job_id)
         rows = conn.execute(
             "SELECT * FROM entities WHERE job_id=? ORDER BY entity_type, value",
             (job_id,),

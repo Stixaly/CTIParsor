@@ -42,7 +42,7 @@ def test_entities_are_listed_by_type_then_value(temp_db_client, job):
     _create(temp_db_client, job, "beta", "malware")
     _create(temp_db_client, job, "Alpha", "malware")
     assert [e["value"] for e in temp_db_client.get(_url(job)).json()] == ["Alpha", "beta", "Zebra"]
-    assert temp_db_client.get(_url("other-job")).json() == []
+    assert temp_db_client.get(_url("other-job")).status_code == 404
 
 
 def test_create_refuses_an_unknown_type_or_job(temp_db_client, job):

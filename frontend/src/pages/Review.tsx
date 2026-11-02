@@ -680,7 +680,7 @@ export default function Review() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target as HTMLElement).isContentEditable) return
       if (e.ctrlKey || e.metaKey || e.altKey) return
       if (e.key === '?')                              { setKbdOpen(true); e.preventDefault() }
       else if (e.key === 'Escape')                    { setKbdOpen(false); setFocusedId(null); setDrawer(null) }

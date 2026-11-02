@@ -11,6 +11,7 @@ import { splitDrop } from '../components/dropFiles'
 import type { IgnoredFile } from '../components/dropFiles'
 import KanbanCard from '../components/dashboard/KanbanCard'
 import ActivityCard from '../components/dashboard/ActivityCard'
+import { relTime } from '../components/dashboard/relTime'
 
 // ── Design tokens (fonts as constants — avoids repeating the fallback stack) ──
 
@@ -30,16 +31,6 @@ const clockTime = (ms: number) =>
   new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-/** ISO timestamp → "3m ago / 2h ago / yesterday / 4d ago" */
-function relTime(iso: string): string {
-  const mins = (Date.now() - new Date(iso).getTime()) / 60_000
-  if (mins < 1)    return 'just now'
-  if (mins < 60)   return `${Math.round(mins)}m ago`
-  if (mins < 1440) return `${Math.round(mins / 60)}h ago`
-  const d = Math.round(mins / 1440)
-  return d === 1 ? 'yesterday' : `${d}d ago`
-}
 
 /**
  * Average pipeline duration (created_at → updated_at) for completed jobs.

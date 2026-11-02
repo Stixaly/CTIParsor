@@ -754,6 +754,12 @@ def _upload_path_for(job_id: str) -> str | None:
     """
     try:
         matches = sorted(uploads_dir().glob(f"{job_id}.*"))
+        # A URL capture leaves {job_id}.pdf (the archive the source viewer shows)
+        # beside {job_id}.txt, the text the pipeline reads (ADR-0029): the text wins.
+        if any(m.suffix == ".pdf" for m in matches):
+            texts = [m for m in matches if m.suffix == ".txt"]
+            if texts:
+                return str(texts[0])
         if matches:
             return str(matches[0])
     except Exception as exc:
@@ -1248,9 +1254,11 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
     original_filename = job["original_filename"]
     report_name       = re.sub(r"[^\w\-]", "_", Path(original_filename).stem)
 
-    # Locate the uploaded file to recompute its hash (stable — file never changes)
+    # Locate the uploaded file to recompute its hash (stable — file never changes):
+    # the file the run read, so a URL capture hashes its .txt and not its .pdf.
     upload_matches = list(uploads_dir().glob(f"{job_id}.*"))
-    source_hash, source_bytes = load_file_bytes(upload_matches[0] if upload_matches else None)
+    _ingested = _upload_path_for(job_id)
+    source_hash, source_bytes = load_file_bytes(Path(_ingested) if _ingested else None)
 
     # The report's publication date, recomputed from the stored source and
     # text exactly as the run computed it (ADR-0063 §4) — deterministic, so

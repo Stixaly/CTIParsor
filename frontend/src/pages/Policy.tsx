@@ -790,7 +790,9 @@ function IOModal({ rules, globalMode, onClose, onImport }: {
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a')
     a.href = url; a.download = 'relationship-policy.json'; a.click()
-    URL.revokeObjectURL(url)
+    // Defer revocation so the browser has time to start the download before
+    // the blob URL is invalidated (revoking synchronously breaks Firefox).
+    setTimeout(() => URL.revokeObjectURL(url), 100)
   }
   const apply = () => {
     try {

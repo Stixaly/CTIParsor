@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 
 _MAX_FETCH = 25
 _MAX_TOTAL_SECONDS = 30.0
-_CVE_PATTERN = compile_pattern(r"^CVE-[0-9]{4}-[0-9]{4,7}$")
+# The sequence number is 4 to 12 digits (CVE-2024-12345678 exists), as in stage2_extraction.
+_CVE_PATTERN = compile_pattern(r"^CVE-[0-9]{4}-[0-9]{4,12}$")
 
 
 class CirclUnavailable(Exception):

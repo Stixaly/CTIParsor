@@ -88,8 +88,11 @@ if _spacy_module is not None and not _SKIP_HEAVY:
 _CVE_DASH = "\\-‐-―−﹣－­"
 # Zero-width / invisible separators that can appear between CVE components.
 _CVE_ZW = "​‌‍⁠﻿"
+# The sequence number is 4 to 12 digits: CVE-2024-12345678 is an id, and a
+# bound of 7 cut it to CVE-2024-1234567.  A longer run is glued digits, refused
+# by _extract_cves rather than cut.
 _CVE_PATTERN = _compile_pattern(
-    rf"CVE[{_CVE_ZW}]*[{_CVE_DASH}][{_CVE_ZW}]*[0-9]{{4}}[{_CVE_ZW}]*[{_CVE_DASH}][{_CVE_ZW}]*[0-9]{{4,7}}",
+    rf"CVE[{_CVE_ZW}]*[{_CVE_DASH}][{_CVE_ZW}]*[0-9]{{4}}[{_CVE_ZW}]*[{_CVE_DASH}][{_CVE_ZW}]*[0-9]{{4,12}}",
     re.IGNORECASE,
 )
 _CVE_ZW_PATTERN = _compile_pattern(f"[{_CVE_ZW}]")
@@ -215,12 +218,24 @@ _DOMAIN_EXTRA_NON_TLD_EXTS = (
 _DOMAIN_NON_TLD_EXTS = "|".join(sorted(
     set(_MALWARE_FILE_EXTS.split("|")) | set(_DOMAIN_EXTRA_NON_TLD_EXTS)
 ))
+# Up to 126 labels: a bound of 5 cut a deeper name and kept a wrong one
+# ("a.b.c.d.e.f.example.com" gave "b.c.d.e.f.example").  _domain_accepted
+# applies the 253-character cap of a DNS name.
 _DOMAIN_PATTERN = _compile_pattern(
-    r"\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.){1,5}"
+    r"\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.){1,126}"
+    # The two-letter lookahead is tried first: the extension alternation after it
+    # costs about six times more, and runs at each of the up to 126 backtracking steps.
+    r"(?=[a-zA-Z]{2})"
     rf"(?!(?:{_DOMAIN_NON_TLD_EXTS})\b)"
     r"[a-zA-Z]{2,12}\b",
     re.IGNORECASE,
 )
+_DOMAIN_MAX_LENGTH = 253
+
+
+def _domain_accepted(domain: str) -> bool:
+    """Is this `_DOMAIN_PATTERN` match short enough to be a DNS name?"""
+    return len(domain) <= _DOMAIN_MAX_LENGTH
 
 # URLs complètes (http/https/ftp + domaine + chemin optionnel)
 _URL_PATTERN = _compile_pattern(
@@ -345,6 +360,19 @@ def _half_bracket_repl(m: re.Match) -> str:
         return "."
     return m.group()
 
+# The spellings of "@" that a defanged dot can sit beside in an address.
+_AT_SPELLINGS = ("@", "[@]", "(@)", "{@}", "[at]", "(at)")
+
+
+def _beside_at(match: re.Match) -> bool:
+    """Is the match glued to an "@" on either side: "me@[.]evil", "me[.]@evil"?"""
+    text, (start, end) = match.string, match.span()
+    before = text[max(0, start - 4):start].lower()
+    after = text[end:end + 4].lower()
+    return (any(before.endswith(s) for s in _AT_SPELLINGS)
+            or any(after.startswith(s) for s in _AT_SPELLINGS))
+
+
 def _defang_repl(match: re.Match) -> str:
     m = match.group(0).lower()
 
@@ -363,7 +391,9 @@ def _defang_repl(match: re.Match) -> str:
     if 'at' in m or '@' in m:
         return '@'
     if 'dot' in m or '.' in m or '{' in m:
-        return '.'
+        # Beside an "@" the dot is the address's own separator: "me@[.]evil[.]com"
+        # is me@evil.com, not me@.evil.com.
+        return '' if _beside_at(match) else '.'
     if '//' in m:
         return '//'
     if '/' in m:
@@ -622,6 +652,8 @@ def _extract_network_iocs(text: str) -> list[RawEntity]:
                 url_hostnames.add(parts[1].lower())
     for m in _DOMAIN_PATTERN.finditer(text):
         domain = m.group().lower()
+        if not _domain_accepted(domain):
+            continue
         if domain not in url_hostnames:
             results.append(RawEntity(value=domain, entity_type=EntityType.DOMAIN))
 
@@ -864,6 +896,9 @@ def _extract_cves(text: str) -> list[RawEntity]:
     seen: set[str] = set()
     results: list[RawEntity] = []
     for m in _CVE_PATTERN.finditer(text):
+        # A letter glued to the id means it was cut out of a longer word ("XCVE-2024-3400").
+        if glued_to_a_word(text, *m.span()):
+            continue
         # Strip zero-width separators and normalise any dash variant to "-"
         # so "CVE​‑ 2024– 1234" becomes the canonical "CVE-2024-1234".
         v = _CVE_ZW_PATTERN.sub("", m.group())

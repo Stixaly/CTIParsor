@@ -206,4 +206,15 @@ describe('confPct', () => {
     expect(confPct(0.9)).toBe(90)
     expect(confPct(90)).toBe(90)
   })
+
+  it('shows 0 for a confidence that is not a finite number', () => {
+    expect(confPct(NaN)).toBe(0)
+    expect(confPct(Infinity)).toBe(0)
+    expect(confPct(-Infinity)).toBe(0)
+  })
+
+  it('keeps the percentage within 0 to 100', () => {
+    expect(confPct(-0.5)).toBe(0)
+    expect(confPct(150)).toBe(100)
+  })
 })

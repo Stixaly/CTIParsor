@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import urllib.request
 from pathlib import Path
 
@@ -29,6 +30,14 @@ REPO = "MISP/misp-warninglists"
 COMMIT = "af01b1d67ae78b2064c2823ebfd9078d6e7828c9"     # main on 2026-10-11
 LISTS = ("security-provider-blogpost", "automated-malware-analysis", "tranco10k")
 OUT = Path(__file__).resolve().parent.parent / "pipeline" / "data" / "warninglists.json"
+_COMMIT_SHA = re.compile(r"[0-9a-f]{7,40}")     # fullmatch: `$` would accept a trailing newline
+
+
+def _commit(value: str) -> str:
+    """A commit SHA, checked before it is put into the URL."""
+    if not _COMMIT_SHA.fullmatch(value):
+        raise argparse.ArgumentTypeError(f"not a commit SHA (7 to 40 lower-case hex digits): {value!r}")
+    return value
 
 
 def _fetch(commit: str, name: str) -> dict:
@@ -39,7 +48,7 @@ def _fetch(commit: str, name: str) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--commit", default=COMMIT, help="misp-warninglists commit to vendor")
+    parser.add_argument("--commit", type=_commit, default=COMMIT, help="misp-warninglists commit to vendor")
     args = parser.parse_args()
     lists = {}
     for name in LISTS:

@@ -77,6 +77,23 @@ def test_a_corpus_git_cannot_describe_is_skipped_and_is_not_a_failure(monkeypatc
     assert out.splitlines()[-1] == f"[sync] 0/1 corpora synced, 0 failed. {LAST}"
 
 
+def test_a_remote_that_is_not_https_fails_before_git_runs(monkeypatch, capsys, tmp_path):
+    """The https check runs before git: the corpus fails with the API's message,
+    git never receives its command, the other corpora still sync, and the exit
+    code says one failed (package_offline_corpora.sh reads it)."""
+    ran: list = []
+    monkeypatch.setattr(sc.subprocess, "run", lambda cmd, **kwargs: ran.append(cmd))
+    ssh = {"name": "ssh", "git": "ssh://git@example.org/x.git", "path": str(tmp_path / "ssh")}
+    good = {"name": "good", "git": "https://example.org/good.git", "path": str(tmp_path / "good")}
+
+    status, out = sync(monkeypatch, capsys, [ssh, good], command=sc.git_command, run=sc._run)
+
+    assert status == 1
+    assert "! ssh: git remote refused: only https:// remotes are fetched ('ssh://git@example.org/x.git')" in out
+    assert [cmd[-1] for cmd in ran] == [str(tmp_path / "good")]
+    assert out.splitlines()[-1] == f"[sync] 1/2 corpora synced, 1 failed. {LAST}"
+
+
 def test_no_corpus_at_all_exits_0(monkeypatch, capsys):
     status, out = sync(monkeypatch, capsys, [])
 

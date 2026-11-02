@@ -17,13 +17,15 @@ import re
 import sys
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import quote
 
 KEEP = {"torch"}            # installed from the PyTorch index, never from PyPI
 PIN = re.compile(r"^([A-Za-z0-9_.-]+)==([^\s;\\]+)")
 
 
 def pypi_hashes(name: str, version: str) -> list[str]:
-    url = f"https://pypi.org/pypi/{name}/{version}/json"
+    # The version is free text from the lock (`1.0/../x`, `1.0?x`): quoted, it stays one path segment.
+    url = f"https://pypi.org/pypi/{quote(name, safe='')}/{quote(version, safe='')}/json"
     with urllib.request.urlopen(url, timeout=60) as response:
         files = json.load(response)["urls"]
     hashes = sorted({f["digests"]["sha256"] for f in files})
