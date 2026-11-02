@@ -218,13 +218,15 @@ _DOMAIN_EXTRA_NON_TLD_EXTS = (
 _DOMAIN_NON_TLD_EXTS = "|".join(sorted(
     set(_MALWARE_FILE_EXTS.split("|")) | set(_DOMAIN_EXTRA_NON_TLD_EXTS)
 ))
-# Up to 126 labels: a bound of 5 cut a deeper name and kept a wrong one
-# ("a.b.c.d.e.f.example.com" gave "b.c.d.e.f.example").  _domain_accepted
-# applies the 253-character cap of a DNS name.
+# Up to 30 labels: a bound of 5 cut a deeper name and kept a wrong one
+# ("a.b.c.d.e.f.example.com" gave "b.c.d.e.f.example").  Not the 126 DNS
+# allows: the cost grows with the bound at each start on a run of dots
+# (tests/test_re2_fallbacks.py), and 126 took 1.01 s on CI against its 1 s
+# budget.  _domain_accepted applies the 253-character cap of a DNS name.
 _DOMAIN_PATTERN = _compile_pattern(
-    r"\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.){1,126}"
+    r"\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.){1,30}"
     # The two-letter lookahead is tried first: the extension alternation after it
-    # costs about six times more, and runs at each of the up to 126 backtracking steps.
+    # costs about six times more, and runs at each of the up to 30 backtracking steps.
     r"(?=[a-zA-Z]{2})"
     rf"(?!(?:{_DOMAIN_NON_TLD_EXTS})\b)"
     r"[a-zA-Z]{2,12}\b",

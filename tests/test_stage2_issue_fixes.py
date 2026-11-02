@@ -44,7 +44,7 @@ class TestRefangBesideAt:
 
 
 class TestLongDomains:
-    """#255 — up to 126 labels; a name over 253 characters is refused."""
+    """#255 — up to 30 labels; a name over 253 characters is refused."""
 
     def test_a_domain_of_more_than_five_labels_is_kept_whole(self):
         assert _values("Seen at a.b.c.d.e.f.example.com today.", EntityType.DOMAIN) == [

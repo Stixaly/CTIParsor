@@ -23,8 +23,8 @@ theme.
   same file the run read.
 - **Stage 2 extraction fixes.** A defanged dot beside an `@` no longer leaves
   an invalid address (`me@[.]evil[.]com` is `me@evil.com`, #252). A host name
-  of more than six labels is kept whole instead of losing its first label and
-  its TLD (#255); one over 253 characters is refused. A CVE sequence number of
+  of 6 to 30 labels is kept whole instead of losing its first label and its
+  TLD (#255); one over 253 characters is refused. A CVE sequence number of
   8 to 12 digits is kept whole, by the extraction and by the Stage 2f check,
   where 7 used to cut it (#256, #258), and a CVE glued to a word or to more
   digits (`XCVE-2024-3400`) is not extracted (#257).
