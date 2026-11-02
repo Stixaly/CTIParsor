@@ -9,46 +9,6 @@ theme.
 
 ## [Unreleased]
 
-- **A PDF whose text is drawn as glyph outlines is OCR'd.** "Microsoft Print
-  to PDF" writes a page that way when it cannot embed its fonts: no
-  character, no full-page image, only small filled paths. Such a page was
-  read as text and gave nothing, so the job ran on an empty report. A page
-  with almost no text and at least 100 glyph-sized filled paths is now a scan,
-  OCR'd like one; a vector logo stays below that.
-- **A URL capture runs on its DOM text again.** The worker re-derives a job's
-  file from `uploads/`, and picked `{job}.pdf` before `{job}.txt` in
-  alphabetical order, so every capture ran on the PDF archive: ADR-0029
-  measured 72 % of the observables kept that way against 99.6 % from the DOM
-  text. The text now wins when both exist (#259), and the finalize hashes the
-  same file the run read.
-- **Stage 2 extraction fixes.** A defanged dot beside an `@` no longer leaves
-  an invalid address (`me@[.]evil[.]com` is `me@evil.com`, #252). A host name
-  of 6 to 30 labels is kept whole instead of losing its first label and its
-  TLD (#255); one over 253 characters is refused. A CVE sequence number of
-  8 to 12 digits is kept whole, by the extraction and by the Stage 2f check,
-  where 7 used to cut it (#256, #258), and a CVE glued to a word or to more
-  digits (`XCVE-2024-3400`) is not extracted (#257).
-- **The API checks what it was given.** `confidence` on a new entity or
-  relationship must be a finite number between 0 and 1, the scale the store
-  and the STIX export use; a NaN used to crash the bundle build (#264). This
-  adds a minimum and a maximum to the OpenAPI contract, recorded with
-  `--accept-breaking` as a fix that makes the route do what it documents.
-  Listing the entities or relationships of an unknown job answers 404 instead
-  of `[]` (#263). A write with `Origin: null` and no `Sec-Fetch-Site` header
-  is refused as cross-site (#260). The relationship update reads its result
-  back within its job (#266).
-- **Web UI.** The Policy and Coverage exports no longer revoke their download
-  before Firefox reads it (#267); a confidence that is not a finite number
-  shows 0 % instead of `NaN%` (#268); an unreadable job date shows `—` instead
-  of `NaNd ago` (#269); Review's single-key shortcuts ignore typing in an
-  editable element (#270).
-- **Tooling.** `.secrets/` is created mode 700: the password file inside stays
-  644 for the containers' users, but another local account can no longer
-  reach it (#271). `build_warninglists.py` refuses a `--commit` that is not a
-  hex SHA, and `lock_pypi_hashes.py` quotes the name and version it puts in
-  the PyPI URL (#272, #273). `sync_corpora.py` refuses a git remote that is
-  not https, with the API's check, and counts it as a failure (#274).
-
 ## [0.3.0] - 2026-11-02
 
 CTIParsor 0.3.0 is the release on the way to 1.0: it ships the checks 1.0
@@ -78,7 +38,10 @@ will rest on (ADR-0094, accepted) and changes three defaults.
 - **The image installs only Chromium's headless shell:** the full Chrome
   build it carried bundled Google's Widevine module, which may not be
   redistributed.
-- **Fixed:** an unedited install no longer fails Stage 3 on every report, the
+- **Fixed:** the defects reported as #252 to #276 (Stage 2 extraction, the
+  API's input checks, the web UI, tooling), a URL capture that ran on its PDF
+  archive instead of its DOM text, a PDF drawn as glyph outlines that gave an
+  empty report; an unedited install no longer fails Stage 3 on every report, the
   backup no longer leaves `umask 077` in the shell, and the air-gapped install
   works again.
 
@@ -752,6 +715,48 @@ revision that has it (`BUNDLE_AFFECTING`, scope `mapping`, ADR-0086).
   air-gapped host.
 
 ### Fixed
+
+#### Defects reported before the release (#252 to #276), and a PDF drawn as glyph outlines, 2026-11-02
+
+- **A PDF whose text is drawn as glyph outlines is OCR'd.** "Microsoft Print
+  to PDF" writes a page that way when it cannot embed its fonts: no
+  character, no full-page image, only small filled paths. Such a page was
+  read as text and gave nothing, so the job ran on an empty report. A page
+  with almost no text and at least 100 glyph-sized filled paths is now a scan,
+  OCR'd like one; a vector logo stays below that.
+- **A URL capture runs on its DOM text again.** The worker re-derives a job's
+  file from `uploads/`, and picked `{job}.pdf` before `{job}.txt` in
+  alphabetical order, so every capture ran on the PDF archive: ADR-0029
+  measured 72 % of the observables kept that way against 99.6 % from the DOM
+  text. The text now wins when both exist (#259), and the finalize hashes the
+  same file the run read.
+- **Stage 2 extraction fixes.** A defanged dot beside an `@` no longer leaves
+  an invalid address (`me@[.]evil[.]com` is `me@evil.com`, #252). A host name
+  of 6 to 30 labels is kept whole instead of losing its first label and its
+  TLD (#255); one over 253 characters is refused. A CVE sequence number of
+  8 to 12 digits is kept whole, by the extraction and by the Stage 2f check,
+  where 7 used to cut it (#256, #258), and a CVE glued to a word or to more
+  digits (`XCVE-2024-3400`) is not extracted (#257).
+- **The API checks what it was given.** `confidence` on a new entity or
+  relationship must be a finite number between 0 and 1, the scale the store
+  and the STIX export use; a NaN used to crash the bundle build (#264). This
+  adds a minimum and a maximum to the OpenAPI contract, recorded with
+  `--accept-breaking` as a fix that makes the route do what it documents.
+  Listing the entities or relationships of an unknown job answers 404 instead
+  of `[]` (#263). A write with `Origin: null` and no `Sec-Fetch-Site` header
+  is refused as cross-site (#260). The relationship update reads its result
+  back within its job (#266).
+- **Web UI.** The Policy and Coverage exports no longer revoke their download
+  before Firefox reads it (#267); a confidence that is not a finite number
+  shows 0 % instead of `NaN%` (#268); an unreadable job date shows `—` instead
+  of `NaNd ago` (#269); Review's single-key shortcuts ignore typing in an
+  editable element (#270).
+- **Tooling.** `.secrets/` is created mode 700: the password file inside stays
+  644 for the containers' users, but another local account can no longer
+  reach it (#271). `build_warninglists.py` refuses a `--commit` that is not a
+  hex SHA, and `lock_pypi_hashes.py` quotes the name and version it puts in
+  the PyPI URL (#272, #273). `sync_corpora.py` refuses a git remote that is
+  not https, with the API's check, and counts it as a failure (#274).
 
 #### An unedited install skips Stage 3 instead of failing it, 2026-11-01
 
