@@ -200,9 +200,9 @@ ENVEOF
         echo -e "     ${YELLOW}LLM_PROVIDER=lmstudio${NC}          ← or local LM Studio"
         echo -e "     ${YELLOW}LLM_PROVIDER=vllm${NC}              ← or local vLLM"
         echo ""
-        echo -e "  ${CYAN}Optional, both off by default:${NC}"
-        echo -e "     ${YELLOW}VISION_PROVIDER=${NC}               ← read figures (Stage 1f)"
-        echo -e "     ${YELLOW}CVE_ENRICHMENT=1${NC}               ← CVSS scores from CIRCL"
+        echo -e "  ${CYAN}Optional:${NC}"
+        echo -e "     ${YELLOW}VISION_PROVIDER=none${NC}           ← figures (Stage 1f) are read by default, with the LLM provider above if its model can see; none turns it off"
+        echo -e "     ${YELLOW}CVE_ENRICHMENT=1${NC}               ← CVSS scores from CIRCL (off by default)"
     fi
 else
     ok ".env already present"

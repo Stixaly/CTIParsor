@@ -6,6 +6,7 @@ the `mock_llm` fixture (conftest), so Stage 3 runs against a fixed response.
 """
 import importlib.util
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -73,6 +74,145 @@ def test_a_run_reports_every_stage_and_builds_a_valid_bundle(mock_llm, sample_ct
     assert "update.solarwinds.com" in result.text          # refanged
     assert result.valid is True and out.exists()
     assert json.loads(out.read_text())["type"] == "bundle"
+
+
+@pytest.mark.parametrize("vision, text_provider, reason", [
+    ("none", "anthropic", "VISION_PROVIDER=none"),
+    ("auto", "gemini", "auto: LLM_PROVIDER=gemini has no vision backend"),
+    ("auto", "lmstudio", "auto: LLM_PROVIDER=lmstudio has no vision backend"),
+])
+def test_stage_1f_says_why_it_was_skipped(mock_llm, sample_cti_text, tmp_path, monkeypatch,
+                                          vision, text_provider, reason):
+    from pipeline import vlm
+
+    pdf = tmp_path / "report.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    monkeypatch.setenv("VISION_PROVIDER", vision)
+    monkeypatch.setenv("LLM_PROVIDER", text_provider)
+    vlm.reset_backend_cache()
+    try:
+        result = run_document(Document(text=sample_cti_text, figure_pdf=pdf), _opts())
+    finally:
+        vlm.reset_backend_cache()
+
+    assert (result.outcome("1f").status, result.outcome("1f").reason) == ("skipped", reason)
+
+
+# ── Figures follow the text: no text, no figure ──────────────────────────────
+
+_STAGE_3_OFF = "auto: Stage 3 is disabled, so figures stay local"
+
+
+@pytest.fixture()
+def vision_probes(monkeypatch):
+    """The calls made to `get_backend()`, which stands in for the probe: it
+    would send an image (or a request) to the text's provider.  `auto`, an
+    Anthropic key and a PDF are all set, as on a machine that reads figures."""
+    from pipeline import vlm
+
+    calls: list[int] = []
+    # Empty is `auto`, and a variable that is set is one a module's load_dotenv() leaves
+    # alone: unset, the first import of one would bring the developer's value back.
+    monkeypatch.setenv("VISION_PROVIDER", "")
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setattr(vlm, "get_backend", lambda: calls.append(1))
+    vlm.reset_backend_cache()
+    yield calls
+    vlm.reset_backend_cache()
+
+
+def _a_pdf(tmp_path) -> Path:
+    pdf = tmp_path / "report.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    return pdf
+
+
+def _text_only_options(*disabled: str) -> RunOptions:
+    """What `RunOptions.from_env` reads, with the checks that need a model or a database off."""
+    return RunOptions.from_env(disabled={"2f", *disabled}, verify_relationships=False, verify_ttps=False,
+                               consensus=False, document_relations=False, llm_parallelism=1)
+
+
+def test_under_auto_a_run_without_stage_3_sends_no_figure(vision_probes, sample_cti_text, tmp_path, monkeypatch):
+    """`PIPELINE_DISABLED_STAGES=3` (and `evaluation inhouse-run --disable 3`): no text goes to
+    any LLM, so no figure does either, and not even a probe is made."""
+    monkeypatch.setenv("PIPELINE_DISABLED_STAGES", "3")
+
+    result = run_document(Document(text=sample_cti_text, figure_pdf=_a_pdf(tmp_path)), _text_only_options())
+
+    assert (result.outcome("1f").status, result.outcome("1f").reason) == ("skipped", _STAGE_3_OFF)
+    assert result.outcome("3").reason == "disabled"
+    assert vision_probes == []
+
+
+def test_main_no_llm_sends_no_figure_either(vision_probes, sample_cti_text, tmp_path, monkeypatch):
+    """`python main.py report.pdf --no-llm`, with the options main.py builds."""
+    import main
+
+    monkeypatch.setattr("api.db.DATABASE_URL", None)           # prepare_store() goes without one
+    monkeypatch.delenv("PIPELINE_DISABLED_STAGES", raising=False)
+    outcomes = []
+
+    def run(document, options, hooks):
+        # main.py's options; the checks that need a model or a database stay off.
+        options = replace(options, disabled=options.disabled | {"2f"}, verify_relationships=False,
+                          verify_ttps=False, consensus=False, document_relations=False)
+        result = run_document(Document(text=sample_cti_text, figure_pdf=pdf), options)
+        outcomes.append(result.outcome("1f"))
+        return result
+
+    pdf = _a_pdf(tmp_path)
+    monkeypatch.setattr(main, "run_document", run)
+    monkeypatch.setattr("sys.argv", ["main.py", str(pdf), "--no-llm", "--output", str(tmp_path / "out.json")])
+    with pytest.raises(SystemExit):
+        main.main()
+
+    assert [(o.status, o.reason) for o in outcomes] == [("skipped", _STAGE_3_OFF)]
+    assert vision_probes == []
+
+
+@pytest.mark.parametrize("named", ["anthropic", "ollama", "vllm"])
+def test_a_named_vision_provider_is_asked_even_without_stage_3(vision_probes, sample_cti_text, tmp_path,
+                                                                monkeypatch, named):
+    """A named VISION_PROVIDER is the operator's explicit choice: Stage 3 being off does not change it."""
+    monkeypatch.setenv("VISION_PROVIDER", named)
+
+    result = run_document(Document(text=sample_cti_text, figure_pdf=_a_pdf(tmp_path)),
+                          _text_only_options("3"))
+
+    assert vision_probes == [1]
+    assert result.outcome("1f").reason != _STAGE_3_OFF
+
+
+def test_under_auto_with_stage_3_on_the_backend_is_asked(vision_probes, mock_llm, sample_cti_text, tmp_path):
+    result = run_document(Document(text=sample_cti_text, figure_pdf=_a_pdf(tmp_path)), _opts())
+
+    assert vision_probes == [1]
+    assert result.outcome("1f").reason != _STAGE_3_OFF
+
+
+def test_a_run_that_read_figures_names_the_provider_and_model(mock_llm, sample_cti_text, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from pipeline import vlm
+
+    events = []
+
+    class _Hooks(Hooks):
+        def progress(self, event, data):
+            events.append((event, data))
+
+    monkeypatch.setattr(vlm, "get_backend", lambda: SimpleNamespace(name="vllm", model="Inferact/Qwen3.8"))
+    monkeypatch.setattr("pipeline.stage1f_figures.read_figures", lambda *args, **kwargs: [])
+
+    result = run_document(Document(text=sample_cti_text, figure_pdf=_a_pdf(tmp_path)), _opts(), _Hooks())
+
+    outcome = result.outcome("1f")
+    assert (outcome.status, outcome.reason, outcome.counts) == (
+        "ran", "vllm/Inferact/Qwen3.8", {"figures": 0, "read": 0})
+    assert ("stage", {"stage": "1f", "label": "Figures", "figures": 0, "read": 0,
+                      "provider": "vllm", "model": "Inferact/Qwen3.8"}) in events
 
 
 def test_a_disabled_stage_is_skipped_and_never_called(mock_llm, sample_cti_text):

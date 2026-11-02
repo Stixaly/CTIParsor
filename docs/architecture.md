@@ -161,7 +161,8 @@ outside the host reaches `postgres`: it publishes no port.
 
 | Destination | From | When | Turned off by |
 |---|---|---|---|
-| the LLM provider: `api.anthropic.com`, `generativelanguage.googleapis.com` or `api.mistral.ai` | `worker`: Stage 3 and the stages that call the LLM (1f, 3d, 3e, 3f, 3doc, 4c). `app`: Stage 4c on finalize, when the relationship policy enables long-distance links. | every report | a self-hosted provider: `LLM_PROVIDER=ollama`, `lmstudio` or `vllm` |
+| the LLM provider: `api.anthropic.com`, `generativelanguage.googleapis.com` or `api.mistral.ai` | `worker`: Stage 3 and the stages that call the LLM (3d, 3e, 3f, 3doc, 4c). `app`: Stage 4c on finalize, when the relationship policy enables long-distance links. | every report | a self-hosted provider: `LLM_PROVIDER=ollama`, `lmstudio` or `vllm` |
+| the vision provider: the text's provider under `VISION_PROVIDER=auto` (the default), or the one `VISION_PROVIDER` names | `worker`: Stage 1f | a PDF's figures, up to 40 crops per report; not under `auto` when Stage 3 is disabled for the run. The transcriptions join the report text, so they also reach `CONSENSUS_PROVIDER` through Stage 3e's text when 3e runs | `VISION_PROVIDER=none` or `PIPELINE_DISABLED_STAGES=1f` |
 | `huggingface.co` | `bootstrap`; `worker`, if the cache lacks a model | once per model: `all-MiniLM-L6-v2`, `CyNER-2.0-DeBERTa-v3-base`, `gliner_large-v2.1` | `HF_HUB_OFFLINE=1` (`setup.sh --offline` sets it), once the cache is filled |
 | `github.com` and `rules.emergingthreats.net`: the corpora listed in `detection_corpora.yaml` | `bootstrap`; `app` (Settings → Redownload) | on demand | `bootstrap --no-corpora` |
 | `cve.circl.lu` | `worker` (Stage 2f); `app` (finalize) | for a CVE not yet in the cache | `CVE_ENRICHMENT`, off by default |

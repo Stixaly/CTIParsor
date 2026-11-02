@@ -353,7 +353,7 @@ current truth.
 | **Figures** | `test_stage1f_figures.py` | 29 | figure injection, verbatim rendering, edge rendering |
 | **Figures** | `test_figure_store.py` | 12 | JSON round-trip, cache management, span loading |
 | **Figures** | `test_figure_reading_order.py` | 5 | reading order, page ordering, span delimitation |
-| **Figures** | `test_vlm.py` | 18 | payload parsing, backend selection, figure reading, `VISION_CONCURRENCY` parsing and override |
+| **Figures** | `test_vlm.py` | 83 | payload parsing, backend selection, figure reading, `VISION_CONCURRENCY` parsing and override; `VISION_PROVIDER=auto` (the provider of `LLM_PROVIDER`, never another, the skip reasons and their log level), a probe that raised not kept for the next document, credentials kept out of reasons, the config check reading `.env` |
 | **Figures** | `test_figure_context.py` | 12 | prompt context blocks, the ban on copying context into `verbatim_text`, per-figure bands, cache-key separation |
 | Extraction | `test_stage2.py` | 75 | IoC extraction, refang/defang, hash recovery, filename handling |
 | NER | `test_stage2d_cyner.py` | 4 | CyNER label mapping, entity extraction, model fallback |

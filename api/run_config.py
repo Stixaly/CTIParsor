@@ -196,12 +196,18 @@ def utc_stamp() -> str:
 
 
 def captured_env() -> dict[str, str]:
-    """The allow-listed environment variables that are set, with their values."""
+    """The allow-listed environment variables that are set, with their values.
+
+    `VISION_PROVIDER` is the one exception: unset or empty it means `auto`
+    (ADR-0094), which sends figures to the text's provider, so the record says
+    `auto` instead of leaving the default to be inferred."""
     env = {}
     for var_name in _CAPTURED_ENV:
         val = os.getenv(var_name)
         if val is not None:
             env[var_name] = val
+    if not env.get("VISION_PROVIDER", "").strip():
+        env["VISION_PROVIDER"] = "auto"
     return env
 
 

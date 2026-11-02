@@ -14,7 +14,7 @@ if str(_ROOT) not in sys.path:
 
 from pipeline.figure_store import SqliteReadCache
 from pipeline.stage1f_figures import EMPTY_KINDS, find_figures, read_figures
-from pipeline.vlm import FigureRead, get_backend
+from pipeline.vlm import FigureRead, get_backend, skip_reason
 
 
 def normalise(value: str) -> str:
@@ -109,7 +109,7 @@ def main() -> int:
 
     backend = get_backend()
     if backend is None:
-        print("VISION_PROVIDER is not configured — set it in .env", file=sys.stderr)
+        print(f"No vision backend: {skip_reason()}", file=sys.stderr)
         return 2
 
     cache = SqliteReadCache()

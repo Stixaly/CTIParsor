@@ -126,7 +126,7 @@ VLLM_ENABLE_THINKING=false
 prefix included (e.g. `Inferact/Qwen3.8-27B-NVFP4`); a wrong name 404s and
 Stage 3 comes back empty. `VLLM_ENABLE_THINKING=false` (the default) turns off
 Qwen3-style thinking, which on the Stage 3 prompt used the whole output budget
-without returning JSON. The same server can read figures: `VISION_PROVIDER=vllm`.
+without returning JSON. The same server reads figures by default (`VISION_PROVIDER=auto`).
 `VLLM_API_KEY` is sent as a Bearer token when the server was started with a key
 (`vllm serve --api-key`). It applies to Stage 3 and to figures. Unset, Stage 3
 sends the placeholder `vllm`, and figure requests carry no `Authorization` header.
@@ -214,11 +214,24 @@ ENTITY_OVERRIDES_ENABLED=true
 ## Vision (Stage 1f — figures)
 
 Stage 1f reads the figures in a PDF and injects their transcription into
-`report_text`. It is **off by default** — set a provider to turn it on.
+`report_text`. It is **on by default**: `VISION_PROVIDER=auto` reads the figures with
+the provider chosen for the text (`LLM_PROVIDER`), on the model it would use if
+`VISION_PROVIDER` named it. Without a provider that can see, Stage 1f is skipped, as
+Stage 3 is without a provider, and the stage report says why. A figure never goes to
+another provider than the one chosen for the text, so under `auto` a run with
+Stage 3 disabled (`main.py --no-llm`, `PIPELINE_DISABLED_STAGES=3`,
+`evaluation inhouse-run --disable 3`) reads no figure either, and the stage report
+says so; a named `VISION_PROVIDER` is the operator's explicit choice and is not
+affected. A PDF costs up to 40 reads (`claude-haiku-4-5` by default on
+`anthropic`). An existing `.env` that says `VISION_PROVIDER=none` keeps figures off
+until it says `auto`.
 
 ```env
-# Vision backend for Stage 1f, deliberately separate from LLM_PROVIDER:
-# none       (default) Stage 1f is off; figures are not read
+# Vision backend for Stage 1f:
+# auto       (default) the provider of LLM_PROVIDER, when it is one of the four
+#            below, on the model it would use if named here; gemini and
+#            lmstudio have no figure reader, so Stage 1f is skipped
+# none       Stage 1f is off; figures are not read
 # anthropic  default model claude-haiku-4-5
 # ollama     default model qwen3.8 — needs a model with the `vision`
 #            capability; check with: curl -s $OLLAMA_BASE_URL/api/tags
@@ -229,8 +242,10 @@ Stage 1f reads the figures in a PDF and injects their transcription into
 #            model; the probe checks the name is served, then sends one image
 #
 # The model is probed for image support before any figure is sent. A model that
-# cannot see disables Stage 1f with a warning; it is never called anyway.
-VISION_PROVIDER=none
+# cannot see disables Stage 1f (a warning for a named provider, INFO and not
+# WARNING under auto); it is never called anyway. A named provider overrides
+# LLM_PROVIDER.
+VISION_PROVIDER=auto
 VISION_MODEL=
 VISION_TIMEOUT_S=120
 

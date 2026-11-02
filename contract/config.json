@@ -793,7 +793,7 @@
     "env VISION_PROVIDER": {
       "set": true,
       "values": [
-        "none"
+        "auto"
       ]
     },
     "env VISION_TIMEOUT_S": {

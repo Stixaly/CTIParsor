@@ -73,14 +73,14 @@ The boxes below give each stage in detail, in execution order.
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
-│  Stage 1f — FIGURE READING                       (opt-in — ADR-0032) │
-│  PDF-only · off by default (VISION_PROVIDER=none)                    │
+│  Stage 1f — FIGURE READING                      (ADR-0032, ADR-0094) │
+│  PDF-only · on by default, with the text's LLM_PROVIDER if it sees   │
 │  • Triage    : geometry discards 56.9% of images before any model    │
 │  • Crops     : 150 DPI crops, not pages (977 tokens vs 2 191/page)   │
 │  • Injection : transcription enters report_text in ⟦…⟧ sentinels     │
 │  • Relations : attack-chain / network-diagram arrows → src -> dst    │
 │  • Safety    : an unreadable figure is skipped, never costs the run  │
-│  Enable: VISION_PROVIDER=anthropic|ollama|mistral|vllm in .env       │
+│  VISION_PROVIDER = auto (default) | none | a provider by name        │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
