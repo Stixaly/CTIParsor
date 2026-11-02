@@ -9,6 +9,13 @@ theme.
 
 ## [Unreleased]
 
+- **Stage 2 finds two more forms.** A domain on a TLD of more than 12
+  letters is extracted when IANA lists the TLD (`example.international`;
+  8 such TLDs exist), where the 12-letter bound dropped it (#253). An
+  ATT&CK id written in lower case (`t1059.001`, `ta0001`) is extracted in
+  upper case when the bundled ATT&CK index holds it; an unknown one
+  (`t1000`) is not, so prose does not turn into a technique (#254).
+
 ## [0.3.0] - 2026-11-02
 
 CTIParsor 0.3.0 is the release on the way to 1.0: it ships the checks 1.0

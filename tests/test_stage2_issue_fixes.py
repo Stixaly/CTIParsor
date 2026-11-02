@@ -1,11 +1,13 @@
-"""Stage 2 extraction, one class per GitHub issue (#252, #255 to #258).
+"""Stage 2 extraction, one class per GitHub issue (#252 to #258).
 
 Each class has the cases the issue is about (positive) and the ones that must
 keep their current result (negative and controls).
 """
 from models.schemas import EntityType
+from pipeline import aliases
 from pipeline import stage2f_cve_enrichment as stage2f
 from pipeline.stage2_extraction import (
+    _extract_mitre_ttps,
     extract_entities,
     refang,
     refang_with_offsets,
@@ -95,3 +97,45 @@ class TestGluedCve:
     def test_an_id_set_off_by_punctuation_is_kept(self):
         assert sorted(_values("(CVE-2024-3400), CVE-2024-3401.", EntityType.CVE)) == [
             "CVE-2024-3400", "CVE-2024-3401"]
+
+
+class TestLongTld:
+    """#253 — a TLD of more than 12 letters is a domain when IANA lists it."""
+
+    def test_a_listed_long_tld_is_extracted(self):
+        assert _values("Stage at example.international today.", EntityType.DOMAIN) == [
+            "example.international"]
+        assert _values("Seen at x.travelersinsurance now.", EntityType.DOMAIN) == [
+            "x.travelersinsurance"]
+
+    def test_a_long_word_that_is_no_tld_keeps_the_old_result(self):
+        # "serialization" is code, not a TLD: nothing is extracted, as before.
+        assert _values("The object.serialization method ran.", EntityType.DOMAIN) == []
+        # A longer listed word does not turn into a TLD by its prefix.
+        assert _values("Stage at example.internationalx today.", EntityType.DOMAIN) == []
+
+    def test_a_common_tld_is_unchanged(self):
+        assert _values("Stage at example.com today.", EntityType.DOMAIN) == ["example.com"]
+
+
+class TestMitreIdCase:
+    """#254 — a lower-case ATT&CK id is kept, in upper case, when the index holds it."""
+
+    def test_a_known_lower_case_id_is_extracted_upper_cased(self):
+        ttps = _values("The actor used t1059.001 and ta0001 again.", EntityType.TTP)
+        assert set(ttps) == {"T1059.001", "TA0001"}
+
+    def test_an_unknown_lower_case_id_is_dropped(self):
+        assert not aliases.is_attack_id("T1000")
+        assert _values("The t1000 model shipped.", EntityType.TTP) == []
+
+    def test_an_upper_case_id_is_kept_known_or_not(self):
+        # A newer release than the bundled one may hold it.
+        assert set(_values("Seen: T1000 and T1059.001.", EntityType.TTP)) == {"T1000", "T1059.001"}
+
+    def test_the_same_id_in_two_cases_is_one_entity(self):
+        [ttp] = _extract_mitre_ttps("t1059.001 then T1059.001")
+        assert ttp.value == ttp.mitre_id == "T1059.001"
+
+    def test_an_id_glued_to_a_word_or_a_longer_number_is_not_extracted(self):
+        assert _values("rest1059 st1059 and t10591 here", EntityType.TTP) == []
