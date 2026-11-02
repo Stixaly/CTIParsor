@@ -9,6 +9,44 @@ theme.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-02
+
+CTIParsor 0.3.0 is the release on the way to 1.0: it ships the checks 1.0
+will rest on (ADR-0094, accepted) and changes three defaults.
+
+- **What 1.0 promises.** `docs/support-policy.md` defines it: a stable
+  contract, data that survives an upgrade and a restore, and published
+  limits. `ROADMAP.md` says what comes after.
+- **The checks 1.0 will rest on.**
+  - In CI: a contract snapshot that fails a pull request breaking a stable
+    surface; a migration check from the last release that compares every
+    value; a backup restored into an empty install; the browser journey
+    from import to download, offline.
+  - Before each release, by hand: the OpenCTI import of the candidate image,
+    and a clean install from the published image, followed as the docs
+    write it.
+- **The image `main` publishes is the image CI tested,** built once and
+  pushed without a rebuild.
+- **The quick start installs a release's archive and its image pinned by
+  digest.** docs/upgrading.md gives the release-to-release upgrade, with a
+  backup first.
+- **Three defaults change:**
+  - `WORKER_MAX_CONCURRENT` is 1 outside Compose too;
+  - the two corpora with no licence are opt-in;
+  - a PDF's figures are read by default, by the provider chosen for the
+    text and never by another.
+- **The image installs only Chromium's headless shell:** the full Chrome
+  build it carried bundled Google's Widevine module, which may not be
+  redistributed.
+- **Fixed:** an unedited install no longer fails Stage 3 on every report, the
+  backup no longer leaves `umask 077` in the shell, and the air-gapped install
+  works again.
+
+**Upgrading from 0.2.0:** follow docs/upgrading.md, *From one release to the
+next*. Schema version 14 is applied at the first start (`worker_heartbeats`).
+A `.env` copied from 0.2.0 keeps `VISION_PROVIDER=none` (figures off) and its
+placeholder `ANTHROPIC_API_KEY`; empty that key unless you set a real one.
+
 ### Added
 
 #### A clean install from the published image, as the documentation writes it (ADR-0094 item 9), 2026-11-01
