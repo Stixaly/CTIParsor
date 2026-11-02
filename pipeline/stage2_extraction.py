@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 
 from models.schemas import EntityType, RawEntity
 from pipeline import ner_precision
+from pipeline.aliases import is_attack_id
 from pipeline.env_flags import env_bool
 from pipeline.regex_safety import PY_DIGIT, continues_a_word, glued_to_a_word
 from pipeline.regex_safety import PY_WHITESPACE as _WS
@@ -98,8 +99,10 @@ _CVE_PATTERN = _compile_pattern(
 _CVE_ZW_PATTERN = _compile_pattern(f"[{_CVE_ZW}]")
 _CVE_DASH_PATTERN = _compile_pattern(f"[{_CVE_DASH}]")
 
-# MITRE ATT&CK IDs — technique (T####[.###]) and tactic (TA####).
-_MITRE_TTP_PATTERN = _compile_pattern(r"\bTA?[0-9]{4}(?:\.[0-9]{3})?\b", re.ASCII)
+# MITRE ATT&CK IDs — technique (T####[.###]) and tactic (TA####).  Any case:
+# _extract_mitre_ttps keeps one written in lower case only when the bundled
+# ATT&CK index holds it.
+_MITRE_TTP_PATTERN = _compile_pattern(r"\bTA?[0-9]{4}(?:\.[0-9]{3})?\b", re.ASCII | re.IGNORECASE)
 
 # Hash-block pattern — a run of hex fragments separated only by whitespace or
 # line breaks.  A plain contiguous-hex pattern can't read IOC tables, which wrap
@@ -218,6 +221,11 @@ _DOMAIN_EXTRA_NON_TLD_EXTS = (
 _DOMAIN_NON_TLD_EXTS = "|".join(sorted(
     set(_MALWARE_FILE_EXTS.split("|")) | set(_DOMAIN_EXTRA_NON_TLD_EXTS)
 ))
+# Every TLD of more than 12 letters: the whole IANA list of them (IDNs aside), from
+# data.iana.org/TLD/tlds-alpha-by-domain.txt version 2026110200.  Listed rather than
+# a wider bound, which would make "object.serialization" in code a domain.
+_LONG_TLDS = ("americanexpress", "americanfamily", "international", "kerryproperties",
+              "lifeinsurance", "sandvikcoromant", "travelersinsurance", "weatherchannel")
 # Up to 30 labels: a bound of 5 cut a deeper name and kept a wrong one
 # ("a.b.c.d.e.f.example.com" gave "b.c.d.e.f.example").  Not the 126 DNS
 # allows: the cost grows with the bound at each start on a run of dots
@@ -229,7 +237,7 @@ _DOMAIN_PATTERN = _compile_pattern(
     # costs about six times more, and runs at each of the up to 30 backtracking steps.
     r"(?=[a-zA-Z]{2})"
     rf"(?!(?:{_DOMAIN_NON_TLD_EXTS})\b)"
-    r"[a-zA-Z]{2,12}\b",
+    rf"(?:{'|'.join(_LONG_TLDS)}|[a-zA-Z]{{2,12}})\b",
     re.IGNORECASE,
 )
 _DOMAIN_MAX_LENGTH = 253
@@ -915,7 +923,13 @@ def _extract_mitre_ttps(text: str) -> list[RawEntity]:
     seen: set[str] = set()
     results: list[RawEntity] = []
     for m in _MITRE_TTP_PATTERN.finditer(text):
-        v = m.group()
+        v = m.group().upper()
+        # An id in upper case is kept, known or not: a report may cite a technique
+        # newer than the bundled release (ATTACK_RELEASE).  One written in lower
+        # case ("t1059.001") is kept only when the index holds it: "t1000" in
+        # prose is no technique.
+        if v != m.group() and not is_attack_id(v):
+            continue
         if v not in seen:
             seen.add(v)
             # All ATT&CK IDs (TA#### tactics and T####[.###] techniques) are typed

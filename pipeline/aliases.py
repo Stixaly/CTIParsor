@@ -232,3 +232,21 @@ def technique_name_for(technique_id: str) -> str | None:
         return None
     _, id2name = _load_techniques()
     return id2name.get(technique_id.upper().strip())
+
+
+@functools.lru_cache(maxsize=1)
+def _tactic_ids() -> frozenset[str]:
+    """The tactic ids (TA####) of mitre_index.json; empty when it is unreadable,
+    which _load_techniques already logs."""
+    try:
+        index = json.loads(attack_data.resolve(_MITRE_INDEX).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return frozenset()
+    return frozenset((t.get("id") or "").strip().upper()
+                     for t in index.get("tactics", []) if (t.get("id") or "").strip())
+
+
+def is_attack_id(attack_id: str) -> bool:
+    """Does the bundled ATT&CK index hold this technique or tactic id?"""
+    aid = (attack_id or "").upper().strip()
+    return bool(aid) and (aid in _load_techniques()[1] or aid in _tactic_ids())

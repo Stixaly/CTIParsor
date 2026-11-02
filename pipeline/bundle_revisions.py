@@ -103,6 +103,10 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "8 to 12 digits and a host name of more than five labels whole, drops a CVE glued to a word, and "
      "refangs me@[.]evil[.]com to me@evil.com",
      "extraction"),
+    ("5a0504e", "2026-11-02",
+     "Stage 2 extracts a domain on one of IANA's 8 TLDs of more than 12 letters, and a lower-case "
+     "ATT&CK id the bundled index holds (t1059.001 becomes T1059.001)",
+     "extraction"),
 )
 
 
