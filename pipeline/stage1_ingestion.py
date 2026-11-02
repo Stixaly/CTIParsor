@@ -358,8 +358,31 @@ def ocr_lang() -> str:
 # sparse cover or a divider out of OCR.
 _SCAN_IMAGE_COVERAGE = 0.5
 
+# A page whose text is drawn as glyph outlines has no text layer and no image
+# either: each glyph is a small filled path.  "Microsoft Print to PDF" writes a
+# web page that way when it cannot embed its fonts (a CERT-UA advisory: 0
+# characters, 3,777 such paths, an image over 7 % of the page), and the page
+# used to be read as text, which gave nothing.  A page with almost no text and
+# at least this many glyph-sized filled paths is read as a scan.  A vector logo
+# on a cover stays below it; a diagram above it has its labels read by OCR,
+# which is the only reading it can have.
+_OUTLINED_GLYPHS = 100
+_GLYPH_MAX_POINTS = 24.0   # width and height of a body or heading glyph
+
+
+def _outlined_glyphs(page) -> int:
+    """Filled paths of a glyph's size on the page."""
+    return sum(
+        1 for c in page.curves
+        if c.get("fill")
+        and float(c["x1"]) - float(c["x0"]) <= _GLYPH_MAX_POINTS
+        and float(c["bottom"]) - float(c["top"]) <= _GLYPH_MAX_POINTS
+    )
+
 
 def _page_is_scanned(page) -> bool:
+    """True when a page has almost no text layer but something to read: an
+    image over half of it, or text drawn as glyph outlines."""
     # Glyph count rather than extract_text(): the detection runs on every page
     # of every PDF, and text-layout grouping is the expensive part.
     if sum(1 for c in page.chars if not c["text"].isspace()) >= _MIN_CHARS_PER_PAGE:
@@ -369,7 +392,7 @@ def _page_is_scanned(page) -> bool:
         max(0.0, float(img["x1"]) - float(img["x0"])) * max(0.0, float(img["bottom"]) - float(img["top"]))
         for img in page.images
     )
-    return covered / area >= _SCAN_IMAGE_COVERAGE
+    return covered / area >= _SCAN_IMAGE_COVERAGE or _outlined_glyphs(page) >= _OUTLINED_GLYPHS
 
 
 def _ocr_page(path: Path, page_number: int) -> str:

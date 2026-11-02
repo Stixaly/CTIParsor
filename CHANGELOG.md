@@ -9,6 +9,13 @@ theme.
 
 ## [Unreleased]
 
+- **A PDF whose text is drawn as glyph outlines is OCR'd.** "Microsoft Print
+  to PDF" writes a page that way when it cannot embed its fonts: no
+  character, no full-page image, only small filled paths. Such a page was
+  read as text and gave nothing, so the job ran on an empty report. A page
+  with almost no text and at least 100 glyph-sized filled paths is now a scan,
+  OCR'd like one; a vector logo stays below that.
+
 ## [0.3.0] - 2026-11-02
 
 CTIParsor 0.3.0 is the release on the way to 1.0: it ships the checks 1.0

@@ -18,14 +18,20 @@ _PROSE = "APT29 deployed SUNBURST against SolarWinds customers in 2020. " * 3
 
 
 class _Page:
-    """What pdfplumber exposes of a page: glyphs, images, size, text."""
+    """What pdfplumber exposes of a page: glyphs, images, paths, size, text.
 
-    def __init__(self, text: str = "", image_share: float = 0.0):
+    `paths` draws that many filled paths of `path_size` points: text drawn as
+    glyph outlines is many small ones."""
+
+    def __init__(self, text: str = "", image_share: float = 0.0, paths: int = 0,
+                 path_size: float = 6.0, filled: bool = True):
         self._text = text
         self.chars = [{"text": c} for c in text]
         self.width, self.height = 100, 100
         side = 100 * image_share ** 0.5
         self.images = [{"x0": 0, "x1": side, "top": 0, "bottom": side}] if image_share else []
+        self.curves = [{"x0": 0, "x1": path_size, "top": 0, "bottom": path_size, "fill": filled}
+                       for _ in range(paths)]
 
     def extract_text(self):
         return self._text or None
@@ -89,6 +95,19 @@ def ocr(monkeypatch):
     (_Page("", image_share=0.2), False),         # a logo on a divider page
 ])
 def test_a_page_is_a_scan_only_when_an_image_covers_it(page, scanned):
+    assert s1._page_is_scanned(page) is scanned
+
+
+@pytest.mark.parametrize("page,scanned", [
+    (_Page("", paths=3777), True),                       # a "Print to PDF" page, text as outlines
+    (_Page("", image_share=0.07, paths=150), True),      # the same, with a picture beside it
+    (_Page("p. 2", paths=100), True),                    # a page number left as text
+    (_Page(_PROSE, paths=3777), False),                  # a text layer wins: nothing to OCR
+    (_Page("", paths=99), False),                        # a vector logo on a cover
+    (_Page("", paths=500, path_size=40.0), False),       # shapes larger than a glyph
+    (_Page("", paths=500, filled=False), False),         # stroked lines: a chart, a frame
+])
+def test_a_page_of_text_drawn_as_glyph_outlines_is_a_scan(page, scanned):
     assert s1._page_is_scanned(page) is scanned
 
 

@@ -345,7 +345,7 @@ current truth.
 | Layer | File | ~Tests | Covers |
 |---|---|---:|---|
 | Ingestion | `test_stage1.py` | 8 | text ingestion, chunking, overlap, unsupported formats |
-| Ingestion | `test_stage1_pdf_paths.py` | 31 | per-page scan detection, mixed and fully scanned PDFs (OCR in page batches, failures degrade to the text layer), markitdown fallback, PDF/DOCX creation dates, the document anchor from a capture sidecar or HTML metadata |
+| Ingestion | `test_stage1_pdf_paths.py` | 39 | per-page scan detection (an image over half the page, or text drawn as glyph outlines), mixed and fully scanned PDFs (OCR in page batches, failures degrade to the text layer), markitdown fallback, PDF/DOCX creation dates, the document anchor from a capture sidecar or HTML metadata |
 | Ingestion | `test_upload_route.py` | 17 | `/api/upload`: TLP/PAP markings, extension and MIME checks, the `filetype` fallback without libmagic, size limit, full queue, disk errors |
 | Ingestion | `test_ingest_routes.py` | 26 | job creation, TLP validation, URL capture, HTML detection |
 | Ingestion | `test_web_capture.py` | 38 | URL sanitization, SSRF guards, PDF rendering, lazy loading |

@@ -3,7 +3,8 @@ scans inside an otherwise text PDF.
 
 The PDFs are written by hand (no PDF library in the test environment): a text
 page is a Helvetica content stream, a "scanned" page is one full-page
-grayscale image and no text.
+grayscale image and no text, an "outlines" page is text drawn as glyph
+outlines (small filled curves, as "Microsoft Print to PDF" writes it).
 """
 import shutil
 
@@ -73,7 +74,8 @@ def test_docx_past_the_uncompressed_limit_is_refused(tmp_path, monkeypatch):
 # ── PDF ──────────────────────────────────────────────────────────────────────
 
 def _make_pdf(path, pages):
-    """pages: ("text", str) or ("image", (width, height, 8-bit gray bytes))."""
+    """pages: ("text", str), ("image", (width, height, 8-bit gray bytes)), or
+    ("outlines", n): n glyph-sized filled curves and no text."""
     objs: list[bytes] = []
 
     def add(body: bytes) -> int:
@@ -92,6 +94,13 @@ def _make_pdf(path, pages):
             ops.append("ET")
             stream = "\n".join(ops).encode("latin-1")
             resources = f"<< /Font << /F1 {font} 0 R >> >>"
+        elif kind == "outlines":
+            ops = []
+            for i in range(payload):           # a row of 7-point "glyphs", 60 to a line
+                x, y = 72 + (i % 60) * 8, 720 - (i // 60) * 14
+                ops.append(f"{x} {y} m {x} {y + 9} {x + 6} {y + 9} {x + 6} {y} c h f")
+            stream = "\n".join(ops).encode("latin-1")
+            resources = "<< >>"
         else:
             w, h, data = payload
             img = add(b"<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace "
@@ -144,6 +153,25 @@ def test_a_sparse_page_without_an_image_is_not_ocrd(tmp_path, monkeypatch):
     monkeypatch.setattr(s1, "_read_pdf_ocr", lambda p: pytest.fail("whole-document OCR"))
 
     assert "SUNBURST" in s1._read_pdf(path)
+
+
+def test_a_pdf_of_text_drawn_as_outlines_is_ocrd(tmp_path, monkeypatch):
+    # No character and no image: the page used to be read as text, and gave "".
+    path = _make_pdf(tmp_path / "printed.pdf", [("outlines", 400)])
+    monkeypatch.setattr(s1, "_read_pdf_ocr", lambda p: f"whole-document OCR: {IOC}")
+    assert s1._read_pdf(path) == f"whole-document OCR: {IOC}"
+
+
+def test_an_outlined_page_inside_a_text_pdf_is_ocrd_in_place(tmp_path, monkeypatch):
+    path = _make_pdf(tmp_path / "mixed.pdf", [TEXT_PAGE, ("outlines", 400), ("outlines", 20)])
+    calls = []
+    monkeypatch.setattr(s1, "_ocr_page", lambda p, n: calls.append(n) or f"OCR page {n}: {IOC}")
+    monkeypatch.setattr(s1, "_read_pdf_ocr", lambda p: pytest.fail("whole-document OCR"))
+
+    text = s1._read_pdf(path)
+
+    assert calls == [2]             # page 3, a 20-path logo, is not worth OCR
+    assert "page one" in text and f"OCR page 2: {IOC}" in text
 
 
 def test_a_fully_scanned_pdf_takes_the_whole_document_ocr(tmp_path, monkeypatch):
