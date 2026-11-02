@@ -9,13 +9,6 @@ theme.
 
 ## [Unreleased]
 
-- **Stage 2 finds two more forms.** A domain on a TLD of more than 12
-  letters is extracted when IANA lists the TLD (`example.international`;
-  8 such TLDs exist), where the 12-letter bound dropped it (#253). An
-  ATT&CK id written in lower case (`t1059.001`, `ta0001`) is extracted in
-  upper case when the bundled ATT&CK index holds it; an unknown one
-  (`t1000`) is not, so prose does not turn into a technique (#254).
-
 ## [0.3.0] - 2026-11-02
 
 CTIParsor 0.3.0 is the release on the way to 1.0: it ships the checks 1.0
@@ -764,6 +757,12 @@ revision that has it (`BUNDLE_AFFECTING`, scope `mapping`, ADR-0086).
   hex SHA, and `lock_pypi_hashes.py` quotes the name and version it puts in
   the PyPI URL (#272, #273). `sync_corpora.py` refuses a git remote that is
   not https, with the API's check, and counts it as a failure (#274).
+- **Stage 2 finds two more forms.** A domain on a TLD of more than 12
+  letters is extracted when IANA lists the TLD (`example.international`;
+  8 such TLDs exist), where the 12-letter bound dropped it (#253). An
+  ATT&CK id written in lower case (`t1059.001`, `ta0001`) is extracted in
+  upper case when the bundled ATT&CK index holds it; an unknown one
+  (`t1000`) is not, so prose does not turn into a technique (#254).
 
 #### An unedited install skips Stage 3 instead of failing it, 2026-11-01
 
