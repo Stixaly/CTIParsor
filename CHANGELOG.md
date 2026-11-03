@@ -9,6 +9,23 @@ theme.
 
 ## [Unreleased]
 
+### Fixed
+
+#### The air-gap scripts, 2026-11-03
+
+- **`setup.sh --offline` refuses a host without the `docker compose`
+  plugin.** It accepted the standalone `docker-compose` binary, started
+  postgres with it, then waited 90 s for a health status the restore reads
+  through `docker compose`, and blamed postgres. It now stops before writing
+  anything, as the bundle scripts already did. Without `--offline`, the
+  standalone binary is still accepted, with a warning.
+- **Clean-ups.** `check_offline_bundle_docker.sh`, which runs without
+  `set -e`, stops when its `cd` fails; `check_clean_install.sh` derives the
+  URL its stand-in replaces from `RELEASES` instead of a second copy; a
+  comment in `update_offline_corpora.sh` said the tar check dropped its
+  status, which it does not. shellcheck reports no warning on the offline
+  scripts.
+
 ## [0.3.0] - 2026-11-02
 
 CTIParsor 0.3.0 is the release on the way to 1.0: it ships the checks 1.0

@@ -656,8 +656,9 @@ Every variable, with its default and the reasoning behind it:
 It only prepares the environment — it builds, downloads and starts nothing:
 
 ```
-[1]   Docker            — checks docker + docker compose (or docker-compose v1)
-                           are on PATH and the daemon is reachable
+[1]   Docker            — checks docker + docker compose (or the standalone
+                           docker-compose; --offline needs the plugin) are on
+                           PATH and the daemon is reachable
 [2]   .env              — creates it from .env.example if missing; generates
                            CTI_DB_PASSWORD if not already set
 [3]   DB password secret — writes .secrets/db_password from CTI_DB_PASSWORD

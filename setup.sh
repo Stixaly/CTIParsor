@@ -138,9 +138,18 @@ if [ "$DOCKER_OK" = true ]; then
         COMPOSE_CMD="docker compose"
         ok "docker compose: $(docker compose version --short 2>/dev/null || echo 'plugin present')"
     elif command -v docker-compose >/dev/null 2>&1; then
+        if [ -n "$OFFLINE_DIR" ]; then
+            # The restore (scripts/offline_lib_docker.sh) runs `docker compose`
+            # itself, as every bundle script requires: with only this binary,
+            # postgres started, then the restore waited 90 s for a health status
+            # it could not read and blamed postgres.
+            err "--offline needs the 'docker compose' plugin (Compose v2.24+): the restore runs it,"
+            echo "     and only the standalone docker-compose binary is installed."
+            exit 1
+        fi
         COMPOSE_CMD="docker-compose"
-        warn "Using the standalone docker-compose v1 binary — the 'docker compose'"
-        echo "     plugin (v2) is what this repo's docs assume; consider upgrading."
+        warn "Using the standalone docker-compose binary — the 'docker compose'"
+        echo "     plugin (v2.24+) is what this repo's docs assume; consider upgrading."
     else
         err "Neither 'docker compose' (plugin) nor 'docker-compose' (standalone) found."
         DOCKER_OK=false

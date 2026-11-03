@@ -584,7 +584,7 @@ UMASK_AFTER="$(. "$TMP/shell.state"; echo "$UMASK")"
     || step "umask after the backup" FAIL 0 "$UMASK_AFTER, was $UMASK_BEFORE: files unpacked next in that shell would be unreadable by the containers"
 prose "$WORK"               # "from the directory that holds ctiparsor-$old"
 run_block UPGRADE_COMMANDS "$PROJECT" "$PORT" \
-    "1s/.*/old=$PREV_VERSION new=$NEW_VERSION digest=$CAND_DIGEST/; s#https://github\.com/Stixaly/CTIParsor/releases/download/#file://$STANDIN/#g; $QUICK_BOOT" || finish
+    "1s/.*/old=$PREV_VERSION new=$NEW_VERSION digest=$CAND_DIGEST/; s#${RELEASES//./\\.}#file://$STANDIN/#g; $QUICK_BOOT" || finish
 NEW_DIR="$(here)"
 while IFS=$'\t' read -r code secs line; do
     case "$line" in
