@@ -378,6 +378,7 @@ Ranking is deterministic and offline — no model is involved (ADR-0008).
 | `[build] skipped (no clone)` | run `sync_corpora.py` first; check the corpus `path` |
 | corpus shows `0` rules | rules untagged with `attack.tXXXX`, or pointed at a non-rules dir |
 | private repo won't clone | ensure your SSH agent has the key; `git clone` it manually to confirm access |
+| `git remote refused: not a safe remote to fetch` | the remote carries credentials, uses a port other than 443, 8443, 80 or 8080, or its host is or resolves to a loopback, private, link-local or cloud-metadata address (the log line says which). A repo on an internal server: `git clone` it by hand under `corpora/` and register its `path` only |
 | a technique reads 0 despite a known rule | the rule lacks an `attack.tXXXX` tag — coverage keys on ATT&CK tags (the Detections tab still finds it via its atoms) |
 | Detections warns the atom index is empty | run `docker compose run --rm app python scripts/build_rule_atoms.py`; until then rules can only be ranked by technique |
 | no proposal is tiered "Matched this report" | the report has few IoCs, or its observables appear in no rule — the behavioural tier is then the real answer |

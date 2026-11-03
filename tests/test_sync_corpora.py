@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sys
 
+from pipeline import web_capture
 from scripts import sync_corpora as sc
 
 LAST = "Now run: python scripts/build_detection_index.py"
@@ -24,8 +25,10 @@ def tarball_corpus(name: str) -> dict:
 
 def sync(monkeypatch, capsys, corpora, *, command=lambda corpus: ["git", "clone", corpus["name"]],
          run=lambda cmd: True, tarball=lambda corpus: (True, "fetched")):
-    """main() on `corpora` with every fetch replaced; returns (exit status, output)."""
+    """main() on `corpora` with every fetch replaced; returns (exit status, output).
+    A git remote's host resolves to a public address, without the network."""
     monkeypatch.setattr(sys, "argv", ["sync_corpora.py"])
+    monkeypatch.setattr(web_capture, "_resolve_all", lambda host: ["93.184.216.34"])
     monkeypatch.setattr(sc, "load_corpora", lambda config_path: corpora)
     monkeypatch.setattr(sc, "git_command", command)
     monkeypatch.setattr(sc, "_run", run)
@@ -90,6 +93,23 @@ def test_a_remote_that_is_not_https_fails_before_git_runs(monkeypatch, capsys, t
 
     assert status == 1
     assert "! ssh: git remote refused: only https:// remotes are fetched ('ssh://git@example.org/x.git')" in out
+    assert [cmd[-1] for cmd in ran] == [str(tmp_path / "good")]
+    assert out.splitlines()[-1] == f"[sync] 1/2 corpora synced, 1 failed. {LAST}"
+
+
+def test_a_remote_on_a_private_host_fails_before_git_runs(monkeypatch, capsys, tmp_path):
+    """#274: a registry entry pointed at the cloud metadata service is refused
+    like a non-https one: git never sees it, and the exit code says it failed."""
+    ran: list = []
+    monkeypatch.setattr(sc.subprocess, "run", lambda cmd, **kwargs: ran.append(cmd))
+    metadata = {"name": "internal", "git": "https://169.254.169.254/latest/meta-data/x.git",
+                "path": str(tmp_path / "internal")}
+    good = {"name": "good", "git": "https://example.org/good.git", "path": str(tmp_path / "good")}
+
+    status, out = sync(monkeypatch, capsys, [metadata, good], command=sc.git_command, run=sc._run)
+
+    assert status == 1
+    assert "! internal: git remote refused: not a safe remote to fetch (details in the server log)" in out
     assert [cmd[-1] for cmd in ran] == [str(tmp_path / "good")]
     assert out.splitlines()[-1] == f"[sync] 1/2 corpora synced, 1 failed. {LAST}"
 
