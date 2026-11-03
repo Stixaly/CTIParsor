@@ -174,7 +174,7 @@ offline_docker_load_images() {
 offline_write_compose_override() {
     local override="compose.override.yaml"
     local marker="# Written by setup.sh --offline (scripts/offline_lib_docker.sh) — the classic image store keeps no registry digest after docker load."
-    local pairs svc ref bundle_ref in_bundle plain first body="" names="" needed=0
+    local pairs svc ref bundle_ref in_bundle plain body="" overridden="" needed=0
 
     [ "$#" -gt 0 ] || offline_die "offline_write_compose_override: no bundle image references given (a caller bug)"
     [ -f compose.yaml ] || offline_die "compose.yaml not found in $(pwd)"
@@ -196,7 +196,7 @@ offline_write_compose_override() {
             continue  # the bundle did not load this plain tag either
         fi
         body+="  ${svc}:"$'\n'"    image: ${plain}"$'\n'
-        names+=" ${svc}"
+        overridden+=" ${svc}"
         needed=$((needed + 1))
     done <<< "$pairs"
 
@@ -221,7 +221,7 @@ $body"
         echo "services:"
         printf '%s' "$body"
     } > "$override"
-    echo "  ✔  wrote $override: plain tags for$names (classic image store)"
+    echo "  ✔  wrote $override: plain tags for$overridden (classic image store)"
 }
 
 # Restores a named volume from a tar built by `docker run ... tar czf`

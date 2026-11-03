@@ -138,7 +138,8 @@ def test_the_downloads_come_from_the_releases_page_the_check_stands_in_for():
             'echo "CTI_IMAGE=ghcr.io/stixaly/ctiparsor@$digest" >> .env'
     script = CHECK.read_text(encoding="utf-8")
     assert f"RELEASES={RELEASES}\n" in script
-    assert r"s#https://github\.com/Stixaly/CTIParsor/releases/download/#file://$STANDIN/#g" in script
+    # The stand-in replaces that URL, its dots escaped for sed.
+    assert r"s#${RELEASES//./\\.}#file://$STANDIN/#g" in script
     # Every block that starts the stack pulls by digest first; none builds.
     for name in ("INSTALL_START", "UPGRADE_COMMANDS"):
         lines = blocks[name]

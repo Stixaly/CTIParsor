@@ -70,9 +70,9 @@ ARCHIVE="$DIR/corpora.tar.gz"
 echo "=== [2/4] Checking corpora.tar.gz ==="
 [ -f "$ARCHIVE" ] || offline_die "$ARCHIVE missing from the bundle"
 offline_check_tar_safe "$ARCHIVE" -z
-# offline_check_tar_safe drops the status of its `tar -t` (stderr goes to
-# /dev/null), so a truncated or corrupt archive passes it. Listing the archive
-# here, with the status kept, fails closed on that case.
+# offline_check_tar_safe refuses an unreadable archive and an unsafe name, but
+# returns no listing: the archive is listed again for the check that every
+# member lands under corpora/.
 members=$(tar -tzf "$ARCHIVE") || offline_die "cannot read $ARCHIVE as a gzip tar (truncated or corrupt)"
 outside=$(printf '%s\n' "$members" | grep -v -E '^corpora(/|$)' || true)
 if [ -n "$outside" ]; then

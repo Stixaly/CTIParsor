@@ -31,7 +31,9 @@ set -u
 # before running it, exactly as before.
 # =============================================================================
 
-cd "$(dirname "$0")/.."
+# No `set -e` in this script, so a failed cd is stopped here, before the lib's
+# relative path and the rest run from the wrong directory.
+cd "$(dirname "$0")/.." || exit 1
 # shellcheck source=scripts/offline_lib_docker.sh
 source scripts/offline_lib_docker.sh
 
