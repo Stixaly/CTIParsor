@@ -118,6 +118,30 @@ class TestLongTld:
         assert _values("Stage at example.com today.", EntityType.DOMAIN) == ["example.com"]
 
 
+class TestPunycodeTld:
+    """An IDN TLD written as its A-label is the domain's end, not "xn"."""
+
+    def test_an_a_label_tld_is_extracted_whole(self):
+        # .рф used to give "test.xn".
+        assert _values("C2 at test.xn--p1ai today.", EntityType.DOMAIN) == ["test.xn--p1ai"]
+        assert _values("C2 at XN--80AK6AA92E.XN--P1AI today.", EntityType.DOMAIN) == [
+            "xn--80ak6aa92e.xn--p1ai"]
+
+    def test_the_hyphen_punycode_puts_before_its_encoded_part_is_kept(self):
+        # The longest TLD IANA lists, 24 characters.
+        assert _values("Seen at x.xn--vermgensberatung-pwb now.", EntityType.DOMAIN) == [
+            "x.xn--vermgensberatung-pwb"]
+
+    def test_an_xn_prefix_that_is_no_a_label_gives_no_domain(self):
+        # Code (a decrement), and an A-label glued to a word: no "p.xn", no "foo.xn".
+        assert _values("Then p.xn--; returns.", EntityType.DOMAIN) == []
+        assert _values("Then foo.xn--p1ai_bar returns.", EntityType.DOMAIN) == []
+
+    def test_a_two_letter_tld_is_unchanged(self):
+        assert _values("Seen at test.xn now.", EntityType.DOMAIN) == ["test.xn"]
+        assert _values("An example.com-based lure.", EntityType.DOMAIN) == ["example.com"]
+
+
 class TestMitreIdCase:
     """#254 — a lower-case ATT&CK id is kept, in upper case, when the index holds it."""
 
