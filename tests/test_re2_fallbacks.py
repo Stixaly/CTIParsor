@@ -51,6 +51,8 @@ ADVERSARIAL = {
     "no-break spaces": ". " * N,
     "nested roots": "/tmp" * (N // 4),
     "refused roots": "x/tmp " * (N // 6),
+    # The domain's A-label TLD branch at its longest, then refused by a glued "_".
+    "punycode tail": ("a.xn--" + "b" * 59 + "-" + "c" * 58 + "_") * (N // 125),
 }
 
 

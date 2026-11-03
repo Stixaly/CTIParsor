@@ -221,11 +221,19 @@ _DOMAIN_EXTRA_NON_TLD_EXTS = (
 _DOMAIN_NON_TLD_EXTS = "|".join(sorted(
     set(_MALWARE_FILE_EXTS.split("|")) | set(_DOMAIN_EXTRA_NON_TLD_EXTS)
 ))
-# Every TLD of more than 12 letters: the whole IANA list of them (IDNs aside), from
-# data.iana.org/TLD/tlds-alpha-by-domain.txt version 2026110200.  Listed rather than
-# a wider bound, which would make "object.serialization" in code a domain.
+# Every TLD of more than 12 letters: the whole IANA list of them (IDNs aside: see
+# _IDN_TLD), from data.iana.org/TLD/tlds-alpha-by-domain.txt version 2026110200.
+# Listed rather than a wider bound, which would make "object.serialization" in code
+# a domain.
 _LONG_TLDS = ("americanexpress", "americanfamily", "international", "kerryproperties",
               "lifeinsurance", "sandvikcoromant", "travelersinsurance", "weatherchannel")
+# An IDN TLD written as its A-label (IANA lists 151; xn--p1ai is .рф): "xn--", then
+# letters and digits with at most the one hyphen punycode puts before its encoded
+# part (xn--vermgensberatung-pwb).  A shape rather than a list: no word of prose or
+# code takes it.  The two-letter branch is kept off "xn--": it stopped there, and
+# test.xn--p1ai gave the domain "test.xn".  A TLD written in Unicode
+# (test.vermögensberatung) is still not extracted, nor is any non-ASCII label.
+_IDN_TLD = r"xn--[a-zA-Z0-9]{1,59}(?:-[a-zA-Z0-9]{1,58})?"
 # Up to 30 labels: a bound of 5 cut a deeper name and kept a wrong one
 # ("a.b.c.d.e.f.example.com" gave "b.c.d.e.f.example").  Not the 126 DNS
 # allows: the cost grows with the bound at each start on a run of dots
@@ -237,7 +245,7 @@ _DOMAIN_PATTERN = _compile_pattern(
     # costs about six times more, and runs at each of the up to 30 backtracking steps.
     r"(?=[a-zA-Z]{2})"
     rf"(?!(?:{_DOMAIN_NON_TLD_EXTS})\b)"
-    rf"(?:{'|'.join(_LONG_TLDS)}|[a-zA-Z]{{2,12}})\b",
+    rf"(?:{'|'.join(_LONG_TLDS)}|{_IDN_TLD}|(?!xn--)[a-zA-Z]{{2,12}})\b",
     re.IGNORECASE,
 )
 _DOMAIN_MAX_LENGTH = 253

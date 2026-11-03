@@ -107,6 +107,10 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "Stage 2 extracts a domain on one of IANA's 8 TLDs of more than 12 letters, and a lower-case "
      "ATT&CK id the bundled index holds (t1059.001 becomes T1059.001)",
      "extraction"),
+    ("defb855", "2026-11-03",
+     "Stage 2 extracts a domain on an IDN TLD written as its A-label whole (test.xn--p1ai, where it "
+     "gave test.xn)",
+     "extraction"),
 )
 
 
