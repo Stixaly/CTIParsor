@@ -1,5 +1,6 @@
 """Tests for pipeline/detection/sync.py — git dispatch and the tarball fetch
-(ADR-0015 §5). No network: _download and _fetch_text are always monkeypatched."""
+(ADR-0015 §5). No network: _download and _fetch_text are always monkeypatched,
+and so is the host lookup of validate_url (see `public_dns`)."""
 from __future__ import annotations
 
 import hashlib
@@ -12,6 +13,7 @@ from pathlib import Path
 import pytest
 
 import pipeline.detection.sync as sync_mod
+from pipeline import web_capture
 from pipeline.detection.sync import (
     MANIFEST_NAME,
     _parse_md5,
@@ -20,6 +22,17 @@ from pipeline.detection.sync import (
     git_remote_refusal,
     sync_corpus,
 )
+
+_PUBLIC_IP = "93.184.216.34"
+_UNSAFE = "git remote refused: not a safe remote to fetch (details in the server log)"
+
+
+@pytest.fixture(autouse=True)
+def public_dns(monkeypatch):
+    """Every host resolves to a public address, without the network: a git remote
+    is checked by validate_url, which resolves its host.  A test that needs
+    another answer patches `_resolve_all` again."""
+    monkeypatch.setattr(web_capture, "_resolve_all", lambda host: [_PUBLIC_IP])
 
 
 def _make_tar(tmp_path: Path, files: dict[str, str], *, name: str = "src.tar.gz") -> Path:
@@ -126,6 +139,47 @@ def test_git_remote_refusal_refuses_every_transport_but_https(remote: str) -> No
 
 def test_git_remote_refusal_accepts_https() -> None:
     assert git_remote_refusal("https://example.com/repo.git") is None
+
+
+@pytest.mark.parametrize("remote", [
+    "https://169.254.169.254/latest/meta-data/x.git",   # the cloud metadata service (#274)
+    "https://127.0.0.1/x.git",
+    "https://10.0.0.1/x.git",
+    "https://[::1]/x.git",
+    "https://localhost/x.git",
+    "https://metadata.google.internal/x.git",
+    "https://example.com:2222/x.git",                   # a port validate_url does not allow
+])
+def test_git_remote_refusal_refuses_a_host_that_is_not_public(remote: str) -> None:
+    """The registry can come from a YAML file nobody validated over the API: the
+    remote gets the policy one created over the API gets (`_validate_git_remote`)."""
+    assert git_remote_refusal(remote) == _UNSAFE
+
+
+def test_git_remote_refusal_refuses_a_name_that_resolves_to_a_private_address(monkeypatch) -> None:
+    monkeypatch.setattr(web_capture, "_resolve_all", lambda host: ["10.1.2.3"])
+    assert git_remote_refusal("https://git.corp.example/rules.git") == _UNSAFE
+
+
+def test_a_refused_remote_is_not_echoed_and_the_log_says_why(caplog) -> None:
+    """The reason reaches the browser: a token in the remote stays out of it, and
+    so does validate_url's text (CodeQL py/stack-trace-exposure)."""
+    with caplog.at_level("WARNING"):
+        reason = git_remote_refusal("https://oauth2:s3cr3t@github.com/org/rules.git")
+    assert reason == _UNSAFE
+    [record] = [r for r in caplog.records if "not a safe remote" in r.getMessage()]
+    assert "Credentials in URL are not allowed" in record.getMessage()
+    assert "s3cr3t" not in record.getMessage()
+
+
+def test_sync_never_runs_git_for_a_remote_on_a_private_host(tmp_path: Path, monkeypatch) -> None:
+    """#274's reproduction: a registry entry pointed at the metadata service."""
+    calls: list = []
+    monkeypatch.setattr(sync_mod.subprocess, "run", lambda *a, **k: calls.append(a))
+    corpus = {"name": "internal", "path": str(tmp_path / "c"),
+              "git": "https://169.254.169.254/latest/meta-data/x.git"}
+    assert sync_corpus(corpus) == (False, _UNSAFE)
+    assert calls == []
 
 
 def test_parse_md5_accepts_bare_hash_and_hash_filename_lines() -> None:

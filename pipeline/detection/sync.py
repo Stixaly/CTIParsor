@@ -104,12 +104,24 @@ def git_command(corpus: dict) -> list[str] | None:
 
 
 def git_remote_refusal(remote: str) -> str | None:
-    """Why `remote` is refused, or None when it is https://: both the API sync and
+    """Why `remote` is refused, or None when git may fetch it: both the API sync and
     the CLI call it before git runs. The registry can come from a YAML file nobody
-    validated over the API. A returned reason, not an exception, so the API answers
-    with this text and never with an exception's."""
+    validated over the API (the committed one, or the local overlay), so a remote
+    gets here the policy `_validate_git_remote` (api/routes/settings.py) gives one
+    created over the API: https only, then `validate_url`'s — no credentials, an
+    allowed port, a host that resolves to public addresses only.  Without it,
+    `https://169.254.169.254/...` (the cloud metadata service) or an intranet host
+    was cloned as is.  A returned reason, not an exception, so the API answers
+    with this text and never with an exception's: what `validate_url` objected
+    to goes to the log, and the remote is not echoed back, since it may carry a
+    token."""
     if not remote.lower().startswith("https://"):
         return f"git remote refused: only https:// remotes are fetched ({remote[:80]!r})"
+    try:
+        validate_url(remote)
+    except CaptureError as e:
+        _, reason = _failed("git remote refused: not a safe remote to fetch", e)
+        return reason
     return None
 
 

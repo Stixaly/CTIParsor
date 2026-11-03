@@ -9,6 +9,33 @@ theme.
 
 ## [Unreleased]
 
+### Security
+
+#### A corpus's git remote is checked for its host when it is fetched, 2026-11-03
+
+- **The corpus sync refuses a git remote on a host that is not public**
+  (#274). A remote created over the API already went through `validate_url`;
+  one read from `detection_corpora.yaml` or the local overlay was only checked
+  for https, so `https://169.254.169.254/...` or an intranet host was cloned as
+  is, by `sync_corpora.py` and by the Settings "Redownload" button alike. Both
+  now refuse a remote that carries credentials, uses a port other than 443,
+  8443, 80 or 8080, or whose host is or resolves to a loopback, private,
+  link-local or metadata address; the log says which. A repo on an internal
+  server is cloned by hand and registered with its `path` only. DNS rebinding
+  between the check and git's own lookup stays open, as for the tarball
+  download.
+
+### Fixed
+
+#### A domain on an IDN TLD is extracted whole, 2026-11-03
+
+- **Stage 2 reads an IDN TLD written as its A-label.** `test.xn--p1ai`
+  (`.рф`) gave the domain `test.xn`, an indicator that names no host: the TLD
+  branch stopped at the two letters before `--`. A TLD of the A-label's shape
+  (`xn--`, letters and digits, at most one hyphen) now ends the domain, and
+  `xn` followed by `--` no longer does. A TLD written in Unicode
+  (`.vermögensberatung`) is still not extracted (#253).
+
 ## [0.3.0] - 2026-11-02
 
 CTIParsor 0.3.0 is the release on the way to 1.0: it ships the checks 1.0
