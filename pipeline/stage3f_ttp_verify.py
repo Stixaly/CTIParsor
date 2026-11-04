@@ -105,6 +105,20 @@ Return a JSON array — one object per claim:
 # Public API
 # ---------------------------------------------------------------------------
 
+def _verdict(v: dict) -> bool:
+    """The claim's verdict, defaulting to True (safe fallback).
+
+    A textual "false" is a negative verdict, not a truthy string -- the
+    relationship verifier (stage3d) already normalizes this; do the same here.
+    """
+    value = v.get("verified", True)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() not in ("false", "no", "0")
+    return bool(value)
+
+
 def verify_ttps(
     text: str,
     result,                          # LLMEnrichmentResult — avoid import cycle
@@ -198,7 +212,7 @@ def verify_ttps(
     for i, t in enumerate(to_verify):
         v = verifications.get(i + 1)
         # No entry for this claim → default to keeping it (safe fallback).
-        if v is None or v.get("verified", True):
+        if v is None or _verdict(v):
             quote = v.get("quote") if v else None
             if quote and isinstance(quote, str) and quote.strip() and not t.description.strip():
                 t = t.model_copy(update={"description": quote.strip()[:500]})

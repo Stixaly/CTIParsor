@@ -121,7 +121,12 @@ class SuricataAdapter(RuleCorpusAdapter):
         title = msg if msg else (f"suricata sid {sid}" if sid else f"suricata rule {lineno}")
 
         content_hash = hashlib.sha256(line.encode()).hexdigest()
-        native_key = sid if sid.isdigit() else content_hash[:16]
+        # The rule's identity is (GID, SID): Suricata only requires the SID to
+        # be unique within a GID, so two rules sharing a SID with different
+        # GIDs are distinct rules -- keying on the SID alone made the upsert
+        # overwrite the first rule's body while accumulating both rules' atoms.
+        gid = opts.get("gid", "1").strip() or "1"
+        native_key = f"{gid}:{sid}" if sid.isdigit() else content_hash[:16]
 
         atoms = extract_atoms(line)
         header_atoms = self._header_atoms(header)

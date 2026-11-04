@@ -147,7 +147,10 @@ class SqliteReadCache:
                 if row is None:
                     return None
                 return read_from_json(row["read_json"])
-        except DB_ERRORS:
+        # RuntimeError/ValueError too: with DATABASE_URL unset or malformed,
+        # get_conn() raises before any SQL runs, and the cache must fail
+        # soft (CLI runs without a database), not abort Stage 1f.
+        except (*DB_ERRORS, RuntimeError, ValueError):
             logger.warning("Failed to get from cache", exc_info=True)
             return None
 
@@ -167,7 +170,10 @@ class SqliteReadCache:
                     "read_json = excluded.read_json, created_at = excluded.created_at",
                     (sha256, model, prompt_version, read_to_json(read), now_iso()),
                 )
-        except DB_ERRORS:
+        # RuntimeError/ValueError too: with DATABASE_URL unset or malformed,
+        # get_conn() raises before any SQL runs, and the cache must fail
+        # soft (CLI runs without a database), not abort Stage 1f.
+        except (*DB_ERRORS, RuntimeError, ValueError):
             logger.warning("Failed to put to cache", exc_info=True)
 
 
@@ -202,7 +208,10 @@ def save_spans(job_id: str, spans: list[FigureSpan], provider: str) -> int:
                     ),
                 )
             return len(spans)
-    except DB_ERRORS:
+    # RuntimeError/ValueError too: with DATABASE_URL unset or malformed,
+    # get_conn() raises before any SQL runs, and the cache must fail
+    # soft (CLI runs without a database), not abort Stage 1f.
+    except (*DB_ERRORS, RuntimeError, ValueError):
         logger.warning("Failed to save spans", exc_info=True)
         return 0
 
@@ -240,7 +249,10 @@ def load_spans(job_id: str) -> list[FigureSpan]:
                     )
                 )
             return spans
-    except DB_ERRORS:
+    # RuntimeError/ValueError too: with DATABASE_URL unset or malformed,
+    # get_conn() raises before any SQL runs, and the cache must fail
+    # soft (CLI runs without a database), not abort Stage 1f.
+    except (*DB_ERRORS, RuntimeError, ValueError):
         logger.warning("Failed to load spans", exc_info=True)
         return []
 
@@ -277,6 +289,9 @@ def figure_at_offset(job_id: str, offset: int) -> FigureSpan | None:
                 model=row["model"],
                 sha256=row["sha256"],
             )
-    except DB_ERRORS:
+    # RuntimeError/ValueError too: with DATABASE_URL unset or malformed,
+    # get_conn() raises before any SQL runs, and the cache must fail
+    # soft (CLI runs without a database), not abort Stage 1f.
+    except (*DB_ERRORS, RuntimeError, ValueError):
         logger.warning("Failed to find figure at offset", exc_info=True)
         return None

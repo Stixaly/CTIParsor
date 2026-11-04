@@ -15,6 +15,7 @@ constraint on the detection artifact).
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -333,13 +334,53 @@ def _text_matches(
 
     hits: dict[str, list[tuple[Observable, str, str]]] = {}
     for obs in needles:
-        matched = [rid for rid, text in texts.items() if obs.value in text]
-        # A CVE id is specific by construction; only names need the guard.
+        if obs.obs_class == "cve":
+            # A CVE id must match as a WHOLE id: cve-2024-1234 is not evidence
+            # for a rule about cve-2024-12345, which a plain substring test
+            # would claim.  A following digit extends the id; a preceding
+            # letter/digit/hyphen glues it to another token.
+            pat = re.compile(r"(?<![a-z0-9-])" + re.escape(obs.value) + r"(?![0-9])")
+            matched = [rid for rid, text in texts.items() if pat.search(text)]
+        else:
+            matched = [rid for rid, text in texts.items() if obs.value in text]
+        # Only names need the share guard; a CVE id is specific by construction.
         if obs.obs_class == "name" and len(matched) > limit:
             continue
         for rid in matched:
             hits.setdefault(rid, []).append((obs, "title", obs.value))
     return hits
+
+
+def _text_rule_ids(conn: DBConnection, observables: list[Observable]) -> set[str]:
+    """Canonical rule ids whose title or description names a cve/name observable.
+
+    Rules dedicated to a CVE, or YARA/Suricata rules with no ATT&CK tag that
+    only match by title, never reach `rank_rules`' candidate set through atoms
+    or technique tags -- this query finds them so `_text_matches` can rank them.
+    Over-inclusive on purpose (plain LIKE): the boundary-checked `_text_matches`
+    makes the final call.
+    """
+    needles = [o for o in observables
+               if o.obs_class == "cve" or (o.obs_class == "name" and len(o.value) >= 4)]
+    if not needles:
+        return set()
+    out: set[str] = set()
+    for i in range(0, len(needles), 100):
+        batch = needles[i:i + 100]
+        clauses = " OR ".join(
+            "(lower(title) LIKE ? ESCAPE '\\' OR lower(description) LIKE ? ESCAPE '\\')"
+            for _ in batch
+        )
+        params: list[str] = []
+        for o in batch:
+            esc = o.value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            params += [f"%{esc}%", f"%{esc}%"]
+        rows = conn.execute(
+            f"SELECT id FROM detection_rules WHERE is_canonical=1 AND ({clauses})",
+            params,
+        ).fetchall()
+        out.update(r[0] for r in rows)
+    return out
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────
@@ -412,6 +453,8 @@ def rank_rules(
 
     exact = _exact_matches(conn, observables)
     candidates = set(tech_rules) | set(exact)
+    # CVE-dedicated and title-only rules join the candidate set by their text.
+    candidates |= _text_rule_ids(conn, observables)
 
     details = rule_details(conn, candidates)
     partial = _partial_matches(conn, observables, candidates)

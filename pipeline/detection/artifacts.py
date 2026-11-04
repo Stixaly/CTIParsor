@@ -281,9 +281,10 @@ def _title_evidence(
                     native_key=native_key or rule_id,
                 ))
 
-                # Track name matches for discrimination guard
-                if obs_class == "name":
-                    name_match_counts[value] = name_match_counts.get(value, 0) + 1
+                # The NAME_TITLE_MAX_RULES guard counts TITLE matches only:
+                # a short name that is a substring of frequent description
+                # words ("play" in "display"/"payload") must not erase the
+                # rule's real title matches.
 
     # Apply discrimination guard for names
     for value, count in name_match_counts.items():

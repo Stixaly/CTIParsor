@@ -123,6 +123,12 @@ def _predictions(result) -> dict:
                              ("identity", llm.targeted_sectors)):
             entities += [{"type": etype, "value": n, "source": "llm", "confidence": None,
                           "mitre_id": None} for n in names]
+        # The exported campaign is part of the predictions too: it is in the
+        # in-house annotation contract and in the bundle, so a gold campaign
+        # must score as TP, not FN.
+        if llm.campaign_name:
+            entities.append({"type": "campaign", "value": llm.campaign_name, "source": "llm",
+                             "confidence": None, "mitre_id": None})
     relations = []
     if llm is not None:
         relations = [{"source": r.source_value, "type": r.relationship_type, "target": r.target_value,

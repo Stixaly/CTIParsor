@@ -352,7 +352,8 @@ _SENTENCE_STOP = _compile_pattern(r"\.[" + _WS + r"]")
 # The blanks are `_WS`, which a no-break space from an HTML page is.
 # ---------------------------------------------------------------------------
 _DEFANG_PATTERN = _compile_pattern(
-    r"hxxps?://|h\[tt\]ps?://|https?\[s\]://|https?\[:\]://|meow://|fxx?p://|"
+    r"hxxps?(?:://|\[:]//|\[://\]|\[\.\]//)|h\[tt\]ps?(?:://|\[:]//)|"
+    r"https?\[s\]://|https?\[:]://|meow://|fxxps?://|"
     r"[" + _WS + r"]{1,16}\[\.\][" + _WS + r"]+|[" + _WS + r"]{1,16}\(\.\)[" + _WS + r"]+|"
     r"\[\.\]|\(\.\)|\{\.\}|\[dot\]|\(dot\)|"
     r"\[:\]|\(:\)|"
@@ -642,7 +643,13 @@ def _extract_network_iocs(text: str) -> list[RawEntity]:
         url = m.group()
         # Only strip trailing punctuation that cannot be part of a URL
         # Keep trailing slash, hash, query params
-        while url and url[-1] in '".),;}\'':
+        # A trailing ")" is kept when the URL's parentheses balance: "(" and ")" are
+        # legal URI sub-delims (RFC 3986) and Wikipedia-style titles end in one
+        # (.../APT29_(group)) -- stripping it corrupts a real link, while
+        # "(https://example.com/a)" in prose still loses its unmatched ")".
+        while url and url[-1] in '".),;}\'' and not (
+            url[-1] == ")" and url.count(")") <= url.count("(")
+        ):
             url = url[:-1]
         results.append(RawEntity(value=url, entity_type=EntityType.URL))
 

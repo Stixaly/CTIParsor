@@ -98,15 +98,19 @@ def _name_in_text(name: str, text: str, threshold: int | None = None) -> bool:
         text:      source chunk text
         threshold: override similarity threshold (0–100); auto-selected if None
     """
-    if not name or len(name) < _MIN_NAME_LENGTH:
-        return True   # too short to meaningfully reject
-
-    name_lower = name.lower().strip()
+    name_lower = (name or "").lower().strip()
+    if not name_lower:
+        return False  # an empty name matches nowhere, not everywhere
     text_lower = text.lower()
 
+    # Exact match on word boundaries, whatever the length.
     pattern = r'(?<![a-z0-9])' + re.escape(name_lower) + r'(?![a-z0-9])'
     if re.search(pattern, text_lower):
         return True
+
+    # Too short for the fuzzy pass: exact-only, already checked above.
+    if len(name_lower) < _MIN_NAME_LENGTH:
+        return False
 
     if not _RAPIDFUZZ_AVAILABLE or not _fuzzy_allowed(name_lower):
         return False
@@ -238,22 +242,38 @@ def validate_llm_result(
     if result.campaign_name and campaign is None:
         hallucinated.add(result.campaign_name.lower())
 
+    # Validate the named endpoints directly: when the entity lists are empty
+    # (the document-level relations pass), `hallucinated` is empty and a
+    # relationship to an invented entity would otherwise survive.
+    kept_names = {n.lower() for n in (*filtered_actors, *filtered_malware, *filtered_tools)}
+    if campaign:
+        kept_names.add(campaign.lower())
+
+    def _endpoint_ok(value: str) -> bool:
+        v = value.lower()
+        if v in hallucinated:
+            return False
+        if v in kept_names:
+            return True
+        return _keep(value)
+
     filtered_rels = [
         r for r in result.relationships
-        if r.source_value.lower() not in hallucinated
-        and r.target_value.lower() not in hallucinated
+        if _endpoint_ok(r.source_value) and _endpoint_ok(r.target_value)
     ]
 
-    return LLMEnrichmentResult(
-        threat_actors=filtered_actors,
-        malware_families=filtered_malware,
-        tools=filtered_tools,
-        # TTPs: not filtered here — handled by stage3c MITRE normalization
-        ttps=result.ttps,
-        relationships=filtered_rels,
-        ioc_associations=result.ioc_associations,
-        targeted_sectors=result.targeted_sectors,
-        targeted_countries=result.targeted_countries,
-        campaign_name=campaign,
-        course_of_action=result.course_of_action,
-    )
+    filtered_ioc_assoc = [
+        a for a in result.ioc_associations
+        if a.malware_name.lower() not in hallucinated and _keep(a.malware_name)
+    ]
+
+    # model_copy(update=...) keeps every field not listed here (ttps,
+    # sectors, countries, course_of_action, ttp_review, rel_review, ...).
+    return result.model_copy(update={
+        "threat_actors": filtered_actors,
+        "malware_families": filtered_malware,
+        "tools": filtered_tools,
+        "relationships": filtered_rels,
+        "ioc_associations": filtered_ioc_assoc,
+        "campaign_name": campaign,
+    })

@@ -264,9 +264,20 @@ def discrimination(obs_class: str, value: str) -> str:
         return UBIQUITOUS if v in UBIQUITOUS_IPS else DISCRIMINATING
     elif obs_class in ("domain", "url"):
         h = _host(v)
-        if h in UBIQUITOUS_DOMAINS or _registrable(h) in UBIQUITOUS_DOMAINS:
-            return UBIQUITOUS
-        return DISCRIMINATING
+        if h not in UBIQUITOUS_DOMAINS and _registrable(h) not in UBIQUITOUS_DOMAINS:
+            return DISCRIMINATING
+        if obs_class == "url":
+            # A full URL on a shared cloud domain is still specific when it
+            # carries a path: https://s3.amazonaws.com/<bucket>/<payload>
+            # names one object; the bare domain does not.
+            from urllib.parse import urlsplit
+            try:
+                path = urlsplit(v).path
+            except ValueError:
+                path = ""
+            if path.strip("/"):
+                return DISCRIMINATING
+        return UBIQUITOUS
     elif obs_class == "user":
         return UBIQUITOUS if v in UBIQUITOUS_USERS else DISCRIMINATING
     elif obs_class == "registry":

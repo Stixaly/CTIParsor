@@ -98,6 +98,11 @@ def _validate_corpus_path(raw_path: str, subdir: str | None) -> None:
             400,
             f"'path' must resolve inside {_CORPORA_ROOT} (got {raw_path!r} -> {candidate.resolve()})",
         )
+    # is_relative_to() is reflexive, so "./corpora" resolves to the root itself
+    # and passes the check above -- but a later tarball sync rmtree()s the
+    # target directory, so the corpora root itself must never be accepted.
+    if candidate.resolve() == _CORPORA_ROOT:
+        raise HTTPException(400, "'path' must be a strict subdirectory of corpora/")
     if subdir and subdir.strip():
         scoped = candidate.resolve() / subdir.strip()
         if not is_contained(scoped, _CORPORA_ROOT):
