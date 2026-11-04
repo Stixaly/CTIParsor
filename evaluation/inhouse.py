@@ -38,6 +38,8 @@ ROOT = Path(__file__).resolve().parent.parent / "data" / "eval" / "inhouse"
 LAYERS = ("iocs", "entities", "techniques", "relations")
 IOC_TYPES = {"ipv4", "ipv6", "domain", "url", "email", "md5", "sha1", "sha256", "cve",
              "file", "registry_key", "mutex", "mac_addr", "asn"}
+# The types the `entities` layer annotates (docs/eval/annotation-guide.md section 3).
+ENTITY_LAYER_TYPES = {"malware", "tool", "threat_actor", "campaign"}
 
 
 @dataclass
@@ -81,8 +83,13 @@ def score(doc: InhouseDoc, pred: dict, canonical) -> dict:
     if "entities" in doc.layers:
         gold_e = [(e["type"], e["value"], set(e.get("aliases", [])) | {e["value"]})
                   for e in g.get("entities", [])]
-        types = {e[0] for e in gold_e}
-        pred_e = [(e["type"], e["value"]) for e in pred["entities"] if e["type"] in types]
+        # The layer is declared exhaustive over the types it annotates:
+        # EVERY prediction of those types counts, including types with no gold
+        # object (false positives, not to be filtered out by the gold's own
+        # types).  Types the layer does not annotate (ipv4, location, ...) are
+        # not predictions of this layer.
+        pred_e = [(e["type"], e["value"]) for e in pred["entities"]
+                  if e["type"] in ENTITY_LAYER_TYPES]
         out["entities"] = metrics.score_entities(pred_e, gold_e)
     if "techniques" in doc.layers:
         kinds: dict[str, set[str]] = {}
@@ -102,8 +109,12 @@ def score(doc: InhouseDoc, pred: dict, canonical) -> dict:
     # recommends against must NOT come out.
     violations = []
     pred_parents = {t.split(".", 1)[0] for t in pred["ttp_ids"]}
-    pred_triples = {(a.lower(), b.lower(), c.lower())
-                    for a, b, c in ((r["source"], r["type"], r["target"]) for r in pred.get("relations", []))}
+    # Same source as the positive relation score: what the bundle ships when
+    # there is one, else Stage 3's own relationships.
+    shipped = pred.get("bundle_relations")
+    rel_source = shipped if shipped is not None else pred.get("relations", [])
+    pred_triples = {(r["source"].lower(), r["type"].lower(), r["target"].lower())
+                    for r in rel_source}
     for n in g.get("negatives", []):
         if n.get("kind") == "technique" and n.get("id", "").upper().split(".", 1)[0] in pred_parents:
             violations.append(n)

@@ -365,13 +365,16 @@ class WorkerLoop:
 
     def heartbeat_if_due(self, now: float | None = None) -> bool:
         now = now or time.monotonic()
-        if now - self._last_heartbeat >= self.heartbeat_s:
+        # Retry on the next tick while the last stamp failed: a transient DB
+        # error must not silence the liveness refresh for a whole period.
+        if not self._stamp_ok or now - self._last_heartbeat >= self.heartbeat_s:
             heartbeat(self.running_ids, self.worker_id)
             # A loop asked to stop writes no row: forget() may already have
             # deleted it (stop_embedded waits 5 s for the thread, then forgets).
             if not self._stop.is_set():
                 self._stamp_ok = self.stamp()
-            self._last_heartbeat = now
+            if self._stamp_ok or self._stop.is_set():
+                self._last_heartbeat = now
             return True
         return False
 
@@ -461,22 +464,29 @@ class WorkerLoop:
         for job_id in job_ids:
             with self._lock:
                 handle = self._handles.pop(job_id, None)
-            if handle is not None:
-                try:
-                    handle.terminate()
-                except Exception as exc:
-                    logger.error(f"Failed to terminate handle for {job_id}: {exc}")
+            # Requeue FIRST, conditioned on the current lease owner.  Clearing
+            # worker_id before the SIGTERM neutralizes the subprocess watcher's
+            # _finalize_job(jid, "failed", owner_worker_id), which would
+            # otherwise freeze the job as failed the instant the signal lands.
+            # A job already taken over by another worker (worker_id no longer
+            # ours) is left untouched.
             try:
                 conn = get_conn()
                 cur = conn.execute(
                     "UPDATE jobs SET status='queued', worker_id=NULL, heartbeat_at=NULL, updated_at=? "
-                    "WHERE id=? AND status='processing'",
-                    (now_iso(), job_id),
+                    "WHERE id=? AND status='processing' AND worker_id=?",
+                    (now_iso(), job_id, self.worker_id),
                 )
                 if cur.rowcount > 0:
                     count += 1
             except Exception as exc:
                 logger.error(f"Failed to requeue {job_id}: {exc}")
+            if handle is not None:
+                try:
+                    handle.terminate()
+                    handle.join(timeout=5)
+                except Exception as exc:
+                    logger.error(f"Failed to terminate handle for {job_id}: {exc}")
         if count > 0:
             logger.info(f"Terminated and requeued {count} job(s)")
         return count

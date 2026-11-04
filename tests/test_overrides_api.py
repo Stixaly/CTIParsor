@@ -128,3 +128,15 @@ def test_create_validates_action_type_and_term(temp_db, temp_db_client):
     for body in bad:
         assert temp_db_client.post("/api/overrides", json=body).status_code == 400, body
     assert temp_db_client.get("/api/overrides").json()["rows"] == []
+
+
+def test_a_lone_surrogate_in_a_term_is_a_422_not_a_500(temp_db, temp_db_client):
+    """#342: Pydantic echoes `input` into the 422 body; UTF-8 cannot encode it."""
+    resp = temp_db_client.post(
+        "/api/overrides",
+        content=b'{"term": "x\ud800", "entity_type": "malware", "action": "deny"}',
+        headers={"content-type": "application/json"},
+    )
+    assert resp.status_code == 422
+    assert b"\ud800" in resp.content
+    assert resp.json()["detail"][0]["loc"][-1] == "term"

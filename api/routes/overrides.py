@@ -12,7 +12,7 @@ rows act.  The promotion job never activates: a candidate is a suggestion the
 analysts' decisions make, activating it is a person's decision.
 """
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 import pipeline.overrides as overrides
 from api.db import _lock, get_conn, now_iso
@@ -47,6 +47,21 @@ class OverrideIn(BaseModel):
     action: str
     display: str | None = None
     note: str | None = None
+
+    @field_validator("term", "display", "note")
+    @classmethod
+    def _no_nul_or_lone_surrogate(cls, v: str | None) -> str | None:
+        # PostgreSQL TEXT rejects NUL bytes (psycopg.DataError -> HTTP 500);
+        # reject them here as a 4xx instead.
+        if v is None:
+            return v
+        if "\x00" in v:
+            raise ValueError("NUL byte is not allowed")
+        try:
+            v.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise ValueError("lone UTF-16 surrogate is not allowed") from exc
+        return v
 
 
 class StatusIn(BaseModel):

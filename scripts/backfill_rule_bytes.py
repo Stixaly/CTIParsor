@@ -84,17 +84,19 @@ def main() -> int:
                 params = [args.batch]
 
             sql = (
-                "SELECT d.id, LENGTH(COALESCE(d.raw, '')) FROM detection_rules d "
+                "SELECT d.id, d.raw FROM detection_rules d "
                 f"WHERE {where} ORDER BY d.id LIMIT ?"
             )
             rows = conn.execute(sql, params).fetchall()
             if not rows:
                 break
 
+            # rule_bytes must match the exported file's size: UTF-8 octets,
+            # not characters (LENGTH() on text counts characters).
             conn.executemany(
                 "INSERT INTO rule_bytes (rule_id, bytes) VALUES (?, ?) "
                 "ON CONFLICT (rule_id) DO UPDATE SET bytes = EXCLUDED.bytes",
-                [(i, n) for i, n in rows],
+                [(i, len((raw or "").encode("utf-8"))) for i, raw in rows],
             )
             conn.commit()
 

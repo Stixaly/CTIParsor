@@ -56,11 +56,19 @@ def _touch_upload(job_id: str) -> None:
 
 
 class FakeHandle:
-    def __init__(self) -> None:
+    def __init__(self, job_id: str = "") -> None:
+        self.job_id = job_id
         self.terminated = False
+        self.joined: float | None = None
+        self.status_at_terminate: str | None = None
 
     def terminate(self) -> None:
         self.terminated = True
+        row = get_conn().execute("SELECT status FROM jobs WHERE id=?", (self.job_id,)).fetchone()
+        self.status_at_terminate = row["status"]
+
+    def join(self, timeout: float | None = None) -> None:
+        self.joined = timeout
 
 
 class FakeSpawn:
@@ -74,7 +82,7 @@ class FakeSpawn:
     def __call__(self, job_id: str, file_path: str, name: str, on_exit: callable) -> FakeHandle:
         self.calls.append((job_id, file_path, name))
         self.on_exit[job_id] = on_exit
-        handle = FakeHandle()
+        handle = FakeHandle(job_id)
         self.handles[job_id] = handle
         return handle
 
@@ -366,7 +374,10 @@ def test_terminate_and_requeue(setup_db):
     count = loop.terminate_and_requeue(ids)
     assert count == 1
 
-    assert spawn.handles[ids[0]].terminated
+    handle = spawn.handles[ids[0]]
+    assert handle.terminated
+    assert handle.status_at_terminate == "queued", "requeue must come before the SIGTERM"
+    assert handle.joined == 5
     assert ids[0] not in loop.running_ids
 
     conn = get_conn()
@@ -375,6 +386,26 @@ def test_terminate_and_requeue(setup_db):
     assert row["worker_id"] is None
 
     assert loop.running_count == 0
+
+
+def test_terminate_leaves_a_job_another_worker_took_over(setup_db):
+    """#300: the requeue is conditioned on the lease owner."""
+    _insert_job("j1", "queued", "2024-01-01T00:00:00Z")
+    _touch_upload("j1")
+
+    spawn = FakeSpawn()
+    loop = queue_loop.WorkerLoop(max_concurrent=1, spawn=spawn)
+    loop.kick()
+    (job_id,) = loop.running_ids
+
+    conn = get_conn()
+    conn.execute("UPDATE jobs SET worker_id='someone-else' WHERE id=?", (job_id,))
+    conn.commit()
+
+    assert loop.terminate_and_requeue([job_id]) == 0
+
+    row = conn.execute("SELECT status, worker_id FROM jobs WHERE id=?", (job_id,)).fetchone()
+    assert row["status"] == "processing" and row["worker_id"] == "someone-else"
 
 
 def test_run_pipeline_async_rejects_when_queue_is_full(setup_db, monkeypatch: pytest.MonkeyPatch):

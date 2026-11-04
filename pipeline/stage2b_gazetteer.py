@@ -189,6 +189,31 @@ def _is_word_char(ch: str) -> bool:
     return ch.isalnum() or ch == '-'
 
 
+def _lower_index_map(text: str) -> list[int]:
+    """Map each index of `text.lower()` to the index of the character in `text`
+    that produced it.  `str.lower()` is NOT length-preserving (U+0130 lowercases
+    to two code points), so a match offset in the lowered text does not name the
+    same offset in the original text -- spans and context must go through this
+    map."""
+    index_map: list[int] = []
+    for i, ch in enumerate(text):
+        index_map.extend([i] * len(ch.lower()))
+    return index_map
+
+
+def _is_claimed(claimed: list[tuple[int, int, str]], start: int, end: int,
+                entity_type: str) -> bool:
+    """True when [start, end) overlaps a claimed span.  An EXACTLY equal span
+    claimed by a different entity_type does not block (homonyms such as
+    Machete G0095 group / S0409 malware); any other overlap does."""
+    for s, e2, t in claimed:
+        if s == start and e2 == end and t != entity_type:
+            continue
+        if s <= start < e2 or s < end <= e2:
+            return True
+    return False
+
+
 def _match_aho(text: str, automaton, judge: _Judge | None = None, apply: bool = False,
                trace: list[dict] | None = None) -> list[RawEntity]:
     """
@@ -198,10 +223,10 @@ def _match_aho(text: str, automaton, judge: _Judge | None = None, apply: bool = 
     word boundaries and apply longest-match-wins span claiming.
     """
     text_lower = text.lower()
-    text_len   = len(text_lower)
+    index_map  = _lower_index_map(text)
 
     # Collect all candidates (may include overlapping shorter names)
-    # Format: (start, end_exclusive, entry, name_len)
+    # Format: (start, end_exclusive, entry, name_len) — in ORIGINAL text coords
     candidates: list[tuple[int, int, dict, int]] = []
 
     for end_idx, entry_list in automaton.iter(text_lower):
@@ -209,31 +234,44 @@ def _match_aho(text: str, automaton, judge: _Judge | None = None, apply: bool = 
             name_key = entry["name"]
             name_len = len(name_key)
             start    = end_idx - name_len + 1
-            end      = end_idx + 1          # exclusive
+            end      = end_idx + 1          # exclusive, lowered coords
+            if end > len(index_map):
+                continue
+            # lower() is not length-preserving: convert to original coords.
+            o_start = index_map[start]
+            o_end   = index_map[end - 1] + 1
 
-            # Word-boundary check — same semantics as the regex (?<![a-zA-Z0-9\-])
-            before_ok = (start == 0 or not _is_word_char(text_lower[start - 1]))
-            after_ok  = (end >= text_len   or not _is_word_char(text_lower[end]))
+            # Word-boundary check — same semantics as the regex, on the
+            # original text (the lowered char can differ, e.g. U+0130).
+            before_ok = (o_start == 0 or not _is_word_char(text[o_start - 1]))
+            after_ok  = (o_end >= len(text) or not _is_word_char(text[o_end]))
             if not before_ok or not after_ok:
                 continue
 
-            candidates.append((start, end, entry, name_len))
+            candidates.append((o_start, o_end, entry, o_end - o_start))
 
     # Longest match first (same as the pre-sorted regex path)
     candidates.sort(key=lambda x: (-x[3], x[0]))
 
     # Span claiming — identical logic to the regex version
-    seen_canonicals: set[str] = set()
-    claimed: list[tuple[int, int]] = []
+    seen_canonicals: set[tuple[str, str]] = set()
+    claimed: list[tuple[int, int, str]] = []
     results: list[RawEntity] = []
 
     for start, end, entry, _ in candidates:
         canonical       = entry["canonical"]
         canonical_lower = canonical.lower()
+        # Identity is (canonical, entity_type): ATT&CK reuses names across
+        # object kinds (Machete G0095 group vs S0409 malware, ...).
+        seen_key        = (canonical_lower, entry["entity_type"])
 
-        if canonical_lower in seen_canonicals:
+        if _is_claimed(claimed, start, end, entry["entity_type"]):
             continue
-        if any(s <= start < e2 or s < end <= e2 for s, e2 in claimed):
+        if seen_key in seen_canonicals:
+            # Already emitted once: still claim the span -- a repeated mention
+            # must block shorter aliases of OTHER entries inside it from
+            # matching as false positives -- but trace and emit nothing.
+            claimed.append((start, end, entry["entity_type"]))
             continue
         verdict = judge(entry, start, end) if judge else None
         if verdict is not None and verdict.withheld and apply:
@@ -243,8 +281,8 @@ def _match_aho(text: str, automaton, judge: _Judge | None = None, apply: bool = 
         if verdict is not None and (verdict.decision or verdict.withheld) and trace is not None:
             trace.append(_trace_item(entry, text, start, end, verdict))
 
-        claimed.append((start, end))
-        seen_canonicals.add(canonical_lower)
+        claimed.append((start, end, entry["entity_type"]))
+        seen_canonicals.add(seen_key)
 
         ctx_start = max(0, start - 60)
         ctx_end   = min(len(text), end + 60)
@@ -281,9 +319,10 @@ def _match_regex(text: str, judge: _Judge | None = None, apply: bool = False,
         return []
 
     text_lower = text.lower()
+    index_map  = _lower_index_map(text)
     results: list[RawEntity] = []
-    seen_canonicals: set[str] = set()
-    claimed: list[tuple[int, int]] = []
+    seen_canonicals: set[tuple[str, str]] = set()
+    claimed: list[tuple[int, int, str]] = []
 
     for entry in entries:
         name_key  = entry["name"]
@@ -292,8 +331,9 @@ def _match_regex(text: str, judge: _Judge | None = None, apply: bool = False,
         mitre_id  = entry.get("mitre_id")
 
         canonical_lower = canonical.lower()
-        if canonical_lower in seen_canonicals:
-            continue
+        # Identity is (canonical, entity_type): ATT&CK reuses names across
+        # object kinds (Machete G0095 group vs S0409 malware, ...).
+        seen_key = (canonical_lower, etype_str)
         if len(name_key) < _MIN_NAME_LEN:
             continue
 
@@ -310,8 +350,19 @@ def _match_regex(text: str, judge: _Judge | None = None, apply: bool = False,
             + r'(?![^\W_])(?!-)'
         )
         for m in re.finditer(pattern, text_lower):
-            start, end = m.start(), m.end()
-            if any(s <= start < e2 or s < end <= e2 for s, e2 in claimed):
+            if m.end() > len(index_map):
+                continue
+            # Convert the lowered-text offsets to original-text coordinates
+            # (lower() is not length-preserving, e.g. U+0130).
+            start = index_map[m.start()]
+            end   = index_map[m.end() - 1] + 1
+            if _is_claimed(claimed, start, end, etype_str):
+                continue
+            if seen_key in seen_canonicals:
+                # Already emitted once: still claim the span -- a repeated
+                # mention must block shorter aliases of OTHER entries inside
+                # it -- but trace and emit nothing.
+                claimed.append((start, end, etype_str))
                 continue
             verdict = judge(entry, start, end) if judge else None
             if verdict is not None and verdict.withheld and apply:
@@ -320,8 +371,8 @@ def _match_regex(text: str, judge: _Judge | None = None, apply: bool = False,
                 continue      # the next occurrence may qualify
             if verdict is not None and (verdict.decision or verdict.withheld) and trace is not None:
                 trace.append(_trace_item(entry, text, start, end, verdict))
-            claimed.append((start, end))
-            seen_canonicals.add(canonical_lower)
+            claimed.append((start, end, etype_str))
+            seen_canonicals.add(seen_key)
 
             ctx_start = max(0, start - 60)
             ctx_end   = min(len(text), end + 60)
@@ -343,7 +394,6 @@ def _match_regex(text: str, judge: _Judge | None = None, apply: bool = False,
                 mitre_id=mitre_id,
                 source="gazetteer",
             ))
-            break
 
     return results
 

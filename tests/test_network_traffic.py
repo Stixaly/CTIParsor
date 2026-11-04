@@ -13,6 +13,13 @@ from pipeline.network_traffic import TrafficDescriptor, parse_network_traffic
     ("[2001:db8::1]:53 udp dns", TrafficDescriptor("2001:db8::1", "ipv6-addr", 53, ("ipv6", "udp", "dns"))),
     ("https://Update.Example.com/check", TrafficDescriptor("update.example.com", "domain-name", None, ("https",))),
     ("evil.example.com:8080 over http", TrafficDescriptor("evil.example.com", "domain-name", 8080, ("http",))),
+    # a bare IPv6 keeps its last group: it is not a port
+    ("beacon to 2001:db8::1:443", TrafficDescriptor("2001:db8::1:443", "ipv6-addr", None, ("ipv6",))),
+    # a domain label that names a protocol is not a protocol mention
+    ("The domain ftp.example.com was registered", None),
+    # ... however many times, and whatever punctuation follows it
+    ("the ftp.example.com, ftp.example.com", None),
+    ("ftp.example.com over ftp", TrafficDescriptor("ftp.example.com", "domain-name", None, ("ftp",))),
 ])
 def test_what_the_text_states_is_read(text, expected):
     assert parse_network_traffic(text) == expected

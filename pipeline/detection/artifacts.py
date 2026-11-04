@@ -14,6 +14,7 @@ Deterministic and offline: no models, no network, no randomness.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -212,6 +213,13 @@ def _exact_evidence(
     return result
 
 
+def _contains(obs_class: str, needle: str, text: str) -> bool:
+    """Substring test; a CVE id must match as a whole id (same rule as relevance)."""
+    if obs_class != "cve":
+        return needle in text
+    return re.search(r"(?<![a-z0-9-])" + re.escape(needle) + r"(?![0-9])", text) is not None
+
+
 def _title_evidence(
     conn: DBConnection,
     observables: Iterable[Observable],
@@ -252,7 +260,7 @@ def _title_evidence(
 
         for obs_class, value, value_lower in search_terms:
             # Title match takes precedence over description
-            if value_lower in title_lower:
+            if _contains(obs_class, value_lower, title_lower):
                 key = (obs_class, value)
                 if key not in result:
                     result[key] = []
@@ -268,7 +276,7 @@ def _title_evidence(
                 # Track name matches for discrimination guard
                 if obs_class == "name":
                     name_match_counts[value] = name_match_counts.get(value, 0) + 1
-            elif value_lower in desc_lower:
+            elif _contains(obs_class, value_lower, desc_lower):
                 key = (obs_class, value)
                 if key not in result:
                     result[key] = []
@@ -281,9 +289,10 @@ def _title_evidence(
                     native_key=native_key or rule_id,
                 ))
 
-                # Track name matches for discrimination guard
-                if obs_class == "name":
-                    name_match_counts[value] = name_match_counts.get(value, 0) + 1
+                # The NAME_TITLE_MAX_RULES guard counts TITLE matches only:
+                # a short name that is a substring of frequent description
+                # words ("play" in "display"/"payload") must not erase the
+                # rule's real title matches.
 
     # Apply discrimination guard for names
     for value, count in name_match_counts.items():

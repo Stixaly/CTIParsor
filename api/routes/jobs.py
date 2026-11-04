@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
 from api.baseline_store import EXCLUDED_LISTED
-from api.db import _lock, get_conn, now_iso
+from api.db import _lock, get_conn, now_iso, transaction
 from api.logging_config import get_logger
 from api.paths import output_dir, uploads_dir
 from api.routes._common import require_job
@@ -200,28 +200,51 @@ def update_job_status(job_id: str, patch: StatusPatch):
     if patch.status not in valid:
         raise HTTPException(400, f"Invalid status. Valid: {valid}")
     refused: list[str] | None = None
+    conflict: str | None = None
     rowcount = 0
     with _lock:
         with get_conn() as conn:
             # Read and write under the same lock and connection: a rebuild
             # cannot slip its verdict in between.
+            row = conn.execute(
+                "SELECT status, bundle_json, bundle_validation, bundle_validation_errors "
+                "FROM jobs WHERE id=?", (job_id,)
+            ).fetchone()
             if patch.status == "completed":
-                row = conn.execute(
-                    "SELECT bundle_validation, bundle_validation_errors FROM jobs WHERE id=?", (job_id,)
-                ).fetchone()
                 if row and row["bundle_validation"] == "invalid":
                     refused = _stored_errors(row["bundle_validation_errors"])
-            if refused is None:
-                result = conn.execute(
-                    "UPDATE jobs SET status=?, updated_at=? WHERE id=?",
-                    (patch.status, now_iso(), job_id),
-                )
+                elif row and (row["bundle_json"] is None
+                              or row["status"] in ("uploaded", "queued", "processing")):
+                    # A job still in a worker-execution state, or without a
+                    # built bundle, must not be marked completed.
+                    conflict = (f"job is {row['status']!r} with no STIX bundle yet")
+            if refused is None and conflict is None:
+                if patch.status == "completed":
+                    # The guard is repeated in the UPDATE's WHERE so a worker
+                    # writing concurrently cannot slip between the SELECT and
+                    # the UPDATE.
+                    result = conn.execute(
+                        "UPDATE jobs SET status=?, updated_at=? WHERE id=? "
+                        "AND bundle_json IS NOT NULL "
+                        "AND bundle_validation IS DISTINCT FROM 'invalid' "
+                        "AND status NOT IN ('uploaded','queued','processing')",
+                        (patch.status, now_iso(), job_id),
+                    )
+                else:
+                    result = conn.execute(
+                        "UPDATE jobs SET status=?, updated_at=? WHERE id=?",
+                        (patch.status, now_iso(), job_id),
+                    )
                 conn.commit()
                 rowcount = result.rowcount
     # Raise outside the lock so the lock is always released cleanly
     if refused is not None:
         raise _bundle_refused(refused)
+    if conflict is not None:
+        raise HTTPException(409, f"Cannot mark job completed: {conflict}")
     if rowcount == 0:
+        if row is not None and patch.status == "completed":
+            raise HTTPException(409, "Cannot mark job completed: no STIX bundle or still running")
         raise HTTPException(404, "Job not found")
     return {"status": patch.status}
 
@@ -261,6 +284,10 @@ def finalize_job(job_id: str, quick: bool = False):
             "validation": (row["bundle_validation"] if row else None) or "unknown"}
 
 
+class _NotDeleted(Exception):
+    """The guarded DELETE of the jobs row matched nothing: roll the transaction back."""
+
+
 def _delete_job(job_id: str) -> bool:
     """Delete one job's DB rows and files. Returns False if it did not exist.
 
@@ -272,24 +299,48 @@ def _delete_job(job_id: str) -> bool:
         with get_conn() as conn:
             # Fetch original_filename BEFORE deleting — needed to locate output files
             row = conn.execute(
-                "SELECT id, original_filename FROM jobs WHERE id=?", (job_id,)
+                "SELECT id, original_filename, status FROM jobs WHERE id=?", (job_id,)
             ).fetchone()
             if not row:
                 return False
+            if row["status"] == "processing":
+                # Deleting a running job would orphan the worker's writes
+                # (progress_events rows, output/ files) mid-pipeline.
+                raise HTTPException(
+                    409, "job is currently processing — stop it or wait for it to finish"
+                )
             # From here on the id is the one the database holds (a uuid the
             # server generated), never the request's string: it names files.
             job_id, original_filename = row["id"], row["original_filename"]
 
-            # Delete children first so a crash mid-delete doesn't leave orphaned rows
-            # (the FK CASCADE would do this automatically when foreign_keys=ON, but
-            # deleting explicitly makes the order safe regardless of PRAGMA state)
-            conn.execute("DELETE FROM entities WHERE job_id=?", (job_id,))
-            conn.execute("DELETE FROM relationships WHERE job_id=?", (job_id,))
-            conn.execute("DELETE FROM progress_events WHERE job_id=?", (job_id,))
-            # The foreign key would do it; deleting explicitly keeps the order safe, as for the rows above.
-            conn.execute("DELETE FROM job_baselines WHERE job_id=?", (job_id,))
-            conn.execute("DELETE FROM jobs WHERE id=?", (job_id,))
-            conn.commit()
+            # One transaction: the connection is autocommit, so without this
+            # each DELETE would commit separately and a crash mid-delete would
+            # leave orphaned rows.
+            try:
+                with transaction(conn):
+                    # Delete children first so a crash mid-delete doesn't leave orphaned rows
+                    # (the FK CASCADE would do this automatically when foreign_keys=ON, but
+                    # deleting explicitly makes the order safe regardless of PRAGMA state)
+                    conn.execute("DELETE FROM entities WHERE job_id=?", (job_id,))
+                    conn.execute("DELETE FROM relationships WHERE job_id=?", (job_id,))
+                    conn.execute("DELETE FROM progress_events WHERE job_id=?", (job_id,))
+                    # The foreign key would do it; deleting explicitly keeps the order safe, as for the rows above.
+                    conn.execute("DELETE FROM job_baselines WHERE job_id=?", (job_id,))
+                    # The status test is part of the DELETE: a worker may claim
+                    # the job between the SELECT above and here.  0 rows rolls
+                    # the children back with it.
+                    cur = conn.execute(
+                        "DELETE FROM jobs WHERE id=? AND status <> 'processing'", (job_id,)
+                    )
+                    if cur.rowcount == 0:
+                        raise _NotDeleted
+            except _NotDeleted:
+                again = conn.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
+                if not again:
+                    return False
+                raise HTTPException(
+                    409, "job is currently processing — stop it or wait for it to finish"
+                ) from None
 
     # Delete associated files AFTER the DB transaction commits successfully.
     # If file deletion partially fails the DB is already clean — no orphaned rows.

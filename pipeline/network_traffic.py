@@ -47,7 +47,10 @@ def _host(token: str) -> tuple[str, str, int | None] | None:
     candidates: list[tuple[str, int | None]] = [(token, None)]
     m = _HOST_PORT.match(token)
     if m:
-        candidates.insert(0, (m.group(1), int(m.group(2)) if m.group(2) else None))
+        # The host:port split is only a FALLBACK: "2001:db8::1:443" is itself
+        # a valid IPv6 address, and reading it as host 2001:db8::1 + port 443
+        # truncates the address and invents a port.
+        candidates.append((m.group(1), int(m.group(2)) if m.group(2) else None))
     for host, port in candidates:
         try:
             ip = ipaddress.ip_address(host)
@@ -64,9 +67,11 @@ def parse_network_traffic(text: str) -> TrafficDescriptor | None:
     if not isinstance(text, str):
         return None
     found = None
+    host_token = ""
     for token in text.split():
         found = _host(token)
         if found:
+            host_token = token
             break
     if found is None:
         return None
@@ -76,7 +81,20 @@ def parse_network_traffic(text: str) -> TrafficDescriptor | None:
         port = int(m.group(1)) if m else None
     if port is not None and not 0 < port < 65536:
         port = None
-    words = {w.lower() for w in _WORD.findall(text)}
+    # Protocol words are searched OUTSIDE the matched host token: a domain
+    # label like "ftp" in ftp.example.com is not a protocol mention.  The
+    # token's scheme ("https" in https://host/path) still counts, though.
+    # Every occurrence goes, punctuation excluded: a repeated "ftp.example.com,"
+    # must not leave its "ftp" label behind.
+    if host_token:
+        bare = host_token.strip(".,;()'\"")
+        if "://" in bare:
+            text_wo_host = text.replace(bare, bare.split("://", 1)[0])
+        else:
+            text_wo_host = text.replace(bare, " ")
+    else:
+        text_wo_host = text
+    words = {w.lower() for w in _WORD.findall(text_wo_host)}
     network = {"ipv4-addr": ("ipv4",), "ipv6-addr": ("ipv6",)}.get(host_type, ())
     protocols = network + tuple(p for p in (*_TRANSPORT, *_APPLICATION) if p in words)
     if not protocols:

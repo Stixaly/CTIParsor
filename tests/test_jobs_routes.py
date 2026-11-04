@@ -79,8 +79,14 @@ def test_a_job_reports_its_entity_and_relationship_counts(temp_db_client, temp_d
 def test_the_status_can_be_set_to_a_known_value_only(temp_db_client, temp_db):
     _add_job(temp_db, "j1")
 
-    assert temp_db_client.patch("/api/jobs/j1", json={"status": "completed"}).json() == {"status": "completed"}
-    assert temp_db_client.get("/api/jobs/j1").json()["status"] == "completed"
+    # A job with no STIX bundle yet (or still running) cannot be completed.
+    resp = temp_db_client.patch("/api/jobs/j1", json={"status": "completed"})
+    assert resp.status_code == 409
+    assert temp_db_client.get("/api/jobs/j1").json()["status"] == "for_review"
+    # With a built bundle, completing works.
+    _add_job(temp_db, "j2", bundle_json="{}", bundle_validation="valid")
+    assert temp_db_client.patch("/api/jobs/j2", json={"status": "completed"}).json() == {"status": "completed"}
+    assert temp_db_client.get("/api/jobs/j2").json()["status"] == "completed"
     assert temp_db_client.patch("/api/jobs/j1", json={"status": "done"}).status_code == 400
     assert temp_db_client.patch("/api/jobs/nope", json={"status": "failed"}).status_code == 404
 
@@ -385,3 +391,25 @@ def test_a_missing_or_corrupt_ledger(temp_db_client, temp_db, cols, status):
     _add_job(temp_db, "j1", **cols)
     assert temp_db_client.get("/api/jobs/j1/bundle/ledger").status_code == status
     assert temp_db_client.get("/api/jobs/nope/bundle/ledger").status_code == 404
+
+
+def test_a_job_claimed_between_the_check_and_the_delete_is_kept_whole(temp_db, dirs, monkeypatch):
+    """The status test is part of the DELETE, not a separate SELECT: a worker that
+    claims the job in between must find its rows, and the caller gets the 409."""
+    from fastapi import HTTPException
+
+    from api.db import transaction
+
+    _add_job(temp_db, "racy", status="for_review")
+    _add_rows(temp_db, "racy")
+
+    def claimed_first(conn, **kw):
+        conn.execute("UPDATE jobs SET status='processing' WHERE id='racy'")
+        return transaction(conn, **kw)
+
+    monkeypatch.setattr(jobs_routes, "transaction", claimed_first)
+    with pytest.raises(HTTPException) as exc:
+        jobs_routes._delete_job("racy")
+    assert exc.value.status_code == 409
+    assert (_count(temp_db, "jobs", "racy"), _count(temp_db, "entities", "racy"),
+            _count(temp_db, "relationships", "racy"), _count(temp_db, "progress_events", "racy")) == (1, 1, 1, 1)

@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 
-from api.db import DB_ERRORS
+from api.db import DB_ERRORS, transaction
 from api.db_backend import DBConnection
 from models.detection import DetectionRule
 
@@ -20,70 +20,77 @@ def _native_key(rule_id: str) -> str:
 
 def replace_corpus_rules(conn: DBConnection, corpus: str, rules: Iterable[DetectionRule]) -> int:
     """Idempotently replace all rules for one corpus. Returns rules written."""
-    old = [r[0] for r in conn.execute(
-        "SELECT id FROM detection_rules WHERE corpus=?", (corpus,)
-    ).fetchall()]
-    if old:
-        conn.executemany("DELETE FROM rule_bytes WHERE rule_id=?", [(i,) for i in old])
-        conn.executemany("DELETE FROM rule_techniques WHERE rule_id=?", [(i,) for i in old])
-        conn.executemany("DELETE FROM rule_atoms WHERE rule_id=?", [(i,) for i in old])
-        conn.executemany("DELETE FROM rule_related WHERE rule_id=?", [(i,) for i in old])
-        conn.execute("DELETE FROM detection_rules WHERE corpus=?", (corpus,))
+    # Materialize BEFORE any write: `rules` can parse corpus files from disk,
+    # and the connection is autocommit -- a failure mid-iteration would leave
+    # the corpus deleted with no rollback possible.  The deletes and inserts
+    # then run as ONE transaction.
+    rules = list(rules)
+    with transaction(conn):
+        old = [r[0] for r in conn.execute(
+            "SELECT id FROM detection_rules WHERE corpus=?", (corpus,)
+        ).fetchall()]
+        if old:
+            conn.executemany("DELETE FROM rule_bytes WHERE rule_id=?", [(i,) for i in old])
+            conn.executemany("DELETE FROM rule_techniques WHERE rule_id=?", [(i,) for i in old])
+            conn.executemany("DELETE FROM rule_atoms WHERE rule_id=?", [(i,) for i in old])
+            conn.executemany("DELETE FROM rule_related WHERE rule_id=?", [(i,) for i in old])
+            conn.execute("DELETE FROM detection_rules WHERE corpus=?", (corpus,))
 
-    rule_rows, tech_rows, atom_rows, related_rows, byte_rows = [], [], [], [], []
-    for r in rules:
-        sev = getattr(r.severity, "value", r.severity)
-        rule_rows.append((
-            r.id, r.corpus, _native_key(r.id), r.format, r.title, r.description,
-            sev, r.license, r.source_ref, r.content_hash, r.dedup_key,
-            json.dumps(r.data_sources), r.platform, r.raw,
-        ))
-        byte_rows.append((r.id, len(r.raw or "")))
-        for t in r.technique_ids:
-            tech_rows.append((r.id, t.upper()))
-        for cls, value in r.atoms:
-            atom_rows.append((r.id, cls, value))
-        for related_key, rel_type in getattr(r, "related", ()) or ():
-            related_rows.append((r.id, related_key, rel_type))
+        rule_rows, tech_rows, atom_rows, related_rows, byte_rows = [], [], [], [], []
+        for r in rules:
+            sev = getattr(r.severity, "value", r.severity)
+            rule_rows.append((
+                r.id, r.corpus, _native_key(r.id), r.format, r.title, r.description,
+                sev, r.license, r.source_ref, r.content_hash, r.dedup_key,
+                json.dumps(r.data_sources), r.platform, r.raw,
+            ))
+            # rule_bytes holds the exported file's size: UTF-8 octets, not chars.
+            byte_rows.append((r.id, len((r.raw or "").encode("utf-8"))))
+            for t in r.technique_ids:
+                tech_rows.append((r.id, t.upper()))
+            for cls, value in r.atoms:
+                atom_rows.append((r.id, cls, value))
+            for related_key, rel_type in getattr(r, "related", ()) or ():
+                related_rows.append((r.id, related_key, rel_type))
 
-    # is_canonical defaults to 1; the ADR-0010 dedup pass (dedupe_store) runs after
-    # the full rebuild and demotes duplicates. Newly-inserted rows start canonical.
-    conn.executemany(
-        "INSERT INTO detection_rules "
-        "(id,corpus,native_key,format,title,description,severity,license,"
-        "source_ref,content_hash,dedup_key,data_sources,platform,raw,is_canonical) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1) "
-        "ON CONFLICT (id) DO UPDATE SET "
-        "corpus=EXCLUDED.corpus, native_key=EXCLUDED.native_key, format=EXCLUDED.format, "
-        "title=EXCLUDED.title, description=EXCLUDED.description, severity=EXCLUDED.severity, "
-        "license=EXCLUDED.license, source_ref=EXCLUDED.source_ref, "
-        "content_hash=EXCLUDED.content_hash, dedup_key=EXCLUDED.dedup_key, "
-        "data_sources=EXCLUDED.data_sources, platform=EXCLUDED.platform, raw=EXCLUDED.raw, "
-        "is_canonical=EXCLUDED.is_canonical",
-        rule_rows,
-    )
-    conn.executemany(
-        "INSERT INTO rule_bytes (rule_id, bytes) VALUES (?,?) "
-        "ON CONFLICT (rule_id) DO UPDATE SET bytes=EXCLUDED.bytes",
-        byte_rows,
-    )
-    conn.executemany(
-        "INSERT INTO rule_techniques (rule_id, technique_id) VALUES (?,?) "
-        "ON CONFLICT DO NOTHING",
-        tech_rows,
-    )
-    conn.executemany(
-        "INSERT INTO rule_atoms (rule_id, atom_class, value) VALUES (?,?,?) "
-        "ON CONFLICT DO NOTHING",
-        atom_rows,
-    )
-    conn.executemany(
-        "INSERT INTO rule_related (rule_id, related_key, rel_type) VALUES (?,?,?) "
-        "ON CONFLICT DO NOTHING",
-        related_rows,
-    )
-    conn.commit()
+        # is_canonical defaults to 1; the ADR-0010 dedup pass (dedupe_store) runs after
+        # the full rebuild and demotes duplicates. Newly-inserted rows start canonical.
+        conn.executemany(
+            "INSERT INTO detection_rules "
+            "(id,corpus,native_key,format,title,description,severity,license,"
+            "source_ref,content_hash,dedup_key,data_sources,platform,raw,is_canonical) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1) "
+            "ON CONFLICT (id) DO UPDATE SET "
+            "corpus=EXCLUDED.corpus, native_key=EXCLUDED.native_key, format=EXCLUDED.format, "
+            "title=EXCLUDED.title, description=EXCLUDED.description, severity=EXCLUDED.severity, "
+            "license=EXCLUDED.license, source_ref=EXCLUDED.source_ref, "
+            "content_hash=EXCLUDED.content_hash, dedup_key=EXCLUDED.dedup_key, "
+            "data_sources=EXCLUDED.data_sources, platform=EXCLUDED.platform, raw=EXCLUDED.raw, "
+            "is_canonical=EXCLUDED.is_canonical",
+            rule_rows,
+        )
+        conn.executemany(
+            "INSERT INTO rule_bytes (rule_id, bytes) VALUES (?,?) "
+            "ON CONFLICT (rule_id) DO UPDATE SET bytes=EXCLUDED.bytes",
+            byte_rows,
+        )
+        conn.executemany(
+            "INSERT INTO rule_techniques (rule_id, technique_id) VALUES (?,?) "
+            "ON CONFLICT DO NOTHING",
+            tech_rows,
+        )
+        conn.executemany(
+            "INSERT INTO rule_atoms (rule_id, atom_class, value) VALUES (?,?,?) "
+            "ON CONFLICT DO NOTHING",
+            atom_rows,
+        )
+        conn.executemany(
+            "INSERT INTO rule_related (rule_id, related_key, rel_type) VALUES (?,?,?) "
+            "ON CONFLICT DO NOTHING",
+            related_rows,
+        )
     return len(rule_rows)
+
 
 
 # ── Atom index queries (ADR-0014) ────────────────────────────────────────────
@@ -98,16 +105,16 @@ def replace_rule_atoms(conn: DBConnection, rows: Iterable[tuple[str, str, str]])
     rows = list(rows)
     if not rows:
         return 0
-    conn.executemany(
-        "DELETE FROM rule_atoms WHERE rule_id=?",
-        [(rid,) for rid in dict.fromkeys(r[0] for r in rows)],
-    )
-    conn.executemany(
-        "INSERT INTO rule_atoms (rule_id, atom_class, value) VALUES (?,?,?) "
-        "ON CONFLICT DO NOTHING",
-        rows,
-    )
-    conn.commit()
+    with transaction(conn):
+        conn.executemany(
+            "DELETE FROM rule_atoms WHERE rule_id=?",
+            [(rid,) for rid in dict.fromkeys(r[0] for r in rows)],
+        )
+        conn.executemany(
+            "INSERT INTO rule_atoms (rule_id, atom_class, value) VALUES (?,?,?) "
+            "ON CONFLICT DO NOTHING",
+            rows,
+        )
     return len(rows)
 
 
@@ -442,19 +449,23 @@ def canonical_rule_bodies(conn: DBConnection, rule_ids: Iterable[str]) -> dict[s
     ids = sorted({i for i in rule_ids if i})
     if not ids:
         return {}
-    placeholders = ",".join("?" * len(ids))
-    rows = conn.execute(
-        f"SELECT id, corpus, native_key, title, license, source_ref, raw "
-        f"FROM detection_rules WHERE id IN ({placeholders})",
-        ids,
-    ).fetchall()
-    return {
-        r[0]: {
-            "corpus": r[1], "native_key": r[2], "title": r[3],
-            "license": r[4], "source_ref": r[5], "raw": r[6],
-        }
-        for r in rows
-    }
+    out: dict[str, dict] = {}
+    # 400 per statement, matching the batch size the other store queries use
+    # (SQLite caps a statement at 999 variables).
+    for i in range(0, len(ids), 400):
+        batch = ids[i:i + 400]
+        placeholders = ",".join("?" * len(batch))
+        rows = conn.execute(
+            f"SELECT id, corpus, native_key, title, license, source_ref, raw "
+            f"FROM detection_rules WHERE id IN ({placeholders}) AND is_canonical = 1",
+            batch,
+        ).fetchall()
+        for r in rows:
+            out[r[0]] = {
+                "corpus": r[1], "native_key": r[2], "title": r[3],
+                "license": r[4], "source_ref": r[5], "raw": r[6],
+            }
+    return out
 
 
 def lookup_rules(

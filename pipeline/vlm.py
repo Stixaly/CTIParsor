@@ -482,12 +482,28 @@ class OpenAICompatVisionBackend:
                     self.unavailable_reason = f"{self.model} is not pulled at {shown}"
                     self._available = False
                     return False
-                ok = "vision" in (entry.get("capabilities") or [])
+                # `capabilities` belongs to the /api/show response per the
+                # official schema; /api/tags (ModelSummary) only carries it on
+                # newer servers.  When the tags entry lacks the field, ask
+                # /api/show instead of declaring a pulled vision model
+                # unavailable.
+                caps = entry.get("capabilities")
+                if caps is None:
+                    # A failure here is a failed probe (the except below sets
+                    # probe_failed): no definitive "no vision" verdict is cached.
+                    show = _http_json(
+                        f"{root}/api/show",
+                        {"model": self.model},
+                        self._headers(),
+                        self.timeout,
+                    )
+                    caps = show.get("capabilities")
+                ok = "vision" in (caps or [])
                 if not ok:
                     logger.log(
                         self.log_level,
                         "Ollama model %s has no `vision` capability (has: %s)",
-                        self.model, entry.get("capabilities"),
+                        self.model, caps,
                     )
                     self.unavailable_reason = "the model has no `vision` capability"
             elif self.name == "vllm":

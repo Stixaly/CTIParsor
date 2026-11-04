@@ -439,7 +439,14 @@ def _read_absolute(s: str, order_hint: str | None) -> Reading | None:
             else:
                 sign = 1 if tz[0] == "+" else -1
                 digits = tz[1:].replace(":", "")
-                offset = timedelta(hours=int(digits[:2]), minutes=int(digits[2:4] or 0))
+                hh_off = int(digits[:2])
+                mm_off = int(digits[2:4] or 0)
+                # RFC 3339 §5.6 bounds the offset's components (hour 00-23,
+                # minute 00-59).  timedelta() would silently normalize
+                # "+01:99" into +02:39 and the timestamp would pass verified.
+                if hh_off > 23 or mm_off > 59:
+                    return _unresolved("invalid_date", "instant")
+                offset = timedelta(hours=hh_off, minutes=mm_off)
                 if offset >= timedelta(hours=24):
                     return _unresolved("invalid_date", "instant")
                 dt = dt.replace(tzinfo=timezone(sign * offset))
@@ -1123,12 +1130,17 @@ def analyst_assertion(role: str, raw: str) -> TemporalAssertion:
     if role not in BOUND_ROLES + ("within", "throughout", "observed"):
         raise ValueError(f"unknown role {role!r}")
     folded = fold(raw or "")[0].strip(" ")
-    reading = _read_absolute(_strip_leading(folded)[0], None) if folded else None
+    rest, qualifier = _strip_leading(folded) if folded else ("", "none")
+    reading = _read_absolute(rest, None) if folded else None
     if reading is None or reading.status != "verified" or not reading.value:
         why = reading.reason if reading else "unparsed"
         raise ValueError(f"{raw!r} is not a date ({why})")
+    # Keep the analyst's qualifier ("before 2024-01-01" is a bound, not an
+    # exact instant): dropping it here made the export emit a precise
+    # start_time the analyst never asserted.
     return TemporalAssertion(role=role, time_text="", value=reading.value,  # type: ignore[arg-type]
                              precision=reading.precision,  # type: ignore[arg-type]
+                             qualifier=qualifier,  # type: ignore[arg-type]
                              status="verified", origin="analyst", anchor="explicit")
 
 

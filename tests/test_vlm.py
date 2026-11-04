@@ -509,6 +509,28 @@ def test_auto_with_ollama_names_the_model_that_is_not_pulled(monkeypatch, caplog
     assert max(r.levelno for r in caplog.records) == logging.INFO
 
 
+def test_a_failing_api_show_is_a_failed_probe_not_a_cached_no_vision(monkeypatch):
+    # /api/tags carries no `capabilities`, so the probe asks /api/show; if that
+    # call raises, no definitive verdict may be cached for the process.
+    monkeypatch.setenv("VISION_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://box:11434")
+    monkeypatch.setattr("pipeline.vlm._http_get_json",
+                        lambda url, headers, timeout: {"models": [{"name": "qwen3.8:latest"}]})
+    show = {"fail": True}
+
+    def fake_post(url, payload, headers, timeout):
+        if show["fail"]:
+            raise OSError("connection reset")
+        return {"capabilities": ["completion", "vision"]}
+
+    monkeypatch.setattr("pipeline.vlm._http_json", fake_post)
+    assert get_backend() is None
+    assert "the probe failed (OSError" in vlm.skip_reason()
+    show["fail"] = False
+    b = get_backend()                         # not stuck on the first answer
+    assert b is not None and (b.name, b.model) == ("ollama", "qwen3.8")
+
+
 def test_a_named_provider_that_cannot_serve_still_warns(monkeypatch, caplog):
     monkeypatch.setenv("VISION_PROVIDER", "ollama")
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://box:11434")

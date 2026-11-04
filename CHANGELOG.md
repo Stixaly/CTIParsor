@@ -11,6 +11,64 @@ theme.
 
 ### Fixed
 
+#### Bug batch of 2026-11-04 (issues #283-#343), extraction, detection store, queue, API
+
+- **Stage 2.** `refang()` normalizes bracketed defanged schemes (`hxxps[:]//`,
+  `hxxps[://]`, ...), so those URLs are extracted again (#283); a trailing `)` is
+  kept when the URL's parentheses balance, so Wikipedia-style links are no longer
+  truncated (#284); gazetteer mentions are all span-claimed and keyed by
+  (canonical, type), ending false positives on repeated mentions and keeping
+  ATT&CK group/malware homonyms apart, and spans are computed in original-text
+  coordinates after a Unicode-aware `lower()` (#318, #319, #299).
+- **Stage 3.** `validate_llm_result` filters relationship endpoints and IoC
+  associations against the text and preserves `ttp_review`/`rel_review` (#320);
+  short or blank names are no longer auto-accepted (#321); `normalize_ttps` merges
+  the evidence quote and label as a pair (#322); a textual `"false"` verdict
+  removes the TTP (#296).
+- **Detection store.** Negated Sigma selections (`not filter-*`) are no longer
+  indexed as positive atoms (#327); corpus rebuild runs in one transaction and
+  survives a parse error (#328); CVE-dedicated and title-only rules reach
+  `rank_rules`, and CVE text matches are whole-id bounded (#329, #297);
+  `canonical_rule_bodies` batches and filters canonical rules (#331);
+  `rule_bytes` counts UTF-8 octets (#312); Suricata ids include the GID (#311);
+  YARA dedup keys include the condition (#301); the artifact name cap counts title
+  matches only (#334); CVE observables accept 4-12 digits (#298).
+- **Queue/API.** `terminate_and_requeue` requeues conditioned on `worker_id`
+  before terminating the subprocess (#300, #336); heartbeat retries while the
+  last stamp failed (#337); `PATCH /api/jobs/{id}` cannot mark a running or
+  bundle-less job `completed` (#340); job deletion is transactional and refuses
+  running jobs (#341); `PUT /api/relationship-policy` rejects NaN/Infinity
+  instead of bricking the endpoint with 500s (#339); a custom corpus path cannot
+  be the corpora root itself (#343); `POST /api/overrides` rejects NUL bytes and
+  lone surrogates with a 4xx instead of a PostgreSQL DataError 500 (#342).  (#333
+  is by design: `test_url_is_classified_on_its_host` pins URL classification on
+  the host alone.)
+- **Misc.** The figure cache fails soft when `DATABASE_URL` is unset (#325);
+  network-traffic parsing keeps a bare IPv6 whole and ignores protocol words
+  inside the host token (#304, #324); analyst date qualifiers are preserved and
+  invalid UTC offsets rejected (#313, #314); the Ollama vision probe falls back
+  to `/api/show` (#303); in-house evaluation counts false positives of types
+  absent from the gold, scores negatives on shipped relations, and includes the
+  LLM campaign in predictions (#307, #308, #309).
+- **Follow-up after review of the batch.** Gazetteer homonyms of different
+  types on the same span are both kept in every policy mode, not only `apply`
+  (#319). The 3b endpoint filter keeps endpoints the text only carries defanged
+  (whole token in the refanged text) and the document-relations pass validates
+  against its known entities, so IoC, TTP and alias endpoints are no longer
+  dropped (#320). `rank_rules` no longer proposes rules the title pre-filter
+  found but no match backs (#329); artifact title evidence matches CVEs as whole
+  ids (#297); YARA dedup keys carry identifiers and modifiers, multi-line hex
+  included, comments excluded (#301; stored keys change at each corpus's next
+  rebuild); facet byte totals count UTF-8 octets (#312); an overflowing
+  number (`1e999`) in the policy body is a 400 (#339); a lone surrogate in any
+  request body is a 422, and NUL bytes from a baseline are removed before the
+  entity and relationship rows are written (#342); a corpus `subdir` must stay
+  inside its own clone (no absolute path, no `..`) (#343); deleting a job checks
+  its status in the DELETE itself; an Ollama `/api/show` failure is a failed
+  probe, not a cached "no vision" (#303); the in-house `entities` layer scores
+  only the four types it annotates (#307); network-traffic parsing removes every
+  occurrence of the host token before looking for protocol words (#324).
+
 #### The air-gap scripts, 2026-11-03
 
 - **`setup.sh --offline` refuses a host without the `docker compose`

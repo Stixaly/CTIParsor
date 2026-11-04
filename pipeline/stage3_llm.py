@@ -1966,7 +1966,10 @@ def enrich_document_relations(
     # char slice), so this check is at its most meaningful: no tier-2
     # doc_context fallback is needed the way chunk-level extraction needs it.
     from pipeline.stage3b_validate import validate_llm_result
-    result = validate_llm_result(result, full_text)
+    result = validate_llm_result(
+        result, full_text,
+        ner_allow_list={e.value.lower() for e in known_entities},
+    )
 
     # ADR-0063 — dates checked against the whole document, the text this
     # pass quoted from.

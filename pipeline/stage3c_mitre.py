@@ -22,6 +22,7 @@ import functools
 
 # Initialize logging
 from api.logging_config import get_logger
+from models.schemas import EvidenceLabel
 from pipeline.regex_safety import compile_pattern
 from pipeline.stage3_llm import TTPExtracted
 
@@ -266,6 +267,8 @@ def normalize_ttps(
             evidence_label=ttp.evidence_label,
         )
 
+        evidence_text: str | None
+        evidence_label: EvidenceLabel
         if dedup_key in semantic_high_keys:
             # A high-confidence semantic match owns this key — keep its canonical
             # name/ID, but adopt the LLM's description if it is richer.
@@ -278,24 +281,41 @@ def normalize_ttps(
             # kept unless it is absent. Comparing the two by length in a single
             # field is what silently discarded the better evidence before.
             existing = normalized[dedup_key]
-            if len(result_ttp.description) > len(existing.description):
-                normalized[dedup_key] = TTPExtracted(
-                    technique_name=existing.technique_name,
-                    mitre_id=existing.mitre_id,
-                    description=result_ttp.description,
-                    evidence_text=existing.evidence_text or result_ttp.evidence_text,
-                    evidence_label=existing.evidence_label,
-                )
+            description = (result_ttp.description
+                           if len(result_ttp.description) > len(existing.description)
+                           else existing.description)
+            # The evidence PAIR (quote + label) travels together: keep the
+            # existing pair when it holds a quote, else adopt the new one --
+            # never a quote paired with the other entry's "gap" label, and
+            # never drop a verbatim quote just because the other entry's
+            # description is longer.
+            if existing.evidence_text:
+                evidence_text, evidence_label = existing.evidence_text, existing.evidence_label
+            else:
+                evidence_text, evidence_label = result_ttp.evidence_text, result_ttp.evidence_label
+            normalized[dedup_key] = TTPExtracted(
+                technique_name=existing.technique_name,
+                mitre_id=existing.mitre_id,
+                description=description,
+                evidence_text=evidence_text,
+                evidence_label=evidence_label,
+            )
         elif dedup_key in normalized:
-            if len(result_ttp.description) > len(normalized[dedup_key].description):
-                _prev = normalized[dedup_key]
-                normalized[dedup_key] = TTPExtracted(
-                    technique_name=result_ttp.technique_name,
-                    mitre_id=result_ttp.mitre_id,
-                    description=result_ttp.description,
-                    evidence_text=_prev.evidence_text or result_ttp.evidence_text,
-                    evidence_label=result_ttp.evidence_label,
-                )
+            prev = normalized[dedup_key]
+            description = (result_ttp.description
+                           if len(result_ttp.description) > len(prev.description)
+                           else prev.description)
+            if prev.evidence_text:
+                evidence_text, evidence_label = prev.evidence_text, prev.evidence_label
+            else:
+                evidence_text, evidence_label = result_ttp.evidence_text, result_ttp.evidence_label
+            normalized[dedup_key] = TTPExtracted(
+                technique_name=result_ttp.technique_name or prev.technique_name,
+                mitre_id=result_ttp.mitre_id or prev.mitre_id,
+                description=description,
+                evidence_text=evidence_text,
+                evidence_label=evidence_label,
+            )
         else:
             normalized[dedup_key] = result_ttp
 

@@ -139,6 +139,21 @@ def get_last_run() -> dict:
     }
 
 
+def _reject_non_finite(value: str) -> float:
+    """json.loads parse_constant hook: NaN/Infinity are not valid JSON and must
+    never be persisted (they would 500 the endpoint on every later read)."""
+    raise ValueError(f"non-finite constant {value!r} is not valid JSON")
+
+
+def _finite_float(text: str) -> float:
+    """json.loads parse_float hook: `1e999` overflows to inf without going
+    through parse_constant, and json.dumps(allow_nan=False) would then 500."""
+    value = float(text)
+    if value in (float("inf"), float("-inf")):
+        raise ValueError(f"non-finite number {text!r} is not valid JSON")
+    return value
+
+
 @router.get("")
 def get_policy() -> dict:
     """Return the stored relationship policy, or the factory default."""
@@ -148,7 +163,7 @@ def get_policy() -> dict:
         ).fetchone()
     if row and row["policy_json"] and row["policy_json"] != "{}":
         try:
-            return json.loads(row["policy_json"])
+            return json.loads(row["policy_json"], parse_constant=_reject_non_finite)
         except ValueError as exc:
             # The page then shows the factory default as if it were stored.
             logger.error("stored relationship policy is not valid JSON (%s); "
@@ -193,9 +208,15 @@ def _rule_error(i: int, rule: dict, pairs: dict[str, int]) -> str | None:
 async def put_policy(request: Request) -> dict:
     """Replace the relationship policy (full replacement, not patch)."""
     try:
-        body = await request.json()
-    except Exception as exc:
-        raise HTTPException(400, "Request body must be valid JSON") from exc
+        # parse_constant rejects NaN/Infinity, which json.loads would otherwise
+        # accept, persist, and then 500 on every later response serialization.
+        body = json.loads(
+            await request.body(),
+            parse_constant=_reject_non_finite,
+            parse_float=_finite_float,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, f"Request body must be valid JSON: {exc}") from exc
 
     # Light validation
     if not isinstance(body, dict):
@@ -265,7 +286,7 @@ async def put_policy(request: Request) -> dict:
                 400, f"'temporal_export.mode' must be one of: {', '.join(EXPORT_MODES)}"
             )
 
-    policy_json = json.dumps(body)
+    policy_json = json.dumps(body, allow_nan=False)
     with _lock:
         with get_conn() as conn:
             conn.execute(

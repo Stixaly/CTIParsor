@@ -595,3 +595,13 @@ def test_title_evidence_carries_native_key_so_forks_fold(temp_db):
     artifacts = score_artifacts(temp_db, [obs])
     assert len(artifacts) == 1
     assert artifacts[0].score == 2
+
+
+def test_cve_title_evidence_needs_a_whole_id(temp_db):
+    """#297: cve-2024-1234 is not evidence for a rule about CVE-2024-12345."""
+    _insert_rule(temp_db, "rule1", "corpus_a", "nk1", title="CVE-2024-12345 vulnerability")
+    obs = Observable(obs_class="cve", value="cve-2024-1234",
+                     entity_type="cve", display="CVE-2024-1234")
+    artifacts = score_artifacts(temp_db, [obs])
+    assert artifacts[0].score == 0
+    assert artifacts[0].evidence == []
