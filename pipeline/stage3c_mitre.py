@@ -22,6 +22,7 @@ import functools
 
 # Initialize logging
 from api.logging_config import get_logger
+from models.schemas import EvidenceLabel
 from pipeline.regex_safety import compile_pattern
 from pipeline.stage3_llm import TTPExtracted
 
@@ -266,6 +267,8 @@ def normalize_ttps(
             evidence_label=ttp.evidence_label,
         )
 
+        evidence_text: str | None
+        evidence_label: EvidenceLabel
         if dedup_key in semantic_high_keys:
             # A high-confidence semantic match owns this key — keep its canonical
             # name/ID, but adopt the LLM's description if it is richer.

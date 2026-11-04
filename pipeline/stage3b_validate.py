@@ -262,10 +262,13 @@ def validate_llm_result(
         if _endpoint_ok(r.source_value) and _endpoint_ok(r.target_value)
     ]
 
-    filtered_ioc_assoc = [
-        a for a in result.ioc_associations
-        if a.malware_name.lower() not in hallucinated and _keep(a.malware_name)
-    ]
+    def _assoc_ok(a) -> bool:
+        # No malware name to check: the IoC value itself is regex-validated.
+        if not a.malware_name:
+            return True
+        return a.malware_name.lower() not in hallucinated and _keep(a.malware_name)
+
+    filtered_ioc_assoc = [a for a in result.ioc_associations if _assoc_ok(a)]
 
     # model_copy(update=...) keeps every field not listed here (ttps,
     # sectors, countries, course_of_action, ttp_review, rel_review, ...).
