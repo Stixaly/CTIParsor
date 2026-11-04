@@ -254,6 +254,12 @@ def _match_aho(text: str, automaton, judge: _Judge | None = None, apply: bool = 
 
         if any(s <= start < e2 or s < end <= e2 for s, e2 in claimed):
             continue
+        if seen_key in seen_canonicals:
+            # Already emitted once: still claim the span -- a repeated mention
+            # must block shorter aliases of OTHER entries inside it from
+            # matching as false positives -- but trace and emit nothing.
+            claimed.append((start, end))
+            continue
         verdict = judge(entry, start, end) if judge else None
         if verdict is not None and verdict.withheld and apply:
             if trace is not None:
@@ -262,12 +268,7 @@ def _match_aho(text: str, automaton, judge: _Judge | None = None, apply: bool = 
         if verdict is not None and (verdict.decision or verdict.withheld) and trace is not None:
             trace.append(_trace_item(entry, text, start, end, verdict))
 
-        # Claim every valid span, even a repeat of an already-emitted
-        # canonical: the span still blocks shorter aliases of OTHER entries
-        # inside it from matching as false positives.
         claimed.append((start, end))
-        if seen_key in seen_canonicals:
-            continue
         seen_canonicals.add(seen_key)
 
         ctx_start = max(0, start - 60)
@@ -344,6 +345,12 @@ def _match_regex(text: str, judge: _Judge | None = None, apply: bool = False,
             end   = index_map[m.end() - 1] + 1
             if any(s <= start < e2 or s < end <= e2 for s, e2 in claimed):
                 continue
+            if seen_key in seen_canonicals:
+                # Already emitted once: still claim the span -- a repeated
+                # mention must block shorter aliases of OTHER entries inside
+                # it -- but trace and emit nothing.
+                claimed.append((start, end))
+                continue
             verdict = judge(entry, start, end) if judge else None
             if verdict is not None and verdict.withheld and apply:
                 if trace is not None:
@@ -351,13 +358,7 @@ def _match_regex(text: str, judge: _Judge | None = None, apply: bool = False,
                 continue      # the next occurrence may qualify
             if verdict is not None and (verdict.decision or verdict.withheld) and trace is not None:
                 trace.append(_trace_item(entry, text, start, end, verdict))
-            # Claim every valid occurrence, even repeats of an already-emitted
-            # canonical: the span still blocks shorter aliases of OTHER
-            # entries inside it from matching as false positives.  Emit only
-            # the first occurrence per (canonical, entity_type).
             claimed.append((start, end))
-            if seen_key in seen_canonicals:
-                continue
             seen_canonicals.add(seen_key)
 
             ctx_start = max(0, start - 60)

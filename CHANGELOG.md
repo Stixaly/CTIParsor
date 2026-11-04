@@ -32,16 +32,17 @@ theme.
   `canonical_rule_bodies` batches and filters canonical rules (#331);
   `rule_bytes` counts UTF-8 octets (#312); Suricata ids include the GID (#311);
   YARA dedup keys include the condition (#301); the artifact name cap counts title
-  matches only (#334); CVE observables accept 4-12 digits (#298); a URL with a
-  specific path on a shared cloud domain is discriminating (#333).
+  matches only (#334); CVE observables accept 4-12 digits (#298).
 - **Queue/API.** `terminate_and_requeue` requeues conditioned on `worker_id`
   before terminating the subprocess (#300, #336); heartbeat retries while the
   last stamp failed (#337); `PATCH /api/jobs/{id}` cannot mark a running or
   bundle-less job `completed` (#340); job deletion is transactional and refuses
   running jobs (#341); `PUT /api/relationship-policy` rejects NaN/Infinity
   instead of bricking the endpoint with 500s (#339); a custom corpus path cannot
-  be the corpora root itself (#343); overrides reject NUL bytes and lone
-  surrogates (#342).
+  be the corpora root itself (#343); `POST /api/overrides` rejects NUL bytes and
+  lone surrogates with a 4xx instead of a PostgreSQL DataError 500 (#342).  (#333
+  is by design: `test_url_is_classified_on_its_host` pins URL classification on
+  the host alone.)
 - **Misc.** The figure cache fails soft when `DATABASE_URL` is unset (#325);
   network-traffic parsing keeps a bare IPv6 whole and ignores protocol words
   inside the host token (#304, #324); analyst date qualifiers are preserved and

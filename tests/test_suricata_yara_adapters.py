@@ -30,7 +30,7 @@ def _suricata(tmp_path, *lines: str) -> list:
 def test_suricata_rule_is_parsed_into_a_detection_rule(tmp_path):
     (rule,) = _suricata(tmp_path, _TOR_RULE)
 
-    assert rule.id == "et-open:2520000"
+    assert rule.id == "et-open:1:2520000"
     assert rule.format == "suricata" and rule.corpus == "et-open" and rule.license == "MIT"
     assert rule.title == "ET TOR Known Tor Exit Node Traffic group 1"
     assert rule.technique_ids == ["T1090"]
@@ -70,7 +70,7 @@ def test_suricata_skips_comments_blanks_and_non_rules(tmp_path):
         "alert tcp any any -> any any no body here",       # no option body
         _TOR_RULE,
     )
-    assert [r.id for r in rules] == ["et-open:2520000"]
+    assert [r.id for r in rules] == ["et-open:1:2520000"]
 
 
 def test_suricata_rule_without_sid_or_msg_falls_back_to_hash_and_line(tmp_path):
@@ -81,6 +81,18 @@ def test_suricata_rule_without_sid_or_msg_falls_back_to_hash_and_line(tmp_path):
     assert rule.title == "suricata rule 2"
     assert rule.severity == Severity.CRITICAL
     assert ("ip", "8.8.8.8") in rule.atoms and ("port", "53") in rule.atoms
+
+
+def test_suricata_same_sid_different_gid_stay_distinct(tmp_path):
+    """The SID is unique per GID only: keying on the SID alone made the upsert
+    overwrite the first rule's body while accumulating both rules' atoms."""
+    rules = _suricata(
+        tmp_path,
+        'alert dns any any -> any any (msg:"alpha"; content:"alpha.example.com"; sid:1001; gid:1;)',
+        'alert dns any any -> any any (msg:"beta"; content:"beta.example.com"; sid:1001; gid:2;)',
+    )
+    assert [r.id for r in rules] == ["et-open:1:1001", "et-open:2:1001"]
+    assert {r.title for r in rules} == {"alpha", "beta"}
 
 
 def test_suricata_title_uses_the_sid_when_msg_is_missing(tmp_path):
@@ -132,7 +144,7 @@ def test_suricata_superscript_digit_is_not_a_port_and_the_next_rule_is_read(tmp_
         'alert tcp any any -> any ² (msg:"x"; content:"abcdefgh"; sid:9;)',
         'alert tcp any any -> any 80 (msg:"ok"; content:"abcdefgh"; sid:10;)',
     )
-    assert [r.id for r in rules] == ["et-open:9", "et-open:10"]
+    assert [r.id for r in rules] == ["et-open:1:9", "et-open:1:10"]
     assert not any(c == "port" for c, _ in rules[0].atoms)
     assert ("port", "80") in rules[1].atoms
 
@@ -152,7 +164,7 @@ def test_suricata_rule_that_fails_to_convert_is_logged_and_skipped(tmp_path, mon
             'alert tcp any any -> any 80 (msg:"bad"; content:"abcdefgh"; sid:9;)',
             'alert tcp any any -> any 80 (msg:"ok"; content:"abcdefgh"; sid:10;)',
         )
-    assert [r.id for r in rules] == ["et-open:10"]
+    assert [r.id for r in rules] == ["et-open:1:10"]
     [record] = [r for r in caplog.records if "skipped" in r.getMessage()]
     assert "emerging.rules:1" in record.getMessage() and "boom" in record.getMessage()
 
@@ -218,6 +230,18 @@ def test_yara_rule_ids_come_from_the_body_not_meta_id(tmp_path):
 
 def test_yara_dedup_key_is_order_independent_over_strings(tmp_path):
     first, second = _yara(tmp_path)
+    # Same strings in a different order, but the conditions differ
+    # ("IsPE and all of them" vs "any of them"): NOT duplicates.
+    assert first.dedup_key != second.dedup_key
+    assert first.content_hash != second.content_hash
+
+
+def test_yara_dedup_key_ignores_string_order_when_the_condition_matches(tmp_path):
+    text = (
+        'rule A {\n strings:\n  $a = "foo"\n  $b = "bar"\n condition:\n  $a and $b\n}\n'
+        'rule B {\n strings:\n  $b = "bar"\n  $a = "foo"\n condition:\n  $a and $b\n}\n'
+    )
+    first, second = _yara(tmp_path, text, name="order.yar")
     assert first.dedup_key == second.dedup_key
     assert first.content_hash != second.content_hash
 

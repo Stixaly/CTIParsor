@@ -82,8 +82,15 @@ def parse_network_traffic(text: str) -> TrafficDescriptor | None:
     if port is not None and not 0 < port < 65536:
         port = None
     # Protocol words are searched OUTSIDE the matched host token: a domain
-    # label like "ftp" in ftp.example.com is not a protocol mention.
-    text_wo_host = text.replace(host_token, " ", 1) if host_token else text
+    # label like "ftp" in ftp.example.com is not a protocol mention.  The
+    # token's scheme ("https" in https://host/path) still counts, though.
+    if host_token:
+        if "://" in host_token:
+            text_wo_host = text.replace(host_token, host_token.split("://", 1)[0], 1)
+        else:
+            text_wo_host = text.replace(host_token, " ", 1)
+    else:
+        text_wo_host = text
     words = {w.lower() for w in _WORD.findall(text_wo_host)}
     network = {"ipv4-addr": ("ipv4",), "ipv6-addr": ("ipv6",)}.get(host_type, ())
     protocols = network + tuple(p for p in (*_TRANSPORT, *_APPLICATION) if p in words)

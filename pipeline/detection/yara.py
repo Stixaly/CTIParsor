@@ -136,6 +136,8 @@ class YaraAdapter(RuleCorpusAdapter):
 
     def _dedup_key(self, rule: YaraRule) -> str:
         strings = [(kind, value) for _ident, kind, value in rule.strings]
+        if not strings:
+            return ""
         # The condition is part of the rule's semantics: two rules with the
         # same strings but different conditions ("$a and $b" vs "$a or $b")
         # are NOT duplicates and must not be folded into one.
@@ -143,8 +145,6 @@ class YaraAdapter(RuleCorpusAdapter):
         ci = rule.body.find("condition:")
         if ci >= 0:
             cond = " ".join(rule.body[ci + len("condition:"):].split())
-        if not strings and not cond:
-            return ""
         strings.sort()
         payload = json.dumps(
             {"format": "yara", "strings": strings, "condition": cond},

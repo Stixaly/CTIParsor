@@ -137,6 +137,24 @@ class TestRefangProtocols:
     def test_fxp(self):
         assert refang("fxp://files.evil.com") == "ftp://files.evil.com"
 
+    def test_fxxps(self):
+        assert refang("fxxps://files.evil.com") == "ftp://files.evil.com"
+
+    def test_hxxps_bracket_colon(self):
+        assert refang("hxxps[:]//evil.com") == "https://evil.com"
+
+    def test_hxxp_bracket_colon(self):
+        assert refang("hxxp[:]//evil.com") == "http://evil.com"
+
+    def test_hxxps_bracket_slashes(self):
+        assert refang("hxxps[://]evil.com") == "https://evil.com"
+
+    def test_h_tt_ps_bracket_colon(self):
+        assert refang("h[tt]ps[:]//evil.com") == "https://evil.com"
+
+    def test_hxxps_bracket_dot_slashes(self):
+        assert refang("hxxps[.]//evil.com") == "https://evil.com"
+
 
 class TestRefangDots:
     def test_square_bracket_dot(self):
@@ -659,6 +677,15 @@ def test_bracketed_placeholder_host_does_not_raise():
     text = "Beacon traffic went to http://[actor-controlled-ip]/gate.php during the intrusion."
     entities = extract_entities(refang(text))
     assert isinstance(entities, list)
+
+
+def test_url_keeps_a_balanced_trailing_paren():
+    """"(" and ")" are legal URI sub-delims: a Wikipedia-style link ends in one."""
+    urls = {e.value for e in extract_entities("see https://en.wikipedia.org/wiki/APT29_(group) now")}
+    assert "https://en.wikipedia.org/wiki/APT29_(group)" in urls
+    # an unmatched ")" from prose is still stripped
+    urls = {e.value for e in extract_entities("url (https://example.com/a) in parens")}
+    assert "https://example.com/a" in urls
 
 
 def test_url_host_handles_brackets_and_ipv6():
