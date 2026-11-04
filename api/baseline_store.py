@@ -28,10 +28,7 @@ EXCLUDED_LISTED = 200
 
 def _scrub(value: Any) -> Any:
     if isinstance(value, str):
-        # lone surrogate -> U+FFFD, and NUL removed: PostgreSQL TEXT rejects
-        # \x00, and the JSON round trip would decode \\u0000 back into it.
-        return (value.encode("utf-16", "surrogatepass").decode("utf-16", "replace")
-                .replace("\x00", ""))
+        return value.encode("utf-16", "surrogatepass").decode("utf-16", "replace")   # lone surrogate -> U+FFFD
     if isinstance(value, dict):
         return {_scrub(k): _scrub(v) for k, v in value.items()}
     if isinstance(value, list):
