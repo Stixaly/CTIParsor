@@ -79,6 +79,54 @@ class TestRelationshipFilter:
         )
 
 
+class TestRelationshipEndpointRecall:
+    """#320: the endpoint filter must not drop endpoints the text only carries
+    defanged, or that only the NER knows, while still rejecting inventions."""
+
+    DOC = "WellMess beaconed to evil[.]com. APT29 operated it."
+
+    @staticmethod
+    def _rel(src, tgt, kind="communicates-with"):
+        return RelationshipExtracted(source_value=src, relationship_type=kind, target_value=tgt)
+
+    def test_defanged_ioc_endpoint_is_kept(self):
+        r = _result(relationships=[self._rel("WellMess", "evil.com")])
+        out = validate_llm_result(r, self.DOC)
+        assert [(x.source_value, x.target_value) for x in out.relationships] == [("WellMess", "evil.com")]
+
+    def test_ner_known_endpoint_is_kept(self):
+        r = _result(relationships=[self._rel("APT29", "T1566")])
+        assert validate_llm_result(r, self.DOC).relationships == []
+        out = validate_llm_result(r, self.DOC, ner_allow_list={"t1566"})
+        assert len(out.relationships) == 1
+
+    def test_invented_endpoint_is_rejected(self):
+        r = _result(relationships=[self._rel("WellMess", "invented.example")])
+        assert validate_llm_result(r, self.DOC, ner_allow_list={"apt29"}).relationships == []
+
+    def test_short_invented_endpoint_inside_a_word_is_rejected(self):
+        # "mes" occurs only inside "WellMess": a substring is not a mention.
+        r = _result(relationships=[self._rel("WellMess", "mes")])
+        assert validate_llm_result(r, self.DOC).relationships == []
+
+    def test_hallucinated_entity_endpoint_is_rejected(self):
+        r = _result(malware_families=["Ghostly"],
+                    relationships=[self._rel("Ghostly", "evil.com")])
+        assert validate_llm_result(r, self.DOC).relationships == []
+
+    def test_review_lists_are_preserved(self):
+        from pipeline.stage3_llm import RelationshipReview
+        from pipeline.stage3f_ttp_select import TtpReview
+        r = _result(
+            relationships=[self._rel("WellMess", "evil.com")],
+            ttp_review=[TtpReview(attack_id="T1566", reason="undecided")],
+            rel_review=[RelationshipReview(source_value="a", relationship_type="uses",
+                                           target_value="b", reason="x")],
+        )
+        out = validate_llm_result(r, self.DOC)
+        assert len(out.ttp_review) == 1 and len(out.rel_review) == 1
+
+
 class TestEdgeCases:
     def test_empty_result_does_not_raise(self):
         out = validate_llm_result(LLMEnrichmentResult(), "")

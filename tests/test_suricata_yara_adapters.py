@@ -6,6 +6,8 @@ scripts/build_detection_index.py does.
 """
 from __future__ import annotations
 
+import pytest
+
 from models.detection import Severity
 from pipeline.detection.suricata import SuricataAdapter
 from pipeline.detection.yara import YaraAdapter
@@ -285,3 +287,47 @@ def test_yara_unreadable_file_is_skipped(tmp_path, monkeypatch):
 
     monkeypatch.setattr(Path, "read_text", boom)
     assert list(YaraAdapter().parse(tmp_path, corpus="c")) == []
+
+
+def _yara_keys(tmp_path, strings_a: str, strings_b: str, cond: str = "any of them"):
+    text = "".join(
+        f"rule R{i} {{\n strings:\n{s}\n condition:\n  {cond}\n}}\n"
+        for i, s in enumerate((strings_a, strings_b))
+    )
+    first, second = _yara(tmp_path, text, name="pair.yar")
+    return first.dedup_key, second.dedup_key
+
+
+def test_yara_dedup_key_keeps_identifiers_apart(tmp_path):
+    """#301: swapping which identifier carries which value changes `$a and not $b`."""
+    a, b = _yara_keys(
+        tmp_path, '  $a = "foo"\n  $b = "bar"', '  $a = "bar"\n  $b = "foo"', "$a and not $b",
+    )
+    assert a != b
+
+
+@pytest.mark.parametrize("first, second", [
+    ('  $a = "foo"', '  $a = "foo" nocase wide'),
+    ('  $a = "foo"', '  $a = "foo" fullword'),
+    ("  $a = /foo/", "  $a = /foo/i"),
+    # A hex string over two lines that differs only on the second one.
+    ("  $a = { 4D 5A 90 00\n           03 00 }", "  $a = { 4D 5A 90 00\n           FF FF }"),
+])
+def test_yara_dedup_key_keeps_modifiers_apart(tmp_path, first, second):
+    a, b = _yara_keys(tmp_path, first, second, "$a")
+    assert a != b
+
+
+def test_yara_dedup_key_ignores_spacing(tmp_path):
+    a, b = _yara_keys(
+        tmp_path, '  $a = "foo"   nocase  wide', '\t$a="foo" nocase wide', "$a",
+    )
+    assert a == b
+
+
+def test_yara_dedup_key_ignores_comments(tmp_path):
+    a, b = _yara_keys(
+        tmp_path, '  $a = "foo" nocase // the loader string\n  // spare\n  $b = "bar"',
+        '  $a = "foo" nocase\n  $b = "bar"', "$a and $b",
+    )
+    assert a == b

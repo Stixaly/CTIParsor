@@ -84,11 +84,14 @@ def parse_network_traffic(text: str) -> TrafficDescriptor | None:
     # Protocol words are searched OUTSIDE the matched host token: a domain
     # label like "ftp" in ftp.example.com is not a protocol mention.  The
     # token's scheme ("https" in https://host/path) still counts, though.
+    # Every occurrence goes, punctuation excluded: a repeated "ftp.example.com,"
+    # must not leave its "ftp" label behind.
     if host_token:
-        if "://" in host_token:
-            text_wo_host = text.replace(host_token, host_token.split("://", 1)[0], 1)
+        bare = host_token.strip(".,;()'\"")
+        if "://" in bare:
+            text_wo_host = text.replace(bare, bare.split("://", 1)[0])
         else:
-            text_wo_host = text.replace(host_token, " ", 1)
+            text_wo_host = text.replace(bare, " ")
     else:
         text_wo_host = text
     words = {w.lower() for w in _WORD.findall(text_wo_host)}

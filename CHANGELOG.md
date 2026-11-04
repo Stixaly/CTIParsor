@@ -50,6 +50,24 @@ theme.
   to `/api/show` (#303); in-house evaluation counts false positives of types
   absent from the gold, scores negatives on shipped relations, and includes the
   LLM campaign in predictions (#307, #308, #309).
+- **Follow-up after review of the batch.** Gazetteer homonyms of different
+  types on the same span are both kept in every policy mode, not only `apply`
+  (#319). The 3b endpoint filter keeps endpoints the text only carries defanged
+  (whole token in the refanged text) and the document-relations pass validates
+  against its known entities, so IoC, TTP and alias endpoints are no longer
+  dropped (#320). `rank_rules` no longer proposes rules the title pre-filter
+  found but no match backs (#329); artifact title evidence matches CVEs as whole
+  ids (#297); YARA dedup keys carry identifiers and modifiers, multi-line hex
+  included, comments excluded (#301; stored keys change at each corpus's next
+  rebuild); facet byte totals count UTF-8 octets (#312); an overflowing
+  number (`1e999`) in the policy body is a 400 (#339); a lone surrogate in any
+  request body is a 422, and NUL bytes from a baseline are removed before the
+  entity and relationship rows are written (#342); a corpus `subdir` must stay
+  inside its own clone (no absolute path, no `..`) (#343); deleting a job checks
+  its status in the DELETE itself; an Ollama `/api/show` failure is a failed
+  probe, not a cached "no vision" (#303); the in-house `entities` layer scores
+  only the four types it annotates (#307); network-traffic parsing removes every
+  occurrence of the host token before looking for protocol words (#324).
 
 #### The air-gap scripts, 2026-11-03
 

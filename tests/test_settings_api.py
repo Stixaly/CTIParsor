@@ -126,6 +126,19 @@ def test_subdir_escaping_corpora_root_is_rejected_even_with_a_contained_path():
 
 def test_subdir_staying_inside_the_clone_is_accepted():
     settings_mod._validate_corpus_path("./corpora/demo", "sigma")  # must not raise
+    settings_mod._validate_corpus_path("./corpora/demo", "rules/windows")  # must not raise
+
+
+@pytest.mark.parametrize("subdir", [
+    "..", ".", "../other", "sigma/../../other", "./.",
+    str(settings_mod._CORPORA_ROOT / "other"), "/etc", "\\\\server\\share",
+])
+def test_subdir_leaving_the_clone_is_rejected(subdir):
+    """#343: the boundary is the clone, not corpora/ (which holds other corpora)."""
+    with pytest.raises(HTTPException) as exc:
+        settings_mod._validate_corpus_path("./corpora/demo", subdir)
+    assert exc.value.status_code == 400
+    assert "subdir" in str(exc.value.detail)
 
 
 @pytest.mark.parametrize("bad_remote", [

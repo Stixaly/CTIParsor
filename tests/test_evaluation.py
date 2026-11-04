@@ -226,6 +226,24 @@ def test_inhouse_scores_only_annotated_layers_and_counts_negative_violations(tmp
     assert s["negatives"] == {"cases": 2, "violated": 2, "violations": gold["negatives"]}
 
 
+def test_entities_layer_counts_only_the_types_it_annotates(tmp_path):
+    gold = {"status": "gold", "layers": ["entities"],
+            "entities": [{"type": "malware", "value": "WellMess"}]}
+    inhouse = _inhouse(tmp_path, gold)
+    [doc] = inhouse.load(tmp_path)
+    pred = {"entities": [{"type": "malware", "value": "WellMess"},
+                         {"type": "tool", "value": "Invented"},
+                         {"type": "ipv4", "value": "1.2.3.4"},
+                         {"type": "location", "value": "Paris"}],
+            "ttp_ids": []}
+
+    s = inhouse.score(doc, pred, lambda t: t)["entities"]
+
+    assert set(s) == {"malware", "tool"}
+    assert (s["malware"].tp, s["malware"].fp) == (1, 0)
+    assert s["tool"].fp == 1                                     # still a false positive
+
+
 def test_a_pre_annotation_is_never_scored(tmp_path):
     inhouse = _inhouse(tmp_path, {"status": "pre-annotation", "layers": ["iocs"]})
     assert inhouse.load(tmp_path) == []

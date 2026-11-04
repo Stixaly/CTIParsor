@@ -104,11 +104,21 @@ def _validate_corpus_path(raw_path: str, subdir: str | None) -> None:
     if candidate.resolve() == _CORPORA_ROOT:
         raise HTTPException(400, "'path' must be a strict subdirectory of corpora/")
     if subdir and subdir.strip():
-        scoped = candidate.resolve() / subdir.strip()
-        if not is_contained(scoped, _CORPORA_ROOT):
+        sub = subdir.strip()
+        base = candidate.resolve()
+        # The clone is the boundary, not corpora/: another corpus's directory is
+        # inside corpora/ too, and `.` is the clone itself.
+        if (
+            Path(sub).is_absolute()
+            or sub.startswith(("/", "\\"))
+            or ".." in sub.replace("\\", "/").split("/")
+        ):
+            raise HTTPException(400, f"'subdir' must be a relative path inside the corpus (got {subdir!r})")
+        scoped = base / sub
+        if not is_contained(scoped, base) or scoped.resolve() == base:
             raise HTTPException(
                 400,
-                f"'subdir' must resolve inside {_CORPORA_ROOT} (got {subdir!r} -> {scoped.resolve()})",
+                f"'subdir' must resolve inside {base} (got {subdir!r} -> {scoped.resolve()})",
             )
 
 

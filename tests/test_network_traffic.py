@@ -17,6 +17,9 @@ from pipeline.network_traffic import TrafficDescriptor, parse_network_traffic
     ("beacon to 2001:db8::1:443", TrafficDescriptor("2001:db8::1:443", "ipv6-addr", None, ("ipv6",))),
     # a domain label that names a protocol is not a protocol mention
     ("The domain ftp.example.com was registered", None),
+    # ... however many times, and whatever punctuation follows it
+    ("the ftp.example.com, ftp.example.com", None),
+    ("ftp.example.com over ftp", TrafficDescriptor("ftp.example.com", "domain-name", None, ("ftp",))),
 ])
 def test_what_the_text_states_is_read(text, expected):
     assert parse_network_traffic(text) == expected

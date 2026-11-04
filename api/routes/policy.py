@@ -145,6 +145,15 @@ def _reject_non_finite(value: str) -> float:
     raise ValueError(f"non-finite constant {value!r} is not valid JSON")
 
 
+def _finite_float(text: str) -> float:
+    """json.loads parse_float hook: `1e999` overflows to inf without going
+    through parse_constant, and json.dumps(allow_nan=False) would then 500."""
+    value = float(text)
+    if value in (float("inf"), float("-inf")):
+        raise ValueError(f"non-finite number {text!r} is not valid JSON")
+    return value
+
+
 @router.get("")
 def get_policy() -> dict:
     """Return the stored relationship policy, or the factory default."""
@@ -201,7 +210,11 @@ async def put_policy(request: Request) -> dict:
     try:
         # parse_constant rejects NaN/Infinity, which json.loads would otherwise
         # accept, persist, and then 500 on every later response serialization.
-        body = json.loads(await request.body(), parse_constant=_reject_non_finite)
+        body = json.loads(
+            await request.body(),
+            parse_constant=_reject_non_finite,
+            parse_float=_finite_float,
+        )
     except ValueError as exc:
         raise HTTPException(400, f"Request body must be valid JSON: {exc}") from exc
 

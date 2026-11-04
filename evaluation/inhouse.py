@@ -38,6 +38,8 @@ ROOT = Path(__file__).resolve().parent.parent / "data" / "eval" / "inhouse"
 LAYERS = ("iocs", "entities", "techniques", "relations")
 IOC_TYPES = {"ipv4", "ipv6", "domain", "url", "email", "md5", "sha1", "sha256", "cve",
              "file", "registry_key", "mutex", "mac_addr", "asn"}
+# The types the `entities` layer annotates (docs/eval/annotation-guide.md section 3).
+ENTITY_LAYER_TYPES = {"malware", "tool", "threat_actor", "campaign"}
 
 
 @dataclass
@@ -81,10 +83,13 @@ def score(doc: InhouseDoc, pred: dict, canonical) -> dict:
     if "entities" in doc.layers:
         gold_e = [(e["type"], e["value"], set(e.get("aliases", [])) | {e["value"]})
                   for e in g.get("entities", [])]
-        # The layer is declared exhaustive: EVERY prediction of this layer
-        # counts, including types with no gold object (they are false
-        # positives, not to be filtered out by the gold's own types).
-        pred_e = [(e["type"], e["value"]) for e in pred["entities"]]
+        # The layer is declared exhaustive over the types it annotates:
+        # EVERY prediction of those types counts, including types with no gold
+        # object (false positives, not to be filtered out by the gold's own
+        # types).  Types the layer does not annotate (ipv4, location, ...) are
+        # not predictions of this layer.
+        pred_e = [(e["type"], e["value"]) for e in pred["entities"]
+                  if e["type"] in ENTITY_LAYER_TYPES]
         out["entities"] = metrics.score_entities(pred_e, gold_e)
     if "techniques" in doc.layers:
         kinds: dict[str, set[str]] = {}

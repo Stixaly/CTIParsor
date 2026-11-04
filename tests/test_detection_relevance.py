@@ -420,3 +420,29 @@ def test_proposals_endpoint_limit_is_bounded(temp_db, temp_db_client):
     assert len(body["proposals"]) == 5
     assert body["candidate_total"] == 30
     assert body["returned"] == 5
+
+
+def test_like_only_rules_without_evidence_are_not_proposed(temp_db):
+    """#329: 300 rules whose title merely contains "PowerShell" are not 300 proposals."""
+    conn = temp_db.get_conn()
+    rconn = temp_db.get_rule_conn()
+    replace_corpus_rules(rconn, "ioc", [
+        _rule("ioc", f"ps{i}", [], title=f"Suspicious PowerShell download {i}")
+        for i in range(300)
+    ])
+    _seed_job(temp_db, "j329", [("PowerShell", "tool", None)])
+    out = propose_for_job(rconn, "j329", jobs_conn=conn)
+    assert out["candidate_total"] == 0
+    assert out["proposals"] == []
+
+
+def test_cve_title_rule_is_proposed_on_a_whole_id_only(temp_db):
+    conn = temp_db.get_conn()
+    rconn = temp_db.get_rule_conn()
+    replace_corpus_rules(rconn, "ioc", [
+        _rule("ioc", "hit", [], title="Exploitation of CVE-2024-3400"),
+        _rule("ioc", "near", [], title="CVE-2024-34000 other"),
+    ])
+    _seed_job(temp_db, "j329b", [("CVE-2024-3400", "cve", None)])
+    ids = [p["id"] for p in propose_for_job(rconn, "j329b", jobs_conn=conn)["proposals"]]
+    assert ids == ["ioc:hit"]

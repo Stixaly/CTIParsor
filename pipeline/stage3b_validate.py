@@ -249,13 +249,26 @@ def validate_llm_result(
     if campaign:
         kept_names.add(campaign.lower())
 
+    # Endpoints may be IoCs the text only carries defanged (evil[.]com): look
+    # for them verbatim in the refanged text too.  Computed once.
+    from pipeline.stage2_extraction import refang
+    refanged_text = refang(chunk_text).lower()
+    refanged_context = refang(doc_context).lower() if doc_context else ""
+
     def _endpoint_ok(value: str) -> bool:
         v = value.lower()
         if v in hallucinated:
             return False
         if v in kept_names:
             return True
-        return _keep(value)
+        if _keep(value):
+            return True
+        if not v:
+            return False
+        # Whole-token match only: a bare substring would let a short invented
+        # name ("ab") through on any word that contains it ("about").
+        token = re.compile(r"(?<!\w)" + re.escape(v) + r"(?!\w)")
+        return bool(token.search(refanged_text) or token.search(refanged_context))
 
     filtered_rels = [
         r for r in result.relationships

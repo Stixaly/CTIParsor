@@ -56,3 +56,30 @@ def test_a_denied_name_is_dropped_from_the_gazetteer_output(temp_db, matcher):
     results = gaz.match_gazetteer("The Lazarus Group deployed WannaCry against the target.")
     values = {r.value for r in results}
     assert "Lazarus Group" in values and "WannaCry" not in values
+
+
+def test_context_survives_a_length_changing_lowercase_prefix(matcher):
+    # #299: U+0130 lowercases to two code points; offsets must map back.
+    results = gaz.match_gazetteer("İ" * 80 + " APT29")
+    [r] = [r for r in results if r.value.lower() == "apt29" or "APT29" in r.context]
+    assert "APT29" in r.context
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("Emperor Dragonfly attacked X. Later, Emperor Dragonfly attacked Y.", {"G1021"}),
+    ("Threat Group-3390 (Emissary Panda) attacked X.", {"G0027"}),
+    ("Carbon Spider attacked X. Later, Carbon Spider attacked Y.", {"G0046"}),
+])
+def test_repeated_mention_or_alias_claims_its_span(matcher, text, expected):
+    # #318: a repeated mention must still block shorter aliases of other entries.
+    assert {r.mitre_id for r in gaz.match_gazetteer(text)} == expected
+
+
+@pytest.mark.parametrize("mode", ["off", "shadow", "apply"])
+def test_homonyms_of_different_types_both_match_the_same_span(matcher, mode):
+    # #319: Machete is both a group (G0095) and a malware (S0409).
+    results, _ = gaz.match_gazetteer_traced(
+        "The Machete (G0095) group deployed the Machete (S0409) tool.", policy_mode=mode)
+    found = {(r.mitre_id, r.entity_type) for r in results}
+    assert ("G0095", EntityType.THREAT_ACTOR) in found
+    assert ("S0409", EntityType.MALWARE) in found

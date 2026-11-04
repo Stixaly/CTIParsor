@@ -86,6 +86,35 @@ def _reconciliation(*, entities=(), relations=(), imported_entities=(), imported
     )
 
 
+def test_a_nul_in_a_baseline_value_is_not_written(db):
+    """#342: PostgreSQL TEXT refuses NUL, which failed the whole job."""
+    _job(db, pipeline_mode="enrich")
+    reconciliation = _reconciliation(imported_entities=[
+        ImportedEntity(value="cobalt\x00strike", entity_type="tool", mitre_id=None,
+                       status=BASELINE_IN_TEXT, baseline_stix_id="tool--1",
+                       evidence_text="cobalt\x00strike"),
+    ])
+
+    worker._save_entities("j1", [], LLMEnrichmentResult(), report_text="", reconciliation=reconciliation)
+
+    row = _entities(db)[("tool", "cobaltstrike")]
+    assert row["evidence_text"] == "cobaltstrike"
+
+
+def test_a_nul_in_a_baseline_relation_is_not_written(db):
+    """#342: the imported relations go to a TEXT column too."""
+    _job(db, pipeline_mode="enrich")
+    reconciliation = _reconciliation(imported_relations=[
+        ImportedRelation(source_value="APT\x0029", relationship_type="uses",
+                         target_value="Mimi\x00katz", status=BASELINE_ONLY,
+                         baseline_stix_id="relationship--1"),
+    ])
+
+    worker._save_entities("j1", [], LLMEnrichmentResult(), report_text="", reconciliation=reconciliation)
+
+    assert ("APT29", "uses", "Mimikatz") in _relationships(db)
+
+
 # ── _save_entities without a baseline (full mode) ────────────────────────────
 
 def test_a_full_run_stores_the_stage_3r_columns_empty(db):

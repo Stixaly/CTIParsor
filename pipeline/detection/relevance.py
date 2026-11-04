@@ -498,6 +498,11 @@ def rank_rules(
                     best[obs.display] = Match(obs.obs_class, atom_class, obs.value,
                                               obs.display, is_exact, w, disc)
 
+        # A rule that only the LIKE pre-filter proposed, and that no boundary-checked
+        # match backs, has no evidence at all: not a proposal.
+        if not best and rule_id not in tech_rules:
+            continue
+
         # Evidence that counts, first — a `cmd.exe` hit is still shown, never scored.
         matches = sorted(best.values(), key=lambda m: (not m.discriminating, -m.weight))
         disc_weights = [m.weight for m in matches if m.discriminating]

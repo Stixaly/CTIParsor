@@ -489,24 +489,21 @@ class OpenAICompatVisionBackend:
                 # unavailable.
                 caps = entry.get("capabilities")
                 if caps is None:
-                    try:
-                        show = _http_json(
-                            f"{root}/api/show",
-                            {"model": self.model},
-                            self._headers(),
-                            self.timeout,
-                        )
-                        caps = show.get("capabilities")
-                    except Exception as exc:
-                        logger.log(self.log_level,
-                                   "Ollama /api/show failed for %s: %s", self.model, exc)
-                        caps = None
+                    # A failure here is a failed probe (the except below sets
+                    # probe_failed): no definitive "no vision" verdict is cached.
+                    show = _http_json(
+                        f"{root}/api/show",
+                        {"model": self.model},
+                        self._headers(),
+                        self.timeout,
+                    )
+                    caps = show.get("capabilities")
                 ok = "vision" in (caps or [])
                 if not ok:
                     logger.log(
                         self.log_level,
                         "Ollama model %s has no `vision` capability (has: %s)",
-                        self.model, entry.get("capabilities"),
+                        self.model, caps,
                     )
                     self.unavailable_reason = "the model has no `vision` capability"
             elif self.name == "vllm":

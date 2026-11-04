@@ -135,20 +135,81 @@ class YaraAdapter(RuleCorpusAdapter):
         return result
 
     def _dedup_key(self, rule: YaraRule) -> str:
-        strings = [(kind, value) for _ident, kind, value in rule.strings]
+        if not rule.strings:
+            return ""
+        strings = _normalized_strings(rule.body)
         if not strings:
             return ""
         # The condition is part of the rule's semantics: two rules with the
         # same strings but different conditions ("$a and $b" vs "$a or $b")
         # are NOT duplicates and must not be folded into one.
-        cond = ""
-        ci = rule.body.find("condition:")
-        if ci >= 0:
-            cond = " ".join(rule.body[ci + len("condition:"):].split())
-        strings.sort()
+        m = _CONDITION_RE.search(rule.body)
+        if m:
+            cond = " ".join(rule.body[m.end():].split())
+        else:
+            ci = rule.body.find("condition:")
+            cond = " ".join(rule.body[ci + len("condition:"):].split()) if ci >= 0 else ""
         payload = json.dumps(
             {"format": "yara", "strings": strings, "condition": cond},
             sort_keys=True,
             separators=(",", ":"),
         )
         return hashlib.sha256(payload.encode()).hexdigest()
+
+
+_STRINGS_RE = compile_pattern(r"(?m)^[ \t]*strings[ \t]*:")
+_CONDITION_RE = compile_pattern(r"(?m)^[ \t]*condition[ \t]*:")
+_DECL_RE = compile_pattern(r"^[ \t]*(\$[A-Za-z0-9_]*)[ \t]*=[ \t]*(.+?)[ \t]*$")
+
+
+def _literal_end(rest: str) -> int:
+    """Index just past the string literal opening `rest` (quote, hex or regex)."""
+    closer = {'"': '"', "{": "}", "/": "/"}.get(rest[:1])
+    if closer is None:
+        return 0
+    k = 1
+    while k < len(rest):
+        if rest[k] == "\\" and closer != "}":
+            k += 2
+            continue
+        if rest[k] == closer:
+            return k + 1
+        k += 1
+    return len(rest)
+
+
+def _normalized_strings(body: str) -> list[str]:
+    """The `strings:` declarations of a rule: identifier, value AND modifiers.
+
+    Spacing is normalized outside the literal and the list is sorted, so a
+    reordering or a re-indentation does not change the result, while `$a = "x"`
+    and `$a = "x" nocase wide` (or `/x/` and `/x/i`) stay distinct.
+    """
+    m = _STRINGS_RE.search(body)
+    if not m:
+        return []
+    section = body[m.end():]
+    end = _CONDITION_RE.search(section)
+    if end:
+        section = section[:end.start()]
+    out: list[str] = []
+    for line in section.splitlines():
+        if line.strip().startswith("//"):
+            continue          # a comment line is not part of the rule's logic
+        d = _DECL_RE.match(line)
+        if not d:
+            # A hex string (or a long literal) can run over several lines: the
+            # continuation belongs to the declaration above, or two rules that
+            # differ only past the first line would share a key.
+            if out and line.strip():
+                out[-1] = f"{out[-1]} {' '.join(line.split())}"
+            continue
+        rest = d.group(2)
+        cut = _literal_end(rest)
+        # The tail is outside the literal: a `//` there starts a comment.
+        head, tail = rest[:cut], " ".join(rest[cut:].split("//", 1)[0].split())
+        if head.startswith("{"):
+            head = " ".join(head.split())
+        out.append(f"{d.group(1)} = {head} {tail}".strip())
+    out.sort()
+    return out

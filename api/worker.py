@@ -257,6 +257,12 @@ def _stage3r_relation(row: tuple, reconciliation: Reconciliation | None, now: st
     return (*row[:6], 1, *row[7:10], BASELINE_STIX, row[11], status, bid, now)
 
 
+def _without_nul(row: tuple) -> tuple:
+    """`row` with the NUL bytes of its text fields removed: PostgreSQL TEXT refuses
+    them, and a baseline value (kept verbatim in its intake JSON) can carry one."""
+    return tuple(v.replace("\x00", "") if isinstance(v, str) else v for v in row)
+
+
 def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "",
                    reconciliation: Reconciliation | None = None) -> None:
     """Persist Stage 2 IoCs, Stage 2b gazetteer, and Stage 3 LLM entities to the DB.
@@ -446,6 +452,8 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "",
                      1.0, 1, None, None, None, BASELINE_STIX, None, item.status, item.baseline_stix_id, _now)
                     for item in reconciliation.imported_relations
                 ]
+            _entity_rows = [_without_nul(r) for r in _entity_rows]
+            _rel_rows = [_without_nul(r) for r in _rel_rows]
             with transaction(conn):
                 # A job run again after Stage 3 rewrites its rows instead of doubling them.
                 conn.execute("DELETE FROM entities WHERE job_id=?", (job_id,))

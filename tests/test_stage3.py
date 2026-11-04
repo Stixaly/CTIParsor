@@ -810,6 +810,21 @@ class TestEnrichDocumentRelationsHappyPath:
         assert "<<<END REPORT " in system_arg
 
 
+    def test_known_entities_are_the_validation_allow_list(self, mock_llm, sample_cti_text, sample_entities):
+        # #320: endpoints only the NER knows must not be dropped by Stage 3b.
+        import pipeline.stage3b_validate as v3b
+        real = v3b.validate_llm_result
+        seen = {}
+
+        def spy(result, text, *args, **kwargs):
+            seen.update(kwargs)
+            return real(result, text, *args, **kwargs)
+
+        with patch.object(v3b, "validate_llm_result", spy):
+            enrich_document_relations(sample_cti_text, sample_entities)
+        assert seen["ner_allow_list"] == {e.value.lower() for e in sample_entities}
+
+
 class TestEnrichDocumentRelationsGuards:
     def test_no_known_entities_returns_empty_without_calling_llm(self, mock_llm, sample_cti_text):
         result = enrich_document_relations(sample_cti_text, [])

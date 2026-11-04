@@ -52,6 +52,15 @@ def test_a_body_that_is_not_json_is_refused(temp_db_client):
     assert resp.status_code == 400 and "valid JSON" in resp.json()["detail"]
 
 
+def test_an_overflowing_number_is_refused_not_a_500(temp_db_client):
+    """#339: `1e999` parses to inf without passing through parse_constant."""
+    resp = temp_db_client.put(
+        _URL, content=b'{"x": 1e999}', headers={"content-type": "application/json"}
+    )
+    assert resp.status_code == 400 and "valid JSON" in resp.json()["detail"]
+    assert temp_db_client.get(_URL).status_code == 200
+
+
 @pytest.mark.parametrize("body,message", [
     ([], "must be a JSON object"),
     ({"rules": {"src": "a"}}, "'rules' must be an array"),

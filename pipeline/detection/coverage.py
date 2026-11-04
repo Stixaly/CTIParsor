@@ -582,7 +582,7 @@ def rule_facets_for_job(
         # unnecessary in every current write path. `nbytes or 0` below still
         # covers it at zero extra cost, in case that ever changes.
         for fmt, corpus, lic, sev, nbytes in conn.execute(
-            f"SELECT format, corpus, license, severity, LENGTH(raw) "
+            f"SELECT format, corpus, license, severity, OCTET_LENGTH(raw) "
             f"FROM detection_rules WHERE id IN ({placeholders})",
             batch,
         ):

@@ -194,7 +194,7 @@ def _facet(rules: list[dict], key: str) -> list[dict]:
         val = (r.get(key) or _FILTER_DEFAULTS.get(key, "unknown")).strip().lower()
         entry = counts.setdefault(val, {"value": val, "rules": 0, "bytes": 0})
         entry["rules"] += 1
-        entry["bytes"] += len(r.get("raw") or "")
+        entry["bytes"] += len((r.get("raw") or "").encode("utf-8"))
     return sorted(counts.values(), key=lambda x: (-x["rules"], x["value"]))
 
 

@@ -1,3 +1,4 @@
+import json
 import math
 import os
 from contextlib import asynccontextmanager
@@ -8,7 +9,7 @@ from urllib.parse import urlsplit
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
@@ -140,9 +141,14 @@ def _finite(value: Any) -> Any:
 async def request_validation_handler(request: Request, exc: RequestValidationError):
     # FastAPI's default answer echoes each refused value back as `input`, and its
     # JSON encoder refuses NaN and Infinity: a body with one of them would answer 500.
-    return JSONResponse(
+    # ensure_ascii: `input` can hold a lone surrogate (a `\ud800` escape in the
+    # body), which Starlette's UTF-8 rendering cannot encode.
+    return Response(
         status_code=422,
-        content={"detail": jsonable_encoder(_finite(exc.errors()))},
+        content=json.dumps(
+            {"detail": jsonable_encoder(_finite(exc.errors()))}, ensure_ascii=True
+        ),
+        media_type="application/json",
     )
 
 # Request ID middleware for tracing

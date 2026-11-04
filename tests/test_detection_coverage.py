@@ -1094,3 +1094,17 @@ def test_facets_count_an_evidence_reached_rule_without_a_technique(temp_db):
 
     assert len(rule_bodies_for_job(rconn, "jfac", jobs_conn=conn)) == 1
     assert rule_facets_for_job(rconn, "jfac", jobs_conn=conn)["total"] == 1
+
+
+def test_facet_bytes_count_utf8_octets_not_characters(temp_db):
+    """#312: "café" is 5 bytes; LENGTH() counts 4 characters."""
+    from api.routes.coverage import _facet
+    conn = temp_db.get_conn()          # job store
+    rconn = temp_db.get_rule_conn()    # rule store
+    replace_corpus_rules(rconn, "yr", [_fmt_rule("yr", "y1", ["T1059"], "yara")])
+    rconn.execute("UPDATE detection_rules SET raw=? WHERE id=?", ("café", "yr:y1"))
+    rconn.commit()
+    _job_with_techniques(temp_db, "jbytes", ["T1059"])
+
+    assert rule_facets_for_job(rconn, "jbytes", jobs_conn=conn)["bytes"] == 5
+    assert _facet([{"format": "yara", "raw": "café"}], "format")[0]["bytes"] == 5
