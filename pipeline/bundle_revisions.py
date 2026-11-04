@@ -111,6 +111,10 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "Stage 2 extracts a domain on an IDN TLD written as its A-label whole (test.xn--p1ai, where it "
      "gave test.xn)",
      "extraction"),
+    ("d8ff98a", "2026-11-04",
+     "Stage 2 refang/URL fixes and gazetteer span/Unicode fixes, and Stage 3b/3c validation fixes, "
+     "change which entities, relationships and IoC associations a run extracts",
+     "extraction"),
 )
 
 

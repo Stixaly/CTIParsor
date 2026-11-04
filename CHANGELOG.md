@@ -11,6 +11,45 @@ theme.
 
 ### Fixed
 
+#### Bug batch of 2026-11-04 (issues #283-#343), extraction, detection store, queue, API
+
+- **Stage 2.** `refang()` normalizes bracketed defanged schemes (`hxxps[:]//`,
+  `hxxps[://]`, ...), so those URLs are extracted again (#283); a trailing `)` is
+  kept when the URL's parentheses balance, so Wikipedia-style links are no longer
+  truncated (#284); gazetteer mentions are all span-claimed and keyed by
+  (canonical, type), ending false positives on repeated mentions and keeping
+  ATT&CK group/malware homonyms apart, and spans are computed in original-text
+  coordinates after a Unicode-aware `lower()` (#318, #319, #299).
+- **Stage 3.** `validate_llm_result` filters relationship endpoints and IoC
+  associations against the text and preserves `ttp_review`/`rel_review` (#320);
+  short or blank names are no longer auto-accepted (#321); `normalize_ttps` merges
+  the evidence quote and label as a pair (#322); a textual `"false"` verdict
+  removes the TTP (#296).
+- **Detection store.** Negated Sigma selections (`not filter-*`) are no longer
+  indexed as positive atoms (#327); corpus rebuild runs in one transaction and
+  survives a parse error (#328); CVE-dedicated and title-only rules reach
+  `rank_rules`, and CVE text matches are whole-id bounded (#329, #297);
+  `canonical_rule_bodies` batches and filters canonical rules (#331);
+  `rule_bytes` counts UTF-8 octets (#312); Suricata ids include the GID (#311);
+  YARA dedup keys include the condition (#301); the artifact name cap counts title
+  matches only (#334); CVE observables accept 4-12 digits (#298); a URL with a
+  specific path on a shared cloud domain is discriminating (#333).
+- **Queue/API.** `terminate_and_requeue` requeues conditioned on `worker_id`
+  before terminating the subprocess (#300, #336); heartbeat retries while the
+  last stamp failed (#337); `PATCH /api/jobs/{id}` cannot mark a running or
+  bundle-less job `completed` (#340); job deletion is transactional and refuses
+  running jobs (#341); `PUT /api/relationship-policy` rejects NaN/Infinity
+  instead of bricking the endpoint with 500s (#339); a custom corpus path cannot
+  be the corpora root itself (#343); overrides reject NUL bytes and lone
+  surrogates (#342).
+- **Misc.** The figure cache fails soft when `DATABASE_URL` is unset (#325);
+  network-traffic parsing keeps a bare IPv6 whole and ignores protocol words
+  inside the host token (#304, #324); analyst date qualifiers are preserved and
+  invalid UTC offsets rejected (#313, #314); the Ollama vision probe falls back
+  to `/api/show` (#303); in-house evaluation counts false positives of types
+  absent from the gold, scores negatives on shipped relations, and includes the
+  LLM campaign in predictions (#307, #308, #309).
+
 #### The air-gap scripts, 2026-11-03
 
 - **`setup.sh --offline` refuses a host without the `docker compose`
