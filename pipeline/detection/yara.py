@@ -159,7 +159,10 @@ class YaraAdapter(RuleCorpusAdapter):
 
 _STRINGS_RE = compile_pattern(r"(?m)^[ \t]*strings[ \t]*:")
 _CONDITION_RE = compile_pattern(r"(?m)^[ \t]*condition[ \t]*:")
-_DECL_RE = compile_pattern(r"^[ \t]*(\$[A-Za-z0-9_]*)[ \t]*=[ \t]*(.+?)[ \t]*$")
+# No two adjacent quantifiers can match the same character, so the match is
+# linear on a line of repeated blanks (CodeQL py/polynomial-redos): the value
+# is taken whole and stripped in Python.
+_DECL_RE = compile_pattern(r"^[ \t]*(\$[A-Za-z0-9_]*)[ \t]*=(.*)$")
 
 
 def _literal_end(rest: str) -> int:
@@ -204,7 +207,9 @@ def _normalized_strings(body: str) -> list[str]:
             if out and line.strip():
                 out[-1] = f"{out[-1]} {' '.join(line.split())}"
             continue
-        rest = d.group(2)
+        rest = d.group(2).strip(" \t")
+        if not rest:
+            continue
         cut = _literal_end(rest)
         # The tail is outside the literal: a `//` there starts a comment.
         head, tail = rest[:cut], " ".join(rest[cut:].split("//", 1)[0].split())
