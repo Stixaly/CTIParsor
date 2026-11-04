@@ -3,7 +3,7 @@
 // GET /bundle answers 409 with the errors; the graph says the build was
 // refused and why, and its download says so instead of saving a file.
 import { expect, test } from '@playwright/test'
-import { findJob, kanbanCard } from './journey'
+import { findJob, kanbanCard, recordDialogs } from './journey'
 
 const REFUSED = 'refused-bundle-e2e.txt'
 
@@ -24,12 +24,14 @@ test('a refused bundle is answered 409, and the interface says why', async ({ pa
   await expect(refusal).toBeVisible()
   await expect(refusal).toContainText(detail.errors[0])
 
-  const alert = page.waitForEvent('dialog')
+  // The alert can open while the click is still settling: awaiting the click
+  // before handling the dialog then deadlocks (the click waits on the open
+  // alert, the alert on the test).  A handler records and dismisses it instead.
+  const alerts = recordDialogs(page)
   await page.getByRole('button', { name: 'Download STIX', exact: true }).click()
-  const dialog = await alert
-  expect(dialog.message()).toContain('The STIX 2.1 schemas refused this bundle:')
-  expect(dialog.message()).toContain(`• ${detail.errors[0]}`)
-  await dialog.dismiss()
+  await expect.poll(() => alerts.length).toBe(1)
+  expect(alerts[0]).toContain('The STIX 2.1 schemas refused this bundle:')
+  expect(alerts[0]).toContain(`• ${detail.errors[0]}`)
 
   // Nothing rebuilt it on the way: still refused.
   expect((await request.get(`/api/jobs/${job.id}/bundle`)).status()).toBe(409)
