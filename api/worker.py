@@ -1174,9 +1174,16 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
         and (not t.mitre_id or t.mitre_id.lower() not in rejected_ttp_mitre)
     ]
 
-    # Filter campaign_name — excluded if the user rejected the campaign entity
+    # Filter campaign_name — excluded if the user rejected the campaign entity,
+    # and if no campaign row that ships carries it: the run stores the LLM's
+    # campaign as a row (`_save_entities`), so a row the analyst deleted or
+    # renamed is a decision too, and the name must not come back from the
+    # blob (#287).
     campaign_name = llm_result.campaign_name
-    if campaign_name and campaign_name.lower().strip() in rejected_campaigns:
+    shipped_campaigns = {(row["value"] or "").lower().strip()
+                         for row in all_entity_rows if row["entity_type"] == "campaign"}
+    if campaign_name and (campaign_name.lower().strip() in rejected_campaigns
+                          or campaign_name.lower().strip() not in shipped_campaigns):
         campaign_name = None
 
     # Malware, threat-actor and tool names: the stored rows, every source

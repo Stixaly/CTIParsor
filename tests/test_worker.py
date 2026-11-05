@@ -521,6 +521,21 @@ def test_finalize_keeps_the_type_of_the_best_ranked_source_and_the_analysts_acce
         ("malware", ["gazetteer"], ["campaign"], ["analyst", "llm"])]
 
 
+def test_finalize_does_not_bring_back_a_deleted_or_renamed_llm_campaign(db):
+    """#287: the LLM's campaign is stored as a row; deleting the row is the
+    analyst's decision, and the blob must not put the name back."""
+    llm = LLMEnrichmentResult(campaign_name="Dark Halo")
+    _job(db, report_text="APT29 ran Dark Halo.", llm_result_json=llm.model_dump_json())
+    _entity(db, "j1", "APT29", "threat_actor")
+    assert _objects(worker.re_run_final_stages("j1", quick=False), "campaign") == []      # no row: gone
+
+    _entity(db, "j1", "SolarWinds Compromise", "campaign")                               # renamed
+    assert _objects(worker.re_run_final_stages("j1", quick=False), "campaign") == ["SolarWinds Compromise"]
+
+    _entity(db, "j1", "Dark Halo", "campaign")                                           # kept as is
+    assert "Dark Halo" in _objects(worker.re_run_final_stages("j1", quick=False), "campaign")
+
+
 def test_finalize_survives_a_corrupt_llm_blob_and_an_unreadable_anchor(db, monkeypatch, caplog):
     _job(db, status="reviewing", llm_result_json="{not json", report_text="APT29 used SUNBURST.")
     _entity(db, "j1", "APT29", "threat_actor")

@@ -284,7 +284,9 @@ OFFLINE_RULE_STORE_TABLES="detection_rules rule_atoms rule_bytes rule_related ru
 # holds data outside the rule store and schema_migrations (the reports) would lose
 # it: the restore is refused then, unless the caller sets OFFLINE_FORCE_RESTORE=1.
 offline_docker_restore_pg_dump() {
-    local dir="$1" compose_project_user="${CTI_DB_USER:-ctiparsor}" compose_project_db="${CTI_DB_NAME:-ctiparsor}"
+    local dir="$1" compose_project_user compose_project_db
+    compose_project_user=$(offline_db_setting CTI_DB_USER)
+    compose_project_db=$(offline_db_setting CTI_DB_NAME)
     local dump="$dir/ctiparsor.dump" holding="" listed=""
     [ -f "$dump" ] || offline_die "$dir/ctiparsor.dump missing"
     # The tables outside the rule store and schema_migrations that hold rows. The query
@@ -434,6 +436,18 @@ offline_env_value() {
         value="${value%"${value##*[![:blank:]]}"}"
     fi
     printf '%s' "$value"
+}
+
+# The role or database name compose gives postgres (CTI_DB_USER, CTI_DB_NAME): the
+# shell's value when it is set and not empty, else the one in .env, else
+# `ctiparsor` -- compose's own precedence and default.  Reading only the shell
+# sent `-U ctiparsor -d ctiparsor` to a postgres .env had created with other
+# names (#306).  Only that key is read: .env is never sourced as a script.
+offline_db_setting() {
+    local key="$1" value
+    value="${!key:-}"
+    [ -n "$value" ] || value=$(offline_env_value "$key")
+    printf '%s' "${value:-ctiparsor}"
 }
 
 # Writes the air-gap settings into .env (setup.sh --offline, after the restore).
