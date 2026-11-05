@@ -74,13 +74,14 @@ def _extract_iocs(text: str) -> set[str]:
     return found
 
 
-def _read_dom_text(url: str, timeout_ms: int = 30_000) -> str:
+def _read_dom_text(url: str, timeout_ms: int = 30_000, *, enable_js: bool = False) -> str:
     """
     Read visible text from the DOM as the reference the PDF is measured against.
 
-    JavaScript is disabled here for the same reason `capture_url_to_pdf` disables
-    it — and reading it *with* JS makes the comparison meaningless, because the
-    two sides then load different pages.  It is not a hypothetical: on
+    JavaScript follows `enable_js`, the setting of the capture: off by default
+    for the same reason `capture_url_to_pdf` disables it — and a reference read
+    with a different setting than its capture makes the comparison meaningless,
+    because the two sides then load different pages (#316).  It is not a hypothetical: on
     unit42.paloaltonetworks.com the JS-enabled body is **0 characters** (bot
     protection blanks the page for a headless browser) against 25,909 with JS
     off, which silently scored two rows at 0% retention.
@@ -95,7 +96,10 @@ def _read_dom_text(url: str, timeout_ms: int = 30_000) -> str:
             browser = p.chromium.launch(headless=True)
             try:
                 context = browser.new_context(
-                    java_script_enabled=False,
+                    # The same setting as the capture it is compared with:
+                    # with --enable-js, a reference without JS measured the
+                    # capture against different content (#316).
+                    java_script_enabled=enable_js,
                     user_agent=_USER_AGENT,
                 )
                 page = context.new_page()
@@ -126,7 +130,7 @@ def measure_one(url: str, workdir: Path, *, enable_js: bool, timeout_ms: int) ->
     except Exception as exc:
         return Measurement(url=url, ok=False, error=f"ingest failed: {exc}")
 
-    dom_text = _read_dom_text(url, timeout_ms)
+    dom_text = _read_dom_text(url, timeout_ms, enable_js=enable_js)
 
     dom_chars = len(dom_text)
     pdf_chars = len(pdf_text)

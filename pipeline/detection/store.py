@@ -379,6 +379,48 @@ def _also_in_map(conn: DBConnection, dedup_keys: Iterable[str]) -> dict[str, set
     return out
 
 
+def _related_also_in(conn: DBConnection, rules: Iterable[tuple[str, str]]) -> dict[str, set[str]]:
+    """Map rule id → the corpora of the non-canonical rules folded into it by
+    `related:` (derived / renamed), for (rule_id, native_key) pairs.
+
+    `dedupe_store` folds on two axes, and `_also_in_map` only reads the
+    dedup_key one: 4,758 of hayabusa's 4,759 rules fold into SigmaHQ through
+    `related:` alone, so their provenance read as `[]` (#330).  Both directions
+    of a folding edge are read (the duplicate names the canonical, or the
+    canonical names the rule it was renamed from); one hop, which is how the
+    corpora write it.
+    """
+    from pipeline.detection.dedup import FOLDING_RELATIONS
+
+    ids = sorted({rid for rid, _key in rules if rid})
+    if not ids:
+        return {}
+    types = sorted(FOLDING_RELATIONS)
+    tph = ",".join("?" * len(types))
+    out: dict[str, set[str]] = {}
+    # One statement per 400 rules, like `_also_in_map`: never one per rule.
+    for i in range(0, len(ids), 400):
+        batch = ids[i:i + 400]
+        ph = ",".join("?" * len(batch))
+        for rid, corpus in conn.execute(
+            # The canonical names the duplicate (rule_related.rule_id = canonical)…
+            f"SELECT r.rule_id, d.corpus FROM rule_related r "
+            f"JOIN detection_rules d ON d.native_key = r.related_key "
+            f"WHERE r.rule_id IN ({ph}) AND LOWER(TRIM(r.rel_type)) IN ({tph}) "
+            f"AND d.is_canonical=0 AND d.id <> r.rule_id "
+            f"UNION ALL "
+            # …or the duplicate names the canonical (related_key = its native key).
+            f"SELECT c.id, d.corpus FROM rule_related r "
+            f"JOIN detection_rules d ON d.id = r.rule_id "
+            f"JOIN detection_rules c ON c.native_key = r.related_key "
+            f"WHERE c.id IN ({ph}) AND LOWER(TRIM(r.rel_type)) IN ({tph}) "
+            f"AND d.is_canonical=0 AND d.id <> c.id",
+            [*batch, *types, *batch, *types],
+        ):
+            out.setdefault(rid, set()).add(corpus)
+    return out
+
+
 def rules_for_technique(conn: DBConnection, technique_id: str) -> list[dict]:
     """Drill-down: canonical rule metadata covering one technique (no raw body).
 
@@ -393,7 +435,7 @@ def rules_for_technique(conn: DBConnection, technique_id: str) -> list[dict]:
     """
     rows = conn.execute(
         "SELECT d.id, d.corpus, d.title, d.severity, d.license, d.source_ref, "
-        "d.format, d.dedup_key, COALESCE(b.bytes, 0) "
+        "d.format, d.dedup_key, COALESCE(b.bytes, 0), d.native_key "
         "FROM rule_techniques rt JOIN detection_rules d ON d.id = rt.rule_id "
         "LEFT JOIN rule_bytes b ON b.rule_id = rt.rule_id "
         "WHERE rt.technique_id=? AND EXISTS ("
@@ -402,12 +444,14 @@ def rules_for_technique(conn: DBConnection, technique_id: str) -> list[dict]:
         (technique_id.upper(),),
     ).fetchall()
     also_in = _also_in_map(conn, (r[7] for r in rows))
+    related = _related_also_in(conn, ((r[0], r[9]) for r in rows))
     return [
         {
             "id": r[0], "corpus": r[1], "title": r[2], "severity": r[3],
             "license": r[4], "source_ref": r[5], "format": r[6] or "sigma",
             "bytes": r[8],
-            "also_in": sorted(also_in.get(r[7], set()) - {r[1]}) if r[7] else [],
+            "also_in": sorted(((also_in.get(r[7], set()) if r[7] else set())
+                               | related.get(r[0], set())) - {r[1]}),
         }
         for r in rows
     ]

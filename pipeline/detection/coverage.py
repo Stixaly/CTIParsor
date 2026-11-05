@@ -264,7 +264,7 @@ def _evidence_for_job(
 
     widened = _widened_matchable()
     evidence: dict[str, list[dict]] = {}
-    seen: dict[str, set[str]] = {}
+    seen: dict[str, dict[str, int]] = {}      # rule -> display -> index in evidence[rule]
 
     for rule_id, atom_class, value in hits:
         for obs in by_value.get(value, ()):
@@ -272,18 +272,28 @@ def _evidence_for_job(
                 continue
             # One entry per source ENTITY: a file path is emitted as both `file`
             # and `image` and must not corroborate twice.
-            marks = seen.setdefault(rule_id, set())
-            if obs.display in marks:
-                continue
-            marks.add(obs.display)
-            evidence.setdefault(rule_id, []).append({
+            # The hits come sorted by value, so a ubiquitous basename ("hosts")
+            # can arrive before its discriminating full path: the
+            # discriminating one replaces it (#332).
+            marks = seen.setdefault(rule_id, {})
+            disc = not is_ubiquitous(obs.obs_class, obs.value)
+            entry = {
                 "obs_class": obs.obs_class,
                 "display": obs.display,
                 "value": obs.value,
                 "field": atom_class,
-                "discriminating": not is_ubiquitous(obs.obs_class, obs.value),
+                "discriminating": disc,
                 "kind": "atom",
-            })
+            }
+            if obs.display in marks:
+                rows = evidence[rule_id]
+                k = marks[obs.display]
+                if disc and not rows[k]["discriminating"]:
+                    rows[k] = entry
+                continue
+            rows = evidence.setdefault(rule_id, [])
+            marks[obs.display] = len(rows)
+            rows.append(entry)
 
     # ADR-0031 — brand evidence. A rule whose TITLE names what the report is
     # about is admitted too, in its own weaker tier: on UNC6671 every one of the
@@ -335,7 +345,7 @@ def rules_for_job(
     sweeps — and measured 26.3 s on a real report. One id query, one metadata
     batch and one `also_in` sweep replace them: 5.4 s for the same 10,372 rules.
     """
-    from pipeline.detection.store import _also_in_map, canonical_rule_ids_for_techniques
+    from pipeline.detection.store import _also_in_map, _related_also_in, canonical_rule_ids_for_techniques
 
     evidence = _evidence_for_job(conn, job_id, jobs_conn=jobs_conn)
     technique_ids = job_technique_ids(jobs_conn or conn, job_id)
@@ -383,7 +393,7 @@ def rules_for_job(
             # LENGTH(raw) nor a column on this table: both force SQLite past the
             # rule body's overflow pages — 8.2-8.8s versus 1.0s (ADR-0022).
             f"SELECT d.id, d.corpus, d.title, d.severity, d.license, d.source_ref, "
-            f"d.format, d.dedup_key, COALESCE(b.bytes, 0) "
+            f"d.format, d.dedup_key, COALESCE(b.bytes, 0), d.native_key "
             f"FROM detection_rules d "
             f"LEFT JOIN rule_bytes b ON b.rule_id = d.id "
             f"WHERE d.id IN ({placeholders})",
@@ -392,14 +402,18 @@ def rules_for_job(
             meta[row[0]] = {
                 "id": row[0], "corpus": row[1], "title": row[2], "severity": row[3],
                 "license": row[4], "source_ref": row[5], "format": row[6] or "sigma",
-                "bytes": row[8], "dedup_key": row[7],
+                "bytes": row[8], "dedup_key": row[7], "native_key": row[9],
             }
 
     # One also_in sweep for every dedup_key at once.
     also_in = _also_in_map(conn, (m["dedup_key"] for m in meta.values()))
+    # …and the rules folded in by `related:`, which share no dedup_key (#330).
+    related = _related_also_in(conn, ((m["id"], m["native_key"]) for m in meta.values()))
     for m in meta.values():
         dk = m.pop("dedup_key")
-        m["also_in"] = sorted(also_in.get(dk, set()) - {m["corpus"]}) if dk else []
+        m.pop("native_key")
+        folded = (also_in.get(dk, set()) if dk else set()) | related.get(m["id"], set())
+        m["also_in"] = sorted(folded - {m["corpus"]})
 
     evidence_total = 0
     for rid, m in meta.items():

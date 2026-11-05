@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import threading
 import time
 from datetime import datetime
 from typing import cast
@@ -1575,6 +1576,18 @@ def corroborated_ttp_ids(semantic_ttp_entities) -> set[str]:
     }
 
 
+# Whether this thread's last `enrich_chunk` got an answer it could read.  An
+# empty result means "no relationship" only then: a provider that is not
+# configured, a failed request or an unparseable answer give one too, and
+# Stage 3e read those as the second model disagreeing with everything (#323).
+_answer = threading.local()
+
+
+def last_chunk_answered() -> bool:
+    """Did this thread's most recent `enrich_chunk` parse a model answer?"""
+    return bool(getattr(_answer, "parsed", False))
+
+
 def enrich_chunk(
     text: str,
     detected_entities: list[RawEntity],
@@ -1618,6 +1631,7 @@ def enrich_chunk(
                                 only when `document_time` is not given, as a
                                 weak anchor (it never resolves "last month").
     """
+    _answer.parsed = False
     if document_time is None and reference_date is not None:
         document_time = DocumentTime(anchor=Anchor(
             value=reference_date.date().isoformat(), source="file_metadata"))
@@ -1715,6 +1729,7 @@ def enrich_chunk(
         llm_stats.bump("extraction_invalid")
         return LLMEnrichmentResult()
     llm_stats.bump("extraction_ok")
+    _answer.parsed = True
 
     # Stage 3b — remove hallucinated entity names not present in the source text.
     # Pass doc_context and ner_allow_list so the filter can short-circuit the

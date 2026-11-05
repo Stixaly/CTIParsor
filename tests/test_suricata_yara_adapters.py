@@ -331,3 +331,21 @@ def test_yara_dedup_key_ignores_comments(tmp_path):
         '  $a = "foo" nocase\n  $b = "bar"', "$a and $b",
     )
     assert a == b
+
+
+def test_the_atom_backfill_keeps_the_atoms_of_suricata_rules(temp_db, tmp_path):
+    """#310: scripts/build_rule_atoms.py re-reads bodies as Sigma YAML; it used
+    to delete every atom first, so a Suricata rule lost all of its own."""
+    from pipeline.detection.store import replace_corpus_rules
+    from scripts.build_rule_atoms import backfill
+    temp_db.get_conn()
+    rconn = temp_db.get_rule_conn()
+    (rule,) = _suricata(tmp_path, _TOR_RULE)
+    replace_corpus_rules(rconn, "et-open", [rule])
+
+    def count():
+        return rconn.execute("SELECT COUNT(*) FROM rule_atoms WHERE rule_id=?", (rule.id,)).fetchone()[0]
+    before = count()
+    assert before > 0
+    backfill(rconn, progress=lambda _m: None)
+    assert count() == before

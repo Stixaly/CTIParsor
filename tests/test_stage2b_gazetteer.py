@@ -83,3 +83,29 @@ def test_homonyms_of_different_types_both_match_the_same_span(matcher, mode):
     found = {(r.mitre_id, r.entity_type) for r in results}
     assert ("G0095", EntityType.THREAT_ACTOR) in found
     assert ("S0409", EntityType.MALWARE) in found
+
+
+def test_a_mention_glued_to_a_length_changing_letter_is_not_matched(matcher):
+    # #350: "İ" lowers to "i" + U+0307, which the regex lookbehind takes for a
+    # boundary; both paths must judge the boundary on the original text.
+    assert [r for r in gaz.match_gazetteer("İAPT29 was seen.") if r.mitre_id == "G0016"] == []
+    assert [r.mitre_id for r in gaz.match_gazetteer("İ APT29 was seen.") if r.mitre_id == "G0016"] == ["G0016"]
+
+
+def test_repeated_mentions_are_linear_in_the_number_of_claims():
+    # #351: every repeated mention claims its span (#318); looking a span up
+    # must not scan every earlier claim.
+    claims = gaz._Claims()
+    for k in range(2000):
+        assert not claims.blocks(6 * k, 6 * k + 5, "threat_actor")
+        claims.add(6 * k, 6 * k + 5, "threat_actor")
+    assert claims.blocks(6 * 1000 + 2, 6 * 1000 + 4, "malware")       # inside
+    assert claims.blocks(6 * 1000 - 3, 6 * 1000 + 1, "malware")       # straddles a start
+    assert not claims.blocks(6 * 1000, 6 * 1000 + 5, "malware")       # homonym on the same span
+    assert claims.blocks(6 * 1000, 6 * 1000 + 5, "threat_actor")
+    assert not claims.blocks(6 * 1000 + 5, 6 * 1000 + 6, "malware")   # the gap between two
+
+
+def test_many_repeated_mentions_still_emit_one_entity(matcher):
+    results = gaz.match_gazetteer("APT29 " * 2000)
+    assert [r.mitre_id for r in results if r.mitre_id == "G0016"] == ["G0016"]

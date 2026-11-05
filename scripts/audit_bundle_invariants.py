@@ -340,6 +340,31 @@ def check_report_object_refs_resolve(bundles: list[tuple[str, dict]]) -> Finding
 PATTERN_TYPES = frozenset({"stix", "pcre", "sigma", "snort", "suricata", "yara"})
 
 
+# Every STIX 2.1 comparison operator (spec 9.5), "=" being only one of them:
+# `[ipv4-addr:value IN ('1.2.3.4', '2.3.4.5')]` and MATCHES are valid (#315).
+_STIX_COMPARISON = compile_pattern(
+    r"!=|<=|>=|=|<|>|(?i:\b(?:IN|LIKE|MATCHES|ISSUBSET|ISSUPERSET|EXISTS)\b)"
+)
+
+
+def _outside_strings(pattern: str) -> str:
+    """`pattern` with its quoted string literals removed (a `\'` stays inside)."""
+    out: list[str] = []
+    in_str = False
+    i = 0
+    while i < len(pattern):
+        ch = pattern[i]
+        if in_str and ch == "\\":
+            i += 2
+            continue
+        if ch == "'":
+            in_str = not in_str
+        elif not in_str:
+            out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def check_indicator_pattern_wellformed(bundles: list[tuple[str, dict]]) -> Finding:
     """Check indicator patterns are well-formed STIX patterns (`pattern_type: stix`)."""
     try:
@@ -392,7 +417,7 @@ def check_indicator_pattern_wellformed(bundles: list[tuple[str, dict]]) -> Findi
                     if len(examples) < 3:
                         examples.append(f"{job_id}: unbalanced")
                     continue
-                if "=" not in pat:
+                if not _STIX_COMPARISON.search(_outside_strings(pat)):
                     no_comparison += 1
                     faulty.add(job_id)
                     if len(examples) < 3:

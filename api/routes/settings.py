@@ -61,6 +61,11 @@ _UNSAFE_REMOTE_RE = compile_pattern(r"^-|^[A-Za-z0-9_][A-Za-z0-9_+.-]*::")
 KNOWN_FORMATS: frozenset[str] = frozenset({"sigma", "suricata", "yara"})
 
 
+# A corpus name is a URL path segment of the routes below and the default
+# directory under corpora/: no separator, no dot-only name.
+_CORPUS_NAME_RE = compile_pattern(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+
+
 class CorpusIn(BaseModel):
     name: str
     adapter: str = "sigma"
@@ -208,6 +213,13 @@ def create_corpus(body: CorpusIn):
     name = body.name.strip()
     if not name:
         raise HTTPException(400, "name is required")
+    if not _CORPUS_NAME_RE.fullmatch(name):
+        # The name is the {name} segment of the PATCH/DELETE/sync routes: one
+        # with a "/" (raw or %2F) never reaches them again, so it could be
+        # created but neither disabled nor removed (#353).
+        raise HTTPException(
+            400, "name must be letters, digits, '.', '_' or '-' (no '/'), starting with a letter or digit"
+        )
 
     adapter = (body.adapter or "").strip().lower()
     if adapter not in KNOWN_FORMATS:

@@ -939,7 +939,16 @@ class _Run:
             # relationships (the highest hallucination-risk output).
             second_run = False
             if res.relationships and consensus:
-                res = reconcile(res, call(consensus_provider()))
+                from pipeline.stage3_llm import last_chunk_answered
+                second = call(consensus_provider())
+                if last_chunk_answered():
+                    res = reconcile(res, second)
+                else:
+                    # Fail open: no answer is not a disagreement (#323).
+                    llm_stats.bump("consensus_unanswered")
+                    with log_lock:
+                        logger.warning(f"[Stage 3e] chunk {idx}/{total} — {consensus_provider()} "
+                                       "gave no usable answer; the primary result is kept as is")
                 second_run = True
             parts = [f"{n} {label}" for n, label in (
                 (len(res.malware_families), "malware"), (len(res.threat_actors), "actors"),
@@ -1065,7 +1074,10 @@ class _Run:
                 self.record(sid, RAN, "; ".join(notes),
                             0.0, ok=ok, unparsed=unparsed, failed=failed, **extra)
         if consensus:
-            self.record("3e", RAN, "", 0.0, chunks=doubled)
+            unanswered = d.get("consensus_unanswered", 0)
+            self.record("3e", RAN,
+                        f"{unanswered} chunks without a usable second answer, kept as is" if unanswered else "",
+                        0.0, chunks=doubled, unanswered=unanswered)
         else:
             self.record("3e", SKIPPED, "disabled")
         # Results in chunk order; a skipped chunk contributes an empty result.

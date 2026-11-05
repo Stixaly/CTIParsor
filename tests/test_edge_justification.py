@@ -259,3 +259,29 @@ def test_evidence_block_is_omitted_when_the_sro_carries_neither():
 
 def test_text_has_no_trailing_newline():
     assert not justify(_sro(confidence=1), {"origin": "extracted"}, NAMES).endswith("\n")
+
+
+def test_names_with_edge_spaces_or_line_breaks_stay_strong_emphasis():
+    # #338: `**Indicator: admin **` is not strong emphasis in CommonMark.
+    text = justify(
+        {"relationship_type": "based-on", "source_ref": "indicator--1", "target_ref": "user-account--2"},
+        {"origin": "ioc_based_on"},
+        {"indicator--1": "Indicator: admin ", "user-account--2": "ad\nmin"},
+    )
+    assert text.splitlines()[0] == "**Indicator: admin** `based-on` **ad min**"
+
+
+def test_user_account_and_network_traffic_read_as_names_not_ids():
+    # #338: ADR-0093 says no ids; these SCOs carry no name/value.
+    import stix2
+
+    from pipeline.stage4_stix_mapping import _display_names
+    ua = stix2.UserAccount(user_id="1001", account_login="admin")
+    ip = stix2.IPv4Address(value="10.0.0.1")
+    nt = stix2.NetworkTraffic(dst_ref=ip.id, dst_port=443, protocols=["tcp"])
+    unnamed = stix2.NetworkTraffic(dst_ref="ipv4-addr--00000000-0000-4000-8000-000000000000",
+                                   dst_port=8443, protocols=["udp"])
+    names = _display_names([nt, unnamed, ip, ua])
+    assert names[ua.id] == "admin"
+    assert names[nt.id] == "TCP traffic to 10.0.0.1:443"
+    assert names[unnamed.id] == "UDP traffic to port 8443"

@@ -494,7 +494,10 @@ def rank_rules(
                     w *= PARTIAL_FACTOR
                 disc = not is_ubiquitous(obs.obs_class, obs.value)
                 current = best.get(obs.display)
-                if current is None or w > current.weight:
+                # A discriminating match outranks any ubiquitous one of the
+                # same entity, whatever their raw weights: "/etc/x/hosts" must
+                # not give way to its "hosts" basename, which scores nothing (#332).
+                if current is None or (disc, w) > (current.discriminating, current.weight):
                     best[obs.display] = Match(obs.obs_class, atom_class, obs.value,
                                               obs.display, is_exact, w, disc)
 

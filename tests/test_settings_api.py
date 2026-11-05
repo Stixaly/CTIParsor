@@ -253,6 +253,10 @@ def test_a_configured_format_without_a_parser_stays_visible(temp_db, temp_db_cli
 
 @pytest.mark.parametrize("body,message", [
     ({"name": "   "}, "name is required"),
+    ({"name": "team/rules"}, "no '/'"),          # #353: unreachable by PATCH/DELETE afterwards
+    ({"name": "team%2Frules"}, "no '/'"),
+    ({"name": ".."}, "no '/'"),
+    ({"name": "-flag"}, "no '/'"),
     ({"name": "x", "git": "https://h/x.git", "tarball": "https://h/x.tgz"}, "not both"),
     ({"name": "x", "tarball": "file:///etc/passwd"}, "not a safe URL"),
     ({"name": "x", "tarball": "http://127.0.0.1/rules.tgz"}, "not a safe URL"),

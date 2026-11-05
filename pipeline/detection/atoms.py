@@ -285,6 +285,41 @@ def _strip_quotes(s: str) -> str:
     return s
 
 
+def _sigma_literal(s: str) -> str:
+    """The literal a Sigma value names, or "" when it is a wildcard shape.
+
+    Sigma escapes with a backslash only `*`, `?` and the backslash itself; any
+    other backslash is a plain character (`C:\\Windows` is one separator).  An
+    unescaped `*` at either end is a contains/startswith/endswith wildcard and
+    is dropped; one left inside, or any unescaped `?`, is a shape.  The escaped
+    form used to reach the atom as written: `c:\\\\windows` became
+    `c://windows` and `\\*` was refused as a wildcard (#335).
+    """
+    chars: list[tuple[str, bool]] = []          # (char, is_wildcard)
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if ch == "\\" and i + 1 < len(s) and s[i + 1] in "*?\\":
+            chars.append((s[i + 1], False))
+            i += 2
+            continue
+        chars.append((ch, ch in "*?"))
+        i += 1
+
+    def blank(c: tuple[str, bool]) -> bool:
+        return (c[0] == "*" and c[1]) or (not c[1] and c[0].isspace())
+
+    lo, hi = 0, len(chars)
+    while lo < hi and blank(chars[lo]):
+        lo += 1
+    while hi > lo and blank(chars[hi - 1]):
+        hi -= 1
+    chars = chars[lo:hi]
+    if any(wild for _c, wild in chars):
+        return ""
+    return "".join(c for c, _w in chars)
+
+
 def _normalize(cls: str, raw: object) -> list[str]:
     """Normalize one raw Sigma value into 0–2 atom strings for *cls*.
 
@@ -296,11 +331,11 @@ def _normalize(cls: str, raw: object) -> list[str]:
     except Exception:                     # noqa: BLE001 — never break a build on one value
         return []
 
-    s = _strip_quotes(s).lower().strip("*").strip()
+    s = _sigma_literal(_strip_quotes(s).lower())
 
     # An interior wildcard means the rule matches a *shape*, not a value — there
     # is no literal left to compare a report observable against.
-    if not s or "*" in s or "?" in s:
+    if not s:
         return []
 
     if cls == "hash":

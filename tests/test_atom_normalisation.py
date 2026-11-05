@@ -73,3 +73,16 @@ def test_extract_atoms_never_emits_an_untrimmed_value():
     for _cls, value in extract_atoms(rule):
         assert value == value.strip(), f"unstripped {value!r}"
         assert value == value.lower(), f"non-lowercase {value!r}"
+
+
+def test_sigma_escapes_are_read_as_the_literal_they_name():
+    # #335: `\\` is one backslash, `\*` and `\?` are literal characters.
+    assert _normalize("image", "C:\\\\Windows\\\\Temp\\\\x.exe") == ["c:/windows/temp/x.exe", "x.exe"]
+    assert _normalize("url", "https://h.test/a\\?b=1") == ["https://h.test/a?b=1"]
+    assert _normalize("image", "\\Windows\\System32\\cmd.exe") == ["/windows/system32/cmd.exe", "cmd.exe"]
+
+
+def test_unescaped_wildcards_still_mean_a_shape():
+    assert _normalize("image", "*\\cmd.exe") == ["/cmd.exe", "cmd.exe"]     # endswith
+    assert _normalize("file", "*foo*bar*") == []
+    assert _normalize("file", "foo?bar") == []

@@ -202,6 +202,25 @@ def test_realistic_hayabusa_conversion_folds_only_via_provenance(temp_db):
     }
 
 
+def test_a_rule_folded_by_related_reports_its_corpus_in_also_in(temp_db):
+    """#330: the provenance of a rule folded only through `related:` (no shared
+    dedup_key) must still show on the canonical rule."""
+    from pipeline.detection.store import rules_for_technique
+    temp_db.get_conn()
+    rconn = temp_db.get_rule_conn()
+    replace_corpus_rules(rconn, "sigmahq", [_parse(_SIGMAHQ, "sigmahq")])
+    replace_corpus_rules(rconn, "hayabusa", [_parse(_HAYABUSA_REALISTIC, "hayabusa")])
+    dedupe_store(rconn, {"sigmahq": 10, "hayabusa": 95})
+
+    [rule] = rules_for_technique(rconn, "T1059.001")
+    assert (rule["corpus"], rule["also_in"]) == ("sigmahq", ["hayabusa"])
+
+    # The other direction: the canonical rule names the one it was renamed from.
+    dedupe_store(rconn, {"sigmahq": 95, "hayabusa": 10})
+    [rule] = rules_for_technique(rconn, "T1059.001")
+    assert (rule["corpus"], rule["also_in"]) == ("hayabusa", ["sigmahq"])
+
+
 def test_dedupe_keeps_independent_rules(temp_db):
     temp_db.get_conn()          # job store
     rconn = temp_db.get_rule_conn()    # rule store

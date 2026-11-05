@@ -344,3 +344,29 @@ class TestDeterminism:
         rules = synthesize_sigma(obs, job_id="j")
         rule_ids = {r.rule_id for r in rules}
         assert len(rule_ids) == len(rules)
+
+
+def test_a_synthesized_path_round_trips_through_the_atom_extractor():
+    # #335: the escaping synth_sigma writes must be the one atoms.py reads.
+    import yaml
+
+    from pipeline.detection.atoms import extract_atoms
+    from pipeline.detection.observables import Observable
+    from pipeline.detection.synth_sigma import synthesize_sigma
+    [draft] = synthesize_sigma([Observable("image", "c:/windows/temp/x.exe", "file", "C:\\Windows\\Temp\\x.exe")],
+                               job_id="j1")
+    assert extract_atoms(yaml.safe_load(draft.yaml_text)) == [("image", "c:/windows/temp/x.exe"),
+                                                                ("image", "x.exe")]
+    assert draft.sources == ("C:\\Windows\\Temp\\x.exe",)
+
+
+def test_an_image_with_a_colon_past_the_drive_is_not_a_path():
+    from pipeline.detection.observables import Observable
+    from pipeline.detection.synth_sigma import synthesize_sigma
+    assert synthesize_sigma([Observable("image", "/usr/bin:/opt/evil/run.bin", "file", "/usr/bin:/opt/evil/run.bin")],
+                            job_id="j1") == []
+
+
+def test_a_line_break_does_not_split_a_yaml_scalar():
+    from pipeline.detection.synth_sigma import _yaml_scalar
+    assert _yaml_scalar("a\r\nb'c") == "'a  b''c'"

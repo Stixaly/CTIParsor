@@ -4,7 +4,8 @@
 `build_detection_index.py` populates `rule_atoms` and `detection_rules.platform`
 as it parses corpus clones. This script derives the same data from
 `detection_rules.raw`, so a store built before ADR-0014 gains observable-driven
-proposals without re-cloning several gigabytes of Sigma repos.
+proposals without re-cloning several gigabytes of Sigma repos.  Sigma rules
+only: the atoms of Suricata and YARA rules are left as their adapters wrote them.
 
 Offline and idempotent — it only reads the local database.
 
@@ -37,9 +38,18 @@ def backfill(conn, *, batch: int = 500, progress=print) -> dict:
     atom_rows: list[tuple[str, str, str]] = []
     platform_rows: list[tuple[str, str]] = []
 
-    conn.execute("DELETE FROM rule_atoms")
+    # Sigma only: the body is re-read as Sigma YAML, which a Suricata or YARA
+    # rule is not, so deleting every atom and re-deriving from every body
+    # erased the atoms of those formats (#310).  Their adapters build them at
+    # ingestion (`make corpora` / a corpus rebuild re-derives them).
+    conn.execute(
+        "DELETE FROM rule_atoms WHERE rule_id IN "
+        "(SELECT id FROM detection_rules WHERE COALESCE(NULLIF(format, ''), 'sigma') = 'sigma')"
+    )
 
-    cursor = conn.execute("SELECT id, raw FROM detection_rules")
+    cursor = conn.execute(
+        "SELECT id, raw FROM detection_rules WHERE COALESCE(NULLIF(format, ''), 'sigma') = 'sigma'"
+    )
     while True:
         chunk = cursor.fetchmany(batch)
         if not chunk:

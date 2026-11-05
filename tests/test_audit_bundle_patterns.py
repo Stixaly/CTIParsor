@@ -25,3 +25,16 @@ def test_a_stix_pattern_is_still_checked_and_an_unknown_type_still_flagged():
                       {"pattern_type": "made-up", "pattern": "[file:name = 'x']"})
     assert audit.check_indicator_pattern_wellformed(bundles).count == 1      # the unbracketed STIX pattern
     assert audit.check_indicator_required_fields(bundles).count == 1         # the unknown pattern_type
+
+
+def test_every_stix_comparison_operator_is_a_comparison():
+    # #315: "=" is one operator among several; a "=" inside a string is none.
+    good = ["[ipv4-addr:value IN ('1.2.3.4', '2.3.4.5')]", "[file:name MATCHES '^x.*']",
+            "[file:name LIKE 'x%']", "[file:size > 10]", "[file:size <= 10]",
+            "[ipv4-addr:value ISSUBSET '10.0.0.0/8']", "[file:name != 'x']",
+            "[file:name = 'x'] AND [file:size >= 1]"]
+    assert audit.check_indicator_pattern_wellformed(
+        _bundle(*({"pattern_type": "stix", "pattern": p} for p in good))).status == "OK"
+    bad = audit.check_indicator_pattern_wellformed(_bundle({"pattern_type": "stix", "pattern": "[file:name 'a=b']"}))
+    assert bad.count == 1 and "no_comparison=1" in bad.detail
+

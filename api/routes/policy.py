@@ -154,6 +154,14 @@ def _finite_float(text: str) -> float:
     return value
 
 
+def _utf8_encodable(value: object) -> None:
+    """Raise ValueError when a string (key or value) in `value` has no UTF-8 form."""
+    try:
+        json.dumps(value, ensure_ascii=False).encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError("a string holds a lone UTF-16 surrogate") from exc
+
+
 @router.get("")
 def get_policy() -> dict:
     """Return the stored relationship policy, or the factory default."""
@@ -163,7 +171,9 @@ def get_policy() -> dict:
         ).fetchone()
     if row and row["policy_json"] and row["policy_json"] != "{}":
         try:
-            return json.loads(row["policy_json"], parse_constant=_reject_non_finite)
+            stored = json.loads(row["policy_json"], parse_constant=_reject_non_finite)
+            _utf8_encodable(stored)      # stored before #352 was refused at the PUT
+            return stored
         except ValueError as exc:
             # The page then shows the factory default as if it were stored.
             logger.error("stored relationship policy is not valid JSON (%s); "
@@ -215,6 +225,9 @@ async def put_policy(request: Request) -> dict:
             parse_constant=_reject_non_finite,
             parse_float=_finite_float,
         )
+        # A `\ud800` escape decodes to a lone surrogate, which has no UTF-8
+        # form: stored, it would 500 this response and every later GET (#352).
+        _utf8_encodable(body)
     except ValueError as exc:
         raise HTTPException(400, f"Request body must be valid JSON: {exc}") from exc
 

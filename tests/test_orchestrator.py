@@ -638,3 +638,37 @@ def test_a_run_refuses_a_held_claim_to_graph_completion(mock_llm, sample_cti_tex
         for o in result.bundle.objects if o.type == "relationship"}
     assert [(r["rule"], r["reason"]) for r in result.ledger["refused"]
             if names.get(r["target_ref"]) == "ZetaLoader"] == [("transitive:uses+uses", "held_for_review")]
+
+
+# ── Stage 3e fails open (#323) ───────────────────────────────────────────────
+
+def _rels(result):
+    return [(r.source_value, r.target_value, r.confidence, r.evidence_label.value)
+            for r in result.llm_result.relationships]
+
+
+def test_a_second_provider_that_gives_no_answer_leaves_the_primary_result_alone(
+        mock_llm, mock_llm_response, sample_cti_text, monkeypatch):
+    """A failed or unconfigured consensus provider is not a model disagreeing
+    with every relationship: no penalty, no downgrade from "observed"."""
+    from pipeline import stage3_llm
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("CONSENSUS_PROVIDER", "gemini")
+    base = run_document(Document(text=sample_cti_text), _opts())
+
+    def primary_only(system, user, provider=None, **kw):
+        if provider == "gemini":
+            return ""                                   # a failed request
+        return json.dumps(mock_llm_response)
+    mock_llm.side_effect = primary_only
+    monkeypatch.setattr(stage3_llm, "_provider_ready", lambda provider=None: True)
+    failed = run_document(Document(text=sample_cti_text), replace(_opts(), consensus=True))
+    assert _rels(failed) == _rels(base) and _rels(base)
+    assert failed.outcome("3e").counts["unanswered"] >= 1
+
+    # A real answer without the relationship still counts as a disagreement.
+    empty = dict(mock_llm_response, relationships=[])
+    mock_llm.side_effect = lambda s, u, provider=None, **kw: json.dumps(empty if provider == "gemini"
+                                                                       else mock_llm_response)
+    disagreed = run_document(Document(text=sample_cti_text), replace(_opts(), consensus=True))
+    assert [c for _s, _t, c, _l in _rels(disagreed)] < [c for _s, _t, c, _l in _rels(base)]

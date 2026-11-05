@@ -17,7 +17,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from pipeline.bundle_ledger import _rel_origin_from_props
-from pipeline.markdown_text import blockquote, escape_inline
+from pipeline.markdown_text import blockquote, collapse_whitespace, escape_inline
 
 # The `x_inference_rule` of an ATT&CK-reference edge: "attack-reference:G0016>S0002".
 _REFERENCE_PREFIX = "attack-reference:"
@@ -185,11 +185,13 @@ def _quote(sro: Mapping[str, Any]) -> str | None:
 
 def _label(ref: str, names: Mapping[str, str]) -> str:
     """The display name of `ref` as Markdown text, or its id when it has no name."""
-    return escape_inline(names.get(ref) or ref)
+    # Collapsed: a name with an edge space or a line break would read
+    # `** name **`, which is not strong emphasis, or cut the paragraph (#338).
+    return escape_inline(collapse_whitespace(names.get(ref) or "") or ref)
 
 
 def _named(value: Any) -> str | None:
     """`value` as Markdown text when it is a non-empty string, else None."""
-    if isinstance(value, str) and value:
-        return escape_inline(value)
+    if isinstance(value, str) and value.strip():
+        return escape_inline(collapse_whitespace(value))
     return None

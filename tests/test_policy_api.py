@@ -61,6 +61,27 @@ def test_an_overflowing_number_is_refused_not_a_500(temp_db_client):
     assert temp_db_client.get(_URL).status_code == 200
 
 
+@pytest.mark.parametrize("raw", [
+    b'{"version":1,"global":"enforce","rules":[],"note":"\\ud800"}',
+    b'{"version":1,"global":"enforce","rules":[],"\\udfff":1}',
+])
+def test_a_lone_surrogate_is_refused_before_it_is_stored(temp_db_client, raw):
+    """#352: it has no UTF-8 form, so once stored every GET answered 500."""
+    resp = temp_db_client.put(_URL, content=raw, headers={"content-type": "application/json"})
+    assert resp.status_code == 400 and "surrogate" in resp.json()["detail"]
+    assert temp_db_client.get(_URL).json() == {"version": 1, "global": "enforce", "rules": []}
+
+
+def test_a_stored_lone_surrogate_falls_back_to_the_default(temp_db_client, temp_db):
+    with temp_db.get_conn() as conn:
+        conn.execute("INSERT INTO relationship_policy (id, policy_json) VALUES (1, ?) "
+                     "ON CONFLICT (id) DO UPDATE SET policy_json = excluded.policy_json",
+                     ('{"version":1,"global":"auto","rules":[],"note":"\\ud800"}',))
+        conn.commit()
+    resp = temp_db_client.get(_URL)
+    assert resp.status_code == 200 and resp.json()["global"] == "enforce"
+
+
 @pytest.mark.parametrize("body,message", [
     ([], "must be a JSON object"),
     ({"rules": {"src": "a"}}, "'rules' must be an array"),

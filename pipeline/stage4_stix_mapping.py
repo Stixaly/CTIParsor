@@ -2,7 +2,7 @@ import base64
 import json
 import os
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Any
@@ -365,6 +365,11 @@ def _display_names(stix_objects: list) -> dict[str, str]:
         if name is not None:
             names[str(_field(obj, "id"))] = name
     for obj in stix_objects:
+        # A network-traffic has no name of its own: it reads as its
+        # destination (and port), which the first pass named (#338).
+        if _field(obj, "type") == "network-traffic":
+            names[str(_field(obj, "id"))] = _traffic_name(obj, names)
+    for obj in stix_objects:
         if _field(obj, "type") != "relationship":
             continue
         # A missing end gives "", which no name is stored under.
@@ -373,6 +378,19 @@ def _display_names(stix_objects: list) -> dict[str, str]:
         if source is not None and target is not None:
             names[str(_field(obj, "id"))] = f"{source} {_field(obj, 'relationship_type')} {target}"
     return names
+
+
+def _traffic_name(obj, names: Mapping[str, str]) -> str:
+    """A network-traffic as "<protocols> traffic to <destination>:<port>"."""
+    protocols = [p for p in (_field(obj, "protocols") or []) if isinstance(p, str) and p]
+    dst = names.get(str(_field(obj, "dst_ref") or ""))
+    port = _field(obj, "dst_port")
+    label = f"{'/'.join(protocols).upper()} traffic" if protocols else "Network traffic"
+    if dst:
+        label += f" to {dst}"
+    if port is not None:
+        label += f":{port}" if dst else f" to port {port}"
+    return label
 
 
 def _mention_names(obj) -> list[str]:
@@ -397,11 +415,18 @@ def _cased_forms() -> frozenset[str]:
 
 
 def _object_name(obj) -> str | None:
-    """The first of an object's name, value, key, AS number and hash, or None."""
+    """The first of an object's name, value, key, account, AS number and hash, or None."""
     for key in ("name", "value", "key"):
         text = _field(obj, key)
         if isinstance(text, str) and text:
             return text
+    if _field(obj, "type") == "user-account":
+        # No `name` or `value` on a user-account: its id would show in the
+        # description instead, against ADR-0093's "no ids" (#338).
+        for key in ("display_name", "account_login", "user_id"):
+            text = _field(obj, key)
+            if isinstance(text, str) and text:
+                return text
     if _field(obj, "type") == "autonomous-system" and _field(obj, "number") is not None:
         return f"AS{_field(obj, 'number')}"
     hashes = _field(obj, "hashes")

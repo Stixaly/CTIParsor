@@ -243,16 +243,17 @@ def _eligible(obs: Observable, exclude_values: Container[str]) -> str | None:
             return None
         if not _specific_enough(obs.value):
             return None
-    elif obs.obs_class == "image" and not _specific_enough(obs.value):
-        return None
+    elif obs.obs_class == "image":
+        # The same positional colon check as a file (#335): an image is a path too.
+        if ":" in obs.value and not _DRIVE_RE.match(obs.value):
+            return None
+        if not _specific_enough(obs.value) or len(obs.value) < 5:
+            return None
     elif obs.obs_class == "url":
         if len(obs.value) < 8:
             return None
     elif obs.obs_class == "registry":
         if len(obs.value) < 8:
-            return None
-    elif obs.obs_class == "image":
-        if len(obs.value) < 5:
             return None
 
     return kind
@@ -288,7 +289,9 @@ def _rule_uuid(job_id: str, kind: str) -> str:
 
 def _yaml_scalar(value: str) -> str:
     """Serialize a string as a single-quoted YAML scalar."""
-    escaped = value.replace("'", "''")
+    # A line break in a single-quoted scalar is folded by YAML into a space
+    # anyway; writing it would only split the rule's lines (#335).
+    escaped = value.replace("\r", " ").replace("\n", " ").replace("'", "''")
     return f"'{escaped}'"
 
 
@@ -429,7 +432,8 @@ def synthesize_sigma(
         if platform in ("windows", "linux", "macos"):
             logsource["product"] = platform
 
-        sources = tuple(obs.display for obs in obs_list)
+        # A path gives a full-path and a basename observable with one display (#335).
+        sources = tuple(dict.fromkeys(obs.display for obs in obs_list))
 
         # Description lines.
         desc_line1 = f"Generated from CTI report observables ({spec['noun']})."
