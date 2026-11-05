@@ -84,6 +84,31 @@ def test_rebuild_ingests_local_clone(temp_db, temp_db_client, tmp_path, monkeypa
     assert body["corpora"][0]["rules"] == 1            # count reflects ingest
 
 
+def test_rebuild_drops_the_rules_of_a_disabled_corpus(temp_db, temp_db_client, tmp_path, monkeypatch):
+    """#302: a disabled corpus's rules stayed canonical after a rebuild."""
+    _setup(tmp_path, monkeypatch)
+    assert temp_db_client.post("/api/settings/corpora/rebuild").json()["written"] == {"demo": 1}
+    temp_db_client.patch("/api/settings/corpora/demo", json={"enabled": False})
+    summary = temp_db_client.post("/api/settings/corpora/rebuild").json()
+    assert summary["written"] == {} and summary["removed"] == ["demo"]
+    rconn = temp_db.get_rule_conn()
+    assert rconn.execute("SELECT COUNT(*) FROM detection_rules WHERE corpus='demo'").fetchone()[0] == 0
+
+    # Enabled again: the next rebuild ingests it as before.
+    temp_db_client.patch("/api/settings/corpora/demo", json={"enabled": True})
+    assert temp_db_client.post("/api/settings/corpora/rebuild").json()["written"] == {"demo": 1}
+
+
+def test_rebuild_keeps_an_enabled_corpus_whose_clone_is_missing(temp_db, temp_db_client, tmp_path, monkeypatch):
+    import shutil
+    _setup(tmp_path, monkeypatch)
+    temp_db_client.post("/api/settings/corpora/rebuild")
+    shutil.rmtree(tmp_path / "corpora" / "demo")
+    summary = temp_db_client.post("/api/settings/corpora/rebuild").json()
+    assert summary["skipped"] == ["demo"] and summary["removed"] == []
+    assert temp_db_client.get("/api/settings/corpora").json()["corpora"][0]["rules"] == 1
+
+
 def test_add_rejects_non_sigma_adapter(temp_db, temp_db_client, tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch)
     r = temp_db_client.post("/api/settings/corpora", json={"name": "x", "adapter": "elastic"})

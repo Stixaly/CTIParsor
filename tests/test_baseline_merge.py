@@ -15,6 +15,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 import stix2
 
 from models.schemas import EntityType, RawEntity
@@ -472,6 +473,19 @@ def test_a_course_of_action_or_a_rule_of_the_same_content_becomes_the_baseline_o
     result = bs.merge_baseline(objects, build)
 
     assert result.remap == {mine_coa.id: coa["id"], mine_yara.id: yara["id"]}
+
+
+@pytest.mark.parametrize("theirs, mine", [
+    ('$a = "foo  bar"', '$a = "foo bar"'),           # a quoted string's spaces are searched
+    ("$a = /foo  bar/", "$a = /foo bar/"),           # so are a regex's
+])
+def test_a_rule_whose_literals_differ_only_in_spaces_is_another_rule(theirs, mine):
+    """#288: folding every whitespace run merged rules that match different bytes."""
+    def rule(decl):
+        return f"rule Example {{ strings: {decl} condition: $a }}"
+    yara = _sdo("indicator", 2, pattern=rule(theirs), pattern_type="yara", valid_from="2026-01-01T00:00:00Z")
+    build = _passthrough_build(yara)
+    assert bs.merge_baseline([stix2.Indicator(pattern=rule(mine), pattern_type="yara")], build).remap == {}
 
 
 def test_two_baseline_twins_or_another_rule_type_merge_nothing():

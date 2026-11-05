@@ -254,6 +254,9 @@ def _completion_cfg(policy: Optional[dict]) -> dict:
     cfg = dict(_DEFAULTS)
     if policy and isinstance(policy.get("completion"), dict):
         cfg.update({k: v for k, v in policy["completion"].items() if k in _DEFAULTS})
+    from pipeline.temporal import export_mode
+    # Not a completion switch: how dates merged by the alias pass are exported.
+    cfg["temporal_mode"] = export_mode(policy)
     return cfg
 
 
@@ -403,7 +406,7 @@ def _merge_aliases(stix_objects: list, cfg: dict, stats: CompletionStats) -> Non
     # Drop merged duplicate SDOs and rewrite every relationship endpoint.
     _drop_ids(stix_objects, set(remap))
     stats.merged_ids.update(remap)
-    _rewrite_refs(stix_objects, remap, stats)
+    _rewrite_refs(stix_objects, remap, stats, cfg.get("temporal_mode", "faithful"))
 
 
 def _semantic_alias_pass(sdos: list, union: Callable[[str, str], None],
@@ -459,12 +462,48 @@ def _drop_ids(stix_objects: list, ids: set[str]) -> None:
     stix_objects[:] = [o for o in stix_objects if getattr(o, "id", None) not in ids]
 
 
+def _times_of(rel) -> list:
+    """The TemporalAssertions an SRO carries in `x_temporal_assertions`."""
+    from pipeline.temporal import TemporalAssertion
+    out = []
+    for item in rel.get("x_temporal_assertions") or []:
+        if not isinstance(item, dict):
+            continue
+        data = {k: v for k, v in item.items() if k not in ("native", "projection")}
+        try:
+            out.append(TemporalAssertion.model_validate(data))
+        except ValueError:
+            continue
+    return out
+
+
+def _with_merged_times(kept, dup, mode: str):
+    """`kept` with `dup`'s dates merged in (the same rules as Stage 4's own
+    duplicates: `merge_times`, then `export_plan`), or None when `dup` adds none."""
+    from pipeline.temporal import export_plan, merge_times, temporal_identity
+    extra = _times_of(dup)
+    if not extra:
+        return None
+    own = _times_of(kept)
+    known = {temporal_identity(a) for a in own}
+    if all(temporal_identity(a) in known for a in extra):
+        return None
+    plan = export_plan(merge_times(own, extra), mode)
+    try:
+        return _clone_with(kept, start_time=plan.start_time, stop_time=plan.stop_time,
+                           x_temporal_assertions=plan.assertions or None)
+    except Exception as exc:          # a date must never cost the edge
+        logger.warning(f"[Stage 4b] dates of a merged duplicate not applied: {exc}")
+        return None
+
+
 def _rewrite_refs(stix_objects: list, remap: dict[str, str],
-                  stats: Optional[CompletionStats] = None) -> None:
+                  stats: Optional[CompletionStats] = None, mode: str = "faithful") -> None:
     """Point every relationship's source/target at the canonical id; drop the
     resulting self-loops and exact duplicates.  With `stats`, record each drop
     and rewrite (the mapping ledger reports them, ADR-0061)."""
     seen: dict[tuple[str, str, str], str] = {}
+    kept_at: dict[tuple[str, str, str], int] = {}      # key -> index in `out`
     out: list = []
     for o in stix_objects:
         if not _is_rel(o):
@@ -480,6 +519,11 @@ def _rewrite_refs(stix_objects: list, remap: dict[str, str],
             continue
         key = (src, o.get("relationship_type"), tgt)
         if key in seen:
+            # The duplicate's dates are the kept edge's too: "Alpha uses X in
+            # 2021" and "Beta uses X in 2024" are one edge with both (#305).
+            merged = _with_merged_times(out[kept_at[key]], o, mode)
+            if merged is not None:
+                out[kept_at[key]] = merged
             if stats is not None:
                 stats.removed_relationships.append(
                     {"id": o.id, "reason": "duplicate_after_alias_merge", "kept": seen[key]})
@@ -489,6 +533,7 @@ def _rewrite_refs(stix_objects: list, remap: dict[str, str],
             o = _clone_with(o, source_ref=src, target_ref=tgt)
             if stats is not None:
                 stats.remapped_relationships[o.id] = (src, tgt)
+        kept_at[key] = len(out)
         out.append(o)
     stix_objects[:] = out
 

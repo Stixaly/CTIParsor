@@ -161,6 +161,28 @@ def test_alias_merge_reconnects_and_dedups():
     assert rels[0].get("source_ref") == actors[0].id   # rewired to canonical
 
 
+def test_alias_merge_keeps_the_dates_of_a_dropped_duplicate_edge():
+    """#305: two edges that become one after the merge carry both their dates."""
+    from pipeline.temporal import TemporalAssertion
+
+    def dated(src, tgt, year):
+        a = TemporalAssertion(role="within", time_text=f"in {year}", value=str(year),
+                              precision="year", status="verified", evidence_label="observed")
+        return stix2.Relationship(src, "uses", tgt, allow_custom=True,
+                                  x_temporal_assertions=[a.model_dump(mode="json", exclude_none=True)])
+    alpha = stix2.IntrusionSet(name="Alpha", aliases=["Beta"])
+    beta = stix2.IntrusionSet(name="Beta")
+    payload = stix2.Malware(name="Payload", is_family=True)
+    objs = [alpha, beta, payload, dated(alpha, payload, 2021), dated(beta, payload, 2024)]
+
+    stats = complete_graph(objs, policy={"completion": {
+        "alias": True, "reference": False, "transitive": False, "long_distance": False}})
+
+    assert stats.aliases_merged == 1
+    [rel] = _rels(objs)
+    assert sorted(a["value"] for a in rel.get("x_temporal_assertions")) == ["2021", "2024"]
+
+
 def test_alias_merge_never_merges_distinct_iocs():
     """Look-alike CVE vulnerabilities must stay separate (IOC protection)."""
     v1 = stix2.Vulnerability(name="CVE-2023-23397")

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pipeline.detection.dedup import dedupe_store
-from pipeline.detection.registry import _ADAPTERS, corpus_root, load_corpora
+from pipeline.detection.registry import _ADAPTERS, _merged, corpus_root, load_corpora
 from pipeline.detection.store import corpus_counts, replace_corpus_rules
 
 if TYPE_CHECKING:  # the rule-store connection type (ADR-0053); annotation only
@@ -26,7 +26,8 @@ def rebuild_store(
     then run the cross-corpus dedup pass (ADR-0010).
 
     Returns a summary: rules written per corpus, corpora skipped (missing clone /
-    unknown adapter), the grand total, the dedup result, and per-corpus counts
+    unknown adapter), corpora removed (disabled or no longer in the registry,
+    their rules deleted), the grand total, the dedup result, and per-corpus counts
     (each now carrying a `canonical` figure alongside the raw `rules` total).
 
     `on_progress(name, count)` is called with `count=None` before a corpus is
@@ -58,6 +59,18 @@ def rebuild_store(
         if on_progress:
             on_progress(name, written[name])
 
+    # A corpus disabled or removed from the registry keeps no rules: they would
+    # still be canonical, proposed and exported after the rebuild (#302).  An
+    # enabled corpus whose clone is missing keeps the rules it had.  No
+    # registry at all purges nothing: that is a wrong path, not an empty list.
+    removed: list[str] = []
+    if _merged(Path(config_path)):
+        active = {c.get("name") for c in load_corpora(config_path)}
+        stored = [r[0] for r in conn.execute("SELECT DISTINCT corpus FROM detection_rules").fetchall()]
+        for name in sorted(set(stored) - active):
+            replace_corpus_rules(conn, name, [])
+            removed.append(name)
+
     # Cross-corpus dedup runs once the whole store is rebuilt — it can't be done
     # per corpus (replace_corpus_rules sees only one corpus at a time).
     if on_progress:
@@ -66,6 +79,7 @@ def rebuild_store(
     return {
         "written": written,
         "skipped": skipped,
+        "removed": removed,
         "total": sum(written.values()),
         "dedup": dedup,
         "counts": corpus_counts(conn),

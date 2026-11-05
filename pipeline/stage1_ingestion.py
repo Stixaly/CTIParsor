@@ -602,6 +602,18 @@ def _docx_table(table, lines: list[str]) -> None:
             lines.append(" | ".join(cells))
 
 
+# Elements a browser lays out as blocks (or as a line break): the text on
+# either side of one is not one word.  Everything else (span, a, b, code, …) is
+# inline and adds no separator.
+_HTML_BLOCKS = frozenset({
+    "address", "article", "aside", "blockquote", "body", "br", "caption", "dd", "details",
+    "dialog", "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer", "form",
+    "h1", "h2", "h3", "h4", "h5", "h6", "head", "header", "hgroup", "hr", "html", "li",
+    "main", "nav", "ol", "option", "p", "pre", "section", "summary", "table", "tbody",
+    "td", "tfoot", "th", "thead", "title", "tr", "ul",
+})
+
+
 def html_to_text(html: str) -> str:
     """
     Strip markup from an HTML document and return its visible text.
@@ -614,7 +626,16 @@ def html_to_text(html: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
     for tag in soup(["script", "style", "noscript", "template"]):
         tag.decompose()
-    return soup.get_text(separator="\n")
+    # A line break between blocks only, as a browser renders it: a separator
+    # between EVERY text node split "down<span>load</span>" into "down\nload",
+    # and the URL it was part of was extracted cut (#295).
+    for tag in soup.find_all(_HTML_BLOCKS):
+        if tag.name == "br":
+            tag.replace_with("\n")
+            continue
+        tag.insert_before("\n")
+        tag.insert_after("\n")
+    return soup.get_text()
 
 
 def _read_html(path: Path) -> str:
@@ -656,6 +677,11 @@ def chunk_text(text: str, max_chars: int = 3000, overlap: int = 400) -> list[str
         return _apply_overlap(raw, overlap, separator="")
 
     chunks: list[str] = []
+    # Per chunk: the text between it and the one before in the SOURCE.  A
+    # slice of an oversized unit continues the slice before it with nothing in
+    # between; joining the overlap with the document's separator put a
+    # paragraph break inside whatever straddled the cut (#291).
+    joins: list[str] = []
     current: list[str] = []
     current_len = 0
 
@@ -666,12 +692,14 @@ def chunk_text(text: str, max_chars: int = 3000, overlap: int = 400) -> list[str
         if len(unit) > max_chars:
             if current:
                 chunks.append(separator.join(current))
+                joins.append(separator)
                 current = []
                 current_len = 0
             # Collect the raw slices separately — overlap is applied globally
             # at the end so these sub-chunks don't receive a double-overlap.
-            for i in range(0, len(unit), max_chars):
-                chunks.append(unit[i:i + max_chars])
+            for k, piece in enumerate(_slice_at_spaces(unit, max_chars)):
+                chunks.append(piece)
+                joins.append(separator if k == 0 else "")
             # Reset current so the next unit starts fresh (not appended after
             # an oversized unit that already filled the budget)
             current = []
@@ -680,6 +708,7 @@ def chunk_text(text: str, max_chars: int = 3000, overlap: int = 400) -> list[str
 
         if current_len + len(unit) > max_chars and current:
             chunks.append(separator.join(current))
+            joins.append(separator)
             current = [unit]
             current_len = len(unit)
         else:
@@ -688,14 +717,34 @@ def chunk_text(text: str, max_chars: int = 3000, overlap: int = 400) -> list[str
 
     if current:
         chunks.append(separator.join(current))
+        joins.append(separator)
 
-    return _apply_overlap(chunks, overlap, separator=separator)
+    return _apply_overlap(chunks, overlap, separator=separator, joins=joins)
 
 
-def _apply_overlap(chunks: list[str], overlap: int, separator: str = "\n\n") -> list[str]:
+def _slice_at_spaces(unit: str, max_chars: int) -> list[str]:
+    """`unit` cut into pieces of at most `max_chars`, each cut on a space when
+    the second half of the window has one: a cut inside a token gave the
+    extractor a URL's prefix as an IoC of its own (#291).  The space starts the
+    next piece, so the pieces joined with "" are `unit` again."""
+    pieces: list[str] = []
+    i = 0
+    while len(unit) - i > max_chars:
+        cut = unit.rfind(" ", i + max_chars // 2, i + max_chars)
+        end = cut if cut > i else i + max_chars
+        pieces.append(unit[i:end])
+        i = end
+    pieces.append(unit[i:])
+    return pieces
+
+
+def _apply_overlap(chunks: list[str], overlap: int, separator: str = "\n\n",
+                   joins: list[str] | None = None) -> list[str]:
     """
     Prepends the last `overlap` characters of chunk[i] to chunk[i+1].
     Tries to break at a natural newline boundary within the overlap window.
+    `joins[i]`, when given, is what separates chunk i from chunk i-1 in the
+    source ("" for two slices of one unit); `separator` otherwise.
     """
     if overlap <= 0 or len(chunks) <= 1:
         return chunks
@@ -708,5 +757,6 @@ def _apply_overlap(chunks: list[str], overlap: int, separator: str = "\n\n") -> 
         nl = tail.find("\n")
         if nl >= 0:
             tail = tail[nl + 1:]
-        result.append((tail + separator + chunks[i]) if tail else chunks[i])
+        join = joins[i] if joins is not None else separator
+        result.append((tail + join + chunks[i]) if tail else chunks[i])
     return result
