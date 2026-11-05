@@ -119,6 +119,19 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "Stage 2b keeps both ATT&CK homonyms of different types on one span in every policy mode, and "
      "Stage 3b keeps relationship endpoints the text carries only defanged or that the NER knows",
      "extraction"),
+    ("a2c4f40", "2026-11-05",
+     "Stage 2b's regex path checks boundaries on the original text; quotes joined by [...] and quotes "
+     "of Markdown-linked text are located (TTP grades); Stage 3e no longer downgrades every relationship "
+     "when the second provider fails; relationship descriptions name user-account and network-traffic",
+     "extraction"),
+    ("ea73a05", "2026-11-05",
+     "HTML inline tags no longer split URLs, an oversized paragraph is cut on a space without a "
+     "paragraph break in the overlap; Stage 4b keeps the dates of a duplicate edge after an alias "
+     "merge; the baseline merge keeps rules whose literals differ only in spaces apart",
+     "extraction"),
+    ("250261e", "2026-11-05",
+     "Finalize no longer brings back an LLM campaign whose row the analyst deleted or renamed",
+     "mapping"),
 )
 
 

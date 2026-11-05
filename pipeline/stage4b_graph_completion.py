@@ -251,7 +251,7 @@ def _norm_name(name: str) -> str:
 
 
 def _completion_cfg(policy: Optional[dict]) -> dict:
-    cfg = dict(_DEFAULTS)
+    cfg: dict[str, Any] = dict(_DEFAULTS)
     if policy and isinstance(policy.get("completion"), dict):
         cfg.update({k: v for k, v in policy["completion"].items() if k in _DEFAULTS})
     from pipeline.temporal import export_mode
