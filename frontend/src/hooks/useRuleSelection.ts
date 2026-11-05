@@ -51,6 +51,9 @@ export function markOf(sel: number, total: number): '✓' | '–' | '' {
 export function useRuleSelection(
   jobId: string | undefined,
   rules: readonly SelectableRule[],
+  /** False while part of the inventory is still loading (or failed to): an
+   *  exclusion of a rule not listed YET must not be pruned and persisted (#285). */
+  complete = true,
 ): RuleSelection {
   const [excluded, setExcluded] = useState<Set<string>>(new Set())
 
@@ -76,7 +79,7 @@ export function useRuleSelection(
   // TRAP: never prune while `rules` is empty — rules arrive asynchronously, and
   // purging on the empty array would wipe the persisted selection on first render.
   useEffect(() => {
-    if (rules.length === 0) return
+    if (rules.length === 0 || !complete) return
     const validIds = new Set(rules.map(r => r.id))
     setExcluded(prev => {
       const next = new Set(prev)
@@ -91,7 +94,7 @@ export function useRuleSelection(
       persist(next)
       return next
     })
-  }, [rules, persist])
+  }, [rules, complete, persist])
 
   const byId = useMemo(() => new Map(rules.map(r => [r.id, r])), [rules])
 

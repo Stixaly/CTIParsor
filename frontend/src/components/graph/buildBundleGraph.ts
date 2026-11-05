@@ -186,7 +186,17 @@ export function buildBundleGraph(
   if (hasLedger) {
     for (const ent of live) {
       const imported = isImported(ent.enrichment_status)
-      if (imported && inBundle(ent.baseline_stix_id ?? undefined)) continue
+      if (imported && inBundle(ent.baseline_stix_id ?? undefined)) {
+        // The baseline object it ships as: the node of its value (dropped
+        // edges to it are drawn) and of its row (the editor finds it) (#345).
+        const sid = ent.baseline_stix_id!
+        if (!valueToNode.has(norm(ent.value))) valueToNode.set(norm(ent.value), sid)
+        nodeInfo.get(sid)!.rows.push({
+          entity: ent,
+          ledger: { value: ent.value, entity_type: ent.entity_type, outcome: 'emitted', stix_id: sid },
+        })
+        continue
+      }
       const entries = imported ? [] : ledgerEntities.get(entKey(ent.entity_type, ent.value)) ?? []
       const hit = entries.find(x => x.outcome !== 'dropped' && inBundle(x.stix_id))
       if (hit && hit.stix_id) {

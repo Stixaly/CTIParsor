@@ -175,6 +175,9 @@ export default function Review() {
   // store could not tell the two apart.  The worker applies auto-accept now
   // and stamps it `auto_policy`; the page only reads it.
   const [localEntities, setLocalEntities] = useState<ClientEntity[]>([])
+  // Always-current snapshot, for the callbacks that must not re-create on every edit.
+  const localEntitiesRef = useRef<ClientEntity[]>([])
+  useEffect(() => { localEntitiesRef.current = localEntities }, [localEntities])
   const bootstrappedRef = useRef(false)
 
   // Waits for the job too: the enrich mapping above depends on its pipeline_mode.
@@ -346,13 +349,33 @@ export default function Review() {
   // TanStack Query keeps `mutate` stable across renders, so these callbacks are
   // created once, as before, without closing over a stale mutation object.
   const { mutate: mutateEntity } = updateMutation
+  // The latest decision sent per entity: only the failure of that one restores
+  // the stored decision (an older one failing must not undo a newer click).
+  const decisionSeq = useRef(new Map<string, number>())
   const setAccepted = useCallback((id: string, val: boolean | null, bulk = false) => {
     const decision_origin: ClientDecisionOrigin = bulk ? 'human_bulk' : 'human'
+    const before = localEntitiesRef.current.find(e => e.id === id)
+    const seq = (decisionSeq.current.get(id) ?? 0) + 1
+    decisionSeq.current.set(id, seq)
     setLocalEntities(es => es.map(e => e.id === id
       ? { ...e, accepted: val, autoAccepted: false, decision_origin }
       : e))
-    mutateEntity({ id, patch: { accepted: val, decision_origin } })
-  }, [mutateEntity])
+    mutateEntity({ id, patch: { accepted: val, decision_origin } }, {
+      // The card showed a decision the store refused: put the stored one back
+      // and say so, or the bundle and the page disagree silently (#286).
+      onError: (err: Error) => {
+        if (decisionSeq.current.get(id) !== seq) return
+        const stored = qc.getQueryData<Entity[]>(['entities', jobId])?.find(e => e.id === id) ?? before
+        if (stored) {
+          setLocalEntities(es => es.map(e => e.id === id
+            ? { ...e, accepted: stored.accepted, decision_origin: stored.decision_origin,
+                autoAccepted: stored.decision_origin === 'auto_policy' && stored.accepted === true }
+            : e))
+        }
+        alert(`The decision on "${before?.value ?? id}" was not saved: ${errorDetail(err)}`)
+      },
+    })
+  }, [mutateEntity, qc, jobId])
   const accept      = useCallback((id: string, bulk?: boolean) => setAccepted(id, true, bulk), [setAccepted])
   const reject      = useCallback((id: string, bulk?: boolean) => setAccepted(id, false, bulk), [setAccepted])
   const reset       = useCallback((id: string) => setAccepted(id, null), [setAccepted])

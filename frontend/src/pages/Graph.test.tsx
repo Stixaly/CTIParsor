@@ -185,3 +185,30 @@ describe('Graph page — a node’s context is Markdown only from the bundle (AD
     expect(section.querySelector('em')?.textContent).toBe('R')
   })
 })
+
+describe('Graph page — the bundle view’s panels stay in the bundle view (#346)', () => {
+  const BUNDLE: StixBundle = { id: 'bundle--1', type: 'bundle', objects: [
+    { id: 'threat-actor--a', type: 'threat-actor', name: 'APT29' },
+  ] }
+
+  beforeEach(() => {
+    api.fetchJob.mockResolvedValue(JOB)
+    api.fetchEntities.mockResolvedValue(ENTITIES)
+    api.fetchRelationships.mockResolvedValue(RELATIONS)
+    api.fetchBundle.mockResolvedValue(BUNDLE)
+    api.fetchBundleLedger.mockResolvedValue({ version: 1, objects: {}, entities: [], relationships: [], removed: [] })
+  })
+
+  it('closes Differences when switching to the review rows', async () => {
+    renderGraph()
+    fireEvent.click(await screen.findByRole('button', { name: 'STIX bundle' }))
+    fireEvent.click(await screen.findByRole('button', { name: /Differences/ }))
+    await waitFor(() => expect(document.querySelector('.graph-panel')).not.toBeNull())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Review rows' }))
+
+    await waitFor(() => expect(document.querySelector('.graph-panel')).toBeNull())
+    fireEvent.click(screen.getByRole('button', { name: 'STIX bundle' }))
+    expect(screen.getByRole('button', { name: /Differences/ })).toHaveClass('btn-ghost')
+  })
+})
