@@ -68,6 +68,10 @@ class SigmaAdapter(RuleCorpusAdapter):
             try:
                 text = path.read_text(encoding="utf-8")
                 docs = list(yaml.safe_load_all(text))
+            except UnicodeDecodeError as e:
+                # Not UTF-8 (a stray 0xff, or UTF-16 with a BOM): skipped, never decoded (#372).
+                logger.warning(f"[detection] sigma file {path} skipped: {e}")
+                continue
             except (OSError, yaml.YAMLError):
                 continue  # unreadable / malformed file — skip, don't crash the build
             for doc in docs:

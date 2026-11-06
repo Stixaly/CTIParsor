@@ -121,6 +121,19 @@ def test_sigma_document_that_fails_to_convert_is_logged_and_the_next_is_read(tmp
     assert any("skipped" in r.getMessage() and "boom" in r.getMessage() for r in caplog.records)
 
 
+def test_sigma_file_that_is_not_utf8_is_logged_and_the_valid_rule_is_still_read_issue_372(tmp_path, caplog):
+    """A 0xff byte or a UTF-16 file with a BOM is not UTF-8: skipped and logged with its path,
+    never decoded, and it must not stop the readable rules of the same folder."""
+    (tmp_path / "ok.yml").write_text(_SAMPLE, encoding="utf-8")
+    (tmp_path / "bad.yml").write_bytes(b"\xff")
+    (tmp_path / "utf16.yml").write_bytes(_SAMPLE.encode("utf-16"))
+    with caplog.at_level("WARNING"):
+        rules = list(SigmaAdapter().parse(tmp_path, corpus="demo"))
+    assert [r.title for r in rules] == ["Suspicious PowerShell Encoded Command"]
+    assert any("bad.yml" in r.getMessage() for r in caplog.records)
+    assert any("utf16.yml" in r.getMessage() for r in caplog.records)
+
+
 def test_registry_loads_enabled_corpora_and_parses(tmp_path):
     # a corpus clone with one rule
     clone = tmp_path / "clone"
