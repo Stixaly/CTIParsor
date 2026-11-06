@@ -77,7 +77,12 @@ from what Stage 4 ships:
    protocol word, becomes `dst_ref`, with `dst_port` and `protocols` taken
    from the text. An IP gives `ipv4`/`ipv6` by construction, and nothing else
    is guessed. Its pattern is
-   `[network-traffic:dst_ref.value = '…' AND network-traffic:dst_port = …]`.
+   `[network-traffic:dst_ref.value = '…' AND network-traffic:dst_port = … AND network-traffic:protocols[*] = '…']`,
+   with one `protocols[*]` term per transport or application protocol the
+   text names (`tcp`, `udp`, `https`…), sorted; the network layer (`ipv4`/`ipv6`)
+   is left to `dst_ref`. So `tcp/443` and `udp/443` to one host are two
+   Indicators with two ids (#365). Two observables that still share a pattern
+   share one Indicator, and each is `based-on` it (#365).
    A value with no destination (`tcp/445`) is left out with ledger reason
    `no_traffic_endpoint`: STIX requires `src_ref` or `dst_ref`. Only analysts
    create this type; Stage 2 does not extract it.

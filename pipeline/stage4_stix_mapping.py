@@ -1438,6 +1438,9 @@ def build_stix_bundle(
     # IOC value and some other entity name normalize to the same lowercase
     # key.
     sco_id_to_indicator: dict[str, object] = {}
+    # indicator id -> its Indicator.  Two observables whose patterns are the same
+    # share one Indicator, not two objects with one id (#365).
+    indicators_by_id: dict[str, object] = {}
     ioc_valid_from, ioc_valid_basis = _ioc_valid_from(document_anchor)
     # Observables shipped without an Indicator because the report names them
     # without accusing them (pipeline/benign.py, audit B 8.1.7).
@@ -1527,6 +1530,7 @@ def build_stix_bundle(
                 id=indicator_id,
             )
             stix_objects.append(indicator)
+            indicators_by_id[indicator_id] = indicator
             name_to_stix.add(f"indicator:{ioc_key}", indicator)
             seen_indicators.add(ioc_key)
             if hasattr(sco, "id"):
@@ -1569,6 +1573,17 @@ def build_stix_bundle(
             continue
         try:
             indicator_id = stix_ids.indicator_id(pattern)
+            if indicator_id in indicators_by_id:
+                # #365: the same pattern is already an Indicator (another observable
+                # of the same value and protocol).  One object per id: this observable
+                # is based on it, as the first one was.
+                indicator = indicators_by_id[indicator_id]
+                name_to_stix.add(f"indicator:{ioc_key}", indicator)
+                seen_indicators.add(ioc_key)
+                sco_id_to_indicator[sco_id] = indicator
+                led.annotate(sco_id, shared_indicator=indicator_id)
+                _based_on(indicator, sco)
+                continue
             indicator = stix2.Indicator(
                 name=f"Indicator: {entity.value}",
                 pattern=pattern,
@@ -1578,6 +1593,7 @@ def build_stix_bundle(
                 id=indicator_id,
             )
             stix_objects.append(indicator)
+            indicators_by_id[indicator_id] = indicator
             name_to_stix.add(f"indicator:{ioc_key}", indicator)
             seen_indicators.add(ioc_key)
             sco_id_to_indicator[sco_id] = indicator
@@ -2551,12 +2567,17 @@ def _build_stix_pattern(ioc_value: str, sco) -> str | None:
     elif sco_type == "network-traffic":
         # A pattern is what keeps ADR-0041's "route through the Indicator, or
         # drop" rule from dropping every network-traffic relationship.  It
-        # names the destination and port the descriptor states (ADR-0069).
+        # names the destination and port the descriptor states (ADR-0069), and
+        # the protocols it names: "tcp/443" and "udp/443" to one host are two
+        # flows, two Indicators (#365).  The network layer is the destination's
+        # address type, already named by dst_ref, so it is not repeated.
         d = parse_network_traffic(ioc_value)
         if d is not None:
             terms = [f"network-traffic:dst_ref.value = '{_escape_stix_value(d.host)}'"]
             if d.port is not None:
                 terms.append(f"network-traffic:dst_port = {d.port}")
+            terms += [f"network-traffic:protocols[*] = '{p}'"
+                      for p in sorted(d.protocols) if p not in ("ipv4", "ipv6")]
             return "[" + " AND ".join(terms) + "]"
     elif sco_type == "file":
         hashes = sco.get("hashes", {})
