@@ -7,6 +7,7 @@ SIEM backend, which is out of scope for ingestion/coverage.
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import re
 from collections.abc import Callable, Iterable
@@ -81,6 +82,10 @@ class SigmaAdapter(RuleCorpusAdapter):
         A file that cannot be read, is not UTF-8 or is not YAML is reported with a
         warning and through `on_file_error(path, message)` (#373). A YAML error stops
         the reading of that file only: the documents before it are kept.
+
+        `_to_rule` receives the position of each document in its file, counting every
+        document read, rules or not (#375), so that two rules without an `id` in the
+        same file get distinct ids.
         """
         root = Path(root)
         for path in self._iter_rule_files(root):
@@ -94,7 +99,7 @@ class SigmaAdapter(RuleCorpusAdapter):
                 _file_error(path, f"unreadable, skipped: {e}", on_file_error)  # don't crash the build
                 continue
             documents = yaml.safe_load_all(text)
-            while True:
+            for index in itertools.count():
                 try:
                     doc = next(documents)
                 except StopIteration:
@@ -104,7 +109,7 @@ class SigmaAdapter(RuleCorpusAdapter):
                     _file_error(path, f"YAML error, partially imported: {_one_line(e)}", on_file_error)
                     break
                 try:
-                    rule = self._to_rule(doc, text, path, corpus, license)
+                    rule = self._to_rule(doc, text, path, corpus, license, index)
                 except Exception as e:  # noqa: BLE001 — one bad document must not stop the corpus
                     logger.warning(f"[detection] sigma document in {path} skipped: {e}")
                     continue
@@ -123,7 +128,21 @@ class SigmaAdapter(RuleCorpusAdapter):
         path: Path,
         corpus: str,
         license: str,
+        index: int = 0,
     ) -> DetectionRule | None:
+        """Build the rule of one YAML document of `text`.
+
+        `index` is the document's position in its file (0 for the first one, counting
+        every document read). It only matters for a document without a native `id`:
+        index 0 keeps the file's `content_hash[:16]` as its key, so single-document
+        files and first documents keep their ids; later ones hash their position in
+        the file. Two rules without an `id` in one file used to share the file's hash
+        and so one storage id (#375).
+
+        Known limit: `raw` and `content_hash` stay those of the whole file, so every
+        rule of a multi-document file carries the same body (Sigma `action: global`
+        collections need it). `dedup_key` is computed from the document alone.
+        """
         # A Sigma rule is a mapping with at least a title and a detection block.
         if not isinstance(doc, dict) or "title" not in doc or "detection" not in doc:
             return None
@@ -132,7 +151,15 @@ class SigmaAdapter(RuleCorpusAdapter):
 
         content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
         native_id = str(doc.get("id") or "").strip()
-        rule_key = native_id or content_hash[:16]
+        # #375: the file hash is shared by every document of the file, so a later
+        # document without an `id` would take the same storage id as the first one and
+        # replace it in the store. Its position in the file makes its key distinct.
+        if native_id:
+            rule_key = native_id
+        elif index == 0:
+            rule_key = content_hash[:16]
+        else:
+            rule_key = hashlib.sha256(f"{content_hash}:{index}".encode("utf-8")).hexdigest()[:16]
         dedup_key = SigmaAdapter._dedup_key(doc) or content_hash
 
         ls = doc.get("logsource") or {}
