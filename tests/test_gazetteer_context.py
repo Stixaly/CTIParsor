@@ -103,6 +103,19 @@ def test_a_contracted_negation_is_no_alias_issue_359(index, sentence, outcome):
     assert judge(index, sentence, "Snake", "G0010").outcome == outcome
 
 
+@pytest.mark.parametrize("sentence, outcome", [
+    ("Judy, a report about malware, was published yesterday.", "unresolved"),    # issue #360
+    ("Judy, a report on malware, was published yesterday.", "unresolved"),       # issue #360
+    ("Judy, a report about gardening, was published yesterday.", "unresolved"),
+    ("Judy malware infected Android devices.", "resolved"),                       # the affirmative control
+    ("Judy, the Android malware, subscribed victims.", "resolved"),
+    ("Judy, a malware family, was seen.", "resolved"),
+    ("Judy, an adware family, was seen.", "resolved"),
+])
+def test_a_preposition_before_the_type_is_no_apposition_issue_360(index, sentence, outcome):
+    assert judge(index, sentence, "Judy", "S0325").outcome == outcome
+
+
 NEGATIVES = [
     ("Joker’s Stash closed", "Joker", "conflicting_sense"),
     ("Joker's Stash closed", "Joker", "conflicting_sense"),
