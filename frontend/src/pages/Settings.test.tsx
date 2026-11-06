@@ -10,6 +10,8 @@ const api = vi.hoisted(() => ({
   fetchCorpora: vi.fn(),
   fetchFormats: vi.fn(),
   syncCorpus: vi.fn(),
+  addCorpus: vi.fn(),
+  rebuildCorpora: vi.fn(),
 }))
 vi.mock('../api/client', async (orig) => ({ ...(await orig<object>()), ...api }))
 
@@ -39,6 +41,8 @@ beforeEach(() => {
   api.fetchCorpora.mockReset().mockResolvedValue({ corpora: CORPORA })
   api.fetchFormats.mockReset().mockResolvedValue({ formats: [{ format: 'sigma', available: true, corpora: 4, rules: 11 }] })
   api.syncCorpus.mockReset().mockResolvedValue({ ok: true, detail: 'ok', corpora: CORPORA })
+  api.addCorpus.mockReset().mockResolvedValue({ ok: true, warning: null, corpora: CORPORA })
+  api.rebuildCorpora.mockReset().mockResolvedValue({ total: 16, written: { sigma: 11 }, skipped: [] })
 })
 
 describe('Settings — Redownload button (#369)', () => {
@@ -63,5 +67,73 @@ describe('Settings — Redownload button (#369)', () => {
     renderSettings()
     fireEvent.click(await within(await rowOf('et-open')).findByRole('button', { name: 'Redownload' }))
     await waitFor(() => expect(api.syncCorpus).toHaveBeenCalledWith('et-open'))
+  })
+})
+
+// Each failed operation used to end in an error state that nothing rendered (#370).
+describe('Settings — errors and stale messages (#370)', () => {
+  it('shows the API detail of a rejected Redownload on the corpus row', async () => {
+    api.syncCorpus.mockRejectedValueOnce(new Error('502: {"detail":"sync failed: repository not found"}'))
+    renderSettings()
+    fireEvent.click(await within(await rowOf('public-git')).findByRole('button', { name: 'Redownload' }))
+    const alert = await within(await rowOf('public-git')).findByRole('alert')
+    expect(alert).toHaveTextContent('repository not found')
+    expect(within(await rowOf('et-open')).queryByRole('alert')).toBeNull()
+  })
+
+  it('falls back to the error message when the sync body has no detail', async () => {
+    api.syncCorpus.mockRejectedValueOnce(new Error('Failed to fetch'))
+    renderSettings()
+    fireEvent.click(await within(await rowOf('et-open')).findByRole('button', { name: 'Redownload' }))
+    expect(await within(await rowOf('et-open')).findByRole('alert')).toHaveTextContent('Failed to fetch')
+  })
+
+  it('shows no alert after a successful Redownload (control)', async () => {
+    renderSettings()
+    fireEvent.click(await within(await rowOf('et-open')).findByRole('button', { name: 'Redownload' }))
+    await waitFor(() => expect(api.syncCorpus).toHaveBeenCalledWith('et-open'))
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+  })
+
+  it('clears the previous row error when another Redownload starts', async () => {
+    api.syncCorpus.mockRejectedValueOnce(new Error('502: {"detail":"sync failed: repository not found"}'))
+    renderSettings()
+    fireEvent.click(await within(await rowOf('public-git')).findByRole('button', { name: 'Redownload' }))
+    await within(await rowOf('public-git')).findByRole('alert')
+    const publicRow = await rowOf('public-git')
+    fireEvent.click(within(await rowOf('et-open')).getByRole('button', { name: 'Redownload' }))
+    await waitFor(() => expect(api.syncCorpus).toHaveBeenCalledWith('et-open'))
+    await waitFor(() => expect(within(publicRow).queryByRole('alert')).toBeNull())
+  })
+
+  it('keeps the add form open and shows the reason when the API refuses the corpus', async () => {
+    api.addCorpus.mockRejectedValueOnce(new Error('400: {"detail":"unknown format \'yara\' — known formats: sigma"}'))
+    renderSettings()
+    const form = (await screen.findByRole('button', { name: 'Add' })).closest('form')!
+    fireEvent.change(form.querySelector('input')!, { target: { value: 'new-corpus' } })
+    fireEvent.submit(form)
+    expect(await screen.findByRole('alert')).toHaveTextContent('unknown format')
+    expect(api.addCorpus).toHaveBeenCalledWith(expect.objectContaining({ name: 'new-corpus' }))
+    expect(form.isConnected).toBe(true)
+    expect((form.querySelector('input') as HTMLInputElement).value).toBe('new-corpus')
+  })
+
+  it('shows the API detail of a failed rebuild', async () => {
+    api.rebuildCorpora.mockRejectedValueOnce(new Error('500: {"detail":"rebuild failed: disk full"}'))
+    renderSettings()
+    fireEvent.click(await screen.findByRole('button', { name: 'Rebuild index' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('disk full')
+  })
+
+  it('drops the previous rebuild success message when a rebuild fails', async () => {
+    api.rebuildCorpora
+      .mockResolvedValueOnce({ total: 16, written: { sigma: 11 }, skipped: [] })
+      .mockRejectedValueOnce(new Error('500: {"detail":"rebuild failed: disk full"}'))
+    renderSettings()
+    fireEvent.click(await screen.findByRole('button', { name: 'Rebuild index' }))
+    expect(await screen.findByText(/^Rebuilt: 16 total/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Rebuild index' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('disk full')
+    expect(screen.queryByText(/^Rebuilt:/)).toBeNull()
   })
 })
