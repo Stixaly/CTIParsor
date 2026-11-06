@@ -686,13 +686,22 @@ class _Run:
         # Stage 2 — regex IoCs, per chunk (Stage 3 needs each chunk's own),
         # deduplicated by (value, type) keeping the highest confidence.
         best: dict[tuple, RawEntity] = {}
+        from pipeline.stage4_stix_mapping import _url_key
+
+        def _dedup_key(e: RawEntity) -> tuple:
+            # A URL's path keeps its case, as Stage 4 keeps it: /A and /a are
+            # two resources, and lower-casing merged them into one IoC (#289).
+            value = _url_key(e.value) if e.entity_type == EntityType.URL else e.value.lower()
+            return (value, e.entity_type)
         self.r.entities_per_chunk = [[] for _ in self.r.chunks]
         if self.gate("2"):
             t0 = time.monotonic()
             self.r.entities_per_chunk = [extract_entities(c) for c in self.r.chunks]
             for chunk_ents in self.r.entities_per_chunk:
                 for e in chunk_ents:
-                    key = (e.value.lower(), e.entity_type)
+                    # Keyed as Stage 4 keys an observable: a URL's path keeps
+                    # its case, so /A and /a stay two IoCs (#289).
+                    key = _dedup_key(e)
                     if key not in best or e.confidence > best[key].confidence:
                         best[key] = e
             self.record("2", RAN, ner_note, time.monotonic() - t0, entities=len(best))
@@ -705,7 +714,7 @@ class _Run:
             t0 = time.monotonic()
             self.r.gazetteer, gaz_trace = match_gazetteer_traced(text)
             for ge in self.r.gazetteer:
-                best.setdefault((ge.value.lower(), ge.entity_type), ge)
+                best.setdefault(_dedup_key(ge), ge)
             # The ordinary-word policy's counts (docs/gazetteer-ordinary-words.md):
             # in shadow mode what it would withhold, in apply mode what it did.
             policy_mode = gazetteer_policy.mode()

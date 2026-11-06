@@ -1167,11 +1167,21 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
         elif et == "campaign":
             rejected_campaigns.add(val)
 
-    # Filter TTPs — a TTP is excluded if its name OR MITRE ID was explicitly rejected
+    # Filter TTPs — a TTP is excluded if its name OR MITRE ID was explicitly
+    # rejected, and when no technique row that ships carries its id or name:
+    # the run stores each of the LLM's techniques as a row (`_save_entities`),
+    # so a row the analyst deleted must not come back from the blob (#287).
+    _ttp_types = ("technique", "tactic", "procedure", "ttp")
+    shipped_ttp_names = {(row["value"] or "").lower().strip()
+                         for row in all_entity_rows if row["entity_type"] in _ttp_types}
+    shipped_ttp_mitre = {(row["mitre_id"] or "").lower().strip()
+                         for row in all_entity_rows if row["entity_type"] in _ttp_types and row["mitre_id"]}
     filtered_ttps = [
         t for t in llm_result.ttps
         if t.technique_name.lower() not in rejected_ttp_names
         and (not t.mitre_id or t.mitre_id.lower() not in rejected_ttp_mitre)
+        and (t.technique_name.lower().strip() in shipped_ttp_names
+             or (t.mitre_id or "").lower().strip() in shipped_ttp_mitre)
     ]
 
     # Filter campaign_name — excluded if the user rejected the campaign entity,

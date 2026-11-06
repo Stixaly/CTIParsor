@@ -153,6 +153,14 @@ UBIQUITOUS_DOMAINS: frozenset[str] = frozenset({
     "localhost", "example.com", "example.org", "test.com",
 })
 
+#: The ubiquitous domains where anyone hosts content of their own: object
+#: stores, file shares, app and CDN hosting.  A URL path there is one tenant's
+#: object, so a full URL on one is classified on its path (#333).
+UBIQUITOUS_HOSTING_DOMAINS: frozenset[str] = frozenset({
+    "amazonaws.com", "windows.net", "azurewebsites.net", "googleapis.com",
+    "sharepoint.com", "onedrive.com", "digitalocean.com",
+})
+
 #: Addresses that are infrastructure, not indicators: public resolvers and
 #: wildcard/broadcast forms. RFC1918 ranges are NOT here -- an internal pivot
 #: target is real incident content (ADR-0014).
@@ -264,9 +272,23 @@ def discrimination(obs_class: str, value: str) -> str:
         return UBIQUITOUS if v in UBIQUITOUS_IPS else DISCRIMINATING
     elif obs_class in ("domain", "url"):
         h = _host(v)
-        if h in UBIQUITOUS_DOMAINS or _registrable(h) in UBIQUITOUS_DOMAINS:
-            return UBIQUITOUS
-        return DISCRIMINATING
+        if h not in UBIQUITOUS_DOMAINS and _registrable(h) not in UBIQUITOUS_DOMAINS:
+            return DISCRIMINATING
+        # On a shared HOSTING domain the path names one tenant's object:
+        # https://s3.amazonaws.com/<bucket>/<payload> is a C2 or a payload, the
+        # host alone is everyone's (#333).  On a service domain (gmail.com,
+        # google.com) a path still names nothing specific: the URL stays
+        # classified on its host.
+        if obs_class == "url" and (h in UBIQUITOUS_HOSTING_DOMAINS
+                                   or _registrable(h) in UBIQUITOUS_HOSTING_DOMAINS):
+            from urllib.parse import urlsplit
+            try:
+                path = urlsplit(v if "://" in v else f"https://{v}").path
+            except ValueError:
+                path = ""
+            if path.strip("/"):
+                return DISCRIMINATING
+        return UBIQUITOUS
     elif obs_class == "user":
         return UBIQUITOUS if v in UBIQUITOUS_USERS else DISCRIMINATING
     elif obs_class == "registry":

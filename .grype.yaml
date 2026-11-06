@@ -34,3 +34,13 @@ ignore:
       name: python
       version: 3.14.10
       type: binary
+
+  # socket.getaddrinfo truncates a host or port at a NUL byte: fixed in 3.16
+  # only.  The one place a host from outside reaches it is the web capture's
+  # SSRF check, which refuses a NUL before resolving (pipeline/web_capture.py).
+  - vulnerability: CVE-2026-116566
+    reason: "Unreachable: the only externally supplied host refuses NUL bytes before getaddrinfo (SECURITY.md, reviewed 2026-11-06)"
+    package:
+      name: python
+      version: 3.14.10
+      type: binary
