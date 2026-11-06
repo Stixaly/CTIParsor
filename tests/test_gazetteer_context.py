@@ -91,6 +91,18 @@ def test_the_other_identity_of_an_ambiguous_form_is_excluded(index, sentence, su
     assert judge(index, sentence, surface, other).reason == "other_identity"
 
 
+@pytest.mark.parametrize("sentence, outcome", [
+    ("Turla isn't known as Snake", "unresolved"),                  # issue #359
+    ("Turla wasn’t known as Snake", "unresolved"),                 # issue #359, typographic apostrophe
+    ("Turla is not known as Snake", "unresolved"),
+    ("Turla aren't known as Snake", "unresolved"),
+    ("Turla can't be known as Snake", "unresolved"),
+    ("Turla, also known as Snake", "resolved"),                    # the affirmative control
+])
+def test_a_contracted_negation_is_no_alias_issue_359(index, sentence, outcome):
+    assert judge(index, sentence, "Snake", "G0010").outcome == outcome
+
+
 NEGATIVES = [
     ("Joker’s Stash closed", "Joker", "conflicting_sense"),
     ("Joker's Stash closed", "Joker", "conflicting_sense"),

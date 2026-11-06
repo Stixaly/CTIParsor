@@ -175,8 +175,9 @@ def _attached_id(text: str, start: int, end: int) -> str | None:
 _P = r"[\s,;:(\[\"“”'’]"
 _CUE = (r"(?:also\s+known\s+as|also\s+called|also\s+referred\s+to\s+as|also\s+tracked\s+as|known\s+as"
         r"|a\.k\.a\.?|aka|dubbed)")
+# A negated gap is no alias, contracted (isn't, wasn’t) or not.
 _NEG = r"(?:not|no|never|nor|unlike|unrelated|distinct|different)"
-_ALIAS_GAP = re.compile(rf"{_P}*(?:(?!{_NEG}\b)[\w-]+{_P}+){{0,3}}?{_CUE}{_P}*(?:the\s+)?", re.I)
+_ALIAS_GAP = re.compile(rf"{_P}*(?:(?!{_NEG}\b|[\w-]*n['’]t\b)[\w-]+{_P}+){{0,3}}?{_CUE}{_P}*(?:the\s+)?", re.I)
 _APPOSITIVE_GAP = re.compile(r",\s+the\s+", re.I)
 _MAX_GAP = 80
 
