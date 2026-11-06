@@ -229,7 +229,10 @@ def brand_tokens(conn: DBConnection, domains: Iterable[str]) -> list[BrandToken]
     for tok in candidates:
         try:
             cur = conn.execute(
-                "SELECT COUNT(*) FROM rule_text WHERE body_tsv @@ phraseto_tsquery('simple', ?)",
+                "SELECT COUNT(*) FROM rule_text "
+                "WHERE body_tsv @@ phraseto_tsquery('simple', ?) "
+                "AND EXISTS (SELECT 1 FROM detection_rules d "
+                "WHERE d.id = rule_text.rule_id AND d.is_canonical = 1)",
                 (tok,),
             )
             count = cur.fetchone()[0]
@@ -255,7 +258,10 @@ def brand_evidence(
     for tok in tokens:
         try:
             cur = conn.execute(
-                "SELECT rule_id FROM rule_text WHERE body_tsv @@ phraseto_tsquery('simple', ?)",
+                "SELECT rule_text.rule_id FROM rule_text "
+                "WHERE body_tsv @@ phraseto_tsquery('simple', ?) "
+                "AND EXISTS (SELECT 1 FROM detection_rules d "
+                "WHERE d.id = rule_text.rule_id AND d.is_canonical = 1)",
                 (tok.token,),
             )
             rows = cur.fetchall()
@@ -293,6 +299,11 @@ def cve_evidence(conn: DBConnection, cves: Iterable[str]) -> dict[str, list[dict
 
     Like every title match it carries `discriminating: False`: the rule is ABOUT
     this CVE, it does not HOLD a value from the report.
+
+    Only canonical rules match (#362): `dedupe_store` can demote a rule without
+    the index following, until the next `rebuild_rule_text`.
+    The filter is an EXISTS, not a JOIN, so the planner enters through the
+    full-text index, not `idx_detection_canon` (see store.atom_hits).
     """
     values = sorted({c.strip().lower() for c in cves if isinstance(c, str) and c.strip()})
     if not values or not rule_text_built(conn):
@@ -302,7 +313,10 @@ def cve_evidence(conn: DBConnection, cves: Iterable[str]) -> dict[str, list[dict
     for cve in values:
         try:
             rows = conn.execute(
-                "SELECT rule_id FROM rule_text WHERE body_tsv @@ phraseto_tsquery('simple', ?)",
+                "SELECT rule_text.rule_id FROM rule_text "
+                "WHERE body_tsv @@ phraseto_tsquery('simple', ?) "
+                "AND EXISTS (SELECT 1 FROM detection_rules d "
+                "WHERE d.id = rule_text.rule_id AND d.is_canonical = 1)",
                 (cve,),
             ).fetchall()
         except DB_ERRORS:

@@ -253,6 +253,38 @@ def test_rebuild_rule_text_indexes_canonical_rules_and_skips_empty_bodies(temp_d
     assert [(r[0], r[1]) for r in rows] == [("r1", "okta fastpass phishing")]
 
 
+# ── Stale index: a demoted rule is never a match (#362) ──────────────────────
+
+def test_a_demoted_rule_is_not_a_brand_match_issue_362(temp_db):
+    conn = _store(temp_db.get_rule_conn(), [("r1", "Okta FastPass Phishing", "")])
+    # Demoted by dedup after the index was built: its row is still there.
+    conn.execute(
+        "INSERT INTO detection_rules (id, corpus, native_key, title, description, is_canonical) "
+        "VALUES (?,?,?,?,?,0)",
+        ("r2", "test", "r2", "Okta FastPass copy", ""),
+    )
+    conn.execute("INSERT INTO rule_text (rule_id, body) VALUES (?,?)", ("r2", "okta fastpass copy"))
+    conn.commit()
+
+    tokens = brand_tokens(conn, ["oktaenroll.com", "keyokta.com", "myoktasso.com"])
+    assert [(t.token, t.rules) for t in tokens] == [("okta", 1)]
+    assert set(brand_evidence(conn, tokens)) == {"r1"}
+
+
+def test_a_demoted_rule_is_not_a_cve_match_issue_362(temp_db):
+    conn = _store(temp_db.get_rule_conn(), [("r1", "Exploit for CVE-2024-3400", "")])
+    conn.execute(
+        "INSERT INTO detection_rules (id, corpus, native_key, title, description, is_canonical) "
+        "VALUES (?,?,?,?,?,0)",
+        ("r2", "test", "r2", "Exploit for CVE-2024-3400 copy", ""),
+    )
+    conn.execute("INSERT INTO rule_text (rule_id, body) VALUES (?,?)",
+                 ("r2", "exploit for cve-2024-3400 copy"))
+    conn.commit()
+
+    assert set(cve_evidence(conn, ["CVE-2024-3400"])) == {"r1"}
+
+
 def test_rebuild_rule_text_writes_in_batches(temp_db):
     conn = _store(temp_db.get_rule_conn(), [
         ("r1", "Alpha", ""), ("r2", "Beta", ""), ("r3", "Gamma", ""),
