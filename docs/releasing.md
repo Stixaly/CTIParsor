@@ -42,9 +42,16 @@ image pass the commands of [Verifying a release](#verifying-a-release) (checked
 2026-10-23). It is not an immutable Release: immutability was turned on after
 it was published (see [One-time repository settings](#one-time-repository-settings)).
 
-The latest, [0.3.0](https://github.com/Stixaly/CTIParsor/releases/tag/v0.3.0),
-was published on 2026-11-02 and is marked Latest. Its tag `v0.3.0` is annotated
-and names commit e226775. On GHCR, `0.3.0`, `0.3` and `sha-e226775…` name one
+The latest, [0.3.1](https://github.com/Stixaly/CTIParsor/releases/tag/v0.3.1),
+was published on 2026-11-06 and is marked Latest. Its tag `v0.3.1` is annotated
+and names commit 85ebe62, the merge of the release pull request (#357). On GHCR,
+`0.3.1`, `0.3` and `sha-85ebe62…` name one digest,
+`sha256:af0ce3063f1f7e71ccf7187cf35786e0d1befd47cc93c3ddba6ed843e856ca1d`; the Release is
+immutable (read on 2026-11-06).
+
+[0.3.0](https://github.com/Stixaly/CTIParsor/releases/tag/v0.3.0)
+was published on 2026-11-02. Its tag `v0.3.0` is annotated
+and names commit e226775. On GHCR, `0.3.0` and `sha-e226775…` name one
 digest, `sha256:cf6bdc47e541aefc9816b3f1dee492d0729acac08c83dbf9690206882d4a69c8`
 (read on 2026-11-06).
 
