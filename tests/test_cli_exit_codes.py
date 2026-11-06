@@ -13,6 +13,7 @@ each outcome into its exit code.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -162,3 +163,21 @@ def test_a_database_the_code_cannot_migrate_is_1(monkeypatch, argv):
     monkeypatch.setattr(main, "run_pipeline", _never)
     monkeypatch.setattr(main, "run_directory", _never)
     assert _exit_status(monkeypatch, *argv) == 1
+
+
+def test_reports_sharing_a_stem_get_their_own_bundle(monkeypatch, tmp_path):
+    # #290: report.txt and report.md both wrote report_bundle.json.
+    src, out = tmp_path / "in", tmp_path / "out"
+    src.mkdir()
+    for name in ("report.txt", "report.md", "other.txt"):
+        (src / name).write_text(name, encoding="utf-8")
+    calls: list[tuple[str, str]] = []
+
+    def fake(path, output, options=None, policy_source="db"):
+        calls.append((Path(path).name, Path(output).name))
+        return True
+    monkeypatch.setattr(main, "run_pipeline", fake)
+    main.run_directory(str(src), str(out))
+    assert sorted(calls) == [("other.txt", "other_bundle.json"),
+                             ("report.md", "report_md_bundle.json"),
+                             ("report.txt", "report_txt_bundle.json")]

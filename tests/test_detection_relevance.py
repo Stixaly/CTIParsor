@@ -446,3 +446,35 @@ def test_cve_title_rule_is_proposed_on_a_whole_id_only(temp_db):
     _seed_job(temp_db, "j329b", [("CVE-2024-3400", "cve", None)])
     ids = [p["id"] for p in propose_for_job(rconn, "j329b", jobs_conn=conn)["proposals"]]
     assert ids == ["ioc:hit"]
+
+
+def test_a_ubiquitous_basename_does_not_shadow_its_discriminating_path(temp_db, monkeypatch):
+    """#332: a path is also emitted as its basename; when the basename alone is
+    ubiquitous, the discriminating full path must stay the entity's match in
+    both the coverage evidence and the proposals, even when the basename hit
+    comes first (atom hits are sorted by value) or weighs more (rarer atom)."""
+    import pipeline.detection.control as control
+    import pipeline.detection.relevance as relevance
+    from pipeline.detection.coverage import _evidence_for_job
+
+    def only_the_basename(obs_class, value):
+        return value == "abc.dll"
+    monkeypatch.setattr(control, "is_ubiquitous", only_the_basename)
+    monkeypatch.setattr(relevance, "is_ubiquitous", only_the_basename)
+    conn = temp_db.get_conn()
+    rconn = temp_db.get_rule_conn()
+    path = "c:/implant/abc.dll"            # sorts after its basename "abc.dll"
+    replace_corpus_rules(rconn, "c", [
+        _rule("c", "implant", [], atoms=[("file", path), ("file", "abc.dll")]),
+        # The full path in more rules: a lower IDF than the basename's.
+        *(_rule("c", f"other{k}", [], atoms=[("file", path)]) for k in range(3)),
+    ])
+    _seed_job(temp_db, "jpath", [(path, "file", None)])
+
+    [row] = _evidence_for_job(rconn, "jpath", jobs_conn=conn)["c:implant"]
+    assert (row["value"], row["discriminating"]) == (path, True)
+
+    [top] = [p for p in propose_for_job(rconn, "jpath", jobs_conn=conn)["proposals"]
+             if p["id"] == "c:implant"]
+    assert top["evidence_count"] == 1
+    assert [(m["value"], m["discriminating"]) for m in top["matches"]] == [(path, True)]

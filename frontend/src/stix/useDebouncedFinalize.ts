@@ -20,39 +20,56 @@ export function useDebouncedFinalize(jobId: string | undefined) {
   const [running, setRunning] = useState(false)
   const [failed, setFailed] = useState(false)
 
+  // The rebuild in flight, so `flush()` can wait for it: `run` clears the
+  // timer as it starts, and a flush during the request used to return at once,
+  // so the Graph page downloaded the bundle from before the edit (#292).
+  const inFlight = useRef<Promise<void> | null>(null)
+  // Edits counted, so a rebuild that started before an edit does not mark it saved.
+  const edits = useRef(0)
+
   const run = useCallback(async () => {
     if (timer.current) { clearTimeout(timer.current); timer.current = null }
     if (!jobId) return
-    setRunning(true)
-    try {
-      await finalizeJobQuick(jobId)
-      setPending(false)
-      setFailed(false)
-      qc.invalidateQueries({ queryKey: ['bundle', jobId] })
-      qc.invalidateQueries({ queryKey: ['bundle-ledger', jobId] })
-      qc.invalidateQueries({ queryKey: ['jobs'] })
-    } catch (e) {
-      // Keep `pending`: the stored bundle is still behind the edits.
-      setFailed(true)
-      // A refused rebuild is stored all the same: the view must say so rather
-      // than keep drawing the previous build.
-      if (e instanceof BundleRefusedError) {
+    // One rebuild at a time: the next one starts from the edits after the last.
+    while (inFlight.current) await inFlight.current
+    const seq = edits.current
+    const attempt = (async () => {
+      setRunning(true)
+      try {
+        await finalizeJobQuick(jobId)
+        // An edit made during the request is not in this build: still pending.
+        if (edits.current === seq) setPending(false)
+        setFailed(false)
         qc.invalidateQueries({ queryKey: ['bundle', jobId] })
         qc.invalidateQueries({ queryKey: ['bundle-ledger', jobId] })
+        qc.invalidateQueries({ queryKey: ['jobs'] })
+      } catch (e) {
+        // Keep `pending`: the stored bundle is still behind the edits.
+        setFailed(true)
+        // A refused rebuild is stored all the same: the view must say so rather
+        // than keep drawing the previous build.
+        if (e instanceof BundleRefusedError) {
+          qc.invalidateQueries({ queryKey: ['bundle', jobId] })
+          qc.invalidateQueries({ queryKey: ['bundle-ledger', jobId] })
+        }
+      } finally {
+        setRunning(false)
       }
-    } finally {
-      setRunning(false)
-    }
+    })()
+    inFlight.current = attempt
+    try { await attempt } finally { if (inFlight.current === attempt) inFlight.current = null }
   }, [jobId, qc])
 
   const markDirty = useCallback(() => {
+    edits.current += 1
     setPending(true)
     if (timer.current) clearTimeout(timer.current)
     timer.current = setTimeout(run, FINALIZE_DEBOUNCE_MS)
   }, [run])
 
-  /** Rebuild now if an edit is waiting for one. */
+  /** Wait for a rebuild in flight, then rebuild now if an edit is waiting for one. */
   const flush = useCallback(async () => {
+    while (inFlight.current) await inFlight.current
     if (timer.current) await run()
   }, [run])
 

@@ -231,6 +231,18 @@ def test_a9_contradictory_hints_leave_it_ambiguous():
     assert a.status == "ambiguous"
 
 
+@pytest.mark.parametrize("other", ["99/12/2024", "32/01/2024", "31/04/2024", "29/02/2023"])
+def test_a9_an_impossible_date_gives_no_order_hint(other):
+    # #317: a component above 12 fixes the order only if the date exists.
+    (a,) = _check(f"Seen {other}; it started on 03/04/2024.", _llm("start", "on 03/04/2024"))
+    assert (a.status, a.value) == ("ambiguous", None)
+
+
+def test_a9_a_leap_day_is_a_valid_hint():
+    (a,) = _check("Seen 29/02/2024; it started on 03/04/2024.", _llm("start", "on 03/04/2024"))
+    assert (a.status, a.value) == ("verified", "2024-04-03")
+
+
 def test_a19_a_status_supplied_by_the_model_is_recomputed():
     (a,) = _check("Active since March 2023.",
                   _llm("start", "since March 2023", status="conflict", reason="made up"))

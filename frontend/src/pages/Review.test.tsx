@@ -115,6 +115,24 @@ describe('Review — decisions come from the server (ADR-0058)', () => {
   }, 20_000)
 })
 
+describe('Review — a decision the store refused (#286)', () => {
+  it('restores the accepted entity when its rejection fails, and says so', async () => {
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => {})
+    api.updateEntity.mockRejectedValueOnce(new Error('503: unavailable'))
+    const { container } = renderReview()
+    await opened()
+    const card = container.querySelector('[data-marg-id="e-auto"]')!
+    expect(card).toHaveClass('accepted')
+    fireEvent.click(within(card as HTMLElement).getByTitle('Reject (R)'))
+    await waitFor(() => expect(api.updateEntity).toHaveBeenCalledWith(
+      'job-1', 'e-auto', { accepted: false, decision_origin: 'human' },
+    ))
+    await waitFor(() => expect(card).toHaveClass('accepted'))
+    expect(alert).toHaveBeenCalledWith(expect.stringContaining('was not saved'))
+    alert.mockRestore()
+  }, 20_000)
+})
+
 describe('Review — a bundle the STIX schemas refused', () => {
   it('says so and why when Finalize is refused, instead of "check server logs"', async () => {
     const { BundleRefusedError } = await vi.importActual<typeof import('../api/client')>('../api/client')

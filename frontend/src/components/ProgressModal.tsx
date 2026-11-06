@@ -33,7 +33,7 @@ interface Props {
 }
 
 export default function ProgressModal({ jobId, filename, onClose, returnFocusTo }: Props) {
-  const { events, done, partialGraphEvents } = useSSE(jobId)
+  const { events, done, lost, partialGraphEvents } = useSSE(jobId)
 
   // Accumulate streaming graph
   const { sNodes, sEdges, byId, deg, adj } = useMemo(() => {
@@ -232,7 +232,10 @@ export default function ProgressModal({ jobId, filename, onClose, returnFocusTo 
           {/* Stage list */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, overflowY: 'auto' }}>
             {STAGES.map(stage => {
-              const isComplete = completedStages.has(stage.n) && (done || currentStageN > stage.n)
+              // Finished only on success: the stage a failed (or lost) run was in
+              // did not complete, and must not be ticked green (#347, #293).
+              const finished = done && !failed && !lost
+              const isComplete = completedStages.has(stage.n) && (finished || currentStageN > stage.n)
               const isActive   = !done && currentStageN === stage.n
               const detail = getStageDetail(stage.n)
 
@@ -282,6 +285,11 @@ export default function ProgressModal({ jobId, filename, onClose, returnFocusTo 
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--no)' }}>
                 <AlertCircle size={15} />
                 Pipeline failed — check server logs
+              </div>
+            ) : lost ? (
+              <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--warn)' }}>
+                <AlertCircle size={15} />
+                Lost the connection to the progress stream — the job may still be running; check its status in the reports list
               </div>
             ) : done ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--ok)' }}>

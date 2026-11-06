@@ -1757,9 +1757,44 @@ def _content_key(obj: object) -> tuple[str, ...] | None:
         name = " ".join(_str(obj, "name").casefold().split())
         return (stix_type, name) if name else None
     if stix_type == "indicator" and field(obj, "pattern_type") not in (None, "stix"):
-        text = " ".join(_str(obj, "pattern").split())
-        return (stix_type, str(field(obj, "pattern_type")), text) if text else None
+        pattern_type = str(field(obj, "pattern_type"))
+        text = _fold_outside_literals(_str(obj, "pattern"), regex=pattern_type == "yara")
+        return (stix_type, pattern_type, text) if text else None
     return None
+
+
+def _fold_outside_literals(text: str, *, regex: bool = False) -> str:
+    """`text` with each whitespace run outside string literals read as one
+    space, edges trimmed.  Inside a quoted string (and, with `regex`, a YARA
+    `= /…/` regular expression) every character counts: `"foo  bar"` and
+    `"foo bar"` search different bytes, and folding them merged two rules (#288).
+    An unterminated literal keeps the rest as written, which can only keep two
+    rules apart."""
+    out: list[str] = []
+    i, n = 0, len(text)
+    pending_space = False
+    while i < n:
+        ch = text[i]
+        if ch.isspace():
+            pending_space = True
+            i += 1
+            continue
+        if pending_space and out:
+            out.append(" ")
+        pending_space = False
+        closer = ch if ch in "\"'" else None
+        if closer is None and regex and ch == "/" and out and out[-1 if out[-1] != " " else -2][-1:] == "=":
+            closer = "/"
+        if closer is None:
+            out.append(ch)
+            i += 1
+            continue
+        j = i + 1
+        while j < n and text[j] != closer:
+            j += 2 if text[j] == "\\" else 1
+        out.append(text[i:j + 1])
+        i = j + 1
+    return "".join(out)
 
 
 def _remap_target(obj: object, entry: Entry, kept: AbstractSet[str]) -> str | None:

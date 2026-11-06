@@ -206,3 +206,27 @@ def test_a_no_break_space_next_to_a_blank_is_one_space():
     assert text[span.start:span.end].startswith("It also") and text[span.end - 1] == "."
     listed = "delivery vectors, including:\xa0\n* Trickbot spreading through scripting files"
     assert locate("delivery vectors, including: * Trickbot spreading through scripting files", listed)
+
+
+def test_a_quote_joining_two_sentences_is_located():
+    # #326: stage3d_verify joins two distant sentences with QUOTE_JOIN.
+    from pipeline.evidence_span import locate, stated_in, words
+    doc = ("First sentence with ten distinct words here right now. Middle filler. "
+           "Second sentence with ten other words at the end.")
+    quote = ("First sentence with ten distinct words here right now. [...] "
+             "Second sentence with ten other words at the end.")
+    assert stated_in(quote, words(doc))
+    span = locate(quote, doc)
+    assert span is not None and span.exact and (span.start, span.end) == (0, len(doc))
+    # A made-up second half is not covered by the first one alone.
+    assert locate("First sentence with ten distinct words here right now. [...] "
+                  "Nothing like this appears anywhere in the source text at all.", doc) is None
+
+
+def test_a_markdown_link_in_the_text_does_not_hide_the_quote():
+    # #326: converters leave "[name](target)"; a model quotes only "name".
+    from pipeline.evidence_span import locate
+    doc = "The intrusion was attributed to [REvil](/threat-actors/revil) ransomware operators last year."
+    span = locate("attributed to REvil ransomware operators", doc)
+    assert span is not None and span.exact
+    assert doc[span.start:span.end] == "attributed to [REvil](/threat-actors/revil) ransomware operators"

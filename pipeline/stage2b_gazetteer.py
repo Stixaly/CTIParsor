@@ -24,6 +24,7 @@ Speed:
 """
 from __future__ import annotations
 
+import bisect
 import functools
 import json
 import re
@@ -201,17 +202,39 @@ def _lower_index_map(text: str) -> list[int]:
     return index_map
 
 
-def _is_claimed(claimed: list[tuple[int, int, str]], start: int, end: int,
-                entity_type: str) -> bool:
-    """True when [start, end) overlaps a claimed span.  An EXACTLY equal span
-    claimed by a different entity_type does not block (homonyms such as
-    Machete G0095 group / S0409 malware); any other overlap does."""
-    for s, e2, t in claimed:
-        if s == start and e2 == end and t != entity_type:
-            continue
-        if s <= start < e2 or s < end <= e2:
-            return True
-    return False
+class _Claims:
+    """The spans already claimed, kept sorted so a lookup is O(log n).
+
+    Claims never overlap (a candidate that overlaps one is refused, and the
+    candidates come longest first), except an EXACTLY equal span claimed by a
+    different entity_type: homonyms such as Machete G0095 group / S0409
+    malware.  Sorted by start, the ends are then sorted too, so the claims that
+    can overlap [start, end) are the ones just before the insertion point of
+    `end`.  A list scanned for every candidate was quadratic in the number of
+    repeated mentions (#351), which #318 claims one span each.
+    """
+
+    __slots__ = ("_spans",)
+
+    def __init__(self) -> None:
+        self._spans: list[tuple[int, int, str]] = []
+
+    def blocks(self, start: int, end: int, entity_type: str) -> bool:
+        """True when [start, end) overlaps a claimed span.  An EXACTLY equal
+        span claimed by a different entity_type does not block; any other
+        overlap does."""
+        i = bisect.bisect_left(self._spans, (end,)) - 1
+        while i >= 0:
+            s, e2, t = self._spans[i]
+            if e2 <= start:
+                return False
+            if not (s == start and e2 == end and t != entity_type):
+                return True
+            i -= 1
+        return False
+
+    def add(self, start: int, end: int, entity_type: str) -> None:
+        bisect.insort(self._spans, (start, end, entity_type))
 
 
 def _match_aho(text: str, automaton, judge: _Judge | None = None, apply: bool = False,
@@ -255,7 +278,7 @@ def _match_aho(text: str, automaton, judge: _Judge | None = None, apply: bool = 
 
     # Span claiming — identical logic to the regex version
     seen_canonicals: set[tuple[str, str]] = set()
-    claimed: list[tuple[int, int, str]] = []
+    claimed = _Claims()
     results: list[RawEntity] = []
 
     for start, end, entry, _ in candidates:
@@ -265,13 +288,13 @@ def _match_aho(text: str, automaton, judge: _Judge | None = None, apply: bool = 
         # object kinds (Machete G0095 group vs S0409 malware, ...).
         seen_key        = (canonical_lower, entry["entity_type"])
 
-        if _is_claimed(claimed, start, end, entry["entity_type"]):
+        if claimed.blocks(start, end, entry["entity_type"]):
             continue
         if seen_key in seen_canonicals:
             # Already emitted once: still claim the span -- a repeated mention
             # must block shorter aliases of OTHER entries inside it from
             # matching as false positives -- but trace and emit nothing.
-            claimed.append((start, end, entry["entity_type"]))
+            claimed.add(start, end, entry["entity_type"])
             continue
         verdict = judge(entry, start, end) if judge else None
         if verdict is not None and verdict.withheld and apply:
@@ -281,7 +304,7 @@ def _match_aho(text: str, automaton, judge: _Judge | None = None, apply: bool = 
         if verdict is not None and (verdict.decision or verdict.withheld) and trace is not None:
             trace.append(_trace_item(entry, text, start, end, verdict))
 
-        claimed.append((start, end, entry["entity_type"]))
+        claimed.add(start, end, entry["entity_type"])
         seen_canonicals.add(seen_key)
 
         ctx_start = max(0, start - 60)
@@ -322,7 +345,7 @@ def _match_regex(text: str, judge: _Judge | None = None, apply: bool = False,
     index_map  = _lower_index_map(text)
     results: list[RawEntity] = []
     seen_canonicals: set[tuple[str, str]] = set()
-    claimed: list[tuple[int, int, str]] = []
+    claimed = _Claims()
 
     for entry in entries:
         name_key  = entry["name"]
@@ -356,13 +379,19 @@ def _match_regex(text: str, judge: _Judge | None = None, apply: bool = False,
             # (lower() is not length-preserving, e.g. U+0130).
             start = index_map[m.start()]
             end   = index_map[m.end() - 1] + 1
-            if _is_claimed(claimed, start, end, etype_str):
+            # The lookarounds ran on the lowered text, where U+0130 becomes
+            # "i" + a combining dot that is not a word char: check the
+            # boundaries again on the original text, as the Aho path does (#350).
+            if (start > 0 and _is_word_char(text[start - 1])) or \
+                    (end < len(text) and _is_word_char(text[end])):
+                continue
+            if claimed.blocks(start, end, etype_str):
                 continue
             if seen_key in seen_canonicals:
                 # Already emitted once: still claim the span -- a repeated
                 # mention must block shorter aliases of OTHER entries inside
                 # it -- but trace and emit nothing.
-                claimed.append((start, end, etype_str))
+                claimed.add(start, end, etype_str)
                 continue
             verdict = judge(entry, start, end) if judge else None
             if verdict is not None and verdict.withheld and apply:
@@ -371,7 +400,7 @@ def _match_regex(text: str, judge: _Judge | None = None, apply: bool = False,
                 continue      # the next occurrence may qualify
             if verdict is not None and (verdict.decision or verdict.withheld) and trace is not None:
                 trace.append(_trace_item(entry, text, start, end, verdict))
-            claimed.append((start, end, etype_str))
+            claimed.add(start, end, etype_str)
             seen_canonicals.add(seen_key)
 
             ctx_start = max(0, start - 60)

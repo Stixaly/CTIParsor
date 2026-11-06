@@ -312,6 +312,19 @@ describe('buildBundleGraph — rows imported from the analyst’s bundle (ADR-00
     expect(g.diff.filter(d => d.kind === 'stale')).toEqual([])
   })
 
+  it('places a dropped edge on its baseline ends and gives the node its row (#345)', () => {
+    const dropped = rel('APT29', 'targets', 'WellMess')
+    const withDrop: BundleLedger = { ...ledger, relationships: [
+      lrel('APT29', 'targets', 'WellMess', { outcome: 'dropped', reason: 'invalid_for_types' })] }
+    const g = buildBundleGraph(bundle, withDrop, [
+      imported('WellMess', 'malware', 'malware--w', 'baseline_only'),
+      imported('APT29', 'intrusion-set', 'intrusion-set--a', 'baseline_in_text'),
+    ], [dropped])!
+    const edge = g.edges.find(e => e.kind === 'dropped')
+    expect(edge && [edge.source, edge.target]).toEqual(['intrusion-set--a', 'malware--w'])
+    expect(g.nodeInfo.get('malware--w')?.rows.map(r => r.entity.value)).toEqual(['WellMess'])
+  })
+
   it('leaves an imported object the ledger removed to the removed list, not a ghost', () => {
     const g = buildBundleGraph(bundle, ledger,
       [imported('198.18.12.77', 'ipv4', 'ipv4-addr--ip', 'baseline_only', false)], [])!

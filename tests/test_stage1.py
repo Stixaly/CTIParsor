@@ -133,3 +133,30 @@ def test_chunk_text_no_empty_chunks():
     chunks = chunk_text(text)
     assert len(chunks) == 1
     assert chunks[0] == "Short text."
+
+
+def test_inline_tags_do_not_split_a_url_or_a_word():
+    # #295: a separator between every text node cut "down<span>load</span>".
+    from models.schemas import EntityType
+    from pipeline.stage1_ingestion import html_to_text
+    from pipeline.stage2_extraction import extract_entities
+    text = html_to_text("<p>C2: https://evil.test/down<span>load</span>/payload.exe</p>"
+                        "<p>Used by <b>APT</b><i>29</i>.<br>Next line</p><ul><li>a</li><li>b</li></ul>")
+    urls = {e.value for e in extract_entities(text) if e.entity_type == EntityType.URL}
+    assert urls == {"https://evil.test/download/payload.exe"}
+    assert "Used by APT29." in text
+    # Blocks and <br> still separate what they separate.
+    assert "\nNext line" in text and "a\n" in text and "\nb" in text
+
+
+def test_the_overlap_does_not_break_a_url_cut_inside_a_long_paragraph():
+    # #291: two slices of one oversized paragraph were rejoined with "\n\n".
+    from models.schemas import EntityType
+    from pipeline.stage1_ingestion import chunk_text
+    from pipeline.stage2_extraction import extract_entities
+    url = "https://evil.test/download/payload.exe"
+    text = ("word " * 596 + url + " tail\n\nSecond paragraph.\n\nThird paragraph.\n\nFourth paragraph.")
+    chunks = chunk_text(text)
+    found = {e.value for c in chunks for e in extract_entities(c) if e.entity_type == EntityType.URL}
+    assert url in found and not any(u != url and url.startswith(u) for u in found)
+    assert all("do\n\nwnload" not in c for c in chunks)

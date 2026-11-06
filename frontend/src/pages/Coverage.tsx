@@ -106,7 +106,7 @@ export default function Coverage() {
     () => [...promoted.promoted].filter(id => !rulesById.has(id)),
     [promoted.promoted, rulesById],
   )
-  const { data: promotedMeta } = useQuery({
+  const { data: promotedMeta, isSuccess: promotedLoaded } = useQuery({
     queryKey: ['promoted-rules', jobId, promotedIds.join(',')],
     queryFn: () => lookupRules(promotedIds),
     enabled: promotedIds.length > 0,
@@ -126,7 +126,15 @@ export default function Coverage() {
     return extra.length ? [...rules, ...extra] : rules
   }, [rules, rulesById, promotedMeta])
 
-  const selection = useRuleSelection(jobId, allRules)
+  // The inventory is complete once both sources answered: pruning exclusions
+  // against the coverage rules alone erased the stored exclusion of every
+  // promoted rule whose metadata had not arrived yet (#285).
+  const inventoryComplete = !!reportRules && (promotedIds.length === 0 || promotedLoaded)
+  const selection = useRuleSelection(jobId, allRules, inventoryComplete)
+
+  // Every rule the export can hold, promoted ones included: the panel's
+  // per-corpus counts, licences and archive preview look rules up here (#344).
+  const allRulesById = useMemo(() => new Map(allRules.map(r => [r.id, r])), [allRules])
 
   // One TechEntry per coverage cell, in cell order (already sorted by score
   // desc on the API side). Only an enterprise technique gets tactic columns;
@@ -383,7 +391,7 @@ export default function Coverage() {
               reportName={job?.original_filename ?? ''}
               columns={columns}
               rules={allRules}
-              rulesById={rulesById}
+              rulesById={allRulesById}
               selection={selection}
               hasPromoted={allRules.length > rules.length}
             />

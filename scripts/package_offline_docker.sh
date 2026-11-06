@@ -97,6 +97,10 @@ if $WITH_PROXY; then
     docker compose --profile proxy pull proxy
 fi
 
+# The names compose gives postgres, from the shell or .env (#306).
+DB_USER=$(offline_db_setting CTI_DB_USER)
+DB_NAME=$(offline_db_setting CTI_DB_NAME)
+
 echo "=== [3/8] Saving images → images.tar.gz ==="
 IMAGES_LIST=$(offline_bundle_images "$WITH_LLM" "$WITH_PROXY")
 mapfile -t IMAGES <<< "$IMAGES_LIST"
@@ -113,7 +117,7 @@ offline_wait_postgres_healthy 90 \
 # build from this checkout would inherit): building the bundle needs the Hub.
 # bootstrap --strict sets them to 1 itself for its own offline check.
 docker compose --profile bootstrap run --rm -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 bootstrap bootstrap --strict
-rule_count=$(offline_pg_exec psql -U "${CTI_DB_USER:-ctiparsor}" -d "${CTI_DB_NAME:-ctiparsor}" -tAc \
+rule_count=$(offline_pg_exec psql -U "$DB_USER" -d "$DB_NAME" -tAc \
     "SELECT count(*) FROM detection_rules") \
     || offline_die "cannot count the rules after bootstrap — check 'docker compose logs postgres'"
 [ "$rule_count" -gt 0 ] || offline_die "the rule store is empty after bootstrap — refusing to build a bundle without rules"
@@ -125,9 +129,9 @@ docker run --rm \
     alpine tar czf /backup/cti-cache.tar.gz -C /data .
 
 echo "=== [6/8] Exporting the schema + the rule store (pg_dump, no reports) ==="
-db_tables=$(offline_pg_exec psql -U "${CTI_DB_USER:-ctiparsor}" -d "${CTI_DB_NAME:-ctiparsor}" -tAc \
+db_tables=$(offline_pg_exec psql -U "$DB_USER" -d "$DB_NAME" -tAc \
     "SELECT tablename FROM pg_tables WHERE schemaname='public'") \
-    || offline_die "cannot list the tables of ${CTI_DB_NAME:-ctiparsor}"
+    || offline_die "cannot list the tables of ${DB_NAME}"
 [ -n "$db_tables" ] || offline_die "no table in public — wrong database?"
 # The schema of every table is exported, the data only of the rule store and of
 # schema_migrations (the version the bundle is at). The rest is the job store: the
@@ -136,7 +140,7 @@ db_tables=$(offline_pg_exec psql -U "${CTI_DB_USER:-ctiparsor}" -d "${CTI_DB_NAM
 mapfile -t args < <(printf '%s\n' "$db_tables" | offline_exclude_data_args $OFFLINE_RULE_STORE_TABLES schema_migrations)
 # --schema=public: the other schemas (the throwaway t_<hex> ones of the test suite
 # share this database) stay out, and --no-blobs leaves out the large objects.
-offline_pg_exec pg_dump -Fc --schema=public --no-blobs -U "${CTI_DB_USER:-ctiparsor}" -d "${CTI_DB_NAME:-ctiparsor}" "${args[@]}" \
+offline_pg_exec pg_dump -Fc --schema=public --no-blobs -U "$DB_USER" -d "$DB_NAME" "${args[@]}" \
     > "$STAGE_DIR/ctiparsor.dump"
 # The table of contents of the dump is checked too: a data entry of any other table
 # stops the packaging here, before the bundle is made, and so does a listing that
@@ -171,8 +175,8 @@ echo "=== [8/8] Manifest, checksums, pack ==="
     echo "BUNDLE_GIT_REV=$GIT_REV"
     echo "BUNDLE_BUILT_AT=$BUILT_AT"
     echo "BUNDLE_IMAGES=\"${IMAGES[*]}\""
-    echo "BUNDLE_DB_USER=${CTI_DB_USER:-ctiparsor}"
-    echo "BUNDLE_DB_NAME=${CTI_DB_NAME:-ctiparsor}"
+    echo "BUNDLE_DB_USER=${DB_USER}"
+    echo "BUNDLE_DB_NAME=${DB_NAME}"
     if $WITH_LLM; then
         # The first model is the text model (setup.sh wires it into .env);
         # BUNDLE_OLLAMA_MODELS lists all of them, for the vision hint.

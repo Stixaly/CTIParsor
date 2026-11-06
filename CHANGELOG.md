@@ -11,6 +11,53 @@ theme.
 
 ### Fixed
 
+#### Bug batch of 2026-11-05 (issues #285-#354)
+
+- **Extraction.** The gazetteer's regex fallback checks word boundaries on the
+  original text (`İAPT29` is no mention) (#350), and repeated mentions no longer
+  cost a scan of every earlier claim (#351). `html_to_text` separates blocks only,
+  so inline tags no longer cut URLs (#295); an oversized paragraph is cut on a
+  space and its slices are rejoined without a paragraph break (#291). An
+  impossible numeric date (`99/12/2024`, `31/04/2024`) no longer fixes the
+  day/month order of another (#317). `locate()` finds quotes joined by `[...]`
+  and quotes of Markdown-linked text (#326). Stage 3e keeps the primary result
+  when the second provider gives no usable answer, instead of penalizing every
+  relationship (#323).
+- **Bundle.** Relationship descriptions collapse whitespace in names and name
+  user-account and network-traffic objects instead of showing their ids (#338).
+  The alias merge of Stage 4b keeps the dates of a duplicate edge (#305). The
+  baseline merge compares rule literals (quoted strings, YARA regexes) exactly
+  (#288). Finalize no longer brings back an LLM campaign whose row was deleted
+  or renamed (#287; deleted LLM techniques still come back from the blob).
+- **Detection.** Sigma atoms read Sigma escapes (`\\`, `\*`, `\?`), so a
+  synthesized rule's path matches again; a synthesized image gets the colon check
+  of a file; YAML scalars lose line breaks and sources are deduplicated (#335; the
+  atoms of stored rules change at their corpus's next rebuild). A discriminating
+  match is no longer replaced by a ubiquitous one of the same entity (#332).
+  `also_in` lists the corpora of rules folded through `related:` (#330). A
+  rebuild deletes the rules of a disabled or removed corpus (#302).
+  `build_rule_atoms` backfills Sigma rules only and keeps the Suricata and YARA
+  atoms (#310).
+- **API.** `PUT /api/relationship-policy` refuses a lone UTF-16 surrogate with a
+  400, and a stored one reads as the default (#352). A corpus name must be one URL
+  path segment (letters, digits, `.`, `_`, `-`) (#353).
+- **CLI and scripts.** `--input-dir` keeps reports that share a stem apart
+  (`report_txt_bundle.json`, `report_md_bundle.json`) (#290). The offline restore
+  and packager read `CTI_DB_USER` / `CTI_DB_NAME` from `.env` as compose does
+  (#306). The bundle audit accepts every STIX comparison operator (#315); the
+  web-capture harness reads its DOM reference with the capture's JavaScript
+  setting (#316).
+- **Frontend.** A lost progress stream and a failed run no longer read as a
+  success, nor tick the failed stage (#293, #347); the PDF viewer recovers when
+  its URL changes after an error (#347). Graph: switching to the review view
+  closes the bundle panels and filters (#346), and baseline objects take their
+  review rows and dropped edges (#345). Coverage: promoted rules count in the
+  export panel (#344) and their exclusions survive a partial load (#285). A
+  download waits for a rebuild already running (#292). Policy: close changes no
+  longer overwrite each other and a change waiting for its debounce is saved when
+  the page is left (#354, #294). Review: a refused decision is restored and
+  reported (#286).
+
 #### Bug batch of 2026-11-04 (issues #283-#343), extraction, detection store, queue, API
 
 - **Stage 2.** `refang()` normalizes bracketed defanged schemes (`hxxps[:]//`,

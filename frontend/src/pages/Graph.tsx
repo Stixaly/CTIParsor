@@ -896,11 +896,17 @@ export default function Graph() {
     setSelectedId(null)
     setSelectedEdge(null)
     setHiddenTypes(new Set())
+    // The differences and baseline panels and the provenance filter belong to
+    // the bundle view: kept across a switch, they left an empty drawer and
+    // hidden edges the review view has no control to show again (#346).
+    setDiffOpen(false)
+    setBaselineOpen(false)
+    setHiddenKinds(new Set())
     try { localStorage.setItem(MODE_KEY, m) } catch { /* private mode: not remembered */ }
   }, [])
 
   // Right panel: an explicit panel (editor, differences) wins over selection.
-  const rightPanel = editMode ? 'editor' : diffOpen ? 'diff' : baselineOpen && bundleData ? 'baseline'
+  const rightPanel = editMode ? 'editor' : diffOpen && bundleData ? 'diff' : baselineOpen && bundleData ? 'baseline'
                    : selectedEdge ? 'edge' : selectedId ? 'detail' : null
   const selectedNode = selectedId ? byId.get(selectedId) ?? null : null
   const selectedEdgeObj = selectedEdge ? edges.find(e => e.id === selectedEdge) ?? null : null

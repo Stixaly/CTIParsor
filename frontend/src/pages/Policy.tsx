@@ -982,9 +982,22 @@ export default function Policy() {
     }
   }, [remotePolicy])
 
+  // The full policy as this page last changed it.  Each change is merged into
+  // it at once, and every PUT sends it whole: merged into the last SERVER
+  // answer instead, a second change made while the first PUT was in flight
+  // re-sent the old value of the first one (#354).  The PUTs go one after the
+  // other, each with the draft as it is when it leaves, so the last to arrive
+  // is the latest.
+  const draftRef = useRef<Record<string, unknown> | null>(null)
+  const saveChain = useRef<Promise<unknown>>(Promise.resolve())
+  const { mutateAsync: putPolicy } = saveMut
+
   const savePolicy = useCallback((patch: Record<string, unknown>) => {
-    saveMut.mutate({ ...serverPolicyRef.current, version: 1, ...patch })
-  }, [saveMut])
+    draftRef.current = { ...(draftRef.current ?? serverPolicyRef.current), version: 1, ...patch }
+    const next = saveChain.current.catch(() => {}).then(() => putPolicy(draftRef.current!))
+    saveChain.current = next
+    next.catch(() => {})      // shown by saveMut.isError
+  }, [putPolicy])
 
   // ── Pin budget (ADR-0026) ───────────────────────────────────────────────────
   // What the LAST run produced, per rule.  Read-only measurement, separate from
@@ -1023,6 +1036,18 @@ export default function Policy() {
 
   // ── Auto-save with 1.5s debounce ────────────────────────────────────────────
   const saveTimer    = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // The save the timer will make, so leaving the page can make it now.
+  const pendingPatch = useRef<(() => void) | null>(null)
+  const scheduleSave = useCallback((patch: () => Record<string, unknown>) => {
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    const fire = () => {
+      saveTimer.current = null
+      pendingPatch.current = null
+      savePolicy(patch())
+    }
+    pendingPatch.current = fire
+    saveTimer.current = setTimeout(fire, 1500)
+  }, [savePolicy])
   // Always-current snapshot of `rules` used inside debounced callbacks.
   // Without this, `changeGlobalMode`'s timeout closes over a stale `rules`
   // value (the rules at the moment the mode was toggled, not 1.5 s later).
@@ -1039,23 +1064,24 @@ export default function Policy() {
       pendingRulesRef.current = nextRules
       return nextRules
     })
-    if (saveTimer.current) clearTimeout(saveTimer.current)
-    saveTimer.current = setTimeout(() => {
-      savePolicy({ global: globalMode, rules: pendingRulesRef.current })
-    }, 1500)
-  }, [globalMode, savePolicy])
+    scheduleSave(() => ({ global: globalMode, rules: pendingRulesRef.current }))
+  }, [globalMode, scheduleSave])
 
   const changeGlobalMode = (m: 'enforce' | 'auto') => {
     setGlobalMode(m)
-    if (saveTimer.current) clearTimeout(saveTimer.current)
-    saveTimer.current = setTimeout(() => {
-      // Use the ref so we always save the *latest* rules, not the rules that
-      // were in scope when this timeout was scheduled (stale closure bug).
-      savePolicy({ global: m, rules: pendingRulesRef.current })
-    }, 1500)
+    // Use the ref so we always save the *latest* rules, not the rules that
+    // were in scope when this timeout was scheduled (stale closure bug).
+    scheduleSave(() => ({ global: m, rules: pendingRulesRef.current }))
   }
 
-  useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current) }, [])
+  // Leaving the page before the debounce fired used to drop the change (#294):
+  // the save waiting for its timer is sent on the way out instead.
+  useEffect(() => () => {
+    if (!saveTimer.current) return
+    clearTimeout(saveTimer.current)
+    saveTimer.current = null
+    pendingPatch.current?.()
+  }, [])
 
   // ── Derived counts ──────────────────────────────────────────────────────────
   const total    = rules.length

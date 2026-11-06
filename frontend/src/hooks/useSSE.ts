@@ -1,18 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PartialGraphEvent, ProgressEvent } from '../types'
 
-// Maximum number of consecutive SSE errors before giving up and marking done.
+// Maximum number of consecutive SSE errors before giving up on the stream.
 const MAX_ERRORS = 5
 
 export function useSSE(jobId: string | null) {
   const [events, setEvents] = useState<(ProgressEvent | PartialGraphEvent)[]>([])
   const [done, setDone] = useState(false)
+  // The stream was given up after repeated errors: `done` too, but the
+  // pipeline's outcome is unknown, so it must not read as a success (#293).
+  const [lost, setLost] = useState(false)
   const errorCountRef = useRef(0)
 
   useEffect(() => {
     if (!jobId) return
     setEvents([])
     setDone(false)
+    setLost(false)
     errorCountRef.current = 0
 
     const es = new EventSource(`/api/jobs/${jobId}/progress`)
@@ -51,6 +55,7 @@ export function useSSE(jobId: string | null) {
     es.onerror = () => {
       errorCountRef.current += 1
       if (errorCountRef.current >= MAX_ERRORS) {
+        setLost(true)
         setDone(true)
         es.close()
       }
@@ -68,5 +73,5 @@ export function useSSE(jobId: string | null) {
   const partialGraphEvents = events.filter(
     (e): e is PartialGraphEvent => '_type' in e && e._type === 'partial_graph')
 
-  return { events, done, latestStage, partialGraphEvents }
+  return { events, done, lost, latestStage, partialGraphEvents }
 }

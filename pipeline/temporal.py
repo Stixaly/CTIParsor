@@ -859,12 +859,22 @@ def numeric_order_hint(chunk: str, span: tuple[int, int], sep: str | None = None
     for m in _R_NUMERIC_ANY.finditer(passage):
         if m.group(2) != m.group(4) or (sep is not None and m.group(2) != sep):
             continue
-        a, b = int(m.group(1)), int(m.group(3))
-        if a > 12 and 1 <= b <= 12:
+        a, b, year = int(m.group(1)), int(m.group(3)), int(m.group(5))
+        # Only a date that exists fixes an order: 99/12/2024 or 31/02/2024
+        # is no day-month date at all, and must not settle 03/04/2024 (#317).
+        if a > 12 and 1 <= b <= 12 and _is_date(year, b, a):
             orders.add("dmy")
-        elif b > 12 and 1 <= a <= 12:
+        elif b > 12 and 1 <= a <= 12 and _is_date(year, a, b):
             orders.add("mdy")
     return next(iter(orders)) if len(orders) == 1 else None
+
+
+def _is_date(year: int, month: int, day: int) -> bool:
+    try:
+        date(year, month, day)
+    except ValueError:
+        return False
+    return True
 
 
 def _separator(time_text: str) -> str | None:

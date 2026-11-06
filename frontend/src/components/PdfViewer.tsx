@@ -206,6 +206,18 @@ export default function PdfViewer({ url, filename, entities, focusedId, onFocusE
   const [rotation, setRotation] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [baseSize, setBaseSize] = useState<{ w: number; h: number } | null>(null)
+  // A new document starts clean: after a load error <Document> is unmounted,
+  // and only its own success cleared the error, so no other URL could ever
+  // load again (#347).  Reset while rendering, not in an effect: an effect
+  // runs after <Document>'s own and would wipe the error it just reported.
+  const [shownUrl, setShownUrl] = useState(url)
+  if (shownUrl !== url) {
+    setShownUrl(url)
+    setError(null)
+    setNumPages(null)
+    setBaseSize(null)
+    setCurrentPage(1)
+  }
   const [available, setAvailable] = useState(0)
   const [measureTick, setMeasureTick] = useState(0)
 

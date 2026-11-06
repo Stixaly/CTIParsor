@@ -17,6 +17,11 @@ _WORD = re.compile(r"[^\W_]+")
 # The closing parenthesis is optional: a quote cut short ends inside the URL.
 _MD_LINK_TARGET = re.compile(r"\]\([^)\s]*\)?")
 
+# A whole Markdown link, for `_normalise`: its text is kept, its brackets and
+# target are not, so "[REvil](/threat-actors/revil)" reads as "REvil" — the
+# form `words()` gives `stated_in` and the one a model quotes (#326).
+_MD_LINK = re.compile(r"\[([^\[\]\n]*)\]\([^)\s]*\)?")
+
 # The separator the document-level verifier puts between the two sentences of
 # one quote (stage3d_verify._VERIFY_SYSTEM_DOCUMENT).
 QUOTE_JOIN = "[...]"
@@ -82,10 +87,19 @@ Normalise for comparison, keeping a map back to original offsets.
     normalised_chars: list[str] = []
     index_map: list[int] = []
 
+    # Offsets of the link syntax to leave out: each link's "[" and its "](...)".
+    skip: dict[int, int] = {}            # start -> end (exclusive)
+    for m in _MD_LINK.finditer(text):
+        skip[m.start()] = m.start() + 1
+        skip[m.end(1)] = m.end()
+
     i = 0
     n = len(text)
 
     while i < n:
+        if i in skip:
+            i = skip[i]
+            continue
         char = text[i]
 
         if char in _LIGATURES:
@@ -101,7 +115,7 @@ Normalise for comparison, keeping a map back to original offsets.
             # technique then lost a grade) as in the evaluation.
             normalised_chars.append(" ")
             index_map.append(i)
-            while i < n and _is_blank(text[i]):
+            while i < n and _is_blank(text[i]) and i not in skip:
                 i += 1
         elif char in _CHAR_MAP:
             normalised_chars.append(_CHAR_MAP[char])
@@ -164,6 +178,8 @@ Locate *quote* in *text*, returning a span in original coordinates.
         return None
     if not quote or not text:
         return None
+    if QUOTE_JOIN in quote:
+        return _locate_joined(quote, text, min_coverage)
 
     # Normalize
     nq, _ = _normalise(quote)
@@ -262,6 +278,31 @@ Locate *quote* in *text*, returning a span in original coordinates.
 
     # f) None
     return None
+
+
+def _locate_joined(quote: str, text: str, min_coverage: float) -> Span | None:
+    """A quote made of sentences joined by QUOTE_JOIN, which no text holds as
+    written: each part is located on its own and the span runs from the first
+    to the last one found (#326).  The coverage counts the words of every part,
+    the ones of a part not found included."""
+    parts = [p for p in (part.strip() for part in quote.split(QUOTE_JOIN)) if p]
+    found: list[Span] = []
+    matched = 0.0
+    total = 0
+    for part in parts:
+        n_words = len(_word_spans(_normalise(part)[0].strip(" ")))
+        total += n_words
+        span = locate(part, text, min_coverage=min_coverage)
+        if span is not None:
+            found.append(span)
+            matched += span.coverage * n_words
+    if not found or not total:
+        return None
+    coverage = matched / total
+    if coverage < min_coverage:
+        return None
+    return Span(start=min(sp.start for sp in found), end=max(sp.end for sp in found),
+                coverage=coverage, exact=coverage >= 0.99 and all(sp.exact for sp in found))
 
 
 def sentence_index_of(span: Span, sentence_bounds: list[tuple[int, int]]) -> int | None:

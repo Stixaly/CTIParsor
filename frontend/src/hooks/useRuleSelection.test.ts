@@ -123,3 +123,25 @@ describe('useRuleSelection persistence', () => {
     expect(result.current.isSelected('b2')).toBe(true)
   })
 })
+
+describe('useRuleSelection — an inventory still loading (#285)', () => {
+  it('keeps promoted exclusions while their metadata loads', () => {
+    localStorage.setItem('coverage.selection.jobA', JSON.stringify(['promoted']))
+    const { result, rerender } = renderHook(
+      ({ rules, complete }: { rules: SelectableRule[]; complete: boolean }) =>
+        useRuleSelection('jobA', rules, complete),
+      { initialProps: { rules: [] as SelectableRule[], complete: false } },
+    )
+    rerender({ rules: [rule('covered')], complete: false })
+    expect(localStorage.getItem('coverage.selection.jobA')).toBe(JSON.stringify(['promoted']))
+    rerender({ rules: [rule('covered'), rule('promoted')], complete: true })
+    expect(result.current.isSelected('promoted')).toBe(false)
+  })
+
+  it('prunes an exclusion the complete inventory no longer lists', () => {
+    localStorage.setItem('coverage.selection.jobA', JSON.stringify(['gone']))
+    const { result } = renderHook(() => useRuleSelection('jobA', [rule('covered')], true))
+    expect(result.current.isSelected('gone')).toBe(true)
+    expect(localStorage.getItem('coverage.selection.jobA')).toBe('[]')
+  })
+})
