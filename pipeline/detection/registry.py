@@ -147,8 +147,15 @@ def _overlay_lock(config_path: Path) -> Iterator[None]:
 def _write_overlay_file(config_path: str | Path, corpora: list[dict]) -> None:
     """Replace the overlay in one step: write a sibling `.tmp`, then `os.replace` it
     over the overlay, so a reader or a crash never sees half a file. The caller
-    holds `_overlay_lock`."""
-    overlay = _local_overlay_path(Path(config_path))
+    holds `_overlay_lock`.
+
+    The path is resolved first (#371). In the Docker image the overlay is a symlink
+    into the state volume (`/app/detection_corpora.local.yaml` → `/app/state/...`),
+    and `/app` is read-only: a `.tmp` beside the link would fail, and `os.replace`
+    over the link would turn it into a plain file that never reaches the volume. So
+    the `.tmp` sits beside the real file, and the replace stays atomic on one
+    filesystem. `resolve()` also follows a link whose target does not exist yet."""
+    overlay = _local_overlay_path(Path(config_path)).resolve()
     tmp = overlay.with_name(overlay.name + ".tmp")
     tmp.write_text(
         yaml.safe_dump({"corpora": corpora}, sort_keys=False, allow_unicode=True),

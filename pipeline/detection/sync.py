@@ -88,19 +88,25 @@ GIT_HARDENING: tuple[str, ...] = (
 GIT_ENV: dict[str, str] = {"GIT_ALLOW_PROTOCOL": "https", "GIT_TERMINAL_PROMPT": "0"}
 
 
+def _is_empty_dir(path: Path) -> bool:
+    """An existing folder with nothing in it: what an interrupted clone leaves behind.
+    git clones into it, so it is not a checkout to pull (#367)."""
+    return path.is_dir() and not any(path.iterdir())
+
+
 def git_command(corpus: dict) -> list[str] | None:
     """The git command to fetch one corpus: `clone --depth 1` when the local
-    `path` is missing, else `pull --ff-only`, both with GIT_HARDENING. Returns
-    None when the corpus has no `git` remote (its path is managed manually).
-    The pull is only safe once clone_mismatch(corpus) is None: callers check it
-    first (#367)."""
+    `path` is missing or an empty folder, else `pull --ff-only`, both with
+    GIT_HARDENING. Returns None when the corpus has no `git` remote (its path is
+    managed manually). The pull is only safe once clone_mismatch(corpus) is None:
+    callers check it first (#367)."""
     remote = corpus.get("git")
     if not remote:
         return None
     path = Path(str(corpus.get("path") or ""))
     if str(path) in ("", "."):
         raise ValueError("no path configured")
-    if path.exists():
+    if path.exists() and not _is_empty_dir(path):
         return ["git", *GIT_HARDENING, "-C", str(path), "pull", "--ff-only"]
     path.parent.mkdir(parents=True, exist_ok=True)
     return ["git", *GIT_HARDENING, "clone", "--depth", "1", remote, str(path)]
@@ -163,22 +169,30 @@ def clone_mismatch(corpus: dict) -> str | None:
     `git -C` climbs to the parent checkout and would pull that one instead. A clone
     whose `origin` is not the configured `git` remote is refused too: the pull would
     contact the old repository. A missing `path` is None, since git_command clones
-    it. Nothing is deleted here, the folder is the user's to remove. The API answers
-    the reason with a 409, the CLI prints it and counts a failure."""
+    it, and so is an empty folder (left by an interrupted clone): git clones into it.
+    A folder git refuses with "dubious ownership" (owned by another user) gets a
+    reason that names `safe.directory`. Nothing is deleted here, the folder is the
+    user's to remove. The API answers the reason with a 409, the CLI prints it and
+    counts a failure."""
     remote = corpus.get("git")
     if corpus.get("tarball") or not remote:
         return None
     path = Path(str(corpus.get("path") or ""))
-    if str(path) in ("", ".") or not path.exists():
+    if str(path) in ("", ".") or not path.exists() or _is_empty_dir(path):
         return None
     try:
         top = _git_query(path, "rev-parse", "--show-toplevel")
+        if top.returncode != 0 and "dubious ownership" in (top.stderr or ""):
+            return (f"{path} belongs to another user, and git refuses to read it "
+                    f"(safe.directory) — run `git config --global --add safe.directory {path}` "
+                    "or change its owner, then Redownload")
         if top.returncode != 0:
             return (f"{path} exists but is not a git clone of its own (no git repository there) "
                     "— remove it or choose another path, then Redownload")
         if Path(top.stdout.strip()).resolve() != path.resolve():
             # The enclosing checkout's path stays out of the message: it is a
-            # server path, and this text reaches the browser.
+            # server path, and this text reaches the browser. The configured
+            # `path`, typed by the user or the default, is in it.
             return (f"{path} exists but is not a git clone of its own "
                     "(it sits inside another checkout) "
                     "— remove it or choose another path, then Redownload")

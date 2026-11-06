@@ -86,6 +86,7 @@ def test_git_command_clones_when_path_missing_and_pulls_when_present(tmp_path: P
     assert cmd[-5:] == ["clone", "--depth", "1", "https://example.com/repo.git", str(path)]
 
     path.mkdir()
+    (path / "README").write_text("", encoding="utf-8")   # a checkout is present; an empty folder is cloned (#367)
     cmd = git_command(corpus)
     assert cmd[-4:] == ["-C", str(path), "pull", "--ff-only"]
 

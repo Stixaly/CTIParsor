@@ -120,7 +120,8 @@ def test_a_folder_that_is_not_its_remotes_clone_fails_before_git_runs_issue_367(
     ran: list = []
     plain = tmp_path / "plain"
     plain.mkdir()
-    stray = {"name": "stray", "git": "https://example.org/stray.git", "path": str(plain)}
+    (plain / "notes.txt").write_text("", encoding="utf-8")   # not empty: an empty folder is cloned (#367)
+    stray ={"name": "stray", "git": "https://example.org/stray.git", "path": str(plain)}
     good = {"name": "good", "git": "https://example.org/good.git", "path": str(tmp_path / "good")}
 
     status, out = sync(monkeypatch, capsys, [stray, good], command=lambda corpus: ["git", "pull", corpus["name"]],

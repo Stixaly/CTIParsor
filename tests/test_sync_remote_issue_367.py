@@ -87,6 +87,7 @@ def test_a_plain_folder_inside_another_checkout_is_not_a_clone_issue_367(tmp_pat
     parent = _clone_of(tmp_path, ORIGIN_A)
     folder = parent / "corpus"
     folder.mkdir()
+    (folder / "notes.txt").write_text("", encoding="utf-8")   # not empty: an empty folder is cloned (#367)
     corpus = {"name": "a", "path": str(folder), "git": ORIGIN_A}
 
     message = clone_mismatch(corpus)
@@ -147,6 +148,35 @@ def test_a_clone_without_origin_is_refused_issue_367(tmp_path):
     message = clone_mismatch({"name": "b", "path": str(repo), "git": REMOTE_B})
 
     assert message is not None and "no origin remote" in message
+
+
+def test_a_folder_owned_by_another_user_names_safe_directory_issue_367(tmp_path, monkeypatch):
+    """git refuses a repository owned by another user ("dubious ownership"). The message
+    must say so and give the fix, not claim there is no repository to remove."""
+    folder = tmp_path / "theirs"
+    folder.mkdir()
+    (folder / "README").write_text("", encoding="utf-8")
+    stderr = f"fatal: detected dubious ownership in repository at '{folder}'\n"
+    monkeypatch.setattr(sync_mod, "_git_query", lambda path, *args: subprocess.CompletedProcess(
+        args=[], returncode=128, stdout="", stderr=stderr))
+
+    message = clone_mismatch({"name": "b", "path": str(folder), "git": REMOTE_B})
+
+    assert message == (f"{folder} belongs to another user, and git refuses to read it (safe.directory) "
+                       f"— run `git config --global --add safe.directory {folder}` "
+                       "or change its owner, then Redownload")
+    assert "no git repository" not in message and "remove it" not in message
+
+
+def test_an_empty_folder_is_cloned_not_refused_issue_367(tmp_path):
+    """An interrupted clone leaves an empty folder: git clones into it, so there is
+    no clone to check and the command is a clone, not a pull."""
+    folder = tmp_path / "half"
+    folder.mkdir()
+    corpus = {"name": "b", "path": str(folder), "git": REMOTE_B}
+
+    assert clone_mismatch(corpus) is None
+    assert git_command(corpus)[-5:] == ["clone", "--depth", "1", REMOTE_B, str(folder)]
 
 
 def test_the_api_answers_409_and_never_fetches_issue_367(temp_db, temp_db_client, tmp_path, monkeypatch):

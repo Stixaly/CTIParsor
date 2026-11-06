@@ -6,6 +6,7 @@ the empty overlay and is held before its write until B tries to read. With the
 lock, B waits for A's write, A's wait runs out after one second, and nothing
 deadlocks.
 """
+import os
 import threading
 
 import pytest
@@ -89,3 +90,53 @@ def test_failed_overlay_write_keeps_the_previous_overlay_issue_371(tmp_path, mon
     with pytest.raises(OSError):
         registry.add_corpus(config, _entry("lost"))
     assert overlay.read_text(encoding="utf-8") == before
+
+
+@pytest.mark.parametrize("target_exists", [False, True], ids=["target-missing", "target-present"])
+def test_overlay_symlink_stays_a_link_and_its_target_is_written_issue_371(tmp_path, target_exists):
+    """The Docker image links the overlay (`/app/detection_corpora.local.yaml`) to the
+    state volume (`/app/state/...`). The write must keep the link, write the target,
+    and leave its `.tmp` beside the target, not beside the link."""
+    app = tmp_path / "app"
+    state = tmp_path / "state"
+    app.mkdir()
+    state.mkdir()
+    config = app / "detection_corpora.yaml"
+    config.write_text("corpora: []\n", encoding="utf-8")
+    target = state / "detection_corpora.local.yaml"
+    if target_exists:
+        target.write_text(yaml.safe_dump({"corpora": [_entry("old")]}), encoding="utf-8")
+    link = app / "detection_corpora.local.yaml"
+    link.symlink_to(target)
+
+    registry.add_corpus(config, _entry("new"))
+
+    assert link.is_symlink()
+    assert link.resolve() == target.resolve()
+    final = yaml.safe_load(target.read_text(encoding="utf-8"))["corpora"]
+    assert [c["name"] for c in final] == (["old", "new"] if target_exists else ["new"])
+    assert sorted(p.name for p in app.iterdir()) == ["detection_corpora.local.yaml", "detection_corpora.yaml"]
+
+
+def test_overlay_in_a_read_only_folder_is_written_through_its_link_issue_371(tmp_path):
+    """The Docker image runs with a read-only `/app`. The `.tmp` used to be created
+    beside the link, which raised PermissionError (a 500 on every registry write)."""
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root ignores directory permissions")
+    app = tmp_path / "app"
+    state = tmp_path / "state"
+    app.mkdir()
+    state.mkdir()
+    config = app / "detection_corpora.yaml"
+    config.write_text("corpora: []\n", encoding="utf-8")
+    target = state / "detection_corpora.local.yaml"
+    (app / "detection_corpora.local.yaml").symlink_to(target)
+
+    app.chmod(0o555)
+    try:
+        registry.add_corpus(config, _entry("new"))
+    finally:
+        app.chmod(0o755)
+
+    final = yaml.safe_load(target.read_text(encoding="utf-8"))["corpora"]
+    assert [c["name"] for c in final] == ["new"]
