@@ -191,6 +191,10 @@ pipeline still produces valid STIX. ML models are downloaded once and cached.
   `gh release verify v0.2.0` checks GitHub's release attestation. Its
   archive, its SBOM and its image pass the pinned verify commands of its
   notes (checked 2026-10-30).
+  [v0.3.0](https://github.com/Stixaly/CTIParsor/releases/tag/v0.3.0),
+  published on 2026-11-02 from the tag `v0.3.0` on commit e226775, is
+  immutable too; on 2026-11-06 GHCR served its digest for `0.3.0`, `0.3`
+  and the commit's `sha-` name.
 
 ### Not shipped
 **diskcache** (PYSEC-2026-2447 / CVE-2025-69872 / GHSA-w8v5-vhqr-4h9v,
@@ -227,7 +231,7 @@ added together.
 ## Supported versions
 Fixes land on `main` and ship in the next release. Only the latest release is
 supported: [the Releases page](https://github.com/Stixaly/CTIParsor/releases/latest)
-names it (0.2.0 since 2026-10-29).
+names it (0.3.0 since 2026-11-02).
 
 ## Reporting a vulnerability
 Report it privately:

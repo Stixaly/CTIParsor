@@ -26,7 +26,7 @@ from scripts import clean_install_journey as journey
 ROOT = Path(__file__).resolve().parent.parent
 CHECK = ROOT / "scripts" / "check_clean_install.sh"
 RELEASES = "https://github.com/Stixaly/CTIParsor/releases/download/"
-DIGEST_0_2_0 = "sha256:f7ea0d3f9d44692b8b08ed31dae5b1738ab19a88bc1cce856d7a297320c95526"
+DIGEST_0_3_0 = "sha256:cf6bdc47e541aefc9816b3f1dee492d0729acac08c83dbf9690206882d4a69c8"
 CANDIDATE = "ghcr.io/stixaly/ctiparsor@sha256:" + "0" * 64
 TOOLS = ("bash", "curl", "git", "tar", "sha256sum", "free", "df", "python3")
 
@@ -79,7 +79,7 @@ def test_a_missing_or_doubled_block_stops_the_check(tmp_path):
                       encoding="utf-8")
     with pytest.raises(journey.Refused, match="2 block"):
         journey.read_blocks(tmp_path)
-    readme.write_text(text.replace("version=0.2.0 digest=", "version=0.2.0 hash="), encoding="utf-8")
+    readme.write_text(text.replace("version=0.3.0 digest=", "version=0.3.0 hash="), encoding="utf-8")
     with pytest.raises(journey.Refused, match="values line"):
         journey.read_blocks(tmp_path)
 
@@ -89,11 +89,11 @@ def test_the_values_lines_name_the_latest_release_and_its_digest():
     install = dict(w.split("=", 1) for w in blocks["INSTALL_FILES"][0].split())
     upgrade = dict(w.split("=", 1) for w in blocks["UPGRADE_COMMANDS"][0].split())
     # The README installs the latest release; the upgrade's example moves to it.
-    assert install == {"version": "0.2.0", "digest": DIGEST_0_2_0}
-    assert upgrade == {"old": "0.1.0", "new": install["version"], "digest": install["digest"]}
+    assert install == {"version": "0.3.0", "digest": DIGEST_0_3_0}
+    assert upgrade == {"old": "0.2.0", "new": install["version"], "digest": install["digest"]}
     # docker.md names the same digest for that release.
     docker = (ROOT / "docs" / "docker.md").read_text(encoding="utf-8")
-    assert f"0.2.0, the latest release, is the image of commit ce59cfb, digest\n`{DIGEST_0_2_0}`" in docker
+    assert f"0.3.0, the latest release, is the image of commit e226775, digest\n`{DIGEST_0_3_0}`" in docker
 
 
 #: What no block may do: delete data, name a project (`-p X`, `-pX`, `-p=X`), run as root, or bypass the
