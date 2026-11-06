@@ -136,7 +136,7 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "A file and a mutex sharing a name are two SCOs with their own Indicators, and URLs whose paths "
      "differ in case stay two observables (Stage 2 and Stage 4); a deleted LLM technique stays out",
      "extraction"),
-    ("3da9cf5", "2026-11-06",
+    ("b8dd115", "2026-11-07",
      "The gazetteer context policy (apply mode) reads a contracted negation before an alias cue as "
      "a negation, and an apposition whose type noun follows a preposition no longer types the name",
      "extraction"),
