@@ -13,8 +13,9 @@ theme.
 
 #### Bug batch of 2026-11-06 (issues #359-#375)
 
-Two fixes change the bundles built from the same report (`BUNDLE_AFFECTING`:
-the gazetteer context policy in `apply` mode, and network-traffic Indicators).
+Four fixes change the bundles built from the same report (`BUNDLE_AFFECTING`:
+#359 and #360 in the gazetteer context policy's `apply` mode, #364 and #365 for
+network-traffic observables and Indicators).
 Stored bundles are not rebuilt until they are finalized or run again. The
 detection-rule fixes apply at the next corpus rebuild. No configuration change;
 the database schema is unchanged.
@@ -37,8 +38,10 @@ the database schema is unchanged.
   (#363), and the title searches keep canonical rules only (#362). The Sigma
   adapter skips and reports a file that is not UTF-8 instead of aborting the
   rebuild (#372), keeps the documents read before a YAML error (#373), and gives
-  each id-less document of a file its own storage id, so two such rules no
-  longer merge into one row (#375). `rebuild_store` lists the files it could not
+  each id-less rule of a file its own storage id, so two such rules no longer
+  merge into one row; the first rule of a file keeps its id (#375). Each rule of
+  a multi-document file still carries the whole file as its raw body, which a
+  Sigma `action: global` collection needs. `rebuild_store` lists the files it could not
   fully read under `file_errors`, and `build_detection_index.py` prints them.
 - **Corpus registry and sync.** Overlapping add/disable/remove requests no
   longer drop one another's update: the overlay is changed under a lock and

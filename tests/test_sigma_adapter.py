@@ -199,16 +199,31 @@ def test_ids_of_documents_without_id_are_stable_across_parses_issue_375(tmp_path
     assert first == second and len(set(first)) == 2
 
 
-def test_non_rule_document_still_counts_in_the_position_issue_375(tmp_path):
-    """A document that is not a rule keeps its place: the rule after it is not renumbered."""
+def test_non_rule_document_before_the_first_rule_does_not_shift_its_id_issue_375(tmp_path):
+    """A document that is not a rule (an `action: global` collection, say) does not count:
+    the first rule keeps the file's `content_hash[:16]`, and the second one is rank 1."""
     text = "just: a mapping\n---\n" + _NO_ID_PAIR
     (tmp_path / "mixed.yml").write_text(text, encoding="utf-8")
     rules = list(SigmaAdapter().parse(tmp_path, corpus="c"))
     assert [r.title for r in rules] == ["First rule", "Second rule"]
-    # The mapping is document 0, so "First rule" is document 1 and "Second rule" document 2.
     content_hash = rules[0].content_hash
-    assert rules[0].id == "c:" + hashlib.sha256(f"{content_hash}:1".encode("utf-8")).hexdigest()[:16]
-    assert rules[1].id == "c:" + hashlib.sha256(f"{content_hash}:2".encode("utf-8")).hexdigest()[:16]
+    assert rules[0].id == f"c:{content_hash[:16]}"
+    assert rules[1].id == "c:" + hashlib.sha256(f"{content_hash}:1".encode("utf-8")).hexdigest()[:16]
+
+
+def test_invalid_date_stops_the_file_and_keeps_the_rules_before_it_issue_373(tmp_path):
+    """`date: 2024-13-45` makes PyYAML raise ValueError, not YAMLError: the rule before it
+    is still produced, the file is reported as partly imported, and nothing escapes."""
+    (tmp_path / "dated.yml").write_text(
+        _SAMPLE + "---\ntitle: Dated\ndate: 2024-13-45\ndetection: {condition: x}\n", encoding="utf-8",
+    )
+    errors: list[tuple] = []
+    rules = list(SigmaAdapter().parse(
+        tmp_path, corpus="c", on_file_error=lambda path, message: errors.append((path, message)),
+    ))
+    assert [r.title for r in rules] == ["Suspicious PowerShell Encoded Command"]
+    assert [path for path, _ in errors] == [tmp_path / "dated.yml"]
+    assert "partially imported" in errors[0][1]
 
 
 def test_registry_loads_enabled_corpora_and_parses(tmp_path):

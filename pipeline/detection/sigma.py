@@ -7,7 +7,6 @@ SIEM backend, which is out of scope for ingestion/coverage.
 from __future__ import annotations
 
 import hashlib
-import itertools
 import json
 import re
 from collections.abc import Callable, Iterable
@@ -81,11 +80,14 @@ class SigmaAdapter(RuleCorpusAdapter):
 
         A file that cannot be read, is not UTF-8 or is not YAML is reported with a
         warning and through `on_file_error(path, message)` (#373). A YAML error stops
-        the reading of that file only: the documents before it are kept.
+        the reading of that file only: the documents before it are kept. So does an
+        invalid date (`date: 2024-13-45`, a ValueError from PyYAML) or a nesting too
+        deep for the parser (a RecursionError).
 
-        `_to_rule` receives the position of each document in its file, counting every
-        document read, rules or not (#375), so that two rules without an `id` in the
-        same file get distinct ids.
+        `_to_rule` receives the rank of each rule among the rules of its file: 0 for
+        the first rule produced, then 1, 2… Non-rule documents (a `action: global`
+        collection, say) do not count, so they do not shift the ids (#375). Two rules
+        without an `id` in the same file still get distinct ids.
         """
         root = Path(root)
         for path in self._iter_rule_files(root):
@@ -99,22 +101,24 @@ class SigmaAdapter(RuleCorpusAdapter):
                 _file_error(path, f"unreadable, skipped: {e}", on_file_error)  # don't crash the build
                 continue
             documents = yaml.safe_load_all(text)
-            for index in itertools.count():
+            rank = 0
+            while True:
                 try:
                     doc = next(documents)
                 except StopIteration:
                     break
-                except yaml.YAMLError as e:
-                    # The documents read before this one are already yielded; the rest of the file is lost (#373).
+                except (yaml.YAMLError, ValueError, RecursionError) as e:
+                    # The rules read before this one are already yielded; the rest of the file is lost (#373).
                     _file_error(path, f"YAML error, partially imported: {_one_line(e)}", on_file_error)
                     break
                 try:
-                    rule = self._to_rule(doc, text, path, corpus, license, index)
+                    rule = self._to_rule(doc, text, path, corpus, license, rank)
                 except Exception as e:  # noqa: BLE001 — one bad document must not stop the corpus
                     logger.warning(f"[detection] sigma document in {path} skipped: {e}")
                     continue
                 if rule is not None:
                     yield rule
+                    rank += 1
 
     @staticmethod
     def _iter_rule_files(root: Path) -> Iterable[Path]:
@@ -130,14 +134,15 @@ class SigmaAdapter(RuleCorpusAdapter):
         license: str,
         index: int = 0,
     ) -> DetectionRule | None:
-        """Build the rule of one YAML document of `text`.
+        """Build the rule of one YAML document of `text`, or None when it is not a rule.
 
-        `index` is the document's position in its file (0 for the first one, counting
-        every document read). It only matters for a document without a native `id`:
-        index 0 keeps the file's `content_hash[:16]` as its key, so single-document
-        files and first documents keep their ids; later ones hash their position in
-        the file. Two rules without an `id` in one file used to share the file's hash
-        and so one storage id (#375).
+        `index` is the rank of the rule among the rules of its file (0 for the first
+        rule produced, 1 for the next one…); `parse` counts only the documents that
+        return a rule, so a non-rule document before it does not change its id. It
+        only matters for a document without a native `id`: index 0 keeps the file's
+        `content_hash[:16]` as its key, so single-document files and first rules keep
+        their ids; later ones hash their rank in the file. Two rules without an `id`
+        in one file used to share the file's hash and so one storage id (#375).
 
         Known limit: `raw` and `content_hash` stay those of the whole file, so every
         rule of a multi-document file carries the same body (Sigma `action: global`
