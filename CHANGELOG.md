@@ -9,6 +9,15 @@ theme.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-06
+
+A fix release: the issue batches of 2026-11-03 to 2026-11-05 (#283-#354) across
+extraction, the STIX bundle, the detection store, the API, the air-gap scripts and
+the web UI, and the web capture's refusal of NUL bytes that keeps CVE-2026-116566
+unreachable. Several fixes change the bundles built from the same report
+(`BUNDLE_AFFECTING`); stored bundles are not rebuilt until they are finalized or
+run again. No configuration change; the database schema is unchanged.
+
 ### Fixed
 
 #### Follow-up of the 2026-11-05 batch (#289, #333, #287, CVE-2026-116566)
