@@ -25,7 +25,13 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from pipeline.detection.registry import load_corpora  # noqa: E402
-from pipeline.detection.sync import GIT_ENV, fetch_tarball, git_command, git_remote_refusal  # noqa: E402
+from pipeline.detection.sync import (  # noqa: E402
+    GIT_ENV,
+    clone_mismatch,
+    fetch_tarball,
+    git_command,
+    git_remote_refusal,
+)
 
 
 def _run(cmd: list[str]) -> bool:
@@ -68,6 +74,12 @@ def main() -> int:
                 # A refused remote is a failure, not a skip: package_offline_corpora.sh
                 # reads the exit code to know every corpus it asked for was fetched.
                 print(f"  ! {name}: {refusal}")
+                failed += 1
+                continue
+            # A folder that is not the clone of this remote is a failure too (#367).
+            mismatch = clone_mismatch(corpus)
+            if mismatch:
+                print(f"  ! {name}: {mismatch}")
                 failed += 1
                 continue
         try:

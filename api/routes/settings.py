@@ -18,7 +18,7 @@ from api.db import get_rule_conn
 from pipeline.detection.builder import rebuild_store
 from pipeline.detection.registry import _ADAPTERS, add_corpus, merged_corpora, remove_corpus
 from pipeline.detection.store import corpus_counts
-from pipeline.detection.sync import sync_corpus
+from pipeline.detection.sync import clone_mismatch, sync_corpus
 from pipeline.regex_safety import compile_pattern
 from pipeline.security import is_contained
 from pipeline.web_capture import CaptureError, validate_url
@@ -312,6 +312,8 @@ def sync_one_corpus(name: str):
     for the Settings "Redownload" button. Restricted to PUBLIC corpora: private
     ones must use the CLI so git credentials never flow through the app (ADR-0006).
     Cloning a large repo can take a while — the request blocks until git finishes.
+    A folder that is not the clone of this corpus's remote is a 409, checked before
+    any git command runs: the folder is removed by hand, never by this route (#367).
     """
     corpus = next((c for c in merged_corpora(_CONFIG) if c.get("name") == name), None)
     if corpus is None:
@@ -328,6 +330,10 @@ def sync_one_corpus(name: str):
             f"'{name}' is private — fetch it with `python scripts/sync_corpora.py` "
             "so git credentials stay out of the app",
         )
+
+    mismatch = clone_mismatch(corpus)
+    if mismatch:
+        raise HTTPException(409, mismatch)
 
     ok, detail = sync_corpus(corpus)
     if not ok:

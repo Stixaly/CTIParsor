@@ -114,6 +114,24 @@ def test_a_remote_on_a_private_host_fails_before_git_runs(monkeypatch, capsys, t
     assert out.splitlines()[-1] == f"[sync] 1/2 corpora synced, 1 failed. {LAST}"
 
 
+def test_a_folder_that_is_not_its_remotes_clone_fails_before_git_runs_issue_367(monkeypatch, capsys, tmp_path):
+    """#367: a plain folder where the corpus should be cloned is refused before git
+    runs, the reason is printed, and the other corpora still sync."""
+    ran: list = []
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    stray = {"name": "stray", "git": "https://example.org/stray.git", "path": str(plain)}
+    good = {"name": "good", "git": "https://example.org/good.git", "path": str(tmp_path / "good")}
+
+    status, out = sync(monkeypatch, capsys, [stray, good], command=lambda corpus: ["git", "pull", corpus["name"]],
+                       run=lambda cmd: ran.append(cmd) or True)
+
+    assert status == 1
+    assert f"! stray: {plain} exists but is not a git clone of its own" in out
+    assert ran == [["git", "pull", "good"]]
+    assert out.splitlines()[-1] == f"[sync] 1/2 corpora synced, 1 failed. {LAST}"
+
+
 def test_no_corpus_at_all_exits_0(monkeypatch, capsys):
     status, out = sync(monkeypatch, capsys, [])
 

@@ -337,6 +337,8 @@ def test_a_successful_sync_reingests_the_store(temp_db, temp_db_client, tmp_path
     cfg.write_text(cfg.read_text(encoding="utf-8") + "    git: https://h/demo.git\n", encoding="utf-8")
     synced = []
     monkeypatch.setattr(settings_mod, "sync_corpus", lambda c: synced.append(c["name"]) or (True, "up to date"))
+    # The demo folder is a plain copy, not a clone: the clone check (#367) has its own tests.
+    monkeypatch.setattr(settings_mod, "clone_mismatch", lambda c: None)
 
     r = temp_db_client.post("/api/settings/corpora/demo/sync").json()
 

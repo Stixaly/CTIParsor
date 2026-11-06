@@ -21,6 +21,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
+from urllib.parse import urlsplit, urlunsplit
 
 from api.logging_config import get_logger
 from pipeline.regex_safety import compile_pattern
@@ -90,7 +91,9 @@ GIT_ENV: dict[str, str] = {"GIT_ALLOW_PROTOCOL": "https", "GIT_TERMINAL_PROMPT":
 def git_command(corpus: dict) -> list[str] | None:
     """The git command to fetch one corpus: `clone --depth 1` when the local
     `path` is missing, else `pull --ff-only`, both with GIT_HARDENING. Returns
-    None when the corpus has no `git` remote (its path is managed manually)."""
+    None when the corpus has no `git` remote (its path is managed manually).
+    The pull is only safe once clone_mismatch(corpus) is None: callers check it
+    first (#367)."""
     remote = corpus.get("git")
     if not remote:
         return None
@@ -122,6 +125,80 @@ def git_remote_refusal(remote: str) -> str | None:
     except CaptureError as e:
         _, reason = _failed("git remote refused: not a safe remote to fetch", e)
         return reason
+    return None
+
+
+# Local git queries (rev-parse, remote get-url) do not touch the network; the timeout
+# only guards against a hung filesystem.
+_CHECK_TIMEOUT = 30
+
+
+def _git_query(path: Path, *args: str) -> subprocess.CompletedProcess:
+    """A local git query run in `path`, with the fetch's hardening and environment."""
+    return subprocess.run(["git", *GIT_HARDENING, "-C", str(path), *args],  # noqa: S603, S607 — local query, git from PATH
+                          capture_output=True, text=True, timeout=_CHECK_TIMEOUT,
+                          env={**os.environ, **GIT_ENV})
+
+
+def _without_credentials(remote: str) -> str:
+    """`remote` with any `user:pass@` taken out: a token in a remote must not reach
+    the browser, and the messages name both remotes."""
+    parts = urlsplit(remote.strip())
+    return urlunsplit(parts._replace(netloc=parts.netloc.rpartition("@")[2]))
+
+
+def _remote_key(remote: str) -> str:
+    """What two remotes must share to be the same repository: no credentials, scheme
+    and host in lower case, no trailing `/` and no `.git`."""
+    parts = urlsplit(_without_credentials(remote))
+    path = parts.path.rstrip("/")
+    if path.endswith(".git"):
+        path = path[:-4].rstrip("/")
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, "", ""))
+
+
+def clone_mismatch(corpus: dict) -> str | None:
+    """Why `git pull` must not run in the existing `path` of a git corpus, or None
+    when it may (#367). A folder that is not the root of its own clone is refused:
+    `git -C` climbs to the parent checkout and would pull that one instead. A clone
+    whose `origin` is not the configured `git` remote is refused too: the pull would
+    contact the old repository. A missing `path` is None, since git_command clones
+    it. Nothing is deleted here, the folder is the user's to remove. The API answers
+    the reason with a 409, the CLI prints it and counts a failure."""
+    remote = corpus.get("git")
+    if corpus.get("tarball") or not remote:
+        return None
+    path = Path(str(corpus.get("path") or ""))
+    if str(path) in ("", ".") or not path.exists():
+        return None
+    try:
+        top = _git_query(path, "rev-parse", "--show-toplevel")
+        if top.returncode != 0:
+            return (f"{path} exists but is not a git clone of its own (no git repository there) "
+                    "— remove it or choose another path, then Redownload")
+        if Path(top.stdout.strip()).resolve() != path.resolve():
+            # The enclosing checkout's path stays out of the message: it is a
+            # server path, and this text reaches the browser.
+            return (f"{path} exists but is not a git clone of its own "
+                    "(it sits inside another checkout) "
+                    "— remove it or choose another path, then Redownload")
+        origin = _git_query(path, "remote", "get-url", "origin")
+    except (OSError, subprocess.TimeoutExpired) as e:
+        _, reason = _failed(f"could not check {path} against its git remote", e)
+        return reason
+    if origin.returncode != 0:
+        return (f"{path} is a git clone with no origin remote "
+                f"— remove the folder to clone {_without_credentials(remote)}")
+    current = origin.stdout.strip()
+    try:
+        same = _remote_key(current) == _remote_key(remote)
+    except ValueError:   # urlsplit refuses e.g. unbalanced IPv6 brackets
+        return (f"{path} has an origin remote that cannot be parsed "
+                "— remove the folder to clone the configured remote")
+    if not same:
+        return (f"{path} is a clone of {_without_credentials(current)} but the corpus is "
+                f"configured for {_without_credentials(remote)} "
+                "— remove the folder to clone the new remote")
     return None
 
 
@@ -311,6 +388,9 @@ def sync_corpus(corpus: dict, *, timeout: int = 900) -> tuple[bool, str]:
     refusal = git_remote_refusal(str(corpus.get("git") or ""))
     if refusal:
         return False, refusal
+    mismatch = clone_mismatch(corpus)
+    if mismatch:
+        return False, mismatch
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,  # noqa: S603 — https remote
                               env={**os.environ, **GIT_ENV})
