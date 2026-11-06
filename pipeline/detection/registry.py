@@ -64,9 +64,19 @@ def _local_overlay_path(config_path: Path) -> Path:
     return config_path.with_name(f"{config_path.stem}.local{config_path.suffix}")
 
 
+#: The keys that name where a corpus's files come from. An overlay that names one
+#: of them replaces the committed source (#368); the other one is dropped.
+_SOURCE_KEYS = ("git", "tarball")
+
+
 def _merged(path: Path) -> list[dict]:
     """Committed registry with the local overlay merged over it (override by
-    `name`, append new). Includes disabled entries. See ADR-0006 Rev 3."""
+    `name`, append new). Includes disabled entries. See ADR-0006 Rev 3.
+
+    An overlay entry that names a source (`git` or `tarball`) chooses the source of
+    the merged entry: a source key the overlay does not set is dropped from the
+    committed entry, so the merged corpus never carries two URLs (#368). An overlay
+    with no source (e.g. `{"name": X, "enabled": False}`) keeps the committed source."""
     merged: dict[str, dict] = {}
     order: list[str] = []
     for entry in [*_read_corpora(path), *_read_corpora(_local_overlay_path(path))]:
@@ -74,6 +84,10 @@ def _merged(path: Path) -> list[dict]:
         if not name:
             continue
         if name in merged:
+            if any(entry.get(k) for k in _SOURCE_KEYS):
+                for k in _SOURCE_KEYS:
+                    if not entry.get(k):
+                        merged[name].pop(k, None)
             merged[name].update(entry)   # local overrides committed by name
         else:
             merged[name] = dict(entry)
