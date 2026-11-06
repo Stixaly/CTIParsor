@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useSyncExternalStore } from 'react'
 
 import { loadStringSet, saveStringSet, toggleInSet } from './sets'
 
@@ -13,6 +13,56 @@ export interface PromotedRules {
 }
 
 /**
+ * Shared store behind every instance of the hook (#366). The Review page and
+ * its Detections panel each call `usePromotedRules` for the same job; with a
+ * local `useState` in each, a promotion made in one was invisible to the other
+ * until a remount, so the Detection rules button and its ZIP ignored it.
+ *
+ * Each snapshot remembers the raw localStorage string it was read from. A set
+ * is only re-read when that string changed underneath it, so `getSnapshot`
+ * returns the same object across renders. When the write did not stick
+ * (storage unavailable or full), the snapshot keeps the in-memory set, since
+ * the stored string still matches what was recorded.
+ */
+const listeners = new Set<() => void>()
+const snapshots = new Map<string, { raw: string | null; set: ReadonlySet<string> }>()
+
+function readRaw(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    // localStorage unavailable (private browsing): the in-memory set is the only copy.
+    return null
+  }
+}
+
+function snapshotFor(key: string): ReadonlySet<string> {
+  const raw = readRaw(key)
+  const hit = snapshots.get(key)
+  if (hit && hit.raw === raw) return hit.set
+  const set = loadStringSet(key)
+  snapshots.set(key, { raw, set })
+  return set
+}
+
+// Persisted by the MUTATORS, never by an effect on the state — see the header
+// of `hooks/sets.ts` for the race that rule prevents.
+function writeSnapshot(key: string, next: ReadonlySet<string>): void {
+  saveStringSet(key, next)
+  snapshots.set(key, { raw: readRaw(key), set: next })
+  listeners.forEach((listener) => listener())
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+const EMPTY: ReadonlySet<string> = new Set()
+
+/**
  * Manages the set of rules promoted from proposals into the coverage selection.
  *
  * IMPORTANT: The storage key is `coverage.promoted.${jobId}`, which is
@@ -24,30 +74,25 @@ export interface PromotedRules {
  * NEVER purge this set against a list of known rules. A promoted rule is by
  * definition ABSENT from the coverage set, so purging would immediately
  * delete it. This is the trap of this file.
+ *
+ * Every instance for the same job shares one set (see `snapshotFor`), so a
+ * promotion or a removal shows up at once in each mounted consumer.
  */
 export function usePromotedRules(
   jobId: string | undefined
 ): PromotedRules {
-  const [promoted, setPromoted] = useState<ReadonlySet<string>>(
-    () => new Set()
+  const key = jobId === undefined ? undefined : `coverage.promoted.${jobId}`
+
+  const current = useCallback(
+    (): ReadonlySet<string> => (key === undefined ? EMPTY : snapshotFor(key)),
+    [key]
   )
+  const promoted = useSyncExternalStore(subscribe, current)
 
-  // Load from localStorage on mount and when jobId changes
-  useEffect(() => {
-    if (jobId === undefined) {
-      setPromoted(new Set())
-      return
-    }
-
-    setPromoted(loadStringSet(`coverage.promoted.${jobId}`))
-  }, [jobId])
-
-  // Persisted by the MUTATORS, never by an effect on `promoted` — see the
-  // header of `hooks/sets.ts` for the race that rule prevents.
   const persist = useCallback((next: ReadonlySet<string>) => {
-    if (jobId === undefined) return
-    saveStringSet(`coverage.promoted.${jobId}`, next)
-  }, [jobId])
+    if (key === undefined) return
+    writeSnapshot(key, next)
+  }, [key])
 
   const isPromoted = useCallback(
     (id: string) => promoted.has(id),
@@ -55,42 +100,28 @@ export function usePromotedRules(
   )
 
   const toggle = useCallback(
-    (id: string) => {
-      setPromoted((prev) => {
-        const next = toggleInSet(prev, id)
-        persist(next)
-        return next
-      })
-    },
-    [persist]
+    (id: string) => persist(toggleInSet(current(), id)),
+    [current, persist]
   )
 
   const promote = useCallback((ids: readonly string[]) => {
-    setPromoted((prev) => {
-      const next = new Set(prev)
-      for (const id of ids) {
-        next.add(id)
-      }
-      persist(next)
-      return next
-    })
-  }, [persist])
+    const next = new Set(current())
+    for (const id of ids) {
+      next.add(id)
+    }
+    persist(next)
+  }, [current, persist])
 
   const demote = useCallback((ids: readonly string[]) => {
-    setPromoted((prev) => {
-      const next = new Set(prev)
-      for (const id of ids) {
-        next.delete(id)
-      }
-      persist(next)
-      return next
-    })
-  }, [persist])
+    const next = new Set(current())
+    for (const id of ids) {
+      next.delete(id)
+    }
+    persist(next)
+  }, [current, persist])
 
   const clear = useCallback(() => {
-    const next: ReadonlySet<string> = new Set()
-    setPromoted(next)
-    persist(next)
+    persist(new Set())
   }, [persist])
 
   return useMemo(
