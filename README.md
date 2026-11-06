@@ -559,11 +559,11 @@ throughout (ADR-0015 / ADR-0022).
   then download a ZIP with each rule in its native extension and a manifest
   of licences and exclusions.
 
-The `bootstrap` run already clones the corpora and builds the rule store. Two
-things it leaves to you:
+The `bootstrap` run already clones the corpora and builds the rule store,
+including the rule-title index for brand evidence (ADR-0031, rebuilt with the
+store since #363). One thing it leaves to you:
 
 ```bash
-docker compose run --rm app python scripts/build_rule_text.py   # rule-title index for brand evidence (ADR-0031) — never built by bootstrap
 docker compose --profile bootstrap run --rm bootstrap bootstrap --no-models  # later: re-clone every corpus and rebuild the store
 ```
 

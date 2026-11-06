@@ -9,6 +9,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from api.db import transaction
+from pipeline.detection.brands import rebuild_rule_text
 from pipeline.detection.dedup import dedupe_store
 from pipeline.detection.registry import _ADAPTERS, _merged, corpus_root, load_corpora
 from pipeline.detection.store import corpus_counts, replace_corpus_rules
@@ -30,12 +32,19 @@ def rebuild_store(
     on_progress: Callable[[str, int | None], None] | None = None,
 ) -> dict:
     """Parse every enabled corpus's local clone and replace its rules in the store,
-    then run the cross-corpus dedup pass (ADR-0010).
+    then run the cross-corpus dedup pass (ADR-0010), then rebuild the rule_text
+    title index over the canonical rules that pass elected (ADR-0031, #363).
+
+    The index is rebuilt last because replacing a corpus deletes its rules and
+    their rule_text rows (foreign key), and nothing else refills them: without
+    this step a rebuild erased the title and description matches (CVE and brand
+    evidence) until someone ran scripts/build_rule_text.py.
 
     Returns a summary: rules written per corpus, corpora skipped (missing clone /
     unknown adapter), corpora removed (disabled or no longer in the registry,
-    their rules deleted), the grand total, the dedup result, and per-corpus counts
-    (each now carrying a `canonical` figure alongside the raw `rules` total).
+    their rules deleted), the grand total, the dedup result, the rule_text bilan
+    (`rows` written, `empty_bodies` skipped, see rebuild_rule_text), and per-corpus
+    counts (each now carrying a `canonical` figure alongside the raw `rules` total).
     `file_errors` maps each corpus whose files were not fully read to a list of
     `{"path": <relative to the corpus root>, "error": <message>}` (#373): a file
     that is unreadable, not UTF-8, or broken YAML past its first documents. Such a
@@ -98,6 +107,11 @@ def rebuild_store(
     if on_progress:
         on_progress("dedup", None)
     dedup = dedupe_store(conn, priority)
+    # One transaction, so a failure leaves the previous index in place rather
+    # than an empty one. dedupe_store has already committed, so the canonical
+    # flags read here are the elected ones.
+    with transaction(conn):
+        rule_text = rebuild_rule_text(conn)
     return {
         "written": written,
         "skipped": skipped,
@@ -105,5 +119,6 @@ def rebuild_store(
         "file_errors": file_errors,
         "total": sum(written.values()),
         "dedup": dedup,
+        "rule_text": rule_text,
         "counts": corpus_counts(conn),
     }

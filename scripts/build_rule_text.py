@@ -5,6 +5,11 @@ A brand token is looked up here in 0.4ms; the same lookup as a scan of
 `detection_rules` measured 4.1s, and two such sweeps cost 12.8s on one report
 against a panel that answers in 2.9s. Rebuild whenever the rule corpora change —
 a stale index under-reports, and every hit is re-checked against the live row.
+
+Since #363 the rule-store rebuild (scripts/build_detection_index.py and the
+Settings page) rebuilds this index too, so running this script by hand is only
+needed to refresh it without re-reading the corpora. The work is done by
+pipeline.detection.brands.rebuild_rule_text.
 """
 import argparse
 import os
@@ -14,6 +19,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from api.db import DB_ERRORS, get_rule_conn, init_db
+from pipeline.detection.brands import rebuild_rule_text
 
 
 def main() -> int:
@@ -32,7 +38,6 @@ def main() -> int:
 
     try:
         conn.execute("BEGIN")
-        conn.execute("DELETE FROM rule_text")
     except DB_ERRORS as exc:
         print(f"[rule-text] cannot start the rebuild: {exc}")
         return 1
@@ -41,35 +46,18 @@ def main() -> int:
     print("─" * 50)
 
     start = time.perf_counter()
-    rows_written = 0
-    empty_bodies = 0
-    batch: list[tuple[str, str]] = []
-
-    cur = conn.execute(
-        "SELECT id, COALESCE(title,''), COALESCE(description,'') "
-        "FROM detection_rules WHERE is_canonical=1"
-    )
-    for rule_id, title, description in cur:
-        body = f"{title} {description}".strip().lower()
-        if not body:
-            empty_bodies += 1
-            continue
-        batch.append((rule_id, body))
-        if len(batch) >= args.batch:
-            conn.executemany("INSERT INTO rule_text (rule_id, body) VALUES (?,?)", batch)
-            rows_written += len(batch)
-            batch = []
-
-    if batch:
-        conn.executemany("INSERT INTO rule_text (rule_id, body) VALUES (?,?)", batch)
-        rows_written += len(batch)
-
+    try:
+        result = rebuild_rule_text(conn, batch=args.batch)
+    except DB_ERRORS as exc:
+        conn.rollback()
+        print(f"[rule-text] the rebuild failed, the index is unchanged: {exc}")
+        return 1
     conn.commit()
     elapsed = time.perf_counter() - start
 
     print(f"  rules scanned         {total}")
-    print(f"  rows written          {rows_written}")
-    print(f"  empty bodies            {empty_bodies}")
+    print(f"  rows written          {result['rows']}")
+    print(f"  empty bodies            {result['empty_bodies']}")
     print(f"  elapsed                 {elapsed:.1f}s")
     print("[rule-text] done.")
     return 0

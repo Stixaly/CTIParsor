@@ -412,7 +412,8 @@ CREATE TABLE figure_reads (
 );
 
 -- Full-text index over rule title+description (ADR-0031), 0.4 ms instead of
--- 4.1 s.  Populated offline by scripts/build_rule_text.py; brand evidence is
+-- 4.1 s.  Rebuilt with the rule store (rebuild_store, #363) and by
+-- scripts/build_rule_text.py; brand evidence is
 -- simply absent while the table is empty, exactly as proposals degrade while
 -- the atom index is unbuilt.  No corpus re-clone.  A plain table since
 -- ADR-0053, not a SQLite FTS5 virtual one: body_tsv is a GENERATED column,

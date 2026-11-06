@@ -14,6 +14,7 @@ from pipeline.detection.brands import (
     brand_tokens,
     campaign_tokens,
     cve_evidence,
+    rebuild_rule_text,
 )
 
 
@@ -225,3 +226,37 @@ def test_cve_evidence_does_not_match_a_different_cve(temp_db):
     conn = _store(temp_db.get_rule_conn(), rows)
     evidence = cve_evidence(conn, ["CVE-2024-3400"])
     assert evidence == {}
+
+
+# ── rebuild_rule_text (#363) ─────────────────────────────────────────────────
+
+def test_rebuild_rule_text_indexes_canonical_rules_and_skips_empty_bodies(temp_db):
+    conn = temp_db.get_rule_conn()
+    rules = [
+        ("r1", "Okta FastPass Phishing", "", 1),
+        ("r2", "", "", 1),                       # empty body: counted, not indexed
+        ("r3", "Okta FastPass copy", "", 0),     # demoted by dedup: not indexed
+    ]
+    for rid, title, description, canonical in rules:
+        conn.execute(
+            "INSERT INTO detection_rules (id, corpus, native_key, title, description, is_canonical) "
+            "VALUES (?,?,?,?,?,?)",
+            (rid, "test", rid, title, description, canonical),
+        )
+    # A row left behind for r3 from before it was demoted: the rebuild drops it.
+    conn.execute("INSERT INTO rule_text (rule_id, body) VALUES (?,?)", ("r3", "okta fastpass copy"))
+    conn.commit()
+
+    result = rebuild_rule_text(conn)
+    assert result == {"rows": 1, "empty_bodies": 1}
+    rows = conn.execute("SELECT rule_id, body FROM rule_text").fetchall()
+    assert [(r[0], r[1]) for r in rows] == [("r1", "okta fastpass phishing")]
+
+
+def test_rebuild_rule_text_writes_in_batches(temp_db):
+    conn = _store(temp_db.get_rule_conn(), [
+        ("r1", "Alpha", ""), ("r2", "Beta", ""), ("r3", "Gamma", ""),
+    ])
+    result = rebuild_rule_text(conn, batch=2)
+    assert result == {"rows": 3, "empty_bodies": 0}
+    assert conn.execute("SELECT COUNT(*) FROM rule_text").fetchone()[0] == 3

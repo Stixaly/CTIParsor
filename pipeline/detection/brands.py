@@ -171,6 +171,44 @@ def rule_text_built(conn: DBConnection) -> bool:
         return False
 
 
+def rebuild_rule_text(conn: DBConnection, *, batch: int = 2000) -> dict:
+    """Replace the rule_text index with one row per canonical rule (ADR-0031).
+
+    Deletes every row, then indexes the title and description of each rule with
+    `is_canonical=1` as one lower-cased string. A rule with an empty body is not
+    indexed. Returns `{"rows": <rows written>, "empty_bodies": <rules skipped>}`.
+
+    Opens no transaction and commits none: the caller wraps it (rebuild_store and
+    scripts/build_rule_text.py do), so a failure can roll the index back. Called
+    after the dedup pass, it indexes only the elected canonical rules, which is
+    why a rebuild of the rule store no longer leaves the index stale (#363).
+    """
+    conn.execute("DELETE FROM rule_text")
+    rows_written = 0
+    empty_bodies = 0
+    pending: list[tuple[str, str]] = []
+
+    cur = conn.execute(
+        "SELECT id, COALESCE(title,''), COALESCE(description,'') "
+        "FROM detection_rules WHERE is_canonical=1"
+    )
+    for rule_id, title, description in cur:
+        body = f"{title} {description}".strip().lower()
+        if not body:
+            empty_bodies += 1
+            continue
+        pending.append((rule_id, body))
+        if len(pending) >= batch:
+            conn.executemany("INSERT INTO rule_text (rule_id, body) VALUES (?,?)", pending)
+            rows_written += len(pending)
+            pending = []
+
+    if pending:
+        conn.executemany("INSERT INTO rule_text (rule_id, body) VALUES (?,?)", pending)
+        rows_written += len(pending)
+    return {"rows": rows_written, "empty_bodies": empty_bodies}
+
+
 def brand_tokens(conn: DBConnection, domains: Iterable[str]) -> list[BrandToken]:
     """Find brand tokens that appear in a limited number of canonical rules."""
     counts = campaign_tokens(domains)
