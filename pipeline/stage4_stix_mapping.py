@@ -2208,12 +2208,16 @@ _HOST_SCO = {"ipv4-addr": stix2.IPv4Address, "ipv6-addr": stix2.IPv6Address,
 
 
 def _network_traffic_sco(value: str, scos: list, value_to_sco: dict, canonical_to_sco: dict,
-                         ledger: MappingLedger | None):
+                         ledger: MappingLedger | None, typed: dict | None = None):
     """A `network-traffic` to the destination `value` names, or None (ADR-0069).
 
     The destination is the observable already built for that host, or a new
     one (recorded in the ledger as the traffic's endpoint).  It used to be a
     `Software(name=value)` placeholder, which lost the type and the endpoint.
+
+    typed: the (type, value) -> SCO index of `_map_iocs_to_scos_typed`.  A new
+    host goes in it too, so an entity naming that host later is the same
+    observable, not a second object with the same id (#364).
     """
     d = parse_network_traffic(value)
     if d is None:
@@ -2223,6 +2227,8 @@ def _network_traffic_sco(value: str, scos: list, value_to_sco: dict, canonical_t
         host = _HOST_SCO[d.host_type](value=d.host)
         scos.append(host)
         value_to_sco[d.host] = canonical_to_sco[d.host] = host
+        if typed is not None:
+            typed[(_SCO_ENTITY_TYPE[d.host_type].value, d.host.lower())] = host
         if ledger is not None:
             ledger.object(host, "network_traffic_endpoint", traffic=value)
     kwargs: dict = {"dst_ref": host.id, "protocols": list(d.protocols)}
@@ -2326,7 +2332,7 @@ def _map_iocs_to_scos_typed(
             continue
         canonical_key = _expand_registry_hive(entity.value).lower()
         if entity.entity_type == EntityType.NETWORK_TRAFFIC:
-            sco = _network_traffic_sco(entity.value, scos, value_to_sco, canonical_to_sco, ledger)
+            sco = _network_traffic_sco(entity.value, scos, value_to_sco, canonical_to_sco, ledger, typed)
         else:
             sco = _entity_to_sco(entity)
         if sco is not None:
