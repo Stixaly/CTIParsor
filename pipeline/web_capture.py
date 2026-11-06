@@ -377,6 +377,11 @@ def _resolve_all(host: str) -> list[str]:
     flips to a private address mid-render cannot be used to walk past the check
     that already passed.
     """
+    # CPython before 3.16 truncates a host at a NUL byte (CVE-2026-116566):
+    # "public.example\0.internal" would be checked as one host and fetched
+    # as another.  No host name holds one, so it is refused before resolving.
+    if "\x00" in host:
+        raise CaptureError("Host contains a NUL byte")
     try:
         results = socket.getaddrinfo(host, None)
     except (socket.gaierror, UnicodeError, OSError) as e:
@@ -580,6 +585,9 @@ def validate_url(raw_url: str) -> str:
         raise CaptureError("Empty URL")
 
     url = raw_url.strip()
+    if "\x00" in url:
+        # See _resolve_all: getaddrinfo would read a host cut at the NUL.
+        raise CaptureError("URL contains a NUL byte")
     if "://" not in url:
         url = f"https://{url}"
 

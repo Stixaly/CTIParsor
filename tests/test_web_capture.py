@@ -695,3 +695,14 @@ def test_load_error_leaves_other_failures_unannotated():
     exc = Exception("Page.goto: net::ERR_NAME_NOT_RESOLVED at https://nope.example/")
     msg = web_capture._load_error_message("https://nope.example/", exc)
     assert msg == f"Could not load https://nope.example/: {exc}"
+
+
+@pytest.mark.parametrize("url", ["https://public.example\x00.internal/", "https://example.com/a\x00b"])
+def test_a_nul_byte_is_refused_before_any_resolution(url, monkeypatch):
+    # CVE-2026-116566: CPython < 3.16 truncates a getaddrinfo host at a NUL.
+    monkeypatch.setattr(web_capture.socket, "getaddrinfo", lambda *a: pytest.fail("must not resolve"))
+    with pytest.raises(CaptureError, match="NUL"):
+        validate_url(url)
+    web_capture._resolve_all.cache_clear()
+    with pytest.raises(CaptureError, match="NUL"):
+        web_capture._resolve_all("public.example\x00.internal")

@@ -126,3 +126,17 @@ def test_stem_strips_one_extension_only():
 def test_host_cuts_at_leftmost_delimiter():
     assert _host("host?a=/b") == "host"
     assert _host("http://user:pass@h.example.com:8080/p") == "h.example.com"
+
+
+def test_a_url_on_a_shared_hosting_domain_is_classified_on_its_path():
+    # #333: the bucket and object are the attacker's, the host is everyone's.
+    assert discrimination("url", "https://s3.amazonaws.com/apt-c2-bucket/beacon.dll") == DISCRIMINATING
+    assert discrimination("url", "https://evil.blob.core.windows.net/x/payload.exe") == DISCRIMINATING
+    assert discrimination("url", "https://s3.amazonaws.com/") == UBIQUITOUS
+    assert discrimination("domain", "s3.amazonaws.com") == UBIQUITOUS
+    assert discrimination("url", "https://gmail.com/x") == UBIQUITOUS     # a service, not hosting
+
+
+def test_every_hosting_domain_is_a_ubiquitous_domain():
+    from pipeline.detection.control import UBIQUITOUS_DOMAINS, UBIQUITOUS_HOSTING_DOMAINS
+    assert UBIQUITOUS_HOSTING_DOMAINS <= UBIQUITOUS_DOMAINS
