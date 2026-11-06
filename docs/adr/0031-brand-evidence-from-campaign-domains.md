@@ -81,11 +81,17 @@ Recurrence *is* the noise filter, which is what makes this safe without a
 maintained product list.
 
 ```
+domain     = full name, lower-cased, trailing dot and leading "www." removed ("WWW.Okta.com." → "okta.com")
 label      = registrable name minus TLD, dots and hyphens   ("oktaenroll.com" → "oktaenroll")
 candidates = substrings of length 4..14 occurring in ≥ 3 distinct domains
 maximal    = drop s when a longer t exists with s ⊂ t and df(t) ≥ df(s)
 brand      = maximal token that is not a stopword and names 1..50 canonical rules
 ```
+
+"Distinct domains" means distinct normalised full names, counted before the TLD
+is cut: `frostledger.com`, `frostledger.net` and `frostledger.org` are three
+domains, all sharing the label `frostledger`, so the theme `frostledger` has
+df 3 (issue #361). Repeating one full name never raises the count.
 
 Measured across five real reports:
 

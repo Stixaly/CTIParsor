@@ -70,6 +70,36 @@ def test_the_same_domain_twice_counts_once():
     assert tokens.get("okta") == 3
 
 
+def test_three_distinct_domains_sharing_a_name_count_as_three_issue_361():
+    """Three TLDs of one name are three domains, not one label seen three times.
+
+    Before the fix the labels were deduplicated after the TLD was cut, so this
+    collapsed to `{}` and the coverage walk never searched for the theme.
+    """
+    domains = ["frostledger.com", "frostledger.net", "frostledger.org"]
+    assert campaign_tokens(domains) == {"frostledger": 3}
+
+
+def test_one_domain_repeated_three_times_is_still_no_theme_issue_361():
+    domains = ["frostledger.com"] * 3
+    assert campaign_tokens(domains) == {}
+
+
+def test_distinct_names_still_recur_across_domains_issue_361():
+    domains = ["idokta.com", "keyokta.com", "oktaenroll.com"]
+    assert campaign_tokens(domains) == {"okta": 3}
+
+
+def test_spellings_of_one_host_count_once():
+    """Case, a trailing dot and a leading `www.` name the same host.
+
+    `www.frostledger.com` and `frostledger.com` are one domain, so the two
+    entries plus `frostledger.net` make two domains, not three.
+    """
+    domains = ["Frostledger.com", "www.frostledger.com.", "frostledger.net"]
+    assert campaign_tokens(domains) == {}
+
+
 def test_domain_stopwords_never_become_brands(temp_db):
     domains = ["passkey1.com", "passkey2.com", "passkey3.com", "passkey4.com"]
     rows = [

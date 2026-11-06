@@ -93,6 +93,17 @@ DOMAIN_STOPWORDS: frozenset[str] = frozenset({
 })
 
 
+def _domain_key(domain: str) -> str:
+    """Normalise a full domain for counting: case, trailing dot, leading `www.`.
+
+    Two spellings of one host are one domain; two TLDs of one name are two.
+    """
+    key = domain.strip().lower().rstrip(".")
+    if key.startswith("www."):
+        key = key[len("www."):]
+    return key
+
+
 def _label(domain: str) -> str:
     """Extract the registrable label without TLD, dots, or hyphens."""
     if "." in domain:
@@ -126,15 +137,20 @@ def _maximal(counts: dict[str, int]) -> dict[str, int]:
 
 
 def campaign_tokens(domains: Iterable[str]) -> dict[str, int]:
-    """Recurring substrings across a campaign's domain labels → domain count."""
+    """Recurring substrings across a campaign's domains → distinct domain count.
+
+    Deduplication happens on the full normalised domain, before the TLD is cut:
+    `frostledger.com`, `.net` and `.org` are three domains (issue #361), even
+    though they share one label.
+    """
     valid_domains = [d for d in domains if isinstance(d, str) and d.strip()]
     if not valid_domains:
         return {}
 
-    labels = {_label(d) for d in valid_domains}
+    keys = {_domain_key(d) for d in valid_domains}
     counter: Counter[str] = Counter()
-    for label in labels:
-        for sub in _substrings(label):
+    for key in keys:
+        for sub in _substrings(_label(key)):
             counter[sub] += 1
 
     filtered = {k: v for k, v in counter.items() if v >= BRAND_MIN_DOMAINS}
