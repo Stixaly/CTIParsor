@@ -234,7 +234,7 @@ export default function Settings() {
                 >
                   {c.enabled ? 'Disable' : 'Enable'}
                 </button>
-                {c.git && !c.private && (
+                {(c.git || c.tarball) && !c.private && (
                   <button
                     type="button"
                     style={btn}
