@@ -132,6 +132,10 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
     ("250261e", "2026-11-05",
      "Finalize no longer brings back an LLM campaign whose row the analyst deleted or renamed",
      "mapping"),
+    ("543f449", "2026-11-06",
+     "A file and a mutex sharing a name are two SCOs with their own Indicators, and URLs whose paths "
+     "differ in case stay two observables (Stage 2 and Stage 4); a deleted LLM technique stays out",
+     "extraction"),
 )
 
 
