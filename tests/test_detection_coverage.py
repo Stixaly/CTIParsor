@@ -563,9 +563,10 @@ def test_export_selection_zip(temp_db, temp_db_client):
     assert {r["id"] for r in manifest["rules"]} == {"sig:s1", "net:n1"}
 
 
-def test_export_selection_ignores_rules_outside_the_report(temp_db, temp_db_client):
-    """Ids are intersected with the report's linkable set — the export must never
-    become a generic store-dump endpoint keyed by arbitrary ids."""
+def test_export_selection_packages_canonical_rules_outside_the_report(temp_db, temp_db_client):
+    """Issue #366: a canonical rule outside the report's techniques is a promotion,
+    so the export packages it (marked promoted). Unknown ids stay ignored — the
+    export is not a dump of arbitrary ids, only of canonical rules."""
     temp_db.get_conn()          # job store
     rconn = temp_db.get_rule_conn()    # rule store
     replace_corpus_rules(rconn, "sig", [
@@ -576,16 +577,18 @@ def test_export_selection_ignores_rules_outside_the_report(temp_db, temp_db_clie
 
     resp = temp_db_client.post(
         "/api/jobs/jo/detections/export",
-        json={"rule_ids": ["sig:s1", "sig:zz"]},
+        json={"rule_ids": ["sig:s1", "sig:zz", "ghost:x"]},
     )
     assert resp.status_code == 200, resp.text
 
     zf = zipfile.ZipFile(io.BytesIO(resp.content))
     rule_files = [n for n in zf.namelist() if n.startswith("rules/")]
-    assert len(rule_files) == 1
+    assert len(rule_files) == 2
 
     manifest = json.loads(zf.read("MANIFEST.json"))
-    assert {r["id"] for r in manifest["rules"]} == {"sig:s1"}
+    assert {r["id"] for r in manifest["rules"]} == {"sig:s1", "sig:zz"}
+    promoted = {r["id"]: r["promoted"] for r in manifest["rules"]}
+    assert promoted == {"sig:s1": False, "sig:zz": True}
 
 
 def test_export_selection_400_on_empty_ids(temp_db, temp_db_client):

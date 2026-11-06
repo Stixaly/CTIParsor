@@ -412,9 +412,14 @@ rule language. Drill-down rules (`/coverage/{technique}/rules`) each carry
 ```jsonc
 // POST /api/jobs/{id}/detections/export      → 200 application/zip
 { "rule_ids": ["sigmahq:1a2b3c", "et-open:2010935"] }
-// 400 if the list is empty · 404 if no requested id belongs to this report.
-// Ids are intersected with the report's linkable rules, so this can never be
-// used to dump arbitrary rules from the store.
+// 400 if the list is empty, or if more than 500 canonical ids lie outside the
+// report's coverage · 404 if no requested id is a rule of this report or a
+// canonical rule of the store.
+// An id linkable to the report is packaged as before. A canonical store rule the
+// report does not reach (a promotion from the Detections panel, issue #366) is
+// packaged too, with `"promoted": true` and no techniques in MANIFEST.json, so
+// an export holds what the panel shows. Unknown and non-canonical ids are ignored.
+// `/rules/lookup` already serves those bodies without job scope.
 ```
 
 The GET form (axis filters) and this POST form share one archive builder, so both
