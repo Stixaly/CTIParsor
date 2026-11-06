@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import stix2
 import yaml
@@ -812,10 +813,14 @@ def build_stix_bundle(
     name_to_stix = _NameIndex()
 
     # --- SCOs from technical IoCs ---
-    scos, value_to_sco = _map_iocs_to_scos(raw_entities, ledger=led)
+    scos, value_to_sco, entity_scos = _map_iocs_to_scos_typed(raw_entities, ledger=led)
     stix_objects.extend(scos)
     for _value, _sco in value_to_sco.items():
         name_to_stix.add(_value, _sco)
+    # Every observable under its value, one per type: a relationship naming
+    # "svchost.exe" can reach the mutex as well as the file (#289).
+    for _entity, _sco in entity_scos:
+        name_to_stix.add(_entity.value.lower(), _sco)
 
     # --- SDOs from pipeline-detected entity types (infrastructure, intrusion_set, etc.) ---
     _sdo_entity_types = {
@@ -1548,13 +1553,11 @@ def build_stix_bundle(
 
     # --- Indicator SDOs for remaining IoCs (not already covered by ioc_associations) ---
     # Research best-practice: every accepted IoC should have a machine-readable pattern
-    for entity in raw_entities:
+    for entity, sco in entity_scos:
         ioc_key = entity.value.lower()
-        if ioc_key in seen_indicators:
-            continue  # already has an indicator
-        sco = value_to_sco.get(ioc_key)
-        if sco is None:
-            continue
+        sco_id = str(_field(sco, "id"))
+        if sco_id in sco_id_to_indicator or sco_id in benign_sco_ids:
+            continue  # this observable already has an indicator, or is benign
         why = _benign(sco)
         if why:
             benign_sco_ids.add(str(_field(sco, "id")))
@@ -1577,8 +1580,7 @@ def build_stix_bundle(
             stix_objects.append(indicator)
             name_to_stix.add(f"indicator:{ioc_key}", indicator)
             seen_indicators.add(ioc_key)
-            if hasattr(sco, "id"):
-                sco_id_to_indicator[sco.id] = indicator
+            sco_id_to_indicator[sco_id] = indicator
             led.object(indicator, "ioc_indicator", ioc_value=entity.value, sco_id=_field(sco, "id"),
                        valid_from_basis=ioc_valid_basis)
             _based_on(indicator, sco)
@@ -2234,9 +2236,42 @@ def _network_traffic_sco(value: str, scos: list, value_to_sco: dict, canonical_t
         return None
 
 
+def _url_key(value: str) -> str:
+    """A URL as one observable: scheme and host lower-cased, the rest as written.
+
+    Lower-casing the whole value merged https://h/A and https://h/a, which
+    a server may serve as two resources (#289)."""
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return value
+    if not parts.scheme or not parts.netloc:
+        return value
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, parts.query, parts.fragment))
+
+
+def _observable_key(entity: RawEntity) -> tuple[str, str]:
+    """What makes two entities one observable: their type, and their value
+    normalized as that type allows (hive-expanded registry keys, URLs by
+    `_url_key`, everything else lower-cased).  The value alone merged a file
+    and a mutex both named svchost.exe into one SCO (#289)."""
+    if entity.entity_type == EntityType.URL:
+        return (entity.entity_type.value, _url_key(entity.value))
+    return (entity.entity_type.value, _expand_registry_hive(entity.value).lower())
+
+
 def _map_iocs_to_scos(
     entities: list[RawEntity], ledger: MappingLedger | None = None,
 ) -> tuple[list, dict[str, object]]:
+    """SCO objects and a lower-cased value -> SCO index (the first SCO of each
+    value); `_map_iocs_to_scos_typed` also gives each entity its own SCO."""
+    scos, value_to_sco, _pairs = _map_iocs_to_scos_typed(entities, ledger)
+    return scos, value_to_sco
+
+
+def _map_iocs_to_scos_typed(
+    entities: list[RawEntity], ledger: MappingLedger | None = None,
+) -> tuple[list, dict[str, object], list[tuple[RawEntity, object]]]:
     """
     Creates SCO objects and returns both the list and a value→SCO index.
     Each entity is mapped to its SCO exactly once.
@@ -2265,35 +2300,49 @@ def _map_iocs_to_scos(
         if ledger is not None and entity.entity_type in _OBSERVABLE_IOC_TYPES:
             ledger.entity(entity.value, entity.entity_type.value, outcome, obj=obj, reason=reason)
 
+    # (entity type, normalized value) -> the SCO built for it: the identity of
+    # an observable.  Two entities of different types sharing a value (a file
+    # and a mutex named svchost.exe) are two observables (#289).
+    typed: dict[tuple[str, str], object] = {}
+    pairs: list[tuple[RawEntity, object]] = []
+    first_value: dict[tuple[str, str], set[str]] = {}    # obs key -> spellings seen
+
     for entity in entities:
         key = entity.value.lower()
-        # Skip values already mapped — a caller that passes duplicate entities
-        # (e.g. the CLI, which flattens overlapping chunks without dedup) would
-        # otherwise append the same SCO twice, putting two objects with an
-        # identical deterministic id into the bundle and Report.object_refs.
-        if key in value_to_sco:
-            _record(entity, "merged", value_to_sco[key], "same_value")
+        obs_key = _observable_key(entity)
+        # Skip observables already mapped — a caller that passes duplicate
+        # entities (e.g. the CLI, which flattens overlapping chunks without
+        # dedup) would otherwise append the same SCO twice, putting two objects
+        # with an identical deterministic id into the bundle and Report.object_refs.
+        if obs_key in typed:
+            sco = typed[obs_key]
+            # Another spelling (a registry hive, a URL host's case) is the same
+            # observable; the same spelling is the same value.
+            reason = "same_value" if key in first_value.get(obs_key, ()) else "same_observable"
+            first_value.setdefault(obs_key, set()).add(key)
+            _record(entity, "merged", sco, reason)
+            value_to_sco.setdefault(key, sco)
+            pairs.append((entity, sco))
             continue
         canonical_key = _expand_registry_hive(entity.value).lower()
-        if canonical_key in canonical_to_sco:
-            value_to_sco[key] = canonical_to_sco[canonical_key]
-            _record(entity, "merged", canonical_to_sco[canonical_key], "same_observable")
-            continue
         if entity.entity_type == EntityType.NETWORK_TRAFFIC:
             sco = _network_traffic_sco(entity.value, scos, value_to_sco, canonical_to_sco, ledger)
         else:
             sco = _entity_to_sco(entity)
         if sco is not None:
             scos.append(sco)
-            value_to_sco[key] = sco
-            canonical_to_sco[canonical_key] = sco
+            typed[obs_key] = sco
+            first_value[obs_key] = {key}
+            value_to_sco.setdefault(key, sco)
+            canonical_to_sco.setdefault(canonical_key, sco)
+            pairs.append((entity, sco))
             _record(entity, "emitted", sco)
             if ledger is not None:
                 ledger.object(sco, "entity")
         else:
             _record(entity, "dropped", reason=_no_sco_reason(entity))
 
-    return scos, value_to_sco
+    return scos, value_to_sco, pairs
 
 
 def _no_sco_reason(entity: RawEntity) -> str:

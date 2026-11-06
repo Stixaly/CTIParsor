@@ -1563,3 +1563,25 @@ def test_no_artifact_without_source_bytes():
         original_filename="report.pdf", source_hash=real_hash, source_bytes=None,
     )
     assert not any(o.get("type") == "artifact" for o in bundle.objects)
+
+
+def _typed(bundle, *types):
+    return sorted((o.type, getattr(o, "name", None) or o.value) for o in bundle.objects if o.type in types)
+
+
+def test_a_file_and_a_mutex_of_one_name_are_two_observables_with_their_indicators():
+    # #289: keyed by value alone, the mutex became a duplicate of the file.
+    bundle = build_stix_bundle([RawEntity(value="svchost.exe", entity_type=EntityType.FILE),
+                                RawEntity(value="svchost.exe", entity_type=EntityType.MUTEX)],
+                               LLMEnrichmentResult(), "typed")
+    assert _typed(bundle, "file", "mutex") == [("file", "svchost.exe"), ("mutex", "svchost.exe")]
+    patterns = sorted(o.pattern for o in bundle.objects if o.type == "indicator")
+    assert patterns == ["[file:name = 'svchost.exe']", "[mutex:name = 'svchost.exe']"]
+
+
+def test_urls_whose_paths_differ_in_case_are_two_observables():
+    # #289: the path of a URL is case-sensitive; its scheme and host are not.
+    bundle = build_stix_bundle([RawEntity(value=v, entity_type=EntityType.URL) for v in
+                                ("https://example.org/A", "https://example.org/a", "https://EXAMPLE.org/a")],
+                               LLMEnrichmentResult(), "urls")
+    assert _typed(bundle, "url") == [("url", "https://example.org/A"), ("url", "https://example.org/a")]

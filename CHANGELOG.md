@@ -11,6 +11,21 @@ theme.
 
 ### Fixed
 
+#### Follow-up of the 2026-11-05 batch (#289, #333, #287, CVE-2026-116566)
+
+- **Bundle.** Two observables of different types sharing a value (a file and a
+  mutex named `svchost.exe`) are two SCOs with their own Indicators, and URLs
+  whose paths differ only in case stay two observables, in Stage 2's
+  deduplication as in Stage 4 (#289). Finalize no longer brings back an LLM
+  technique whose row was deleted (#287).
+- **Detection.** A full URL with a path on a shared hosting domain (S3, Azure,
+  SharePoint, OneDrive, googleapis, DigitalOcean) is discriminating; a service
+  domain such as gmail.com is still classified on its host (#333).
+- **Security.** The web capture refuses a NUL byte in a URL or host before any
+  resolution, which keeps CVE-2026-116566 (CPython < 3.16 truncates a
+  `getaddrinfo` host at a NUL) unreachable; accepted for Python 3.14.10 in
+  `.grype.yaml` and SECURITY.md.
+
 #### Bug batch of 2026-11-05 (issues #285-#354)
 
 - **Extraction.** The gazetteer's regex fallback checks word boundaries on the

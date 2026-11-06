@@ -467,6 +467,7 @@ def test_finalize_applies_every_reviewer_rejection_to_the_llm_blob(db):
     _entity(db, "j1", "finance", "identity", accepted=0)
     _entity(db, "j1", "Some Group", "no-such-type")                # unknown type: skipped
     _entity(db, "j1", "185.220.101.45", "ipv4")
+    _entity(db, "j1", "Masquerading", "ttp", mitre_id="T1036")     # the run's row of the kept technique
     with db.get_conn() as conn:                                     # a row pydantic refuses: skipped
         conn.execute("INSERT INTO entities (id, job_id, value, entity_type, accepted, confidence) "
                      "VALUES ('bad', 'j1', '10.0.0.1', 'ipv4', 1, NULL)")
@@ -534,6 +535,16 @@ def test_finalize_does_not_bring_back_a_deleted_or_renamed_llm_campaign(db):
 
     _entity(db, "j1", "Dark Halo", "campaign")                                           # kept as is
     assert "Dark Halo" in _objects(worker.re_run_final_stages("j1", quick=False), "campaign")
+
+
+def test_finalize_does_not_bring_back_a_deleted_llm_technique(db):
+    """#287: an LLM technique is stored as a row; once the row is deleted the
+    blob must not put the technique back."""
+    llm = LLMEnrichmentResult(ttps=[TTPExtracted(technique_name="Phishing", mitre_id="T1566"),
+                                    TTPExtracted(technique_name="Masquerading", mitre_id="T1036")])
+    _job(db, report_text="APT29 phished and masqueraded.", llm_result_json=llm.model_dump_json())
+    _entity(db, "j1", "Masquerading", "ttp", mitre_id="T1036")
+    assert _objects(worker.re_run_final_stages("j1", quick=False), "attack-pattern") == ["Masquerading"]
 
 
 def test_finalize_survives_a_corrupt_llm_blob_and_an_unreadable_anchor(db, monkeypatch, caplog):
