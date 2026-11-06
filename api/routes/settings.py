@@ -314,6 +314,8 @@ def sync_one_corpus(name: str):
     Cloning a large repo can take a while — the request blocks until git finishes.
     A folder that is not the clone of this corpus's remote is a 409, checked before
     any git command runs: the folder is removed by hand, never by this route (#367).
+    A download that the rebuild could not re-import (its `subdir` or `path` is
+    missing) is a 422 that says why; the rules indexed before are kept (#374).
     """
     corpus = next((c for c in merged_corpora(_CONFIG) if c.get("name") == name), None)
     if corpus is None:
@@ -340,8 +342,22 @@ def sync_one_corpus(name: str):
         raise HTTPException(502, f"sync failed: {detail}")
 
     with get_rule_conn() as conn:
-        rebuild_store(conn, _CONFIG)
-    return {"ok": True, "detail": detail, "corpora": _with_counts()}
+        summary = rebuild_store(conn, _CONFIG)
+    if name in summary["skipped"]:
+        # The fetch worked but the rebuild wrote nothing for this corpus, and kept
+        # the rules it had: say so instead of reporting a success (#374).
+        raise HTTPException(
+            422,
+            f"downloaded, but not re-imported: {summary['skip_reasons'][name]}. "
+            "The rules indexed before are kept.",
+        )
+    return {
+        "ok": True,
+        "detail": detail,
+        "rules": summary["written"].get(name, 0),
+        "file_errors": summary["file_errors"].get(name, []),
+        "corpora": _with_counts(),
+    }
 
 
 @router.post("/corpora/rebuild")

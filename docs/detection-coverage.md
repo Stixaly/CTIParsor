@@ -374,7 +374,7 @@ Ranking is deterministic and offline — no model is involved (ADR-0008).
 
 | Symptom | Cause / fix |
 |---|---|
-| `[build] skipped (no clone)` | run `sync_corpora.py` first; check the corpus `path` |
+| `[build] skipped <corpus>: <reason>` | the reason names the fix: run `sync_corpora.py` first when `path` does not exist, or correct the corpus `subdir` (a folder missing under an existing `path`) or the `adapter` (#374) |
 | corpus shows `0` rules | rules untagged with `attack.tXXXX`, or pointed at a non-rules dir |
 | private repo won't clone | ensure your SSH agent has the key; `git clone` it manually to confirm access |
 | `git remote refused: not a safe remote to fetch` | the remote carries credentials, uses a port other than 443, 8443, 80 or 8080, or its host is or resolves to a loopback, private, link-local or cloud-metadata address (the log line says which). A repo on an internal server: `git clone` it by hand under `corpora/` and register its `path` only |

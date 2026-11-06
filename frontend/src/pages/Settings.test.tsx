@@ -40,9 +40,9 @@ async function rowOf(name: string): Promise<HTMLElement> {
 beforeEach(() => {
   api.fetchCorpora.mockReset().mockResolvedValue({ corpora: CORPORA })
   api.fetchFormats.mockReset().mockResolvedValue({ formats: [{ format: 'sigma', available: true, corpora: 4, rules: 11 }] })
-  api.syncCorpus.mockReset().mockResolvedValue({ ok: true, detail: 'ok', corpora: CORPORA })
+  api.syncCorpus.mockReset().mockResolvedValue({ ok: true, detail: 'ok', rules: 3, file_errors: [], corpora: CORPORA })
   api.addCorpus.mockReset().mockResolvedValue({ ok: true, warning: null, corpora: CORPORA })
-  api.rebuildCorpora.mockReset().mockResolvedValue({ total: 16, written: { sigma: 11 }, skipped: [] })
+  api.rebuildCorpora.mockReset().mockResolvedValue({ total: 16, written: { sigma: 11 }, skipped: [], skip_reasons: {}, file_errors: {} })
 })
 
 describe('Settings — Redownload button (#369)', () => {
@@ -127,7 +127,7 @@ describe('Settings — errors and stale messages (#370)', () => {
 
   it('drops the previous rebuild success message when a rebuild fails', async () => {
     api.rebuildCorpora
-      .mockResolvedValueOnce({ total: 16, written: { sigma: 11 }, skipped: [] })
+      .mockResolvedValueOnce({ total: 16, written: { sigma: 11 }, skipped: [], skip_reasons: {}, file_errors: {} })
       .mockRejectedValueOnce(new Error('500: {"detail":"rebuild failed: disk full"}'))
     renderSettings()
     fireEvent.click(await screen.findByRole('button', { name: 'Rebuild index' }))
@@ -135,5 +135,74 @@ describe('Settings — errors and stale messages (#370)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Rebuild index' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('disk full')
     expect(screen.queryByText(/^Rebuilt:/)).toBeNull()
+  })
+})
+
+// A missing subdir is a 422 on the sync (#374); unread files and skipped corpora are warnings.
+describe('Settings — sync and rebuild warnings (#374)', () => {
+  it('shows the 422 of a Redownload whose subdir is missing, naming it', async () => {
+    api.syncCorpus.mockRejectedValueOnce(new Error(
+      `422: {"detail":"downloaded, but not re-imported: subdir 'rulez' not found under ./corpora/public-git. The rules indexed before are kept."}`,
+    ))
+    renderSettings()
+    fireEvent.click(await within(await rowOf('public-git')).findByRole('button', { name: 'Redownload' }))
+    const alert = await within(await rowOf('public-git')).findByRole('alert')
+    expect(alert).toHaveTextContent('not re-imported')
+    expect(alert).toHaveTextContent("subdir 'rulez' not found")
+    expect(alert).toHaveTextContent('The rules indexed before are kept.')
+  })
+
+  it('warns after a Redownload that left files unread, on that row only', async () => {
+    api.syncCorpus.mockResolvedValueOnce({
+      ok: true, detail: 'up to date', rules: 2, file_errors: [{ path: 'bad.yml', error: 'not UTF-8' }], corpora: CORPORA,
+    })
+    renderSettings()
+    fireEvent.click(await within(await rowOf('public-git')).findByRole('button', { name: 'Redownload' }))
+    const warning = await within(await rowOf('public-git')).findByRole('status')
+    expect(warning).toHaveTextContent('1 file was not fully read: bad.yml')
+    expect(within(await rowOf('et-open')).queryByRole('status')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('shows no warning after a Redownload that read every file (control)', async () => {
+    renderSettings()
+    fireEvent.click(await within(await rowOf('public-git')).findByRole('button', { name: 'Redownload' }))
+    await waitFor(() => expect(api.syncCorpus).toHaveBeenCalledWith('public-git'))
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+  })
+
+  it('warns after a rebuild that skipped a corpus, with the reason', async () => {
+    api.rebuildCorpora.mockResolvedValueOnce({
+      total: 11,
+      written: { sigma: 11 },
+      skipped: ['public-git'],
+      skip_reasons: { 'public-git': "subdir 'rulez' not found under ./corpora/public-git" },
+      file_errors: {},
+    })
+    renderSettings()
+    fireEvent.click(await screen.findByRole('button', { name: 'Rebuild index' }))
+    const warning = await screen.findByRole('status')
+    expect(warning).toHaveTextContent("public-git was skipped: subdir 'rulez' not found under ./corpora/public-git.")
+    expect(screen.getByText(/^Rebuilt: 11 total/)).toBeTruthy()
+  })
+
+  it('warns after a rebuild that left files unread, per corpus', async () => {
+    api.rebuildCorpora.mockResolvedValueOnce({
+      total: 2,
+      written: { sigma: 2 },
+      skipped: [],
+      skip_reasons: {},
+      file_errors: { sigma: [{ path: 'a.yml', error: 'x' }, { path: 'b.yml', error: 'y' }] },
+    })
+    renderSettings()
+    fireEvent.click(await screen.findByRole('button', { name: 'Rebuild index' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('sigma: 2 files were not fully read: a.yml, b.yml.')
+  })
+
+  it('shows no rebuild warning when nothing was skipped or unread (control)', async () => {
+    renderSettings()
+    fireEvent.click(await screen.findByRole('button', { name: 'Rebuild index' }))
+    await waitFor(() => expect(screen.getByText(/^Rebuilt: 16 total/)).toBeTruthy())
+    expect(screen.queryByRole('status')).toBeNull()
   })
 })

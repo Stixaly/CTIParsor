@@ -399,6 +399,33 @@ export interface FormatInfo {
   rules: number
 }
 
+/** A file of a corpus the rebuild could not fully read (#373). `path` is relative to the corpus root. */
+export interface CorpusFileError {
+  path: string
+  error: string
+}
+
+/** POST /settings/corpora/{name}/sync (#374): the download's detail, what the rebuild
+ *  wrote for this corpus, and the files it could not read. A missing subdir is a 422. */
+export interface CorpusSyncResult {
+  ok: boolean
+  detail: string
+  rules: number
+  file_errors: CorpusFileError[]
+  corpora: CorpusConfig[]
+}
+
+/** POST /settings/corpora/rebuild (#374). Other fields of the summary are not read here. */
+export interface CorpusRebuildSummary {
+  total: number
+  written: Record<string, number>
+  skipped: string[]
+  /** Why each skipped corpus was skipped, keyed by its name. */
+  skip_reasons: Record<string, string>
+  /** Per corpus whose files were not all read; a corpus absent from it read every file. */
+  file_errors: Record<string, CorpusFileError[]>
+}
+
 export interface ProgressEvent {
   stage?: number
   label?: string

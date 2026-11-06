@@ -26,6 +26,19 @@ def _collect_file_errors(errors: list[dict], root: Path) -> Callable[[Path, str]
     return on_file_error
 
 
+def _missing_root_reason(corpus: dict) -> str:
+    """Why a corpus whose folder does not exist was skipped (#374).
+
+    With a `subdir`, the parent folder (`path`) is what the clone left behind: when it
+    is there, the subdir is the mistake and is named; when it is not, nothing was
+    downloaded yet."""
+    path = str(corpus.get("path") or "")
+    subdir = str(corpus.get("subdir") or "").strip()
+    if subdir and Path(path).is_dir():
+        return f"subdir '{subdir}' not found under {path}"
+    return f"{path} does not exist (not downloaded yet)"
+
+
 def rebuild_store(
     conn: DBConnection,
     config_path: str | Path,
@@ -45,6 +58,9 @@ def rebuild_store(
     their rules deleted), the grand total, the dedup result, the rule_text bilan
     (`rows` written, `empty_bodies` skipped, see rebuild_rule_text), and per-corpus
     counts (each now carrying a `canonical` figure alongside the raw `rules` total).
+    `skipped` is the list of those corpus names; `skip_reasons` maps each of them
+    to a message that says why (#374): no path configured, unknown adapter (named),
+    a `subdir` missing under an existing `path`, or a `path` not downloaded yet.
     `file_errors` maps each corpus whose files were not fully read to a list of
     `{"path": <relative to the corpus root>, "error": <message>}` (#373): a file
     that is unreadable, not UTF-8, or broken YAML past its first documents. Such a
@@ -61,6 +77,7 @@ def rebuild_store(
     """
     written: dict[str, int] = {}
     skipped: list[str] = []
+    skip_reasons: dict[str, str] = {}
     file_errors: dict[str, list[dict]] = {}
     priority: dict[str, int] = {}
     for corpus in load_corpora(config_path):
@@ -71,9 +88,15 @@ def rebuild_store(
             root = corpus_root(corpus)
         except ValueError:          # no path: one bad entry must not stop the rebuild
             skipped.append(name)
+            skip_reasons[name] = "no path configured in the registry"
             continue
-        if adapter is None or not root.exists():
+        if adapter is None:
             skipped.append(name)
+            skip_reasons[name] = f"unknown adapter '{corpus.get('adapter', '')}'"
+            continue
+        if not root.exists():
+            skipped.append(name)
+            skip_reasons[name] = _missing_root_reason(corpus)
             continue
         if on_progress:
             on_progress(name, None)
@@ -115,6 +138,7 @@ def rebuild_store(
     return {
         "written": written,
         "skipped": skipped,
+        "skip_reasons": skip_reasons,
         "removed": removed,
         "file_errors": file_errors,
         "total": sum(written.values()),
