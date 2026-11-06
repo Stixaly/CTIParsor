@@ -52,6 +52,9 @@ def main() -> int:
     summary = rebuild_store(conn, args.config, on_progress=_progress)
     if summary["skipped"]:
         print(f"[build] skipped (missing clone / unknown adapter): {', '.join(summary['skipped'])}")
+    for corpus, errors in summary["file_errors"].items():
+        for err in errors:
+            print(f"[build] file error in {corpus}: {err['path']}: {err['error']}")
 
     print("─" * 50)
     for row in summary["counts"]:

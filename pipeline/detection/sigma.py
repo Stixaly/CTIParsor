@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 import yaml
@@ -53,6 +53,18 @@ def _case_sensitive_key(key: object) -> bool:
     return not _CASE_SENSITIVE_MODIFIERS.isdisjoint(modifiers)
 
 
+def _one_line(error: Exception) -> str:
+    """A parser error on one line: PyYAML's message spans several (marks and snippet)."""
+    return " ".join(str(error).split())
+
+
+def _file_error(path: Path, message: str, on_file_error: Callable[[Path, str], None] | None) -> None:
+    """Warn about a file that was skipped or partly read, and tell the caller (#373)."""
+    logger.warning(f"[detection] sigma file {path} {message}")
+    if on_file_error is not None:
+        on_file_error(path, message)
+
+
 class SigmaAdapter(RuleCorpusAdapter):
     format = "sigma"
 
@@ -62,19 +74,35 @@ class SigmaAdapter(RuleCorpusAdapter):
         *,
         corpus: str,
         license: str = "unknown",
+        on_file_error: Callable[[Path, str], None] | None = None,
     ) -> Iterable[DetectionRule]:
+        """Yield the rules of every Sigma file under `root`.
+
+        A file that cannot be read, is not UTF-8 or is not YAML is reported with a
+        warning and through `on_file_error(path, message)` (#373). A YAML error stops
+        the reading of that file only: the documents before it are kept.
+        """
         root = Path(root)
         for path in self._iter_rule_files(root):
             try:
                 text = path.read_text(encoding="utf-8")
-                docs = list(yaml.safe_load_all(text))
             except UnicodeDecodeError as e:
                 # Not UTF-8 (a stray 0xff, or UTF-16 with a BOM): skipped, never decoded (#372).
-                logger.warning(f"[detection] sigma file {path} skipped: {e}")
+                _file_error(path, f"not UTF-8, skipped: {e}", on_file_error)
                 continue
-            except (OSError, yaml.YAMLError):
-                continue  # unreadable / malformed file — skip, don't crash the build
-            for doc in docs:
+            except OSError as e:
+                _file_error(path, f"unreadable, skipped: {e}", on_file_error)  # don't crash the build
+                continue
+            documents = yaml.safe_load_all(text)
+            while True:
+                try:
+                    doc = next(documents)
+                except StopIteration:
+                    break
+                except yaml.YAMLError as e:
+                    # The documents read before this one are already yielded; the rest of the file is lost (#373).
+                    _file_error(path, f"YAML error, partially imported: {_one_line(e)}", on_file_error)
+                    break
                 try:
                     rule = self._to_rule(doc, text, path, corpus, license)
                 except Exception as e:  # noqa: BLE001 — one bad document must not stop the corpus

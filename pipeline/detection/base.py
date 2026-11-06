@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from models.detection import DetectionRule
@@ -27,6 +27,7 @@ class RuleCorpusAdapter(ABC):
         *,
         corpus: str,
         license: str = "unknown",
+        on_file_error: Callable[[Path, str], None] | None = None,
     ) -> Iterable[DetectionRule]:
         """Yield a `DetectionRule` for each rule found under `root`.
 
@@ -34,5 +35,8 @@ class RuleCorpusAdapter(ABC):
             root:    local directory of an already-fetched corpus clone.
             corpus:  registry name, used to namespace rule IDs.
             license: SPDX-ish license from the registry entry, stamped on each rule.
+            on_file_error: called with (path, message) for each file that could not
+                be read or only partly read (#373). Adapters keep no state for it:
+                the same instance serves every corpus. None ignores such files.
         """
         raise NotImplementedError

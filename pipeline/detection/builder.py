@@ -17,6 +17,13 @@ if TYPE_CHECKING:  # the rule-store connection type (ADR-0053); annotation only
     from api.db_backend import DBConnection
 
 
+def _collect_file_errors(errors: list[dict], root: Path) -> Callable[[Path, str], None]:
+    """A `on_file_error` callback that files each error under its path relative to `root`."""
+    def on_file_error(path: Path, message: str) -> None:
+        errors.append({"path": path.relative_to(root).as_posix(), "error": message})
+    return on_file_error
+
+
 def rebuild_store(
     conn: DBConnection,
     config_path: str | Path,
@@ -29,6 +36,12 @@ def rebuild_store(
     unknown adapter), corpora removed (disabled or no longer in the registry,
     their rules deleted), the grand total, the dedup result, and per-corpus counts
     (each now carrying a `canonical` figure alongside the raw `rules` total).
+    `file_errors` maps each corpus whose files were not fully read to a list of
+    `{"path": <relative to the corpus root>, "error": <message>}` (#373): a file
+    that is unreadable, not UTF-8, or broken YAML past its first documents. Such a
+    corpus is still replaced by what was read, so the total is short by those
+    rules and this is where the caller learns it. The dict is empty when every
+    file was read.
 
     `on_progress(name, count)` is called with `count=None` before a corpus is
     parsed and with the rule count after it is written; `name="dedup"` marks the
@@ -39,6 +52,7 @@ def rebuild_store(
     """
     written: dict[str, int] = {}
     skipped: list[str] = []
+    file_errors: dict[str, list[dict]] = {}
     priority: dict[str, int] = {}
     for corpus in load_corpora(config_path):
         name = corpus.get("name", "?")
@@ -54,8 +68,16 @@ def rebuild_store(
             continue
         if on_progress:
             on_progress(name, None)
-        rules = list(adapter.parse(root, corpus=name, license=corpus.get("license", "unknown")))
+        errors: list[dict] = []
+        rules = list(adapter.parse(
+            root,
+            corpus=name,
+            license=corpus.get("license", "unknown"),
+            on_file_error=_collect_file_errors(errors, root),
+        ))
         written[name] = replace_corpus_rules(conn, name, rules)
+        if errors:
+            file_errors[name] = errors
         if on_progress:
             on_progress(name, written[name])
 
@@ -80,6 +102,7 @@ def rebuild_store(
         "written": written,
         "skipped": skipped,
         "removed": removed,
+        "file_errors": file_errors,
         "total": sum(written.values()),
         "dedup": dedup,
         "counts": corpus_counts(conn),

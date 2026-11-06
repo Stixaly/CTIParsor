@@ -134,6 +134,33 @@ def test_sigma_file_that_is_not_utf8_is_logged_and_the_valid_rule_is_still_read_
     assert any("utf16.yml" in r.getMessage() for r in caplog.records)
 
 
+def test_sigma_broken_document_after_a_valid_rule_keeps_that_rule_issue_373(tmp_path, caplog):
+    """A YAML error in the second document must not drop the valid first one, and the file
+    is reported as partly imported through on_file_error, with its path (#373)."""
+    (tmp_path / "ok.yml").write_text(_SAMPLE, encoding="utf-8")
+    (tmp_path / "two.yml").write_text(_SAMPLE + "---\ntitle: [unterminated\n", encoding="utf-8")
+    errors: list[tuple] = []
+    with caplog.at_level("WARNING"):
+        rules = list(SigmaAdapter().parse(
+            tmp_path, corpus="c", on_file_error=lambda path, message: errors.append((path, message)),
+        ))
+    assert len(rules) == 2
+    assert [path for path, _ in errors] == [tmp_path / "two.yml"]
+    assert "partially imported" in errors[0][1]
+    assert any("two.yml" in r.getMessage() for r in caplog.records)
+
+
+def test_sigma_broken_first_document_reports_the_file_and_reads_the_next_file_issue_373(tmp_path):
+    (tmp_path / "a_bad.yml").write_text("title: [unterminated\n---\n" + _SAMPLE, encoding="utf-8")
+    (tmp_path / "b_ok.yml").write_text(_SAMPLE, encoding="utf-8")
+    errors: list[tuple] = []
+    rules = list(SigmaAdapter().parse(
+        tmp_path, corpus="c", on_file_error=lambda path, message: errors.append((path, message)),
+    ))
+    assert len(rules) == 1
+    assert [path for path, _ in errors] == [tmp_path / "a_bad.yml"]
+
+
 def test_registry_loads_enabled_corpora_and_parses(tmp_path):
     # a corpus clone with one rule
     clone = tmp_path / "clone"

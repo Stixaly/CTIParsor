@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from api.logging_config import get_logger
@@ -59,6 +59,7 @@ class SuricataAdapter(RuleCorpusAdapter):
         *,
         corpus: str,
         license: str = "unknown",
+        on_file_error: Callable[[Path, str], None] | None = None,
     ) -> Iterable[DetectionRule]:
         """Parse a Suricata corpus directory.
 
@@ -66,6 +67,7 @@ class SuricataAdapter(RuleCorpusAdapter):
             root: Root directory containing `.rules` files.
             corpus: Corpus identifier for rule IDs.
             license: License string for the corpus.
+            on_file_error: Called with (path, message) for an unreadable file (#373).
 
         Returns:
             Iterable of `DetectionRule` objects.
@@ -75,7 +77,9 @@ class SuricataAdapter(RuleCorpusAdapter):
             for path in root.rglob(pattern):
                 try:
                     text = path.read_text(encoding="utf-8", errors="ignore")
-                except OSError:
+                except OSError as e:
+                    if on_file_error is not None:
+                        on_file_error(path, f"unreadable, skipped: {e}")
                     continue
                 for lineno, line in enumerate(text.splitlines(), 1):
                     s = line.strip()
