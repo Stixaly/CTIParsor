@@ -1,4 +1,4 @@
-import { useState, useLayoutEffect, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { isImported, type Entity } from '../../types'
 import { typeDot, typeLabel, typeSoft, typeInk, TYPE_GROUPS, confPct } from './tokens'
@@ -65,6 +65,22 @@ export default function InlineHoverChip({
     const up = needed > spaceBelow && spaceAbove > spaceBelow
     setMenu({ up, maxHeight: Math.max(120, up ? spaceAbove : spaceBelow) })
   }, [typeMenu, place])
+
+  // The menu belongs to one entity: it closes when the chip moves to another (#558).
+  useEffect(() => { setTypeMenu(false) }, [entity.id])
+
+  // Escape and a press outside the chip close the open menu (#558), as in RuleBodyDrawer.
+  useEffect(() => {
+    if (!typeMenu) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setTypeMenu(false) }
+    const onPress = (e: MouseEvent) => { if (!chipRef.current?.contains(e.target as Node)) setTypeMenu(false) }
+    window.addEventListener('keydown', onKey)
+    document.addEventListener('mousedown', onPress)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.removeEventListener('mousedown', onPress)
+    }
+  }, [typeMenu])
 
   return createPortal(
     <div

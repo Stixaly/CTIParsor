@@ -139,6 +139,35 @@ describe('generateDefangedVariants', () => {
     expect(generateDefangedVariants('http://evil.com')).toContain('hxxp://evil.com')
     expect(generateDefangedVariants('a@b.com')).toContain('a[at]b.com')
   })
+
+  // #553: the scheme defanging and the separator defanging are combined, not only applied apart
+  it('combines the scheme and separator defangings (#553)', () => {
+    const v = generateDefangedVariants('https://evil.com')
+    expect(v).toContain('hxxps[://]evil.com')
+    expect(v).toContain('hxxps[:]//evil.com')
+    expect(generateDefangedVariants('http://evil.com')).toContain('hxxp[://]evil.com')
+    expect(generateDefangedVariants('http://evil.com')).toContain('hxxp[:]//evil.com')
+  })
+
+  it('combines the scheme defanging with a dot defanging (#553)', () => {
+    expect(generateDefangedVariants('https://evil.com')).toContain('hxxps[://]evil[.]com')
+  })
+
+  it('keeps every existing variant when it adds the combined forms (#553)', () => {
+    const v = generateDefangedVariants('https://evil.com')
+    for (const kept of ['hxxps://evil.com', 'https[://]evil.com', 'https[:]//evil.com', 'https://evil[.]com']) {
+      expect(v).toContain(kept)
+    }
+  })
+})
+
+describe('buildRanges — defanged URL forms (#553)', () => {
+  it('highlights a URL written with a combined scheme and separator defanging', () => {
+    const text = 'C2 seen at hxxps[://]evil[.]com last week.'
+    const ranges = buildRanges(text, [{ id: 'u1', value: 'https://evil.com', entity_type: 'url', accepted: null }])
+    expect(ranges).toHaveLength(1)
+    expect(text.slice(ranges[0].start, ranges[0].end)).toBe('hxxps[://]evil[.]com')
+  })
 })
 
 describe('suggestRelType', () => {

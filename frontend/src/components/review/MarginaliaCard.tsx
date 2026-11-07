@@ -77,12 +77,15 @@ export default function MarginaliaCard({
       if (popupRef.current?.contains(e.target as Node)) return
       setMenuOpen(false)
     }
+    const closeOnEscape = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false) }
     document.addEventListener('click', close)
     document.addEventListener('scroll', closeOnScroll, true)
+    document.addEventListener('keydown', closeOnEscape)
     window.addEventListener('resize', close)
     return () => {
       document.removeEventListener('click', close)
       document.removeEventListener('scroll', closeOnScroll, true)
+      document.removeEventListener('keydown', closeOnEscape)
       window.removeEventListener('resize', close)
     }
   }, [menuOpen])

@@ -144,4 +144,18 @@ describe('BaselinePanel — naming what left', () => {
     expect(screen.getByText('APT29 uses WellMess')).toBeTruthy()
     expect(screen.getByText(/\(WellMess\)$/)).toBeTruthy()
   })
+
+  it('gives a left-out relationship its relationship reason, not the object reason (#564)', () => {
+    const merged: BundleLedger = {
+      ...ledger,
+      removed: [{ stix_id: 'relationship--dup', kind: 'baseline', reason: 'duplicate_after_baseline_merge' }],
+    }
+    const data = buildBundleGraph(bundle, merged, [], [])
+    render(
+      <BaselinePanel job={job} ledger={merged} data={data} labelOf={makeLabelOf(data.byId, bundle.objects)}
+        onClose={() => {}} onPickNode={() => {}} onPickEdge={() => {}} />,
+    )
+    expect(screen.getByText('the match with your STIX bundle made it a duplicate of a relationship the bundle already ships')).toBeTruthy()
+    expect(screen.queryByText('duplicate_after_baseline_merge')).toBeNull()
+  })
 })

@@ -202,12 +202,20 @@ export default function RelationshipCreator({
   })
   const [srcQuery, setSrcQuery] = useState('')
   const [tgtQuery, setTgtQuery] = useState('')
+  // Set once the analyst picks a verb: a verb they picked is not replaced (#555)
+  const verbPicked = useRef(false)
 
-  // Auto-suggest relationship type whenever source or target changes
+  // Auto-suggest relationship type whenever source or target changes.  A refresh
+  // of `entities` (or an inline add) used to reset the verb the analyst had picked:
+  // a picked verb is kept for as long as the pair still offers it (#555).
   useEffect(() => {
     const s = entities.find(e => e.id === srcId)
     const t = entities.find(e => e.id === tgtId)
-    if (s && t) setType(suggestRelType(s.entity_type, t.entity_type))
+    if (!s || !t) return
+    const { valid } = verbsForPair(s.entity_type, t.entity_type)
+    setType(cur => (verbPicked.current && valid.includes(cur))
+      ? cur
+      : suggestRelType(s.entity_type, t.entity_type))
   }, [srcId, tgtId, entities])
 
   /** Filter entity list for a picker:
@@ -315,7 +323,7 @@ export default function RelationshipCreator({
                 <select
                   className="rc-type"
                   value={type}
-                  onChange={e => setType(e.target.value)}
+                  onChange={e => { verbPicked.current = true; setType(e.target.value) }}
                   title={constrained
                     ? `Showing valid STIX 2.1 verbs for ${typeLabel(src!.entity_type)} → ${typeLabel(tgt!.entity_type)}`
                     : undefined
@@ -324,8 +332,9 @@ export default function RelationshipCreator({
                   {/* Show only spec-valid verbs for a known pair; all verbs otherwise.
                       `valid` already contains the right set in both cases (spec verbs
                       when constrained, all REL_TYPES when unconstrained), so a single
-                      map suffices — the old two-branch conditional was dead code. */}
-                  {valid.map(v => <option key={v} value={v}>{v}</option>)}
+                      map suffices — the old two-branch conditional was dead code.
+                      The current verb stays selectable even if `valid` lacks it (#561). */}
+                  {Array.from(new Set([...valid, type])).map(v => <option key={v} value={v}>{v}</option>)}
                 </select>
               )
             })()}

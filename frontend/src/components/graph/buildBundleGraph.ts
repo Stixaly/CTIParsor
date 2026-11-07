@@ -184,6 +184,8 @@ export function buildBundleGraph(
   for (const r of ledger?.removed ?? []) if (r.kind === 'baseline') baselineLeft.set(r.stix_id, r.reason)
 
   if (hasLedger) {
+    // Review rows sharing a key (duplicates) are listed once.
+    const seenRemovedEnts = new Set<string>()
     for (const ent of live) {
       const imported = isImported(ent.enrichment_status)
       if (imported && inBundle(ent.baseline_stix_id ?? undefined)) {
@@ -237,15 +239,17 @@ export function buildBundleGraph(
       if (ent.accepted !== false) continue
       if (isImported(ent.enrichment_status)) {
         const sid = ent.baseline_stix_id ?? undefined
-        if (inBundle(sid) && !live.some(e => e.baseline_stix_id === sid)) {
+        if (inBundle(sid) && !live.some(e => e.baseline_stix_id === sid) && !seenRemovedEnts.has(sid)) {
+          seenRemovedEnts.add(sid)
           diff.push({ kind: 'stale', subject: 'entity', reason: 'removed_since_build', title: ent.value, nodeId: sid })
         }
         continue
       }
       const k = entKey(ent.entity_type, ent.value)
-      if (liveKeys.has(k)) continue
+      if (liveKeys.has(k) || seenRemovedEnts.has(k)) continue
       const hit = (ledgerEntities.get(k) ?? []).find(x => x.outcome !== 'dropped' && inBundle(x.stix_id))
       if (hit && hit.stix_id && nodeInfo.get(hit.stix_id)!.rows.length === 0) {
+        seenRemovedEnts.add(k)
         diff.push({ kind: 'stale', subject: 'entity', reason: 'removed_since_build',
                     title: ent.value, nodeId: hit.stix_id, ledgerEntity: hit })
       }
@@ -363,6 +367,7 @@ export function buildBundleGraph(
   // ── Review relationship changes the stored bundle predates ───────────────
   if (hasLedger) {
     const liveRelKeys = new Set<string>()
+    const seenAddedRels = new Set<string>()
     for (const r of rawRelations) {
       if (isImported(r.enrichment_status)) {
         // Its SRO ships as received, or left with the objects it joins; left
@@ -382,7 +387,8 @@ export function buildBundleGraph(
       if (r.accepted === false) continue
       const k = relKey(r.source_value, r.relationship_type, r.target_value)
       liveRelKeys.add(k)
-      if (!ledgerKeys.has(k)) {
+      if (!ledgerKeys.has(k) && !seenAddedRels.has(k)) {
+        seenAddedRels.add(k)
         diff.push({ kind: 'stale', subject: 'relationship', reason: 'added_since_build',
                     title: `${r.source_value} ${r.relationship_type} ${r.target_value}`,
                     nodeId: nodeForValue(r.source_value) ?? nodeForValue(r.target_value) })

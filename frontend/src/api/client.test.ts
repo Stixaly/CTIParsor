@@ -1,5 +1,11 @@
 import { afterEach, describe, it, expect, vi } from 'vitest'
-import { BundleRefusedError, errorDetail, fetchAttackIndex, fetchBaselineStatus, fetchBundle, finalizeJob, inspectBaseline, uploadFile } from './client'
+import {
+  BundleRefusedError, bulkUpdateEntities, bulkUpdateRelationships, createEntity, createRelationship, acceptAllPendingEntities,
+  deleteEntity, deleteJob, deleteRelationship, detectionsExportUrl, downloadExportSelection, errorDetail, fetchAttackIndex,
+  fetchBaselineIntake, fetchBaselineStatus, fetchBundle, fetchBundleLedger, fetchCoverage, fetchCoverageReportRules,
+  fetchCoverageRules, fetchDetectionProposals, fetchEntities, fetchJob, fetchRelationships, finalizeJob, finalizeJobQuick,
+  inspectBaseline, sourceUrl, updateEntity, updateJobStatus, updateRelationship, uploadFile,
+} from './client'
 import { enrichmentView, isImported } from '../types'
 
 describe('errorDetail', () => {
@@ -175,5 +181,69 @@ describe('uploadFile (ADR-0090)', () => {
     answer(400, '{"detail":"x"}')
     const err = await failure(uploadFile(new File(['report'], 'r.txt')))
     expect(errorDetail(err)).toBe('x')
+  })
+})
+
+// Every id that is built into a path is one encoded segment (#551): a value
+// with a slash, a query mark or a hash must not change the route.
+describe('path segments are encoded (#551)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  const SLASHED = 'a/b c?d#e'
+  const ENC = 'a%2Fb%20c%3Fd%23e'
+
+  function serveOk() {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({
+      ok: true, status: 200, json: () => Promise.resolve({}), text: () => Promise.resolve(''),
+    })))
+  }
+
+  it.each<[string, () => unknown, string]>([
+    ['fetchJob', () => fetchJob(SLASHED), `/api/jobs/${ENC}`],
+    ['updateJobStatus', () => updateJobStatus(SLASHED, 'x'), `/api/jobs/${ENC}`],
+    ['finalizeJob', () => finalizeJob(SLASHED), `/api/jobs/${ENC}/finalize`],
+    ['finalizeJobQuick', () => finalizeJobQuick(SLASHED), `/api/jobs/${ENC}/finalize?quick=true`],
+    ['deleteJob', () => deleteJob(SLASHED), `/api/jobs/${ENC}`],
+    ['fetchBundle', () => fetchBundle(SLASHED), `/api/jobs/${ENC}/bundle`],
+    ['fetchBundleLedger', () => fetchBundleLedger(SLASHED), `/api/jobs/${ENC}/bundle/ledger`],
+    ['fetchBaselineIntake', () => fetchBaselineIntake(SLASHED), `/api/jobs/${ENC}/baseline/intake`],
+    ['fetchEntities', () => fetchEntities(SLASHED), `/api/jobs/${ENC}/entities`],
+    ['updateEntity', () => updateEntity(SLASHED, SLASHED, {}), `/api/jobs/${ENC}/entities/${ENC}`],
+    ['deleteEntity', () => deleteEntity(SLASHED, SLASHED), `/api/jobs/${ENC}/entities/${ENC}`],
+    ['createEntity', () => createEntity(SLASHED, { value: 'v', entity_type: 't' }), `/api/jobs/${ENC}/entities`],
+    ['acceptAllPendingEntities', () => acceptAllPendingEntities(SLASHED), `/api/jobs/${ENC}/entities/accept-pending`],
+    ['bulkUpdateEntities', () => bulkUpdateEntities(SLASHED, 'malware', 'accept'), `/api/jobs/${ENC}/entities/bulk`],
+    ['fetchRelationships', () => fetchRelationships(SLASHED), `/api/jobs/${ENC}/relationships`],
+    ['createRelationship', () => createRelationship(SLASHED, { source_value: 'a', relationship_type: 'r', target_value: 'b' }), `/api/jobs/${ENC}/relationships`],
+    ['updateRelationship', () => updateRelationship(SLASHED, SLASHED, {}), `/api/jobs/${ENC}/relationships/${ENC}`],
+    ['deleteRelationship', () => deleteRelationship(SLASHED, SLASHED), `/api/jobs/${ENC}/relationships/${ENC}`],
+    ['bulkUpdateRelationships', () => bulkUpdateRelationships(SLASHED, [], 'accept'), `/api/jobs/${ENC}/relationships/bulk`],
+    ['fetchCoverage', () => fetchCoverage(SLASHED), `/api/jobs/${ENC}/coverage`],
+    ['fetchCoverageRules', () => fetchCoverageRules(SLASHED, SLASHED), `/api/jobs/${ENC}/coverage/${ENC}/rules`],
+    ['fetchCoverageRules, untagged', () => fetchCoverageRules('j1', '(untagged)'), '/api/jobs/j1/coverage/(untagged)/rules'],
+    ['fetchCoverageReportRules', () => fetchCoverageReportRules(SLASHED), `/api/jobs/${ENC}/coverage/rules`],
+    ['fetchDetectionProposals', () => fetchDetectionProposals(SLASHED), `/api/jobs/${ENC}/detections/proposals?limit=200`],
+  ])('%s requests one encoded segment per id', async (_name, call, url) => {
+    serveOk()
+    await call()
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe(url)
+  })
+
+  it('builds the source and the detection export links the same way', () => {
+    expect(sourceUrl(SLASHED)).toBe(`/api/jobs/${ENC}/source`)
+    expect(detectionsExportUrl(SLASHED)).toBe(`/api/jobs/${ENC}/detections/export`)
+  })
+})
+
+// A failed export POST carries the `<status>: ` prefix like every other call,
+// or errorDetail cuts the JSON body at its first ': ' (#547).
+describe('downloadExportSelection errors (#547)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('reads the FastAPI detail, as every other error does', async () => {
+    answer(400, '{"detail":"Too many rules"}')
+    const err = await failure(downloadExportSelection('j1', ['r1']))
+    expect(err.message).toBe('400: {"detail":"Too many rules"}')
+    expect(errorDetail(err)).toBe('Too many rules')
   })
 })

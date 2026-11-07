@@ -379,7 +379,7 @@ export default function NewReportModal({ open, initialFile, initialBundle, initi
         else takeBundle(bundle)
       }
       if (report) { setFile(report); setValue('') }
-    })
+    }).catch((err: unknown) => setError(errorDetail(err)))
   }
 
   const renderMarkingRow = <L extends MarkingLevel>(

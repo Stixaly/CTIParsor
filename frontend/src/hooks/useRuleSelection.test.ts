@@ -9,6 +9,7 @@
  * never be flattened to empty by a mount.
  */
 import { act, renderHook } from '@testing-library/react'
+import { StrictMode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useRuleSelection, type SelectableRule } from './useRuleSelection'
@@ -143,5 +144,45 @@ describe('useRuleSelection — an inventory still loading (#285)', () => {
     const { result } = renderHook(() => useRuleSelection('jobA', [rule('covered')], true))
     expect(result.current.isSelected('gone')).toBe(true)
     expect(localStorage.getItem('coverage.selection.jobA')).toBe('[]')
+  })
+})
+
+// #545: three separate defects in the same hook, one test each.
+describe('useRuleSelection — initial state, toggles and writes (#545)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    vi.restoreAllMocks()
+  })
+
+  it('shows the stored selection on the first render, not every rule selected', () => {
+    localStorage.setItem('coverage.selection.jobA', JSON.stringify(['a1']))
+    const seen: boolean[] = []
+    renderHook(() => {
+      const selection = useRuleSelection('jobA', RULES_A)
+      seen.push(selection.isSelected('a1'))
+      return selection
+    })
+    expect(seen[0]).toBe(false)
+  })
+
+  it('two toggles in one act cancel out, even when both start from the same render', () => {
+    const { result } = renderHook(() => useRuleSelection('jobA', RULES_A))
+    act(() => {
+      const toggle = result.current.toggleScope
+      toggle(['a1', 'a2'])
+      toggle(['a1', 'a2'])
+    })
+    expect(result.current.selectedCount).toBe(2)
+  })
+
+  it('writes the exclusion once per toggle, from outside the state updater', () => {
+    const writes = recordWrites()
+    const { result } = renderHook(() => useRuleSelection('jobA', RULES_A), { wrapper: StrictMode })
+    writes.splice(0)
+    act(() => {
+      result.current.toggleScope(['a1'])
+    })
+    const aWrites = writes.filter(([k]) => k === 'coverage.selection.jobA')
+    expect(aWrites).toHaveLength(1)
   })
 })

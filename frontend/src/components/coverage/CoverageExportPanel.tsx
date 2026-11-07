@@ -36,6 +36,12 @@ interface Props {
    *  rule is an addition the server-side selection cannot reproduce, so the
    *  streaming GET export must not be used. */
   hasPromoted: boolean
+  /** False while a promoted rule's metadata is still on its way (or never came):
+   *  the archive would miss that rule, so the download waits (#486). */
+  inventoryComplete?: boolean
+  /** The promoted rules' metadata could not be fetched: the download stays off
+   *  and says so, instead of waiting for an answer that will not come. */
+  inventoryFailed?: boolean
 }
 
 export default function CoverageExportPanel({
@@ -46,6 +52,8 @@ export default function CoverageExportPanel({
   rulesById,
   selection,
   hasPromoted,
+  inventoryComplete = true,
+  inventoryFailed = false,
 }: Props): JSX.Element {
   const [view, setView] = useState<'tactic' | 'format'>('tactic')
   const [downloading, setDownloading] = useState(false)
@@ -118,6 +126,7 @@ export default function CoverageExportPanel({
     sub,
     indent = 0,
     group = false,
+    format,
     right,
     rightColor,
     bg,
@@ -128,6 +137,9 @@ export default function CoverageExportPanel({
     sub?: string
     indent?: number
     group?: boolean
+    /** The format this row stands for in the format view. Given explicitly: a
+     *  header with no rule has no ids to read it from (#566). */
+    format?: DetectionFormat
     right: string
     rightColor: string
     bg?: string
@@ -176,7 +188,7 @@ export default function CoverageExportPanel({
         <div style={{ display: 'flex', gap: 3 }}>
           {view === 'tactic'
             ? DETECTION_FORMATS.map((f) => fmtChip(ids, f))
-            : fmtChip(ids, (rulesById.get(ids[0])?.format ?? 'sigma') as DetectionFormat)}
+            : format ? fmtChip(ids, format) : null}
         </div>
         <span style={{ fontFamily: mono, fontSize: 11.5, textAlign: 'right' }}>
           {total ? `${sel}/${total}` : '—'}
@@ -318,7 +330,8 @@ export default function CoverageExportPanel({
       const a = document.createElement('a')
       a.href = url
       a.download = filename
-      a.click()
+      // Firefox ignores click() on a detached <a> (#546).
+      document.body.appendChild(a); a.click(); document.body.removeChild(a)
       // Defer revocation so the browser has time to start the download before
       // the blob URL is invalidated (revoking synchronously breaks Firefox).
       setTimeout(() => URL.revokeObjectURL(url), 100)
@@ -435,8 +448,9 @@ export default function CoverageExportPanel({
               {view === 'tactic'
                 ? columns.map((col) => {
                     const ids = Array.from(new Set(col.techs.flatMap((t) => t.ruleIds)))
-                    const selIds = ids.filter((id) => selection.isSelected(id))
-                    const corpora = new Set(selIds.map((id) => rulesById.get(id)?.corpus).filter(Boolean)).size
+                    // Every rule of the tactic, not only the selected ones: a header that
+                    // reads 0 corpora on Clear disagrees with its own technique rows (#567).
+                    const corpora = new Set(ids.map((id) => rulesById.get(id)?.corpus).filter(Boolean)).size
                     return (
                       <div key={col.tactic}>
                         <Row
@@ -494,6 +508,7 @@ export default function CoverageExportPanel({
                           label={FORMAT_STYLE[f].label}
                           sub={FORMAT_STYLE[f].dest}
                           group
+                          format={f}
                           right={`${licenses} licenses · ${FORMAT_STYLE[f].ext}`}
                           rightColor="var(--ink-3)"
                           bg="var(--bg-soft)"
@@ -513,6 +528,7 @@ export default function CoverageExportPanel({
                               label={c.corpus}
                               sub={`${techsCovered} techniques`}
                               indent={14}
+                              format={f}
                               right={none ? 'none — all rights reserved' : c.license}
                               rightColor={none ? 'var(--warn)' : 'var(--ink-3)'}
                               bg={none ? 'color-mix(in oklab, var(--warn) 5%, transparent)' : undefined}
@@ -598,16 +614,21 @@ export default function CoverageExportPanel({
         ) : (
           <button
             type="button"
-            disabled={downloading}
+            disabled={downloading || !inventoryComplete}
             onClick={handleDownload}
             style={{
               ...primaryStyle,
               border: 'none',
-              cursor: downloading ? 'wait' : 'pointer',
+              cursor: inventoryFailed ? 'not-allowed'
+                : downloading || !inventoryComplete ? 'wait' : 'pointer',
               fontFamily: 'inherit',
             }}
           >
-            {downloading ? 'Preparing ZIP…' : `Download ZIP · ${selection.selectedCount} rules`}
+            {downloading
+              ? 'Preparing ZIP…'
+              : !inventoryComplete
+                ? (inventoryFailed ? 'Promoted rules did not load — reload the page' : 'Loading promoted rules…')
+                : `Download ZIP · ${selection.selectedCount} rules`}
           </button>
         )}
         {error ? (

@@ -47,10 +47,10 @@ export function buildGraphData(
   // Show only non-rejected entities.
   const visible = rawEntities.filter(e => e.accepted !== false)
 
-  // value (lowercase) → entity id.  Last writer wins on duplicate values, the
+  // value (trimmed, lowercase) → entity id.  Last writer wins on duplicate values, the
   // same ambiguity the backend has when resolving relationships by value.
   const valueToId = new Map<string, string>()
-  visible.forEach(e => valueToId.set(e.value.toLowerCase(), e.id))
+  visible.forEach(e => valueToId.set(e.value.trim().toLowerCase(), e.id))
 
   const nodes: GraphNode[] = visible.map(e => ({
     id: e.id, type: e.entity_type, name: e.value,
@@ -73,8 +73,8 @@ export function buildGraphData(
   const adj: Record<string, Set<string>> = {}
   nodes.forEach(n => { adj[n.id] = new Set() })
   rawRelations.forEach(r => {
-    const srcId = valueToId.get(r.source_value.toLowerCase())
-    const tgtId = valueToId.get(r.target_value.toLowerCase())
+    const srcId = valueToId.get(r.source_value.trim().toLowerCase())
+    const tgtId = valueToId.get(r.target_value.trim().toLowerCase())
     if (!srcId || !tgtId) { unmatchedCount++; return }
     const l = ledgerByKey.get(relKey(r.source_value, r.relationship_type, r.target_value))
     if (l && fate) fate.set(r.id, l)

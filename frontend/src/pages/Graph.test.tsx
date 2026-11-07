@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Graph, { RelEditor } from './Graph'
 import type { GraphEdge, GraphNode } from '../components/graph/graphLayout'
 import type { Entity, Job, Relationship, StixBundle } from '../types'
+import { suggestRelType } from '../components/review/tokens'
 
 const api = vi.hoisted(() => ({
   fetchJob: vi.fn(),
@@ -55,6 +56,23 @@ function renderEditor(over: Partial<Parameters<typeof RelEditor>[0]> = {}) {
   render(<RelEditor {...props} />)
   return props
 }
+
+// #550 — the new link's verb select offers, and selects, a verb the picked pair allows.
+describe('RelEditor — the new link’s verb fits the picked pair (#550)', () => {
+  it('selects the suggested verb once both ends are picked, and offers it', () => {
+    renderEditor({ edges: [] })
+    fireEvent.click(screen.getByRole('button', { name: 'New' }))
+    const [src, tgt] = screen.getAllByPlaceholderText('Search entities…')
+    fireEvent.focus(src)
+    fireEvent.mouseDown(screen.getByText('APT29'))
+    fireEvent.focus(tgt)
+    fireEvent.mouseDown(screen.getByText('WINELOADER'))
+    const select = document.querySelector('select') as HTMLSelectElement
+    const suggested = suggestRelType('threat_actor', 'malware')
+    expect(select.value).toBe(suggested)
+    expect(Array.from(select.options).map(o => o.value)).toContain(suggested)
+  })
+})
 
 describe('RelEditor — Delete (ADR-0090)', () => {
   it('turns Delete off for a row of the analyst’s bundle, and says why', () => {

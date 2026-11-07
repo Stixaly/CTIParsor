@@ -71,4 +71,64 @@ describe('Policy page — saving', () => {
       vi.useRealTimers()
     }
   })
+
+  it('a reset made while a debounced save waits stays the last PUT (#498, #544)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      api.putRelationshipPolicy.mockResolvedValue(undefined)
+      renderPolicy()
+      fireEvent.click(await screen.findByRole('button', { name: /Full auto/ }))   // debounce armed
+      fireEvent.click(screen.getByRole('button', { name: 'Reset' }))              // before 1.5 s
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+      await waitFor(() => expect(api.putRelationshipPolicy).toHaveBeenCalled())
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+      // The timer armed by "Full auto" must not send `auto` after the reset.
+      expect(api.putRelationshipPolicy).toHaveBeenCalledTimes(1)
+      const calls = api.putRelationshipPolicy.mock.calls
+      const last = calls[calls.length - 1][0]
+      expect(last.global).toBe('enforce')
+      expect(last.rules.length).toBeGreaterThan(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('an immediate save cancels the debounced save it overlaps (#544)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      api.putRelationshipPolicy.mockResolvedValue(undefined)
+      renderPolicy()
+      fireEvent.click(await screen.findByRole('button', { name: /Full auto/ }))   // debounce armed
+      fireEvent.click(screen.getByRole('button', { name: 'Sequential' }))         // immediate save
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+      await waitFor(() => expect(api.putRelationshipPolicy).toHaveBeenCalledTimes(1))
+      expect(api.putRelationshipPolicy.mock.calls[0][0]).toMatchObject({
+        global: 'auto', pin_budget_mode: 'sequential',
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+      expect(api.putRelationshipPolicy).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('the Import/Export download is attached to the body while clicked (#546)', async () => {
+    const urls = { created: [] as string[], revoked: [] as string[] }
+    const clicked: Array<{ attached: boolean; download: string }> = []
+    URL.createObjectURL = vi.fn(() => { urls.created.push('blob:policy'); return 'blob:policy' })
+    URL.revokeObjectURL = vi.fn((u: string) => { urls.revoked.push(u) })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      clicked.push({ attached: document.body.contains(this), download: this.download })
+    })
+    try {
+      renderPolicy()
+      fireEvent.click(await screen.findByRole('button', { name: /Import \/ Export/ }))
+      fireEvent.click(screen.getByRole('button', { name: /Download/ }))
+      expect(clicked).toEqual([{ attached: true, download: 'relationship-policy.json' }])
+      expect(document.querySelectorAll('a[download]').length).toBe(0)           // removed again
+      await waitFor(() => expect(urls.revoked).toEqual(['blob:policy']))
+    } finally {
+      click.mockRestore()
+    }
+  })
 })

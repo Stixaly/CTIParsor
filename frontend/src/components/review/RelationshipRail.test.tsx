@@ -272,4 +272,14 @@ describe('RelationshipRail — a relationship the bundle supplied (ADR-0090)', (
                { getEntityEnrichment: (v: string) => (v === 'APT29' ? 'baseline_only' : 'matched') })
     expect(screen.getByText('in STIX').getAttribute('title')).toBe('Already in the supplied STIX bundle')
   })
+
+  // #561: an IoC → technique pair offers only `indicates`; the current verb (uses) is still selectable
+  it('keeps the current verb selectable when the pair does not suggest it (#561)', () => {
+    renderFull([rel({ id: 'r1', source_value: '1.2.3.4', target_value: 'T1059', relationship_type: 'uses' })],
+               { getEntityType: (v: string) => (v === '1.2.3.4' ? 'ipv4' : 'ttp') })
+    fireEvent.click(screen.getByRole('button', { name: /uses/ }))
+    const select = screen.getByRole('combobox') as HTMLSelectElement
+    expect(select.value).toBe('uses')
+    expect(Array.from(select.options).map(o => o.value)).toContain('uses')
+  })
 })

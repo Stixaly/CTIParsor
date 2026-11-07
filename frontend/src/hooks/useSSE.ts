@@ -13,13 +13,15 @@ export function useSSE(jobId: string | null) {
   const errorCountRef = useRef(0)
 
   useEffect(() => {
-    if (!jobId) return
+    // Reset before the guard: a jobId that goes back to null must not leave the
+    // previous job's events and `done` behind (#548).
     setEvents([])
     setDone(false)
     setLost(false)
     errorCountRef.current = 0
+    if (!jobId) return
 
-    const es = new EventSource(`/api/jobs/${jobId}/progress`)
+    const es = new EventSource(`/api/jobs/${encodeURIComponent(jobId)}/progress`)
 
     const handleStage = (e: MessageEvent) => {
       // A successful message resets the error counter

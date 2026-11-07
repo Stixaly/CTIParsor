@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { loadStringSet, saveStringSet } from './sets'
 
@@ -55,13 +55,25 @@ export function useRuleSelection(
    *  exclusion of a rule not listed YET must not be pruned and persisted (#285). */
   complete = true,
 ): RuleSelection {
-  const [excluded, setExcluded] = useState<Set<string>>(new Set())
+  // Read on the first render: an empty initial set showed every rule selected
+  // for one paint before the effect below loaded the stored exclusions (#545).
+  const [excluded, setExcluded] = useState<Set<string>>(() =>
+    jobId === undefined ? new Set() : loadStringSet(`coverage.selection.${jobId}`))
+
+  // The latest exclusions, for the mutators. A mutator that starts from the
+  // render's closure misses a change made earlier in the same act, so two quick
+  // toggles of one scope cancelled out (#545). Kept in step by `commit`.
+  const excludedRef = useRef(excluded)
+  const commit = useCallback((next: Set<string>) => {
+    excludedRef.current = next
+    setExcluded(next)
+  }, [])
 
   // Load persisted exclusions whenever the job changes.
   useEffect(() => {
     if (jobId === undefined) return
-    setExcluded(loadStringSet(`coverage.selection.${jobId}`))
-  }, [jobId])
+    commit(loadStringSet(`coverage.selection.${jobId}`))
+  }, [jobId, commit])
 
   // Persisted by the MUTATORS, never by an effect on `excluded` — the same rule
   // `usePromotedRules` documents, and for the same reason. An effect with
@@ -81,20 +93,19 @@ export function useRuleSelection(
   useEffect(() => {
     if (rules.length === 0 || !complete) return
     const validIds = new Set(rules.map(r => r.id))
-    setExcluded(prev => {
-      const next = new Set(prev)
-      let changed = false
-      for (const id of next) {
-        if (!validIds.has(id)) {
-          next.delete(id)
-          changed = true
-        }
+    const prev = excludedRef.current
+    const next = new Set(prev)
+    let changed = false
+    for (const id of prev) {
+      if (!validIds.has(id)) {
+        next.delete(id)
+        changed = true
       }
-      if (!changed) return prev
-      persist(next)
-      return next
-    })
-  }, [rules, complete, persist])
+    }
+    if (!changed) return
+    persist(next)
+    commit(next)
+  }, [rules, complete, persist, commit])
 
   const byId = useMemo(() => new Map(rules.map(r => [r.id, r])), [rules])
 
@@ -133,30 +144,32 @@ export function useRuleSelection(
 
   const toggleScope = useCallback((ids: readonly string[]) => {
     if (ids.length === 0) return
-    const sel = selectedOf(ids)
-    setExcluded(prev => {
-      const next = new Set(prev)
-      if (sel === ids.length) {
-        for (const id of ids) next.add(id)
-      } else {
-        for (const id of ids) next.delete(id)
-      }
-      persist(next)
-      return next
-    })
-  }, [selectedOf, persist])
+    const prev = excludedRef.current
+    let sel = 0
+    for (const id of ids) {
+      if (!prev.has(id)) sel++
+    }
+    const next = new Set(prev)
+    if (sel === ids.length) {
+      for (const id of ids) next.add(id)
+    } else {
+      for (const id of ids) next.delete(id)
+    }
+    persist(next)
+    commit(next)
+  }, [persist, commit])
 
   const selectAll = useCallback(() => {
     const next = new Set<string>()
-    setExcluded(next)
     persist(next)
-  }, [persist])
+    commit(next)
+  }, [persist, commit])
 
   const clearAll = useCallback(() => {
     const next = new Set(rules.map(r => r.id))
-    setExcluded(next)
     persist(next)
-  }, [rules, persist])
+    commit(next)
+  }, [rules, persist, commit])
 
   return useMemo(() => ({
     excluded,

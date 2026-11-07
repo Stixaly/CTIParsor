@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import InlineHoverChip from './InlineHoverChip'
 import { IMPORTED_TITLE } from './MarginaliaCard'
 import type { Entity } from '../../types'
@@ -35,5 +35,51 @@ describe('InlineHoverChip — imported rows (ADR-0090)', () => {
     renderChip(ent({ enrichment_status: 'new' }))
 
     expect(screen.getByTitle('Change type')).toBeEnabled()
+  })
+})
+
+// #558: the type menu closes on Escape, on a press outside the chip, and when the chip moves to another entity.
+describe('InlineHoverChip — type menu closes (#558)', () => {
+  const openMenu = () => fireEvent.click(screen.getByTitle('Change type'))
+  const menuIsOpen = () => screen.queryByText('Change type') !== null
+
+  it('closes the type menu on Escape', () => {
+    renderChip(ent())
+    openMenu()
+    expect(menuIsOpen()).toBe(true)
+
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    expect(menuIsOpen()).toBe(false)
+  })
+
+  it('closes the type menu on a press outside the chip', () => {
+    renderChip(ent())
+    openMenu()
+
+    fireEvent.mouseDown(document.body)
+    expect(menuIsOpen()).toBe(false)
+  })
+
+  it('keeps the type menu open on a press inside the chip', () => {
+    renderChip(ent())
+    openMenu()
+
+    fireEvent.mouseDown(screen.getByText('Change type'))
+    expect(menuIsOpen()).toBe(true)
+  })
+
+  it('closes the type menu when the chip moves to another entity', () => {
+    const { rerender } = renderChip(ent())
+    openMenu()
+    expect(menuIsOpen()).toBe(true)
+
+    rerender(
+      <InlineHoverChip
+        entity={ent({ id: 'e2', value: 'Emotet' })} x={100} y={200}
+        onAccept={vi.fn()} onReject={vi.fn()} onReset={vi.fn()} onOpen={vi.fn()} onChangeType={vi.fn()}
+        onEnterChip={vi.fn()} onLeaveChip={vi.fn()}
+      />,
+    )
+    expect(menuIsOpen()).toBe(false)
   })
 })

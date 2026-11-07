@@ -22,14 +22,14 @@ export function useMitreSearch() {
 
     // ID prefix matches first (highest signal)
     for (const e of all) {
-      if (!seen.has(e.id) && e.id.toLowerCase().startsWith(q)) {
+      if (!seen.has(e.id) && (e.id ?? '').toLowerCase().startsWith(q)) {
         results.push(e)
         seen.add(e.id)
       }
     }
     // Name contains
     for (const e of all) {
-      if (!seen.has(e.id) && e.name.toLowerCase().includes(q)) {
+      if (!seen.has(e.id) && (e.name ?? '').toLowerCase().includes(q)) {
         results.push(e)
         seen.add(e.id)
       }
