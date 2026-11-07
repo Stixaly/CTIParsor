@@ -15,8 +15,8 @@ route matches gets a JSON 404, not the application page (`api/main.py`).
 | `GET` | `/api/jobs/{id}` | Get a single job (includes entity/relationship counts, `pipeline_mode`, and for an `enrich` job an `enrichment` block, below) |
 | `GET` | `/api/jobs/{id}/baseline` | The STIX bundle the job was created from, as received, as a JSON download. 404 for a job with none |
 | `GET` | `/api/jobs/{id}/baseline/intake` | What the intake made of that bundle, whole: every object left out and why. 404 for a job with none |
-| `PATCH` | `/api/jobs/{id}` | Update status: `for_review`, `reviewing`, `completed` or `failed`. 400 for any other value, `uploaded` and `processing` included: the server sets those. 409 for `completed` while the stored bundle is one Stage 5 refused (below) |
-| `DELETE` | `/api/jobs/{id}` | Delete job, all DB rows, and all associated files |
+| `PATCH` | `/api/jobs/{id}` | Update status: `for_review`, `reviewing`, `completed` or `failed`. 400 for any other value, `uploaded` and `processing` included: the server sets those. 409 while a worker runs the job (`processing`, whatever its lease: the same refusal as DELETE, #385), and 409 for `completed` while the stored bundle is one Stage 5 refused (below) |
+| `DELETE` | `/api/jobs/{id}` | Delete job, all DB rows, and all associated files. 409 while a worker runs the job (`processing`): stop it or wait for it to finish |
 | `POST` | `/api/jobs/{id}/finalize` | Re-run Stages 4–5 on the accepted rows and store the bundle; sets status `completed`. `?quick=true` rebuilds the bundle and leaves the status alone (the rebuild the UI schedules after each edit). Returns `{ status, bundle_size, validation }`, `validation` being `validated`, `unverified` or `unknown` (Stage 5 did not run). 409 when Stage 5 refuses the rebuilt bundle (below). Two finalizes of one job can overlap: a build never replaces a bundle built from newer rows (below) |
 | `GET` | `/api/jobs/{id}/bundle` | Download the STIX 2.1 bundle JSON. The header `X-Bundle-Validation` carries Stage 5's verdict: `validated`, `unverified` (the JSON schemas were missing) or `unknown` (built before the verdict was stored). 409 when Stage 5 refused the bundle (below) |
 | `GET` | `/api/jobs/{id}/bundle/ledger` | What Stage 4 did with each entity and relationship row when it built the stored bundle (ADR-0061): what each became, what was rewritten or dropped and why, why each generated object exists. 404 when the bundle predates the ledger — a quick finalize writes one |
@@ -90,7 +90,7 @@ validation, with a list as `detail`.
 |---|---|
 | `GET /api/jobs/{id}/bundle` | 409: the bundle is not served, by the graph view or the download |
 | `POST /api/jobs/{id}/finalize` (`quick` or not) | 409. The rebuilt bundle is stored with its verdict, and the job is not completed: a `completed` job goes back to `for_review`, any other status stays |
-| `PATCH /api/jobs/{id}` with `{"status": "completed"}` | 409. Every other status is accepted |
+| `PATCH /api/jobs/{id}` with `{"status": "completed"}` | 409. Every other status is accepted, unless the job is `processing`: then every status is refused (#385, see the routes table) |
 
 `GET /api/jobs/{id}/bundle/ledger` ignores the verdict. A finalize whose
 bundle Stage 5 accepts replaces it. A bundle built before the verdict was

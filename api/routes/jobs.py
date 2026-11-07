@@ -84,6 +84,11 @@ def _bundle_refused(errors: list[str]) -> HTTPException:
     return HTTPException(409, detail={"validation": "invalid", "errors": errors})
 
 
+# DELETE and PATCH refuse a job a worker is running, whatever its lease (#385): a
+# status change would take the job out of the heartbeat's reach.
+_PROCESSING_DETAIL = "job is currently processing — stop it or wait for it to finish"
+
+
 def _stored_errors(raw: str | None) -> list[str]:
     """`jobs.bundle_validation_errors` (a JSON list, already cut short by the worker)."""
     try:
@@ -194,11 +199,12 @@ def get_baseline_intake(job_id: str):
 
 @router.patch("/{job_id}", responses=_BUNDLE_REFUSED)
 def update_job_status(job_id: str, patch: StatusPatch):
-    """Set a job's status.  409 for `completed` while the stored bundle is one
-    the STIX schemas refused (see finalize)."""
+    """Set a job's status.  409 while a worker runs the job (#385, as DELETE does), and
+    409 for `completed` while the stored bundle is one the STIX schemas refused (see finalize)."""
     valid = {"for_review", "reviewing", "completed", "failed"}
     if patch.status not in valid:
         raise HTTPException(400, f"Invalid status. Valid: {valid}")
+    running = False
     refused: list[str] | None = None
     conflict: str | None = None
     rowcount = 0
@@ -210,15 +216,20 @@ def update_job_status(job_id: str, patch: StatusPatch):
                 "SELECT status, bundle_json, bundle_validation, bundle_validation_errors "
                 "FROM jobs WHERE id=?", (job_id,)
             ).fetchone()
-            if patch.status == "completed":
+            if row and row["status"] == "processing":
+                # The heartbeat stamps only `processing` rows: a status set here
+                # would leave the job unleased, and requeue_orphans would never
+                # take it back.
+                running = True
+            elif patch.status == "completed":
                 if row and row["bundle_validation"] == "invalid":
                     refused = _stored_errors(row["bundle_validation_errors"])
                 elif row and (row["bundle_json"] is None
-                              or row["status"] in ("uploaded", "queued", "processing")):
+                              or row["status"] in ("uploaded", "queued")):
                     # A job still in a worker-execution state, or without a
                     # built bundle, must not be marked completed.
                     conflict = (f"job is {row['status']!r} with no STIX bundle yet")
-            if refused is None and conflict is None:
+            if not running and refused is None and conflict is None:
                 if patch.status == "completed":
                     # The guard is repeated in the UPDATE's WHERE so a worker
                     # writing concurrently cannot slip between the SELECT and
@@ -231,13 +242,19 @@ def update_job_status(job_id: str, patch: StatusPatch):
                         (patch.status, now_iso(), job_id),
                     )
                 else:
+                    # Same guard as DELETE's: a worker may claim the job after the SELECT.
                     result = conn.execute(
-                        "UPDATE jobs SET status=?, updated_at=? WHERE id=?",
+                        "UPDATE jobs SET status=?, updated_at=? WHERE id=? AND status <> 'processing'",
                         (patch.status, now_iso(), job_id),
                     )
                 conn.commit()
                 rowcount = result.rowcount
+                if rowcount == 0 and row is not None:
+                    again = conn.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
+                    running = again is not None and again["status"] == "processing"
     # Raise outside the lock so the lock is always released cleanly
+    if running:
+        raise HTTPException(409, _PROCESSING_DETAIL)
     if refused is not None:
         raise _bundle_refused(refused)
     if conflict is not None:
@@ -306,9 +323,7 @@ def _delete_job(job_id: str) -> bool:
             if row["status"] == "processing":
                 # Deleting a running job would orphan the worker's writes
                 # (progress_events rows, output/ files) mid-pipeline.
-                raise HTTPException(
-                    409, "job is currently processing — stop it or wait for it to finish"
-                )
+                raise HTTPException(409, _PROCESSING_DETAIL)
             # From here on the id is the one the database holds (a uuid the
             # server generated), never the request's string: it names files.
             job_id, original_filename = row["id"], row["original_filename"]
@@ -338,9 +353,7 @@ def _delete_job(job_id: str) -> bool:
                 again = conn.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
                 if not again:
                     return False
-                raise HTTPException(
-                    409, "job is currently processing — stop it or wait for it to finish"
-                ) from None
+                raise HTTPException(409, _PROCESSING_DETAIL) from None
 
     # Delete associated files AFTER the DB transaction commits successfully.
     # If file deletion partially fails the DB is already clean — no orphaned rows.
