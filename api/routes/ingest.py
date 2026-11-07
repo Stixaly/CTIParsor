@@ -261,7 +261,12 @@ async def ingest_text(request: Request, body: TextIngestRequest):
         job_id, suffix, len(text),
     )
 
-    return await asyncio.to_thread(start_job, job_id, dest, filename, tlp, pap, baseline=baseline)
+    try:
+        return await asyncio.to_thread(start_job, job_id, dest, filename, tlp, pap, baseline=baseline)
+    except Exception:
+        # Whatever stopped the job from starting, nothing else will ever delete the text (issue #439).
+        dest.unlink(missing_ok=True)
+        raise
 
 
 @router.post("/url", responses=BASELINE_REFUSED)
@@ -377,11 +382,13 @@ async def ingest_url(request: Request, body: UrlIngestRequest):
 
     try:
         response = await asyncio.to_thread(start_job, job_id, text_dest, filename, tlp, pap, baseline=baseline)
-    except HTTPException as exc:
-        if exc.status_code == 503:
-            # start_job removed the text it was given; the archive and its metadata go too.
-            dest.unlink(missing_ok=True)
-            capture_meta_path(text_dest).unlink(missing_ok=True)
+    except Exception:
+        # The job did not start, whatever the reason (the 503 queue refusal, or an error
+        # in start_job): the archive, its text and its metadata go too (issue #439).
+        # Exception, not BaseException: a cancelled await leaves the thread running start_job.
+        dest.unlink(missing_ok=True)
+        text_dest.unlink(missing_ok=True)
+        capture_meta_path(text_dest).unlink(missing_ok=True)
         raise
     response["source_url"] = result.final_url
     response["blocked_requests"] = result.blocked_requests

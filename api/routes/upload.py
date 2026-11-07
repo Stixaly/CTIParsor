@@ -209,17 +209,15 @@ def upload_file(
         raise HTTPException(500, "File upload failed — empty file")
 
     # The baseline is read last, once the cheap checks on the report have passed
-    # and it is on disk; whatever stops the request before the job is handed to
-    # `start_job` (a refused baseline, a marking that cannot be resolved, a bug)
-    # takes the report file with it.
-    handed_over = False
+    # and it is on disk.  The file becomes the job's only once `start_job` has
+    # returned: whatever stops the request before that (a refused baseline, a
+    # marking that cannot be resolved, a `start_job` that raises) takes the report
+    # file with it.
     try:
         baseline = read_baseline(
             read_baseline_file(baseline_stix.file) if baseline_stix is not None else None, baseline_report_id)
         tlp_level, pap_level = baseline_markings(baseline, tlp_level, pap_level)
-        handed_over = True
-    finally:
-        if not handed_over:
-            dest.unlink(missing_ok=True)
-
-    return start_job(job_id, dest, file.filename or "unknown", tlp_level, pap_level, baseline=baseline)
+        return start_job(job_id, dest, file.filename or "unknown", tlp_level, pap_level, baseline=baseline)
+    except BaseException:
+        dest.unlink(missing_ok=True)
+        raise
