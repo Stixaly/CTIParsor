@@ -48,7 +48,8 @@ _JSON_VERSIONS: dict[str, tuple[tuple[str, ...], ...]] = {
 }
 
 _SEMVER = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
-_VERSION_LINE = re.compile(r'^__version__ = "(\d+\.\d+\.\d+)"$', re.MULTILINE | re.ASCII)
+#: The lookahead lets a CRLF line end match, and keeps its ``\r`` out of the match so that `prepare` writes it back.
+_VERSION_LINE = re.compile(r'^__version__ = "(\d+\.\d+\.\d+)"(?=\r?$)', re.MULTILINE | re.ASCII)
 #: ``## [X.Y.Z] - date`` and ``## [Unreleased]``: the version (or word) and the date.
 _HEADING = re.compile(r"## \[([^\]]*)\](?: - (.*))?")
 _ISO_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
@@ -266,13 +267,14 @@ def unreleased_body(root: Path) -> str:
 def _summary(body: str, version: str, repo: str) -> str:
     """For a body too long to ship: the text that opens it, then its entries (``####`` titles) by ``###`` group.
 
-    The opening text is the summary a maintainer writes above the first heading (docs/releasing.md).
+    The opening text is the summary a maintainer writes above the first ``### `` group (docs/releasing.md);
+    a ``####`` title before that group is part of it.
     A group the changelog names twice ("### Added" recurs between older entries) is listed once, where
     it first appears; a group with no ``####`` entry (older entries are plain bullets) is left out.
     """
     lines = body.split("\n")
     code = _in_code(lines)
-    first = next((i for i, line in enumerate(lines) if not code[i] and line.startswith("###")), len(lines))
+    first = next((i for i, line in enumerate(lines) if not code[i] and line.startswith("### ")), len(lines))
     groups: dict[str | None, list[str]] = {}  # heading -> bullets; entries before any group have no heading
     heading: str | None = None
     for i in range(first, len(lines)):
