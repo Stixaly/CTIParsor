@@ -131,9 +131,9 @@ def test_corpus_filter_applied_to_meta(monkeypatch, domains, expect_capec):
     else:
         monkeypatch.setenv("TTP_SEMANTIC_DOMAINS", domains)
 
-    # _load_corpus is lru_cached (one load per process), so the previous
+    # _load_corpus_for is lru_cached (one load per process and key), so the previous
     # parametrisation would otherwise be served from cache.
-    s2c._load_corpus.cache_clear()
+    s2c._load_corpus_for.cache_clear()
     corpus = s2c._load_corpus()
     if corpus is None:
         pytest.skip("embedding cache unreadable (model mismatch)")
@@ -141,4 +141,4 @@ def test_corpus_filter_applied_to_meta(monkeypatch, domains, expect_capec):
     has_capec = any(m.get("domain") == "capec" for m in meta)
     assert has_capec is expect_capec
     assert len(_emb) == len(meta)      # embeddings stay aligned with meta
-    s2c._load_corpus.cache_clear()     # don't leak this corpus to other tests
+    s2c._load_corpus_for.cache_clear() # don't leak this corpus to other tests
