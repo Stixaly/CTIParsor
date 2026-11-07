@@ -1,4 +1,4 @@
-import { useMemo, useRef, useEffect, type CSSProperties } from 'react'
+import { useMemo, useRef, useEffect, cloneElement, type CSSProperties } from 'react'
 import type { Entity } from '../../types'
 import { typeColor, buildRanges } from './tokens'
 import RelationshipOverlay from './RelationshipOverlay'
@@ -216,15 +216,19 @@ export default function DocumentReader({
   const paragraphs: React.ReactNode[][] = []
   let buf: React.ReactNode[] = []
   segments.forEach((seg, i) => {
-    const child = (seg as React.ReactElement<{ children?: React.ReactNode }>).props?.children
+    const el = seg as React.ReactElement<{ children?: React.ReactNode }>
+    const child = el.props?.children
     if (typeof child === 'string' && child.includes('\n\n')) {
+      // Each piece is a clone of the segment, so a highlight (rel-ev-hl, tok, focus
+      // style) and its data-* attributes survive the split.  Only the text changes.
       const parts = child.split('\n\n')
-      buf.push(<span key={`p-${i}-0`}>{parts[0]}</span>)
+      const piece = (k: string, text: string) => cloneElement(el, { key: `p-${i}-${k}` }, text)
+      buf.push(piece('0', parts[0]))
       paragraphs.push(buf)
       for (let k = 1; k < parts.length - 1; k++) {
-        paragraphs.push([<span key={`p-${i}-${k}`}>{parts[k]}</span>])
+        paragraphs.push([piece(String(k), parts[k])])
       }
-      buf = parts.length > 1 ? [<span key={`p-${i}-last`}>{parts[parts.length - 1]}</span>] : []
+      buf = parts.length > 1 ? [piece('last', parts[parts.length - 1])] : []
     } else {
       buf.push(seg)
     }

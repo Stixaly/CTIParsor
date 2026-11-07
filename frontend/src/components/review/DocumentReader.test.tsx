@@ -23,7 +23,7 @@ const entity = (over: Partial<Entity> = {}): Entity => ({
 
 const noop = () => {}
 
-type Extra = { focusedId?: string | null; onEntityNotInText?: (id: string) => void }
+type Extra = { focusedId?: string | null; onEntityNotInText?: (id: string) => void; relEvidence?: string[] }
 
 const readerElement = (text: string, entities: Entity[], extra: Extra = {}) => (
   <DocumentReader
@@ -42,7 +42,7 @@ const readerElement = (text: string, entities: Entity[], extra: Extra = {}) => (
     onMarkShiftClick={noop}
     onMarkDragStart={noop}
     onSelectionRelate={noop}
-    relEvidence={[]}
+    relEvidence={extra.relEvidence ?? []}
     relsForOverlay={[]}
     showRelArrows={false}
   />
@@ -180,6 +180,30 @@ describe('DocumentReader — wrapped hash highlighting', () => {
     const marks = [...container.querySelectorAll('mark')]
     expect(marks).toHaveLength(1)
     expect(marks[0].textContent).toBe(HASH)
+  })
+
+  // issue #455: the paragraph splitter pushed the pieces of a split evidence span
+  // into plain <span>s, so a proof that crossed a blank line lost rel-ev-hl.
+  it('keeps the evidence highlight on every piece of a span split across paragraphs (issue 455)', () => {
+    const text = 'Intro line.\n\nThe loader drops payload.\n\nNext paragraph here.'
+    const { container } = renderReader(text, [], {
+      relEvidence: ['loader drops payload.\n\nNext paragraph'],
+    })
+    const hl = [...container.querySelectorAll('.rel-ev-hl')]
+    expect(hl.map(h => h.textContent)).toEqual(['loader drops payload.', 'Next paragraph'])
+    // The pieces are clones of one element: no id may be repeated in the DOM.
+    const ids = [...container.querySelectorAll('[id]')].map(el => el.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  // Control: evidence on a single paragraph is one highlighted span, unchanged.
+  it('keeps a single-paragraph evidence span as one highlight (issue 455 control)', () => {
+    const { container } = renderReader('Intro.\n\nThe loader drops payload here.', [], {
+      relEvidence: ['loader drops payload here'],
+    })
+    const hl = [...container.querySelectorAll('.rel-ev-hl')]
+    expect(hl).toHaveLength(1)
+    expect(hl[0].textContent).toBe('loader drops payload here')
   })
 
   it('highlights stacked hashes in a column on their own rows', () => {
