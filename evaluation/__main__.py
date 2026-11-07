@@ -899,7 +899,8 @@ def cmd_inhouse_score(args) -> None:
     docs = {d.doc_id: d for d in inhouse.load()}
     totals: dict[str, metrics.Counts] = {}
     negatives = [0, 0]
-    observables = {"cases": 0, "as_indicator": 0}
+    obs_cases = 0
+    obs_as_indicator: int | None = 0
     per_doc = {}
     recorded: set[str] = set()
     failed: list[str] = []
@@ -926,19 +927,18 @@ def cmd_inhouse_score(args) -> None:
         negatives[0] += s["negatives"]["cases"]
         negatives[1] += s["negatives"]["violated"]
         if "observables" in s:
-            observables["cases"] += s["observables"]["cases"]
+            obs_cases += s["observables"]["cases"]
             # A report without observables has none to count, bundle or not;
             # one with observables but no recorded bundle makes the total unknown.
             n = s["observables"]["as_indicator"] if s["observables"]["cases"] else 0
-            observables["as_indicator"] = (None if n is None or observables["as_indicator"] is None
-                                           else observables["as_indicator"] + n)
+            obs_as_indicator = None if n is None or obs_as_indicator is None else obs_as_indicator + n
     failed.sort()
     missing = sorted(set(docs) - recorded)
     report = {"run": args.name, "documents": len(per_doc),
               "documents_failed": failed, "documents_missing": missing,
               "micro": {k: v.as_dict() for k, v in sorted(totals.items())},
               "negatives": {"cases": negatives[0], "violated": negatives[1]},
-              "observables": observables}
+              "observables": {"cases": obs_cases, "as_indicator": obs_as_indicator}}
     _write(run_dir / "score.json", report)
     print(json.dumps(report, indent=2), flush=True)
     problems: list[str] = []
