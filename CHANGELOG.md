@@ -11,6 +11,40 @@ theme.
 
 ### Fixed
 
+#### Audit batch of 2026-11-06, the issues that waited for a decision (#397, #399, #400, #414, #416, #432)
+
+The last six issues of the batch below needed a design choice; each follows the
+one recorded in its commit. Two schema migrations: 15 (job store,
+`jobs.resolved_types_json`) and 16 (rule store, `rule_techniques.propagated`),
+both applied at start-up. The fixes change the bundles built from the same
+report (`BUNDLE_AFFECTING`: extraction for #399 with consensus on, mapping for
+#414 and #432).
+
+- **Extraction.** Stage 3e no longer counts a secondary model's `gap` as
+  corroboration: a triplet it proposes only as `gap` keeps its confidence and
+  label (#399, ADR-0009).
+- **Calibration.** A proposed cutoff's support counts only the decisions
+  between it and the auto-accept level, so auto-accepted rows no longer
+  validate a cutoff below them; a cutoff at or above that level is still
+  reported as `above_auto_accept` (#400, ADR-0051, ADR-0058).
+- **Ledger.** A finalize or a rebuild records Stage 2's type-conflict losers
+  too, for jobs run under migration 15; a losing type the analyst brought back
+  is not reported as dropped (#397). An entity merged by the alias merge and
+  then matched to the baseline keeps the earlier merge in `merged_via`, and a
+  relationship a merge removed points at the objects that replaced its ends
+  (#416, ADR-0061).
+- **Baseline merge.** A CTIParsor object whose id the analyst excluded from
+  the baseline no longer comes back when the document states it again: it is
+  left out with the relationships that name it (`baseline_rejected` in the
+  ledger). An excluded entry no longer makes the index lookup ambiguous, so the
+  kept baseline object of the same value absorbs CTIParsor's copy (#414,
+  ADR-0090).
+- **Detection.** The techniques a canonical rule inherits from the rules
+  folded under it are marked and computed again at every dedup pass, so a
+  removed corpus or a split cluster no longer leaves them behind (#432).
+  Inherited rows written before migration 16 stay until their rule's corpus is
+  rewritten: run a full rule-store rebuild after the upgrade to clear them.
+
 #### Audit batch of 2026-11-06 (issues #376-#470)
 
 An audit filed 95 issues; each was checked against the code before any fix.
@@ -19,7 +53,8 @@ Most of the others were partly wrong, and only the real part is fixed; each
 commit says which. The fixes change the bundles built from the same report
 (`BUNDLE_AFFECTING`, extraction and mapping); stored bundles are not rebuilt
 until finalized or run again, and the rule store changes at the next rebuild.
-No configuration change; the database schema is unchanged.
+No configuration change. The schema migrations of the follow-up above (15, 16)
+are the only schema changes.
 
 - **Extraction.** Stage 3f no longer reads a preamble's `[]` as an abstention
   (#378), matches quotes past zero-width characters, counts the spotlighting
@@ -42,10 +77,8 @@ No configuration change; the database schema is unchanged.
   matches the cumulative support the code and ADR-0058 use). Promotion skips
   null sources and recounts active promotions (#418).
   The analyst's deny rows apply to the LLM lists of the CLI bundle and
-  to targeted countries and sectors (#382). The ledger records Stage 2's
-  type-conflict losers (#397): the CLI run since this batch, a finalize or a
-  rebuild once the job ran under migration 15 (`jobs.resolved_types_json`); a
-  losing type the analyst brought back since is no longer reported as dropped.
+  to targeted countries and sectors (#382). The CLI ledger records Stage 2's
+  type-conflict losers (#397; the API path is in the follow-up above).
 - **Bundle.** An explicit `targets` row keeps its quote and confidence (#383).
   Long-distance completion links SDOs only (#417, #412). Payloads on gist,
   raw.github.com and Google Sites get Indicators, and `www.` is ignored in the

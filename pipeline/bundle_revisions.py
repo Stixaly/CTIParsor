@@ -160,6 +160,15 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "longer cut a rule apart, and a meta string wrapped after a backslash is rejoined without a "
      "space (#425-#427, #435)",
      "mapping"),
+    ("471acd5", "2026-11-07",
+     "With consensus on, a triplet the second model proposes only as gap keeps its confidence and "
+     "evidence label instead of the agreement boost (#399)",
+     "extraction"),
+    ("351bd4a", "2026-11-07",
+     "Baseline merge: a CTIParsor object whose id the analyst excluded is left out with the "
+     "relationships naming it, and a kept twin absorbs the copy of an excluded entry (#414); the "
+     "techniques a canonical rule inherits are recomputed at every dedup pass (#432)",
+     "mapping"),
 )
 
 
