@@ -81,6 +81,10 @@ LEGACY_MODIFIER_CLASSES: dict[str, str] = {
     "http_stat_code": "strlit",
 }
 
+#: Keywords that hand the next `content:` back to the raw packet, closing the
+#: sticky buffer before it.  `pkt_data` is the only one the adapter knows of.
+PACKET_RESET_KEYWORDS: frozenset[str] = frozenset({"pkt_data"})
+
 NOISE_LITERALS: frozenset[str] = frozenset({
     "get", "post", "head", "put", "delete", "options", "connect",
     "http/1.0", "http/1.1", "http/2", "content-type", "user-agent",
@@ -161,9 +165,23 @@ def parse_options(body: str) -> list[tuple[str, str]]:
 
 
 def _unquote(value: str) -> str:
-    """Strip one pair of enclosing double quotes if present."""
-    if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
-        return value[1:-1]
+    """Return the text between the opening double quote and its closing one.
+
+    The closing quote is the first one not escaped by a backslash, so
+    `"/gate.php", fast_pattern` gives `/gate.php`: the modifiers after the
+    literal are not part of it.  A value that does not open with a quote, or
+    never closes, is returned unchanged.
+    """
+    if not value.startswith('"'):
+        return value
+    i = 1
+    while i < len(value):
+        if value[i] == "\\":
+            i += 2
+            continue
+        if value[i] == '"':
+            return value[1:i]
+        i += 1
     return value
 
 
@@ -375,6 +393,12 @@ def extract_atoms(rule_line: str, *, max_atoms: int = 40) -> list[tuple[str, str
             if cls == "strlit" and looks_like_domain(text.strip().lower()):
                 cls = "domain"
             _add(cls, text, out, seen, max_atoms)
+            continue
+
+        # `pkt_data` sends the following content to the raw packet: the sticky
+        # buffer before it no longer applies.
+        if value == "" and key in PACKET_RESET_KEYWORDS:
+            current_buffer = None
             continue
 
         # A naked keyword that is *only* a buffer opens one.  Ambiguous keywords
