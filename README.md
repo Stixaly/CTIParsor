@@ -122,12 +122,12 @@ Docker is the only supported way to install, develop and run CTIParsor
 [Releases page](https://github.com/Stixaly/CTIParsor/releases) has an archive
 of the repository at its tag (`compose.yaml`, `docker/`, `setup.sh`,
 `.env.example`: what Compose needs beside the image) and, in its notes, the
-digest of its image. The first line names 0.3.1, the latest release when this
+digest of its image. The first line names 0.4.0, the latest release when this
 was written; for a newer one, take both values from its notes.
 
 <!-- scripts/check_clean_install.sh: INSTALL_FILES -->
 ```bash
-version=0.3.1 digest=sha256:af0ce3063f1f7e71ccf7187cf35786e0d1befd47cc93c3ddba6ed843e856ca1d
+version=0.4.0 digest=sha256:a8f33b4c23f91081e80cad9f65b21f81de4dd8fc4be1b6fe58e215ce30167c65
 curl -fsSLO https://github.com/Stixaly/CTIParsor/releases/download/v$version/ctiparsor-$version.tar.gz
 curl -fsSLO https://github.com/Stixaly/CTIParsor/releases/download/v$version/SHA256SUMS
 sha256sum -c --ignore-missing SHA256SUMS
@@ -137,7 +137,7 @@ bash setup.sh
 echo "CTI_IMAGE=ghcr.io/stixaly/ctiparsor@$digest" >> .env
 ```
 
-`sha256sum` must print `ctiparsor-0.3.1.tar.gz: OK` (with your version).
+`sha256sum` must print `ctiparsor-0.4.0.tar.gz: OK` (with your version).
 `setup.sh` writes `.env` from `.env.example` and a database password; it
 downloads and starts nothing. Choose the LLM provider in `.env` now
 ([Configuration](#configuration)). With `ANTHROPIC_API_KEY=` empty, Stage 3 is
@@ -174,7 +174,7 @@ the image `ctiparsor:local`.
 
 ```bash
 git clone https://github.com/Stixaly/CTIParsor.git && cd CTIParsor
-git checkout v0.3.1              # a release tag; main is where development happens
+git checkout v0.4.0              # a release tag; main is where development happens
 bash setup.sh
 docker compose build             # or: make docker-build (stamps the git revision)
 docker compose up -d
