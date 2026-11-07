@@ -12,6 +12,8 @@ const api = vi.hoisted(() => ({
   syncCorpus: vi.fn(),
   addCorpus: vi.fn(),
   rebuildCorpora: vi.fn(),
+  removeCorpus: vi.fn(),
+  setCorpusEnabled: vi.fn(),
 }))
 vi.mock('../api/client', async (orig) => ({ ...(await orig<object>()), ...api }))
 
@@ -43,6 +45,8 @@ beforeEach(() => {
   api.syncCorpus.mockReset().mockResolvedValue({ ok: true, detail: 'ok', rules: 3, file_errors: [], corpora: CORPORA })
   api.addCorpus.mockReset().mockResolvedValue({ ok: true, warning: null, corpora: CORPORA })
   api.rebuildCorpora.mockReset().mockResolvedValue({ total: 16, written: { sigma: 11 }, skipped: [], skip_reasons: {}, file_errors: {} })
+  api.removeCorpus.mockReset().mockResolvedValue({ ok: true, corpora: CORPORA })
+  api.setCorpusEnabled.mockReset().mockResolvedValue({ ok: true, corpora: CORPORA })
 })
 
 describe('Settings — Redownload button (#369)', () => {
@@ -135,6 +139,55 @@ describe('Settings — errors and stale messages (#370)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Rebuild index' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('disk full')
     expect(screen.queryByText(/^Rebuilt:/)).toBeNull()
+  })
+})
+
+// A refused remove or enable/disable used to end in an error nothing rendered (#446).
+describe('Settings — remove and enable/disable errors (#446)', () => {
+  it('shows the API detail of a rejected Remove on the corpus row', async () => {
+    api.removeCorpus.mockRejectedValueOnce(new Error('409: {"detail":"corpus is still in use"}'))
+    renderSettings()
+    fireEvent.click(await within(await rowOf('public-git')).findByRole('button', { name: 'Remove' }))
+    const alert = await within(await rowOf('public-git')).findByRole('alert')
+    expect(alert).toHaveTextContent('Remove failed')
+    expect(alert).toHaveTextContent('corpus is still in use')
+    expect(within(await rowOf('et-open')).queryByRole('alert')).toBeNull()
+  })
+
+  it('shows the API detail of a rejected Disable on the corpus row', async () => {
+    api.setCorpusEnabled.mockRejectedValueOnce(new Error('500: {"detail":"could not write the policy"}'))
+    renderSettings()
+    fireEvent.click(await within(await rowOf('et-open')).findByRole('button', { name: 'Disable' }))
+    const alert = await within(await rowOf('et-open')).findByRole('alert')
+    expect(alert).toHaveTextContent('Disable failed')
+    expect(alert).toHaveTextContent('could not write the policy')
+    expect(within(await rowOf('public-git')).queryByRole('alert')).toBeNull()
+  })
+
+  it('says Enable failed when a disabled corpus cannot be enabled', async () => {
+    api.fetchCorpora.mockResolvedValue({ corpora: CORPORA.map(c => c.name === 'et-open' ? { ...c, enabled: false } : c) })
+    api.setCorpusEnabled.mockRejectedValueOnce(new Error('500: {"detail":"boom"}'))
+    renderSettings()
+    fireEvent.click(await within(await rowOf('et-open')).findByRole('button', { name: 'Enable' }))
+    expect(await within(await rowOf('et-open')).findByRole('alert')).toHaveTextContent('Enable failed')
+  })
+
+  it('clears the previous row error when another Remove starts', async () => {
+    api.removeCorpus.mockRejectedValueOnce(new Error('409: {"detail":"corpus is still in use"}'))
+    renderSettings()
+    fireEvent.click(await within(await rowOf('public-git')).findByRole('button', { name: 'Remove' }))
+    await within(await rowOf('public-git')).findByRole('alert')
+    const publicRow = await rowOf('public-git')
+    fireEvent.click(within(await rowOf('et-open')).getByRole('button', { name: 'Remove' }))
+    await waitFor(() => expect(api.removeCorpus).toHaveBeenCalledWith('et-open'))
+    await waitFor(() => expect(within(publicRow).queryByRole('alert')).toBeNull())
+  })
+
+  it('shows no alert after a successful Disable (control)', async () => {
+    renderSettings()
+    fireEvent.click(await within(await rowOf('et-open')).findByRole('button', { name: 'Disable' }))
+    await waitFor(() => expect(api.setCorpusEnabled).toHaveBeenCalledWith('et-open', false))
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
   })
 })
 

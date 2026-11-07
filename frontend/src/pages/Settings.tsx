@@ -62,8 +62,10 @@ export default function Settings() {
     onMutate: () => setMsg(''),
     onSuccess: invalidate,
   })
+  // Remove and enable/disable report on their own corpus row, like Redownload (#446).
   const remove = useMutation({
     mutationFn: (name: string) => removeCorpus(name),
+    onMutate: () => setMsg(''),
     onSuccess: invalidate,
   })
   const sync = useMutation({
@@ -78,6 +80,7 @@ export default function Settings() {
   })
   const toggle = useMutation({
     mutationFn: (v: { name: string; enabled: boolean }) => setCorpusEnabled(v.name, v.enabled),
+    onMutate: () => setMsg(''),
     onSuccess: invalidate,
   })
 
@@ -278,6 +281,16 @@ export default function Settings() {
               {sync.isError && sync.variables === c.name && (
                 <p role="alert" style={{ gridColumn: '1 / -1', margin: 0, fontSize: 12, color: 'var(--no)', overflowWrap: 'anywhere' }}>
                   Redownload failed: {errorDetail(sync.error)}
+                </p>
+              )}
+              {toggle.isError && toggle.variables?.name === c.name && (
+                <p role="alert" style={{ gridColumn: '1 / -1', margin: 0, fontSize: 12, color: 'var(--no)', overflowWrap: 'anywhere' }}>
+                  {toggle.variables?.enabled ? 'Enable' : 'Disable'} failed: {errorDetail(toggle.error)}
+                </p>
+              )}
+              {remove.isError && remove.variables === c.name && (
+                <p role="alert" style={{ gridColumn: '1 / -1', margin: 0, fontSize: 12, color: 'var(--no)', overflowWrap: 'anywhere' }}>
+                  Remove failed: {errorDetail(remove.error)}
                 </p>
               )}
               {sync.data && sync.variables === c.name && sync.data.file_errors.length > 0 && (
