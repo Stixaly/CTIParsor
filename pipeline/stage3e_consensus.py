@@ -59,26 +59,33 @@ def reconcile(
 ) -> LLMEnrichmentResult:
     """Keep all of ``primary`` but re-grade its relationships using ``secondary``.
 
-    - A relationship both models proposed gets a confidence boost.
+    - A relationship both models proposed gets a confidence boost.  A `gap`
+      proposal from the secondary (it could not find the claim in the text) is
+      not agreement: when every secondary proposal for the triplet is `gap`, the
+      relationship is left as it is (issue #399).
     - A relationship only the primary proposed loses confidence and, if it was
       labelled "observed", is downgraded to "reported" so it can no longer
       auto-promote in the review UI on a single model's word.
     """
-    sec_keys = {
-        (r.source_value.lower(), r.relationship_type, r.target_value.lower())
-        for r in secondary.relationships
-    }
+    sec_labels: dict[tuple[str, str, str], list[EvidenceLabel]] = {}
+    for r in secondary.relationships:
+        key = (r.source_value.lower(), r.relationship_type, r.target_value.lower())
+        sec_labels.setdefault(key, []).append(r.evidence_label)
 
     agreed = 0
     for rel in primary.relationships:
         key = (rel.source_value.lower(), rel.relationship_type, rel.target_value.lower())
-        if key in sec_keys:
-            rel.confidence = min(1.0, rel.confidence + _AGREE_BOOST)
-            agreed += 1
-        else:
+        proposed = sec_labels.get(key)
+        if proposed is None:
             rel.confidence = max(0.0, rel.confidence - _SINGLE_PENALTY)
             if rel.evidence_label == EvidenceLabel.OBSERVED:
                 rel.evidence_label = EvidenceLabel.REPORTED
+        elif all(label == EvidenceLabel.GAP for label in proposed):
+            # Neutral: the secondary only says it cannot find the claim.
+            continue
+        else:
+            rel.confidence = min(1.0, rel.confidence + _AGREE_BOOST)
+            agreed += 1
 
     logger.info(
         "[Stage 3e] consensus: %d/%d relationships corroborated by %s",
