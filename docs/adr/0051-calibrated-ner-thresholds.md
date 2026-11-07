@@ -207,3 +207,13 @@ longer depends on the order of the rows (`tests/test_calibration.py`).
 `propose()` is unchanged: its statuses, its sample guards and its auto-accept
 ceiling are as decided above. A stored `model_thresholds` row keeps its value
 until the next `--apply`, as before.
+
+## Amendment (2026-11-07): the support of a cutoff is its calibrated band
+
+The support floor (`min_block_samples`, 20) counted every decision at or above
+the proposed cutoff, including the ones at or above 0.90 that the worker
+accepts on its own. One decision at 0.85 and twenty at 0.95 therefore
+validated a 0.85 cutoff (issue #400). The floor now counts only the decisions
+from the cutoff up to `auto_accept_level`, excluded: the calibrated band. A
+cutoff at or above that level is still `above_auto_accept`, and that check now
+runs before the support check.

@@ -57,13 +57,15 @@ CALIBRATED_SOURCES: tuple[str, ...] = ("cyner", "gliner")
 DEFAULT_TARGET_PRECISION = 0.90
 DEFAULT_MIN_SAMPLES = 200
 
-# Floor on the support behind a proposed cutoff: the number of decisions at or
-# above it, i.e. the population its precision rests on going forward (see
-# propose()). It is NOT the sample of the one isotonic block whose lower edge is
-# proposed: that block can be a single decision, with the at-or-above decisions
-# (controls included) supplying the count. min_samples above only gates the
-# pair's aggregate decision count. Under-supported cutoffs are reported as
-# target_unreachable, not skipped in favour of a later block.
+# Floor on the support behind a proposed cutoff: the number of decisions in its
+# calibrated band, from the cutoff up to AUTO_ACCEPT_LEVEL (excluded), i.e. the
+# population its precision rests on going forward (see propose()). It is NOT the
+# sample of the one isotonic block whose lower edge is proposed: that block can
+# be a single decision, and the band's decisions supply the count. Decisions at
+# or above AUTO_ACCEPT_LEVEL do not count: the worker accepts them on its own.
+# min_samples above only gates the pair's aggregate decision count.
+# Under-supported cutoffs are reported as target_unreachable, not skipped in
+# favour of a later block.
 DEFAULT_MIN_BLOCK_SAMPLES = 20
 
 
@@ -199,25 +201,30 @@ def propose(
         p.status = "target_unreachable"
         return p
 
+    # The cutoff at or above auto_accept_level is never proposed, whatever its
+    # support: the check runs first, so it keeps its status.
+    if first_ok.lo >= auto_accept_level:
+        p.unclamped = first_ok.lo
+        p.status = "above_auto_accept"
+        return p
+
     # min_samples above only gates the pair's AGGREGATE decision count, not
-    # how much of it actually falls at or above this specific cutoff. PAVA
+    # how much of it actually falls in this specific cutoff's band. PAVA
     # can isolate a single lucky decision into its own already-monotone block
     # (no violation to pool it with a neighbour), so first_ok.n alone is not
     # a reliable guard -- a legitimate, well-supported cutoff is routinely
     # made of many such small blocks in a row. What has to be large enough is
-    # the SAME support _precision_recall(points, cutoff) below counts: every
-    # decision at or above the proposed cutoff, which is the population this
-    # cutoff's precision actually rests on going forward.
-    support = sum(1 for s, _ in points if s >= first_ok.lo)
+    # the decisions of the calibrated band: from the proposed cutoff up to
+    # auto_accept_level, excluded. The worker accepts every decision at or
+    # above that level on its own, so counting them would let them validate a
+    # cutoff below it (a single decision at 0.85 and twenty at 0.95 is not
+    # support for 0.85).
+    support = sum(1 for s, _ in points if first_ok.lo <= s < auto_accept_level)
     if support < min_block_samples:
         p.status = "target_unreachable"
         return p
 
     p.unclamped = first_ok.lo
-    if first_ok.lo >= auto_accept_level:
-        p.status = "above_auto_accept"
-        return p
-
     p.proposed = first_ok.lo
     p.precision_at_proposed, p.recall_at_proposed = _precision_recall(points, p.proposed)
     p.status = "unchanged" if abs(p.proposed - current) < 1e-9 else "ok"
