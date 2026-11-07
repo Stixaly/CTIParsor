@@ -78,7 +78,7 @@ class AnnoctrDoc:
     layers: frozenset[str]          # {"general"} or {"general", "cyber"}
     techniques: list[Mention] = field(default_factory=list)
     tactics: list[Mention] = field(default_factory=list)
-    entities: dict[str, GoldEntity] = field(default_factory=dict)   # key: etype|label
+    entities: dict[str, GoldEntity] = field(default_factory=dict)   # key: etype|normalised label
 
     @property
     def technique_ids(self) -> set[str]:
@@ -207,7 +207,9 @@ def load(root: Path = DEFAULT_ROOT, splits: tuple[str, ...] = SPLITS,
                         _add_entity(doc, ENTITY_TYPE_MAP[etype_src], surface, surface)
 
     if include_general_only:
-        cyber_ids = set(docs)
+        # The cyber ids of every split, not only of the ones asked for: a train
+        # or test report must not come back as a general-only document.
+        cyber_ids = set(docs) | {p.stem for s in SPLITS for p in (root / "text" / s).glob("*.txt")}
         for path in sorted((root / "all" / "text").glob("*.txt")):
             if path.stem in cyber_ids:
                 continue
@@ -230,7 +232,9 @@ def load(root: Path = DEFAULT_ROOT, splits: tuple[str, ...] = SPLITS,
 
 
 def _add_entity(doc: AnnoctrDoc, etype: str, label: str, surface: str) -> None:
-    key = f"{etype}|{label.lower()}"
+    # Keyed on the normalised label (case, whitespace incl. no-break space): two
+    # spans that read the same are one gold entity, not two.
+    key = f"{etype}|{' '.join(label.lower().split())}"
     ent = doc.entities.setdefault(key, GoldEntity(etype, label))
     if surface:
         ent.surfaces.add(surface)
