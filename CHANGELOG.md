@@ -9,6 +9,48 @@ theme.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-07
+
+A fix release, numbered as a minor one under ADR-0085 §8 because it migrates
+both stores and changes API answers. It fixes the issue batches of 2026-11-06
+(#359-#375, and the audit batch #376-#470): every issue was checked against the
+code first, the wrong ones are closed with the reason, and only the real part
+of each is fixed.
+
+- **Two schema migrations,** applied at the first start, with no action on your
+  part: 15 adds `jobs.resolved_types_json` (the type-conflict losers a finalize
+  records in its ledger, #397), 16 adds `rule_techniques.propagated` (the
+  techniques a canonical detection rule inherits, recomputed at every dedup
+  pass, #432).
+- **API answers that change:** a status change or a delete of a job a worker
+  runs is refused with 409 (#385); a blank entity value or relationship type is
+  refused with 400 (#438); a NUL byte in a path answers 404 (#386); a corpus
+  sync whose corpus the rebuild skipped answers 422 (#374), and Redownload
+  refuses with 409 a folder that is not the configured clone (#367); the
+  rule-id detection export packages a rule promoted from outside the report's
+  coverage (#366).
+- **Bundles change** for the same report (`BUNDLE_AFFECTING`, extraction and
+  mapping): Stage 2 and Stage 3 extraction fixes, the baseline merge (an object
+  the analyst excluded stays out, #414), quoted YARA, Sigma, Suricata and Snort
+  rules, and Indicators on user-content hosts. The mapping ledger gains
+  `merged_via` (#416).
+- **No configuration variable added or removed;** `CONSENSUS_PROVIDER=none`
+  now turns consensus off (#399).
+
+**Upgrade notes.**
+
+- Back up first ([docs/upgrading.md](docs/upgrading.md#1-back-up-first)): once
+  0.4.0 has migrated the database to version 16, a 0.3.x image refuses it, and
+  going back means restoring that backup.
+- A Compose install rebuilds the rule store in the `bootstrap` that follows
+  every upgrade, which also clears inherited techniques written before
+  migration 16. A host install does it with a rebuild from the Settings page
+  (or `POST /api/settings/corpora/rebuild`); until then such rows stay on the
+  rule they were written under.
+- Stored bundles are not rebuilt: finalize a report again, or run it again, to
+  get the fixes. A report run before 0.4.0 has no stored type-conflict losers,
+  so its finalize ledger still lacks them.
+
 ### Fixed
 
 #### Audit batch of 2026-11-06, the issues that waited for a decision (#397, #399, #400, #414, #416, #432)
@@ -43,7 +85,7 @@ report (`BUNDLE_AFFECTING`: extraction for #399 with consensus on, mapping for
   folded under it are marked and computed again at every dedup pass, so a
   removed corpus or a split cluster no longer leaves them behind (#432).
   Inherited rows written before migration 16 stay until their rule's corpus is
-  rewritten: run a full rule-store rebuild after the upgrade to clear them.
+  rewritten: the rule-store rebuild of the upgrade notes above clears them.
 
 #### Audit batch of 2026-11-06 (issues #376-#470)
 
