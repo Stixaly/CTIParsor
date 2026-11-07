@@ -159,7 +159,10 @@ old unit); *ids/doc* = distinct candidate ids per document.
 The select path does not see passages: it sends one list per Stage 1 chunk
 (`--chunk k:cap`, k candidates per passage merged by technique, at most `cap`
 per chunk, best fused rank first). *Local* = the technique is in the list of a
-chunk containing one of its annotated passages; *doc* = in some chunk's list.
+chunk containing one of its annotated passages, or lying inside one (a passage
+longer than the chunk cap, e.g. a table run without punctuation; before #460
+only the first counted, so such passages could never be found); *doc* = in some
+chunk's list.
 Both corpora, names neutral, 16 dev reports, 6.3 chunks per report.
 
 | Retrieval | k : cap | local | doc | candidates / chunk |
