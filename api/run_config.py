@@ -57,13 +57,14 @@ _CAPTURED_ENV = (
 
 # The data files whose content decides what a run emits: the ATT&CK, gazetteer
 # and retrieval data of Stages 2b, 2c, 3c and 3f, the gazetteer's ordinary-word
-# policy and context rules, and the benign-indicator warning lists.
+# policy and context rules, the benign-indicator warning lists and the list of
+# legitimate files and registry keys (ADR-0095).
 _DATA_DIR = Path(__file__).parent.parent / "pipeline" / "data"
 _DATA_FILES = (
     "mitre_index.json", "attack_relationships.json", "gazetteer.json",
     "mitre_embeddings.npy", "mitre_embeddings_meta.json",
     "attack_retrieval_corpus.json", "attack_retrieval_embeddings.npy",
-    "warninglists.json", "attack_revoked.json",
+    "warninglists.json", "legitimate_observables.json", "attack_revoked.json",
     "gazetteer_policy.json", "gazetteer_context_rules.json",
     "mitre_embeddings_manifest.json", "attack_manifest.json",
 )

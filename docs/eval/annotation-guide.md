@@ -34,6 +34,38 @@ report mentions a behaviour without saying it happened. See
   or benign (`update.microsoft.com` used for a lookalike comparison); add it
   to `negatives` if the pipeline is likely to pick it up.
 
+### 2.1 Observables that are not IoCs (`observables`)
+
+A report often lists, in an IoC table or a YARA rule, values that are real
+but indicate nothing: a detection on them would fire on every machine. Put
+them in `observables`, not in `iocs` (ADR-0095):
+
+    "observables": [{"type": "file", "value": "C:\\Windows\\System32\\rundll32.exe",
+                     "why": "legitimate", "quote": "..."}]
+
+* `why: legitimate` — a file or registry key every system of its kind has:
+  a Windows binary or DLL in its own directory or bare (`rundll32.exe`,
+  `comsvcs.dll`, `kernel32.dll`), a standard key (`...\CurrentVersion\Run`,
+  `...\Winlogon\SpecialAccounts\UserList`), a standard Unix file
+  (`.bash_history`).
+* `why: no-ioc-type` — a value no IoC type fits: a Telegram handle, a GUID,
+  a device name (`\\.\EPMNTDRV`). Give it a descriptive `type`
+  (`telegram_handle`, `guid`, `device`).
+* `quote` — the sentence or table cell that names it.
+* Stays an IoC: a system name **outside its directory**
+  (`C:\Users\Public\svchost.exe`, a masquerade), a near name (`schtask.exe`),
+  a file given with a hash, a key the attacker created
+  (`...\Services\EvilSvc`), and a store the attacker copied: the SAM,
+  SECURITY and SYSTEM hives (`HKLM\SAM`), `ntds.dit`, an LSASS dump.
+* Same value in `iocs` and `observables`: never. If the report uses the same
+  name both ways (the real `rundll32.exe` and a dropped copy), the IoC is the
+  copy's path or hash.
+
+The `observables` list is part of the `iocs` layer: annotate it with that
+layer, completely. The scorer counts an extracted observable neither as a
+hit nor as a false positive, and reports how many the bundle wrongly turned
+into an Indicator (`observables.as_indicator`).
+
 ## 3. Named entities (`entities`)
 
 Same definitions as AnnoCTR's guidelines (in the AnnoCTR repository):

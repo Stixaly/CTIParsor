@@ -1,0 +1,111 @@
+{
+  "version": "2026-11-08",
+  "decision": "docs/adr/0095-a-legitimate-observable-is-never-an-indicator.md",
+  "description": "Files and registry keys present on every system of their kind. A report names them as the place or the means of an attack, never as its trace: an Indicator on one would match every machine. Stage 4 keeps their observable and gives them no Indicator (pipeline/benign.py). Matching is exact: a listed name outside its listed directories, a subkey of a listed key, a file with a hash, all keep their Indicator. Written for CTIParsor; a missing entry only keeps an Indicator, as before this list existed.",
+  "windows_roots": ["c:\\windows", "\\windows", "%systemroot%", "%windir%", "\\systemroot", "$env:windir", "$env:systemroot"],
+  "windows_files": [
+    {
+      "dirs": ["system32", "syswow64"],
+      "names": [
+        "arp.exe", "at.exe", "attrib.exe", "bitsadmin.exe", "calc.exe", "certutil.exe", "chkdsk.exe",
+        "cipher.exe", "cmd.exe", "cmstp.exe", "control.exe", "cscript.exe", "curl.exe", "dism.exe",
+        "dllhost.exe", "esentutl.exe", "expand.exe", "extrac32.exe", "findstr.exe", "forfiles.exe",
+        "fsutil.exe", "hostname.exe", "icacls.exe", "ipconfig.exe", "makecab.exe", "mavinject.exe",
+        "msdt.exe", "mshta.exe", "msiexec.exe", "mstsc.exe", "nbtstat.exe", "net.exe", "net1.exe",
+        "netsh.exe", "netstat.exe", "nslookup.exe", "odbcconf.exe", "ping.exe",
+        "reg.exe", "regsvr32.exe", "robocopy.exe", "route.exe", "rundll32.exe", "sc.exe",
+        "schtasks.exe", "sdbinst.exe", "shutdown.exe", "svchost.exe", "systeminfo.exe", "takeown.exe",
+        "tar.exe", "taskkill.exe", "tasklist.exe", "timeout.exe", "userinit.exe", "werfault.exe",
+        "wermgr.exe", "wevtutil.exe", "whoami.exe", "wscript.exe", "wusa.exe", "xcopy.exe",
+        "advapi32.dll", "amsi.dll", "bcrypt.dll", "combase.dll", "comsvcs.dll", "crypt32.dll",
+        "cryptbase.dll", "dbgcore.dll", "dbghelp.dll", "dnsapi.dll", "gdi32.dll", "iphlpapi.dll",
+        "kernel32.dll", "kernelbase.dll", "mpr.dll", "mscoree.dll", "mshtml.dll", "msvcrt.dll",
+        "netapi32.dll", "ntdll.dll", "ole32.dll", "oleaut32.dll", "psapi.dll", "rpcrt4.dll",
+        "samlib.dll", "secur32.dll", "setupapi.dll", "shell32.dll", "shlwapi.dll", "sspicli.dll",
+        "urlmon.dll", "user32.dll", "userenv.dll", "vaultcli.dll", "version.dll", "winhttp.dll",
+        "wininet.dll", "wldap32.dll", "ws2_32.dll", "wtsapi32.dll", "xpsp2res.dll"
+      ]
+    },
+    {
+      "dirs": ["system32"],
+      "names": [
+        "bcdedit.exe", "conhost.exe", "csrss.exe", "diskpart.exe", "klist.exe", "lsass.exe",
+        "nltest.exe", "ntdsutil.exe", "query.exe", "quser.exe", "services.exe", "setspn.exe",
+        "smss.exe", "spoolsv.exe", "taskhostw.exe", "vssadmin.exe", "wbadmin.exe", "wininit.exe",
+        "winlogon.exe"
+      ]
+    },
+    {"dirs": ["", "system32", "syswow64"], "names": ["notepad.exe"]},
+    {"dirs": ["", "syswow64"], "names": ["explorer.exe", "hh.exe", "regedit.exe"]},
+    {"dirs": ["system32\\wbem", "syswow64\\wbem"], "names": ["wmic.exe", "wmiprvse.exe"]},
+    {
+      "dirs": ["system32\\windowspowershell\\v1.0", "syswow64\\windowspowershell\\v1.0"],
+      "names": ["powershell.exe", "powershell_ise.exe"]
+    },
+    {"dirs": ["system32\\drivers"], "names": ["fltmgr.sys", "http.sys", "ndis.sys", "ntfs.sys", "tcpip.sys"]}
+  ],
+  "unix_files": [
+    {
+      "dirs": ["~", "/root", "/home/*"],
+      "names": [
+        ".bash_history", ".bash_logout", ".bash_profile", ".bashrc", ".lesshst", ".mysql_history",
+        ".profile", ".python_history", ".sh_history", ".viminfo", ".wget-hsts", ".zsh_history", ".zshrc"
+      ]
+    },
+    {
+      "dirs": ["/bin", "/usr/bin", "/sbin", "/usr/sbin"],
+      "names": [
+        "base64", "bash", "chattr", "chmod", "chown", "crontab", "curl", "dash", "gzip", "id", "ifconfig",
+        "ip", "iptables", "kill", "nohup", "openssl", "passwd", "perl", "pkill", "ps", "python",
+        "python3", "scp", "sh", "ssh", "sudo", "systemctl", "tar", "uname", "useradd", "usermod",
+        "wget", "whoami", "zsh"
+      ]
+    },
+    {"dirs": ["/etc"], "names": ["bash.bashrc", "crontab", "hosts", "passwd", "profile", "rc.local", "resolv.conf"]}
+  ],
+  "windows_registry_keys": [
+    "environment",
+    "software\\microsoft\\windows defender",
+    "software\\microsoft\\windows defender\\exclusions",
+    "software\\microsoft\\windows defender\\exclusions\\extensions",
+    "software\\microsoft\\windows defender\\exclusions\\paths",
+    "software\\microsoft\\windows defender\\exclusions\\processes",
+    "software\\microsoft\\windows defender\\real-time protection",
+    "software\\microsoft\\windows nt\\currentversion",
+    "software\\microsoft\\windows nt\\currentversion\\image file execution options",
+    "software\\microsoft\\windows nt\\currentversion\\silentprocessexit",
+    "software\\microsoft\\windows nt\\currentversion\\windows",
+    "software\\microsoft\\windows nt\\currentversion\\winlogon",
+    "software\\microsoft\\windows nt\\currentversion\\winlogon\\specialaccounts\\userlist",
+    "software\\microsoft\\windows\\currentversion\\explorer\\advanced",
+    "software\\microsoft\\windows\\currentversion\\explorer\\shell folders",
+    "software\\microsoft\\windows\\currentversion\\explorer\\user shell folders",
+    "software\\microsoft\\windows\\currentversion\\internet settings",
+    "software\\microsoft\\windows\\currentversion\\policies\\explorer",
+    "software\\microsoft\\windows\\currentversion\\policies\\explorer\\run",
+    "software\\microsoft\\windows\\currentversion\\policies\\system",
+    "software\\microsoft\\windows\\currentversion\\run",
+    "software\\microsoft\\windows\\currentversion\\runonce",
+    "software\\microsoft\\windows\\currentversion\\runonceex",
+    "software\\microsoft\\windows\\currentversion\\runservices",
+    "software\\microsoft\\windows\\currentversion\\runservicesonce",
+    "software\\microsoft\\windows\\currentversion\\uninstall",
+    "software\\policies\\microsoft\\windows defender",
+    "software\\policies\\microsoft\\windows defender\\real-time protection",
+    "system\\currentcontrolset\\control\\computername\\computername",
+    "system\\currentcontrolset\\control\\lsa",
+    "system\\currentcontrolset\\control\\safeboot\\minimal",
+    "system\\currentcontrolset\\control\\safeboot\\network",
+    "system\\currentcontrolset\\control\\securityproviders\\wdigest",
+    "system\\currentcontrolset\\control\\session manager",
+    "system\\currentcontrolset\\control\\session manager\\environment",
+    "system\\currentcontrolset\\control\\terminal server",
+    "system\\currentcontrolset\\control\\terminal server\\winstations\\rdp-tcp",
+    "system\\currentcontrolset\\services"
+  ],
+  "never_listed": {
+    "why": "A store whose copy is what the attacker takes, or what decrypts it, stays an IoC even though every system has one: its theft is the trace (the analyst's decision B1 of 2026-11-07 on the cert-ua report: the HKLM\\SYSTEM, SECURITY and SAM hives the attacker saved are IoCs). A test checks that no list above names one.",
+    "windows_registry_keys": ["sam", "security", "system"],
+    "files": ["ntds.dit", "shadow", "lsass.dmp"]
+  }
+}

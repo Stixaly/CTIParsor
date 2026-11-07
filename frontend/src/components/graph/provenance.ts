@@ -155,6 +155,13 @@ export function benignReason(code: unknown): string {
   if (c === 'public_dns_resolver') return 'a public DNS resolver'
   if (c.startsWith('reference_site')) return 'a security vendor’s or sandbox’s site, a reference'
   if (c.startsWith('popular_domain')) return 'one of the 10,000 most popular domains'
+  // ADR-0095: legitimate observables, and values no sensor matches as an IoC.
+  if (c === 'legitimate_file:windows') return 'a Windows system file, bare or in its standard directory'
+  if (c === 'legitimate_file:unix') return 'a standard Unix file in its usual directory'
+  if (c === 'legitimate_registry_key') return 'a registry key every Windows system has'
+  if (c === 'no_ioc_type:guid') return 'a GUID, not an indicator type'
+  if (c === 'no_ioc_type:device') return 'a device name, not a file'
+  if (c === 'no_ioc_type:messenger_handle') return 'a messaging handle, not an indicator type'
   return c || 'no reason recorded'
 }
 
