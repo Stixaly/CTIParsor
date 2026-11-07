@@ -193,7 +193,7 @@ is empty until Stage 3r writes them. The bundle itself is not in the response.
 |---|---|---|
 | `GET` | `/api/jobs/{id}/entities` | List all entities |
 | `POST` | `/api/jobs/{id}/entities` | Create an entity manually |
-| `PATCH` | `/api/jobs/{id}/entities/{eid}` | Update (`accepted`, `entity_type`, `value`, `mitre_id`). 409 when it changes `entity_type`, `value` or `mitre_id` of a row imported from the analyst's STIX bundle (`enrichment_status` `baseline_in_text` or `baseline_only`): accept or reject it |
+| `PATCH` | `/api/jobs/{id}/entities/{eid}` | Update (`accepted`, `entity_type`, `value`, `mitre_id`). 400 when `value` is sent empty or blank (an absent key leaves it unchanged). 409 when it changes `entity_type`, `value` or `mitre_id` of a row imported from the analyst's STIX bundle (`enrichment_status` `baseline_in_text` or `baseline_only`): accept or reject it |
 | `DELETE` | `/api/jobs/{id}/entities/{eid}` | Remove. 409 for a row imported from the analyst's STIX bundle: reject it instead |
 | `POST` | `/api/jobs/{id}/entities/accept-pending` | Accept all NULL-state entities in one query. 404 for an unknown job |
 | `POST` | `/api/jobs/{id}/entities/bulk` | Bulk accept / reject / reset entities by type (see below) |
@@ -223,7 +223,7 @@ accepts it gets a 409. The columns are described in
 |---|---|---|
 | `GET` | `/api/jobs/{id}/relationships` | List all relationships |
 | `POST` | `/api/jobs/{id}/relationships` | Create a relationship |
-| `PATCH` | `/api/jobs/{id}/relationships/{rid}` | Update (`accepted`, `source_value`, `relationship_type`, `target_value`, `evidence_text`, `evidence_label`, `start_time`, `stop_time`). 409 when it changes an endpoint or the verb of a row imported from the analyst's STIX bundle, or sends a `start_time` or `stop_time` for it: accept or reject it |
+| `PATCH` | `/api/jobs/{id}/relationships/{rid}` | Update (`accepted`, `source_value`, `relationship_type`, `target_value`, `evidence_text`, `evidence_label`, `start_time`, `stop_time`). 400 when `relationship_type` is sent empty or blank, or is not a valid STIX type (an absent key leaves it unchanged). 409 when it changes an endpoint or the verb of a row imported from the analyst's STIX bundle, or sends a `start_time` or `stop_time` for it: accept or reject it |
 | `DELETE` | `/api/jobs/{id}/relationships/{rid}` | Remove. 409 for a row imported from the analyst's STIX bundle: reject it instead |
 | `GET` | `/api/jobs/{id}/relationships/valid-types` | List valid STIX relationship type strings |
 | `POST` | `/api/jobs/{id}/relationships/bulk` | Accept, reject or reset several relationships in one call: `{ "ids": [...], "action": "accept" \| "reject" \| "reset" }`, at most 500 ids. Journaled as `human_bulk` (ADR-0058), which threshold calibration does not read. Returns `{ updated, action }` |
