@@ -121,6 +121,9 @@ def test_a_quote_that_cannot_be_located_never_fails_the_save(db, monkeypatch):
 
 def test_denied_llm_names_are_not_saved(db, monkeypatch):
     _job(db)
+    # The deny row, as the store would hold it: without_denied() checks
+    # denied_keys() first, then is_denied() per name (#382).
+    monkeypatch.setattr("pipeline.overrides.denied_keys", lambda: frozenset({("cobalt strike", "tool")}))
     monkeypatch.setattr("pipeline.overrides.is_denied", lambda value, etype: value == "Cobalt Strike")
     worker._save_entities("j1", [], LLMEnrichmentResult(tools=["Cobalt Strike", "Rclone"]), report_text="")
     assert [r["value"] for r in _entities(db)] == ["Rclone"]
