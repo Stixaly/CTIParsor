@@ -287,9 +287,13 @@ while who why will with would you your
 
 
 def _stem(tok: str) -> str:
-    """A crude suffix strip: "downloads", "downloaded", "downloading" -> "download"."""
+    """A crude suffix strip: "downloads", "downloaded", "downloading" -> "download".
+
+    A word ending in "ss" keeps it ("process", "access"): its "s" is not a plural.
+    "processes" still loses its "es" and meets "process".
+    """
     for suf in ("ing", "ed", "es", "s"):
-        if tok.endswith(suf) and len(tok) - len(suf) >= 4:
+        if tok.endswith(suf) and len(tok) - len(suf) >= 4 and not (suf == "s" and tok.endswith("ss")):
             return tok[: -len(suf)]
     return tok
 
@@ -546,7 +550,9 @@ class Retriever:
         out: list[list[TtpCandidate]] = []
         for pi, p in enumerate(passages):
             row = []
-            for fused, j in enumerate(order[pi], start=1):
+            # bm25 alone: a technique sharing no token with the passage is no candidate.
+            picks = [j for j in order[pi] if self.method != "bm25" or bm_best[pi, j] > 0]
+            for fused, j in enumerate(picks, start=1):
                 tid = self.tech_ids[j]
                 d_r = int(dense_rank[pi, j]) if dense_rank is not None else None
                 b_ok = bm_best is not None and bm_best[pi, j] > 0
