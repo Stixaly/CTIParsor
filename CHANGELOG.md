@@ -54,7 +54,11 @@ No configuration change; the database schema is unchanged.
   in the text (#415).
 - **Detection.** Suricata rules keep every ATT&CK technique (#421); `pkt_data`
   closes the sticky buffer and modifiers leave the literal (#428). YARA rules
-  with a regex after `matches` are split whole (#427). Rule titles index `-` and
+  with a regex after `matches` are split whole (#427); commented meta or strings
+  lines and section keywords inside literals no longer cut a rule, and a
+  trailing-dot FQDN is a domain (#425, #426); the YARA dedup key keeps blanks
+  inside literals (#420); a meta string wrapped after a backslash is rejoined
+  without a space (#435). Rule titles index `-` and
   `_` as word breaks, so `CVE_2024_3400` matches (#424); brand maximality runs
   after the rule filter (#423). The Sigma dedup key keeps base64 case and value
   spaces (#429); a batch repeating a rule id keeps one rule's atoms (#430);

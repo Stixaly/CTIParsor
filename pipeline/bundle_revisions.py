@@ -155,6 +155,11 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "parser; explicit targets rows; long-distance completion on SDOs only; user-content hosts "
      "get Indicators; the re-issued baseline Report lists stated objects",
      "mapping"),
+    ("f5a4b49", "2026-11-07",
+     "Quoted YARA rules: comments, section keywords in literals and regexes after matches no "
+     "longer cut a rule apart, and a meta string wrapped after a backslash is rejoined without a "
+     "space (#425-#427, #435)",
+     "mapping"),
 )
 
 
