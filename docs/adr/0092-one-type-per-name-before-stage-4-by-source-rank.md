@@ -220,9 +220,11 @@ its five scenarios has a name under two types.
   kept), and the analyst's accept brings the Campaign back.
 - **The freshness list.** The commit is listed in `BUNDLE_AFFECTING`
   (`pipeline/bundle_revisions.py`) with scope `mapping`, as ADR-0091's is.
-- **Not covered.** `scripts/rebuild_bundle_provenance.py` and
-  `scripts/measure_pin_allocation.py` call `build_stix_bundle` with the stored
-  LLM lists, without the helper; they keep ADR-0091's behaviour.
+- **Not covered.** `scripts/measure_pin_allocation.py` calls `build_stix_bundle`
+  with the stored LLM lists, without the helper; it keeps ADR-0091's behaviour.
+  `scripts/rebuild_bundle_provenance.py` builds its named lists through the
+  helper and drops the rejected rows, as the worker's finalize does (#465); its
+  relationships still come from the stored JSON.
   `scripts/baseline_round_trip.py` uses the helper, but its database has no
   `decision_origin` column, so an accept does not count there.
 
