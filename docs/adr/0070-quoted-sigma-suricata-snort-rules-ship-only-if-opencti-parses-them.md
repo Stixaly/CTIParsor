@@ -85,3 +85,24 @@ rule before Stage 4 creates its Indicator.
   it. Its source path is in its header.
 - The recall loss on wrapped net rules remains. Fixing it needs a decision on
   how to join a cut `content:` string.
+
+## Local patch (2026-11-07)
+
+`pipeline/detection/opencti_snort/snort_parser.py` is no longer OpenCTI's file
+as it is. In `Parser.validate_options` (the loop over the options), `opt` was
+reset only when `len(value) == 1`, so a bare option (`http.uri;`, no argument)
+kept the `True` of the option before it and was accepted as Snort. When it was
+the first option, the same name was read before it was assigned and
+`UnboundLocalError` escaped (#422). Stage 4 then shipped a Suricata sticky
+buffer typed `snort`, and `net_rule_dialect` never retyped it.
+
+The patch resets `opt = False` at the top of each iteration, and the block
+carries a `# CTIParsor patch (#422)` comment. Nothing else changes. Effects:
+a bare option that `Dicts` does not know is refused as `unrecognized option`,
+and a Suricata sticky buffer typed `snort` is now retyped `suricata` when
+`parsuricata` accepts it. A rule that was accepted before only because of the
+carried-over `True` can now be refused.
+
+To update the copy from OpenCTI, copy the two files again and then re-apply
+this patch by hand: the `opt = False` line moved to the top of the loop body.
+The tests for it are `tests/test_snort_parser_patch_issue_422.py`.

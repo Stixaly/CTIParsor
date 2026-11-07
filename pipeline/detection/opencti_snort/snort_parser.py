@@ -410,9 +410,15 @@ class Parser:
     def validate_options(self, options):
         for _index, option in options.items():
             key, value = option
+            # CTIParsor patch (#422): OpenCTI sets `opt` only on some paths
+            # (when len(value) == 1), so a bare option such as `http.uri;` kept
+            # the True of the option before it, or raised UnboundLocalError when
+            # it came first.  `opt` is now reset for every option, so an option
+            # Dicts does not know is rejected as unrecognized, with or without
+            # an argument.  Nothing else changes.
+            opt = False
             if len(value) == 1:
                 content_mod = self.dicts.content_modifiers(value[0])
-                opt = False
                 if content_mod:
                     # TODO: implement this feature
                     continue
