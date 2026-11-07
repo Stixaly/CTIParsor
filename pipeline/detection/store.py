@@ -6,11 +6,19 @@ script and the API, and testable against an isolated temp database.
 from __future__ import annotations
 
 import json
+from collections import Counter
 from collections.abc import Iterable
 
 from api.db import DB_ERRORS, transaction
 from api.db_backend import DBConnection
+from api.logging_config import get_logger
 from models.detection import DetectionRule
+
+logger = get_logger(__name__)
+
+# Above this many duplicated ids in one corpus, one line for the corpus replaces
+# the per-id warnings, so a corpus with a systematic clash does not flood the log.
+_DUPLICATE_ID_LOG_LIMIT = 10
 
 
 def _native_key(rule_id: str) -> str:
@@ -19,12 +27,33 @@ def _native_key(rule_id: str) -> str:
 
 
 def replace_corpus_rules(conn: DBConnection, corpus: str, rules: Iterable[DetectionRule]) -> int:
-    """Idempotently replace all rules for one corpus. Returns rules written."""
+    """Idempotently replace all rules for one corpus. Returns distinct rule ids written.
+
+    A batch may repeat an id (a Sigma `id:` written twice, a Suricata `gid:sid`
+    repeated). Only the last rule with that id is written, as `DO UPDATE` always
+    made it, and its own atoms, techniques and related keys are the ones stored:
+    the child tables use `DO NOTHING`, so without this step they would accumulate
+    the atoms of every rule sharing the id (#430). A warning names each repeated id.
+    """
     # Materialize BEFORE any write: `rules` can parse corpus files from disk,
     # and the connection is autocommit -- a failure mid-iteration would leave
     # the corpus deleted with no rollback possible.  The deletes and inserts
     # then run as ONE transaction.
     rules = list(rules)
+    by_id: dict[str, DetectionRule] = {}
+    occurrences: Counter[str] = Counter()
+    for r in rules:
+        by_id[r.id] = r
+        occurrences[r.id] += 1
+    duplicated = [(rid, n) for rid, n in occurrences.items() if n > 1]
+    if len(duplicated) > _DUPLICATE_ID_LOG_LIMIT:
+        logger.warning(f"[detection] corpus '{corpus}': {len(duplicated)} duplicate rule ids — "
+                       "only the last rule of each id is kept")
+    else:
+        for rid, n in duplicated:
+            logger.warning(f"[detection] corpus '{corpus}': duplicate rule id {rid} "
+                           f"({n} occurrences) — only the last rule is kept")
+    rules = list(by_id.values())
     with transaction(conn):
         old = [r[0] for r in conn.execute(
             "SELECT id FROM detection_rules WHERE corpus=?", (corpus,)
