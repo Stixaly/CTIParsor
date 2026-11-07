@@ -24,20 +24,23 @@ NEAR = 200
 class EvidenceRow:
     doc_id: str
     technique: str          # canonical parent id
-    correct: bool           # the technique is in the gold set
+    correct: bool           # the technique is in the gold set, located or not
+    gold_located: bool      # one of its gold mentions is located in the text
     quote: str
     located: tuple[int, int] | None
-    on_passage: bool | None    # None: not located or not a correct technique
+    on_passage: bool | None    # None: not located or no located gold mention
     near_passage: bool | None
 
 
 def check(doc_id: str, text: str, ttps: list[dict], gold_spans: dict[str, list[tuple[int, int]]],
-          canonical) -> list[EvidenceRow]:
+          canonical, gold_techs: set[str] | None = None) -> list[EvidenceRow]:
     """`ttps`: [{"mitre_id", "evidence_text"}]; `gold_spans`: parent id -> located
-    mention spans.  One row per predicted technique that carries a quote."""
+    mention spans; `gold_techs`: every gold parent id, located or not (default: the
+    ids of `gold_spans`).  One row per predicted technique that carries a quote."""
     from pipeline.evidence_span import locate
     from pipeline.stage2_extraction import refang_with_offsets
 
+    gold = set(gold_spans) if gold_techs is None else gold_techs
     live: tuple[str, list[int]] | None = None
     rows = []
     for t in ttps:
@@ -57,19 +60,22 @@ def check(doc_id: str, text: str, ttps: list[dict], gold_spans: dict[str, list[t
             if span and span.end > span.start:
                 located = (live[1][span.start], live[1][span.end - 1] + 1)
         spans = gold_spans.get(tech, [])
-        correct = tech in gold_spans
+        correct = tech in gold
+        gold_located = tech in gold_spans
         on = near = None
-        if located and correct:
+        if located and gold_located:
             on = any(located[0] < e and s < located[1] for s, e in spans)
             near = any(located[0] < e + NEAR and s - NEAR < located[1] for s, e in spans)
-        rows.append(EvidenceRow(doc_id, tech, correct, quote, located, on, near))
+        rows.append(EvidenceRow(doc_id, tech, correct, gold_located, quote, located, on, near))
     return rows
 
 
 def summarise(rows: list[EvidenceRow]) -> dict:
     with_quote = len(rows)
     located = [r for r in rows if r.located]
-    correct_located = [r for r in located if r.correct]
+    # The ratios range over located quotes of techniques with a located gold
+    # mention: a gold technique no mention of which could be placed has no passage.
+    correct_located = [r for r in located if r.gold_located]
 
     def share(n: int, d: int) -> float | None:
         return round(n / d, 4) if d else None
@@ -102,12 +108,12 @@ def support_sample(rows: list[EvidenceRow], texts: dict[str, str], path: Path, n
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["doc_id", "technique", "technique_name", "in_gold", "quote", "context",
-                    "supports_use (yes/no/unsure)", "note"])
+        w.writerow(["doc_id", "technique", "technique_name", "in_gold", "gold_located", "quote",
+                    "context", "supports_use (yes/no/unsure)", "note"])
         for r in picked:
             s, e = r.located  # type: ignore[misc]
             text = texts[r.doc_id]
             ctx = text[max(0, s - 300):min(len(text), e + 300)].replace("\n", " ")
             w.writerow([r.doc_id, r.technique, technique_name(r.technique), r.correct,
-                        r.quote, ctx, "", ""])
+                        r.gold_located, r.quote, ctx, "", ""])
     return len(picked)
