@@ -122,3 +122,29 @@ def test_intact_archive_still_extracts_issue_433(tmp_path: Path, monkeypatch) ->
     assert (dest / "rules" / "r0.rules").exists()
     assert (dest / sync_mod.MANIFEST_NAME).exists()
     _assert_nothing_left(dest)
+
+
+_NEUTRAL = "could not extract the archive (details in the server log)"
+
+
+@pytest.mark.parametrize("failure, reason", [
+    (OSError(28, "No space left on device"), "No space left on device"),
+    (PermissionError(13, "Permission denied"), "Permission denied"),
+    (tarfile.FilterError("/x: refused by the data filter"), "refused by the data filter"),
+])
+def test_an_extraction_failure_that_is_not_damage_is_a_neutral_failure_issue_433(
+        tmp_path: Path, monkeypatch, caplog, failure, reason) -> None:
+    # The archive is whole: a full disk or a refused member is not a corrupt archive,
+    # so the browser is not told it is (the detail goes to the log).
+    _serve(monkeypatch, _big_archive())
+
+    def refuse(self, *args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(tarfile.TarFile, "extractall", refuse)
+    with caplog.at_level("WARNING"):
+        ok, detail = sync_mod.fetch_tarball(_corpus(tmp_path))
+    assert (ok, detail) == (False, _NEUTRAL)
+    assert any("could not extract the archive" in r.getMessage() and reason in r.getMessage()
+               for r in caplog.records)
+    _assert_nothing_left(tmp_path / "et")

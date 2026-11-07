@@ -10,6 +10,7 @@ api/routes/settings.py).
 """
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 import lzma
@@ -36,9 +37,11 @@ MANIFEST_NAME = ".sync.json"     # written into `path` after a tarball fetch (AD
 _USER_AGENT = "cti-to-stix/1.0 (detection corpus sync)"
 _CHUNK = 1 << 20
 _MD5_RE = compile_pattern(r"^[0-9a-f]{32}$")
-# What reading a cut-off or damaged archive raises: tarfile's errors, EOFError and
-# gzip/bz2's OSError from the stream, zlib's and lzma's errors (#433).
-_CORRUPT_ARCHIVE = (tarfile.TarError, EOFError, OSError, zlib.error, lzma.LZMAError)
+# What reading a cut-off or damaged archive raises: EOFError from the stream, zlib's
+# and lzma's errors, gzip's BadGzipFile and tarfile's ReadError (#433).  Any other
+# OSError (a full disk, a refused permission) or TarError (the `data` filter refusing
+# a member) is not damage: it gets a neutral message, its detail in the log.
+_TRUNCATED_ARCHIVE = (EOFError, zlib.error, lzma.LZMAError, gzip.BadGzipFile, tarfile.ReadError)
 
 
 def _failed(what: str, exc: BaseException) -> tuple[bool, str]:
@@ -353,8 +356,10 @@ def fetch_tarball(corpus: dict, *, timeout: int = 900) -> tuple[bool, str]:
             tar = tarfile.open(archive, mode="r:*")
         except tarfile.TarError as e:
             return _failed("not a tar archive", e)
-        except _CORRUPT_ARCHIVE as e:
+        except _TRUNCATED_ARCHIVE as e:
             return _failed("archive is truncated or corrupt", e)
+        except OSError as e:
+            return _failed("could not extract the archive", e)
 
         # A cut-off or damaged stream raises from getmembers()/extractall(), not from
         # open(): those calls are in the try too (#433). The finally removes the
@@ -366,8 +371,10 @@ def fetch_tarball(corpus: dict, *, timeout: int = 900) -> tuple[bool, str]:
                     return False, "archive contains no extractable files"
                 kwargs: dict = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
                 tar.extractall(staging, members=members, **kwargs)  # noqa: S202 — _safe_members + data filter
-        except _CORRUPT_ARCHIVE as e:
+        except _TRUNCATED_ARCHIVE as e:
             return _failed("archive is truncated or corrupt", e)
+        except (tarfile.TarError, OSError) as e:
+            return _failed("could not extract the archive", e)
 
         manifest = {
             "url": url,
