@@ -135,14 +135,17 @@ class YaraRule:
 def _regex_end(text: str, start: int) -> int:
     """Index of the ``/`` closing the regex literal opened at ``start``, or ``-1``.
 
-    A regex opens at a ``/`` after ``=`` (blanks aside), as in `_find_rule_end`, and
-    closes at the first unescaped ``/`` on the same line.  A ``/`` followed by ``/``
-    or ``*`` is a comment, never a regex: YARA reads it so.
+    A regex opens at a ``/`` after ``=`` (blanks aside) or after ``matches`` (#427),
+    as in `_find_rule_end`, and closes at the first unescaped ``/`` on the same
+    line.  A ``/`` followed by ``/`` or ``*`` is a comment, never a regex: YARA
+    reads it so.
     """
     j = start - 1
     while j >= 0 and text[j] in " \t":
         j -= 1
-    if j < 0 or text[j] != "=" or text[start + 1:start + 2] in ("/", "*"):
+    if j < 0 or text[start + 1:start + 2] in ("/", "*"):
+        return -1
+    if text[j] != "=" and not _ends_with_matches(text, j):
         return -1
     n = len(text)
     i = start + 1
@@ -225,6 +228,32 @@ def _ends_with_matches(text: str, j: int) -> bool:
     return start == 0 or not (text[start - 1].isalnum() or text[start - 1] in "_$")
 
 
+def _mask_literals(text: str) -> str:
+    """Blank the contents of ``"..."`` strings and regexes, keeping every offset.
+
+    Section keywords (``meta:``, ``strings:``, ``condition:``) are searched in this
+    copy: a literal such as ``"say condition: now"`` must not end a section (#425).
+    The text must already have its comments stripped (see `_strip_comments`).
+    """
+    out = list(text)
+    n = len(text)
+    i = 0
+    while i < n:
+        if text[i] == '"':
+            close = i + 1
+            while close < n and text[close] != '"':
+                close += 2 if text[close] == "\\" else 1
+            close = min(close, n)
+        elif text[i] == "/" and (close := _regex_end(text, i)) != -1:
+            pass
+        else:
+            i += 1
+            continue
+        out[i + 1:close] = " " * (close - i - 1)
+        i = close + 1
+    return "".join(out)
+
+
 def _find_rule_end(text: str, start: int) -> int:
     """Find the index of the matching ``}`` for the ``{`` at ``start``.
 
@@ -305,17 +334,20 @@ def _parse_meta(body: str) -> dict[str, str]:
     """Extract the ``meta:`` section from a rule body.
 
     Returns a dict with lowercased keys. Repeated keys are joined by ``","``.
+    The body must be comment-free (see `split_rules`): a commented ``author`` line
+    is not metadata (#425).
     """
     meta: dict[str, str] = {}
+    masked = _mask_literals(body)
     # Find the meta section
-    meta_start = body.find("meta:")
+    meta_start = masked.find("meta:")
     if meta_start == -1:
         return meta
     # Find the end of the meta section
     end_markers = ["strings:", "condition:"]
     meta_end = len(body)
     for marker in end_markers:
-        idx = body.find(marker, meta_start + 5)
+        idx = masked.find(marker, meta_start + 5)
         if idx != -1 and idx < meta_end:
             meta_end = idx
     section = body[meta_start + 5:meta_end]
@@ -343,13 +375,14 @@ def _parse_strings(body: str) -> list[tuple[str, str, str]]:
     """Extract the ``strings:`` section from a rule body.
 
     Returns a list of ``(identifier, kind, value)`` tuples where kind is
-    ``"text"``, ``"hex"``, or ``"regex"``.
+    ``"text"``, ``"hex"``, or ``"regex"``.  The body must be comment-free (#425).
     """
     strings: list[tuple[str, str, str]] = []
-    strings_start = body.find("strings:")
+    masked = _mask_literals(body)
+    strings_start = masked.find("strings:")
     if strings_start == -1:
         return strings
-    strings_end = body.find("condition:", strings_start + 8)
+    strings_end = masked.find("condition:", strings_start + 8)
     if strings_end == -1:
         strings_end = len(body)
     section = body[strings_start + 8:strings_end]
@@ -429,8 +462,11 @@ def _classify_literal(s: str) -> str:
     # here sends "kernel32.dll" on to the domain test, where ".dll" passes for a TLD.
     if ("\\" in s_lower or "/" in s_lower) and _RE_FILE_EXT.match(s_lower):
         return "file"
-    # 6. Domain — shape alone is not enough; see pipeline.detection.tlds.
-    if looks_like_domain(s_lower):
+    # 6. Domain — shape alone is not enough; see pipeline.detection.tlds. A trailing
+    # dot is the FQDN form, and `www.` is not a label: `www.online` leaves the single
+    # label `online`, which is a word, not a domain (#426).
+    host = s_lower[:-1] if s_lower.endswith(".") else s_lower
+    if looks_like_domain(host[4:] if host.startswith("www.") else host):
         return "domain"
     # 7. Fallback
     return "strlit"
@@ -556,8 +592,10 @@ def split_rules(text: str) -> list[YaraRule]:
         rule_kw_offset = m.group(0).find("rule")
         body_start = rule_start + rule_kw_offset
         body = text[body_start:end + 1]
-        meta = _parse_meta(body)
-        strings = _parse_strings(body)
+        # The sections are read from the comment-free copy, so a `/* author = "evil" */`
+        # inside the rule is not metadata and `$c` is not a string (#425).
+        meta = _parse_meta(clean[body_start:end + 1])
+        strings = _parse_strings(clean[body_start:end + 1])
         rules.append(YaraRule(
             name=name,
             tags=tags,
