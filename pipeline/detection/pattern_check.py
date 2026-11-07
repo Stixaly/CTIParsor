@@ -61,8 +61,16 @@ _CHECKERS: dict[str, tuple[str, Callable[[str], None]]] = {
 
 
 def check_pattern(pattern_type: str, pattern: str) -> tuple[str, str | None]:
-    """(status, the parser's message when it refused) for one quoted rule."""
+    """(status, the parser's message when it refused) for one quoted rule.
+
+    A blank rule (empty, or only whitespace) is refused whatever its type, before
+    the parser of its dialect is asked: the Sigma and Suricata parsers return an
+    empty result on it without raising, and OpenCTI would take it as an Indicator
+    for no rule at all (#434).
+    """
     library, parse = _CHECKERS[pattern_type]
+    if not pattern.strip():
+        return REFUSED, "empty rule: nothing to parse"
     if pattern_type in ("suricata", "snort") and len(pattern) > _MAX_NET_RULE:
         return REFUSED, f"longer than {_MAX_NET_RULE} characters"
     try:
