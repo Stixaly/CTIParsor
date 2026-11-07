@@ -36,7 +36,12 @@ No configuration change; the database schema is unchanged.
   Active Directory are dropped (#396); an empty CIRCL answer is a miss (#395). An
   image wholly off the page is no figure, and a figure block gets one blank line
   (#376, #388). Stage 2c's corpus cache follows its domains and the model loaded
-  (#389). The analyst's deny rows apply to the LLM lists of the CLI bundle and
+  (#389). A malformed MITRE index reads as empty and lookups strip their id
+  (#404); only usable ATT&CK tracks are listed, once each (#405). Calibration
+  skips non-finite confidences and empty filters (#401; #400's comment now
+  matches the cumulative support the code and ADR-0058 use). Promotion skips
+  null sources and recounts active promotions (#418).
+  The analyst's deny rows apply to the LLM lists of the CLI bundle and
   to targeted countries and sectors (#382). The CLI ledger records Stage 2's
   type-conflict losers (#397, API path still open).
 - **Bundle.** An explicit `targets` row keeps its quote and confidence (#383).
