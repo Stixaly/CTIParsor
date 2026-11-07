@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
   fetchBundle: vi.fn(),
   fetchBundleLedger: vi.fn(),
   deleteRelationship: vi.fn(),
+  updateRelationship: vi.fn(),
   finalizeJobQuick: vi.fn(),
 }))
 
@@ -24,6 +25,7 @@ vi.mock('../api/client', async importOriginal => ({
   fetchBundle: api.fetchBundle,
   fetchBundleLedger: api.fetchBundleLedger,
   deleteRelationship: api.deleteRelationship,
+  updateRelationship: api.updateRelationship,
   finalizeJobQuick: api.finalizeJobQuick,
 }))
 
@@ -80,6 +82,45 @@ describe('RelEditor — Delete (ADR-0090)', () => {
     renderEditor()
 
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
+
+// Reject is offered on an accepted row too, e.g. one imported from the baseline (#452).
+describe('RelEditor — Reject and Restore (#452)', () => {
+  it('offers Reject on an accepted row, and rejects that row', () => {
+    const props = renderEditor({ edges: [edge('rel-acc', true)], imported: new Set() })
+
+    expect(screen.getByTitle('Reject')).toBeEnabled()
+    fireEvent.click(screen.getByTitle('Reject'))
+
+    expect(props.onReject).toHaveBeenCalledWith('rel-acc')
+  })
+
+  it('offers Reject on an accepted row of the analyst’s bundle too', () => {
+    const props = renderEditor({ edges: [edge('rel-bundle', true)] })
+
+    expect(screen.getByTitle('Reject')).toBeEnabled()
+    fireEvent.click(screen.getByTitle('Reject'))
+
+    expect(props.onReject).toHaveBeenCalledWith('rel-bundle')
+  })
+
+  it('keeps Accept and Reject on a pending row', () => {
+    renderEditor({ edges: [edge('rel-pend', null)], imported: new Set() })
+
+    expect(screen.getByTitle('Accept')).toBeInTheDocument()
+    expect(screen.getByTitle('Reject')).toBeInTheDocument()
+    expect(screen.queryByTitle('Restore')).not.toBeInTheDocument()
+  })
+
+  it('keeps Restore, and no Reject, on a rejected row', () => {
+    const props = renderEditor({ edges: [edge('rel-rej', false)], imported: new Set() })
+
+    expect(screen.queryByTitle('Reject')).not.toBeInTheDocument()
+    expect(screen.queryByTitle('Accept')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTitle('Restore'))
+
+    expect(props.onReset).toHaveBeenCalledWith('rel-rej')
   })
 })
 
@@ -183,6 +224,27 @@ describe('Graph page — a node’s context is Markdown only from the bundle (AD
     const section = (await screen.findByText('Description')).parentElement!
     expect(section.querySelector('blockquote')?.textContent?.trim()).toBe('A sentence.')
     expect(section.querySelector('em')?.textContent).toBe('R')
+  })
+})
+
+describe('Graph page — Reject on an accepted link sends accepted: false (#452)', () => {
+  beforeEach(() => {
+    api.fetchJob.mockResolvedValue(JOB)
+    api.fetchEntities.mockResolvedValue(ENTITIES)
+    api.fetchRelationships.mockResolvedValue([{ ...RELATIONS[0], accepted: true }])
+    api.fetchBundle.mockRejectedValue(new Error('404: no bundle yet'))
+    api.fetchBundleLedger.mockResolvedValue(null)
+    api.updateRelationship.mockReset()
+    api.updateRelationship.mockResolvedValue({})
+  })
+
+  it('patches the relationship with accepted: false', async () => {
+    renderGraph()
+    fireEvent.click(await screen.findByRole('button', { name: 'Review rows' }))
+    fireEvent.click(await screen.findByTitle('Edit links'))
+    fireEvent.click(await screen.findByTitle('Reject'))
+
+    await waitFor(() => expect(api.updateRelationship).toHaveBeenCalledWith('job-1', 'rel-1', { accepted: false }))
   })
 })
 
