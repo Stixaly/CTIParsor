@@ -122,6 +122,15 @@ def test_the_tools_run_in_the_server_s_container_the_password_in_the_environment
     assert not any("s@cret" in word for cmd, _ in calls for word in cmd)
 
 
+def test_a_password_in_the_environment_survives_a_url_without_one_issue_467(monkeypatch):
+    # PGPASSWORD delivers the password when the URL carries none (the docs' setup); only a URL
+    # that names one replaces it.
+    monkeypatch.setenv("PGPASSWORD", "from-env")
+    _versions(monkeypatch)
+    assert cbr.tools("postgresql://ctiparsor@127.0.0.1:1/ctiparsor", "5f2c0d9e", 18).env["PGPASSWORD"] == "from-env"
+    assert cbr.tools(_URL, "5f2c0d9e", 18).env["PGPASSWORD"] == "s@cret"
+
+
 def test_without_a_container_this_host_s_pg_dump_must_be_as_new_as_the_server(monkeypatch):
     monkeypatch.setattr(cbr.shutil, "which", lambda name: None)
     with pytest.raises(cbr.Unusable, match="no pg_dump on this host: name the PostgreSQL server's container"):

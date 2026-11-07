@@ -90,8 +90,7 @@ def tools(admin_url: str, container: str | None, server_major: int) -> Tools:
     """pg_dump and pg_restore for this server: its container's own, or this
     host's when both are at least as new as the server.  Unusable otherwise."""
     parts = urlsplit(admin_url)
-    env = dict(os.environ)
-    env.pop("PGPASSWORD", None)
+    env = dict(os.environ)                # PGPASSWORD from the environment stays unless the URL names one
     if parts.password:
         env["PGPASSWORD"] = unquote(parts.password)
     if container:
