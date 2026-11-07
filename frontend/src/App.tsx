@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useParams } from 'react-router-dom'
 import { ThemeProvider } from './context/ThemeContext'
 import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
@@ -7,6 +7,14 @@ import Graph from './pages/Graph'
 import Coverage from './pages/Coverage'
 import Policy from './pages/Policy'
 import Settings from './pages/Settings'
+
+// Keyed by job: another job remounts the review, so nothing from the last one
+// (bootstrap refs, "review completed", "bundle outdated") carries over (#450).
+// Preferences live in localStorage and survive the remount.
+function ReviewForJob() {
+  const { jobId } = useParams<{ jobId: string }>()
+  return <Review key={jobId} />
+}
 
 export default function App() {
   return (
@@ -21,7 +29,7 @@ export default function App() {
         </Route>
 
         {/* ── Full-screen — Review + Graph (no sidebar) ── */}
-        <Route path="/review/:jobId" element={<Review />} />
+        <Route path="/review/:jobId" element={<ReviewForJob />} />
         <Route path="/graph/:jobId"  element={<Graph />} />
         <Route path="/coverage/:jobId" element={<Coverage />} />
       </Routes>

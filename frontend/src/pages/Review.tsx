@@ -584,16 +584,18 @@ export default function Review() {
   }
 
   // ── keyboard navigation ───────────────────────────────────────────────────
+  // J/K walk the entities on screen (docEntities, so the type filter applies),
+  // in the order their value first appears in the text, whatever its case (#448).
   const orderedEntityIds = useMemo(() => {
-    const text = job?.report_text ?? ''
-    return [...localEntities]
+    const text = (job?.report_text ?? '').toLowerCase()
+    return [...docEntities]
       .sort((a, b) => {
-        const ai = text.indexOf(a.value)
-        const bi = text.indexOf(b.value)
+        const ai = text.indexOf(a.value.toLowerCase())
+        const bi = text.indexOf(b.value.toLowerCase())
         return (ai === -1 ? 9e9 : ai) - (bi === -1 ? 9e9 : bi)
       })
       .map(e => e.id)
-  }, [localEntities, job?.report_text])
+  }, [docEntities, job?.report_text])
 
   const goNextPending = useCallback((dir: 1 | -1) => {
     const ids = orderedEntityIds
@@ -601,10 +603,10 @@ export default function Review() {
     const startIdx = focusedId ? ids.indexOf(focusedId) : -1
     for (let i = 1; i <= N; i++) {
       const k = ((startIdx + dir * i) % N + N) % N
-      const e = localEntities.find(x => x.id === ids[k])
+      const e = docEntities.find(x => x.id === ids[k])
       if (e?.accepted === null) { setFocusedId(ids[k]); return }
     }
-  }, [orderedEntityIds, focusedId, localEntities])
+  }, [orderedEntityIds, focusedId, docEntities])
 
   const jumpToValue = (value: string) => {
     const match = localEntities.find(e => e.value === value)

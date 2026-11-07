@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { Entity, Job, Relationship } from '../types'
 import { finalizeJobQuick } from '../api/client'
 import { ThemeProvider } from '../context/ThemeContext'
+import App from '../App'
 import Review from './Review'
 import { IMPORTED_TITLE } from '../components/review/MarginaliaCard'
 
@@ -445,5 +446,77 @@ describe('Review — the Detection rules export follows promotions (#366)', () =
     fireEvent.click(await screen.findByRole('button', { name: /Detection rules · 3/ }))
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1))
     expect(fetchSpy).toHaveBeenCalledWith('/api/jobs/job-1/detections/export')
+  }, 20_000)
+})
+
+// #450 — the review page is keyed by job in App.tsx: going to another job must
+// not keep the first job's "review completed" state.
+describe('Review — changing job (#450)', () => {
+  function NextJob() {
+    const navigate = useNavigate()
+    return <button onClick={() => navigate('/review/job-2')}>Next job</button>
+  }
+
+  it('shows Complete Review again on another job after this one was completed', async () => {
+    api.finalizeJob.mockResolvedValue({})
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={['/review/job-1']}>
+          <NextJob />
+          <App />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    await opened()
+    fireEvent.click(screen.getByRole('button', { name: /^Complete Review/ }))
+    expect(await screen.findByRole('button', { name: 'Download STIX' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next job' }))
+    expect(await screen.findByRole('button', { name: /^Complete Review/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Download STIX' })).not.toBeInTheDocument()
+  }, 20_000)
+})
+
+// #448 — J and K walk the entities on screen, in the order their value first
+// appears in the text, whatever the case of the text.
+describe('Review — J and K on the entities on screen (#448)', () => {
+  // APT29 is the actor, hidden by the Malware filter; WellMess and WellMail are malware.
+  const ACTOR = entity({ id: 'e-actor', value: 'APT29', entity_type: 'threat_actor' })
+  const MESS  = entity({ id: 'e-mess', value: 'WellMess' })
+  const MAIL  = entity({ id: 'e-mail', value: 'WellMail' })
+
+  // Focusing an entity scrolls its mark into view; jsdom has no layout.
+  beforeEach(() => {
+    Element.prototype.scrollIntoView = vi.fn()
+  })
+
+  it('does not focus an entity that a type filter hides', async () => {
+    api.fetchEntities.mockImplementation(() => Promise.resolve([ACTOR, MESS, MAIL]))
+    const { container } = renderReview()
+    await opened()
+    fireEvent.click(screen.getByTitle('Malware'))
+    fireEvent.keyDown(window, { key: 'j' })
+    expect(container.querySelector('[data-marg-id="e-mess"]')).toHaveClass('focused')
+    expect(container.querySelector('[data-marg-id="e-actor"]')).toBeNull()
+  }, 20_000)
+
+  it('still walks every pending entity when no filter is active (control)', async () => {
+    api.fetchEntities.mockImplementation(() => Promise.resolve([ACTOR, MESS, MAIL]))
+    const { container } = renderReview()
+    await opened()
+    fireEvent.keyDown(window, { key: 'j' })
+    expect(container.querySelector('[data-marg-id="e-actor"]')).toHaveClass('focused')
+    fireEvent.keyDown(window, { key: 'j' })
+    expect(container.querySelector('[data-marg-id="e-mess"]')).toHaveClass('focused')
+  }, 20_000)
+
+  it('orders the walk by where the value first appears, whatever its case', async () => {
+    api.fetchJob.mockImplementation(() => Promise.resolve({ ...JOB, report_text: 'APT29 used wellmess and WellMail.' }))
+    api.fetchEntities.mockImplementation(() => Promise.resolve([MAIL, MESS]))
+    const { container } = renderReview()
+    await opened()
+    fireEvent.keyDown(window, { key: 'j' })
+    expect(container.querySelector('[data-marg-id="e-mess"]')).toHaveClass('focused')
   }, 20_000)
 })
