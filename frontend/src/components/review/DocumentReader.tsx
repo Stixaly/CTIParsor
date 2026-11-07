@@ -221,14 +221,19 @@ export default function DocumentReader({
     if (typeof child === 'string' && child.includes('\n\n')) {
       // Each piece is a clone of the segment, so a highlight (rel-ev-hl, tok, focus
       // style) and its data-* attributes survive the split.  Only the text changes.
+      // The ref is the one exception: it is kept on the first piece alone, since the
+      // scroll-to-entity target is the one that registered it, and a later piece's
+      // ref would overwrite it with the last piece.  data-eid stays on every piece,
+      // so a drop or a click on any fragment still finds the entity.
       const parts = child.split('\n\n')
-      const piece = (k: string, text: string) => cloneElement(el, { key: `p-${i}-${k}` }, text)
-      buf.push(piece('0', parts[0]))
+      const piece = (k: string, text: string, first: boolean) =>
+        cloneElement(el, first ? { key: `p-${i}-${k}` } : { key: `p-${i}-${k}`, ref: null } as React.Attributes, text)
+      buf.push(piece('0', parts[0], true))
       paragraphs.push(buf)
       for (let k = 1; k < parts.length - 1; k++) {
-        paragraphs.push([piece(String(k), parts[k])])
+        paragraphs.push([piece(String(k), parts[k], false)])
       }
-      buf = parts.length > 1 ? [piece('last', parts[parts.length - 1])] : []
+      buf = parts.length > 1 ? [piece('last', parts[parts.length - 1], false)] : []
     } else {
       buf.push(seg)
     }

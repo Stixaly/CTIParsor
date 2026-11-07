@@ -206,6 +206,22 @@ describe('DocumentReader — wrapped hash highlighting', () => {
     expect(hl[0].textContent).toBe('loader drops payload here')
   })
 
+  // issue #455: an entity whose value spans a blank line is split into one <mark> per
+  // paragraph.  The scroll target was the last piece (each clone carried the ref).
+  it('scrolls to the first piece of an entity split across paragraphs (issue 455)', () => {
+    const notInText = vi.fn()
+    const { container } = renderReader('Intro line.\n\nAPT29\n\nGroup struck again.',
+      [entity({ id: 'e2', value: 'APT29\n\nGroup', entity_type: 'threat-actor' })],
+      { focusedId: 'e2', onEntityNotInText: notInText })
+    expect(notInText).not.toHaveBeenCalled()
+    const marks = [...container.querySelectorAll('mark')]
+    expect(marks.map(m => m.textContent)).toEqual(['APT29', 'Group'])
+    expect(marks.map(m => m.getAttribute('data-eid'))).toEqual(['e2', 'e2'])
+    const scrolled = (Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>).mock
+      .instances[0] as HTMLElement
+    expect(scrolled).toBe(marks[0])
+  })
+
   it('highlights stacked hashes in a column on their own rows', () => {
     const a = 'd41d8cd98f00b204e9800998ecf8427e'
     const b = '5d41402abc4b2a76b9719d911017c592'
