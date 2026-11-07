@@ -35,12 +35,20 @@ CACHE_DIR=/app/cache
 # wires it to. A deployment that still sets PGPASSWORD directly via .env
 # keeps working unchanged: this only overrides it when the secret file is
 # present.
+#
+# libpq reads a .pgpass field with `\` and `:` escaped as `\\` and `\:` (the
+# PostgreSQL docs, "The Password File"); an unescaped `:` splits the line and
+# a `\` is dropped, so a password containing either would not authenticate.
+pgpass_escape() {
+    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/:/\\:/g'
+}
+
 load_db_password_secret() {
     if [ -r /run/secrets/db_password ]; then
         PGPASSWORD="$(cat /run/secrets/db_password)"
         export PGPASSWORD
         if [ -n "${HOME:-}" ] && [ -d "$HOME" ]; then
-            printf '*:*:*:*:%s\n' "$PGPASSWORD" > "$HOME/.pgpass"
+            printf '*:*:*:*:%s\n' "$(pgpass_escape "$PGPASSWORD")" > "$HOME/.pgpass"
             chmod 600 "$HOME/.pgpass"
         fi
     fi
