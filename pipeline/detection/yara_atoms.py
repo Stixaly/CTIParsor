@@ -214,11 +214,23 @@ def _strip_comments(text: str) -> str:
     return "".join(result)
 
 
+def _ends_with_matches(text: str, j: int) -> bool:
+    """True if the ``matches`` operator ends at index ``j`` of ``text``.
+
+    The word must stand alone: ``$matches`` or ``rematches`` is not the operator.
+    """
+    start = j - len("matches") + 1
+    if start < 0 or text[start:j + 1] != "matches":
+        return False
+    return start == 0 or not (text[start - 1].isalnum() or text[start - 1] in "_$")
+
+
 def _find_rule_end(text: str, start: int) -> int:
     """Find the index of the matching ``}`` for the ``{`` at ``start``.
 
-    Ignores braces inside double-quoted strings and regexes (``/.../``
-    preceded by ``=``). Returns ``-1`` if not found.
+    Ignores braces inside double-quoted strings and regexes. A regex opens at a
+    ``/`` after ``=`` (strings section) or after ``matches`` (condition); any other
+    ``/`` is division, as in ``filesize / 2``. Returns ``-1`` if not found.
     """
     depth = 0
     i = start
@@ -247,10 +259,11 @@ def _find_rule_end(text: str, start: int) -> int:
                 i += 1
             elif c == "/" and i > 0:
                 # Check if this is a regex start: previous non-space char is '='
+                # or the end of the `matches` operator
                 j = i - 1
                 while j >= 0 and text[j] in " \t":
                     j -= 1
-                if j >= 0 and text[j] == "=":
+                if j >= 0 and (text[j] == "=" or _ends_with_matches(text, j)):
                     in_regex = True
                     i += 1
                 else:
