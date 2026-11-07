@@ -170,8 +170,8 @@ def test_release_diff_lists_what_changed_technique_by_technique(world):
     assert e["renamed"] == {"T1002": ["Old name", "New name"]}
     assert e["description_changed"] == ["T1005"]
     assert e["tactics_changed"] == {"T1007": [["discovery"], ["collection", "discovery"]]}
-    assert e["procedures"] == {"old": 1, "new": 3, "techniques_with_more": 2, "techniques_with_fewer": 0}
-    assert e["more_procedures"] == ["T1006", "T1099"]
+    assert e["procedures"] == {"old": 1, "new": 3, "techniques_with_more": 1, "techniques_with_fewer": 0}
+    assert e["more_procedures"] == ["T1006"]                       # T1099 is new: its own category
     assert e["new_revoked_by"] == {"T1004": "T1099"}
     assert e["new_active_names"] == {"T1003.001": "T1003.001", "T1099": "T1099"}
     assert e["tactics"]["same"] is True
