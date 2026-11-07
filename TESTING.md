@@ -373,6 +373,7 @@ current truth.
 | NER | `test_ner_precision_issue_396.py` | 18 | a lowercase country is no place, a capitalised one still is; Active Directory is no threat actor (#396) |
 | NER | `test_stage2c_cache_issue_389.py` | 4 | the Stage 2c corpus cache is keyed on its domains and the model loaded; a fallback model never reads the primary's cache (#389) |
 | NER | `test_type_conflict_ledger_issue_397.py` | 5 | a type loser resolved away is recorded in the ledger as outranked by the kept type, once; the run's ledger and the bundle agree (#397) |
+| NER | `test_type_conflict_ledger_api_issue_397.py` | 11 | the worker stores Stage 2's losers (`jobs.resolved_types_json`, `baseline_stix` for a loser the baseline holds) and a finalize records them; NULL, unreadable rows, a rejected winner or a losing type the analyst brought back leave no outranked entry (#397) |
 | **Aliases** | `test_aliases.py` | 6 | alias resolution, MITRE ID mapping, surface forms |
 | **Aliases** | `test_alias_disambiguation.py` | 11 | type-aware resolution, alias isolation, canonical name handling |
 | **Aliases** | `test_alias_list_spaces_issue_393.py` | 10 | a no-break space joins the anchor words of an alias list and a CyNER name; a line break or a blank line ends the anchor; every emitted name has single spaces (#393) |
