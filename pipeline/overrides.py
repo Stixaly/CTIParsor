@@ -6,7 +6,8 @@ enumerated after someone read a real report's noise.  The `entity_overrides`
 table is the same idea fed by the review UI instead of by hand:
 
 * a `deny` row drops an exact `(value, entity_type)` from every NER stage's
-  output — the gazetteer, CyNER, GLiNER, and the LLM's name lists;
+  output — the gazetteer, CyNER, GLiNER, and the LLM's name and target lists
+  (`without_denied`, called on the worker's store and the CLI's Stage 4);
 * a `promote` row adds a term the analysts keep accepting (or created by
   hand) to the Stage 2b gazetteer, so the next report finds it
   deterministically at gazetteer confidence, before any model runs.
@@ -26,10 +27,14 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
+from typing import TYPE_CHECKING
 
 from api.logging_config import get_logger
 from models.schemas import RawEntity
 from pipeline.env_flags import env_bool
+
+if TYPE_CHECKING:  # pragma: no cover - stage3_llm imports the stages that import this module
+    from pipeline.stage3_llm import LLMEnrichmentResult
 
 logger = get_logger(__name__)
 
@@ -125,6 +130,31 @@ def drop_denied(entities: list[RawEntity]) -> list[RawEntity]:
     if len(kept) != len(entities):
         logger.info(f"[overrides] deny rows dropped {len(entities) - len(kept)} of {len(entities)} entities")
     return kept
+
+
+def _not_denied(names: list[str], entity_type: str) -> list[str]:
+    return [n for n in names if not is_denied(n, entity_type)]
+
+
+def without_denied(llm_result: LLMEnrichmentResult) -> LLMEnrichmentResult:
+    """*llm_result* without the names an active deny row names (ADR-0052): the
+    LLM's malware, threat-actor, tool and campaign names, and its targeted
+    countries (type `location`) and sectors (type `identity`).  Those lists
+    reach the bundle without passing through a stage, so the API worker (on
+    the store and on finalize) and the CLI's Stage 4 both call this: a denied
+    name is dropped on every path.  With nothing denied the object comes back
+    as it is; otherwise a copy, and the argument is not changed."""
+    if not denied_keys():
+        return llm_result
+    return llm_result.model_copy(update={
+        "malware_families": _not_denied(llm_result.malware_families, "malware"),
+        "threat_actors": _not_denied(llm_result.threat_actors, "threat_actor"),
+        "tools": _not_denied(llm_result.tools, "tool"),
+        "campaign_name": (None if llm_result.campaign_name and is_denied(llm_result.campaign_name, "campaign")
+                          else llm_result.campaign_name),
+        "targeted_countries": _not_denied(llm_result.targeted_countries, "location"),
+        "targeted_sectors": _not_denied(llm_result.targeted_sectors, "identity"),
+    })
 
 
 def reload() -> None:

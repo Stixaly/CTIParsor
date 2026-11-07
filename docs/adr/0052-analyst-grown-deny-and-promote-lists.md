@@ -65,6 +65,12 @@ decisions as *candidates* and applied only once a person activates them.**
      substring, so denying `"Microsoft"` as a threat actor leaves `"Microsoft
      Threat Intelligence"` alone and `"Microsoft"` as an identity untouched.
      Same semantics as `_ORG_BLOCKLIST`.
+     *Amendment (issue #382):* the LLM's lists are filtered by one helper,
+     `pipeline/overrides.without_denied`, called by the worker's
+     `_save_entities` and finalize and by the CLI's Stage 4 before the names
+     join the bundle, so both bundles drop the same names. It also covers the
+     targeted countries (type `location`) and sectors (type `identity`), which
+     no stage filters.
    - `promote` — an entry in the gazetteer's own shape (`name`, `canonical`,
      `entity_type`, `mitre_id: None`, `domain: "override"`) merged into
      `stage2b_gazetteer._load()` and re-sorted longest-first, so the term is

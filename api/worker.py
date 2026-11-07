@@ -307,22 +307,21 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "",
     # and they are padded to a common width just before the insert below.
     # The NER stages drop denied names at their own output (ADR-0052); the
     # LLM's name lists are the one source that reaches the store without
-    # passing through a stage, so they are filtered here.
-    from pipeline.overrides import is_denied
+    # passing through a stage, so they are filtered here, by the helper the
+    # CLI's Stage 4 also uses (pipeline/overrides.without_denied).
+    from pipeline.overrides import without_denied
 
+    kept_llm = without_denied(llm_result)
     rows_llm: list[tuple] = []
-    for name in llm_result.malware_families:
-        if not is_denied(name, "malware"):
-            rows_llm.append((str(uuid4()), job_id, name, "malware", "", LLM_NAME_CONFIDENCE, None, None, "llm"))
-    for name in llm_result.threat_actors:
-        if not is_denied(name, "threat_actor"):
-            rows_llm.append((str(uuid4()), job_id, name, "threat_actor", "", LLM_NAME_CONFIDENCE,
-                             None, None, "llm"))
-    for name in llm_result.tools:
-        if not is_denied(name, "tool"):
-            rows_llm.append((str(uuid4()), job_id, name, "tool", "", LLM_NAME_CONFIDENCE, None, None, "llm"))
-    if llm_result.campaign_name and not is_denied(llm_result.campaign_name, "campaign"):
-        rows_llm.append((str(uuid4()), job_id, llm_result.campaign_name, "campaign", "",
+    for name in kept_llm.malware_families:
+        rows_llm.append((str(uuid4()), job_id, name, "malware", "", LLM_NAME_CONFIDENCE, None, None, "llm"))
+    for name in kept_llm.threat_actors:
+        rows_llm.append((str(uuid4()), job_id, name, "threat_actor", "", LLM_NAME_CONFIDENCE,
+                         None, None, "llm"))
+    for name in kept_llm.tools:
+        rows_llm.append((str(uuid4()), job_id, name, "tool", "", LLM_NAME_CONFIDENCE, None, None, "llm"))
+    if kept_llm.campaign_name:
+        rows_llm.append((str(uuid4()), job_id, kept_llm.campaign_name, "campaign", "",
                          LLM_NAME_CONFIDENCE, None, None, "llm"))
     # ADR-0028 — resolve each TTP quote to an offset in the report.
     from pipeline.evidence_span import locate
@@ -1139,6 +1138,10 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
             logger.error("[finalize] job %s: the stored LLM result cannot be read (%s); "
                          "the bundle has no techniques, campaign or targets from it",
                          job_id, str(exc).splitlines()[0])
+    # ADR-0052: the deny rows apply to these JSON-only fields too (targeted
+    # countries and sectors, the campaign), as on the CLI's Stage 4.
+    from pipeline.overrides import without_denied
+    llm_result = without_denied(llm_result)
 
     # ── Build rejection filter sets from the DB ────────────────────────────────
     # Bug fix: the JSON blob bypasses accept/reject decisions made in the UI.
