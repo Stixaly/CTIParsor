@@ -161,12 +161,16 @@ def ambiguous_forms(entries: Iterable[dict]) -> frozenset[str]:
 
 
 def judge(occ: Occurrence, index: Index) -> Judgement:
-    """The policy's outcome for one occurrence of one gazetteer entry."""
+    """The policy's outcome for one occurrence of one gazetteer entry.  A CASE form
+    inside a URL, a path or a dotted identifier is excluded (embedded) before it is
+    resolved, as a CONTEXT form is (issue #381)."""
     decision = _decision(occ.name_key)
     candidates = index.candidates.get(occ.name_key, {})
     ambiguous = len(candidates) > 1
     if decision == "CASE" and not occ.surface[:1].isupper():
         return Judgement("excluded", "case_mismatch", decision)
+    if decision == "CASE" and gazetteer_context.embedded(occ.text, occ.start, occ.end):
+        return Judgement("excluded", "embedded", decision)
     if decision != "CONTEXT" and not ambiguous:
         return RESOLVED if decision is None else Judgement("resolved", None, decision)
 
