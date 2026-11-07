@@ -19,6 +19,11 @@ import argparse
 import json
 import sys
 from collections import Counter
+from pathlib import Path
+
+# Ensure the project root is on sys.path so `api` is importable from a plain
+# `python scripts/audit_edge_provenance.py` (#540).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from api.db import get_conn, init_db
 from api.db_backend import DBConnection

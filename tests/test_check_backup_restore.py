@@ -61,7 +61,7 @@ def test_the_smoke_runs_the_commands_of_the_docs_as_written():
     assert sorted(docs) == ["BACKUP_COMMANDS", "CHECK_COMMANDS", "RESTORE_COMMANDS"]
     assert docs == script
     assert docs["BACKUP_COMMANDS"][:2] == [
-        "day=$(date +%F)",                    # one date for both files
+        "stamp=$(date +%F-%H%M%S)",           # one stamp, to the second, for both files
         "docker compose stop app worker"]     # one moment for both
     # The files hold every report: readable by their owner only.  The umask is
     # set in a subshell of each command that writes one, so that it does not

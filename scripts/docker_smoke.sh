@@ -101,7 +101,7 @@ command -v python3 >/dev/null 2>&1 || { echo "ERROR: python3 is required on the 
 # on purpose, to smoke-test a restored install.  --clean (`down -v`) and
 # --backup-restore (a test report written into the stack, its app and worker
 # stopped) run only on the smoke's own project, allowed or not.
-# All of it is settled before .env is sourced below, and read-only from here on:
+# All of it is settled before .env is read below, and read-only from here on:
 # a .env cannot redirect the smoke (Compose would read its COMPOSE_PROJECT_NAME
 # too, hence the export further down).
 SMOKE_OWN_PROJECT=ctiparsor-smoke
@@ -128,12 +128,18 @@ readonly SMOKE_OWN_PROJECT SMOKE_PROJECT CLEAN BACKUP_RESTORE
 # script drives `docker compose` directly rather than through the Makefile
 # (whose `docker-up`/`docker-bootstrap` targets do this via a file
 # prerequisite), so it materializes the same file itself.
+# The repository root first: .env and .secrets/ are there, whatever the directory
+# the smoke was started from (#542).
+cd "$(dirname "$0")/.."
+. scripts/offline_lib_docker.sh
 CTI_ENV_FILE="${CTI_ENV_FILE:-.env}"
 mkdir -p .secrets
-case "$CTI_ENV_FILE" in
-    /*) . "$CTI_ENV_FILE" ;;
-    *)  . "./$CTI_ENV_FILE" ;;
-esac
+# The settings the smoke takes from .env, as compose does: the shell's value when it
+# is set, else the one in .env, read as data and never sourced, so that a CRLF file
+# gives no carriage return (#543).
+for key in CTI_DB_PASSWORD CTI_BIND CTI_PORT SMOKE_HEALTH_TIMEOUT SMOKE_JOB_TIMEOUT SMOKE_REQUIRED_STAGES; do
+    printf -v "$key" '%s' "${!key:-$(offline_env_value "$key" "$CTI_ENV_FILE")}"
+done
 : "${CTI_DB_PASSWORD:?Set CTI_DB_PASSWORD in $CTI_ENV_FILE (e.g. openssl rand -hex 24)}"
 printf '%s' "$CTI_DB_PASSWORD" > .secrets/db_password
 # World-readable, not owner-only: app/worker read it as uid 1001 and postgres
@@ -156,9 +162,6 @@ SMOKE_JOB_TIMEOUT="${SMOKE_JOB_TIMEOUT:-1800}"
 # Stages that must have run for --job to pass: a job that finishes with its LLM or
 # its models missing degrades without an error (ADR-0059 stage report), so it is named.
 SMOKE_REQUIRED_STAGES="${SMOKE_REQUIRED_STAGES:-2c 2d 2e 3}"
-
-# Move to repo root
-cd "$(dirname "$0")/.."
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 in_app() {

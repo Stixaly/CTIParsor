@@ -39,6 +39,16 @@ exit 1
 """
 
 
+def _checkout(tmp_path: Path) -> Path:
+    """A checkout of the smoke's own: it reads .env and writes .secrets/ in the root of
+    the checkout it runs from, so the test must never run the repository's copy."""
+    root = tmp_path / "checkout"
+    (root / "scripts").mkdir(parents=True)
+    for name in ("docker_smoke.sh", "offline_lib_docker.sh"):
+        shutil.copy(REPO / "scripts" / name, root / "scripts" / name)
+    return root
+
+
 def _run(script: Path, tmp_path: Path, *args: str, shell_project: str | None = None,
          allow: str | None = None, dotenv: str = "", busy: str | None = None,
          list_fails: bool = False) -> tuple[int, str, list[str]]:
@@ -46,7 +56,11 @@ def _run(script: Path, tmp_path: Path, *args: str, shell_project: str | None = N
     fake = tmp_path / "fake-docker"
     fake.write_text(FAKE_DOCKER)
     fake.chmod(0o755)
-    (tmp_path / ".env").write_text("CTI_DB_PASSWORD=not-a-secret\n" + dotenv)
+    root = tmp_path
+    if script == SMOKE:
+        root = _checkout(tmp_path)
+        script = root / "scripts" / SMOKE.name
+    (root / ".env").write_text("CTI_DB_PASSWORD=not-a-secret\n" + dotenv)
     env = {"PATH": os.environ["PATH"], "HOME": str(tmp_path), "DOCKER_BIN": str(fake),
            "FAKE_DOCKER_LOG": str(log), "SMOKE_HEALTH_TIMEOUT": "1"}
     for name, value in (("COMPOSE_PROJECT_NAME", shell_project), ("SMOKE_ALLOW_PROJECT", allow),

@@ -71,7 +71,9 @@ def main() -> int:
         fixed = set()
         for vid in ids:
             for affected in _get(f"/vulns/{vid}").get("affected", []):
-                if _norm(affected["package"]["name"]) == _norm(pkg):
+                # `package` is optional in OSV: a range of git commits has none, and names no PyPI release.
+                package = affected.get("package")
+                if isinstance(package, dict) and _norm(package.get("name", "")) == _norm(pkg):
                     fixed.update(event["fixed"] for rng in affected.get("ranges", [])
                                  for event in rng.get("events", []) if "fixed" in event)
         # OSV also lists fixing git commits; keep the releases, in version order.

@@ -58,6 +58,10 @@ TABLES: tuple[str, ...] = (
 
 _IDENT_RE = compile_pattern(r"^[a-z_][a-z0-9_]*$")
 
+# The tables whose rule_id references detection_rules(id) (#534): a row of a rule the
+# source does not hold is left out and counted, as migrate_jobs_to_postgres does (#466).
+RULE_CHILD_TABLES: frozenset[str] = frozenset({"rule_text"})
+
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Migrate the detection-rule corpus from SQLite to PostgreSQL")
@@ -116,7 +120,17 @@ def copy_table(src: sqlite3.Connection, pg_cur, table: str, *, batch: int) -> tu
     placeholders = ",".join(["%s"] * len(common_cols))
     insert_sql = f"INSERT INTO {table} ({cols_str}) VALUES ({placeholders}) ON CONFLICT DO NOTHING"
 
-    cur = src.execute(f"SELECT {cols_str} FROM {table}")
+    where = ""
+    if table in RULE_CHILD_TABLES and "rule_id" in src_cols:
+        orphans = src.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE rule_id IS NULL OR rule_id NOT IN (SELECT id FROM detection_rules)"
+        ).fetchone()[0]
+        if orphans:
+            print(f"[migrate] {table}: {orphans} row(s) whose rule is absent from the source - skipped",
+                  file=sys.stderr)
+        where = " WHERE rule_id IN (SELECT id FROM detection_rules)"
+
+    cur = src.execute(f"SELECT {cols_str} FROM {table}{where}")
     source_rows = 0
     inserted_rows = 0
     while True:

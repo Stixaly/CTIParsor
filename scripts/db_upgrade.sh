@@ -121,7 +121,8 @@ majors_in() {  # majors_in <volume> -> one major per line, from <major>/docker/P
 
 SOURCE="" SRC_VOLUME="" SRC_MOUNT="" SRC_PGDATA=""
 if docker volume inspect "$VOLUME" >/dev/null 2>&1; then
-    OTHERS="$(majors_in "$VOLUME" | grep -vx "$TARGET" | sort -n | tr '\n' ' ' | sed 's/ $//')"
+    # grep -v exits 1 when the target is the only major: that is not a failure here (#539).
+    OTHERS="$(majors_in "$VOLUME" | { grep -vx "$TARGET" || true; } | sort -n | tr '\n' ' ' | sed 's/ $//')"
     case "$OTHERS" in
         "") ;;
         *" "*) die "$VOLUME holds clusters of PostgreSQL $OTHERS besides $TARGET: move one by hand" ;;

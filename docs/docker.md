@@ -228,23 +228,23 @@ Data persists in named volumes. Two of them hold what you cannot rebuild: `cti-s
 
 The database commands below need the password even on the local socket (`compose.yaml` sets `scram-sha-256` for it too). They read it inside the container from the mounted secret, so it never appears on the host's command line. They name the role and the database `ctiparsor`: with another `CTI_DB_USER` or `CTI_DB_NAME`, write yours in their place. The `cti-state` commands run `tar` in a one-off container of the `app` service, as the user the app runs as: Compose mounts the volume of the project it runs in, whatever the project's name, and a bind mount (below) the same way.
 
-**Backup**, from the directory of `compose.yaml` and `.env`. `umask 077` makes the two files readable by you only, since they hold every report at its TLP; each command that writes one sets it in a subshell of its own, `( … )`, so that it does not stay set in your shell: files you unpack there later, such as the next release, must stay readable by the containers. `day` gives both files the same date, even past midnight. `app` and `worker` stop first, so that no report changes between the dump and the archive; a report in progress goes back to the queue and resumes when they start again. `postgres` keeps running for `pg_dump`. Not while `bootstrap` runs.
+**Backup**, from the directory of `compose.yaml` and `.env`. `umask 077` makes the two files readable by you only, since they hold every report at its TLP; each command that writes one sets it in a subshell of its own, `( … )`, so that it does not stay set in your shell: files you unpack there later, such as the next release, must stay readable by the containers. `stamp` names both files with the date and the time, to the second: a second backup, even on the same day, writes new files and never truncates the last good ones, and the dump and the archive it was taken with carry the same stamp. `app` and `worker` stop first, so that no report changes between the dump and the archive; a report in progress goes back to the queue and resumes when they start again. `postgres` keeps running for `pg_dump`. Not while `bootstrap` runs.
 
 <!-- scripts/check_backup_restore_docker.sh: BACKUP_COMMANDS -->
 ```bash
-day=$(date +%F)
+stamp=$(date +%F-%H%M%S)
 docker compose stop app worker
-(umask 077; docker compose exec -T postgres sh -c 'PGPASSWORD="$(cat /run/secrets/db_password)" exec "$@"' sh pg_dump -U ctiparsor -d ctiparsor -Fc > ctiparsor-$day.dump)
-(umask 077; docker compose run --rm --no-deps -T --entrypoint tar app czf - -C /app/state . > cti-state-$day.tgz)
+(umask 077; docker compose exec -T postgres sh -c 'PGPASSWORD="$(cat /run/secrets/db_password)" exec "$@"' sh pg_dump -U ctiparsor -d ctiparsor -Fc > ctiparsor-$stamp.dump)
+(umask 077; docker compose run --rm --no-deps -T --entrypoint tar app czf - -C /app/state . > cti-state-$stamp.tgz)
 docker compose start app worker
 ```
 
-**Check a backup** before you count on it (YYYY-MM-DD: the backup's date). The first command prints how many tables the dump holds the rows of: every table of the database. The second prints how many files and directories the archive holds under `uploads/`. A damaged file stops either one with an error.
+**Check a backup** before you count on it (YYYY-MM-DD-HHMMSS: the stamp in the backup's file names). The first command prints how many tables the dump holds the rows of: every table of the database. The second prints how many files and directories the archive holds under `uploads/`. A damaged or truncated file stops either one with an error, even when the command has already printed some lines: each one fails if any part of it fails (`pipefail`, in a subshell that leaves your shell alone).
 
 <!-- scripts/check_backup_restore_docker.sh: CHECK_COMMANDS -->
 ```bash
-docker compose exec -T postgres pg_restore -l < ctiparsor-YYYY-MM-DD.dump | grep -c 'TABLE DATA'
-tar tzf cti-state-YYYY-MM-DD.tgz | grep -c '^./uploads/.'
+(set -o pipefail; docker compose exec -T postgres pg_restore -l < ctiparsor-YYYY-MM-DD-HHMMSS.dump | grep -c 'TABLE DATA')
+(set -o pipefail; tar tzf cti-state-YYYY-MM-DD-HHMMSS.tgz | grep -c '^./uploads/.')
 ```
 
 **Restore** into an empty project: on another machine, or on this one under another project name (`export COMPOSE_PROJECT_NAME=ctiparsor-restored` in the shell that runs the commands; stop the old stack first, or give the new one another `CTI_PORT`). The install you took the backup from stays as it is until the restored one works. Volumes are named after their project (`<project>_pg-data-18`, `<project>_cti-state`), so a new project starts with empty ones. You need `compose.yaml`, `.env` and the two files. On another machine, run `bash setup.sh` in the checkout first, with your `.env` in place (or `make .secrets/db_password`): it writes `.secrets/db_password` from `CTI_DB_PASSWORD`, which every service mounts. Without that file Compose creates a directory in its place and `postgres` does not start: delete that directory, then run `setup.sh`. Keep `CTI_DB_USER` and `CTI_DB_NAME` as they were: the dump recreates its tables under that role. Passwords are not in the dump: the new project's `CTI_DB_PASSWORD` is the one that counts. Run the release that took the backup, or a newer one, which migrates the database at its first start; an older one refuses it.
@@ -256,8 +256,8 @@ The database first, then `cti-state`, then the stack. An app started on the rest
 <!-- scripts/check_backup_restore_docker.sh: RESTORE_COMMANDS -->
 ```bash
 docker compose up -d --wait postgres
-docker compose exec -T postgres sh -c 'PGPASSWORD="$(cat /run/secrets/db_password)" exec "$@"' sh pg_restore -U ctiparsor -d ctiparsor --single-transaction < ctiparsor-YYYY-MM-DD.dump
-docker compose run --rm --no-deps -T --entrypoint tar app xzf - --keep-old-files -C /app/state < cti-state-YYYY-MM-DD.tgz
+docker compose exec -T postgres sh -c 'PGPASSWORD="$(cat /run/secrets/db_password)" exec "$@"' sh pg_restore -U ctiparsor -d ctiparsor --single-transaction < ctiparsor-YYYY-MM-DD-HHMMSS.dump
+docker compose run --rm --no-deps -T --entrypoint tar app xzf - --keep-old-files -C /app/state < cti-state-YYYY-MM-DD-HHMMSS.tgz
 docker compose up -d
 ```
 
