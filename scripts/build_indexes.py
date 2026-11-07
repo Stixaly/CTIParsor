@@ -624,6 +624,10 @@ def build_revoked(bundles: dict[str, Path | None], out_dir: Path | None = None) 
     The MITRE index leaves revoked techniques out, so an id a report still
     writes (T1562, revoked for T1685 in 2026) used to be resolved by its name
     instead, and "Impair Defenses" now only names the Mobile technique T1629.
+
+    The names are read as Enterprise's (mitre_db.revoked_names), so pass the
+    Enterprise bundle alone: the active names of the bundles given here are
+    the ones that hide a revoked name.
     """
     out_dir = out_dir or _DATA_DIR
     revoked_path = out_dir / _REVOKED_NAME
@@ -744,7 +748,10 @@ def main() -> None:
     if only is None or only == "relationships":
         build_attack_relationships(bundles, out_dir)
     if only is None or only == "revoked":
-        build_revoked(bundles, out_dir)
+        # Enterprise only, as build_attack_release does: the names read by
+        # mitre_db.revoked_names() are Enterprise's, and a Mobile or ICS active name
+        # would otherwise hide a revoked Enterprise name ("Impair Defenses", issue #464).
+        build_revoked({"enterprise": bundles["enterprise"]}, out_dir)
     if only == "retrieval":
         build_retrieval(bundles, neutralise=not args.keep_names,
                         out_dir=args.retrieval_out or out_dir)
