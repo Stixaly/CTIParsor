@@ -474,18 +474,31 @@ comes out.
 - AnnoCTR, public: 120 reports with the cyber layer (70 train, 16 dev,
   34 test), read as clean text. It annotates techniques and named entities.
   The test split is read once per decision.
-- The in-house set: reports read from their original file. On 2026-10-31,
-  9 reports are in `data/eval/inhouse/` (git-ignored), all `pre-annotation`,
-  none with a layer declared ([inhouse-set.md](eval/inhouse-set.md)).
+- The in-house set: reports read from their original file. On 2026-11-07,
+  8 reports are in `data/eval/inhouse/` (git-ignored), all `status: gold`,
+  each with the 4 layers declared: 249 IoCs, 258 entities, 282 techniques,
+  320 relations, 36 negative cases, plus 15 `observables`
+  ([inhouse-set.md](eval/inhouse-set.md)). On 2026-10-31 there were 9, all
+  `pre-annotation`. The ninth, the negative case on example domains, was
+  removed by the maintainer on 2026-11-07: no report now measures a text
+  filled with examples that are not IoCs.
 
-**What the in-house annotation will cover.** Every layer of `LAYERS` in
+**How the in-house gold was made.** ChatGPT (GPT-6) annotated; Claude reread
+each report against its source file and completed the missing layers; the
+maintainer arbitrated 40 disputed points. The undisputed elements were not
+reread one by one by a person. It is AI-assisted annotation arbitrated by one
+maintainer, not a human-reviewed one. ATT&CK Mobile techniques are included
+(21), while the pipeline produces Enterprise only: technique recall on this set
+is lower for that reason.
+
+**What the in-house annotation covers.** Every layer of `LAYERS` in
 `evaluation/inhouse.py` (`iocs`, `entities`, `techniques`, `relations`), on
 every report, each declared in the `layers` field of its `gold.json`. Negative
 cases are annotated as [annotation-guide.md](eval/annotation-guide.md) §6 asks,
 and scored wherever a report has them. The limits, published with every
-figure: 9 reports, one annotator, a pilot. Nine reports do not detect a small
-difference between two releases, so the results are given per document as
-well as in aggregate.
+figure: 8 reports, AI-assisted annotation arbitrated by one maintainer, a
+pilot. Eight reports do not detect a small difference between two releases,
+so the results are given per document as well as in aggregate.
 
 **What is published today, and its limits.** Before 1.0 the figures are not
 measured on the exported bundle. The AnnoCTR runner turns off Stages 1f, 4
@@ -500,8 +513,9 @@ serving `Inferact/Qwen3.8-27B-NVFP4`:
 | Threat actors: precision / recall | 0.259 / 0.967 | 2026-10-19 | same |
 | Locations: precision / recall | 0.505 / 0.545 | 2026-10-19 | same |
 
-IoCs and relationships have no gold measurement yet: AnnoCTR does not annotate
-them, and the in-house set is not annotated.
+IoCs and relationships have no published measurement yet: AnnoCTR does not
+annotate them, and the in-house gold (2026-11-07) is not yet scored on the
+exported bundle (ADR-0094 item 6, not built).
 
 One more limit, until the measurement of the exported bundle replaces the
 current scorer: the in-house entity score counts only the entity types the

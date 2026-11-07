@@ -4,6 +4,7 @@
 **Date:** 2026-10-31
 **Deciders:** maintainer
 **Extends:** ADR-0085 (its decision 8 covers the versions before 1.0 only)
+**Amended by:** the amendment of 2026-11-07 below (item 5 done, with limits)
 **Relates to:** ADR-0054 (Docker is the only supported install), ADR-0060 (the
 evaluation protocol), ADR-0066 (STIX ids), ADR-0077 (versioned migrations),
 ADR-0084 (a bundle Stage 5 refuses is not served), ADR-0090 (enriching a STIX
@@ -79,7 +80,8 @@ Quality, as published today:
   by 0.028 F1 on dev; with `LLM_TEMPERATURE=0 LLM_SEED=13`, by 0
   (`docs/eval/README.md`).
 - The in-house set holds 9 reports in `data/eval/inhouse/` (git-ignored), all
-  `pre-annotation`, none with a layer declared (read on 2026-10-31).
+  `pre-annotation`, none with a layer declared (read on 2026-10-31; see the
+  amendment of 2026-11-07 below).
   `docs/eval/inhouse-set.md` records that it has no French report and no fully
   scanned one.
 
@@ -117,7 +119,8 @@ detect a small difference. The AnnoCTR test split is read once per decision
 (ADR-0060), so it cannot gate every release. The run-to-run spread at the
 provider's default sampling (0.028 F1) exceeds ADR-0060's adoption step
 (+0.02); with fixed sampling it was 0, on the one provider checked. A threshold
-fixed today would be fixed on drafts: no in-house report is gold yet.
+fixed today would be fixed on drafts: no in-house report is gold yet
+(on 2026-11-07, 8 are; see the amendment below).
 
 **2. Real use before 1.0.** The candidate is frozen, then used on 5 real
 reports outside the evaluation corpora, through the export and an import into
@@ -165,7 +168,9 @@ install is a migration path (`docs/upgrading.md` §3).
 **10. The in-house annotation covers every layer of `LAYERS`**
 (`evaluation/inhouse.py`: `iocs`, `entities`, `techniques`, `relations`), on
 every report, each declared in the `layers` field of its `gold.json`. The
-published limits: 9 reports, one annotator, a pilot. Why: a layer left out of
+published limits: 9 reports, one annotator, a pilot (on 2026-11-07: 8 reports,
+AI-assisted annotation arbitrated by one maintainer, a pilot; see the
+amendment). Why: a layer left out of
 `layers` is not scored, so a layer annotated on some reports only gives a
 second, smaller denominator per layer.
 
@@ -290,7 +295,8 @@ package are not supported. The maintainer changed two of the proposed statuses:
   which have no evidence yet.
 - **A billed run before 1.0.** Decision 13 needs item 11: two runs with
   `anthropic` on AnnoCTR test and two on the in-house set, each one billed
-  per call. The in-house runs wait for its gold (item 5).
+  per call. The in-house runs waited for its gold (item 5, done on 2026-11-07
+  with the limits of the amendment below).
 - **Figures are read by default (decision 14, item 12).** A PDF with figures
   costs up to 40 more calls to the text's provider, billed on `anthropic`, and
   its bundle can hold what the figures show.
@@ -320,7 +326,7 @@ of evidence is missing.
 | 2 | Migration from the last release: `scripts/check_migration_from.py` from `v0.2.0`, then from each release tag (ADR-0085 item 5), with a seed that holds files, decisions, a baseline, a bundle, its verdict and its ledger; content compared, not only row counts | data survives an upgrade | done: `scripts/check_migration_from.py` (several refs, `--last-release`), `scripts/migration_seed.py`, `scripts/migration_compare.py`, `scripts/migration_readback.py`; CI from the last release tag on every run and from the base commit on a pull request; `tests/test_migration_seed.py`, `tests/test_migration_compare.py`, `tests/test_migration_readback.py`, `tests/test_check_migration_from.py`. Run from `v0.2.0` and from `v0.1.0` (versions 12 and 13 applied): every value kept, the seed read back. Not covered: the tables no route reads (the decision journal, figures, the figure and CVE caches, the rules' side tables) are compared in the database only; `detection_corpora.local.yaml` in `cti-state` (its path is the checkout's); a database older than `v0.1.0` |
 | 3 | Backup and restore: a consistent backup of the database and `cti-state`, a restore into an empty project, a check that reports, decisions, baselines and bundles come back | data survives a restore | done: `scripts/check_backup_restore.py` (fast-tests, every run): the item 2 seed backed up with the `pg_dump`, `pg_restore` and `tar` flags of `docs/docker.md`, restored into an empty database and directory, compared strictly (every row, column type, sequence state, schema object and file, nothing more) and read back through the API; `scripts/check_backup_restore_docker.sh`, run by `scripts/docker_smoke.sh --backup-restore` (container-image): the documented commands as written, a Compose stack restored into a second, empty project; `tests/test_check_backup_restore.py`, `tests/test_migration_compare.py`. Run on PostgreSQL 17 and 18: everything back; a lost or added row, a changed value, a dropped trigger or index, a changed default, a reset sequence, a changed file, and a review revision bumped by triggers firing during the load, each caught. Not covered: a restore onto a new cluster at the same address is run by the Compose check only (the Python check restores on the same server); a backup taken while `app` or `worker` run; a restore across PostgreSQL majors (`make db-upgrade`); `cti-cache` and `.env`, which the backup leaves out |
 | 4 | Browser journey: Playwright against the built interface, the API, a worker and PostgreSQL: import, review, export; in CI | the journey is usable (blocker 4) | done: `scripts/check_browser_e2e.sh` (job `browser-e2e`, every run; `publish-image` waits for it), `frontend/playwright.config.ts`, `frontend/e2e/`, `scripts/browser_e2e_db.py`, `tests/test_browser_e2e_db.py`. In Chromium, offline (`PIPELINE_DISABLED_STAGES` turns off every model, LLM and network stage; the stage report is checked): import, progress from the run's events, a reload, accept, reject and retype, completion, download, the bundle checked (STIX 2.1, references inside it, decisions applied) and compared with `GET /bundle` (`validated`); the same by keyboard alone; enrichment with the graph's ledger, each match checked; a failed report and its reason; a refused bundle answered 409; axe (WCAG 2.1 A/AA, serious and critical) on each page, one element allowlisted; an iptables guard counts every packet the API and its worker send off loopback, 0 required (a DNS lookup through a resolver on loopback is not counted, a connection after it is). Not covered: the models, the LLM and the vision and CVE stages (their own track); a PDF or a URL import; the graph and coverage pages by keyboard; a screen reader; whether the report still runs at the reload (recorded, not asserted: the run ends under a second after its first event); the reason a failed report failed, on the page (the journey reads it from the progress events) |
-| 5 | In-house gold: the 9 reports annotated on every layer of `LAYERS`, `status: gold` (decision 10) | the denominators of the measurement | not started (9 `pre-annotation` drafts) |
+| 5 | In-house gold: the 9 reports annotated on every layer of `LAYERS`, `status: gold` (decision 10) | the denominators of the measurement | done on 2026-11-07, with limits: 8 reports, all `status: gold`, 4 layers declared on each (see the amendment). On 2026-10-31 it was not started (9 `pre-annotation` drafts) |
 | 6 | Measurement of the exported bundle: score the bundle Stages 4 and 5 produce, per layer and per document, with every report not scored named; published with each release; compared with the previous release on the same data | published limits | not started |
 | 7 | Worker status: an idle worker visible in `GET /api/queue/status`, or the documentation says that an empty list is not an outage | operations | done: `worker_heartbeats` (schema version 14, `api/migrations/v0014_worker_heartbeats.py`): every queue loop writes its row at start and every `WORKER_HEARTBEAT_S`, busy or idle, deletes it on a clean stop, and deletes the rows silent for an hour; while that write fails, the worker stops touching its liveness file, so its container turns `unhealthy` (before, it stayed `healthy` with the job store down); `GET /api/queue/status` lists each worker `busy`, `idle` or `stale`, and `worker_summary` the live ones and their free slots; `docs/operations.md`; `tests/test_queue_status_api.py`, `tests/test_job_queue.py`, `tests/test_migrations.py`; `scripts/docker_smoke.sh` checks that the idle worker container is listed (job `container-image`). Not covered: a worker of a version before 14 is listed only while it holds a report; a worker that crashed is listed as it was until its lease expires (180 s) |
 | 8 | OpenCTI import of the candidate: the A4 recipe on bundles the candidate produced, tied to its commit and image digest | the import the matrix supports | done: `scripts/check_opencti_candidate.sh`, `scripts/opencti_candidate_bundles.py`, `scripts/opencti_expectations.py`, `scripts/opencti_import_check.py` (`--full`), `tests/test_opencti_expectations.py`; a release step (`docs/releasing.md`, step 4), not in CI. On 2026-11-01, on main's image at 4df5cbd: 83 of 83 expectations and 1 WARN (one name held by two types). Not covered: OpenCTI versions other than 7.260930.0; bundles made with the models or an LLM (the candidate runs offline); a connector or a live feed (bundles are imported by pycti) |
@@ -333,3 +339,37 @@ Done before this ADR, by pull request #229: `WORKER_MAX_CONCURRENT` defaults to
 1 in the code (decision 6), and `python -m evaluation inhouse-score` names the
 gold reports a run failed or lacks, and exits 1 when there are any or when no
 report was scored.
+
+## Amendment (2026-11-07): the in-house gold, done with limits
+
+The context above is dated 2026-10-31 and stays true at that date. State on
+2026-11-07, for item 5 and decision 10:
+
+- `data/eval/inhouse/` (git-ignored) holds **8 reports**, all `status: gold`,
+  each with the 4 layers of `LAYERS` declared (`iocs`, `entities`,
+  `techniques`, `relations`). `evaluation.inhouse.load()` loads all 8. Totals:
+  249 IoCs, 258 entities, 282 techniques, 320 relations, 36 `negatives`, plus
+  15 `observables`.
+- The ninth report, `domain-collision-caturegli-2025` (the negative case: an
+  article full of example domains), was removed from the corpus by the
+  maintainer on 2026-11-07, who judges it of no interest. No report now
+  measures a text filled with examples that are not IoCs; the remaining
+  negatives are inside the other reports. `greyvibe-withsecure-2026` and
+  `greyvibe-withsecure-web` cover the same subject.
+- **How it was annotated.** ChatGPT (GPT-6) annotated; Claude then reread each
+  report against its source file (each element checked against the text and
+  the figures, missing layers completed, quotes ChatGPT invented replaced);
+  the maintainer then arbitrated 40 disputed points. The undisputed elements
+  were not reread one by one by a person. This is AI-assisted annotation
+  arbitrated by the maintainer, not the human-reviewed annotation this ADR
+  planned.
+- Rules the maintainer set, applied to the whole corpus: a system command the
+  attacker uses is a `tool` entity; ATT&CK Mobile techniques are included (21
+  in all, while the pipeline produces Enterprise only, so technique recall is
+  lower, on purpose); a new `observables` list holds legitimate items cited as
+  indicators and values without an IoC type (neither the loader nor the scorer
+  uses it yet); malware versions are aliases of the family; one technique
+  (T1656) is absent from the local ATT&CK index.
+- The published limits (decision 10) become: 8 reports, AI-assisted annotation
+  arbitrated by one maintainer, a pilot. Item 5 no longer blocks items 6 and
+  11; item 6 (the scorer of the exported bundle) is not built.

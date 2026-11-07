@@ -9,6 +9,12 @@ theme.
 
 ## [Unreleased]
 
+- **Documentation:** the in-house evaluation set is gold on 2026-11-07: 8
+  reports, 4 layers each (249 IoCs, 258 entities, 282 techniques, 320
+  relations, 36 negatives). The annotation is AI-assisted and arbitrated by the
+  maintainer (ADR-0094 item 5 done, with limits); the Caturegli negative case
+  was removed. Code unchanged.
+
 ## [0.5.0] - 2026-11-07
 
 A fix release, numbered as a minor one under ADR-0085 §8 because it changes API
