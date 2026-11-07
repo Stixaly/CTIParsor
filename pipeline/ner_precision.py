@@ -142,6 +142,10 @@ def actor_is_ordinary(value: str, cased: bool = True) -> bool:
         return True
     if (low[4:] if low.startswith("the ") else low) in _countries():
         return True
+    # Whole-string: _all_generic reads one token at a time, and "Active Directory"
+    # is two tokens that name nothing alone.
+    if " ".join(low.split()) in _platforms():
+        return True
     return _all_generic(value, _platforms() | _DEMONYMS | _countries())
 
 
@@ -191,11 +195,11 @@ def place_name(value: str) -> str:
     value = value.rstrip("'’")         # "the United States'" (a plural possessive)
     if not value:
         return ""
+    if not value[0].isupper():          # "beirut" in a URL, "netflix", "us" (the pronoun), "russia"
+        return ""
     if _is_country(value):
         return value
     if not all(c.isalpha() or c in _PLACE_PUNCTUATION for c in value):
-        return ""
-    if not value[0].isupper():          # "beirut" in a URL, "netflix"
         return ""
     letters = [c for c in value if c.isalpha()]
     if len(letters) <= 5 and all(c.isupper() for c in letters):

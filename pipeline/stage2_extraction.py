@@ -51,7 +51,7 @@ _NER_PRODUCT_BLOCKLIST = frozenset({
     "fastapi", "spring", "express", "rails",
     # Platforms / infra
     "linux", "windows", "macos", "android", "ios", "ubuntu", "debian",
-    "docker", "kubernetes", "terraform", "ansible",
+    "docker", "kubernetes", "terraform", "ansible", "active directory",
     # Registries / package managers
     "npm", "pypi", "pip", "cargo", "nuget", "maven",
     # Cloud / CDN

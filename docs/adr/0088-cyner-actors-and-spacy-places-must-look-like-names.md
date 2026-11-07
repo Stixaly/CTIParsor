@@ -102,7 +102,9 @@ before the `_GPE_BLOCKLIST`.
 - The value is put on one line ("Saudi\nArabia" from a wrapped line). A leading
   "the" and a trailing apostrophe are dropped ("the United States" becomes
   "United States").
-- A country, or a known abbreviation (U.S., USA, UK, UAE, PRC…), is kept. Stage
+- A country, or a known abbreviation (U.S., USA, UK, UAE, PRC…), is kept when its
+  first letter is a capital: "us" (the pronoun), "russia" and "iran" in lower case
+  are not places (issue 396). Stage
   2's length rule still drops a two-letter value, and now also "the US", whose
   article is gone: the check runs again after the strip.
 - Any other value is kept only if it can be a place name: letters (accented
