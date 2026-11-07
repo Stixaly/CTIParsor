@@ -406,7 +406,8 @@
     "origin": "extracted"
    },
    "relationship--R19": {
-    "origin": "extracted"
+    "origin": "extracted",
+    "replaces": "targeted_location"
    },
    "relationship--R2": {
     "origin": "completion_transitive",

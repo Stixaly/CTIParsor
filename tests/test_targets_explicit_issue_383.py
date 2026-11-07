@@ -43,6 +43,10 @@ def test_an_explicit_targets_row_keeps_its_quote_and_confidence_issue_383(ner_fo
     [edge] = _targets_edges(bundle, "APT29", "France")
     assert (edge.confidence, edge.x_evidence_text) == (40, QUOTE)
     assert ledger["objects"][edge.id]["origin"] == "extracted"
+    # The ledger says the row replaced the list's edge, under its own key: `changes`
+    # is the Graph page's sign of a rewrite, which this is not (issue #383).
+    assert ledger["objects"][edge.id]["replaces"] == "targeted_location"
+    assert "changes" not in ledger["objects"][edge.id]
     [row] = [r for r in ledger["relationships"] if r["target_value"] == "France"]
     assert (row["outcome"], row["stix_id"]) == ("merged", edge.id)
 
@@ -68,4 +72,5 @@ def test_the_targets_product_alone_still_builds_its_edges_issue_383():
     [edge] = _targets_edges(bundle, "APT29", "France")
     assert edge.get("x_evidence_text") is None
     assert ledger["objects"][edge.id]["origin"] == "targeted_location"
+    assert "replaces" not in ledger["objects"][edge.id]
     assert len(_targets_edges(bundle, "APT29", "Government")) == 1

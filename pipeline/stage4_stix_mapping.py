@@ -1765,12 +1765,16 @@ def build_stix_bundle(
             # this row's quote and confidence replace it under the same id, at
             # the same place in the bundle; the edge then has this row's origin
             # (issue #383).
-            if led.objects.get(existing_id, {}).get("origin") == "targeted_location":
-                existing_idx = next(i for i in range(len(stix_objects) - 1, -1, -1)
-                                    if getattr(stix_objects[i], "id", None) == existing_id)
-                stix_objects[existing_idx] = stix2.Relationship(**{**_rel_kwargs, "id": existing_id})
-                led.objects.pop(existing_id)
-                led.object(stix_objects[existing_idx], ORIGIN_EXTRACTED)
+            if existing_id is not None and led.objects.get(existing_id, {}).get("origin") == "targeted_location":
+                existing_idx = next((i for i in range(len(stix_objects) - 1, -1, -1)
+                                     if getattr(stix_objects[i], "id", None) == existing_id), None)
+                if existing_idx is not None:
+                    stix_objects[existing_idx] = stix2.Relationship(**{**_rel_kwargs, "id": existing_id})
+                    # The ledger keeps the replaced origin under its own key: `changes`
+                    # is the Graph page's sign of a rewrite, and this is not one.
+                    led.objects.pop(existing_id)
+                    led.object(stix_objects[existing_idx], ORIGIN_EXTRACTED,
+                               replaces="targeted_location")
             if _row_times:
                 state = _time_state.get(rel_key)
                 if state is None:
@@ -2010,7 +2014,7 @@ def build_stix_bundle(
             # states that is not in it yet is added (D1), baseline objects and edges
             # alike (in_report holds both, once each); only the refs to baseline
             # objects that no longer ship (an analyst rejection) leave it.
-            added = list(dict.fromkeys(in_report))
+            added = [i for i in dict.fromkeys(in_report) if i not in listed]
             d = reissue_report(baseline.objects[chosen], merge.kept, added, enrichment, source_ref, now)
             if not d["object_refs"]:
                 # Everything it lists was rejected and the document adds nothing:
@@ -2036,8 +2040,7 @@ def build_stix_bundle(
             # The one property this ADR adds to the Report as received (ADR-0093).
             # added_refs counts the refs the Report did not list before (the stated
             # ones it already listed are not new).
-            gained = [i for i in added if i not in listed]
-            led.object(reissued, "baseline_report_upsert", added_refs=len(gained), removed_refs=removed_refs,
+            led.object(reissued, "baseline_report_upsert", added_refs=len(added), removed_refs=removed_refs,
                        attached_file=attached_file)
             baseline.verbatim[chosen] = d
             reissued_id = chosen
