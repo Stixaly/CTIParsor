@@ -203,6 +203,10 @@ pipeline still produces valid STIX. ML models are downloaded once and cached.
   published on 2026-11-07 from the tag `v0.4.0` on commit ea6ba55, is
   immutable too; on 2026-11-07 GHCR served its digest for `0.4.0`, `0.4`
   and the commit's `sha-` name.
+  [v0.5.0](https://github.com/Stixaly/CTIParsor/releases/tag/v0.5.0),
+  published on 2026-11-07 from the tag `v0.5.0` on commit 7e45996, is
+  immutable too; on 2026-11-07 GHCR served its digest for `0.5.0`, `0.5`
+  and the commit's `sha-` name.
 
 ### Not shipped
 **diskcache** (PYSEC-2026-2447 / CVE-2025-69872 / GHSA-w8v5-vhqr-4h9v,
@@ -239,7 +243,7 @@ added together.
 ## Supported versions
 Fixes land on `main` and ship in the next release. Only the latest release is
 supported: [the Releases page](https://github.com/Stixaly/CTIParsor/releases/latest)
-names it (0.4.0 since 2026-11-07).
+names it (0.5.0 since 2026-11-07).
 
 ## Reporting a vulnerability
 Report it privately:
