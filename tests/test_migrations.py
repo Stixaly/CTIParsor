@@ -247,7 +247,7 @@ def test_version_14_adds_an_empty_worker_table_and_leaves_a_running_job_with_its
 
     report = migrate.upgrade(conn)
 
-    assert report.applied == [14] and report.recognised == list(range(1, 14))
+    assert report.applied == [14, 15] and report.recognised == list(range(1, 14))
     assert conn.execute("SELECT COUNT(*) AS n FROM worker_heartbeats").fetchone()["n"] == 0
     job = conn.execute("SELECT status, worker_id, heartbeat_at FROM jobs").fetchone()
     assert tuple(job) == ("processing", "old-worker:7:a1b2c3", "t")   # the previous revision's worker keeps it
@@ -256,6 +256,24 @@ def test_version_14_adds_an_empty_worker_table_and_leaves_a_running_job_with_its
     with pytest.raises(Exception, match="worker_heartbeats_pkey"):
         conn.execute("INSERT INTO worker_heartbeats (worker_id, role, max_concurrent, app_version, started_at, "
                      "heartbeat_at) VALUES ('w1','worker',1,'0.3.0','t','t')")
+
+
+def test_version_15_adds_a_nullable_column_and_is_idempotent(schema):
+    conn = schema()
+    _legacy_at(conn, 14)
+    conn.execute("INSERT INTO jobs (id, original_filename, status, created_at, updated_at) "
+                 "VALUES ('j1','r.pdf','completed','t','t')")
+    assert not history.column_exists(conn, "jobs", "resolved_types_json")
+
+    report = migrate.upgrade(conn)
+
+    assert report.applied == [15] and report.recognised == list(range(1, 15))
+    assert conn.execute("SELECT resolved_types_json FROM jobs").fetchone()["resolved_types_json"] is None
+    conn.execute("UPDATE jobs SET resolved_types_json='[]' WHERE id='j1'")
+    for statement in history.load()[14].statements:                   # run again: nothing breaks, nothing is lost
+        conn.execute(statement)
+    assert conn.execute("SELECT resolved_types_json FROM jobs").fetchone()["resolved_types_json"] == "[]"
+    assert migrate.upgrade(conn).applied == []
 
 
 # ── Refusals ─────────────────────────────────────────────────────────────────

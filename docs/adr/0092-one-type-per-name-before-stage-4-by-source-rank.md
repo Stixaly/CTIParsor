@@ -38,7 +38,9 @@ then `spacy`/`alias_list`, then any other source). Equal ranks keep every type.
 So no conflict between two detectors of different rank reaches the store.
 The loser of such a conflict is not lost from the ledger: the run keeps what that
 pass dropped (`RunResult.resolved_away`), and Stage 4 records it as
-`outranked_type` (#397). The bundle is built as before.
+`outranked_type` (#397). The worker stores them in `jobs.resolved_types_json`
+(migration 15) for a finalize or a rebuild; a job run before it has none stored.
+The bundle is built as before.
 
 What reaches Stage 4 is what that pass never sees:
 
