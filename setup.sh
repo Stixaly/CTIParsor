@@ -54,6 +54,13 @@ ask() {
     printf -v "$__var" '%s' "${__reply:-$__default}"
 }
 
+# Value of KEY in .env: the last `KEY=` line, without a trailing \r. A .env saved
+# with Windows line endings (CRLF) would otherwise keep the \r: an empty
+# CTI_DB_PASSWORD would look set, and the secret file would get a stray \r.
+env_value() {
+    grep -E "^$1=" .env | tail -1 | cut -d'=' -f2- | tr -d '\r'
+}
+
 # ── Flags ───────────────────────────────────────────────────────────────────
 OFFLINE_DIR=""
 for arg in "$@"; do
@@ -215,8 +222,8 @@ ENVEOF
     fi
 else
     ok ".env already present"
-    PROVIDER_VALUE=$(grep -E '^LLM_PROVIDER=' .env | tail -1 | cut -d'=' -f2-)
-    KEY_VALUE=$(grep -E '^ANTHROPIC_API_KEY=' .env | tail -1 | cut -d'=' -f2-)
+    PROVIDER_VALUE=$(env_value LLM_PROVIDER)
+    KEY_VALUE=$(env_value ANTHROPIC_API_KEY)
     if grep -qE "sk-ant-xxx|xxxx" .env 2>/dev/null; then
         warn "API key looks like the old placeholder: Stage 3 will fail on every report."
         echo -e "  ${RED}  nano .env  →  a real ANTHROPIC_API_KEY=sk-ant-..., or leave it empty${NC}"
@@ -230,7 +237,7 @@ fi
 # CTI_DB_PASSWORD, required by compose (compose.yaml's postgres service and
 # every service that talks to it). Generate one if .env doesn't have it yet.
 if grep -qE '^CTI_DB_PASSWORD=' .env 2>/dev/null && \
-   [ -n "$(grep -E '^CTI_DB_PASSWORD=' .env | tail -1 | cut -d'=' -f2-)" ]; then
+   [ -n "$(env_value CTI_DB_PASSWORD)" ]; then
     ok "CTI_DB_PASSWORD already set in .env"
 else
     GENERATED_PW=$(openssl rand -hex 24 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
@@ -254,7 +261,7 @@ fi
 echo ""
 hdr "[3/3]  DB PASSWORD SECRET"
 
-CTI_DB_PASSWORD_VALUE=$(grep -E '^CTI_DB_PASSWORD=' .env | tail -1 | cut -d'=' -f2-)
+CTI_DB_PASSWORD_VALUE=$(env_value CTI_DB_PASSWORD)
 # The directory is 700 (other local accounts cannot traverse it); the file stays 644 for the containers' uids.
 mkdir -p .secrets
 chmod 700 .secrets
