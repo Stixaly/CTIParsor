@@ -127,6 +127,15 @@ def _extract_host(url: str) -> str:
     return url.split(":", 1)[0].strip().lower()
 
 
+def _normalize_host(host: str) -> str:
+    """A hostname in the form rules are normalised to: no `www.`, no trailing dot.
+
+    Every branch that yields a `domain` goes through it, so `www.evil.com` from a
+    URL, an email or a file name is the same observable as `evil.com` (#518).
+    """
+    return host.removeprefix("www.").removesuffix(".")
+
+
 def _is_report_domain(value: str) -> bool:
     """Is this value a hostname, or a filename that merely looks like one?
 
@@ -214,7 +223,7 @@ def observables_from_entities(rows: Iterable[Mapping[str, object]]) -> list[Obse
                     add("ip", val, etype, display)
 
             elif etype == "domain":
-                val = _refang(raw_value).lower().removeprefix("www.").removesuffix(".")
+                val = _normalize_host(_refang(raw_value).lower())
                 if len(val) >= 4 and _is_report_domain(val):
                     add("domain", val, etype, display)
 
@@ -222,14 +231,14 @@ def observables_from_entities(rows: Iterable[Mapping[str, object]]) -> list[Obse
                 val = _refang(raw_value).lower()
                 if len(val) >= 4:
                     add("url", val, etype, display)
-                host = _extract_host(val)
+                host = _normalize_host(_extract_host(val))
                 if len(host) >= 4 and _is_report_domain(host):
                     add("domain", host, etype, display)
 
             elif etype == "email":
                 val = _refang(raw_value).lower()
                 if "@" in val:
-                    host = val.rsplit("@", 1)[-1]
+                    host = _normalize_host(val.rsplit("@", 1)[-1])
                     if len(host) >= 4 and _is_report_domain(host):
                         add("domain", host, etype, display)
 
@@ -250,8 +259,9 @@ def observables_from_entities(rows: Iterable[Mapping[str, object]]) -> list[Obse
                 # when a `domain` entity already produced it this is a no-op,
                 # and when the extractor typed it ONLY as a file the observable
                 # survives in the class it actually belongs to.
-                if "/" not in val and _is_report_domain(val):
-                    add("domain", val, etype, display)
+                host = _normalize_host(val)
+                if "/" not in val and _is_report_domain(host):
+                    add("domain", host, etype, display)
                     continue
                 # Index the full path *and* the basename: a report naming only
                 # the binary must still match a rule pinning its install path.

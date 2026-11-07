@@ -335,7 +335,9 @@ def sentence_index_of(span: Span, sentence_bounds: list[tuple[int, int]]) -> int
 def sentence_bounds(text: str) -> list[tuple[int, int]]:
     """
     Splits text into sentences and returns their (start, end) offsets.
-    Separators: . ! ? followed by whitespace, or double newline.
+    Separators: . ! ? followed by whitespace, or a blank line (which may hold
+    spaces, tabs or a CR, #506).  Each span is `text[start:end]` exactly, with no
+    blank at either end.
     """
     if not text:
         return []
@@ -346,9 +348,12 @@ def sentence_bounds(text: str) -> list[tuple[int, int]]:
     # We want to split on these.
 
     # Let's iterate manually to be safe and precise with offsets.
-    i = 0
     n = len(text)
+    # The first span starts on its text, not on the blanks before it (#506).
     start = 0
+    while start < n and text[start].isspace():
+        start += 1
+    i = start
 
     while i < n:
         # Terminal punctuation followed by whitespace ends a sentence.  The
@@ -364,12 +369,22 @@ def sentence_bounds(text: str) -> list[tuple[int, int]]:
         # A blank line ends a sentence too: headings, bullet lists and IoC
         # tables in CTI reports carry no terminal punctuation at all, and
         # without this every such block would fuse into its neighbour.  The
-        # newlines are the separator, so the span stops before them.
-        elif text[i] == '\n' and i + 1 < n and text[i + 1] == '\n':
-            if text[start:i].strip():
-                bounds.append((start, i))
-            start = i + 2
-            i = i + 2
+        # newlines are the separator, so the span stops before them.  A blank
+        # line may hold spaces or tabs (#506), and every blank after the break
+        # is skipped, so the next span starts on its text.
+        elif text[i] == '\n':
+            k = i + 1
+            while k < n and text[k] in " \t\r":
+                k += 1
+            if k < n and text[k] == '\n':
+                if text[start:i].strip():
+                    bounds.append((start, _strip_end(text, start, i)))
+                while k < n and text[k].isspace():
+                    k += 1
+                start = k
+                i = k
+            else:
+                i += 1
         else:
             i += 1
 
@@ -377,9 +392,17 @@ def sentence_bounds(text: str) -> list[tuple[int, int]]:
     if start < n:
         fragment = text[start:n]
         if fragment.strip():
-            bounds.append((start, n))
+            bounds.append((start, _strip_end(text, start, n)))
 
     return bounds
+
+
+def _strip_end(text: str, start: int, end: int) -> int:
+    """`end`, moved back over the blanks that end `text[start:end]` (#506): a
+    span is its sentence, so `text[start:end]` never ends in a newline or space."""
+    while end > start and text[end - 1].isspace():
+        end -= 1
+    return end
 
 
 def words(text: str) -> str:

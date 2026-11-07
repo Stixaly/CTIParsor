@@ -173,6 +173,11 @@ def compile_status(source: str) -> tuple[str, str | None]:
     ledger and shown on the Graph page.  A rule that includes a file is not
     self-contained and cannot be checked on its own, so it is refused."""
     global _warned_unverified
+    # Before the import: yara.compile("") compiles an empty ruleset without
+    # error, so a blank rule would come out as "compiles" (#517, as #434 did
+    # for the Sigma and Suricata parsers).
+    if not source.strip():
+        return DOES_NOT_COMPILE, "empty rule: nothing to compile"
     try:
         import yara
     except ImportError:

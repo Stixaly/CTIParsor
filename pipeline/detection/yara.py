@@ -15,6 +15,7 @@ from pipeline.detection.yara_atoms import (
     rule_platform,
     split_rules,
 )
+from pipeline.detection.yara_check import with_declared_imports
 from pipeline.regex_safety import compile_pattern
 
 _YARA_GLOBS = ("*.yar", "*.yara", "*.rule")
@@ -68,10 +69,12 @@ class YaraAdapter(RuleCorpusAdapter):
                     if on_file_error is not None:
                         on_file_error(path, f"unreadable, skipped: {e}")
                     continue
-                for rule in split_rules(text):
+                rules = split_rules(text)
+                private_rules = {r.name: r for r in rules if r.is_private}
+                for rule in rules:
                     if rule.is_private:
                         continue
-                    r = self._to_rule(rule, path, corpus, license)
+                    r = self._to_rule(rule, path, corpus, license, private_rules)
                     if r is not None:
                         yield r
 
@@ -81,6 +84,7 @@ class YaraAdapter(RuleCorpusAdapter):
         path: Path,
         corpus: str,
         license: str,
+        private_rules: dict[str, YaraRule] | None = None,
     ) -> DetectionRule | None:
         if not rule.name:
             return None
@@ -121,7 +125,7 @@ class YaraAdapter(RuleCorpusAdapter):
             content_hash=content_hash,
             dedup_key=self._dedup_key(rule) or content_hash,
             related=[],
-            raw=rule.body,
+            raw=_export_body(rule, private_rules or {}),
         )
 
     def _techniques(self, rule: YaraRule) -> list[str]:
@@ -162,6 +166,30 @@ class YaraAdapter(RuleCorpusAdapter):
         return hashlib.sha256(payload.encode()).hexdigest()
 
 
+def _export_body(rule: YaraRule, private_rules: dict[str, YaraRule]) -> str:
+    """The text a standalone export writes for `rule` (#478, #479).
+
+    The rule keeps its `global` modifier (`rule.source`), and it is preceded by
+    the `private` rules it uses, directly or through another one, in file order,
+    and by the file's `import` lines that its text uses.  Nothing else of the
+    file is written.
+    """
+    if private_rules:
+        needed: set[str] = set()
+        pending = [rule.source]
+        while pending:
+            for name in _IDENTIFIER_RE.findall(pending.pop()):
+                if name in private_rules and name not in needed:
+                    needed.add(name)
+                    pending.append(private_rules[name].source)
+        deps = [private_rules[name].source for name in private_rules if name in needed]
+        body = "\n\n".join([*deps, rule.source])
+    else:
+        body = rule.source
+    return with_declared_imports(body, rule.imports)[0]
+
+
+_IDENTIFIER_RE = compile_pattern(r"[A-Za-z_][A-Za-z0-9_]*")
 _STRINGS_RE = compile_pattern(r"(?m)^[ \t]*strings[ \t]*:")
 _CONDITION_RE = compile_pattern(r"(?m)^[ \t]*condition[ \t]*:")
 # No two adjacent quantifiers can match the same character, so the match is

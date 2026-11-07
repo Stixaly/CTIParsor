@@ -36,14 +36,17 @@ class PipelineConfig(BaseModel):
 
     @classmethod
     def from_env(cls) -> "PipelineConfig":
+        provider = os.getenv("LLM_PROVIDER", "anthropic")
         return cls(
             chunk=ChunkConfig(
                 max_chars=int(os.getenv("CHUNK_MAX_CHARS", "3000")),
                 overlap=int(os.getenv("CHUNK_OVERLAP", "400")),
             ),
             llm=LLMConfig(
-                provider=os.getenv("LLM_PROVIDER", "anthropic"),
-                model=os.getenv("ANTHROPIC_MODEL", os.getenv("LLM_MODEL", "claude-sonnet-4-6")),
+                provider=provider,
+                # The model variable of the provider this run uses: ANTHROPIC_MODEL,
+                # VLLM_MODEL, OLLAMA_MODEL... (#531), then LLM_MODEL.
+                model=os.getenv(f"{provider.upper()}_MODEL", os.getenv("LLM_MODEL", "claude-sonnet-4-6")),
                 timeout_seconds=int(os.getenv("LLM_TIMEOUT", "120")),
                 max_retries=int(os.getenv("LLM_MAX_RETRIES", "3")),
             ),

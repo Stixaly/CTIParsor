@@ -50,12 +50,15 @@ def get_techniques() -> list[dict]:
 
 
 def get_tactics() -> list[dict]:
-    return _load().get("tactics", [])
+    # A new list, as get_techniques(): a caller that clears it must not empty the cache.
+    return list(_load().get("tactics", []))
 
 
 def lookup_by_id(mitre_id: str) -> dict | None:
     """Return the index entry for a given ATT&CK / CAPEC ID (case-insensitive,
-    surrounding spaces ignored)."""
+    surrounding spaces ignored).  A non-string (None) is not an id: None."""
+    if not isinstance(mitre_id, str):
+        return None
     mid = mitre_id.strip().upper()
     for entry in get_tactics():
         if entry["id"].upper() == mid:
@@ -71,6 +74,8 @@ def search(query: str, limit: int = 15) -> list[dict]:
     Search techniques and tactics by ID prefix or name substring.
     Tactics and ID-prefix matches are ranked first.
     """
+    if not isinstance(query, str):
+        return []
     q = query.lower().strip()
     if not q:
         return []

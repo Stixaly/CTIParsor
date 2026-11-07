@@ -86,7 +86,7 @@ def _load_active() -> tuple[frozenset[tuple[str, str]], tuple[dict, ...]]:
         elif r["action"] == "promote" and r["entity_type"] in GAZETTEER_TYPES:
             promoted.append({
                 "name": term,
-                "canonical": (r["display"] or "").strip() or r["term"],
+                "canonical": (r["display"] or "").strip() or r["term"].strip(),
                 "entity_type": r["entity_type"],
                 "mitre_id": None,
                 "domain": "override",

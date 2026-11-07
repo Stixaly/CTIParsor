@@ -200,7 +200,8 @@ def with_named_entities(
             raw_type, value, source = e.entity_type, e.value, e.source
         else:
             raw_type, value, *rest = e
-            source = rest[0] if rest else ""
+            # A NULL source (the column is nullable) ranks as "", the lowest priority (#510).
+            source = (rest[0] if rest else "") or ""
         try:
             etype = EntityType(raw_type)
         except ValueError:

@@ -128,7 +128,8 @@ def test_every_other_type_is_its_own_family():
     ("ipv6", ("2001:DB8:0:0:0:0:0:0/32", "2001:db8::/32")),
     ("domain", ("Evil[.]TEST", "evil.test")),
     ("email", ("Bob(at)Evil[.]test", "bob@evil.test")),
-    ("url", ("hxxps://Evil[.]test/A", "https://evil.test/a")),
+    # Scheme and host fold, the path keeps its case (#483).
+    ("url", ("hxxps://Evil[.]test/A", "https://evil.test/A")),
     ("mac_addr", ("00:1A:2B:3C:4D:5E", "00:1a:2b:3c:4d:5e")),
     ("sha256", (SHA256.upper(), SHA256)),
     ("file", ("SVCHost.EXE ", "svchost.exe")),
@@ -144,6 +145,11 @@ def test_every_other_type_is_its_own_family():
 def test_both_spellings_normalise_alike(entity_type, spellings):
     first, second = spellings
     assert bs.normalize_value(entity_type, first) == bs.normalize_value(entity_type, second)
+
+
+def test_url_paths_differing_by_case_stay_apart():
+    """/A and /a are two resources: only the scheme and the host fold (#483)."""
+    assert bs.normalize_value("url", "https://evil.test/A") != bs.normalize_value("url", "https://evil.test/a")
 
 
 def test_a_normal_form_is_the_expected_one():

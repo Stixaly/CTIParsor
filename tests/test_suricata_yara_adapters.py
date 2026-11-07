@@ -220,7 +220,8 @@ def test_yara_rules_are_parsed_and_private_rules_skipped(tmp_path):
     assert first.technique_ids == ["T1055.001", "T1027"]   # upper-cased, de-duplicated
     assert first.data_sources == ["file"] and first.severity == Severity.UNKNOWN
     assert first.source_ref.endswith("apt.yar")
-    assert first.raw.startswith("rule APT_Sample_1")
+    # The export text leads with the private rule APT_Sample_1 uses (#478).
+    assert first.raw.startswith("private rule IsPE") and "rule APT_Sample_1" in first.raw
 
 
 def test_yara_rule_ids_come_from_the_body_not_meta_id(tmp_path):

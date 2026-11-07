@@ -205,3 +205,28 @@ def test_baseline_marking_definition_appears_once(monkeypatch, fake_reissue):
     baseline.objects[tlp.id] = json.loads(tlp.serialize())
     bundle, _ = _build(baseline, tlp_level="AMBER")
     assert [o.id for o in bundle.objects].count(tlp.id) == 1
+
+
+def _upsert_merge(stix_objects, baseline):
+    """As _fake_merge, and the kept object is re-issued with what the report added (#492)."""
+    result = _fake_merge(stix_objects, baseline)
+    reissued = {**_baseline_malware(), "description": "Added by the report.",
+                "modified": "2026-02-01T00:00:00.000Z"}
+    return bs.MergeResult(kept=result.kept, stated=result.stated, remap={}, dropped=result.dropped,
+                          removed_relationships=[], remapped_relationships={},
+                          upserted={MALWARE_ID: (reissued, ("description",))})
+
+
+def test_a_reissued_baseline_object_ships_as_reissued_and_is_validated(monkeypatch, fake_reissue):
+    """(#492) Stage 4 writes the re-issued dict, not the one received; Stage 5
+    no longer trusts it as validated at intake; the ledger names what changed."""
+    monkeypatch.setattr(bs, "merge_baseline", _upsert_merge)
+    baseline = _baseline()
+    _, ledger = _build(baseline)
+
+    assert baseline.verbatim[MALWARE_ID]["description"] == "Added by the report."
+    assert baseline.trusted == frozenset()
+    entry = ledger.to_dict()["objects"][MALWARE_ID]
+    assert entry["origin"] == "baseline"
+    assert entry["changes"] == ["description"]
+    assert entry["upsert"] == "baseline_relationship_upsert"

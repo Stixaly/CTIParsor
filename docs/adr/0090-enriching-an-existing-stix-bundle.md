@@ -498,3 +498,42 @@ Now:
 - Ledger: an entity of such an object is `dropped` with reason `baseline_rejected`
   and no `stix_id`; the object leaves the ledger's objects. The baseline object of
   the same id is already in `removed` (kind `baseline`), so it is not repeated.
+
+## Amendment (2026-11-07): what a duplicate edge adds joins the baseline edge (#492)
+
+A CTIParsor relationship that duplicates a baseline one (same source, verb and
+target once the ends are remapped) is still not shipped (`duplicate_after_baseline_merge`).
+Before this amendment, whatever it carried that the baseline edge did not, a
+`start_time` from the new report for instance, was lost with it. The analyst's
+decision (2026-11-07) is to fold it into the baseline edge. This is the second
+exception to I2 and to decision 5, after the chosen Report (D1), and it follows
+the same rule: an OpenCTI-style upsert under the baseline's id.
+
+- `start_time` takes the earlier of the two, `stop_time` the later. This is what
+  OpenCTI does itself on a relationship upsert (`upsert-utils.js`: `ALIGN_OLDEST`
+  for `start_time`, `ALIGN_NEWEST` for `stop_time`, read in `opencti-master` on
+  2026-11-07).
+- The new `description` follows the baseline's, after a blank line, unless the
+  baseline's already contains it. OpenCTI replaces a description on upsert when the
+  import's confidence allows it, so it receives both texts and loses neither.
+- Everything else of the baseline edge is kept: `id`, `created`, `created_by_ref`,
+  `confidence`, markings, `x_*`. `modified` is the build time, or 1 ms after the
+  edge's own `modified` when the clock is behind, as for the Report.
+- No upsert is made when the merged dates would end the edge before it starts
+  (STIX requires `stop_time` later than `start_time`), or when the duplicate adds
+  nothing.
+- Stage 4 writes the re-issued dict (`MergeResult.upserted`) as the verbatim
+  object, and drops it from `trusted`, so Stage 5 validates it. The ledger keeps
+  the origin `baseline`, sets `upsert: "baseline_relationship_upsert"`, and puts the
+  properties that changed in `changes`, because the edge is rewritten.
+- ADR-0063 §6 refuses a min/max merge of CTIParsor's own date assertions, because it
+  would fabricate continuity, and keeps each one in `times`. That rule is unchanged.
+  It does not apply here: the baseline edge is a foreign object, and OpenCTI applies
+  this min/max itself when it imports the new report's edge onto the stored one.
+  The bundle says what OpenCTI will store. The new report's own dates stay in the
+  job's `times` and in the ledger entry of the dropped duplicate.
+- A duplicate of a CTIParsor edge, not a baseline one, is not affected (ADR-0063 §6).
+- Not tested by an OpenCTI import. The upsert rules above were read in its source.
+  An earlier `start_time` changes the relationship's standard id in OpenCTI, which
+  then keeps its STIX id in `x_opencti_stix_ids`. That last point is inferred from
+  the code, not observed.

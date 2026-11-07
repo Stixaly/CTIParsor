@@ -127,13 +127,17 @@ class TestParentSubsumption:
 
 # ── Phase B — Stage 3f TTP verification ─────────────────────────────────────────
 
+# A sentence of the report: a verified claim must quote the text (#493).
+_REPORT = "The actor ran a PowerShell script on the host."
+
+
 def _verifier(verdicts: dict[int, bool]):
     """Build a fake llm_fn returning a verification array for the given verdicts."""
     import json
 
     def _fn(system: str, user: str) -> str:
         arr = [
-            {"n": n, "verified": v, "quote": ("found it" if v else None)}
+            {"n": n, "verified": v, "quote": (_REPORT if v else None)}
             for n, v in verdicts.items()
         ]
         return json.dumps(arr)
@@ -155,7 +159,7 @@ class TestTTPVerification:
             TTPExtracted(technique_name="Real", mitre_id="T1059.001"),
             TTPExtracted(technique_name="Hallucinated", mitre_id="T1486"),
         ])
-        out = v.verify_ttps("text", result, _verifier({1: True, 2: False}))
+        out = v.verify_ttps(_REPORT, result, _verifier({1: True, 2: False}))
         ids = {t.mitre_id for t in out.ttps}
         assert ids == {"T1059.001"}
 

@@ -1901,8 +1901,13 @@ def build_stix_bundle(
         by_id = {getattr(o, "id", None): o for o in stix_objects}
         for oid in sorted(merge.kept):
             led.baseline_object(by_id[oid], status="matched" if oid in merge.stated else "only")
-        baseline.verbatim.update({i: baseline.objects[i] for i in merge.kept})
-        baseline.trusted = frozenset(merge.kept)
+        for oid, (_, gained) in sorted(merge.upserted.items()):
+            led.baseline_upsert(oid, gained)
+        # A re-issued relationship (#492) ships as re-issued, and Stage 5 checks it:
+        # it is no longer the object validated at intake.
+        baseline.verbatim.update({i: merge.upserted[i][0] if i in merge.upserted else baseline.objects[i]
+                                  for i in merge.kept})
+        baseline.trusted = frozenset(merge.kept - merge.upserted.keys())
 
     # --- Report SDO wrapping all objects ---
     # description : the source, the count of each object type and the text, as

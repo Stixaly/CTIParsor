@@ -92,7 +92,7 @@ class MappingLedger:
     def object(self, obj: Any, origin: str, **info: Any) -> None:
         """Record why `obj` exists.  First writer wins: an object is created
         once, and a later call for the same id is a reuse, not a new origin."""
-        oid = getattr(obj, "id", None)
+        oid = stix_field(obj, "id")
         if oid and oid not in self.objects:
             self.objects[oid] = {"origin": origin, **_clean(info)}
 
@@ -113,7 +113,7 @@ class MappingLedger:
     ) -> None:
         entry: dict = {"value": value, "entity_type": entity_type, "outcome": outcome}
         if obj is not None:
-            entry["stix_id"] = obj.id
+            entry["stix_id"] = stix_field(obj, "id")
             entry["stix_type"] = stix_field(obj, "type")
             name = stix_field(obj, "name")
             if name:
@@ -142,14 +142,15 @@ class MappingLedger:
         """A later copy of the same edge replaced `old_id` in the bundle (it
         carried start/stop times the first did not).  Entries that pointed at
         the old SRO now point at the one that ships."""
+        new_id = stix_field(new_rel, "id")
         for e in self.relationships:
             if e.get("stix_id") == old_id:
                 e["outcome"] = "merged"
-                e["merged_with"] = new_rel.id
-                e["stix_id"] = new_rel.id
+                e["merged_with"] = new_id
+                e["stix_id"] = new_id
         origin = self.objects.pop(old_id, None)
-        if origin is not None:
-            self.objects[new_rel.id] = origin
+        if origin is not None and new_id:
+            self.objects[new_id] = origin
 
     # ── Stage 4b alias merge ─────────────────────────────────────────────────
     def apply_alias_merge(self, merged_ids: dict[str, str], removed_rels: list[dict],
@@ -175,7 +176,7 @@ class MappingLedger:
                 if e.get("stix_id") != r["id"]:
                     continue
                 if r.get("kept"):
-                    e["outcome"] = "merged"
+                    _merged_as(e, r["reason"])
                     e["merged_with"] = r["kept"]
                     e["stix_id"] = r["kept"]
                 else:
@@ -222,7 +223,7 @@ class MappingLedger:
                 if e.get("stix_id") != r["id"]:
                     continue
                 if r.get("kept"):
-                    e["outcome"] = "merged"
+                    _merged_as(e, "baseline_match")
                     e["merged_with"] = r["kept"]
                     e["stix_id"] = r["kept"]
                 else:
@@ -257,7 +258,7 @@ class MappingLedger:
         """A baseline object that ships as received (ADR-0090).  It replaces the
         origin Stage 4 gave the CTIParsor object of its id, which it stands for:
         the rows that produced that object are merged onto it."""
-        oid = getattr(obj, "id", None)
+        oid = stix_field(obj, "id")
         if not oid:
             return
         # The annotations stay (an observable with no Indicator, and why); only the origin changes.
@@ -268,6 +269,14 @@ class MappingLedger:
         for r in self.relationships:
             if r.get("stix_id") == oid:
                 _merged_as(r, "baseline_match")
+
+    def baseline_upsert(self, oid: str, gained: tuple[str, ...]) -> None:
+        """A baseline relationship re-issued under its id with what the report
+        adds to it (#492): `gained` names the properties that changed.  The
+        origin stays the baseline's; `changes` says the object was rewritten."""
+        entry = self.objects.setdefault(oid, {"origin": "baseline"})
+        entry["upsert"] = "baseline_relationship_upsert"
+        entry["changes"] = list(gained)
 
     # ── Refusals: rejected or held triples not built back ────────────────────
     def refused_edge(self, source_ref: str, relationship_type: str, target_ref: str,
@@ -312,7 +321,10 @@ class MappingLedger:
         """An SRO that ships in the bundle but not in the Report's object_refs:
         an edge the report does not state (MITRE's, or composed from two
         others; audit B 8.4.2).  Recorded now, with its origin."""
-        entry = self.objects.setdefault(obj.id, {"origin": _rel_origin_from_props(obj)})
+        oid = stix_field(obj, "id")
+        if not oid:
+            return
+        entry = self.objects.setdefault(oid, {"origin": _rel_origin_from_props(obj)})
         entry["outside_report"] = True
 
     def finalize(self, stix_objects: list) -> None:
@@ -321,8 +333,9 @@ class MappingLedger:
         for o in stix_objects:
             if stix_field(o, "type") != "relationship":
                 continue
-            if o.id not in self.objects:
-                self.objects[o.id] = {"origin": _rel_origin_from_props(o)}
+            oid = stix_field(o, "id")
+            if oid and oid not in self.objects:
+                self.objects[oid] = {"origin": _rel_origin_from_props(o)}
 
     def to_dict(self) -> dict:
         out = {

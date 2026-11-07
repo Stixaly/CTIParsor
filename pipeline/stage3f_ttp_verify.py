@@ -40,6 +40,7 @@ from typing import Callable
 
 from api.logging_config import get_logger
 from pipeline.env_flags import env_bool, env_int
+from pipeline.evidence_span import stated_in, words
 from pipeline.llm_parse import fit_report, parse_numbered_claims
 
 logger = get_logger(__name__)
@@ -149,8 +150,9 @@ def verify_ttps(
 
     Returns:
         A new LLMEnrichmentResult; TTPs whose use is not supported by a quoted
-        sentence are removed.  Verified TTPs keep their description (augmented
-        with the supporting quote when one was returned and the description was
+        sentence are removed: a verdict with no quote, or a quote the text does
+        not state (#493), counts as unverified.  Verified TTPs keep their
+        description (filled with the supporting quote when the description was
         empty).
 
     Falls back to returning the original result unchanged when verification is
@@ -207,18 +209,28 @@ def verify_ttps(
         return result
     llm_stats.bump("ttp_verification_ok")
 
+    text_words = words(text)
     kept_verified: list = []
     removed = 0
     for i, t in enumerate(to_verify):
         v = verifications.get(i + 1)
         # No entry for this claim → default to keeping it (safe fallback).
-        if v is None or _verdict(v):
-            quote = v.get("quote") if v else None
-            if quote and isinstance(quote, str) and quote.strip() and not t.description.strip():
-                t = t.model_copy(update={"description": quote.strip()[:500]})
+        if v is None:
             kept_verified.append(t)
-        else:
+            continue
+        if not _verdict(v):
             removed += 1
+            continue
+        # A verdict counts only with a quote the text states (#493): an empty or
+        # invented quote is no evidence, and is never copied into the description.
+        quote = v.get("quote")
+        quote = quote.strip() if isinstance(quote, str) else ""
+        if not quote or not stated_in(quote, text_words):
+            removed += 1
+            continue
+        if not t.description.strip():
+            t = t.model_copy(update={"description": quote[:500]})
+        kept_verified.append(t)
 
     if removed:
         logger.info(

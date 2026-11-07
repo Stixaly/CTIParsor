@@ -140,7 +140,9 @@ def job_technique_ids(conn: DBConnection, job_id: str) -> list[str]:
         "AND " + SHIPS,
         (job_id,),
     ).fetchall()
-    return [r[0].upper() for r in rows if r[0]]
+    # SELECT DISTINCT is case-sensitive, so `t1059` and `T1059` arrive as two rows
+    # and only collapse after .upper(): dedupe here, keeping first-seen order.
+    return list(dict.fromkeys(r[0].upper() for r in rows if r[0]))
 
 
 def compute_for_job(
@@ -330,7 +332,8 @@ def rules_for_job(
     contains. The tag join alone proposed 86,453 rules across seven reports of
     which 908 (1.05%) held any report value; on one report the ratio was 3 in
     12,280. `evidence_only=False` restores the unfiltered tag join, which the ZIP
-    export and the detection-engineering backlog still want.
+    export and the detection-engineering backlog still want, plus the rules that
+    evidence admits and no tag reaches (#516).
 
     Evidence also *adds* rules the tag join cannot reach: none of the 16,314
     canonical YARA rules carries an ATT&CK tag, so they arrive here only through
@@ -371,11 +374,15 @@ def rules_for_job(
 
     tag_total = len(all_ids)
 
+    # Both paths need the admitted set. evidence_only narrows the tag join to it;
+    # the unfiltered path adds the rules no tag reaches (YARA, brand) (#516).
+    admitted = {rid for rid, evs in evidence.items() if _admits(evs)}
     if evidence_only:
-        admitted = {rid for rid, evs in evidence.items() if _admits(evs)}
         for t, ids in rules_for_tech.items():
             rules_for_tech[t] = {rid for rid in ids if rid in admitted}
         all_ids = admitted
+    else:
+        all_ids |= admitted
 
     if not all_ids:
         return {"job_id": job_id, "techniques": [], "technique_total": 0,

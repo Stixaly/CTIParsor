@@ -257,7 +257,7 @@ def _domain_accepted(domain: str) -> bool:
 
 # URLs complètes (http/https/ftp + domaine + chemin optionnel)
 _URL_PATTERN = _compile_pattern(
-    r"https?://[a-zA-Z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+",
+    r"(?:https?|ftp)://[a-zA-Z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+",
     re.IGNORECASE,
 )
 
@@ -647,7 +647,12 @@ def _extract_network_iocs(text: str) -> list[RawEntity]:
         # legal URI sub-delims (RFC 3986) and Wikipedia-style titles end in one
         # (.../APT29_(group)) -- stripping it corrupts a real link, while
         # "(https://example.com/a)" in prose still loses its unmatched ")".
-        while url and url[-1] in '".),;}\'' and not (
+        # A URL between double quotes ends at the closing quote (#497): its ";"
+        # or "," is part of it, and only the unbalanced ")" is still cut.
+        quoted = (m.start() > 0 and text[m.start() - 1] == '"'
+                  and m.end() < len(text) and text[m.end()] == '"')
+        trailing = ")" if quoted else '".),;}\''
+        while url and url[-1] in trailing and not (
             url[-1] == ")" and url.count(")") <= url.count("(")
         ):
             url = url[:-1]

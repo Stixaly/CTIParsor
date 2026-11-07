@@ -215,7 +215,7 @@ def validate_llm_result(
             w for w in name.split()
             if len(w) >= 5 and w.lower().rstrip(".,;:") not in _CAMPAIGN_STOPWORDS
         ]
-        search_corpus = chunk_text + " " + doc_context
+        search_corpus = chunk_text + " " + (doc_context or "")
         if keywords and any(_name_in_text(kw, search_corpus) for kw in keywords):
             return True
         logger.debug(f"Dropped campaign (no keyword match): '{name}'")
