@@ -163,17 +163,24 @@ _STOP = (r"(?:and|or|nor|of|in|on|to|with|for|the|a|an|by|from|is|was|are|were|a
 # and "a variant of the malware" keep the malware head: of, and, or, the, a, an, its, as stay allowed.
 _APPOS_BLOCK = (r"(?:about|regarding|against|into|onto|via|under|over|between|among|within|without|like|per"
                 r"|concerning|on|in|to|for|from|by|with|at|than|vs|versus|that|which|is|was|are|were|not|but)")
-_ID_AFTER = re.compile(r"((?:[ \t]+[A-Za-z][\w-]*){0,3}?)[ \t]*[(\[][ \t]*(?:ID:?[ \t]*)?([GS]\d{4})[ \t]*[)\]]")
+# A display-wrapped sentence breaks its lines: "Machete\n(S0409)" is one sentence, so one
+# line break counts as a blank between a name and what follows it (issue #408).  A blank
+# line ("\n\n") ends the paragraph and is no gap.
+_GAP = r"(?:[ \t]+|[ \t]*\r?\n[ \t]*)"     # at least one blank
+_GAP_OPT = r"[ \t]*(?:\r?\n[ \t]*)?"       # none, or a blank
+_ID_AFTER = re.compile(r"((?:[ \t]+[A-Za-z][\w-]*){0,3}?)" + _GAP_OPT
+                       + r"[(\[][ \t]*(?:ID:?[ \t]*)?([GS]\d{4})[ \t]*[)\]]")
 _ATTACK_LINK = re.compile(r"\]\((?:https?://)?attack\.mitre\.org/(?:software|groups)/([GS]\d{4})/?[)#]", re.I)
 
 
-def _attached_id(text: str, start: int, end: int) -> str | None:
+def _attached_id(text: str, start: int, end: int, u1: int) -> str | None:
     if _char(text, start - 1) == "[":
         m = _ATTACK_LINK.match(text, end)
         if m:
             return m.group(1).upper()
     m = _ID_AFTER.match(text, end)
-    if m and not re.search(rf"\b{_STOP}\b", m.group(1), re.I):
+    # The ID must lie in the unit too: "- Machete" then "(S0409)" on the next line is another one.
+    if m and m.start(2) < u1 and not re.search(rf"\b{_STOP}\b", m.group(1), re.I):
         return m.group(2)
     return None
 
@@ -215,11 +222,11 @@ def _alias(text: str, start: int, end: int, u0: int, u1: int, names, cid: str,
 @functools.lru_cache(maxsize=256)
 def _typed_res(nouns: tuple[str, ...]) -> tuple[re.Pattern, re.Pattern, re.Pattern]:
     alt = "|".join(re.escape(n).replace(r"\ ", r"\s+") for n in sorted(nouns, key=len, reverse=True))
-    after = re.compile(rf"[ \t]+(?:(?!{_STOP}\b)[\w-]+[ \t]+)?(?:{alt})(?![\w-])", re.I)
-    appositive = re.compile(rf",[ \t]+(?:the|an?)[ \t]+(?:(?!{_APPOS_BLOCK}\b)[\w-]+[ \t]+){{0,3}}?"
+    after = re.compile(rf"{_GAP}(?:(?!{_STOP}\b)[\w-]+{_GAP})?(?:{alt})(?![\w-])", re.I)
+    appositive = re.compile(rf",{_GAP}(?:the|an?){_GAP}(?:(?!{_APPOS_BLOCK}\b)[\w-]+{_GAP}){{0,3}}?"
                             rf"(?:{alt})(?![\w-])", re.I)
-    before = re.compile(rf"(?<![\w-])(?:{alt})[ \t]+(?:family[ \t]+)?(?:called|named|dubbed|known[ \t]+as)"
-                        r"[ \t]+[\"“']?$", re.I)
+    before = re.compile(rf"(?<![\w-])(?:{alt}){_GAP}(?:family{_GAP})?(?:called|named|dubbed|known{_GAP}as)"
+                        rf"{_GAP}[\"“']?$", re.I)
     return after, appositive, before
 
 
@@ -272,7 +279,7 @@ def evidence(text: str, start: int, end: int, name_key: str, candidates: Mapping
         return Evidence(excluded="conflicting_sense")
 
     found: dict[str, str] = {}
-    attached = _attached_id(text, start, end)
+    attached = _attached_id(text, start, end, u1)
     if attached is not None and attached in candidates:
         found[attached] = "attached_id"
     if anchor_ok is not None:

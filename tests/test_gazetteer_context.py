@@ -120,6 +120,32 @@ def test_a_preposition_before_the_type_is_no_apposition_issue_360(index, sentenc
     assert judge(index, sentence, "Judy", "S0325").outcome == outcome
 
 
+# ── A line break inside the sentence (issue #408) ────────────────────────────
+
+WRAPPED = [
+    ("The group used Machete\n(S0409) in attacks.", "Machete", "S0409", "attached_id"),   # issue #408
+    ("The attack used The Cuba\nransomware against hospitals.", "Cuba", "S0625", "typed"),  # issue #408
+    ("The group used Machete (S0409) in attacks.", "Machete", "S0409", "attached_id"),    # the space control
+    ("The attack used The Cuba ransomware against hospitals.", "Cuba", "S0625", "typed"),  # the space control
+]
+
+
+@pytest.mark.parametrize("sentence, surface, identity, rule", WRAPPED)
+def test_a_line_break_is_a_blank_in_a_construction_issue_408(index, sentence, surface, identity, rule):
+    verdict = judge(index, sentence, surface, identity)
+    assert (verdict.outcome, verdict.rule) == ("resolved", rule), verdict
+
+
+@pytest.mark.parametrize("sentence", [
+    "The group used Machete\n\n(S0409) in attacks.",                # a blank line ends the paragraph
+    "The attack used The Cuba\n\nransomware against hospitals.",    # a blank line ends the paragraph
+    "- The group used Machete\n(S0409) is a tool.",                 # the ID is on another list item's line
+])
+def test_a_blank_line_or_another_unit_is_no_construction_issue_408(index, sentence):
+    surface, identity = ("Cuba", "S0625") if "Cuba" in sentence else ("Machete", "S0409")
+    assert judge(index, sentence, surface, identity).outcome == "unresolved"
+
+
 NEGATIVES = [
     ("Joker’s Stash closed", "Joker", "conflicting_sense"),
     ("Joker's Stash closed", "Joker", "conflicting_sense"),

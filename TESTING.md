@@ -361,7 +361,7 @@ current truth.
 | Evaluation | `test_measure_ner_precision.py` | 71 | ADR-0089's decision rule in `scripts/measure_ner_precision.py`: each gate's threshold at its boundary (M1 +5 points, M2 and M4a one gold entity net, M4a and M4b one point, M5 2%), the float edge cases, void when M0 fails, incomplete when the train replay is missing or is not the one named; which records are run again (error or unreadable, a Stage 3 request with no answer, a CyNER or spaCy pass that did not run) and which are the model's answer; documents left out, a document missing from both runs included; the configuration and `run.json` differences between two runs |
 | NER | `test_stage2e_gliner.py` | 16 | per-type cutoffs, model loading (no deprecated `resume_download`), batch fallback, merge precedence |
 | NER | `test_stage_registry.py` | 4 | registry merging, deduplication, case insensitivity |
-| NER | `test_gazetteer_context.py` | 89 | gazetteer context: a contracted negation is no alias (#359), a preposition before the type is no apposition (#360) |
+| NER | `test_gazetteer_context.py` | 100 | gazetteer context: a contracted negation is no alias (#359), a preposition before the type is no apposition (#360), one line break is a blank in a construction, a blank line is not (#408) |
 | **Aliases** | `test_aliases.py` | 6 | alias resolution, MITRE ID mapping, surface forms |
 | **Aliases** | `test_alias_disambiguation.py` | 11 | type-aware resolution, alias isolation, canonical name handling |
 | LLM enrich | `test_stage3.py` | 80 | LLM enrichment, JSON parsing, deduplication, prompt sanitization, the document-level pass reaching the provider whole |
