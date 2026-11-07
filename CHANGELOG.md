@@ -34,6 +34,11 @@ theme.
   Indicator (`observables.as_indicator`), from a new `bundle_indicated` field
   of each run's record. **Evaluation scores can move:** an `iocs` false
   positive that the gold now lists as an observable is no longer one.
+- **Documentation:** the in-house evaluation set is gold on 2026-11-07: 8
+  reports, 4 layers each (249 IoCs, 258 entities, 282 techniques, 320
+  relations, 36 negatives). The annotation is AI-assisted and arbitrated by the
+  maintainer (ADR-0094 item 5 done, with limits); the Caturegli negative case
+  was removed. Code unchanged.
 
 ## [0.5.0] - 2026-11-07
 

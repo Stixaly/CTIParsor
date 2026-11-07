@@ -15,6 +15,36 @@ pre-annotation drafts come from `python -m evaluation preannotate <file>
 --doc-id <id>`; **a draft is biased towards what the pipeline already
 finds** — read the whole report.
 
+## State on 2026-11-07
+
+`data/eval/inhouse/` holds **8 reports**, all `status: gold`, each with the 4
+layers of `LAYERS` declared (`iocs`, `entities`, `techniques`, `relations`);
+`evaluation.inhouse.load()` loads all 8. Totals: 249 IoCs, 258 entities, 282
+techniques, 320 relations, 36 `negatives`, plus 15 `observables`. The table
+below is the selection of 2026-10-03; its *Layers* and *Double* columns are the
+plan of that date. Every report now carries all 4 layers, and no double
+annotation was made.
+
+**Provenance.** ChatGPT (GPT-6) annotated. Claude then reread each report
+against its source file: each element checked against the text and the
+figures, missing layers completed, quotes ChatGPT invented replaced. The
+maintainer then arbitrated 40 disputed points. The undisputed elements were
+not reread one by one by a person. This is AI-assisted annotation arbitrated by
+one maintainer, not a human-reviewed annotation. Limits to publish with any
+figure: 8 reports, AI-assisted annotation arbitrated by one maintainer, a
+pilot.
+
+**Rules set by the maintainer, applied to the whole corpus:**
+
+- a system command the attacker uses is a `tool` entity;
+- ATT&CK Mobile techniques are included (21 in all). The pipeline produces
+  Enterprise only, so technique recall is lower, on purpose;
+- a new `observables` list holds legitimate items cited as indicators (a
+  Windows binary, say) and values without an IoC type; the loader and the
+  scorer do not use it yet;
+- malware versions are aliases of the family;
+- one technique (T1656) is absent from the local ATT&CK index.
+
 ## Selection
 
 | doc_id | Source | Format | What it measures | Layers | Double |
@@ -27,7 +57,7 @@ finds** — read the whole report.
 | `cert-ua` | CERT-UA advisory | PDF, 4 p, 6 tables, 14 hashes, 2 IPs | a compact, table-heavy advisory: the IoC layer alone is a full annotation | iocs, techniques, relations | yes |
 | `shinyhunters-gcb-2026` | Google Cloud blog, *ShinyHunters targets education sector* | PDF printed from a blog, 7 IPs | blog layout, inline IoCs, one actor | all | yes |
 | `intelsq1-day0-html` | *IntelSQ1-report003: Day0* (HedgeDoc page) | HTML | an HTML source read without a PDF step. **Confirm it is shareable before any second annotator sees it** | iocs, entities | — |
-| `domain-collision-caturegli-2025` | Caturegli, *Internal domain name collision 2.0* | PDF, 93 p, research paper, 29 image-heavy pages | a **negative** case: dozens of example domains and addresses that are not indicators; annotate `iocs` (the empty set, or near it) and `negatives` only | iocs, negatives | — |
+| `domain-collision-caturegli-2025` (**removed 2026-11-07 by the maintainer, who judges it of no interest**) | Caturegli, *Internal domain name collision 2.0* | PDF, 93 p, research paper, 29 image-heavy pages | a **negative** case: dozens of example domains and addresses that are not indicators; annotate `iocs` (the empty set, or near it) and `negatives` only | iocs, negatives | — |
 | `desert-hydra-medium-2026` (optional) | Medium, *Operation Desert Hydra — AI-assisted CTI pipeline* | PDF printed from the web, 23 MB, 37 images | a blog **about** a pipeline that quotes MuddyWater indicators as examples: `generic` negatives, and benign IoCs | iocs, negatives | — |
 
 Three reports in double annotation (the shortest three), as the guide asks;
@@ -38,8 +68,10 @@ Three reports in double annotation (the shortest three), as the guide asks;
 - **French reports: none.** The audits ask for five, CERT-FR among them
   (`CERTFR-2025-CTI-00x` PDFs are public). Drop them in `data/eval/inhouse/`
   with the same commands; multilingual quality is otherwise unmeasured.
-- **Scanned PDFs: none fully scanned.** The Caturegli paper has 29
-  image-heavy pages, which exercises Stage 1f, not OCR. A scanned advisory
+- **A dedicated negative case: none since 2026-11-07.** The Caturegli paper
+  (a text full of example domains that are not IoCs) was removed. The 36
+  `negatives` that remain sit inside the other reports.
+- **Scanned PDFs: none fully scanned.** A scanned advisory
   (a CERT bulletin printed and scanned) is the missing case.
 - The Locked Shields exercise documents on this workstation are TLP:GREEN
   and were left out on purpose.
