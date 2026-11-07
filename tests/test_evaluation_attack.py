@@ -667,7 +667,8 @@ def test_inhouse_score_of_a_complete_run_exits_0_and_names_nothing(world, monkey
     report = _read(run_dir / "score.json")
     iocs = {"tp": 2, "fp": 0, "fn": 0, "precision": 1.0, "recall": 1.0, "f1": 1.0}
     assert report == {"run": "h", "documents": 2, "documents_failed": [], "documents_missing": [],
-                      "micro": {"iocs": iocs}, "negatives": {"cases": 0, "violated": 0}}
+                      "micro": {"iocs": iocs}, "negatives": {"cases": 0, "violated": 0},
+                      "observables": {"cases": 0, "as_indicator": 0}}
     assert json.loads(capsys.readouterr().out) == report
 
 

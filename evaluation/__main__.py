@@ -927,7 +927,9 @@ def cmd_inhouse_score(args) -> None:
         negatives[1] += s["negatives"]["violated"]
         if "observables" in s:
             observables["cases"] += s["observables"]["cases"]
-            n = s["observables"]["as_indicator"]
+            # A report without observables has none to count, bundle or not;
+            # one with observables but no recorded bundle makes the total unknown.
+            n = s["observables"]["as_indicator"] if s["observables"]["cases"] else 0
             observables["as_indicator"] = (None if n is None or observables["as_indicator"] is None
                                            else observables["as_indicator"] + n)
     failed.sort()

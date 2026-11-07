@@ -1571,12 +1571,13 @@ def _typed(bundle, *types):
 
 def test_a_file_and_a_mutex_of_one_name_are_two_observables_with_their_indicators():
     # #289: keyed by value alone, the mutex became a duplicate of the file.
-    bundle = build_stix_bundle([RawEntity(value="svchost.exe", entity_type=EntityType.FILE),
-                                RawEntity(value="svchost.exe", entity_type=EntityType.MUTEX)],
+    # (Not a Windows system name: a bare `svchost.exe` file is legitimate, ADR-0095.)
+    bundle = build_stix_bundle([RawEntity(value="updater.exe", entity_type=EntityType.FILE),
+                                RawEntity(value="updater.exe", entity_type=EntityType.MUTEX)],
                                LLMEnrichmentResult(), "typed")
-    assert _typed(bundle, "file", "mutex") == [("file", "svchost.exe"), ("mutex", "svchost.exe")]
+    assert _typed(bundle, "file", "mutex") == [("file", "updater.exe"), ("mutex", "updater.exe")]
     patterns = sorted(o.pattern for o in bundle.objects if o.type == "indicator")
-    assert patterns == ["[file:name = 'svchost.exe']", "[mutex:name = 'svchost.exe']"]
+    assert patterns == ["[file:name = 'updater.exe']", "[mutex:name = 'updater.exe']"]
 
 
 def test_urls_whose_paths_differ_in_case_are_two_observables():
