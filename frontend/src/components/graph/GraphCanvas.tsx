@@ -126,6 +126,15 @@ function phyllotaxis(i: number, scale = 30) {
   return { x: r * Math.cos(a), y: r * Math.sin(a) }
 }
 
+/** An edge the canvas does not draw: one of its ends is of a hidden type, or its kind is hidden. */
+function edgeHidden(
+  e: GraphEdge, byId: Map<string, GraphNode>, hiddenTypes: Set<string>, hiddenKinds?: Set<EdgeKind>,
+): boolean {
+  return hiddenTypes.has(byId.get(e.source)?.type ?? '')
+      || hiddenTypes.has(byId.get(e.target)?.type ?? '')
+      || (!!e.kind && !!hiddenKinds?.has(e.kind))
+}
+
 // ── Public handle exposed via ref ──────────────────────────────────────────
 
 export interface GraphCanvasHandle {
@@ -479,7 +488,12 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
 
   const pos = posRef.current
 
-  const offsets = useMemo(() => parallelOffsets(activeEdges), [activeEdges])
+  // Spread over the edges drawn, not the hidden ones: a hidden twin used to
+  // push the visible edges of its pair off the straight line (#453).
+  const offsets = useMemo(
+    () => parallelOffsets(activeEdges.filter(e => !edgeHidden(e, byId, hiddenTypes, hiddenKinds))),
+    [activeEdges, byId, hiddenTypes, hiddenKinds],
+  )
   const radiusOf = (id: string) => {
     const n = byId.get(id)
     return n ? nodeRadius(n.type, deg[id] || 0) : 12
@@ -515,10 +529,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
         {activeEdges.map(e => {
           const a = pos[e.source], b = pos[e.target]
           if (!a || !b) return null
-          const hidden  = hiddenTypes.has(byId.get(e.source)?.type ?? '')
-                       || hiddenTypes.has(byId.get(e.target)?.type ?? '')
-                       || (!!e.kind && !!hiddenKinds?.has(e.kind))
-          if (hidden) return null
+          if (edgeHidden(e, byId, hiddenTypes, hiddenKinds)) return null
           const sel     = e.id === selectedEdgeId
           const hot     = sel || (!!neighborSet && (e.source === focusId || e.target === focusId))
           const dim     = !hot && !!neighborSet
