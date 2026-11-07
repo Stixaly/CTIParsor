@@ -150,14 +150,18 @@ def rebuild_store(
         if on_progress:
             on_progress("dedup", None)
         dedup = dedupe_store(conn, priority)
-    except BaseException:
+    except Exception:
         # A failure part-way has already replaced some corpora, and their rule_text
         # rows went with them (foreign key). Re-index what the store holds before the
         # error goes up, so the title index is not left empty (#384). The rows are
         # indexed as they stand: dedup did not run, so a rule it would have demoted
-        # may be indexed until the next successful rebuild.
-        with transaction(conn):
-            rebuild_rule_text(conn)
+        # may be indexed until the next successful rebuild. If the re-index fails
+        # too (a lost connection), it is logged and the first error is the one raised.
+        try:
+            with transaction(conn):
+                rebuild_rule_text(conn)
+        except Exception as exc:  # noqa: BLE001 — never mask the rebuild's own error
+            logger.error(f"[detection] rule_text could not be rebuilt after a failed rebuild: {exc}")
         raise
     # One transaction, so a failure leaves the previous index in place rather
     # than an empty one. dedupe_store has already committed, so the canonical
