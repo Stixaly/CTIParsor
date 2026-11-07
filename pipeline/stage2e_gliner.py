@@ -195,8 +195,8 @@ def extract_gliner_entities(text: str) -> list[RawEntity]:
     # Collect non-empty chunks, then call model.predict_entities() in batches
     # of _BATCH_SIZE.  When given a list, GLiNER returns list[list[dict]].
     # Falls back to single-string calls if the batch API raises.
-    # best[key] = (score, context_snippet)
-    best: dict[tuple[str, EntityType], tuple[float, str]] = {}
+    # best[key] = (score, context_snippet, span_text)
+    best: dict[tuple[str, EntityType], tuple[float, str, str]] = {}
 
     # Build the flat list of (chunk_text, char_offset) upfront
     all_chunks = [(t, off) for t, off in _iter_chunks(text) if t.strip()]
@@ -270,16 +270,14 @@ def extract_gliner_entities(text: str) -> list[RawEntity]:
 
                 key = (value.lower(), etype)
                 if key not in best or score > best[key][0]:
-                    best[key] = (score, context)
+                    best[key] = (score, context, _span_text(chunk_text, pred, value))
 
     # ── Convert to RawEntity ─────────────────────────────────────────────────
     results: list[RawEntity] = []
-    for (value_lower, etype), (score, context) in best.items():
-        # Recover original casing from the best match's value (use key value_lower
-        # as fallback — we don't store original casing in `best`, so reconstruct)
-        # Re-extract from best's context window is brittle; just use the lower form
-        # with title-case for readability on IDENTITY/CAMPAIGN/LOCATION types.
-        display_value = _recover_casing(value_lower, context)
+    for (value_lower, etype), (score, context, span_text) in best.items():
+        # The casing the span has in the text (GLiNER's offsets), else the first
+        # whole-word match of the value in the context.
+        display_value = span_text or _recover_casing(value_lower, context)
         results.append(RawEntity(
             value=display_value,
             entity_type=etype,
@@ -292,22 +290,38 @@ def extract_gliner_entities(text: str) -> list[RawEntity]:
     return drop_denied(results)
 
 
+def _span_text(chunk_text: str, pred: dict, value: str) -> str:
+    """
+    The text GLiNER's own offsets point at in *chunk_text*, with the casing it
+    has there, or "" when the offsets do not select *value* (missing, out of
+    range, or pointing at other text).
+    """
+    start, end = pred.get("start"), pred.get("end")
+    if not isinstance(start, int) or not isinstance(end, int) or not 0 <= start < end <= len(chunk_text):
+        return ""
+    span = chunk_text[start:end].strip()
+    return span if span.lower() == value.lower() else ""
+
+
 def _recover_casing(value_lower: str, context: str) -> str:
     """
-    Try to find the original-cased version of *value_lower* in *context*.
-    Falls back to the lower-cased value if not found.
+    Try to find the original-cased version of *value_lower* in *context*, as a
+    whole word: "rat" is not the "rat" inside "crates".  Falls back to the
+    lower-cased value if no whole-word match is found.
     """
-    # Case-insensitive search in context
-    from pipeline.regex_safety import compile_pattern
+    # Case-insensitive search in context.  glued_to_a_word, not `\b`: it reads
+    # non-ASCII letters as word characters, and a value that starts or ends with
+    # a symbol ("C++") has no `\b` around it.
+    from pipeline.regex_safety import compile_pattern, glued_to_a_word
     pattern = compile_pattern(re.escape(value_lower), re.IGNORECASE)
-    m = pattern.search(context)
-    if m:
-        return m.group()
+    for m in pattern.finditer(context):
+        if not glued_to_a_word(context, *m.span()):
+            return m.group()
     return value_lower
 
 
 # ---------------------------------------------------------------------------
-# ExtractionStage class wrapper — consumed by pipeline.registry
+# ExtractionStage class wrapper (pipeline.base)
 # ---------------------------------------------------------------------------
 
 from pipeline.base import BaseExtractionStage  # noqa: E402
