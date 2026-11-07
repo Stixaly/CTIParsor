@@ -420,14 +420,18 @@ def rule_header(rule_line: str) -> dict[str, str]:
     }
 
 
-def rule_metadata(rule_line: str) -> dict[str, str]:
+def rule_metadata(rule_line: str) -> dict[str, list[str]]:
     """Extract metadata key-value pairs from a Suricata rule.
+
+    A rule may carry several `metadata:` options, and a key may repeat (one
+    `mitre_technique_id` per technique). Every value is kept, across all the
+    options, in order of appearance, without duplicates.
 
     Args:
         rule_line: A single-line Suricata rule.
 
     Returns:
-        A dict of metadata entries (key lowercased, value as-is).
+        A dict mapping each metadata key (lowercased) to its list of values.
         Returns {} if no metadata option is present.
     """
     if not isinstance(rule_line, str):
@@ -438,19 +442,22 @@ def rule_metadata(rule_line: str) -> dict[str, str]:
         return {}
     body = rule_line[first_open + 1:last_close]
     options = parse_options(body)
+    result: dict[str, list[str]] = {}
     for key, value in options:
-        if key == "metadata":
-            result: dict[str, str] = {}
-            for entry in value.split(","):
-                entry = entry.strip()
-                if not entry:
-                    continue
-                parts = entry.split(" ", 1)
-                if len(parts) < 2:
-                    continue
-                result[parts[0].strip().lower()] = parts[1].strip()
-            return result
-    return {}
+        if key != "metadata":
+            continue
+        for entry in value.split(","):
+            entry = entry.strip()
+            if not entry:
+                continue
+            parts = entry.split(" ", 1)
+            if len(parts) < 2:
+                continue
+            values = result.setdefault(parts[0].strip().lower(), [])
+            value_text = parts[1].strip()
+            if value_text not in values:
+                values.append(value_text)
+    return result
 
 
 def technique_ids(rule_line: str) -> list[str]:
@@ -461,15 +468,13 @@ def technique_ids(rule_line: str) -> list[str]:
 
     Returns:
         A deduplicated list of valid MITRE technique IDs (e.g. "T1071"),
-        in order of first appearance. Returns [] if none found.
+        in order of first appearance, across every `metadata:` option.
+        Returns [] if none found.
     """
     meta = rule_metadata(rule_line)
-    raw = meta.get("mitre_technique_id", "")
-    if not raw:
-        return []
     result: list[str] = []
     seen: set[str] = set()
-    for candidate in raw.split(","):
+    for candidate in meta.get("mitre_technique_id", []):
         candidate = candidate.strip().upper()
         if _RE_MITRE.match(candidate) and candidate not in seen:
             result.append(candidate)
