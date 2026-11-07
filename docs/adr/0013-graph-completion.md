@@ -250,8 +250,9 @@ Decided by the maintainer: the same rule, with the same triples.
   one). When a bare name finds nothing, a row that does not ship is also looked
   up under those keys, so "France", named only by the LLM's targeted-country
   list, is the Location the product targets. The rows that ship are looked up
-  the same way for the rule above; in the relationship loop they resolve as
-  before.
+  the same way for the rule above; in the relationship loop a `targets` row
+  resolves the same way too, and replaces the edge the list product built
+  for it, so its quote and confidence ship (#383).
 - **The ledger.** Each refusal joins `refused`, which now names on every entry
   the `origin` the edge would have had: `targeted_location`, `policy_pin`, or
   `completion_reference` / `completion_transitive` / `completion_long_distance`

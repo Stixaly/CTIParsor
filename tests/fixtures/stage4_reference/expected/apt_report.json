@@ -419,7 +419,7 @@
     "origin": "extracted"
    },
    "relationship--R22": {
-    "origin": "ioc_based_on"
+    "origin": "extracted"
    },
    "relationship--R23": {
     "origin": "ioc_based_on"
@@ -437,10 +437,10 @@
     "origin": "ioc_based_on"
    },
    "relationship--R28": {
-    "origin": "extracted"
+    "origin": "ioc_based_on"
    },
    "relationship--R29": {
-    "origin": "ioc_based_on"
+    "origin": "extracted"
    },
    "relationship--R3": {
     "origin": "completion_transitive",
@@ -453,7 +453,7 @@
     "origin": "ioc_based_on"
    },
    "relationship--R32": {
-    "origin": "extracted"
+    "origin": "ioc_based_on"
    },
    "relationship--R33": {
     "origin": "extracted"
@@ -471,9 +471,7 @@
     "origin": "extracted"
    },
    "relationship--R38": {
-    "actor": "Cozy Bear",
-    "origin": "targeted_location",
-    "target": "Germany"
+    "origin": "extracted"
    },
    "relationship--R39": {
     "actor": "Cozy Bear",
@@ -545,7 +543,7 @@
     "relationship_type": "attributed-to",
     "source_ref": "campaign--b365b2d3-5581-5c02-b2d8-46f954ee7dd3",
     "source_value": "Midnight Frost",
-    "stix_id": "relationship--R32",
+    "stix_id": "relationship--R33",
     "target_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
     "target_value": "Cozy Bear"
    },
@@ -556,7 +554,7 @@
     "relationship_type": "communicates-with",
     "source_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
     "source_value": "SUNBURST",
-    "stix_id": "relationship--R34",
+    "stix_id": "relationship--R35",
     "target_ref": "ipv4-addr--ab2d6146-cc21-57a2-941a-aaa29f36f27d",
     "target_value": "91.215.85.17"
    },
@@ -567,7 +565,7 @@
     "relationship_type": "drops",
     "source_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
     "source_value": "SUNBURST",
-    "stix_id": "relationship--R35",
+    "stix_id": "relationship--R36",
     "target_ref": "file--2e454e4a-0165-5c28-a2a9-c07c4f2d2eb5",
     "target_value": "svchost_update.dll"
    },
@@ -578,31 +576,31 @@
     "relationship_type": "exploits",
     "source_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
     "source_value": "SUNBURST",
-    "stix_id": "relationship--R36",
+    "stix_id": "relationship--R37",
     "target_ref": "vulnerability--1060aa6d-d4be-5f85-b0a9-a725b3025f74",
     "target_value": "CVE-2023-23397"
    },
    {
     "changes": [],
     "final_type": "targets",
-    "merged_with": "relationship--R38",
+    "merged_with": "relationship--R19",
     "outcome": "merged",
     "relationship_type": "targets",
     "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
     "source_value": "Cozy Bear",
-    "stix_id": "relationship--R38",
+    "stix_id": "relationship--R19",
     "target_ref": "location--7215cb31-5700-55b2-81b3-633c09c0351d",
     "target_value": "Germany"
    },
    {
     "changes": [],
     "final_type": "uses",
-    "merged_with": "relationship--R21",
+    "merged_with": "relationship--R22",
     "outcome": "merged",
     "relationship_type": "uses",
     "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
     "source_value": "Cozy Bear",
-    "stix_id": "relationship--R21",
+    "stix_id": "relationship--R22",
     "target_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
     "target_value": "SUNBURST"
    },
@@ -613,7 +611,7 @@
     "relationship_type": "uses",
     "source_ref": "campaign--b365b2d3-5581-5c02-b2d8-46f954ee7dd3",
     "source_value": "Midnight Frost",
-    "stix_id": "relationship--R33",
+    "stix_id": "relationship--R34",
     "target_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
     "target_value": "SUNBURST"
    },
@@ -624,7 +622,7 @@
     "relationship_type": "uses",
     "source_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
     "source_value": "SUNBURST",
-    "stix_id": "relationship--R37",
+    "stix_id": "relationship--R38",
     "target_ref": "attack-pattern--21379509-09c4-57a1-82c8-0c126fbf60ff",
     "target_value": "Registry Run Keys / Startup Folder"
    },
@@ -635,7 +633,7 @@
     "relationship_type": "uses",
     "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
     "source_value": "Cozy Bear",
-    "stix_id": "relationship--R19",
+    "stix_id": "relationship--R20",
     "target_ref": "attack-pattern--daf76c9d-477a-5004-be6c-73dc129b5e4d",
     "target_value": "LSASS Memory"
    },
@@ -646,7 +644,7 @@
     "relationship_type": "uses",
     "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
     "source_value": "Cozy Bear",
-    "stix_id": "relationship--R20",
+    "stix_id": "relationship--R21",
     "target_ref": "tool--dae20ca4-ebdf-5248-83ac-0f7a52f94fcc",
     "target_value": "Mimikatz"
    },
@@ -657,7 +655,7 @@
     "relationship_type": "uses",
     "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
     "source_value": "Cozy Bear",
-    "stix_id": "relationship--R21",
+    "stix_id": "relationship--R22",
     "target_ref": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa",
     "target_value": "SUNBURST",
     "times": [
@@ -714,7 +712,7 @@
     "relationship_type": "indicates",
     "source_ref": "indicator--fcde9c8c-df4f-52e8-9a02-8941dca6470e",
     "source_value": "91.215.85.17",
-    "stix_id": "relationship--R28",
+    "stix_id": "relationship--R29",
     "target_ref": "campaign--b365b2d3-5581-5c02-b2d8-46f954ee7dd3",
     "target_value": "Midnight Frost"
    },
@@ -1262,7 +1260,7 @@
    "x_evidence_label": "inferred",
    "x_inference_rule": "transitive:uses+uses",
    "x_inferred_from": [
-    "relationship--R21",
+    "relationship--R22",
     "relationship--R17"
    ]
   },
@@ -1285,8 +1283,8 @@
    "x_evidence_label": "inferred",
    "x_inference_rule": "transitive:uses+exploits",
    "x_inferred_from": [
-    "relationship--R21",
-    "relationship--R36"
+    "relationship--R22",
+    "relationship--R37"
    ]
   },
   {
@@ -1308,8 +1306,8 @@
    "x_evidence_label": "inferred",
    "x_inference_rule": "transitive:uses+exploits",
    "x_inferred_from": [
-    "relationship--R33",
-    "relationship--R36"
+    "relationship--R34",
+    "relationship--R37"
    ]
   },
   {
@@ -1331,8 +1329,8 @@
    "x_evidence_label": "inferred",
    "x_inference_rule": "transitive:attributed-to+uses",
    "x_inferred_from": [
-    "relationship--R32",
-    "relationship--R19"
+    "relationship--R33",
+    "relationship--R20"
    ]
   },
   {
@@ -1354,8 +1352,8 @@
    "x_evidence_label": "inferred",
    "x_inference_rule": "transitive:attributed-to+uses",
    "x_inferred_from": [
-    "relationship--R32",
-    "relationship--R20"
+    "relationship--R33",
+    "relationship--R21"
    ]
   },
   {
@@ -1456,17 +1454,17 @@
    "confidence": 90,
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
-   "description": "**APT29** `uses` **LSASS Memory**\n\n**Why:** A relationship row of this job (extracted from the report or added by an analyst), with no supporting sentence quoted.\n\n**Evidence:** reported · **Confidence:** 90/100",
+   "description": "**APT29** `targets` **Germany**\n\n**Why:** A relationship row of this job (extracted from the report or added by an analyst), with no supporting sentence quoted.\n\n**Evidence:** reported · **Confidence:** 90/100",
    "id": "relationship--R19",
    "modified": "<build-time>",
    "object_marking_refs": [
     "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
     "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
    ],
-   "relationship_type": "uses",
+   "relationship_type": "targets",
    "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
    "spec_version": "2.1",
-   "target_ref": "attack-pattern--daf76c9d-477a-5004-be6c-73dc129b5e4d",
+   "target_ref": "location--7215cb31-5700-55b2-81b3-633c09c0351d",
    "type": "relationship",
    "x_evidence_label": "reported"
   },
@@ -1489,7 +1487,7 @@
    "x_evidence_label": "inferred",
    "x_inference_rule": "transitive:attributed-to+uses",
    "x_inferred_from": [
-    "relationship--R32",
+    "relationship--R33",
     "relationship--R14"
    ]
   },
@@ -1497,8 +1495,26 @@
    "confidence": 90,
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
-   "description": "**APT29** `uses` **Mimikatz**\n\n> Cozy Bear dumped credentials from LSASS memory with Mimikatz.\n\n**Why:** The report states this link in the sentence quoted above.\n\n**Evidence:** reported · **Confidence:** 90/100",
+   "description": "**APT29** `uses` **LSASS Memory**\n\n**Why:** A relationship row of this job (extracted from the report or added by an analyst), with no supporting sentence quoted.\n\n**Evidence:** reported · **Confidence:** 90/100",
    "id": "relationship--R20",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "uses",
+   "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
+   "spec_version": "2.1",
+   "target_ref": "attack-pattern--daf76c9d-477a-5004-be6c-73dc129b5e4d",
+   "type": "relationship",
+   "x_evidence_label": "reported"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "**APT29** `uses` **Mimikatz**\n\n> Cozy Bear dumped credentials from LSASS memory with Mimikatz.\n\n**Why:** The report states this link in the sentence quoted above.\n\n**Evidence:** reported · **Confidence:** 90/100",
+   "id": "relationship--R21",
    "modified": "<build-time>",
    "object_marking_refs": [
     "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
@@ -1517,7 +1533,7 @@
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
    "description": "**APT29** `uses` **SUNBURST**\n\n> The attachment dropped a loader called SUNBURST.\n\n**Why:** The report states this link in the sentence quoted above.\n\n**Evidence:** reported · **Confidence:** 90/100",
-   "id": "relationship--R21",
+   "id": "relationship--R22",
    "modified": "<build-time>",
    "object_marking_refs": [
     "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
@@ -1549,7 +1565,7 @@
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
    "description": "**Indicator: 3f2504e04f8911d39a0c0305e82c3301** `based-on` **3f2504e04f8911d39a0c0305e82c3301**\n\n**Why:** The indicator's pattern is built from this observable, which the report lists.\n\n**Evidence:** observed · **Confidence:** 90/100",
-   "id": "relationship--R22",
+   "id": "relationship--R23",
    "modified": "<build-time>",
    "object_marking_refs": [
     "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
@@ -1567,7 +1583,7 @@
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
    "description": "**Indicator: Global\\\\MidnightFrostMtx** `based-on` **Global\\\\MidnightFrostMtx**\n\n**Why:** The indicator's pattern is built from this observable, which the report lists.\n\n**Evidence:** observed · **Confidence:** 90/100",
-   "id": "relationship--R23",
+   "id": "relationship--R24",
    "modified": "<build-time>",
    "object_marking_refs": [
     "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
@@ -1585,7 +1601,7 @@
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
    "description": "**Indicator: HKLM\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run\\\\FrostSvc** `based-on` **HKEY\\_LOCAL\\_MACHINE\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run\\\\FrostSvc**\n\n**Why:** The indicator's pattern is built from this observable, which the report lists.\n\n**Evidence:** observed · **Confidence:** 90/100",
-   "id": "relationship--R24",
+   "id": "relationship--R25",
    "modified": "<build-time>",
    "object_marking_refs": [
     "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
@@ -1603,7 +1619,7 @@
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
    "description": "**Indicator: alerts\\[@\\]mail-notice-ministry.test** `based-on` **alerts\\[@\\]mail-notice-ministry.test**\n\n**Why:** The indicator's pattern is built from this observable, which the report lists.\n\n**Evidence:** observed · **Confidence:** 90/100",
-   "id": "relationship--R25",
+   "id": "relationship--R26",
    "modified": "<build-time>",
    "object_marking_refs": [
     "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
@@ -1621,7 +1637,7 @@
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
    "description": "**Indicator: svchost\\_update.dll** `based-on` **svchost\\_update.dll**\n\n**Why:** The indicator's pattern is built from this observable, which the report lists.\n\n**Evidence:** observed · **Confidence:** 90/100",
-   "id": "relationship--R26",
+   "id": "relationship--R27",
    "modified": "<build-time>",
    "object_marking_refs": [
     "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
@@ -1639,7 +1655,7 @@
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
    "description": "**Malicious IoC: 91.215.85.17** `based-on` **91.215.85.17**\n\n**Why:** The indicator's pattern is built from this observable, which the report lists.\n\n**Evidence:** observed · **Confidence:** 90/100",
-   "id": "relationship--R27",
+   "id": "relationship--R28",
    "modified": "<build-time>",
    "object_marking_refs": [
     "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
@@ -1657,7 +1673,7 @@
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
    "description": "**Malicious IoC: 91.215.85.17** `indicates` **Midnight Frost**\n\n**Why:** A relationship row of this job (extracted from the report or added by an analyst), with no supporting sentence quoted.\n\n**Evidence:** reported · **Confidence:** 90/100",
-   "id": "relationship--R28",
+   "id": "relationship--R29",
    "modified": "<build-time>",
    "object_marking_refs": [
     "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
@@ -1669,24 +1685,6 @@
    "target_ref": "campaign--b365b2d3-5581-5c02-b2d8-46f954ee7dd3",
    "type": "relationship",
    "x_evidence_label": "reported"
-  },
-  {
-   "confidence": 90,
-   "created": "<build-time>",
-   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
-   "description": "**Malicious IoC: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855** `based-on` **e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855**\n\n**Why:** The indicator's pattern is built from this observable, which the report lists.\n\n**Evidence:** observed · **Confidence:** 90/100",
-   "id": "relationship--R29",
-   "modified": "<build-time>",
-   "object_marking_refs": [
-    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
-    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
-   ],
-   "relationship_type": "based-on",
-   "source_ref": "indicator--8d30e978-c6dd-5439-9ed0-bd61238915c3",
-   "spec_version": "2.1",
-   "target_ref": "file--22f8ff52-8f62-5f03-a53a-6f50f54fd74c",
-   "type": "relationship",
-   "x_evidence_label": "observed"
   },
   {
    "confidence": 76,
@@ -1707,7 +1705,7 @@
    "x_evidence_label": "inferred",
    "x_inference_rule": "transitive:attributed-to+uses",
    "x_inferred_from": [
-    "relationship--R32",
+    "relationship--R33",
     "relationship--R15"
    ]
   },
@@ -1715,8 +1713,26 @@
    "confidence": 90,
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
-   "description": "**Malicious IoC: frostmail-cdn.test** `based-on` **frostmail-cdn.test**\n\n**Why:** The indicator's pattern is built from this observable, which the report lists.\n\n**Evidence:** observed · **Confidence:** 90/100",
+   "description": "**Malicious IoC: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855** `based-on` **e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855**\n\n**Why:** The indicator's pattern is built from this observable, which the report lists.\n\n**Evidence:** observed · **Confidence:** 90/100",
    "id": "relationship--R30",
+   "modified": "<build-time>",
+   "object_marking_refs": [
+    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
+   ],
+   "relationship_type": "based-on",
+   "source_ref": "indicator--8d30e978-c6dd-5439-9ed0-bd61238915c3",
+   "spec_version": "2.1",
+   "target_ref": "file--22f8ff52-8f62-5f03-a53a-6f50f54fd74c",
+   "type": "relationship",
+   "x_evidence_label": "observed"
+  },
+  {
+   "confidence": 90,
+   "created": "<build-time>",
+   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
+   "description": "**Malicious IoC: frostmail-cdn.test** `based-on` **frostmail-cdn.test**\n\n**Why:** The indicator's pattern is built from this observable, which the report lists.\n\n**Evidence:** observed · **Confidence:** 90/100",
+   "id": "relationship--R31",
    "modified": "<build-time>",
    "object_marking_refs": [
     "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
@@ -1734,7 +1750,7 @@
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
    "description": "**Malicious IoC: hxxp://frostmail-cdn.test/stage/payload.bin** `based-on` **hxxp://frostmail-cdn.test/stage/payload.bin**\n\n**Why:** The indicator's pattern is built from this observable, which the report lists.\n\n**Evidence:** observed · **Confidence:** 90/100",
-   "id": "relationship--R31",
+   "id": "relationship--R32",
    "modified": "<build-time>",
    "object_marking_refs": [
     "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
@@ -1752,7 +1768,7 @@
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
    "description": "**Midnight Frost** `attributed-to` **APT29**\n\n> The campaign, tracked as Midnight Frost\n\n**Why:** The report states this link in the sentence quoted above.\n\n**Evidence:** reported · **Confidence:** 90/100",
-   "id": "relationship--R32",
+   "id": "relationship--R33",
    "modified": "<build-time>",
    "object_marking_refs": [
     "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
@@ -1771,7 +1787,7 @@
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
    "description": "**Midnight Frost** `uses` **SUNBURST**\n\n**Why:** A relationship row of this job (extracted from the report or added by an analyst), with no supporting sentence quoted.\n\n**Evidence:** reported · **Confidence:** 90/100",
-   "id": "relationship--R33",
+   "id": "relationship--R34",
    "modified": "<build-time>",
    "object_marking_refs": [
     "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
@@ -1789,7 +1805,7 @@
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
    "description": "**SUNBURST** `communicates-with` **91.215.85.17**\n\n> SUNBURST contacted the command-and-control server at 91.215.85.17\n\n**Why:** The report states this link in the sentence quoted above.\n\n**Evidence:** observed · **Confidence:** 90/100",
-   "id": "relationship--R34",
+   "id": "relationship--R35",
    "modified": "<build-time>",
    "object_marking_refs": [
     "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
@@ -1808,7 +1824,7 @@
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
    "description": "**SUNBURST** `drops` **svchost\\_update.dll**\n\n> The loader also dropped the file svchost\\_update.dll\n\n**Why:** The report states this link in the sentence quoted above.\n\n**Evidence:** reported · **Confidence:** 90/100",
-   "id": "relationship--R35",
+   "id": "relationship--R36",
    "modified": "<build-time>",
    "object_marking_refs": [
     "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
@@ -1827,7 +1843,7 @@
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
    "description": "**SUNBURST** `exploits` **CVE-2023-23397**\n\n**Why:** A relationship row of this job (extracted from the report or added by an analyst), with no supporting sentence quoted.\n\n**Evidence:** reported · **Confidence:** 90/100",
-   "id": "relationship--R36",
+   "id": "relationship--R37",
    "modified": "<build-time>",
    "object_marking_refs": [
     "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
@@ -1845,7 +1861,7 @@
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
    "description": "**SUNBURST** `uses` **Registry Run Keys / Startup Folder**\n\n> wrote a persistence entry under HKLM\n\n**Why:** The report states this link in the sentence quoted above.\n\n**Evidence:** reported · **Confidence:** 90/100",
-   "id": "relationship--R37",
+   "id": "relationship--R38",
    "modified": "<build-time>",
    "object_marking_refs": [
     "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
@@ -1858,23 +1874,6 @@
    "type": "relationship",
    "x_evidence_label": "reported",
    "x_evidence_text": "wrote a persistence entry under HKLM"
-  },
-  {
-   "created": "<build-time>",
-   "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
-   "description": "**APT29** `targets` **Germany**\n\n**Why:** The report names **Cozy Bear** as a threat actor and **Germany** as a target. CTIParsor links every threat actor of the report to every target it names, so the report may not say that this actor targets this one.\n\n**Evidence:** reported",
-   "id": "relationship--R38",
-   "modified": "<build-time>",
-   "object_marking_refs": [
-    "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
-    "marking-definition--a6f20d4d-0360-59b6-ba22-3b48707828b1"
-   ],
-   "relationship_type": "targets",
-   "source_ref": "threat-actor--7f47ce54-16c8-5fb1-b905-8006861f4884",
-   "spec_version": "2.1",
-   "target_ref": "location--7215cb31-5700-55b2-81b3-633c09c0351d",
-   "type": "relationship",
-   "x_evidence_label": "reported"
   },
   {
    "created": "<build-time>",
@@ -1912,7 +1911,7 @@
    "x_evidence_label": "inferred",
    "x_inference_rule": "transitive:attributed-to+uses",
    "x_inferred_from": [
-    "relationship--R32",
+    "relationship--R33",
     "relationship--R16"
    ]
   },
@@ -1969,7 +1968,7 @@
    "x_evidence_label": "inferred",
    "x_inference_rule": "transitive:uses+uses",
    "x_inferred_from": [
-    "relationship--R33",
+    "relationship--R34",
     "relationship--R17"
    ]
   },
@@ -2092,41 +2091,41 @@
     "course-of-action--226626e0-b1d6-5107-9d0c-f1ec2f82a741",
     "indicator--fcde9c8c-df4f-52e8-9a02-8941dca6470e",
     "relationship--R6",
-    "relationship--R27",
+    "relationship--R28",
     "indicator--012743a8-0532-5c22-ae59-b0d1348b1880",
     "relationship--R8",
-    "relationship--R30",
+    "relationship--R31",
     "indicator--ed78c78e-753b-5156-9ff9-085a1edd5604",
     "relationship--R9",
-    "relationship--R31",
+    "relationship--R32",
     "indicator--8d30e978-c6dd-5439-9ed0-bd61238915c3",
     "relationship--R7",
-    "relationship--R29",
+    "relationship--R30",
     "indicator--d97e1047-aaf6-5971-9401-b2fb9efa2b93",
-    "relationship--R22",
-    "indicator--d3878cdc-a378-528e-b647-2e32f5fbaba4",
-    "relationship--R26",
-    "indicator--f54ded35-bf73-558f-acc2-a6a740bc28b3",
-    "relationship--R24",
-    "indicator--6d244288-aebd-58ed-85dc-41f1b6286f64",
     "relationship--R23",
-    "indicator--fdd54cfa-a477-52a7-b6a7-e7a7c3606b0e",
+    "indicator--d3878cdc-a378-528e-b647-2e32f5fbaba4",
+    "relationship--R27",
+    "indicator--f54ded35-bf73-558f-acc2-a6a740bc28b3",
     "relationship--R25",
-    "relationship--R38",
+    "indicator--6d244288-aebd-58ed-85dc-41f1b6286f64",
+    "relationship--R24",
+    "indicator--fdd54cfa-a477-52a7-b6a7-e7a7c3606b0e",
+    "relationship--R26",
+    "relationship--R19",
     "relationship--R39",
     "relationship--R41",
     "relationship--R40",
+    "relationship--R22",
     "relationship--R21",
     "relationship--R20",
-    "relationship--R19",
-    "relationship--R32",
     "relationship--R33",
     "relationship--R34",
     "relationship--R35",
-    "relationship--R37",
     "relationship--R36",
+    "relationship--R38",
+    "relationship--R37",
     "relationship--R18",
-    "relationship--R28",
+    "relationship--R29",
     "artifact--180a8609-538b-582f-85b8-eb48ee03a382"
    ],
    "published": "<build-time>",

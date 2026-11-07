@@ -1711,7 +1711,9 @@ def build_stix_bundle(
     # Reuses the shared seen_rel_keys set so a semantic edge that duplicates a
     # targets/indicates edge created above is also collapsed.
     for rel in llm_result.relationships:
-        row_edge = _resolve_row(rel)
+        # A `targets` row may name a country or sector that only the targeted
+        # lists put in the bundle, as the targets product above does (issue #383).
+        row_edge = _resolve_row(rel, targeted=rel.relationship_type.strip().lower() == "targets")
         if row_edge.dropped is not None:
             led.relationship(rel, "dropped", reason=row_edge.dropped, **row_edge.info)
             continue
@@ -1758,6 +1760,17 @@ def build_stix_bundle(
             entry = led.relationship(rel, "merged", stix_id=existing_id, merged_with=existing_id,
                                      final_type=rel_type, source_ref=source.id,
                                      target_ref=target.id, changes=changes)
+            # The exception to "the first stays": an edge the targets product
+            # built from the lists has no quote and the product's confidence, so
+            # this row's quote and confidence replace it under the same id, at
+            # the same place in the bundle; the edge then has this row's origin
+            # (issue #383).
+            if led.objects.get(existing_id, {}).get("origin") == "targeted_location":
+                existing_idx = next(i for i in range(len(stix_objects) - 1, -1, -1)
+                                    if getattr(stix_objects[i], "id", None) == existing_id)
+                stix_objects[existing_idx] = stix2.Relationship(**{**_rel_kwargs, "id": existing_id})
+                led.objects.pop(existing_id)
+                led.object(stix_objects[existing_idx], ORIGIN_EXTRACTED)
             if _row_times:
                 state = _time_state.get(rel_key)
                 if state is None:
