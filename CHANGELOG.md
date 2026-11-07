@@ -9,6 +9,217 @@ theme.
 
 ## [Unreleased]
 
+### Fixed
+
+#### Audit batch of 2026-11-07 (#478–#571)
+
+94 issues, each checked against the code first: fixed, or closed as not
+reproducible (#549, #550, #556, #557; pin tests kept for #550 and #556, no
+entry below). No schema migration.
+
+- **API answers that change:** a blank entity value or relationship end is
+  refused with 400 and a NUL byte or lone surrogate in a text field with 422
+  (#494, #495, #525); a rule id holding a NUL byte answers 422 (#526); an
+  upload answers 200 instead of 400 in the two libmagic-free fallback cases
+  (#489, #490); `POST /finalize` may answer 409 when a review decision
+  overtook it four times (#499).
+- **Bundles change** for the same report (`BUNDLE_AFFECTING`). Extraction:
+  #496, #497, #507, #508, #509, #493, #511. Mapping: #483, #484, #492, #503,
+  #506, #517, #519, #520.
+- **Evaluation scores can move** (#481).
+- **`scripts/docker_smoke.sh`:** a value set in the shell now wins over `.env`
+  (#543).
+
+##### Extraction and Stage 3
+
+- An FTP URL (`ftp://`, also once refanged from `fxp://`/`fxxp://`) is
+  extracted whole with its path instead of only its host, and its host is no
+  longer reported separately as a domain (#496).
+- A URL written between double quotes keeps a trailing `;`, `,` or `.` that
+  belongs to it; punctuation after an unquoted URL is still removed (#497).
+- Report sentence spans index the original text exactly: three or more
+  newlines, blank lines holding spaces or tabs, and CRLF blank lines separate
+  paragraphs, and a span no longer starts or ends on blanks. The report
+  sentences shown on objects change (#506).
+- Values that differ only by outer spaces are one value when type conflicts
+  are resolved and entities merged (#507). A promoted gazetteer override with
+  no display name uses its term, stripped, as the canonical name (#508). A job
+  whose stored entity has a NULL source no longer fails in named-entity
+  ranking; such a source ranks last (#510).
+- The VLM figure reader accepts a reply whose JSON object is followed by a
+  note, and skips a `<think>` block, instead of rejecting the figure as unread
+  (#509). Inline `data:` images and fonts of a captured page are no longer
+  blocked by the capture request filter; every other subresource, private and
+  loopback addresses included, is still checked (#511). A capture that
+  finishes after its 504 deadline removes its `.pdf.part` staging file (#480).
+- Stage 3f no longer keeps a technique on a `verified: true` whose quote is
+  empty or absent from the report: it counts as unverified and the technique
+  is removed, and an invented quote is never copied into the technique
+  description. With TTP verification on, a report can keep fewer techniques
+  (#493).
+- Stage 3b checks a campaign given `doc_context=None` like one with an empty
+  context instead of raising `TypeError` (#514).
+- `PipelineConfig.from_env()` reads the model variable of the selected provider
+  (`VLLM_MODEL`, `OLLAMA_MODEL`, …, then `LLM_MODEL`) instead of always
+  `ANTHROPIC_MODEL` (#531).
+- Calibration no longer fails with a `ValueError` when a stored cutoff exists
+  for a source with no stage default; the stored cutoff is the value in force
+  (#501). Applying calibrated thresholds writes every cutoff in one
+  transaction: if one write fails, none is stored (#527).
+- `mitre_db.get_tactics()` returns a copy, so a caller that changes the list no
+  longer changes the ATT&CK index; `lookup_by_id(None)` and `search(None)`
+  return nothing instead of raising (#512). A `mitre_index.json` whose root is
+  valid JSON but not an object is read as an unreadable index by the alias
+  resolver (#513).
+
+##### STIX mapping and baseline
+
+- The baseline merge keeps two URLs that differ only by the case of their path
+  apart (scheme and host still fold), as Stage 4 already does (#483).
+- A CTIParsor Indicator is replaced by a baseline one only when both state the
+  same single comparison; it no longer folds into a compound baseline pattern
+  of which it is one part (#484).
+- In enrich mode, a relationship of the new report that duplicates a baseline
+  relationship no longer loses what it adds: the baseline relationship is
+  re-issued under its id (an OpenCTI-style upsert, ADR-0090 amendment) with the
+  earlier `start_time`, the later `stop_time` and the new description after the
+  baseline's (#492).
+- Long-distance inference (Stage 4b `completion.long_distance`) no longer
+  crashes on STIX objects given as dictionaries; a pair without an id gives no
+  edge (#502). It drops a reasoning model's `<think>` block before reading the
+  answer, so a draft object in it is no longer taken as the answer (#503).
+- The mapping ledger accepts STIX objects given as dictionaries (#504) and
+  keeps the reason and merge history of a relationship absorbed by an alias or
+  baseline merge (#505).
+- `validate_bundle` returns an `invalid` verdict with the reason for input that
+  is not a STIX bundle (empty or malformed JSON, an object without `id`/`type`,
+  a JSON list) instead of raising (#500).
+
+##### Detection rules
+
+- An exported YARA rule keeps the `import` lines it uses and the `private`
+  rules it references, so the exported file compiles on its own (#478), and
+  keeps its `global` modifier (#479). Stores built before keep the old body
+  until the rule store is rebuilt.
+- A blank or whitespace-only YARA rule is refused as not compiling, as #434 did
+  for the other formats (#517).
+- Snort rules with a single bracketed address or variable (`[$HOME_NET]`,
+  `![192.168.1.1]`) parse and can ship as Indicators (#519). Snort rules with
+  an out-of-range or unknown port (`999999`, `-500`, `invalid_port`) are
+  refused before they can ship; the port checks were skipped (#520).
+  `Sanitizer.sanitize` applies its per-option methods and `Sanitizer.depth` no
+  longer crashes (not called by the pipeline, #521).
+- `merge_by_technique(limit=0)` returns no candidates; a per-chunk cap of 0
+  still means no cap (#515). With `evidence_only` off, the Detections panel
+  keeps the rules the report's evidence admits even without an ATT&CK tag
+  (YARA, brand rules), under (untagged) (#516).
+- Domains taken from URLs, emails and file names lose a leading `www.` and a
+  trailing dot like bare domains, so they match the rule atoms (#518).
+  Technique ids differing only by case count once in the detection coverage
+  (#522). An artifact's label and entity type come from the observable that
+  gives its class and tier (#523).
+
+##### API and worker
+
+- The entity and relationship API names the field in the 400 it answers to a
+  blank value or end, on POST and PATCH (#494, #495, #525, see the answers
+  above). `translate_placeholders` leaves named `%(name)s` placeholders intact
+  (#524).
+- `POST /api/rules/lookup` and `POST /api/jobs/{job_id}/detections/export`
+  answer 422 to a rule id holding a NUL byte or a lone surrogate instead of a
+  500 (#526).
+- The retention sweep no longer deletes a job requeued or updated after the
+  sweep selected it: the delete re-checks the expiry it was chosen for (#488).
+- Without python-magic, a text report whose multibyte UTF-8 character straddles
+  the first megabyte is accepted (#489), and an `.html`/`.htm` page with HTML
+  markup is accepted as with python-magic (#490).
+- A job whose lease was reclaimed while its launch was pending is no longer run
+  under the new owner's identity; the stale launch is abandoned (#491).
+- A finalize overtaken by a review decision no longer publishes the bundle
+  built from the older decisions: it builds again from the current rows, up to
+  three times, then answers 409 so the analyst finalizes again once the review
+  settles (#499).
+
+##### Evaluation
+
+- Entity scores no longer depend on the order of the gold annotations: the
+  one-to-one matching now maximises the exact pairs, then all pairs, instead of
+  taking the first candidate greedily. Earlier figures may move slightly
+  (#481).
+- The agreement F1 between two annotators is the same whichever is read first:
+  the aliases of both are compared (#482).
+- In-house negative cases use the positive scores' normalisation: canonical,
+  case-folded technique ids (#528), relation triples normalised like
+  `score_relations` (#529), and CVE (upper), MAC and IPv6 (lower) values
+  compared case-insensitively (#530).
+
+##### Frontend
+
+- Ids that contain a slash, a question mark or a hash are encoded as a single
+  path segment in every job, entity, relationship and coverage request (#551).
+  A failed detection-export download shows the server's message instead of a
+  fragment of its JSON body (#547). The progress stream forgets the previous
+  job's events and status when the job id is cleared, and encodes the job id in
+  its URL (#548). The ATT&CK search no longer crashes on an index entry without
+  a name or an id (#552).
+- Policy page: a Reset, Import, pin-mode, evidence or window change made within
+  1.5 s of an edit stays the saved policy; the pending debounced save is
+  cancelled instead of overwriting it (#498, #544). The Policy export and the
+  Coverage ZIP download work in Firefox (#546).
+- Coverage: the selection shows the saved exclusions from the first paint, and
+  two quick toggles of one scope no longer cancel out (#545). The ZIP always
+  includes rules promoted from the proposals panel: the download waits,
+  disabled, until their metadata has loaded (#486). In the "By format · corpus"
+  view an empty Suricata or YARA header shows its own badge (#566), and a
+  tactic header keeps its corpus count after Clear (#567).
+- Graph: the Baseline panel gives a left-out relationship its readable reason
+  (#564); relationships whose endpoint values differ only by surrounding spaces
+  are drawn (#565); Baseline edges get an arrowhead in their own colour (#568);
+  the Differences panel lists each relationship added and each entity rejected
+  once, even when several review rows share a key (#569); a right-click or
+  middle-click on the canvas or a node no longer starts a drag or clears the
+  selection (#570).
+- Review: a URL defanged in both scheme and separator (`hxxps[://]evil[.]com`)
+  is highlighted in the source (#553). The relationship creator keeps the
+  picked verb when the entity list refreshes or an endpoint changes, as long as
+  the new pair allows it (#555), and the rail and creator keep the current verb
+  in the list even when the pair does not suggest it (#561). The type menu of a
+  highlighted entity closes on Escape, on a press outside it and when the chip
+  moves (#558); the margin card's type menu closes on Escape (#563).
+- The entity picker accepts a defanged indicator (`evil[.]com`, `hxxps://…`,
+  `user[@]host.com`) without the format warning, and Escape closes it while
+  that warning is shown (#554, #559). A dropped file that cannot be read shows
+  its error in the New report modal (#560). A new PDF opens unrotated at the
+  default zoom (#562). Relative times no longer read "60m ago" or "24h ago"
+  near the hour and day boundaries (#571).
+
+##### Scripts and operations
+
+- `scripts/db_upgrade.sh` (and `upgrade_postgres_17_to_18.sh`) no longer exit 1
+  silently when the volume already holds the target major alone; they say there
+  is nothing to do and exit 0 (#539).
+- `scripts/audit_edge_provenance.py` and `scripts/audit_coverage_formats.py`
+  run from the repository root again (#540, #541).
+- `scripts/docker_smoke.sh` reads `.env` and writes `.secrets/` in the
+  repository root whatever the current directory (#542), reads `.env` as data
+  and strips the `\r` of a CRLF file; a value set in the shell wins over `.env`,
+  as with Compose (#543).
+- The backup commands in `docs/docker.md` name files to the second, so a second
+  backup the same day no longer truncates the first (#485), and the checks run
+  with `pipefail`, so a truncated archive or an unreadable dump fails (#487).
+  Backups made before keep their date-only names.
+- `scripts/contract.py`: `openapi_parent` no longer crashes on a root operation
+  key (#532). `scripts/check_stages.py` checks the Chromium browser for URL
+  capture, not only the Playwright import (#533).
+  `scripts/migrate_rules_to_postgres.py` skips and counts `rule_text` rows whose
+  rule is absent from the SQLite source instead of failing on a foreign key
+  (#534). `scripts/check_requirement_floors.py` no longer fails on an OSV
+  advisory whose `affected` entry has no `package` (#535).
+  `scripts/build_indexes.py` writes no embeddings manifest for the default
+  model, as ADR-0087 requires (#536). `scripts/smoke_stage_report.py` with no
+  argument prints its usage and exits 2 (#537).
+  `scripts/clean_install_journey.py` reads a fractional step duration (#538).
+
 ## [0.4.0] - 2026-11-07
 
 A fix release, numbered as a minor one under ADR-0085 §8 because it migrates
