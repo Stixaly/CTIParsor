@@ -223,8 +223,8 @@ already holds instead of adding a second one. Only these properties change:
 
 - **`object_refs`**: the references to baseline objects that ship, in their
   order, then what CTIParsor adds and the document states: its new objects and
-  relationships, and the baseline relationships the Report does not list that
-  CTIParsor built too. An ATT&CK or composed edge is not stated, and is not
+  relationships, and the baseline objects and relationships the Report does not
+  list that the document states (#413). An ATT&CK or composed edge is not stated, and is not
   added. A reference to an
   object that does not ship is not carried into this list; the mapping ledger's
   entry for the Report lists it under `removed_refs`.

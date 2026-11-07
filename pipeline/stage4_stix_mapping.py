@@ -2007,10 +2007,10 @@ def build_stix_bundle(
         d: dict | None = None
         if chosen is not None:
             # The chosen Report is re-issued under its own id: what the document
-            # states that is not in it yet is added (D1); only the refs to baseline
+            # states that is not in it yet is added (D1), baseline objects and edges
+            # alike (in_report holds both, once each); only the refs to baseline
             # objects that no longer ship (an analyst rejection) leave it.
-            added = [i for i in in_report if i not in merge.kept]
-            added += [i for i in sorted(merge.stated) if baseline.objects.get(i, {}).get("type") == "relationship"]
+            added = list(dict.fromkeys(in_report))
             d = reissue_report(baseline.objects[chosen], merge.kept, added, enrichment, source_ref, now)
             if not d["object_refs"]:
                 # Everything it lists was rejected and the document adds nothing:
@@ -2034,7 +2034,10 @@ def build_stix_bundle(
             reissued = stix2.parse(d, allow_custom=True)
             stix_objects.append(reissued)
             # The one property this ADR adds to the Report as received (ADR-0093).
-            led.object(reissued, "baseline_report_upsert", added_refs=len(added), removed_refs=removed_refs,
+            # added_refs counts the refs the Report did not list before (the stated
+            # ones it already listed are not new).
+            gained = [i for i in added if i not in listed]
+            led.object(reissued, "baseline_report_upsert", added_refs=len(gained), removed_refs=removed_refs,
                        attached_file=attached_file)
             baseline.verbatim[chosen] = d
             reissued_id = chosen
