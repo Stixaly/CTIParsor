@@ -451,6 +451,9 @@ current truth.
 | **Rule adapters** | `test_suricata_buffers_issue_428.py` | 7 | `pkt_data` closes the sticky buffer; `fast_pattern` and `nocase` are not part of the literal (#428) |
 | **Rule adapters** | `test_suricata_metadata_issue_421.py` | 5 | every ATT&CK technique in a Suricata rule's metadata is kept, including a key repeated in one option or across two (#421) |
 | **Rule adapters** | `test_yara_rule_end_issue_427.py` | 6 | a brace, a closing brace, a quote or a slash in a `matches` regex does not end the YARA rule early (#427) |
+| **Rule adapters** | `test_yara_issue_426_425.py` | 12 | a FQDN with a final dot is a domain and a lone label after `www.` is not (#426); a commented line or a `condition:`/`strings:` word inside a literal is not read as a section (#425); a `/*` after a `matches` regex is no comment (#427) |
+| **Rule adapters** | `test_yara_dedup_issue_420.py` | 4 | blanks inside a condition literal or a `matches` regex keep rules apart; blanks between tokens are still ignored (#420) |
+| **Rule adapters** | `test_yara_check_issue_435.py` | 4 | a meta string cut after an escaping backslash is joined with no space; a doubled backslash and a plain wrap keep the space (#435) |
 | **Rule adapters** | `test_pattern_check_empty_issue_434.py` | 15 | a blank Sigma, Suricata or baseline rule is refused for every type, and a blank Suricata rule is not retyped (#434) |
 | **Rule adapters** | `test_detection_builder_issue_373.py` | 2 | `rebuild_store` after a broken YAML document keeps the valid rules and lists the file in `file_errors`; a non-UTF-8 file is listed by its path (#373) |
 | **Rule adapters** | `test_sigma_ids_issue_375.py` | 2 | two Sigma documents without `id` in one file become two rows with their own atoms, and a rebuild keeps both (#375) |
