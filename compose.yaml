@@ -363,7 +363,7 @@ services:
   #             capabilities: [gpu]
   ollama:
     profiles: [ollama]
-    image: ollama/ollama:0.40.12@sha256:20d1bbfbabe1c97ba4b16301f08a20d8484bcf77047742a3cb71c613d8e12d0b
+    image: ollama/ollama:0.40.14@sha256:ebaef4f4c5d93660e1f25f8ad085a112f51ccfb0e8458073e71793959dba91c9
     volumes:
       - ollama-models:/root/.ollama
     # The pipeline calls the OpenAI-compatible endpoint, which takes no
