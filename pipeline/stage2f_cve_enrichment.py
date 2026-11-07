@@ -45,10 +45,27 @@ def enrichment_enabled() -> bool:
     return env_bool("CVE_ENRICHMENT", default=False)
 
 
+def _cvss_v3(metrics: list) -> tuple[float | None, str | None]:
+    """The first CVSS v3 baseScore in a list of CIRCL metrics, with its vector.
+
+    A metric whose baseScore is None is passed over, not taken as the answer:
+    the metrics after it, and cvssV3_0 in the same one, are still looked at.
+    """
+    for m in metrics:
+        if not isinstance(m, dict):
+            continue
+        for version in ("cvssV3_1", "cvssV3_0"):
+            cvss = m.get(version)
+            if isinstance(cvss, dict) and cvss.get("baseScore") is not None:
+                return cvss["baseScore"], cvss.get("vectorString")
+    return None, None
+
+
 def _fetch_from_circl(cve_id: str) -> dict | None:
     """Fetch one CVE's description and CVSS v3 score from CIRCL, or None.
 
-    None means CIRCL has no record of the CVE. A failure to get an answer raises
+    None means CIRCL has no record of the CVE, or a record with neither a description
+    nor a score (what get_cached would not return either). A failure to get an answer raises
     CirclUnavailable instead, so the caller does not remember the CVE as unknown.
     """
     if not is_valid_cve(cve_id):
@@ -95,17 +112,7 @@ def _fetch_from_circl(cve_id: str) -> dict | None:
                 metrics = adp.get("metrics")
                 if not isinstance(metrics, list):
                     continue
-                for m in metrics:
-                    if not isinstance(m, dict):
-                        continue
-                    if "cvssV3_1" in m and isinstance(m["cvssV3_1"], dict):
-                        score = m["cvssV3_1"].get("baseScore")
-                        vector = m["cvssV3_1"].get("vectorString")
-                        break
-                    elif "cvssV3_0" in m and isinstance(m["cvssV3_0"], dict):
-                        score = m["cvssV3_0"].get("baseScore")
-                        vector = m["cvssV3_0"].get("vectorString")
-                        break
+                score, vector = _cvss_v3(metrics)
                 if score is not None:
                     break
 
@@ -114,17 +121,11 @@ def _fetch_from_circl(cve_id: str) -> dict | None:
             if isinstance(cna, dict):
                 metrics = cna.get("metrics")
                 if isinstance(metrics, list):
-                    for m in metrics:
-                        if not isinstance(m, dict):
-                            continue
-                        if "cvssV3_1" in m and isinstance(m["cvssV3_1"], dict):
-                            score = m["cvssV3_1"].get("baseScore")
-                            vector = m["cvssV3_1"].get("vectorString")
-                            break
-                        elif "cvssV3_0" in m and isinstance(m["cvssV3_0"], dict):
-                            score = m["cvssV3_0"].get("baseScore")
-                            vector = m["cvssV3_0"].get("vectorString")
-                            break
+                    score, vector = _cvss_v3(metrics)
+
+    # Nothing usable in the answer: remembered as a miss, the way get_cached reads it.
+    if description is None and score is None:
+        return None
 
     return {"description": description, "cvss_score": score, "cvss_vector": vector}
 

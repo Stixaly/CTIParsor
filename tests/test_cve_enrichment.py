@@ -201,10 +201,11 @@ def test_circl_falls_back_to_the_cna_score(monkeypatch, version, score):
     assert module._fetch_from_circl("CVE-2019-0001")["cvss_score"] == score
 
 
-def test_circl_answer_without_containers_is_an_empty_record(monkeypatch):
+def test_circl_answer_without_containers_is_a_miss(monkeypatch):
+    """Issue 395: a 200 with no description and no score is a remembered miss, not a record of Nones
+    (the cache already reads it as a miss on the second call)."""
     _circl(monkeypatch, {"dataType": "CVE_RECORD"})
-    assert module._fetch_from_circl("CVE-2019-0001") == {
-        "description": None, "cvss_score": None, "cvss_vector": None}
+    assert module._fetch_from_circl("CVE-2019-0001") is None
 
 
 def test_circl_404_is_an_absence(monkeypatch):
