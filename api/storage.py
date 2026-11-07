@@ -1,12 +1,9 @@
 """
-Storage abstraction for pipeline job state.
+Storage interface for pipeline job state, and its test double.
 
-Decouples the worker orchestration logic from SQLite so that:
-  - Unit tests can use InMemoryJobStorage without touching the database
-  - A future swap to Postgres or Redis requires changing only this module
-
-Production usage:
-    storage = SQLiteJobStorage()
+The production writes are made by api/worker.py and api/db.py (PostgreSQL only,
+ADR-0053).  The SQLiteJobStorage wrapper that used to sit here had no caller left
+and was removed (#441).
 
 Test usage:
     storage = InMemoryJobStorage()
@@ -32,80 +29,6 @@ class JobStorage(ABC):
 
     @abstractmethod
     def emit_progress(self, job_id: str, event_type: str, data: dict) -> None: ...
-
-
-class SQLiteJobStorage(JobStorage):
-    """Production implementation — thin wrapper around api.db functions."""
-
-    def update_status(self, job_id: str, status: str) -> None:
-        from api import db
-        db.set_job_status(job_id, status)
-
-    def save_entities(self, job_id: str, entities: list) -> None:
-        from api import db
-        conn = db.get_conn()
-        with conn:
-            # Standard upsert, valid on SQLite 3.24+ and PostgreSQL (ADR-0045).  The
-            # DO UPDATE mirrors what INSERT OR REPLACE did: a re-saved entity starts
-            # over, evidence columns included (REPLACE deleted the old row).
-            conn.executemany(
-                """INSERT INTO entities
-                   (id, job_id, value, entity_type, context, confidence, mitre_id, accepted, source)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT (id) DO UPDATE SET
-                       job_id = excluded.job_id, value = excluded.value,
-                       entity_type = excluded.entity_type, context = excluded.context,
-                       confidence = excluded.confidence, mitre_id = excluded.mitre_id,
-                       accepted = excluded.accepted, source = excluded.source,
-                       evidence_text = NULL, evidence_label = NULL,
-                       evidence_start = NULL, evidence_end = NULL,
-                       decision_origin = NULL, decided_at = NULL,
-                       policy_version = NULL, control_sample = 0""",
-                [
-                    (
-                        f"{job_id}_{e.value}_{e.entity_type.value}",
-                        job_id,
-                        e.value,
-                        e.entity_type.value,
-                        e.context,
-                        e.confidence,
-                        e.mitre_id,
-                        None,
-                        e.source,
-                    )
-                    for e in entities
-                ],
-            )
-            conn.commit()
-
-    def save_bundle(self, job_id: str, bundle_json: str) -> None:
-        from api import db
-        conn = db.get_conn()
-        with conn:
-            # No ledger, no Stage 5 verdict and no build record come with this
-            # bundle: clear the old ones rather than let them describe a build
-            # it did not come from (ADR-0061, ADR-0086).
-            conn.execute(
-                "UPDATE jobs SET bundle_json=?, bundle_ledger_json=NULL, bundle_validation=NULL, "
-                "bundle_validation_errors=NULL, bundle_build_json=NULL, bundle_review_revision=NULL, "
-                "updated_at=? WHERE id=?",
-                (bundle_json, db.now_iso(), job_id),
-            )
-            conn.commit()
-
-    def save_llm_result(self, job_id: str, llm_result_json: str) -> None:
-        from api import db
-        conn = db.get_conn()
-        with conn:
-            conn.execute(
-                "UPDATE jobs SET llm_result_json=?, updated_at=? WHERE id=?",
-                (llm_result_json, db.now_iso(), job_id),
-            )
-            conn.commit()
-
-    def emit_progress(self, job_id: str, event_type: str, data: dict) -> None:
-        from api import db
-        db.emit_progress(job_id, event_type, data)
 
 
 class InMemoryJobStorage(JobStorage):

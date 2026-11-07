@@ -74,7 +74,7 @@ CREATE TABLE jobs (
                                     -- its bundle with the job's current review_revision,
                                     -- guarded by worker_id (ADR-0086).  NULL = built
                                     -- before v12, or by a writer with no snapshot
-                                    -- (save_bundle): any build may replace it
+                                    -- (none left since #441): any build may replace it
     bundle_build_json TEXT,         -- what built bundle_json: kind (run | finalize |
                                     -- quick), built_at, git_rev, policy, env (the
                                     -- allow-list), manifest, and baseline_sha256 when the

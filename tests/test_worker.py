@@ -679,21 +679,6 @@ def test_a_bundle_is_finalized_with_its_verdict(db, owner):
     assert row["bundle_validation"] is None and row["bundle_validation_errors"] is None
 
 
-def test_saving_a_bundle_through_the_storage_clears_the_verdict(db):
-    from api.storage import SQLiteJobStorage
-
-    _job(db, bundle_json="{}", bundle_ledger_json="{}", bundle_validation="invalid",
-         bundle_validation_errors='["bad"]', bundle_build_json='{"kind": "run"}', bundle_review_revision=3)
-
-    SQLiteJobStorage().save_bundle("j1", '{"type": "bundle"}')
-
-    row = _row(db)
-    assert row["bundle_json"] == '{"type": "bundle"}'
-    assert (row["bundle_ledger_json"], row["bundle_validation"], row["bundle_validation_errors"]) == (
-        None, None, None)
-    assert (row["bundle_build_json"], row["bundle_review_revision"]) == (None, None)    # no build to name
-
-
 def test_a_finalize_without_a_bundle_keeps_the_stored_verdict(db):
     _job(db, bundle_json="{}", bundle_validation="validated")
     assert worker._finalize_job("j1", "failed", None)
