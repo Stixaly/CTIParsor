@@ -85,7 +85,7 @@ from pipeline import attack_data
 from pipeline.aliases import mitre_id_for
 from pipeline.regex_safety import compile_pattern
 from pipeline.stix_access import field as stix_field
-from pipeline.stix_rel_spec import rel_is_suggested
+from pipeline.stix_rel_spec import SDO_TYPES, rel_is_suggested
 
 logger = get_logger(__name__)
 
@@ -771,6 +771,14 @@ def _infer_transitive(
 
 
 # ── Step 3 — long-distance relation prediction (opt-in, injected LLM) ──────────
+# Only these objects are central nodes or endpoints (issue #417): an Artifact,
+# an observable or a marking is never linked by a long-distance edge, and an
+# observable's Indicator stands in for it (ADR-0062).  A Report is built after
+# completion, so it is not in the graph here.
+LONG_DISTANCE_TYPES: frozenset[str] = SDO_TYPES - {"indicator", "report"}
+_NOT_AN_SDO = "not_an_sdo"
+
+
 def _connected_components(node_ids: set[str], rels: list) -> list[set[str]]:
     parent = {n: n for n in node_ids}
 
@@ -808,9 +816,15 @@ def _infer_long_distance(
     forbidden: Optional[dict[tuple[str, str, str], str]] = None,
 ) -> None:
     """CTINexus Phase 3: pick a central node per disconnected sub-graph and ask
-    ``infer`` for the relation to the report's topic node."""
-    id_to_obj = {
+    ``infer`` for the relation to the report's topic node.
+
+    Only SDOs (``LONG_DISTANCE_TYPES``) are candidates; an edge the model
+    proposes to a non-SDO object is refused into ``stats.refused`` (issue #417)."""
+    all_objs = {
         o.id: o for o in stix_objects if hasattr(o, "id") and not _is_rel(o)
+    }
+    id_to_obj = {
+        i: o for i, o in all_objs.items() if _otype(o) in LONG_DISTANCE_TYPES
     }
     rels = [o for o in stix_objects if _is_rel(o)]
     deg = _degree_map(rels)
@@ -839,8 +853,8 @@ def _infer_long_distance(
             continue
         if not edge or edge.verb not in VALID_REL_TYPES:
             continue
-        s = id_to_obj.get(edge.source_id)
-        t = id_to_obj.get(edge.target_id)
+        s = all_objs.get(edge.source_id)
+        t = all_objs.get(edge.target_id)
         if s is None or t is None or s.id == t.id:
             continue
         verb = _apply_pin(edge.verb, _otype(s), _otype(t), pol_index)
@@ -849,6 +863,9 @@ def _infer_long_distance(
             continue
         key = (s.id, verb, t.id)
         if key in existing:
+            continue
+        if _otype(s) not in LONG_DISTANCE_TYPES or _otype(t) not in LONG_DISTANCE_TYPES:
+            _refuse(key, "long-distance", [], {key: _NOT_AN_SDO}, stats)
             continue
         if _refuse(key, "long-distance", [], forbidden or {}, stats):
             continue

@@ -24,7 +24,7 @@ from api.logging_config import get_logger
 from models.schemas import STIX_RELATIONSHIP_TYPES
 from pipeline.evidence_span import stated_in, words
 from pipeline.llm_parse import fit_report
-from pipeline.stage4b_graph_completion import InferredEdge
+from pipeline.stage4b_graph_completion import LONG_DISTANCE_TYPES, InferredEdge
 from pipeline.stix_access import field
 
 logger = get_logger(__name__)
@@ -173,6 +173,9 @@ def build_long_distance_inferer(
     system = _SYSTEM.format(verbs=", ".join(sorted(STIX_RELATIONSHIP_TYPES)))
 
     def infer(central, topic, report_text) -> Optional[InferredEdge]:
+        # Stage 4b only pairs SDOs (issue #417); never ask about an Artifact or an observable.
+        if _type(central) not in LONG_DISTANCE_TYPES or _type(topic) not in LONG_DISTANCE_TYPES:
+            return None
         a_name, b_name = _name(central), _name(topic)
         if not a_name or not b_name:
             return None
