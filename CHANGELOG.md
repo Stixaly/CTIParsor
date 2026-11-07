@@ -42,8 +42,10 @@ No configuration change; the database schema is unchanged.
   matches the cumulative support the code and ADR-0058 use). Promotion skips
   null sources and recounts active promotions (#418).
   The analyst's deny rows apply to the LLM lists of the CLI bundle and
-  to targeted countries and sectors (#382). The CLI ledger records Stage 2's
-  type-conflict losers (#397, API path still open).
+  to targeted countries and sectors (#382). The ledger records Stage 2's
+  type-conflict losers (#397): the CLI run since this batch, a finalize or a
+  rebuild once the job ran under migration 15 (`jobs.resolved_types_json`); a
+  losing type the analyst brought back since is no longer reported as dropped.
 - **Bundle.** An explicit `targets` row keeps its quote and confidence (#383).
   Long-distance completion links SDOs only (#417, #412). Payloads on gist,
   raw.github.com and Google Sites get Indicators, and `www.` is ignored in the

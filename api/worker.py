@@ -28,6 +28,7 @@ from api.baseline_store import baseline_sha256, load_baseline, objects_by_id, va
 from api.db import _lock, backup_db, emit_progress, get_conn, now_iso, set_job_status, transaction
 from api.paths import output_dir, uploads_dir
 from api.run_config import BuildKind, build_record, run_build_record, utc_stamp
+from models.schemas import EntityType, RawEntity
 from pipeline import baseline_stix
 from pipeline.baseline_stix import BaselineBuild, BaselineError, BaselineIndex, Reconciliation
 from pipeline.decisions import BASELINE_STIX
@@ -261,6 +262,30 @@ def _without_nul(row: tuple) -> tuple:
     """`row` with the NUL bytes of its text fields removed: PostgreSQL TEXT refuses
     them, and a baseline value (kept verbatim in its intake JSON) can carry one."""
     return tuple(v.replace("\x00", "") if isinstance(v, str) else v for v in row)
+
+
+def _stored_resolved_away(job_id: str, stored: str | None) -> list[RawEntity]:
+    """The entities Stage 2 resolved away, as `extraction_ready` stored them
+    (`jobs.resolved_types_json`, #397).  NULL (a job run before migration 15) or
+    unreadable gives none; a row whose type is not an EntityType is skipped."""
+    if not stored:
+        return []
+    try:
+        rows = json.loads(stored)
+        if not isinstance(rows, list):
+            raise ValueError("not a list")
+    except ValueError as exc:
+        logger.warning("[finalize] job %s: the stored type-conflict losers cannot be read (%s); "
+                       "the ledger lacks them", job_id, str(exc).splitlines()[0])
+        return []
+    out: list[RawEntity] = []
+    for row in rows:
+        try:
+            out.append(RawEntity(value=row["value"], entity_type=EntityType(row["entity_type"]),
+                                 source=row["source"]))
+        except (ValueError, KeyError, TypeError):
+            continue
+    return out
 
 
 def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "",
@@ -527,6 +552,8 @@ class _WorkerHooks(Hooks):
         self.run_config: dict | None = None
         # Stage 3r's reconciliation; None in full mode.
         self.reconciliation: Reconciliation | None = None
+        # Stage 2's type-conflict losers, stored for the finalize ledger (#397).
+        self.resolved_away: list[RawEntity] = []
 
     def progress(self, event: str, data: dict) -> None:
         emit_progress(self.job_id, event, data)
@@ -565,12 +592,26 @@ class _WorkerHooks(Hooks):
             raise RunAborted
         _save_entities(self.job_id, entities, llm_result, report_text=text, reconciliation=self.reconciliation)
         _apply_auto_accept(self.job_id)
-        # Persist the LLM result for finalize.
+        # Persist the LLM result and Stage 2's type-conflict losers for finalize
+        # (#397).  A loser the analyst's baseline holds is stored as
+        # `baseline_stix`, the source the CLI ledger gives it (enrich mode).
+        losers = []
+        for e in self.resolved_away:
+            etype = EntityType(e.entity_type).value
+            source = e.source
+            if (self.reconciliation is not None
+                    and self.reconciliation.entity(etype, e.value)[0] == baseline_stix.MATCHED):
+                source = BASELINE_STIX
+            losers.append({"value": e.value, "entity_type": etype, "source": source})
+        resolved_types_json = json.dumps(losers)
         with _lock:
             with get_conn() as conn:
-                conn.execute("UPDATE jobs SET llm_result_json=?, updated_at=? WHERE id=?",
-                             (llm_result.model_dump_json(), now_iso(), self.job_id))
+                conn.execute("UPDATE jobs SET llm_result_json=?, resolved_types_json=?, updated_at=? WHERE id=?",
+                             (llm_result.model_dump_json(), resolved_types_json, now_iso(), self.job_id))
                 conn.commit()
+
+    def type_conflicts_resolved(self, resolved_away: list[RawEntity]) -> None:
+        self.resolved_away = resolved_away
 
     def baseline_reconciled(self, reconciliation: Reconciliation) -> None:
         self.reconciliation = reconciliation
@@ -990,7 +1031,6 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
     if str(_ROOT) not in sys.path:
         sys.path.insert(0, str(_ROOT))
 
-    from models.schemas import EntityType, RawEntity
     from pipeline.stage3_llm import LLMEnrichmentResult, RelationshipExtracted
     from pipeline.stage4b_graph_completion import HELD_FOR_REVIEW, REJECTED_BY_ANALYST, RefusedRelationship
     from pipeline.stage5_validation import INVALID, export_bundle, validate_bundle
@@ -1219,6 +1259,7 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
         ((row["entity_type"], row["value"],
           stored_row_source(row["source"], row["accepted"], row["decision_origin"]))
          for row in all_entity_rows),
+        resolved_away=_stored_resolved_away(job_id, job["resolved_types_json"]),
     )
     raw_entities = [e for e in raw_entities if named.keeps(e)]
     campaign_name = named.llm_result.campaign_name

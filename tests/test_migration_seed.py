@@ -76,7 +76,8 @@ def test_an_older_release_s_schema_gets_the_columns_it_has(schema):
     seeded = ms.seed(schema)
     assert seeded.skipped_tables == ["job_baselines", "worker_heartbeats"]
     assert seeded.skipped_columns == {
-        "jobs": ["bundle_build_json", "bundle_review_revision", "pipeline_mode", "review_revision"],
+        "jobs": ["bundle_build_json", "bundle_review_revision", "pipeline_mode", "resolved_types_json",
+                 "review_revision"],
         "entities": ["baseline_stix_id", "enrichment_status"],
         "relationships": ["baseline_stix_id", "enrichment_status"],
     }

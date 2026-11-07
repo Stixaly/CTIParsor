@@ -36,6 +36,7 @@ migrations".
 | 12 | `jobs.review_revision`, `jobs.bundle_review_revision`, `jobs.bundle_build_json`; the triggers that bump `review_revision` | 0086 |
 | 13 | `jobs.pipeline_mode`, `job_baselines`, `entities` and `relationships` `.enrichment_status` and `.baseline_stix_id` | 0090 |
 | 14 | `worker_heartbeats` | 0094 (item 7) |
+| 15 | `jobs.resolved_types_json` | 0092 (#397) |
 
 ```sql
 CREATE TABLE jobs (
@@ -45,6 +46,7 @@ CREATE TABLE jobs (
     report_text     TEXT,           -- refanged extracted text (stored once)
     bundle_json     TEXT,           -- serialised STIX bundle
     llm_result_json TEXT,           -- LLM result snapshot for finalize
+    resolved_types_json TEXT,       -- Stage 2's type-conflict losers, for the finalize ledger (#397); NULL before version 15
     tlp_level       TEXT,           -- per-job TLP marking (clear|green|amber|amber+strict|red, ADR-0073)
     pap_level       TEXT,           -- per-job PAP statement marking
     run_config_json TEXT,           -- run-config snapshot (ADR-0024): a bundle

@@ -547,8 +547,10 @@ A full **Finalize** used to re-scan the text for the accepted named entities and
   source but the analyst's rows; equal ranks keep all their types. The types left out
   go to the ledger as `dropped / outranked_type` and do not reach Stage 4
   (`pipeline/named_entities.py`, `pipeline/orchestrator.py`). The types Stage 2's
-  `resolve_type_conflicts` already dropped are recorded the same way (#397); the
-  bundle does not change.
+  `resolve_type_conflicts` already dropped are recorded the same way (#397), on the
+  CLI and on the API path (the worker stores them in `jobs.resolved_types_json`, read
+  by a finalize or a rebuild); a job run before migration 15 has none stored, so its
+  finalize ledger lacks them. The bundle does not change.
 - **Ends that name several objects** (ADR-0091) — when an end names several candidate
   objects, the verb picks the pair it accepts (`rel_is_allowed`). When several pairs
   fit, or none does, the row is not built and the ledger records `ambiguous_name`

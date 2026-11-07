@@ -124,12 +124,17 @@ def _resolved_away(present: dict[str, set[tuple[EntityType, str]]], dropped: Ite
     """The (name, type)s of `dropped` that Stage 2 resolved away (#397), each as an
     OutrankedType whose kept side is what `present` (the entities that stayed)
     holds under the name.  A (name, type) the outranking already holds (`gone`)
-    is not repeated; a type not compared by name is not a named entity."""
+    is not repeated; a type not compared by name is not a named entity.  A
+    (name, type) that `present` holds again is not resolved away either: on a
+    finalize the analyst may have added or accepted the losing type since the
+    run, and it then ships or is outranked like any stored row."""
     away: dict[tuple[str, EntityType], tuple[str, set[str]]] = {}
     for e in dropped:
         etype = EntityType(e.entity_type)
         key = _key(e.value)
         if etype not in _COMPARED or not key or key not in present or (key, etype.value) in gone:
+            continue
+        if any(t == etype for t, _ in present[key]):
             continue
         away.setdefault((key, etype), (e.value.strip(), set()))[1].add(
             _source_of(etype, e.value, e.source, baseline_holds))

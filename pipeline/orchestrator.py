@@ -214,6 +214,10 @@ class Hooks:
         """Stages 2-3 are done; the first hard-to-undo write belongs here.
         Raise RunAborted to stop before Stage 4."""
 
+    def type_conflicts_resolved(self, resolved_away: list[RawEntity]) -> None:
+        """The entities Stage 2's `resolve_type_conflicts` dropped (a name typed two
+        ways, its losing type); called just before extraction_ready (#397)."""
+
     def policy(self) -> dict | None:
         """The relationship policy Stage 4 applies (read when Stage 4 starts)."""
         return None
@@ -1346,6 +1350,7 @@ def run_document(document: Document, options: RunOptions | None = None,
     if run.r.llm_result is None:   # enrich() always sets it
         raise RuntimeError("Stage 3 left no result")
     run.reconcile()
+    run.hooks.type_conflicts_resolved(run.r.resolved_away)
     run.hooks.extraction_ready(run.r.entities, run.r.llm_result, run.r.text)
     run.map_to_stix()
     run.validate()
