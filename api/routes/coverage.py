@@ -12,10 +12,10 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from api.db import get_conn, get_rule_conn
-from api.routes._common import require_job
+from api.routes._common import require_job, storable_text
 from pipeline.detection.artifacts import coverage_with_phases
 from pipeline.detection.coverage import (
     compute_for_job,
@@ -226,6 +226,14 @@ def export_facets(job_id: str):
 class ExportSelection(BaseModel):
     """Body of the rule-id export: the exact rules to package (ADR-0022)."""
     rule_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("rule_ids")
+    @classmethod
+    def _no_nul_or_lone_surrogate(cls, ids: list[str]) -> list[str]:
+        # PostgreSQL refuses these in the IN list: a 422 here, a 500 at the query otherwise (#526).
+        for rid in ids:
+            storable_text(rid)
+        return ids
 
 
 def export_body_budget() -> int:
@@ -499,6 +507,14 @@ class RuleLookup(BaseModel):
     """Body of the rule lookup: which rules, and whether to include their text."""
     rule_ids: list[str] = Field(default_factory=list)
     include_body: bool = False
+
+    @field_validator("rule_ids")
+    @classmethod
+    def _no_nul_or_lone_surrogate(cls, ids: list[str]) -> list[str]:
+        # PostgreSQL refuses these in the IN list: a 422 here, a 500 at the query otherwise (#526).
+        for rid in ids:
+            storable_text(rid)
+        return ids
 
 
 @router.post("/rules/lookup")

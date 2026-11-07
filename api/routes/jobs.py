@@ -1,6 +1,7 @@
 import json
 import mimetypes
 import re
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -14,7 +15,7 @@ from api.db import _lock, get_conn, now_iso, transaction
 from api.logging_config import get_logger
 from api.paths import output_dir, uploads_dir
 from api.routes._common import require_job
-from api.worker import BundleInvalidError, re_run_final_stages
+from api.worker import BundleInvalidError, FinalizeOvertaken, re_run_final_stages
 from pipeline.env_flags import env_int
 
 logger = get_logger(__name__)
@@ -292,6 +293,9 @@ def finalize_job(job_id: str, quick: bool = False):
         bundle_json = re_run_final_stages(job_id, quick=quick)
     except BundleInvalidError as exc:
         raise _bundle_refused(exc.errors) from exc
+    except FinalizeOvertaken as exc:
+        raise HTTPException(409, "Review decisions changed during every rebuild; finalize again "
+                                 "once the review settles") from exc
     if bundle_json is None:
         raise HTTPException(500, "Finalize failed — check server logs")
 
@@ -305,20 +309,33 @@ class _NotDeleted(Exception):
     """The guarded DELETE of the jobs row matched nothing: roll the transaction back."""
 
 
+# The cutoff of the retention sweep in progress (sweep_expired_jobs), or None.  While it is set,
+# _delete_job deletes a job only if it is still expired, and its DELETE repeats that test (#488).
+_sweep_cutoff: ContextVar[str | None] = ContextVar("sweep_cutoff", default=None)
+
+
 def _delete_job(job_id: str) -> bool:
     """Delete one job's DB rows and files. Returns False if it did not exist.
 
     Shared by the DELETE route and the retention sweep so both apply the exact
     same cleanup — a second copy of this would drift the moment one of them
     gained a new output file type.
+
+    Under the sweep (`_sweep_cutoff` set) a job that is queued, processing or
+    was updated after the cutoff is kept, and so is one that changes between
+    the read below and the DELETE: the sweep's list is only a choice of
+    candidates, the DELETE decides.  Returns False then, not 409.
     """
+    cutoff = _sweep_cutoff.get()
     with _lock:
         with get_conn() as conn:
             # Fetch original_filename BEFORE deleting — needed to locate output files
             row = conn.execute(
-                "SELECT id, original_filename, status FROM jobs WHERE id=?", (job_id,)
+                "SELECT id, original_filename, status, updated_at FROM jobs WHERE id=?", (job_id,)
             ).fetchone()
             if not row:
+                return False
+            if cutoff is not None and (row["status"] in ("queued", "processing") or row["updated_at"] >= cutoff):
                 return False
             if row["status"] == "processing":
                 # Deleting a running job would orphan the worker's writes
@@ -342,16 +359,23 @@ def _delete_job(job_id: str) -> bool:
                     # The foreign key would do it; deleting explicitly keeps the order safe, as for the rows above.
                     conn.execute("DELETE FROM job_baselines WHERE job_id=?", (job_id,))
                     # The status test is part of the DELETE: a worker may claim
-                    # the job between the SELECT above and here.  0 rows rolls
-                    # the children back with it.
-                    cur = conn.execute(
-                        "DELETE FROM jobs WHERE id=? AND status <> 'processing'", (job_id,)
-                    )
+                    # the job between the SELECT above and here.  Under the sweep
+                    # the expiry is tested here too, for the same reason (#488).
+                    # 0 rows rolls the children back with it.
+                    if cutoff is None:
+                        cur = conn.execute(
+                            "DELETE FROM jobs WHERE id=? AND status <> 'processing'", (job_id,)
+                        )
+                    else:
+                        cur = conn.execute(
+                            "DELETE FROM jobs WHERE id=? AND status NOT IN ('queued','processing') "
+                            "AND updated_at < ?", (job_id, cutoff),
+                        )
                     if cur.rowcount == 0:
                         raise _NotDeleted
             except _NotDeleted:
                 again = conn.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
-                if not again:
+                if not again or cutoff is not None:
                     return False
                 raise HTTPException(409, _PROCESSING_DETAIL) from None
 
@@ -400,12 +424,16 @@ def sweep_expired_jobs(retention_days: int | None = None) -> int:
         return 0
 
     deleted = 0
-    for job_id in ids:
-        try:
-            if _delete_job(job_id):
-                deleted += 1
-        except Exception as exc:
-            logger.error(f"[retention] failed to delete job {job_id}: {exc}")
+    token = _sweep_cutoff.set(cutoff)
+    try:
+        for job_id in ids:
+            try:
+                if _delete_job(job_id):
+                    deleted += 1
+            except Exception as exc:
+                logger.error(f"[retention] failed to delete job {job_id}: {exc}")
+    finally:
+        _sweep_cutoff.reset(token)
 
     if deleted:
         logger.info(f"[retention] swept {deleted} job(s) older than {days}d")

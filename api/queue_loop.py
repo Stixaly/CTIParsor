@@ -21,6 +21,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Iterable
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -88,6 +89,16 @@ def lease_cutoff(now: datetime | None = None) -> str:
     if now is None:
         now = datetime.now(timezone.utc)
     return (now - timedelta(seconds=LEASE_TIMEOUT_S)).isoformat()
+
+
+# The worker_id this loop wrote when it claimed the job being launched.  _kick_locked sets it around the
+# spawn call; api.worker._spawn_job passes it to the child instead of the owner the row carries by then, and
+# abandons the launch when the row is no longer this claim's (#491).
+claimed_by: ContextVar[str | None] = ContextVar("claimed_by", default=None)
+
+
+class ClaimLost(RuntimeError):
+    """The job was reclaimed or requeued between its claim and its launch: the launch is abandoned."""
 
 
 def claim_next_queued(worker_id: str = WORKER_ID) -> tuple[str, str, str] | None:
@@ -326,6 +337,7 @@ class WorkerLoop:
             job_id, file_path, original_filename = claimed
             with self._lock:
                 self._handles[job_id] = None
+            token = claimed_by.set(self.worker_id)
             try:
                 handle = (self._spawn or _default_spawn)(job_id, file_path, original_filename, self._on_exit)
                 with self._lock:
@@ -335,6 +347,12 @@ class WorkerLoop:
                         self._handles[job_id] = handle
                 started += 1
                 logger.info(f"Started job {job_id}")
+            except ClaimLost as exc:
+                # Another loop holds the job now: its status is theirs to write, not this launch's to fail.
+                with self._lock:
+                    self._handles.pop(job_id, None)
+                logger.warning(f"Launch abandoned for job {job_id}: {exc}")
+                continue
             except Exception as exc:
                 with self._lock:
                     self._handles.pop(job_id, None)
@@ -344,6 +362,8 @@ class WorkerLoop:
                 })
                 logger.error(f"Failed to start job {job_id}: {exc}")
                 continue
+            finally:
+                claimed_by.reset(token)
         return started
 
     def _on_exit(self, job_id: str) -> None:

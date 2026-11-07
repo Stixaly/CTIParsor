@@ -1,3 +1,5 @@
+import codecs
+import re
 from pathlib import Path
 from uuid import uuid4
 
@@ -42,6 +44,10 @@ SUPPORTED_MIME = {
 _MAX_BYTES = 50 * 1024 * 1024
 # Maximum file size to check in memory for MIME validation (10 MB)
 _MAX_MIME_CHECK = 10 * 1024 * 1024
+# What the MIME check reads of the file: its first megabyte (#489 — the bytes past it are not read).
+_MIME_READ_BYTES = 1024 * 1024
+# The markup that opens an HTML page.  filetype, the fallback's sniffer, knows no text formats (#490).
+_HTML_OPENING = re.compile(rb"<!doctype\s+html|<html[\s>]|<head[\s>]|<body[\s>]", re.IGNORECASE)
 
 # PAP marking levels (object_marking_refs applied to every object in the
 # generated STIX bundle — see stage4_stix_mapping.py).  TLP levels come from
@@ -75,6 +81,26 @@ def clean_pap(value: str | None) -> str | None:
     if v not in _PAP_LEVELS:
         raise HTTPException(400, f"Invalid pap_level. Valid: {', '.join(sorted(_PAP_LEVELS))}")
     return v
+
+
+def _check_utf8(chunk: bytes) -> None:
+    """Raise UnicodeDecodeError unless the bytes read are valid UTF-8 (#489).
+
+    Only what was read is decoded.  A character cut by the end of the read is
+    held back, not refused, unless the read reached the end of the file.
+    """
+    codecs.getincrementaldecoder("utf-8")().decode(chunk, final=len(chunk) < _MIME_READ_BYTES)
+
+
+def _looks_like_html(chunk: bytes) -> bool:
+    """Whether the bytes read open an HTML page: markup, and UTF-8 text (#490)."""
+    if _HTML_OPENING.search(chunk) is None:
+        return False
+    try:
+        _check_utf8(chunk)
+    except UnicodeDecodeError:
+        return False
+    return True
 
 
 @router.post("/upload", responses=BASELINE_REFUSED)
@@ -129,7 +155,7 @@ def upload_file(
     # Read first chunk to validate MIME type.  `file.file` is the underlying
     # SpooledTemporaryFile — read synchronously since this route now runs in
     # FastAPI's threadpool rather than on the event loop.
-    first_chunk = file.file.read(1024 * 1024)  # Read 1MB for MIME check
+    first_chunk = file.file.read(_MIME_READ_BYTES)  # Read 1MB for MIME check
 
     # Validate MIME type using python-magic with filetype as fallback.
     # HTTPException is re-raised immediately so validation rejections always
@@ -149,17 +175,18 @@ def upload_file(
         # python-magic unavailable or raised an internal error — fall back to filetype.
         if suffix in {".txt", ".md"}:
             try:
-                first_chunk.decode("utf-8")
+                _check_utf8(first_chunk)
             except UnicodeDecodeError as exc:
                 raise HTTPException(400, "Text file is not valid UTF-8.") from exc
         else:
             # The rejections below are filetype's verdict, not python-magic's
             # failure: `from None` keeps that failure out of their traceback.
+            # filetype has no HTML kind, so an HTML page is accepted on its markup (#490).
             kind = filetype.guess(first_chunk)
-            if kind is None:
+            if kind is None and not (suffix in {".html", ".htm"} and _looks_like_html(first_chunk)):
                 raise HTTPException(400, "Could not determine file type. Please ensure the file is valid.") from None
             allowed_mimes = SUPPORTED_MIME.get(suffix, [])
-            if allowed_mimes and kind.mime not in allowed_mimes:
+            if kind is not None and allowed_mimes and kind.mime not in allowed_mimes:
                 raise HTTPException(
                     415,
                     f"File content appears to be '{kind.mime}' but extension is '{suffix}'. "
