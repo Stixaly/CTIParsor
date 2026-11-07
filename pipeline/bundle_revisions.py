@@ -136,6 +136,14 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "A file and a mutex sharing a name are two SCOs with their own Indicators, and URLs whose paths "
      "differ in case stay two observables (Stage 2 and Stage 4); a deleted LLM technique stays out",
      "extraction"),
+    ("b8dd115", "2026-11-07",
+     "The gazetteer context policy (apply mode) reads a contracted negation before an alias cue as "
+     "a negation, and an apposition whose type noun follows a preposition no longer types the name",
+     "extraction"),
+    ("36691d0", "2026-11-06",
+     "A network-traffic and an IPv4 entity for one host share one ipv4-addr; a flow's Indicator "
+     "pattern names its protocol, and observables sharing a pattern share one Indicator",
+     "mapping"),
 )
 
 

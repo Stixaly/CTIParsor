@@ -1,4 +1,6 @@
 """Tests for the Sigma corpus adapter (ADR-0006)."""
+import hashlib
+
 from models.detection import Severity
 from pipeline.detection.registry import iter_rules, load_corpora
 from pipeline.detection.sigma import SigmaAdapter
@@ -105,10 +107,10 @@ def test_sigma_yaml_dates_in_a_list_still_get_a_dedup_key(tmp_path):
 def test_sigma_document_that_fails_to_convert_is_logged_and_the_next_is_read(tmp_path, monkeypatch, caplog):
     original = SigmaAdapter._to_rule
 
-    def flaky(doc, text, path, corpus, license):
+    def flaky(doc, text, path, corpus, license, index=0):
         if doc.get("title") == "boom":
             raise RuntimeError("boom")
-        return original(doc, text, path, corpus, license)
+        return original(doc, text, path, corpus, license, index)
 
     monkeypatch.setattr(SigmaAdapter, "_to_rule", staticmethod(flaky))
     (tmp_path / "two.yml").write_text(
@@ -119,6 +121,109 @@ def test_sigma_document_that_fails_to_convert_is_logged_and_the_next_is_read(tmp
         rules = list(SigmaAdapter().parse(tmp_path, corpus="c"))
     assert [r.title for r in rules] == ["Suspicious PowerShell Encoded Command"]
     assert any("skipped" in r.getMessage() and "boom" in r.getMessage() for r in caplog.records)
+
+
+def test_sigma_file_that_is_not_utf8_is_logged_and_the_valid_rule_is_still_read_issue_372(tmp_path, caplog):
+    """A 0xff byte or a UTF-16 file with a BOM is not UTF-8: skipped and logged with its path,
+    never decoded, and it must not stop the readable rules of the same folder."""
+    (tmp_path / "ok.yml").write_text(_SAMPLE, encoding="utf-8")
+    (tmp_path / "bad.yml").write_bytes(b"\xff")
+    (tmp_path / "utf16.yml").write_bytes(_SAMPLE.encode("utf-16"))
+    with caplog.at_level("WARNING"):
+        rules = list(SigmaAdapter().parse(tmp_path, corpus="demo"))
+    assert [r.title for r in rules] == ["Suspicious PowerShell Encoded Command"]
+    assert any("bad.yml" in r.getMessage() for r in caplog.records)
+    assert any("utf16.yml" in r.getMessage() for r in caplog.records)
+
+
+def test_sigma_broken_document_after_a_valid_rule_keeps_that_rule_issue_373(tmp_path, caplog):
+    """A YAML error in the second document must not drop the valid first one, and the file
+    is reported as partly imported through on_file_error, with its path (#373)."""
+    (tmp_path / "ok.yml").write_text(_SAMPLE, encoding="utf-8")
+    (tmp_path / "two.yml").write_text(_SAMPLE + "---\ntitle: [unterminated\n", encoding="utf-8")
+    errors: list[tuple] = []
+    with caplog.at_level("WARNING"):
+        rules = list(SigmaAdapter().parse(
+            tmp_path, corpus="c", on_file_error=lambda path, message: errors.append((path, message)),
+        ))
+    assert len(rules) == 2
+    assert [path for path, _ in errors] == [tmp_path / "two.yml"]
+    assert "partially imported" in errors[0][1]
+    assert any("two.yml" in r.getMessage() for r in caplog.records)
+
+
+def test_sigma_broken_first_document_reports_the_file_and_reads_the_next_file_issue_373(tmp_path):
+    (tmp_path / "a_bad.yml").write_text("title: [unterminated\n---\n" + _SAMPLE, encoding="utf-8")
+    (tmp_path / "b_ok.yml").write_text(_SAMPLE, encoding="utf-8")
+    errors: list[tuple] = []
+    rules = list(SigmaAdapter().parse(
+        tmp_path, corpus="c", on_file_error=lambda path, message: errors.append((path, message)),
+    ))
+    assert len(rules) == 1
+    assert [path for path, _ in errors] == [tmp_path / "a_bad.yml"]
+
+
+_NO_ID_PAIR = (
+    "title: First rule\n"
+    "logsource: {product: windows}\n"
+    "detection:\n"
+    "  selection: {Image: alpha-marker}\n"
+    "  condition: selection\n"
+    "---\n"
+    "title: Second rule\n"
+    "logsource: {product: windows}\n"
+    "detection:\n"
+    "  selection: {Image: beta-marker}\n"
+    "  condition: selection\n"
+)
+
+
+def test_two_documents_without_id_in_one_file_get_distinct_ids_issue_375(tmp_path):
+    """#375: the second document used to take the file hash, the first one's storage id.
+    The first keeps the historical `content_hash[:16]`, and each rule keeps its own atoms."""
+    (tmp_path / "pair.yml").write_text(_NO_ID_PAIR, encoding="utf-8")
+    rules = list(SigmaAdapter().parse(tmp_path, corpus="c"))
+    assert [r.title for r in rules] == ["First rule", "Second rule"]
+    assert rules[0].id != rules[1].id
+    assert rules[0].id == f"c:{rules[0].content_hash[:16]}"
+    assert ("image", "alpha-marker") in rules[0].atoms and ("image", "beta-marker") not in rules[0].atoms
+    assert ("image", "beta-marker") in rules[1].atoms and ("image", "alpha-marker") not in rules[1].atoms
+    # Same raw body and file hash: only the id and the atoms differ between the two rules.
+    assert rules[0].content_hash == rules[1].content_hash and rules[0].raw == rules[1].raw
+
+
+def test_ids_of_documents_without_id_are_stable_across_parses_issue_375(tmp_path):
+    (tmp_path / "pair.yml").write_text(_NO_ID_PAIR, encoding="utf-8")
+    first = [r.id for r in SigmaAdapter().parse(tmp_path, corpus="c")]
+    second = [r.id for r in SigmaAdapter().parse(tmp_path, corpus="c")]
+    assert first == second and len(set(first)) == 2
+
+
+def test_non_rule_document_before_the_first_rule_does_not_shift_its_id_issue_375(tmp_path):
+    """A document that is not a rule (an `action: global` collection, say) does not count:
+    the first rule keeps the file's `content_hash[:16]`, and the second one is rank 1."""
+    text = "just: a mapping\n---\n" + _NO_ID_PAIR
+    (tmp_path / "mixed.yml").write_text(text, encoding="utf-8")
+    rules = list(SigmaAdapter().parse(tmp_path, corpus="c"))
+    assert [r.title for r in rules] == ["First rule", "Second rule"]
+    content_hash = rules[0].content_hash
+    assert rules[0].id == f"c:{content_hash[:16]}"
+    assert rules[1].id == "c:" + hashlib.sha256(f"{content_hash}:1".encode("utf-8")).hexdigest()[:16]
+
+
+def test_invalid_date_stops_the_file_and_keeps_the_rules_before_it_issue_373(tmp_path):
+    """`date: 2024-13-45` makes PyYAML raise ValueError, not YAMLError: the rule before it
+    is still produced, the file is reported as partly imported, and nothing escapes."""
+    (tmp_path / "dated.yml").write_text(
+        _SAMPLE + "---\ntitle: Dated\ndate: 2024-13-45\ndetection: {condition: x}\n", encoding="utf-8",
+    )
+    errors: list[tuple] = []
+    rules = list(SigmaAdapter().parse(
+        tmp_path, corpus="c", on_file_error=lambda path, message: errors.append((path, message)),
+    ))
+    assert [r.title for r in rules] == ["Suspicious PowerShell Encoded Command"]
+    assert [path for path, _ in errors] == [tmp_path / "dated.yml"]
+    assert "partially imported" in errors[0][1]
 
 
 def test_registry_loads_enabled_corpora_and_parses(tmp_path):

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchCorpora, fetchFormats, addCorpus, setCorpusEnabled, removeCorpus, syncCorpus, rebuildCorpora } from '../api/client'
-import type { CorpusConfig, FormatInfo } from '../types'
+import { fetchCorpora, fetchFormats, addCorpus, setCorpusEnabled, removeCorpus, syncCorpus, rebuildCorpora, errorDetail } from '../api/client'
+import type { CorpusConfig, CorpusFileError, CorpusRebuildSummary, FormatInfo } from '../types'
 
 const inp: React.CSSProperties = {
   padding: '6px 8px',
@@ -23,6 +23,21 @@ const btn: React.CSSProperties = {
   cursor: 'pointer',
 }
 
+/** The files a sync or a rebuild could not fully read (#373): a count and the first few paths. */
+function unreadFiles(errors: CorpusFileError[]): string {
+  const n = errors.length
+  const shown = errors.slice(0, 3).map((e) => e.path).join(', ')
+  const more = n > 3 ? ` and ${n - 3} more` : ''
+  return `${n} ${n === 1 ? 'file was' : 'files were'} not fully read: ${shown}${more}. Rules in ${n === 1 ? 'it' : 'them'} may be missing from the index.`
+}
+
+/** What a rebuild says it did not do (#374): each skipped corpus with its reason, and the unread files. */
+function rebuildWarnings(r: CorpusRebuildSummary): string[] {
+  const skipped = r.skipped.map((c) => `${c} was skipped: ${r.skip_reasons[c]}.`)
+  const unread = Object.entries(r.file_errors).map(([corpus, errors]) => `${corpus}: ${unreadFiles(errors)}`)
+  return [...skipped, ...unread]
+}
+
 export default function Settings() {
   const qc = useQueryClient()
   const { data: corporaData } = useQuery({ queryKey: ['corpora'], queryFn: fetchCorpora })
@@ -36,8 +51,15 @@ export default function Settings() {
     qc.invalidateQueries({ queryKey: ['formats'] })
   }
 
+  // The success message of the last rebuild. Each operation clears it when it starts,
+  // so a stale "Rebuilt: …" never sits next to a newer failure (#370).
+  const [msg, setMsg] = useState<string>('')
+
+  // A failed operation keeps its error on the mutation (add, sync, rebuild): it is
+  // rendered below, and TanStack Query clears it when the same operation starts again.
   const add = useMutation({
     mutationFn: (body: { name: string; adapter: string; git?: string; tarball?: string; subdir?: string; license?: string; priority?: number; private?: boolean }) => addCorpus(body),
+    onMutate: () => setMsg(''),
     onSuccess: invalidate,
   })
   const remove = useMutation({
@@ -46,10 +68,12 @@ export default function Settings() {
   })
   const sync = useMutation({
     mutationFn: (name: string) => syncCorpus(name),
+    onMutate: () => setMsg(''),
     onSuccess: invalidate,
   })
   const rebuild = useMutation({
     mutationFn: () => rebuildCorpora(),
+    onMutate: () => setMsg(''),
     onSuccess: invalidate,
   })
   const toggle = useMutation({
@@ -64,7 +88,6 @@ export default function Settings() {
   const [subdir, setSubdir] = useState<string>('')
   const [license, setLicense] = useState<string>('unknown')
   const [priority, setPriority] = useState<string>('')
-  const [msg, setMsg] = useState<string>('')
 
   const selectedFormat = formats.find((f) => f.format === adapter)
   const formatAvailable = selectedFormat ? selectedFormat.available : false
@@ -234,7 +257,7 @@ export default function Settings() {
                 >
                   {c.enabled ? 'Disable' : 'Enable'}
                 </button>
-                {c.git && !c.private && (
+                {(c.git || c.tarball) && !c.private && (
                   <button
                     type="button"
                     style={btn}
@@ -252,6 +275,16 @@ export default function Settings() {
                   Remove
                 </button>
               </div>
+              {sync.isError && sync.variables === c.name && (
+                <p role="alert" style={{ gridColumn: '1 / -1', margin: 0, fontSize: 12, color: 'var(--no)', overflowWrap: 'anywhere' }}>
+                  Redownload failed: {errorDetail(sync.error)}
+                </p>
+              )}
+              {sync.data && sync.variables === c.name && sync.data.file_errors.length > 0 && (
+                <p role="status" style={{ gridColumn: '1 / -1', margin: 0, fontSize: 12, color: 'var(--warn)', overflowWrap: 'anywhere' }}>
+                  Downloaded, but {unreadFiles(sync.data.file_errors)}
+                </p>
+              )}
             </div>
           ))}
         </div>
@@ -328,6 +361,12 @@ export default function Settings() {
           Add
         </button>
       </form>
+      {/* The form stays open on a refused add: only a successful one resets its fields. */}
+      {add.isError && (
+        <p role="alert" style={{ margin: '0 0 20px', fontSize: 12, color: 'var(--no)' }}>
+          The repo was not added: {errorDetail(add.error)}
+        </p>
+      )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <button
@@ -342,8 +381,18 @@ export default function Settings() {
         >
           {rebuild.isPending ? 'Rebuilding…' : 'Rebuild index'}
         </button>
+        {rebuild.isError && (
+          <span role="alert" style={{ fontSize: 12, color: 'var(--no)' }}>
+            Rebuild failed: {errorDetail(rebuild.error)}
+          </span>
+        )}
         {msg && <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>{msg}</span>}
       </div>
+      {rebuild.data && rebuildWarnings(rebuild.data).length > 0 && (
+        <p role="status" style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--warn)', overflowWrap: 'anywhere' }}>
+          Rebuilt with warnings: {rebuildWarnings(rebuild.data).join(' ')}
+        </p>
+      )}
 
       <p style={{ marginTop: 16, fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.6 }}>
         Each corpus is cloned (or, for tarball sources, downloaded and verified) into a gitignored directory; <span className="link">Redownload</span> re-fetches the

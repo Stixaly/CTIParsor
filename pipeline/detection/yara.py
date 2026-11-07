@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from models.detection import DetectionRule, Severity
@@ -45,6 +45,7 @@ class YaraAdapter(RuleCorpusAdapter):
         *,
         corpus: str,
         license: str = "unknown",
+        on_file_error: Callable[[Path, str], None] | None = None,
     ) -> Iterable[DetectionRule]:
         """Parse a YARA corpus directory.
 
@@ -52,6 +53,7 @@ class YaraAdapter(RuleCorpusAdapter):
             root: Root directory containing YARA rule files.
             corpus: Corpus identifier for rule IDs.
             license: License string for the corpus.
+            on_file_error: Called with (path, message) for an unreadable file (#373).
 
         Returns:
             Iterable of `DetectionRule` objects.
@@ -61,7 +63,9 @@ class YaraAdapter(RuleCorpusAdapter):
             for path in root.rglob(pattern):
                 try:
                     text = path.read_text(encoding="utf-8", errors="ignore")
-                except OSError:
+                except OSError as e:
+                    if on_file_error is not None:
+                        on_file_error(path, f"unreadable, skipped: {e}")
                     continue
                 for rule in split_rules(text):
                     if rule.is_private:

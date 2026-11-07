@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 import yaml
@@ -53,6 +53,18 @@ def _case_sensitive_key(key: object) -> bool:
     return not _CASE_SENSITIVE_MODIFIERS.isdisjoint(modifiers)
 
 
+def _one_line(error: Exception) -> str:
+    """A parser error on one line: PyYAML's message spans several (marks and snippet)."""
+    return " ".join(str(error).split())
+
+
+def _file_error(path: Path, message: str, on_file_error: Callable[[Path, str], None] | None) -> None:
+    """Warn about a file that was skipped or partly read, and tell the caller (#373)."""
+    logger.warning(f"[detection] sigma file {path} {message}")
+    if on_file_error is not None:
+        on_file_error(path, message)
+
+
 class SigmaAdapter(RuleCorpusAdapter):
     format = "sigma"
 
@@ -62,22 +74,51 @@ class SigmaAdapter(RuleCorpusAdapter):
         *,
         corpus: str,
         license: str = "unknown",
+        on_file_error: Callable[[Path, str], None] | None = None,
     ) -> Iterable[DetectionRule]:
+        """Yield the rules of every Sigma file under `root`.
+
+        A file that cannot be read, is not UTF-8 or is not YAML is reported with a
+        warning and through `on_file_error(path, message)` (#373). A YAML error stops
+        the reading of that file only: the documents before it are kept. So does an
+        invalid date (`date: 2024-13-45`, a ValueError from PyYAML) or a nesting too
+        deep for the parser (a RecursionError).
+
+        `_to_rule` receives the rank of each rule among the rules of its file: 0 for
+        the first rule produced, then 1, 2… Non-rule documents (a `action: global`
+        collection, say) do not count, so they do not shift the ids (#375). Two rules
+        without an `id` in the same file still get distinct ids.
+        """
         root = Path(root)
         for path in self._iter_rule_files(root):
             try:
                 text = path.read_text(encoding="utf-8")
-                docs = list(yaml.safe_load_all(text))
-            except (OSError, yaml.YAMLError):
-                continue  # unreadable / malformed file — skip, don't crash the build
-            for doc in docs:
+            except UnicodeDecodeError as e:
+                # Not UTF-8 (a stray 0xff, or UTF-16 with a BOM): skipped, never decoded (#372).
+                _file_error(path, f"not UTF-8, skipped: {e}", on_file_error)
+                continue
+            except OSError as e:
+                _file_error(path, f"unreadable, skipped: {e}", on_file_error)  # don't crash the build
+                continue
+            documents = yaml.safe_load_all(text)
+            rank = 0
+            while True:
                 try:
-                    rule = self._to_rule(doc, text, path, corpus, license)
+                    doc = next(documents)
+                except StopIteration:
+                    break
+                except (yaml.YAMLError, ValueError, RecursionError) as e:
+                    # The rules read before this one are already yielded; the rest of the file is lost (#373).
+                    _file_error(path, f"YAML error, partially imported: {_one_line(e)}", on_file_error)
+                    break
+                try:
+                    rule = self._to_rule(doc, text, path, corpus, license, rank)
                 except Exception as e:  # noqa: BLE001 — one bad document must not stop the corpus
                     logger.warning(f"[detection] sigma document in {path} skipped: {e}")
                     continue
                 if rule is not None:
                     yield rule
+                    rank += 1
 
     @staticmethod
     def _iter_rule_files(root: Path) -> Iterable[Path]:
@@ -91,7 +132,22 @@ class SigmaAdapter(RuleCorpusAdapter):
         path: Path,
         corpus: str,
         license: str,
+        index: int = 0,
     ) -> DetectionRule | None:
+        """Build the rule of one YAML document of `text`, or None when it is not a rule.
+
+        `index` is the rank of the rule among the rules of its file (0 for the first
+        rule produced, 1 for the next one…); `parse` counts only the documents that
+        return a rule, so a non-rule document before it does not change its id. It
+        only matters for a document without a native `id`: index 0 keeps the file's
+        `content_hash[:16]` as its key, so single-document files and first rules keep
+        their ids; later ones hash their rank in the file. Two rules without an `id`
+        in one file used to share the file's hash and so one storage id (#375).
+
+        Known limit: `raw` and `content_hash` stay those of the whole file, so every
+        rule of a multi-document file carries the same body (Sigma `action: global`
+        collections need it). `dedup_key` is computed from the document alone.
+        """
         # A Sigma rule is a mapping with at least a title and a detection block.
         if not isinstance(doc, dict) or "title" not in doc or "detection" not in doc:
             return None
@@ -100,7 +156,15 @@ class SigmaAdapter(RuleCorpusAdapter):
 
         content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
         native_id = str(doc.get("id") or "").strip()
-        rule_key = native_id or content_hash[:16]
+        # #375: the file hash is shared by every document of the file, so a later
+        # document without an `id` would take the same storage id as the first one and
+        # replace it in the store. Its position in the file makes its key distinct.
+        if native_id:
+            rule_key = native_id
+        elif index == 0:
+            rule_key = content_hash[:16]
+        else:
+            rule_key = hashlib.sha256(f"{content_hash}:{index}".encode("utf-8")).hexdigest()[:16]
         dedup_key = SigmaAdapter._dedup_key(doc) or content_hash
 
         ls = doc.get("logsource") or {}

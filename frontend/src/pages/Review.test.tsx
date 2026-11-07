@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -32,6 +32,11 @@ const RELS: Relationship[] = [{
   evidence_label: 'observed',
 }]
 
+const NO_BASE_RULES = {
+  job_id: 'job-1', techniques: [], technique_total: 0, rule_total: 0,
+  tag_total: 0, evidence_total: 0, evidence_only: false,
+}
+
 const JOB: Job = {
   id: 'job-1', original_filename: 'r.txt', status: 'for_review',
   report_text: 'APT29 used WellMess and WellMail.', created_at: '', updated_at: '',
@@ -44,6 +49,7 @@ const api = vi.hoisted(() => ({
   fetchEntities: vi.fn(),
   fetchRelationships: vi.fn(),
   finalizeJob: vi.fn(),
+  fetchCoverageReportRules: vi.fn(),
 }))
 
 vi.mock('../api/client', async () => ({
@@ -52,7 +58,7 @@ vi.mock('../api/client', async () => ({
   fetchEntities: api.fetchEntities,
   fetchRelationships: api.fetchRelationships,
   fetchThresholds: () => Promise.resolve({ enabled: true, auto_accept_level: 0.9, control_sample_rate: 0.1 }),
-  fetchCoverageReportRules: () => Promise.resolve({ rules: [] }),
+  fetchCoverageReportRules: api.fetchCoverageReportRules,
   updateEntity: api.updateEntity,
   updateRelationship: api.updateRelationship,
   createEntity: vi.fn(), createRelationship: vi.fn(),
@@ -89,6 +95,7 @@ beforeEach(() => {
   api.fetchJob.mockReset().mockImplementation(() => Promise.resolve(JOB))
   api.fetchEntities.mockReset().mockImplementation(() => Promise.resolve(ENTITIES))
   api.fetchRelationships.mockReset().mockImplementation(() => Promise.resolve(RELS))
+  api.fetchCoverageReportRules.mockReset().mockImplementation(() => Promise.resolve(NO_BASE_RULES))
   localStorage.clear()
 })
 
@@ -371,5 +378,51 @@ describe('Review — a job enriched from the STIX bundle (ADR-0090)', () => {
     fireEvent.click(changeType)
 
     expect(api.updateEntity).not.toHaveBeenCalled()
+  }, 20_000)
+})
+
+// #366 — the Detection rules button and its ZIP follow the promotions made in
+// the Detections panel, including when the report has no base rules.
+describe('Review — the Detection rules export follows promotions (#366)', () => {
+  let fetchSpy: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    fetchSpy = vi.fn(() => Promise.resolve(new Response(new Blob(['zip']), {
+      status: 200, headers: { 'content-disposition': 'attachment; filename="r.zip"' },
+    })))
+    vi.stubGlobal('fetch', fetchSpy)
+    URL.createObjectURL = vi.fn(() => 'blob:review')
+    URL.revokeObjectURL = vi.fn()
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('enables the button and POSTs the promoted id when the report has no base rules', async () => {
+    localStorage.setItem('coverage.promoted.job-1', JSON.stringify(['new-rule']))
+    renderReview()
+    await opened()
+    const button = await screen.findByRole('button', { name: /Detection rules · 1/ })
+    expect(button).toBeEnabled()
+
+    fireEvent.click(button)
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1))
+    expect(fetchSpy).toHaveBeenCalledWith('/api/jobs/job-1/detections/export', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ rule_ids: ['new-rule'] }),
+    }))
+  }, 20_000)
+
+  it('keeps the plain GET when nothing is promoted', async () => {
+    api.fetchCoverageReportRules.mockImplementation(() => Promise.resolve({
+      ...NO_BASE_RULES, rule_total: 3,
+    }))
+    renderReview()
+    await opened()
+    fireEvent.click(await screen.findByRole('button', { name: /Detection rules · 3/ }))
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1))
+    expect(fetchSpy).toHaveBeenCalledWith('/api/jobs/job-1/detections/export')
   }, 20_000)
 })

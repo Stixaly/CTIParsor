@@ -24,7 +24,12 @@ from pipeline.detection.coverage import (
     rules_for_job,
 )
 from pipeline.detection.relevance import propose_for_job
-from pipeline.detection.store import corpus_counts, lookup_rules, rules_for_technique
+from pipeline.detection.store import (
+    canonical_rule_bodies,
+    corpus_counts,
+    lookup_rules,
+    rules_for_technique,
+)
 
 router = APIRouter(prefix="/api", tags=["coverage"])
 
@@ -284,6 +289,9 @@ def _zip_export(
                 "license": r.get("license") or "unknown",
                 "source_ref": r.get("source_ref"),
                 "techniques": r.get("techniques", []),
+                # True for a rule the analyst promoted from outside the report's
+                # coverage (issue #366); its `techniques` is then empty.
+                "promoted": bool(r.get("promoted", False)),
             })
             licenses.setdefault(r.get("license") or "unknown", set()).add(r["corpus"])
             fmt_counts[fmt] = fmt_counts.get(fmt, 0) + 1
@@ -398,15 +406,44 @@ def export_detections(
     )
 
 
+def _promoted_rules(conn, rule_ids: set[str]) -> list[dict]:
+    """Canonical rules the analyst promoted from outside the report's coverage (#366).
+
+    Unknown and non-canonical ids come back absent: `canonical_rule_bodies` filters
+    on `is_canonical`, so they are ignored rather than refused. The shape matches
+    `_load_rules`, with `techniques` empty and `promoted` set.
+    """
+    bodies = canonical_rule_bodies(conn, rule_ids)
+    if not bodies:
+        return []
+    meta = {r["id"]: r for r in lookup_rules(conn, bodies.keys())}
+    return [
+        {
+            "id": rid, **body,
+            "format": meta.get(rid, {}).get("format", "sigma"),
+            "severity": meta.get(rid, {}).get("severity", "unknown"),
+            "techniques": [],
+            "promoted": True,
+        }
+        for rid, body in sorted(bodies.items())
+    ]
+
+
 @router.post("/jobs/{job_id}/detections/export")
 def export_detections_selection(job_id: str, selection: ExportSelection):
     """Download exactly the requested rules as a ZIP (ADR-0022).
 
     The axis-filtered GET cannot express an arbitrary rule set; the granular
-    coverage UI selects per rule, so it POSTs the ids. Ids are intersected with
-    the rules linkable to this report — the export can never reach rules outside
-    the report's technique set. Same archive layout, manifest and README as the
-    GET.
+    coverage UI selects per rule, so it POSTs the ids. An id linkable to this
+    report is packaged as before. An id the report does not reach is packaged
+    too when it is a canonical rule of the store, as a *promoted* rule (issue
+    #366): the analyst added it by hand in the Detections panel, so it is not
+    in the coverage the export used to intersect with and was dropped silently.
+    `/rules/lookup` already serves those bodies without job scope, so the export
+    hands over nothing it did not already expose. Unknown and non-canonical ids
+    are ignored. At most `RULE_LOOKUP_MAX` promoted ids per request, refused
+    before any body is read. Same archive layout, manifest and README as the
+    GET; the manifest marks each promoted rule.
     """
     with get_conn() as jobs_conn:
         row = jobs_conn.execute(
@@ -420,12 +457,24 @@ def export_detections_selection(job_id: str, selection: ExportSelection):
             raise HTTPException(400, "rule_ids must be a non-empty list")
         all_rules = _load_rules(get_rule_conn(), jobs_conn, job_id, body_ids=wanted)
 
-    if not all_rules:
+    # Requested ids the report's coverage does not hold: the promotions. Counted
+    # before their bodies are loaded.
+    outside = wanted - {r["id"] for r in all_rules}
+    if len(outside) > RULE_LOOKUP_MAX:
+        raise HTTPException(
+            400, f"at most {RULE_LOOKUP_MAX} promoted rule ids outside this report per export",
+        )
+    promoted = _promoted_rules(get_rule_conn(), outside) if outside else []
+
+    if not all_rules and not promoted:
         raise HTTPException(404, "No detection rules match this report's techniques")
 
-    rules = [r for r in all_rules if r["id"] in wanted]
+    rules = [r for r in all_rules if r["id"] in wanted] + promoted
     if not rules:
         raise HTTPException(404, "No requested rule matches this report")
+    # The promoted rules join the archive's universe too, so the manifest's
+    # `excluded` block counts them as kept rather than as negative.
+    all_rules = all_rules + promoted
 
     # The manifest records the COUNT of requested ids, not the list: 10,000 ids
     # copied into the manifest would double its size without audit value.

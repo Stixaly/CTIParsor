@@ -8,7 +8,11 @@ and local overrides. The overlay is merged over the committed file (override by
 """
 from __future__ import annotations
 
-from collections.abc import Iterable
+import fcntl
+import os
+import threading
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import yaml
@@ -60,9 +64,19 @@ def _local_overlay_path(config_path: Path) -> Path:
     return config_path.with_name(f"{config_path.stem}.local{config_path.suffix}")
 
 
+#: The keys that name where a corpus's files come from. An overlay that names one
+#: of them replaces the committed source (#368); the other one is dropped.
+_SOURCE_KEYS = ("git", "tarball")
+
+
 def _merged(path: Path) -> list[dict]:
     """Committed registry with the local overlay merged over it (override by
-    `name`, append new). Includes disabled entries. See ADR-0006 Rev 3."""
+    `name`, append new). Includes disabled entries. See ADR-0006 Rev 3.
+
+    An overlay entry that names a source (`git` or `tarball`) chooses the source of
+    the merged entry: a source key the overlay does not set is dropped from the
+    committed entry, so the merged corpus never carries two URLs (#368). An overlay
+    with no source (e.g. `{"name": X, "enabled": False}`) keeps the committed source."""
     merged: dict[str, dict] = {}
     order: list[str] = []
     for entry in [*_read_corpora(path), *_read_corpora(_local_overlay_path(path))]:
@@ -70,6 +84,10 @@ def _merged(path: Path) -> list[dict]:
         if not name:
             continue
         if name in merged:
+            if any(entry.get(k) for k in _SOURCE_KEYS):
+                for k in _SOURCE_KEYS:
+                    if not entry.get(k):
+                        merged[name].pop(k, None)
             merged[name].update(entry)   # local overrides committed by name
         else:
             merged[name] = dict(entry)
@@ -92,30 +110,88 @@ def load_corpora(config_path: str | Path) -> list[dict]:
 
 # ── Overlay writes (settings UI, ADR-0007) — only ever touch the gitignored overlay ──
 
-def write_overlay(config_path: str | Path, corpora: list[dict]) -> None:
-    _local_overlay_path(Path(config_path)).write_text(
+#: Serialises the read-modify-write of the overlay (#371). The RLock covers the
+#: threads of this process; the flock in `_overlay_lock` covers other uvicorn
+#: workers (API_WORKERS > 1), which have their own RLock.
+_OVERLAY_LOCK = threading.RLock()
+_HELD = threading.local()   # this thread's nesting depth inside _overlay_lock
+
+
+@contextmanager
+def _overlay_lock(config_path: Path) -> Iterator[None]:
+    """Hold the overlay lock for a whole read-modify-write. The flock is taken on
+    the registry's directory, not on a `.lock` file, so no untracked file appears
+    beside the gitignored overlay. Closing the descriptor releases the flock.
+    A flock on a second descriptor would wait on the first even in the same
+    thread, so a nested call (holding the RLock already) takes only the RLock."""
+    with _OVERLAY_LOCK:
+        if getattr(_HELD, "depth", 0):
+            _HELD.depth += 1
+            try:
+                yield
+            finally:
+                _HELD.depth -= 1
+            return
+        fd = os.open(config_path.parent, os.O_RDONLY)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            _HELD.depth = 1
+            try:
+                yield
+            finally:
+                _HELD.depth = 0
+        finally:
+            os.close(fd)
+
+
+def _write_overlay_file(config_path: str | Path, corpora: list[dict]) -> None:
+    """Replace the overlay in one step: write a sibling `.tmp`, then `os.replace` it
+    over the overlay, so a reader or a crash never sees half a file. The caller
+    holds `_overlay_lock`.
+
+    The path is resolved first (#371). In the Docker image the overlay is a symlink
+    into the state volume (`/app/detection_corpora.local.yaml` → `/app/state/...`),
+    and `/app` is read-only: a `.tmp` beside the link would fail, and `os.replace`
+    over the link would turn it into a plain file that never reaches the volume. So
+    the `.tmp` sits beside the real file, and the replace stays atomic on one
+    filesystem. `resolve()` also follows a link whose target does not exist yet."""
+    overlay = _local_overlay_path(Path(config_path)).resolve()
+    tmp = overlay.with_name(overlay.name + ".tmp")
+    tmp.write_text(
         yaml.safe_dump({"corpora": corpora}, sort_keys=False, allow_unicode=True),
         encoding="utf-8",
     )
+    os.replace(tmp, overlay)
+
+
+def write_overlay(config_path: str | Path, corpora: list[dict]) -> None:
+    """Replace the overlay under `_overlay_lock`. Read-modify-write callers must
+    hold the lock themselves across the read (see add_corpus)."""
+    with _overlay_lock(Path(config_path)):
+        _write_overlay_file(config_path, corpora)
 
 
 def add_corpus(config_path: str | Path, entry: dict) -> list[dict]:
-    """Add/replace a corpus in the local overlay (by `name`). Returns the overlay list."""
-    overlay = [c for c in _read_corpora(_local_overlay_path(Path(config_path)))
-               if c.get("name") != entry.get("name")]
-    overlay.append(entry)
-    write_overlay(config_path, overlay)
+    """Add/replace a corpus in the local overlay (by `name`). Returns the overlay list.
+    The read, the change and the write form one locked section (#371)."""
+    with _overlay_lock(Path(config_path)):
+        overlay = [c for c in _read_corpora(_local_overlay_path(Path(config_path)))
+                   if c.get("name") != entry.get("name")]
+        overlay.append(entry)
+        _write_overlay_file(config_path, overlay)
     return overlay
 
 
 def remove_corpus(config_path: str | Path, name: str) -> list[dict]:
     """Remove a corpus. If it's defined in the committed registry, write a disable
-    override into the overlay instead (we never edit the committed file)."""
+    override into the overlay instead (we never edit the committed file).
+    The read, the change and the write form one locked section (#371)."""
     path = Path(config_path)
-    overlay = [c for c in _read_corpora(_local_overlay_path(path)) if c.get("name") != name]
-    if any(c.get("name") == name for c in _read_corpora(path)):
-        overlay.append({"name": name, "enabled": False})   # disable a committed corpus
-    write_overlay(config_path, overlay)
+    with _overlay_lock(path):
+        overlay = [c for c in _read_corpora(_local_overlay_path(path)) if c.get("name") != name]
+        if any(c.get("name") == name for c in _read_corpora(path)):
+            overlay.append({"name": name, "enabled": False})   # disable a committed corpus
+        _write_overlay_file(config_path, overlay)
     return overlay
 
 

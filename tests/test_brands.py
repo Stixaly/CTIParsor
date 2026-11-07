@@ -14,6 +14,7 @@ from pipeline.detection.brands import (
     brand_tokens,
     campaign_tokens,
     cve_evidence,
+    rebuild_rule_text,
 )
 
 
@@ -68,6 +69,36 @@ def test_the_same_domain_twice_counts_once():
     domains = ["okta-portal.com", "okta-portal.com", "keyokta.com", "oktaenroll.com"]
     tokens = campaign_tokens(domains)
     assert tokens.get("okta") == 3
+
+
+def test_three_distinct_domains_sharing_a_name_count_as_three_issue_361():
+    """Three TLDs of one name are three domains, not one label seen three times.
+
+    Before the fix the labels were deduplicated after the TLD was cut, so this
+    collapsed to `{}` and the coverage walk never searched for the theme.
+    """
+    domains = ["frostledger.com", "frostledger.net", "frostledger.org"]
+    assert campaign_tokens(domains) == {"frostledger": 3}
+
+
+def test_one_domain_repeated_three_times_is_still_no_theme_issue_361():
+    domains = ["frostledger.com"] * 3
+    assert campaign_tokens(domains) == {}
+
+
+def test_distinct_names_still_recur_across_domains_issue_361():
+    domains = ["idokta.com", "keyokta.com", "oktaenroll.com"]
+    assert campaign_tokens(domains) == {"okta": 3}
+
+
+def test_spellings_of_one_host_count_once():
+    """Case, a trailing dot and a leading `www.` name the same host.
+
+    `www.frostledger.com` and `frostledger.com` are one domain, so the two
+    entries plus `frostledger.net` make two domains, not three.
+    """
+    domains = ["Frostledger.com", "www.frostledger.com.", "frostledger.net"]
+    assert campaign_tokens(domains) == {}
 
 
 def test_domain_stopwords_never_become_brands(temp_db):
@@ -195,3 +226,69 @@ def test_cve_evidence_does_not_match_a_different_cve(temp_db):
     conn = _store(temp_db.get_rule_conn(), rows)
     evidence = cve_evidence(conn, ["CVE-2024-3400"])
     assert evidence == {}
+
+
+# ── rebuild_rule_text (#363) ─────────────────────────────────────────────────
+
+def test_rebuild_rule_text_indexes_canonical_rules_and_skips_empty_bodies(temp_db):
+    conn = temp_db.get_rule_conn()
+    rules = [
+        ("r1", "Okta FastPass Phishing", "", 1),
+        ("r2", "", "", 1),                       # empty body: counted, not indexed
+        ("r3", "Okta FastPass copy", "", 0),     # demoted by dedup: not indexed
+    ]
+    for rid, title, description, canonical in rules:
+        conn.execute(
+            "INSERT INTO detection_rules (id, corpus, native_key, title, description, is_canonical) "
+            "VALUES (?,?,?,?,?,?)",
+            (rid, "test", rid, title, description, canonical),
+        )
+    # A row left behind for r3 from before it was demoted: the rebuild drops it.
+    conn.execute("INSERT INTO rule_text (rule_id, body) VALUES (?,?)", ("r3", "okta fastpass copy"))
+    conn.commit()
+
+    result = rebuild_rule_text(conn)
+    assert result == {"rows": 1, "empty_bodies": 1}
+    rows = conn.execute("SELECT rule_id, body FROM rule_text").fetchall()
+    assert [(r[0], r[1]) for r in rows] == [("r1", "okta fastpass phishing")]
+
+
+# ── Stale index: a demoted rule is never a match (#362) ──────────────────────
+
+def test_a_demoted_rule_is_not_a_brand_match_issue_362(temp_db):
+    conn = _store(temp_db.get_rule_conn(), [("r1", "Okta FastPass Phishing", "")])
+    # Demoted by dedup after the index was built: its row is still there.
+    conn.execute(
+        "INSERT INTO detection_rules (id, corpus, native_key, title, description, is_canonical) "
+        "VALUES (?,?,?,?,?,0)",
+        ("r2", "test", "r2", "Okta FastPass copy", ""),
+    )
+    conn.execute("INSERT INTO rule_text (rule_id, body) VALUES (?,?)", ("r2", "okta fastpass copy"))
+    conn.commit()
+
+    tokens = brand_tokens(conn, ["oktaenroll.com", "keyokta.com", "myoktasso.com"])
+    assert [(t.token, t.rules) for t in tokens] == [("okta", 1)]
+    assert set(brand_evidence(conn, tokens)) == {"r1"}
+
+
+def test_a_demoted_rule_is_not_a_cve_match_issue_362(temp_db):
+    conn = _store(temp_db.get_rule_conn(), [("r1", "Exploit for CVE-2024-3400", "")])
+    conn.execute(
+        "INSERT INTO detection_rules (id, corpus, native_key, title, description, is_canonical) "
+        "VALUES (?,?,?,?,?,0)",
+        ("r2", "test", "r2", "Exploit for CVE-2024-3400 copy", ""),
+    )
+    conn.execute("INSERT INTO rule_text (rule_id, body) VALUES (?,?)",
+                 ("r2", "exploit for cve-2024-3400 copy"))
+    conn.commit()
+
+    assert set(cve_evidence(conn, ["CVE-2024-3400"])) == {"r1"}
+
+
+def test_rebuild_rule_text_writes_in_batches(temp_db):
+    conn = _store(temp_db.get_rule_conn(), [
+        ("r1", "Alpha", ""), ("r2", "Beta", ""), ("r3", "Gamma", ""),
+    ])
+    result = rebuild_rule_text(conn, batch=2)
+    assert result == {"rows": 3, "empty_bodies": 0}
+    assert conn.execute("SELECT COUNT(*) FROM rule_text").fetchone()[0] == 3

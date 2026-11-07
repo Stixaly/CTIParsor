@@ -91,6 +91,35 @@ def test_the_other_identity_of_an_ambiguous_form_is_excluded(index, sentence, su
     assert judge(index, sentence, surface, other).reason == "other_identity"
 
 
+@pytest.mark.parametrize("sentence, outcome", [
+    ("Turla isn't known as Snake", "unresolved"),                  # issue #359
+    ("Turla wasn’t known as Snake", "unresolved"),                 # issue #359, typographic apostrophe
+    ("Turla is not known as Snake", "unresolved"),
+    ("Turla aren't known as Snake", "unresolved"),
+    ("Turla can't be known as Snake", "unresolved"),
+    ("Turla, also known as Snake", "resolved"),                    # the affirmative control
+])
+def test_a_contracted_negation_is_no_alias_issue_359(index, sentence, outcome):
+    assert judge(index, sentence, "Snake", "G0010").outcome == outcome
+
+
+@pytest.mark.parametrize("sentence, outcome", [
+    ("Judy, a report about malware, was published yesterday.", "unresolved"),    # issue #360
+    ("Judy, a report on malware, was published yesterday.", "unresolved"),       # issue #360
+    ("Judy, a report about gardening, was published yesterday.", "unresolved"),
+    ("Judy malware infected Android devices.", "resolved"),                       # the affirmative control
+    ("Judy, the Android malware, subscribed victims.", "resolved"),
+    ("Judy, a malware family, was seen.", "resolved"),
+    ("Judy, an adware family, was seen.", "resolved"),
+    ("Judy, a family of malware, was found.", "resolved"),                        # issue #360
+    ("Judy, a piece of malware, was found.", "resolved"),                         # issue #360
+    ("Judy, a new and persistent malware, was found.", "resolved"),               # issue #360
+    ("Judy, a variant of the malware, was found.", "resolved"),                   # issue #360
+])
+def test_a_preposition_before_the_type_is_no_apposition_issue_360(index, sentence, outcome):
+    assert judge(index, sentence, "Judy", "S0325").outcome == outcome
+
+
 NEGATIVES = [
     ("Joker’s Stash closed", "Joker", "conflicting_sense"),
     ("Joker's Stash closed", "Joker", "conflicting_sense"),

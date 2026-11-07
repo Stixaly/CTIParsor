@@ -86,6 +86,7 @@ def test_git_command_clones_when_path_missing_and_pulls_when_present(tmp_path: P
     assert cmd[-5:] == ["clone", "--depth", "1", "https://example.com/repo.git", str(path)]
 
     path.mkdir()
+    (path / "README").write_text("", encoding="utf-8")   # a checkout is present; an empty folder is cloned (#367)
     cmd = git_command(corpus)
     assert cmd[-4:] == ["-C", str(path), "pull", "--ff-only"]
 
@@ -398,6 +399,9 @@ def test_sync_corpus_dispatches_tarball_git_and_manual(tmp_path: Path, monkeypat
         stderr = ""
 
     monkeypatch.setattr(sync_mod.subprocess, "run", lambda *a, **kw: FakeProc())
+    # tmp_path is a plain folder, not a clone: the clone check has its own tests
+    # (test_sync_remote_issue_367.py), this one is about the dispatch to git.
+    monkeypatch.setattr(sync_mod, "clone_mismatch", lambda corpus: None)
     assert sync_corpus({"git": "https://u/x.git", "path": str(tmp_path)}) == (True, "pulled")
 
     ok, detail = sync_corpus({"path": "p"})

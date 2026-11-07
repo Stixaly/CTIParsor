@@ -361,6 +361,7 @@ current truth.
 | Evaluation | `test_measure_ner_precision.py` | 71 | ADR-0089's decision rule in `scripts/measure_ner_precision.py`: each gate's threshold at its boundary (M1 +5 points, M2 and M4a one gold entity net, M4a and M4b one point, M5 2%), the float edge cases, void when M0 fails, incomplete when the train replay is missing or is not the one named; which records are run again (error or unreadable, a Stage 3 request with no answer, a CyNER or spaCy pass that did not run) and which are the model's answer; documents left out, a document missing from both runs included; the configuration and `run.json` differences between two runs |
 | NER | `test_stage2e_gliner.py` | 16 | per-type cutoffs, model loading (no deprecated `resume_download`), batch fallback, merge precedence |
 | NER | `test_stage_registry.py` | 4 | registry merging, deduplication, case insensitivity |
+| NER | `test_gazetteer_context.py` | 89 | gazetteer context: a contracted negation is no alias (#359), a preposition before the type is no apposition (#360) |
 | **Aliases** | `test_aliases.py` | 6 | alias resolution, MITRE ID mapping, surface forms |
 | **Aliases** | `test_alias_disambiguation.py` | 11 | type-aware resolution, alias isolation, canonical name handling |
 | LLM enrich | `test_stage3.py` | 80 | LLM enrichment, JSON parsing, deduplication, prompt sanitization, the document-level pass reaching the provider whole |
@@ -381,6 +382,7 @@ current truth.
 | STIX mapping | `test_stage4.py` | 84 | SDO/SCO/SRO build, alias merging, IoC coverage, observable routing (ADR-0041, ADR-0062), a URL that is not a URI left out with its ledger reason |
 | STIX mapping | `test_stage4_paths.py` | 52 | every observable to its SCO and pattern, named SDOs, PAP, embedded-rule Indicators, pin budget/grounding/malformed policies, relationship guards, CVE/CVSS and campaign merges, stix2 refusals |
 | STIX mapping | `test_stix_rel_spec.py` | 4 | listed vs allowed relationships: common verbs, unknown types, direction |
+| STIX mapping | `test_network_traffic.py` | 22 | network flows: a flow and its host are one observable (#364); TCP and UDP flows to one host are two Indicators, a single flow keeps its protocol in the pattern, and two observables with one pattern share one Indicator (#365); what the text states is read, nothing is guessed, an out-of-range port is dropped |
 | STIX mapping | `test_stix_ids.py` | 19 | ids equal to OpenCTI's standard ids: 15 values produced by pycti's own `generate_id` (ADR-0066), case and CAPEC rules |
 | STIX mapping | `test_bundle_ledger.py` | 24 | mapping ledger: every row outcome and change, origins, 4b alias merge, API round-trip (ADR-0061); an IoC `indicates` a technique through its Indicator, turned around when written backwards (ADR-0065) |
 | STIX mapping | `test_stix_self_edges.py` | 4 | self-edge prevention, endpoint validation, bundle integrity |
@@ -412,37 +414,48 @@ current truth.
 | **Relationship policy** | `test_pin_evidence.py` | 31 | term extraction, sentence indexing, grounding gates, pins on listed observable pairs |
 | **Relationship policy** | `test_policy_last_run.py` | 17 | stats extraction, database queries, bundle handling |
 | **Relationship policy** | `test_policy_rule_validation.py` | 15 | policy validation, API rejection, graph survival |
-| **Rule adapters** | `test_sigma_adapter.py` | 8 | rule parsing, tactic skipping, registry loading |
+| **Rule adapters** | `test_sigma_adapter.py` | 18 | rule parsing, tactic skipping, registry loading, a non-UTF-8 file or a broken document logged by path while the valid rules are kept (#372, #373), two documents without `id` in one file get distinct ids (#375) |
 | **Rule adapters** | `test_suricata_yara_adapters.py` | 17 | Suricata and YARA corpora end to end: ids, severity, header atoms from bracketed lists, dedup keys, private rules, file extensions |
 | **Rule adapters** | `test_sigma_negation.py` | 15 | negation logic, selector expansion, condition parsing |
 | **Rule adapters** | `test_multiformat_atoms.py` | 47 | atom extraction, buffer handling, negation, metadata |
 | **Rule adapters** | `test_escape_unescaping.py` | 12 | YARA/Suricata unescaping, backslash handling, edge cases |
 | **Rule adapters** | `test_atom_normalisation.py` | 6 | basename stripping, lowercase enforcement, atom trimming |
+| **Rule adapters** | `test_detection_builder_issue_373.py` | 2 | `rebuild_store` after a broken YAML document keeps the valid rules and lists the file in `file_errors`; a non-UTF-8 file is listed by its path (#373) |
+| **Rule adapters** | `test_sigma_ids_issue_375.py` | 2 | two Sigma documents without `id` in one file become two rows with their own atoms, and a rebuild keeps both (#375) |
+| **Rule adapters** | `test_registry_concurrency_issue_371.py` | 2 | overlapping `add_corpus` calls keep both overlay entries (the overlay write is locked); a failed overlay write keeps the previous overlay (#371) |
+| **Rule adapters** | `test_registry_source_issue_368.py` | 4 | the merged registry entry carries one source only, the one the overlay chose (tarball over Git remote and back), also after `add_corpus` (#368) |
+| **Rule adapters** | `test_detection_sync.py` | 35 | corpus sync: tarball members that are unsafe are skipped, the Git and tarball dispatch, the clone check stubbed out here (its own tests are in `test_sync_remote_issue_367.py`) |
 | **Rule dedup** | `test_detection_dedup.py` | 10 | dedup key logic, canonical election, provenance folding |
 | **Rule dedup** | `test_provenance_dedup.py` | 18 | dedup clustering, provenance folding, deterministic merging |
 | **Rule relevance** | `test_detection_relevance.py` | 29 | atom mapping, platform factors, IDF weighting, ranking |
 | **Rule relevance** | `test_technique_idf.py` | 21 | technique counting, IDF calculation, rule mapping |
 | **Rule relevance** | `test_relevance_corroboration.py` | 8 | corroboration scoring, match weighting, proposal flags |
-| **Rule relevance** | `test_control.py` | 17 | value discrimination, domain guards, host classification |
-| **Rule relevance** | `test_brands.py` | 12 | brand detection, domain themes, evidence preference |
+| **Rule relevance** | `test_control.py` | 19 | value discrimination, domain guards, host classification |
+| **Rule relevance** | `test_brands.py` | 23 | brand detection, domain themes, evidence preference, three TLDs of one name counted as three domains and one host spelled several ways counted once (#361), `rebuild_rule_text` over canonical rules and in batches, a demoted rule never a brand or CVE match (#362) |
 | **Rule relevance** | `test_observables_domain_guard.py` | 10 | domain validation, filename rejection, URL handling |
-| **Detection coverage** | `test_detection_coverage.py` | 48 | scoring policy, format splitting, export selection, evidence |
+| **Rule relevance** | `test_rule_text_rebuild_issue_363.py` | 2 | `rebuild_store` refills the `rule_text` title index it erased, so the CVE title match survives a Rebuild index; a rule demoted by dedup is not indexed (#363) |
+| **Rule relevance** | `test_stale_rule_text_issue_362.py` | 1 | a re-elected canonical rule is not served from a stale `rule_text` index: every title read joins on `is_canonical = 1` (#362) |
+| **Detection coverage** | `test_detection_coverage.py` | 51 | scoring policy, format splitting, export selection (a canonical rule outside the report's techniques is packaged, #366), evidence |
 | **Detection coverage** | `test_detection_artifacts.py` | 26 | artifact scoring, evidence capping, folding, vocabulary |
 | **Detection coverage** | `test_detection_phases.py` | 15 | tactic mapping, off-matrix handling, phase counting, a column for every enterprise tactic on every committed ATT&CK track (ADR-0087) |
 | **Detection coverage** | `test_mitre_db.py` | 8 | ATT&CK/CAPEC index lookup and search ranking, missing or corrupt index |
 | **Detection coverage** | `test_coverage_artifacts_api.py` | 5 | artifact coverage routes, payload shape, 404 handling |
 | **Export filters** | `test_export_filters.py` | 13 | facet totals, format filtering, license exclusion, manifest |
 | **Export filters** | `test_rule_lookup.py` | 8 | rule lookup, metadata retrieval, license handling |
+| **Export filters** | `test_export_promoted_issue_366.py` | 4 | the rule-id export packages a promoted rule next to a covered one, alone (no 404), an unknown id is ignored, promoted ids are capped at the lookup maximum; the manifest marks promotions (#366) |
 | **Rule synthesis** | `test_synth_sigma.py` | 47 | rule synthesis, value validation, path escaping, stability |
 | API | `test_api_routes.py` | 11 | health checks, job listing, upload validation, progress |
 | API | `test_attack_api.py` | 5 | `GET /api/attack/index`: each committed ATT&CK track served byte for byte with `X-Attack-Release`, the sha256 ETag and its 304, the 19.2 ETag sent to an API on 20.0 gets the 20.0 index, a track without an index answers 404 (ADR-0087) |
 | API | `test_relationships_api.py` | 18 | relationship creation, label coercion, patch validation, dates, `POST /relationships/bulk` (`human_bulk`, journaled, other jobs untouched — ADR-0065) |
-| API | `test_settings_api.py` | 31 | corpus listing, overlay management, rebuild ingestion, formats, unsafe paths/remotes/tarballs, enable/disable, per-corpus sync |
+| API | `test_settings_api.py` | 53 | corpus listing, overlay management, rebuild ingestion, formats, unsafe paths/remotes/tarballs, enable/disable, per-corpus sync |
+| API | `test_sync_remote_issue_367.py` | 12 | a Redownload refuses a folder that is not a clone of the configured remote (409, no fetch), compares remotes without credentials, accepts the same remote spelled differently, clones a missing path, skips tarball corpora (#367) |
+| API | `test_sync_corpora.py` | 9 | `sync_corpora`: a folder that is not its remote's clone fails before git runs (#367), a corpus managed by hand is skipped and is not a failure |
+| API | `test_sync_subdir_issue_374.py` | 5 | a sync whose `subdir` is missing answers 422 naming it and keeps the index; a correct subdir answers 200 with its rule count and `file_errors` (#374) |
 | API | `test_jobs_routes.py` | 23 | job list/get/status, finalize, delete (rows and every file), retention sweep, source file, bundle and ledger |
 | API | `test_entities_api.py` | 13 | manual entities, edit, bulk accept/reject/reset, delete, refusals |
 | API | `test_policy_api.py` | 22 | relationship policy round trip, default fallback, every refused shape |
 | API | `test_logging_config.py` | 9 | request ids, JSON/text formatters, `setup_logging` handlers, log helpers |
-| Persistence | `test_persistence.py` | 7 | backup consistency, migration idempotency, label persistence |
+| Persistence | `test_persistence.py` | 13 | backup consistency, migration idempotency, label persistence |
 | Persistence | `test_db_transaction.py` | 6 | transaction rollback, commit, exception handling |
 | Persistence | `test_container_env.py` | 4 | `CTIPARSOR_GIT_REV` fallback when `git` is absent or fails (ADR-0044) — `_path_from_env`/`BACKUP_DIR` and `CTIPARSOR_DB_PATH` were removed along with SQLite (ADR-0053) |
 | Queue | `test_worker.py` | 47 | the worker's terminal states (no bundle, timeout, abort, reclaimed, failed backup), hook guards, subprocess thread caps, the crash watcher, the finalize rebuild applying reviewer rejections and reading legacy/ADR-0063 dates, Stage 5's verdict deciding what a rebuild may complete (ADR-0084), a run storing its build record (ADR-0086) |
@@ -951,7 +964,13 @@ checks the disabled Change type. The browser journey (2026-10-31) adds
 `components/ProgressModal.test.tsx` (4 tests): the progress dialog's focus
 moves in, stays in under Tab and Shift+Tab, Escape closes it, and on close the
 focus goes back to what had it at the opening, or to New report when that is
-gone. ESLint runs
+gone. Branch `claude/fix-issues-359-375` (2026-11-06) adds
+`pages/Settings.test.tsx` (17 `it(` cases: the Redownload and rebuild warnings and
+the 422 of a missing `subdir`, #367, #374) and `hooks/usePromotedRules.test.ts`
+(5: promotions shared between two instances of the hook and kept per job in
+localStorage, #366). It adds two #366 cases to `pages/Review.test.tsx`, which
+now holds 22 `it(` calls (20 before the branch, static count; `npm test` was not
+run for this count). ESLint runs
 the TypeScript rules, `rules-of-hooks` and `exhaustive-deps` as errors, and
 the formatting the code already follows (`frontend/eslint.config.js`).
 `npm run check` runs lint, `tsc` and Vitest, the three steps of CI's frontend

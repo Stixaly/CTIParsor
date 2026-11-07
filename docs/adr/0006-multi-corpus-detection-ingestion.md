@@ -136,7 +136,9 @@ privacy is **per-corpus**, handled by a **two-tier registry**:
 | `detection_corpora.local.yaml` | gitignored | private corpuses + local overrides |
 
 `load_corpora` merges the local overlay over the committed file (override by
-`name`, append new). All clones stay gitignored (`/corpora/`). Sync uses ambient
+`name`, append new). An overlay entry that names a source (`git` or `tarball`)
+replaces the committed source: the other one is dropped, so a merged corpus has
+one URL only (#368). All clones stay gitignored (`/corpora/`). Sync uses ambient
 git auth — public needs none, private uses the SSH agent. `license` and the
 `private` flag stay per-corpus.
 

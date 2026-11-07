@@ -1,4 +1,4 @@
-import type { Job, Entity, Relationship, StixBundle, BundleLedger, CoverageResult, CoverageRule, CoverageReportRules, DetectionProposals, DetectionCorpus, CorpusConfig, FormatInfo, ExportFacets, ExportSelection, ExportAxis, LastRun, RuleLookupResult, ThresholdsInfo, AttackIndex, MitreEntry, BaselineIntake, BaselineStatus } from '../types'
+import type { Job, Entity, Relationship, StixBundle, BundleLedger, CoverageResult, CoverageRule, CoverageReportRules, DetectionProposals, DetectionCorpus, CorpusConfig, CorpusRebuildSummary, CorpusSyncResult, FormatInfo, ExportFacets, ExportSelection, ExportAxis, LastRun, RuleLookupResult, ThresholdsInfo, AttackIndex, MitreEntry, BaselineIntake, BaselineStatus } from '../types'
 
 const BASE = '/api'
 
@@ -232,9 +232,9 @@ export const setCorpusEnabled = (name: string, enabled: boolean) =>
 export const removeCorpus = (name: string) =>
   req<{ ok: boolean; corpora: CorpusConfig[] }>(`/settings/corpora/${encodeURIComponent(name)}`, { method: 'DELETE' })
 export const syncCorpus = (name: string) =>
-  req<{ ok: boolean; detail: string; corpora: CorpusConfig[] }>(`/settings/corpora/${encodeURIComponent(name)}/sync`, { method: 'POST' })
+  req<CorpusSyncResult>(`/settings/corpora/${encodeURIComponent(name)}/sync`, { method: 'POST' })
 export const rebuildCorpora = () =>
-  req<{ total: number; written: Record<string, number>; skipped: string[] }>('/settings/corpora/rebuild', { method: 'POST' })
+  req<CorpusRebuildSummary>('/settings/corpora/rebuild', { method: 'POST' })
 
 // ── Relationship Policy ───────────────────────────────────────────────────────
 export const getRelationshipPolicy = () =>

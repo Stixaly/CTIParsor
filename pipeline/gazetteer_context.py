@@ -157,6 +157,12 @@ def _conflicting(text: str, start: int, end: int, u0: int, u1: int, phrases) -> 
 
 _STOP = (r"(?:and|or|nor|of|in|on|to|with|for|the|a|an|by|from|is|was|are|were|as|at|that|which|this"
          r"|these|its|it|not|but|than|vs|versus)")
+# Between "a" and the type noun of an apposition, a preposition makes the head
+# another noun: "a report about malware" is a report, not a malware (issue #360).
+# Only the words that change the head or open a clause block it, so "a family of malware"
+# and "a variant of the malware" keep the malware head: of, and, or, the, a, an, its, as stay allowed.
+_APPOS_BLOCK = (r"(?:about|regarding|against|into|onto|via|under|over|between|among|within|without|like|per"
+                r"|concerning|on|in|to|for|from|by|with|at|than|vs|versus|that|which|is|was|are|were|not|but)")
 _ID_AFTER = re.compile(r"((?:[ \t]+[A-Za-z][\w-]*){0,3}?)[ \t]*[(\[][ \t]*(?:ID:?[ \t]*)?([GS]\d{4})[ \t]*[)\]]")
 _ATTACK_LINK = re.compile(r"\]\((?:https?://)?attack\.mitre\.org/(?:software|groups)/([GS]\d{4})/?[)#]", re.I)
 
@@ -175,8 +181,9 @@ def _attached_id(text: str, start: int, end: int) -> str | None:
 _P = r"[\s,;:(\[\"“”'’]"
 _CUE = (r"(?:also\s+known\s+as|also\s+called|also\s+referred\s+to\s+as|also\s+tracked\s+as|known\s+as"
         r"|a\.k\.a\.?|aka|dubbed)")
+# A negated gap is no alias, contracted (isn't, wasn’t) or not.
 _NEG = r"(?:not|no|never|nor|unlike|unrelated|distinct|different)"
-_ALIAS_GAP = re.compile(rf"{_P}*(?:(?!{_NEG}\b)[\w-]+{_P}+){{0,3}}?{_CUE}{_P}*(?:the\s+)?", re.I)
+_ALIAS_GAP = re.compile(rf"{_P}*(?:(?!{_NEG}\b|[\w-]*n['’]t\b)[\w-]+{_P}+){{0,3}}?{_CUE}{_P}*(?:the\s+)?", re.I)
 _APPOSITIVE_GAP = re.compile(r",\s+the\s+", re.I)
 _MAX_GAP = 80
 
@@ -209,7 +216,8 @@ def _alias(text: str, start: int, end: int, u0: int, u1: int, names, cid: str,
 def _typed_res(nouns: tuple[str, ...]) -> tuple[re.Pattern, re.Pattern, re.Pattern]:
     alt = "|".join(re.escape(n).replace(r"\ ", r"\s+") for n in sorted(nouns, key=len, reverse=True))
     after = re.compile(rf"[ \t]+(?:(?!{_STOP}\b)[\w-]+[ \t]+)?(?:{alt})(?![\w-])", re.I)
-    appositive = re.compile(rf",[ \t]+(?:the|an?)[ \t]+(?:[\w-]+[ \t]+){{0,3}}?(?:{alt})(?![\w-])", re.I)
+    appositive = re.compile(rf",[ \t]+(?:the|an?)[ \t]+(?:(?!{_APPOS_BLOCK}\b)[\w-]+[ \t]+){{0,3}}?"
+                            rf"(?:{alt})(?![\w-])", re.I)
     before = re.compile(rf"(?<![\w-])(?:{alt})[ \t]+(?:family[ \t]+)?(?:called|named|dubbed|known[ \t]+as)"
                         r"[ \t]+[\"“']?$", re.I)
     return after, appositive, before

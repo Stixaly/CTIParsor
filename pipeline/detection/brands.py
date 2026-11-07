@@ -93,6 +93,17 @@ DOMAIN_STOPWORDS: frozenset[str] = frozenset({
 })
 
 
+def _domain_key(domain: str) -> str:
+    """Normalise a full domain for counting: case, trailing dot, leading `www.`.
+
+    Two spellings of one host are one domain; two TLDs of one name are two.
+    """
+    key = domain.strip().lower().rstrip(".")
+    if key.startswith("www."):
+        key = key[len("www."):]
+    return key
+
+
 def _label(domain: str) -> str:
     """Extract the registrable label without TLD, dots, or hyphens."""
     if "." in domain:
@@ -126,15 +137,20 @@ def _maximal(counts: dict[str, int]) -> dict[str, int]:
 
 
 def campaign_tokens(domains: Iterable[str]) -> dict[str, int]:
-    """Recurring substrings across a campaign's domain labels → domain count."""
+    """Recurring substrings across a campaign's domains → distinct domain count.
+
+    Deduplication happens on the full normalised domain, before the TLD is cut:
+    `frostledger.com`, `.net` and `.org` are three domains (issue #361), even
+    though they share one label.
+    """
     valid_domains = [d for d in domains if isinstance(d, str) and d.strip()]
     if not valid_domains:
         return {}
 
-    labels = {_label(d) for d in valid_domains}
+    keys = {_domain_key(d) for d in valid_domains}
     counter: Counter[str] = Counter()
-    for label in labels:
-        for sub in _substrings(label):
+    for key in keys:
+        for sub in _substrings(_label(key)):
             counter[sub] += 1
 
     filtered = {k: v for k, v in counter.items() if v >= BRAND_MIN_DOMAINS}
@@ -153,6 +169,44 @@ def rule_text_built(conn: DBConnection) -> bool:
         return cur.fetchone() is not None
     except DB_ERRORS:
         return False
+
+
+def rebuild_rule_text(conn: DBConnection, *, batch: int = 2000) -> dict:
+    """Replace the rule_text index with one row per canonical rule (ADR-0031).
+
+    Deletes every row, then indexes the title and description of each rule with
+    `is_canonical=1` as one lower-cased string. A rule with an empty body is not
+    indexed. Returns `{"rows": <rows written>, "empty_bodies": <rules skipped>}`.
+
+    Opens no transaction and commits none: the caller wraps it (rebuild_store and
+    scripts/build_rule_text.py do), so a failure can roll the index back. Called
+    after the dedup pass, it indexes only the elected canonical rules, which is
+    why a rebuild of the rule store no longer leaves the index stale (#363).
+    """
+    conn.execute("DELETE FROM rule_text")
+    rows_written = 0
+    empty_bodies = 0
+    pending: list[tuple[str, str]] = []
+
+    cur = conn.execute(
+        "SELECT id, COALESCE(title,''), COALESCE(description,'') "
+        "FROM detection_rules WHERE is_canonical=1"
+    )
+    for rule_id, title, description in cur:
+        body = f"{title} {description}".strip().lower()
+        if not body:
+            empty_bodies += 1
+            continue
+        pending.append((rule_id, body))
+        if len(pending) >= batch:
+            conn.executemany("INSERT INTO rule_text (rule_id, body) VALUES (?,?)", pending)
+            rows_written += len(pending)
+            pending = []
+
+    if pending:
+        conn.executemany("INSERT INTO rule_text (rule_id, body) VALUES (?,?)", pending)
+        rows_written += len(pending)
+    return {"rows": rows_written, "empty_bodies": empty_bodies}
 
 
 def brand_tokens(conn: DBConnection, domains: Iterable[str]) -> list[BrandToken]:
@@ -175,7 +229,10 @@ def brand_tokens(conn: DBConnection, domains: Iterable[str]) -> list[BrandToken]
     for tok in candidates:
         try:
             cur = conn.execute(
-                "SELECT COUNT(*) FROM rule_text WHERE body_tsv @@ phraseto_tsquery('simple', ?)",
+                "SELECT COUNT(*) FROM rule_text "
+                "WHERE body_tsv @@ phraseto_tsquery('simple', ?) "
+                "AND EXISTS (SELECT 1 FROM detection_rules d "
+                "WHERE d.id = rule_text.rule_id AND d.is_canonical = 1)",
                 (tok,),
             )
             count = cur.fetchone()[0]
@@ -201,7 +258,10 @@ def brand_evidence(
     for tok in tokens:
         try:
             cur = conn.execute(
-                "SELECT rule_id FROM rule_text WHERE body_tsv @@ phraseto_tsquery('simple', ?)",
+                "SELECT rule_text.rule_id FROM rule_text "
+                "WHERE body_tsv @@ phraseto_tsquery('simple', ?) "
+                "AND EXISTS (SELECT 1 FROM detection_rules d "
+                "WHERE d.id = rule_text.rule_id AND d.is_canonical = 1)",
                 (tok.token,),
             )
             rows = cur.fetchall()
@@ -239,6 +299,11 @@ def cve_evidence(conn: DBConnection, cves: Iterable[str]) -> dict[str, list[dict
 
     Like every title match it carries `discriminating: False`: the rule is ABOUT
     this CVE, it does not HOLD a value from the report.
+
+    Only canonical rules match (#362): `dedupe_store` can demote a rule without
+    the index following, until the next `rebuild_rule_text`.
+    The filter is an EXISTS, not a JOIN, so the planner enters through the
+    full-text index, not `idx_detection_canon` (see store.atom_hits).
     """
     values = sorted({c.strip().lower() for c in cves if isinstance(c, str) and c.strip()})
     if not values or not rule_text_built(conn):
@@ -248,7 +313,10 @@ def cve_evidence(conn: DBConnection, cves: Iterable[str]) -> dict[str, list[dict
     for cve in values:
         try:
             rows = conn.execute(
-                "SELECT rule_id FROM rule_text WHERE body_tsv @@ phraseto_tsquery('simple', ?)",
+                "SELECT rule_text.rule_id FROM rule_text "
+                "WHERE body_tsv @@ phraseto_tsquery('simple', ?) "
+                "AND EXISTS (SELECT 1 FROM detection_rules d "
+                "WHERE d.id = rule_text.rule_id AND d.is_canonical = 1)",
                 (cve,),
             ).fetchall()
         except DB_ERRORS:

@@ -9,6 +9,60 @@ theme.
 
 ## [Unreleased]
 
+### Fixed
+
+#### Bug batch of 2026-11-06 (issues #359-#375)
+
+Four fixes change the bundles built from the same report (`BUNDLE_AFFECTING`:
+#359 and #360 in the gazetteer context policy's `apply` mode, #364 and #365 for
+network-traffic observables and Indicators).
+Stored bundles are not rebuilt until they are finalized or run again. The
+detection-rule fixes apply at the next corpus rebuild. No configuration change;
+the database schema is unchanged.
+
+- **Extraction.** The gazetteer context policy reads a contracted negation
+  (`isn't`, `wasn’t`, `can't`) before an alias cue as a negation, like `is not`
+  (#359). An apposition whose type noun follows a preposition (`Judy, a report
+  about malware,`) no longer types the name; a type noun heading the apposition
+  (`Judy, a malware family,`) still does (#360).
+- **Bundle.** A network-traffic and an IPv4 entity naming the same host share
+  one `ipv4-addr`, whatever their order, instead of two objects with one id
+  (#364). A flow's Indicator pattern names its transport protocol
+  (`network-traffic:protocols[*] = 'tcp'`), so TCP and UDP flows to one host get
+  two Indicators; two observables that still share a pattern share one Indicator
+  (#365). Indicator ids of flows with a known protocol change.
+- **Detection.** Brand evidence counts distinct full domains, so
+  `frostledger.com`, `.net` and `.org` reach the threshold of three (#361). A
+  rule-store rebuild rebuilds the `rule_text` title index after the dedup pass,
+  so CVE and brand matches survive a Settings rebuild or an offline update
+  (#363), and the title searches keep canonical rules only (#362). The Sigma
+  adapter skips and reports a file that is not UTF-8 instead of aborting the
+  rebuild (#372), keeps the documents read before a YAML error (#373), and gives
+  each id-less rule of a file its own storage id, so two such rules no longer
+  merge into one row; the first rule of a file keeps its id (#375). Each rule of
+  a multi-document file still carries the whole file as its raw body, which a
+  Sigma `action: global` collection needs. `rebuild_store` lists the files it could not
+  fully read under `file_errors`, and `build_detection_index.py` prints them.
+- **Corpus registry and sync.** Overlapping add/disable/remove requests no
+  longer drop one another's update: the overlay is changed under a lock and
+  replaced atomically (#371). An overlay that names a source (`git` or
+  `tarball`) replaces the committed source instead of joining it (#368).
+  Redownload refuses, with a 409, a folder that is not the clone of the
+  configured remote instead of pulling the previous repository or a parent
+  checkout; nothing is deleted (#367). A sync whose corpus the rebuild skipped
+  (a missing `subdir` or `path`) answers 422 with the reason instead of a success,
+  and keeps the rules indexed before; `rebuild_store` reports `skip_reasons` and
+  the sync answer carries the corpus's `rules` and `file_errors` (#374).
+- **API.** The rule-id detection export packages a canonical rule promoted from
+  outside the report's coverage, marked `promoted` in `MANIFEST.json`, instead of
+  dropping it (#366).
+- **Frontend.** The Review page's Detection rules button and ZIP follow rules
+  promoted or removed in its Detections panel without a reload (#366). Settings
+  offers Redownload for public tarball corpora (#369) and shows why a
+  Redownload, an add or a rebuild failed, clearing the previous success message
+  (#370), and warns about skipped corpora and unread files after a Redownload or
+  a rebuild (#374).
+
 ## [0.3.1] - 2026-11-06
 
 A fix release: the issue batches of 2026-11-03 to 2026-11-05 (#283-#354) across

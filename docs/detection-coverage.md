@@ -33,15 +33,11 @@ reading the coverage matrix. For the design rationale see [ADR-0006](adr/0006-mu
 > the panel now serves the 31 Okta and Scattered Spider rules that matter.
 >
 > Brand lookup needs the rule-title index (`rule_text`, a PostgreSQL `tsvector`
-> since ADR-0053). Neither `bootstrap` nor the Settings page's **Rebuild index**
-> builds it — run it yourself:
->
-> ```bash
-> docker compose run --rm app python scripts/build_rule_text.py
-> ```
->
-> Rebuild it whenever the rule corpora change. While it is absent, brand evidence
-> is simply not produced; nothing else degrades.
+> since ADR-0053). `bootstrap` and the Settings page's **Rebuild index** build it
+> with the rule store, from the canonical rules, so a rebuild keeps it current
+> (#363). `scripts/build_rule_text.py` rebuilds it alone, without re-reading the
+> corpora. While it is absent, brand evidence is simply not produced; nothing
+> else degrades.
 
 ## Working from *Proposed detections*
 
@@ -88,7 +84,10 @@ that you can turn one on, as your own decision:
 
 - **From the UI:** Settings, the corpus row, **Enable**; then **Redownload**,
   which clones it and re-ingests the store. This writes `enabled: true` to the
-  local overlay.
+  local overlay. If the folder at `path` is already there but is not the clone
+  of this corpus's `git` remote (another URL, or not a clone at all), Redownload
+  refuses with the reason and runs nothing: remove the folder by hand, then
+  Redownload again (#367).
 - **By hand:** put this in `detection_corpora.local.yaml`, then run steps 2 and
   3 below (in the containers the overlay is `/app/state/detection_corpora.local.yaml`,
   on the `cti-state` volume):
@@ -141,8 +140,8 @@ copy in place.
 docker compose run --rm app python scripts/build_detection_index.py
 ```
 Parses every enabled corpus's local clone into the `detection_rules` /
-`rule_techniques` / `rule_atoms` tables in PostgreSQL (`DATABASE_URL`,
-ADR-0053). Re-runnable and idempotent. The **Rebuild index** button on the
+`rule_techniques` / `rule_atoms` tables and the `rule_text` title index in
+PostgreSQL (`DATABASE_URL`, ADR-0053). Re-runnable and idempotent. The **Rebuild index** button on the
 Settings page does the same from already-cloned repos.
 
 If your store was built before ADR-0014, add the atom index in place — no
@@ -375,7 +374,7 @@ Ranking is deterministic and offline — no model is involved (ADR-0008).
 
 | Symptom | Cause / fix |
 |---|---|
-| `[build] skipped (no clone)` | run `sync_corpora.py` first; check the corpus `path` |
+| `[build] skipped <corpus>: <reason>` | the reason names the fix: run `sync_corpora.py` first when `path` does not exist, or correct the corpus `subdir` (a folder missing under an existing `path`) or the `adapter` (#374) |
 | corpus shows `0` rules | rules untagged with `attack.tXXXX`, or pointed at a non-rules dir |
 | private repo won't clone | ensure your SSH agent has the key; `git clone` it manually to confirm access |
 | `git remote refused: not a safe remote to fetch` | the remote carries credentials, uses a port other than 443, 8443, 80 or 8080, or its host is or resolves to a loopback, private, link-local or cloud-metadata address (the log line says which). A repo on an internal server: `git clone` it by hand under `corpora/` and register its `path` only |
