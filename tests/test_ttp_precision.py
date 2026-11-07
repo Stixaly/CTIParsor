@@ -29,6 +29,7 @@ class TestThresholdResolution:
     def test_per_model_default_minilm(self, monkeypatch):
         import pipeline.stage2c_ttp_semantic as s2c
         monkeypatch.setattr(s2c, "_TTP_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+        monkeypatch.setattr(s2c, "_active_model", None)  # a model loaded by an earlier test wins (#389)
         monkeypatch.delenv("TTP_HIGH_THRESHOLD", raising=False)
         monkeypatch.delenv("TTP_MEDIUM_THRESHOLD", raising=False)
         monkeypatch.setattr(s2c, "_MANIFEST_PATH", s2c._MANIFEST_PATH.with_name("__absent__.json"))
@@ -38,6 +39,7 @@ class TestThresholdResolution:
     def test_securebert_has_higher_cutpoints(self, monkeypatch):
         import pipeline.stage2c_ttp_semantic as s2c
         monkeypatch.setattr(s2c, "_TTP_EMBEDDING_MODEL", "ehsanaghaei/SecureBERT-Plus")
+        monkeypatch.setattr(s2c, "_active_model", None)  # a model loaded by an earlier test wins (#389)
         monkeypatch.delenv("TTP_HIGH_THRESHOLD", raising=False)
         monkeypatch.delenv("TTP_MEDIUM_THRESHOLD", raising=False)
         monkeypatch.setattr(s2c, "_MANIFEST_PATH", s2c._MANIFEST_PATH.with_name("__absent__.json"))
@@ -47,6 +49,7 @@ class TestThresholdResolution:
     def test_env_override_wins(self, monkeypatch):
         import pipeline.stage2c_ttp_semantic as s2c
         monkeypatch.setattr(s2c, "_TTP_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+        monkeypatch.setattr(s2c, "_active_model", None)  # a model loaded by an earlier test wins (#389)
         monkeypatch.setattr(s2c, "_MANIFEST_PATH", s2c._MANIFEST_PATH.with_name("__absent__.json"))
         monkeypatch.setenv("TTP_HIGH_THRESHOLD", "0.80")
         monkeypatch.setenv("TTP_MEDIUM_THRESHOLD", "0.55")
