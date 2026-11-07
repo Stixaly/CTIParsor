@@ -214,6 +214,11 @@ _CUE = (r"(?:also\s+known\s+as|also\s+called|also\s+referred\s+to\s+as|also\s+tr
 # A negated gap is no alias, contracted (isn't, wasn’t) or not.
 _NEG = r"(?:not|no|never|nor|unlike|unrelated|distinct|different)"
 _ALIAS_GAP = re.compile(rf"{_P}*(?:(?!{_NEG}\b|[\w-]*n['’]t\b)[\w-]+{_P}+){{0,3}}?{_CUE}{_P}*(?:the\s+)?", re.I)
+# Right after the name, an ATT&CK ID in brackets may come before the punctuation and the cue:
+# "Turla (G0010), also called Snake" (issue #410).  Only where the name precedes the occurrence:
+# an ID after the occurrence is its own attached ID.
+_ALIAS_GAP_AFTER_NAME = re.compile(rf"(?:{_P}*[(\[][ \t]*(?:ID:?[ \t]*)?[GS]\d{{4}}[ \t]*[)\]])?"
+                                   + _ALIAS_GAP.pattern, re.I)
 _APPOSITIVE_GAP = re.compile(r",\s+the\s+", re.I)
 _MAX_GAP = 80
 
@@ -231,7 +236,7 @@ def _alias(text: str, start: int, end: int, u0: int, u1: int, names, cid: str,
             a0, a1 = m.span()
             if a1 <= start:
                 gap = text[a1:start]
-                ok = len(gap) <= _MAX_GAP and _ALIAS_GAP.fullmatch(gap)
+                ok = len(gap) <= _MAX_GAP and _ALIAS_GAP_AFTER_NAME.fullmatch(gap)
             elif a0 >= end:
                 gap = text[end:a0]
                 ok = len(gap) <= _MAX_GAP and (_ALIAS_GAP.fullmatch(gap) or _APPOSITIVE_GAP.fullmatch(gap))

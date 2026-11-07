@@ -103,6 +103,21 @@ def test_a_contracted_negation_is_no_alias_issue_359(index, sentence, outcome):
     assert judge(index, sentence, "Snake", "G0010").outcome == outcome
 
 
+@pytest.mark.parametrize("sentence, outcome, rule", [
+    ("Turla (G0010), also called Snake", "resolved", "alias"),                    # issue #410
+    ("Turla [G0010], also called Snake", "resolved", "alias"),                    # issue #410, brackets
+    ("Turla (ID: G0010), also called Snake", "resolved", "alias"),                # issue #410, "ID:"
+    ("Turla (G0010) also called Snake", "resolved", "alias"),                     # issue #410, no comma
+    ("Turla, also called Snake", "resolved", "alias"),                            # the control
+    ("Turla (G0010), not known as Snake", "unresolved", None),                    # issue #410, negation kept
+    ("Turla (G0010) isn't known as Snake", "unresolved", None),                   # issue #410, negation kept
+    ("Turla (G0010), also known as Snake", "resolved", "alias"),
+])
+def test_an_attack_id_after_the_name_is_no_obstacle_issue_410(index, sentence, outcome, rule):
+    verdict = judge(index, sentence, "Snake", "G0010")
+    assert (verdict.outcome, verdict.rule) == (outcome, rule), verdict
+
+
 @pytest.mark.parametrize("sentence, outcome", [
     ("Judy, a report about malware, was published yesterday.", "unresolved"),    # issue #360
     ("Judy, a report on malware, was published yesterday.", "unresolved"),       # issue #360
