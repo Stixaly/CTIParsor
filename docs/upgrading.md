@@ -17,9 +17,9 @@ of its image.
    shows. The backup is the way back: the new release migrates the database at
    its first start, and the old one then refuses to start on it.
 2. **Install the new release beside the old one and start it**, from the
-   directory that holds `ctiparsor-0.3.1`. The first line names the release
-   you have and the one you install, with its digest; the example moves 0.3.1
-   to 0.4.0. An install made from a clone (the README's until 0.2.0) has no
+   directory that holds `ctiparsor-0.4.0`. The first line names the release
+   you have and the one you install, with its digest; the example moves 0.4.0
+   to 0.5.0. An install made from a clone (the README's until 0.2.0) has no
    such directory: rename the clone first, for one at v0.2.0 `mv CTIParsor
    ctiparsor-0.2.0`, and work from its parent. `compose.yaml` names the Compose
    project `ctiparsor` whatever the directory is called, so the containers and
@@ -27,7 +27,7 @@ of its image.
 
 <!-- scripts/check_clean_install.sh: UPGRADE_COMMANDS -->
 ```bash
-old=0.3.1 new=0.4.0 digest=sha256:a8f33b4c23f91081e80cad9f65b21f81de4dd8fc4be1b6fe58e215ce30167c65
+old=0.4.0 new=0.5.0 digest=sha256:fbb49c4082bdbdc3d5cf9d46438d4f173ad734ad6d3f4883de38fbf75b09087f
 curl -fsSLO https://github.com/Stixaly/CTIParsor/releases/download/v$new/ctiparsor-$new.tar.gz
 curl -fsSLO https://github.com/Stixaly/CTIParsor/releases/download/v$new/SHA256SUMS
 sha256sum -c --ignore-missing SHA256SUMS
