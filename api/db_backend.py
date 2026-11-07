@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterable, Sequence
 from functools import lru_cache
 from typing import Any, Protocol
@@ -41,36 +42,42 @@ def backend_from_url(url: str | None) -> str:
     raise ValueError(f"Unsupported DATABASE_URL scheme: {url!r} (expected postgresql://...)")
 
 
+# One alternative per SQL lexical region that can hold a literal '?': the scan
+# matches the leftmost region first, so a quote inside a comment (or a '--' inside
+# a string) is consumed as part of the enclosing token. The lone '?' and '%'
+# alternatives are the only tokens that are rewritten outside regions.
+_SQL_TOKEN = re.compile(
+    r"--[^\n]*"                                              # line comment, up to the newline
+    r"|/\*.*?\*/"                                            # block comment (not nested)
+    r"|'(?:[^']|'')*'"                                       # string literal, '' escapes a quote
+    r'|"[^"]*"'                                              # quoted identifier
+    r"|(?<![\w$])\$(?P<tag>[A-Za-z_]\w*|)\$.*?\$(?P=tag)\$"  # dollar-quoted body, $$ or $tag$
+    r"|[?%]",
+    re.DOTALL,
+)
+
+
 @lru_cache(maxsize=1024)
 def translate_placeholders(sql: str) -> str:
     """Convert sqlite3 qmark placeholders to psycopg format placeholders.
 
     psycopg's placeholder scanner is a plain text scan for '%s'/'%b'/'%t' (see
-    psycopg._queries._split_query) -- it is NOT aware of SQL string quoting, so
-    a literal '%' must be doubled to '%%' everywhere in the query text,
-    including inside a quoted string literal (e.g. `LIKE '%foo%'`), or psycopg
-    raises "only '%s', '%b', '%t' are allowed as placeholders". Quote tracking
-    below is only needed to decide whether a '?' is a real placeholder (outside
-    quotes) or a literal question mark (inside one) -- '%' escaping applies
-    unconditionally.
+    psycopg._queries._split_query) -- it is NOT aware of SQL structure, so a
+    literal '%' must be doubled to '%%' everywhere in the query text, including
+    inside a quoted string literal (e.g. `LIKE '%foo%'`), a comment or a
+    dollar-quoted body, or psycopg raises "only '%s', '%b', '%t' are allowed as
+    placeholders". The '?' is different: it is only a placeholder outside SQL
+    comments, quoted strings, quoted identifiers and dollar-quoted bodies (#440),
+    so `_SQL_TOKEN` skips those regions and rewrites '?' only elsewhere.
     """
-    result = []
-    in_single = False
-    in_double = False
-    for char in sql:
-        if char == "'" and not in_double:
-            in_single = not in_single
-            result.append(char)
-        elif char == '"' and not in_single:
-            in_double = not in_double
-            result.append(char)
-        elif char == "%":
-            result.append("%%")
-        elif char == "?" and not in_single and not in_double:
-            result.append("%s")
-        else:
-            result.append(char)
-    return "".join(result)
+
+    def _translate(match: re.Match[str]) -> str:
+        text = match.group(0)
+        if text == "?":
+            return "%s"
+        return text.replace("%", "%%")
+
+    return _SQL_TOKEN.sub(_translate, sql)
 
 
 @lru_cache(maxsize=256)
