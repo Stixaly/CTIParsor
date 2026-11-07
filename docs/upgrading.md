@@ -57,8 +57,8 @@ from the new one replaces the containers and keeps the volumes, every
 report with them. The first process to start on the new image applies the
 new schema versions, under a lock the others wait for: `app`, `worker`, or
 the `bootstrap` that follows them, whose output then shows `[db] schema
-version 13 -> 14` (from 0.2.0) while `docker compose logs app worker` shows
-`schema at version 14, nothing to migrate`. `bootstrap` runs after every
+version 14 -> 16` (from 0.3.x) while `docker compose logs app worker` shows
+`schema at version 16, nothing to migrate`. `bootstrap` runs after every
 upgrade: it keeps the models already downloaded, fetches any the new
 release adds, updates the detection corpora and rebuilds the rule store
 (about 5 minutes on the clean install of [TESTING.md](../TESTING.md#clean-install-from-the-published-image),
@@ -279,6 +279,11 @@ rebuild the corpus from the Settings page. The sizing table is in
   image then refuses the database ("an older image was started after a newer one
   migrated it", `api/migrate.py`). To go back, restore the backup taken before
   that start ([§1](#1-back-up-first)).
+- Schema versions 15 (`jobs.resolved_types_json`, #397) and 16
+  (`rule_techniques.propagated`, #432) are new in 0.4.0 and apply the same way.
+  Techniques a detection rule inherited before version 16 stay until the rule
+  store is rebuilt: the `bootstrap` of an upgrade does it, a host install does
+  it from the Settings page.
 - STIX enrichment (ADR-0090) is on by default. `STIX_ENRICHMENT_ENABLED=false`
   turns it off, and the body budget of `POST /api/upload` then drops by the
   20 MB a baseline may weigh, to 50 MB plus the 64 KB form. The 50 MB limit on
