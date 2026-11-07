@@ -146,6 +146,19 @@ def test_a_blank_line_or_another_unit_is_no_construction_issue_408(index, senten
     assert judge(index, sentence, surface, identity).outcome == "unresolved"
 
 
+# A URL ends at a blank, or at a closing mark it does not balance; a name after it is no part of it.
+@pytest.mark.parametrize("sentence, surface, identity, outcome, reason", [
+    ("(see https://example.com)—Play (G1040)", "Play", "G1040", "resolved", None),        # the URL ends at ")"
+    ("(see https://example.com)–Play (G1040)", "Play", "G1040", "resolved", None),        # or at a dash
+    ("(see example)—Play (G1040)", "Play", "G1040", "resolved", None),                    # the control
+    ("see https://example.com/(a)Joker (S0432)", "Joker", "S0432", "excluded", "embedded"),  # a path
+    ("see https://example.com/a(b)/photo/1", "photo", "S0021", "excluded", "embedded"),      # balanced
+])
+def test_a_url_ends_at_an_unbalanced_mark_issue_407(index, sentence, surface, identity, outcome, reason):
+    verdict = judge(index, sentence, surface, identity)
+    assert (verdict.outcome, verdict.reason) == (outcome, reason), verdict
+
+
 NEGATIVES = [
     ("Joker’s Stash closed", "Joker", "conflicting_sense"),
     ("Joker's Stash closed", "Joker", "conflicting_sense"),

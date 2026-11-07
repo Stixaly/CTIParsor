@@ -126,6 +126,29 @@ def _is_executable(text: str, end: int) -> bool:
     return text[end:end + 4].lower() == ".exe" and not _char(text, end + 4).isalnum()
 
 
+# A URL starts at its scheme ("://") or at "www." (issue #407).
+_URL_START = re.compile(r"://|(?<![\w.])www\.", re.I)
+_URL_QUOTE = "\"«»“”—–"
+
+
+def _url_end(text: str, i: int) -> int:
+    """Where the URL whose scheme or "www." begins at text[i] ends: at a blank, a quote
+    or a dash, or at a closing bracket the URL does not open ("(see https://x.com)" ends
+    before the ")", "https://x.com/a(b)/c" does not)."""
+    depth = 0
+    for j in range(i, len(text)):
+        c = text[j]
+        if c.isspace() or c in _URL_QUOTE:
+            return j
+        if c in "([<":
+            depth += 1
+        elif c in ")]>":
+            if not depth:
+                return j
+            depth -= 1
+    return len(text)
+
+
 def embedded(text: str, start: int, end: int) -> bool:
     """Inside a URL, a path, a file name or a dotted identifier — a
     Markdown link's label is not."""
@@ -138,8 +161,8 @@ def embedded(text: str, start: int, end: int) -> bool:
         return True
     if before == "[" and text.startswith("](", end):
         return False
-    ts = max(text.rfind(c, 0, start) for c in " \t\n(<\"'") + 1
-    return "://" in text[ts:start] or text[ts:start].lower().startswith("www.")
+    ts = max(text.rfind(c, 0, start) for c in " \t\r\n") + 1
+    return any(start < _url_end(text, m.start()) for m in _URL_START.finditer(text, ts, start))
 
 
 @functools.lru_cache(maxsize=256)
