@@ -197,10 +197,19 @@ def type_conflict(name: str, stix_type: str) -> list[tuple[str, str]]:
 
 # ── MITRE ATT&CK technique name ↔ ID ──────────────────────────────────────────
 
+# Precedence of a domain when one name is shared ("Phishing": T1566, Mobile
+# T1660, CAPEC-98).  Stage 3c uses the same ranking (issue #377).
+_DOMAIN_RANK = {"enterprise-attack": 0, "ics-attack": 1, "mobile-attack": 2, "capec": 3}
+
+
 @functools.lru_cache(maxsize=1)
 def _load_techniques() -> tuple[dict[str, str], dict[str, str]]:
-    """Return (technique-name->id, id->canonical-name) from mitre_index.json."""
+    """Return (technique-name->id, id->canonical-name) from mitre_index.json.
+
+    A name shared by several domains resolves to the highest-ranked one
+    (_DOMAIN_RANK), not to the first one in the file: the index lists CAPEC first."""
     name2id: dict[str, str] = {}
+    name_rank: dict[str, int] = {}
     id2name: dict[str, str] = {}
     path = attack_data.resolve(_MITRE_INDEX)
     try:
@@ -213,7 +222,10 @@ def _load_techniques() -> tuple[dict[str, str], dict[str, str]]:
         tid = (t.get("id") or "").strip()
         name = (t.get("name") or "").lower().strip()
         if tid and name:
-            name2id.setdefault(name, tid)
+            rank = _DOMAIN_RANK.get(t.get("domain", ""), len(_DOMAIN_RANK))
+            if rank < name_rank.get(name, len(_DOMAIN_RANK) + 1):
+                name2id[name] = tid
+                name_rank[name] = rank
             id2name.setdefault(tid.upper(), t["name"])
     return name2id, id2name
 

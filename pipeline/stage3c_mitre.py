@@ -23,6 +23,7 @@ import functools
 # Initialize logging
 from api.logging_config import get_logger
 from models.schemas import EvidenceLabel
+from pipeline.aliases import _DOMAIN_RANK
 from pipeline.regex_safety import compile_pattern
 from pipeline.stage3_llm import TTPExtracted
 
@@ -97,9 +98,6 @@ def _load_index() -> dict[str, dict] | None:
             name_rank[old_name] = 0
 
     return index if index else None
-
-
-_DOMAIN_RANK = {"enterprise-attack": 0, "ics-attack": 1, "mobile-attack": 2, "capec": 3}
 
 
 def _resolve(technique_name: str, mitre_id: str | None) -> tuple[str, str | None, str | None]:
