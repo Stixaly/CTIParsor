@@ -398,7 +398,9 @@ read, and which the interface reads through `GET /api/attack/index`.
   lists the releases this installation has. There is no fallback to the default:
   a run is never given another release than the one it asked for (ADR-0073's
   rule for a TLP level). `python -c "from pipeline import attack_data;
-  print(attack_data.available())"` lists them.
+  print(attack_data.available())"` lists them. A track directory counts only
+  when its `attack_manifest.json` is usable and names that track's version, so a
+  directory with an empty or unreadable manifest is not listed.
 * **It is read when the process starts.** The loaders cache what they read, like
   `TTP_EMBEDDING_MODEL`. Set it in `.env` (the `app`, `worker` and `dev`
   services read that file) and restart. The first use fixes the release for the

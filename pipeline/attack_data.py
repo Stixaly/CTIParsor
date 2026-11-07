@@ -78,17 +78,44 @@ def _read_manifest(directory: Path) -> dict:
     return data
 
 
+def _track_manifest(name: str) -> dict:
+    """The manifest of the track directory `name`, when release() can use it.
+
+    Raises UnknownAttackRelease with the reason otherwise.  available() and
+    _release() both check through here; _release() adds the list of releases to
+    its own message, so this never calls available().
+    """
+    if not is_version(name) or not (TRACKS_DIR / name / MANIFEST_NAME).is_file():
+        raise UnknownAttackRelease("no such ATT&CK release here")
+    manifest = _read_manifest(TRACKS_DIR / name)
+    if str(manifest["release"]) != name:
+        raise UnknownAttackRelease(
+            f"{TRACKS_DIR / name / MANIFEST_NAME} says release {manifest['release']!r}, not {name!r}")
+    return manifest
+
+
 def available() -> list[str]:
-    """The releases this installation can run: the default first."""
+    """The releases this installation can run: the default first.
+
+    A track is listed only when release() accepts it, and a track named like the
+    default is not listed again: release() answers that name with the default.
+    """
     out = []
     try:
         out.append(str(_read_manifest(DATA_DIR)["release"]))
     except UnknownAttackRelease:
         pass
     if TRACKS_DIR.is_dir():
-        out += sorted((p.name for p in TRACKS_DIR.iterdir()
-                       if _VERSION.fullmatch(p.name) and (p / MANIFEST_NAME).is_file()),
-                      key=lambda v: tuple(int(x) for x in v.split(".")))
+        names = sorted((p.name for p in TRACKS_DIR.iterdir() if _VERSION.fullmatch(p.name)),
+                       key=lambda v: tuple(int(x) for x in v.split(".")))
+        for name in names:
+            if name in out:
+                continue
+            try:
+                _track_manifest(name)
+            except UnknownAttackRelease:
+                continue
+            out.append(name)
     return out
 
 
@@ -104,15 +131,12 @@ def _release(value: str) -> Release:
     name = value[1:] if _TAGGED.match(value) else value
     if name in ("", "default", default_version):
         return Release(default_version, DATA_DIR, True, default)
-    if not is_version(name) or not (TRACKS_DIR / name / MANIFEST_NAME).is_file():
+    try:
+        manifest = _track_manifest(name)
+    except UnknownAttackRelease as exc:
         raise UnknownAttackRelease(
-            f"ATTACK_RELEASE={value!r}: no such ATT&CK release here; available: "
-            f"{', '.join(available()) or 'none'} (unset = the default, {default_version})")
-    manifest = _read_manifest(TRACKS_DIR / name)
-    if str(manifest["release"]) != name:
-        raise UnknownAttackRelease(
-            f"{TRACKS_DIR / name / MANIFEST_NAME} says release {manifest['release']!r}, "
-            f"not {name!r}")
+            f"ATTACK_RELEASE={value!r}: {exc}; available: "
+            f"{', '.join(available()) or 'none'} (unset = the default, {default_version})") from exc
     return Release(name, TRACKS_DIR / name, False, manifest)
 
 
