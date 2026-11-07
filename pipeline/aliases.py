@@ -214,6 +214,9 @@ def _load_techniques() -> tuple[dict[str, str], dict[str, str]]:
     path = attack_data.resolve(_MITRE_INDEX)
     try:
         index = json.loads(path.read_text(encoding="utf-8"))
+        # A valid JSON that is not an object has no .get(): read it as unreadable.
+        if not isinstance(index, dict):
+            raise ValueError(f"root is {type(index).__name__}, not an object")
     except (OSError, ValueError) as exc:
         logger.error(f"[aliases] {path.name} unreadable, no technique name is resolved: "
                      f"{type(exc).__name__}: {exc}")
@@ -252,6 +255,8 @@ def _tactic_ids() -> frozenset[str]:
     which _load_techniques already logs."""
     try:
         index = json.loads(attack_data.resolve(_MITRE_INDEX).read_text(encoding="utf-8"))
+        if not isinstance(index, dict):
+            raise ValueError(f"root is {type(index).__name__}, not an object")
     except (OSError, ValueError):
         return frozenset()
     return frozenset((t.get("id") or "").strip().upper()

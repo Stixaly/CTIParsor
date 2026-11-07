@@ -460,6 +460,44 @@ describe('New report — enrich mode (ADR-0090)', () => {
   })
 })
 
+describe('New report — enrich mode, reads that come late (#556, #560)', () => {
+  // #556: the report radios are off while a read is in flight, so two reads never
+  // overlap and a late answer cannot replace the one for the report picked after it.
+  it('keeps the report radios off while a read is in flight (#556)', async () => {
+    let answerFirst!: (i: BaselineIntake) => void
+    api.inspectBaseline
+      .mockResolvedValueOnce(CHOICE)
+      .mockImplementationOnce(() => new Promise<BaselineIntake>(r => { answerFirst = r }))
+    const user = userEvent.setup()
+    const reportFile = new File(['report'], 'report.pdf', { type: 'application/pdf' })
+    renderModal({ initialFile: reportFile })
+    await enrichWithBundle(user, bundleFile())
+    await screen.findByRole('radiogroup', { name: 'Report to enrich' })
+
+    await user.click(screen.getByRole('radio', { name: 'APT29 report' }))
+    await waitFor(() => expect(api.inspectBaseline).toHaveBeenCalledTimes(2))
+    expect(screen.getByRole('radio', { name: 'APT29 report' })).toBeDisabled()
+    expect(screen.getByRole('radio', { name: /Lazarus campaign/ })).toBeDisabled()
+
+    await act(async () => answerFirst({ ...LAZARUS_SCOPE, scope_report_id: 'report--a' }))
+    await settle()
+    expect(screen.getByRole('radio', { name: /Lazarus campaign/ })).toBeEnabled()
+    expect(api.inspectBaseline).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows the error when a dropped .json cannot be read, instead of an unhandled rejection (#560)', async () => {
+    renderModal()
+    const unreadable = new File(['{}'], 'broken.json', { type: 'application/json' })
+    vi.spyOn(unreadable, 'slice').mockReturnValue({
+      arrayBuffer: () => Promise.reject(new Error('The file could not be read')),
+    } as unknown as Blob)
+
+    fireEvent.drop(screen.getByRole('dialog'), { dataTransfer: { files: [unreadable] } })
+
+    expect(await screen.findByText('The file could not be read')).toBeInTheDocument()
+  })
+})
+
 describe('New report — a bundle dropped with the modal (ADR-0090)', () => {
   it('opens in enrich mode with the dropped bundle, and reads it', async () => {
     api.inspectBaseline.mockResolvedValue(INTAKE)

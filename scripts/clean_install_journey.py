@@ -144,7 +144,8 @@ def _steps(out: Path) -> list[dict[str, Any]]:
     rows = []
     for line in (out / "steps.tsv").read_text(encoding="utf-8").splitlines():
         name, status, seconds, detail = (line.split("\t") + ["", "", ""])[:4]
-        rows.append({"step": name, "status": status, "seconds": int(seconds or 0), "detail": detail})
+        seconds_int = int(round(float(seconds))) if seconds and seconds.strip() else 0
+        rows.append({"step": name, "status": status, "seconds": seconds_int, "detail": detail})
     return rows
 
 

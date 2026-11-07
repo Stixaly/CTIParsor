@@ -68,7 +68,11 @@ def load(root: Path = ROOT, include_drafts: bool = False) -> list[InhouseDoc]:
 def _ioc_norm(t: str, v: str) -> tuple[str, str]:
     from pipeline.stage2_extraction import refang
     v = refang(v.strip())
-    return t, v.lower() if t in ("md5", "sha1", "sha256", "domain", "email") else v
+    if t == "cve":
+        v = v.upper()
+    elif t in ("md5", "sha1", "sha256", "domain", "email", "ipv6", "mac_addr"):
+        v = v.lower()
+    return t, v
 
 
 def score(doc: InhouseDoc, pred: dict, canonical) -> dict:
@@ -108,17 +112,19 @@ def score(doc: InhouseDoc, pred: dict, canonical) -> dict:
     # Negative cases: a technique or relation the report denies or only
     # recommends against must NOT come out.
     violations = []
-    pred_parents = {t.split(".", 1)[0] for t in pred["ttp_ids"]}
+    # Same canonical() and triple normalisation as the positive scores.
+    pred_parents = {c.split(".", 1)[0] for t in pred["ttp_ids"] if (c := canonical(t)) is not None}
     # Same source as the positive relation score: what the bundle ships when
     # there is one, else Stage 3's own relationships.
     shipped = pred.get("bundle_relations")
     rel_source = shipped if shipped is not None else pred.get("relations", [])
-    pred_triples = {(r["source"].lower(), r["type"].lower(), r["target"].lower())
-                    for r in rel_source}
+    pred_triples = {metrics.norm_triple((r["source"], r["type"], r["target"])) for r in rel_source}
     for n in g.get("negatives", []):
-        if n.get("kind") == "technique" and n.get("id", "").upper().split(".", 1)[0] in pred_parents:
-            violations.append(n)
-        elif n.get("kind") == "relation" and tuple(x.lower() for x in n.get("triple", [])) in pred_triples:
+        if n.get("kind") == "technique":
+            c = canonical(n.get("id", "").upper())
+            if c is not None and c.split(".", 1)[0] in pred_parents:
+                violations.append(n)
+        elif n.get("kind") == "relation" and metrics.norm_triple(n.get("triple", [])) in pred_triples:
             violations.append(n)
     out["negatives"] = {"cases": len(g.get("negatives", [])), "violated": len(violations),
                         "violations": violations}
@@ -152,9 +158,10 @@ def agreement(a: dict, b: dict) -> dict:
         norm = lambda g: {_ioc_norm(i["type"], i["value"]) for i in g.get("iocs", [])}  # noqa: E731
         out["iocs"] = metrics.set_counts(norm(b), norm(a)).as_dict()
     if "entities" in layers:
-        gold = [(e["type"], e["value"], set(e.get("aliases", [])) | {e["value"]}) for e in a.get("entities", [])]
-        pred = [(e["type"], e["value"]) for e in b.get("entities", [])]
-        out["entities"] = metrics.micro(metrics.score_entities(pred, gold).values()).as_dict()
+        # Both sides with their aliases, so the match is symmetric (#482).
+        forms = lambda g: [(e["type"], metrics.norm_forms([e["value"], *e.get("aliases", [])]))  # noqa: E731
+                           for e in g.get("entities", [])]
+        out["entities"] = metrics.micro(metrics.score_entity_forms(forms(b), forms(a)).values()).as_dict()
     if "techniques" in layers:
         ids = lambda g: {t["id"].upper().split(".", 1)[0] for t in g.get("techniques", [])}  # noqa: E731
         out["techniques"] = metrics.set_counts(ids(b), ids(a)).as_dict()

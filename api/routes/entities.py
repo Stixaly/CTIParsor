@@ -2,10 +2,10 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from api.db import _lock, get_conn, now_iso, transaction
-from api.routes._common import require_job
+from api.routes._common import require_job, storable_text
 from models.schemas import EntityType
 from pipeline import baseline_stix, decisions
 
@@ -29,6 +29,12 @@ class EntityPatch(BaseModel):
     # decided in one click).  Automatic origins are the server's to write.
     decision_origin: str = decisions.HUMAN
 
+    @field_validator("value", "entity_type", "mitre_id")
+    @classmethod
+    def _no_nul_or_lone_surrogate(cls, v: str | None) -> str | None:
+        # PostgreSQL refuses these: a 422 here, a 500 at the UPDATE otherwise (#525).
+        return storable_text(v)
+
 
 class EntityCreate(BaseModel):
     value: str
@@ -37,6 +43,12 @@ class EntityCreate(BaseModel):
     # The scale the store and the STIX export use (0 to 1; the export multiplies by 100).
     confidence: float = Field(1.0, ge=0, le=1, allow_inf_nan=False)
     mitre_id: str | None = None
+
+    @field_validator("value", "entity_type", "context", "mitre_id")
+    @classmethod
+    def _no_nul_or_lone_surrogate(cls, v: str | None) -> str | None:
+        # PostgreSQL refuses these: a 422 here, a 500 at the INSERT otherwise (#495, #525).
+        return storable_text(v)
 
 
 class BulkPatch(BaseModel):
@@ -88,6 +100,9 @@ def list_entities(job_id: str):
 def create_entity(job_id: str, body: EntityCreate):
     if body.entity_type not in VALID_TYPES:
         raise HTTPException(400, f"Unknown entity_type '{body.entity_type}'")
+    # Same refusal as the PATCH below: a blank name is not an entity (issue #438, #525).
+    if not body.value.strip():
+        raise HTTPException(400, "value must not be empty")
     with get_conn() as conn:
         require_job(conn, job_id)
 

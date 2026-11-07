@@ -2,10 +2,10 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from api.db import _lock, get_conn, now_iso, transaction
-from api.routes._common import require_job
+from api.routes._common import require_job, storable_text
 from models.schemas import STIX_RELATIONSHIP_TYPES
 from pipeline import baseline_stix, decisions
 from pipeline.temporal import (
@@ -49,6 +49,13 @@ class RelPatch(BaseModel):
     # ADR-0058 — see EntityPatch.decision_origin.
     decision_origin: str = decisions.HUMAN
 
+    @field_validator("source_value", "relationship_type", "target_value", "evidence_text",
+                     "evidence_label", "start_time", "stop_time")
+    @classmethod
+    def _no_nul_or_lone_surrogate(cls, v: str | None) -> str | None:
+        # PostgreSQL refuses these: a 422 here, a 500 at the write otherwise (#494, #525).
+        return storable_text(v)
+
 
 class RelBulk(BaseModel):
     ids: list[str]
@@ -70,6 +77,13 @@ class RelCreate(BaseModel):
     evidence_label: str = "reported"
     start_time: str | None = None
     stop_time: str | None = None
+
+    @field_validator("source_value", "relationship_type", "target_value", "evidence_text",
+                     "evidence_label", "start_time", "stop_time")
+    @classmethod
+    def _no_nul_or_lone_surrogate(cls, v: str | None) -> str | None:
+        # PostgreSQL refuses these: a 422 here, a 500 at the write otherwise (#494, #525).
+        return storable_text(v)
 
 
 def _parse_date_field(raw: str | None, field: str) -> TemporalAssertion | None:
@@ -183,6 +197,11 @@ def create_relationship(job_id: str, body: RelCreate):
     if body.relationship_type not in VALID_REL_TYPES:
         raise HTTPException(400, f"Unknown relationship_type '{body.relationship_type}'. "
                                  f"Valid types: {', '.join(VALID_REL_TYPES)}")
+    # A blank end names no object: the claim would be accepted with nothing to export (issue #494).
+    if not body.source_value.strip():
+        raise HTTPException(400, "source_value must not be empty")
+    if not body.target_value.strip():
+        raise HTTPException(400, "target_value must not be empty")
     with get_conn() as conn:
         require_job(conn, job_id)
     _label = body.evidence_label if body.evidence_label in _VALID_LABELS else "reported"
@@ -266,6 +285,11 @@ def update_relationship(job_id: str, rel_id: str, patch: RelPatch):
         raise HTTPException(
             400, f"decision_origin must be one of: {', '.join(sorted(decisions.CLIENT_ORIGINS))}",
         )
+    # A blank end, sent as a value, is refused as on create (issue #494); an absent one is a partial patch.
+    if patch.source_value is not None and not patch.source_value.strip():
+        raise HTTPException(400, "source_value must not be empty")
+    if patch.target_value is not None and not patch.target_value.strip():
+        raise HTTPException(400, "target_value must not be empty")
 
     if patch.accepted is True and patch.decision_origin == decisions.HUMAN_BULK:
         with get_conn() as conn:

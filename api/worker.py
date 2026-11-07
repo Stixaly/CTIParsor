@@ -101,6 +101,12 @@ def _validation_errors_json(errors: list[str] | None) -> str | None:
     return json.dumps(_stored_validation_errors(errors)) if errors else None
 
 
+class FinalizeOvertaken(RuntimeError):
+    """Review decisions kept landing while `re_run_final_stages` built (#499): every
+    build was stale, none was published.  The API answers 409; finalizing again
+    once the review settles publishes the bundle."""
+
+
 class BundleInvalidError(RuntimeError):
     """Stage 5's JSON schemas refused the bundle `re_run_final_stages` just built.
 
@@ -834,7 +840,18 @@ def _spawn_job(job_id: str, file_path: str, original_filename: str,
     # realistic way to hit the exact race that check exists to close: a lease
     # can expire and be reclaimed by another worker while THIS subprocess is
     # still alive and CPU/memory-starved, then get OOM-killed.
-    owner_worker_id = _current_owner(job_id)
+    # The loop passes its own claim (queue_loop.claimed_by) rather than the row's
+    # owner, which may already be another loop's: then the launch is abandoned (#491).
+    from api import queue_loop
+
+    claimed = queue_loop.claimed_by.get()
+    if claimed is None:
+        owner_worker_id = _current_owner(job_id)
+    else:
+        owner_worker_id = claimed
+        if _current_owner(job_id) != claimed:
+            raise queue_loop.ClaimLost(
+                f"job {job_id} is no longer claimed by worker_id={claimed} (reclaimed or requeued)")
 
     ctx = mp.get_context("spawn")
     proc = ctx.Process(
@@ -960,7 +977,7 @@ def _stored_newer_build(job_id: str, revision: int, *, complete: bool) -> str | 
     `complete`: the analyst's Finalize, which completes the job with that
     bundle unless its verdict is invalid.  Raises `BundleInvalidError` with the
     STORED errors when the stored verdict is invalid.  None when the job no
-    longer exists."""
+    longer exists, or no build newer than `revision` is stored (#499)."""
     with _lock:
         with get_conn() as conn:
             with transaction(conn):
@@ -970,9 +987,13 @@ def _stored_newer_build(job_id: str, revision: int, *, complete: bool) -> str | 
                         "WHERE id=? AND bundle_review_revision > ? AND bundle_validation IS DISTINCT FROM 'invalid'",
                         (now_iso(), job_id, revision))
                 stored = conn.execute(
-                    "SELECT bundle_json, bundle_validation, bundle_validation_errors FROM jobs WHERE id=?",
-                    (job_id,)).fetchone()
+                    "SELECT bundle_json, bundle_validation, bundle_validation_errors, bundle_review_revision "
+                    "FROM jobs WHERE id=?", (job_id,)).fetchone()
     if stored is None:
+        return None
+    # Not newer: the stored bundle stands for nothing here, and returning it would present an
+    # older bundle as this finalize's result.  The caller rebuilds when the rows moved on (#499).
+    if stored["bundle_review_revision"] is None or stored["bundle_review_revision"] <= revision:
         return None
     logger.info(f"[finalize] job {job_id}: rows read at revision {revision}, but a build from a newer "
                 "revision is stored; nothing published")
@@ -985,7 +1006,20 @@ def _stored_newer_build(job_id: str, revision: int, *, complete: bool) -> str | 
     return stored["bundle_json"]
 
 
-def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
+def _review_moved_on(job_id: str, revision: int) -> bool:
+    """Whether the job's decisions changed after `revision` was read (False when the job is gone)."""
+    with _lock:
+        with get_conn() as conn:
+            row = conn.execute("SELECT review_revision FROM jobs WHERE id=?", (job_id,)).fetchone()
+    return row is not None and row["review_revision"] != revision
+
+
+# A finalize overtaken by a decision builds again (#499), at most this many times:
+# decisions landing faster than a build must not keep the finalize looping.
+_MAX_REBUILDS = 3
+
+
+def re_run_final_stages(job_id: str, quick: bool = False, *, _rebuilds: int = 0) -> str | None:
     """
     Re-runs Stage 4+5 using the accepted entities currently in the DB.
     Returns the new bundle JSON, or None on failure.
@@ -1009,8 +1043,11 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
     never overwrites a newer one.  The refused build returns the stored bundle
     instead: the full finalize completes the job with it, and a stored invalid
     verdict raises `BundleInvalidError` with the stored errors; the refused
-    build's own verdict is not acted on.  Only a build that publishes writes
-    the export file in output/ (never served: the job store is authoritative).
+    build's own verdict is not acted on.  A build the job's current revision has
+    overtaken (a decision landed while it was built, #499) is not published
+    either, and the finalize builds again from the rows as they stand.  Only a
+    build that publishes writes the export file in output/ (never served: the
+    job store is authoritative).
 
     Entity sources stored during the pipeline:
       ioc       – regex-extracted IoC (Stage 2)
@@ -1412,9 +1449,10 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
                     "bundle_validation_errors=?, bundle_build_json=?, bundle_review_revision=?, "
                     "status = CASE WHEN ? THEN 'completed' WHEN ? AND status = 'completed' THEN 'for_review' "
                     "ELSE status END, updated_at=? "
-                    "WHERE id=? AND (bundle_review_revision IS NULL OR bundle_review_revision <= ?)",
+                    "WHERE id=? AND (bundle_review_revision IS NULL OR bundle_review_revision <= ?) "
+                    "AND review_revision = ?",
                     (bundle_json, ledger_json, *verdict, build, revision, not quick and not invalid, invalid,
-                     now_iso(), job_id, revision),
+                     now_iso(), job_id, revision, revision),
                 ).rowcount == 1
                 if published:
                     export_bundle(bundle_json, out_path, validation)
@@ -1423,6 +1461,14 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
         stored = _stored_newer_build(job_id, revision, complete=not quick)
         if stored is not None:
             return stored
+        if _review_moved_on(job_id, revision):
+            # A decision landed while this bundle was built, so the bundle is stale and is not published
+            # (#499): the finalize builds again from the rows as they stand now, a bounded number of times.
+            if _rebuilds < _MAX_REBUILDS:
+                return re_run_final_stages(job_id, quick=quick, _rebuilds=_rebuilds + 1)
+            logger.warning(f"[finalize] job {job_id}: overtaken by review decisions {_MAX_REBUILDS + 1} times; "
+                           "the bundle is not published, finalize again once the review settles")
+            raise FinalizeOvertaken(job_id)
         # The job was deleted meanwhile: nothing is stored, as before.
 
     if invalid:

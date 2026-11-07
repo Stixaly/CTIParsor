@@ -53,6 +53,9 @@ def judge(report: object, required: list[str]) -> tuple[list[str], list[str]]:
 
 
 def main() -> int:
+    if len(sys.argv) < 2:
+        print('usage: smoke_stage_report.py "<required stages>" < stage_report.json', file=sys.stderr)
+        return 2
     required = sys.argv[1].split()
     try:
         report = json.load(sys.stdin)

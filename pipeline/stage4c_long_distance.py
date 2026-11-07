@@ -23,7 +23,7 @@ from typing import Callable, Optional
 from api.logging_config import get_logger
 from models.schemas import STIX_RELATIONSHIP_TYPES
 from pipeline.evidence_span import stated_in, words
-from pipeline.llm_parse import fit_report
+from pipeline.llm_parse import fit_report, strip_reasoning
 from pipeline.stage4b_graph_completion import LONG_DISTANCE_TYPES, InferredEdge
 from pipeline.stix_access import field
 
@@ -145,12 +145,15 @@ def _excerpt(text: str, forms_a: list[str], forms_b: list[str], budget: int) -> 
 
 
 def _parse(raw: str) -> Optional[dict]:
-    """Return the first valid JSON object in the response, or None."""
+    """Return the first valid JSON object in the response, or None.  The
+    `<think>` block of a reasoning model is dropped first (#503): a draft
+    object in it is not the answer."""
+    cleaned = strip_reasoning(raw)
     decoder = json.JSONDecoder()
-    for i, ch in enumerate(raw):
+    for i, ch in enumerate(cleaned):
         if ch == "{":
             try:
-                obj, _ = decoder.raw_decode(raw, i)
+                obj, _ = decoder.raw_decode(cleaned, i)
                 if isinstance(obj, dict):
                     return obj
             except json.JSONDecodeError:
@@ -202,11 +205,16 @@ def build_long_distance_inferer(
         if not stated_in(quote, words(report_text or "")):
             return None   # and it must be in the report, as Stage 3d requires
 
+        # The objects may be dicts or stix2 objects (#502): read the id as the other Stage 4 code does.
+        central_id, topic_id = field(central, "id"), field(topic, "id")
+        if not central_id or not topic_id:
+            return None
+
         # "source" picks which entity is the subject of the verb.
         if str(data.get("source") or "a").strip().lower() == "b":
-            src_id, tgt_id = topic.id, central.id
+            src_id, tgt_id = topic_id, central_id
         else:
-            src_id, tgt_id = central.id, topic.id
+            src_id, tgt_id = central_id, topic_id
         return InferredEdge(
             source_id=src_id, verb=verb, target_id=tgt_id,
             confidence=confidence, evidence_text=quote,

@@ -65,4 +65,13 @@ describe('useMitreSearch', () => {
     expect(result.current.release).toBeNull()
     expect(result.current.search('T1059')).toEqual([])
   })
+
+  // #552: an index entry without a name must not throw inside the name scan.
+  it('does not throw on an entry without a name, and still finds it by id (#552)', async () => {
+    serve('20.0', [T1059, { id: 'T1001', domain: 'enterprise-attack' }])
+    const { result } = render()
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    expect(() => result.current.search('zzz')).not.toThrow()
+    expect(result.current.search('t1001').map(e => e.id)).toEqual(['T1001'])
+  })
 })

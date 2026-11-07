@@ -10,6 +10,7 @@ from pathlib import Path
 
 import stix2
 from stix2validator import ValidationOptions, print_results, validate_string
+from stix2validator.errors import ValidationError
 
 # Initialize logging
 from api.logging_config import get_logger
@@ -148,7 +149,20 @@ def validate_bundle(bundle_json: str, *, quiet: bool = False) -> ValidationResul
 
     # ── Full JSON-schema validation ───────────────────────────────────────────
     options = ValidationOptions(version="2.1")
-    results = validate_string(bundle_json, options=options)
+    # Input that is not a STIX object at all is a verdict, not an exception (#500):
+    # empty or malformed JSON raises ValueError, an object without id/type raises
+    # ValidationError, and a JSON list comes back as a list of results.
+    try:
+        results = validate_string(bundle_json, options=options)
+    except (ValueError, ValidationError) as exc:
+        if not quiet:
+            logger.error(f"[Stage 5] Input is not a STIX bundle: {exc}")
+        return ValidationResult(INVALID, [str(exc)])
+    if isinstance(results, list):
+        message = "Root STIX document must be an object, not a list."
+        if not quiet:
+            logger.error(f"[Stage 5] {message}")
+        return ValidationResult(INVALID, [message])
     found = getattr(results, "object_results", None) or [results]
     errors = [str(e) for r in found for e in (r.errors or [])]
     warnings = [str(w) for r in found for w in (r.warnings or [])]

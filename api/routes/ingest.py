@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -303,19 +304,32 @@ async def ingest_url(request: Request, body: UrlIngestRequest):
     # a timed-out capture never leaves a half-rendered PDF where the pipeline
     # would read it.
     staging = dest.with_name(f"{job_id}.pdf.part")
+    # Set by the deadline below, before it unlinks `staging`.  The capture's own
+    # thread reads it once the render returns: a render that finishes after the
+    # 504 removes the file it wrote, because nothing else will (#480).  The
+    # deadline sets the flag and then unlinks; the thread writes and then reads
+    # the flag.  Whichever comes last sees the other's effect.
+    abandoned = threading.Event()
 
-    try:
-        result = await asyncio.wait_for(
-            asyncio.to_thread(
-                web_capture.capture_url_to_pdf,
+    def _capture_then_discard_if_abandoned():
+        try:
+            return web_capture.capture_url_to_pdf(
                 safe_url,
                 staging,
                 enable_js=body.enable_js,
                 timeout_ms=_CAPTURE_TIMEOUT_MS,
-            ),
+            )
+        finally:
+            if abandoned.is_set():
+                staging.unlink(missing_ok=True)
+
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(_capture_then_discard_if_abandoned),
             timeout=_CAPTURE_DEADLINE_S,
         )
     except asyncio.TimeoutError as exc:
+        abandoned.set()
         staging.unlink(missing_ok=True)
         raise HTTPException(
             504, f"Capturing {safe_url} timed out after {_CAPTURE_DEADLINE_S:.0f}s"

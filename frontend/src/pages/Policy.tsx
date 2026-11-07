@@ -789,7 +789,9 @@ function IOModal({ rules, globalMode, onClose, onImport }: {
     const blob = new Blob([exportText], { type: 'application/json' })
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a')
-    a.href = url; a.download = 'relationship-policy.json'; a.click()
+    a.href = url; a.download = 'relationship-policy.json'
+    // Firefox ignores click() on a detached <a> (#546).
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
     // Defer revocation so the browser has time to start the download before
     // the blob URL is invalidated (revoking synchronously breaks Firefox).
     setTimeout(() => URL.revokeObjectURL(url), 100)
@@ -992,7 +994,25 @@ export default function Policy() {
   const saveChain = useRef<Promise<unknown>>(Promise.resolve())
   const { mutateAsync: putPolicy } = saveMut
 
+  // The debounced save (scheduleSave) and the rules it will send.  Declared
+  // before savePolicy, which cancels the timer.
+  const saveTimer    = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // The save the timer will make, so leaving the page can make it now.
+  const pendingPatch = useRef<(() => void) | null>(null)
+  // Always-current snapshot of `rules` used inside debounced callbacks.
+  // Without this, `changeGlobalMode`'s timeout closes over a stale `rules`
+  // value (the rules at the moment the mode was toggled, not 1.5 s later).
+  const pendingRulesRef = useRef<PolicyRule[]>(rules)
+
   const savePolicy = useCallback((patch: Record<string, unknown>) => {
+    // Every immediate save sends the whole policy, so a debounced save still
+    // waiting for its timer is stale now: cancel it, or it sends the old value
+    // after this one (#498, #544).
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = null
+    pendingPatch.current = null
+    // What was just saved is what a later save must send.
+    if (Array.isArray(patch.rules)) pendingRulesRef.current = patch.rules as PolicyRule[]
     draftRef.current = { ...(draftRef.current ?? serverPolicyRef.current), version: 1, ...patch }
     const next = saveChain.current.catch(() => {}).then(() => putPolicy(draftRef.current!))
     saveChain.current = next
@@ -1035,9 +1055,6 @@ export default function Policy() {
   }
 
   // ── Auto-save with 1.5s debounce ────────────────────────────────────────────
-  const saveTimer    = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // The save the timer will make, so leaving the page can make it now.
-  const pendingPatch = useRef<(() => void) | null>(null)
   const scheduleSave = useCallback((patch: () => Record<string, unknown>) => {
     if (saveTimer.current) clearTimeout(saveTimer.current)
     const fire = () => {
@@ -1048,10 +1065,6 @@ export default function Policy() {
     pendingPatch.current = fire
     saveTimer.current = setTimeout(fire, 1500)
   }, [savePolicy])
-  // Always-current snapshot of `rules` used inside debounced callbacks.
-  // Without this, `changeGlobalMode`'s timeout closes over a stale `rules`
-  // value (the rules at the moment the mode was toggled, not 1.5 s later).
-  const pendingRulesRef = useRef<PolicyRule[]>(rules)
   useEffect(() => { pendingRulesRef.current = rules }, [rules])
 
   const setRules = useCallback((fn: (rs: PolicyRule[]) => PolicyRule[]) => {

@@ -126,6 +126,9 @@ class YaraRule:
     #: Modules imported by the *file* this rule came from.  Imports are file-level
     #: in YARA, never inside `rule { … }`, so they cannot be recovered from `body`.
     imports: tuple[str, ...] = ()
+    #: The rule's text from its `global` / `private` modifiers, not from `rule`
+    #: as `body` is: a standalone export needs the modifiers to compile (#478, #479).
+    source: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -592,6 +595,10 @@ def split_rules(text: str) -> list[YaraRule]:
         rule_kw_offset = m.group(0).find("rule")
         body_start = rule_start + rule_kw_offset
         body = text[body_start:end + 1]
+        # The modifiers are in `source` only: `body` keeps its value, which the
+        # content hash and the native key are built on.  Group 1 is the modifiers,
+        # empty when there are none, so its start is the `rule` keyword then.
+        source = text[m.start(1):end + 1]
         # The sections are read from the comment-free copy, so a `/* author = "evil" */`
         # inside the rule is not metadata and `$c` is not a string (#425).
         meta = _parse_meta(clean[body_start:end + 1])
@@ -604,6 +611,7 @@ def split_rules(text: str) -> list[YaraRule]:
             body=body,
             is_private=is_private,
             imports=imports,
+            source=source,
         ))
     return rules
 

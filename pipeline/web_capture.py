@@ -756,12 +756,17 @@ def capture_url_to_pdf(
                 route.abort()
                 return
 
-            try:
-                validate_url(request.url)
-            except CaptureError:
-                blocked[0] += 1
-                route.abort()
-                return
+            # An inline `data:` URL carries its bytes in the request itself and
+            # never reaches the network, so there is no address to validate (#511).
+            # Only that scheme is exempt; the resource-type check above still
+            # applies, and every http(s) subresource is re-checked here.
+            if not request.url.lower().startswith("data:"):
+                try:
+                    validate_url(request.url)
+                except CaptureError:
+                    blocked[0] += 1
+                    route.abort()
+                    return
 
             route.continue_()
         except Exception as exc:

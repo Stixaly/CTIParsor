@@ -106,7 +106,7 @@ export default function Coverage() {
     () => [...promoted.promoted].filter(id => !rulesById.has(id)),
     [promoted.promoted, rulesById],
   )
-  const { data: promotedMeta, isSuccess: promotedLoaded } = useQuery({
+  const { data: promotedMeta, isSuccess: promotedLoaded, isError: promotedFailed } = useQuery({
     queryKey: ['promoted-rules', jobId, promotedIds.join(',')],
     queryFn: () => lookupRules(promotedIds),
     enabled: promotedIds.length > 0,
@@ -386,6 +386,9 @@ export default function Coverage() {
               rulesById={rulesById}
               evidence={evidence}
             />
+            {/* hasPromoted comes from the promotions themselves, not from the metadata
+                that has arrived: while the lookup is pending the plain GET must already
+                be off, or the archive silently lacks the promoted rules (#486). */}
             <CoverageExportPanel
               jobId={jobId}
               reportName={job?.original_filename ?? ''}
@@ -393,7 +396,9 @@ export default function Coverage() {
               rules={allRules}
               rulesById={allRulesById}
               selection={selection}
-              hasPromoted={allRules.length > rules.length}
+              hasPromoted={promotedIds.length > 0}
+              inventoryComplete={inventoryComplete}
+              inventoryFailed={promotedIds.length > 0 && promotedFailed}
             />
           </>
         )}

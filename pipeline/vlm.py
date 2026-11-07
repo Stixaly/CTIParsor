@@ -17,6 +17,7 @@ from urllib.parse import urlsplit, urlunsplit
 from dotenv import load_dotenv
 
 from pipeline.env_flags import env_float
+from pipeline.llm_parse import strip_reasoning
 from pipeline.vllm_options import vllm_extra_body
 
 try:
@@ -235,8 +236,10 @@ def _http_get_json(url: str, headers: dict[str, str], timeout: float) -> dict:
 
 
 def _parse_payload(raw: str) -> dict:
-    """Extract and parse a JSON object from raw model output."""
-    s = raw.strip()
+    """Extract and parse a JSON object from raw model output.  The `<think>`
+    block of a reasoning model is dropped first (#509), and text after the
+    object, such as a note, is ignored: the object ends where it closes."""
+    s = strip_reasoning(raw).strip()
     if s.startswith("```"):
         lines = s.splitlines()
         if len(lines) > 1:
@@ -244,15 +247,11 @@ def _parse_payload(raw: str) -> dict:
         if s.rstrip().endswith("```"):
             s = s.rstrip()[:-3].rstrip()
 
-    if not s.startswith("{"):
-        start = s.find("{")
-        end = s.rfind("}")
-        if start == -1 or end == -1:
-            raise ValueError("No JSON object found")
-        s = s[start:end + 1]
-
+    start = s.find("{")
+    if start == -1:
+        raise ValueError("No JSON object found")
     try:
-        data = json.loads(s)
+        data, _ = json.JSONDecoder().raw_decode(s, start)
     except json.JSONDecodeError as e:
         raise ValueError(f"Invalid JSON: {e}") from e
 

@@ -217,6 +217,8 @@ export default function PdfViewer({ url, filename, entities, focusedId, onFocusE
     setNumPages(null)
     setBaseSize(null)
     setCurrentPage(1)
+    setRotation(0)
+    setZoomIdx(null)
   }
   const [available, setAvailable] = useState(0)
   const [measureTick, setMeasureTick] = useState(0)

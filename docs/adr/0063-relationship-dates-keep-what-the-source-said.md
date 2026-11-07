@@ -578,3 +578,12 @@ The code facts were checked at `8bde0a2` on 2026-09-28. The AnnoCTR counts
 were recounted per tag, not per line. OpenCTI's behaviour was read from its
 source and issues and has not been tested by an import. The implementation
 was validated as described above.
+
+## Amendment (2026-11-07): a baseline edge (#492)
+
+§6 governs CTIParsor's own duplicates and stays as written. When a CTIParsor edge
+duplicates a relationship of an enrichment baseline (ADR-0090), the baseline edge is
+re-issued with the earlier `start_time`, the later `stop_time` and both
+descriptions. That is the min/max §6 refuses for CTIParsor's assertions, applied to
+a foreign object because OpenCTI applies it on import anyway. ADR-0090's amendment
+of the same date gives the rules.

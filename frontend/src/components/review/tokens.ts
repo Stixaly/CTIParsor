@@ -430,9 +430,13 @@ export function generateDefangedVariants(value: string): string[] {
   // URL scheme defanging — applied to the clean value and every dot-variant
   if (/^https?:\/\//i.test(value)) {
     for (const v of [value, ...variants]) {
-      variants.add(v.replace(/^http/i, 'hxxp'))
+      const hxxp = v.replace(/^http/i, 'hxxp')
+      variants.add(hxxp)
       variants.add(v.replace('://', '[://]'))
       variants.add(v.replace(':', '[:]'))
+      // The scheme and the separator defanged together (#553)
+      variants.add(hxxp.replace('://', '[://]'))
+      variants.add(hxxp.replace(':', '[:]'))
     }
   }
 

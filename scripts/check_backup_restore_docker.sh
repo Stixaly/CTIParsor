@@ -71,23 +71,23 @@ if [ "$DOCKER_BIN" != docker ]; then
 fi
 
 # The commands of docs/docker.md, "Data and backups", character for character:
-# tests/test_check_backup_restore.py fails when the two differ.  YYYY-MM-DD
-# stands for the date of the backup.
+# tests/test_check_backup_restore.py fails when the two differ.  YYYY-MM-DD-HHMMSS
+# stands for the stamp of the backup's file names.
 read -r -d '' BACKUP_COMMANDS <<'COMMANDS'
-day=$(date +%F)
+stamp=$(date +%F-%H%M%S)
 docker compose stop app worker
-(umask 077; docker compose exec -T postgres sh -c 'PGPASSWORD="$(cat /run/secrets/db_password)" exec "$@"' sh pg_dump -U ctiparsor -d ctiparsor -Fc > ctiparsor-$day.dump)
-(umask 077; docker compose run --rm --no-deps -T --entrypoint tar app czf - -C /app/state . > cti-state-$day.tgz)
+(umask 077; docker compose exec -T postgres sh -c 'PGPASSWORD="$(cat /run/secrets/db_password)" exec "$@"' sh pg_dump -U ctiparsor -d ctiparsor -Fc > ctiparsor-$stamp.dump)
+(umask 077; docker compose run --rm --no-deps -T --entrypoint tar app czf - -C /app/state . > cti-state-$stamp.tgz)
 docker compose start app worker
 COMMANDS
 read -r -d '' CHECK_COMMANDS <<'COMMANDS'
-docker compose exec -T postgres pg_restore -l < ctiparsor-YYYY-MM-DD.dump | grep -c 'TABLE DATA'
-tar tzf cti-state-YYYY-MM-DD.tgz | grep -c '^./uploads/.'
+(set -o pipefail; docker compose exec -T postgres pg_restore -l < ctiparsor-YYYY-MM-DD-HHMMSS.dump | grep -c 'TABLE DATA')
+(set -o pipefail; tar tzf cti-state-YYYY-MM-DD-HHMMSS.tgz | grep -c '^./uploads/.')
 COMMANDS
 read -r -d '' RESTORE_COMMANDS <<'COMMANDS'
 docker compose up -d --wait postgres
-docker compose exec -T postgres sh -c 'PGPASSWORD="$(cat /run/secrets/db_password)" exec "$@"' sh pg_restore -U ctiparsor -d ctiparsor --single-transaction < ctiparsor-YYYY-MM-DD.dump
-docker compose run --rm --no-deps -T --entrypoint tar app xzf - --keep-old-files -C /app/state < cti-state-YYYY-MM-DD.tgz
+docker compose exec -T postgres sh -c 'PGPASSWORD="$(cat /run/secrets/db_password)" exec "$@"' sh pg_restore -U ctiparsor -d ctiparsor --single-transaction < ctiparsor-YYYY-MM-DD-HHMMSS.dump
+docker compose run --rm --no-deps -T --entrypoint tar app xzf - --keep-old-files -C /app/state < cti-state-YYYY-MM-DD-HHMMSS.tgz
 docker compose up -d
 COMMANDS
 
@@ -114,7 +114,7 @@ run_docs() {       # run_docs <project> <date> <commands>: the lines as written,
         cd "$WORK" || exit 1
         export COMPOSE_PROJECT_NAME="$1"
         while IFS= read -r line <&3; do
-            line=${line//YYYY-MM-DD/$2}
+            line=${line//YYYY-MM-DD-HHMMSS/$2}
             info "[$1] \$ $line"
             if ! eval "$line" < /dev/null 2> "$WORK/.stderr"; then
                 cat "$WORK/.stderr" >&2

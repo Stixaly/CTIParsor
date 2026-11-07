@@ -110,3 +110,13 @@ def test_main_reads_invalid_json_as_no_report_and_exits_1():
 
     assert proc.returncode == 1
     assert proc.stdout.splitlines() == ["problem: no stage report for this job (missing, empty or unreadable)"]
+
+
+def test_main_without_its_argument_prints_usage_and_exits_2_without_a_traceback():  # (#537)
+    """No stage list on the command line is a usage error, not an IndexError on argv[1]."""
+    proc = subprocess.run([sys.executable, str(SCRIPT)], input="[]",
+                          capture_output=True, text=True, check=False)
+
+    assert proc.returncode == 2
+    assert "usage:" in proc.stderr
+    assert "Traceback" not in proc.stderr

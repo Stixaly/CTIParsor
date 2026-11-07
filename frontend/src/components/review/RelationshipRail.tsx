@@ -176,9 +176,10 @@ function RelCard({ r, onAccept, onReject, onReset, onJump, onChangeType, onChang
             onBlur={() => setEditing(false)}
             autoFocus
           >
-            {/* When a known src→tgt pair is selected, show only spec-valid verbs */}
+            {/* When a known src→tgt pair is selected, show only spec-valid verbs,
+                plus the current one: it stays selectable even if the pair does not suggest it (#561) */}
             {constrained
-              ? valid.map(t => <option key={t} value={t}>{t}</option>)
+              ? Array.from(new Set([...valid, r.relationship_type])).map(t => <option key={t} value={t}>{t}</option>)
               : REL_TYPES.map(t => <option key={t} value={t}>{t}</option>)
             }
           </select>

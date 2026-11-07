@@ -104,7 +104,7 @@ rows: list[tuple[str, bool, str]] = [
     # Chromium still needs its system libraries, and without them it dies at
     # launch with "error while loading shared libraries: libasound.so.2".
     ("Ingest    — URL capture (Playwright)",
-     chk_import("playwright"), "make install-capture"),
+     chk_browser(), "make install-capture"),
 ]
 
 _store = detection_store()

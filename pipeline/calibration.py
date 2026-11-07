@@ -45,6 +45,7 @@ from __future__ import annotations
 import math
 from dataclasses import asdict, dataclass, field
 
+from api.db import transaction
 from api.logging_config import get_logger
 from pipeline.decisions import AUTO_ACCEPT_LEVEL, HUMAN, HUMAN_BULK, LEGACY
 
@@ -334,7 +335,11 @@ def calibrate(
     decisions = load_decisions(conn, sources, origins)
     proposals = []
     for (source, entity_type), points in sorted(decisions.items()):
-        current = overrides.get((source, entity_type), stage_default(source))
+        # The stage default is looked up only when there is no override: it raises
+        # for a source with no calibrated stage (#501).
+        current = overrides.get((source, entity_type))
+        if current is None:
+            current = stage_default(source)
         proposals.append(propose(
             source, entity_type, current, points,
             target_precision=target_precision, min_samples=min_samples,
@@ -365,21 +370,22 @@ def apply_proposals(conn, proposals: list[Proposal], now: str) -> int:
     with no error anywhere in the write path to catch it.
     """
     written = 0
-    for p in proposals:
-        if p.proposed is None:
-            continue
-        if not 0.0 <= p.proposed <= 1.0:
-            logger.warning(
-                f"[calibration] skipping out-of-range proposed threshold "
-                f"{p.proposed!r} for ({p.source}, {p.entity_type})"
-            )
-            continue
-        conn.execute(_UPSERT, (
-            p.source, p.entity_type, p.proposed, p.sample_size, p.target_precision,
-            p.precision_at_proposed, p.recall_at_proposed, "calibrated", now,
-        ))
-        written += 1
-    conn.commit()
+    # One transaction: autocommit would keep the rows written before a failure (#527).
+    with transaction(conn):
+        for p in proposals:
+            if p.proposed is None:
+                continue
+            if not 0.0 <= p.proposed <= 1.0:
+                logger.warning(
+                    f"[calibration] skipping out-of-range proposed threshold "
+                    f"{p.proposed!r} for ({p.source}, {p.entity_type})"
+                )
+                continue
+            conn.execute(_UPSERT, (
+                p.source, p.entity_type, p.proposed, p.sample_size, p.target_precision,
+                p.precision_at_proposed, p.recall_at_proposed, "calibrated", now,
+            ))
+            written += 1
     return written
 
 

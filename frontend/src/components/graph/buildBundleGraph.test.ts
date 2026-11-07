@@ -249,6 +249,25 @@ describe('buildBundleGraph', () => {
     expect(item.subject).toBe('object')
     expect(item.nodeId).toBeUndefined()
   })
+
+  it('lists a relationship added since the build once when two review rows share its key (#569)', () => {
+    const { bundle, entities, relations, ledger } = fixture()
+    const added = [rel('Mimikatz', 'related-to', 'evil.example'), rel('Mimikatz', 'related-to', 'evil.example')]
+    const g = buildBundleGraph(bundle, ledger, entities, [...relations, ...added])
+    const stale = g.diff.filter(d => d.kind === 'stale' && d.reason === 'added_since_build')
+    expect(stale).toHaveLength(1)
+    expect(stale[0].title).toBe('Mimikatz related-to evil.example')
+  })
+
+  it('lists an entity rejected since the build once when two review rows share its key (#569)', () => {
+    const { bundle, entities, relations, ledger } = fixture()
+    const rejected = entities.map(e => e.value === 'APT29' ? { ...e, accepted: false } : e)
+    rejected.push(entity('APT29', 'threat_actor', false))
+    const g = buildBundleGraph(bundle, ledger, rejected, relations)
+    const stale = g.diff.filter(d => d.kind === 'stale' && d.reason === 'removed_since_build' && d.subject === 'entity')
+    expect(stale).toHaveLength(1)
+    expect(stale[0].title).toBe('APT29')
+  })
 })
 
 describe('stixLabel', () => {

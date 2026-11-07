@@ -248,8 +248,9 @@ Four boundaries, in order:
    default and the functional default are the same default.
 3. **A request filter on the browser context.** Only `document`, `stylesheet`,
    `image`, `font` are allowed through (plus `script`/`xhr`/`fetch` when JS is
-   opted into), and **every subresource URL is re-run through `validate_url`** —
-   so a page cannot reach the LAN through an `<img src>`. Refusals are counted
+   opted into), and **every subresource URL is re-run through `validate_url`**
+   (except inline `data:` URLs, which carry their bytes and never reach the
+   network, #511) — so a page cannot reach the LAN through an `<img src>`. Refusals are counted
    and returned to the caller as `blocked_requests`.
 4. **`chromium_sandbox=True`**, plus an ephemeral context, `service_workers`
    blocked, `accept_downloads=False`, `ignore_https_errors=False`. The escape

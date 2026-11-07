@@ -433,11 +433,13 @@ def score_artifacts(
 
     artifacts: list[Artifact] = []
     for value, obs_list in value_groups.items():
-        # Determine representative class: lowest tier, then alphabetical
-        rep_class = min(
+        # Representative observable: lowest tier, then alphabetical. Its class sets
+        # the artifact's class and tier, so its display and entity_type go with them (#523).
+        rep_obs = min(
             obs_list,
             key=lambda o: (pyramid_tier(o.obs_class), o.obs_class)
-        ).obs_class
+        )
+        rep_class = rep_obs.obs_class
 
         # Collect all evidence for all classes of this value
         all_exact: list[ArtifactEvidence] = []
@@ -503,9 +505,6 @@ def score_artifacts(
         # DF for this artifact
         df = df_map.get(value, 0) if any_matchable else 0
 
-        # Display and entity_type from first observable seen
-        first_obs = obs_list[0]
-
         # Sorted list of all classes
         classes = sorted(set(o.obs_class for o in obs_list))
 
@@ -513,8 +512,8 @@ def score_artifacts(
             artifact_class=rep_class,
             classes=classes,
             value=value,
-            display=first_obs.display,
-            entity_type=first_obs.entity_type,
+            display=rep_obs.display,
+            entity_type=rep_obs.entity_type,
             entity_types=entity_types,
             tier=tier,
             tier_label=tier_label,

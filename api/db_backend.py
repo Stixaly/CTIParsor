@@ -52,6 +52,7 @@ _SQL_TOKEN = re.compile(
     r"|'(?:[^']|'')*'"                                       # string literal, '' escapes a quote
     r'|"[^"]*"'                                              # quoted identifier
     r"|(?<![\w$])\$(?P<tag>[A-Za-z_]\w*|)\$.*?\$(?P=tag)\$"  # dollar-quoted body, $$ or $tag$
+    r"|%\([A-Za-z_]\w*\)[sbt]"                               # named placeholder %(name)s (#524)
     r"|[?%]",
     re.DOTALL,
 )
@@ -69,12 +70,17 @@ def translate_placeholders(sql: str) -> str:
     placeholders". The '?' is different: it is only a placeholder outside SQL
     comments, quoted strings, quoted identifiers and dollar-quoted bodies (#440),
     so `_SQL_TOKEN` skips those regions and rewrites '?' only elsewhere.
+
+    A named placeholder '%(name)s' (psycopg's dict-parameter form, #524) outside
+    a region is left intact: escaping it would turn it into a literal '%(name)s'.
     """
 
     def _translate(match: re.Match[str]) -> str:
         text = match.group(0)
         if text == "?":
             return "%s"
+        if text.startswith("%("):
+            return text
         return text.replace("%", "%%")
 
     return _SQL_TOKEN.sub(_translate, sql)

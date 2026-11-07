@@ -16,6 +16,7 @@ from pydantic import BaseModel, field_validator
 
 import pipeline.overrides as overrides
 from api.db import _lock, get_conn, now_iso
+from api.routes._common import storable_text
 from pipeline.overrides import ACTIONS, GAZETTEER_TYPES, NAMED_TYPES, STATUSES
 from pipeline.promotion import (
     DEFAULT_MIN_ACCEPTS,
@@ -53,15 +54,7 @@ class OverrideIn(BaseModel):
     def _no_nul_or_lone_surrogate(cls, v: str | None) -> str | None:
         # PostgreSQL TEXT rejects NUL bytes (psycopg.DataError -> HTTP 500);
         # reject them here as a 4xx instead.
-        if v is None:
-            return v
-        if "\x00" in v:
-            raise ValueError("NUL byte is not allowed")
-        try:
-            v.encode("utf-8")
-        except UnicodeEncodeError as exc:
-            raise ValueError("lone UTF-16 surrogate is not allowed") from exc
-        return v
+        return storable_text(v)
 
 
 class StatusIn(BaseModel):

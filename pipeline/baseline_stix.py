@@ -29,6 +29,7 @@ from dataclasses import dataclass, replace
 from dataclasses import field as dataclass_field
 from datetime import UTC, datetime, timedelta
 from typing import Any, TypeVar
+from urllib.parse import urlsplit
 
 import stix2
 from stix2 import registry as stix2_registry
@@ -47,6 +48,7 @@ from pipeline.stage4_stix_mapping import (
     _expand_registry_hive,
     _pap_marking,
     _tlp_marking,
+    _url_key,
     normalise_tlp,
 )
 from pipeline.stix_access import field
@@ -163,6 +165,17 @@ def _norm_name(name: str) -> str:
     return " ".join(name.casefold().split())
 
 
+def _url_form(value: str) -> str:
+    """A URL as Stage 4 keys its observable (`_url_key`, #289): scheme and host
+    lower-cased, the path as written, since /A and /a are two resources (#483).
+    A value with no scheme or host, or one urlsplit rejects, is folded as before."""
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return value.lower()
+    return _url_key(value) if parts.scheme and parts.netloc else value.lower()
+
+
 def normalize_value(entity_type: str, value: str) -> str:
     """The form of `value` that keys are made of.  `entity_type` is an EntityType value."""
     et = _entity_type_value(entity_type)
@@ -184,6 +197,8 @@ def normalize_value(entity_type: str, value: str) -> str:
         return _expand_registry_hive(v).lower()
     if et == "cve":
         return v.upper()
+    if et == "url":
+        return _url_form(v)
     if et in OBSERVABLE_ENTITY_TYPES:
         return v.lower()
     return _norm_name(v)
@@ -463,6 +478,28 @@ def pattern_keys(pattern: str) -> tuple[set[Key], set[Key]]:
                 if key:
                     strong.add(key)
     return strong, weak
+
+
+def _single_comparison(pattern: str) -> bool:
+    """True when `pattern` is one comparison, with no observation operator and no
+    qualifier: then its keys are its whole logic.  Never raises."""
+    if pattern_too_complex(pattern):
+        return False
+    try:
+        info = Pattern(pattern).inspect()
+    except (ParseException, RecursionError):
+        return False
+    count = sum(len(items) for items in info.comparisons.values())
+    return count == 1 and not info.observation_ops and not info.qualifiers
+
+
+def _same_indicator(obj: object, base: object) -> bool:
+    """Whether an Indicator may stand for a baseline one: both state the same single
+    comparison (#484).  Keys leave out what a pattern compares on another property
+    (a port next to an address), so a compound pattern never matches its simple part."""
+    pattern = str(field(obj, "pattern") or "")
+    other = str(field(base, "pattern") or "")
+    return _single_comparison(pattern) and _single_comparison(other) and pattern_keys(pattern) == pattern_keys(other)
 
 
 # ── Resolution ──────────────────────────────────────────────────────────────
@@ -1738,6 +1775,9 @@ class MergeResult:
     removed_relationships: list[dict]             # CTIParsor SROs dropped: {"id", "reason", "kept"?}
     remapped_relationships: dict[str, tuple[str, str]]   # CTIParsor SRO id -> (source_ref, target_ref)
     rejected: frozenset[str] = frozenset()        # CTIParsor object ids not shipped: the analyst rejected their id
+    # Baseline relationships re-issued with what a CTIParsor duplicate added (#492):
+    # id -> (the dict that ships, the properties it gained).
+    upserted: dict[str, tuple[dict, tuple[str, ...]]] = dataclass_field(default_factory=dict)
 
 
 def _to_millis(moment: datetime) -> datetime:
@@ -1749,6 +1789,65 @@ def _to_millis(moment: datetime) -> datetime:
 def _stix_time(moment: datetime) -> str:
     """`moment` as a STIX timestamp: 2026-10-25T10:00:00.000Z."""
     return _to_millis(moment).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
+def _as_time(value: Any) -> datetime | None:
+    """A STIX timestamp (a string or a datetime) as a UTC datetime; None when unreadable."""
+    if isinstance(value, datetime):
+        ts = value
+    elif isinstance(value, str):
+        try:
+            ts = datetime.fromisoformat(value)
+        except (ValueError, OverflowError):
+            return None
+    else:
+        return None
+    return (ts if ts.tzinfo else ts.replace(tzinfo=UTC)).astimezone(UTC)
+
+
+def _later_than(original: Mapping[str, Any], now: datetime) -> str:
+    """The `modified` of a new version of `original`: `now`, or 1 ms after the
+    version it replaces when the clock is behind (a new version is strictly later)."""
+    stamp = _to_millis(now)
+    prior = _to_millis(_modified(original))
+    if prior >= stamp:
+        stamp = prior + timedelta(milliseconds=1)
+    return _stix_time(stamp)
+
+
+def merge_relationship(original: dict, new: object, now: datetime) -> tuple[dict, tuple[str, ...]]:
+    """The baseline relationship `original` with what `new`, a CTIParsor edge of
+    the same triple, adds (#492): the earlier `start_time`, the later
+    `stop_time` (OpenCTI's own upsert: ALIGN_OLDEST and ALIGN_NEWEST), and its
+    `description` after the baseline's.  Everything else of `original` is kept,
+    `modified` moves to `now`.  Returns `original` itself and () when `new` adds
+    nothing, or when the dates it adds would end the edge before it starts."""
+    d = copy.deepcopy(original)
+    gained: list[str] = []
+    for key, earlier in (("start_time", True), ("stop_time", False)):
+        mine = _as_time(field(new, key))
+        if mine is None:
+            continue
+        theirs = _as_time(d.get(key))
+        if theirs is None or (mine < theirs if earlier else mine > theirs):
+            d[key] = _stix_time(mine)
+            gained.append(key)
+    start, stop = _as_time(d.get("start_time")), _as_time(d.get("stop_time"))
+    if start is not None and stop is not None and stop <= start:
+        return original, ()                        # STIX: stop_time must be later than start_time
+    text = str(field(new, "description") or "").strip()
+    if text:
+        prior = str(d.get("description") or "").strip()
+        if not prior:
+            d["description"] = text
+            gained.append("description")
+        elif text not in prior:
+            d["description"] = f"{prior}\n\n{text}"
+            gained.append("description")
+    if not gained:
+        return original, ()
+    d["modified"] = _later_than(original, now)
+    return d, tuple(gained)
 
 
 def _content_key(obj: object) -> tuple[str, ...] | None:
@@ -1847,7 +1946,8 @@ def _rejected_entry(entry: Entry, excluded: AbstractSet[str]) -> bool:
 def merge_baseline(stix_objects: list, baseline: BaselineBuild) -> MergeResult:
     """Fold Stage 4's objects into the baseline, in place (architecture §8.2):
     the baseline's kept objects join the list, parsed; every CTIParsor object a
-    kept entry matches is replaced by it and every reference to it rewritten;
+    kept entry matches is replaced by it (an Indicator only by one stating the
+    same single comparison, #484) and every reference to it rewritten;
     the CTIParsor relationships this makes self-loops or duplicates of a
     baseline one are dropped.  A CTIParsor object the analyst rejected (its id
     excluded, no kept twin) and the relationships that name it are not shipped
@@ -1890,6 +1990,8 @@ def merge_baseline(stix_objects: list, baseline: BaselineBuild) -> MergeResult:
         if not isinstance(entry, Entry):
             continue
         target = _remap_target(o, entry, kept)
+        if target is not None and stix_type == "indicator" and not _same_indicator(o, baseline.objects[target]):
+            continue                       # a different pattern: both ship (#484)
         if target is not None and target != oid:
             remap[oid] = target
 
@@ -1926,6 +2028,9 @@ def merge_baseline(stix_objects: list, baseline: BaselineBuild) -> MergeResult:
     from pipeline.stage4b_graph_completion import stated_by_the_report
 
     out = list(parsed)
+    position = {_str(o, "id"): i for i, o in enumerate(out)}
+    upserted: dict[str, tuple[dict, tuple[str, ...]]] = {}
+    now = datetime.now(UTC)
     removed: list[dict] = []
     remapped: dict[str, tuple[str, str]] = {}
     stated_relations: set[str] = set()
@@ -1948,6 +2053,15 @@ def merge_baseline(stix_objects: list, baseline: BaselineBuild) -> MergeResult:
             removed.append({"id": oid, "reason": "duplicate_after_baseline_merge", "kept": seen[triple]})
             if seen[triple] in kept and stated_by_the_report(new):
                 stated_relations.add(seen[triple])      # the document states the baseline's edge
+            if seen[triple] in kept:
+                # What the report says of the edge the baseline holds (dates, description)
+                # joins it: the baseline's edge is re-issued, an OpenCTI upsert (#492).
+                base_id = seen[triple]
+                current, gained = upserted.get(base_id, (baseline.objects[base_id], ()))
+                merged, more = merge_relationship(current, new, now)
+                if more:
+                    upserted[base_id] = (merged, tuple(dict.fromkeys(gained + more)))
+                    out[position[base_id]] = stix2.parse(merged, allow_custom=True)
         else:
             seen[triple] = oid
             out.append(new)
@@ -1966,7 +2080,7 @@ def merge_baseline(stix_objects: list, baseline: BaselineBuild) -> MergeResult:
     stated = set(remap.values()) | shared | stated_relations
     return MergeResult(kept=frozenset(kept), stated=frozenset(stated), remap=remap, dropped=dropped,
                        removed_relationships=removed, remapped_relationships=remapped,
-                       rejected=frozenset(rejected))
+                       rejected=frozenset(rejected), upserted=upserted)
 
 
 def reissue_report(original: dict, kept: AbstractSet[str], added: Sequence[str], enrichment: dict,
@@ -1982,11 +2096,7 @@ def reissue_report(original: dict, kept: AbstractSet[str], added: Sequence[str],
             refs.append(r)
             listed.add(r)
     d["object_refs"] = refs
-    stamp = _to_millis(now)
-    prior = _to_millis(_modified(original))
-    if prior >= stamp:                                # the clock is behind the Report: strictly after it
-        stamp = prior + timedelta(milliseconds=1)
-    d["modified"] = _stix_time(stamp)
+    d["modified"] = _later_than(original, now)        # strictly after the Report, even with the clock behind
     if source_ref is not None and source_ref not in original.get("external_references", []):
         # Not twice: a Report CTIParsor already re-issued, or built, carries it.
         d["external_references"] = [*original.get("external_references", []), source_ref]

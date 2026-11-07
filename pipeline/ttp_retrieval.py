@@ -688,4 +688,4 @@ def merge_by_technique(cands: Iterable[TtpCandidate], limit: int | None = None) 
         else:
             inc.sources = merged
     ordered = sorted(best.values(), key=lambda c: (c.fused_rank or 10**9, c.dense_rank or 10**9, c.attack_id))
-    return ordered[:limit] if limit else ordered
+    return ordered[:limit] if limit is not None else ordered

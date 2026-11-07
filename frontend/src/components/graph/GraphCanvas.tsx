@@ -31,6 +31,7 @@ const MARKER_COLORS: Record<string, string> = {
   'gv-arrow-no':    'var(--no)',
   'gv-arrow-warn':  'var(--warn)',
   'gv-arrow-muted': 'var(--ink-4)',
+  'gv-arrow-baseline': 'var(--ink-2)',
 }
 const markerFor = (stroke: string) =>
   Object.entries(MARKER_COLORS).find(([, c]) => c === stroke)?.[0] ?? 'gv-arrow'
@@ -403,6 +404,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     }
     let drag: { x: number; y: number } | null = null
     const onDown = (e: PointerEvent) => {
+      if (e.button !== 0) return
       if ((e.target as Element).closest('[data-node], [data-edge-hit]')) return
       drag = { x: e.clientX, y: e.clientY }
       svg.style.cursor = 'grabbing'
@@ -442,6 +444,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   }, [])
 
   const onNodeDown = useCallback((e: React.PointerEvent, id: string) => {
+    if (e.button !== 0) return
     e.stopPropagation()
     const w  = screenToWorld(e.clientX, e.clientY)
     const p  = posRef.current[id] ?? { x: 0, y: 0 }

@@ -19,6 +19,21 @@ from pipeline.env_flags import env_bool
 from pipeline.stage4_stix_mapping import TLP_LEVELS, tlp_default
 
 
+def storable_text(v: str | None) -> str | None:
+    """`v`, or a ValueError if PostgreSQL TEXT cannot hold it, for a pydantic
+    `field_validator`: a NUL byte or a lone UTF-16 surrogate would otherwise
+    fail at the INSERT as a psycopg.DataError, so a 500 (#495, #525)."""
+    if v is None:
+        return v
+    if "\x00" in v:
+        raise ValueError("NUL byte is not allowed")
+    try:
+        v.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError("lone UTF-16 surrogate is not allowed") from exc
+    return v
+
+
 def refuse_nul_id(job_id: str) -> None:
     """Raise 404 for an id holding a NUL (`%00` in the URL), before the database sees it.
 

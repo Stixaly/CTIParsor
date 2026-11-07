@@ -63,6 +63,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -744,7 +745,12 @@ def main() -> None:
     if only is None or only == "gazetteer":
         build_gazetteer(bundles, out_dir)
     if only is None or only == "embeddings":
-        build_embeddings(bundles, out_dir)
+        # ADR-0087: the default track has no manifest. The model is read after the .env file is
+        # loaded, as build_embeddings does, so the flag names the model that build_embeddings uses.
+        from dotenv import load_dotenv
+        load_dotenv()
+        model_id = os.getenv("TTP_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+        build_embeddings(bundles, out_dir, write_manifest=model_id != "all-MiniLM-L6-v2")
     if only is None or only == "relationships":
         build_attack_relationships(bundles, out_dir)
     if only is None or only == "revoked":

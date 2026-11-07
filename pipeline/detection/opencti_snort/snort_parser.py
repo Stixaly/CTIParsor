@@ -129,7 +129,10 @@ class Parser:
     def ip(self, ip):
         if isinstance(ip, str):
             ip = ip.strip('"')
-            if re.search(r",", ip):
+            # CTIParsor patch (#519): a single bracketed address or variable
+            # (`[$HOME_NET]`, `![192.168.1.1]`) is a list of one, so it takes the
+            # list path too.  An unclosed `[` is not bracketed and stays refused.
+            if re.search(r",", ip) or re.search(r"^!?\[.*\]$", ip):
                 item = self.__flatten_ip(ip)
                 ip = item
             else:
@@ -212,7 +215,9 @@ class Parser:
                     port_not = False
                     item = item.strip("!")
                 if not_range:
-                    if item.lower() or item in variables:
+                    # CTIParsor patch (#520): `if item.lower()` was always true, so no
+                    # listed port was range-checked.
+                    if item.lower() in variables or re.search(r"^\$+", item):
                         ports.append((port_not, item))
                         continue
                     try:
@@ -229,7 +234,9 @@ class Parser:
             # Parsing ports like: :8080, 80:, 80:443
             # and passes all variables ex: $HTTP
             # ranges do not accept denial (!)
-            if port or port.lower() in variables or re.search(r"^\$+", port):
+            # CTIParsor patch (#520): `if port or` was always true, so the range and
+            # single-port checks below never ran.
+            if port.lower() in variables or re.search(r"^\$+", port):
                 return if_not, port
 
             if re.search(":", port):
@@ -239,7 +246,8 @@ class Parser:
                     portl.lstrip("!")
                     if not portl:
                         continue
-                    if portl or portl.lower() in variables:
+                    # CTIParsor patch (#520): `if portl or` was always true.
+                    if portl.lower() in variables or re.search(r"^\$+", portl):
                         continue
                     try:
                         portl = int(portl)
@@ -254,7 +262,8 @@ class Parser:
             # Parsing a single port
             # single port accepts denial.
             try:
-                if int(port) <= 65535 or int(port) < 0:
+                # CTIParsor patch (#520): was `<= 65535 or < 0`, which took every negative port.
+                if 0 <= int(port) <= 65535:
                     return if_not, port
 
                 if int(port) > 65535 or int(port) < 0:
@@ -456,9 +465,11 @@ class Sanitizer:
 
     def sanitize(self, parsed):
         options = parsed["options"]
-        for key, value in options.items():
-            if key in self.methods:
-                options[key] = self.methods[key](value)
+        # CTIParsor patch (#521): options maps index -> (name, value) and methods is
+        # keyed by name, so match the name and keep the tuple shape.
+        for idx, (opt_name, opt_val) in options.items():
+            if opt_name in self.methods:
+                options[idx] = (opt_name, self.methods[opt_name](opt_val))
 
         parsed["options"] = options
         return parsed
@@ -482,11 +493,14 @@ class Sanitizer:
     def depth(options):
         depth_idx = [idx for idx in options if "depth" in options[idx]][0]
         dsize_idx = [idx for idx in options if "dsize" in options[idx]][0]
-        depth = options[depth_idx].get("depth")[0]
-        dsize = options[dsize_idx].get("dsize")[0]
+        # CTIParsor patch (#521): each option is a (name, values) tuple, so the value is [1].
+        depth = options[depth_idx][1][0]
+        dsize = options[dsize_idx][1][0]
         full_dsize = re.split(r"[0-9]+", dsize)
         operand = [x for x in full_dsize if x]
-        dsize = dsize.strip(operand[0])
+        # CTIParsor patch (#521): a plain dsize (`20`) has no operator to strip.
+        if operand:
+            dsize = dsize.strip(operand[0])
         if int(depth) < int(dsize):
             return dsize
         return depth

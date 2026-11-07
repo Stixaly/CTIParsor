@@ -218,7 +218,10 @@ def openapi_side(key: str) -> str:
 def openapi_parent(key: str) -> str:
     """The entry `key` belongs to: `GET /a body.x[]` -> `GET /a body.x` ->
     `GET /a body` -> `GET /a`."""
-    method, path, rest = key.split(" ", 2)
+    parts = key.split(" ", 2)
+    if len(parts) < 3:
+        return key
+    method, path, rest = parts
     base = f"{method} {path}"
     for suffix in ("[]", "{*}"):
         if rest.endswith(suffix):

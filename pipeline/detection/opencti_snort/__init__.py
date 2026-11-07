@@ -1,4 +1,4 @@
-"""OpenCTI's Snort rule parser, copied from OpenCTI with one local patch (ADR-0070, #422).
+"""OpenCTI's Snort rule parser, copied from OpenCTI with local patches (ADR-0070, #422; #519, #520, #521).
 
 Source: OpenCTI master of 2026-10-01,
 ``opencti-platform/opencti-graphql/src/python/runtime/snort/`` —

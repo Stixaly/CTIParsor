@@ -14,6 +14,11 @@ import argparse
 import sys
 import time
 from collections import Counter
+from pathlib import Path
+
+# Ensure the project root is on sys.path so `api` and `pipeline` are importable
+# from a plain `python scripts/audit_coverage_formats.py` (#541).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from api.db import get_conn, init_db
 from pipeline.detection.coverage import (

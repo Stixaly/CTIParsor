@@ -235,6 +235,11 @@ def test_the_parent_of_a_key():
     assert c.openapi_parent("GET /api/a param:query:format") == "GET /api/a"
 
 
+def test_the_parent_of_an_operation_is_itself_and_does_not_crash():
+    """An operation key has no `rest` to split: its parent is the key, not a ValueError (#532)."""
+    assert c.openapi_parent("GET /api/jobs") == "GET /api/jobs"
+
+
 # ── cli ──────────────────────────────────────────────────────────────────────
 
 _ARG = {"action": "store", "nargs": None, "required": False, "choices": None, "default": "db", "type": None,

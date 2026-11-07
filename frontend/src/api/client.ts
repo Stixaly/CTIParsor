@@ -60,33 +60,33 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 // Jobs
 export const fetchJobs = () => req<Job[]>('/jobs')
-export const fetchJob = (id: string) => req<Job>(`/jobs/${id}`)
+export const fetchJob = (id: string) => req<Job>(`/jobs/${encodeURIComponent(id)}`)
 export const updateJobStatus = (id: string, status: string) =>
-  req<{ status: string }>(`/jobs/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) })
+  req<{ status: string }>(`/jobs/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ status }) })
 /** Full finalize — Stages 4-5, then the job is completed.  Used by the manual Finalize button. */
 export const finalizeJob = (id: string) =>
-  req<{ status: string; bundle_size: number }>(`/jobs/${id}/finalize`, { method: 'POST' })
+  req<{ status: string; bundle_size: number }>(`/jobs/${encodeURIComponent(id)}/finalize`, { method: 'POST' })
 
 /** Quick finalize — Stages 4-5 without completing the job, used by the debounced
  *  auto-finalize.  Keeps the bundle up-to-date after every entity/relationship
  *  change; the report keeps its status. */
 export const finalizeJobQuick = (id: string) =>
-  req<{ status: string; bundle_size: number }>(`/jobs/${id}/finalize?quick=true`, { method: 'POST' })
+  req<{ status: string; bundle_size: number }>(`/jobs/${encodeURIComponent(id)}/finalize?quick=true`, { method: 'POST' })
 export const deleteJob = (id: string) =>
-  req<{ deleted: string }>(`/jobs/${id}`, { method: 'DELETE' })
-export const fetchBundle = (id: string) => req<StixBundle>(`/jobs/${id}/bundle`)
+  req<{ deleted: string }>(`/jobs/${encodeURIComponent(id)}`, { method: 'DELETE' })
+export const fetchBundle = (id: string) => req<StixBundle>(`/jobs/${encodeURIComponent(id)}/bundle`)
 /** What Stage 4 did with each review row (ADR-0061).  Resolves to null when the
  *  stored bundle has no ledger (built before it existed) or there is no bundle. */
 export const fetchBundleLedger = async (id: string): Promise<BundleLedger | null> => {
   try {
-    return await req<BundleLedger>(`/jobs/${id}/bundle/ledger`)
+    return await req<BundleLedger>(`/jobs/${encodeURIComponent(id)}/bundle/ledger`)
   } catch (e) {
     if (e instanceof Error && e.message.startsWith('404')) return null
     throw e
   }
 }
 /** Returns the URL to stream the original uploaded file (PDF, DOCX, …). */
-export const sourceUrl  = (id: string) => `/api/jobs/${id}/source`
+export const sourceUrl  = (id: string) => `/api/jobs/${encodeURIComponent(id)}/source`
 
 // Upload
 export interface UploadOptions {
@@ -124,26 +124,26 @@ export async function inspectBaseline(file: File, reportId?: string): Promise<Ba
 }
 
 export const fetchBaselineStatus = () => req<BaselineStatus>('/baselines/status')
-export const fetchBaselineIntake = (jobId: string) => req<BaselineIntake>(`/jobs/${jobId}/baseline/intake`)
+export const fetchBaselineIntake = (jobId: string) => req<BaselineIntake>(`/jobs/${encodeURIComponent(jobId)}/baseline/intake`)
 
 // NER cutoffs and the server's auto-accept level (ADR-0051, ADR-0058)
 export const fetchThresholds = () => req<ThresholdsInfo>('/thresholds')
 
 // Entities
 export const fetchEntities = (jobId: string) =>
-  req<Entity[]>(`/jobs/${jobId}/entities`)
+  req<Entity[]>(`/jobs/${encodeURIComponent(jobId)}/entities`)
 export const updateEntity = (jobId: string, entityId: string, patch: object) =>
-  req<Entity>(`/jobs/${jobId}/entities/${entityId}`, {
+  req<Entity>(`/jobs/${encodeURIComponent(jobId)}/entities/${encodeURIComponent(entityId)}`, {
     method: 'PATCH', body: JSON.stringify(patch),
   })
 export const deleteEntity = (jobId: string, entityId: string) =>
-  req<{ deleted: string }>(`/jobs/${jobId}/entities/${entityId}`, { method: 'DELETE' })
+  req<{ deleted: string }>(`/jobs/${encodeURIComponent(jobId)}/entities/${encodeURIComponent(entityId)}`, { method: 'DELETE' })
 export const createEntity = (jobId: string, body: {
   value: string; entity_type: string; context?: string; confidence?: number; source?: string; mitre_id?: string | null
 }) =>
-  req<Entity>(`/jobs/${jobId}/entities`, { method: 'POST', body: JSON.stringify(body) })
+  req<Entity>(`/jobs/${encodeURIComponent(jobId)}/entities`, { method: 'POST', body: JSON.stringify(body) })
 export const acceptAllPendingEntities = (jobId: string) =>
-  req<{ accepted: number }>(`/jobs/${jobId}/entities/accept-pending`, { method: 'POST' })
+  req<{ accepted: number }>(`/jobs/${encodeURIComponent(jobId)}/entities/accept-pending`, { method: 'POST' })
 
 /**
  * Bulk accept / reject / reset all entities of a given type in one request.
@@ -158,24 +158,24 @@ export const bulkUpdateEntities = (
   scope: 'pending' | 'all' = 'pending',
 ) =>
   req<{ updated: number; entity_type: string; action: string; scope: string }>(
-    `/jobs/${jobId}/entities/bulk`,
+    `/jobs/${encodeURIComponent(jobId)}/entities/bulk`,
     { method: 'POST', body: JSON.stringify({ entity_type, action, scope }) },
   )
 
 // Relationships
 export const fetchRelationships = (jobId: string) =>
-  req<Relationship[]>(`/jobs/${jobId}/relationships`)
+  req<Relationship[]>(`/jobs/${encodeURIComponent(jobId)}/relationships`)
 export const createRelationship = (jobId: string, body: {
   source_value: string; relationship_type: string; target_value: string; confidence?: number; evidence_text?: string | null
   evidence_label?: 'observed' | 'reported' | 'assessed' | 'inferred' | 'gap'
 }) =>
-  req<Relationship>(`/jobs/${jobId}/relationships`, { method: 'POST', body: JSON.stringify(body) })
+  req<Relationship>(`/jobs/${encodeURIComponent(jobId)}/relationships`, { method: 'POST', body: JSON.stringify(body) })
 export const updateRelationship = (jobId: string, relId: string, patch: object) =>
-  req<Relationship>(`/jobs/${jobId}/relationships/${relId}`, {
+  req<Relationship>(`/jobs/${encodeURIComponent(jobId)}/relationships/${encodeURIComponent(relId)}`, {
     method: 'PATCH', body: JSON.stringify(patch),
   })
 export const deleteRelationship = (jobId: string, relId: string) =>
-  req<{ deleted: string }>(`/jobs/${jobId}/relationships/${relId}`, { method: 'DELETE' })
+  req<{ deleted: string }>(`/jobs/${encodeURIComponent(jobId)}/relationships/${encodeURIComponent(relId)}`, { method: 'DELETE' })
 /** Decide many relationships in one call — a review group (ADR-0065).  Stored
  *  as `human_bulk`, which calibration does not read. */
 export const bulkUpdateRelationships = (
@@ -183,7 +183,7 @@ export const bulkUpdateRelationships = (
   ids: string[],
   action: 'accept' | 'reject' | 'reset',
 ) =>
-  req<{ updated: number; action: string }>(`/jobs/${jobId}/relationships/bulk`, {
+  req<{ updated: number; action: string }>(`/jobs/${encodeURIComponent(jobId)}/relationships/bulk`, {
     method: 'POST', body: JSON.stringify({ ids, action }),
   })
 
@@ -202,21 +202,21 @@ export async function fetchAttackIndex(): Promise<AttackIndex> {
 
 // Detection coverage (ADR-0006)
 export const fetchCoverage = (jobId: string) =>
-  req<CoverageResult>(`/jobs/${jobId}/coverage`)
+  req<CoverageResult>(`/jobs/${encodeURIComponent(jobId)}/coverage`)
 export const fetchCoverageRules = (jobId: string, techniqueId: string) =>
-  req<{ technique_id: string; rules: CoverageRule[] }>(`/jobs/${jobId}/coverage/${techniqueId}/rules`)
+  req<{ technique_id: string; rules: CoverageRule[] }>(`/jobs/${encodeURIComponent(jobId)}/coverage/${encodeURIComponent(techniqueId)}/rules`)
 /** Every rule linkable to a report, in every format, grouped by technique — the
  *  unranked tag join. Backs the coverage page's selection set (ADR-0022). */
 export const fetchCoverageReportRules = (jobId: string) =>
-  req<CoverageReportRules>(`/jobs/${jobId}/coverage/rules`)
+  req<CoverageReportRules>(`/jobs/${encodeURIComponent(jobId)}/coverage/rules`)
 /** Rules ranked by the report's own observables, with match evidence (ADR-0014) —
  *  backs the Review "Detections" tab. */
 export const fetchDetectionProposals = (jobId: string, limit = 200) =>
-  req<DetectionProposals>(`/jobs/${jobId}/detections/proposals?limit=${limit}`)
+  req<DetectionProposals>(`/jobs/${encodeURIComponent(jobId)}/detections/proposals?limit=${limit}`)
 /** URL that streams a ZIP of every detected rule (bodies) for a report, in every
  *  format. For an arbitrary subset use `downloadExportSelection` (ADR-0022). */
 export const detectionsExportUrl = (jobId: string) =>
-  `/api/jobs/${jobId}/detections/export`
+  `/api/jobs/${encodeURIComponent(jobId)}/detections/export`
 export const fetchDetectionCorpora = () =>
   req<{ corpora: DetectionCorpus[] }>(`/detection-corpora`)
 
@@ -283,7 +283,8 @@ export async function downloadExportSelection(
     body: JSON.stringify({ rule_ids: ruleIds }),
   })
   if (!res.ok) {
-    throw new Error(await res.text().catch(() => res.statusText))
+    const msg = await res.text().catch(() => res.statusText)
+    throw new Error(`${res.status}: ${msg}`)
   }
   const disposition = res.headers.get('content-disposition') ?? ''
   const match = disposition.match(/filename="([^"]+)"/)

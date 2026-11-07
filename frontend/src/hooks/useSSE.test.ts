@@ -35,3 +35,26 @@ describe('useSSE', () => {
     expect(result.current.lost).toBe(false)
   })
 })
+
+// #548: the job id is one encoded path segment, and no id resets the stream.
+describe('useSSE follows the job id (#548)', () => {
+  it('encodes the job id in the progress URL', () => {
+    vi.stubGlobal('EventSource', FakeEventSource)
+    renderHook(() => useSSE('a/b c'))
+    expect(FakeEventSource.last!.url).toBe('/api/jobs/a%2Fb%20c/progress')
+  })
+
+  it('forgets the previous job\'s events and done state when the id goes back to null', () => {
+    vi.stubGlobal('EventSource', FakeEventSource)
+    const { result, rerender } = renderHook(
+      ({ jobId }: { jobId: string | null }) => useSSE(jobId),
+      { initialProps: { jobId: 'job-1' as string | null } },
+    )
+    act(() => { FakeEventSource.last!.emit('done', { status: 'completed' }) })
+    expect(result.current.done).toBe(true)
+
+    rerender({ jobId: null })
+    expect(result.current.done).toBe(false)
+    expect(result.current.events).toEqual([])
+  })
+})

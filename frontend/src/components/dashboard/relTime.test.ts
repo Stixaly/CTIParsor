@@ -17,6 +17,16 @@ describe('relTime', () => {
     expect(relTime('2026-10-29T12:00:00Z')).toBe('4d ago')
   })
 
+  // #571: the unit is picked from the rounded count, so no bucket reads "60m" or "24h".
+  it('moves to the next unit when the rounded count reaches the boundary (#571)', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+    expect(relTime('2026-11-02T11:00:30Z')).toBe('1h ago')
+    expect(relTime('2026-11-02T11:00:15Z')).toBe('1h ago')
+    expect(relTime('2026-11-01T12:30:00Z')).toBe('yesterday')
+    expect(relTime('2026-11-01T12:15:00Z')).toBe('yesterday')
+  })
+
   it('keeps a future timestamp at just now', () => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)

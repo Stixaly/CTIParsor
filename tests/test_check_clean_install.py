@@ -422,6 +422,16 @@ def test_the_report_says_what_failed_and_that_quick_is_not_the_gate(tmp_path):
     assert md.startswith("# Clean install: FAIL") and "This run is not the release gate." in md
 
 
+def test_a_fractional_step_duration_is_read_and_rounded_not_a_value_error(tmp_path):  # (#538)
+    """steps.tsv may hold a float duration (`12.7`), as the commands' .times files do."""
+    (tmp_path / "steps.tsv").write_text("report A\tPASS\t12.7\tok\nreport B\tPASS\t\tno time\n",
+                                        encoding="utf-8")
+    assert journey._steps(tmp_path) == [
+        {"step": "report A", "status": "PASS", "seconds": 13, "detail": "ok"},
+        {"step": "report B", "status": "PASS", "seconds": 0, "detail": "no time"},
+    ]
+
+
 # ── No maintainer's path in a public document ────────────────────────────────
 
 def test_no_public_document_names_a_maintainer_s_machine():

@@ -66,6 +66,18 @@ describe('buildGraphData', () => {
     expect(adj[a.id].has(t.id)).toBe(true)
   })
 
+  it('matches values that differ only by surrounding whitespace (#565)', () => {
+    const a = entity(' APT29 ', 'threat_actor')   // stored with padding: shown as-is
+    const m = entity('WellMess', 'malware')
+    const r = rel('APT29', ' WellMess ')
+    const { nodes, edges, unmatchedCount } = buildGraphData([a, m], [r])
+    expect(unmatchedCount).toBe(0)
+    expect(edges).toHaveLength(1)
+    expect(edges[0].source).toBe(a.id)
+    expect(edges[0].target).toBe(m.id)
+    expect(nodes.find(n => n.id === a.id)?.name).toBe(' APT29 ')
+  })
+
   it('returns empty structures for empty input', () => {
     const g = buildGraphData([], [])
     expect(g.nodes).toEqual([])

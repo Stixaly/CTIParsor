@@ -7,7 +7,7 @@
 import { useMemo, useState } from 'react'
 import { BASELINE_REASON_LABEL, type BundleLedger, type Entity, type Job, type Relationship } from '../../types'
 import type { BundleGraphData } from './buildBundleGraph'
-import { EDGE_ORIGIN_LABEL, OBJECT_ORIGIN_LABEL, entityReason, isFromBaseline, reasonRef } from './provenance'
+import { EDGE_ORIGIN_LABEL, OBJECT_ORIGIN_LABEL, entityReason, isFromBaseline, reasonRef, relationshipReason } from './provenance'
 import { Note, PanelHeader } from './BundlePanels'
 import { typeLabel } from '../review/tokens'
 
@@ -151,7 +151,8 @@ export function BaselinePanel({
             <PickRow key={r.stix_id}>
               <div style={ROW_TITLE}>{rowName(r.stix_id)}</div>
               <div style={ROW_SUB}>
-                {entityReason(r.reason)}{reasonRef(r.reason) ? ` (${rowName(reasonRef(r.reason)!)})` : ''}
+                {r.stix_id.startsWith('relationship--') ? relationshipReason(r.reason) : entityReason(r.reason)}
+                {reasonRef(r.reason) ? ` (${rowName(reasonRef(r.reason)!)})` : ''}
               </div>
             </PickRow>
           ))}

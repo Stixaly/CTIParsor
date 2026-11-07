@@ -53,10 +53,10 @@ class BaseExtractionStage:
         land in the result (the previous version seeded `seen` only from
         `existing`, letting intra-batch duplicates through).
         """
-        seen = {(e.value.lower(), e.entity_type) for e in existing}
+        seen = {(e.value.strip().lower(), e.entity_type) for e in existing}
         result = list(existing)
         for e in new_entities:
-            key = (e.value.lower(), e.entity_type)
+            key = (e.value.strip().lower(), e.entity_type)
             if key not in seen:
                 seen.add(key)
                 result.append(e)
@@ -104,7 +104,7 @@ def resolve_type_conflicts(entities: list[RawEntity]) -> list[RawEntity]:
     by_value: dict[str, list[RawEntity]] = {}
     order: list[str] = []
     for e in entities:
-        key = e.value.lower()
+        key = e.value.strip().lower()
         if key not in by_value:
             by_value[key] = []
             order.append(key)

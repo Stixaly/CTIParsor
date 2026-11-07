@@ -155,46 +155,117 @@ def _norm(v: str) -> str:
     return " ".join(v.lower().split())
 
 
+def norm_forms(values: Iterable[str]) -> set[str]:
+    """The normalised surface forms of one entity, for `score_entity_forms`."""
+    return {_norm(v) for v in values}
+
+
+def norm_triple(t) -> tuple[str, str, str]:
+    """A (source, type, target) triple as the relation scores compare it."""
+    return (_norm(t[0]), t[1].lower(), _norm(t[2]))
+
+
+def _pair_weight(p: set[str], g: set[str], big: int) -> int:
+    """`big` for an exact pair (a shared form), 1 for a partial one (a form
+    contains another), 0 for none."""
+    if p & g:
+        return big
+    return 1 if any(a in b or b in a for a in p for b in g if a and b) else 0
+
+
+def _best_pairs(weight: list[list[int]]) -> list[tuple[int, int, int]]:
+    """Maximum-weight one-to-one pairing of rows and columns (Hungarian method),
+    so the total does not depend on the order of either side.  A weight of 0
+    is no pair.  Returns (row, column, weight) for each pair made."""
+    if not weight or not weight[0]:
+        return []
+    transposed = len(weight) > len(weight[0])
+    w = [list(r) for r in zip(*weight, strict=True)] if transposed else weight
+    n, m = len(w), len(w[0])
+    cost = [[-x for x in row] for row in w]
+    inf = sum(abs(x) for row in cost for x in row) + 1
+    u = [0] * (n + 1)
+    v = [0] * (m + 1)
+    p = [0] * (m + 1)      # p[j]: the (1-based) row matched to column j, 0 if free
+    way = [0] * (m + 1)
+    for i in range(1, n + 1):
+        p[0] = i
+        j0 = 0
+        minv = [inf] * (m + 1)
+        used = [False] * (m + 1)
+        while True:
+            used[j0] = True
+            i0, delta, j1 = p[j0], inf, 0
+            for j in range(1, m + 1):
+                if not used[j]:
+                    cur = cost[i0 - 1][j - 1] - u[i0] - v[j]
+                    if cur < minv[j]:
+                        minv[j], way[j] = cur, j0
+                    if minv[j] < delta:
+                        delta, j1 = minv[j], j
+            for j in range(m + 1):
+                if used[j]:
+                    u[p[j]] += delta
+                    v[j] -= delta
+                else:
+                    minv[j] -= delta
+            j0 = j1
+            if p[j0] == 0:
+                break
+        while j0:
+            j1 = way[j0]
+            p[j0] = p[j1]
+            j0 = j1
+    pairs = []
+    for j in range(1, m + 1):
+        i, jj = p[j] - 1, j - 1
+        if p[j] and w[i][jj] > 0:
+            pairs.append((jj, i, w[i][jj]) if transposed else (i, jj, w[i][jj]))
+    return pairs
+
+
+def score_entity_forms(pred: list[tuple[str, set[str]]], gold: list[tuple[str, set[str]]],
+                       lenient: bool = False) -> dict[str, Counts]:
+    """`score_entities` on sets of normalised forms, for both sides: a pair is
+    exact when the two sets share a form, partial when one form contains
+    another.  The relation is symmetric, so swapping `pred` and `gold` swaps
+    FP and FN and nothing else."""
+    pred = list({(t, frozenset(f)): (t, f) for t, f in pred}.values())
+    out: dict[str, Counts] = {}
+    for etype in sorted({t for t, _ in pred} | {t for t, _ in gold}):
+        ps = [f for t, f in pred if t == etype]
+        gs = [f for t, f in gold if t == etype]
+        # An exact pair outweighs any number of partial ones, so the matching
+        # first maximises exact pairs, then the pairs of any kind.
+        big = len(ps) + len(gs) + 1
+        weight = [[_pair_weight(p, g, big) for g in gs] for p in ps]
+        c = out.setdefault(etype, Counts())
+        used_p: set[int] = set()
+        used_g: set[int] = set()
+        for pi, gi, w in _best_pairs(weight):
+            used_p.add(pi)
+            used_g.add(gi)
+            if w == big or lenient:
+                c.tp += 1
+            else:
+                c.fp += 1
+                c.fn += 1
+        c.fp += len(ps) - len(used_p)
+        c.fn += len(gs) - len(used_g)
+    return out
+
+
 def score_entities(pred: list[tuple[str, str]], gold: list[tuple[str, str, set[str]]],
                    lenient: bool = False) -> dict[str, Counts]:
     """Per entity type, one document.  `pred`: (etype, value) the pipeline kept;
     `gold`: (etype, label, surface forms).  A prediction matches a gold entity
     of its type exactly when it equals the label or any surface form, partially
-    when one contains the other.  One-to-one, exact pairs first.  Strict: a
-    partial pair is a FP and a FN (as in tests/eval_pipeline.score_sample)."""
+    when one contains the other.  One-to-one, maximising the exact pairs, then
+    the pairs.  Strict: a partial pair is a FP and a FN (as in
+    tests/eval_pipeline.score_sample)."""
     pred = list(dict.fromkeys((t, _norm(v)) for t, v in pred))
     gold_sets = [(t, {_norm(label)} | {_norm(s) for s in surfaces}) for t, label, surfaces in gold]
-    cands = []
-    for pi, (pt, pv) in enumerate(pred):
-        for gi, (gt, forms) in enumerate(gold_sets):
-            if pt != gt:
-                continue
-            if pv in forms:
-                cands.append((0, pi, gi, True))
-            elif any(pv in f or f in pv for f in forms if f and pv):
-                cands.append((1, pi, gi, False))
-    cands.sort()
-    used_p: set[int] = set()
-    used_g: set[int] = set()
-    out: dict[str, Counts] = {}
-    for _, pi, gi, exact in cands:
-        if pi in used_p or gi in used_g:
-            continue
-        used_p.add(pi)
-        used_g.add(gi)
-        c = out.setdefault(pred[pi][0], Counts())
-        if exact or lenient:
-            c.tp += 1
-        else:
-            c.fp += 1
-            c.fn += 1
-    for pi, (pt, _) in enumerate(pred):
-        if pi not in used_p:
-            out.setdefault(pt, Counts()).fp += 1
-    for gi, (gt, _) in enumerate(gold_sets):
-        if gi not in used_g:
-            out.setdefault(gt, Counts()).fn += 1
-    return out
+    return score_entity_forms([(t, {v}) for t, v in pred], gold_sets, lenient)
 
 
 # ── Relationships (in-house set) ─────────────────────────────────────────────
@@ -203,9 +274,7 @@ def score_relations(pred: set[tuple[str, str, str]], gold: set[tuple[str, str, s
     """(source, type, target) triples.  `strict`: both entities, the type and
     the direction.  `undirected_untyped`: the two entities are linked at all —
     reported alongside to tell a wrong verb or direction from a missing edge."""
-    def norm(t):
-        return (_norm(t[0]), t[1].lower(), _norm(t[2]))
-    p, g = {norm(t) for t in pred}, {norm(t) for t in gold}
+    p, g = {norm_triple(t) for t in pred}, {norm_triple(t) for t in gold}
     loose = lambda s: {frozenset((a, c)) for a, _, c in s}  # noqa: E731
     return {"strict": set_counts(p, g), "undirected_untyped": set_counts(loose(p), loose(g))}
 

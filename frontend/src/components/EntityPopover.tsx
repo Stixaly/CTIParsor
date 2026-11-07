@@ -24,8 +24,19 @@ interface ValidationResult {
   hint: string
 }
 
+// Undoes the defanging a report uses (evil[.]com, hxxps://, user[@]host.com), so a
+// defanged IoC copied from the text is checked as the value it stands for (#554).
+function refang(text: string): string {
+  return text
+    .replace(/^hxxp(s?)/i, 'http$1')
+    .replace(/\[:\/\/\]/g, '://')
+    .replace(/\[:\]/g, ':')
+    .replace(/\[\.\]|\(\.\)|\{\.\}/g, '.')
+    .replace(/\[at\]|\(at\)|\[@\]|\(@\)|\{@\}/gi, '@')
+}
+
 function validateIoC(text: string, type: string): ValidationResult | null {
-  const v = text.trim()
+  const v = refang(text.trim())
   switch (type) {
     case 'ipv4': {
       const parts = v.split('.')
@@ -200,6 +211,17 @@ export default function EntityPopover({
     if (e.key === 'Escape') { e.preventDefault(); onClose() }
     if (e.key === 'Enter' && firstMatch) { e.preventDefault(); pick(firstMatch) }
   }
+
+  // The warning hides the search input, and with it its onKeyDown: while it is
+  // shown, Escape is taken on the window instead (#559).
+  useEffect(() => {
+    if (!pendingConfirm) return
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); onClose() }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [pendingConfirm, onClose])
 
   // ── position (clamped to viewport) ────────────────────────────────────────
 

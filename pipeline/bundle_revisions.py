@@ -169,6 +169,18 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "relationships naming it, and a kept twin absorbs the copy of an excluded entry (#414); the "
      "techniques a canonical rule inherits are recomputed at every dedup pass (#432)",
      "mapping"),
+    ("3e2b444", "2026-11-07",
+     "Extraction: FTP URLs keep their path, a quoted URL keeps its trailing punctuation, values "
+     "differing by outer spaces are one value, a promoted canonical is stripped, a VLM answer "
+     "followed by a note is read, a captured page keeps its inline data: images, and Stage 3f "
+     "removes a technique whose quote is not in the report (#493, #496, #497, #507, #508, #509, #511)",
+     "extraction"),
+    ("3e2b444", "2026-11-07",
+     "Mapping: the baseline merge keeps URL path case and compound Indicators apart and re-issues "
+     "a baseline edge with what its duplicate adds; long-distance inference drops <think>; sentence "
+     "spans index the text exactly; blank YARA and bad-port Snort rules are refused, bracketed "
+     "Snort addresses accepted (#483, #484, #492, #503, #506, #517, #519, #520)",
+     "mapping"),
 )
 
 
