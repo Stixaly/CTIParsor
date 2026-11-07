@@ -165,9 +165,14 @@ def selection_max_output_tokens(provider: str | None = None) -> int:
 
 
 def _norm(s: str) -> str:
+    # The invisible characters the Stage 3 prompt drops (zero-width space, bidi
+    # marks, BOM): a quote copied with one is the same words (#402).  Lazy:
+    # stage3_llm imports this module.
+    from pipeline.stage3_llm import _INVISIBLE_CHARS
+
     # str.split, not compile_pattern(r"\s+"): RE2's `\s` is ASCII only, and a
     # quote would not be found in a report that writes "spear\xa0phishing".
-    return " ".join(s.split()).lower()
+    return " ".join(_INVISIBLE_CHARS.sub("", s).split()).lower()
 
 
 @functools.lru_cache(maxsize=1)
@@ -215,10 +220,14 @@ def _fit_candidates(text: str, cands: list[TtpCandidate], max_chars: int | None)
     the LLM's own proposals and the best `_MIN_RETRIEVED` retrieved ones.  Only
     a text that alone outgrows the limit (never a Stage 1 chunk: ≤ 5,400
     characters against 32,000) is then cut by `fit_text`.
+
+    The budget is the prompt `fit_report` builds with no candidates: the text
+    and the two spotlighting marker lines around it (#402).
     """
     if max_chars is None:
         return cands
-    budget = max_chars - len(_SELECT_USER_TEMPLATE.format(text=text, candidates=""))
+    framed, _ = fit_report(_SELECT_USER_TEMPLATE, text, None, candidates="")
+    budget = max_chars - len(framed)
     keep = list(cands)
     while len(format_candidates(keep)) > budget:
         retrieved = [i for i, c in enumerate(keep) if "llm" not in c.sources]
@@ -461,6 +470,8 @@ def chunk_candidates(retrieved: Sequence[TtpCandidate], llm: Sequence[TtpCandida
         if key in out:
             inc = out[key]
             out[key] = inc.model_copy(update={
+                # An LLM proposal without a passage keeps the 2c one (#402).
+                "passage": inc.passage or c.passage,
                 "sources": sorted(set(inc.sources) | set(c.sources)),
                 "example": inc.example if inc.example_kind == "procedure" else (c.example or inc.example),
                 "example_kind": inc.example_kind if inc.example_kind == "procedure" else c.example_kind,
