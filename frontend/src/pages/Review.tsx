@@ -775,8 +775,10 @@ export default function Review() {
   // LLM-extracted entities (malware/actor/TTP/campaign names) are paraphrased
   // from context and often don't appear verbatim in the source text.  Shared by
   // the Text view and the Source view so both give the same self-dismissing hint.
+  // Reads localEntitiesRef so the callback keeps its identity across decisions:
+  // a new one reruns the reader's focus effect and repeats the hint.
   const handleEntityNotInText = useCallback((id: string) => {
-    const entity = localEntities.find(e => e.id === id)
+    const entity = localEntitiesRef.current.find(e => e.id === id)
     if (!entity) return
     if (notInTextTimer.current) clearTimeout(notInTextTimer.current)
     // ADR-0090: a row the analyst's own bundle supplied is not in the text by
@@ -785,7 +787,7 @@ export default function Review() {
       ? `"${entity.value}" comes from your STIX bundle; it is not in the report text`
       : `"${entity.value}" not found verbatim in document text`)
     notInTextTimer.current = setTimeout(() => setNotInTextHint(null), 3000)
-  }, [localEntities])
+  }, [])
 
   // The Marginalia's focus.  A bundle-only row gets the same hint here: the PDF
   // viewer never reports a missing occurrence, so nothing else would say it.

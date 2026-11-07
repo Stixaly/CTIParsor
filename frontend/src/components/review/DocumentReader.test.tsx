@@ -23,33 +23,33 @@ const entity = (over: Partial<Entity> = {}): Entity => ({
 
 const noop = () => {}
 
-function renderReader(
-  text: string,
-  entities: Entity[],
-  extra: { focusedId?: string | null; onEntityNotInText?: (id: string) => void } = {},
-) {
-  return render(
-    <DocumentReader
-      text={text}
-      entities={entities}
-      highlightStyle="underline"
-      focusedId={extra.focusedId ?? null}
-      onEntityNotInText={extra.onEntityNotInText}
-      setFocusedId={noop}
-      setHoverEntity={noop}
-      onAccept={noop}
-      onReject={noop}
-      onReset={noop}
-      onChangeType={noop}
-      onCreate={noop}
-      onMarkShiftClick={noop}
-      onMarkDragStart={noop}
-      onSelectionRelate={noop}
-      relEvidence={[]}
-      relsForOverlay={[]}
-      showRelArrows={false}
-    />,
-  )
+type Extra = { focusedId?: string | null; onEntityNotInText?: (id: string) => void }
+
+const readerElement = (text: string, entities: Entity[], extra: Extra = {}) => (
+  <DocumentReader
+    text={text}
+    entities={entities}
+    highlightStyle="underline"
+    focusedId={extra.focusedId ?? null}
+    onEntityNotInText={extra.onEntityNotInText}
+    setFocusedId={noop}
+    setHoverEntity={noop}
+    onAccept={noop}
+    onReject={noop}
+    onReset={noop}
+    onChangeType={noop}
+    onCreate={noop}
+    onMarkShiftClick={noop}
+    onMarkDragStart={noop}
+    onSelectionRelate={noop}
+    relEvidence={[]}
+    relsForOverlay={[]}
+    showRelArrows={false}
+  />
+)
+
+function renderReader(text: string, entities: Entity[], extra: Extra = {}) {
+  return render(readerElement(text, entities, extra))
 }
 
 describe('DocumentReader — wrapped hash highlighting', () => {
@@ -131,6 +131,44 @@ describe('DocumentReader — wrapped hash highlighting', () => {
   it('reports a genuinely absent hash as not-in-text', () => {
     const notInText = vi.fn()
     renderReader('Narrative report with no indicator tables.', [entity()], {
+      focusedId: 'e1',
+      onEntityNotInText: notInText,
+    })
+    expect(notInText).toHaveBeenCalledWith('e1')
+  })
+
+  // issue #447: a rejected entity has no range (buildRanges drops it), so it
+  // looked "not in the text".  It is in the text: no hint for it.
+  it('does not report a rejected focused entity as not-in-text (issue 447)', () => {
+    const notInText = vi.fn()
+    renderReader('Narrative report with no indicator tables.', [entity({ accepted: false })], {
+      focusedId: 'e1',
+      onEntityNotInText: notInText,
+    })
+    expect(notInText).not.toHaveBeenCalled()
+  })
+
+  // The Review page recreates the callback on each decision.  Rejecting the
+  // focused entity must not report it, even though the callback changed.
+  it('stays silent when the focused entity is rejected and the callback changes (issue 447)', () => {
+    const first = vi.fn()
+    const second = vi.fn()
+    const { rerender } = renderReader('Narrative report with no indicator tables.', [entity()], {
+      focusedId: 'e1',
+      onEntityNotInText: first,
+    })
+    expect(first).toHaveBeenCalledWith('e1')
+    rerender(readerElement('Narrative report with no indicator tables.', [entity({ accepted: false })], {
+      focusedId: 'e1',
+      onEntityNotInText: second,
+    }))
+    expect(second).not.toHaveBeenCalled()
+  })
+
+  // Control: an accepted entity that really is absent from the text still gets the hint.
+  it('still reports an accepted entity that is absent from the text (issue 447 control)', () => {
+    const notInText = vi.fn()
+    renderReader('Narrative report with no indicator tables.', [entity({ accepted: true })], {
       focusedId: 'e1',
       onEntityNotInText: notInText,
     })

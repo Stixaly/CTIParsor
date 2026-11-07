@@ -63,6 +63,11 @@ export default function DocumentReader({
     return spans.sort((a, b) => a.start - b.start)
   }, [relEvidence, text])
 
+  // A rejected entity is in the text, just not highlighted (buildRanges drops it):
+  // saying it was "not found in text" was wrong.  Same guard as SourceViewer.
+  // A boolean, not the entity list, so the effect does not rerun on every decision.
+  const focusedRejected = entities.find(e => e.id === focusedId)?.accepted === false
+
   // ── scroll focused mark into view ────────────────────────────────────────
   useEffect(() => {
     if (!focusedId) return
@@ -71,14 +76,14 @@ export default function DocumentReader({
       // Always scroll to the entity — removes the old "only scroll if near edge"
       // restriction that caused visible-but-unfocused entities to give no feedback.
       node.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    } else {
+    } else if (!focusedRejected) {
       // Entity exists in the list but has no occurrence in the document text.
       // This is normal for LLM-extracted entities (malware names, actor names,
       // campaign names, TTP descriptions) that are paraphrased from context rather
       // than copied verbatim.  Notify the parent so it can show a hint to the user.
       onEntityNotInText?.(focusedId)
     }
-  }, [focusedId, onEntityNotInText])
+  }, [focusedId, focusedRejected, onEntityNotInText])
 
   // ── text selection ────────────────────────────────────────────────────────
   const handleMouseUp = () => {
