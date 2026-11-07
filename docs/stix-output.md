@@ -308,7 +308,8 @@ listed under [What ships](#what-ships).
   needs `rfc3986-validator` installed: without it, every value passes.
 - **`outranked_type`** (entity, dropped). When several sources type one name as
   malware, threat actor, tool or campaign, the name keeps the type of its
-  best-ranked source. The other types are dropped before Stage 4, with
+  best-ranked source. The other types are dropped before Stage 4 (including those
+  Stage 2 already resolved away, #397), with
   `sources`, `kept_types` and `kept_sources`
   ([ADR-0092](adr/0092-one-type-per-name-before-stage-4-by-source-rank.md)).
   Best rank first: `analyst`, `manual` and `baseline_stix`; then `ioc` and

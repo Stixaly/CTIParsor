@@ -83,9 +83,13 @@ class OutrankedType:
 @dataclass(frozen=True)
 class NamedEntities:
     """`llm_result` with the named lists completed and the outranked types left
-    out, and the types that were left out."""
+    out, and the types that were left out.  `resolved_away` are the types
+    Stage 2's `resolve_type_conflicts` had already dropped before this call
+    (#397): recorded in the ledger, but not in the lists nor in `keeps`, as the
+    bundle never held them."""
     llm_result: LLMEnrichmentResult
     outranked: tuple[OutrankedType, ...] = ()
+    resolved_away: tuple[OutrankedType, ...] = ()
 
     def keeps(self, entity: RawEntity) -> bool:
         """False for a raw entity of an outranked (name, type), which Stage 4's
@@ -97,17 +101,54 @@ class NamedEntities:
         return frozenset((_key(o.value), o.entity_type) for o in self.outranked)
 
     def record(self, ledger: MappingLedger) -> None:
-        """One `dropped / outranked_type` entry per outranked type (ADR-0061)."""
-        for o in self.outranked:
+        """One `dropped / outranked_type` entry per outranked type (ADR-0061),
+        the resolved-away ones included."""
+        for o in (*self.outranked, *self.resolved_away):
             ledger.entity(o.value, o.entity_type, "dropped", reason="outranked_type",
                           sources=list(o.sources), kept_types=list(o.kept_types),
                           kept_sources=list(o.kept_sources))
+
+
+def _source_of(etype: EntityType, value: str, source: str,
+               baseline_holds: Callable[[str, str], bool] | None) -> str:
+    """`baseline_stix` for a (name, type) the analyst's baseline holds, whatever
+    found it (`note` in `with_named_entities`); the entity's source otherwise."""
+    if baseline_holds is not None and baseline_holds(etype.value, value):
+        return decisions.BASELINE_STIX
+    return source
+
+
+def _resolved_away(present: dict[str, set[tuple[EntityType, str]]], dropped: Iterable[RawEntity],
+                   gone: set[tuple[str, str]], baseline_holds: Callable[[str, str], bool] | None,
+                   ) -> tuple[OutrankedType, ...]:
+    """The (name, type)s of `dropped` that Stage 2 resolved away (#397), each as an
+    OutrankedType whose kept side is what `present` (the entities that stayed)
+    holds under the name.  A (name, type) the outranking already holds (`gone`)
+    is not repeated; a type not compared by name is not a named entity."""
+    away: dict[tuple[str, EntityType], tuple[str, set[str]]] = {}
+    for e in dropped:
+        etype = EntityType(e.entity_type)
+        key = _key(e.value)
+        if etype not in _COMPARED or not key or key not in present or (key, etype.value) in gone:
+            continue
+        away.setdefault((key, etype), (e.value.strip(), set()))[1].add(
+            _source_of(etype, e.value, e.source, baseline_holds))
+    out = []
+    for (key, etype), (value, sources) in away.items():
+        kept = present[key]
+        out.append(OutrankedType(value=value, entity_type=etype.value, sources=tuple(sorted(sources)),
+                                 kept_types=tuple(sorted({t.value for t, _ in kept})),
+                                 kept_sources=tuple(sorted({s for _, s in kept}))))
+    out.sort(key=lambda o: (_key(o.value), o.entity_type))
+    return tuple(out)
 
 
 def with_named_entities(
     llm_result: LLMEnrichmentResult,
     entities: Iterable[RawEntity | tuple[str, str] | tuple[str, str, str]],
     baseline_holds: Callable[[str, str], bool] | None = None,
+    *,
+    resolved_away: Iterable[RawEntity] = (),
 ) -> NamedEntities:
     """Every malware, threat-actor and tool in `entities` joins the matching
     list of `llm_result`, deduplicated case-insensitively; a name both have
@@ -120,18 +161,25 @@ def with_named_entities(
 
     `baseline_holds(entity_type, value)` is a run's Stage 3r answer (enrich
     mode): a (name, type) the analyst's baseline holds counts as `baseline_stix`,
-    whatever found it, as its stored row does on a finalize (`stored_row_source`)."""
+    whatever found it, as its stored row does on a finalize (`stored_row_source`).
+
+    `resolved_away` are the RawEntity objects Stage 2's `resolve_type_conflicts`
+    dropped from `entities` before the run reached Stage 4 (#397).  They are
+    not compared again (the bundle is the same with or without them): each
+    (name, type) of them that `entities` keeps under another type is recorded
+    as outranked in `NamedEntities.resolved_away`, for the ledger."""
     lists: dict[str, list[str]] = {f: list(getattr(llm_result, f)) for f in NAMED_LISTS.values()}
     seen: dict[str, set[str]] = {f: {_key(n) for n in v} for f, v in lists.items()}
     # (name key, type) -> the first spelling, and every source that typed it so
     typed: dict[tuple[str, EntityType], tuple[str, set[str]]] = {}
+    # name key -> (type, source) of every entity of the run that stays, any type
+    present: dict[str, set[tuple[EntityType, str]]] = {}
 
     def note(value: str, etype: EntityType, source: str) -> None:
         key = _key(value)
         if key:
-            if baseline_holds is not None and baseline_holds(etype.value, value):
-                source = decisions.BASELINE_STIX
-            typed.setdefault((key, etype), (value.strip(), set()))[1].add(source)
+            typed.setdefault((key, etype), (value.strip(), set()))[1].add(
+                _source_of(etype, value, source, baseline_holds))
 
     for etype, field in NAMED_LISTS.items():
         for name in lists[field]:
@@ -152,10 +200,10 @@ def with_named_entities(
             etype = EntityType(raw_type)
         except ValueError:
             continue
-        if etype not in _COMPARED:
-            continue
         key = _key(value)
-        if not key:
+        if key:
+            present.setdefault(key, set()).add((etype, _source_of(etype, value, source, baseline_holds)))
+        if etype not in _COMPARED or not key:
             continue
         note(value, etype, source)
         target = NAMED_LISTS.get(etype)
@@ -184,14 +232,16 @@ def with_named_entities(
             for t in etypes if ranks[t] != best
         )
 
-    if not outranked:
-        return NamedEntities(llm_result if not added else llm_result.model_copy(update=lists))
     outranked.sort(key=lambda o: (_key(o.value), o.entity_type))
     gone = {(_key(o.value), o.entity_type) for o in outranked}
+    away = _resolved_away(present, resolved_away, gone, baseline_holds)
+    if not outranked:
+        return NamedEntities(llm_result if not added else llm_result.model_copy(update=lists),
+                             resolved_away=away)
     update: dict[str, Any] = {
         field: [n for n in lists[field] if (_key(n), etype.value) not in gone]
         for etype, field in NAMED_LISTS.items()
     }
     if llm_result.campaign_name and (_key(llm_result.campaign_name), EntityType.CAMPAIGN.value) in gone:
         update["campaign_name"] = None
-    return NamedEntities(llm_result.model_copy(update=update), tuple(outranked))
+    return NamedEntities(llm_result.model_copy(update=update), tuple(outranked), away)

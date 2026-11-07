@@ -36,6 +36,9 @@ carries several types, it keeps the types of the best-ranked source
 (`_TYPE_PRECEDENCE`: `ioc`/`gazetteer`, then `semantic`, then `cyner`/`gliner`,
 then `spacy`/`alias_list`, then any other source). Equal ranks keep every type.
 So no conflict between two detectors of different rank reaches the store.
+The loser of such a conflict is not lost from the ledger: the run keeps what that
+pass dropped (`RunResult.resolved_away`), and Stage 4 records it as
+`outranked_type` (#397). The bundle is built as before.
 
 What reaches Stage 4 is what that pass never sees:
 
