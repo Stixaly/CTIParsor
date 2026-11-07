@@ -9,6 +9,35 @@ theme.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-07
+
+A fix release, numbered as a minor one under ADR-0085 §8 because it changes API
+answers and bundle output. It fixes 90 of the 94 issues of the 2026-11-07 audit
+(#478-#571); the four not reproducible are closed with the reason.
+
+- **No schema migration** and no configuration variable added or removed.
+- **API answers that change:** 400 for a blank entity value or relationship
+  end, 422 for a NUL byte or lone surrogate in a text field or rule id, 200
+  instead of 400 for two upload fallbacks, and 409 from `POST /finalize` when
+  review decisions overtake it four times.
+- **Bundles change** for the same report (`BUNDLE_AFFECTING`, extraction and
+  mapping). Two are visible to an OpenCTI user: a CTIParsor relationship that
+  duplicates a baseline relationship now re-issues the baseline one under its
+  own id, with the earliest `start_time`, the latest `stop_time` and both
+  descriptions (#492); a technique the 3f verifier confirmed without a quote
+  found in the report is removed (#493).
+- **Evaluation scores can move:** entity matching is now a maximum one-to-one
+  matching instead of a greedy one (#481).
+
+**Upgrade notes.**
+
+- Nothing to migrate: pull the image and restart
+  ([docs/upgrading.md](docs/upgrading.md)).
+- Stored bundles are not rebuilt: finalize a report again, or run it again, to
+  get the fixes.
+- A client that treated every non-2xx answer of the routes above as a server
+  error should read the new 400, 409 and 422 codes as refusals of its input.
+
 ### Fixed
 
 #### Audit batch of 2026-11-07 (#478–#571)
