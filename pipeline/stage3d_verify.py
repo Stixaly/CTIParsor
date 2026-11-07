@@ -51,6 +51,7 @@ from typing import Callable
 
 # Initialize logging
 from api.logging_config import get_logger
+from models.schemas import EvidenceLabel
 from pipeline.env_flags import env_bool, env_int
 from pipeline.evidence_span import stated_in, words
 from pipeline.llm_parse import fit_report, parse_numbered_claims
@@ -184,6 +185,9 @@ def verify_relationships(
         (ADR-0082): kept out of the bundle, stored pending for an analyst.
         Until 2026-10 those claims stayed in `relationships`, indistinguishable
         from verified ones.
+        A kept claim labelled `gap` becomes `reported`: its quote shows the
+        source states it.  The other labels are left as extraction gave them.
+        `times` are not touched: they were checked before this pass (ADR-0063).
 
     Claims are verified in batches of STIX_VERIFY_BATCH_SIZE.  The result is
     returned unchanged when verification is disabled or there are fewer than
@@ -285,11 +289,28 @@ def _verify_batch(text: str, text_words: str, rels: list, llm_fn: Callable[[str,
         if not quote:
             out.held.append(hold(rel, "verified without a quote"))
         elif not stated_in(quote, text_words):
-            out.held.append(hold(rel.model_copy(update={"evidence_text": quote[:quote_cap]}),
+            out.held.append(hold(rel.model_copy(update={"evidence_text": _cut_quote(quote, quote_cap)}),
                                  "quote not found in the text"))
         else:
-            out.kept.append(rel.model_copy(update={"evidence_text": quote[:quote_cap]}))
+            # A gap the quote backs is stated by the source: `reported`, as Stage 3f's
+            # select mode grades a quoted technique.  Any other label stays as it was.
+            label = EvidenceLabel.REPORTED if rel.evidence_label == EvidenceLabel.GAP else rel.evidence_label
+            out.kept.append(rel.model_copy(update={"evidence_text": _cut_quote(quote, quote_cap),
+                                                   "evidence_label": label}))
     return out
+
+
+def _cut_quote(quote: str, cap: int) -> str:
+    """`quote` kept to `cap` characters.  A longer one is cut at the last space
+    before the cap, with an ellipsis, as `object_mentions._clip` does, so no
+    word is left half-written."""
+    if len(quote) <= cap:
+        return quote
+    head = quote[:cap - 1]
+    cut = head.rfind(" ")
+    if cut > 0:
+        head = head[:cut]
+    return head.rstrip() + "…"
 
 
 # ---------------------------------------------------------------------------
