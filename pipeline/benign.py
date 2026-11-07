@@ -17,12 +17,16 @@ bundle would alert on Google.
 - a vendor's, researcher's or sandbox's site, the host of a reference link
   (MISP warninglists security-provider-blogpost, automated-malware-analysis;
   the host or any subdomain of it), except the platforms anyone publishes on
-  that the blogpost list also carries (GitHub, Medium, Twitter, S3…): a
-  payload on `raw.githubusercontent.com` is a payload;
+  that the blogpost list also carries (GitHub and its gist/raw hosts, Google
+  Sites, Medium, Twitter, S3…): a payload on `raw.githubusercontent.com` or
+  `sites.google.com` is a payload;
 - one of the 10,000 most popular domains (MISP warninglist tranco10k), for
   that exact domain only: `x.duckdns.org` or `evil.blogspot.com` are not
   popular because their parent is, and a URL on a popular domain keeps its
   Indicator (a payload on GitHub is still a payload).
+
+A leading `www.` is ignored on both sides of the comparison: `alienvault.com`
+and `www.alienvault.com` are the same site (#411).
 
 The observable still ships, without an Indicator; Stage 4's ledger says why.
 `BENIGN_IOC_FILTER=false` turns this off.  The lists are vendored by
@@ -51,6 +55,7 @@ _POPULAR_LIST = "tranco10k"
 # platform (gchq.github.io, a blog on blogspot) stays a reference.
 _USER_CONTENT = frozenset({
     "github.com", "raw.githubusercontent.com", "gist.githubusercontent.com", "medium.com",
+    "gist.github.com", "raw.github.com", "sites.google.com",
     "twitter.com", "t.co", "facebook.com", "www.facebook.com", "stackoverflow.com",
     "dropbox.com", "www.dropbox.com", "pastebin.lu",
     "s3-eu-west-1.amazonaws.com", "s3-us-west-2.amazonaws.com",
@@ -69,6 +74,11 @@ def enabled() -> bool:
     return env_bool("BENIGN_IOC_FILTER", default=True)
 
 
+def _bare(host: str) -> str:
+    """`host` without a leading `www.` (#411)."""
+    return host[4:] if host.startswith("www.") else host
+
+
 @functools.lru_cache(maxsize=1)
 def _lists() -> dict[str, frozenset[str]]:
     try:
@@ -77,10 +87,12 @@ def _lists() -> dict[str, frozenset[str]]:
         logger.warning(f"[benign] {_PATH.name} unreadable, no warninglist applies: "
                        f"{type(exc).__name__}: {exc}")
         return {}
-    lists = {name: frozenset(entry.get("values", [])) for name, entry in data.get("lists", {}).items()}
+    lists = {name: frozenset(_bare(v) for v in entry.get("values", []))
+             for name, entry in data.get("lists", {}).items()}
+    user_content = frozenset(_bare(v) for v in _USER_CONTENT)
     for name in _REFERENCE_LISTS:
         if name in lists:
-            lists[name] = lists[name] - _USER_CONTENT
+            lists[name] = lists[name] - user_content
     return lists
 
 
@@ -92,6 +104,7 @@ def _host_in(host: str, values: frozenset[str]) -> bool:
 
 def _reference_site(host: str) -> str | None:
     lists = _lists()
+    host = _bare(host)
     for name in _REFERENCE_LISTS:
         if _host_in(host, lists.get(name, frozenset())):
             return f"reference_site:{name}"
@@ -116,8 +129,7 @@ def benign_reason(entity_type: EntityType, value: str) -> str | None:
         reference = _reference_site(host)
         if reference:
             return reference
-        bare = host[4:] if host.startswith("www.") else host
-        if bare in _lists().get(_POPULAR_LIST, frozenset()):
+        if _bare(host) in _lists().get(_POPULAR_LIST, frozenset()):
             return f"popular_domain:{_POPULAR_LIST}"
         return None
     if entity_type == EntityType.URL:
