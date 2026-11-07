@@ -63,7 +63,10 @@ The dedup axis is `dedup_key = sha256(normalized(logsource) + normalized(detecti
 computed by `SigmaAdapter`. Normalization lowercases scalars/keys and sorts lists,
 so formatting-, ordering-, case-, and metadata-only differences (title, author,
 id, references) hash identically — but two rules with different detection logic do
-not. This is the semantically correct definition of "duplicate" for coverage: two
+not. Values under a case-sensitive modifier (`|re`, `|cased`, `|base64`,
+`|base64offset`) keep their case, and no value is stripped of its whitespace
+(issue #429): a leading space in `|contains` is part of the substring, and
+`SGVsbG8=` and `sgvsbg8=` are different encoded payloads. This is the semantically correct definition of "duplicate" for coverage: two
 rules corroborate a technique only if they would match different events. Rules with
 no usable detection logic fall back to their `content_hash` so they never pool.
 
