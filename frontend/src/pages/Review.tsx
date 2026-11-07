@@ -415,6 +415,9 @@ export default function Review() {
         updateEntity(jobId!, e.id, { accepted: null, decision_origin: 'human_bulk' })))
         .then(() => qc.invalidateQueries({ queryKey: ['entities', jobId] }))
         .catch(() => { /* non-blocking — local state is already correct */ })
+        // #449: the reset is a decision, so the bundle is stale.  Some PATCHes may
+        // have landed before one failed, so this runs whatever the outcome.
+        .finally(markDirty)
     }
   }
 

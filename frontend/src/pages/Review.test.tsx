@@ -140,6 +140,27 @@ describe('Review — a decision the store refused (#286)', () => {
   }, 20_000)
 })
 
+// #449 — undoing the auto-accept is a decision like any other: the bundle on the
+// server no longer matches the page, so it is marked outdated and rebuilt.
+describe('Review — undoing the auto-accept (#449)', () => {
+  it('marks the bundle outdated and schedules the rebuild when "Undo all" is clicked', async () => {
+    vi.mocked(finalizeJobQuick).mockClear()
+    renderReview()
+    await opened()
+    expect(screen.queryByText(/Bundle outdated/)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Undo all' }))
+    expect(api.updateEntity).toHaveBeenCalledWith(
+      'job-1', 'e-auto', { accepted: null, decision_origin: 'human_bulk' },
+    )
+    await screen.findByText(/Bundle outdated/)
+    expect(finalizeJobQuick).not.toHaveBeenCalled()   // debounced, like any edit
+
+    await waitFor(() => expect(finalizeJobQuick).toHaveBeenCalledWith('job-1'), { timeout: 6_000 })
+    await screen.findByText(/Bundle current/)   // let the rebuild's state update land in the test
+  }, 20_000)
+})
+
 describe('Review — a bundle the STIX schemas refused', () => {
   it('says so and why when Finalize is refused, instead of "check server logs"', async () => {
     const { BundleRefusedError } = await vi.importActual<typeof import('../api/client')>('../api/client')
