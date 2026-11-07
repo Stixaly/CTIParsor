@@ -5,6 +5,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from api.db import get_conn
+from api.routes._common import refuse_nul_id
 
 router = APIRouter(prefix="/api/jobs", tags=["progress"])
 
@@ -49,6 +50,8 @@ def _parse_last_event_id(request: Request) -> int:
 
 @router.get("/{job_id}/progress")
 async def progress_stream(job_id: str, request: Request):
+    refuse_nul_id(job_id)       # before the stream opens: a 404 here, not a 500 part-way through it
+
     async def generator():
         # Resume from the client's Last-Event-ID on reconnect (0 on first connect)
         last_id = _parse_last_event_id(request)
@@ -64,7 +67,10 @@ async def progress_stream(job_id: str, request: Request):
 
         _elapsed = 0.0
         while True:
-            events = _fetch_events_after(job_id, last_id)
+            # Off the event loop: each read is a blocking psycopg call, made on every poll (0.5 s) for every
+            # open stream.  Each pool thread keeps one cached connection for its life (api/db.py, not closed by
+            # `with get_conn()`), so connections are bounded by the pool's size, not by polls or streams.
+            events = await asyncio.to_thread(_fetch_events_after, job_id, last_id)
             for ev in events:
                 # Emit an SSE id: so the browser tracks its resume point and
                 # sends it back as Last-Event-ID after a dropped connection.
@@ -75,7 +81,7 @@ async def progress_stream(job_id: str, request: Request):
                     done_sent = True
                     return
 
-            status = _fetch_job_status(job_id)
+            status = await asyncio.to_thread(_fetch_job_status, job_id)
             if status in ("for_review", "completed", "failed"):
                 if not done_sent:
                     yield f"event: done\ndata: {json.dumps({'status': status})}\n\n"

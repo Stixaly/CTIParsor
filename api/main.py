@@ -151,6 +151,18 @@ async def request_validation_handler(request: Request, exc: RequestValidationErr
         media_type="application/json",
     )
 
+@app.middleware("http")
+async def refuse_nul_in_path(request: Request, call_next):
+    """A NUL byte in the path names no row: PostgreSQL refuses it in a text
+    parameter, so every route that looks an id up would answer 500. Answer as
+    for an unknown id, before any route runs (#386)."""
+    path = request.url.path
+    if "\x00" in path:
+        detail = "Job not found" if path.startswith("/api/jobs/") else "Not found"
+        return JSONResponse({"detail": detail}, status_code=404)
+    return await call_next(request)
+
+
 # Request ID middleware for tracing
 _REQUEST_ID_RE = compile_pattern(r"^[a-zA-Z0-9\-_]{1,64}$")
 
