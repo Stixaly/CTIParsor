@@ -37,7 +37,10 @@ reading the coverage matrix. For the design rationale see [ADR-0006](adr/0006-mu
 > with the rule store, from the canonical rules, so a rebuild keeps it current
 > (#363). `scripts/build_rule_text.py` rebuilds it alone, without re-reading the
 > corpora. While it is absent, brand evidence is simply not produced; nothing
-> else degrades.
+> else degrades. Titles are indexed with `-` and `_` turned into spaces, and the
+> CVE query gets the same treatment, so `CVE_2024_3400`, `CVE 2024 3400` and
+> `CVE-2024-3400` all match one another (#424). An index built before this change
+> keeps its old tokens until it is rebuilt, which the next rule-store rebuild does.
 
 ## Working from *Proposed detections*
 

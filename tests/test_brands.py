@@ -20,21 +20,17 @@ from pipeline.detection.brands import (
 
 def _store(conn, rows):
     """rows = list of (id, title, description) -> populates detection_rules
-    AND rule_text (body_tsv is a generated column, so only `body` is written,
-    matching what scripts/build_rule_text.py writes in production: the
-    lower-cased "title description" concatenation)."""
+    AND rule_text through rebuild_rule_text, the same code that
+    scripts/build_rule_text.py and rebuild_store run in production (#424: the
+    body is normalised there, so a hand-written body would not match it)."""
     for rid, title, description in rows:
         conn.execute(
             "INSERT INTO detection_rules (id, corpus, native_key, title, description, is_canonical) "
             "VALUES (?,?,?,?,?,1)",
             (rid, "test", rid, title, description),
         )
-        body = f"{title} {description}".strip().lower()
-        if body:
-            conn.execute(
-                "INSERT INTO rule_text (rule_id, body) VALUES (?,?)",
-                (rid, body),
-            )
+    conn.commit()
+    rebuild_rule_text(conn)
     conn.commit()
     return conn
 
