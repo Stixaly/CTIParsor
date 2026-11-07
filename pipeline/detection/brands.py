@@ -151,6 +151,10 @@ def _maximal(counts: dict[str, int]) -> dict[str, int]:
 def campaign_tokens(domains: Iterable[str]) -> dict[str, int]:
     """Recurring substrings across a campaign's domains → distinct domain count.
 
+    These are candidates, not yet maximal: `brand_tokens` applies `_maximal`
+    after the rule filter (#423), so a longer token that names no rule cannot
+    remove the substring that does.
+
     Deduplication happens on the full normalised domain, before the TLD is cut:
     `frostledger.com`, `.net` and `.org` are three domains (issue #361), even
     though they share one label.
@@ -168,9 +172,8 @@ def campaign_tokens(domains: Iterable[str]) -> dict[str, int]:
     # A brand names something: a run of digits ("2024" in three domains) is not
     # one, and since rule_text splits CVE ids into words (#424) it would match
     # every CVE-2024-* title.
-    filtered = {k: v for k, v in counter.items()
-                if v >= BRAND_MIN_DOMAINS and any(ch.isalpha() for ch in k)}
-    return _maximal(filtered)
+    return {k: v for k, v in counter.items()
+            if v >= BRAND_MIN_DOMAINS and any(ch.isalpha() for ch in k)}
 
 
 def rule_text_built(conn: DBConnection) -> bool:
@@ -227,7 +230,12 @@ def rebuild_rule_text(conn: DBConnection, *, batch: int = 2000) -> dict:
 
 
 def brand_tokens(conn: DBConnection, domains: Iterable[str]) -> list[BrandToken]:
-    """Find brand tokens that appear in a limited number of canonical rules."""
+    """Find brand tokens that appear in a limited number of canonical rules.
+
+    Order (ADR-0031): candidates → stopwords and rule count → maximality over the
+    survivors. Maximality comes last so that a longer candidate naming no rule
+    (`oktalogin`) cannot remove the brand it contains (`okta`) (#423).
+    """
     counts = campaign_tokens(domains)
     if not counts:
         return []
@@ -258,6 +266,8 @@ def brand_tokens(conn: DBConnection, domains: Iterable[str]) -> list[BrandToken]
         if 1 <= count <= BRAND_MAX_TITLE_RULES:
             results.append(BrandToken(token=tok, domains=counts[tok], rules=count))
 
+    kept = _maximal({t.token: t.domains for t in results})
+    results = [t for t in results if t.token in kept]
     results.sort(key=lambda t: (-t.rules, t.token))
     return results
 

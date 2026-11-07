@@ -83,10 +83,18 @@ maintained product list.
 ```
 domain     = full name, lower-cased, trailing dot and leading "www." removed ("WWW.Okta.com." → "okta.com")
 label      = registrable name minus TLD, dots and hyphens   ("oktaenroll.com" → "oktaenroll")
-candidates = substrings of length 4..14 occurring in ≥ 3 distinct domains
-maximal    = drop s when a longer t exists with s ⊂ t and df(t) ≥ df(s)
-brand      = maximal token that is not a stopword and names 1..50 canonical rules
+candidates = substrings of length 4..14 occurring in ≥ 3 distinct domains (with a letter)
+brand      = candidate that is not a stopword and names 1..50 canonical rules
+maximal    = over the brands: drop s when a longer brand t exists with s ⊂ t and df(t) ≥ df(s)
 ```
+
+Maximality comes **last**, over the survivors of the rule filter (#423). Taken
+before it, a longer candidate that names no rule removed the brand it contains:
+`oktalogin.com`, `.net` and `.org` made `oktalogin` (df 3) a superstring of
+`okta` (df 3), so `okta` went first, and then `oktalogin` went for naming no
+rule, leaving the report with no brand at all. Now `okta` survives, because
+`oktalogin` is not a brand; if a rule does name `oktalogin`, it is the brand and
+`okta` is removed as before.
 
 "Distinct domains" means distinct normalised full names, counted before the TLD
 is cut: `frostledger.com`, `frostledger.net` and `frostledger.org` are three

@@ -48,11 +48,16 @@ def test_a_single_random_domain_yields_no_theme():
     assert tokens == {}
 
 
-def test_a_fragment_loses_to_the_longer_token_that_contains_it():
+def test_a_fragment_loses_to_the_longer_token_that_contains_it(temp_db):
+    """`poly` recurs as often as `polygon` and names a rule, so it survives the
+    rule filter; maximality then removes it as a fragment of a brand the corpus
+    names. Maximality runs after the rule filter, not in campaign_tokens (#423).
+    """
     domains = ["polygon1.com", "polygon2.com", "polygon3.com"]
-    tokens = campaign_tokens(domains)
-    assert "polygon" in tokens
-    assert "poly" not in tokens
+    rows = [("r1", "Polygon Wallet", ""), ("r2", "Poly Wallet", "")]
+    conn = _store(temp_db.get_rule_conn(), rows)
+    tokens = brand_tokens(conn, domains)
+    assert [t.token for t in tokens] == ["polygon"]
 
 
 def test_the_same_domain_twice_counts_once():
@@ -74,7 +79,8 @@ def test_three_distinct_domains_sharing_a_name_count_as_three_issue_361():
     collapsed to `{}` and the coverage walk never searched for the theme.
     """
     domains = ["frostledger.com", "frostledger.net", "frostledger.org"]
-    assert campaign_tokens(domains) == {"frostledger": 3}
+    # Candidates are not maximal (#423): the fragments of the label are here too.
+    assert campaign_tokens(domains)["frostledger"] == 3
 
 
 def test_one_domain_repeated_three_times_is_still_no_theme_issue_361():
