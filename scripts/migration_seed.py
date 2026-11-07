@@ -514,7 +514,7 @@ def _rules() -> dict[str, list[dict[str, Any]]]:
         ],
         "rule_bytes": [{"rule_id": RULE, "bytes": len(_RULE_RAW)}, {"rule_id": RULE_COPY, "bytes": len(_RULE_RAW)}],
         "rule_techniques": [{"rule_id": RULE, "technique_id": "T1567.002"},
-                            {"rule_id": RULE, "technique_id": "T1048"}],
+                            {"rule_id": RULE, "technique_id": "T1048", "propagated": 1}],
         "rule_text": [{"rule_id": RULE, "body": "Rclone Exfiltration To Cloud Storage Detects rclone copying "
                                                 "to a remote."}],
         "rule_atoms": [{"rule_id": RULE, "atom_class": "process", "value": "rclone.exe"},

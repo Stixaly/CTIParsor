@@ -18,6 +18,7 @@ def _db() -> sqlite3.Connection:
         );
         CREATE TABLE rule_techniques (
             rule_id TEXT NOT NULL, technique_id TEXT NOT NULL,
+            propagated INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (rule_id, technique_id)
         );
         CREATE TABLE rule_related (

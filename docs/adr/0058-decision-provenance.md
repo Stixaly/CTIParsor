@@ -138,3 +138,10 @@ propagated`, if any, stay readable. Nothing writes either value now.
 `propagated` stays in the vocabulary of origins, and the readers that learn
 from decisions still leave it out (`HUMAN_ORIGINS` is `human` and
 `human_bulk`).
+
+## Amendment (2026-11-07): auto-accepted rows are not support for a cutoff
+
+Threshold calibration (ADR-0051) no longer counts the rows at or above 0.90
+toward the support of a cutoff proposed below 0.90 (issue #400). The support is
+the decisions of the calibrated band, from the cutoff up to 0.90 excluded; a
+cutoff at or above 0.90 keeps its `above_auto_accept` status.

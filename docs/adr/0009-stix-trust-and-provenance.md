@@ -30,9 +30,11 @@ for a human.
 ### 2. Cross-model consensus (opt-in, anti-hallucination)
 With `ENABLE_CONSENSUS=true`, relationship-bearing chunks are re-run through a
 **second** provider; agreement boosts confidence, single-model claims are penalised
-and downgraded from `observed`. Stronger than Stage 3d self-verification (two
-different models, not a model judging itself). Reuses the existing `_call_llm`
-provider abstraction.
+and downgraded from `observed`. A `gap` from the second model (it cannot find the
+claim in the text) is not agreement: a triplet it proposes only as `gap` keeps its
+confidence and label, neither boosted nor penalised (issue #399). Stronger than
+Stage 3d self-verification (two different models, not a model judging itself).
+Reuses the existing `_call_llm` provider abstraction.
 
 ### 3. Provenance & sharing markings (Option: post-processing stamp)
 Every bundle object is stamped with an authoring `Identity` (`created_by_ref` → the

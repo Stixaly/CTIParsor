@@ -121,12 +121,17 @@ def _propagate_techniques(
     Measured on the real store, this was the difference between losing 2
     techniques and losing none.
 
-    Idempotent (ON CONFLICT DO NOTHING), and safe to re-run: `replace_corpus_rules`
-    rewrites `rule_techniques` per corpus and `rebuild_store` calls dedup after,
-    so propagated rows are regenerated rather than accumulated.
+    Idempotent, and safe to re-run: the rows the last pass wrote (`propagated = 1`)
+    are deleted first and computed again from the clusters as they are now, so a
+    technique whose corpus was removed, or a cluster that split, does not outlive
+    its cluster.  A rule's own techniques (`propagated = 0`) are never touched here:
+    `replace_corpus_rules` rewrites them per corpus.  A technique the winner already
+    has of its own is not inserted again (ON CONFLICT DO NOTHING on the
+    (rule_id, technique_id) key, and the set difference below).
 
     Returns the number of technique rows added.
     """
+    conn.execute("DELETE FROM rule_techniques WHERE propagated=1")
     # Two full scans, not two queries per cluster: at ~6.3k clusters the
     # per-cluster form issued ~12k round-trips and dominated the rebuild.
     techs_by_rule: dict[str, set[str]] = defaultdict(set)
@@ -156,7 +161,7 @@ def _propagate_techniques(
 
     if rows:
         conn.executemany(
-            "INSERT INTO rule_techniques (rule_id, technique_id) VALUES (?,?) "
+            "INSERT INTO rule_techniques (rule_id, technique_id, propagated) VALUES (?,?,1) "
             "ON CONFLICT DO NOTHING",
             rows,
         )
