@@ -80,6 +80,7 @@ def test_an_older_release_s_schema_gets_the_columns_it_has(schema):
                  "review_revision"],
         "entities": ["baseline_stix_id", "enrichment_status"],
         "relationships": ["baseline_stix_id", "enrichment_status"],
+        "rule_techniques": ["propagated"],
     }
     assert ms.coverage_errors(schema, seeded) == []
     assert all("pipeline_mode" not in row for row in seeded.rows["jobs"])

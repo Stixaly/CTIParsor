@@ -37,6 +37,7 @@ migrations".
 | 13 | `jobs.pipeline_mode`, `job_baselines`, `entities` and `relationships` `.enrichment_status` and `.baseline_stix_id` | 0090 |
 | 14 | `worker_heartbeats` | 0094 (item 7) |
 | 15 | `jobs.resolved_types_json` | 0092 (#397) |
+| 16 | `rule_techniques.propagated` (#432): 1 for the techniques dedup gives a canonical rule from its cluster; 0 before, until the rule's corpus is rewritten | 0010 (#432) |
 
 ```sql
 CREATE TABLE jobs (
@@ -380,6 +381,7 @@ CREATE TABLE rule_atoms (
 CREATE TABLE rule_techniques (
     rule_id      TEXT NOT NULL,
     technique_id TEXT NOT NULL,       -- ATT&CK id, indexed for coverage lookup
+    propagated   INTEGER NOT NULL DEFAULT 0,  -- 1: inherited from the cluster by dedup, recomputed each pass (#432); 0: its own tag
     PRIMARY KEY (rule_id, technique_id)
 );
 
