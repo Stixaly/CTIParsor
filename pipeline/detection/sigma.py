@@ -30,8 +30,10 @@ _GROUP_SOFTWARE_RE = compile_pattern(r"^[gs][0-9]{4}$", re.IGNORECASE)
 # like "defense_evasion", so the numeric ID form is skipped to avoid mixing the
 # two representations in one list.
 _TACTIC_ID_RE = compile_pattern(r"^ta[0-9]{4}$", re.IGNORECASE)
-# `|re` and `|cased` make the case of a value part of the match (see _canonicalize).
-_CASE_SENSITIVE_MODIFIERS = frozenset({"re", "cased"})
+# `|re` and `|cased` make the case of a value part of the match, and so do the
+# `|base64` / `|base64offset` encodings (`SGVsbG8=` and `sgvsbg8=` decode to different
+# bytes). See _canonicalize.
+_CASE_SENSITIVE_MODIFIERS = frozenset({"re", "cased", "base64", "base64offset"})
 
 _LEVEL_MAP = {
     "informational": Severity.INFORMATIONAL,
@@ -230,8 +232,10 @@ class SigmaAdapter(RuleCorpusAdapter):
         Sigma string matching is case-insensitive by default, and selection /
         list order is not semantically meaningful — so we lowercase scalars and
         keys and sort lists, making formatting-only differences hash-identical.
-        Values under a `|re` or `|cased` key keep their case: there it is part
-        of the match, so `Foo.*bar` and `foo.*bar` are different rules.
+        Values under a case-sensitive key (`|re`, `|cased`, `|base64`,
+        `|base64offset`) keep their case: there it is part of the match, so
+        `Foo.*bar` and `foo.*bar` are different rules. Values are never
+        stripped: a leading space in `|contains` is part of the substring.
         """
         if isinstance(node, dict):
             return {str(k).strip().lower(): SigmaAdapter._canonicalize(
@@ -241,7 +245,11 @@ class SigmaAdapter(RuleCorpusAdapter):
             items = [SigmaAdapter._canonicalize(v, keep_case) for v in node]
             return sorted(items, key=lambda x: json.dumps(x, sort_keys=True, default=str))
         if isinstance(node, str):
-            return node.strip() if keep_case else node.strip().lower()
+            # Spaces are part of a value (`|contains: ' evil'`, #429); the line
+            # breaks a YAML block scalar adds at its edges are not, or a copy of
+            # the rule written with `|` would no longer fold with its original.
+            node = node.strip("\r\n")
+            return node if keep_case else node.lower()
         return node
 
     @staticmethod

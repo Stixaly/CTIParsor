@@ -165,19 +165,20 @@ def requeue_orphans(*, unconditional: bool = False) -> int:
             where = "status='processing' AND (heartbeat_at IS NULL OR heartbeat_at < ?)"
             params = (cutoff,)
 
-        # Read the affected ids first so each can get its own emit_progress
-        # below -- every other status transition in this module pairs a DB
-        # write with one, and without it a client polling a requeued job's
-        # SSE stream sees it simply stop producing events across a restart
-        # instead of an explicit signal that it is back in the queue.
-        ids = [r[0] for r in conn.execute(f"SELECT id FROM jobs WHERE {where}", params).fetchall()]
-
+        # One statement, so the ids returned are exactly the rows this UPDATE
+        # requeued (a SELECT before it could list a row another loop had just
+        # taken over).  Each gets its own emit_progress below -- every other
+        # status transition in this module pairs a DB write with one, and
+        # without it a client polling a requeued job's SSE stream sees it
+        # simply stop producing events across a restart instead of an explicit
+        # signal that it is back in the queue.
         cur = conn.execute(
             f"UPDATE jobs SET status='queued', worker_id=NULL, heartbeat_at=NULL, updated_at=? "
-            f"WHERE {where}",
+            f"WHERE {where} RETURNING id",
             (now, *params),
         )
-        count = cur.rowcount
+        ids = [r[0] for r in cur.fetchall()]
+        count = len(ids)
         if count > 0:
             logger.info(
                 f"Requeued {count} orphaned job(s) "

@@ -144,6 +144,22 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "A network-traffic and an IPv4 entity for one host share one ipv4-addr; a flow's Indicator "
      "pattern names its protocol, and observables sharing a pattern share one Indicator",
      "mapping"),
+    ("8afe783", "2026-11-07",
+     "Batch #376-#470, extraction: Stage 3f preamble/quotes/passages, reasoning prefix, 3d gap "
+     "grading, consensus off on none; gazetteer line breaks, URL ends, CASE forms, ids before "
+     "alias cues; Enterprise-first technique names; BM25 -ss stemming; GLiNER casing; no-break "
+     "spaces in names; lowercase countries; CIRCL misses; figure blocks; 2c corpus cache",
+     "extraction"),
+    ("4b964df", "2026-11-07",
+     "Batch #376-#470, mapping: deny rows on the LLM lists of the CLI bundle; the patched Snort "
+     "parser; explicit targets rows; long-distance completion on SDOs only; user-content hosts "
+     "get Indicators; the re-issued baseline Report lists stated objects",
+     "mapping"),
+    ("f5a4b49", "2026-11-07",
+     "Quoted YARA rules: comments, section keywords in literals and regexes after matches no "
+     "longer cut a rule apart, and a meta string wrapped after a backslash is rejoined without a "
+     "space (#425-#427, #435)",
+     "mapping"),
 )
 
 

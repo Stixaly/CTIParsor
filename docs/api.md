@@ -8,15 +8,15 @@ route matches gets a JSON 404, not the application page (`api/main.py`).
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/upload` | Upload a file (multipart `file=`) and queue it. Returns `{ job_id, filename, status }`, `status` being `queued` or `processing`; 503 when the queue is full (the uploaded file and the job's baseline, if any, are removed, and the job row stays, `failed`). Optional `baseline_stix` (a file) and `baseline_report_id` (a form field): a STIX 2.1 bundle to enrich (below) |
-| `POST` | `/api/ingest/text` | Ingest pasted text (JSON `text`, optional `title`). Stored `.html`, `.md` or `.txt` by content — pasted markup is stripped, not ingested raw. 20 chars min, 2 MB max; 400 for a text that holds a NUL character or one with no UTF-8 form (a lone surrogate), before anything is written. 503 when the queue is full, as the upload answers: the written text is removed. Optional `baseline_bundle` (the TEXT of the STIX file) and `baseline_report_id` |
-| `POST` | `/api/ingest/url` | Render a URL with headless Chromium (JSON `url`, optional `enable_js`). Writes `{job_id}.pdf` (archive, shown in Review) and `{job_id}.txt` (rendered DOM text, ingested). 400 policy refusal · 502 unreachable or blank render · 503 Playwright absent, or the queue full (then the `.pdf`, the `.txt` and the metadata file are removed) · 504 timeout. Optional `baseline_bundle` and `baseline_report_id`, checked before the capture |
+| `POST` | `/api/upload` | Upload a file (multipart `file=`) and queue it. Returns `{ job_id, filename, status }`, `status` being `queued` or `processing`; 503 when the queue is full (the uploaded file and the job's baseline, if any, are removed, and the job row stays, `failed`); any other error while the job starts also removes the uploaded file. Optional `baseline_stix` (a file) and `baseline_report_id` (a form field): a STIX 2.1 bundle to enrich (below) |
+| `POST` | `/api/ingest/text` | Ingest pasted text (JSON `text`, optional `title`). Stored `.html`, `.md` or `.txt` by content — pasted markup is stripped, not ingested raw. 20 chars min, 2 MB max; 400 for a text that holds a NUL character or one with no UTF-8 form (a lone surrogate), before anything is written. 503 when the queue is full, as the upload answers: the written text is removed (and so for any other error while the job starts). Optional `baseline_bundle` (the TEXT of the STIX file) and `baseline_report_id` |
+| `POST` | `/api/ingest/url` | Render a URL with headless Chromium (JSON `url`, optional `enable_js`). Writes `{job_id}.pdf` (archive, shown in Review) and `{job_id}.txt` (rendered DOM text, ingested). 400 policy refusal · 502 unreachable or blank render · 503 Playwright absent, or the queue full (then the `.pdf`, the `.txt` and the metadata file are removed; so for any other error while the job starts) · 504 timeout. Optional `baseline_bundle` and `baseline_report_id`, checked before the capture |
 | `GET` | `/api/jobs` | List all jobs (with `pipeline_mode`) |
 | `GET` | `/api/jobs/{id}` | Get a single job (includes entity/relationship counts, `pipeline_mode`, and for an `enrich` job an `enrichment` block, below) |
 | `GET` | `/api/jobs/{id}/baseline` | The STIX bundle the job was created from, as received, as a JSON download. 404 for a job with none |
 | `GET` | `/api/jobs/{id}/baseline/intake` | What the intake made of that bundle, whole: every object left out and why. 404 for a job with none |
-| `PATCH` | `/api/jobs/{id}` | Update status: `for_review`, `reviewing`, `completed` or `failed`. 400 for any other value, `uploaded` and `processing` included: the server sets those. 409 for `completed` while the stored bundle is one Stage 5 refused (below) |
-| `DELETE` | `/api/jobs/{id}` | Delete job, all DB rows, and all associated files |
+| `PATCH` | `/api/jobs/{id}` | Update status: `for_review`, `reviewing`, `completed` or `failed`. 400 for any other value, `uploaded` and `processing` included: the server sets those. 409 while a worker runs the job (`processing`, whatever its lease: the same refusal as DELETE, #385), and 409 for `completed` while the stored bundle is one Stage 5 refused (below) |
+| `DELETE` | `/api/jobs/{id}` | Delete job, all DB rows, and all associated files. 409 while a worker runs the job (`processing`): stop it or wait for it to finish |
 | `POST` | `/api/jobs/{id}/finalize` | Re-run Stages 4–5 on the accepted rows and store the bundle; sets status `completed`. `?quick=true` rebuilds the bundle and leaves the status alone (the rebuild the UI schedules after each edit). Returns `{ status, bundle_size, validation }`, `validation` being `validated`, `unverified` or `unknown` (Stage 5 did not run). 409 when Stage 5 refuses the rebuilt bundle (below). Two finalizes of one job can overlap: a build never replaces a bundle built from newer rows (below) |
 | `GET` | `/api/jobs/{id}/bundle` | Download the STIX 2.1 bundle JSON. The header `X-Bundle-Validation` carries Stage 5's verdict: `validated`, `unverified` (the JSON schemas were missing) or `unknown` (built before the verdict was stored). 409 when Stage 5 refused the bundle (below) |
 | `GET` | `/api/jobs/{id}/bundle/ledger` | What Stage 4 did with each entity and relationship row when it built the stored bundle (ADR-0061): what each became, what was rewritten or dropped and why, why each generated object exists. 404 when the bundle predates the ledger — a quick finalize writes one |
@@ -90,7 +90,7 @@ validation, with a list as `detail`.
 |---|---|
 | `GET /api/jobs/{id}/bundle` | 409: the bundle is not served, by the graph view or the download |
 | `POST /api/jobs/{id}/finalize` (`quick` or not) | 409. The rebuilt bundle is stored with its verdict, and the job is not completed: a `completed` job goes back to `for_review`, any other status stays |
-| `PATCH /api/jobs/{id}` with `{"status": "completed"}` | 409. Every other status is accepted |
+| `PATCH /api/jobs/{id}` with `{"status": "completed"}` | 409. Every other status is accepted, unless the job is `processing`: then every status is refused (#385, see the routes table) |
 
 `GET /api/jobs/{id}/bundle/ledger` ignores the verdict. A finalize whose
 bundle Stage 5 accepts replaces it. A bundle built before the verdict was
@@ -193,7 +193,7 @@ is empty until Stage 3r writes them. The bundle itself is not in the response.
 |---|---|---|
 | `GET` | `/api/jobs/{id}/entities` | List all entities |
 | `POST` | `/api/jobs/{id}/entities` | Create an entity manually |
-| `PATCH` | `/api/jobs/{id}/entities/{eid}` | Update (`accepted`, `entity_type`, `value`, `mitre_id`). 409 when it changes `entity_type`, `value` or `mitre_id` of a row imported from the analyst's STIX bundle (`enrichment_status` `baseline_in_text` or `baseline_only`): accept or reject it |
+| `PATCH` | `/api/jobs/{id}/entities/{eid}` | Update (`accepted`, `entity_type`, `value`, `mitre_id`). 400 when `value` is sent empty or blank (an absent key leaves it unchanged). 409 when it changes `entity_type`, `value` or `mitre_id` of a row imported from the analyst's STIX bundle (`enrichment_status` `baseline_in_text` or `baseline_only`): accept or reject it |
 | `DELETE` | `/api/jobs/{id}/entities/{eid}` | Remove. 409 for a row imported from the analyst's STIX bundle: reject it instead |
 | `POST` | `/api/jobs/{id}/entities/accept-pending` | Accept all NULL-state entities in one query. 404 for an unknown job |
 | `POST` | `/api/jobs/{id}/entities/bulk` | Bulk accept / reject / reset entities by type (see below) |
@@ -223,7 +223,7 @@ accepts it gets a 409. The columns are described in
 |---|---|---|
 | `GET` | `/api/jobs/{id}/relationships` | List all relationships |
 | `POST` | `/api/jobs/{id}/relationships` | Create a relationship |
-| `PATCH` | `/api/jobs/{id}/relationships/{rid}` | Update (`accepted`, `source_value`, `relationship_type`, `target_value`, `evidence_text`, `evidence_label`, `start_time`, `stop_time`). 409 when it changes an endpoint or the verb of a row imported from the analyst's STIX bundle, or sends a `start_time` or `stop_time` for it: accept or reject it |
+| `PATCH` | `/api/jobs/{id}/relationships/{rid}` | Update (`accepted`, `source_value`, `relationship_type`, `target_value`, `evidence_text`, `evidence_label`, `start_time`, `stop_time`). 400 when `relationship_type` is sent empty or blank, or is not a valid STIX type (an absent key leaves it unchanged). 409 when it changes an endpoint or the verb of a row imported from the analyst's STIX bundle, or sends a `start_time` or `stop_time` for it: accept or reject it |
 | `DELETE` | `/api/jobs/{id}/relationships/{rid}` | Remove. 409 for a row imported from the analyst's STIX bundle: reject it instead |
 | `GET` | `/api/jobs/{id}/relationships/valid-types` | List valid STIX relationship type strings |
 | `POST` | `/api/jobs/{id}/relationships/bulk` | Accept, reject or reset several relationships in one call: `{ "ids": [...], "action": "accept" \| "reject" \| "reset" }`, at most 500 ids. Journaled as `human_bulk` (ADR-0058), which threshold calibration does not read. Returns `{ updated, action }` |

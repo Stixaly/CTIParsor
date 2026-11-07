@@ -1,4 +1,4 @@
-import { useMemo, useRef, useEffect, type CSSProperties } from 'react'
+import { useMemo, useRef, useEffect, cloneElement, type CSSProperties } from 'react'
 import type { Entity } from '../../types'
 import { typeColor, buildRanges } from './tokens'
 import RelationshipOverlay from './RelationshipOverlay'
@@ -63,6 +63,11 @@ export default function DocumentReader({
     return spans.sort((a, b) => a.start - b.start)
   }, [relEvidence, text])
 
+  // A rejected entity is in the text, just not highlighted (buildRanges drops it):
+  // saying it was "not found in text" was wrong.  Same guard as SourceViewer.
+  // A boolean, not the entity list, so the effect does not rerun on every decision.
+  const focusedRejected = entities.find(e => e.id === focusedId)?.accepted === false
+
   // ── scroll focused mark into view ────────────────────────────────────────
   useEffect(() => {
     if (!focusedId) return
@@ -71,14 +76,14 @@ export default function DocumentReader({
       // Always scroll to the entity — removes the old "only scroll if near edge"
       // restriction that caused visible-but-unfocused entities to give no feedback.
       node.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    } else {
+    } else if (!focusedRejected) {
       // Entity exists in the list but has no occurrence in the document text.
       // This is normal for LLM-extracted entities (malware names, actor names,
       // campaign names, TTP descriptions) that are paraphrased from context rather
       // than copied verbatim.  Notify the parent so it can show a hint to the user.
       onEntityNotInText?.(focusedId)
     }
-  }, [focusedId, onEntityNotInText])
+  }, [focusedId, focusedRejected, onEntityNotInText])
 
   // ── text selection ────────────────────────────────────────────────────────
   const handleMouseUp = () => {
@@ -211,15 +216,24 @@ export default function DocumentReader({
   const paragraphs: React.ReactNode[][] = []
   let buf: React.ReactNode[] = []
   segments.forEach((seg, i) => {
-    const child = (seg as React.ReactElement<{ children?: React.ReactNode }>).props?.children
+    const el = seg as React.ReactElement<{ children?: React.ReactNode }>
+    const child = el.props?.children
     if (typeof child === 'string' && child.includes('\n\n')) {
+      // Each piece is a clone of the segment, so a highlight (rel-ev-hl, tok, focus
+      // style) and its data-* attributes survive the split.  Only the text changes.
+      // The ref is the one exception: it is kept on the first piece alone, since the
+      // scroll-to-entity target is the one that registered it, and a later piece's
+      // ref would overwrite it with the last piece.  data-eid stays on every piece,
+      // so a drop or a click on any fragment still finds the entity.
       const parts = child.split('\n\n')
-      buf.push(<span key={`p-${i}-0`}>{parts[0]}</span>)
+      const piece = (k: string, text: string, first: boolean) =>
+        cloneElement(el, first ? { key: `p-${i}-${k}` } : { key: `p-${i}-${k}`, ref: null } as React.Attributes, text)
+      buf.push(piece('0', parts[0], true))
       paragraphs.push(buf)
       for (let k = 1; k < parts.length - 1; k++) {
-        paragraphs.push([<span key={`p-${i}-${k}`}>{parts[k]}</span>])
+        paragraphs.push([piece(String(k), parts[k], false)])
       }
-      buf = parts.length > 1 ? [<span key={`p-${i}-last`}>{parts[parts.length - 1]}</span>] : []
+      buf = parts.length > 1 ? [piece('last', parts[parts.length - 1], false)] : []
     } else {
       buf.push(seg)
     }

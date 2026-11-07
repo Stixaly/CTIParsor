@@ -126,6 +126,29 @@ def _is_executable(text: str, end: int) -> bool:
     return text[end:end + 4].lower() == ".exe" and not _char(text, end + 4).isalnum()
 
 
+# A URL starts at its scheme ("://") or at "www." (issue #407).
+_URL_START = re.compile(r"://|(?<![\w.])www\.", re.I)
+_URL_QUOTE = "\"«»“”—–"
+
+
+def _url_end(text: str, i: int) -> int:
+    """Where the URL whose scheme or "www." begins at text[i] ends: at a blank, a quote
+    or a dash, or at a closing bracket the URL does not open ("(see https://x.com)" ends
+    before the ")", "https://x.com/a(b)/c" does not)."""
+    depth = 0
+    for j in range(i, len(text)):
+        c = text[j]
+        if c.isspace() or c in _URL_QUOTE:
+            return j
+        if c in "([<":
+            depth += 1
+        elif c in ")]>":
+            if not depth:
+                return j
+            depth -= 1
+    return len(text)
+
+
 def embedded(text: str, start: int, end: int) -> bool:
     """Inside a URL, a path, a file name or a dotted identifier — a
     Markdown link's label is not."""
@@ -138,8 +161,8 @@ def embedded(text: str, start: int, end: int) -> bool:
         return True
     if before == "[" and text.startswith("](", end):
         return False
-    ts = max(text.rfind(c, 0, start) for c in " \t\n(<\"'") + 1
-    return "://" in text[ts:start] or text[ts:start].lower().startswith("www.")
+    ts = max(text.rfind(c, 0, start) for c in " \t\r\n") + 1
+    return any(start < _url_end(text, m.start()) for m in _URL_START.finditer(text, ts, start))
 
 
 @functools.lru_cache(maxsize=256)
@@ -163,17 +186,24 @@ _STOP = (r"(?:and|or|nor|of|in|on|to|with|for|the|a|an|by|from|is|was|are|were|a
 # and "a variant of the malware" keep the malware head: of, and, or, the, a, an, its, as stay allowed.
 _APPOS_BLOCK = (r"(?:about|regarding|against|into|onto|via|under|over|between|among|within|without|like|per"
                 r"|concerning|on|in|to|for|from|by|with|at|than|vs|versus|that|which|is|was|are|were|not|but)")
-_ID_AFTER = re.compile(r"((?:[ \t]+[A-Za-z][\w-]*){0,3}?)[ \t]*[(\[][ \t]*(?:ID:?[ \t]*)?([GS]\d{4})[ \t]*[)\]]")
+# A display-wrapped sentence breaks its lines: "Machete\n(S0409)" is one sentence, so one
+# line break counts as a blank between a name and what follows it (issue #408).  A blank
+# line ("\n\n") ends the paragraph and is no gap.
+_GAP = r"(?:[ \t]+|[ \t]*\r?\n[ \t]*)"     # at least one blank
+_GAP_OPT = r"[ \t]*(?:\r?\n[ \t]*)?"       # none, or a blank
+_ID_AFTER = re.compile(r"((?:[ \t]+[A-Za-z][\w-]*){0,3}?)" + _GAP_OPT
+                       + r"[(\[][ \t]*(?:ID:?[ \t]*)?([GS]\d{4})[ \t]*[)\]]")
 _ATTACK_LINK = re.compile(r"\]\((?:https?://)?attack\.mitre\.org/(?:software|groups)/([GS]\d{4})/?[)#]", re.I)
 
 
-def _attached_id(text: str, start: int, end: int) -> str | None:
+def _attached_id(text: str, start: int, end: int, u1: int) -> str | None:
     if _char(text, start - 1) == "[":
         m = _ATTACK_LINK.match(text, end)
         if m:
             return m.group(1).upper()
     m = _ID_AFTER.match(text, end)
-    if m and not re.search(rf"\b{_STOP}\b", m.group(1), re.I):
+    # The ID must lie in the unit too: "- Machete" then "(S0409)" on the next line is another one.
+    if m and m.start(2) < u1 and not re.search(rf"\b{_STOP}\b", m.group(1), re.I):
         return m.group(2)
     return None
 
@@ -184,6 +214,11 @@ _CUE = (r"(?:also\s+known\s+as|also\s+called|also\s+referred\s+to\s+as|also\s+tr
 # A negated gap is no alias, contracted (isn't, wasn’t) or not.
 _NEG = r"(?:not|no|never|nor|unlike|unrelated|distinct|different)"
 _ALIAS_GAP = re.compile(rf"{_P}*(?:(?!{_NEG}\b|[\w-]*n['’]t\b)[\w-]+{_P}+){{0,3}}?{_CUE}{_P}*(?:the\s+)?", re.I)
+# Right after the name, an ATT&CK ID in brackets may come before the punctuation and the cue:
+# "Turla (G0010), also called Snake" (issue #410).  Only where the name precedes the occurrence:
+# an ID after the occurrence is its own attached ID.
+_ALIAS_GAP_AFTER_NAME = re.compile(rf"(?:{_P}*[(\[][ \t]*(?:ID:?[ \t]*)?[GS]\d{{4}}[ \t]*[)\]])?"
+                                   + _ALIAS_GAP.pattern, re.I)
 _APPOSITIVE_GAP = re.compile(r",\s+the\s+", re.I)
 _MAX_GAP = 80
 
@@ -201,7 +236,7 @@ def _alias(text: str, start: int, end: int, u0: int, u1: int, names, cid: str,
             a0, a1 = m.span()
             if a1 <= start:
                 gap = text[a1:start]
-                ok = len(gap) <= _MAX_GAP and _ALIAS_GAP.fullmatch(gap)
+                ok = len(gap) <= _MAX_GAP and _ALIAS_GAP_AFTER_NAME.fullmatch(gap)
             elif a0 >= end:
                 gap = text[end:a0]
                 ok = len(gap) <= _MAX_GAP and (_ALIAS_GAP.fullmatch(gap) or _APPOSITIVE_GAP.fullmatch(gap))
@@ -215,11 +250,11 @@ def _alias(text: str, start: int, end: int, u0: int, u1: int, names, cid: str,
 @functools.lru_cache(maxsize=256)
 def _typed_res(nouns: tuple[str, ...]) -> tuple[re.Pattern, re.Pattern, re.Pattern]:
     alt = "|".join(re.escape(n).replace(r"\ ", r"\s+") for n in sorted(nouns, key=len, reverse=True))
-    after = re.compile(rf"[ \t]+(?:(?!{_STOP}\b)[\w-]+[ \t]+)?(?:{alt})(?![\w-])", re.I)
-    appositive = re.compile(rf",[ \t]+(?:the|an?)[ \t]+(?:(?!{_APPOS_BLOCK}\b)[\w-]+[ \t]+){{0,3}}?"
+    after = re.compile(rf"{_GAP}(?:(?!{_STOP}\b)[\w-]+{_GAP})?(?:{alt})(?![\w-])", re.I)
+    appositive = re.compile(rf",{_GAP}(?:the|an?){_GAP}(?:(?!{_APPOS_BLOCK}\b)[\w-]+{_GAP}){{0,3}}?"
                             rf"(?:{alt})(?![\w-])", re.I)
-    before = re.compile(rf"(?<![\w-])(?:{alt})[ \t]+(?:family[ \t]+)?(?:called|named|dubbed|known[ \t]+as)"
-                        r"[ \t]+[\"“']?$", re.I)
+    before = re.compile(rf"(?<![\w-])(?:{alt}){_GAP}(?:family{_GAP})?(?:called|named|dubbed|known{_GAP}as)"
+                        rf"{_GAP}[\"“']?$", re.I)
     return after, appositive, before
 
 
@@ -272,7 +307,7 @@ def evidence(text: str, start: int, end: int, name_key: str, candidates: Mapping
         return Evidence(excluded="conflicting_sense")
 
     found: dict[str, str] = {}
-    attached = _attached_id(text, start, end)
+    attached = _attached_id(text, start, end, u1)
     if attached is not None and attached in candidates:
         found[attached] = "attached_id"
     if anchor_ok is not None:

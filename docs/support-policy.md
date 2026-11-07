@@ -146,7 +146,7 @@ does not.
 
   | Code | One file | `--input-dir` |
   |---|---|---|
-  | 0 | the bundle was written and Stage 5 did not refuse it (`validated` or `unverified`) | every file gave 0, or the folder holds no supported file |
+  | 0 | the bundle was written and Stage 5 did not refuse it (`validated` or `unverified`), or Stage 4 or 5 was disabled with `--disable-stage` | every file gave 0, or the folder holds no supported file |
   | 1 | Stage 5 refused the bundle; the file was not found; a stage named by `--require-stage` did not run; the database cannot be migrated | the folder does not exist; a file gave 1; the database cannot be migrated |
   | 2 | usage error: a wrong argument, an unknown or mandatory stage id, a `STIX_TLP` value that is refused | the same |
 

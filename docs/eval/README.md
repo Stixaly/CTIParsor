@@ -19,7 +19,8 @@ tables 3 and 10, and the repository):
 * the official split is **temporal**, with every vendor in every split — kept
   as is; a vendor-held-out split would be another protocol, reported apart;
 * the 280 general-layer-only reports are **not** reports without techniques
-  and are never scored for TTPs;
+  and are never scored for TTPs (`load(include_general_only=True)` keeps the
+  cyber reports of train, dev and test out of them, whichever splits it loads);
 * techniques are annotated almost only at the **parent** level (17 sub-technique
   ids among 1,067 document-level labels): the primary TTP score is at parent
   level, exact ids are reported alongside;
@@ -141,7 +142,8 @@ serve (Stage 3 is then `failed`, not an empty success).
 
 The gold is annotated with the ATT&CK of 2022. It is mapped through the
 `revoked-by` chains of one release, and predictions go through the same
-mapping. The release a run's pipeline read is in its manifest
+mapping; a chain that ends on a revoked or deprecated id maps to nothing and
+is reported as out of scope. The release a run's pipeline read is in its manifest
 (`run.json`, `manifest.attack.release`; `ATTACK_RELEASE` selects it,
 [docs/configuration.md](../configuration.md#attck-release)). A run from before the
 manifest recorded it has no `attack` block and is mapped on the default track.

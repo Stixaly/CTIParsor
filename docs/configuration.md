@@ -299,6 +299,8 @@ TTP_VERIFY_MIN=1
 # Re-runs relationship-bearing chunks through a SECOND provider; agreement
 # boosts confidence, single-model claims are penalised and can't auto-promote.
 # CONSENSUS_PROVIDER must differ from LLM_PROVIDER and have its key set.
+# CONSENSUS_PROVIDER=none, or an empty value, turns consensus off whatever
+# ENABLE_CONSENSUS says.
 ENABLE_CONSENSUS=false
 CONSENSUS_PROVIDER=mistral
 
@@ -398,7 +400,9 @@ read, and which the interface reads through `GET /api/attack/index`.
   lists the releases this installation has. There is no fallback to the default:
   a run is never given another release than the one it asked for (ADR-0073's
   rule for a TLP level). `python -c "from pipeline import attack_data;
-  print(attack_data.available())"` lists them.
+  print(attack_data.available())"` lists them. A track directory counts only
+  when its `attack_manifest.json` is usable and names that track's version, so a
+  directory with an empty or unreadable manifest is not listed.
 * **It is read when the process starts.** The loaders cache what they read, like
   `TTP_EMBEDDING_MODEL`. Set it in `.env` (the `app`, `worker` and `dev`
   services read that file) and restart. The first use fixes the release for the
@@ -521,7 +525,7 @@ Stage 2f adds a description and a CVSS v3 score to each CVE's `vulnerability`
 object (`x_cvss_v3_score`, `x_cvss_v3_vector`). It always reads the
 `cve_cache` table; with the flag on, it also looks up what the cache does not
 hold on the public CIRCL API — at most 25 lookups and 30 s per report — and
-caches the answer, a CVE CIRCL has no record of included. A lookup that gets no
+caches the answer, including a CVE CIRCL has no record of, or whose record has neither a description nor a score (a remembered miss). A lookup that gets no
 answer (CIRCL unreachable, a 5xx, an unreadable reply) is not cached and ends
 that report's lookups: the next run asks again. Off by default, because Stages 1, 2, 4
 and 5 otherwise run fully offline.

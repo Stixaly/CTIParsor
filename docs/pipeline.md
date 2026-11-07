@@ -546,7 +546,9 @@ A full **Finalize** used to re-scan the text for the accepted named entities and
   `spacy` and `alias_list` 3, any other source 99). A campaign ranks after every
   source but the analyst's rows; equal ranks keep all their types. The types left out
   go to the ledger as `dropped / outranked_type` and do not reach Stage 4
-  (`pipeline/named_entities.py`, `pipeline/orchestrator.py`).
+  (`pipeline/named_entities.py`, `pipeline/orchestrator.py`). The types Stage 2's
+  `resolve_type_conflicts` already dropped are recorded the same way (#397); the
+  bundle does not change.
 - **Ends that name several objects** (ADR-0091) — when an end names several candidate
   objects, the verb picks the pair it accepts (`rel_is_allowed`). When several pairs
   fit, or none does, the row is not built and the ledger records `ambiguous_name`

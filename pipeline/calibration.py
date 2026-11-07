@@ -42,6 +42,7 @@ compute, read back by `pipeline.thresholds` in the next worker subprocess.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass, field
 
 from api.logging_config import get_logger
@@ -56,13 +57,13 @@ CALIBRATED_SOURCES: tuple[str, ...] = ("cyner", "gliner")
 DEFAULT_TARGET_PRECISION = 0.90
 DEFAULT_MIN_SAMPLES = 200
 
-# Floor on a SINGLE isotonic block's own sample count before its rate is
-# trusted as the cutoff. min_samples above only gates the pair's aggregate
-# decision count; PAVA can still isolate one lucky (or unlucky) decision into
-# its own tiny block that happens to already be locally non-decreasing, which
-# min_samples alone does not catch. The blocks' rates are non-decreasing by
-# construction, so skipping an under-sized block and continuing to the next
-# one never picks a worse cutoff than the aggregate check already allowed.
+# Floor on the support behind a proposed cutoff: the number of decisions at or
+# above it, i.e. the population its precision rests on going forward (see
+# propose()). It is NOT the sample of the one isotonic block whose lower edge is
+# proposed: that block can be a single decision, with the at-or-above decisions
+# (controls included) supplying the count. min_samples above only gates the
+# pair's aggregate decision count. Under-supported cutoffs are reported as
+# target_unreachable, not skipped in favour of a later block.
 DEFAULT_MIN_BLOCK_SAMPLES = 20
 
 
@@ -252,7 +253,15 @@ def load_decisions(
     sources: tuple[str, ...] = CALIBRATED_SOURCES,
     origins: tuple[str, ...] = (HUMAN,),
 ) -> dict[tuple[str, str], list[tuple[float, bool]]]:
-    """Every analyst-decided row of the calibrated sources, grouped by (source, entity_type)."""
+    """Every analyst-decided row of the calibrated sources, grouped by (source, entity_type).
+
+    A non-finite confidence (NaN, ±inf) is skipped and logged: it has no place on
+    the cutoff axis, and a NaN breaks the sort the isotonic fit depends on, which
+    inverts the blocks around it.  Empty `sources` or `origins` read nothing
+    (`IN ()` is not valid SQL on PostgreSQL).
+    """
+    if not sources or not origins:
+        return {}
     marks = ",".join("?" for _ in sources)
     origin_marks = ",".join("?" for _ in origins)
     rows = conn.execute(
@@ -262,10 +271,15 @@ def load_decisions(
         (*sources, *origins),
     ).fetchall()
     grouped: dict[tuple[str, str], list[tuple[float, bool]]] = {}
+    skipped = 0
     for r in rows:
-        grouped.setdefault((r["source"], r["entity_type"]), []).append(
-            (float(r["confidence"]), bool(r["accepted"]))
-        )
+        score = float(r["confidence"])
+        if not math.isfinite(score):
+            skipped += 1
+            continue
+        grouped.setdefault((r["source"], r["entity_type"]), []).append((score, bool(r["accepted"])))
+    if skipped:
+        logger.warning(f"[calibration] skipped {skipped} decided row(s) with a non-finite confidence")
     return grouped
 
 
@@ -276,6 +290,8 @@ def excluded_decisions(
 ) -> dict[str, int]:
     """Decided rows of the calibrated sources that calibration did NOT read, per
     origin — so a report built on few decisions says how many it set aside."""
+    if not sources:
+        return {}
     marks = ",".join("?" for _ in sources)
     rows = conn.execute(
         "SELECT COALESCE(decision_origin, 'none') AS origin, COUNT(*) AS n FROM entities "

@@ -156,8 +156,14 @@ def upgrade(conn: Any = None) -> Report:
         conn = _postgres_conn()
     known = history.load()
     conn.execute(f"SET lock_timeout = '{env_int('DB_MIGRATION_LOCK_TIMEOUT_S', default=600)}s'")
-    conn.execute(f"SELECT pg_advisory_lock({_LOCK_KEY})")
-    conn.execute("RESET lock_timeout")
+    # Issue #443: the RESET runs even when the lock is not obtained
+    # (LockNotAvailable), so the connection, reused by the next query, does not
+    # keep the migration's lock_timeout. The connection is autocommit: a failed
+    # lock leaves no open transaction to roll back before the RESET.
+    try:
+        conn.execute(f"SELECT pg_advisory_lock({_LOCK_KEY})")
+    finally:
+        conn.execute("RESET lock_timeout")
     try:
         conn.execute_script(_VERSION_TABLE_DDL)
         records = _records(conn)

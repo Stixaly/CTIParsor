@@ -23,33 +23,33 @@ const entity = (over: Partial<Entity> = {}): Entity => ({
 
 const noop = () => {}
 
-function renderReader(
-  text: string,
-  entities: Entity[],
-  extra: { focusedId?: string | null; onEntityNotInText?: (id: string) => void } = {},
-) {
-  return render(
-    <DocumentReader
-      text={text}
-      entities={entities}
-      highlightStyle="underline"
-      focusedId={extra.focusedId ?? null}
-      onEntityNotInText={extra.onEntityNotInText}
-      setFocusedId={noop}
-      setHoverEntity={noop}
-      onAccept={noop}
-      onReject={noop}
-      onReset={noop}
-      onChangeType={noop}
-      onCreate={noop}
-      onMarkShiftClick={noop}
-      onMarkDragStart={noop}
-      onSelectionRelate={noop}
-      relEvidence={[]}
-      relsForOverlay={[]}
-      showRelArrows={false}
-    />,
-  )
+type Extra = { focusedId?: string | null; onEntityNotInText?: (id: string) => void; relEvidence?: string[] }
+
+const readerElement = (text: string, entities: Entity[], extra: Extra = {}) => (
+  <DocumentReader
+    text={text}
+    entities={entities}
+    highlightStyle="underline"
+    focusedId={extra.focusedId ?? null}
+    onEntityNotInText={extra.onEntityNotInText}
+    setFocusedId={noop}
+    setHoverEntity={noop}
+    onAccept={noop}
+    onReject={noop}
+    onReset={noop}
+    onChangeType={noop}
+    onCreate={noop}
+    onMarkShiftClick={noop}
+    onMarkDragStart={noop}
+    onSelectionRelate={noop}
+    relEvidence={extra.relEvidence ?? []}
+    relsForOverlay={[]}
+    showRelArrows={false}
+  />
+)
+
+function renderReader(text: string, entities: Entity[], extra: Extra = {}) {
+  return render(readerElement(text, entities, extra))
 }
 
 describe('DocumentReader — wrapped hash highlighting', () => {
@@ -137,11 +137,89 @@ describe('DocumentReader — wrapped hash highlighting', () => {
     expect(notInText).toHaveBeenCalledWith('e1')
   })
 
+  // issue #447: a rejected entity has no range (buildRanges drops it), so it
+  // looked "not in the text".  It is in the text: no hint for it.
+  it('does not report a rejected focused entity as not-in-text (issue 447)', () => {
+    const notInText = vi.fn()
+    renderReader('Narrative report with no indicator tables.', [entity({ accepted: false })], {
+      focusedId: 'e1',
+      onEntityNotInText: notInText,
+    })
+    expect(notInText).not.toHaveBeenCalled()
+  })
+
+  // The Review page recreates the callback on each decision.  Rejecting the
+  // focused entity must not report it, even though the callback changed.
+  it('stays silent when the focused entity is rejected and the callback changes (issue 447)', () => {
+    const first = vi.fn()
+    const second = vi.fn()
+    const { rerender } = renderReader('Narrative report with no indicator tables.', [entity()], {
+      focusedId: 'e1',
+      onEntityNotInText: first,
+    })
+    expect(first).toHaveBeenCalledWith('e1')
+    rerender(readerElement('Narrative report with no indicator tables.', [entity({ accepted: false })], {
+      focusedId: 'e1',
+      onEntityNotInText: second,
+    }))
+    expect(second).not.toHaveBeenCalled()
+  })
+
+  // Control: an accepted entity that really is absent from the text still gets the hint.
+  it('still reports an accepted entity that is absent from the text (issue 447 control)', () => {
+    const notInText = vi.fn()
+    renderReader('Narrative report with no indicator tables.', [entity({ accepted: true })], {
+      focusedId: 'e1',
+      onEntityNotInText: notInText,
+    })
+    expect(notInText).toHaveBeenCalledWith('e1')
+  })
+
   it('still highlights a contiguous hash as a single mark', () => {
     const { container } = renderReader(`File Hash: ${HASH} (SHA-256)`, [entity()])
     const marks = [...container.querySelectorAll('mark')]
     expect(marks).toHaveLength(1)
     expect(marks[0].textContent).toBe(HASH)
+  })
+
+  // issue #455: the paragraph splitter pushed the pieces of a split evidence span
+  // into plain <span>s, so a proof that crossed a blank line lost rel-ev-hl.
+  it('keeps the evidence highlight on every piece of a span split across paragraphs (issue 455)', () => {
+    const text = 'Intro line.\n\nThe loader drops payload.\n\nNext paragraph here.'
+    const { container } = renderReader(text, [], {
+      relEvidence: ['loader drops payload.\n\nNext paragraph'],
+    })
+    const hl = [...container.querySelectorAll('.rel-ev-hl')]
+    expect(hl.map(h => h.textContent)).toEqual(['loader drops payload.', 'Next paragraph'])
+    // The pieces are clones of one element: no id may be repeated in the DOM.
+    const ids = [...container.querySelectorAll('[id]')].map(el => el.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  // Control: evidence on a single paragraph is one highlighted span, unchanged.
+  it('keeps a single-paragraph evidence span as one highlight (issue 455 control)', () => {
+    const { container } = renderReader('Intro.\n\nThe loader drops payload here.', [], {
+      relEvidence: ['loader drops payload here'],
+    })
+    const hl = [...container.querySelectorAll('.rel-ev-hl')]
+    expect(hl).toHaveLength(1)
+    expect(hl[0].textContent).toBe('loader drops payload here')
+  })
+
+  // issue #455: an entity whose value spans a blank line is split into one <mark> per
+  // paragraph.  The scroll target was the last piece (each clone carried the ref).
+  it('scrolls to the first piece of an entity split across paragraphs (issue 455)', () => {
+    const notInText = vi.fn()
+    const { container } = renderReader('Intro line.\n\nAPT29\n\nGroup struck again.',
+      [entity({ id: 'e2', value: 'APT29\n\nGroup', entity_type: 'threat-actor' })],
+      { focusedId: 'e2', onEntityNotInText: notInText })
+    expect(notInText).not.toHaveBeenCalled()
+    const marks = [...container.querySelectorAll('mark')]
+    expect(marks.map(m => m.textContent)).toEqual(['APT29', 'Group'])
+    expect(marks.map(m => m.getAttribute('data-eid'))).toEqual(['e2', 'e2'])
+    const scrolled = (Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>).mock
+      .instances[0] as HTMLElement
+    expect(scrolled).toBe(marks[0])
   })
 
   it('highlights stacked hashes in a column on their own rows', () => {

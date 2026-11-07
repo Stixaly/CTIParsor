@@ -15,10 +15,11 @@ always a syntax error.
 `prepare_embedded_rule` makes two repairs. Each one only touches something that
 cannot compile as it is:
 
-- A ``meta`` string cut by a line break is joined back with a single space.  A
-  meta value does not change what the rule matches.  A cut text string under
-  ``strings:`` is left alone: whether the break stood for a space or for
-  nothing changes what the rule matches, and the text cannot say which.
+- A ``meta`` string cut by a line break is joined back with a single space, or
+  with nothing after a backslash that ends the line (#435).  A meta value does
+  not change what the rule matches.  A cut text string under ``strings:`` is
+  left alone: whether the break stood for a space or for nothing changes what
+  the rule matches, and the text cannot say which.
 - An ``import "module"`` line that the report declares outside the rule is
   added when the rule uses that module.
 
@@ -86,6 +87,16 @@ def _leaves_quote_open(line: str) -> bool:
     return inside
 
 
+def _joiner(line: str) -> str:
+    """What goes between a line and its continuation: a space, or nothing (#435).
+
+    An odd run of backslashes at the end of the line ends in an escape that the
+    break cut.  A space after it would make the escape `\\ ` (a space), which YARA
+    does not know; the join keeps the line as the author wrote it.
+    """
+    return "" if (len(line) - len(line.rstrip("\\"))) % 2 else " "
+
+
 def _close_wrapped_string(lines: list[str], i: int) -> tuple[str, int, int] | None:
     """Join the lines after the open string at ``lines[i]`` until it closes.
 
@@ -101,7 +112,7 @@ def _close_wrapped_string(lines: list[str], i: int) -> tuple[str, int, int] | No
             continue
         if _SECTION.match(nxt) or nxt.strip() == "}":
             return None
-        merged = f"{merged} {nxt.strip()}"
+        merged = f"{merged}{_joiner(merged)}{nxt.strip()}"
         used += 1
         if not _leaves_quote_open(merged):
             return merged, j, used
@@ -112,7 +123,8 @@ def rejoin_wrapped_meta_strings(body: str) -> tuple[str, int]:
     """Join back the ``meta`` strings a line break cut in two.
 
     Returns the body and the number of continuation lines joined.  A string
-    that cannot be closed (see `_close_wrapped_string`) is left as it was.
+    that cannot be closed (see `_close_wrapped_string`) is left as it was.  The
+    join adds a space, except after an odd run of backslashes (see `_joiner`).
     """
     lines = body.split("\n")
     out: list[str] = []

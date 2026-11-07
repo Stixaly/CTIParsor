@@ -1754,7 +1754,9 @@ def test_named_sdos_are_entries_with_their_mitre_id_and_forms():
     index = _baseline("opencti_report.json")
     actor = _entry(index, "intrusion-set")
     assert (actor.entity_type, actor.value, actor.mitre_id) == ("intrusion_set", "APT29", "G0016")
-    assert actor.surface_forms == ("apt29", "cozy bear", "the dukes", "nobelium")
+    # The name and aliases first, then the MITRE forms (issue #415): the forms are the named keys.
+    assert actor.surface_forms[:4] == ("apt29", "cozy bear", "the dukes", "nobelium")
+    assert set(actor.surface_forms) == {k[2] for k in actor.keys if k[0] == "named"}
     assert ("named", "actor", "cozy bear") in actor.keys and ("mitre", "G0016") in actor.keys
     technique = _entry(index, "attack-pattern")
     assert (technique.entity_type, technique.mitre_id, technique.surface_forms) == ("ttp", "T1059.001", ("powershell",))

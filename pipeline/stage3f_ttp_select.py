@@ -165,9 +165,14 @@ def selection_max_output_tokens(provider: str | None = None) -> int:
 
 
 def _norm(s: str) -> str:
+    # The invisible characters the Stage 3 prompt drops (zero-width space, bidi
+    # marks, BOM): a quote copied with one is the same words (#402).  Lazy:
+    # stage3_llm imports this module.
+    from pipeline.stage3_llm import _INVISIBLE_CHARS
+
     # str.split, not compile_pattern(r"\s+"): RE2's `\s` is ASCII only, and a
     # quote would not be found in a report that writes "spear\xa0phishing".
-    return " ".join(s.split()).lower()
+    return " ".join(_INVISIBLE_CHARS.sub("", s).split()).lower()
 
 
 @functools.lru_cache(maxsize=1)
@@ -215,10 +220,14 @@ def _fit_candidates(text: str, cands: list[TtpCandidate], max_chars: int | None)
     the LLM's own proposals and the best `_MIN_RETRIEVED` retrieved ones.  Only
     a text that alone outgrows the limit (never a Stage 1 chunk: ≤ 5,400
     characters against 32,000) is then cut by `fit_text`.
+
+    The budget is the prompt `fit_report` builds with no candidates: the text
+    and the two spotlighting marker lines around it (#402).
     """
     if max_chars is None:
         return cands
-    budget = max_chars - len(_SELECT_USER_TEMPLATE.format(text=text, candidates=""))
+    framed, _ = fit_report(_SELECT_USER_TEMPLATE, text, None, candidates="")
+    budget = max_chars - len(framed)
     keep = list(cands)
     while len(format_candidates(keep)) > budget:
         retrieved = [i for i, c in enumerate(keep) if "llm" not in c.sources]
@@ -232,10 +241,13 @@ def parse_selection(raw: str) -> list[dict] | None:
     """The `selected` list of the model's answer, or None when there is none.
 
     Accepts the object anywhere in the answer (a model may wrap it in a fence
-    or a sentence) and a bare list; anything else is unparseable."""
+    or a sentence) and a bare list; anything else is unparseable.  A bare `[]`
+    is an abstention only when no other block follows it: a preamble such as
+    "(or [] if none)" before the real answer is not one (#378)."""
     if not raw:
         return None
     decoder = json.JSONDecoder()
+    abstention: list[dict] | None = None
     i = 0
     while i < len(raw):
         if raw[i] not in "{[":
@@ -249,11 +261,13 @@ def parse_selection(raw: str) -> list[dict] | None:
         if isinstance(obj, dict) and isinstance(obj.get("selected"), list):
             return [x for x in obj["selected"] if isinstance(x, dict)]
         if isinstance(obj, list) and all(isinstance(x, dict) for x in obj):
-            return list(obj)
+            if obj:
+                return list(obj)
+            abstention = []     # kept only if nothing after it answers
         # A complete value of another shape: never read a list nested in it
         # ({"chosen": []} is not an abstention).
         i = end
-    return None
+    return abstention
 
 
 def salvage_selection(raw: str) -> list[dict] | None:
@@ -456,6 +470,8 @@ def chunk_candidates(retrieved: Sequence[TtpCandidate], llm: Sequence[TtpCandida
         if key in out:
             inc = out[key]
             out[key] = inc.model_copy(update={
+                # An LLM proposal without a passage keeps the 2c one (#402).
+                "passage": inc.passage or c.passage,
                 "sources": sorted(set(inc.sources) | set(c.sources)),
                 "example": inc.example if inc.example_kind == "procedure" else (c.example or inc.example),
                 "example_kind": inc.example_kind if inc.example_kind == "procedure" else c.example_kind,

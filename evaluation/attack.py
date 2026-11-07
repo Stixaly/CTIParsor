@@ -113,6 +113,10 @@ class Catalogue:
             canonical = self.revoked_by[canonical]
         if status == DEPRECATED or (status == REVOKED and canonical == gid):
             canonical = None
+        # A chain that ends on a revoked or deprecated id maps to nothing: that id
+        # is not one the pipeline can be scored against either.
+        if canonical is not None and self.status.get(canonical, UNKNOWN) != ACTIVE:
+            canonical = None
         if status == UNKNOWN:
             # Not in the current bundle at all; the pipeline may still know it.
             canonical = gid if gid in self.pipeline_ids else None
@@ -233,8 +237,9 @@ def release_diff(old_dir: Path, new_dir: Path) -> dict:
     Per domain: the techniques that became active (`new_active`) or stopped
     being (`no_longer_active`, with the id that replaced a revoked one), those
     renamed, with another description or other tactics, those with more
-    procedures (`more_procedures`; a procedure is a non-revoked `uses`
-    relationship that has a description), and the same for software and groups."""
+    procedures (`more_procedures`, among the techniques both releases name; a
+    procedure is a non-revoked `uses` relationship that has a description), and
+    the same for software and groups."""
     report = {}
     for domain in DOMAINS:
         old, new = _read_domain(old_dir, domain), _read_domain(new_dir, domain)
@@ -243,7 +248,9 @@ def release_diff(old_dir: Path, new_dir: Path) -> dict:
         act_n = {k for k, v in nt.items() if v["status"] == ACTIVE}
         both = act_o & act_n
         osw, nsw = old["software"], new["software"]
-        more = sorted(k for k in act_n if np_[k] > op[k])
+        # A technique new in this release has no old count to grow from: its
+        # procedures are its `new_technique` change, not "more procedures".
+        more = sorted(k for k in act_n if k in ot and np_[k] > op[k])
         r = {
             "collections": {"old": old["collections"], "new": new["collections"]},
             "active": {"old": len(act_o), "new": len(act_n)},

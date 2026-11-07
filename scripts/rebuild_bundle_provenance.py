@@ -6,6 +6,10 @@ from data already stored in the database under a given relationship policy,
 then counts edges by label. It writes nothing: neither to the database nor
 to disk. It is a measurement, not a migration.
 
+The bundle is built from the same rows and decisions as the worker's finalize
+(see _load_job): a rejected entity stays out, and the named objects come as
+the product's do.
+
 This script reads DATABASE_URL the same way the API does; the connection it
 gets back is never written to.
 
@@ -27,12 +31,42 @@ if str(_ROOT) not in sys.path:
 from api.db import get_conn, init_db  # noqa: E402
 from api.db_backend import DBConnection  # noqa: E402
 from models.schemas import EntityType, RawEntity  # noqa: E402
+from pipeline.decisions import SHIPS  # noqa: E402
+from pipeline.named_entities import stored_row_source, with_named_entities  # noqa: E402
+from pipeline.overrides import without_denied  # noqa: E402
 from pipeline.stage3_llm import LLMEnrichmentResult  # noqa: E402
 from pipeline.stage4_stix_mapping import build_stix_bundle  # noqa: E402
 
+# The entity types the worker's finalize hands to build_stix_bundle as raw
+# entities (api/worker.py, re_run_final_stages: _RAW_ENTITY_TYPES).  The named
+# types come in through the LLM lists instead, via with_named_entities.
+_RAW_ENTITY_TYPES = frozenset({
+    EntityType.IPV4, EntityType.IPV6, EntityType.DOMAIN,
+    EntityType.URL, EntityType.EMAIL, EntityType.MD5,
+    EntityType.SHA1, EntityType.SHA256, EntityType.MAC_ADDR,
+    EntityType.ASN, EntityType.FILE, EntityType.REGISTRY_KEY,
+    EntityType.MUTEX, EntityType.NETWORK_TRAFFIC,
+    EntityType.USER_ACCOUNT,
+    EntityType.CVE,
+    EntityType.TECHNIQUE, EntityType.TACTIC,
+    EntityType.PROCEDURE, EntityType.TTP,
+    EntityType.INFRASTRUCTURE, EntityType.INTRUSION_SET,
+    EntityType.LOCATION, EntityType.IDENTITY,
+    EntityType.CAMPAIGN, EntityType.INCIDENT,
+})
+
 
 def _load_job(conn: DBConnection, job_id: str) -> tuple[list, object, str, str] | None:
-    """Return (raw_entities, llm_result, report_text, filename) or None."""
+    """Return (raw_entities, llm_result, report_text, filename) or None.
+
+    The bundle inputs are built as the worker's finalize builds them
+    (api/worker.py, re_run_final_stages), so the bundle is the product's: only
+    the rows that ship (pipeline.decisions.SHIPS), a rejected entity stays out;
+    the deny list applies; the analyst's rejections filter the LLM's JSON
+    fields; the named lists come through with_named_entities.  The worker is
+    the reference: keep the two in step.  Graph completion and the saved
+    relationships are not rebuilt here (the relationships stay the JSON's).
+    """
     cur = conn.execute(
         "SELECT id, original_filename, report_text, llm_result_json "
         "FROM jobs WHERE id = ?",
@@ -54,16 +88,69 @@ def _load_job(conn: DBConnection, job_id: str) -> tuple[list, object, str, str] 
         except Exception:
             return None
 
-    cur = conn.execute(
-        "SELECT value, entity_type, context, confidence, mitre_id, source "
-        "FROM entities WHERE job_id = ?",
+    # Columns: value, entity_type, context, confidence, mitre_id, source, accepted, decision_origin
+    rows = conn.execute(
+        "SELECT value, entity_type, context, confidence, mitre_id, source, accepted, decision_origin "
+        f"FROM entities WHERE job_id = ? AND {SHIPS}",
         (job_id_val,),
+    ).fetchall()
+    rejected_rows = conn.execute(
+        "SELECT value, entity_type, mitre_id FROM entities WHERE job_id = ? AND accepted = 0",
+        (job_id_val,),
+    ).fetchall()
+
+    llm_result = without_denied(llm_result)
+
+    # The analyst's rejections, for the JSON-blob fields (worker: rejected_* sets).
+    rejected_ttp_names: set[str] = set()
+    rejected_ttp_mitre: set[str] = set()
+    rejected_locations: set[str] = set()
+    rejected_identities: set[str] = set()
+    rejected_campaigns: set[str] = set()
+    for value, et, mid in rejected_rows:
+        val = value.lower().strip()
+        mid = (mid or "").lower().strip()
+        if et in ("technique", "tactic", "procedure", "ttp"):
+            rejected_ttp_names.add(val)
+            if mid:
+                rejected_ttp_mitre.add(mid)
+        elif et == "location":
+            rejected_locations.add(val)
+        elif et == "identity":
+            rejected_identities.add(val)
+        elif et == "campaign":
+            rejected_campaigns.add(val)
+
+    _ttp_types = ("technique", "tactic", "procedure", "ttp")
+    shipped_ttp_names = {(r[0] or "").lower().strip() for r in rows if r[1] in _ttp_types}
+    shipped_ttp_mitre = {(r[4] or "").lower().strip() for r in rows if r[1] in _ttp_types and r[4]}
+    filtered_ttps = [
+        t for t in llm_result.ttps
+        if t.technique_name.lower() not in rejected_ttp_names
+        and (not t.mitre_id or t.mitre_id.lower() not in rejected_ttp_mitre)
+        and (t.technique_name.lower().strip() in shipped_ttp_names
+             or (t.mitre_id or "").lower().strip() in shipped_ttp_mitre)
+    ]
+
+    campaign_name = llm_result.campaign_name
+    shipped_campaigns = {(r[0] or "").lower().strip() for r in rows if r[1] == "campaign"}
+    if campaign_name and (campaign_name.lower().strip() in rejected_campaigns
+                          or campaign_name.lower().strip() not in shipped_campaigns):
+        campaign_name = None
+
+    named = with_named_entities(
+        LLMEnrichmentResult(campaign_name=campaign_name),
+        ((r[1], r[0], stored_row_source(r[5], r[6], r[7])) for r in rows),
     )
+    campaign_name = named.llm_result.campaign_name
+
     raw_entities: list[RawEntity] = []
-    for r in cur.fetchall():
+    for r in rows:
         try:
             etype = EntityType(r[1])
         except (ValueError, TypeError):
+            continue
+        if etype not in _RAW_ENTITY_TYPES:
             continue
         raw_entities.append(
             RawEntity(
@@ -75,8 +162,37 @@ def _load_job(conn: DBConnection, job_id: str) -> tuple[list, object, str, str] 
                 source=r[5] or "",
             )
         )
+    raw_entities = [e for e in raw_entities if named.keeps(e)]
+
+    filtered_countries = [
+        c for c in llm_result.targeted_countries if c.lower().strip() not in rejected_locations
+    ]
+    filtered_sectors = [
+        s for s in llm_result.targeted_sectors if s.lower().strip() not in rejected_identities
+    ]
+    llm_result = llm_result.model_copy(update={
+        "malware_families": named.llm_result.malware_families,
+        "threat_actors": named.llm_result.threat_actors,
+        "tools": named.llm_result.tools,
+        "ttps": filtered_ttps,
+        "campaign_name": campaign_name,
+        "targeted_countries": filtered_countries,
+        "targeted_sectors": filtered_sectors,
+    })
 
     return raw_entities, llm_result, report_text or "", filename or ""
+
+
+def _build_bundle(raw_entities: list, llm_result, filename: str, report_text: str, policy: dict):
+    """Stage 4 on the inputs of _load_job, as a pipeline run builds its bundle."""
+    return build_stix_bundle(
+        raw_entities,
+        llm_result,
+        filename,
+        report_text=report_text,
+        original_filename=filename,
+        relationship_policy=policy,
+    )
 
 
 def _label_census(bundle) -> dict[str, int]:
@@ -153,14 +269,7 @@ def main() -> None:
         sys.exit(1)
 
     raw_entities, llm_result, report_text, filename = loaded
-    bundle = build_stix_bundle(
-        raw_entities,
-        llm_result,
-        filename,
-        report_text=report_text,
-        original_filename=filename,
-        relationship_policy=policy,
-    )
+    bundle = _build_bundle(raw_entities, llm_result, filename, report_text, policy)
 
     census = _label_census(bundle)
     pinned = _pinned_count(bundle)

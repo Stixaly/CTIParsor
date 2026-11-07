@@ -1711,7 +1711,9 @@ def build_stix_bundle(
     # Reuses the shared seen_rel_keys set so a semantic edge that duplicates a
     # targets/indicates edge created above is also collapsed.
     for rel in llm_result.relationships:
-        row_edge = _resolve_row(rel)
+        # A `targets` row may name a country or sector that only the targeted
+        # lists put in the bundle, as the targets product above does (issue #383).
+        row_edge = _resolve_row(rel, targeted=rel.relationship_type.strip().lower() == "targets")
         if row_edge.dropped is not None:
             led.relationship(rel, "dropped", reason=row_edge.dropped, **row_edge.info)
             continue
@@ -1758,6 +1760,21 @@ def build_stix_bundle(
             entry = led.relationship(rel, "merged", stix_id=existing_id, merged_with=existing_id,
                                      final_type=rel_type, source_ref=source.id,
                                      target_ref=target.id, changes=changes)
+            # The exception to "the first stays": an edge the targets product
+            # built from the lists has no quote and the product's confidence, so
+            # this row's quote and confidence replace it under the same id, at
+            # the same place in the bundle; the edge then has this row's origin
+            # (issue #383).
+            if existing_id is not None and led.objects.get(existing_id, {}).get("origin") == "targeted_location":
+                existing_idx = next((i for i in range(len(stix_objects) - 1, -1, -1)
+                                     if getattr(stix_objects[i], "id", None) == existing_id), None)
+                if existing_idx is not None:
+                    stix_objects[existing_idx] = stix2.Relationship(**{**_rel_kwargs, "id": existing_id})
+                    # The ledger keeps the replaced origin under its own key: `changes`
+                    # is the Graph page's sign of a rewrite, and this is not one.
+                    led.objects.pop(existing_id)
+                    led.object(stix_objects[existing_idx], ORIGIN_EXTRACTED,
+                               replaces="targeted_location")
             if _row_times:
                 state = _time_state.get(rel_key)
                 if state is None:
@@ -1994,10 +2011,10 @@ def build_stix_bundle(
         d: dict | None = None
         if chosen is not None:
             # The chosen Report is re-issued under its own id: what the document
-            # states that is not in it yet is added (D1); only the refs to baseline
+            # states that is not in it yet is added (D1), baseline objects and edges
+            # alike (in_report holds both, once each); only the refs to baseline
             # objects that no longer ship (an analyst rejection) leave it.
-            added = [i for i in in_report if i not in merge.kept]
-            added += [i for i in sorted(merge.stated) if baseline.objects.get(i, {}).get("type") == "relationship"]
+            added = [i for i in dict.fromkeys(in_report) if i not in listed]
             d = reissue_report(baseline.objects[chosen], merge.kept, added, enrichment, source_ref, now)
             if not d["object_refs"]:
                 # Everything it lists was rejected and the document adds nothing:
@@ -2021,6 +2038,8 @@ def build_stix_bundle(
             reissued = stix2.parse(d, allow_custom=True)
             stix_objects.append(reissued)
             # The one property this ADR adds to the Report as received (ADR-0093).
+            # added_refs counts the refs the Report did not list before (the stated
+            # ones it already listed are not new).
             led.object(reissued, "baseline_report_upsert", added_refs=len(added), removed_refs=removed_refs,
                        attached_file=attached_file)
             baseline.verbatim[chosen] = d

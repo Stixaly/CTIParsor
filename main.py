@@ -138,7 +138,8 @@ def run_pipeline(input_file: str, output_file: str, options: RunOptions | None =
     document = Document(file_path=input_file, original_filename=Path(input_file).name,
                         output_path=output_file)
     try:
-        result = run_document(document, options or RunOptions.from_env(), _ConsoleHooks(policy_source))
+        options = options or RunOptions.from_env()
+        result = run_document(document, options, _ConsoleHooks(policy_source))
     except (FileNotFoundError, ValueError, StageRequired) as exc:
         print(f"      [ERREUR] {exc}")
         return False
@@ -160,10 +161,16 @@ def run_pipeline(input_file: str, output_file: str, options: RunOptions | None =
         print_bundle_summary(result.bundle)
     _print_stages(result)
 
-    valid = bool(result.valid)
+    # None: Stage 5 did not run. That is a success only when the user disabled
+    # Stage 4 or 5; a bundle that was never built for another reason still
+    # fails the run, as before (#457).
+    skipped_by_user = result.valid is None and bool({"4", "5"} & options.disabled)
+    valid = bool(result.valid) or skipped_by_user
     if result.validation == "unverified":
         status = "OK (validation skipped — schemas missing)"
-    elif valid:
+    elif skipped_by_user:
+        status = "OK (validation skipped — stage 4 or 5 disabled)"
+    elif result.valid:
         status = "OK"
     else:
         status = "VALIDATION ERRORS"

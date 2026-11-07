@@ -81,6 +81,10 @@ LEGACY_MODIFIER_CLASSES: dict[str, str] = {
     "http_stat_code": "strlit",
 }
 
+#: Keywords that hand the next `content:` back to the raw packet, closing the
+#: sticky buffer before it.  `pkt_data` is the only one the adapter knows of.
+PACKET_RESET_KEYWORDS: frozenset[str] = frozenset({"pkt_data"})
+
 NOISE_LITERALS: frozenset[str] = frozenset({
     "get", "post", "head", "put", "delete", "options", "connect",
     "http/1.0", "http/1.1", "http/2", "content-type", "user-agent",
@@ -161,9 +165,23 @@ def parse_options(body: str) -> list[tuple[str, str]]:
 
 
 def _unquote(value: str) -> str:
-    """Strip one pair of enclosing double quotes if present."""
-    if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
-        return value[1:-1]
+    """Return the text between the opening double quote and its closing one.
+
+    The closing quote is the first one not escaped by a backslash, so
+    `"/gate.php", fast_pattern` gives `/gate.php`: the modifiers after the
+    literal are not part of it.  A value that does not open with a quote, or
+    never closes, is returned unchanged.
+    """
+    if not value.startswith('"'):
+        return value
+    i = 1
+    while i < len(value):
+        if value[i] == "\\":
+            i += 2
+            continue
+        if value[i] == '"':
+            return value[1:i]
+        i += 1
     return value
 
 
@@ -377,6 +395,12 @@ def extract_atoms(rule_line: str, *, max_atoms: int = 40) -> list[tuple[str, str
             _add(cls, text, out, seen, max_atoms)
             continue
 
+        # `pkt_data` sends the following content to the raw packet: the sticky
+        # buffer before it no longer applies.
+        if value == "" and key in PACKET_RESET_KEYWORDS:
+            current_buffer = None
+            continue
+
         # A naked keyword that is *only* a buffer opens one.  Ambiguous keywords
         # were already consumed by the look-ahead above, so ignoring them here is
         # what keeps legacy rules from opening a phantom buffer.
@@ -420,14 +444,18 @@ def rule_header(rule_line: str) -> dict[str, str]:
     }
 
 
-def rule_metadata(rule_line: str) -> dict[str, str]:
+def rule_metadata(rule_line: str) -> dict[str, list[str]]:
     """Extract metadata key-value pairs from a Suricata rule.
+
+    A rule may carry several `metadata:` options, and a key may repeat (one
+    `mitre_technique_id` per technique). Every value is kept, across all the
+    options, in order of appearance, without duplicates.
 
     Args:
         rule_line: A single-line Suricata rule.
 
     Returns:
-        A dict of metadata entries (key lowercased, value as-is).
+        A dict mapping each metadata key (lowercased) to its list of values.
         Returns {} if no metadata option is present.
     """
     if not isinstance(rule_line, str):
@@ -438,19 +466,22 @@ def rule_metadata(rule_line: str) -> dict[str, str]:
         return {}
     body = rule_line[first_open + 1:last_close]
     options = parse_options(body)
+    result: dict[str, list[str]] = {}
     for key, value in options:
-        if key == "metadata":
-            result: dict[str, str] = {}
-            for entry in value.split(","):
-                entry = entry.strip()
-                if not entry:
-                    continue
-                parts = entry.split(" ", 1)
-                if len(parts) < 2:
-                    continue
-                result[parts[0].strip().lower()] = parts[1].strip()
-            return result
-    return {}
+        if key != "metadata":
+            continue
+        for entry in value.split(","):
+            entry = entry.strip()
+            if not entry:
+                continue
+            parts = entry.split(" ", 1)
+            if len(parts) < 2:
+                continue
+            values = result.setdefault(parts[0].strip().lower(), [])
+            value_text = parts[1].strip()
+            if value_text not in values:
+                values.append(value_text)
+    return result
 
 
 def technique_ids(rule_line: str) -> list[str]:
@@ -461,15 +492,13 @@ def technique_ids(rule_line: str) -> list[str]:
 
     Returns:
         A deduplicated list of valid MITRE technique IDs (e.g. "T1071"),
-        in order of first appearance. Returns [] if none found.
+        in order of first appearance, across every `metadata:` option.
+        Returns [] if none found.
     """
     meta = rule_metadata(rule_line)
-    raw = meta.get("mitre_technique_id", "")
-    if not raw:
-        return []
     result: list[str] = []
     seen: set[str] = set()
-    for candidate in raw.split(","):
+    for candidate in meta.get("mitre_technique_id", []):
         candidate = candidate.strip().upper()
         if _RE_MITRE.match(candidate) and candidate not in seen:
             result.append(candidate)

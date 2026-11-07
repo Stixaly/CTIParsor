@@ -205,7 +205,8 @@ class SuricataAdapter(RuleCorpusAdapter):
 
     def _severity(self, line: str) -> Severity:
         meta = rule_metadata(line)
-        sev = meta.get("signature_severity", "").lower()
+        # One value per rule: the first signature_severity seen.
+        sev = (meta.get("signature_severity") or [""])[0].lower()
         return _SEVERITY_MAP.get(sev, Severity.UNKNOWN)
 
     def _dedup_key(self, body: str, header: dict[str, str] | None = None) -> str:

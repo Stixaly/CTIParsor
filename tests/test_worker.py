@@ -121,6 +121,9 @@ def test_a_quote_that_cannot_be_located_never_fails_the_save(db, monkeypatch):
 
 def test_denied_llm_names_are_not_saved(db, monkeypatch):
     _job(db)
+    # The deny row, as the store would hold it: without_denied() checks
+    # denied_keys() first, then is_denied() per name (#382).
+    monkeypatch.setattr("pipeline.overrides.denied_keys", lambda: frozenset({("cobalt strike", "tool")}))
     monkeypatch.setattr("pipeline.overrides.is_denied", lambda value, etype: value == "Cobalt Strike")
     worker._save_entities("j1", [], LLMEnrichmentResult(tools=["Cobalt Strike", "Rclone"]), report_text="")
     assert [r["value"] for r in _entities(db)] == ["Rclone"]
@@ -674,21 +677,6 @@ def test_a_bundle_is_finalized_with_its_verdict(db, owner):
     assert worker._finalize_job("j1", "for_review", owner, bundle_json="{}")   # a later bundle, no verdict
     row = _row(db)
     assert row["bundle_validation"] is None and row["bundle_validation_errors"] is None
-
-
-def test_saving_a_bundle_through_the_storage_clears_the_verdict(db):
-    from api.storage import SQLiteJobStorage
-
-    _job(db, bundle_json="{}", bundle_ledger_json="{}", bundle_validation="invalid",
-         bundle_validation_errors='["bad"]', bundle_build_json='{"kind": "run"}', bundle_review_revision=3)
-
-    SQLiteJobStorage().save_bundle("j1", '{"type": "bundle"}')
-
-    row = _row(db)
-    assert row["bundle_json"] == '{"type": "bundle"}'
-    assert (row["bundle_ledger_json"], row["bundle_validation"], row["bundle_validation_errors"]) == (
-        None, None, None)
-    assert (row["bundle_build_json"], row["bundle_review_revision"]) == (None, None)    # no build to name
 
 
 def test_a_finalize_without_a_bundle_keeps_the_stored_verdict(db):

@@ -105,7 +105,7 @@ def _thresholds() -> tuple[float, float]:
          for the model the cache was actually built/calibrated with)
       3. TTP_HIGH_THRESHOLD / TTP_MEDIUM_THRESHOLD env overrides (operator tuning)
     """
-    high, medium = _MODEL_THRESHOLDS.get(_TTP_EMBEDDING_MODEL, _DEFAULT_THRESHOLDS)
+    high, medium = _MODEL_THRESHOLDS.get(_active_model_name(), _DEFAULT_THRESHOLDS)
 
     manifest_path = attack_data.resolve(_MANIFEST_PATH)
     if manifest_path.exists():
@@ -477,6 +477,16 @@ def semantic_topk_ids(text: str, k: int = 25) -> set[str]:
 
 # ── Lazy-loaded model and cached embeddings ───────────────────────────────────
 
+# The model _load_model() loaded: the configured one, or the legacy one after a
+# fallback.  None until a model is loaded (#389).
+_active_model: str | None = None
+
+
+def _active_model_name() -> str:
+    """The embedding model in use: the one _load_model() loaded, else the configured one."""
+    return _active_model or _TTP_EMBEDDING_MODEL
+
+
 @functools.lru_cache(maxsize=1)
 def _load_model():
     """
@@ -486,6 +496,7 @@ def _load_model():
     legacy all-MiniLM-L6-v2 if the primary model cannot be downloaded/loaded.
     Returns None when SKIP_HEAVY_MODELS=1.
     """
+    global _active_model
     if _SKIP_HEAVY:
         return None
 
@@ -500,6 +511,7 @@ def _load_model():
     try:
         from sentence_transformers import SentenceTransformer
         model = SentenceTransformer(_TTP_EMBEDDING_MODEL)
+        _active_model = _TTP_EMBEDDING_MODEL
         logger.info(f"Loaded embedding model: {_TTP_EMBEDDING_MODEL}")
         return model
     except Exception as e:
@@ -509,6 +521,7 @@ def _load_model():
             try:
                 from sentence_transformers import SentenceTransformer
                 model = SentenceTransformer(_LEGACY_MODEL)
+                _active_model = _LEGACY_MODEL
                 return model
             except Exception as e2:
                 logger.error(f"Fallback also failed: {e2}")
@@ -517,12 +530,27 @@ def _load_model():
         return None
 
 
-@functools.lru_cache(maxsize=1)
 def _load_corpus() -> tuple | None:
+    """
+    The semantic corpus for the model in use and the enabled domains (see
+    _load_corpus_for).  Not cached itself: TTP_SEMANTIC_DOMAINS is read on every
+    call, so a change of it in the same process takes effect (#389).  Call
+    _load_model() first: a fallback to the legacy model changes which cache
+    matches.
+    """
+    enabled = _enabled_domains()
+    return _load_corpus_for(frozenset(enabled) if enabled is not None else None, _active_model_name())
+
+
+@functools.lru_cache(maxsize=1)
+def _load_corpus_for(enabled: frozenset[str] | None, model: str) -> tuple | None:
     """
     Returns (embeddings_numpy, meta_list) where:
       embeddings has shape (N, D)  — D = 384 for MiniLM, 768 for SecureBERT+
       meta_list[i] = {'id': ..., 'name': ..., 'domain': ..., ...}
+
+    `enabled` is the domain restriction (None for none) and `model` the
+    embedding model in use: the cache is keyed on both (#389).
 
     Validates the cache against the manifest (mitre_embeddings_manifest.json) to
     detect when the embedding model has changed and a rebuild is needed.
@@ -548,10 +576,10 @@ def _load_corpus() -> tuple | None:
         # No manifest → cache was built before ADR-004; assume legacy model
         cache_model = _LEGACY_MODEL
 
-    if cache_model != _TTP_EMBEDDING_MODEL:
+    if cache_model != model:
         logger.warning(
             f"Embedding cache was built with '{cache_model}' "
-            f"but TTP_EMBEDDING_MODEL='{_TTP_EMBEDDING_MODEL}'. "
+            f"but the model in use is '{model}'. "
             f"Rebuild with: python scripts/build_indexes.py --only embeddings"
         )
         return None
@@ -572,7 +600,6 @@ def _load_corpus() -> tuple | None:
     # in the bundle, producing near-duplicate pairs (CAPEC-163 "Spear Phishing"
     # beside T1566.001 "Spearphishing Attachment").  ATT&CK-only by default;
     # set TTP_SEMANTIC_DOMAINS to re-enable CAPEC or narrow further.
-    enabled = _enabled_domains()
     if enabled is not None:
         total = len(meta)
         keep = [i for i, m in enumerate(meta) if m.get("domain") in enabled]
@@ -721,7 +748,7 @@ def detect_ttps_semantic(text: str, top_k_per_sentence: int = 1) -> list[RawEnti
 
 
 # ---------------------------------------------------------------------------
-# ExtractionStage class wrapper — consumed by pipeline.registry
+# ExtractionStage class wrapper (pipeline.base)
 # ---------------------------------------------------------------------------
 
 from pipeline.base import BaseExtractionStage  # noqa: E402

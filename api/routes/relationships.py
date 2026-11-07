@@ -259,7 +259,8 @@ def bulk_update_relationships(job_id: str, body: RelBulk):
 
 @router.patch("/{rel_id}", responses=_IMPORTED_ROW)
 def update_relationship(job_id: str, rel_id: str, patch: RelPatch):
-    if patch.relationship_type and patch.relationship_type not in VALID_REL_TYPES:
+    # `is not None`, not truthiness: '' used to skip this check and was stored as the verb (issue #438).
+    if patch.relationship_type is not None and patch.relationship_type not in VALID_REL_TYPES:
         raise HTTPException(400, f"Unknown relationship_type '{patch.relationship_type}'")
     if patch.decision_origin not in decisions.CLIENT_ORIGINS:
         raise HTTPException(

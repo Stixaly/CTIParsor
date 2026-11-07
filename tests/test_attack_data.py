@@ -32,7 +32,7 @@ _CACHES = (
     ("pipeline.aliases", "_load"), ("pipeline.aliases", "_load_techniques"),
     ("pipeline.stage2b_gazetteer", "_load"), ("pipeline.stage2b_gazetteer", "_build_automaton"),
     ("pipeline.stage2b_gazetteer", "_policy_index"),
-    ("pipeline.stage2c_ttp_semantic", "_load_corpus"),
+    ("pipeline.stage2c_ttp_semantic", "_load_corpus_for"),
     ("pipeline.stage3c_mitre", "_load_index"), ("pipeline.stage3c_mitre", "_tactics_by_id"),
     ("pipeline.stage3f_ttp_select", "_definitions"),
     ("pipeline.stage4b_graph_completion", "_attack_pairs"),

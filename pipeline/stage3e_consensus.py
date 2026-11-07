@@ -34,6 +34,9 @@ def consensus_enabled() -> bool:
         return False
     second = os.getenv("CONSENSUS_PROVIDER", "").strip().lower()
     primary = os.getenv("LLM_PROVIDER", "anthropic").strip().lower()
+    if second == "none":
+        # No second provider named: the same as ENABLE_CONSENSUS=false.
+        return False
     if not second:
         logger.warning("[Stage 3e] ENABLE_CONSENSUS=true but CONSENSUS_PROVIDER is unset — disabled.")
         return False

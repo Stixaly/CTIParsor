@@ -159,11 +159,22 @@ class DocChunks:
     candidates: list[list[str]]       # canonical candidate ids per chunk (merged, capped)
 
 
+def _overlaps(passage: str, chunk: str) -> bool:
+    """A gold passage and a chunk share text: the chunk contains the passage,
+    or lies inside it.  The second case is a passage longer than the chunk cap
+    (a Markdown table with no punctuation is one 12 000-character passage; its
+    chunks are at most 3 400): `passage in chunk` alone never holds (#460).
+    Both are whitespace normalised, so this is a text test, not an offset one:
+    chunks carry no offsets."""
+    return bool(passage) and bool(chunk) and (passage in chunk or chunk in passage)
+
+
 def chunk_row(docs: list[DocChunks]) -> dict:
     """Parent-level recall of the per-chunk candidate lists.
 
-    local  a gold technique is in the list of a chunk that contains one of
-           its annotated passages — the selector can choose it there;
+    local  a gold technique is in the list of a chunk that overlaps one of
+           its annotated passages (see `_overlaps`) — the selector can choose
+           it there;
     doc    it is in the list of some chunk of the document.
     """
     found_local = gold_local = found_doc = gold_doc = 0
@@ -180,7 +191,7 @@ def chunk_row(docs: list[DocChunks]) -> dict:
         for gp, passages in by_parent.items():
             gold_local += 1
             found_local += any(gp in sets[j] for j, ch in enumerate(d.chunks)
-                               for p in passages if p and p in ch)
+                               for p in passages if _overlaps(p, ch))
         n_chunks += len(d.chunks)
         n_cands += sum(len(c) for c in d.candidates)
     return {

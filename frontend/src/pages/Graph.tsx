@@ -458,10 +458,6 @@ export function RelEditor({
                           style={{ width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 5, border: 'none', cursor: 'pointer', background: 'color-mix(in oklab, var(--ok) 14%, var(--bg-soft))', color: 'var(--ok)' }}>
                           <Check size={11} />
                         </button>
-                        <button onClick={() => onReject(e.id)} title="Reject"
-                          style={{ width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 5, border: 'none', cursor: 'pointer', background: 'color-mix(in oklab, var(--no) 12%, var(--bg-soft))', color: 'var(--no)' }}>
-                          <X size={11} />
-                        </button>
                       </>
                     )}
                     {rej && (
@@ -474,6 +470,13 @@ export function RelEditor({
                       <span style={{ fontSize: 9, color: 'var(--ok)', ...MONO, display: 'flex', alignItems: 'center', gap: 3 }}>
                         <Check size={9} /> accepted
                       </span>
+                    )}
+                    {/* Reject is offered on a pending or accepted row (#452); a rejected one is restored instead. */}
+                    {!rej && (
+                      <button onClick={() => onReject(e.id)} title="Reject"
+                        style={{ width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 5, border: 'none', cursor: 'pointer', background: 'color-mix(in oklab, var(--no) 12%, var(--bg-soft))', color: 'var(--no)' }}>
+                        <X size={11} />
+                      </button>
                     )}
                     <button onClick={() => onDelete(e.id)} disabled={fromBundle}
                       title={fromBundle ? 'From your STIX bundle: reject it in the review instead' : 'Delete'}

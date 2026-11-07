@@ -10,6 +10,7 @@ from models.detection import DetectionRule, Severity
 from pipeline.detection.base import RuleCorpusAdapter
 from pipeline.detection.yara_atoms import (
     YaraRule,
+    _ends_with_matches,
     extract_atoms,
     rule_platform,
     split_rules,
@@ -149,10 +150,10 @@ class YaraAdapter(RuleCorpusAdapter):
         # are NOT duplicates and must not be folded into one.
         m = _CONDITION_RE.search(rule.body)
         if m:
-            cond = " ".join(rule.body[m.end():].split())
+            cond = _collapse_blanks(rule.body[m.end():])
         else:
             ci = rule.body.find("condition:")
-            cond = " ".join(rule.body[ci + len("condition:"):].split()) if ci >= 0 else ""
+            cond = _collapse_blanks(rule.body[ci + len("condition:"):]) if ci >= 0 else ""
         payload = json.dumps(
             {"format": "yara", "strings": strings, "condition": cond},
             sort_keys=True,
@@ -167,6 +168,43 @@ _CONDITION_RE = compile_pattern(r"(?m)^[ \t]*condition[ \t]*:")
 # linear on a line of repeated blanks (CodeQL py/polynomial-redos): the value
 # is taken whole and stripped in Python.
 _DECL_RE = compile_pattern(r"^[ \t]*(\$[A-Za-z0-9_]*)[ \t]*=(.*)$")
+
+
+def _collapse_blanks(text: str) -> str:
+    """Collapse each run of blanks to one space, except inside a literal (#420).
+
+    A condition's literals are data: ``pe.imports("kernel32  .dll")`` and
+    ``pe.imports("kernel32 .dll")`` name different modules, so their blanks stay.
+    A regex is read after ``matches``, the only operator that takes one in a
+    condition.  Comments are not removed: a comment makes a key differ, it does
+    not merge two rules.
+    """
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == '"' or (c == "/" and _follows_matches(text, i)):
+            end = i + 1
+            while end < n and text[end] != c:
+                end += 2 if text[end] == "\\" else 1
+            out.append(text[i:end + 1])
+            i = end + 1
+        elif c.isspace():
+            while i < n and text[i].isspace():
+                i += 1
+            out.append(" ")
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out).strip()
+
+
+def _follows_matches(text: str, i: int) -> bool:
+    """True if the last word before index ``i`` (blanks aside) is ``matches``."""
+    j = i - 1
+    while j >= 0 and text[j].isspace():
+        j -= 1
+    return j >= 0 and _ends_with_matches(text, j)
 
 
 def _literal_end(rest: str) -> int:

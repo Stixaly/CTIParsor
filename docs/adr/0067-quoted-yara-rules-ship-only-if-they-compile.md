@@ -51,7 +51,9 @@ Before Stage 4 creates a YARA Indicator, it calls
 
 1. **Repair what the layout broke, and only what cannot compile as it is.**
    - In the `meta:` section, a string left open at the end of a line is
-     joined with the next non-blank lines, with one space, until it closes. It
+     joined with the next non-blank lines, with one space, or with nothing when
+     the line ends in an escaping backslash (an odd run of them, #435: a space
+     there would make the escape `\ `), until it closes. It
      stops after 3 lines, at a section header, and at the rule's closing brace.
      If the string still does not close, the lines stay as they were. A meta
      value does not change what the rule matches.

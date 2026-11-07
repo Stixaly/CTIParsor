@@ -178,7 +178,9 @@ def test_a_two_sentence_quote_survives_in_document_mode():
     out = v.verify_relationships(text, _rels(1), llm_fn, enabled=True, document=True)
     assert out.relationships[0].evidence_text == quote.strip()
     out = v.verify_relationships(text, _rels(1), llm_fn, enabled=True)
-    assert len(out.relationships[0].evidence_text) == 500
+    kept = out.relationships[0].evidence_text   # issue_398: cut at a word boundary
+    assert kept.endswith("…") and len(kept) <= 500
+    assert quote[len(kept) - 1] == " "
 
 
 def test_a_two_sentence_quote_needs_both_sentences_in_the_text():

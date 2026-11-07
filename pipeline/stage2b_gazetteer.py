@@ -433,7 +433,7 @@ def available() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# ExtractionStage class wrapper — consumed by pipeline.registry
+# ExtractionStage class wrapper (pipeline.base)
 # ---------------------------------------------------------------------------
 
 from pipeline.base import BaseExtractionStage  # noqa: E402

@@ -123,7 +123,9 @@ def compute_candidates(
         if not term or entity_type not in NAMED_TYPES:
             continue
         t = tallies.setdefault((term, entity_type), _Tally())
-        t.sources.add(source)
+        # A NULL source names no stage: not listed (sorting it beside a string raised TypeError, #418).
+        if source:
+            t.sources.add(source)
         if accepted == 0:
             t.rejected += 1
             t.rejected_jobs.add(job_id)
@@ -182,10 +184,19 @@ def list_overrides(conn, *, status: str | None = None, action: str | None = None
 
 
 def gazetteer_terms() -> frozenset[str]:
-    """Every surface form the gazetteer already matches (base index + active promotions)."""
+    """Every surface form the base gazetteer index matches.
+
+    Active promotions are left out (#418): a promoted term is not proposed again,
+    so `apply_candidates` never refreshed its counts.  A term that is both in the
+    index and promoted stays known.
+    """
     try:
+        from pipeline.overrides import promoted_entries
         from pipeline.stage2b_gazetteer import _load
-        return frozenset(e["name"] for e in _load())
+        # _load() is the index followed by the active promotions: taking the
+        # promotions away as a multiset leaves the index, even for a name in both.
+        promoted = Counter(e["name"] for e in promoted_entries())
+        return frozenset(Counter(e["name"] for e in _load()) - promoted)
     except Exception as exc:
         # Promote candidates are then not checked against the gazetteer: one may
         # propose a name it already matches.

@@ -19,6 +19,16 @@ from pipeline.env_flags import env_bool
 from pipeline.stage4_stix_mapping import TLP_LEVELS, tlp_default
 
 
+def refuse_nul_id(job_id: str) -> None:
+    """Raise 404 for an id holding a NUL (`%00` in the URL), before the database sees it.
+
+    PostgreSQL refuses a NUL in a text parameter (a DataError, so a 500), and no
+    job has one: the answer is the one an unknown id gets (issue #386).
+    """
+    if "\x00" in job_id:
+        raise HTTPException(404, "Job not found")
+
+
 def require_job(conn: DBConnection, job_id: str) -> None:
     """Raise 404 unless *job_id* names an existing job.
 
@@ -28,6 +38,7 @@ def require_job(conn: DBConnection, job_id: str) -> None:
     which is exactly the kind of extra SQLite traffic this codebase has had to
     hunt down before.
     """
+    refuse_nul_id(job_id)
     if not conn.execute("SELECT id FROM jobs WHERE id=?", (job_id,)).fetchone():
         raise HTTPException(404, "Job not found")
 

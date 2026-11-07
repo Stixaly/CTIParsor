@@ -238,6 +238,10 @@ class RunResult:
     chunks: list[str] = field(default_factory=list)
     entities_per_chunk: list[list[RawEntity]] = field(default_factory=list)
     entities: list[RawEntity] = field(default_factory=list)
+    # The Stage 2 entities resolve_type_conflicts dropped (a name typed two ways,
+    # its losing type): not in `entities`, and Stage 4 records them in the ledger
+    # as outranked (#397).
+    resolved_away: list[RawEntity] = field(default_factory=list)
     gazetteer: list[RawEntity] = field(default_factory=list)
     semantic_ttps: list[RawEntity] = field(default_factory=list)
     # ADR-0072 select mode: the retrieved candidates of each chunk.  Never
@@ -785,6 +789,10 @@ class _Run:
         # Same value, different type from two stages (gazetteer `tool` vs
         # CyNER `malware`): merge_into's (value, type) key kept both.
         self.r.entities = resolve_type_conflicts(entities)
+        # resolve_type_conflicts returns the objects it was given: what is not
+        # left is what it dropped, kept for Stage 4's ledger (#397).
+        kept_objects = {id(e) for e in self.r.entities}
+        self.r.resolved_away = [e for e in entities if id(e) not in kept_objects]
 
         logger.info(f"[Stage 2] Extracted {len(self.r.entities)} entities "
                     f"(gazetteer={len(self.r.gazetteer)}, semantic_ttp={len(self.r.semantic_ttps)}, "
@@ -1160,6 +1168,7 @@ class _Run:
         from pipeline.baseline_stix import MATCHED, BaselineBuild
         from pipeline.bundle_ledger import MappingLedger
         from pipeline.named_entities import with_named_entities
+        from pipeline.overrides import without_denied_listed
         from pipeline.stage4b_graph_completion import HELD_FOR_REVIEW, RefusedRelationship
         ledger = MappingLedger()
         # Enrich mode (ADR-0090 lot 4): the baseline is merged into Stage 4's
@@ -1183,16 +1192,25 @@ class _Run:
         # finalisation already did from the job store — the CLI dropped them
         # (audit B 8.1.2).  A name typed several ways keeps its best-ranked
         # source's type (ADR-0092): the types left out are recorded in the
-        # ledger, and their raw entities do not reach Stage 4.  A name the
+        # ledger, and their raw entities do not reach Stage 4.  The types Stage 2
+        # already resolved away (`r.resolved_away`, #397) are recorded too, while
+        # the bundle is built from `entities` alone, as before.  A name the
         # analyst's baseline holds under a type is the analyst's, as its row's
         # origin `baseline_stix` says on a finalize.  `r.llm_result` itself is
-        # left as Stage 3 made it.
+        # left as Stage 3 made it.  The analyst's deny rows (ADR-0052) come off
+        # the LLM's lists here, as the worker's `_save_entities` takes them off
+        # the stored rows: the same names are dropped on both paths, and each
+        # one is recorded in the ledger as `dropped / denied`.
         rec = r.reconciliation
+        llm_kept, denied = without_denied_listed(r.llm_result)
         named = with_named_entities(
-            r.llm_result, entities,
+            llm_kept, entities,
             baseline_holds=None if rec is None else lambda t, v: rec.entity(t, v)[0] == MATCHED,
+            resolved_away=r.resolved_away,
         )
         named.record(ledger)
+        for name, etype in denied:
+            ledger.entity(name, etype, "dropped", reason="denied")
         r.bundle = build_bundle(
             [e for e in entities if named.keeps(e)], named.llm_result,
             report_name=self.doc.report_name,

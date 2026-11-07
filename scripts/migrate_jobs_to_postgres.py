@@ -12,6 +12,10 @@ The rule store (corpus of rules) is a separate table set migrated by the
 sibling script scripts/migrate_rules_to_postgres.py (ADR-0053), not this one.
 The source SQLite file is opened read-only and is never modified.
 
+A child row (entities, relationships, report_figures) whose job the source does
+not hold is left out and reported. The decision_origin backfill of migration v0006
+runs after the copy, on the copied rows.
+
 Usage:
     python scripts/migrate_jobs_to_postgres.py [--sqlite PATH] [--postgres URL]
                                                [--dry-run] [--append] [--batch N]
@@ -35,6 +39,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from api import migrations as history  # noqa: E402
 from api.db import _JOB_STORE_DDL_POSTGRES  # noqa: E402
 from pipeline.regex_safety import compile_pattern
 
@@ -57,6 +62,11 @@ TABLES: tuple[str, ...] = (
 )
 
 _IDENT_RE = compile_pattern(r"^[a-z_][a-z0-9_]*$")
+
+# The tables whose job_id REFERENCES jobs(id) in the target: a row whose job the
+# source does not hold cannot be inserted (ForeignKeyViolation), so copy_table
+# leaves it out and says how many.  progress_events has no such key: copied whole.
+JOB_CHILD_TABLES: frozenset[str] = frozenset({"entities", "relationships", "report_figures"})
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -115,7 +125,17 @@ def copy_table(src: sqlite3.Connection, pg_cur, table: str, *, batch: int) -> tu
     placeholders = ",".join(["%s"] * len(common_cols))
     insert_sql = f"INSERT INTO {table} ({cols_str}) VALUES ({placeholders}) ON CONFLICT DO NOTHING"
 
-    cur = src.execute(f"SELECT {cols_str} FROM {table}")
+    where = ""
+    if table in JOB_CHILD_TABLES and "job_id" in src_cols:
+        orphans = src.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE job_id IS NULL OR job_id NOT IN (SELECT id FROM jobs)"
+        ).fetchone()[0]
+        if orphans:
+            print(f"[migrate] {table}: {orphans} row(s) whose job is absent from the source - skipped",
+                  file=sys.stderr)
+        where = " WHERE job_id IN (SELECT id FROM jobs)"
+
+    cur = src.execute(f"SELECT {cols_str} FROM {table}{where}")
     source_rows = 0
     inserted_rows = 0
     while True:
@@ -130,6 +150,14 @@ def copy_table(src: sqlite3.Connection, pg_cur, table: str, *, batch: int) -> tu
             print(f"[migrate] {table}: {source_rows} rows processed", file=sys.stderr)
 
     return (source_rows, inserted_rows)
+
+
+def decision_backfill_statements() -> tuple[str, ...]:
+    """The decision_origin backfill of migration v0006 ('legacy' for the decisions
+    made before the column existed), taken from the migration itself.  It must run
+    after the copy: the DDL above runs it on tables that are still empty (#466)."""
+    mg = next(m for m in history.load() if m.version == 6)
+    return tuple(s for s in mg.statements if s.lstrip().upper().startswith("UPDATE "))
 
 
 def realign_identity(pg_cur, table: str, column: str) -> None:
@@ -193,6 +221,10 @@ def main(argv: list[str] | None = None) -> int:
             results.append((table, source_rows, inserted))
 
         realign_identity(cur, "progress_events", "id")
+
+        for statement in decision_backfill_statements():
+            cur.execute(statement)
+            print(f"[migrate] {statement.split()[1]}: decision_origin backfilled on {cur.rowcount} row(s)")
 
         print(f"{'table':<20} {'source':>10} {'inserted':>10} {'target':>10}")
         print("-" * 52)

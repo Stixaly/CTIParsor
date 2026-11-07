@@ -142,6 +142,9 @@ def update_entity(job_id: str, entity_id: str, patch: EntityPatch):
         values.append(patch.entity_type)
 
     if patch.value is not None:
+        # An empty or blank value would be stored as the entity's name (issue #438).
+        if not patch.value.strip():
+            raise HTTPException(400, "value must not be empty")
         updates.append("value=?")
         values.append(patch.value)
 

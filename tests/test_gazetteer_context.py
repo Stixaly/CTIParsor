@@ -103,6 +103,21 @@ def test_a_contracted_negation_is_no_alias_issue_359(index, sentence, outcome):
     assert judge(index, sentence, "Snake", "G0010").outcome == outcome
 
 
+@pytest.mark.parametrize("sentence, outcome, rule", [
+    ("Turla (G0010), also called Snake", "resolved", "alias"),                    # issue #410
+    ("Turla [G0010], also called Snake", "resolved", "alias"),                    # issue #410, brackets
+    ("Turla (ID: G0010), also called Snake", "resolved", "alias"),                # issue #410, "ID:"
+    ("Turla (G0010) also called Snake", "resolved", "alias"),                     # issue #410, no comma
+    ("Turla, also called Snake", "resolved", "alias"),                            # the control
+    ("Turla (G0010), not known as Snake", "unresolved", None),                    # issue #410, negation kept
+    ("Turla (G0010) isn't known as Snake", "unresolved", None),                   # issue #410, negation kept
+    ("Turla (G0010), also known as Snake", "resolved", "alias"),
+])
+def test_an_attack_id_after_the_name_is_no_obstacle_issue_410(index, sentence, outcome, rule):
+    verdict = judge(index, sentence, "Snake", "G0010")
+    assert (verdict.outcome, verdict.rule) == (outcome, rule), verdict
+
+
 @pytest.mark.parametrize("sentence, outcome", [
     ("Judy, a report about malware, was published yesterday.", "unresolved"),    # issue #360
     ("Judy, a report on malware, was published yesterday.", "unresolved"),       # issue #360
@@ -118,6 +133,45 @@ def test_a_contracted_negation_is_no_alias_issue_359(index, sentence, outcome):
 ])
 def test_a_preposition_before_the_type_is_no_apposition_issue_360(index, sentence, outcome):
     assert judge(index, sentence, "Judy", "S0325").outcome == outcome
+
+
+# ── A line break inside the sentence (issue #408) ────────────────────────────
+
+WRAPPED = [
+    ("The group used Machete\n(S0409) in attacks.", "Machete", "S0409", "attached_id"),   # issue #408
+    ("The attack used The Cuba\nransomware against hospitals.", "Cuba", "S0625", "typed"),  # issue #408
+    ("The group used Machete (S0409) in attacks.", "Machete", "S0409", "attached_id"),    # the space control
+    ("The attack used The Cuba ransomware against hospitals.", "Cuba", "S0625", "typed"),  # the space control
+]
+
+
+@pytest.mark.parametrize("sentence, surface, identity, rule", WRAPPED)
+def test_a_line_break_is_a_blank_in_a_construction_issue_408(index, sentence, surface, identity, rule):
+    verdict = judge(index, sentence, surface, identity)
+    assert (verdict.outcome, verdict.rule) == ("resolved", rule), verdict
+
+
+@pytest.mark.parametrize("sentence", [
+    "The group used Machete\n\n(S0409) in attacks.",                # a blank line ends the paragraph
+    "The attack used The Cuba\n\nransomware against hospitals.",    # a blank line ends the paragraph
+    "- The group used Machete\n(S0409) is a tool.",                 # the ID is on another list item's line
+])
+def test_a_blank_line_or_another_unit_is_no_construction_issue_408(index, sentence):
+    surface, identity = ("Cuba", "S0625") if "Cuba" in sentence else ("Machete", "S0409")
+    assert judge(index, sentence, surface, identity).outcome == "unresolved"
+
+
+# A URL ends at a blank, or at a closing mark it does not balance; a name after it is no part of it.
+@pytest.mark.parametrize("sentence, surface, identity, outcome, reason", [
+    ("(see https://example.com)—Play (G1040)", "Play", "G1040", "resolved", None),        # the URL ends at ")"
+    ("(see https://example.com)–Play (G1040)", "Play", "G1040", "resolved", None),        # or at a dash
+    ("(see example)—Play (G1040)", "Play", "G1040", "resolved", None),                    # the control
+    ("see https://example.com/(a)Joker (S0432)", "Joker", "S0432", "excluded", "embedded"),  # a path
+    ("see https://example.com/a(b)/photo/1", "photo", "S0021", "excluded", "embedded"),      # balanced
+])
+def test_a_url_ends_at_an_unbalanced_mark_issue_407(index, sentence, surface, identity, outcome, reason):
+    verdict = judge(index, sentence, surface, identity)
+    assert (verdict.outcome, verdict.reason) == (outcome, reason), verdict
 
 
 NEGATIVES = [

@@ -11,6 +11,85 @@ theme.
 
 ### Fixed
 
+#### Audit batch of 2026-11-06 (issues #376-#470)
+
+An audit filed 95 issues; each was checked against the code before any fix.
+Six were wrong and five repeated fixed issues: those are closed with the reason.
+Most of the others were partly wrong, and only the real part is fixed; each
+commit says which. The fixes change the bundles built from the same report
+(`BUNDLE_AFFECTING`, extraction and mapping); stored bundles are not rebuilt
+until finalized or run again, and the rule store changes at the next rebuild.
+No configuration change; the database schema is unchanged.
+
+- **Extraction.** Stage 3f no longer reads a preamble's `[]` as an abstention
+  (#378), matches quotes past zero-width characters, counts the spotlighting
+  markers in its budget and keeps Stage 2c's passage (#402); a `<think>` block
+  after a prefix is removed (#379). Stage 3d grades a verified `gap` relation as
+  `reported` and cuts quotes at a word (#398); `CONSENSUS_PROVIDER=none`
+  disables consensus (#399). The gazetteer accepts one line break between a name
+  and its id or type (#408), ends a URL at an unbalanced mark or dash (#407),
+  checks case-distinctive forms against URLs and paths (#381) and lets an id
+  stand between a name and its alias cue (#410). A technique name shared by MITRE
+  domains resolves to Enterprise first (#377). BM25 keeps the `s` of `-ss` words
+  and bm25 mode drops zero-score picks (#391, #392). GLiNER keeps its span's
+  casing (#394); no-break spaces join name words (#393); lowercase countries and
+  Active Directory are dropped (#396); an empty CIRCL answer is a miss (#395). An
+  image wholly off the page is no figure, and a figure block gets one blank line
+  (#376, #388). Stage 2c's corpus cache follows its domains and the model loaded
+  (#389). A malformed MITRE index reads as empty and lookups strip their id
+  (#404); only usable ATT&CK tracks are listed, once each (#405). Calibration
+  skips non-finite confidences and empty filters (#401; #400's comment now
+  matches the cumulative support the code and ADR-0058 use). Promotion skips
+  null sources and recounts active promotions (#418).
+  The analyst's deny rows apply to the LLM lists of the CLI bundle and
+  to targeted countries and sectors (#382). The CLI ledger records Stage 2's
+  type-conflict losers (#397, API path still open).
+- **Bundle.** An explicit `targets` row keeps its quote and confidence (#383).
+  Long-distance completion links SDOs only (#417, #412). Payloads on gist,
+  raw.github.com and Google Sites get Indicators, and `www.` is ignored in the
+  benign check (#411). A blank Sigma or Suricata rule is refused (#434), and the
+  copied Snort parser is patched so a bare option is no longer accepted
+  (#422, ADR-0070). The re-issued baseline Report lists the stated objects
+  (#413), inferred edges follow a merged premise (#414) and MITRE forms are read
+  in the text (#415).
+- **Detection.** Suricata rules keep every ATT&CK technique (#421); `pkt_data`
+  closes the sticky buffer and modifiers leave the literal (#428). YARA rules
+  with a regex after `matches` are split whole (#427); commented meta or strings
+  lines and section keywords inside literals no longer cut a rule, and a
+  trailing-dot FQDN is a domain (#425, #426); the YARA dedup key keeps blanks
+  inside literals (#420); a meta string wrapped after a backslash is rejoined
+  without a space (#435). Rule titles index `-` and
+  `_` as word breaks, so `CVE_2024_3400` matches (#424); brand maximality runs
+  after the rule filter (#423). The Sigma dedup key keeps base64 case and value
+  spaces (#429); a batch repeating a rule id keeps one rule's atoms (#430);
+  `also_in` follows the whole dedup chain (#431). A truncated tarball fails the
+  sync cleanly (#433); a malformed registry or priority no longer stops a
+  rebuild, and `rule_text` survives a failed one (#436, #384).
+- **API.** A status change on a job a worker runs is refused with 409 (#385); a
+  NUL byte in a path answers 404 (#386); the progress stream reads the database
+  off the event loop (#387); empty relationship types and entity values are
+  refused (#438); a report whose job fails to start is removed (#439);
+  placeholders in SQL comments and dollar quotes stay literal (#440); requeue
+  announces only the jobs it took (#442); a migration resets `lock_timeout`
+  (#443).
+- **Frontend.** Undoing the auto-accept marks the bundle outdated (#449);
+  rejecting an entity shows no "not found in text" hint (#447); accepted links
+  can be rejected in the graph (#452); evidence highlights survive paragraph
+  breaks (#455); corpus remove and enable errors show (#446); J/K walk the
+  visible entities and the Review page resets per job (#448, #450); hidden edges
+  no longer bow visible ones (#453).
+- **CLI, scripts and evaluation.** Disabling Stage 4 or 5 exits 0 (#457). The
+  revoked-name index is built from Enterprise only (#464). `setup.sh` strips the
+  CR of CRLF `.env` values (#468); `check_backup_restore` keeps `PGPASSWORD`
+  (#467); the container escapes `.pgpass` (#469); `release.py` reads CRLF and
+  opens groups on `### ` (#470). The provenance rebuild matches finalize (#465);
+  the SQLite migration backfills after the copy (#466). Evaluation: long gold
+  passages count (#460), general-only loads exclude every split's cyber reports
+  and blank-only gold duplicates merge (#459, #458), unverified year repairs
+  count (#461), revoked chains must end on an active id (#462), and `in_gold`
+  lists every gold technique (#463).
+- **Removed.** The unused `StageRegistry` (#403) and `SQLiteJobStorage` (#441).
+
 #### Bug batch of 2026-11-06 (issues #359-#375)
 
 Four fixes change the bundles built from the same report (`BUNDLE_AFFECTING`:

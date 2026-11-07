@@ -51,7 +51,7 @@ _NER_PRODUCT_BLOCKLIST = frozenset({
     "fastapi", "spring", "express", "rails",
     # Platforms / infra
     "linux", "windows", "macos", "android", "ios", "ubuntu", "debian",
-    "docker", "kubernetes", "terraform", "ansible",
+    "docker", "kubernetes", "terraform", "ansible", "active directory",
     # Registries / package managers
     "npm", "pypi", "pip", "cargo", "nuget", "maven",
     # Cloud / CDN
@@ -1063,7 +1063,7 @@ def _deduplicate(entities: list[RawEntity]) -> list[RawEntity]:
 
 
 # ---------------------------------------------------------------------------
-# ExtractionStage class wrapper — consumed by pipeline.registry
+# ExtractionStage class wrapper (pipeline.base)
 # ---------------------------------------------------------------------------
 
 from pipeline.base import BaseExtractionStage  # noqa: E402

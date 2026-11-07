@@ -93,6 +93,18 @@ DOMAIN_STOPWORDS: frozenset[str] = frozenset({
 })
 
 
+#: PostgreSQL's `simple` parser keeps a hyphen inside a number (`CVE-2024-3400`
+#: gives '-2024' '-3400') but splits an underscore (`CVE_2024_3400` gives '2024'
+#: '3400'), so the two spellings of one id never met in the index (#424). The
+#: indexed body and the query both go through this table, so they meet.
+_SEPARATORS = str.maketrans({"-": " ", "_": " "})
+
+
+def _as_words(text: str) -> str:
+    """Turn `-` and `_` into spaces, so an id tokenises the same whatever its separator."""
+    return text.translate(_SEPARATORS)
+
+
 def _domain_key(domain: str) -> str:
     """Normalise a full domain for counting: case, trailing dot, leading `www.`.
 
@@ -139,6 +151,10 @@ def _maximal(counts: dict[str, int]) -> dict[str, int]:
 def campaign_tokens(domains: Iterable[str]) -> dict[str, int]:
     """Recurring substrings across a campaign's domains → distinct domain count.
 
+    These are candidates, not yet maximal: `brand_tokens` applies `_maximal`
+    after the rule filter (#423), so a longer token that names no rule cannot
+    remove the substring that does.
+
     Deduplication happens on the full normalised domain, before the TLD is cut:
     `frostledger.com`, `.net` and `.org` are three domains (issue #361), even
     though they share one label.
@@ -153,8 +169,11 @@ def campaign_tokens(domains: Iterable[str]) -> dict[str, int]:
         for sub in _substrings(_label(key)):
             counter[sub] += 1
 
-    filtered = {k: v for k, v in counter.items() if v >= BRAND_MIN_DOMAINS}
-    return _maximal(filtered)
+    # A brand names something: a run of digits ("2024" in three domains) is not
+    # one, and since rule_text splits CVE ids into words (#424) it would match
+    # every CVE-2024-* title.
+    return {k: v for k, v in counter.items()
+            if v >= BRAND_MIN_DOMAINS and any(ch.isalpha() for ch in k)}
 
 
 def rule_text_built(conn: DBConnection) -> bool:
@@ -175,7 +194,8 @@ def rebuild_rule_text(conn: DBConnection, *, batch: int = 2000) -> dict:
     """Replace the rule_text index with one row per canonical rule (ADR-0031).
 
     Deletes every row, then indexes the title and description of each rule with
-    `is_canonical=1` as one lower-cased string. A rule with an empty body is not
+    `is_canonical=1` as one lower-cased string, with `-` and `_` turned into
+    spaces (#424, see `_as_words`). A rule with an empty body is not
     indexed. Returns `{"rows": <rows written>, "empty_bodies": <rules skipped>}`.
 
     Opens no transaction and commits none: the caller wraps it (rebuild_store and
@@ -193,7 +213,7 @@ def rebuild_rule_text(conn: DBConnection, *, batch: int = 2000) -> dict:
         "FROM detection_rules WHERE is_canonical=1"
     )
     for rule_id, title, description in cur:
-        body = f"{title} {description}".strip().lower()
+        body = _as_words(f"{title} {description}".strip().lower()).strip()
         if not body:
             empty_bodies += 1
             continue
@@ -210,7 +230,12 @@ def rebuild_rule_text(conn: DBConnection, *, batch: int = 2000) -> dict:
 
 
 def brand_tokens(conn: DBConnection, domains: Iterable[str]) -> list[BrandToken]:
-    """Find brand tokens that appear in a limited number of canonical rules."""
+    """Find brand tokens that appear in a limited number of canonical rules.
+
+    Order (ADR-0031): candidates → stopwords and rule count → maximality over the
+    survivors. Maximality comes last so that a longer candidate naming no rule
+    (`oktalogin`) cannot remove the brand it contains (`okta`) (#423).
+    """
     counts = campaign_tokens(domains)
     if not counts:
         return []
@@ -241,6 +266,8 @@ def brand_tokens(conn: DBConnection, domains: Iterable[str]) -> list[BrandToken]
         if 1 <= count <= BRAND_MAX_TITLE_RULES:
             results.append(BrandToken(token=tok, domains=counts[tok], rules=count))
 
+    kept = _maximal({t.token: t.domains for t in results})
+    results = [t for t in results if t.token in kept]
     results.sort(key=lambda t: (-t.rules, t.token))
     return results
 
@@ -300,6 +327,10 @@ def cve_evidence(conn: DBConnection, cves: Iterable[str]) -> dict[str, list[dict
     Like every title match it carries `discriminating: False`: the rule is ABOUT
     this CVE, it does not HOLD a value from the report.
 
+    The query id gets the same `-`/`_` to space normalisation as the indexed
+    body (#424), so `CVE_2024_3400` in a title matches `CVE-2024-3400` here; the
+    `value` stays the id as the report wrote it.
+
     Only canonical rules match (#362): `dedupe_store` can demote a rule without
     the index following, until the next `rebuild_rule_text`.
     The filter is an EXISTS, not a JOIN, so the planner enters through the
@@ -314,10 +345,13 @@ def cve_evidence(conn: DBConnection, cves: Iterable[str]) -> dict[str, list[dict
         try:
             rows = conn.execute(
                 "SELECT rule_text.rule_id FROM rule_text "
-                "WHERE body_tsv @@ phraseto_tsquery('simple', ?) "
+                # Both spellings: an index built before #424 still holds
+                # 'cve' '-2024' '-3400' for a hyphenated title, until rebuilt.
+                "WHERE (body_tsv @@ phraseto_tsquery('simple', ?) "
+                "OR body_tsv @@ phraseto_tsquery('simple', ?)) "
                 "AND EXISTS (SELECT 1 FROM detection_rules d "
                 "WHERE d.id = rule_text.rule_id AND d.is_canonical = 1)",
-                (cve,),
+                (_as_words(cve), cve),
             ).fetchall()
         except DB_ERRORS:
             continue

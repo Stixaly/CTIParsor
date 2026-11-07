@@ -666,15 +666,18 @@ def test_a_body_past_the_limit_becomes_the_list_of_its_entries(tmp_path, cli):
     make_tree(tmp_path, "0.3.0", changelog=SUMMARY_CHANGELOG.format(filler="Words. " * 100))
     code, out, err = cli(tmp_path, "notes", "0.3.0", "--max-chars", 600)
     assert (code, err) == (0, "")
-    # The opening paragraph stays; "### Added" is listed once with its later entry; "### Fixed",
-    # which has plain bullets and no entry, is left out.
+    # The opening paragraph stays, with the "####" entry written before any group (it is not a group);
+    # "### Added" is listed once with its later entry; "### Fixed", which has plain bullets and no entry,
+    # is left out.
     assert out == (
         "The opening summary.\n"
         "\n"
+        "#### Before any group, 2026-10-01\n"
+        "\n"
+        "Text.\n"
+        "\n"
         "The notes for 0.3.0 are longer than a GitHub release allows. Every change is described in "
         "[CHANGELOG.md](https://github.com/Stixaly/CTIParsor/blob/v0.3.0/CHANGELOG.md); its entries:\n"
-        "\n"
-        "- Before any group, 2026-10-01\n"
         "\n"
         "### Added\n"
         "\n"
@@ -696,11 +699,26 @@ def test_the_body_is_kept_when_it_fits_the_limit(tmp_path):
 def test_the_annex_stays_when_the_body_is_summarised(tmp_path):
     make_tree(tmp_path, "0.3.0", changelog=SUMMARY_CHANGELOG.format(filler="Words. " * 100))
     notes = release_notes(tmp_path, "0.3.0", image=IMAGE, repo="x/y", max_chars=1500)
-    assert notes.startswith("The opening summary.\n\nThe notes for 0.3.0 are longer than a GitHub release allows.")
+    assert notes.startswith("The opening summary.\n\n#### Before any group, 2026-10-01\n\nText.\n\n"
+                            "The notes for 0.3.0 are longer than a GitHub release allows.")
     assert "blob/v0.3.0/CHANGELOG.md" in notes and "github.com/x/y/" in notes
     assert "- Third, 2026-10-04\n\n## Container image\n\n" in notes
     assert f"docker pull {IMAGE}" in notes
     assert len(notes) <= 1500
+
+
+def test_a_fourth_level_title_before_the_first_group_stays_in_the_opening_issue_470(tmp_path):
+    # "#### " before any "### " is an entry of the opening block, not the start of a group.
+    changelog = (
+        "## [Unreleased]\n\n## [0.3.0] - 2026-10-17\n\n"
+        "The opening summary.\n\n#### Before any group, 2026-10-01\n\nText.\n\n"
+        "### Added\n\n#### First, 2026-10-02\n\n" + "Words. " * 100 + "\n"
+    )
+    make_tree(tmp_path, "0.3.0", changelog=changelog)
+    notes = release_notes(tmp_path, "0.3.0", max_chars=500)
+    assert notes.startswith("The opening summary.\n\n#### Before any group, 2026-10-01\n\nText.\n\nThe notes for 0.3.0")
+    assert "- First, 2026-10-02\n" in notes
+    assert "- Before any group" not in notes
 
 
 def test_notes_refuse_what_is_too_long_even_as_a_list(tmp_path, cli):
@@ -774,6 +792,17 @@ def test_prepare_sets_every_version_and_changes_nothing_else(tree, cli):
             expected["packages"][""]["version"] = "0.3.0"
         assert new[rel].decode("utf-8") == json.dumps(expected, indent=2, ensure_ascii=False) + "\n"
         assert [line for line in new[rel].decode().splitlines() if "0.2.0" in line] == []
+
+
+def test_a_crlf_version_line_is_read_and_prepared_with_crlf_kept_issue_470(tree, cli):
+    # A file saved with CRLF (a Windows editor, a checkout with autocrlf) still states its version.
+    version_file = tree / "pipeline" / "__init__.py"
+    version_file.write_bytes(version_file.read_bytes().replace(b"\n", b"\r\n"))
+    assert read_version(tree) == "0.2.0"
+    old = version_file.read_bytes()
+    assert cli(tree, "prepare", "0.3.0", "--date", "2026-10-17")[0] == 0
+    assert version_file.read_bytes() == old.replace(b'"0.2.0"', b'"0.3.0"')
+    assert b'__version__ = "0.3.0"\r\n' in version_file.read_bytes()
 
 
 def test_prepare_dates_the_section_today_by_default(tree, cli):

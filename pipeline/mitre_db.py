@@ -27,16 +27,26 @@ def _load() -> dict:
     if not path.exists():
         return {"techniques": [], "tactics": []}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except Exception as e:
         logger.error(f"Could not load index: {e}")
         return {"techniques": [], "tactics": []}
+    # Valid JSON is not enough: `null` or a list has no .get(), and every getter
+    # would raise AttributeError on it.  Only an object with two lists is kept.
+    if not isinstance(data, dict) or not all(
+            isinstance(data.get(key, []), list) for key in ("techniques", "tactics")):
+        logger.error(f"Index {path.name} is not an object with 'techniques' and 'tactics' lists; ignored")
+        return {"techniques": [], "tactics": []}
+    return data
 
 
 def get_techniques() -> list[dict]:
     # .get() not [] — a valid-JSON-but-wrong-shape index (missing the key) would
     # otherwise KeyError-crash every caller (stage3c MITRE normalization, search).
-    return _load().get("techniques", [])
+    # A new list: the cached index is shared by the whole process, and a caller
+    # that clears its result must not empty it for the others.  The dicts are
+    # shared, not copied: read them, do not change them.
+    return list(_load().get("techniques", []))
 
 
 def get_tactics() -> list[dict]:
@@ -44,8 +54,9 @@ def get_tactics() -> list[dict]:
 
 
 def lookup_by_id(mitre_id: str) -> dict | None:
-    """Return the index entry for a given ATT&CK / CAPEC ID (case-insensitive)."""
-    mid = mitre_id.upper()
+    """Return the index entry for a given ATT&CK / CAPEC ID (case-insensitive,
+    surrounding spaces ignored)."""
+    mid = mitre_id.strip().upper()
     for entry in get_tactics():
         if entry["id"].upper() == mid:
             return entry

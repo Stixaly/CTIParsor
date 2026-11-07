@@ -31,7 +31,9 @@ T = EntityType
     (T.DOMAIN, "evil-c2.example-bad.top", None),
     (T.URL, "https://www.mandiant.com/resources/blog/apt29", "reference_site:security-provider-blogpost"),
     (T.URL, "https://attack.mitre.org/techniques/T1071/", "reference_site:security-provider-blogpost"),
-    (T.URL, "https://analyze.intezer.com/analyses/abc", "reference_site:automated-malware-analysis"),
+    # The blogpost list names www.intezer.com, a parent of this host (#411 www normalisation): the reason
+    # it gives is the first list that matches, so it is no longer the sandbox list.  Still a reference.
+    (T.URL, "https://analyze.intezer.com/analyses/abc", "reference_site:security-provider-blogpost"),
     # Platforms anyone publishes on stay indicators, even where a list names them.
     (T.URL, "https://raw.githubusercontent.com/x/y/payload.ps1", None),
     (T.URL, "https://github.com/attacker/tool", None),

@@ -108,6 +108,20 @@ def test_a_form_without_a_decision_is_resolved_as_before(index):
     assert judge(index, "the lazarus group", "lazarus group") == gp.RESOLVED
 
 
+@pytest.mark.parametrize("sentence", [
+    "Fetched https://example.com/Silence/index.html today.",     # a URL's path
+    "Saved from C:\\tools\\Silence\\loader.bin today.",          # a Windows path
+])
+def test_a_case_form_inside_a_url_or_path_is_embedded_issue_381(index, sentence):
+    verdict = judge(index, sentence, "Silence")
+    assert (verdict.outcome, verdict.reason, verdict.decision) == ("excluded", "embedded", "CASE")
+
+
+def test_a_case_form_in_a_sentence_is_still_resolved_issue_381(index):
+    assert judge(index, "Silence (G0091) was active.", "Silence").outcome == "resolved"
+    assert judge(index, "Silence was active.", "Silence").outcome == "resolved"
+
+
 def test_the_mode_defaults_to_shadow(monkeypatch):
     monkeypatch.delenv("GAZETTEER_POLICY", raising=False)
     assert gp.mode() == "shadow"
@@ -165,6 +179,14 @@ def test_apply_never_chooses_an_ambiguous_identity_by_index_order(matcher):
 def test_apply_lets_capitalised_and_retained_forms_through(matcher):
     assert _found("BARIUM and PatchWork, then elfin.", "apply") == {
         ("APT41", "G0096"), ("Patchwork", "G0040"), ("APT33", "G0064")}
+
+
+def test_apply_withholds_a_case_form_in_a_url_issue_381(matcher):
+    text = "Fetched https://example.com/Silence/index.html today.  Silence (G0091) was active."
+    assert _found(text, "off") == _found(text, "shadow") == {("Silence", "G0091")}
+    entities, trace = gaz.match_gazetteer_traced(text, policy_mode="apply")
+    assert [(e.value, e.mitre_id) for e in entities] == [("Silence", "G0091")]
+    assert [i["reason"] for i in trace if i["surface"] == "Silence"] == ["embedded", None]
 
 
 def test_apply_leaves_names_the_policy_does_not_review(matcher):

@@ -170,12 +170,18 @@ def score(docs: list[TimeDoc], *, repair_spans: bool = True) -> Score:
             candidates = _variants(doc, t) if repair_spans else [doc.text[t.start:t.end]]
             # The gold span's reading, unless a one-character repair reads.
             reading = normalize(candidates[0], anchor=anchor)
+            year_repair = None      # first repair left at a year candidate, as a reading would be
             for text in candidates[1:]:
                 if reading.status == "verified":
                     break
                 repaired = normalize(text, anchor=anchor)
                 if repaired.status == "verified":
                     reading = repaired
+                elif year_repair is None and repaired.reason == "year_from_context" and repaired.alternatives:
+                    year_repair = repaired
+            # The gold span gives no year candidate and a repair does: count that one.
+            if reading.status != "verified" and year_repair is not None and not reading.alternatives:
+                reading = year_repair
             got = _as_timeml(reading.value) if reading.status == "verified" else None
             if got is None:
                 sc.reasons[reading.reason or reading.status] += 1

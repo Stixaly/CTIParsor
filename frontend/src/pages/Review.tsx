@@ -415,6 +415,9 @@ export default function Review() {
         updateEntity(jobId!, e.id, { accepted: null, decision_origin: 'human_bulk' })))
         .then(() => qc.invalidateQueries({ queryKey: ['entities', jobId] }))
         .catch(() => { /* non-blocking — local state is already correct */ })
+        // #449: the reset is a decision, so the bundle is stale.  Some PATCHes may
+        // have landed before one failed, so this runs whatever the outcome.
+        .finally(markDirty)
     }
   }
 
@@ -581,16 +584,18 @@ export default function Review() {
   }
 
   // ── keyboard navigation ───────────────────────────────────────────────────
+  // J/K walk the entities on screen (docEntities, so the type filter applies),
+  // in the order their value first appears in the text, whatever its case (#448).
   const orderedEntityIds = useMemo(() => {
-    const text = job?.report_text ?? ''
-    return [...localEntities]
+    const text = (job?.report_text ?? '').toLowerCase()
+    return [...docEntities]
       .sort((a, b) => {
-        const ai = text.indexOf(a.value)
-        const bi = text.indexOf(b.value)
+        const ai = text.indexOf(a.value.toLowerCase())
+        const bi = text.indexOf(b.value.toLowerCase())
         return (ai === -1 ? 9e9 : ai) - (bi === -1 ? 9e9 : bi)
       })
       .map(e => e.id)
-  }, [localEntities, job?.report_text])
+  }, [docEntities, job?.report_text])
 
   const goNextPending = useCallback((dir: 1 | -1) => {
     const ids = orderedEntityIds
@@ -598,10 +603,10 @@ export default function Review() {
     const startIdx = focusedId ? ids.indexOf(focusedId) : -1
     for (let i = 1; i <= N; i++) {
       const k = ((startIdx + dir * i) % N + N) % N
-      const e = localEntities.find(x => x.id === ids[k])
+      const e = docEntities.find(x => x.id === ids[k])
       if (e?.accepted === null) { setFocusedId(ids[k]); return }
     }
-  }, [orderedEntityIds, focusedId, localEntities])
+  }, [orderedEntityIds, focusedId, docEntities])
 
   const jumpToValue = (value: string) => {
     const match = localEntities.find(e => e.value === value)
@@ -772,8 +777,10 @@ export default function Review() {
   // LLM-extracted entities (malware/actor/TTP/campaign names) are paraphrased
   // from context and often don't appear verbatim in the source text.  Shared by
   // the Text view and the Source view so both give the same self-dismissing hint.
+  // Reads localEntitiesRef so the callback keeps its identity across decisions:
+  // a new one reruns the reader's focus effect and repeats the hint.
   const handleEntityNotInText = useCallback((id: string) => {
-    const entity = localEntities.find(e => e.id === id)
+    const entity = localEntitiesRef.current.find(e => e.id === id)
     if (!entity) return
     if (notInTextTimer.current) clearTimeout(notInTextTimer.current)
     // ADR-0090: a row the analyst's own bundle supplied is not in the text by
@@ -782,7 +789,7 @@ export default function Review() {
       ? `"${entity.value}" comes from your STIX bundle; it is not in the report text`
       : `"${entity.value}" not found verbatim in document text`)
     notInTextTimer.current = setTimeout(() => setNotInTextHint(null), 3000)
-  }, [localEntities])
+  }, [])
 
   // The Marginalia's focus.  A bundle-only row gets the same hint here: the PDF
   // viewer never reports a missing occurrence, so nothing else would say it.

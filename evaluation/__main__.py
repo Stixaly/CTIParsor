@@ -346,11 +346,14 @@ def cmd_score(args) -> None:
     for doc_id in rows:
         d = docs[doc_id]
         spans: dict[str, list[tuple[int, int]]] = {}
+        gold_techs: set[str] = set()
         for m in d.techniques:
             c = canonical(m.label)
+            if c:
+                gold_techs.add(c.split(".", 1)[0])
             if c and m.start is not None and m.end is not None:
                 spans.setdefault(c.split(".", 1)[0], []).append((m.start, m.end))
-        ev_rows += evidence.check(doc_id, d.text, preds[doc_id]["ttps"], spans, canonical)
+        ev_rows += evidence.check(doc_id, d.text, preds[doc_id]["ttps"], spans, canonical, gold_techs)
 
     stages: dict[str, dict[str, int]] = {}
     llm_health: dict[str, int] = {}
@@ -790,11 +793,15 @@ def cmd_support_sample(args) -> None:
     for doc_id in s["rows"]:
         d = s["docs"][doc_id]
         spans: dict[str, list[tuple[int, int]]] = {}
+        gold_techs: set[str] = set()
         for m in d.techniques:
             c = s["canonical"](m.label)
+            if c:
+                gold_techs.add(c.split(".", 1)[0])
             if c and m.start is not None and m.end is not None:
                 spans.setdefault(c.split(".", 1)[0], []).append((m.start, m.end))
-        rows += evidence.check(doc_id, d.text, s["preds"][doc_id]["ttps"], spans, s["canonical"])
+        rows += evidence.check(doc_id, d.text, s["preds"][doc_id]["ttps"], spans, s["canonical"],
+                               gold_techs)
     path = OUT / "runs" / args.name / "support-sample.csv"
     n = evidence.support_sample(rows, {k: v.text for k, v in s["docs"].items()}, path, n=args.n)
     print(f"{n} quotes to judge -> {path}")

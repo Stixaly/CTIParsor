@@ -13,7 +13,7 @@ path = "**"
 SPDX-FileCopyrightText = "CTIParsor contributors"
 SPDX-License-Identifier = "Apache-2.0"
 
-# OpenCTI's Snort rule parser, copied unmodified (ADR-0070).
+# OpenCTI's Snort rule parser, copied with one local patch in snort_parser.py (ADR-0070, #422).
 [[annotations]]
 path = "pipeline/detection/opencti_snort/**"
 precedence = "override"

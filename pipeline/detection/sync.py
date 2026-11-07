@@ -10,8 +10,10 @@ api/routes/settings.py).
 """
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
+import lzma
 import os
 import shutil
 import subprocess
@@ -19,6 +21,7 @@ import tarfile
 import tempfile
 import urllib.error
 import urllib.request
+import zlib
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit, urlunsplit
@@ -34,6 +37,11 @@ MANIFEST_NAME = ".sync.json"     # written into `path` after a tarball fetch (AD
 _USER_AGENT = "cti-to-stix/1.0 (detection corpus sync)"
 _CHUNK = 1 << 20
 _MD5_RE = compile_pattern(r"^[0-9a-f]{32}$")
+# What reading a cut-off or damaged archive raises: EOFError from the stream, zlib's
+# and lzma's errors, gzip's BadGzipFile and tarfile's ReadError (#433).  Any other
+# OSError (a full disk, a refused permission) or TarError (the `data` filter refusing
+# a member) is not damage: it gets a neutral message, its detail in the log.
+_TRUNCATED_ARCHIVE = (EOFError, zlib.error, lzma.LZMAError, gzip.BadGzipFile, tarfile.ReadError)
 
 
 def _failed(what: str, exc: BaseException) -> tuple[bool, str]:
@@ -288,7 +296,8 @@ def fetch_tarball(corpus: dict, *, timeout: int = 900) -> tuple[bool, str]:
     after a successful extraction, so a failed download never destroys a working
     corpus. Writes `<path>/.sync.json` = {url, sha256, md5, size, fetched_at}
     (ADR-0015 §5: a tarball has no revision to pin, so the fetch records URL +
-    content hash instead). Returns (ok, detail)."""
+    content hash instead). A cut-off or damaged archive is a failed sync, not an
+    exception (#433). Returns (ok, detail)."""
     url = corpus.get("tarball")
     if not isinstance(url, str) or not url.strip():   # YAML can hand us an int/None
         return False, "no tarball URL"
@@ -345,15 +354,27 @@ def fetch_tarball(corpus: dict, *, timeout: int = 900) -> tuple[bool, str]:
         staging.mkdir(parents=True)
         try:
             tar = tarfile.open(archive, mode="r:*")
-        except (tarfile.TarError, OSError, EOFError) as e:
+        except tarfile.TarError as e:
             return _failed("not a tar archive", e)
+        except _TRUNCATED_ARCHIVE as e:
+            return _failed("archive is truncated or corrupt", e)
+        except OSError as e:
+            return _failed("could not extract the archive", e)
 
-        with tar:
-            members, skipped = _safe_members(tar, staging)
-            if not members:
-                return False, "archive contains no extractable files"
-            kwargs: dict = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
-            tar.extractall(staging, members=members, **kwargs)  # noqa: S202 — _safe_members + data filter
+        # A cut-off or damaged stream raises from getmembers()/extractall(), not from
+        # open(): those calls are in the try too (#433). The finally removes the
+        # staging folder, so the previous copy at `path` is never replaced.
+        try:
+            with tar:
+                members, skipped = _safe_members(tar, staging)
+                if not members:
+                    return False, "archive contains no extractable files"
+                kwargs: dict = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
+                tar.extractall(staging, members=members, **kwargs)  # noqa: S202 — _safe_members + data filter
+        except _TRUNCATED_ARCHIVE as e:
+            return _failed("archive is truncated or corrupt", e)
+        except (tarfile.TarError, OSError) as e:
+            return _failed("could not extract the archive", e)
 
         manifest = {
             "url": url,

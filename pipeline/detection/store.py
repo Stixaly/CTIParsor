@@ -6,11 +6,19 @@ script and the API, and testable against an isolated temp database.
 from __future__ import annotations
 
 import json
+from collections import Counter, defaultdict
 from collections.abc import Iterable
 
 from api.db import DB_ERRORS, transaction
 from api.db_backend import DBConnection
+from api.logging_config import get_logger
 from models.detection import DetectionRule
+
+logger = get_logger(__name__)
+
+# Above this many duplicated ids in one corpus, one line for the corpus replaces
+# the per-id warnings, so a corpus with a systematic clash does not flood the log.
+_DUPLICATE_ID_LOG_LIMIT = 10
 
 
 def _native_key(rule_id: str) -> str:
@@ -19,12 +27,33 @@ def _native_key(rule_id: str) -> str:
 
 
 def replace_corpus_rules(conn: DBConnection, corpus: str, rules: Iterable[DetectionRule]) -> int:
-    """Idempotently replace all rules for one corpus. Returns rules written."""
+    """Idempotently replace all rules for one corpus. Returns distinct rule ids written.
+
+    A batch may repeat an id (a Sigma `id:` written twice, a Suricata `gid:sid`
+    repeated). Only the last rule with that id is written, as `DO UPDATE` always
+    made it, and its own atoms, techniques and related keys are the ones stored:
+    the child tables use `DO NOTHING`, so without this step they would accumulate
+    the atoms of every rule sharing the id (#430). A warning names each repeated id.
+    """
     # Materialize BEFORE any write: `rules` can parse corpus files from disk,
     # and the connection is autocommit -- a failure mid-iteration would leave
     # the corpus deleted with no rollback possible.  The deletes and inserts
     # then run as ONE transaction.
     rules = list(rules)
+    by_id: dict[str, DetectionRule] = {}
+    occurrences: Counter[str] = Counter()
+    for r in rules:
+        by_id[r.id] = r
+        occurrences[r.id] += 1
+    duplicated = [(rid, n) for rid, n in occurrences.items() if n > 1]
+    if len(duplicated) > _DUPLICATE_ID_LOG_LIMIT:
+        logger.warning(f"[detection] corpus '{corpus}': {len(duplicated)} duplicate rule ids — "
+                       "only the last rule of each id is kept")
+    else:
+        for rid, n in duplicated:
+            logger.warning(f"[detection] corpus '{corpus}': duplicate rule id {rid} "
+                           f"({n} occurrences) — only the last rule is kept")
+    rules = list(by_id.values())
     with transaction(conn):
         old = [r[0] for r in conn.execute(
             "SELECT id FROM detection_rules WHERE corpus=?", (corpus,)
@@ -380,44 +409,82 @@ def _also_in_map(conn: DBConnection, dedup_keys: Iterable[str]) -> dict[str, set
 
 
 def _related_also_in(conn: DBConnection, rules: Iterable[tuple[str, str]]) -> dict[str, set[str]]:
-    """Map rule id → the corpora of the non-canonical rules folded into it by
-    `related:` (derived / renamed), for (rule_id, native_key) pairs.
+    """Map rule id → the corpora of the non-canonical rules in its cluster, for
+    (rule_id, native_key) pairs. The cluster is the one `dedupe_store` elects.
 
     `dedupe_store` folds on two axes, and `_also_in_map` only reads the
     dedup_key one: 4,758 of hayabusa's 4,759 rules fold into SigmaHQ through
-    `related:` alone, so their provenance read as `[]` (#330).  Both directions
-    of a folding edge are read (the duplicate names the canonical, or the
-    canonical names the rule it was renamed from); one hop, which is how the
-    corpora write it.
+    `related:` alone, so their provenance read as `[]` (#330).  A `related:`
+    edge is read in both directions (the duplicate names the canonical, or the
+    canonical names the rule it was renamed from).
+
+    dedupe_store unions transitively, so a chain C→B→A is one cluster and A must
+    credit C too (#431). The closure is walked here hop by hop from the
+    canonical rules, over the same two edges (a shared dedup_key, a folding
+    `related:` edge in either direction), until no new rule turns up. One
+    statement per 400 rules per hop: a chain costs one more statement per link,
+    and a rule with no folds costs none.
     """
     from pipeline.detection.dedup import FOLDING_RELATIONS
 
-    ids = sorted({rid for rid, _key in rules if rid})
-    if not ids:
+    seeds = {rid for rid, _key in rules if rid}
+    if not seeds:
         return {}
     types = sorted(FOLDING_RELATIONS)
     tph = ",".join("?" * len(types))
+    # Every edge found so far, both ways, and the (corpus, is_canonical) of each
+    # rule met. A rule reached by an edge is expanded in the next hop.
+    adjacent: dict[str, set[str]] = defaultdict(set)
+    info: dict[str, tuple[str, int]] = {}
+    seen = set(seeds)
+    frontier = set(seeds)
+    while frontier:
+        found: set[str] = set()
+        todo = sorted(frontier)
+        for i in range(0, len(todo), 400):
+            batch = todo[i:i + 400]
+            ph = ",".join("?" * len(batch))
+            for rid, other, corpus, canonical in conn.execute(
+                # Shared dedup_key (an empty key folds nothing, as in dedupe_store).
+                f"SELECT f.id, n.id, n.corpus, n.is_canonical FROM detection_rules f "
+                f"JOIN detection_rules n ON n.dedup_key = f.dedup_key "
+                f"WHERE f.id IN ({ph}) AND f.dedup_key <> '' AND n.id <> f.id "
+                f"UNION ALL "
+                # The rule names a related rule by its native key…
+                f"SELECT r.rule_id, d.id, d.corpus, d.is_canonical FROM rule_related r "
+                f"JOIN detection_rules d ON d.native_key = r.related_key "
+                f"WHERE r.rule_id IN ({ph}) AND LOWER(TRIM(r.rel_type)) IN ({tph}) "
+                f"AND d.id <> r.rule_id "
+                f"UNION ALL "
+                # …or a related rule names it (related_key = its native key).
+                f"SELECT c.id, r.rule_id, d.corpus, d.is_canonical FROM detection_rules c "
+                f"JOIN rule_related r ON r.related_key = c.native_key "
+                f"JOIN detection_rules d ON d.id = r.rule_id "
+                f"WHERE c.id IN ({ph}) AND LOWER(TRIM(r.rel_type)) IN ({tph}) "
+                f"AND r.rule_id <> c.id",
+                [*batch, *batch, *types, *batch, *types],
+            ):
+                adjacent[rid].add(other)
+                adjacent[other].add(rid)
+                info[other] = (corpus, canonical)
+                if other not in seen:
+                    found.add(other)
+        seen |= found
+        frontier = found
+
     out: dict[str, set[str]] = {}
-    # One statement per 400 rules, like `_also_in_map`: never one per rule.
-    for i in range(0, len(ids), 400):
-        batch = ids[i:i + 400]
-        ph = ",".join("?" * len(batch))
-        for rid, corpus in conn.execute(
-            # The canonical names the duplicate (rule_related.rule_id = canonical)…
-            f"SELECT r.rule_id, d.corpus FROM rule_related r "
-            f"JOIN detection_rules d ON d.native_key = r.related_key "
-            f"WHERE r.rule_id IN ({ph}) AND LOWER(TRIM(r.rel_type)) IN ({tph}) "
-            f"AND d.is_canonical=0 AND d.id <> r.rule_id "
-            f"UNION ALL "
-            # …or the duplicate names the canonical (related_key = its native key).
-            f"SELECT c.id, d.corpus FROM rule_related r "
-            f"JOIN detection_rules d ON d.id = r.rule_id "
-            f"JOIN detection_rules c ON c.native_key = r.related_key "
-            f"WHERE c.id IN ({ph}) AND LOWER(TRIM(r.rel_type)) IN ({tph}) "
-            f"AND d.is_canonical=0 AND d.id <> c.id",
-            [*batch, *types, *batch, *types],
-        ):
-            out.setdefault(rid, set()).add(corpus)
+    for seed in seeds:
+        # The cluster is the connected component of the seed in the walked graph.
+        cluster = {seed}
+        stack = [seed]
+        while stack:
+            for nxt in adjacent.get(stack.pop(), ()):
+                if nxt not in cluster:
+                    cluster.add(nxt)
+                    stack.append(nxt)
+        corpora = {info[m][0] for m in cluster if m in info and info[m][1] == 0}
+        if corpora:
+            out[seed] = corpora
     return out
 
 

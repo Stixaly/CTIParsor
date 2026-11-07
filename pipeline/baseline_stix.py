@@ -1270,8 +1270,10 @@ def _named_draft(order: int, obj: object, keys: set[Key]) -> _Draft:
     name = _str(obj, "name").strip()
     names = [name, *_strings(field(obj, "aliases")), *_strings(field(obj, "x_mitre_aliases"))]
     value = name or _str(obj, "country").strip().upper()
+    # The surface forms are the named keys (_named_keys: the MITRE canonical name and
+    # alias_surface_forms too, for an actor or a piece of software), read in the text.
     return _Draft(order, oid, sdo_type, _ENTITY_OF_SDO[sdo_type], value, keys, set(), object_ids=[oid],
-                  forms=[_norm_name(n) for n in names])
+                  forms=[_norm_name(n) for n in names] + sorted(k[2] for k in keys if k[0] == "named"))
 
 
 def _build_index(imported: Mapping[str, Any]) -> tuple[list[Entry], list[Relation], frozenset[str]]:
@@ -1815,13 +1817,17 @@ def _remap_target(obj: object, entry: Entry, kept: AbstractSet[str]) -> str | No
 
 
 def _rewrite_ends(obj: Any, remap: Mapping[str, str]) -> Any:
-    """`obj` with its top-level _ref / _refs properties read through `remap`; the object
-    itself when none of them moves.  Rebuilt through its JSON, as stage4b's _clone_with."""
+    """`obj` with its top-level _ref / _refs properties, and its x_inferred_from (the
+    premises of an inferred edge, stage4b), read through `remap`; the object itself when
+    none of them moves.  Rebuilt through its JSON, as stage4b's _clone_with."""
     changes: dict[str, Any] = {}
     for key, value in obj.items():
         if key.endswith("_ref") and isinstance(value, str) and value in remap:
             changes[key] = remap[value]
         elif key.endswith("_refs") and isinstance(value, list):
+            if any(isinstance(v, str) and v in remap for v in value):
+                changes[key] = [remap.get(v, v) if isinstance(v, str) else v for v in value]
+        elif key == "x_inferred_from" and isinstance(value, list):
             if any(isinstance(v, str) and v in remap for v in value):
                 changes[key] = [remap.get(v, v) if isinstance(v, str) else v for v in value]
     if not changes:
@@ -1924,6 +1930,10 @@ def merge_baseline(stix_objects: list, baseline: BaselineBuild) -> MergeResult:
             out.append(new)
             if moved:
                 remapped[oid] = (source, target)
+    # An inferred edge names its premises (x_inferred_from): one that became a duplicate
+    # names the baseline edge it became.  Premises are edges, never remapped above.
+    premises = {r["id"]: r["kept"] for r in removed if "kept" in r}
+    out = [_rewrite_ends(o, premises) if field(o, "x_inferred_from") else o for o in out]
     stix_objects[:] = out
 
     # What the document states of the baseline: the objects CTIParsor's became, by a
