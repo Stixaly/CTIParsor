@@ -721,7 +721,7 @@ def detect_ttps_semantic(text: str, top_k_per_sentence: int = 1) -> list[RawEnti
 
 
 # ---------------------------------------------------------------------------
-# ExtractionStage class wrapper — consumed by pipeline.registry
+# ExtractionStage class wrapper (pipeline.base)
 # ---------------------------------------------------------------------------
 
 from pipeline.base import BaseExtractionStage  # noqa: E402
