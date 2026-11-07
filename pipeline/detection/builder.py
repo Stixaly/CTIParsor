@@ -10,13 +10,31 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from api.db import transaction
+from api.logging_config import get_logger
 from pipeline.detection.brands import rebuild_rule_text
-from pipeline.detection.dedup import dedupe_store
+from pipeline.detection.dedup import _DEFAULT_PRIORITY, dedupe_store
 from pipeline.detection.registry import _ADAPTERS, _merged, corpus_root, load_corpora
 from pipeline.detection.store import corpus_counts, replace_corpus_rules
 
 if TYPE_CHECKING:  # the rule-store connection type (ADR-0053); annotation only
     from api.db_backend import DBConnection
+
+logger = get_logger(__name__)
+
+
+def _priority(corpus: dict, name: str) -> int:
+    """The corpus's dedup rank (lower wins). An absent or null `priority` (Settings
+    writes null when the field is left empty) is _DEFAULT_PRIORITY silently; one
+    that is not an integer falls back to it with a warning, rather than stopping
+    the rebuild (#436)."""
+    value = corpus.get("priority")
+    if value is None:
+        return _DEFAULT_PRIORITY
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        logger.warning(f"[detection] corpus '{name}': priority {value!r} is not an integer — {_DEFAULT_PRIORITY} used")
+        return _DEFAULT_PRIORITY
 
 
 def _collect_file_errors(errors: list[dict], root: Path) -> Callable[[Path, str], None]:
@@ -51,7 +69,8 @@ def rebuild_store(
     The index is rebuilt last because replacing a corpus deletes its rules and
     their rule_text rows (foreign key), and nothing else refills them: without
     this step a rebuild erased the title and description matches (CVE and brand
-    evidence) until someone ran scripts/build_rule_text.py.
+    evidence) until someone ran scripts/build_rule_text.py. If the rebuild fails
+    part-way, the index is still rebuilt before the error is raised (#384).
 
     Returns a summary: rules written per corpus, corpora skipped (missing clone /
     unknown adapter), corpora removed (disabled or no longer in the registry,
@@ -80,56 +99,66 @@ def rebuild_store(
     skip_reasons: dict[str, str] = {}
     file_errors: dict[str, list[dict]] = {}
     priority: dict[str, int] = {}
-    for corpus in load_corpora(config_path):
-        name = corpus.get("name", "?")
-        priority[name] = int(corpus.get("priority", 1000))
-        adapter = _ADAPTERS.get(corpus.get("adapter", ""))
-        try:
-            root = corpus_root(corpus)
-        except ValueError:          # no path: one bad entry must not stop the rebuild
-            skipped.append(name)
-            skip_reasons[name] = "no path configured in the registry"
-            continue
-        if adapter is None:
-            skipped.append(name)
-            skip_reasons[name] = f"unknown adapter '{corpus.get('adapter', '')}'"
-            continue
-        if not root.exists():
-            skipped.append(name)
-            skip_reasons[name] = _missing_root_reason(corpus)
-            continue
-        if on_progress:
-            on_progress(name, None)
-        errors: list[dict] = []
-        rules = list(adapter.parse(
-            root,
-            corpus=name,
-            license=corpus.get("license", "unknown"),
-            on_file_error=_collect_file_errors(errors, root),
-        ))
-        written[name] = replace_corpus_rules(conn, name, rules)
-        if errors:
-            file_errors[name] = errors
-        if on_progress:
-            on_progress(name, written[name])
+    try:
+        for corpus in load_corpora(config_path):
+            name = corpus.get("name", "?")
+            priority[name] = _priority(corpus, name)
+            adapter = _ADAPTERS.get(corpus.get("adapter", ""))
+            try:
+                root = corpus_root(corpus)
+            except ValueError:          # no path: one bad entry must not stop the rebuild
+                skipped.append(name)
+                skip_reasons[name] = "no path configured in the registry"
+                continue
+            if adapter is None:
+                skipped.append(name)
+                skip_reasons[name] = f"unknown adapter '{corpus.get('adapter', '')}'"
+                continue
+            if not root.exists():
+                skipped.append(name)
+                skip_reasons[name] = _missing_root_reason(corpus)
+                continue
+            if on_progress:
+                on_progress(name, None)
+            errors: list[dict] = []
+            rules = list(adapter.parse(
+                root,
+                corpus=name,
+                license=corpus.get("license", "unknown"),
+                on_file_error=_collect_file_errors(errors, root),
+            ))
+            written[name] = replace_corpus_rules(conn, name, rules)
+            if errors:
+                file_errors[name] = errors
+            if on_progress:
+                on_progress(name, written[name])
 
-    # A corpus disabled or removed from the registry keeps no rules: they would
-    # still be canonical, proposed and exported after the rebuild (#302).  An
-    # enabled corpus whose clone is missing keeps the rules it had.  No
-    # registry at all purges nothing: that is a wrong path, not an empty list.
-    removed: list[str] = []
-    if _merged(Path(config_path)):
-        active = {c.get("name") for c in load_corpora(config_path)}
-        stored = [r[0] for r in conn.execute("SELECT DISTINCT corpus FROM detection_rules").fetchall()]
-        for name in sorted(set(stored) - active):
-            replace_corpus_rules(conn, name, [])
-            removed.append(name)
+        # A corpus disabled or removed from the registry keeps no rules: they would
+        # still be canonical, proposed and exported after the rebuild (#302).  An
+        # enabled corpus whose clone is missing keeps the rules it had.  No
+        # registry at all purges nothing: that is a wrong path, not an empty list.
+        removed: list[str] = []
+        if _merged(Path(config_path)):
+            active = {c.get("name") for c in load_corpora(config_path)}
+            stored = [r[0] for r in conn.execute("SELECT DISTINCT corpus FROM detection_rules").fetchall()]
+            for name in sorted(set(stored) - active):
+                replace_corpus_rules(conn, name, [])
+                removed.append(name)
 
-    # Cross-corpus dedup runs once the whole store is rebuilt — it can't be done
-    # per corpus (replace_corpus_rules sees only one corpus at a time).
-    if on_progress:
-        on_progress("dedup", None)
-    dedup = dedupe_store(conn, priority)
+        # Cross-corpus dedup runs once the whole store is rebuilt — it can't be done
+        # per corpus (replace_corpus_rules sees only one corpus at a time).
+        if on_progress:
+            on_progress("dedup", None)
+        dedup = dedupe_store(conn, priority)
+    except BaseException:
+        # A failure part-way has already replaced some corpora, and their rule_text
+        # rows went with them (foreign key). Re-index what the store holds before the
+        # error goes up, so the title index is not left empty (#384). The rows are
+        # indexed as they stand: dedup did not run, so a rule it would have demoted
+        # may be indexed until the next successful rebuild.
+        with transaction(conn):
+            rebuild_rule_text(conn)
+        raise
     # One transaction, so a failure leaves the previous index in place rather
     # than an empty one. dedupe_store has already committed, so the canonical
     # flags read here are the elected ones.

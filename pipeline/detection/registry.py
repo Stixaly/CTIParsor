@@ -48,7 +48,11 @@ def corpus_root(corpus: dict) -> Path:
 
 
 def _read_corpora(path: Path) -> list[dict]:
-    """Read the `corpora:` list from one registry file (empty if missing/bad)."""
+    """Read the `corpora:` list from one registry file (empty if missing/bad).
+
+    A root that is not a mapping, or a `corpora:` that is not a list, makes the
+    whole file unreadable, as a YAML error does (#436). Inside the list, an entry
+    that is not a mapping is skipped with a warning and the others still load."""
     if not path.exists():
         return []
     try:
@@ -56,7 +60,20 @@ def _read_corpora(path: Path) -> list[dict]:
     except yaml.YAMLError as e:
         logger.error(f"[detection] could not parse {path}: {e}")
         return []
-    return data.get("corpora") or []
+    if not isinstance(data, dict):
+        logger.error(f"[detection] could not parse {path}: the root is not a mapping")
+        return []
+    corpora = data.get("corpora") or []
+    if not isinstance(corpora, list):
+        logger.error(f"[detection] could not parse {path}: 'corpora' is not a list")
+        return []
+    entries = []
+    for entry in corpora:
+        if isinstance(entry, dict):
+            entries.append(entry)
+        else:
+            logger.warning(f"[detection] {path}: entry {entry!r} is not a mapping — skipped")
+    return entries
 
 
 def _local_overlay_path(config_path: Path) -> Path:
