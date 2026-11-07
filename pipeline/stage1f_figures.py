@@ -164,6 +164,12 @@ def find_figures(pdf_path: Path | str) -> list[FigureCandidate]:
                     cx1 = min(page.width, x1)
                     cbottom = min(page.height, bottom)
 
+                    # An image wholly off the page clamps to an empty or inverted box.
+                    # Tested before the min/max swap below, which would turn it into a
+                    # box on the page edge that the crop then rejects.
+                    if cx1 <= cx0 or cbottom <= ctop:
+                        continue
+
                     # Ensure min/max order
                     min_x = min(cx0, cx1)
                     max_x = max(cx0, cx1)
@@ -172,9 +178,6 @@ def find_figures(pdf_path: Path | str) -> list[FigureCandidate]:
 
                     clamped_w = max_x - min_x
                     clamped_h = max_y - min_y
-
-                    if clamped_w <= 0 or clamped_h <= 0:
-                        continue
 
                     area_ratio = min((clamped_w * clamped_h) / page_area, 1.0)
 
@@ -369,8 +372,10 @@ def render_edges(read: FigureRead) -> list[str]:
     lines: list[str] = []
     seen: set[tuple[str, str]] = set()
     for edge in read.edges:
-        src = edge.src.strip()
-        dst = edge.dst.strip()
+        # Inner whitespace becomes one space: a name the model wrapped onto two
+        # lines would otherwise split its arrow across two lines of the block.
+        src = " ".join(edge.src.split())
+        dst = " ".join(edge.dst.split())
         if not src or not dst or src == dst:
             continue
         if (src, dst) in seen:
@@ -464,8 +469,13 @@ def inject_append(base_text: str,
     # carry a lower ordinal than one printed before it.
     for ordinal, (cand, read, sha256) in enumerate(reads, start=1):
         if parts:
-            parts.append("\n\n")
-            pos += 2
+            # Only the newlines the text does not already end with, so the block
+            # sits one blank line below it.  The text itself is never edited.
+            trailing = len(parts[-1]) - len(parts[-1].rstrip("\n"))
+            sep = "\n" * max(0, 2 - trailing)
+            if sep:
+                parts.append(sep)
+                pos += len(sep)
         char_start = pos
         block = render_block(ordinal, read)
         parts.append(block)
