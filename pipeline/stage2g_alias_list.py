@@ -50,7 +50,14 @@ from pipeline.thresholds import get_threshold
 # Allows apostrophes, hyphens, ampersands and periods so "U.S." / "Kimsuky-
 # affiliated" style tokens don't break the match.
 _WORD = r"[A-Z][\w'&.-]*"
-_ANCHOR = rf"(?:{_WORD}(?:[ \t]+{_WORD}){{0,3}})"
+
+# The gap between two words of one name: a run of blanks, no-break spaces
+# included (#393). A line break is not one: "Sandworm\nBerserk Bear (aka
+# Dragonfly)" would otherwise anchor "Sandworm Berserk Bear", so a name wrapped
+# across two lines keeps its last line only, as before.
+_BLANK = PY_WHITESPACE.replace("\n", "").replace("\r", "")
+_GAP = rf"[{_BLANK}]+"
+_ANCHOR = rf"(?:{_WORD}(?:{_GAP}{_WORD}){{0,3}})"
 
 # A blank around the marker: Python's whitespace, not `\s`, which RE2 keeps to
 # ASCII -- "aka" followed by a no-break space from an HTML page is a marker.
@@ -108,7 +115,9 @@ _STRIP = "".join(c for c in map(chr, range(0x3001)) if c.isspace()) + ".,;:'\"()
 
 
 def _clean_alias(raw: str) -> str | None:
-    value = raw.strip(_STRIP)
+    # Every run of blanks and line breaks becomes one space: the name is emitted as
+    # "Berserk Bear" whatever the text put between its words.
+    value = " ".join(raw.split()).strip(_STRIP)
     if len(value) < 3:
         return None
     if value.lower() in _STOPWORDS:
@@ -185,7 +194,7 @@ def available() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# ExtractionStage class wrapper — consumed by pipeline.registry
+# ExtractionStage class wrapper (pipeline.base)
 # ---------------------------------------------------------------------------
 
 from pipeline.base import BaseExtractionStage  # noqa: E402

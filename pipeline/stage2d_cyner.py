@@ -221,8 +221,9 @@ def _collapse_repeated_token(value: str) -> str:
     (2026-09-20) where the token-classification pipeline emitted the same
     subword-merged token twice in a row. A real name never repeats its own
     token back-to-back, so any adjacent case-insensitive repeat is dropped;
-    only the first occurrence is kept."""
-    tokens = value.split(" ")
+    only the first occurrence is kept. Split on any whitespace, a line break or
+    a no-break space included: "COLDWELL\nCOLDWELL Dropper" collapses too."""
+    tokens = value.split()
     collapsed: list[str] = []
     for tok in tokens:
         if collapsed and collapsed[-1].lower() == tok.lower():
@@ -492,7 +493,7 @@ def extract_cyner_entities(text: str) -> list[RawEntity]:
 
 
 # ---------------------------------------------------------------------------
-# ExtractionStage class wrapper — consumed by pipeline.registry
+# ExtractionStage class wrapper (pipeline.base)
 # ---------------------------------------------------------------------------
 
 from pipeline.base import BaseExtractionStage  # noqa: E402
