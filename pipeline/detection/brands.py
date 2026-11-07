@@ -345,10 +345,13 @@ def cve_evidence(conn: DBConnection, cves: Iterable[str]) -> dict[str, list[dict
         try:
             rows = conn.execute(
                 "SELECT rule_text.rule_id FROM rule_text "
-                "WHERE body_tsv @@ phraseto_tsquery('simple', ?) "
+                # Both spellings: an index built before #424 still holds
+                # 'cve' '-2024' '-3400' for a hyphenated title, until rebuilt.
+                "WHERE (body_tsv @@ phraseto_tsquery('simple', ?) "
+                "OR body_tsv @@ phraseto_tsquery('simple', ?)) "
                 "AND EXISTS (SELECT 1 FROM detection_rules d "
                 "WHERE d.id = rule_text.rule_id AND d.is_canonical = 1)",
-                (_as_words(cve),),
+                (_as_words(cve), cve),
             ).fetchall()
         except DB_ERRORS:
             continue
