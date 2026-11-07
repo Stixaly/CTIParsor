@@ -232,10 +232,13 @@ def parse_selection(raw: str) -> list[dict] | None:
     """The `selected` list of the model's answer, or None when there is none.
 
     Accepts the object anywhere in the answer (a model may wrap it in a fence
-    or a sentence) and a bare list; anything else is unparseable."""
+    or a sentence) and a bare list; anything else is unparseable.  A bare `[]`
+    is an abstention only when no other block follows it: a preamble such as
+    "(or [] if none)" before the real answer is not one (#378)."""
     if not raw:
         return None
     decoder = json.JSONDecoder()
+    abstention: list[dict] | None = None
     i = 0
     while i < len(raw):
         if raw[i] not in "{[":
@@ -249,11 +252,13 @@ def parse_selection(raw: str) -> list[dict] | None:
         if isinstance(obj, dict) and isinstance(obj.get("selected"), list):
             return [x for x in obj["selected"] if isinstance(x, dict)]
         if isinstance(obj, list) and all(isinstance(x, dict) for x in obj):
-            return list(obj)
+            if obj:
+                return list(obj)
+            abstention = []     # kept only if nothing after it answers
         # A complete value of another shape: never read a list nested in it
         # ({"chosen": []} is not an abstention).
         i = end
-    return None
+    return abstention
 
 
 def salvage_selection(raw: str) -> list[dict] | None:
