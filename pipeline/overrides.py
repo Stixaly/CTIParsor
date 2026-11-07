@@ -136,6 +136,38 @@ def _not_denied(names: list[str], entity_type: str) -> list[str]:
     return [n for n in names if not is_denied(n, entity_type)]
 
 
+# The LLM's lists a deny row takes names from, with the entity type each is denied as.
+_DENIABLE_LISTS = (
+    ("malware_families", "malware"),
+    ("threat_actors", "threat_actor"),
+    ("tools", "tool"),
+    ("targeted_countries", "location"),
+    ("targeted_sectors", "identity"),
+)
+
+
+def without_denied_listed(llm_result: LLMEnrichmentResult) -> tuple[LLMEnrichmentResult, tuple[tuple[str, str], ...]]:
+    """`without_denied`, and the (name, entity type) pairs it took out, in the
+    order the lists hold them (the campaign last).  Both bundle paths record
+    them in the ledger as `dropped / denied` (ADR-0061)."""
+    if not denied_keys():
+        return llm_result, ()
+    removed = [(n, etype) for field, etype in _DENIABLE_LISTS
+               for n in getattr(llm_result, field) if is_denied(n, etype)]
+    campaign = llm_result.campaign_name
+    if campaign and is_denied(campaign, "campaign"):
+        removed.append((campaign, "campaign"))
+    kept = llm_result.model_copy(update={
+        "malware_families": _not_denied(llm_result.malware_families, "malware"),
+        "threat_actors": _not_denied(llm_result.threat_actors, "threat_actor"),
+        "tools": _not_denied(llm_result.tools, "tool"),
+        "campaign_name": None if campaign and is_denied(campaign, "campaign") else campaign,
+        "targeted_countries": _not_denied(llm_result.targeted_countries, "location"),
+        "targeted_sectors": _not_denied(llm_result.targeted_sectors, "identity"),
+    })
+    return kept, tuple(removed)
+
+
 def without_denied(llm_result: LLMEnrichmentResult) -> LLMEnrichmentResult:
     """*llm_result* without the names an active deny row names (ADR-0052): the
     LLM's malware, threat-actor, tool and campaign names, and its targeted
@@ -144,17 +176,7 @@ def without_denied(llm_result: LLMEnrichmentResult) -> LLMEnrichmentResult:
     the store and on finalize) and the CLI's Stage 4 both call this: a denied
     name is dropped on every path.  With nothing denied the object comes back
     as it is; otherwise a copy, and the argument is not changed."""
-    if not denied_keys():
-        return llm_result
-    return llm_result.model_copy(update={
-        "malware_families": _not_denied(llm_result.malware_families, "malware"),
-        "threat_actors": _not_denied(llm_result.threat_actors, "threat_actor"),
-        "tools": _not_denied(llm_result.tools, "tool"),
-        "campaign_name": (None if llm_result.campaign_name and is_denied(llm_result.campaign_name, "campaign")
-                          else llm_result.campaign_name),
-        "targeted_countries": _not_denied(llm_result.targeted_countries, "location"),
-        "targeted_sectors": _not_denied(llm_result.targeted_sectors, "identity"),
-    })
+    return without_denied_listed(llm_result)[0]
 
 
 def reload() -> None:

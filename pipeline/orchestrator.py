@@ -1168,7 +1168,7 @@ class _Run:
         from pipeline.baseline_stix import MATCHED, BaselineBuild
         from pipeline.bundle_ledger import MappingLedger
         from pipeline.named_entities import with_named_entities
-        from pipeline.overrides import without_denied
+        from pipeline.overrides import without_denied_listed
         from pipeline.stage4b_graph_completion import HELD_FOR_REVIEW, RefusedRelationship
         ledger = MappingLedger()
         # Enrich mode (ADR-0090 lot 4): the baseline is merged into Stage 4's
@@ -1199,14 +1199,18 @@ class _Run:
         # origin `baseline_stix` says on a finalize.  `r.llm_result` itself is
         # left as Stage 3 made it.  The analyst's deny rows (ADR-0052) come off
         # the LLM's lists here, as the worker's `_save_entities` takes them off
-        # the stored rows: the same names are dropped on both paths.
+        # the stored rows: the same names are dropped on both paths, and each
+        # one is recorded in the ledger as `dropped / denied`.
         rec = r.reconciliation
+        llm_kept, denied = without_denied_listed(r.llm_result)
         named = with_named_entities(
-            without_denied(r.llm_result), entities,
+            llm_kept, entities,
             baseline_holds=None if rec is None else lambda t, v: rec.entity(t, v)[0] == MATCHED,
             resolved_away=r.resolved_away,
         )
         named.record(ledger)
+        for name, etype in denied:
+            ledger.entity(name, etype, "dropped", reason="denied")
         r.bundle = build_bundle(
             [e for e in entities if named.keeps(e)], named.llm_result,
             report_name=self.doc.report_name,

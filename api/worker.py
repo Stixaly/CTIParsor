@@ -1147,8 +1147,8 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
                          job_id, str(exc).splitlines()[0])
     # ADR-0052: the deny rows apply to these JSON-only fields too (targeted
     # countries and sectors, the campaign), as on the CLI's Stage 4.
-    from pipeline.overrides import without_denied
-    llm_result = without_denied(llm_result)
+    from pipeline.overrides import without_denied_listed
+    llm_result, denied_names = without_denied_listed(llm_result)
 
     # ── Build rejection filter sets from the DB ────────────────────────────────
     # Bug fix: the JSON blob bypasses accept/reject decisions made in the UI.
@@ -1311,6 +1311,8 @@ def re_run_final_stages(job_id: str, quick: bool = False) -> str | None:
     from pipeline.bundle_ledger import MappingLedger
     ledger = MappingLedger()
     named.record(ledger)
+    for name, etype in denied_names:   # the LLM's lists, as without_denied_listed took them out
+        ledger.entity(name, etype, "dropped", reason="denied")
     policy = _load_policy()
     bundle = build_bundle(
         raw_entities, llm_result,
