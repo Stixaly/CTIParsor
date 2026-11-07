@@ -901,7 +901,14 @@ def run_pipeline_async(job_id: str, file_path: str, original_filename: str) -> s
         queue_loop.start_embedded().kick()
     except Exception as exc:
         logger.error(f"[Worker] Could not kick the queue loop: {exc}")
-    row = get_conn().execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
+    # The job is queued by now: this read only picks the answer's wording, so a
+    # database error here must not reach the route, which would delete the
+    # upload of a job the queue will run (#439).
+    try:
+        row = get_conn().execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"[Worker] Could not read the status of queued job {job_id}: {exc}")
+        return "queued"
     return "started" if row and row["status"] == "processing" else "queued"
 
 
