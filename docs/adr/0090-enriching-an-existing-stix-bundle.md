@@ -472,3 +472,29 @@ each touches `CHANGELOG.md`, this index and, for lot 4, `BUNDLE_AFFECTING`.
 | 7 | Measures A3, A4, A6, acceptance, flag default `true`, this ADR Accepted with the figures (done 2026-10-25) | figures in this ADR; see "Lot 7" |
 
 Lot 7 starts the OpenCTI Docker on demand only (about 8 GB of RAM under WSL).
+
+## Amendment (2026-11-07): a rejection holds on the CTIParsor copy (#414)
+
+SCO ids are deterministic, so a CTIParsor observable can carry the id of a baseline
+observable the analyst rejected. Before this amendment such an object was written
+under that id: the rejection did not hold, and the Report could list the object.
+Now:
+
+- A CTIParsor object whose id is excluded by the analyst, and that no kept baseline
+  object took the place of, is not shipped. Its relationships are not shipped either,
+  after their ends are rewritten; each is `removed` with reason `baseline_rejected`
+  and no `kept`. The Report does not list it.
+- A lookup does not count an entry whose observable the analyst rejected. When the
+  kept baseline object of the same value is the only candidate left, the CTIParsor
+  copy merges onto it (`baseline_match`), and nothing is written twice.
+- Not changed: an object a reference closure drops (`baseline_refs_closure`) and
+  that the analyst did not reject still comes back as CTIParsor's own copy. A
+  premise of an inferred edge that the merge removed without a `kept` keeps its
+  id in `x_inferred_from`, as it did before (ADR-0013 names only the `kept` case).
+  Only relationships are removed with a rejected object: Stage 4 builds no other
+  object that references one (no Sighting, Note or Observed Data, no SCO `_ref`),
+  so none is left pointing at it. A CTIParsor relationship never takes the id of
+  an excluded one: relationship ids are random, not derived from their content.
+- Ledger: an entity of such an object is `dropped` with reason `baseline_rejected`
+  and no `stix_id`; the object leaves the ledger's objects. The baseline object of
+  the same id is already in `removed` (kind `baseline`), so it is not repeated.

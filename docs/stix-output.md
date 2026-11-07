@@ -153,6 +153,8 @@ Design: [ADR-0090](adr/0090-enriching-an-existing-stix-bundle.md).
   baseline object stands in for them, and every reference to them is rewritten.
   A CTIParsor object with the same id as a baseline object is that baseline
   object. The mapping ledger records the replacement with reason `baseline_match`.
+  An entity or relationship the alias merge had already merged keeps that merge
+  in `merged_via` (issue #416).
 - **Files known by their name only.** A CTIParsor `file` with no hash of its own
   is merged into the baseline's file when exactly one baseline file carries
   that name, and is then not shipped. When two baseline files carry the name,
@@ -171,13 +173,20 @@ Design: [ADR-0090](adr/0090-enriching-an-existing-stix-bundle.md).
   repeats a baseline relationship's source, verb and target, is dropped. The
   mapping ledger records it under `removed`, kind `relationship`, as
   `self_loop_after_baseline_merge` or `duplicate_after_baseline_merge`; the
-  `replaced_by` of a duplicate names the edge kept.
+  `replaced_by` of a duplicate names the edge kept. In the ledger, a removed
+  relationship's `source_ref` and `target_ref` follow each end onto the object
+  that replaced it (issue #416).
 - **Rejected objects.** A baseline object is left out when every row the analyst
   linked to it is rejected; a pending row keeps it. Whatever references it leaves
   too. Each one is recorded in the mapping ledger as `removed`, kind `baseline`: the
   object with reason `baseline_rejected`, and what references it with
   `baseline_refs_closure:<id>`, where `<id>` is the excluded or already dropped
   object it references.
+- **CTIParsor copy of a rejected object.** A CTIParsor object whose id the analyst
+  rejected, with no kept baseline object of its value to take its place, is not
+  shipped, and neither are the relationships that name it (reason
+  `baseline_rejected`, issue #414). A CTIParsor copy of a kept baseline object of the
+  same value merges onto that object instead.
 - **Report.** With a chosen Report in the baseline, CTIParsor re-issues that one
   (below) and builds no Report of its own, with two exceptions. If the analyst
   rejected the chosen Report, it is not re-issued, and CTIParsor builds its own

@@ -17,10 +17,10 @@ never inside it: it describes the build, it is not STIX content.
 Shape of `to_dict()` (version 1):
 
     objects        {stix_id: {"origin": str, ...}}   why each object/SRO exists
-    entities       [{value, entity_type, outcome, stix_id?, reason?, ...}]
+    entities       [{value, entity_type, outcome, stix_id?, reason?, merged_via?, ...}]
     relationships  [{source_value, relationship_type, target_value, outcome,
                      stix_id?, final_type?, source_ref?, target_ref?,
-                     changes: [...], reason?, merged_with?}]
+                     changes: [...], reason?, merged_via?, merged_with?}]
     removed        [{stix_id, kind, reason, replaced_by?, name?, ...}]
                      not shipped: absorbed by an alias merge, a baseline
                      object left out (kind "baseline"), or a detection
@@ -40,6 +40,10 @@ Shape of `to_dict()` (version 1):
 Outcomes: "emitted" (this input produced the object), "merged" (it resolved to
 an object or edge that already existed — `stix_id` / `merged_with` names it),
 "dropped" (not in the bundle — `reason` says why).
+
+`reason` of a merged entity or relationship is its last merge (the alias merge,
+then the baseline match).  `merged_via` lists the earlier merges it went
+through, in order, only when there were some (issue #416).
 """
 from __future__ import annotations
 
@@ -161,8 +165,7 @@ class MappingLedger:
             self.objects.pop(dup, None)
             for e in self.entities:
                 if e.get("stix_id") == dup:
-                    e["outcome"] = "merged"
-                    e["reason"] = "alias_merge"
+                    _merged_as(e, "alias_merge")
                     e["stix_id"] = canon
         for r in removed_rels:
             self.removed.append({"stix_id": r["id"], "kind": "relationship",
@@ -183,6 +186,9 @@ class MappingLedger:
             for e in self.relationships:
                 if e.get("stix_id") == rid:
                     e["source_ref"], e["target_ref"] = src, tgt
+        # A relationship a merge removed keeps the ends it was written with: follow
+        # each onto the node that absorbed it.
+        self._follow_refs(merged_ids)
         # An edge the targets product or a pinned rule did not build names the
         # objects before the merge: follow each onto the node that absorbed it.
         self._follow_refused(merged_ids)
@@ -201,13 +207,11 @@ class MappingLedger:
                                  "replaced_by": canon})
             for e in self.entities:
                 if e.get("stix_id") == dup:
-                    e["outcome"] = "merged"
-                    e["reason"] = "baseline_match"
+                    _merged_as(e, "baseline_match")
                     e["stix_id"] = canon
             for e in self.relationships:
                 if e.get("stix_id") == dup:
-                    e["outcome"] = "merged"
-                    e["reason"] = "baseline_match"
+                    _merged_as(e, "baseline_match")
                     e["stix_id"] = canon
             self.objects.pop(dup, None)
         for r in result.removed_relationships:
@@ -225,10 +229,24 @@ class MappingLedger:
                     e["outcome"] = "dropped"
                     e["reason"] = r["reason"]
                     e.pop("stix_id", None)
+        for rid in sorted(getattr(result, "rejected", ())):
+            # Not shipped: its id is a baseline object the analyst rejected, which is
+            # already a `removed` entry when the baseline object is in scope (#414).
+            if rid not in result.dropped:
+                self.removed.append({"stix_id": rid, "kind": "object", "reason": "baseline_rejected"})
+            self.objects.pop(rid, None)
+            for e in self.entities:
+                if e.get("stix_id") == rid:
+                    e["outcome"] = "dropped"
+                    e["reason"] = "baseline_rejected"
+                    e.pop("stix_id", None)
         for rid, (src, tgt) in result.remapped_relationships.items():
             for e in self.relationships:
                 if e.get("stix_id") == rid:
                     e["source_ref"], e["target_ref"] = src, tgt
+        # A relationship the merge removed keeps the ends it had: follow each onto
+        # the baseline object that replaced it.
+        self._follow_refs(result.remap)
         # A refused edge names the objects Stage 4b saw: follow each onto the
         # baseline object that replaced it.
         self._follow_refused(result.remap)
@@ -246,12 +264,10 @@ class MappingLedger:
         self.objects[oid] = {**self.objects.get(oid, {}), "origin": "baseline", "status": status}
         for e in self.entities:
             if e.get("stix_id") == oid:
-                e["outcome"] = "merged"
-                e["reason"] = "baseline_match"
+                _merged_as(e, "baseline_match")
         for r in self.relationships:
             if r.get("stix_id") == oid:
-                r["outcome"] = "merged"
-                r["reason"] = "baseline_match"
+                _merged_as(r, "baseline_match")
 
     # ── Refusals: rejected or held triples not built back ────────────────────
     def refused_edge(self, source_ref: str, relationship_type: str, target_ref: str,
@@ -270,6 +286,16 @@ class MappingLedger:
         built, so they have no id: the entry names the triple."""
         self.refused.extend(_clean({**r, "origin": _inference_origin(r.get("rule"))})
                             for r in refused)
+
+    def _follow_refs(self, remap: dict[str, str]) -> None:
+        """Point every relationship entry's ends at the objects that replaced them
+        (issue #416).  Shipped edges are already rewritten from the merge's
+        remapped relationships; this also covers the edges a merge removed, which
+        would otherwise keep their ends on the absorbed ids."""
+        for e in self.relationships:
+            for key in ("source_ref", "target_ref"):
+                if e.get(key) in remap:
+                    e[key] = remap[e[key]]
 
     def _follow_refused(self, remap: dict[str, str]) -> None:
         """Point each refused edge at the objects that replaced its ends; two
@@ -321,3 +347,16 @@ def _refused_key(entry: dict) -> tuple:
 def _clean(info: dict) -> dict:
     """Drop None values so the stored JSON only says what is known."""
     return {k: v for k, v in info.items() if v is not None}
+
+
+def _merged_as(entry: dict, reason: str) -> None:
+    """Mark `entry` merged for `reason`.  A merge it already went through, with
+    another reason, is kept in `merged_via` (in order, once); `reason` is the
+    last one.  An entry merged once has no `merged_via` (issue #416)."""
+    previous = entry.get("reason")
+    if entry.get("outcome") == "merged" and previous and previous != reason:
+        via = entry.setdefault("merged_via", [])
+        if previous not in via:
+            via.append(previous)
+    entry["outcome"] = "merged"
+    entry["reason"] = reason

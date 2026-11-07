@@ -70,6 +70,12 @@ and records, as it decides:
 - what the Stage 4b alias merge **removed after creation** (absorbed objects,
   self-loops and duplicates it produced, endpoints it rewired).
 
+A merged entity or relationship's `reason` is its last merge: `alias_merge`,
+then `baseline_match`, which the Baseline panel reads. Each earlier merge it went
+through is kept in `merged_via`, in order and once (issue #416). An entry merged
+only once has no `merged_via`. A relationship a merge removed keeps `source_ref`
+/ `target_ref` pointing at the objects that replaced its ends.
+
 The bundle is byte-for-byte the same with or without a ledger (tested). The
 ledger is stored in `jobs.bundle_ledger_json`, written in the same `UPDATE` as
 `bundle_json` by both the pipeline run and finalize — never on its own, so it

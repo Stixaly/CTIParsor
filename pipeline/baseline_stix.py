@@ -25,7 +25,7 @@ import re
 from collections import Counter, deque
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from collections.abc import Set as AbstractSet
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from dataclasses import field as dataclass_field
 from datetime import UTC, datetime, timedelta
 from typing import Any, TypeVar
@@ -1737,6 +1737,7 @@ class MergeResult:
     dropped: dict[str, str]                       # baseline id -> reason, not shipped (rejected / closure)
     removed_relationships: list[dict]             # CTIParsor SROs dropped: {"id", "reason", "kept"?}
     remapped_relationships: dict[str, tuple[str, str]]   # CTIParsor SRO id -> (source_ref, target_ref)
+    rejected: frozenset[str] = frozenset()        # CTIParsor object ids not shipped: the analyst rejected their id
 
 
 def _to_millis(moment: datetime) -> datetime:
@@ -1837,28 +1838,41 @@ def _rewrite_ends(obj: Any, remap: Mapping[str, str]) -> Any:
     return stix2.parse(d, allow_custom=True)
 
 
+def _rejected_entry(entry: Entry, excluded: AbstractSet[str]) -> bool:
+    """Whether the analyst rejected the object `entry` is named by: its observable, or
+    its SDO, or its lone Indicator (#414)."""
+    return entry.entry_id in excluded
+
+
 def merge_baseline(stix_objects: list, baseline: BaselineBuild) -> MergeResult:
     """Fold Stage 4's objects into the baseline, in place (architecture §8.2):
     the baseline's kept objects join the list, parsed; every CTIParsor object a
     kept entry matches is replaced by it and every reference to it rewritten;
     the CTIParsor relationships this makes self-loops or duplicates of a
-    baseline one are dropped.  Baseline objects are never rewritten.  The
-    chosen Report is not added: Stage 4 re-issues it."""
+    baseline one are dropped.  A CTIParsor object the analyst rejected (its id
+    excluded, no kept twin) and the relationships that name it are not shipped
+    either.  Baseline objects are never rewritten.  The chosen Report is not
+    added: Stage 4 re-issues it."""
     index = baseline.index
     report = index.scope_report_id
     candidates = set(index.imported_ids) - ({report} if report else set())
     kept, dropped = ref_closure(baseline.objects, candidates, set(baseline.excluded))
     dropped.update({oid: "baseline_rejected" for oid in baseline.excluded if oid in index.imported_ids})
     kept = {oid for oid in kept if oid in baseline.objects}
+    # The entries the analyst did not reject: an ambiguous lookup is judged on these (#414).
+    live = replace(index, entries=[e for e in index.entries if not _rejected_entry(e, baseline.excluded)])
 
     remap: dict[str, str] = {}
     for o in stix_objects:
         stix_type = field(o, "type")
         oid = _str(o, "id")
-        if stix_type in {"relationship", "report", "marking-definition"} or oid in baseline.objects:
+        if stix_type in {"relationship", "report", "marking-definition"} or oid in kept:
             continue
         strong, weak = keys_for_object(o)
         entry = index.lookup(strong, stix_type)
+        if entry is AMBIGUOUS:
+            found = live.lookup(strong, stix_type)
+            entry = found if isinstance(found, Entry) else AMBIGUOUS
         name_only = entry is None and weak and all(k[0] == "id" for k in strong)
         if name_only and stix_type == "file":
             # A file known by its name alone: the one baseline file of that name,
@@ -1890,13 +1904,18 @@ def merge_baseline(stix_objects: list, baseline: BaselineBuild) -> MergeResult:
     for o in stix_objects:
         oid = _str(o, "id")
         key = _content_key(o)
-        if key is not None and oid not in remap and oid not in baseline.objects and len(twins.get(key, ())) == 1:
+        if key is not None and oid not in remap and oid not in kept and len(twins.get(key, ())) == 1:
             remap[oid] = twins[key][0]
 
     # A CTIParsor object whose id a kept baseline object holds is that object (SCO ids are
     # deterministic): the baseline one is written, the CTIParsor one is not.
     shared = {_str(o, "id") for o in stix_objects if _str(o, "id") in kept}   # stated by the document too
     rest = [o for o in stix_objects if field(o, "id") not in remap and field(o, "id") not in kept]
+    # A CTIParsor object the analyst rejected (its id excluded, no kept twin it became) does not
+    # ship, and neither does a relationship that names it once its ends are rewritten (#414).
+    rejected = {_str(o, "id") for o in rest
+                if field(o, "type") not in {"relationship", "report", "marking-definition"}
+                and _str(o, "id") in baseline.excluded}
     parsed = [stix2.parse(baseline.objects[oid], allow_custom=True) for oid in sorted(kept)]
     seen: dict[tuple[Any, Any, Any], str] = {}           # (source, verb, target) -> the relationship kept for it
     for base in parsed:
@@ -1911,6 +1930,8 @@ def merge_baseline(stix_objects: list, baseline: BaselineBuild) -> MergeResult:
     remapped: dict[str, tuple[str, str]] = {}
     stated_relations: set[str] = set()
     for o in rest:
+        if _str(o, "id") in rejected:
+            continue
         moved = field(o, "source_ref") in remap or field(o, "target_ref") in remap
         new = _rewrite_ends(o, remap)
         if field(new, "type") != "relationship":
@@ -1919,7 +1940,9 @@ def merge_baseline(stix_objects: list, baseline: BaselineBuild) -> MergeResult:
         oid = _str(new, "id")
         source, target = _str(new, "source_ref"), _str(new, "target_ref")
         triple = (source, field(new, "relationship_type"), target)
-        if source == target:
+        if source in rejected or target in rejected:
+            removed.append({"id": oid, "reason": "baseline_rejected"})
+        elif source == target:
             removed.append({"id": oid, "reason": "self_loop_after_baseline_merge"})
         elif triple in seen:
             removed.append({"id": oid, "reason": "duplicate_after_baseline_merge", "kept": seen[triple]})
@@ -1942,7 +1965,8 @@ def merge_baseline(stix_objects: list, baseline: BaselineBuild) -> MergeResult:
     # an edge stated: an ATT&CK or composed edge between them is not the report's word.
     stated = set(remap.values()) | shared | stated_relations
     return MergeResult(kept=frozenset(kept), stated=frozenset(stated), remap=remap, dropped=dropped,
-                       removed_relationships=removed, remapped_relationships=remapped)
+                       removed_relationships=removed, remapped_relationships=remapped,
+                       rejected=frozenset(rejected))
 
 
 def reissue_report(original: dict, kept: AbstractSet[str], added: Sequence[str], enrichment: dict,
