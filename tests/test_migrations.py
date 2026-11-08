@@ -480,11 +480,11 @@ def test_version_19_adds_the_pending_oidc_requests_table_and_is_idempotent(schem
     report = migrate.upgrade(conn)
 
     assert report.applied == [19] and report.recognised == list(range(1, 19))
-    conn.execute("INSERT INTO oidc_logins (state_hash, nonce, code_verifier, next_path, created_at, expires_at) "
-                 "VALUES ('h','n','v','/','t','t')")
+    conn.execute("INSERT INTO oidc_logins (state_hash, nonce, code_verifier, next_path, binding_hash, "
+                 "created_at, expires_at) VALUES ('h','n','v','/','b','t','t')")
     with pytest.raises(Exception, match="oidc_logins_pkey"):
-        conn.execute("INSERT INTO oidc_logins (state_hash, nonce, code_verifier, next_path, created_at, "
-                     "expires_at) VALUES ('h','n2','v2','/','t','t')")
+        conn.execute("INSERT INTO oidc_logins (state_hash, nonce, code_verifier, next_path, binding_hash, "
+                     "created_at, expires_at) VALUES ('h','n2','v2','/','b2','t','t')")
     for statement in history.load()[18].statements:                   # run again: nothing breaks, nothing is lost
         conn.execute(statement)
     assert conn.execute("SELECT COUNT(*) AS n FROM oidc_logins").fetchone()["n"] == 1

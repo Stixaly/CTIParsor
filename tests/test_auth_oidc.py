@@ -124,7 +124,17 @@ def sign_in(client, idp, *, next_path: str | None = None, token_claims: dict | N
 def refused(response, code: str) -> None:
     assert response.status_code == 302 and response.headers["location"] == f"/login?error={code}", (
         response.status_code, response.headers.get("location"))
-    assert "set-cookie" not in response.headers
+    cookies = response.headers.get_list("set-cookie")
+    assert not any(c.startswith("ctiparsor_session=") for c in cookies)       # no session
+    if response.request.url.path.endswith("/callback"):
+        assert_binding_cleared(cookies)
+
+
+def assert_binding_cleared(cookies: list[str]) -> None:
+    (cleared,) = [c for c in cookies if c.startswith("ctiparsor_oidc=")]
+    flags = {part.strip().lower() for part in cleared.split(";")}
+    assert {"max-age=0", "path=/api/auth/oidc", "httponly", "samesite=lax", "secure"} <= flags
+    assert cleared.startswith('ctiparsor_oidc=""') or cleared.startswith("ctiparsor_oidc=;")
 
 
 def users() -> list[dict]:
@@ -141,8 +151,31 @@ def test_the_login_redirects_to_the_authorization_endpoint_with_pkce_state_and_n
     assert query["code_challenge_method"] == "S256" and len(query["code_challenge"]) == 43
     assert len(query["state"]) >= 32 and len(query["nonce"]) >= 32 and query["state"] != query["nonce"]
     response = client.get("/api/auth/oidc/login", follow_redirects=False)
-    assert "set-cookie" not in response.headers                         # nothing is left in the browser
     assert response.headers["cache-control"] == "no-store"
+    assert not any(c.startswith("ctiparsor_session=") for c in response.headers.get_list("set-cookie"))
+
+
+def test_the_login_binds_the_request_to_the_browser_with_a_cookie(client, temp_db):
+    response = client.get("/api/auth/oidc/login", follow_redirects=False)
+    (cookie,) = response.headers.get_list("set-cookie")
+    assert cookie.startswith("ctiparsor_oidc=")
+    flags = {part.strip().lower() for part in cookie.split(";")}
+    assert {"httponly", "secure", "samesite=lax", "path=/api/auth/oidc", "max-age=600"} <= flags
+    value = cookie.split(";")[0].split("=", 1)[1]
+    assert len(value) >= 32
+    with temp_db.get_conn() as conn:
+        stored = conn.execute("SELECT binding_hash FROM oidc_logins").fetchone()["binding_hash"]
+    assert stored == hashlib.sha256(value.encode()).hexdigest() and value not in stored
+
+
+def test_the_binding_cookie_is_secure_only_over_https(client, idp, temp_db):
+    from fastapi.testclient import TestClient
+
+    import api.main
+
+    with TestClient(api.main.app, base_url="http://testserver", client=("127.0.0.1", 50000)) as plain:
+        cookie = plain.get("/api/auth/oidc/login", follow_redirects=False).headers["set-cookie"]
+    assert "secure" not in {part.strip().lower() for part in cookie.split(";")}
 
 
 def test_each_login_has_its_own_state_nonce_and_challenge(client):
@@ -189,10 +222,11 @@ def test_the_routes_work_in_both_oidc_modes(client, monkeypatch, mode):
 def test_a_full_sign_in_creates_the_user_with_the_mapped_role_and_a_session(client, idp):
     response = sign_in(client, idp)
     assert response.status_code == 302 and response.headers["location"] == "/"
-    cookie = response.headers["set-cookie"]
+    cookies = response.headers.get_list("set-cookie")
+    (cookie,) = [c for c in cookies if c.startswith("ctiparsor_session=")]
     flags = {part.strip().lower() for part in cookie.split(";")}
-    assert cookie.startswith("ctiparsor_session=")
     assert {"httponly", "secure", "samesite=strict", "path=/"} <= flags
+    assert_binding_cleared(cookies)                                      # the sign-in cookie is spent
     me = client.get("/api/auth/me").json()
     assert (me["username"], me["role"], me["auth_source"], me["display_name"]) == ("alice", "analyst", "oidc",
                                                                                    "Alice A.")
@@ -315,6 +349,49 @@ def test_a_local_path_is_kept(value):
 def test_an_open_redirect_attempt_ends_at_the_root(client, idp, value):
     response = sign_in(client, idp, next_path=value)
     assert response.status_code == 302 and response.headers["location"] == "/"
+
+
+# ── The binding to the browser ───────────────────────────────────────────────
+
+def test_a_callback_without_the_binding_cookie_is_refused(client, idp):
+    query = start(client)
+    client.cookies.clear()                                               # the browser that comes back never started it
+    idp.id_token = idp.sign(idp.claims(query["nonce"]))
+    refused(client.get("/api/auth/oidc/callback", params={"code": "c", "state": query["state"]},
+                       follow_redirects=False), "state")
+    assert idp.token_requests == [] and users() == []
+
+
+def test_a_callback_with_another_browsers_cookie_is_refused(client, idp):
+    victim = start(client)                                               # a state started by one login ...
+    client.cookies.clear()
+    start(client)                                                        # ... a cookie from a different one
+    idp.id_token = idp.sign(idp.claims(victim["nonce"]))
+    refused(client.get("/api/auth/oidc/callback", params={"code": "c", "state": victim["state"]},
+                       follow_redirects=False), "state")
+    assert idp.token_requests == [] and users() == []
+
+
+def test_a_made_up_binding_cookie_is_refused(client, idp):
+    query = start(client)
+    client.cookies.clear()
+    client.cookies.set("ctiparsor_oidc", "x" * 43, domain="testserver", path="/api/auth/oidc")
+    idp.id_token = idp.sign(idp.claims(query["nonce"]))
+    refused(client.get("/api/auth/oidc/callback", params={"code": "c", "state": query["state"]},
+                       follow_redirects=False), "state")
+
+
+def test_a_state_started_in_one_browser_is_spent_by_a_refused_attempt(client, idp):
+    query = start(client)
+    good = dict(client.cookies)
+    client.cookies.clear()
+    refused(client.get("/api/auth/oidc/callback", params={"code": "c", "state": query["state"]},
+                       follow_redirects=False), "state")
+    for name, value in good.items():
+        client.cookies.set(name, value, domain="testserver", path="/api/auth/oidc")
+    idp.id_token = idp.sign(idp.claims(query["nonce"]))
+    refused(client.get("/api/auth/oidc/callback", params={"code": "c", "state": query["state"]},
+                       follow_redirects=False), "state")
 
 
 # ── The state ────────────────────────────────────────────────────────────────

@@ -2,7 +2,8 @@
 
 `oidc_logins` holds what the server must remember between sending the browser to the
 identity provider and the browser coming back: the SHA-256 of the `state` (the value
-itself travels in the URL), the `nonce`, the PKCE verifier and the page to return to.
+itself travels in the URL), the `nonce`, the PKCE verifier, the page to return to and the SHA-256 of a value that
+is also set as a cookie in the browser that started the sign-in (the binding).
 A row is read once, then deleted, and lives 10 minutes.
 Process state, not report data: the new table keys to nothing, so a worker of the
 previous revision is not affected."""
@@ -16,11 +17,12 @@ MIGRATION = Migration(
     is_applied=lambda conn: (
         tables_exist(conn, "oidc_logins")
         and columns_exist(conn, "oidc_logins", "state_hash", "nonce", "code_verifier", "next_path",
-                          "created_at", "expires_at")),
+                          "created_at", "expires_at", "binding_hash")),
     statements=(
         "CREATE TABLE IF NOT EXISTS oidc_logins ("
         " state_hash TEXT PRIMARY KEY, nonce TEXT NOT NULL, code_verifier TEXT NOT NULL,"
-        " next_path TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL)",
+        " next_path TEXT NOT NULL, binding_hash TEXT NOT NULL, created_at TEXT NOT NULL,"
+        " expires_at TEXT NOT NULL)",
         "CREATE INDEX IF NOT EXISTS idx_oidc_logins_expires ON oidc_logins(expires_at)",
     ),
 )

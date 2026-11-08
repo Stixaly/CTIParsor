@@ -156,20 +156,22 @@ def _b64url(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
 
-def begin_login(next_path: str | None) -> str:
-    """Store a pending request and return the identity provider's authorization URL.
+def begin_login(next_path: str | None) -> tuple[str, str]:
+    """Store a pending request and return (the identity provider's authorization URL, the
+    binding value for the browser's cookie).
     Raises OidcError (`idp` when discovery fails, `busy` when too many are pending)."""
     settings = config.oidc_settings()
     endpoint = discovery(settings)["authorization_endpoint"]
     state, nonce, verifier = secrets.token_urlsafe(32), secrets.token_urlsafe(32), secrets.token_urlsafe(64)
-    if not store.begin_oidc_login(state, nonce, verifier, safe_next(next_path)):
+    binding = secrets.token_urlsafe(32)
+    if not store.begin_oidc_login(state, nonce, verifier, safe_next(next_path), binding):
         raise OidcError("busy", "too many sign-ins are pending")
     query = urlencode({
         "response_type": "code", "client_id": settings.client_id, "redirect_uri": settings.redirect_uri,
         "scope": " ".join(settings.scopes), "state": state, "nonce": nonce,
         "code_challenge": _b64url(hashlib.sha256(verifier.encode("ascii")).digest()),
         "code_challenge_method": "S256"}, quote_via=quote)
-    return endpoint + ("&" if "?" in endpoint else "?") + query
+    return endpoint + ("&" if "?" in endpoint else "?") + query, binding
 
 
 # ── The answer ───────────────────────────────────────────────────────────────
@@ -313,12 +315,14 @@ def _account(settings: config.OidcSettings, claims: dict) -> store.User:
     raise OidcError("account", "no free username")
 
 
-def complete_login(code: str | None, state: str | None) -> tuple[store.User, str]:
-    """Finish a sign-in: (the user, the page to return to).  Raises OidcError."""
+def complete_login(code: str | None, state: str | None, binding: str | None) -> tuple[store.User, str]:
+    """Finish a sign-in: (the user, the page to return to).  `binding` is the cookie of the
+    browser that comes back; it must be the one the request started with (a sign-in that
+    someone else started cannot be finished in this browser).  Raises OidcError."""
     settings = config.oidc_settings()
-    pending = store.consume_oidc_login(state) if state else None
+    pending = store.consume_oidc_login(state, binding) if state else None
     if pending is None:
-        raise OidcError("state", "unknown, used or expired state")
+        raise OidcError("state", "unknown, used or expired state, or not the browser that started it")
     if not code:
         raise OidcError("state", "no authorization code")
     claims = _verify(settings, _exchange(settings, code, pending["code_verifier"]))

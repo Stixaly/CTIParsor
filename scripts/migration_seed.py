@@ -565,6 +565,7 @@ def spec(stage4: Path = STAGE4) -> dict[str, list[dict[str, Any]]]:
         "oidc_logins": [
             {"state_hash": hashlib.sha256(b"seeded-oidc-state").hexdigest(), "nonce": "c2VlZGVkLW5vbmNl",
              "code_verifier": "c2VlZGVkLXBrY2UtdmVyaWZpZXI", "next_path": "/jobs",
+             "binding_hash": hashlib.sha256(b"seeded-oidc-binding").hexdigest(),
              "created_at": _t(26, "08:30:00.000000"), "expires_at": _t(26, "08:40:00.000000")},
         ],
         "jobs": _jobs(stage4),

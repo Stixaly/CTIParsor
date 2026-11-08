@@ -124,10 +124,22 @@ def _redirect(url: str) -> RedirectResponse:
     return RedirectResponse(url, status_code=302, headers={"Cache-Control": "no-store"})
 
 
-def _refused(code: str, detail: str) -> RedirectResponse:
-    """Back to the sign-in page with a fixed code; the log has the reason, never a token."""
+OIDC_COOKIE = "ctiparsor_oidc"
+OIDC_COOKIE_PATH = "/api/auth/oidc"
+
+
+def _clear_binding(answer: RedirectResponse, request: Request) -> RedirectResponse:
+    answer.delete_cookie(OIDC_COOKIE, path=OIDC_COOKIE_PATH, httponly=True, samesite="lax",
+                         secure=cookie_secure(request))
+    return answer
+
+
+def _refused(code: str, detail: str, request: Request | None = None) -> RedirectResponse:
+    """Back to the sign-in page with a fixed code; the log has the reason, never a token.
+    With `request` (the callback), the binding cookie is deleted in the same answer."""
     logger.warning("[auth] OIDC sign-in refused (%s): %s", code, detail)
-    return _redirect(f"/login?error={code}")
+    answer = _redirect(f"/login?error={code}")
+    return _clear_binding(answer, request) if request is not None else answer
 
 
 @router.get("/oidc/login", status_code=302, responses={
@@ -139,11 +151,16 @@ def _refused(code: str, detail: str) -> RedirectResponse:
 def oidc_login(request: Request, next_path: str = Query("/", alias="next")):
     _oidc_available()
     try:
-        return _redirect(oidc.begin_login(next_path))
+        url, binding = oidc.begin_login(next_path)
     except oidc.OidcError as exc:
         return _refused(exc.code, str(exc))
     except config.AuthConfigError as exc:
         return _refused("config", str(exc))
+    answer = _redirect(url)
+    # Lax, not Strict: the identity provider sends the browser back with a cross-site GET.
+    answer.set_cookie(OIDC_COOKIE, binding, max_age=int(store.OIDC_LOGIN_TTL.total_seconds()), httponly=True,
+                      samesite="lax", secure=cookie_secure(request), path=OIDC_COOKIE_PATH)
+    return answer
 
 
 @router.get("/oidc/callback", status_code=302, responses={
@@ -157,15 +174,15 @@ def oidc_callback(request: Request, code: str | None = None, state: str | None =
     _oidc_available()
     if error:                                       # the identity provider refused; its text is not passed on
         if state:
-            store.consume_oidc_login(state)
-        return _refused("denied", f"the identity provider answered error={error[:64]!r}")
+            store.consume_oidc_login(state, request.cookies.get(OIDC_COOKIE))
+        return _refused("denied", f"the identity provider answered error={error[:64]!r}", request)
     try:
-        user, next_path = oidc.complete_login(code, state)
+        user, next_path = oidc.complete_login(code, state, request.cookies.get(OIDC_COOKIE))
     except oidc.OidcError as exc:
-        return _refused(exc.code, str(exc))
+        return _refused(exc.code, str(exc), request)
     except config.AuthConfigError as exc:
-        return _refused("config", str(exc))
+        return _refused("config", str(exc), request)
     session_id, _ = store.create_session(user.id)
-    answer = _redirect(next_path)
+    answer = _clear_binding(_redirect(next_path), request)
     set_session_cookie(answer, session_id, cookie_secure(request))
     return answer

@@ -160,6 +160,7 @@ How it behaves:
   cookie as a local sign-in and sends the browser to `next` (a local path only; any
   other value becomes `/`). A refusal sends the browser to `/login?error=<code>`:
   `state`, `token`, `idp`, `denied`, `no_role`, `disabled`, `config`, `busy`.
+- The sign-in is tied to the browser that started it: `login` sets a cookie `ctiparsor_oidc` (`HttpOnly`, `SameSite=Lax`, 10 minutes) and the callback refuses a request without the matching cookie, so a link to someone else's callback does not sign you in as them.
 - The account is created at the first sign-in, named after `preferred_username`
   (`OIDC_USERNAME_CLAIM`), else `email`, else `sub`. It is identified by the issuer
   and `sub`, never by name: a username already taken, by a local account too, gets a

@@ -27,7 +27,7 @@ own rule whatever the mode: loopback clients, or the `METRICS_TOKEN` bearer (see
   checks the state (single use, 10 minutes), exchanges the code, validates the ID token and answers 302 to
   `next` with the session cookie; any failure answers 302 to `/login?error=<code>` (`state`, `token`, `idp`,
   `denied`, `no_role`, `disabled`, `config`, `busy`). Both are open and limited per client address
-  (`LOGIN_RATE_LIMIT`); 404 with `AUTH_MODE=off`, 403 with `local`. `next` must be a local path, else `/`.
+  (`LOGIN_RATE_LIMIT`); 404 with `AUTH_MODE=off`, 403 with `local`. `next` must be a local path, else `/`. The login sets a short-lived cookie `ctiparsor_oidc` (`HttpOnly`, `SameSite=Lax`, path `/api/auth/oidc`, 10 minutes) that ties the sign-in to the browser that started it; the callback refuses (`state`) a request without the matching cookie, and deletes it in every answer.
   `POST /api/auth/logout` ends the CTIParsor session only.
 - Before any route runs, a request for `/api/...` or the docs (`/docs`, `/redoc`, `/openapi.json`) without a
   valid session or token gets 401 (not for `GET /api/health`, `POST /api/auth/login` and the two OIDC routes); the body is not read.
