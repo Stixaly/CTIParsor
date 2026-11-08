@@ -42,6 +42,8 @@ Four view modes toggled at the top of the document pane:
 | **Source** | The original file, rendered inline for every supported format: **PDF** (pdf.js pages), **HTML/HTM** (sandboxed iframe), **TXT/MD** (raw source). PDF and TXT/MD carry the same entity highlights as the Text view and support click-to-locate; **DOCX** falls back to a download link (no browser-native rendering) |
 | **Detections** | Sigma rules **ranked by this report's own technical content** — hashes, domains, binaries, paths, registry keys, CVEs — and by platform, each with the evidence behind its rank (ADR-0014) |
 
+**Stages that did not run.** When the stage report of the job holds a stage that was skipped or failed with a reason, a panel under the top bar lists it ("Stage 3 — LLM enrichment: skipped — TLP:AMBER forbids sending the report to anthropic ..."). A stage refused by the TLP egress policy (ADR-0097) is marked and the panel says what to do: mark the report CLEAR or GREEN if that is allowed, or configure a local model. Nothing is shown when every stage ran. The New report dialog gives the same warning before the import, under the TLP picker, and does not block it.
+
 **Entity interaction:**
 - Entities highlighted inline with type-colour coding
 - Click a mark in the text → scroll + focus in the marginalia panel

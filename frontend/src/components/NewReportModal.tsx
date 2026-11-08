@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { X, Loader2, AlertTriangle } from 'lucide-react'
-import { uploadFile, ingestText, ingestUrl, inspectBaseline, fetchBaselineStatus, errorDetail } from '../api/client'
+import { uploadFile, ingestText, ingestUrl, inspectBaseline, fetchBaselineStatus, fetchEgress, errorDetail } from '../api/client'
 import { TLP_LEVELS, PAP_LEVELS, BASELINE_REASON_LABEL } from '../types'
 import type { MarkingLevel, TlpLevel, PapLevel, PipelineMode, BaselineIntake } from '../types'
 import { splitDrop } from './dropFiles'
@@ -159,6 +159,33 @@ export default function NewReportModal({ open, initialFile, initialBundle, initi
   const tlp = minTlp ? raiseTo(TLP_DISPLAY_ORDER, pickedTlp, minTlp) : pickedTlp
   const pap = minPap ? raiseTo(PAP_DISPLAY_ORDER, pickedPap, minPap) : pickedPap
   const marksSet = tlp !== null && pap !== null
+
+  // Whether the configured providers would take a report with this marking (ADR-0097).
+  // The pick is debounced, and each level is asked once.  An unanswered question
+  // shows nothing: the server decides when the job runs.
+  const [askedTlp, setAskedTlp] = useState<TlpLevel | null>(tlp)
+  useEffect(() => {
+    const t = setTimeout(() => setAskedTlp(tlp), 200)
+    return () => clearTimeout(t)
+  }, [tlp])
+  const { data: egress } = useQuery({
+    queryKey: ['llm-egress', askedTlp],
+    queryFn: () => fetchEgress(askedTlp),
+    enabled: open,
+    staleTime: Infinity,
+    retry: false,
+  })
+  // Text and figures usually go to the same provider and share one reason: say it once.
+  const textRefused = egress !== undefined && !egress.text.allowed
+  const figuresRefused = egress?.figures != null && !egress.figures.allowed
+  const egressRefusals: { what: string; stages: string; reason: string }[] = []
+  if (egress && textRefused) {
+    const both = figuresRefused && egress.figures?.reason === egress.text.reason
+    egressRefusals.push({ what: both ? 'report text and figures' : 'report text', stages: both ? '3 and 1f' : '3', reason: egress.text.reason })
+  }
+  if (egress?.figures && figuresRefused && !(textRefused && egress.figures.reason === egress.text.reason)) {
+    egressRefusals.push({ what: 'figures', stages: '1f', reason: egress.figures.reason })
+  }
 
   const trimmed = value.trim()
   const mode: 'empty' | 'file' | 'url' | 'text' =
@@ -834,6 +861,20 @@ export default function NewReportModal({ open, initialFile, initialBundle, initi
           </div>
           {renderMarkingRow('TLP', TLP_DISPLAY_ORDER, tlp, setPickedTlp, 'TLP marking', minTlp ?? undefined)}
           {renderMarkingRow('PAP', PAP_DISPLAY_ORDER, pap, setPickedPap, 'PAP marking', minPap ?? undefined)}
+          {egressRefusals.length > 0 && (
+            <div role="status" style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11.5, color: 'var(--ink-2)' }}>
+              {egressRefusals.map(r => (
+                <div key={r.stages} style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                  <AlertTriangle size={12} style={{ flexShrink: 0, marginTop: 2, color: 'var(--warn)' }} />
+                  <span>
+                    The {r.what} will not go to the language model:{' '}
+                    {r.reason}. The import still works; Stage {r.stages} will be skipped.
+                    Mark the report CLEAR or GREEN if that is allowed, or configure a local model.
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         </div>{/* end scrolling region */}

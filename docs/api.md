@@ -14,7 +14,7 @@ The role each operation would need under ADR-0097 is listed in [api-permissions.
 | `POST` | `/api/ingest/text` | Ingest pasted text (JSON `text`, optional `title`). Stored `.html`, `.md` or `.txt` by content — pasted markup is stripped, not ingested raw. 20 chars min, 2 MB max; 400 for a text that holds a NUL character or one with no UTF-8 form (a lone surrogate), before anything is written. 503 when the queue is full, as the upload answers: the written text is removed (and so for any other error while the job starts). Optional `baseline_bundle` (the TEXT of the STIX file) and `baseline_report_id` |
 | `POST` | `/api/ingest/url` | Render a URL with headless Chromium (JSON `url`, optional `enable_js`). Writes `{job_id}.pdf` (archive, shown in Review) and `{job_id}.txt` (rendered DOM text, ingested). 400 policy refusal · 502 unreachable or blank render · 503 Playwright absent, or the queue full (then the `.pdf`, the `.txt` and the metadata file are removed; so for any other error while the job starts) · 504 timeout. Optional `baseline_bundle` and `baseline_report_id`, checked before the capture |
 | `GET` | `/api/jobs` | List all jobs (with `pipeline_mode`) |
-| `GET` | `/api/jobs/{id}` | Get a single job (includes entity/relationship counts, `pipeline_mode`, and for an `enrich` job an `enrichment` block, below) |
+| `GET` | `/api/jobs/{id}` | Get a single job (includes entity/relationship counts, `pipeline_mode`, and for an `enrich` job an `enrichment` block, below). `stages` lists what each stage did, from the stage report the worker stored (`stage`, `label`, `status`: `ran`, `skipped` or `failed`, `reason`, and `egress` for a stage that sends the report out, ADR-0097); absent for a job with no stored report |
 | `GET` | `/api/jobs/{id}/baseline` | The STIX bundle the job was created from, as received, as a JSON download. 404 for a job with none |
 | `GET` | `/api/jobs/{id}/baseline/intake` | What the intake made of that bundle, whole: every object left out and why. 404 for a job with none |
 | `PATCH` | `/api/jobs/{id}` | Update status: `for_review`, `reviewing`, `completed` or `failed`. 400 for any other value, `uploaded` and `processing` included: the server sets those. 409 while a worker runs the job (`processing`, whatever its lease: the same refusal as DELETE, #385), and 409 for `completed` while the stored bundle is one Stage 5 refused (below) |
@@ -449,6 +449,12 @@ amendment of 2026-10-19).
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/attack/index` | The `mitre_index.json` of the ATT&CK track the API runs (`ATTACK_RELEASE`), byte for byte: `{"techniques": [...], "tactics": [...]}`. `X-Attack-Release` names the release (`19.2`, `20.0`). The ETag is the file's sha256 and `Cache-Control` is `no-cache`, so a matching `If-None-Match` gets a 304. A track without the file answers 404; the default track's file is never served in its place |
+
+## LLM egress (ADR-0097)
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/llm/egress` | Whether a report with the marking `?tlp=` (CLEAR, GREEN, AMBER, AMBER+STRICT or RED; absent = the default marking, `STIX_TLP`, AMBER when unset) may go to the configured providers. Returns `{ tlp, text, figures }`: `text` is the Stage 3 provider and `figures` the Stage 1f one (`null` when the vision setting names no backend), each `{ provider, host, local, allowed, reason }`, `reason` being empty when the report may go. Reads the environment only: nothing is resolved or sent. 400 for an unknown level. The New report dialog calls it to warn before the import |
 
 ## Queue
 
