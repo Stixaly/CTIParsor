@@ -8,8 +8,8 @@ pipeline also configures the socket.
 
     python run_api.py
 
-The default stays 127.0.0.1: binding to every interface is opt-in, because the
-application has no authentication of any kind.
+The default stays 127.0.0.1: binding to every interface is opt-in, and it is
+refused unless AUTH_MODE turns authentication on (ADR-0097).
 """
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from pathlib import Path
 import uvicorn
 from dotenv import load_dotenv
 
+from api.auth import config as auth_config
 from pipeline.env_flags import env_bool
 
 DEFAULT_HOST = "127.0.0.1"
@@ -90,6 +91,15 @@ def exposure_warning(host: str, port: int) -> list[str]:
     """Return warning lines if the bind exposes the port to other machines."""
     if not is_exposed(host):
         return []
+    if auth_config.enabled():
+        return [
+            "",
+            f"  NOTE: listening on {host}:{port} - reachable from other machines, with "
+            f"AUTH_MODE={auth_config.auth_mode()}.",
+            "  Serve it behind TLS (the `proxy` profile, docs/deployment.md): sessions and",
+            "  tokens travel in clear text over plain HTTP.",
+            "",
+        ]
     return [
         "",
         "  " + "=" * 68,
@@ -159,11 +169,17 @@ def main() -> int:
     host = _resolve_host()
     port = _resolve_port()
     workers = _resolve_workers()
+    try:
+        auth_config.check_startup(host)
+    except auth_config.AuthConfigError as exc:
+        raise SystemExit(f"refusing to start: {exc}") from None
     reload = env_bool("API_RELOAD", default=False)
     if reload and workers > 1:
         workers = 1
         print("  NOTE: API_RELOAD is on, forcing API_WORKERS=1 (uvicorn cannot reload with multiple workers).")
     print(f"  CTIParsor API → http://{host}:{port}")
+    print(f"  authentication: AUTH_MODE={auth_config.auth_mode()}"
+          + ("  (single analyst, loopback only; not for sharing)" if not auth_config.enabled() else ""))
     for line in role_banner():
         print(line)
     for line in exposure_warning(host, port):

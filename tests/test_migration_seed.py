@@ -74,10 +74,11 @@ def test_the_rows_are_stored_as_the_spec_says(schema):
 def test_an_older_release_s_schema_gets_the_columns_it_has(schema):
     schema_at(schema, 11)                                   # v0.1.0
     seeded = ms.seed(schema)
-    assert seeded.skipped_tables == ["job_baselines", "worker_heartbeats"]
+    assert seeded.skipped_tables == ["users", "sessions", "api_tokens", "login_failures", "job_baselines",
+                                     "worker_heartbeats"]
     assert seeded.skipped_columns == {
-        "jobs": ["bundle_build_json", "bundle_review_revision", "pipeline_mode", "resolved_types_json",
-                 "review_revision"],
+        "jobs": ["bundle_build_json", "bundle_review_revision", "imported_by", "pipeline_mode",
+                 "resolved_types_json", "review_revision"],
         "entities": ["baseline_stix_id", "enrichment_status"],
         "relationships": ["baseline_stix_id", "enrichment_status"],
         "rule_techniques": ["propagated"],

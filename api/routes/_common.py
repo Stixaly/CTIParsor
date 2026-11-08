@@ -215,7 +215,7 @@ def baseline_markings(baseline: StoredBaseline | None, tlp: str | None,
 
 def start_job(
     job_id: str, dest: Path, filename: str, tlp: str | None, pap: str | None,
-    *, baseline: StoredBaseline | None = None,
+    *, baseline: StoredBaseline | None = None, imported_by: str | None = None,
 ) -> dict[str, object]:
     """Insert the `jobs` row and hand the file to the pipeline.
 
@@ -226,6 +226,9 @@ def start_job(
 
     With a `baseline` the job is in `enrich` mode: its row and the baseline's
     are written in one transaction, before the worker can start.
+
+    `imported_by` is the id of the user who imports the report (None when authentication
+    is off): the owner a deletion by an analyst is checked against.
     """
     from api.worker import run_pipeline_async
 
@@ -237,8 +240,9 @@ def start_job(
             with transaction(conn):
                 conn.execute(
                     "INSERT INTO jobs (id, original_filename, status, tlp_level, pap_level, pipeline_mode, "
-                    "created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
-                    (job_id, filename, "uploaded", tlp, pap, "enrich" if baseline else "full", ts, ts),
+                    "imported_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                    (job_id, filename, "uploaded", tlp, pap, "enrich" if baseline else "full", imported_by,
+                     ts, ts),
                 )
                 if baseline is not None:
                     # ASCII JSON: a NUL or a lone surrogate in a string is an escape, which PostgreSQL accepts.

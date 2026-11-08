@@ -65,6 +65,10 @@ services:
       # Fixed on purpose: a value in .env must not be able to bind the API to
       # loopback inside the container (unreachable) or turn on the reloader.
       API_HOST: 0.0.0.0
+      # Where the port is published on the host.  The API itself cannot tell (it binds
+      # 0.0.0.0 in the container); the start guard of AUTH_MODE=off judges this address,
+      # so CTI_BIND=0.0.0.0 without authentication is refused.  Same default as `ports`.
+      API_PUBLISHED_HOST: "${CTI_BIND:-127.0.0.1}"
       API_PORT: "8000"
       API_RELOAD: "0"
       # Host names the API answers to (api/main.py).  `app` is what the

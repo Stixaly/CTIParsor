@@ -32,7 +32,12 @@ cross-checked across two models (Stage 3e). A malicious document cannot inject
 arbitrary entities that aren't grounded in its own text.
 
 ### 2. Local web API (CORS + auth)
-The web UI serves on `localhost` with **no authentication**. There is also no
+The web UI serves on `localhost`. With the default `AUTH_MODE=off` it has **no
+authentication**; `AUTH_MODE=local` turns on local accounts, roles, sessions and
+API tokens (ADR-0097, [docs/deployment.md](docs/deployment.md#authentication)),
+and the API refuses to start with authentication off on a bind address that is
+not loopback. The rest of this section describes the unauthenticated posture.
+There is also no
 CORS middleware: one uvicorn process serves both the API and the built React
 UI, so the browser only ever calls this API from the same origin it loaded
 the page from, and the dev server proxies `/api` the same way (`frontend/vite.config.ts`)
@@ -117,9 +122,14 @@ No telemetry, no analytics, no outbound calls except the **optional** LLM provid
 pipeline still produces valid STIX. ML models are downloaded once and cached.
 
 ## What this is NOT
-- Not a multi-user / hosted service — there is no authn/authz. [ADR-0097](docs/adr/0097-1-0-is-a-shared-service-for-one-team.md)
-  (accepted on 2026-11-08) plans authentication, roles and an audit trail for
-  1.0; until its work items are done, this line stays true.
+- Not yet a finished multi-user service. `AUTH_MODE=local` gives local accounts, three
+  roles (`reader`, `analyst`, `admin`) checked on every route, server-side sessions with a
+  CSRF token, and hashed API tokens ([ADR-0097](docs/adr/0097-1-0-is-a-shared-service-for-one-team.md) items 14 and 15, part A). Not there yet:
+  sign-in with an identity provider (OIDC), the sign-in page of the web interface, the
+  admin screens for users and tokens, and the audit trail of who did what. Until they
+  land, create accounts and tokens with `python -m api.admin`, and read the
+  state-changing actions from the access log of your proxy. With `AUTH_MODE=off` (the
+  default) there is no authn/authz at all.
 - Not hardened for internet exposure — keep it on localhost or behind your own auth proxy.
   `API_HOST` in `.env` controls the bind address; see [docs/deployment.md](docs/deployment.md)
   for the three supported postures (SSH tunnel, firewalled interface, nginx + TLS + basic auth).

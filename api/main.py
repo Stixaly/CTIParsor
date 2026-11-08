@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
@@ -25,6 +25,9 @@ from pipeline.regex_safety import compile_pattern
 setup_logging()
 logger = get_logger(__name__)
 
+from api.auth import config as auth_config
+from api.auth.deps import current_user
+from api.auth.middleware import AuthGateMiddleware
 from api.body_limit import DEFAULT_BUDGET_BYTES, BodyLimitMiddleware
 from api.db import get_conn, init_db
 from api.paths import output_dir, uploads_dir
@@ -35,6 +38,7 @@ limiter = Limiter(key_func=get_remote_address)
 
 from api.routes import (
     attack,
+    auth,
     baselines,
     coverage,
     entities,
@@ -61,6 +65,24 @@ async def lifespan(app: FastAPI):
     Tests patch `api.main.init_db`; the patch still applies here because the
     name is resolved from the module namespace at call time.
     """
+    # A bad AUTH_MODE, authentication off beyond loopback, or OIDC without its
+    # settings stops the process here (ADR-0097, Network posture).
+    try:
+        auth_config.check_startup()
+    except auth_config.AuthConfigError as exc:
+        logger.error("[startup] %s", exc)
+        raise
+    if auth_config.enabled():
+        logger.info("[startup] authentication: AUTH_MODE=%s", auth_config.auth_mode())
+    else:
+        logger.warning("[startup] authentication is OFF (AUTH_MODE=off): single-analyst use on loopback only; "
+                       "anyone who reaches the port has full access")
+        if not (os.environ.get("API_HOST") or "").strip() and not auth_config.published_host():
+            # Started by hand (a bare `uvicorn --host ...`): the guard above judged the default
+            # loopback, which is not what the socket may be bound to.
+            logger.warning("[startup] neither API_HOST nor API_PUBLISHED_HOST is set, so the start guard cannot "
+                           "know the bind address. Start the API with `python run_api.py` or the Compose stack, "
+                           "the only supported launches")
     # A bad STIX_TLP stops the process here, not at the first bundle — a
     # marking is never guessed (ADR-0073).
     from pipeline.stage4_stix_mapping import tlp_default
@@ -122,9 +144,14 @@ app.state.limiter = limiter
 
 @app.exception_handler(RateLimitExceeded)
 async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    try:
+        wait = int(exc.limit.limit.get_expiry()) if exc.limit else 60     # the window of the limit that was hit
+    except (AttributeError, TypeError, ValueError):
+        wait = 60
     return JSONResponse(
         status_code=429,
         content={"detail": "Too many requests. Please try again later."},
+        headers={"Retry-After": str(wait)},
     )
 
 
@@ -273,6 +300,10 @@ app.add_middleware(BodyLimitMiddleware, budgets={
     ("POST", "/api/jobs/{job_id}/detections/export"): coverage.export_body_budget,
 }, default=lambda: DEFAULT_BUDGET_BYTES)
 
+# Before the body is read: an anonymous request for /api gets 401 here when authentication is on
+# (api/auth/middleware.py).  Added after the budgets, so it runs before them.
+app.add_middleware(AuthGateMiddleware)
+
 # Added last, so it runs first: an unknown Host is answered 400 before the
 # request-id middleware or the write guard see it.
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=_ALLOWED_HOSTS, www_redirect=False)
@@ -291,23 +322,19 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=_ALLOWED_HOSTS, www_redi
 # cross-origin browser call to this API.
 
 
-# API routes
-app.include_router(jobs.router)
-app.include_router(llm.router)
-app.include_router(upload.router)
-app.include_router(ingest.router)
-app.include_router(entities.router)
-app.include_router(relationships.router)
-app.include_router(progress.router)
-app.include_router(policy.router)
-app.include_router(coverage.router)
-app.include_router(settings.router)
-app.include_router(queue.router)
-app.include_router(metrics.router)
-app.include_router(thresholds.router)
-app.include_router(overrides.router)
-app.include_router(attack.router)
-app.include_router(baselines.router)
+# API routes.  Every router gets the access check once, here: the minimum role of
+# each operation is in api/auth/permissions.py, and a router added without it
+# would be open.  `GET /api/health`, below, is the one open route.
+_ROUTERS = (jobs, llm, upload, ingest, entities, relationships, progress, policy, coverage, settings, queue,
+            thresholds, overrides, attack, baselines, auth)
+for _module in _ROUTERS:
+    app.include_router(_module.router, dependencies=[Depends(current_user)])
+# Routers with their own access rule instead of a user's role. `/metrics`: loopback,
+# or the METRICS_TOKEN bearer for Prometheus, which holds no user account; it is
+# outside `/api`, so the gate does not apply either (ADR-0097 work item 18).
+_OWN_RULE_ROUTERS = (metrics,)
+for _module in _OWN_RULE_ROUTERS:
+    app.include_router(_module.router)
 
 
 @app.get("/api/health")

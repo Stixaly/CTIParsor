@@ -75,6 +75,67 @@ not.
 **Do not put this on the internet as-is.** Options B and C below are the two
 ways to narrow who can reach it.
 
+## Authentication
+
+`AUTH_MODE` (default `off`) turns authentication on; the section above describes
+`off`. The API refuses to start with `AUTH_MODE=off` and an `API_HOST` that is
+not loopback, and the start log says which mode runs. To turn it on:
+
+1. Set `AUTH_MODE=local` in `.env` (`oidc` and `both` are read now, but sign-in
+   with an identity provider is not implemented yet: they refuse to start without
+   `OIDC_ISSUER_URL` and `OIDC_CLIENT_ID`).
+2. Create the first admin. The command prompts for the password twice, or reads it
+   from a file; it refuses if an admin exists unless `--force`:
+
+   ```bash
+   python -m api.admin create-admin --username alice
+   docker compose exec app python -m api.admin create-admin --username alice
+   ```
+
+3. Create the other accounts (`create-user --role analyst|reader`), and a token for
+   each script, shown once, valid 90 days unless `--days` says otherwise:
+
+   ```bash
+   python -m api.admin create-token --user alice --name nightly-import --days 30
+   curl -H "Authorization: Bearer ctp_..." http://localhost:8000/api/jobs
+   ```
+
+`list-users`, `set-password` and `disable` (`--enable` reverses it) complete the
+command. Roles: a `reader` reads reports, bundles and coverage; an `analyst` also
+imports, records review decisions, finalizes, exports and deletes the reports they
+imported; an `admin` also deletes any report and manages settings, the
+relationship policy and the thresholds. A report stored before authentication was
+turned on has no owner: only an admin deletes it. Five sign-in attempts for a
+username in 15 minutes lock that username for 15 minutes. The attempt is counted
+before the password is checked, so the lock also stops the account's real owner for
+those 15 minutes; `python -m api.admin set-password --username NAME` lifts it at once.
+Sign-in is also limited per client address (`LOGIN_RATE_LIMIT`, default `10/minute`).
+`python -m api.admin list-tokens` and `revoke-token --id ID` manage the tokens.
+
+Sessions and tokens travel in clear text over plain HTTP. Authentication beyond the
+loopback address goes through the `proxy` profile (TLS, option C below): the session
+cookie is `Secure` when the request arrived over HTTPS (the scheme, or the proxy's
+`X-Forwarded-Proto: https`), and is sent without `Secure` over plain HTTP, because
+Safari refuses a `Secure` cookie on `http://localhost`, which is how a Docker published
+port is reached. Over plain HTTP anyone on the path can read it.
+
+Start the API with `python run_api.py` or the Compose stack, the only supported
+launches: the start guard reads `API_HOST` (or `API_PUBLISHED_HOST`), and a bare
+`uvicorn --host ...` gives it nothing to judge (the start log then warns).
+`API_PUBLISHED_HOST` is set by Compose from `CTI_BIND`; do not set it by hand.
+When authentication is on, a request for `/api` or the interactive docs (`/docs`,
+`/redoc`, `/openapi.json`) without a valid session or token gets 401 before its body
+is read.
+
+In the Docker stack the `app` container always binds `0.0.0.0`, so the guard judges
+the address compose publishes the port on (`CTI_BIND`, passed as `API_PUBLISHED_HOST`):
+the default stack, published on `127.0.0.1`, starts with `AUTH_MODE=off` for one
+analyst, and a `CTI_BIND` that is not loopback needs `AUTH_MODE=local` (or `oidc`,
+`both`) or the container stops. The `proxy` profile (TLS on `CTI_TLS_BIND`) is not seen
+by the application: exposing it with `AUTH_MODE=off` leaves the proxy's basic
+authentication as the only control, which ADR-0097 does not recommend for a shared
+service.
+
 ## 3. Three ways to run it
 
 ### Option A — stay on loopback, reach it over SSH

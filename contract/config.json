@@ -94,6 +94,12 @@
         "20.0"
       ]
     },
+    "env AUTH_MODE": {
+      "set": false,
+      "values": [
+        "off"
+      ]
+    },
     "env BACKUP_KEEP": {
       "set": false,
       "values": [
@@ -574,6 +580,12 @@
         "lmstudio-model"
       ]
     },
+    "env LOGIN_RATE_LIMIT": {
+      "set": false,
+      "values": [
+        "10/minute"
+      ]
+    },
     "env LOG_BACKUP_COUNT": {
       "set": false,
       "values": [
@@ -668,6 +680,12 @@
       "set": false,
       "values": [
         "0.10"
+      ]
+    },
+    "env SESSION_TTL_HOURS": {
+      "set": false,
+      "values": [
+        "12"
       ]
     },
     "env STIX_AUTHOR_NAME": {

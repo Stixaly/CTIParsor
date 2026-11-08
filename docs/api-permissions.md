@@ -2,7 +2,7 @@
 
 Date: 2026-11-08. Source: `contract/openapi.json` at commit `537054f` (60 entries, `GET /api/health` included), with the route functions in `api/routes/*.py` and `api/main.py`.
 
-Status: proposal for ADR-0097 work item 14; not enforced. Today the API has no authentication and no role check. The only write guard is `refuse_cross_site_writes` in `api/main.py`, which refuses browser cross-site requests. It is not an authorization control.
+Status: enforced since ADR-0097 work items 14 and 15, part A, when `AUTH_MODE` is not `off`; the table lives in `api/auth/permissions.py` and `tests/test_auth_permissions.py` fails for an operation without a role. With `AUTH_MODE=off` (the default) the API has no authentication and no role check. The inventory below is the 2026-11-08 one (60 operations); the operations added since are `POST /api/auth/login` (open), `POST /api/auth/logout` and `GET /api/auth/me` (reader). The write guard `refuse_cross_site_writes` in `api/main.py` refuses browser cross-site requests; it is not an authorization control.
 
 Roles, from ADR-0097 (Roles): `reader` < `analyst` < `admin`, each containing the one before. The minimal role in each row is the proposal, not the current state. Where a route mixes reads and writes, the stricter one applies.
 
@@ -82,6 +82,7 @@ Columns and effect labels:
 | 58 | POST | /api/upload | api/routes/upload.py:upload_file (calls `start_job`) | the multipart form: report, optional baseline | `uploads/{job_id}.*`, `jobs` row, queue | LLM: the Stage 3 provider set by configuration; whether it is local or remote, and TLP egress: to check | analyst | Creates a job that spends LLM time. Rate limit 10 per minute. |
 | 59 | POST | /api/ingest/text | api/routes/ingest.py:ingest_text (calls `start_job`) | the request text | `uploads/{job_id}.html`, `.md` or `.txt`; `jobs` row; queue | LLM: as route 58 | analyst | As route 58. Rate limit 20 per minute. |
 | 60 | POST | /api/ingest/url | api/routes/ingest.py:ingest_url (calls `web_capture.capture_url_to_pdf`, `start_job`) | the external URL, chosen by the caller | `uploads/{job_id}.pdf` and `.txt`, capture metadata, `jobs` row, queue | EXT (headless browser fetches the URL); LLM: as route 58 | analyst | Fetches an external page and creates a job. Rate limit 5 per minute. |
+| 61 | GET | /api/llm/egress | api/routes/llm.py:get_egress (calls `pipeline.egress.decide`) | the `tlp` query, the provider settings | none | none | reader | Added after the snapshot (#602): whether a TLP would be sent to the configured providers; shows their host, never a key. |
 
 ## Questions to settle
 

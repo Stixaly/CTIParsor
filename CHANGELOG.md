@@ -77,6 +77,23 @@ theme.
   `.env.example`; their values, which the code already defaults to, are
   unchanged.
 
+- **Authentication** (ADR-0097 work items 14 and 15, part A). `AUTH_MODE`
+  (`off` by default, as before; `local`; `oidc` and `both` are refused until
+  OIDC lands) turns on local accounts with Argon2id passwords, server-side
+  sessions (cookie `ctiparsor_session`, 12 h sliding, `SESSION_TTL_HOURS`,
+  `X-CSRF-Token` on cookie-authenticated writes) and `ctp_` bearer tokens for
+  scripts (90 days by default). Every operation requires the role of
+  `docs/api-permissions.md` (reader, analyst, admin); an analyst deletes only
+  the reports they imported (`jobs.imported_by`), an admin any. Anonymous
+  requests for `/api` and the docs get 401 before any body is read. Sign-in
+  attempts are counted before the password is checked: 5 per username in 15
+  minutes lock it (the real owner too, until `set-password`), and sign-in is
+  limited per address (`LOGIN_RATE_LIMIT`, default 10/minute). The cookie is
+  `Secure` over HTTPS only. `python -m api.admin` creates the first admin and
+  manages users and tokens. With `AUTH_MODE=off`, the API refuses to start on
+  a published address that is not loopback. Migration v0018 adds the account
+  tables. OIDC, the sign-in page, the admin pages and the audit trail come next.
+
 - **The worker no longer logs a database backup after each report.** It never
   took one: both stores are PostgreSQL (ADR-0053) and `backup_db()` only
   logged where `pg_dump` is. The function is removed. Back up with `pg_dump`
