@@ -120,15 +120,31 @@ def test_a_refused_request_below_the_role_is_refused_with_the_user(auth_client, 
     assert _lines(capsys.readouterr().out)[-1]["outcome"] == "refused"
 
 
-def test_an_anonymous_refused_request_is_recorded_with_no_user_and_the_raw_path(auth_client, temp_db, capsys):
+def test_an_anonymous_refused_request_is_a_log_line_and_not_a_row(auth_client, temp_db, capsys):
     capsys.readouterr()
+    before = len(_rows(temp_db))
     response = auth_client.patch("/api/jobs/no-such-job", json={"status": "completed"})
 
     assert response.status_code == 401
-    row = _rows(temp_db)[-1]
-    assert (row["user_id"], row["username"], row["role"], row["auth"]) == (None, None, None, "none")
-    assert row["route"] == "/api/jobs/no-such-job" and row["target"] == {}
-    assert row["status"] == 401 and row["outcome"] == "refused"
+    assert len(_rows(temp_db)) == before                    # an anonymous client cannot fill the table
+    line = [r for r in _lines(capsys.readouterr().out) if r.get("route") == "/api/jobs/no-such-job"][-1]
+    assert (line["user_id"], line["username"], line["role"], line["auth"]) == (None, None, None, "none")
+    assert line["status"] == 401 and line["outcome"] == "refused" and line["target"] == {}
+
+
+def test_an_unmatched_path_is_cut_to_256_characters(auth_client, capsys):
+    capsys.readouterr()
+    auth_client.post("/api/" + "x" * 5000)
+    line = [r for r in _lines(capsys.readouterr().out) if str(r.get("route", "")).startswith("/api/xxx")][-1]
+    assert len(line["route"]) == 256
+
+
+def test_a_failed_sign_in_is_kept_as_a_row(auth_client, temp_db):
+    before = len(_rows(temp_db))
+    answer = auth_client.post("/api/auth/login", json={"username": "nobody", "password": "wrong password!"})
+    assert answer.status_code == 401
+    rows = _rows(temp_db)
+    assert len(rows) == before + 1 and rows[-1]["route"] == "/api/auth/login" and rows[-1]["outcome"] == "refused"
 
 
 def test_an_unknown_path_is_recorded_under_its_raw_path(auth_client, make_user, sign_in, temp_db):

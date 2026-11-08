@@ -155,11 +155,13 @@ def prune(now: datetime | None = None) -> None:
     get_conn().execute("DELETE FROM audit_events WHERE at < ?", (cutoff,))
 
 
-def write(record: dict[str, Any]) -> None:
-    """Write one record: the JSON line, then the row.  Never raises: the answer to the request
-    is decided before this runs, and a failed write is logged by its type only (the message of
-    a database error can repeat the values it refused)."""
+def write(record: dict[str, Any], *, row: bool = True) -> None:
+    """Write one record: the JSON line, then the row (unless `row` is False).  Never raises: the
+    answer to the request is decided before this runs, and a failed write is logged by its type
+    only (the message of a database error can repeat the values it refused)."""
     _audit_logger.info(json.dumps({"audit": True, **record}, default=str))
+    if not row:
+        return
     try:
         _insert(record)
     except Exception as exc:
@@ -219,6 +221,18 @@ def _actor(scope: Scope) -> tuple[Any, str]:
     return None, "none"
 
 
+#: An unmatched path is the caller's text: keep its start only.
+_MAX_RAW_PATH = 256
+#: The one open write whose anonymous refusals are kept as rows: failed sign-ins (rate-limited).
+_SIGN_IN = "/api/auth/login"
+
+
+def _keeps_row(record: dict[str, Any]) -> bool:
+    """An anonymous request the gate refused (401, no user) is a JSON line only, not a row: an
+    unauthenticated client must not be able to fill the table.  A failed sign-in is kept."""
+    return not (record["user_id"] is None and record["status"] == 401 and record["route"] != _SIGN_IN)
+
+
 def _record(scope: Scope, status: int) -> dict[str, Any]:
     user, auth = _actor(scope)
     route = scope.get("route")
@@ -226,7 +240,7 @@ def _record(scope: Scope, status: int) -> dict[str, Any]:
     if not template:
         # No route matched (an unknown path, or the gate's 401 before routing): the path itself,
         # with a NUL byte written out, since PostgreSQL refuses it in text.
-        template = _api_path(scope).replace("\x00", "\\x00")
+        template = _api_path(scope).replace("\x00", "\\x00")[:_MAX_RAW_PATH]
     client = scope.get("client")
     return {
         "at": timestamp(_now()),
@@ -280,7 +294,8 @@ class AuditMiddleware:
             await self.app(scope, receive, send_and_see)
         finally:
             # An unhandled error sends no answer from the app: the server answers 500, so 500 is recorded.
-            await asyncio.to_thread(write, _record(scope, answer.get("status", 500)))
+            record = _record(scope, answer.get("status", 500))
+            await asyncio.to_thread(write, record, row=_keeps_row(record))
 
 
 # ---------------------------------------------------------------------------

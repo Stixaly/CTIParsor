@@ -262,7 +262,7 @@ default). The list is newest first. When more records follow, the response heade
 `X-Next-Cursor` holds the value for the `cursor` parameter of the next page.
 
 The table has no link to `users`: a record keeps the user id and name it was written with.
-An anonymous flood of refused requests fills the table until the retention deletes them.
+An anonymous request refused with 401 (no session, no token) is written as a JSON line only, not as a row, so an unauthenticated client cannot fill the table; a failed sign-in (`POST /api/auth/login`, limited per address) is kept as a row. An unmatched path is cut to 256 characters.
 
 ## Monitoring and alerts
 
