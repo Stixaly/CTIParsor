@@ -279,7 +279,8 @@ def build_run_config(policy: dict | None = None) -> dict:
     # git_rev
     git_rev = _resolve_git_rev()
 
-    # embedding_model
+    # embedding_model: the one requested.  The one loaded is only known once
+    # Stage 2c has run: it is in stage_report, on the 2c entry ("embedding").
     embedding_model = os.getenv("TTP_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 
     # ttp_thresholds
