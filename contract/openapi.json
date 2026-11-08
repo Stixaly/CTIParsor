@@ -23,6 +23,9 @@
         "string"
       ]
     },
+    "DELETE /api/jobs/{} response:403": {
+      "media": []
+    },
     "DELETE /api/jobs/{}/entities/{}": {
       "deprecated": false
     },
@@ -298,6 +301,58 @@
     },
     "GET /api/attack/index response:404": {
       "media": []
+    },
+    "GET /api/auth/me": {
+      "deprecated": false
+    },
+    "GET /api/auth/me response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/auth/me response:200.auth_mode": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/auth/me response:200.auth_source": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/auth/me response:200.csrf_token": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/auth/me response:200.display_name": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/auth/me response:200.role": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/auth/me response:200.username": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
     },
     "GET /api/baselines/status": {
       "deprecated": false
@@ -4502,6 +4557,108 @@
       ]
     },
     "PATCH /api/settings/corpora/{} response:200.ok": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "POST /api/auth/login": {
+      "deprecated": false
+    },
+    "POST /api/auth/login body": {
+      "media": [
+        "application/json"
+      ],
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/auth/login body.password": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/auth/login body.username": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/auth/login response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/auth/login response:200.auth_mode": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/auth/login response:200.auth_source": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/auth/login response:200.csrf_token": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/auth/login response:200.display_name": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/auth/login response:200.role": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/auth/login response:200.username": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/auth/login response:401": {
+      "media": []
+    },
+    "POST /api/auth/login response:403": {
+      "media": []
+    },
+    "POST /api/auth/login response:404": {
+      "media": []
+    },
+    "POST /api/auth/login response:429": {
+      "media": []
+    },
+    "POST /api/auth/logout": {
+      "deprecated": false
+    },
+    "POST /api/auth/logout response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/auth/logout response:200.signed_out": {
       "required": true,
       "types": [
         "boolean"
