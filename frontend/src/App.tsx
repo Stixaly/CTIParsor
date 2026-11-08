@@ -8,8 +8,10 @@ import Coverage from './pages/Coverage'
 import Policy from './pages/Policy'
 import Settings from './pages/Settings'
 import Login from './pages/Login'
+import Access from './pages/Access'
+import Account from './pages/Account'
 import { AuthProvider } from './context/AuthContext'
-import { RequireAuth, RequireRole } from './components/RequireAuth'
+import { RequireAuth, RequireRole, RequireSession } from './components/RequireAuth'
 
 // Keyed by job: another job remounts the review, so nothing from the last one
 // (bootstrap refs, "review completed", "bundle outdated") carries over (#450).
@@ -35,6 +37,12 @@ export default function App() {
               <Route element={<RequireRole role="admin" />}>
                 <Route path="/policy"    element={<Policy />} />
                 <Route path="/settings"  element={<Settings />} />
+              </Route>
+              <Route element={<RequireSession />}>
+                <Route path="/account"   element={<Account />} />
+                <Route element={<RequireRole role="admin" />}>
+                  <Route path="/access"  element={<Access />} />
+                </Route>
               </Route>
             </Route>
 

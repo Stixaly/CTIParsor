@@ -21,6 +21,21 @@ reader; Policy and Settings only for an admin); the server refuses it in any cas
 ends while you work (it lasts 12 hours from the last request), the next request takes you back to the
 sign-in page and then to where you were.
 
+## Access and My tokens
+
+With authentication on, every user has a "My tokens" page (sidebar): the tokens made for their own
+account, a form to create one (a name, and 1 to 365 days, 90 by default) and a Revoke button. A new token is
+shown once, in a box with a Copy button and the warning that it will not be shown again; the page keeps
+only its name, dates and last use. A token carries its user's role.
+
+An admin also has an Access page. The Users table lists every account with its role, source (local or
+identity provider), state and last sign-in. From it an admin creates a local user (username, display name,
+role, a password of 12 characters or more), changes a role, disables or enables an account (disabling asks
+first, ends the user's sessions and revokes no token), and sets a local user's password (it ends their
+sessions and lifts their sign-in lock). Your own row cannot be disabled or demoted. The Tokens table lists
+every token, creates one for a user and revokes one (it asks first). The server's error messages are shown
+as they come. With `AUTH_MODE=off` neither page exists.
+
 ## Workflow
 
 ```

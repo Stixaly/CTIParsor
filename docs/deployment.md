@@ -112,6 +112,15 @@ those 15 minutes; `python -m api.admin set-password --username NAME` lifts it at
 Sign-in is also limited per client address (`LOGIN_RATE_LIMIT`, default `10/minute`).
 `python -m api.admin list-tokens` and `revoke-token --id ID` manage the tokens.
 
+An admin can do the same from the web interface, on the Access page (sidebar): create a
+local user, change a role, disable or enable an account, set a password, and create or
+revoke any token. Every user has a "My tokens" page for their own tokens. A token is shown
+once, when it is created. Disabling a user ends their sessions and revokes no token; a
+disabled user's tokens are refused until the account is enabled again. An admin cannot
+disable or demote their own account, and the last enabled admin cannot be disabled or
+demoted. The command line stays available and uses the same functions; it is the way to
+create the first admin, and to recover when no admin can sign in.
+
 Sessions and tokens travel in clear text over plain HTTP. Authentication beyond the
 loopback address goes through the `proxy` profile (TLS, option C below): the session
 cookie is `Secure` when the request arrived over HTTPS (the scheme, or the proxy's

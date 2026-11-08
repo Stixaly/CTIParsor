@@ -23,6 +23,21 @@ own rule whatever the mode: loopback clients, or the `METRICS_TOKEN` bearer (see
   failures for a username in 15 minutes answer 429 with `Retry-After` for 15 minutes.
 - `GET /api/auth/methods` (open) tells the sign-in page what to offer: `{ auth_mode, local, oidc }`.
   `local` is true for `local` and `both`, `oidc` for `oidc` and `both`; with `AUTH_MODE=off` both are false.
+- **Users and tokens** (404 `Authentication is off` for all of them with `AUTH_MODE=off`). For an `admin`:
+
+  | Method | Path | Description |
+  |---|---|---|
+  | `GET` | `/api/admin/users` | Every user: `id`, `username`, `display_name`, `auth_source`, `role`, `disabled`, `created_at`, `last_login_at`. Never a hash |
+  | `POST` | `/api/admin/users` | Create a local user `{ username, role, display_name?, password }` (201). The password policy of the CLI applies (12 characters or more). 400 for a bad username, a weak password, or when local accounts are off (`AUTH_MODE=oidc`); 409 for a username that is taken |
+  | `PATCH` | `/api/admin/users/{id}` | `{ role?, disabled?, display_name? }`. Disabling ends the user's sessions and revokes no token: a disabled user's tokens are refused until the account is enabled again. 409 when an admin disables or demotes themself, and when the change would leave no enabled admin |
+  | `POST` | `/api/admin/users/{id}/password` | `{ password }`: set a local user's password. It ends that user's sessions and clears their sign-in lock. 400 for a weak password and for an OIDC user |
+  | `GET` | `/api/admin/tokens` | Every token: `id`, `name`, `user_id`, `username`, `created_at`, `expires_at`, `revoked_at`, `last_used_at`. Never the secret or its hash |
+  | `POST` | `/api/admin/tokens` | `{ user_id, name, days? }` (1 to 365, default 90) → 201 with the record and `token`, the only time the token is sent. 404 for an unknown user |
+  | `DELETE` | `/api/admin/tokens/{id}` | Revoke a token. 404 when there is no active token with that id |
+
+  For any signed-in user, for their own tokens only (another user's id is a 404): `GET /api/auth/tokens`,
+  `POST /api/auth/tokens` (`{ name, days? }`, same answer as the admin creation) and
+  `DELETE /api/auth/tokens/{id}`. A token made here carries the role of its user.
 - Before any route runs, a request for `/api/...` or the docs (`/docs`, `/redoc`, `/openapi.json`) without a
   valid session or token gets 401 (not for `GET /api/health`, `POST /api/auth/login` and `GET /api/auth/methods`); the body is not read.
   `POST /api/auth/login` is also limited per client address (`LOGIN_RATE_LIMIT`, 429 with `Retry-After`).

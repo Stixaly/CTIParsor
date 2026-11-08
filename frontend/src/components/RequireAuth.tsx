@@ -33,6 +33,12 @@ export function RequireAuth() {
   return <Outlet />
 }
 
+/** A page that exists only for a signed-in user: with authentication off there is no account to show. */
+export function RequireSession() {
+  const auth = useAuth()
+  return auth.status === 'signed-in' ? <Outlet /> : <Navigate to="/dashboard" replace />
+}
+
 /** A page for one role and above; anyone else goes to the dashboard (the server refuses the calls anyway). */
 export function RequireRole({ role }: { role: Role }) {
   const auth = useAuth()

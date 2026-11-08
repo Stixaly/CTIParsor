@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
-import { LayoutDashboard, Link2, LogOut, Settings as SettingsIcon, Tag } from 'lucide-react'
+import { KeyRound, LayoutDashboard, Link2, LogOut, Settings as SettingsIcon, Tag, Users } from 'lucide-react'
 import ThemeSwitcher from './ThemeSwitcher'
 import { useAuth } from '../context/AuthContext'
 
@@ -11,6 +11,7 @@ export default function Layout() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const admin = auth.can('admin')
+  const signedIn = auth.status === 'signed-in'
   const signOut = async () => {
     await auth.signOut()
     queryClient.clear()
@@ -43,6 +44,8 @@ export default function Layout() {
             { to: '/dashboard', icon: <LayoutDashboard size={15} />, label: 'Dashboard', show: true },
             { to: '/policy',    icon: <Link2 size={15} />,           label: 'Policy',    show: admin },
             { to: '/settings',  icon: <SettingsIcon size={15} />,    label: 'Settings',  show: admin },
+            { to: '/access',    icon: <Users size={15} />,           label: 'Access',    show: admin && signedIn },
+            { to: '/account',   icon: <KeyRound size={15} />,        label: 'My tokens', show: signedIn },
           ].filter(item => item.show).map(({ to, icon, label }) => (
             <NavLink
               key={to}

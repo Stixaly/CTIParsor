@@ -23,6 +23,17 @@ PERMISSIONS: dict[tuple[str, str], str] = {
     ("GET", "/api/auth/methods"): OPEN,
     ("POST", "/api/auth/logout"): "reader",
     ("GET", "/api/auth/me"): "reader",
+    # admin.py: users and tokens. A token route under /api/auth/ only touches the caller's own tokens.
+    ("GET", "/api/auth/tokens"): "reader",
+    ("POST", "/api/auth/tokens"): "reader",
+    ("DELETE", "/api/auth/tokens/{token_id}"): "reader",
+    ("GET", "/api/admin/users"): "admin",
+    ("POST", "/api/admin/users"): "admin",
+    ("PATCH", "/api/admin/users/{user_id}"): "admin",
+    ("POST", "/api/admin/users/{user_id}/password"): "admin",
+    ("GET", "/api/admin/tokens"): "admin",
+    ("POST", "/api/admin/tokens"): "admin",
+    ("DELETE", "/api/admin/tokens/{token_id}"): "admin",
     # attack.py, baselines.py
     ("GET", "/api/attack/index"): "reader",
     ("GET", "/api/baselines/status"): "reader",
