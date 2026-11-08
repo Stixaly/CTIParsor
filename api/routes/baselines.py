@@ -8,6 +8,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from api.baseline_store import scrubbed
 from api.body_limit import ENVELOPE_BYTES
 from api.main import limiter
+from api.response_models.baselines import BaselineStatus
 from api.routes._common import (
     BASELINE_REFUSED,
     check_baseline_bytes,
@@ -30,13 +31,13 @@ def body_budget() -> int:
     return MAX_BASELINE_BYTES + ENVELOPE_BYTES
 
 
-@router.get("/status")
+@router.get("/status", response_model=BaselineStatus, response_model_exclude_unset=True)
 def baselines_status():
     """Whether this server enriches a bundle (`STIX_ENRICHMENT_ENABLED`) and the limits it applies."""
     return {"enabled": enrichment_enabled(), "max_bytes": MAX_BASELINE_BYTES, "max_objects": MAX_BASELINE_OBJECTS}
 
 
-@router.post("/inspect", response_model=Intake, responses=BASELINE_REFUSED)
+@router.post("/inspect", response_model=Intake, response_model_exclude_unset=True, responses=BASELINE_REFUSED)
 @limiter.limit("10/minute")
 def inspect_baseline(
     request: Request,

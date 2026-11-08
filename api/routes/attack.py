@@ -29,6 +29,7 @@ def _matches(if_none_match: str | None, etag: str) -> bool:
     "/index",
     responses={
         200: {
+            "content": {"application/json": {}},
             "description": "The selected track's mitre_index.json, unmodified",
             "headers": {
                 "X-Attack-Release": {"description": "Its release: 19.2, 20.0", "schema": {"type": "string"}},

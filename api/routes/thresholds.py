@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 import pipeline.thresholds as thresholds
 from api.db import _lock, get_conn, now_iso
+from api.response_models.thresholds import DeletedOut, OverrideOut, RecalibrateOut, ThresholdsOut
 from models.schemas import EntityType
 from pipeline.calibration import (
     AUTO_ACCEPT_LEVEL,
@@ -57,7 +58,7 @@ def _check_key(source: str, entity_type: str) -> None:
         raise HTTPException(400, f"Unknown entity_type '{entity_type}'")
 
 
-@router.get("")
+@router.get("", response_model=ThresholdsOut, response_model_exclude_unset=True)
 def get_thresholds() -> dict:
     with get_conn() as conn:
         rows = list_overrides(conn)
@@ -74,7 +75,7 @@ def get_thresholds() -> dict:
     }
 
 
-@router.post("/recalibrate")
+@router.post("/recalibrate", response_model=RecalibrateOut, response_model_exclude_unset=True)
 def recalibrate(body: RecalibrateIn) -> dict:
     if not 0.0 < body.target_precision <= 1.0:
         raise HTTPException(400, "'target_precision' must be in (0, 1]")
@@ -109,7 +110,7 @@ def recalibrate(body: RecalibrateIn) -> dict:
     }
 
 
-@router.put("/{source}/{entity_type}")
+@router.put("/{source}/{entity_type}", response_model=OverrideOut, response_model_exclude_unset=True)
 def put_threshold(source: str, entity_type: str, body: OverrideIn) -> dict:
     _check_key(source, entity_type)
     if not 0.0 <= body.threshold <= 1.0:
@@ -121,7 +122,7 @@ def put_threshold(source: str, entity_type: str, body: OverrideIn) -> dict:
     return {"source": source, "entity_type": entity_type, "threshold": body.threshold, "origin": "manual"}
 
 
-@router.delete("/{source}/{entity_type}")
+@router.delete("/{source}/{entity_type}", response_model=DeletedOut, response_model_exclude_unset=True)
 def delete_threshold(source: str, entity_type: str) -> dict:
     _check_key(source, entity_type)
     with _lock:

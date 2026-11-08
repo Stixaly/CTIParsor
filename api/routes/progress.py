@@ -1,5 +1,6 @@
 import asyncio
 import json
+from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
@@ -8,6 +9,17 @@ from api.db import get_conn
 from api.routes._common import refuse_nul_id
 
 router = APIRouter(prefix="/api/jobs", tags=["progress"])
+
+# The stream is text/event-stream, not JSON, so it has no response_model.  Each frame is
+# `id:` (progress events only), `event:` and `data:` (a JSON text).
+_SSE: dict[int | str, dict[str, Any]] = {200: {
+    "description": (
+        "Server-sent events of one job. First `connected` ({job_id}). Then the job's progress events, "
+        "each with an `id` that a reconnect sends back as Last-Event-ID; their event names are the stored "
+        "event types. Last `done` ({status}, plus `error` when the stream timed out or the job was not found), "
+        "once the job is for_review, completed or failed, or after 45 minutes."),
+    "content": {"text/event-stream": {"schema": {"type": "string"}}},
+}}
 
 # Hard ceiling on how long a single SSE connection stays open.  Without it, a job
 # wedged in a non-terminal status (e.g. the worker subprocess died without the
@@ -48,7 +60,7 @@ def _parse_last_event_id(request: Request) -> int:
         return 0
 
 
-@router.get("/{job_id}/progress")
+@router.get("/{job_id}/progress", responses=_SSE)
 async def progress_stream(job_id: str, request: Request):
     refuse_nul_id(job_id)       # before the stream opens: a 404 here, not a 500 part-way through it
 
