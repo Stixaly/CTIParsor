@@ -63,6 +63,8 @@ python-multipart>=0.0.31     # 0.0.31 fixes the last of PYSEC-2026-1851/1852/303
 aiofiles>=23.0.0
 slowapi>=0.1.8
 argon2-cffi>=23.1.0          # Argon2id hashes of local account passwords (ADR-0097)
+joserfc>=1.7.6                # Verifies the ID token of an OIDC sign-in: JWS signature against the issuer's JWKS (ADR-0097)
+httpx>=0.27                  # HTTP client of the OIDC sign-in: discovery, JWKS and token requests (ADR-0097)
 python-magic>=0.4.27
 filetype>=1.2.0
 # PostgreSQL driver for the job store, used only when DATABASE_URL is set (ADR-0045).

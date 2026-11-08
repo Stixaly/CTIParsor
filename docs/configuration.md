@@ -785,14 +785,36 @@ and publishes with `CTI_BIND` / `CTI_PORT`.
 # off   = no authentication; the API refuses to start unless API_HOST is loopback
 #         (127.0.0.0/8, ::1, localhost).
 # local = local accounts, roles, sessions and API tokens, created with `python -m api.admin`.
-# oidc, both = read now; they refuse to start without OIDC_ISSUER_URL and
-#         OIDC_CLIENT_ID, and sign-in with an identity provider is not implemented yet.
+# oidc  = sign-in with an OpenID Connect identity provider only (settings below).
+# both  = local accounts and OIDC.
 # Any other value is refused: a typo does not leave the API open.
 # AUTH_MODE=off
 # Lifetime of a web session, in hours; each request slides it.
 # SESSION_TTL_HOURS=12
 # Sign-in attempts allowed per client address (slowapi syntax).
 # LOGIN_RATE_LIMIT=10/minute
+```
+
+`AUTH_MODE=oidc` and `both` need the settings below (set up in
+[deployment.md](deployment.md#sign-in-with-an-identity-provider-oidc)). The API refuses
+to start without the first five, with a non-https issuer or redirect URI (`http` only
+for `localhost` and `127.0.0.1`), with an unreadable or empty secret file, with a role
+map that is empty or names a role other than `reader`, `analyst`, `admin`, or with
+`OIDC_SCOPES` lacking `openid`.
+
+```env
+# OIDC_ISSUER_URL=https://idp.example.org/realms/cti
+# OIDC_CLIENT_ID=ctiparsor
+# A file holding the client secret; read at each use.  No secret goes in an env var.
+# OIDC_CLIENT_SECRET_FILE=/run/secrets/oidc_client_secret
+# The full callback URL, as registered at the provider.  Never guessed from the Host header.
+# OIDC_REDIRECT_URI=https://cti.example.org/api/auth/oidc/callback
+# group=role pairs; the highest role among the user's groups wins; no mapped group, no sign-in.
+# OIDC_ROLE_MAP=cti-admins=admin,cti-analysts=analyst,cti-readers=reader
+# OIDC_SCOPES=openid profile email
+# OIDC_GROUPS_CLAIM=groups
+# The username of a new account: this claim, else email, else sub.
+# OIDC_USERNAME_CLAIM=preferred_username
 ```
 
 Five sign-in attempts for a username within 15 minutes lock it for 15 minutes; the

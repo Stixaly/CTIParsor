@@ -44,6 +44,8 @@ install, with the dev tools.
 | `aiofiles` | Async file I/O |
 | `slowapi` | Request rate limiting |
 | `argon2-cffi` | Argon2id hashes of local account passwords (ADR-0097) |
+| `joserfc` | Checks the signature of the ID token in an OIDC sign-in (ADR-0097). Chosen over `authlib` because it is only the JOSE part, with no HTTP client or framework code, and `cryptography` is already a dependency |
+| `httpx` | HTTP client of the OIDC sign-in: discovery document, JWKS, token request (ADR-0097). It was already installed through `anthropic` |
 | `python-magic` | Upload content-type sniffing (libmagic) |
 | `filetype` | Upload type detection fallback, pure Python |
 | `psycopg` | PostgreSQL driver for both stores (ADR-0045, ADR-0053) |
