@@ -27,17 +27,19 @@ class PolicyRule(Response):
 
 class PinEvidence(Response):
     mode: str | None = Field(default=None, description="'cooccurrence' (default) or 'cartesian'.")
-    window: int | None = Field(default=None, description="Sentences apart, non-negative.")
+    window: JsonValue = Field(default=None, description="Sentences apart, non-negative.")
 
 
 class Completion(Response):
-    transitive: bool | None = None
-    alias: bool | None = None
-    reference: bool | None = None
-    long_distance: bool | None = None
-    fuzzy_alias: bool | None = None
-    semantic_alias: bool | None = None
-    max_new_edges: int | None = None
+    # Booleans and an integer when the PUT checked them; any JSON value for a
+    # body stored before those checks, so a GET never fails on an old row.
+    transitive: JsonValue = None
+    alias: JsonValue = None
+    reference: JsonValue = None
+    long_distance: JsonValue = None
+    fuzzy_alias: JsonValue = None
+    semantic_alias: JsonValue = None
+    max_new_edges: JsonValue = None
 
 
 class TemporalExport(Response):
@@ -46,12 +48,14 @@ class TemporalExport(Response):
 
 class RelationshipPolicy(Response):
     version: JsonValue = None
-    global_: str | None = Field(
+    global_: JsonValue = Field(
         default=None, alias="global", description="'enforce' (default) or 'auto'.",
     )
-    rules: list[PolicyRule] | None = None
-    max_pinned_edges: int | None = None
-    pin_budget_mode: str | None = Field(
+    # A list of rule objects; any JSON value for a body stored before the PUT
+    # checked its shape.
+    rules: list[PolicyRule] | JsonValue = None
+    max_pinned_edges: JsonValue = None
+    pin_budget_mode: JsonValue = Field(
         default=None, description="'fair-share' (default) or 'sequential'.",
     )
     pin_evidence: PinEvidence | None = None

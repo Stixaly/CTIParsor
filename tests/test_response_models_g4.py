@@ -369,3 +369,22 @@ def test_a_captured_url_returns_the_job_and_the_capture_fields(ingest_client, tm
         "rendered_chars": 42,
     }
     assert (tmp_path / f"{body['job_id']}.pdf").exists()
+
+
+def test_a_policy_stored_before_the_put_checks_still_reads(temp_db, temp_db_client):
+    # A body the PUT would refuse today (wrong types, a rule that is not an
+    # object) may sit in the database from an older release: GET returns it
+    # as stored instead of failing on the response model.
+    legacy = {"version": "1", "global": 1, "rules": ["src->uses->tgt"],
+              "max_pinned_edges": "ten", "completion": {"transitive": "yes", "max_new_edges": 2.5},
+              "pin_evidence": {"window": "3"}}
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO relationship_policy (id, policy_json) VALUES (1, ?) "
+            "ON CONFLICT (id) DO UPDATE SET policy_json = excluded.policy_json",
+            (json.dumps(legacy),),
+        )
+        conn.commit()
+    r = temp_db_client.get("/api/relationship-policy")
+    assert r.status_code == 200
+    assert r.json() == legacy
