@@ -69,20 +69,35 @@ def api_host() -> str:
     return (os.getenv("API_HOST") or "").strip() or "127.0.0.1"
 
 
+def published_host() -> str | None:
+    """API_PUBLISHED_HOST: the address a port published for the API listens on, set by
+    compose from CTI_BIND.  In a container the API always binds 0.0.0.0; this address
+    says who can reach it."""
+    return (os.getenv("API_PUBLISHED_HOST") or "").strip() or None
+
+
 def check_startup(host: str | None = None) -> None:
     """Refuse a configuration that leaves the API open or half configured.
 
     Raises AuthConfigError when AUTH_MODE is not valid, when it is `off` and
-    the bind address is not loopback, and when it is `oidc` or `both` and no
-    OIDC configuration exists.  The message names the settings to change.
+    the address that decides exposure is not loopback, and when it is `oidc` or
+    `both` and no OIDC configuration exists.  That address is API_PUBLISHED_HOST
+    when set (the API runs behind a published port), else `host` (API_HOST).
+    The message names the settings to change.
     """
     mode = auth_mode()
-    host = api_host() if host is None else host.strip()
+    published = published_host()
+    host = published or (api_host() if host is None else host.strip())
     if mode == "off" and not is_loopback_host(host):
+        if published:
+            where = (f"CTI_BIND={published!r} publishes the API beyond this machine (API_PUBLISHED_HOST); "
+                     "set CTI_BIND=127.0.0.1")
+        else:
+            where = f"API_HOST={host!r} is not loopback; set API_HOST=127.0.0.1"
         raise AuthConfigError(
-            f"AUTH_MODE=off with API_HOST={host!r}: the API would be reachable from other machines with no "
-            "authentication. Set AUTH_MODE=local (or oidc, both) and create the first admin with "
-            "`python -m api.admin create-admin`, or bind API_HOST to a loopback address (127.0.0.1).")
+            f"AUTH_MODE=off: the API would be reachable from other machines with no authentication. {where}, "
+            "or set AUTH_MODE=local (or oidc, both) and create the first admin with "
+            "`python -m api.admin create-admin`.")
     if mode in ("oidc", "both") and not oidc_configured():
         raise AuthConfigError(
             f"AUTH_MODE={mode} needs OIDC_ISSUER_URL and OIDC_CLIENT_ID. Set them, or use AUTH_MODE=local.")

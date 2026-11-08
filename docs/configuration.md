@@ -725,10 +725,15 @@ and publishes with `CTI_BIND` / `CTI_PORT`.
 # SESSION_TTL_HOURS=12
 ```
 
-`run_api.py` and the app's own start both check the pair: `AUTH_MODE=off` with an
+`run_api.py` and the app's own start both check it: `AUTH_MODE=off` with an
 `API_HOST` that is not loopback stops the process with a message naming both
-settings. Under Docker the container binds `0.0.0.0`, so the stack needs
-`AUTH_MODE=local` (or `oidc`, `both`).
+settings. Under Docker the container binds `0.0.0.0` and compose passes
+`API_PUBLISHED_HOST` (from `CTI_BIND`, default `127.0.0.1`); when it is set, that
+address is the one judged. The default stack therefore starts with `AUTH_MODE=off`,
+and `CTI_BIND=0.0.0.0` needs `AUTH_MODE=local` (or `oidc`, `both`). The `proxy`
+profile is not seen by the application: exposing it with `AUTH_MODE=off` leaves the
+proxy's basic authentication as the only control, which ADR-0097 does not recommend
+for a shared service.
 
 `API_ALLOWED_HOSTS` (default `localhost,127.0.0.1,[::1]`) is the list of
 `Host` names the API answers to; any other gets 400 before a handler runs,

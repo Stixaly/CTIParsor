@@ -98,6 +98,7 @@ def _authentication_off(monkeypatch):
     sends no credentials.  A test about authentication sets AUTH_MODE itself."""
     monkeypatch.setenv("AUTH_MODE", "off")
     monkeypatch.setenv("API_HOST", "127.0.0.1")
+    monkeypatch.delenv("API_PUBLISHED_HOST", raising=False)
     monkeypatch.delenv("SESSION_TTL_HOURS", raising=False)
 
 

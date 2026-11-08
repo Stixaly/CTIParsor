@@ -144,3 +144,63 @@ def test_the_app_says_at_start_that_it_runs_without_authentication(temp_db, capl
         with TestClient(api.main.app):
             pass
     assert "authentication is OFF" in caplog.text
+
+
+# ── The published address (Docker) ───────────────────────────────────────────
+
+def test_a_published_loopback_address_lets_the_container_bind_everywhere(monkeypatch):
+    monkeypatch.setenv("AUTH_MODE", "off")
+    monkeypatch.setenv("API_PUBLISHED_HOST", "127.0.0.1")
+    config.check_startup("0.0.0.0")
+
+
+def test_a_published_address_beyond_loopback_is_refused_naming_cti_bind(monkeypatch):
+    monkeypatch.setenv("AUTH_MODE", "off")
+    monkeypatch.setenv("API_PUBLISHED_HOST", "0.0.0.0")
+    with pytest.raises(config.AuthConfigError, match="CTI_BIND"):
+        config.check_startup("0.0.0.0")
+    monkeypatch.setenv("AUTH_MODE", "local")
+    config.check_startup("0.0.0.0")
+
+
+def test_without_a_published_address_api_host_decides(monkeypatch):
+    monkeypatch.setenv("AUTH_MODE", "off")
+    monkeypatch.delenv("API_PUBLISHED_HOST", raising=False)
+    with pytest.raises(config.AuthConfigError, match="API_HOST"):
+        config.check_startup("0.0.0.0")
+
+
+def test_the_app_starts_in_a_container_published_on_loopback(temp_db, monkeypatch):
+    import api.main
+
+    monkeypatch.setenv("AUTH_MODE", "off")
+    monkeypatch.setenv("API_HOST", "0.0.0.0")
+    monkeypatch.setenv("API_PUBLISHED_HOST", "127.0.0.1")
+    with patch("api.main.init_db"), patch("api.queue_loop.start_embedded"):
+        with TestClient(api.main.app) as client:
+            assert client.get("/api/health").status_code == 200
+
+
+def test_run_api_judges_the_published_address(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u@h/d")
+    monkeypatch.setenv("API_HOST", "0.0.0.0")
+    monkeypatch.setenv("AUTH_MODE", "off")
+    monkeypatch.setenv("API_PUBLISHED_HOST", "0.0.0.0")
+    with patch("run_api.uvicorn.run") as serve, patch("run_api.load_dotenv"):
+        with pytest.raises(SystemExit, match="CTI_BIND"):
+            run_api.main()
+    serve.assert_not_called()
+
+
+def test_compose_passes_the_publication_address_with_the_ports_default():
+    import re
+    from pathlib import Path
+
+    import yaml
+
+    compose = yaml.safe_load((Path(__file__).parent.parent / "compose.yaml").read_text(encoding="utf-8"))
+    app = compose["services"]["app"]
+    passed = app["environment"]["API_PUBLISHED_HOST"]
+    published = next(p for p in app["ports"] if p.endswith(":8000"))
+    default = re.match(r"\$\{CTI_BIND:-([^}]+)\}", published).group(1)
+    assert passed == "${CTI_BIND:-" + default + "}" and default == "127.0.0.1"

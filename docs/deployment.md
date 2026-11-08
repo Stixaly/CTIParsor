@@ -112,9 +112,14 @@ Sessions and tokens travel in clear text over plain HTTP. Serve a shared instanc
 behind TLS (option C below); the session cookie is `Secure`, so a browser does not
 send it back over plain HTTP, except from loopback.
 
-In the Docker stack the `app` container always binds `0.0.0.0`, so it starts only
-with `AUTH_MODE` other than `off`; compose publishes it on `127.0.0.1` unless
-`CTI_BIND` says otherwise.
+In the Docker stack the `app` container always binds `0.0.0.0`, so the guard judges
+the address compose publishes the port on (`CTI_BIND`, passed as `API_PUBLISHED_HOST`):
+the default stack, published on `127.0.0.1`, starts with `AUTH_MODE=off` for one
+analyst, and a `CTI_BIND` that is not loopback needs `AUTH_MODE=local` (or `oidc`,
+`both`) or the container stops. The `proxy` profile (TLS on `CTI_TLS_BIND`) is not seen
+by the application: exposing it with `AUTH_MODE=off` leaves the proxy's basic
+authentication as the only control, which ADR-0097 does not recommend for a shared
+service.
 
 ## 3. Three ways to run it
 
