@@ -50,6 +50,12 @@ theme.
   `contract/openapi.json` now records the response fields (compatible
   additions only, none breaking).
 
+- **`GET /metrics`** (ADR-0097 work item 18): Prometheus text format with
+  job, worker, queue-age, database, disk and backup metrics, for loopback
+  clients or a client with the `METRICS_TOKEN` bearer (serve it behind TLS).
+  `docs/monitoring/ctiparsor.rules.yml` has the alert rules, and
+  `docs/operations.md` the procedure for each alert.
+
 - **Stage 3d (relationship verification) and the document-level relation
   pass (Stage 3doc) are on by default**, in the code and in `.env.example`
   (`ENABLE_STIX_VERIFICATION=true`, `ENABLE_DOCUMENT_LEVEL_RELATIONS=true`);

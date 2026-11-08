@@ -40,6 +40,7 @@ from api.routes import (
     entities,
     ingest,
     jobs,
+    metrics,
     overrides,
     policy,
     progress,
@@ -300,6 +301,7 @@ app.include_router(policy.router)
 app.include_router(coverage.router)
 app.include_router(settings.router)
 app.include_router(queue.router)
+app.include_router(metrics.router)
 app.include_router(thresholds.router)
 app.include_router(overrides.router)
 app.include_router(attack.router)

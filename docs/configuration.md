@@ -19,6 +19,7 @@ whole file, so a change takes effect at the next `docker compose up -d`.
 - [Worker, queue and retention](#worker-queue-and-retention)
 - [OCR](#ocr)
 - [Logging](#logging)
+- [Monitoring](#monitoring)
 - [Expert tuning](#expert-tuning)
 - [Web server and Docker Compose](#web-server-and-docker-compose)
 
@@ -677,6 +678,23 @@ and an image rebuild.
 Under Docker, `docker compose logs -f app worker` reads stdout. The root
 filesystem is read-only, so a `LOG_FILE` has to point into a volume, e.g.
 `/app/state/ctiparsor.log`.
+
+## Monitoring
+
+```env
+# The status file the `backup` service writes; GET /metrics reads it for the
+# backup metrics.  A missing file leaves those metrics out.
+# BACKUP_STATUS_FILE=/app/backup-status/status.json
+# A secret: the bearer token for a scraper outside loopback.  Generate it with
+# openssl rand -hex 32.  Empty: only loopback clients can read GET /metrics.
+# METRICS_TOKEN=
+```
+
+`GET /metrics` needs no other setting. It is on by default and answers loopback
+clients only. With `METRICS_TOKEN` set, a client that sends it as
+`Authorization: Bearer <token>` is accepted from any address; a wrong token is
+refused. Serve it only behind TLS, through the `proxy` profile
+([operations.md](operations.md#monitoring-and-alerts)).
 
 ## Expert tuning
 
