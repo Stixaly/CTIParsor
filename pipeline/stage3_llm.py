@@ -1778,7 +1778,7 @@ def enrich_chunk(
     # Mirrors Stage 3d for techniques: each LLM-extracted TTP must be supported by
     # a sentence describing its use, or it is dropped.  TTPs already corroborated
     # by a high-confidence semantic match are trusted and skipped.
-    # Only runs when ENABLE_TTP_VERIFICATION=true in .env (default: false).
+    # Runs unless ENABLE_TTP_VERIFICATION=false in .env (default: true).
     if result.ttps:
         from pipeline.stage3f_ttp_verify import verify_enabled as ttp_verify_enabled
         from pipeline.stage3f_ttp_verify import verify_ttps

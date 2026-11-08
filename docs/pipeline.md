@@ -186,7 +186,7 @@ The boxes below give each stage in detail, in execution order.
 │  each technique's USE (with its expected ATT&CK tactic); unsupported │
 │  techniques are dropped. Semantic-corroborated TTPs are trusted and │
 │  skipped, so cost tracks 3d (~1.4× calls — ADR-0011 Phase B).       │
-│  Enable: ENABLE_TTP_VERIFICATION=true in .env                       │
+│  On by default; ENABLE_TTP_VERIFICATION=false turns it off          │
 │  TTP_MODE=select (default): selects among the retrieved candidates  │
 │  and the LLM's own picks, exact quote checked by code; a failed     │
 │  call ships nothing (candidates go to review); an answer cut off    │
@@ -489,7 +489,7 @@ Second LLM call per chunk quotes the exact supporting sentence for every relatio
 
 ### 6. TTP self-verification (Stage 3f)
 
-The TTP analogue of Stage 3d (ADR-0011 Phase B). For each LLM-extracted technique, a second LLM call must quote the sentence describing that technique being *used* — annotated with the technique's expected ATT&CK tactic so a behaviour-vs-tactic mismatch is also rejected. Enable with `ENABLE_TTP_VERIFICATION` (recommended on — without it TTPs pass no evidence gate while relationships pass two).
+The TTP analogue of Stage 3d (ADR-0011 Phase B). For each LLM-extracted technique, a second LLM call must quote the sentence describing that technique being *used* — annotated with the technique's expected ATT&CK tactic so a behaviour-vs-tactic mismatch is also rejected. On by default; `ENABLE_TTP_VERIFICATION=false` turns it off (without it TTPs pass no evidence gate while relationships pass two).
 
 Only a **high-confidence** semantic match (cosine ≥ the model's high cut-point) waives the check. That floor matters: a *medium* match (≥ 0.48) is precisely the nearest-but-wrong tier the Phase A margin gate exists to suppress, so letting it grant a bypass would hand the weakest signal in the pipeline veto power over the strongest check. On a real 12-page report, 13 of 16 corroborators sat below the cut-point and were waving through techniques with no textual support at all.
 

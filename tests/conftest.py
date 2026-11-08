@@ -79,8 +79,9 @@ def _llm_provider_ready(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _llm_checks_at_their_defaults(monkeypatch):
-    """Stages 3d and 3f run as their defaults (off), as in CI, whatever the
-    developer's `.env` says: `pipeline.stage3_llm` loads it at import, and
+    """Stages 3d and 3f are pinned off in the suite (their code default is now
+    on), as in CI, whatever the developer's `.env` says: `pipeline.stage3_llm`
+    loads it at import, and
     both modules read their switch once.  `mock_llm` answers every call with
     the extraction JSON, which a verifier cannot parse — and an unparseable
     verification holds its claims for review (ADR-0082) — so with a local

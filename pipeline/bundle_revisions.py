@@ -189,6 +189,9 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "Stage 3d relationship verification and the Stage 3doc whole-document relation pass run by "
      "default (ENABLE_STIX_VERIFICATION, ENABLE_DOCUMENT_LEVEL_RELATIONS)",
      "extraction"),
+    ("84fa746", "2026-11-08",
+     "Stage 3f technique verification runs by default (ENABLE_TTP_VERIFICATION)",
+     "extraction"),
 )
 
 

@@ -18,7 +18,7 @@ OLD_SEMANTICS: list[tuple[str, bool, Callable[[str], bool], bool]] = [
     ("ENABLE_STIX_VERIFICATION", False,
      lambda v: v.lower() in ("true", "1", "yes"), True),
     ("ENABLE_TTP_VERIFICATION", False,
-     lambda v: v.lower() in ("true", "1", "yes"), False),
+     lambda v: v.lower() in ("true", "1", "yes"), True),
     # stage3e — the strictest of the seven: only the literal "true".
     ("ENABLE_CONSENSUS", False,
      lambda v: v.strip().lower() == "true", False),

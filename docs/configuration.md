@@ -280,7 +280,7 @@ LLM_TIMEOUT=120
 ENABLE_STIX_VERIFICATION=true
 STIX_VERIFY_MIN_RELS=1
 
-# Stage 3f — Self-verification of TTPs (ADR-0011 Phase B).  Recommended ON:
+# Stage 3f — Self-verification of TTPs (ADR-0011 Phase B).  On by default (`ENABLE_TTP_VERIFICATION=false` turns it off):
 # TTP analogue of 3d: each LLM-extracted technique must be supported by a quoted
 # sentence describing its use.  Only a HIGH-confidence semantic match waives the
 # check — a medium one (≥ 0.48) is the nearest-but-wrong tier and must not grant
