@@ -89,6 +89,9 @@ services:
       - cti-state:/app/state
       - ./.secrets/db_password:/run/secrets/db_password:ro
       - cti-cache:/app/cache
+      # Written by the `backup` service (profile backup); read here for the
+      # monitoring metrics (ADR-0097 item 18). Read-only: the app never writes it.
+      - cti-backup-status:/app/backup-status:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"   # reach an Ollama / LM Studio / vLLM on the host
     networks:
@@ -190,6 +193,51 @@ services:
     restart: "no"
     healthcheck:
       disable: true
+
+  # Scheduled backups (docs/docker.md, Data and backups; ADR-0097 item 19).
+  # Opt-in: `docker compose --profile backup up -d backup`. It runs the
+  # documented pg_dump and tar commands once a day at BACKUP_TIME (UTC), keeps
+  # the newest BACKUP_KEEP pairs in BACKUP_TARGET and writes the outcome to the
+  # status file in cti-backup-status (docker/backup/run.sh). It uses the same
+  # PostgreSQL image as `postgres` (pg_dump, tar, sh), so it adds no image of
+  # its own. It reads cti-state and never writes it. Nothing in this service
+  # stops app or worker: a report in progress can be in the archive half-written.
+  # BACKUP_TARGET has no default on purpose: a backup written to the state
+  # volume's own disk is no backup. Put it on another disk or an NFS share.
+  backup:
+    image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+    profiles: [backup]
+    entrypoint: ["/bin/sh", "/backup/run.sh"]
+    user: "70:70"                        # as `postgres`: the target directory must be writable by uid 70
+    environment:
+      CTI_DB_USER: ${CTI_DB_USER:-ctiparsor}
+      CTI_DB_NAME: ${CTI_DB_NAME:-ctiparsor}
+      BACKUP_TIME: ${BACKUP_TIME:-02:30}
+      BACKUP_KEEP: ${BACKUP_KEEP:-7}
+    volumes:
+      - cti-state:/app/state:ro
+      - ${BACKUP_TARGET:?set BACKUP_TARGET}:/backups
+      - cti-backup-status:/backup-status
+      - ./docker/backup:/backup:ro
+      - ./.secrets/db_password:/run/secrets/db_password:ro
+    tmpfs:
+      - /tmp
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend       # the database only: a backup needs no egress
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    restart: unless-stopped
 
   # The job store (ADR-0045) AND the detection-rule corpus (ADR-0053: no
   # more SQLite file on cti-state -- both stores are PostgreSQL now).  No
@@ -492,6 +540,9 @@ networks:
 volumes:
   cti-state: {}
   cti-cache: {}
+  # The backup service's status file (/backup-status/status.json), read by the
+  # app's /metrics at /app/backup-status. Holds no data of its own.
+  cti-backup-status: {}
   # PostgreSQL 18's cluster.  The 17 volume, `pg-data`, is no longer declared:
   # `docker compose down -v` leaves it alone until you delete it yourself.
   pg-data-18: {}
