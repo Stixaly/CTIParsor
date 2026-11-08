@@ -807,8 +807,7 @@
     "GET /api/jobs/{}/bundle/ledger response:200.entities": {
       "required": false,
       "types": [
-        "array",
-        "null"
+        "any"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.entities[]": {
@@ -818,56 +817,51 @@
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.entities[].entity_type": {
-      "required": true,
+      "required": false,
       "types": [
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.entities[].outcome": {
-      "required": true,
+      "required": false,
       "types": [
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.entities[].reason": {
       "required": false,
       "types": [
-        "null",
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.entities[].stix_id": {
       "required": false,
       "types": [
-        "null",
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.entities[].stix_name": {
       "required": false,
       "types": [
-        "null",
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.entities[].stix_type": {
       "required": false,
       "types": [
-        "null",
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.entities[].value": {
-      "required": true,
+      "required": false,
       "types": [
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.objects": {
       "required": false,
       "types": [
-        "null",
-        "object"
+        "any"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.objects{*}": {
@@ -877,16 +871,15 @@
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.objects{*}.origin": {
-      "required": true,
+      "required": false,
       "types": [
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.refused": {
       "required": false,
       "types": [
-        "array",
-        "null"
+        "any"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.refused[]": {
@@ -898,40 +891,37 @@
     "GET /api/jobs/{}/bundle/ledger response:200.refused[].origin": {
       "required": false,
       "types": [
-        "null",
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.refused[].reason": {
       "required": false,
       "types": [
-        "null",
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.refused[].relationship_type": {
-      "required": true,
+      "required": false,
       "types": [
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.refused[].source_ref": {
-      "required": true,
+      "required": false,
       "types": [
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.refused[].target_ref": {
-      "required": true,
+      "required": false,
       "types": [
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.relationships": {
       "required": false,
       "types": [
-        "array",
-        "null"
+        "any"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.relationships[]": {
@@ -943,87 +933,73 @@
     "GET /api/jobs/{}/bundle/ledger response:200.relationships[].changes": {
       "required": false,
       "types": [
-        "array",
-        "null"
-      ]
-    },
-    "GET /api/jobs/{}/bundle/ledger response:200.relationships[].changes[]": {
-      "required": true,
-      "types": [
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.relationships[].final_type": {
       "required": false,
       "types": [
-        "null",
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.relationships[].merged_with": {
       "required": false,
       "types": [
-        "null",
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.relationships[].outcome": {
-      "required": true,
+      "required": false,
       "types": [
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.relationships[].reason": {
       "required": false,
       "types": [
-        "null",
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.relationships[].relationship_type": {
-      "required": true,
+      "required": false,
       "types": [
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.relationships[].source_ref": {
       "required": false,
       "types": [
-        "null",
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.relationships[].source_value": {
-      "required": true,
+      "required": false,
       "types": [
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.relationships[].stix_id": {
       "required": false,
       "types": [
-        "null",
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.relationships[].target_ref": {
       "required": false,
       "types": [
-        "null",
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.relationships[].target_value": {
-      "required": true,
+      "required": false,
       "types": [
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.removed": {
       "required": false,
       "types": [
-        "array",
-        "null"
+        "any"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.removed[]": {
@@ -1033,42 +1009,39 @@
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.removed[].kind": {
-      "required": true,
+      "required": false,
       "types": [
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.removed[].name": {
       "required": false,
       "types": [
-        "null",
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.removed[].reason": {
-      "required": true,
+      "required": false,
       "types": [
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.removed[].replaced_by": {
       "required": false,
       "types": [
-        "null",
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.removed[].stix_id": {
-      "required": true,
+      "required": false,
       "types": [
-        "string"
+        "object"
       ]
     },
     "GET /api/jobs/{}/bundle/ledger response:200.version": {
       "required": false,
       "types": [
-        "integer",
-        "null"
+        "any"
       ]
     },
     "GET /api/jobs/{}/coverage": {
