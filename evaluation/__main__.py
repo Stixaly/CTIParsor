@@ -24,6 +24,7 @@ default, `--attack-release` for another.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -833,13 +834,17 @@ def cmd_support_sample(args) -> None:
 
 # ── in-house set ─────────────────────────────────────────────────────────────
 
-def _run_file(path: Path, disabled: set[str]):
+def _run_file(path: Path, disabled: set[str], output_path: str | None = None):
     from pipeline.orchestrator import Document, RunOptions, run_document
 
     # Stage 4 stays on: relationships are scored as the bundle ships them,
-    # graph completion (4b) and long-distance inference (4c) included.
-    options = RunOptions.from_env(disabled={"5"} | disabled, required={"3"})
-    return run_document(Document(file_path=str(path), original_filename=path.name), options)
+    # graph completion (4b) and long-distance inference (4c) included.  Stage 5
+    # runs only with an output path: the bundle written there is the one scored
+    # by `inhouse-score --from bundle`.
+    options = RunOptions.from_env(disabled=disabled if output_path else {"5"} | disabled,
+                                  required={"3"})
+    return run_document(Document(file_path=str(path), original_filename=path.name,
+                                 output_path=output_path), options)
 
 
 def cmd_preannotate(args) -> None:
@@ -866,23 +871,85 @@ def cmd_inhouse_run(args) -> None:
     run_dir = OUT / "inhouse-runs" / args.name
     _stay_on_the_release(run_dir / "run.json", args.name)
     if not (run_dir / "run.json").exists():
-        _write(run_dir / "run.json", {"name": args.name, "disabled": sorted(disabled),
+        _write(run_dir / "run.json", {"name": args.name, "format": 2, "disabled": sorted(disabled),
                                       "manifest": build_manifest()})
     for d in inhouse.load():
         out = run_dir / "docs" / f"{d.doc_id}.json"
         if out.exists():
             continue
         t0 = time.monotonic()
+        bundle_path = run_dir / "bundles" / f"{d.doc_id}.json"
+        # No file of an earlier attempt may be recorded as this document's bundle.
+        bundle_path.unlink(missing_ok=True)
+        bundle_path.with_stem(bundle_path.stem + "_invalid").unlink(missing_ok=True)
         try:
-            result = _run_file(d.source, disabled)
+            result = _run_file(d.source, disabled, str(bundle_path))
+            # Stage 5 writes `<id>_invalid.json` when the schemas refuse the bundle.
+            written = next((p for p in (bundle_path, bundle_path.with_stem(bundle_path.stem + "_invalid"))
+                            if p.is_file()), None)
             record = {"doc_id": d.doc_id, "seconds": round(time.monotonic() - t0, 1),
-                      "stages": result.stage_report(), **_predictions(result)}
+                      "stages": result.stage_report(), **_predictions(result),
+                      "validation": result.validation,
+                      "bundle_file": written.relative_to(run_dir).as_posix() if written else None,
+                      "bundle_sha256": hashlib.sha256(written.read_bytes()).hexdigest() if written else None}
         except attack_data.UnknownAttackRelease:
             raise   # the setting is wrong for the whole run, not for this document
         except Exception as exc:
             record = {"doc_id": d.doc_id, "error": f"{type(exc).__name__}: {exc}"}
         _write(out, record)
         print(f"{d.doc_id}: {'ERROR' if 'error' in record else 'ok'}", flush=True)
+
+
+def _bundle_projection(run_dir: Path, rec: dict, run_format: int) -> tuple[dict | None, str]:
+    """The projection of the bundle a run recorded for one document, or the
+    reason it cannot be scored."""
+    from evaluation import bundle as bundle_eval
+
+    if "error" in rec:
+        return None, "processing error"
+    if run_format < 2 or "bundle_file" not in rec:
+        return None, "no bundle recorded (format-1 run?)"
+    verdict = rec.get("validation")
+    if verdict != "validated":
+        return None, f"verdict {verdict if verdict in ('invalid', 'unverified') else 'unknown'}"
+    root = run_dir.resolve()
+    name = rec["bundle_file"]
+    path = (root / name).resolve() if isinstance(name, str) and name else None
+    if path is None or not path.is_relative_to(root) or not path.is_file():
+        return None, "bundle missing"
+    raw = path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != rec.get("bundle_sha256"):
+        return None, "bundle changed since the run (sha256)"
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, RecursionError):
+        return None, "bundle is not JSON"
+    try:
+        projection = bundle_eval.project(parsed)
+    except (ValueError, TypeError, AttributeError, RecursionError):
+        return None, "bundle malformed"
+    unresolved = [p for p in projection["problems"] if p.startswith("unresolved reference")]
+    if len(unresolved) < len(projection["problems"]):
+        return None, f"bundle malformed: {projection['problems'][0]}"
+    if unresolved:
+        return None, f"unresolved references: {len(unresolved)}"
+    return projection, ""
+
+
+def _doc_counts(s: dict) -> dict:
+    """One document's score as plain dicts, for the report's `per_document`."""
+    out: dict = {"layers": s["layers"]}
+    if "iocs" in s:
+        out["iocs"] = s["iocs"].as_dict()
+        out["observables"] = s["observables"]
+    if "entities" in s:
+        out["entities"] = {t: c.as_dict() for t, c in sorted(s["entities"].items())}
+    if "techniques" in s:
+        out["techniques"] = s["techniques"].technique.as_dict()
+    if "relations" in s:
+        out["relations"] = s["relations"]["strict"].as_dict()
+    out["negatives"] = s["negatives"]
+    return out
 
 
 def cmd_inhouse_score(args) -> None:
@@ -892,7 +959,12 @@ def cmd_inhouse_score(args) -> None:
     out.  A gold report the run recorded as an error (`documents_failed`) or has
     no result for (`documents_missing`) is named in the report; then, or when no
     report was scored, the command exits non-zero once the report is written and
-    printed."""
+    printed.
+
+    `--from bundle` scores the validated bundle the run wrote (evaluation.bundle)
+    instead of the runner's predictions; a report whose bundle cannot be scored
+    is named in `documents_unscored` with the reason."""
+    from_bundle = args.source == "bundle"
     run_dir = OUT / "inhouse-runs" / args.name
     meta = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
     canonical, _ = _canonical_fn(run_release(meta))
@@ -902,8 +974,11 @@ def cmd_inhouse_score(args) -> None:
     obs_cases = 0
     obs_as_indicator: int | None = 0
     per_doc = {}
+    per_document = {}
     recorded: set[str] = set()
     failed: list[str] = []
+    unscored: dict[str, str] = {}
+    entities_scored = False
     for p in sorted((run_dir / "docs").glob("*.json")):
         pred = json.loads(p.read_text(encoding="utf-8"))
         recorded.add(p.stem)
@@ -912,9 +987,21 @@ def cmd_inhouse_score(args) -> None:
             continue   # not a gold report (a draft, a folder since removed): not expected
         if "error" in pred:
             failed.append(p.stem)
+        if from_bundle:
+            projection, reason = _bundle_projection(run_dir, pred, int(meta.get("format", 1)))
+            if projection is None:
+                unscored[p.stem] = reason
+                continue
+            s = inhouse.score_bundle(d, projection, canonical)
+        elif "error" in pred:
             continue
-        s = inhouse.score(d, pred, canonical)
+        else:
+            s = inhouse.score(d, pred, canonical)
         per_doc[d.doc_id] = s
+        per_document[d.doc_id] = _doc_counts(s)
+        if from_bundle:
+            per_document[d.doc_id]["unsupported_patterns"] = s["unsupported_patterns"]
+            per_document[d.doc_id]["validation"] = pred["validation"]
         for layer in ("iocs",):
             if layer in s:
                 totals[layer] = totals.get(layer, metrics.Counts()) + s[layer]
@@ -922,6 +1009,8 @@ def cmd_inhouse_score(args) -> None:
             totals["techniques"] = totals.get("techniques", metrics.Counts()) + s["techniques"].technique
         if "relations" in s:
             totals["relations"] = totals.get("relations", metrics.Counts()) + s["relations"]["strict"]
+        if "entities" in s:
+            entities_scored = True
         for et, c in s.get("entities", {}).items():
             totals[f"entity:{et}"] = totals.get(f"entity:{et}", metrics.Counts()) + c
         negatives[0] += s["negatives"]["cases"]
@@ -932,18 +1021,32 @@ def cmd_inhouse_score(args) -> None:
             # one with observables but no recorded bundle makes the total unknown.
             n = s["observables"]["as_indicator"] if s["observables"]["cases"] else 0
             obs_as_indicator = None if n is None or obs_as_indicator is None else obs_as_indicator + n
+    if entities_scored:
+        # The layer is exhaustive over its types: one with nothing in it is a row of zeros.
+        for et in sorted(inhouse.ENTITY_LAYER_TYPES):
+            totals.setdefault(f"entity:{et}", metrics.Counts())
     failed.sort()
     missing = sorted(set(docs) - recorded)
-    report = {"run": args.name, "documents": len(per_doc),
-              "documents_failed": failed, "documents_missing": missing,
-              "micro": {k: v.as_dict() for k, v in sorted(totals.items())},
-              "negatives": {"cases": negatives[0], "violated": negatives[1]},
-              "observables": {"cases": obs_cases, "as_indicator": obs_as_indicator}}
-    _write(run_dir / "score.json", report)
+    report: dict = {"format": "inhouse-score/2", "source": args.source, "run": args.name,
+                    "run_manifest": meta.get("manifest"),
+                    "gold": {i: hashlib.sha256((d.source.parent / "gold.json").read_bytes()).hexdigest()
+                             for i, d in sorted(docs.items())},
+                    "documents": len(per_doc),
+                    "documents_failed": failed, "documents_missing": missing}
+    if from_bundle:
+        report["documents_unscored"] = dict(sorted(unscored.items()))
+    report |= {"micro": {k: v.as_dict() for k, v in sorted(totals.items())},
+               "negatives": {"cases": negatives[0], "violated": negatives[1]},
+               "observables": {"cases": obs_cases, "as_indicator": obs_as_indicator},
+               "per_document": per_document}
+    score_file = run_dir / ("score-bundle.json" if from_bundle else "score.json")
+    _write(score_file, report)
     print(json.dumps(report, indent=2), flush=True)
     problems: list[str] = []
     if failed:
         problems.append(f"failed on {', '.join(failed)}")
+    if unscored:
+        problems.append("not scored: " + ", ".join(f"{i} ({r})" for i, r in sorted(unscored.items())))
     if missing:
         problems.append(f"no result for {', '.join(missing)}")
     if not per_doc:
@@ -951,7 +1054,69 @@ def cmd_inhouse_score(args) -> None:
                         else "no document scored: no report has a source.* file and a gold.json with status gold")
     if problems:
         sys.exit(f"{args.name}: incomplete in-house score, {'; '.join(problems)} "
-                 f"(report written to {run_dir / 'score.json'})")
+                 f"(report written to {score_file})")
+
+
+_COMPARE_METRICS = ("precision", "recall", "f1")
+
+
+def _delta(a: dict, b: dict) -> dict:
+    return {m: {"a": a[m], "b": b[m], "delta": round(b[m] - a[m], 4)} for m in _COMPARE_METRICS}
+
+
+def _layer_rows(entry: dict) -> dict[str, dict]:
+    """A `per_document` entry as {layer: counts}, entity types as `entity:<type>`."""
+    rows = {k: v for k, v in entry.items() if k in ("iocs", "techniques", "relations")}
+    rows.update({f"entity:{t}": c for t, c in entry.get("entities", {}).items()})
+    return rows
+
+
+def _micro_common(pa: dict, pb: dict) -> dict:
+    """The micro totals over the documents scored on both sides only, from `per_document`."""
+    sums: dict[str, list[metrics.Counts]] = {}
+    for doc_id in set(pa) & set(pb):
+        ra, rb = _layer_rows(pa[doc_id]), _layer_rows(pb[doc_id])
+        for k in set(ra) & set(rb):
+            ca, cb = (metrics.Counts(r[k]["tp"], r[k]["fp"], r[k]["fn"]) for r in (ra, rb))
+            tot = sums.setdefault(k, [metrics.Counts(), metrics.Counts()])
+            tot[0], tot[1] = tot[0] + ca, tot[1] + cb
+    return {k: _delta(a.as_dict(), b.as_dict()) for k, (a, b) in sorted(sums.items())}
+
+
+def _refuse(message: str) -> None:
+    print(message, file=sys.stderr)
+    sys.exit(2)
+
+
+def cmd_inhouse_compare(args) -> None:
+    """Two `inhouse-score` reports of the same gold, side by side.  Refuses (exit
+    2) two reports that do not measure the same thing: another format, another
+    source (run / bundle), or a gold that changed between them.  Writes nothing."""
+    a = json.loads(Path(args.a).read_text(encoding="utf-8"))
+    b = json.loads(Path(args.b).read_text(encoding="utf-8"))
+    if a.get("format") != "inhouse-score/2" or b.get("format") != "inhouse-score/2":
+        _refuse(f"both reports must have format inhouse-score/2 (got {a.get('format')!r}, {b.get('format')!r})")
+    if a.get("source") != b.get("source"):
+        _refuse(f"the reports score different things: source {a.get('source')!r} vs {b.get('source')!r}")
+    ga, gb = a.get("gold", {}), b.get("gold", {})
+    differ = sorted(i for i in set(ga) | set(gb) if ga.get(i) != gb.get(i))
+    if differ:
+        _refuse("the gold differs between the reports: " + ", ".join(
+            f"{i} ({'only in A' if i not in gb else 'only in B' if i not in ga else 'hash differs'})"
+            for i in differ))
+    pa, pb = a.get("per_document", {}), b.get("per_document", {})
+    micro_a, micro_b = a.get("micro", {}), b.get("micro", {})
+    out: dict = {"source": a["source"], "run_a": a.get("run"), "run_b": b.get("run"),
+                 "micro": {k: _delta(micro_a[k], micro_b[k]) for k in sorted(set(micro_a) & set(micro_b))},
+                 "micro_common": _micro_common(pa, pb),
+                 "micro_comparable": set(pa) == set(pb),
+                 "micro_one_side_only": sorted(set(micro_a) ^ set(micro_b)),
+                 "per_document": {}, "only_in_a": sorted(set(pa) - set(pb)),
+                 "only_in_b": sorted(set(pb) - set(pa))}
+    for doc_id in sorted(set(pa) & set(pb)):
+        ra, rb = _layer_rows(pa[doc_id]), _layer_rows(pb[doc_id])
+        out["per_document"][doc_id] = {k: _delta(ra[k], rb[k]) for k in sorted(set(ra) & set(rb))}
+    print(json.dumps(out, indent=2))
 
 
 def cmd_hard_docs(args) -> None:
@@ -1108,7 +1273,14 @@ def main() -> None:
 
     p = sub.add_parser("inhouse-score")
     p.add_argument("--name", required=True)
+    p.add_argument("--from", dest="source", choices=("run", "bundle"), default="run",
+                   help="score the runner's predictions (default) or the bundle the run wrote")
     p.set_defaults(fn=cmd_inhouse_score)
+
+    p = sub.add_parser("inhouse-compare")
+    p.add_argument("a", help="score.json or score-bundle.json of the reference run")
+    p.add_argument("b", help="the same of the candidate run")
+    p.set_defaults(fn=cmd_inhouse_compare)
 
     p = sub.add_parser("agreement")
     p.add_argument("a")

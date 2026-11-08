@@ -99,3 +99,34 @@ scored, it then says why on stderr and exits with code 1. `inhouse-run` with
 the same `--name` and `--disable` runs the missing reports; it skips a report
 it already recorded, even as an error, so delete
 `data/eval/inhouse-runs/<name>/docs/<doc_id>.json` to run a failed one again.
+
+### Scoring the exported bundle
+
+`inhouse-run` keeps Stages 4 and 5 on and writes each report's bundle to
+`data/eval/inhouse-runs/<name>/bundles/<doc_id>.json` (`<doc_id>_invalid.json`
+when the schemas refuse it). The record keeps `validation`, `bundle_file` and
+`bundle_sha256`; `run.json` has `"format": 2`.
+
+```bash
+python -m evaluation inhouse-score --name inhouse-2026-11 --from bundle
+# data/eval/inhouse-runs/inhouse-2026-11/score-bundle.json
+python -m evaluation inhouse-compare \
+    data/eval/inhouse-runs/<old>/score-bundle.json \
+    data/eval/inhouse-runs/<new>/score-bundle.json
+```
+
+`--from run` is the default and scores the runner's predictions, as before
+(`score.json`). `--from bundle` scores the bundle through
+`evaluation/bundle.py`, which reads it and never executes a pattern. A report
+is scored only if the run recorded no error, the verdict is `validated`, the
+bundle file is in the run's folder with the recorded sha256, it reads as JSON,
+and no reference in it is unresolved. Any other report is named in
+`documents_unscored` with its reason and the command exits non-zero. A
+format-1 run has no bundle.
+
+`inhouse-compare A B` takes two score files. It exits 2 if their format,
+source (`run` or `bundle`) or gold hashes differ. Otherwise it prints
+precision, recall and F1 of A and B and the delta, by layer and by document,
+with `micro_common` (documents scored on both sides) and `micro_comparable`.
+Both sides must have been run: comparing with the previous release means
+running both versions. Rationale: ADR-0096.

@@ -9,6 +9,20 @@ theme.
 
 ## [Unreleased]
 
+- **The in-house evaluation scores the exported bundle** (ADR-0096, ADR-0094
+  item 6). `python -m evaluation inhouse-run` now keeps Stage 5 on and writes
+  each report's bundle to `data/eval/inhouse-runs/<name>/bundles/` with its
+  verdict and sha256 (`run.json` gains `"format": 2`).
+  `inhouse-score --from bundle` scores that bundle against the gold; a report
+  with an error, a verdict other than `validated`, a missing or altered file
+  or an unresolved reference is listed in `documents_unscored` and the
+  command exits non-zero. `inhouse-compare A B` prints the per-layer and
+  per-document delta of two scores and refuses scores of another format,
+  source or gold. `--from run` stays the default with its former meaning.
+  `--from run` scores keep their values; its `micro` now lists the four
+  entity types, zeros included. No run on the 8 gold reports has been made
+  with this code yet.
+
 ## [0.6.0] - 2026-11-08
 
 A minor release under ADR-0085 §8 because it changes bundle output: a

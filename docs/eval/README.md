@@ -72,7 +72,8 @@ October 2026 audit's CLI defect (detector names dropped at Stage 4, fixed by
 `pipeline/named_entities.py`) never touched these numbers, and the entity
 precision reported here is the union of the detectors before Stage 4 — which
 is neither the CLI's bundle nor the worker's. `inhouse-run` is the exception:
-Stage 4 stays on and relationships are scored as the bundle ships them.
+Stages 4 and 5 stay on, it writes each report's bundle, and
+`inhouse-score --from bundle` scores that bundle (ADR-0096).
 
 ## Running and scoring
 
@@ -111,7 +112,15 @@ python -m evaluation hard-docs <folder> [<folder> ...]
 
 # the in-house set: preannotate, inhouse-run, inhouse-score and agreement are in
 # docs/eval/inhouse-set.md (commands) and docs/eval/annotation-guide.md
+python -m evaluation inhouse-run --name inhouse-2026-11        # writes bundles/
+python -m evaluation inhouse-score --name inhouse-2026-11 --from bundle
+python -m evaluation inhouse-compare <score-bundle.json A> <score-bundle.json B>
 ```
+
+`inhouse-score --from bundle` scores the validated bundle of each report, and
+names every report it cannot score (exit non-zero). `--from run` (default)
+keeps its former meaning. `inhouse-compare` refuses two scores of another
+format, source or gold. Details: [inhouse-set.md](inhouse-set.md), ADR-0096.
 
 `retrieval` reports, per corpus × retriever × keyword gate: recall per
 passage (the technique is in the top-k of a passage carrying one of its
