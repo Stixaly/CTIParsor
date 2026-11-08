@@ -57,6 +57,14 @@ theme.
   logged where `pg_dump` is. The function is removed. Back up with `pg_dump`
   and the `cti-state` archive, as docs/docker.md describes.
 
+- **Bounds** (ADR-0097 work item 20). `GET /api/jobs` takes optional
+  `limit` and `cursor` (keyset pages, `X-Next-Cursor`); without them the list
+  is unchanged. A job whose lease is lost more than `JOB_MAX_ATTEMPTS` times
+  (default 3) is failed as "quarantined" instead of requeued; a clean worker
+  stop does not count. Uploads and ingests are refused with 507 when less
+  than `UPLOAD_MIN_FREE_MB` (default 1024) is free. Migration v0017 adds
+  `jobs.attempts`.
+
 - **TTP self-verification (Stage 3f) is on by default in the code.** It was
   already `ENABLE_TTP_VERIFICATION=true` in `.env.example`; the code's fallback
   was `false`, so a process started without `.env` did not run it. Cost: about
