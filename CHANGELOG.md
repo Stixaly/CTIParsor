@@ -28,6 +28,13 @@ theme.
   `run.json` (`embedding`), and refuse to resume a run on another loaded
   model. An analyst's run goes on as before. No bundle changes.
 
+- **Scheduled backups** (ADR-0097 work item 19): an opt-in `backup`
+  Compose profile runs the documented `pg_dump` and `cti-state` archive daily
+  at `BACKUP_TIME` (UTC, default 02:30) to `BACKUP_TARGET`, checks both files,
+  keeps the newest `BACKUP_KEEP` pairs (default 7), and writes a status file
+  the app reads (`BACKUP_STATUS_FILE`). Without `BACKUP_TARGET` the service
+  refuses to back up; the rest of the stack starts as before.
+
 - **The API's responses are described in the OpenAPI schema** (ADR-0094
   item 1's gap). Every JSON operation declares a response model, with
   `extra="allow"` and `response_model_exclude_unset=True`: a field the model
