@@ -16,6 +16,12 @@ from pydantic import BaseModel, field_validator
 
 import pipeline.overrides as overrides
 from api.db import _lock, get_conn, now_iso
+from api.response_models.overrides import (
+    OverrideDeleted,
+    OverrideList,
+    OverridePromotion,
+    OverrideRow,
+)
 from api.routes._common import storable_text
 from pipeline.overrides import ACTIONS, GAZETTEER_TYPES, NAMED_TYPES, STATUSES
 from pipeline.promotion import (
@@ -69,7 +75,7 @@ def _check_rule(entity_type: str, action: str) -> None:
         raise HTTPException(400, f"entity_type for '{action}' must be one of: {', '.join(sorted(allowed))}")
 
 
-@router.get("")
+@router.get("", response_model=OverrideList)
 def get_overrides(status: str | None = Query(None), action: str | None = Query(None)) -> dict:
     if status is not None and status not in STATUSES:
         raise HTTPException(400, f"status must be one of: {', '.join(STATUSES)}")
@@ -80,7 +86,7 @@ def get_overrides(status: str | None = Query(None), action: str | None = Query(N
     return {"enabled": overrides.overrides_enabled(), "rows": rows}
 
 
-@router.post("/promote")
+@router.post("/promote", response_model=OverridePromotion)
 def promote(body: PromoteIn) -> dict:
     if min(body.min_rejections, body.min_accepts, body.min_jobs) < 1:
         raise HTTPException(400, "'min_rejections', 'min_accepts' and 'min_jobs' must be positive integers")
@@ -96,7 +102,7 @@ def promote(body: PromoteIn) -> dict:
     return {"applied": body.apply, "written": written, "candidates": [c.as_dict() for c in candidates]}
 
 
-@router.post("")
+@router.post("", response_model=OverrideRow)
 def create_override(body: OverrideIn) -> dict:
     _check_rule(body.entity_type, body.action)
     if not body.term.strip():
@@ -112,7 +118,7 @@ def create_override(body: OverrideIn) -> dict:
     return row
 
 
-@router.patch("/{override_id}")
+@router.patch("/{override_id}", response_model=OverrideRow)
 def patch_override(override_id: str, body: StatusIn) -> dict:
     if body.status not in STATUSES:
         raise HTTPException(400, f"status must be one of: {', '.join(STATUSES)}")
@@ -125,7 +131,7 @@ def patch_override(override_id: str, body: StatusIn) -> dict:
     return row
 
 
-@router.delete("/{override_id}")
+@router.delete("/{override_id}", response_model=OverrideDeleted)
 def remove_override(override_id: str) -> dict:
     with _lock:
         with get_conn() as conn:

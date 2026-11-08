@@ -5,6 +5,12 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from api.db import _lock, get_conn, now_iso, transaction
+from api.response_models.entities import (
+    EntityAcceptPending,
+    EntityBulkResult,
+    EntityDeleted,
+    EntityOut,
+)
 from api.routes._common import require_job, storable_text
 from models.schemas import EntityType
 from pipeline import baseline_stix, decisions
@@ -85,7 +91,7 @@ def _check_origin(origin: str) -> None:
         )
 
 
-@router.get("")
+@router.get("", response_model=list[EntityOut])
 def list_entities(job_id: str):
     with get_conn() as conn:
         require_job(conn, job_id)
@@ -96,7 +102,7 @@ def list_entities(job_id: str):
     return [_row_to_dict(r) for r in rows]
 
 
-@router.post("")
+@router.post("", response_model=EntityOut)
 def create_entity(job_id: str, body: EntityCreate):
     if body.entity_type not in VALID_TYPES:
         raise HTTPException(400, f"Unknown entity_type '{body.entity_type}'")
@@ -121,7 +127,7 @@ def create_entity(job_id: str, body: EntityCreate):
             "held_reason": None, "enrichment_status": None, "baseline_stix_id": None}
 
 
-@router.patch("/{entity_id}", responses=_IMPORTED_ROW)
+@router.patch("/{entity_id}", response_model=EntityOut, responses=_IMPORTED_ROW)
 def update_entity(job_id: str, entity_id: str, patch: EntityPatch):
     _check_origin(patch.decision_origin)
     with get_conn() as conn:
@@ -196,7 +202,7 @@ def update_entity(job_id: str, entity_id: str, patch: EntityPatch):
     return _row_to_dict(updated)
 
 
-@router.post("/accept-pending")
+@router.post("/accept-pending", response_model=EntityAcceptPending)
 def accept_all_pending(job_id: str):
     """Accept all entities whose accepted field is NULL (unreviewed) in one query."""
     with get_conn() as conn:
@@ -210,7 +216,7 @@ def accept_all_pending(job_id: str):
     return {"accepted": accepted}
 
 
-@router.post("/bulk")
+@router.post("/bulk", response_model=EntityBulkResult)
 def bulk_update_entities(job_id: str, body: BulkPatch):
     """
     Bulk accept / reject / reset all entities of a given type in one SQL query.
@@ -272,7 +278,7 @@ def bulk_update_entities(job_id: str, body: BulkPatch):
     }
 
 
-@router.delete("/{entity_id}", responses=_IMPORTED_ROW)
+@router.delete("/{entity_id}", response_model=EntityDeleted, responses=_IMPORTED_ROW)
 def delete_entity(job_id: str, entity_id: str):
     with _lock:
         with get_conn() as conn:
