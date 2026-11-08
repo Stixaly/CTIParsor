@@ -34,7 +34,8 @@ from typing import TYPE_CHECKING, Any
 
 from api.logging_config import get_logger
 from models.schemas import EntityType, RawEntity
-from pipeline import attack_data
+from pipeline import attack_data, egress
+from pipeline.egress import EgressDecision
 from pipeline.env_flags import env_bool, env_int
 from pipeline.temporal import DocumentTime
 
@@ -509,6 +510,9 @@ def build_bundle(
     from pipeline.stage4_stix_mapping import build_stix_bundle
     from pipeline.stage4c_long_distance import default_long_distance_inferer
 
+    # The inferer sends report text to the Stage 3 provider: TLP decides first.
+    long_distance = long_distance and text_egress(tlp_level).allowed
+
     return build_stix_bundle(
         entities, llm_result, report_name,
         report_text=report_text,
@@ -558,6 +562,14 @@ def stage3_can_run(opts: RunOptions) -> bool:
     return "3" not in opts.disabled and _provider_ready()
 
 
+def text_egress(tlp_level: str | None, provider: str | None = None) -> EgressDecision:
+    """May a report marked `tlp_level` (None = the default marking) go to the Stage 3
+    provider, or to `provider` (ADR-0097)?  Stage 3 and everything that sends the
+    report's text follow it; `stage3_can_run` only says the provider is configured."""
+    from pipeline.stage3_llm import _PROVIDER
+    return egress.decide(egress.effective_tlp(tlp_level), provider or _PROVIDER)
+
+
 class _Run:
     """State of one run_document() call; one method per stage."""
 
@@ -566,6 +578,8 @@ class _Run:
         self.opts = options
         self.hooks = hooks
         self.r = RunResult(document=document)
+        # May the report go to the Stage 3 provider?  Stage 3 and what follows it obey it.
+        self.text_decision = text_egress(document.tlp_level)
 
     # -- bookkeeping ---------------------------------------------------------
 
@@ -692,7 +706,7 @@ class _Run:
         if pdf is None:
             self.record("1f", SKIPPED, "no PDF")
             return
-        from pipeline.vlm import follows_text, get_backend, skip_reason
+        from pipeline.vlm import follows_text, get_backend, skip_reason, vision_provider_name
         if "3" in self.opts.disabled and follows_text():
             # Under `auto` a figure goes where the text goes, and no text goes
             # anywhere: `--no-llm` sends nothing.  Decided before get_backend(),
@@ -700,9 +714,20 @@ class _Run:
             # the operator's explicit choice and is not asked.
             self.record("1f", SKIPPED, "auto: Stage 3 is disabled, so figures stay local")
             return
+        # Decided before get_backend(), whose probe may already send a request.
+        # Under `auto` a figure goes where the text goes.
+        # A setting with no backend (none, unknown, no vision provider) sends nothing:
+        # get_backend() says why.
+        named = vision_provider_name()
+        decision = (egress.decide(egress.effective_tlp(self.doc.tlp_level), named)
+                    if named else None)
+        egress_note = {"egress": decision.record()} if decision else None
+        if decision is not None and not decision.allowed:
+            self.record("1f", SKIPPED, decision.reason, details=egress_note)
+            return
         vision = get_backend()
         if vision is None:
-            self.record("1f", SKIPPED, skip_reason() or "no vision backend")
+            self.record("1f", SKIPPED, skip_reason() or "no vision backend", details=egress_note)
             return
         from pipeline.figure_store import SqliteReadCache
         from pipeline.stage1f_figures import inject_append, map_verbatim, read_figures
@@ -728,11 +753,11 @@ class _Run:
             # provider and model read the figures depends on VISION_PROVIDER
             # and LLM_PROVIDER together.
             self.record("1f", RAN, f"{vision.name}/{vision.model}", time.monotonic() - t0,
-                        figures=len(reads), read=kept)
+                        details=egress_note, figures=len(reads), read=kept)
         except Exception as exc:
             # A figure that cannot be read must never cost the report.
             self.r.figure_spans = []
-            self.record("1f", FAILED, str(exc), time.monotonic() - t0)
+            self.record("1f", FAILED, str(exc), time.monotonic() - t0, details=egress_note)
 
     def extract(self) -> None:
         from pipeline import ner_precision
@@ -886,7 +911,9 @@ class _Run:
         })
 
     def _stage3_can_run(self) -> bool:
-        return stage3_can_run(self.opts)
+        """Stage 3 will run for this report: enabled, ready, and allowed to receive it
+        (ADR-0097).  Stage 2c's mode follows it."""
+        return self.text_decision.allowed and stage3_can_run(self.opts)
 
     def enrich(self) -> None:
         from pipeline.stage3_llm import (
@@ -896,8 +923,14 @@ class _Run:
         )
 
         results: list[LLMEnrichmentResult] = []
-        if self.gate("3", _provider_ready,
-                     f"LLM provider not ready ({provider_label()})"):
+        if "3" not in self.opts.disabled and not self.text_decision.allowed:
+            # Refused before any call: nothing of the report reaches the provider.
+            self.record("3", SKIPPED, self.text_decision.reason,
+                        details={"egress": self.text_decision.record()})
+            for sid in ("3d", "3f", "3e", "3doc"):
+                self.record(sid, SKIPPED, "Stage 3 did not run")
+        elif self.gate("3", _provider_ready,
+                       f"LLM provider not ready ({provider_label()})"):
             results = self._chunks_to_llm()
             self._document_relations(results)
         else:
@@ -936,6 +969,12 @@ class _Run:
         r, hooks, opts = self.r, self.hooks, self.opts
         chunks, total = r.chunks, len(r.chunks)
         consensus = opts.switch("3e", opts.consensus, consensus_enabled)
+        # The second provider receives the text too: a refusal turns consensus off.
+        consensus_refusal = ""
+        if consensus:
+            second = text_egress(self.doc.tlp_level, consensus_provider())
+            if not second.allowed:
+                consensus, consensus_refusal = False, second.reason
         verify_rels = opts.switch("3d", opts.verify_relationships, rel_verify_enabled)
         verify_ttps = opts.switch("3f", opts.verify_ttps, ttp_verify_enabled)
 
@@ -1115,10 +1154,12 @@ class _Run:
             # "nothing found", and must not read as such.
             last = f" — last error: {stats_after['last_error']}" if d.get("provider_failures") else ""
             self.record("3", FAILED, f"no usable LLM answer in {attempted} extraction calls: "
-                        f"{detail}{last}", time.monotonic() - t0, **counts)
+                        f"{detail}{last}", time.monotonic() - t0,
+                        details={"egress": self.text_decision.record()}, **counts)
         else:
             self.record("3", RAN, f"{unusable} of {attempted} extraction calls unusable: {detail}"
-                        if unusable else "", time.monotonic() - t0, **counts)
+                        if unusable else "", time.monotonic() - t0,
+                        details={"egress": self.text_decision.record()}, **counts)
         select = opts.ttp_mode == "select"
         for sid, on, prefix in (("3d", verify_rels, "rel_verification"),
                                 ("3f", verify_ttps, "ttp_selection" if select else "ttp_verification")):
@@ -1172,7 +1213,7 @@ class _Run:
                         f"{unanswered} chunks without a usable second answer, kept as is" if unanswered else "",
                         0.0, chunks=doubled, unanswered=unanswered)
         else:
-            self.record("3e", SKIPPED, "disabled")
+            self.record("3e", SKIPPED, consensus_refusal or "disabled")
         # Results in chunk order; a skipped chunk contributes an empty result.
         return [chunk_results.get(i, LLMEnrichmentResult()) for i in range(1, total + 1)]
 
@@ -1349,6 +1390,8 @@ class _Run:
             self.record("4c", SKIPPED, "disabled")
         elif not ld_policy:
             self.record("4c", SKIPPED, "not enabled by the relationship policy")
+        elif not self.text_decision.allowed:
+            self.record("4c", SKIPPED, self.text_decision.reason)
         else:
             self.record("4c", RAN, "", 0.0, long_distance_added=comp.get("long_distance_added", 0))
         self.hooks.progress("stage", {

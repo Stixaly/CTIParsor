@@ -7,7 +7,6 @@ Covers:
   - Empty LLM response → empty result, no exception
   - Transient errors (timeout) → propagate for tenacity retry
   - _provider_ready() guards short-circuit correctly
-  - enrich_all_chunks merges multiple chunk results
 """
 from __future__ import annotations
 
@@ -26,7 +25,6 @@ from pipeline.stage3_llm import (
     _merge_results,
     _normalize_llm_json,
     _sanitize_text_for_prompt,
-    enrich_all_chunks,
     enrich_chunk,
 )
 
@@ -229,22 +227,6 @@ class TestDedupNames:
         result = _dedup_names(["", "  ", "APT29"])
         assert "" not in result
         assert "APT29" in result
-
-
-# ── enrich_all_chunks ──────────────────────────────────────────────────────────
-
-class TestEnrichAllChunks:
-    def test_returns_merged_result(self, mock_llm, sample_cti_text):
-        chunks = [sample_cti_text[:200], sample_cti_text[200:]]
-        entities_per_chunk = [[], []]
-        result = enrich_all_chunks(chunks, entities_per_chunk)
-        assert isinstance(result, LLMEnrichmentResult)
-
-    def test_single_chunk_equivalent_to_enrich_chunk(self, mock_llm, sample_cti_text, sample_entities):
-        single = enrich_chunk(sample_cti_text, sample_entities)
-        multi = enrich_all_chunks([sample_cti_text], [sample_entities])
-        # Both should be valid LLMEnrichmentResult instances with same structure
-        assert type(single) is type(multi)
 
 
 # ── _sanitize_text_for_prompt ───────────────────────────────────────────────────
