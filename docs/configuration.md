@@ -19,6 +19,7 @@ whole file, so a change takes effect at the next `docker compose up -d`.
 - [Worker, queue and retention](#worker-queue-and-retention)
 - [OCR](#ocr)
 - [Logging](#logging)
+- [Monitoring](#monitoring)
 - [Expert tuning](#expert-tuning)
 - [Web server and Docker Compose](#web-server-and-docker-compose)
 
@@ -677,6 +678,17 @@ and an image rebuild.
 Under Docker, `docker compose logs -f app worker` reads stdout. The root
 filesystem is read-only, so a `LOG_FILE` has to point into a volume, e.g.
 `/app/state/ctiparsor.log`.
+
+## Monitoring
+
+```env
+# The status file the `backup` service writes; GET /metrics reads it for the
+# backup metrics.  A missing file leaves those metrics out.
+# BACKUP_STATUS_FILE=/app/backup-status/status.json
+```
+
+`GET /metrics` needs no setting: it is on by default and answers loopback
+clients only ([operations.md](operations.md#monitoring-and-alerts)).
 
 ## Expert tuning
 

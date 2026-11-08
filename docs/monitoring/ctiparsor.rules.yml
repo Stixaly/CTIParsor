@@ -1,0 +1,77 @@
+# Prometheus alert rules for CTIParsor (ADR-0097 item 18).
+#
+# Load them from prometheus.yml with `rule_files:`, and scrape GET /metrics
+# from loopback (docs/operations.md, *Monitoring and alerts*). Routing the
+# alerts to people (Alertmanager, mail, chat) is the operator's.
+#
+# Each alert's `runbook` annotation names the section of docs/operations.md
+# that says what it means and what to do.
+groups:
+  - name: ctiparsor
+    rules:
+      - alert: CtiparsorNoLiveWorker
+        expr: sum(ctiparsor_workers{state=~"busy|idle"}) == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No CTIParsor worker is alive"
+          description: "No worker loop has heartbeated within the lease for 5 minutes. Queued reports do not run."
+          runbook: "docs/operations.md#no-live-worker"
+
+      - alert: CtiparsorQueueWaitTooLong
+        expr: ctiparsor_oldest_queued_job_age_seconds > 1800
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A queued report has waited more than 30 minutes"
+          description: "The oldest queued job has been waiting for over 30 minutes (threshold 1800 s)."
+          runbook: "docs/operations.md#queue-wait-too-long"
+
+      - alert: CtiparsorFailedJobsRising
+        expr: delta(ctiparsor_failed_jobs[1h]) > 3
+        labels:
+          severity: warning
+        annotations:
+          summary: "More than 3 reports failed in the last hour"
+          description: "The number of failed jobs rose by more than 3 within one hour (net of requeues and deletions)."
+          runbook: "docs/operations.md#failed-reports-rising"
+
+      - alert: CtiparsorDatabaseDown
+        expr: ctiparsor_database_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "CTIParsor cannot reach its database"
+          description: "PostgreSQL has not answered SELECT 1 from the API for 1 minute."
+          runbook: "docs/operations.md#database-down"
+
+      - alert: CtiparsorDiskNearlyFull
+        expr: ctiparsor_state_dir_free_bytes / ctiparsor_state_dir_total_bytes < 0.10 or ctiparsor_state_dir_free_bytes < 2147483648
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Free disk under the CTIParsor state directory is below 10 % or 2 GiB"
+          description: "The filesystem holding uploads and exports has less than 10 % or less than 2 GiB free."
+          runbook: "docs/operations.md#disk-nearly-full"
+
+      - alert: CtiparsorBackupTooOld
+        expr: (time() - ctiparsor_backup_last_success_timestamp_seconds > 93600) or absent(ctiparsor_backup_last_success_timestamp_seconds)
+        labels:
+          severity: critical
+        annotations:
+          summary: "No successful backup in the last 26 hours, or none known"
+          description: "The last successful backup is older than 26 hours, or the backup service has never reported one."
+          runbook: "docs/operations.md#backup-too-old"
+
+      - alert: CtiparsorBackupLastAttemptFailed
+        expr: ctiparsor_backup_last_attempt_ok == 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "The last backup attempt failed"
+          description: "The backup service's last attempt reported ok=false. Its error is in the status file."
+          runbook: "docs/operations.md#backup-failed"

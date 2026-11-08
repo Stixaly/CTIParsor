@@ -11,6 +11,7 @@ address, `127.0.0.1:8000`; use your `CTI_BIND` and `CTI_PORT`.
 | Why did a report fail? | its last progress event, and the worker's log |
 | What fills the disk? | `docker system df -v`, `du` in `cti-state` |
 | How many reports at once? | `WORKER_MAX_CONCURRENT`, `CTI_WORKER_MEMORY` |
+| Should someone be paged? | `GET /metrics`, and the alert rules of *Monitoring and alerts* |
 
 ## Health
 
@@ -175,3 +176,93 @@ docker compose logs -f app worker
 - `LOG_LEVEL` (`INFO`), and `LOG_FORMAT=json` for one JSON object per line;
   `LOG_FILE` adds a rotated file ([configuration.md](configuration.md)).
 - `docker compose logs postgres` for the database.
+
+## Monitoring and alerts
+
+`GET /metrics` serves Prometheus text format (0.0.4). It is left out of the
+API schema. Until authentication exists, it answers only a client on loopback
+(127.0.0.0/8 or ::1) and returns 403 to any other, so a scraper must connect
+from loopback. A connection through Docker's published port usually arrives
+from the Docker network's gateway instead, and gets 403. Verify the scrape
+first:
+
+```bash
+curl -fsS http://127.0.0.1:8000/metrics
+```
+
+A Prometheus container can reach the app over loopback if it shares the app's
+network namespace (`network_mode: "service:app"` in Compose). This is not run
+on the stack by the project: check the scrape before relying on it. Work item
+14 adds an admin token for the scraper.
+
+The endpoint answers while the database is down: `ctiparsor_database_up` is
+0, and the metrics that need the database are left out.
+
+| Metric | Meaning |
+|---|---|
+| `ctiparsor_jobs{status}` | jobs per status (every status is listed, at 0 when none) |
+| `ctiparsor_failed_jobs` | jobs in status `failed` |
+| `ctiparsor_oldest_queued_job_age_seconds` | age of the oldest `queued` job; 0 when the queue is empty |
+| `ctiparsor_workers{state}` | worker loops: `busy`, `idle`, `stale` (the rule of `GET /api/queue/status`) |
+| `ctiparsor_database_up` | 1 when PostgreSQL answers `SELECT 1`, else 0 |
+| `ctiparsor_state_dir_free_bytes`, `ctiparsor_state_dir_total_bytes` | free and total bytes of the filesystem holding the state directory |
+| `ctiparsor_backup_last_attempt_ok` | 1 when the last backup attempt succeeded, 0 when it failed; absent without a status file |
+| `ctiparsor_backup_last_success_timestamp_seconds` | Unix time of the last successful backup; absent until one succeeds |
+
+The alert rules are in `docs/monitoring/ctiparsor.rules.yml`. Each alert below
+names its rule. Routing the alerts to people (Alertmanager, mail, chat) is the
+operator's to set up.
+
+### No live worker
+
+`CtiparsorNoLiveWorker`: no worker loop is `busy` or `idle` for 5 minutes.
+Queued reports do not run. Check `docker compose ps worker` and
+`docker compose logs worker`; the *Health* and *The queue and its workers*
+sections say what the worker's state and log mean. A worker container that
+exits is restarted by Docker; one that is `unhealthy` is not.
+
+### Queue wait too long
+
+`CtiparsorQueueWaitTooLong`: the oldest queued report has waited more than
+30 minutes (`ctiparsor_oldest_queued_job_age_seconds` above 1800), for 5
+minutes. Look at `worker_summary.idle_slots` in `GET /api/queue/status`. Zero
+slots with busy workers means the reports are running and the queue is simply
+long. Free slots with no progress means a worker is stuck: its log names the
+report.
+
+### Failed reports rising
+
+`CtiparsorFailedJobsRising`: more than 3 more jobs are in status `failed` than
+an hour ago. The rule is net of requeues and deletions. Read the reason of each
+recent failure, as in *Failed reports* above.
+
+### Database down
+
+`CtiparsorDatabaseDown`: `ctiparsor_database_up` is 0 for 1 minute.
+`GET /api/health` returns 503 in the same case. Check `docker compose ps
+postgres` and `docker compose logs postgres`, then the app's log
+(`[health] job store unreachable`).
+
+### Disk nearly full
+
+`CtiparsorDiskNearlyFull`: free space under the state directory is below 10 %
+of the filesystem, or below 2 GiB, for 10 minutes. Nothing here deletes data
+by itself, except `JOB_RETENTION_DAYS` if it is set. Find the largest items
+with the table in *Disk* above.
+
+### Backup too old
+
+`CtiparsorBackupTooOld`: the last successful backup is more than 26 hours old,
+or no backup has been reported (the metric is absent). An absent metric means
+the `backup` service has not written its status file: it is not started
+(`docker compose --profile backup up -d backup`), or it has no volume. An
+installation that runs no scheduled backup gets this alert too; run the
+backup or leave the rule out. The status file holds the timestamps:
+`docker compose --profile backup logs backup`.
+
+### Backup failed
+
+`CtiparsorBackupLastAttemptFailed`: the last backup attempt reported
+`ok: false`. The `error` field of the status file says why, and the older
+backups are kept. Fix the cause (the target path, the disk, the database
+password) and run the backup again with `BACKUP_RUN_NOW=1`.
