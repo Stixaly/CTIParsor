@@ -9,7 +9,7 @@ ADR-0019: Multi-format support (sigma/suricata/yara). Format availability is
 derived from the pipeline detection registry adapters (_ADAPTERS).
 """
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -172,6 +172,48 @@ def _validate_git_remote(value: str) -> None:
         raise HTTPException(400, f"'git' is not a safe remote: {e}") from e
 
 
+#: Query parameters whose value is a credential when a corpus URL carries one.
+_SECRET_QUERY_PARAMS = frozenset({"token", "access_token", "private_token", "key", "sig"})
+_MASK = "***"
+#: A lone userinfo name (no password) that looks like a token: a known token
+#: prefix, or a long run of token characters. Over-masking a long account name is
+#: harmless; leaking a token is not.
+_TOKEN_LIKE_USER_RE = compile_pattern(r"(?:gh[pousr]_|github_pat_|glpat-)\S+|[A-Za-z0-9_-]{20,}")
+
+
+def _mask_url(url: str | None) -> str | None:
+    """Return `url` with its secret parts replaced by `***`, for responses only.
+
+    Masked: the password of the userinfo (`https://user:***@host`), a lone userinfo
+    name shaped like a token, and the value of each query parameter in
+    `_SECRET_QUERY_PARAMS`. The rest is kept as written. Storage and the fetch keep
+    the real URL. A URL with no secret comes back unchanged.
+    """
+    if not url:
+        return url
+    try:
+        parts = urlsplit(url)
+    except ValueError:   # unbalanced IPv6 brackets: nothing safe to show
+        return _MASK
+    netloc = parts.netloc
+    if "@" in netloc:
+        userinfo, _, hostport = netloc.rpartition("@")
+        user, colon, password = userinfo.partition(":")
+        if colon and password:
+            userinfo = f"{user}:{_MASK}"
+        elif not colon and _TOKEN_LIKE_USER_RE.fullmatch(user):
+            userinfo = _MASK
+        netloc = f"{userinfo}@{hostport}"
+    query = parts.query
+    if query:
+        pairs = []
+        for pair in query.split("&"):
+            name, eq, _value = pair.partition("=")
+            pairs.append(f"{name}={_MASK}" if eq and name.lower() in _SECRET_QUERY_PARAMS else pair)
+        query = "&".join(pairs)
+    return urlunsplit((parts.scheme, netloc, parts.path, query, parts.fragment))
+
+
 def _with_counts() -> list[dict]:
     items = merged_corpora(_CONFIG)
     # The rule store is always the SQLite corpus, whatever DATABASE_URL says (ADR-0045).
@@ -182,6 +224,10 @@ def _with_counts() -> list[dict]:
         it["enabled"] = it.get("enabled", True)
         it["adapter"] = it.get("adapter", "sigma")
         it["adapter_available"] = it["adapter"] in _ADAPTERS
+        # Responses only: the stored and fetched URLs keep their secrets.
+        for field in ("git", "tarball"):
+            if it.get(field):
+                it[field] = _mask_url(it[field])
     return items
 
 
