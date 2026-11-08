@@ -140,7 +140,11 @@ class LedgerRelationship(ApiResponse):
     relationship_type: JsonValue = None
     target_value: JsonValue = None
     outcome: JsonValue = Field(default=None, description="emitted, merged or dropped.")
-    changes: JsonValue = Field(default=None, description="What the mapping rewrote: objects with from, to, kind and reason (older ledgers: property names).")
+    changes: JsonValue = Field(
+        default=None,
+        description="What the mapping rewrote: objects with from, to, kind and reason "
+                    "(older ledgers: property names).",
+    )
     stix_id: JsonValue = None
     final_type: JsonValue = None
     source_ref: JsonValue = None
