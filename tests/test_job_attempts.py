@@ -96,3 +96,27 @@ def test_a_job_that_keeps_killing_its_worker_stops_after_the_limit(db, monkeypat
     assert state["attempts"] == 3
     assert state["status"] == "failed"
     assert queue_loop.claim_next_queued("w") is None  # nothing left to claim: the loop does not spin on it
+
+
+def test_a_clean_stop_gives_the_attempt_back_and_a_lost_lease_keeps_it(db, monkeypatch):
+    """Three clean stops, then one lost lease: the job is requeued, not quarantined (ADR-0097 item 20)."""
+    monkeypatch.setattr(queue_loop, "JOB_MAX_ATTEMPTS", 3)
+    _insert("j1", "queued")
+    uploads_dir().joinpath("j1.txt").touch()
+    loop = queue_loop.WorkerLoop(max_concurrent=1, worker_id="w", heartbeat_s=0, spawn=lambda *a, **k: None)
+
+    for _ in range(3):
+        assert queue_loop.claim_next_queued("w") is not None
+        assert _state("j1")["attempts"] == 1
+        assert loop.terminate_and_requeue(["j1"]) == 1
+        state = _state("j1")
+        assert (state["status"], state["attempts"]) == ("queued", 0)
+
+    assert queue_loop.claim_next_queued("w") is not None
+    get_conn().execute("UPDATE jobs SET heartbeat_at=? WHERE id='j1'", (STALE,))
+    get_conn().commit()
+    assert queue_loop.requeue_orphans() == 1
+
+    state = _state("j1")
+    assert (state["status"], state["attempts"]) == ("queued", 1)
+    assert _done_events("j1") == []

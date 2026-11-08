@@ -507,8 +507,10 @@ class WorkerLoop:
             try:
                 conn = get_conn()
                 cur = conn.execute(
-                    "UPDATE jobs SET status='queued', worker_id=NULL, heartbeat_at=NULL, updated_at=? "
-                    "WHERE id=? AND status='processing' AND worker_id=?",
+                    # A clean stop is not a failure of the job: the attempt its claim counted is given back
+                    # (ADR-0097 item 20). Only a lost lease (requeue_orphans) keeps the attempt.
+                    "UPDATE jobs SET status='queued', worker_id=NULL, heartbeat_at=NULL, updated_at=?, "
+                    "attempts = GREATEST(attempts - 1, 0) WHERE id=? AND status='processing' AND worker_id=?",
                     (now_iso(), job_id, self.worker_id),
                 )
                 if cur.rowcount > 0:
