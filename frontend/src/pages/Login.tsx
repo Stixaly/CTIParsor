@@ -6,14 +6,16 @@ import { safeNext } from '../api/session'
 import { useAuth } from '../context/AuthContext'
 
 /** What `?error=<code>` says.  The identity-provider callback sends the code; an unknown one is shown as it is. */
+// The codes GET /api/auth/oidc/callback sends back (api/routes/auth.py, api/auth/oidc.py).
 const ERROR_TEXT: Record<string, string> = {
-  access_denied: 'The identity provider did not let you in.',
+  state: 'The sign-in took too long, or was started in another window or browser. Try again.',
   denied: 'The identity provider did not let you in.',
-  state: 'The sign-in took too long or was started in another window. Try again.',
-  invalid_state: 'The sign-in took too long or was started in another window. Try again.',
+  no_role: 'Your account is in no group that gives access to CTIParsor. Ask an administrator.',
   disabled: 'This account is disabled.',
-  no_account: 'No account matches your identity.',
-  unavailable: 'The identity provider is not reachable. Try again later.',
+  token: "The identity provider's answer could not be verified. Try again, or tell an administrator.",
+  idp: 'The identity provider is not reachable or answered wrongly. Try again later.',
+  config: 'Sign-in with the identity provider is not configured correctly. Tell an administrator.',
+  busy: 'Too many sign-ins are in progress. Try again in a minute.',
 }
 
 function errorText(code: string | null): string | null {

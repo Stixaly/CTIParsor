@@ -116,8 +116,20 @@ describe('Login', () => {
 
   it('shows the error the identity provider sent back', async () => {
     serve()
-    renderLogin('/login?error=access_denied')
+    renderLogin('/login?error=denied')
     expect(await screen.findByText('The identity provider did not let you in.')).toBeInTheDocument()
+  })
+
+  it('explains a sign-in refused for want of a mapped group', async () => {
+    serve()
+    renderLogin('/login?error=no_role')
+    expect(await screen.findByText(/in no group that gives access/)).toBeInTheDocument()
+  })
+
+  it('shows an unknown code without trusting it', async () => {
+    serve()
+    renderLogin('/login?error=whatever')
+    expect(await screen.findByText('Sign-in failed (whatever).')).toBeInTheDocument()
   })
 
   it('links to the organisation sign-in only when it is on, and keeps next', async () => {
