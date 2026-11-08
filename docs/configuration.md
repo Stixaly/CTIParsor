@@ -226,7 +226,14 @@ A provider is **local** when it is `vllm`, `ollama` or `lmstudio` and the host o
 its base URL (`VLLM_BASE_URL`, `OLLAMA_BASE_URL`, `LMSTUDIO_BASE_URL`) is a loopback
 or private address (IPv4 or IPv6), or a name listed in `LLM_LOCAL_HOSTS`. No DNS
 lookup is made: a hostname that is not in the list is external, whatever it
-resolves to. `anthropic`, `gemini` and `mistral` are always external.
+resolves to. Link-local (169.254.0.0/16, the cloud metadata address, and fe80::/10)
+and unspecified (0.0.0.0, ::) addresses are not local, nor is a base URL with a
+backslash, a space or a control character. An `LLM_LOCAL_HOSTS` entry is a bare
+hostname: one with a colon is ignored, with a warning. When `HTTPS_PROXY`,
+`HTTP_PROXY` or `ALL_PROXY` is set and `NO_PROXY` does not cover the provider's host
+(exact name, domain suffix, address or network), the provider is not local, and the
+refusal says so. `anthropic`, `gemini` and `mistral` are always external; the
+recorded host of `anthropic` is the one of `ANTHROPIC_BASE_URL` when set.
 
 ```env
 # Hostnames that count as local, comma-separated, case-insensitive. Replaces the

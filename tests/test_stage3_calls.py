@@ -1,7 +1,7 @@
 """Stage 3 — the provider plumbing and the paths test_stage3.py does not reach:
 client construction, provider diagnostics, the Anthropic and OpenAI-compatible
 calls with their retries, dispatch, JSON repair of a truncated answer, and the
-branches of enrich_chunk / enrich_all_chunks / enrich_document_relations.
+branches of enrich_chunk / enrich_document_relations.
 
 No request leaves the process: clients are fakes, retries do not sleep.
 """
@@ -712,37 +712,6 @@ def test_a_relationship_without_dates_is_left_as_is(monkeypatch):
     result = s3.check_relationship_times(s3.LLMEnrichmentResult(relationships=[dated, plain]),
                                          "APT29 used SUNBURST in 2020.", None)
     assert result.relationships[1] == plain and result.relationships[0].times[0].status
-
-
-# ── enrich_all_chunks with the document-level pass ──────────────────────────
-
-def test_the_document_pass_gets_every_known_entity_once(monkeypatch):
-    monkeypatch.setenv("ENABLE_DOCUMENT_LEVEL_RELATIONS", "true")
-    _llm(monkeypatch, json.dumps({"threat_actors": ["APT29", "Dukes"], "tools": ["Mimikatz"]}),
-         json.dumps({"malware_families": ["SUNBURST"]}))
-    monkeypatch.setattr("pipeline.stage3b_validate.validate_llm_result", lambda result, text, **kw: result)
-    captured = {}
-
-    def doc_pass(full_text, known, document_time=None):
-        captured["text"], captured["known"] = full_text, [(e.value, e.entity_type) for e in known]
-        return s3.LLMEnrichmentResult(relationships=[s3.RelationshipExtracted(
-            source_value="APT29", relationship_type="uses", target_value="SUNBURST")])
-
-    monkeypatch.setattr(s3, "enrich_document_relations", doc_pass)
-    gazetteer = [RawEntity(value="APT29", entity_type=EntityType.THREAT_ACTOR, source="gazetteer")]
-    cyner = [RawEntity(value="SUNBURST", entity_type=EntityType.MALWARE, source="cyner")]
-    per_chunk = [[RawEntity(value="185.220.101.45", entity_type=EntityType.IPV4)],
-                 [RawEntity(value="185.220.101.45", entity_type=EntityType.IPV4)]]
-
-    merged = s3.enrich_all_chunks([_TEXT, _TEXT + " Part two."], per_chunk,
-                                  gazetteer_entities=gazetteer, cyner_entities=cyner)
-
-    assert captured["text"] == f"{_TEXT}\n\n{_TEXT} Part two."
-    assert captured["known"] == [
-        ("APT29", EntityType.THREAT_ACTOR), ("SUNBURST", EntityType.MALWARE),
-        ("185.220.101.45", EntityType.IPV4), ("Dukes", EntityType.THREAT_ACTOR), ("Mimikatz", EntityType.TOOL)]
-    assert [(r.source_value, r.target_value) for r in merged.relationships] == [("APT29", "SUNBURST")]
-    assert "APT29" not in merged.threat_actors                     # the gazetteer already has it
 
 
 # ── enrich_document_relations branches ───────────────────────────────────────

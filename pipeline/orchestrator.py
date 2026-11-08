@@ -911,7 +911,9 @@ class _Run:
         })
 
     def _stage3_can_run(self) -> bool:
-        return stage3_can_run(self.opts)
+        """Stage 3 will run for this report: enabled, ready, and allowed to receive it
+        (ADR-0097).  Stage 2c's mode follows it."""
+        return self.text_decision.allowed and stage3_can_run(self.opts)
 
     def enrich(self) -> None:
         from pipeline.stage3_llm import (
