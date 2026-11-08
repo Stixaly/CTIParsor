@@ -23,6 +23,7 @@ from api.body_limit import ENVELOPE_BYTES
 from api.logging_config import get_logger
 from api.main import limiter
 from api.paths import uploads_dir
+from api.response_models.ingest import IngestJob, IngestUrlJob
 from api.routes._common import (
     BASELINE_REFUSED,
     StoredBaseline,
@@ -192,7 +193,7 @@ def _timestamp_slug() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
 
-@router.post("/text", responses=BASELINE_REFUSED)
+@router.post("/text", response_model=IngestJob, response_model_exclude_unset=True, responses=BASELINE_REFUSED)
 @limiter.limit("20/minute")
 async def ingest_text(request: Request, body: TextIngestRequest):
     tlp = _clean_marking(body.tlp_level, "tlp_level")
@@ -270,7 +271,7 @@ async def ingest_text(request: Request, body: TextIngestRequest):
         raise
 
 
-@router.post("/url", responses=BASELINE_REFUSED)
+@router.post("/url", response_model=IngestUrlJob, response_model_exclude_unset=True, responses=BASELINE_REFUSED)
 @limiter.limit("5/minute")
 async def ingest_url(request: Request, body: UrlIngestRequest):
     tlp = _clean_marking(body.tlp_level, "tlp_level")

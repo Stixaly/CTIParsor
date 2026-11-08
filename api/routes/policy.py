@@ -38,6 +38,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from api.db import _lock, get_conn
 from api.logging_config import get_logger
+from api.response_models.policy import LastRun, RelationshipPolicy
 from models.schemas import STIX_RELATIONSHIP_TYPES
 from pipeline.stage4_stix_mapping import verb_ships_as_written
 from pipeline.stix_rel_spec import SCO_TYPES, SDO_TYPES
@@ -97,7 +98,7 @@ def _extract_synthesis_stats(bundle_json: str | None) -> dict | None:
     return None
 
 
-@router.get("/last-run")
+@router.get("/last-run", response_model=LastRun, response_model_exclude_unset=True)
 def get_last_run() -> dict:
     """Synthesis accounting of the most recent bundle — what each pinned rule
     actually produced on the last run.
@@ -162,7 +163,7 @@ def _utf8_encodable(value: object) -> None:
         raise ValueError("a string holds a lone UTF-16 surrogate") from exc
 
 
-@router.get("")
+@router.get("", response_model=RelationshipPolicy, response_model_exclude_unset=True)
 def get_policy() -> dict:
     """Return the stored relationship policy, or the factory default."""
     with get_conn() as conn:
@@ -214,7 +215,7 @@ def _rule_error(i: int, rule: dict, pairs: dict[str, int]) -> str | None:
     return None
 
 
-@router.put("")
+@router.put("", response_model=RelationshipPolicy, response_model_exclude_unset=True)
 async def put_policy(request: Request) -> dict:
     """Replace the relationship policy (full replacement, not patch)."""
     try:
