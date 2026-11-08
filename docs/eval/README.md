@@ -147,6 +147,16 @@ serve (Stage 3 is then `failed`, not an empty success).
   human-judged `support-sample`;
 * which stages ran, were skipped or failed, and seconds per report.
 
+## The embedding model a run loaded (ADR-0094)
+
+`run` and `inhouse-run` load the Stage 2c encoder before the first document and
+stop if it fell back to the legacy model or if the embedding (or retrieval)
+cache was built for another encoder: rebuild with
+`python scripts/build_indexes.py --only embeddings` (`--only retrieval` in
+select mode). The status is in `run.json` (`embedding`), and a run resumed on
+another loaded model is refused. With `SKIP_HEAVY_MODELS=1` the check is
+skipped and `run.json` says so.
+
 ## ATT&CK releases (ADR-0087)
 
 The gold is annotated with the ATT&CK of 2022. It is mapped through the
