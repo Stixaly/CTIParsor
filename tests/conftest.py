@@ -359,3 +359,18 @@ def api_client():
     with patch("api.main.init_db"), patch("api.queue_loop.start_embedded"):
         with TestClient(api.main.app, raise_server_exceptions=True) as client:
             yield client
+
+
+@pytest.fixture(autouse=True)
+def _egress_open(monkeypatch):
+    """The egress policy (ADR-0097) refuses an unmarked report (AMBER) to the hosted
+    providers the tests configure; allow every decision, and keep the record it
+    makes.  tests/test_egress.py overrides this fixture to test the real rule."""
+    import dataclasses
+
+    from pipeline import egress
+
+    real = egress.decide
+    monkeypatch.setattr(egress, "decide",
+                        lambda tlp, provider: dataclasses.replace(real(tlp, provider),
+                                                                  allowed=True, reason=""))

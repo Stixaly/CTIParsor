@@ -81,6 +81,7 @@ The boxes below give each stage in detail, in execution order.
 │  • Relations : attack-chain / network-diagram arrows → src -> dst    │
 │  • Safety    : an unreadable figure is skipped, never costs the run  │
 │  VISION_PROVIDER = auto (default) | none | a provider by name        │
+│  TLP egress: AMBER and above reads figures with a local provider only│
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
@@ -153,6 +154,8 @@ The boxes below give each stage in detail, in execution order.
 │  • Crash-resume: checkpoint saved every N chunks                     │
 │  • Providers: Anthropic | Gemini | Mistral (hosted)                  │
 │               Ollama | vLLM | LM Studio (local)                      │
+│  • TLP egress: AMBER and above runs on a local provider only; else   │
+│    Stage 3 is skipped with the reason (ADR-0097)                     │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐

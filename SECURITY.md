@@ -95,6 +95,14 @@ Every emitted bundle carries a **TLP** marking (and optional **PAP**) plus an
 authoring `Identity`, so downstream OpenCTI/MISP can apply sharing policy. Set
 `STIX_TLP` (or per-job `tlp_level`) before exporting outside your team.
 
+The marking also decides what leaves the host (ADR-0097). A CLEAR or GREEN report
+may go to any configured LLM provider. An AMBER, AMBER+STRICT or RED report, and
+one without a marking (AMBER unless `STIX_TLP` says otherwise), goes only to a
+local provider (`vllm`, `ollama`, `lmstudio` on a loopback or private address, or a
+host named in `LLM_LOCAL_HOSTS`). Otherwise Stage 3 and Stage 1f are skipped before
+any call, and the stage report says why. Embedding and NER models run in the
+process. See [docs/configuration.md](docs/configuration.md#egress-policy-tlp).
+
 ### 7. Reference STIX bundles (ADR-0090)
 A STIX 2.1 bundle sent to enrich a report is untrusted input. A bundle over 20 MB,
 or with more than 10,000 objects, is refused (`pipeline/baseline_stix.py`,

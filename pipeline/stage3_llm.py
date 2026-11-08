@@ -13,7 +13,7 @@ from tenacity import RetryError, retry, retry_if_exception_type, stop_after_atte
 
 # Initialize logging
 from api.logging_config import get_logger
-from models.schemas import EntityType, EvidenceLabel, RawEntity
+from models.schemas import EvidenceLabel, RawEntity
 from pipeline import attack_data
 from pipeline.env_flags import env_int
 from pipeline.llm_parse import SPOTLIGHT_RULE, fit_report, strip_reasoning
@@ -913,6 +913,11 @@ def _call_openai_compatible(client_param, model: str, system: str, user: str, la
         return ""
 
 
+# INVARIANT (ADR-0097): every path to _call_llm sends report text to a provider,
+# and each is gated by the TLP egress decision (pipeline/egress.py) taken before
+# it: Stage 3 and what follows it in the orchestrator, and Stage 4c in
+# build_bundle.  A new caller must be gated the same way and added to the list in
+# tests/test_egress.py::test_every_reference_to_call_llm_is_a_known_gated_path.
 def _call_llm(system: str, user: str, provider: str | None = None,
               max_prompt_length: int | None = None, max_output_tokens: int | None = None) -> str:
     """Dispatches to an LLM provider with retry logic.
@@ -1823,78 +1828,6 @@ def select_chunk_ttps(text: str, retrieved: list, llm_ttps: list | None = None,
         return _call_llm(s, u, provider=provider, max_output_tokens=ceiling)
     sel = select_ttps(text, cands, _select_call, llm_labels=labels, max_prompt_chars=_MAX_PROMPT_LENGTH)
     return LLMEnrichmentResult(ttps=sel.selected, ttp_review=sel.review)
-
-
-def enrich_all_chunks(
-    chunks: list[str],
-    entities_per_chunk: list[list[RawEntity]],
-    gazetteer_entities: list[RawEntity] | None = None,
-    cyner_entities: list[RawEntity] | None = None,
-    semantic_ttp_entities: list[RawEntity] | None = None,
-    doc_context: str | None = None,
-    ner_allow_list: set[str] | None = None,
-    reference_date: datetime | None = None,
-    document_time: DocumentTime | None = None,
-) -> LLMEnrichmentResult:
-    """
-    CLI-facing wrapper: calls enrich_chunk for each chunk with the same
-    quality arguments that the API worker passes.  Previously these were
-    silently omitted, so the CLI produced lower-quality output than the API
-    (no gazetteer context, no doc_context, no hallucination allow-list).
-    """
-    all_results = []
-    total = len(chunks)
-
-    for i, (chunk, entities) in enumerate(zip(chunks, entities_per_chunk, strict=True), 1):
-        logger.info(f"LLM chunk {i}/{total}...")
-        result = enrich_chunk(
-            chunk, entities,
-            gazetteer_entities=gazetteer_entities,
-            cyner_entities=cyner_entities,
-            semantic_ttp_entities=semantic_ttp_entities,  # tells LLM which TTPs already found
-            doc_context=doc_context,
-            ner_allow_list=ner_allow_list,
-            reference_date=reference_date,
-            document_time=document_time,
-        )
-        all_results.append(result)
-
-    # Stage 3 document-level relation pass (ADR-0057, opt-in) — CLI parity
-    # with the API worker's wiring of the same capability.
-    if document_level_relations_enabled():
-        known_entities: list[RawEntity] = list(gazetteer_entities or []) + list(cyner_entities or [])
-        known_keys = {(e.value.lower(), e.entity_type) for e in known_entities}
-        for entities in entities_per_chunk:
-            for e in entities:
-                key = (e.value.lower(), e.entity_type)
-                if key not in known_keys:
-                    known_entities.append(e)
-                    known_keys.add(key)
-        for r in all_results:
-            for name, etype in (
-                [(n, EntityType.THREAT_ACTOR) for n in r.threat_actors]
-                + [(n, EntityType.MALWARE) for n in r.malware_families]
-                + [(n, EntityType.TOOL) for n in r.tools]
-            ):
-                key = (name.lower(), etype)
-                if key not in known_keys:
-                    known_entities.append(RawEntity(value=name, entity_type=etype, source="llm"))
-                    known_keys.add(key)
-
-        full_text = "\n\n".join(chunks)
-        logger.info(f"[Stage 3 doc-relations] {len(known_entities)} known entities, "
-                    f"{len(full_text)} chars of report text")
-        doc_rel_result = enrich_document_relations(full_text, known_entities,
-                                                   document_time=document_time)
-        logger.info(f"[Stage 3 doc-relations] {len(doc_rel_result.relationships)} relationships found")
-        all_results.append(doc_rel_result)
-
-    return _merge_results(
-        all_results,
-        gazetteer_entities=gazetteer_entities,
-        semantic_ttp_entities=semantic_ttp_entities,
-        cyner_entities=cyner_entities,
-    )
 
 
 def document_level_relations_enabled() -> bool:

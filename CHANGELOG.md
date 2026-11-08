@@ -100,6 +100,17 @@ theme.
   `ENABLE_TTP_VERIFICATION=false`. The run's recorded configuration shows the
   switch as `true` when it is unset.
 
+- **TLP egress policy** (ADR-0097 work item 16). A report marked AMBER,
+  AMBER+STRICT or RED, or unmarked (AMBER unless `STIX_TLP` says otherwise),
+  goes only to a local provider: `vllm`, `ollama` or `lmstudio` on a loopback
+  or private address (not link-local, not behind a configured proxy), or a
+  host named in the new `LLM_LOCAL_HOSTS`. Otherwise Stage 3 and what follows
+  it (3d, 3e, 3f, 3doc, the 4c long-distance inference) and Stage 1f are
+  skipped before any call, with the reason in the stage report; a required
+  Stage 3 fails the run. The Stage 3 and 1f records carry an `egress` entry.
+  **With the default `anthropic` provider, an unmarked report no longer gets
+  LLM extraction**: mark it CLEAR or GREEN, or use a local model.
+
 - **`scripts/measure_default_provider.py`**, the billed measurement of the
   default provider (ADR-0094 item 11): two AnnoCTR test runs and two in-house
   runs at `LLM_TEMPERATURE=0` with figure reading on, then the spread between
