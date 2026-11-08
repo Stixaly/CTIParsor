@@ -34,6 +34,11 @@ theme.
   `.env.example`; their values, which the code already defaults to, are
   unchanged.
 
+- **The worker no longer logs a database backup after each report.** It never
+  took one: both stores are PostgreSQL (ADR-0053) and `backup_db()` only
+  logged where `pg_dump` is. The function is removed. Back up with `pg_dump`
+  and the `cti-state` archive, as docs/docker.md describes.
+
 - **TTP self-verification (Stage 3f) is on by default in the code.** It was
   already `ENABLE_TTP_VERIFICATION=true` in `.env.example`; the code's fallback
   was `false`, so a process started without `.env` did not run it. Cost: about
