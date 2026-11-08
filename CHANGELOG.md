@@ -20,6 +20,16 @@ theme.
   `run.json` (`embedding`), and refuse to resume a run on another loaded
   model. An analyst's run goes on as before. No bundle changes.
 
+- **The API's responses are described in the OpenAPI schema** (ADR-0094
+  item 1's gap). Every JSON operation declares a response model, with
+  `extra="allow"` and `response_model_exclude_unset=True`: a field the model
+  does not declare is still returned, and a key a route leaves out stays out,
+  so **no response changes**. Values read from the database are typed loosely,
+  so a row stored by an older release still reads. The ZIP exports, the source
+  file, the bundle and the progress stream declare their media type instead.
+  `contract/openapi.json` now records the response fields (850 compatible
+  differences, none breaking).
+
 - **Stage 3d (relationship verification) and the document-level relation
   pass (Stage 3doc) are on by default**, in the code and in `.env.example`
   (`ENABLE_STIX_VERIFICATION=true`, `ENABLE_DOCUMENT_LEVEL_RELATIONS=true`);

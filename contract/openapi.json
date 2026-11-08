@@ -14,7 +14,13 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "DELETE /api/jobs/{} response:200.deleted": {
+      "required": true,
+      "types": [
+        "string"
       ]
     },
     "DELETE /api/jobs/{}/entities/{}": {
@@ -37,7 +43,13 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "DELETE /api/jobs/{}/entities/{} response:200.deleted": {
+      "required": true,
+      "types": [
+        "string"
       ]
     },
     "DELETE /api/jobs/{}/entities/{} response:409": {
@@ -63,7 +75,13 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "DELETE /api/jobs/{}/relationships/{} response:200.deleted": {
+      "required": true,
+      "types": [
+        "string"
       ]
     },
     "DELETE /api/jobs/{}/relationships/{} response:409": {
@@ -86,6 +104,12 @@
         "object"
       ]
     },
+    "DELETE /api/overrides/{} response:200.deleted": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
     "DELETE /api/settings/corpora/{}": {
       "deprecated": false
     },
@@ -100,7 +124,103 @@
         "application/json"
       ],
       "types": [
+        "object"
+      ]
+    },
+    "DELETE /api/settings/corpora/{} response:200.corpora": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "DELETE /api/settings/corpora/{} response:200.corpora[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "DELETE /api/settings/corpora/{} response:200.corpora[].adapter": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "DELETE /api/settings/corpora/{} response:200.corpora[].adapter_available": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "DELETE /api/settings/corpora/{} response:200.corpora[].enabled": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "DELETE /api/settings/corpora/{} response:200.corpora[].git": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "DELETE /api/settings/corpora/{} response:200.corpora[].license": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "DELETE /api/settings/corpora/{} response:200.corpora[].name": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "DELETE /api/settings/corpora/{} response:200.corpora[].path": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "DELETE /api/settings/corpora/{} response:200.corpora[].priority": {
+      "required": false,
+      "types": [
         "any"
+      ]
+    },
+    "DELETE /api/settings/corpora/{} response:200.corpora[].private": {
+      "required": false,
+      "types": [
+        "boolean",
+        "null"
+      ]
+    },
+    "DELETE /api/settings/corpora/{} response:200.corpora[].rules": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "DELETE /api/settings/corpora/{} response:200.corpora[].subdir": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "DELETE /api/settings/corpora/{} response:200.corpora[].tarball": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "DELETE /api/settings/corpora/{} response:200.ok": {
+      "required": true,
+      "types": [
+        "boolean"
       ]
     },
     "DELETE /api/thresholds/{}/{}": {
@@ -124,6 +244,30 @@
       ],
       "types": [
         "object"
+      ]
+    },
+    "DELETE /api/thresholds/{}/{} response:200.default": {
+      "required": true,
+      "types": [
+        "number"
+      ]
+    },
+    "DELETE /api/thresholds/{}/{} response:200.deleted": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "DELETE /api/thresholds/{}/{} response:200.deleted.entity_type": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "DELETE /api/thresholds/{}/{} response:200.deleted.source": {
+      "required": true,
+      "types": [
+        "string"
       ]
     },
     "GET /api/attack/index": {
@@ -163,7 +307,25 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "GET /api/baselines/status response:200.enabled": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "GET /api/baselines/status response:200.max_bytes": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/baselines/status response:200.max_objects": {
+      "required": true,
+      "types": [
+        "integer"
       ]
     },
     "GET /api/detection-corpora": {
@@ -174,7 +336,44 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "GET /api/detection-corpora response:200.corpora": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/detection-corpora response:200.corpora[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/detection-corpora response:200.corpora[].canonical": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/detection-corpora response:200.corpora[].corpus": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/detection-corpora response:200.corpora[].license": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/detection-corpora response:200.corpora[].rules": {
+      "required": true,
+      "types": [
+        "integer"
       ]
     },
     "GET /api/health": {
@@ -196,7 +395,63 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "array"
+      ]
+    },
+    "GET /api/jobs response:200[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs response:200[].created_at": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs response:200[].id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs response:200[].original_filename": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs response:200[].pap_level": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs response:200[].pipeline_mode": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs response:200[].status": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs response:200[].tlp_level": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs response:200[].updated_at": {
+      "required": true,
+      "types": [
+        "string"
       ]
     },
     "GET /api/jobs/{}": {
@@ -213,7 +468,257 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "GET /api/jobs/{} response:200.created_at": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment": {
+      "required": false,
+      "types": [
+        "null",
+        "object"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.counts": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.counts{*}": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.counts{*}{*}": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.intake": {
+      "required": true,
+      "types": [
+        "null",
+        "object"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.intake.bundle_id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.intake.counts": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.intake.counts{*}": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.intake.excluded": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.intake.excluded[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.intake.excluded[].detail": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.intake.excluded[].id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.intake.excluded[].reason": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.intake.excluded[].type": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.intake.excluded_total": {
+      "required": false,
+      "types": [
+        "integer",
+        "null"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.intake.min_pap": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.intake.min_tlp": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.intake.needs_report_choice": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.intake.reports": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.intake.reports[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.intake.reports[].id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.intake.reports[].name": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.intake.reports[].published": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.intake.reports[].refs": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.intake.scope_report_id": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.intake.sha256": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.intake.warnings": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.intake.warnings[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{} response:200.enrichment.validated": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "GET /api/jobs/{} response:200.entity_count": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{} response:200.id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{} response:200.original_filename": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{} response:200.pap_level": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{} response:200.pipeline_mode": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{} response:200.relationship_count": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{} response:200.report_text": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{} response:200.status": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{} response:200.tlp_level": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{} response:200.updated_at": {
+      "required": true,
+      "types": [
+        "string"
       ]
     },
     "GET /api/jobs/{}/baseline": {
@@ -273,6 +778,12 @@
         "any"
       ]
     },
+    "GET /api/jobs/{}/bundle response:200 header:x-bundle-validation": {
+      "required": false,
+      "types": [
+        "string"
+      ]
+    },
     "GET /api/jobs/{}/bundle response:409": {
       "media": []
     },
@@ -290,7 +801,274 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.entities": {
+      "required": false,
+      "types": [
+        "array",
+        "null"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.entities[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.entities[].entity_type": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.entities[].outcome": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.entities[].reason": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.entities[].stix_id": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.entities[].stix_name": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.entities[].stix_type": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.entities[].value": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.objects": {
+      "required": false,
+      "types": [
+        "null",
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.objects{*}": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.objects{*}.origin": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.refused": {
+      "required": false,
+      "types": [
+        "array",
+        "null"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.refused[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.refused[].origin": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.refused[].reason": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.refused[].relationship_type": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.refused[].source_ref": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.refused[].target_ref": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.relationships": {
+      "required": false,
+      "types": [
+        "array",
+        "null"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.relationships[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.relationships[].changes": {
+      "required": false,
+      "types": [
+        "array",
+        "null"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.relationships[].changes[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.relationships[].final_type": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.relationships[].merged_with": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.relationships[].outcome": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.relationships[].reason": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.relationships[].relationship_type": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.relationships[].source_ref": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.relationships[].source_value": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.relationships[].stix_id": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.relationships[].target_ref": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.relationships[].target_value": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.removed": {
+      "required": false,
+      "types": [
+        "array",
+        "null"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.removed[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.removed[].kind": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.removed[].name": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.removed[].reason": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.removed[].replaced_by": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.removed[].stix_id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/bundle/ledger response:200.version": {
+      "required": false,
+      "types": [
+        "integer",
+        "null"
       ]
     },
     "GET /api/jobs/{}/coverage": {
@@ -307,7 +1085,109 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/coverage response:200.by_score": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/coverage response:200.by_score{*}": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage response:200.cells": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/coverage response:200.cells[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/coverage response:200.cells[].by_format": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/coverage response:200.cells[].by_format{*}": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/coverage response:200.cells[].by_format{*}.corpora": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/coverage response:200.cells[].by_format{*}.corpora[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage response:200.cells[].by_format{*}.rule_count": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage response:200.cells[].corpora": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/coverage response:200.cells[].corpora[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage response:200.cells[].rule_count": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage response:200.cells[].score": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage response:200.cells[].technique_id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage response:200.job_id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage response:200.techniques_total": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage response:200.validated": {
+      "required": true,
+      "types": [
+        "boolean"
       ]
     },
     "GET /api/jobs/{}/coverage/artifacts": {
@@ -324,7 +1204,458 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.artifacts": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.artifacts[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.artifacts[].class": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.artifacts[].classes": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.artifacts[].classes[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.artifacts[].corpora": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.artifacts[].corpora[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.artifacts[].df": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.artifacts[].display": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.artifacts[].entity_type": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.artifacts[].entity_types": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.artifacts[].entity_types[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.artifacts[].evidence": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.artifacts[].evidence[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.artifacts[].evidence[].corpus": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.artifacts[].evidence[].exact": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.artifacts[].evidence[].field": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.artifacts[].evidence[].rule_id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.artifacts[].evidence_corpora": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.artifacts[].evidence_corpora[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.artifacts[].evidence_total": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.artifacts[].excluded": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.artifacts[].score": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.artifacts[].tier": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.artifacts[].tier_label": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.artifacts[].value": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.by_tier": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.by_tier[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.by_tier[].artifacts": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.by_tier[].covered": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.by_tier[].label": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.by_tier[].tier": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.by_tier[].uncovered": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.by_tier[].weak": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.canonical_rules": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.job_id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.matched_rules": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.covered": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.covered.columns": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.covered.columns[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.covered.columns[].label": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.covered.columns[].rules": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.covered.columns[].tactic": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.covered.columns[].techniques": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.covered.columns[].techniques[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.covered.rules_placed": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.covered.rules_total": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.covered.rules_untagged": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.gap": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.gap[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.gap[].covered_rules": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.gap[].label": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.gap[].report_techniques": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.gap[].tactic": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.report": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.report.columns": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.report.columns[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.report.columns[].label": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.report.columns[].tactic": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.report.columns[].techniques": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.report.columns[].techniques[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.report.off_matrix": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.report.off_matrix[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.report.off_matrix[].domain": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.report.off_matrix[].technique_id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.report.off_matrix_total": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.phases.report.on_matrix_total": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.totals": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.totals.artifacts": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.totals.covered": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.totals.excluded": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.totals.uncovered": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.totals.weak": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/artifacts response:200.vocabulary_threshold": {
+      "required": true,
+      "types": [
+        "integer"
       ]
     },
     "GET /api/jobs/{}/coverage/rules": {
@@ -341,7 +1672,200 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.evidence_only": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.evidence_total": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.job_id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.rule_total": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.tag_total": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.technique_total": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.techniques": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.techniques[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.techniques[].rules": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.techniques[].rules[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.techniques[].rules[].also_in": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.techniques[].rules[].also_in[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.techniques[].rules[].bytes": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.techniques[].rules[].corpus": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.techniques[].rules[].evidence_count": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.techniques[].rules[].format": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.techniques[].rules[].id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.techniques[].rules[].license": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.techniques[].rules[].matches": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.techniques[].rules[].matches[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.techniques[].rules[].matches[].discriminating": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.techniques[].rules[].matches[].display": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.techniques[].rules[].matches[].field": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.techniques[].rules[].matches[].kind": {
+      "enum": [
+        "atom",
+        "title"
+      ],
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.techniques[].rules[].matches[].obs_class": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.techniques[].rules[].matches[].value": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.techniques[].rules[].severity": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.techniques[].rules[].source_ref": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.techniques[].rules[].title": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.techniques[].rules[].title_count": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/rules response:200.techniques[].technique_id": {
+      "required": true,
+      "types": [
+        "string"
       ]
     },
     "GET /api/jobs/{}/coverage/{}/rules": {
@@ -364,7 +1888,88 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/{}/rules response:200.rules": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/{}/rules response:200.rules[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/{}/rules response:200.rules[].also_in": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/{}/rules response:200.rules[].also_in[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/{}/rules response:200.rules[].bytes": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/{}/rules response:200.rules[].corpus": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/{}/rules response:200.rules[].format": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/{}/rules response:200.rules[].id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/{}/rules response:200.rules[].license": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/{}/rules response:200.rules[].severity": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/{}/rules response:200.rules[].source_ref": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/{}/rules response:200.rules[].title": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/coverage/{}/rules response:200.technique_id": {
+      "required": true,
+      "types": [
+        "string"
       ]
     },
     "GET /api/jobs/{}/detections/export": {
@@ -430,7 +2035,8 @@
     },
     "GET /api/jobs/{}/detections/export response:200": {
       "media": [
-        "application/json"
+        "application/json",
+        "application/zip"
       ],
       "types": [
         "any"
@@ -450,7 +2056,139 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export/facets response:200.bytes": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export/facets response:200.corpus": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export/facets response:200.corpus[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export/facets response:200.corpus[].bytes": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export/facets response:200.corpus[].rules": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export/facets response:200.corpus[].value": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export/facets response:200.format": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export/facets response:200.format[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export/facets response:200.format[].bytes": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export/facets response:200.format[].rules": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export/facets response:200.format[].value": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export/facets response:200.license": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export/facets response:200.license[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export/facets response:200.license[].bytes": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export/facets response:200.license[].rules": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export/facets response:200.license[].value": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export/facets response:200.severity": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export/facets response:200.severity[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export/facets response:200.severity[].bytes": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export/facets response:200.severity[].rules": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export/facets response:200.severity[].value": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/export/facets response:200.total": {
+      "required": true,
+      "types": [
+        "integer"
       ]
     },
     "GET /api/jobs/{}/detections/proposals": {
@@ -474,7 +2212,252 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.atom_index_built": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.candidate_total": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.corroborated_total": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.counts": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.counts{*}": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.job_id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.observables": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.observables[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.observables[].class": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.observables[].display": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.observables[].entity_type": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.observables[].value": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.observables_total": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.platform": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.proposals": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.proposals[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.proposals[].corpus": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.proposals[].evidence_count": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.proposals[].format": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.proposals[].id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.proposals[].license": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.proposals[].matches": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.proposals[].matches[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.proposals[].matches[].discriminating": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.proposals[].matches[].display": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.proposals[].matches[].exact": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.proposals[].matches[].field": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.proposals[].matches[].obs_class": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.proposals[].matches[].value": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.proposals[].matches[].weight": {
+      "required": true,
+      "types": [
+        "number"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.proposals[].platform": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.proposals[].score": {
+      "required": true,
+      "types": [
+        "number"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.proposals[].severity": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.proposals[].source_ref": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.proposals[].support_count": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.proposals[].techniques": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.proposals[].techniques[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.proposals[].tier": {
+      "enum": [
+        "behavioural",
+        "direct",
+        "weak"
+      ],
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.proposals[].title": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/detections/proposals response:200.returned": {
+      "required": true,
+      "types": [
+        "integer"
       ]
     },
     "GET /api/jobs/{}/entities": {
@@ -491,7 +2474,106 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/entities response:200[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/entities response:200[].accepted": {
+      "required": false,
+      "types": [
+        "boolean",
+        "null"
+      ]
+    },
+    "GET /api/jobs/{}/entities response:200[].baseline_stix_id": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/entities response:200[].confidence": {
+      "required": true,
+      "types": [
+        "null",
+        "number"
+      ]
+    },
+    "GET /api/jobs/{}/entities response:200[].context": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/entities response:200[].control_sample": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "GET /api/jobs/{}/entities response:200[].decision_origin": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/entities response:200[].enrichment_status": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/entities response:200[].entity_type": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/entities response:200[].held_reason": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/entities response:200[].id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/entities response:200[].job_id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/entities response:200[].mitre_id": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/entities response:200[].source": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/entities response:200[].value": {
+      "required": true,
+      "types": [
+        "string"
       ]
     },
     "GET /api/jobs/{}/progress": {
@@ -505,7 +2587,8 @@
     },
     "GET /api/jobs/{}/progress response:200": {
       "media": [
-        "application/json"
+        "application/json",
+        "text/event-stream"
       ],
       "types": [
         "any"
@@ -525,7 +2608,249 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].accepted": {
+      "required": false,
+      "types": [
+        "boolean",
+        "null"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].baseline_stix_id": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].confidence": {
+      "required": true,
+      "types": [
+        "null",
+        "number"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].decision_origin": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].enrichment_status": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].evidence_label": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].evidence_text": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].held_reason": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].job_id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].relationship_type": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].source_value": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].start_time": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].stop_time": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].target_value": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].times": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].times[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].times[].alternatives": {
+      "required": false,
+      "types": [
+        "array",
+        "null"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].times[].alternatives[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].times[].anchor": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].times[].anchor_source": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].times[].anchor_value": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].times[].doc_offset": {
+      "required": false,
+      "types": [
+        "integer",
+        "null"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].times[].evidence_label": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].times[].first_last": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].times[].id": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].times[].model_value": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].times[].origin": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].times[].precision": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].times[].qualifier": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].times[].reason": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].times[].role": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].times[].status": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].times[].time_text": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs/{}/relationships response:200[].times[].value": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
       ]
     },
     "GET /api/jobs/{}/relationships/valid-types": {
@@ -542,7 +2867,13 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "array"
+      ]
+    },
+    "GET /api/jobs/{}/relationships/valid-types response:200[]": {
+      "required": true,
+      "types": [
+        "string"
       ]
     },
     "GET /api/jobs/{}/source": {
@@ -556,6 +2887,7 @@
     },
     "GET /api/jobs/{}/source response:200": {
       "media": [
+        "*/*",
         "application/json"
       ],
       "types": [
@@ -587,6 +2919,104 @@
         "object"
       ]
     },
+    "GET /api/overrides response:200.enabled": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "GET /api/overrides response:200.rows": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/overrides response:200.rows[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/overrides response:200.rows[].accepted_count": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/overrides response:200.rows[].action": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/overrides response:200.rows[].created_at": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/overrides response:200.rows[].display": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/overrides response:200.rows[].entity_type": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/overrides response:200.rows[].id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/overrides response:200.rows[].job_count": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/overrides response:200.rows[].note": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/overrides response:200.rows[].origin": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/overrides response:200.rows[].rejected_count": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/overrides response:200.rows[].status": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/overrides response:200.rows[].term": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/overrides response:200.rows[].updated_at": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
     "GET /api/queue/status": {
       "deprecated": false
     },
@@ -595,7 +3025,190 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "GET /api/queue/status response:200.backend": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/queue/status response:200.counts": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/queue/status response:200.counts{*}": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/queue/status response:200.queue": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/queue/status response:200.queue.depth": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/queue/status response:200.queue.max_depth": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/queue/status response:200.queue.oldest_queued_job_id": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/queue/status response:200.queue.oldest_queued_seconds": {
+      "required": true,
+      "types": [
+        "null",
+        "number"
+      ]
+    },
+    "GET /api/queue/status response:200.role": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/queue/status response:200.worker_summary": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/queue/status response:200.worker_summary.alive": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/queue/status response:200.worker_summary.busy": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/queue/status response:200.worker_summary.capacity": {
+      "required": true,
+      "types": [
+        "integer",
+        "null"
+      ]
+    },
+    "GET /api/queue/status response:200.worker_summary.idle": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/queue/status response:200.worker_summary.idle_slots": {
+      "required": true,
+      "types": [
+        "integer",
+        "null"
+      ]
+    },
+    "GET /api/queue/status response:200.worker_summary.stale": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/queue/status response:200.workers": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/queue/status response:200.workers[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/queue/status response:200.workers[].app_version": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/queue/status response:200.workers[].heartbeat_seconds_ago": {
+      "required": true,
+      "types": [
+        "null",
+        "number"
+      ]
+    },
+    "GET /api/queue/status response:200.workers[].max_concurrent": {
+      "required": true,
+      "types": [
+        "integer",
+        "null"
+      ]
+    },
+    "GET /api/queue/status response:200.workers[].oldest_heartbeat_seconds_ago": {
+      "required": true,
+      "types": [
+        "null",
+        "number"
+      ]
+    },
+    "GET /api/queue/status response:200.workers[].role": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/queue/status response:200.workers[].running_jobs": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/queue/status response:200.workers[].stale": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "GET /api/queue/status response:200.workers[].started_at": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/queue/status response:200.workers[].state": {
+      "enum": [
+        "busy",
+        "idle",
+        "stale"
+      ],
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/queue/status response:200.workers[].worker_id": {
+      "required": true,
+      "types": [
+        "string"
       ]
     },
     "GET /api/relationship-policy": {
@@ -609,6 +3222,159 @@
         "object"
       ]
     },
+    "GET /api/relationship-policy response:200.completion": {
+      "required": false,
+      "types": [
+        "null",
+        "object"
+      ]
+    },
+    "GET /api/relationship-policy response:200.completion.alias": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/relationship-policy response:200.completion.fuzzy_alias": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/relationship-policy response:200.completion.long_distance": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/relationship-policy response:200.completion.max_new_edges": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/relationship-policy response:200.completion.reference": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/relationship-policy response:200.completion.semantic_alias": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/relationship-policy response:200.completion.transitive": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/relationship-policy response:200.global": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/relationship-policy response:200.max_pinned_edges": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/relationship-policy response:200.pin_budget_mode": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/relationship-policy response:200.pin_evidence": {
+      "required": false,
+      "types": [
+        "null",
+        "object"
+      ]
+    },
+    "GET /api/relationship-policy response:200.pin_evidence.mode": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/relationship-policy response:200.pin_evidence.window": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/relationship-policy response:200.rules": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/relationship-policy response:200.rules[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/relationship-policy response:200.rules[].enabled": {
+      "required": false,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/relationship-policy response:200.rules[].mode": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/relationship-policy response:200.rules[].src": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/relationship-policy response:200.rules[].tgt": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/relationship-policy response:200.rules[].verb": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/relationship-policy response:200.temporal_export": {
+      "required": false,
+      "types": [
+        "null",
+        "object"
+      ]
+    },
+    "GET /api/relationship-policy response:200.temporal_export.mode": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/relationship-policy response:200.version": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
     "GET /api/relationship-policy/last-run": {
       "deprecated": false
     },
@@ -620,6 +3386,47 @@
         "object"
       ]
     },
+    "GET /api/relationship-policy/last-run response:200.available": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "GET /api/relationship-policy/last-run response:200.completion": {
+      "required": true,
+      "types": [
+        "null",
+        "object"
+      ]
+    },
+    "GET /api/relationship-policy/last-run response:200.created_at": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/relationship-policy/last-run response:200.filename": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/relationship-policy/last-run response:200.job_id": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/relationship-policy/last-run response:200.pin": {
+      "required": true,
+      "types": [
+        "null",
+        "object"
+      ]
+    },
     "GET /api/settings/corpora": {
       "deprecated": false
     },
@@ -628,7 +3435,97 @@
         "application/json"
       ],
       "types": [
+        "object"
+      ]
+    },
+    "GET /api/settings/corpora response:200.corpora": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/settings/corpora response:200.corpora[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/settings/corpora response:200.corpora[].adapter": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/settings/corpora response:200.corpora[].adapter_available": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "GET /api/settings/corpora response:200.corpora[].enabled": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "GET /api/settings/corpora response:200.corpora[].git": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/settings/corpora response:200.corpora[].license": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/settings/corpora response:200.corpora[].name": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/settings/corpora response:200.corpora[].path": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/settings/corpora response:200.corpora[].priority": {
+      "required": false,
+      "types": [
         "any"
+      ]
+    },
+    "GET /api/settings/corpora response:200.corpora[].private": {
+      "required": false,
+      "types": [
+        "boolean",
+        "null"
+      ]
+    },
+    "GET /api/settings/corpora response:200.corpora[].rules": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/settings/corpora response:200.corpora[].subdir": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/settings/corpora response:200.corpora[].tarball": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
       ]
     },
     "GET /api/settings/formats": {
@@ -639,7 +3536,43 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "GET /api/settings/formats response:200.formats": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/settings/formats response:200.formats[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/settings/formats response:200.formats[].available": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "GET /api/settings/formats response:200.formats[].corpora": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/settings/formats response:200.formats[].format": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/settings/formats response:200.formats[].rules": {
+      "required": true,
+      "types": [
+        "integer"
       ]
     },
     "GET /api/thresholds": {
@@ -651,6 +3584,154 @@
       ],
       "types": [
         "object"
+      ]
+    },
+    "GET /api/thresholds response:200.auto_accept_audit": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/thresholds response:200.auto_accept_audit[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/thresholds response:200.auto_accept_audit[].confirmed": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/thresholds response:200.auto_accept_audit[].decided": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/thresholds response:200.auto_accept_audit[].entity_type": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/thresholds response:200.auto_accept_audit[].precision": {
+      "required": true,
+      "types": [
+        "null",
+        "number"
+      ]
+    },
+    "GET /api/thresholds response:200.auto_accept_audit[].sampled": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/thresholds response:200.auto_accept_audit[].source": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/thresholds response:200.auto_accept_level": {
+      "required": true,
+      "types": [
+        "number"
+      ]
+    },
+    "GET /api/thresholds response:200.control_sample_rate": {
+      "required": true,
+      "types": [
+        "number"
+      ]
+    },
+    "GET /api/thresholds response:200.defaults": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/thresholds response:200.defaults{*}": {
+      "required": true,
+      "types": [
+        "number"
+      ]
+    },
+    "GET /api/thresholds response:200.enabled": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "GET /api/thresholds response:200.rows": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/thresholds response:200.rows[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/thresholds response:200.rows[].entity_type": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/thresholds response:200.rows[].origin": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/thresholds response:200.rows[].precision_at": {
+      "required": true,
+      "types": [
+        "null",
+        "number"
+      ]
+    },
+    "GET /api/thresholds response:200.rows[].recall_retained": {
+      "required": true,
+      "types": [
+        "null",
+        "number"
+      ]
+    },
+    "GET /api/thresholds response:200.rows[].sample_size": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/thresholds response:200.rows[].source": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/thresholds response:200.rows[].target_precision": {
+      "required": true,
+      "types": [
+        "null",
+        "number"
+      ]
+    },
+    "GET /api/thresholds response:200.rows[].threshold": {
+      "required": true,
+      "types": [
+        "number"
+      ]
+    },
+    "GET /api/thresholds response:200.rows[].updated_at": {
+      "required": true,
+      "types": [
+        "string"
       ]
     },
     "PATCH /api/jobs/{}": {
@@ -682,7 +3763,19 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "PATCH /api/jobs/{} response:200.status": {
+      "enum": [
+        "completed",
+        "failed",
+        "for_review",
+        "reviewing"
+      ],
+      "required": true,
+      "types": [
+        "string"
       ]
     },
     "PATCH /api/jobs/{} response:409": {
@@ -752,7 +3845,100 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "PATCH /api/jobs/{}/entities/{} response:200.accepted": {
+      "required": false,
+      "types": [
+        "boolean",
+        "null"
+      ]
+    },
+    "PATCH /api/jobs/{}/entities/{} response:200.baseline_stix_id": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/entities/{} response:200.confidence": {
+      "required": true,
+      "types": [
+        "null",
+        "number"
+      ]
+    },
+    "PATCH /api/jobs/{}/entities/{} response:200.context": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/entities/{} response:200.control_sample": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "PATCH /api/jobs/{}/entities/{} response:200.decision_origin": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/entities/{} response:200.enrichment_status": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/entities/{} response:200.entity_type": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/entities/{} response:200.held_reason": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/entities/{} response:200.id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/entities/{} response:200.job_id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/entities/{} response:200.mitre_id": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/entities/{} response:200.source": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/entities/{} response:200.value": {
+      "required": true,
+      "types": [
+        "string"
       ]
     },
     "PATCH /api/jobs/{}/entities/{} response:409": {
@@ -850,7 +4036,243 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.accepted": {
+      "required": false,
+      "types": [
+        "boolean",
+        "null"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.baseline_stix_id": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.confidence": {
+      "required": true,
+      "types": [
+        "null",
+        "number"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.decision_origin": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.enrichment_status": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.evidence_label": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.evidence_text": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.held_reason": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.job_id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.relationship_type": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.source_value": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.start_time": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.stop_time": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.target_value": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.times": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.times[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.times[].alternatives": {
+      "required": false,
+      "types": [
+        "array",
+        "null"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.times[].alternatives[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.times[].anchor": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.times[].anchor_source": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.times[].anchor_value": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.times[].doc_offset": {
+      "required": false,
+      "types": [
+        "integer",
+        "null"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.times[].evidence_label": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.times[].first_last": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.times[].id": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.times[].model_value": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.times[].origin": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.times[].precision": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.times[].qualifier": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.times[].reason": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.times[].role": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.times[].status": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.times[].time_text": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/jobs/{}/relationships/{} response:200.times[].value": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
       ]
     },
     "PATCH /api/jobs/{}/relationships/{} response:409": {
@@ -888,6 +4310,86 @@
         "object"
       ]
     },
+    "PATCH /api/overrides/{} response:200.accepted_count": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "PATCH /api/overrides/{} response:200.action": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/overrides/{} response:200.created_at": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/overrides/{} response:200.display": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/overrides/{} response:200.entity_type": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/overrides/{} response:200.id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/overrides/{} response:200.job_count": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "PATCH /api/overrides/{} response:200.note": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/overrides/{} response:200.origin": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/overrides/{} response:200.rejected_count": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "PATCH /api/overrides/{} response:200.status": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/overrides/{} response:200.term": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/overrides/{} response:200.updated_at": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
     "PATCH /api/settings/corpora/{}": {
       "deprecated": false
     },
@@ -917,7 +4419,103 @@
         "application/json"
       ],
       "types": [
+        "object"
+      ]
+    },
+    "PATCH /api/settings/corpora/{} response:200.corpora": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "PATCH /api/settings/corpora/{} response:200.corpora[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "PATCH /api/settings/corpora/{} response:200.corpora[].adapter": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/settings/corpora/{} response:200.corpora[].adapter_available": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "PATCH /api/settings/corpora/{} response:200.corpora[].enabled": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "PATCH /api/settings/corpora/{} response:200.corpora[].git": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/settings/corpora/{} response:200.corpora[].license": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/settings/corpora/{} response:200.corpora[].name": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/settings/corpora/{} response:200.corpora[].path": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/settings/corpora/{} response:200.corpora[].priority": {
+      "required": false,
+      "types": [
         "any"
+      ]
+    },
+    "PATCH /api/settings/corpora/{} response:200.corpora[].private": {
+      "required": false,
+      "types": [
+        "boolean",
+        "null"
+      ]
+    },
+    "PATCH /api/settings/corpora/{} response:200.corpora[].rules": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "PATCH /api/settings/corpora/{} response:200.corpora[].subdir": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/settings/corpora/{} response:200.corpora[].tarball": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/settings/corpora/{} response:200.ok": {
+      "required": true,
+      "types": [
+        "boolean"
       ]
     },
     "POST /api/baselines/inspect": {
@@ -1107,7 +4705,29 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "POST /api/ingest/text response:200.filename": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/ingest/text response:200.job_id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/ingest/text response:200.status": {
+      "enum": [
+        "processing",
+        "queued"
+      ],
+      "required": true,
+      "types": [
+        "string"
       ]
     },
     "POST /api/ingest/text response:400": {
@@ -1177,7 +4797,47 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "POST /api/ingest/url response:200.blocked_requests": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/ingest/url response:200.filename": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/ingest/url response:200.job_id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/ingest/url response:200.rendered_chars": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/ingest/url response:200.source_url": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/ingest/url response:200.status": {
+      "enum": [
+        "processing",
+        "queued"
+      ],
+      "required": true,
+      "types": [
+        "string"
       ]
     },
     "POST /api/ingest/url response:400": {
@@ -1221,7 +4881,8 @@
     },
     "POST /api/jobs/{}/detections/export response:200": {
       "media": [
-        "application/json"
+        "application/json",
+        "application/zip"
       ],
       "types": [
         "any"
@@ -1285,7 +4946,100 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "POST /api/jobs/{}/entities response:200.accepted": {
+      "required": false,
+      "types": [
+        "boolean",
+        "null"
+      ]
+    },
+    "POST /api/jobs/{}/entities response:200.baseline_stix_id": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/entities response:200.confidence": {
+      "required": true,
+      "types": [
+        "null",
+        "number"
+      ]
+    },
+    "POST /api/jobs/{}/entities response:200.context": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/entities response:200.control_sample": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "POST /api/jobs/{}/entities response:200.decision_origin": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/entities response:200.enrichment_status": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/entities response:200.entity_type": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/entities response:200.held_reason": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/entities response:200.id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/entities response:200.job_id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/entities response:200.mitre_id": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/entities response:200.source": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/entities response:200.value": {
+      "required": true,
+      "types": [
+        "string"
       ]
     },
     "POST /api/jobs/{}/entities/accept-pending": {
@@ -1302,7 +5056,13 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "POST /api/jobs/{}/entities/accept-pending response:200.accepted": {
+      "required": true,
+      "types": [
+        "integer"
       ]
     },
     "POST /api/jobs/{}/entities/bulk": {
@@ -1347,7 +5107,31 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "POST /api/jobs/{}/entities/bulk response:200.action": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/entities/bulk response:200.entity_type": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/entities/bulk response:200.scope": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/entities/bulk response:200.updated": {
+      "required": true,
+      "types": [
+        "integer"
       ]
     },
     "POST /api/jobs/{}/finalize": {
@@ -1371,7 +5155,25 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "POST /api/jobs/{}/finalize response:200.bundle_size": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/jobs/{}/finalize response:200.status": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/finalize response:200.validation": {
+      "required": true,
+      "types": [
+        "string"
       ]
     },
     "POST /api/jobs/{}/finalize response:409": {
@@ -1455,7 +5257,243 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.accepted": {
+      "required": false,
+      "types": [
+        "boolean",
+        "null"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.baseline_stix_id": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.confidence": {
+      "required": true,
+      "types": [
+        "null",
+        "number"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.decision_origin": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.enrichment_status": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.evidence_label": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.evidence_text": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.held_reason": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.job_id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.relationship_type": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.source_value": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.start_time": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.stop_time": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.target_value": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.times": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.times[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.times[].alternatives": {
+      "required": false,
+      "types": [
+        "array",
+        "null"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.times[].alternatives[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.times[].anchor": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.times[].anchor_source": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.times[].anchor_value": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.times[].doc_offset": {
+      "required": false,
+      "types": [
+        "integer",
+        "null"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.times[].evidence_label": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.times[].first_last": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.times[].id": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.times[].model_value": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.times[].origin": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.times[].precision": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.times[].qualifier": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.times[].reason": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.times[].role": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.times[].status": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.times[].time_text": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships response:200.times[].value": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
       ]
     },
     "POST /api/jobs/{}/relationships/bulk": {
@@ -1499,7 +5537,19 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "POST /api/jobs/{}/relationships/bulk response:200.action": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/jobs/{}/relationships/bulk response:200.updated": {
+      "required": true,
+      "types": [
+        "integer"
       ]
     },
     "POST /api/overrides": {
@@ -1552,6 +5602,86 @@
       ],
       "types": [
         "object"
+      ]
+    },
+    "POST /api/overrides response:200.accepted_count": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/overrides response:200.action": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/overrides response:200.created_at": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/overrides response:200.display": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/overrides response:200.entity_type": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/overrides response:200.id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/overrides response:200.job_count": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/overrides response:200.note": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/overrides response:200.origin": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/overrides response:200.rejected_count": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/overrides response:200.status": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/overrides response:200.term": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/overrides response:200.updated_at": {
+      "required": true,
+      "types": [
+        "string"
       ]
     },
     "POST /api/overrides/promote": {
@@ -1609,6 +5739,91 @@
         "object"
       ]
     },
+    "POST /api/overrides/promote response:200.applied": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "POST /api/overrides/promote response:200.candidates": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "POST /api/overrides/promote response:200.candidates[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/overrides/promote response:200.candidates[].accepted_count": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/overrides/promote response:200.candidates[].action": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/overrides/promote response:200.candidates[].display": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/overrides/promote response:200.candidates[].entity_type": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/overrides/promote response:200.candidates[].existing_status": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/overrides/promote response:200.candidates[].job_count": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/overrides/promote response:200.candidates[].rejected_count": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/overrides/promote response:200.candidates[].sources": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "POST /api/overrides/promote response:200.candidates[].sources[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/overrides/promote response:200.candidates[].term": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/overrides/promote response:200.written": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
     "POST /api/rules/lookup": {
       "deprecated": false
     },
@@ -1645,7 +5860,103 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "POST /api/rules/lookup response:200.requested": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/rules/lookup response:200.rules": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "POST /api/rules/lookup response:200.rules[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/rules/lookup response:200.rules[].bytes": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/rules/lookup response:200.rules[].corpus": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/rules/lookup response:200.rules[].description": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/rules/lookup response:200.rules[].format": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/rules/lookup response:200.rules[].id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/rules/lookup response:200.rules[].license": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/rules/lookup response:200.rules[].platform": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/rules/lookup response:200.rules[].raw": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/rules/lookup response:200.rules[].severity": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/rules/lookup response:200.rules[].source_ref": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/rules/lookup response:200.rules[].techniques": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "POST /api/rules/lookup response:200.rules[].techniques[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/rules/lookup response:200.rules[].title": {
+      "required": true,
+      "types": [
+        "string"
       ]
     },
     "POST /api/settings/corpora": {
@@ -1734,7 +6045,110 @@
         "application/json"
       ],
       "types": [
+        "object"
+      ]
+    },
+    "POST /api/settings/corpora response:200.corpora": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "POST /api/settings/corpora response:200.corpora[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/settings/corpora response:200.corpora[].adapter": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora response:200.corpora[].adapter_available": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "POST /api/settings/corpora response:200.corpora[].enabled": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "POST /api/settings/corpora response:200.corpora[].git": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora response:200.corpora[].license": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora response:200.corpora[].name": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora response:200.corpora[].path": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora response:200.corpora[].priority": {
+      "required": false,
+      "types": [
         "any"
+      ]
+    },
+    "POST /api/settings/corpora response:200.corpora[].private": {
+      "required": false,
+      "types": [
+        "boolean",
+        "null"
+      ]
+    },
+    "POST /api/settings/corpora response:200.corpora[].rules": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/settings/corpora response:200.corpora[].subdir": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora response:200.corpora[].tarball": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora response:200.ok": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "POST /api/settings/corpora response:200.warning": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
       ]
     },
     "POST /api/settings/corpora/rebuild": {
@@ -1745,7 +6159,188 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.counts": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.counts[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.counts[].canonical": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.counts[].corpus": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.counts[].license": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.counts[].rules": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.dedup": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.dedup.canonical": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.dedup.clusters": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.dedup.duplicates": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.dedup.merged_by_provenance": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.dedup.provenance_edges": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.dedup.total": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.file_errors": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.file_errors{*}": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.file_errors{*}[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.file_errors{*}[].error": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.file_errors{*}[].path": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.removed": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.removed[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.rule_text": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.rule_text.empty_bodies": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.rule_text.rows": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.skip_reasons": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.skip_reasons{*}": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.skipped": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.skipped[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.total": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.written": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/settings/corpora/rebuild response:200.written{*}": {
+      "required": true,
+      "types": [
+        "integer"
       ]
     },
     "POST /api/settings/corpora/{}/sync": {
@@ -1762,7 +6357,139 @@
         "application/json"
       ],
       "types": [
+        "object"
+      ]
+    },
+    "POST /api/settings/corpora/{}/sync response:200.corpora": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "POST /api/settings/corpora/{}/sync response:200.corpora[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/settings/corpora/{}/sync response:200.corpora[].adapter": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora/{}/sync response:200.corpora[].adapter_available": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "POST /api/settings/corpora/{}/sync response:200.corpora[].enabled": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "POST /api/settings/corpora/{}/sync response:200.corpora[].git": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora/{}/sync response:200.corpora[].license": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora/{}/sync response:200.corpora[].name": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora/{}/sync response:200.corpora[].path": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora/{}/sync response:200.corpora[].priority": {
+      "required": false,
+      "types": [
         "any"
+      ]
+    },
+    "POST /api/settings/corpora/{}/sync response:200.corpora[].private": {
+      "required": false,
+      "types": [
+        "boolean",
+        "null"
+      ]
+    },
+    "POST /api/settings/corpora/{}/sync response:200.corpora[].rules": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/settings/corpora/{}/sync response:200.corpora[].subdir": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora/{}/sync response:200.corpora[].tarball": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora/{}/sync response:200.detail": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora/{}/sync response:200.file_errors": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "POST /api/settings/corpora/{}/sync response:200.file_errors[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/settings/corpora/{}/sync response:200.file_errors[].error": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora/{}/sync response:200.file_errors[].path": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/settings/corpora/{}/sync response:200.ok": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "POST /api/settings/corpora/{}/sync response:200.rules": {
+      "required": true,
+      "types": [
+        "integer"
       ]
     },
     "POST /api/thresholds/recalibrate": {
@@ -1820,6 +6547,201 @@
         "object"
       ]
     },
+    "POST /api/thresholds/recalibrate response:200.applied": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.excluded_by_origin": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.excluded_by_origin{*}": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.origins": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.origins[]": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.proposals": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.proposals[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.proposals[].accepted": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.proposals[].current": {
+      "required": true,
+      "types": [
+        "number"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.proposals[].curve": {
+      "required": true,
+      "types": [
+        "array"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.proposals[].curve[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.proposals[].curve[].hi": {
+      "required": true,
+      "types": [
+        "number"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.proposals[].curve[].lo": {
+      "required": true,
+      "types": [
+        "number"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.proposals[].curve[].n": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.proposals[].curve[].rate": {
+      "required": true,
+      "types": [
+        "number"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.proposals[].entity_type": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.proposals[].max_score": {
+      "required": true,
+      "types": [
+        "null",
+        "number"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.proposals[].min_score": {
+      "required": true,
+      "types": [
+        "null",
+        "number"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.proposals[].precision_at_current": {
+      "required": true,
+      "types": [
+        "null",
+        "number"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.proposals[].precision_at_proposed": {
+      "required": true,
+      "types": [
+        "null",
+        "number"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.proposals[].proposed": {
+      "required": true,
+      "types": [
+        "null",
+        "number"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.proposals[].recall_at_current": {
+      "required": true,
+      "types": [
+        "null",
+        "number"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.proposals[].recall_at_proposed": {
+      "required": true,
+      "types": [
+        "null",
+        "number"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.proposals[].rejected": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.proposals[].sample_size": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.proposals[].source": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.proposals[].status": {
+      "enum": [
+        "above_auto_accept",
+        "insufficient_samples",
+        "ok",
+        "target_unreachable",
+        "unchanged"
+      ],
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.proposals[].target_precision": {
+      "required": true,
+      "types": [
+        "number"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.proposals[].unclamped": {
+      "required": true,
+      "types": [
+        "null",
+        "number"
+      ]
+    },
+    "POST /api/thresholds/recalibrate response:200.written": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
     "POST /api/upload": {
       "deprecated": false
     },
@@ -1871,7 +6793,29 @@
         "application/json"
       ],
       "types": [
-        "any"
+        "object"
+      ]
+    },
+    "POST /api/upload response:200.filename": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/upload response:200.job_id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/upload response:200.status": {
+      "enum": [
+        "processing",
+        "queued"
+      ],
+      "required": true,
+      "types": [
+        "string"
       ]
     },
     "POST /api/upload response:400": {
@@ -1892,6 +6836,159 @@
       ],
       "types": [
         "object"
+      ]
+    },
+    "PUT /api/relationship-policy response:200.completion": {
+      "required": false,
+      "types": [
+        "null",
+        "object"
+      ]
+    },
+    "PUT /api/relationship-policy response:200.completion.alias": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "PUT /api/relationship-policy response:200.completion.fuzzy_alias": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "PUT /api/relationship-policy response:200.completion.long_distance": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "PUT /api/relationship-policy response:200.completion.max_new_edges": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "PUT /api/relationship-policy response:200.completion.reference": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "PUT /api/relationship-policy response:200.completion.semantic_alias": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "PUT /api/relationship-policy response:200.completion.transitive": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "PUT /api/relationship-policy response:200.global": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "PUT /api/relationship-policy response:200.max_pinned_edges": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "PUT /api/relationship-policy response:200.pin_budget_mode": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "PUT /api/relationship-policy response:200.pin_evidence": {
+      "required": false,
+      "types": [
+        "null",
+        "object"
+      ]
+    },
+    "PUT /api/relationship-policy response:200.pin_evidence.mode": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PUT /api/relationship-policy response:200.pin_evidence.window": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "PUT /api/relationship-policy response:200.rules": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "PUT /api/relationship-policy response:200.rules[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "PUT /api/relationship-policy response:200.rules[].enabled": {
+      "required": false,
+      "types": [
+        "object"
+      ]
+    },
+    "PUT /api/relationship-policy response:200.rules[].mode": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PUT /api/relationship-policy response:200.rules[].src": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PUT /api/relationship-policy response:200.rules[].tgt": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PUT /api/relationship-policy response:200.rules[].verb": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PUT /api/relationship-policy response:200.temporal_export": {
+      "required": false,
+      "types": [
+        "null",
+        "object"
+      ]
+    },
+    "PUT /api/relationship-policy response:200.temporal_export.mode": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PUT /api/relationship-policy response:200.version": {
+      "required": false,
+      "types": [
+        "any"
       ]
     },
     "PUT /api/thresholds/{}/{}": {
@@ -1930,6 +7027,33 @@
       ],
       "types": [
         "object"
+      ]
+    },
+    "PUT /api/thresholds/{}/{} response:200.entity_type": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PUT /api/thresholds/{}/{} response:200.origin": {
+      "enum": [
+        "manual"
+      ],
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PUT /api/thresholds/{}/{} response:200.source": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PUT /api/thresholds/{}/{} response:200.threshold": {
+      "required": true,
+      "types": [
+        "number"
       ]
     }
   },
