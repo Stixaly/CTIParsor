@@ -37,7 +37,10 @@ Three things, and only these
 
 It is for one analyst, on a self-hosted Docker Compose install, who reviews the
 extractions before exporting them
-([who 1.0 is for](docs/support-policy.md#who-10-is-for)). It certifies no level
+([who 1.0 is for](docs/support-policy.md#who-10-is-for)). That changes if
+[ADR-0097](docs/adr/0097-1-0-is-a-shared-service-for-one-team.md) is accepted
+(proposed on 2026-11-08): 1.0 would be one install shared by one team, behind
+authentication, with roles. It certifies no level
 of precision ([what it does not promise](docs/support-policy.md#what-10-does-not-promise)).
 The [capability matrix](docs/support-policy.md#capability-matrix) marks each
 capability supported, experimental or not supported, with its limits and its
@@ -56,7 +59,15 @@ use, a recorded run with the default provider, figure reading on by
 default, and a run's record of the models it actually loaded (item 13, added
 2026-11-08). The state of each, what it
 proves and what it does not cover are in the ADR's
-[action plan](docs/adr/0094-what-1-0-promises.md#action-plan); the
+[action plan](docs/adr/0094-what-1-0-promises.md#action-plan).
+
+If [ADR-0097](docs/adr/0097-1-0-is-a-shared-service-for-one-team.md) is
+accepted, the tag also waits for its work items 14 to 24, none started:
+authentication and roles, sessions and tokens, the egress policy by TLP, the
+audit, metrics and alert rules, scheduled backups, bounds on the job list and
+on requeues, the false backup log, response models, a load and failure recipe,
+and an end-to-end journey with the real models. The
+
 [readiness checklist](docs/releases/1.0-readiness.md) records each gate on the
 release candidate.
 
@@ -79,6 +90,11 @@ experimental row of the
   another model.** Wired, with no recorded run in the repository. A provider
   is supported only with a recorded run
   ([ADR-0094](docs/adr/0094-what-1-0-promises.md), decision 13).
+- **Beyond one team on one host.** Named in
+  [ADR-0097](docs/adr/0097-1-0-is-a-shared-service-for-one-team.md) as not
+  covered: isolation between teams (an owner per report, filtered queries),
+  high availability, object storage, an OpenCTI connector with retries, and
+  SAML.
 - **An import into MISP.** A target after 1.0
   ([ADR-0094](docs/adr/0094-what-1-0-promises.md), decision 14). There is no
   connector and no import test today; a MISP-shaped STIX 2.1 bundle is
@@ -149,11 +165,6 @@ reason given. The documents hold no plan to change any of them.
   Compose is the only supported install
   ([ADR-0054](docs/adr/0054-full-docker-installation.md)); a host install is
   kept only as a migration path ([upgrading.md](docs/upgrading.md)).
-- **Several analysts, authentication, access control.** The 1.0 target is one
-  analyst on a local install, and CTIParsor is not a multi-user service
-  ([SECURITY.md](SECURITY.md)). ADR-0094 declines to do it before 1.0:
-  [ADR-0036](docs/adr/0036-architecture-service-multi-utilisateur.md)
-  (Proposed) treats authentication as a project of several weeks.
 - **A GPU.** The image carries torch's CPU build.
 - **A Python package, or `pipeline/` as a library.** There is no sdist, wheel
   or PyPI package ([ADR-0085](docs/adr/0085-releases-promote-the-image-main-built.md)):

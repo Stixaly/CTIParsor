@@ -17,7 +17,8 @@ decisions behind the containerization itself.
   - `pg-data-18`: the PostgreSQL 18 job store AND rule store (jobs, entities, relationships, progress, policy, figure and CVE caches, plus the detection-rule corpus since ADR-0053) — back it up together with `cti-state` ([Data and backups](#data-and-backups)).
   - `cti-cache`: HuggingFace models, Sigma/YARA/Suricata corpora — rebuildable with `bootstrap`.
   - `ollama-models`: (Only if using the `ollama` profile).
-- **Services**: `app`, `worker`, `postgres` and `capture-proxy` always run. `app` only accepts and queues reports (`CTIPARSOR_ROLE=api`) and never loads a model; `worker` claims queued reports from the job store and runs each in an isolated subprocess, heartbeating the rows it owns so several workers can share the queue (ADR-0046) — scale it with `docker compose up -d --scale worker=2`; `postgres` is both stores (ADR-0045, ADR-0053: PostgreSQL 18, on the internal network only, running as the image's `postgres` user with every capability dropped and a read-only root; `CTI_DB_PASSWORD` in `.env` is required). `capture-proxy` is a Squid egress filter the URL-capture tab's Chromium goes through, so it can reach public addresses only (see *Security model*). Three optional profiles:
+- **Services**: `app`, `worker`, `postgres` and `capture-proxy` always run. `app` only accepts and queues reports (`CTIPARSOR_ROLE=api`) and never loads a model; `worker` claims queued reports from the job store and runs each in an isolated subprocess, heartbeating the rows it owns so several workers can share the queue (ADR-0046) — scale it with `docker compose up -d --scale worker=2`; `postgres` is both stores (ADR-0045, ADR-0053: PostgreSQL 18, on the internal network only, running as the image's `postgres` user with every capability dropped and a read-only root; `CTI_DB_PASSWORD` in `.env` is required). `capture-proxy` is a Squid egress filter the URL-capture tab's Chromium goes through, so it can reach public addresses only (see *Security model*). Four optional profiles:
+  - `backup`: scheduled backups of the database and `cti-state` (see *Data and backups*).
   - `bootstrap`: one-shot initialisation (models, corpora, rule store), same image and hardening as `app`.
   - `ollama`: a local LLM with no published port, reachable by `app` at `http://ollama:11434`.
   - `proxy`: TLS + password (`nginx-unprivileged`) in front of `app`; the only thing worth publishing on a network.
@@ -274,6 +275,32 @@ Then check the restored install: `curl -fsS http://127.0.0.1:8000/api/health` (y
 **Make the restore the live install** on the same machine: restore the backup a second time, under the install's own project name, `ctiparsor`. The offline scripts (`scripts/package_offline_docker.sh`, `scripts/update_offline_corpora.sh`) and these docs name its volumes `ctiparsor_*`, so keep the install under that name rather than setting another one in `.env`. Once the restored project shows your reports, in a new shell where `COMPOSE_PROJECT_NAME` is not set: `docker compose down`, then `docker volume rm ctiparsor_pg-data-18 ctiparsor_cti-state` (the old install's database and files, for good; `cti-cache` stays), then the restore commands above. Until you remove it, the restored project still holds a copy of the data.
 
 CI runs these commands as written here: `scripts/docker_smoke.sh --backup-restore` backs its stack up, checks the backup, restores it into a second, empty project, and compares every table and file (job `container-image`). `scripts/check_backup_restore.py` backs up a used install with the same `pg_dump`, `pg_restore` and `tar` flags, restores it into an empty database and directory, and compares every row, sequence, schema object and file (job `fast-tests`, ADR-0094 item 3).
+
+**Scheduled backups** (profile `backup`, ADR-0097 item 19) run the backup above once a day. The `backup` service runs `docker/backup/run.sh` on the same PostgreSQL image as `postgres`. It mounts `cti-state` read-only, writes into a host directory of your choice, and keeps the newest pairs. It writes the outcome to a status file on the `cti-backup-status` volume, which the `app` service reads for its metrics ([Monitoring and alerts](operations.md#monitoring-and-alerts)).
+
+Set the target in `.env`, then start the service:
+
+```bash
+# .env: a directory on another disk or an NFS share, not on this machine's system disk
+BACKUP_TARGET=/mnt/backups/ctiparsor
+docker compose --profile backup up -d backup
+```
+
+In production the target must be off this host: another disk or an NFS share. The service refuses to back up without it: with `BACKUP_TARGET` unset, a run writes `ok: false` ("BACKUP_TARGET is not set") and copies nothing. The rest of the stack starts without it. The directory must be writable by uid 70, the `postgres` user the image runs the backup as. To run one backup now, outside the schedule, use `docker compose --profile backup run --rm -e BACKUP_RUN_NOW=1 backup`: it exits 0 on success and 1 on failure.
+
+| Variable | Default | Role |
+|---|---|---|
+| `BACKUP_TARGET` | unset: the service refuses to run | Host directory the backups are written to; off this host in production |
+| `BACKUP_TIME` | `02:30` | Daily run time, UTC, `HH:MM` |
+| `BACKUP_KEEP` | `7` | Backup pairs kept, the newest first. A pair is one dump and one archive with the same stamp |
+
+Each run writes `ctiparsor-YYYY-MM-DD-HHMMSS.dump` and `cti-state-YYYY-MM-DD-HHMMSS.tgz` (UTC), under a temporary name first. It checks both files the way *Check a backup* does, then renames them. A failed run deletes no older pair. Its status is `ok: false` with the error, and the app's `/metrics` shows it.
+
+- **Different from the manual backup.** The scheduled run does not stop `app` and `worker`. A report that is running at that moment can be half in the archive, and the dump and the archive can disagree about it. For a backup you count on, stop the stack with the manual commands above, or check that no report runs at the scheduled time.
+- **Recovery point.** With one run a day, the newest successful pair is at most a day old (RPO 24 h). `BACKUP_TIME` moves the run, not its frequency; manual backups between two scheduled runs shorten the gap.
+- **Restore** is the *Restore* section above, with the names of the pair you choose. Run *Check a backup* on it first.
+- **Stop it** with `docker compose --profile backup stop backup`. A run stopped in the middle removes its temporary files on TERM.
+- **Secrets.** The service reads the database password from `.secrets/db_password`, as the other services do, and has no `.env` of its own. The backup files hold every report at its TLP: keep the target as restricted as the reports.
 
 **Moving an existing SQLite-based install onto PostgreSQL** (one that ran
 before ADR-0045/ADR-0053 keeps its reports and its rule corpus in

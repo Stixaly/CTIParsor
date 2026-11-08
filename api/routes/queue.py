@@ -82,6 +82,22 @@ def _summary(workers: list[dict]) -> dict:
     }
 
 
+def load_workers(conn) -> list[dict]:
+    """Every worker loop and its state, read from `jobs` and `worker_heartbeats`.
+
+    Shared by GET /api/queue/status and GET /metrics (ADR-0097 item 18), so both
+    count a worker the same way.
+    """
+    job_rows = conn.execute(
+        "SELECT worker_id, COUNT(*) as running, MIN(heartbeat_at) as oldest_hb, MAX(heartbeat_at) as newest_hb "
+        "FROM jobs WHERE status='processing' AND worker_id IS NOT NULL GROUP BY worker_id"
+    ).fetchall()
+    loop_rows = conn.execute(
+        "SELECT worker_id, role, max_concurrent, app_version, started_at, heartbeat_at FROM worker_heartbeats"
+    ).fetchall()
+    return _workers(loop_rows, job_rows)
+
+
 @router.get("/queue/status", response_model=QueueStatus, response_model_exclude_unset=True)
 def get_queue_status():
     """Return a snapshot of queue depth, job counts, and every worker loop's liveness."""
@@ -95,16 +111,9 @@ def get_queue_status():
             "SELECT id, created_at FROM jobs WHERE status='queued' ORDER BY created_at ASC LIMIT 1"
         ).fetchone()
 
-        job_rows = conn.execute(
-            "SELECT worker_id, COUNT(*) as running, MIN(heartbeat_at) as oldest_hb, MAX(heartbeat_at) as newest_hb "
-            "FROM jobs WHERE status='processing' AND worker_id IS NOT NULL GROUP BY worker_id"
-        ).fetchall()
-        loop_rows = conn.execute(
-            "SELECT worker_id, role, max_concurrent, app_version, started_at, heartbeat_at FROM worker_heartbeats"
-        ).fetchall()
+        workers = load_workers(conn)
 
     queue_depth = counts.get("queued", 0)
-    workers = _workers(loop_rows, job_rows)
 
     return {
         "role": role(),

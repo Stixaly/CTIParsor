@@ -390,6 +390,22 @@
     "GET /api/jobs": {
       "deprecated": false
     },
+    "GET /api/jobs param:query:cursor": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/jobs param:query:limit": {
+      "maximum": 500,
+      "minimum": 1,
+      "required": false,
+      "types": [
+        "integer",
+        "null"
+      ]
+    },
     "GET /api/jobs response:200": {
       "media": [
         "application/json"

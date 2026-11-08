@@ -19,6 +19,7 @@ whole file, so a change takes effect at the next `docker compose up -d`.
 - [Worker, queue and retention](#worker-queue-and-retention)
 - [OCR](#ocr)
 - [Logging](#logging)
+- [Monitoring](#monitoring)
 - [Expert tuning](#expert-tuning)
 - [Web server and Docker Compose](#web-server-and-docker-compose)
 
@@ -652,6 +653,15 @@ feature** (it was 50 MB). Behind another proxy, allow as much: 72 MiB, that is
 # WORKER_POLL_S=2
 # WORKER_DRAIN_S=60
 
+# A job whose lease expired is requeued while it has been claimed fewer times
+# than this (each claim counts one attempt); then it is marked failed with the
+# reason "quarantined after N attempts", not requeued (ADR-0097 item 20).
+# JOB_MAX_ATTEMPTS=3
+
+# Uploads and pasted text are refused with HTTP 507 while the disk that holds
+# uploads/ has less free space than this, in MB.  0 turns the check off.
+# UPLOAD_MIN_FREE_MB=1024
+
 # The file the worker touches on every poll: its liveness.  The compose
 # healthcheck reads the same variable and fails once the file is two minutes
 # old.  It must be writable (the container's /tmp is a tmpfs).
@@ -719,6 +729,23 @@ Under Docker, `docker compose logs -f app worker` reads stdout. The root
 filesystem is read-only, so a `LOG_FILE` has to point into a volume, e.g.
 `/app/state/ctiparsor.log`.
 
+## Monitoring
+
+```env
+# The status file the `backup` service writes; GET /metrics reads it for the
+# backup metrics.  A missing file leaves those metrics out.
+# BACKUP_STATUS_FILE=/app/backup-status/status.json
+# A secret: the bearer token for a scraper outside loopback.  Generate it with
+# openssl rand -hex 32.  Empty: only loopback clients can read GET /metrics.
+# METRICS_TOKEN=
+```
+
+`GET /metrics` needs no other setting. It is on by default and answers loopback
+clients only. With `METRICS_TOKEN` set, a client that sends it as
+`Authorization: Bearer <token>` is accepted from any address; a wrong token is
+refused. Serve it only behind TLS, through the `proxy` profile
+([operations.md](operations.md#monitoring-and-alerts)).
+
 ## Expert tuning
 
 Calibrated values: change them only alongside a measurement
@@ -783,6 +810,8 @@ published ports, image name, `CTI_INSTALL_CAPTURE`, per-container CPU and memory
 (`CTI_<SERVICE>_CPUS`, `CTI_<SERVICE>_MEMORY`) — are in sections 9 and 12 of
 `.env.example`, with what each exposure means in
 [docs/deployment.md](deployment.md) and the sizing in [docs/docker.md](docker.md).
+
+Scheduled backups (profile `backup`, [docs/docker.md](docker.md#data-and-backups)) read three compose-level settings, all in section 12 of `.env.example`: `BACKUP_TARGET` (the host directory the backups go to; unset, the service refuses to back up), `BACKUP_TIME` (default `02:30`, UTC) and `BACKUP_KEEP` (default `7` pairs). The status file of the last run is read by the app's `/metrics` through `BACKUP_STATUS_FILE` (default `/app/backup-status/status.json` in the app container; a missing file means no backup is known).
 
 `CTI_GIT_REV` (empty by default) is the build argument `GIT_REV`. The image
 records that revision in its `org.opencontainers.image.revision` label and as

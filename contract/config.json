@@ -6,6 +6,11 @@
     "compose service app": {
       "profiles": []
     },
+    "compose service backup": {
+      "profiles": [
+        "backup"
+      ]
+    },
     "compose service bootstrap": {
       "profiles": [
         "bootstrap"
@@ -30,6 +35,7 @@
     "compose service worker": {
       "profiles": []
     },
+    "compose volume cti-backup-status": {},
     "compose volume cti-cache": {},
     "compose volume cti-state": {},
     "compose volume ollama-models": {},
@@ -86,6 +92,30 @@
       "set": false,
       "values": [
         "20.0"
+      ]
+    },
+    "env BACKUP_KEEP": {
+      "set": false,
+      "values": [
+        "7"
+      ]
+    },
+    "env BACKUP_STATUS_FILE": {
+      "set": false,
+      "values": [
+        "/app/backup-status/status.json"
+      ]
+    },
+    "env BACKUP_TARGET": {
+      "set": false,
+      "values": [
+        "/mnt/backups/ctiparsor"
+      ]
+    },
+    "env BACKUP_TIME": {
+      "set": false,
+      "values": [
+        "02:30"
       ]
     },
     "env BENIGN_IOC_FILTER": {
@@ -442,6 +472,12 @@
         ""
       ]
     },
+    "env JOB_MAX_ATTEMPTS": {
+      "set": false,
+      "values": [
+        "3"
+      ]
+    },
     "env JOB_RETENTION_DAYS": {
       "set": false,
       "values": [
@@ -566,6 +602,12 @@
       "set": false,
       "values": [
         "10485760"
+      ]
+    },
+    "env METRICS_TOKEN": {
+      "set": false,
+      "values": [
+        ""
       ]
     },
     "env MISTRAL_API_KEY": {
@@ -776,6 +818,12 @@
       "set": true,
       "values": [
         "1"
+      ]
+    },
+    "env UPLOAD_MIN_FREE_MB": {
+      "set": false,
+      "values": [
+        "1024"
       ]
     },
     "env VISION_ASSUME_CAPABLE": {

@@ -5,7 +5,7 @@
 **Deciders:** maintainer
 **Extends:** ADR-0085 (its decision 8 covers the versions before 1.0 only)
 **Amended by:** the amendments of 2026-11-07 (item 5 done, with limits) and
-2026-11-08 (item 13) below
+2026-11-08 (item 13) below; ADR-0097 (accepted) amends who 1.0 is for
 **Relates to:** ADR-0054 (Docker is the only supported install), ADR-0060 (the
 evaluation protocol), ADR-0066 (STIX ids), ADR-0077 (versioned migrations),
 ADR-0084 (a bundle Stage 5 refuses is not served), ADR-0090 (enriching a STIX
@@ -337,7 +337,7 @@ of evidence is missing.
 | 10 | Freeze and real use: the candidate frozen, 5 real reports outside the evaluation corpora, through export and OpenCTI import, incidents logged (decision 2) | the journey on unseen reports | not started |
 | 11 | A recorded evaluation run with `anthropic` and the default `ANTHROPIC_MODEL`: twice at `LLM_TEMPERATURE=0`, on AnnoCTR test (read once for this decision, as ADR-0060 allows) and on the in-house set once it is gold (item 5), with figure reading on (item 12); the spread between the two runs published | `anthropic` supported (decision 13) | not started |
 | 12 | Figure reading on by default (decision 14): a default `VISION_PROVIDER` that follows `LLM_PROVIDER` when its model passes the image probe, the stage skipped otherwise; tests of each provider's path and of the skip; `.env.example`, the contract snapshot and the docs | figure reading supported, in the default journey | done: `pipeline/vlm.py` (`VISION_PROVIDER` unset, empty or `auto` builds the backend of `LLM_PROVIDER` with the model and the probe a named provider would have; `gemini`, `lmstudio` and any other value are skipped; never another provider; `skip_reason()`; a probe that raised is asked again for the next document; no credentials in a reason; `python -m pipeline.vlm` reads `.env`), `pipeline/orchestrator.py` (the reason goes in the stage report; under `auto` a run with Stage 3 disabled reads no figure, so `--no-llm` still sends nothing; the 1f record names the provider and model), `api/run_config.py` (an unset `VISION_PROVIDER` is recorded as `auto`), `.env.example`, `contract/config.json` (`make contract`: one `default` difference, none breaking), the docs; `tests/test_vlm.py` (each provider's path, the skips, the logging level, the two defaults of `LLM_PROVIDER`), `tests/test_orchestrator.py` (the reason in the stage report; no backend asked, not even a probe, under `auto` with Stage 3 disabled by `--no-llm` or `PIPELINE_DISABLED_STAGES`; a named provider still asked), `tests/test_run_config.py`, `tests/conftest.py` (the suite pins `VISION_PROVIDER=none`). Not covered: no real figure has been read through `auto` yet, the first will be in item 11's in-house runs; the tests fake the probe and the server, no CI job reads a figure |
-| 13 | What a run actually loaded (added 2026-11-08): the run's record names the embedding model Stage 2c loaded, not only the one `TTP_EMBEDDING_MODEL` asks for, with the fallback when the load failed, the thresholds applied and the TTP mode (`select` or `verify`, ADR-0072); a cache built for another encoder is named in the stage report instead of skipping the stage silently, and an evaluation run (`evaluation run`, `inhouse-run`) refuses to start on such a cache or on a fallback | a published figure says which models produced it | not started |
+| 13 | What a run actually loaded (added 2026-11-08): the run's record names the embedding model Stage 2c loaded, not only the one `TTP_EMBEDDING_MODEL` asks for, with the fallback when the load failed, the thresholds applied and the TTP mode (`select` or `verify`, ADR-0072); a cache built for another encoder is named in the stage report instead of skipping the stage silently, and an evaluation run (`evaluation run`, `inhouse-run`) refuses to start on such a cache or on a fallback | a published figure says which models produced it | done (PR #588, 2026-11-08): `embedding_status()` and `retrieval_status()`, the Stage 2c record's `embedding` and `ttp_mode`, a skip that names a missing or mismatched cache, select mode's retriever checked against the loaded model, and the evaluation runs' refusals and `run.json` record; `tests/test_embedding_record.py`, `tests/test_evaluation_attack.py`. Not covered: the job-level run config still names the requested model (the loaded one is in the stage report) |
 
 Done before this ADR, by pull request #229: `WORKER_MAX_CONCURRENT` defaults to
 1 in the code (decision 6), and `python -m evaluation inhouse-score` names the
@@ -399,3 +399,11 @@ The model comparisons that motivated it stay after 1.0
 ([ROADMAP](../../ROADMAP.md#after-10), quality track): retrieval encoders,
 the CyNER and GLiNER contributions by entity type, the fusion rules,
 GLiNER's next version, and fine-tuning. None of them changes the 1.0 promises.
+
+## Amendment (2026-11-08): who 1.0 is for, amended by ADR-0097
+
+ADR-0097 (accepted on 2026-11-08) amends the decision on who 1.0 is for: a
+shared service for one team, behind authentication, instead of one analyst on
+a local install. Decision 0's last sentence and the last item of *Options
+rejected* no longer hold. The other decisions stay. The action plan continues
+in ADR-0097's work items (14 to 24).

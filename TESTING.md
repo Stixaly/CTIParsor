@@ -329,6 +329,28 @@ they were not produced by that run, and names DIR and the run that made them.
 hand (`--env-file`, by default `docker/opencti-test/.env`, filled in from
 `.env.example`; git-ignored).
 
+**Any bundle (ADR-0094 item 10).** `scripts/opencti_import_bundle.py` imports one
+bundle into a running OpenCTI, as the token's user, waits until OpenCTI shows
+its objects, then reads back every object by STIX id. It needs the pycti venv
+above and an admin token (the import of marking definitions and of the
+bundle's objects needs the capabilities the A4 check grants):
+
+```bash
+~/.cache/ctiparsor-pycti-7.260930.0/bin/python scripts/opencti_import_bundle.py BUNDLE.json \
+    --token-file TOKEN_FILE [--url http://127.0.0.1:4000] [--timeout 120]
+```
+
+`--token-file` holds the token alone, or a `KEY=VALUE` file with
+`OPENCTI_ADMIN_TOKEN`; without it the token is read from
+`docker/opencti-test/.env`. The token is never printed. The report gives, per
+STIX type, the objects sent, found, missing and refused (the import's errors,
+as OpenCTI returned them). It goes to `output/opencti-import/<UTC time>/`:
+`report.md` and `report.json`, written whatever the result. Exit 0 when nothing
+is missing or refused, 1 otherwise, 2 when the run cannot start or OpenCTI fails
+a call. It does not check duplicates by name or alias, a second import, markings
+or the Report's fields: `scripts/opencti_import_check.py` does, for its fixtures.
+Use it on the throwaway instance only.
+
 ---
 
 ## 3. Current coverage map
