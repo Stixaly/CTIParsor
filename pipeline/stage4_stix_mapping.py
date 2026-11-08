@@ -2233,14 +2233,25 @@ def verify_ioc_coverage(raw_entities: list[RawEntity], bundle: stix2.Bundle) -> 
     }
 
 
-_SCO_ENTITY_TYPE = {"ipv4-addr": EntityType.IPV4, "ipv6-addr": EntityType.IPV6,
-                    "domain-name": EntityType.DOMAIN, "url": EntityType.URL}
+# SCO type -> (the entity type benign_reason judges, the property holding the value).
+# A mutex is not here: a mutex named by a GUID is the malware's own, a real IoC.
+_SCO_ENTITY_TYPE = {"ipv4-addr": (EntityType.IPV4, "value"), "ipv6-addr": (EntityType.IPV6, "value"),
+                    "domain-name": (EntityType.DOMAIN, "value"), "url": (EntityType.URL, "value"),
+                    "file": (EntityType.FILE, "name"),
+                    "windows-registry-key": (EntityType.REGISTRY_KEY, "key"),
+                    "user-account": (EntityType.USER_ACCOUNT, "user_id")}
 
 
 def _benign(sco) -> str | None:
     """Why this observable gets no Indicator (pipeline/benign.py), or None."""
-    etype = _SCO_ENTITY_TYPE.get(_field(sco, "type") or "")
-    return benign_reason(etype, _field(sco, "value") or "") if etype else None
+    entry = _SCO_ENTITY_TYPE.get(_field(sco, "type") or "")
+    if entry is None:
+        return None
+    if entry[0] == EntityType.FILE and _field(sco, "hashes"):
+        # A hash names the content: `rundll32.exe` with a hash may be a
+        # trojanised copy, and the Indicator is on the hash (ADR-0095).
+        return None
+    return benign_reason(entry[0], _field(sco, entry[1]) or "")
 
 
 _HOST_SCO = {"ipv4-addr": stix2.IPv4Address, "ipv6-addr": stix2.IPv6Address,
@@ -2268,7 +2279,7 @@ def _network_traffic_sco(value: str, scos: list, value_to_sco: dict, canonical_t
         scos.append(host)
         value_to_sco[d.host] = canonical_to_sco[d.host] = host
         if typed is not None:
-            typed[(_SCO_ENTITY_TYPE[d.host_type].value, d.host.lower())] = host
+            typed[(_SCO_ENTITY_TYPE[d.host_type][0].value, d.host.lower())] = host
         if ledger is not None:
             ledger.object(host, "network_traffic_endpoint", traffic=value)
     kwargs: dict = {"dst_ref": host.id, "protocols": list(d.protocols)}

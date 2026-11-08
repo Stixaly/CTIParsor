@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  describeTime, edgeKindOf, EDGE_KIND_ORDER, EDGE_KIND_STYLE, EDGE_ORIGIN_LABEL, entityReason,
+  benignReason, describeTime, edgeKindOf, EDGE_KIND_ORDER, EDGE_KIND_STYLE, EDGE_ORIGIN_LABEL, entityReason,
   isFromBaseline, isRenamed, OBJECT_ORIGIN_LABEL, reasonRef, relationshipReason,
 } from './provenance'
 
@@ -91,5 +91,21 @@ describe('reasons that name the object behind them (ADR-0090)', () => {
     expect(reasonRef('baseline_refs_closure:malware--1')).toBe('malware--1')
     expect(reasonRef('baseline_rejected')).toBeNull()
     expect(reasonRef(undefined)).toBeNull()
+  })
+})
+
+describe('why an observable has no Indicator (ADR-0095)', () => {
+  it('names a legitimate file, key or a value that is no indicator type', () => {
+    expect(benignReason('legitimate_file:windows')).toContain('Windows system file')
+    expect(benignReason('legitimate_file:unix')).toContain('Unix file')
+    expect(benignReason('legitimate_registry_key')).toContain('registry key')
+    expect(benignReason('no_ioc_type:guid')).toContain('GUID')
+    expect(benignReason('no_ioc_type:device')).toContain('device')
+    expect(benignReason('no_ioc_type:messenger_handle')).toContain('handle')
+  })
+
+  it('keeps an unknown code as it is', () => {
+    expect(benignReason('legitimate_file:beos')).toBe('legitimate_file:beos')
+    expect(benignReason(undefined)).toBe('no reason recorded')
   })
 })

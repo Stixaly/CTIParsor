@@ -13,6 +13,7 @@ detection rule quoted in the report itself is represented.
 | URL | `url` SCO, only when the value is a valid URI (RFC 3986); otherwise no observable and no Indicator, and the value is not repaired (ledger reason `not_a_uri`) |
 | Email | `email-addr` SCO |
 | A value the report names without accusing it: a non-routable address, a big public DNS resolver, a security vendor's or sandbox's site, one of the 10,000 most popular domains | its SCO, **without** an Indicator; the ledger says why (`no_indicator: benign`, `benign: <reason>`) |
+| A legitimate observable: a Windows system file bare or in its own directory (`rundll32.exe`, `C:\Windows\System32\comsvcs.dll`), a standard Unix file (`.bash_history`), a standard registry key exactly (`...\CurrentVersion\Run`, not a subkey); or a value no IoC type fits: a GUID, a device name (`\\.\EPMNTDRV`), a messenger handle (`@name`) | its SCO, **without** an Indicator, the same way (`benign: legitimate_file:windows`, `legitimate_file:unix`, `legitimate_registry_key`, `no_ioc_type:guid`, `no_ioc_type:device`, `no_ioc_type:messenger_handle`). A system name elsewhere (`C:\Users\Public\svchost.exe`), a file with a hash, a mutex and the SAM, SECURITY and SYSTEM hives keep their Indicator ([ADR-0095](adr/0095-a-legitimate-observable-is-never-an-indicator.md), list in `pipeline/data/legitimate_observables.json`) |
 | File hash (MD5 / SHA-1 / SHA-256) | `file` SCO |
 | MAC address | `mac-addr` SCO |
 | ASN | `autonomous-system` SCO |

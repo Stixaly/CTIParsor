@@ -16,11 +16,23 @@ gold.json:
      "status": "gold" | "pre-annotation",
      "layers": ["iocs", "entities", "techniques", "relations"],   # annotated exhaustively
      "iocs":       [{"type": "sha256", "value": "..."}],
+     "observables": [{"type": "file", "value": "rundll32.exe", "quote": "...",
+                      "why": "legitimate" | "no-ioc-type"}],
      "entities":   [{"type": "malware", "value": "SUNBURST", "aliases": ["Solorigate"]}],
      "techniques": [{"id": "T1566.001", "kind": "explicit" | "implicit", "quote": "..."}],
      "relations":  [{"source": "APT29", "type": "uses", "target": "SUNBURST", "quote": "..."}],
      "negatives":  [{"kind": "technique" | "relation", "id": "T1547", "triple": [s, t, o],
                      "quote": "...", "why": "negated" | "recommendation" | "generic"}]}
+
+`observables` (optional, annotated with the `iocs` layer): what the report
+names as an indicator but is not one (ADR-0095).  `legitimate`: a file or
+registry key every system of its kind has (`rundll32.exe`, `.bash_history`,
+a Run key); `no-ioc-type`: a value no IoC type fits (a
+Telegram handle, a GUID, a device name), whatever free `type` it is given.  The
+pipeline may extract one: it is neither a hit nor a false positive of the
+`iocs` layer.  The bundle must not give it an Indicator: `observables` in the
+score counts those it does (`as_indicator`; None for a run recorded without
+`bundle_indicated`).
 
 A layer missing from `layers` is not scored: an absent annotation is not an
 absent fact.  A `pre-annotation` file is never scored — it is a draft built
@@ -75,6 +87,25 @@ def _ioc_norm(t: str, v: str) -> tuple[str, str]:
     return t, v
 
 
+def _obs_key(t: str, v: str) -> str:
+    """An observable's value as both the gold and the bundle may spell it: a
+    registry key without its hive, anything else as written, case ignored."""
+    from pipeline.benign import registry_path
+    v = v.strip()
+    return registry_path(v) if t in ("registry_key", "windows-registry-key") else v.lower()
+
+
+def _score_observables(g: dict, pred: dict) -> dict:
+    gold_o = g.get("observables", [])
+    indicated = pred.get("bundle_indicated")
+    shipped = (None if indicated is None
+               else {_obs_key(i["type"], i["value"]) for i in indicated})
+    hits = ([] if shipped is None
+            else [o for o in gold_o if _obs_key(o["type"], o["value"]) in shipped])
+    return {"cases": len(gold_o), "as_indicator": None if shipped is None else len(hits),
+            "items": hits}
+
+
 def score(doc: InhouseDoc, pred: dict, canonical) -> dict:
     """`pred`: the evaluation runner's record for this document
     (evaluation.__main__._predictions)."""
@@ -83,7 +114,12 @@ def score(doc: InhouseDoc, pred: dict, canonical) -> dict:
     if "iocs" in doc.layers:
         gold_i = {_ioc_norm(i["type"], i["value"]) for i in g.get("iocs", [])}
         pred_i = {_ioc_norm(e["type"], e["value"]) for e in pred["entities"] if e["type"] in IOC_TYPES}
+        # A gold observable the pipeline extracted is neither a hit nor a
+        # false positive: extracting it is right, an Indicator on it is not.
+        observable = {_obs_key(o["type"], o["value"]) for o in g.get("observables", [])}
+        pred_i = {p for p in pred_i if p in gold_i or _obs_key(*p) not in observable}
         out["iocs"] = metrics.set_counts(pred_i, gold_i)
+        out["observables"] = _score_observables(g, pred)
     if "entities" in doc.layers:
         gold_e = [(e["type"], e["value"], set(e.get("aliases", [])) | {e["value"]})
                   for e in g.get("entities", [])]

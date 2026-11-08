@@ -150,7 +150,31 @@ def _predictions(result) -> dict:
     return {"ttp_ids": sorted(i for i in ttp_ids if _TECH_ID.match(i)), "ttps": ttps,
             "ttp_review": review, "ttp_candidates": candidates,
             "entities": entities, "relations": relations, "rel_review": rel_review,
-            "bundle_relations": _bundle_relations(result.bundle)}
+            "bundle_relations": _bundle_relations(result.bundle),
+            "bundle_indicated": _bundle_indicated(result.bundle)}
+
+
+# The property that holds an observable's value, by SCO type.
+_SCO_VALUE = {"file": "name", "windows-registry-key": "key", "user-account": "user_id",
+              "mutex": "name"}
+
+
+def _bundle_indicated(bundle) -> list[dict] | None:
+    """The observables an Indicator of the bundle is based on: what a consumer
+    would alert on.  None without a bundle."""
+    if bundle is None:
+        return None
+    objs = json.loads(bundle.serialize())["objects"]
+    by_id = {o["id"]: o for o in objs}
+    out = []
+    for o in objs:
+        if o.get("type") != "relationship" or o.get("relationship_type") != "based-on":
+            continue
+        src, sco = by_id.get(o["source_ref"], {}), by_id.get(o["target_ref"], {})
+        value = sco.get(_SCO_VALUE.get(sco.get("type", ""), "value"))
+        if src.get("type") == "indicator" and isinstance(value, str):
+            out.append({"type": sco["type"], "value": value})
+    return out
 
 
 def _bundle_relations(bundle) -> list[dict] | None:
@@ -875,6 +899,8 @@ def cmd_inhouse_score(args) -> None:
     docs = {d.doc_id: d for d in inhouse.load()}
     totals: dict[str, metrics.Counts] = {}
     negatives = [0, 0]
+    obs_cases = 0
+    obs_as_indicator: int | None = 0
     per_doc = {}
     recorded: set[str] = set()
     failed: list[str] = []
@@ -900,12 +926,19 @@ def cmd_inhouse_score(args) -> None:
             totals[f"entity:{et}"] = totals.get(f"entity:{et}", metrics.Counts()) + c
         negatives[0] += s["negatives"]["cases"]
         negatives[1] += s["negatives"]["violated"]
+        if "observables" in s:
+            obs_cases += s["observables"]["cases"]
+            # A report without observables has none to count, bundle or not;
+            # one with observables but no recorded bundle makes the total unknown.
+            n = s["observables"]["as_indicator"] if s["observables"]["cases"] else 0
+            obs_as_indicator = None if n is None or obs_as_indicator is None else obs_as_indicator + n
     failed.sort()
     missing = sorted(set(docs) - recorded)
     report = {"run": args.name, "documents": len(per_doc),
               "documents_failed": failed, "documents_missing": missing,
               "micro": {k: v.as_dict() for k, v in sorted(totals.items())},
-              "negatives": {"cases": negatives[0], "violated": negatives[1]}}
+              "negatives": {"cases": negatives[0], "violated": negatives[1]},
+              "observables": {"cases": obs_cases, "as_indicator": obs_as_indicator}}
     _write(run_dir / "score.json", report)
     print(json.dumps(report, indent=2), flush=True)
     problems: list[str] = []

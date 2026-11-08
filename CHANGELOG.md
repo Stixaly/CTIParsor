@@ -9,6 +9,31 @@ theme.
 
 ## [Unreleased]
 
+### Changed
+
+- **A legitimate observable ships without an Indicator** (ADR-0095). A
+  Windows system binary or DLL, bare or in its own directory
+  (`rundll32.exe`, `C:\Windows\System32\comsvcs.dll`), a standard Unix file
+  (`.bash_history`), a standard registry key matched exactly
+  (`...\CurrentVersion\Run`, not a subkey), and a value no IoC type fits (a
+  GUID, a device name such as `\\.\EPMNTDRV`, a messenger handle `@name`)
+  keep their observable and lose the `malicious-activity` Indicator that
+  would match every machine. The ledger says why (`no_indicator: benign`,
+  `benign: legitimate_file:windows` and five other reasons), and so does the
+  Graph page. A system name outside its directory
+  (`C:\Users\Public\svchost.exe`), a near name (`schtask.exe`), a file with a
+  hash, a mutex, and the SAM, SECURITY and SYSTEM hives keep their
+  Indicator. The list is `pipeline/data/legitimate_observables.json`, part of
+  the build fingerprint; `BENIGN_IOC_FILTER=false` turns it off with the
+  other benign values. **Bundles change** (`BUNDLE_AFFECTING`, mapping).
+- **In-house evaluation: `observables` in the gold.** `evaluation/inhouse.py`
+  and the annotation guide (section 2.1) describe the new list of values a
+  report names as indicators but which are not (`why: legitimate` or
+  `no-ioc-type`). An extracted observable is neither a hit nor a false
+  positive of the `iocs` layer; the score reports how many the bundle gave an
+  Indicator (`observables.as_indicator`), from a new `bundle_indicated` field
+  of each run's record. **Evaluation scores can move:** an `iocs` false
+  positive that the gold now lists as an observable is no longer one.
 - **Documentation:** the in-house evaluation set is gold on 2026-11-07: 8
   reports, 4 layers each (249 IoCs, 258 entities, 282 techniques, 320
   relations, 36 negatives). The annotation is AI-assisted and arbitrated by the

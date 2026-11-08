@@ -181,6 +181,10 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "spans index the text exactly; blank YARA and bad-port Snort rules are refused, bracketed "
      "Snort addresses accepted (#483, #484, #492, #503, #506, #517, #519, #520)",
      "mapping"),
+    ("e4dc07e", "2026-11-08",
+     "A Windows system file in its own directory, a standard Unix file or registry key, a GUID, a "
+     "device name or a messenger handle keeps its observable without an Indicator (ADR-0095)",
+     "mapping"),
 )
 
 
