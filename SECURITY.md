@@ -124,11 +124,7 @@ pipeline still produces valid STIX. ML models are downloaded once and cached.
 ## What this is NOT
 - Not yet a finished multi-user service. `AUTH_MODE=local` gives local accounts, three
   roles (`reader`, `analyst`, `admin`) checked on every route, server-side sessions with a
-  CSRF token, and hashed API tokens ([ADR-0097](docs/adr/0097-1-0-is-a-shared-service-for-one-team.md) items 14 and 15, part A). Not there yet:
-  sign-in with an identity provider (OIDC), the sign-in page of the web interface, the
-  admin screens for users and tokens, and the audit trail of who did what. Until they
-  land, create accounts and tokens with `python -m api.admin`, and read the
-  state-changing actions from the access log of your proxy. With `AUTH_MODE=off` (the
+  CSRF token, and hashed API tokens ([ADR-0097](docs/adr/0097-1-0-is-a-shared-service-for-one-team.md) items 14 and 15, part A), and an audit trail of each state-changing request, read with `GET /api/audit` or from the JSON lines on standard output (item 17; [docs/operations.md](docs/operations.md#audit-trail)). Not there yet: sign-in with an identity provider (OIDC), the sign-in page of the web interface, and the admin screens for users and tokens. Until they land, create accounts and tokens with `python -m api.admin`. With `AUTH_MODE=off` (the
   default) there is no authn/authz at all.
 - Not hardened for internet exposure — keep it on localhost or behind your own auth proxy.
   `API_HOST` in `.env` controls the bind address; see [docs/deployment.md](docs/deployment.md)

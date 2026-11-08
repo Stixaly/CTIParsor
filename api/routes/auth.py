@@ -60,27 +60,34 @@ def login(body: LoginRequest, request: Request, response: Response):
         raise HTTPException(404, "Authentication is off")
     if not config.local_enabled():
         raise HTTPException(403, "Local sign-in is not enabled")
+    # What the audit record may say about the name typed: the account it names, or nothing (api/audit.py).
+    label = _label(body.username)
+    request.state.audit_attempted = None if label == _UNKNOWN else label
     # The attempt is counted before the password is checked, under a lock per username.
     until = store.begin_attempt(body.username)
     if until is not None:
-        logger.warning("[auth] sign-in refused, username locked: %s", _label(body.username))
+        logger.warning("[auth] sign-in refused, username locked: %s", label)
         raise _locked(until)
     user = store.check_credentials(body.username, body.password)
     if user is None:
-        logger.warning("[auth] failed sign-in for %s", _label(body.username))
+        logger.warning("[auth] failed sign-in for %s", label)
         raise HTTPException(401, "Invalid username or password")
     store.clear_failures(body.username)
     store.mark_login(user.id)
     session_id, session = store.create_session(user.id)
     set_session_cookie(response, session_id, cookie_secure(request))
+    request.state.user = user                       # the audit record names the account that signed in
     return _me(user, session.csrf_token)
+
+
+_UNKNOWN = "<unknown>"
 
 
 def _label(username: str) -> str:
     """What a log line may say about a typed username: the name of an existing account,
     else `<unknown>`.  The field can hold anything, a password included."""
     known = store.find_user(username)
-    return known.username if known else "<unknown>"
+    return known.username if known else _UNKNOWN
 
 
 def _locked(until: datetime) -> HTTPException:

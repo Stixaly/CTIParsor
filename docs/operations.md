@@ -197,6 +197,73 @@ docker compose logs -f app worker
   `LOG_FILE` adds a rotated file ([configuration.md](configuration.md)).
 - `docker compose logs postgres` for the database.
 
+## Audit trail
+
+The API writes one audit record for each state-changing request under `/api/` (`POST`,
+`PUT`, `PATCH`, `DELETE`), whether the request was answered or refused, and one for each
+change made with `python -m api.admin`. Reads (`GET`) and `/metrics` are not recorded.
+The record is written after the answer, so a refused request is recorded too.
+
+Each record has these fields:
+
+- `at`: when the answer was written, UTC, ISO 8601.
+- `request_id`: the request id: the `X-Request-ID` header when it is well formed, else a
+  new one. Null for a command-line change.
+- `user_id`, `username`, `role`: the signed-in account. Null when the request was anonymous,
+  and with `AUTH_MODE=off`. For a command-line change, `username` is the operating-system
+  user who ran the command.
+- `auth`: `session` (the web cookie), `token` (a bearer token), `none` (no valid credentials)
+  or `cli` (a command-line change).
+- `method`: the HTTP method. Null for a command-line change.
+- `route`: the route template, for example `/api/jobs/{job_id}`. When no route matched (an
+  unknown path, or a refusal before routing) it is the raw path. For a command-line change
+  it is the command name, for example `create-token`.
+- `target`: the path parameters as a JSON object, for example `{"job_id": "..."}`. For a
+  command-line change, the account (`{"username": ...}`) or the token id (`{"token_id": ...}`).
+- `status`: the HTTP status of the answer. Null for a command-line change.
+- `outcome`: `ok` for 2xx and 3xx; `refused` for 401, 403, 404, 409 and 429; `error` for any
+  other status. A request that failed without an answer is recorded as status 500, `error`.
+- `client`: the client address as the application sees it. Behind a proxy, that is the
+  proxy's address, unless the proxy's forwarded address is trusted (`FORWARDED_ALLOW_IPS`).
+- `attempted`: on a sign-in only, the username typed, and only when an account of that name
+  exists. A name that matches no account is never written, so a typed password cannot appear.
+
+Never recorded: a request or response body, a query string, a header, a cookie, a token or
+a password.
+
+Where the records go:
+
+- **A JSON line on standard output** for each record, through the logger `ctiparsor.audit`.
+  It is always JSON, whatever `LOG_FORMAT` says, and has the key `"audit": true`. The log
+  system of the host collects it, for example
+  `docker compose logs app | grep '"audit": true'` shows the lines of the API container.
+  A change made with `python -m api.admin` writes its line to standard error, because
+  standard output carries the token of `create-token`.
+- **A row of the table `audit_events`**, read with `GET /api/audit`.
+
+Retention: `AUDIT_RETENTION_DAYS` (default 365; `0` keeps every row, see
+[configuration.md](configuration.md)). A row older than that is deleted. The check runs at
+most once an hour, on the write of a record. CTIParsor does not delete the lines on standard
+output; the retention of the log system applies to them.
+
+A database error while a row is written is logged (`[audit] could not write an audit row`),
+and the answer to the request does not change. The JSON line is still written. A line in the
+log with no row in `audit_events` points at the database.
+
+To read the table, sign in as an admin, or use an admin token:
+
+```bash
+curl -fsS -H "Authorization: Bearer ctp_..."   "http://127.0.0.1:8000/api/audit?outcome=refused&limit=50"
+```
+
+The filters are `user` (a username), `route` (a route template), `outcome` (`ok`, `refused`
+or `error`), `since` and `until` (ISO 8601; `until` is exclusive) and `limit` (1 to 500, 100 by
+default). The list is newest first. When more records follow, the response header
+`X-Next-Cursor` holds the value for the `cursor` parameter of the next page.
+
+The table has no link to `users`: a record keeps the user id and name it was written with.
+An anonymous flood of refused requests fills the table until the retention deletes them.
+
 ## Monitoring and alerts
 
 `GET /metrics` serves Prometheus text format (0.0.4). It is left out of the

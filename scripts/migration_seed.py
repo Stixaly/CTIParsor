@@ -562,6 +562,24 @@ def spec(stage4: Path = STAGE4) -> dict[str, list[dict[str, Any]]]:
         "login_failures": [
             {"username": "tomas@example.org", "attempted_at": _t(26, "08:29:50.000000")},
         ],
+        # The audit trail (version 19): a refused sign-in that names an account, a sign-in, a change
+        # by a request, and a change made by the command line.  The target is the JSON text.
+        "audit_events": [
+            {"at": _t(26, "08:29:50.000000"), "request_id": "seedlogin1", "user_id": None, "username": None,
+             "role": None, "auth": "none", "method": "POST", "route": "/api/auth/login", "target": "{}",
+             "status": 401, "outcome": "refused", "client": "127.0.0.1", "attempted": "tomas@example.org"},
+            {"at": _t(26, "08:30:12.345678"), "request_id": "seedlogin2", "user_id": USER_ADMIN,
+             "username": "mara", "role": "admin", "auth": "session", "method": "POST", "route": "/api/auth/login",
+             "target": "{}", "status": 200, "outcome": "ok", "client": "127.0.0.1", "attempted": "mara"},
+            {"at": _t(26, "08:40:00.000000"), "request_id": "seedpatch1", "user_id": USER_ADMIN,
+             "username": "mara", "role": "admin", "auth": "session", "method": "PATCH",
+             "route": "/api/jobs/{job_id}", "target": json.dumps({"job_id": JOB_A}, sort_keys=True),
+             "status": 200, "outcome": "ok", "client": "127.0.0.1", "attempted": None},
+            {"at": _t(26, "09:00:00.000000"), "request_id": None, "user_id": None, "username": "ops",
+             "role": None, "auth": "cli", "method": None, "route": "create-user",
+             "target": json.dumps({"username": "tomas@example.org"}, sort_keys=True), "status": None,
+             "outcome": "ok", "client": None, "attempted": None},
+        ],
         "jobs": _jobs(stage4),
         "entities": _entities(),
         "relationships": _relationships(),

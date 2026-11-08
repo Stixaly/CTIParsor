@@ -91,6 +91,8 @@ PERMISSIONS: dict[tuple[str, str], str] = {
     ("POST", "/api/thresholds/recalibrate"): "admin",
     ("PUT", "/api/thresholds/{source}/{entity_type}"): "admin",
     ("DELETE", "/api/thresholds/{source}/{entity_type}"): "admin",
+    # audit.py (ADR-0097 item 17): who changed what, admin only.
+    ("GET", "/api/audit"): "admin",
     # upload.py, ingest.py
     ("POST", "/api/upload"): "analyst",
     ("POST", "/api/ingest/text"): "analyst",

@@ -485,6 +485,12 @@ amendment of 2026-10-19).
 |---|---|---|
 | `GET` | `/api/llm/egress` | Whether a report with the marking `?tlp=` (CLEAR, GREEN, AMBER, AMBER+STRICT or RED; absent = the default marking, `STIX_TLP`, AMBER when unset) may go to the configured providers. Returns `{ tlp, text, figures }`: `text` is the Stage 3 provider and `figures` the Stage 1f one (`null` when the vision setting names no backend), each `{ provider, host, local, allowed, reason }`, `reason` being empty when the report may go. Reads the environment only: nothing is resolved or sent. 400 for an unknown level. The New report dialog calls it to warn before the import |
 
+## Audit trail (ADR-0097)
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/audit` | The audit records, newest first, admin only. Query: `user` (a username), `route` (a route template), `outcome` (`ok`, `refused`, `error`), `since` and `until` (ISO 8601; `until` is exclusive), `limit` (1 to 500, default 100), `cursor` (the `X-Next-Cursor` of the previous page). Each record has the fields of [operations.md](operations.md#audit-trail): `id`, `at`, `request_id`, `user_id`, `username`, `role`, `auth`, `method`, `route`, `target`, `status`, `outcome`, `client`, `attempted`. A reader or analyst gets 403. 400 for a time that is not ISO 8601 or a malformed cursor |
+
 ## Queue
 
 | Method | Path | Description |

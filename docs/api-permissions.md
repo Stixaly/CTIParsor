@@ -83,6 +83,7 @@ Columns and effect labels:
 | 59 | POST | /api/ingest/text | api/routes/ingest.py:ingest_text (calls `start_job`) | the request text | `uploads/{job_id}.html`, `.md` or `.txt`; `jobs` row; queue | LLM: as route 58 | analyst | As route 58. Rate limit 20 per minute. |
 | 60 | POST | /api/ingest/url | api/routes/ingest.py:ingest_url (calls `web_capture.capture_url_to_pdf`, `start_job`) | the external URL, chosen by the caller | `uploads/{job_id}.pdf` and `.txt`, capture metadata, `jobs` row, queue | EXT (headless browser fetches the URL); LLM: as route 58 | analyst | Fetches an external page and creates a job. Rate limit 5 per minute. |
 | 61 | GET | /api/llm/egress | api/routes/llm.py:get_egress (calls `pipeline.egress.decide`) | the `tlp` query, the provider settings | none | none | reader | Added after the snapshot (#602): whether a TLP would be sent to the configured providers; shows their host, never a key. |
+| 62 | GET | /api/audit | api/routes/audit.py:list_audit | `audit_events` | none | none | admin | Added with the audit trail (ADR-0097 item 17): who changed what, and whether it was done. Admin only, as the records name every user and client. |
 
 ## Questions to settle
 
