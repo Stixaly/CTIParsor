@@ -20,6 +20,36 @@ export interface Job {
   pipeline_mode?: PipelineMode
   /** Only on enrich jobs (ADR-0090). */
   enrichment?: JobEnrichment
+  /** What each stage did, when the worker stored a stage report (ADR-0059). */
+  stages?: StageRecord[]
+}
+
+/** The egress verdict a stage record carries (ADR-0097). */
+export interface EgressRecord {
+  tlp: string
+  provider: string
+  host: string | null
+  local: boolean
+  allowed: boolean
+}
+
+export interface StageRecord {
+  stage: string
+  label?: string
+  status: 'ran' | 'skipped' | 'failed' | string
+  reason?: string
+  egress?: EgressRecord
+}
+
+/** GET /api/llm/egress: may a report with this marking go to the configured providers? */
+export interface EgressVerdict extends EgressRecord {
+  reason: string
+}
+export interface EgressPreview {
+  tlp: string
+  text: EgressVerdict
+  /** null when the vision setting names no backend: no figure is sent. */
+  figures: EgressVerdict | null
 }
 
 // ── Enrich an existing STIX 2.1 bundle (ADR-0090) ────────────────────────────

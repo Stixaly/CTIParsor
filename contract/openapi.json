@@ -718,6 +718,49 @@
         "string"
       ]
     },
+    "GET /api/jobs/{} response:200.stages": {
+      "required": false,
+      "types": [
+        "array",
+        "null"
+      ]
+    },
+    "GET /api/jobs/{} response:200.stages[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/jobs/{} response:200.stages[].egress": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/jobs/{} response:200.stages[].label": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/jobs/{} response:200.stages[].reason": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/jobs/{} response:200.stages[].stage": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
+    "GET /api/jobs/{} response:200.stages[].status": {
+      "required": false,
+      "types": [
+        "any"
+      ]
+    },
     "GET /api/jobs/{} response:200.status": {
       "required": true,
       "types": [
@@ -2882,6 +2925,120 @@
       "types": [
         "any"
       ]
+    },
+    "GET /api/llm/egress": {
+      "deprecated": false
+    },
+    "GET /api/llm/egress param:query:tlp": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/llm/egress response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/llm/egress response:200.figures": {
+      "required": true,
+      "types": [
+        "null",
+        "object"
+      ]
+    },
+    "GET /api/llm/egress response:200.figures.allowed": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "GET /api/llm/egress response:200.figures.host": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/llm/egress response:200.figures.local": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "GET /api/llm/egress response:200.figures.provider": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/llm/egress response:200.figures.reason": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/llm/egress response:200.figures.tlp": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/llm/egress response:200.text": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/llm/egress response:200.text.allowed": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "GET /api/llm/egress response:200.text.host": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/llm/egress response:200.text.local": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "GET /api/llm/egress response:200.text.provider": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/llm/egress response:200.text.reason": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/llm/egress response:200.text.tlp": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/llm/egress response:200.tlp": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/llm/egress response:400": {
+      "media": []
     },
     "GET /api/overrides": {
       "deprecated": false

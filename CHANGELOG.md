@@ -100,6 +100,14 @@ theme.
   `ENABLE_TTP_VERIFICATION=false`. The run's recorded configuration shows the
   switch as `true` when it is unset.
 
+- **The review page shows why a stage did not run**, and highlights a refusal
+  by the TLP egress policy with what to do (mark the report CLEAR or GREEN, or
+  configure a local model). The New report dialog warns under the TLP picker
+  when the marking would be refused for the configured providers, without
+  blocking the import. API: `GET /api/jobs/{id}` returns `stages` (the stored
+  stage report), and `GET /api/llm/egress?tlp=` returns the verdict for text
+  and figures.
+
 - **TLP egress policy** (ADR-0097 work item 16). A report marked AMBER,
   AMBER+STRICT or RED, or unmarked (AMBER unless `STIX_TLP` says otherwise),
   goes only to a local provider: `vllm`, `ollama` or `lmstudio` on a loopback

@@ -40,6 +40,7 @@ from api.routes import (
     entities,
     ingest,
     jobs,
+    llm,
     metrics,
     overrides,
     policy,
@@ -292,6 +293,7 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=_ALLOWED_HOSTS, www_redi
 
 # API routes
 app.include_router(jobs.router)
+app.include_router(llm.router)
 app.include_router(upload.router)
 app.include_router(ingest.router)
 app.include_router(entities.router)

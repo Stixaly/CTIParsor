@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { BaselineIntake, BaselineReport, BaselineStatus } from '../types'
+import type { BaselineIntake, BaselineReport, BaselineStatus, EgressPreview, EgressVerdict } from '../types'
 import type { IgnoredFile } from './dropFiles'
 import NewReportModal from './NewReportModal'
 
@@ -11,6 +11,7 @@ import NewReportModal from './NewReportModal'
 
 const api = vi.hoisted(() => ({
   fetchBaselineStatus: vi.fn(),
+  fetchEgress: vi.fn(),
   inspectBaseline: vi.fn(),
   uploadFile: vi.fn(),
   ingestText: vi.fn(),
@@ -20,6 +21,7 @@ const api = vi.hoisted(() => ({
 vi.mock('../api/client', async importOriginal => ({
   ...(await importOriginal<typeof import('../api/client')>()),
   fetchBaselineStatus: api.fetchBaselineStatus,
+  fetchEgress: api.fetchEgress,
   inspectBaseline: api.inspectBaseline,
   uploadFile: api.uploadFile,
   ingestText: api.ingestText,
@@ -81,6 +83,17 @@ function configFile() {
   return new File(['{"type":"settings"}'], 'config.json', { type: 'application/json' })
 }
 
+// What GET /api/llm/egress answers with an external text provider: only CLEAR and GREEN may go.
+const verdict = (tlp: string, allowed: boolean): EgressVerdict => ({
+  tlp, provider: 'anthropic', host: 'api.anthropic.com', local: false, allowed,
+  reason: allowed ? '' : `TLP:${tlp} forbids sending the report to anthropic (api.anthropic.com): only a local provider may process it (ADR-0097)`,
+})
+function egressFor(tlp: string | null): EgressPreview {
+  const level = tlp ?? 'AMBER'
+  const allowed = level === 'CLEAR' || level === 'GREEN'
+  return { tlp: level, text: verdict(level, allowed), figures: verdict(level, allowed) }
+}
+
 // A status read that answers when the test says so: the modal waits for it.
 function holdStatus() {
   let answer!: (s: BaselineStatus) => void
@@ -125,6 +138,8 @@ async function setMarks(user: User, tlp: string, pap: string) {
 beforeEach(() => {
   api.fetchBaselineStatus.mockReset()
   api.fetchBaselineStatus.mockResolvedValue(ON)
+  api.fetchEgress.mockReset()
+  api.fetchEgress.mockImplementation((tlp: string | null) => Promise.resolve(egressFor(tlp)))
   api.inspectBaseline.mockReset()
   api.uploadFile.mockReset()
   api.uploadFile.mockResolvedValue({ job_id: 'job-1', filename: 'report.pdf' })
@@ -661,5 +676,44 @@ describe('New report — a bundle dropped with the modal (ADR-0090)', () => {
     expect(api.inspectBaseline).not.toHaveBeenCalled()
     expect(screen.queryByText('apt29-bundle.json')).not.toBeInTheDocument()
     expect(screen.getByRole('radio', { name: /Enrich an existing STIX 2.1 bundle/ })).toHaveAttribute('aria-checked', 'false')
+  })
+})
+
+describe('New report — egress warning (ADR-0097)', () => {
+  it('warns under the TLP picker when the marking would be refused, and does not for GREEN', async () => {
+    const user = userEvent.setup()
+    renderModal()
+    await user.type(screen.getByPlaceholderText(/Paste the report text/), TEXT)
+
+    await setMarks(user, 'AMBER', 'AMBER')
+    const warning = await screen.findByText(/TLP:AMBER forbids sending the report to anthropic/)
+    expect(warning).toBeInTheDocument()
+    expect(screen.getByText(/The import still works/)).toBeInTheDocument()
+    await waitFor(() => expect(api.fetchEgress).toHaveBeenCalledWith('AMBER'))
+
+    await user.click(within(screen.getByRole('radiogroup', { name: 'TLP marking' })).getByRole('radio', { name: 'GREEN' }))
+    await waitFor(() => expect(screen.queryByText(/forbids sending the report/)).not.toBeInTheDocument())
+    await waitFor(() => expect(api.fetchEgress).toHaveBeenCalledWith('GREEN'))
+  })
+
+  it('does not block the import', async () => {
+    const user = userEvent.setup()
+    renderModal()
+    await user.type(screen.getByPlaceholderText(/Paste the report text/), TEXT)
+    await setMarks(user, 'AMBER', 'AMBER')
+    await screen.findByText(/forbids sending the report/)
+
+    await user.click(screen.getByRole('button', { name: 'Create job' }))
+    await waitFor(() => expect(api.ingestText).toHaveBeenCalledTimes(1))
+  })
+
+  it('shows nothing when the question fails', async () => {
+    api.fetchEgress.mockRejectedValue(new Error('500: boom'))
+    const user = userEvent.setup()
+    renderModal()
+    await user.type(screen.getByPlaceholderText(/Paste the report text/), TEXT)
+    await setMarks(user, 'AMBER', 'AMBER')
+    await settle()
+    expect(screen.queryByText(/forbids sending the report/)).not.toBeInTheDocument()
   })
 })

@@ -1,4 +1,4 @@
-import type { Job, Entity, Relationship, StixBundle, BundleLedger, CoverageResult, CoverageRule, CoverageReportRules, DetectionProposals, DetectionCorpus, CorpusConfig, CorpusRebuildSummary, CorpusSyncResult, FormatInfo, ExportFacets, ExportSelection, ExportAxis, LastRun, RuleLookupResult, ThresholdsInfo, AttackIndex, MitreEntry, BaselineIntake, BaselineStatus } from '../types'
+import type { Job, Entity, Relationship, StixBundle, BundleLedger, CoverageResult, CoverageRule, CoverageReportRules, DetectionProposals, DetectionCorpus, CorpusConfig, CorpusRebuildSummary, CorpusSyncResult, FormatInfo, ExportFacets, ExportSelection, ExportAxis, LastRun, RuleLookupResult, ThresholdsInfo, AttackIndex, MitreEntry, BaselineIntake, BaselineStatus, EgressPreview } from '../types'
 
 const BASE = '/api'
 
@@ -124,6 +124,9 @@ export async function inspectBaseline(file: File, reportId?: string): Promise<Ba
 }
 
 export const fetchBaselineStatus = () => req<BaselineStatus>('/baselines/status')
+/** What the TLP egress policy allows for `tlp` (absent = the default marking), without sending anything. */
+export const fetchEgress = (tlp: string | null) =>
+  req<EgressPreview>(`/llm/egress${tlp ? `?tlp=${encodeURIComponent(tlp)}` : ''}`)
 export const fetchBaselineIntake = (jobId: string) => req<BaselineIntake>(`/jobs/${encodeURIComponent(jobId)}/baseline/intake`)
 
 // NER cutoffs and the server's auto-accept level (ADR-0051, ADR-0058)
