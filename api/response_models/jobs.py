@@ -72,8 +72,22 @@ class EnrichmentSummary(ApiResponse):
                     "Empty until Stage 3r writes them.")
 
 
+class StageRecord(ApiResponse):
+    """One entry of the stage report the worker stores (ADR-0059): what a stage did.
+    Stored values pass through; `label` is added from the stage id."""
+
+    stage: JsonValue = None
+    label: JsonValue = Field(default=None, description="The stage's name, from its id.")
+    status: JsonValue = Field(default=None, description="ran, skipped or failed.")
+    reason: JsonValue = Field(default=None, description="Why a stage was skipped or failed.")
+    egress: JsonValue = Field(
+        default=None, description="Present when the stage sends the report out (ADR-0097): "
+                                  "tlp, provider, host, local and allowed.")
+
+
 class JobDetail(ApiResponse):
-    """GET /api/jobs/{id}.  `enrichment` is present only in enrich mode."""
+    """GET /api/jobs/{id}.  `enrichment` is present only in enrich mode; `stages` only when
+    the worker stored a stage report."""
 
     id: str
     original_filename: str
@@ -87,6 +101,7 @@ class JobDetail(ApiResponse):
     entity_count: int
     relationship_count: int
     enrichment: EnrichmentSummary | None = None
+    stages: list[StageRecord] | None = None
 
 
 class StatusResult(ApiResponse):

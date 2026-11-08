@@ -44,6 +44,7 @@ from api.routes import (
     entities,
     ingest,
     jobs,
+    llm,
     metrics,
     overrides,
     policy,
@@ -324,7 +325,7 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=_ALLOWED_HOSTS, www_redi
 # API routes.  Every router gets the access check once, here: the minimum role of
 # each operation is in api/auth/permissions.py, and a router added without it
 # would be open.  `GET /api/health`, below, is the one open route.
-_ROUTERS = (jobs, upload, ingest, entities, relationships, progress, policy, coverage, settings, queue,
+_ROUTERS = (jobs, llm, upload, ingest, entities, relationships, progress, policy, coverage, settings, queue,
             thresholds, overrides, attack, baselines, auth)
 for _module in _ROUTERS:
     app.include_router(_module.router, dependencies=[Depends(current_user)])

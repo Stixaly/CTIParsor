@@ -28,6 +28,7 @@ from api.response_models.jobs import (
 from api.routes._common import require_job
 from api.worker import BundleInvalidError, FinalizeOvertaken, re_run_final_stages
 from pipeline.env_flags import env_int
+from pipeline.orchestrator import STAGE_LABELS
 
 logger = get_logger(__name__)
 
@@ -200,6 +201,19 @@ def _enrichment(conn, job_id: str) -> dict:
     return {"intake": intake, "validated": bool(base and base["validated"]), "counts": counts}
 
 
+def _stage_report(run_config_json: str | None) -> list[dict] | None:
+    """The stage report stored in the job's run config, each entry with its stage's label;
+    None when there is none (a job that has not run, or one from before ADR-0059)."""
+    try:
+        report = json.loads(run_config_json).get("stage_report") if run_config_json else None
+    except (ValueError, AttributeError):
+        return None
+    if not isinstance(report, list):
+        return None
+    return [{**s, "label": STAGE_LABELS.get(str(s.get("stage")), s.get("stage"))}
+            for s in report if isinstance(s, dict)]
+
+
 @router.get("/{job_id}", response_model=JobDetail, response_model_exclude_unset=True)
 def get_job(job_id: str):
     with get_conn() as conn:
@@ -229,6 +243,9 @@ def get_job(job_id: str):
     }
     if enrichment is not None:
         job["enrichment"] = enrichment
+    stages = _stage_report(row["run_config_json"])
+    if stages is not None:
+        job["stages"] = stages
     return job
 
 

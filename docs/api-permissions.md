@@ -82,6 +82,7 @@ Columns and effect labels:
 | 58 | POST | /api/upload | api/routes/upload.py:upload_file (calls `start_job`) | the multipart form: report, optional baseline | `uploads/{job_id}.*`, `jobs` row, queue | LLM: the Stage 3 provider set by configuration; whether it is local or remote, and TLP egress: to check | analyst | Creates a job that spends LLM time. Rate limit 10 per minute. |
 | 59 | POST | /api/ingest/text | api/routes/ingest.py:ingest_text (calls `start_job`) | the request text | `uploads/{job_id}.html`, `.md` or `.txt`; `jobs` row; queue | LLM: as route 58 | analyst | As route 58. Rate limit 20 per minute. |
 | 60 | POST | /api/ingest/url | api/routes/ingest.py:ingest_url (calls `web_capture.capture_url_to_pdf`, `start_job`) | the external URL, chosen by the caller | `uploads/{job_id}.pdf` and `.txt`, capture metadata, `jobs` row, queue | EXT (headless browser fetches the URL); LLM: as route 58 | analyst | Fetches an external page and creates a job. Rate limit 5 per minute. |
+| 61 | GET | /api/llm/egress | api/routes/llm.py:get_egress (calls `pipeline.egress.decide`) | the `tlp` query, the provider settings | none | none | reader | Added after the snapshot (#602): whether a TLP would be sent to the configured providers; shows their host, never a key. |
 
 ## Questions to settle
 

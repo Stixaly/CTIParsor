@@ -65,6 +65,8 @@ PERMISSIONS: dict[tuple[str, str], str] = {
     ("PUT", "/api/relationship-policy"): "admin",
     # queue.py
     ("GET", "/api/queue/status"): "reader",
+    # llm.py
+    ("GET", "/api/llm/egress"): "reader",
     # coverage.py
     ("GET", "/api/detection-corpora"): "reader",
     ("GET", "/api/jobs/{job_id}/coverage"): "reader",

@@ -22,6 +22,7 @@ import { isImported } from '../types'
 import TopChrome from '../components/review/TopChrome'
 import PipelineRibbon, { type StageInfo } from '../components/review/PipelineRibbon'
 import AutoAcceptBanner from '../components/review/AutoAcceptBanner'
+import StageRefusals from '../components/review/StageRefusals'
 import TypeRail from '../components/review/TypeRail'
 import DocumentReader from '../components/review/DocumentReader'
 import DetectionsPanel from '../components/review/DetectionsPanel'
@@ -889,6 +890,9 @@ export default function Review() {
           The supplied STIX bundle already covers everything CTIParsor found in this report.
         </div>
       )}
+
+      {/* ── stages that did not run ── */}
+      <StageRefusals stages={job?.stages} />
 
       {/* ── auto-accept banner ── */}
       <AutoAcceptBanner
