@@ -211,6 +211,40 @@ ENTITY_OVERRIDES_ENABLED=true
 # GAZETTEER_POLICY=shadow
 ```
 
+## Egress policy (TLP)
+
+A report's TLP decides which providers may receive its text and its figures
+(ADR-0097). A report without a marking has the one its bundle gets: `STIX_TLP`,
+AMBER when unset.
+
+| TLP | Providers allowed |
+|---|---|
+| CLEAR, GREEN | any configured provider |
+| AMBER, AMBER+STRICT, RED | local providers only |
+
+A provider is **local** when it is `vllm`, `ollama` or `lmstudio` and the host of
+its base URL (`VLLM_BASE_URL`, `OLLAMA_BASE_URL`, `LMSTUDIO_BASE_URL`) is a loopback
+or private address (IPv4 or IPv6), or a name listed in `LLM_LOCAL_HOSTS`. No DNS
+lookup is made: a hostname that is not in the list is external, whatever it
+resolves to. `anthropic`, `gemini` and `mistral` are always external.
+
+```env
+# Hostnames that count as local, comma-separated, case-insensitive. Replaces the
+# default: localhost, the Compose service name and the Docker host alias.
+# LLM_LOCAL_HOSTS=localhost,ollama,host.docker.internal
+```
+
+A forbidden combination is refused before any call. Stage 3, and with it 3d, 3e,
+3f, 3doc and the Stage 4c long-distance inference, are skipped with the reason
+`TLP:<level> forbids sending the report to <provider> (<host>): only a local
+provider may process it (ADR-0097)`; with Stage 3 required, the run fails with that
+reason. Stage 1f is checked the same way against the vision provider (under
+`VISION_PROVIDER=auto`, the one of `LLM_PROVIDER`). The consensus provider
+(`CONSENSUS_PROVIDER`) is checked on its own: refused, Stage 3e is skipped and
+Stage 3 goes on. The Stage 3 and Stage 1f records carry `egress`: the effective
+TLP, the provider, the host (never a URL or a key), and whether it is local and
+allowed. Embedding and NER models run in the process and are not concerned.
+
 ## Vision (Stage 1f — figures)
 
 Stage 1f reads the figures in a PDF and injects their transcription into

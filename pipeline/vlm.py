@@ -691,6 +691,14 @@ def _text_provider() -> str:
     return os.environ.get("LLM_PROVIDER", _TEXT_PROVIDER_DEFAULT).lower()
 
 
+def vision_provider_name() -> str | None:
+    """The provider Stage 1f would send figures to (VISION_PROVIDER, or under `auto`
+    LLM_PROVIDER); None when the setting names no vision backend, so nothing is sent.
+    Reads the environment only: no probe."""
+    provider = _text_provider() if follows_text() else _setting()
+    return provider if provider in _VISION_PROVIDERS else None
+
+
 def _resolve_backend() -> tuple[VisionBackend | None, str, bool]:
     """The backend VISION_PROVIDER asks for, or why there is none, and whether
     that answer is final.  It is not when the probe itself raised: a network
