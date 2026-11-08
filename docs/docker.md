@@ -286,11 +286,11 @@ BACKUP_TARGET=/mnt/backups/ctiparsor
 docker compose --profile backup up -d backup
 ```
 
-`compose.yaml` requires `BACKUP_TARGET` (`${BACKUP_TARGET:?}`): leave it unset and Compose stops. The directory must be writable by uid 70, the `postgres` user the image runs the backup as. To run one backup now, outside the schedule, use `docker compose --profile backup run --rm -e BACKUP_RUN_NOW=1 backup`: it exits 0 on success and 1 on failure.
+In production the target must be off this host: another disk or an NFS share. The service refuses to back up without it: with `BACKUP_TARGET` unset, a run writes `ok: false` ("BACKUP_TARGET is not set") and copies nothing. The rest of the stack starts without it. The directory must be writable by uid 70, the `postgres` user the image runs the backup as. To run one backup now, outside the schedule, use `docker compose --profile backup run --rm -e BACKUP_RUN_NOW=1 backup`: it exits 0 on success and 1 on failure.
 
 | Variable | Default | Role |
 |---|---|---|
-| `BACKUP_TARGET` | **required** | Host directory the backups are written to |
+| `BACKUP_TARGET` | unset: the service refuses to run | Host directory the backups are written to; off this host in production |
 | `BACKUP_TIME` | `02:30` | Daily run time, UTC, `HH:MM` |
 | `BACKUP_KEEP` | `7` | Backup pairs kept, the newest first. A pair is one dump and one archive with the same stamp |
 

@@ -743,7 +743,7 @@ published ports, image name, `CTI_INSTALL_CAPTURE`, per-container CPU and memory
 `.env.example`, with what each exposure means in
 [docs/deployment.md](deployment.md) and the sizing in [docs/docker.md](docker.md).
 
-Scheduled backups (profile `backup`, [docs/docker.md](docker.md#data-and-backups)) read three compose-level settings, all in section 12 of `.env.example`: `BACKUP_TARGET` (required by `compose.yaml`: the host directory the backups go to), `BACKUP_TIME` (default `02:30`, UTC) and `BACKUP_KEEP` (default `7` pairs). The status file of the last run is read by the app's `/metrics` through `BACKUP_STATUS_FILE` (default `/app/backup-status/status.json` in the app container; a missing file means no backup is known).
+Scheduled backups (profile `backup`, [docs/docker.md](docker.md#data-and-backups)) read three compose-level settings, all in section 12 of `.env.example`: `BACKUP_TARGET` (the host directory the backups go to; unset, the service refuses to back up), `BACKUP_TIME` (default `02:30`, UTC) and `BACKUP_KEEP` (default `7` pairs). The status file of the last run is read by the app's `/metrics` through `BACKUP_STATUS_FILE` (default `/app/backup-status/status.json` in the app container; a missing file means no backup is known).
 
 `CTI_GIT_REV` (empty by default) is the build argument `GIT_REV`. The image
 records that revision in its `org.opencontainers.image.revision` label and as

@@ -78,6 +78,7 @@ def _run(dirs: dict[str, Path], **extra: str) -> subprocess.CompletedProcess[str
         "PATH": f"{dirs['bin']}{os.pathsep}{os.environ.get('PATH', '/usr/bin:/bin')}",
         "HOME": str(dirs["bin"].parent),
         "BACKUP_RUN_NOW": "1",
+        "BACKUP_TARGET_CONFIGURED": str(dirs["backups"]),
         "BACKUP_DIR": str(dirs["backups"]),
         "BACKUP_STATUS_FILE": str(dirs["status"]),
         "STATE_DIR": str(dirs["state"]),
@@ -198,6 +199,30 @@ def test_missing_password_file_is_a_failure(env_dirs: dict[str, Path]) -> None:
     assert status["error"].startswith("reading the database password failed")
 
 
+def test_unset_target_refuses_and_backs_nothing(env_dirs: dict[str, Path]) -> None:
+    old = _seed_old_pairs(env_dirs["backups"], 1)
+    result = _run(env_dirs, BACKUP_TARGET_CONFIGURED="")
+    assert result.returncode == 1
+    assert "BACKUP_TARGET is not set" in result.stderr
+
+    status = json.loads(env_dirs["status"].read_text(encoding="utf-8"))
+    assert status["ok"] is False
+    assert status["error"] == "BACKUP_TARGET is not set: backups would stay on this host"
+    assert status["file"] is None
+    # Nothing was dumped, archived or deleted.
+    assert _pairs(env_dirs["backups"]) == old
+    assert not env_dirs["log"].exists()
+
+
+def test_compose_target_is_not_required() -> None:
+    text = COMPOSE.read_text(encoding="utf-8")
+    # No ${BACKUP_TARGET:?...} anywhere: other services must start without it.
+    assert not re.search(r"\$\{BACKUP_TARGET:\?", text)
+    backup = _compose()["services"]["backup"]
+    assert "${BACKUP_TARGET:-./backups}:/backups" in backup["volumes"]
+    assert backup["environment"]["BACKUP_TARGET_CONFIGURED"] == "${BACKUP_TARGET:-}"
+
+
 @pytest.mark.parametrize("time", ["25:00", "2:30", "02:60", "noon"])
 def test_bad_backup_time_is_refused(env_dirs: dict[str, Path], time: str) -> None:
     result = _run(env_dirs, BACKUP_TIME=time)
@@ -231,7 +256,7 @@ def test_compose_backup_service_is_opt_in_and_read_only() -> None:
 
     volumes = backup["volumes"]
     assert "cti-state:/app/state:ro" in volumes
-    assert "${BACKUP_TARGET:?set BACKUP_TARGET}:/backups" in volumes
+    assert "${BACKUP_TARGET:-./backups}:/backups" in volumes
     assert "cti-backup-status:/backup-status" in volumes
     assert "./docker/backup:/backup:ro" in volumes
     assert "./.secrets/db_password:/run/secrets/db_password:ro" in volumes

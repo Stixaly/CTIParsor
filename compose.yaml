@@ -202,8 +202,9 @@ services:
   # PostgreSQL image as `postgres` (pg_dump, tar, sh), so it adds no image of
   # its own. It reads cti-state and never writes it. Nothing in this service
   # stops app or worker: a report in progress can be in the archive half-written.
-  # BACKUP_TARGET has no default on purpose: a backup written to the state
-  # volume's own disk is no backup. Put it on another disk or an NFS share.
+  # BACKUP_TARGET is not required by Compose: every other service must start
+  # without it. The service refuses to back up while it is unset (run.sh).
+  # In production the target is off this host: another disk or an NFS share.
   backup:
     image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
     profiles: [backup]
@@ -214,9 +215,12 @@ services:
       CTI_DB_NAME: ${CTI_DB_NAME:-ctiparsor}
       BACKUP_TIME: ${BACKUP_TIME:-02:30}
       BACKUP_KEEP: ${BACKUP_KEEP:-7}
+      # Set by .env. run.sh refuses to back up when it is empty, so a missing
+      # target leaves a failed status and nothing written to ./backups.
+      BACKUP_TARGET_CONFIGURED: "${BACKUP_TARGET:-}"
     volumes:
       - cti-state:/app/state:ro
-      - ${BACKUP_TARGET:?set BACKUP_TARGET}:/backups
+      - ${BACKUP_TARGET:-./backups}:/backups
       - cti-backup-status:/backup-status
       - ./docker/backup:/backup:ro
       - ./.secrets/db_password:/run/secrets/db_password:ro

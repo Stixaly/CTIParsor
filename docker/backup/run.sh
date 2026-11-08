@@ -11,6 +11,7 @@
 #   BACKUP_KEEP         backup pairs kept, newest first (default 7)
 #   BACKUP_RUN_NOW      1: back up once now and exit (0 on success, 1 on failure)
 #   BACKUP_DIR          target directory (default /backups)
+#   BACKUP_TARGET_CONFIGURED  the BACKUP_TARGET of .env; empty = refuse to run
 #   BACKUP_STATUS_FILE  status file the app reads (default /backup-status/status.json)
 #   STATE_DIR           the cti-state volume (default /app/state)
 #   DB_PASSWORD_FILE    the database password secret (default /run/secrets/db_password)
@@ -28,6 +29,8 @@ BACKUP_TIME=${BACKUP_TIME:-02:30}
 BACKUP_KEEP=${BACKUP_KEEP:-7}
 BACKUP_RUN_NOW=${BACKUP_RUN_NOW:-0}
 BACKUP_DIR=${BACKUP_DIR:-/backups}
+# Set from BACKUP_TARGET in compose.yaml. Empty means no target was configured.
+BACKUP_TARGET_CONFIGURED=${BACKUP_TARGET_CONFIGURED:-}
 BACKUP_STATUS_FILE=${BACKUP_STATUS_FILE:-/backup-status/status.json}
 STATE_DIR=${STATE_DIR:-/app/state}
 DB_PASSWORD_FILE=${DB_PASSWORD_FILE:-/run/secrets/db_password}
@@ -192,6 +195,15 @@ main() {
         '' | *[!0-9]*) die "BACKUP_KEEP must be a whole number (got '$BACKUP_KEEP')" ;;
     esac
     [ "$BACKUP_KEEP" -ge 1 ] || die "BACKUP_KEEP must be at least 1"
+    if [ -z "$BACKUP_TARGET_CONFIGURED" ]; then
+        # Without a target, /backups would be a directory on the host running
+        # Compose: refuse, record the refusal, back nothing up.
+        msg="BACKUP_TARGET is not set: backups would stay on this host"
+        echo "backup: $msg" >&2
+        write_status false "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(previous_success)" "" "$msg" \
+            || echo "backup: could not write the status file" >&2
+        exit 1
+    fi
     [ -d "$BACKUP_DIR" ] || die "BACKUP_DIR $BACKUP_DIR is not a directory"
 
     WORK=$(mktemp -d "${TMPDIR:-/tmp}/ctibackup.XXXXXX")
