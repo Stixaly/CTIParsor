@@ -82,7 +82,7 @@ def _summary(workers: list[dict]) -> dict:
     }
 
 
-@router.get("/queue/status", response_model=QueueStatus)
+@router.get("/queue/status", response_model=QueueStatus, response_model_exclude_unset=True)
 def get_queue_status():
     """Return a snapshot of queue depth, job counts, and every worker loop's liveness."""
     with get_conn() as conn:

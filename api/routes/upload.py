@@ -104,7 +104,8 @@ def _looks_like_html(chunk: bytes) -> bool:
     return True
 
 
-@router.post("/upload", response_model=UploadResult, responses=BASELINE_REFUSED)
+@router.post("/upload", response_model=UploadResult, response_model_exclude_unset=True,
+             responses=BASELINE_REFUSED)
 @limiter.limit("10/minute")
 def upload_file(
     request: Request,

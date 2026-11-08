@@ -106,7 +106,7 @@ def _stored_errors(raw: str | None) -> list[str]:
         return []
 
 
-@router.get("", response_model=list[JobSummary])
+@router.get("", response_model=list[JobSummary], response_model_exclude_unset=True)
 def list_jobs():
     with get_conn() as conn:
         rows = conn.execute(
@@ -211,7 +211,8 @@ def get_baseline_intake(job_id: str):
     return Response(row["intake_json"], media_type="application/json")
 
 
-@router.patch("/{job_id}", response_model=StatusResult, responses=_BUNDLE_REFUSED)
+@router.patch("/{job_id}", response_model=StatusResult, response_model_exclude_unset=True,
+               responses=_BUNDLE_REFUSED)
 def update_job_status(job_id: str, patch: StatusPatch):
     """Set a job's status.  409 while a worker runs the job (#385, as DELETE does), and
     409 for `completed` while the stored bundle is one the STIX schemas refused (see finalize)."""
@@ -280,7 +281,8 @@ def update_job_status(job_id: str, patch: StatusPatch):
     return {"status": patch.status}
 
 
-@router.post("/{job_id}/finalize", response_model=FinalizeResult, responses=_BUNDLE_REFUSED)
+@router.post("/{job_id}/finalize", response_model=FinalizeResult, response_model_exclude_unset=True,
+             responses=_BUNDLE_REFUSED)
 def finalize_job(job_id: str, quick: bool = False):
     """
     Re-run Stages 4+5 and regenerate the STIX bundle.
@@ -398,7 +400,7 @@ def _delete_job(job_id: str) -> bool:
     return True
 
 
-@router.delete("/{job_id}", response_model=DeleteResult)
+@router.delete("/{job_id}", response_model=DeleteResult, response_model_exclude_unset=True)
 def delete_job(job_id: str):
     if not _delete_job(job_id):
         raise HTTPException(404, "Job not found")

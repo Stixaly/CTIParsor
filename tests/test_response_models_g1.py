@@ -32,7 +32,7 @@ MODEL_OPERATIONS = {
 
 def _operations_of_the_four_modules() -> list[tuple[str, str]]:
     """(method, path) of every route the four modules' routers hold."""
-    return sorted((method.lower(), route.path)
+    return sorted((method.lower(), getattr(route, "path", ""))
                   for router in ROUTERS for route in router.routes
                   for method in getattr(route, "methods", ()))
 
@@ -95,6 +95,25 @@ def test_a_full_ledger_comes_back_exactly_as_stored(temp_db_client, temp_db):
     resp = temp_db_client.get("/api/jobs/lg1/bundle/ledger")
     assert resp.status_code == 200
     assert resp.json() == ledger
+
+
+def test_an_optional_key_the_route_omits_stays_absent(temp_db_client, temp_db):
+    """A response model would add `null` for an optional key the route did not set; the
+    routes exclude unset fields, so a key left out of the data is left out of the response."""
+    with temp_db.get_conn() as conn:
+        conn.execute(
+            "INSERT INTO jobs (id, original_filename, status, created_at, updated_at) "
+            "VALUES ('oa1','r.txt','for_review',?,?)", (temp_db.now_iso(), temp_db.now_iso()))
+        conn.commit()
+    job = temp_db_client.get("/api/jobs/oa1").json()
+    assert "enrichment" not in job                    # not an enrich job: the key is absent, not null
+
+    # A ledger with only one key comes back with only that key (no refused, no objects, ...).
+    with temp_db.get_conn() as conn:
+        conn.execute("UPDATE jobs SET bundle_json='{}', bundle_ledger_json=? WHERE id='oa1'",
+                     ('{"entities": []}',))
+        conn.commit()
+    assert temp_db_client.get("/api/jobs/oa1/bundle/ledger").json() == {"entities": []}
 
 
 def test_an_empty_queue_status_is_the_one_the_route_function_computes(temp_db_client, temp_db):
