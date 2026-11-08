@@ -8,7 +8,7 @@ import re
 import api.routes
 from api.auth.config import ROLES
 from api.auth.permissions import OPEN, PERMISSIONS, required_role
-from api.main import _ROUTERS, app
+from api.main import _OWN_RULE_ROUTERS, _ROUTERS, app
 
 _PARAM = re.compile(r"\{[^}]+\}")
 
@@ -33,7 +33,8 @@ def test_the_router_table_and_the_schema_list_the_same_operations():
 
 def test_every_route_file_is_included_with_the_access_check():
     files = {info.name for info in pkgutil.iter_modules(api.routes.__path__) if not info.name.startswith("_")}
-    assert files == {module.__name__.rsplit(".", 1)[1] for module in _ROUTERS}
+    assert files == {module.__name__.rsplit(".", 1)[1] for module in (*_ROUTERS, *_OWN_RULE_ROUTERS)}
+    assert {module.__name__ for module in _OWN_RULE_ROUTERS} == {"api.routes.metrics"}   # a new one is a decision
 
 
 def test_every_role_is_a_known_one_and_only_health_and_login_are_open():

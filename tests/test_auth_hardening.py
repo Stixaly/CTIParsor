@@ -14,7 +14,7 @@ from api import admin
 from api.auth import store
 from api.auth.deps import current_user
 from api.auth.middleware import DOC_PATHS, OPEN_REQUESTS
-from api.routes import progress
+from api.routes import metrics, progress
 
 from .conftest import AUTH_TEST_PASSWORD
 
@@ -26,6 +26,7 @@ _NOT_GATED_BY_DEPENDENCY = {
     "/docs": "gated by the middleware",
     "/docs/oauth2-redirect": "gated by the middleware",
     "/redoc": "gated by the middleware",
+    "/metrics": "its own rule: loopback or the METRICS_TOKEN bearer (api/routes/metrics.py)",
 }
 
 
@@ -42,7 +43,7 @@ def test_every_route_goes_through_current_user_except_an_explicit_list():
     for route in api.main.app.routes:
         path = getattr(route, "path", None)
         if path is None:                                                     # an included router
-            if not _has_access_dependency(route):
+            if not _has_access_dependency(route) and getattr(route, "original_router", None) is not metrics.router:
                 stray.append(repr(route))
         elif path in _NOT_GATED_BY_DEPENDENCY or path in open_paths:
             continue
@@ -208,3 +209,11 @@ def test_an_empty_password_file_is_named(cli, tmp_path):
     path = _password_file(tmp_path, text="\n")
     code, _, err = cli("create-admin", "--username", "alice", "--password-file", path)
     assert code == 1 and path in err and "empty" in err
+
+
+def test_metrics_keep_their_own_rule_when_authentication_is_on(auth_client, monkeypatch):
+    monkeypatch.setenv("METRICS_TOKEN", "m" * 32)
+    assert auth_client.get("/metrics").status_code == 403                 # not loopback, no token
+    assert auth_client.get("/metrics", headers={"Authorization": "Bearer " + "x" * 32}).status_code == 403
+    answer = auth_client.get("/metrics", headers={"Authorization": "Bearer " + "m" * 32})
+    assert answer.status_code == 200 and "ctiparsor_database_up" in answer.text

@@ -94,6 +94,12 @@
         "off"
       ]
     },
+    "env BACKUP_STATUS_FILE": {
+      "set": false,
+      "values": [
+        "/app/backup-status/status.json"
+      ]
+    },
     "env BENIGN_IOC_FILTER": {
       "set": false,
       "values": [
@@ -578,6 +584,12 @@
       "set": false,
       "values": [
         "10485760"
+      ]
+    },
+    "env METRICS_TOKEN": {
+      "set": false,
+      "values": [
+        ""
       ]
     },
     "env MISTRAL_API_KEY": {

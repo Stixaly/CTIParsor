@@ -9,7 +9,9 @@ route matches gets a JSON 404, not the application page (`api/main.py`).
 With `AUTH_MODE=off` (the default) no route asks for credentials. With `AUTH_MODE=local`
 every route except `GET /api/health` and `POST /api/auth/login` does, and the role each
 operation needs (ADR-0097) is listed in [api-permissions.md](api-permissions.md) and held
-in `api/auth/permissions.py`; a test fails for an operation with no entry.
+in `api/auth/permissions.py`; a test fails for an operation with no entry. `GET /metrics` keeps its
+own rule whatever the mode: loopback clients, or the `METRICS_TOKEN` bearer (see
+[operations.md](operations.md#monitoring-and-alerts)).
 
 - **Web interface.** `POST /api/auth/login` with `{ "username", "password" }` sets the cookie
   `ctiparsor_session` (`HttpOnly`, `SameSite=Strict`, `Secure` unless the request is plain HTTP from

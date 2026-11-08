@@ -44,6 +44,7 @@ from api.routes import (
     entities,
     ingest,
     jobs,
+    metrics,
     overrides,
     policy,
     progress,
@@ -327,6 +328,12 @@ _ROUTERS = (jobs, upload, ingest, entities, relationships, progress, policy, cov
             thresholds, overrides, attack, baselines, auth)
 for _module in _ROUTERS:
     app.include_router(_module.router, dependencies=[Depends(current_user)])
+# Routers with their own access rule instead of a user's role. `/metrics`: loopback,
+# or the METRICS_TOKEN bearer for Prometheus, which holds no user account; it is
+# outside `/api`, so the gate does not apply either (ADR-0097 work item 18).
+_OWN_RULE_ROUTERS = (metrics,)
+for _module in _OWN_RULE_ROUTERS:
+    app.include_router(_module.router)
 
 
 @app.get("/api/health")
