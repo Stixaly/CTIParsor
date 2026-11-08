@@ -36,6 +36,14 @@ extractions before they are exported. The journey 1.0 covers:
 
 One person maintains the project. No promise on this page assumes a team.
 
+**This will change.** [ADR-0097](adr/0097-1-0-is-a-shared-service-for-one-team.md)
+(proposed on 2026-11-08, not yet accepted) makes 1.0 a shared service for one
+team: one install shared by several users, behind authentication, with roles.
+When it is accepted, this section changes with it. Until its work items (14 to
+24) are done, the text above is the current state: no authentication, one
+analyst, and the install reachable from loopback only unless you add your own
+gate ([deployment.md](deployment.md)).
+
 ## What 1.0 promises
 
 Three things, and only these.

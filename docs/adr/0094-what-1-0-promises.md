@@ -5,7 +5,7 @@
 **Deciders:** maintainer
 **Extends:** ADR-0085 (its decision 8 covers the versions before 1.0 only)
 **Amended by:** the amendments of 2026-11-07 (item 5 done, with limits) and
-2026-11-08 (item 13) below
+2026-11-08 (item 13) below; ADR-0097 (proposed) amends who 1.0 is for
 **Relates to:** ADR-0054 (Docker is the only supported install), ADR-0060 (the
 evaluation protocol), ADR-0066 (STIX ids), ADR-0077 (versioned migrations),
 ADR-0084 (a bundle Stage 5 refuses is not served), ADR-0090 (enriching a STIX
@@ -399,3 +399,12 @@ The model comparisons that motivated it stay after 1.0
 ([ROADMAP](../../ROADMAP.md#after-10), quality track): retrieval encoders,
 the CyNER and GLiNER contributions by entity type, the fusion rules,
 GLiNER's next version, and fine-tuning. None of them changes the 1.0 promises.
+
+## Amendment (2026-11-08): who 1.0 is for, amended by ADR-0097
+
+ADR-0097 (Proposed, 2026-11-08) amends the decision on who 1.0 is for: a shared
+service for one team, behind authentication, instead of one analyst on a local
+install. If the maintainer accepts it, decision 0's last sentence and the last
+item of *Options rejected* no longer hold. The other decisions stay. The
+action plan continues in ADR-0097's work items (14 to 24). Until it is
+accepted, the text above stands.
