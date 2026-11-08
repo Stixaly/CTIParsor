@@ -8,7 +8,7 @@ key absent from the stored data is absent from the response, as it was.
 """
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, JsonValue
 
 from api.response_models import Response as ApiResponse
 
@@ -109,59 +109,64 @@ class DeleteResult(ApiResponse):
     deleted: str = Field(description="The id of the deleted job.")
 
 
+# The ledger is stored inside each bundle, written by every release since
+# ADR-0061, and its keys and value shapes changed across ADRs (a `changes`
+# entry became an object with from/to/kind/reason).  Every value is any JSON
+# value and every key optional, so a GET returns an older ledger as stored.
+
 class LedgerObject(ApiResponse):
     """Why one object or edge of the bundle exists.  `origin` is always present; the other
     keys depend on the origin (status, upsert, changes, ...) and pass through unchanged."""
 
-    origin: str
+    origin: JsonValue = None
 
 
 class LedgerEntity(ApiResponse):
     """What Stage 4 did with one entity row."""
 
-    value: str
-    entity_type: str
-    outcome: str = Field(description="emitted, merged or dropped.")
-    stix_id: str | None = None
-    stix_type: str | None = None
-    stix_name: str | None = None
-    reason: str | None = None
+    value: JsonValue = None
+    entity_type: JsonValue = None
+    outcome: JsonValue = Field(default=None, description="emitted, merged or dropped.")
+    stix_id: JsonValue = None
+    stix_type: JsonValue = None
+    stix_name: JsonValue = None
+    reason: JsonValue = None
 
 
 class LedgerRelationship(ApiResponse):
     """What Stage 4 did with one relationship row."""
 
-    source_value: str
-    relationship_type: str
-    target_value: str
-    outcome: str = Field(description="emitted, merged or dropped.")
-    changes: list[str] | None = Field(default=None, description="The properties a baseline upsert rewrote.")
-    stix_id: str | None = None
-    final_type: str | None = None
-    source_ref: str | None = None
-    target_ref: str | None = None
-    reason: str | None = None
-    merged_with: str | None = None
+    source_value: JsonValue = None
+    relationship_type: JsonValue = None
+    target_value: JsonValue = None
+    outcome: JsonValue = Field(default=None, description="emitted, merged or dropped.")
+    changes: JsonValue = Field(default=None, description="What the mapping rewrote: objects with from, to, kind and reason (older ledgers: property names).")
+    stix_id: JsonValue = None
+    final_type: JsonValue = None
+    source_ref: JsonValue = None
+    target_ref: JsonValue = None
+    reason: JsonValue = None
+    merged_with: JsonValue = None
 
 
 class LedgerRemoved(ApiResponse):
     """An object or edge that is not shipped, and why."""
 
-    stix_id: str
-    kind: str = Field(description="object or relationship.")
-    reason: str
-    replaced_by: str | None = None
-    name: str | None = None
+    stix_id: JsonValue = None
+    kind: JsonValue = Field(default=None, description="object or relationship.")
+    reason: JsonValue = None
+    replaced_by: JsonValue = None
+    name: JsonValue = None
 
 
 class LedgerRefused(ApiResponse):
     """An edge Stage 4 would have built and did not, because its triple was rejected or held."""
 
-    source_ref: str
-    relationship_type: str
-    target_ref: str
-    origin: str | None = None
-    reason: str | None = None
+    source_ref: JsonValue = None
+    relationship_type: JsonValue = None
+    target_ref: JsonValue = None
+    origin: JsonValue = None
+    reason: JsonValue = None
 
 
 class BundleLedger(ApiResponse):
@@ -169,9 +174,9 @@ class BundleLedger(ApiResponse):
     optional: the route returns the stored ledger as it was written, and `refused` is
     present only when something was refused."""
 
-    version: int | None = None
-    objects: dict[str, LedgerObject] | None = None
-    entities: list[LedgerEntity] | None = None
-    relationships: list[LedgerRelationship] | None = None
-    removed: list[LedgerRemoved] | None = None
-    refused: list[LedgerRefused] | None = None
+    version: JsonValue = None
+    objects: dict[str, LedgerObject] | JsonValue = None
+    entities: list[LedgerEntity] | JsonValue = None
+    relationships: list[LedgerRelationship] | JsonValue = None
+    removed: list[LedgerRemoved] | JsonValue = None
+    refused: list[LedgerRefused] | JsonValue = None

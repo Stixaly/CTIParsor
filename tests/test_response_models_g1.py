@@ -145,3 +145,30 @@ def test_the_progress_stream_is_the_frames_the_stored_events_make(temp_db_client
     expected += "".join(f"id: {r['id']}\nevent: {r['event_type']}\ndata: {r['data']}\n\n" for r in rows)
     expected += 'event: done\ndata: {"status": "for_review"}\n\n'
     assert resp.text == expected
+
+
+def test_a_ledger_of_any_release_comes_back_as_stored(temp_db_client, temp_db):
+    """CI caught a 500 here: `changes` became a list of objects (from, to, kind,
+    reason) while the model said strings.  The ledger lives inside each bundle and
+    its shapes changed across ADRs, so the model accepts any value."""
+    ledger = {
+        "version": "2",
+        "relationships": [
+            {"source_value": "APT29", "relationship_type": "uses", "target_value": "X",
+             "outcome": "emitted",
+             "changes": [{"from": "controls", "to": "uses", "kind": "verb", "reason": "policy_pin"}]},
+            {"relationship_type": "uses", "outcome": None},
+        ],
+        "removed": [{"kind": "object", "reason": "alias_merge"}],
+        "entities": [{"value": 3}],
+    }
+    with temp_db.get_conn() as conn:
+        conn.execute(
+            "INSERT INTO jobs (id, original_filename, status, bundle_json, bundle_ledger_json, "
+            "created_at, updated_at) VALUES ('lg2','r.txt','for_review','{}',?,?,?)",
+            (json.dumps(ledger), temp_db.now_iso(), temp_db.now_iso()),
+        )
+        conn.commit()
+    resp = temp_db_client.get("/api/jobs/lg2/bundle/ledger")
+    assert resp.status_code == 200
+    assert resp.json() == ledger
