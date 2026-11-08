@@ -337,7 +337,7 @@ of evidence is missing.
 | 10 | Freeze and real use: the candidate frozen, 5 real reports outside the evaluation corpora, through export and OpenCTI import, incidents logged (decision 2) | the journey on unseen reports | not started |
 | 11 | A recorded evaluation run with `anthropic` and the default `ANTHROPIC_MODEL`: twice at `LLM_TEMPERATURE=0`, on AnnoCTR test (read once for this decision, as ADR-0060 allows) and on the in-house set once it is gold (item 5), with figure reading on (item 12); the spread between the two runs published | `anthropic` supported (decision 13) | not started |
 | 12 | Figure reading on by default (decision 14): a default `VISION_PROVIDER` that follows `LLM_PROVIDER` when its model passes the image probe, the stage skipped otherwise; tests of each provider's path and of the skip; `.env.example`, the contract snapshot and the docs | figure reading supported, in the default journey | done: `pipeline/vlm.py` (`VISION_PROVIDER` unset, empty or `auto` builds the backend of `LLM_PROVIDER` with the model and the probe a named provider would have; `gemini`, `lmstudio` and any other value are skipped; never another provider; `skip_reason()`; a probe that raised is asked again for the next document; no credentials in a reason; `python -m pipeline.vlm` reads `.env`), `pipeline/orchestrator.py` (the reason goes in the stage report; under `auto` a run with Stage 3 disabled reads no figure, so `--no-llm` still sends nothing; the 1f record names the provider and model), `api/run_config.py` (an unset `VISION_PROVIDER` is recorded as `auto`), `.env.example`, `contract/config.json` (`make contract`: one `default` difference, none breaking), the docs; `tests/test_vlm.py` (each provider's path, the skips, the logging level, the two defaults of `LLM_PROVIDER`), `tests/test_orchestrator.py` (the reason in the stage report; no backend asked, not even a probe, under `auto` with Stage 3 disabled by `--no-llm` or `PIPELINE_DISABLED_STAGES`; a named provider still asked), `tests/test_run_config.py`, `tests/conftest.py` (the suite pins `VISION_PROVIDER=none`). Not covered: no real figure has been read through `auto` yet, the first will be in item 11's in-house runs; the tests fake the probe and the server, no CI job reads a figure |
-| 13 | What a run actually loaded (added 2026-11-08): the run's record names the embedding model Stage 2c loaded, not only the one `TTP_EMBEDDING_MODEL` asks for, with the fallback when the load failed, the thresholds applied and the TTP mode; a run whose embedding cache was built by another encoder than the one loaded refuses to start | a published figure says which models produced it | not started |
+| 13 | What a run actually loaded (added 2026-11-08): the run's record names the embedding model Stage 2c loaded, not only the one `TTP_EMBEDDING_MODEL` asks for, with the fallback when the load failed, the thresholds applied and the TTP mode (`select` or `verify`, ADR-0072); a cache built for another encoder is named in the stage report instead of skipping the stage silently, and an evaluation run (`evaluation run`, `inhouse-run`) refuses to start on such a cache or on a fallback | a published figure says which models produced it | not started |
 
 Done before this ADR, by pull request #229: `WORKER_MAX_CONCURRENT` defaults to
 1 in the code (decision 6), and `python -m evaluation inhouse-score` names the
@@ -388,8 +388,11 @@ on the candidate nor compared with the previous release.
 when the load fails, falls back to another one, and picks its similarity
 thresholds by the model it actually loaded. A run that names one encoder can
 therefore have used another, and a published figure would say the wrong model.
-Item 13 records what was loaded, and stops a run whose embedding cache does not
-match the encoder in use. It is a condition of 1.0 because every figure the
+When the embedding cache was built for another encoder, Stage 2c and select
+mode's retrieval skip the stage with a log line only. Item 13 records what
+was loaded, names a mismatched cache in the stage report, and makes an
+evaluation run refuse to start on a mismatched cache or a fallback: an
+analyst's run goes on as today, a measurement does not. It is a condition of 1.0 because every figure the
 release publishes (items 6 and 11) must say what produced it.
 
 The model comparisons that motivated it stay after 1.0
