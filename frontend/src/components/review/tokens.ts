@@ -103,7 +103,7 @@ export const SOURCE_LABEL: Record<string, { label: string; hint: string }> = {
   gazetteer: { label: 'gazetteer', hint: 'Known-name dictionary' },
   semantic:  { label: 'semantic',  hint: 'Embedding similarity' },
   cyner:     { label: 'CyNER',     hint: 'Specialised CTI NER model' },
-  llm:       { label: 'LLM',       hint: 'claude-sonnet-4-6' },
+  llm:       { label: 'LLM',       hint: 'claude-sonnet-5-5' },
   manual:    { label: 'manual',    hint: 'Added by reviewer' },
   ioc:       { label: 'regex',     hint: 'Deterministic pattern match' },
   baseline_stix: { label: 'STIX', hint: "From the analyst's STIX 2.1 bundle" },

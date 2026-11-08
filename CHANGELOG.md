@@ -9,6 +9,14 @@ theme.
 
 ## [Unreleased]
 
+- **The Anthropic defaults move to the Claude 5 generation.** Text:
+  `ANTHROPIC_MODEL` defaults to `claude-sonnet-5-5` (was `claude-sonnet-4-6`),
+  in the code and in `.env.example`; figures: `VISION_PROVIDER=anthropic`, or
+  `auto` with `LLM_PROVIDER=anthropic`, reads them with `claude-haiku-5-5` (was
+  `claude-haiku-4-5`). An `.env` that names a model keeps it. The default
+  provider's measurement (ADR-0094 item 11) is made on these models.
+  **Bundles change** for an install that relies on the defaults.
+
 - **A run records the embedding model it loaded, and an evaluation run
   refuses a fallback** (ADR-0094 item 13). The Stage 2c entry of the stage
   report now carries `embedding` (the model requested, the one loaded, whether

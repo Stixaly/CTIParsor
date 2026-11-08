@@ -13,7 +13,7 @@ class ChunkConfig(BaseModel):
 
 class LLMConfig(BaseModel):
     provider: str = "anthropic"
-    model: str = "claude-sonnet-4-6"
+    model: str = "claude-sonnet-5-5"
     temperature: float = Field(0.0, ge=0.0, le=2.0)
     max_retries: int = Field(3, ge=0, le=10)
     timeout_seconds: int = Field(120, ge=10, le=600)
@@ -46,7 +46,7 @@ class PipelineConfig(BaseModel):
                 provider=provider,
                 # The model variable of the provider this run uses: ANTHROPIC_MODEL,
                 # VLLM_MODEL, OLLAMA_MODEL... (#531), then LLM_MODEL.
-                model=os.getenv(f"{provider.upper()}_MODEL", os.getenv("LLM_MODEL", "claude-sonnet-4-6")),
+                model=os.getenv(f"{provider.upper()}_MODEL", os.getenv("LLM_MODEL", "claude-sonnet-5-5")),
                 timeout_seconds=int(os.getenv("LLM_TIMEOUT", "120")),
                 max_retries=int(os.getenv("LLM_MAX_RETRIES", "3")),
             ),
