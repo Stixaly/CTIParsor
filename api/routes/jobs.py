@@ -6,10 +6,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
+from api.auth.deps import current_user
+from api.auth.store import User
 from api.baseline_store import EXCLUDED_LISTED
 from api.db import _lock, get_conn, now_iso, transaction
 from api.logging_config import get_logger
@@ -400,8 +402,19 @@ def _delete_job(job_id: str) -> bool:
     return True
 
 
-@router.delete("/{job_id}", response_model=DeleteResult, response_model_exclude_unset=True)
-def delete_job(job_id: str):
+def may_delete(user: User, imported_by: str | None) -> bool:
+    """An admin deletes any report; an analyst only one they imported.  A report with
+    no owner (stored before migration 18) is an admin's to delete."""
+    return user.role == "admin" or (imported_by is not None and imported_by == user.id)
+
+
+@router.delete("/{job_id}", response_model=DeleteResult, response_model_exclude_unset=True,
+               responses={403: {"description": "An analyst deletes only the reports they imported."}})
+def delete_job(job_id: str, user: User | None = Depends(current_user)):
+    if user is not None and user.role != "admin":
+        row = get_conn().execute("SELECT imported_by FROM jobs WHERE id=?", (job_id,)).fetchone()
+        if row is not None and not may_delete(user, row["imported_by"]):
+            raise HTTPException(403, "Only an admin, or the analyst who imported this report, may delete it")
     if not _delete_job(job_id):
         raise HTTPException(404, "Job not found")
     return {"deleted": job_id}

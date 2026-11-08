@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
@@ -25,6 +25,8 @@ from pipeline.regex_safety import compile_pattern
 setup_logging()
 logger = get_logger(__name__)
 
+from api.auth import config as auth_config
+from api.auth.deps import current_user
 from api.body_limit import DEFAULT_BUDGET_BYTES, BodyLimitMiddleware
 from api.db import get_conn, init_db
 from api.paths import output_dir, uploads_dir
@@ -35,6 +37,7 @@ limiter = Limiter(key_func=get_remote_address)
 
 from api.routes import (
     attack,
+    auth,
     baselines,
     coverage,
     entities,
@@ -59,6 +62,18 @@ async def lifespan(app: FastAPI):
     Tests patch `api.main.init_db`; the patch still applies here because the
     name is resolved from the module namespace at call time.
     """
+    # A bad AUTH_MODE, authentication off beyond loopback, or OIDC without its
+    # settings stops the process here (ADR-0097, Network posture).
+    try:
+        auth_config.check_startup()
+    except auth_config.AuthConfigError as exc:
+        logger.error("[startup] %s", exc)
+        raise
+    if auth_config.enabled():
+        logger.info("[startup] authentication: AUTH_MODE=%s", auth_config.auth_mode())
+    else:
+        logger.warning("[startup] authentication is OFF (AUTH_MODE=off): single-analyst use on loopback only; "
+                       "anyone who reaches the port has full access")
     # A bad STIX_TLP stops the process here, not at the first bundle — a
     # marking is never guessed (ADR-0073).
     from pipeline.stage4_stix_mapping import tlp_default
@@ -289,21 +304,13 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=_ALLOWED_HOSTS, www_redi
 # cross-origin browser call to this API.
 
 
-# API routes
-app.include_router(jobs.router)
-app.include_router(upload.router)
-app.include_router(ingest.router)
-app.include_router(entities.router)
-app.include_router(relationships.router)
-app.include_router(progress.router)
-app.include_router(policy.router)
-app.include_router(coverage.router)
-app.include_router(settings.router)
-app.include_router(queue.router)
-app.include_router(thresholds.router)
-app.include_router(overrides.router)
-app.include_router(attack.router)
-app.include_router(baselines.router)
+# API routes.  Every router gets the access check once, here: the minimum role of
+# each operation is in api/auth/permissions.py, and a router added without it
+# would be open.  `GET /api/health`, below, is the one open route.
+_ROUTERS = (jobs, upload, ingest, entities, relationships, progress, policy, coverage, settings, queue,
+            thresholds, overrides, attack, baselines, auth)
+for _module in _ROUTERS:
+    app.include_router(_module.router, dependencies=[Depends(current_user)])
 
 
 @app.get("/api/health")

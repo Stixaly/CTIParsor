@@ -4,7 +4,29 @@ Every route the FastAPI server exposes. The interactive OpenAPI docs are served
 by the running app at `http://localhost:8000/docs`. A path under `/api/` that no
 route matches gets a JSON 404, not the application page (`api/main.py`).
 
-The role each operation would need under ADR-0097 is listed in [api-permissions.md](api-permissions.md). It is a proposal; the API does not enforce it yet.
+## Authentication
+
+With `AUTH_MODE=off` (the default) no route asks for credentials. With `AUTH_MODE=local`
+every route except `GET /api/health` and `POST /api/auth/login` does, and the role each
+operation needs (ADR-0097) is listed in [api-permissions.md](api-permissions.md) and held
+in `api/auth/permissions.py`; a test fails for an operation with no entry.
+
+- **Web interface.** `POST /api/auth/login` with `{ "username", "password" }` sets the cookie
+  `ctiparsor_session` (`HttpOnly`, `SameSite=Strict`, `Secure` unless the request is plain HTTP from
+  loopback, 12 hours sliding, `SESSION_TTL_HOURS`) and returns the same object as
+  `GET /api/auth/me`: `{ auth_mode, username, display_name, role, auth_source, csrf_token }`.
+  `csrf_token` is the one to send back in the `X-CSRF-Token` header on every `POST`, `PUT`, `PATCH` and
+  `DELETE` made with the cookie (403 without it). `POST /api/auth/logout` ends the session.
+  A wrong password and an unknown username both answer 401 `Invalid username or password`; five
+  failures for a username in 15 minutes answer 429 with `Retry-After` for 15 minutes.
+- **Scripts.** `Authorization: Bearer ctp_...`, a token made with `python -m api.admin create-token`
+  (shown once, 90 days by default, revocable). It needs no CSRF token. A token that is unknown, revoked or
+  expired, and one whose user is disabled, answers 401.
+- **401** without valid credentials; **403** below the operation's role, without the CSRF token, or for an
+  operation the permission table does not list. An analyst's `DELETE /api/jobs/{id}` on a report they did not
+  import (or one with no owner) is a 403: only an admin deletes it.
+- `jobs.imported_by` records the user who imported a report (upload, pasted text, URL, and the same with a
+  baseline); it stays empty when authentication is off.
 
 ## Jobs
 

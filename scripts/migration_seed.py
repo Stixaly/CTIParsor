@@ -292,7 +292,10 @@ JOB_B = "a2c4e6f8-1b3d-4f5a-8c7e-9d0b2a4c6e81"    # a URL capture whose bundle t
 JOB_C = "0b9e8d7c-6a5f-4e3d-9c2b-1a0f9e8d7c6b"    # enriches an analyst's STIX bundle (ADR-0090)
 JOB_D = "d4c3b2a1-9f8e-4d7c-8b6a-5f4e3d2c1b0a"    # failed in Stage 1
 JOB_GONE = "e7f6a5b4-c3d2-4e1f-8a9b-0c1d2e3f4a5b"  # deleted since: its decisions stay (version 7)
-RULE = "sigmahq:5f1c3c3e-8f9e-4b44-a6a0-3a2d7c1e9b10"
+USER_ADMIN = "3b7e1c52-9d04-4a6f-b8e3-52c1f0a9d7e4"   # a local admin, who imported JOB_A (version 18)
+USER_SSO = "c81f4a06-27d5-4e9b-a3c0-6e5d9b1f2a37"     # an OIDC analyst, no password
+_FAKE_HASH = "$argon2id$v=19$m=65536,t=3,p=4$c2VlZHNlZWRzZWVk$aGFzaGhhc2hoYXNo"
+RULE ="sigmahq:5f1c3c3e-8f9e-4b44-a6a0-3a2d7c1e9b10"
 RULE_COPY = "community:5f1c3c3e-8f9e-4b44-a6a0-3a2d7c1e9b10"
 C_TEXT = "WellMess beacons to its C2 every 30 minutes; the operators reused it in 2026.\n"
 
@@ -352,7 +355,7 @@ def _jobs(stage4: Path) -> list[dict[str, Any]]:
          "bundle_ledger_json": ledger_a, "bundle_validation": "validated", "bundle_validation_errors": None,
          "review_revision": 9, "bundle_review_revision": 9,
          "bundle_build_json": json.dumps(_build_record("finalize", "2026-10-21T16:02:44Z")),
-         "pipeline_mode": "full",
+         "pipeline_mode": "full", "imported_by": USER_ADMIN,
          "resolved_types_json": json.dumps([{"value": "Rclone", "entity_type": "malware", "source": "cyner"}])},
         {"id": JOB_B, "original_filename": "coldriver-advisory.pdf", "status": "for_review",
          "report_text": stage4_report_text("minimal", stage4), "bundle_json": bundle_b,
@@ -534,6 +537,31 @@ def spec(stage4: Path = STAGE4) -> dict[str, list[dict[str, Any]]]:
                    "provider": "anthropic", "model": "claude-sonnet-4-5", "elapsed_s": 3.2,
                    "input_tokens": 1530, "output_tokens": 212, "error": None}
     return {
+        # The accounts come first: a job names the user who imported it (version 18).  The hash
+        # is a placeholder in Argon2id's format: nothing verifies it.
+        "users": [
+            {"id": USER_ADMIN, "username": "mara", "display_name": "Mara Voss", "auth_source": "local",
+             "oidc_subject": None, "password_hash": _FAKE_HASH,
+             "role": "admin", "disabled": 0, "created_at": _t(15, "08:00:00.000000"),
+             "last_login_at": _t(26, "08:30:12.345678")},
+            {"id": USER_SSO, "username": "tomas@example.org", "display_name": "Tomas Ek", "auth_source": "oidc",
+             "oidc_subject": "00u1a2b3c4d5e6f7g8h9", "password_hash": None, "role": "analyst", "disabled": 1,
+             "created_at": _t(16, "10:00:00.000000"), "last_login_at": None},
+        ],
+        "sessions": [
+            {"id_hash": hashlib.sha256(b"seeded-session-id").hexdigest(), "user_id": USER_ADMIN,
+             "csrf_token": "c3NlZWRlZC1jc3JmLXRva2Vu", "created_at": _t(26, "08:30:12.345678"),
+             "expires_at": _t(26, "20:30:12.345678"), "last_seen_at": _t(26, "09:02:00.000000")},
+        ],
+        "api_tokens": [
+            {"id": fixed_uuid4("api-token", "nightly"), "user_id": USER_ADMIN, "name": "nightly import",
+             "token_hash": hashlib.sha256(b"ctp_seeded-token").hexdigest(), "created_at": _t(15, "08:05:00.000000"),
+             "expires_at": _t(24, "08:05:00.000000"), "revoked_at": _t(22, "12:00:00.000000"),
+             "last_used_at": _t(21, "23:00:00.000000")},
+        ],
+        "login_failures": [
+            {"username": "tomas@example.org", "attempted_at": _t(26, "08:29:50.000000")},
+        ],
         "jobs": _jobs(stage4),
         "entities": _entities(),
         "relationships": _relationships(),

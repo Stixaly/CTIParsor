@@ -43,6 +43,7 @@ install, with the dev tools.
 | `python-multipart` | File upload (multipart/form-data) |
 | `aiofiles` | Async file I/O |
 | `slowapi` | Request rate limiting |
+| `argon2-cffi` | Argon2id hashes of local account passwords (ADR-0097) |
 | `python-magic` | Upload content-type sniffing (libmagic) |
 | `filetype` | Upload type detection fallback, pure Python |
 | `psycopg` | PostgreSQL driver for both stores (ADR-0045, ADR-0053) |

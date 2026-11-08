@@ -710,6 +710,26 @@ and [Advanced](#advanced).
 configure the single API process; under Docker, compose forces the first three
 and publishes with `CTI_BIND` / `CTI_PORT`.
 
+`AUTH_MODE` (default `off`) turns authentication on (ADR-0097; how to set it up:
+[deployment.md](deployment.md#authentication)):
+
+```env
+# off   = no authentication; the API refuses to start unless API_HOST is loopback
+#         (127.0.0.0/8, ::1, localhost).
+# local = local accounts, roles, sessions and API tokens, created with `python -m api.admin`.
+# oidc, both = read now; they refuse to start without OIDC_ISSUER_URL and
+#         OIDC_CLIENT_ID, and sign-in with an identity provider is not implemented yet.
+# Any other value is refused: a typo does not leave the API open.
+# AUTH_MODE=off
+# Lifetime of a web session, in hours; each request slides it.
+# SESSION_TTL_HOURS=12
+```
+
+`run_api.py` and the app's own start both check the pair: `AUTH_MODE=off` with an
+`API_HOST` that is not loopback stops the process with a message naming both
+settings. Under Docker the container binds `0.0.0.0`, so the stack needs
+`AUTH_MODE=local` (or `oidc`, `both`).
+
 `API_ALLOWED_HOSTS` (default `localhost,127.0.0.1,[::1]`) is the list of
 `Host` names the API answers to; any other gets 400 before a handler runs,
 which is what stops DNS rebinding against an unauthenticated app. **List the

@@ -247,7 +247,7 @@ def test_version_14_adds_an_empty_worker_table_and_leaves_a_running_job_with_its
 
     report = migrate.upgrade(conn)
 
-    assert report.applied == [14, 15, 16] and report.recognised == list(range(1, 14))
+    assert report.applied == [14, 15, 16, 17, 18] and report.recognised == list(range(1, 14))
     assert conn.execute("SELECT COUNT(*) AS n FROM worker_heartbeats").fetchone()["n"] == 0
     job = conn.execute("SELECT status, worker_id, heartbeat_at FROM jobs").fetchone()
     assert tuple(job) == ("processing", "old-worker:7:a1b2c3", "t")   # the previous revision's worker keeps it
@@ -267,7 +267,7 @@ def test_version_15_adds_a_nullable_column_and_is_idempotent(schema):
 
     report = migrate.upgrade(conn)
 
-    assert report.applied == [15, 16] and report.recognised == list(range(1, 15))
+    assert report.applied == [15, 16, 17, 18] and report.recognised == list(range(1, 15))
     assert conn.execute("SELECT resolved_types_json FROM jobs").fetchone()["resolved_types_json"] is None
     conn.execute("UPDATE jobs SET resolved_types_json='[]' WHERE id='j1'")
     for statement in history.load()[14].statements:                   # run again: nothing breaks, nothing is lost
@@ -284,12 +284,51 @@ def test_version_16_marks_the_inherited_techniques_and_is_idempotent(schema):
 
     report = migrate.upgrade(conn)
 
-    assert report.applied == [16] and report.recognised == list(range(1, 16))
+    assert report.applied == [16, 17, 18] and report.recognised == list(range(1, 16))
     assert conn.execute("SELECT propagated FROM rule_techniques").fetchone()["propagated"] == 0   # an old row: its own
     conn.execute("UPDATE rule_techniques SET propagated=1")
     for statement in history.load()[15].statements:                   # run again: nothing breaks, nothing is lost
         conn.execute(statement)
     assert conn.execute("SELECT propagated FROM rule_techniques").fetchone()["propagated"] == 1
+    assert migrate.upgrade(conn).applied == []
+
+
+def test_version_18_adds_the_account_tables_and_a_nullable_owner_and_is_idempotent(schema):
+    conn = schema()
+    _legacy_at(conn, 17)
+    conn.execute("INSERT INTO jobs (id, original_filename, status, created_at, updated_at) "
+                 "VALUES ('j1','r.pdf','completed','t','t')")
+    assert not history.column_exists(conn, "jobs", "imported_by")
+
+    report = migrate.upgrade(conn)
+
+    assert report.applied == [18] and report.recognised == list(range(1, 18))
+    for table in ("users", "sessions", "api_tokens", "login_failures"):
+        assert conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"] == 0
+    owner = conn.execute("SELECT imported_by FROM jobs").fetchone()["imported_by"]
+    assert owner is None                                              # no owner: only an admin deletes it
+    conn.execute("INSERT INTO users (id, username, auth_source, role, created_at) "
+                 "VALUES ('u1','alice','local','analyst','t')")
+    assert tuple(conn.execute("SELECT display_name, disabled FROM users").fetchone()) == ("", 0)
+    with pytest.raises(Exception, match="users_username_key"):
+        conn.execute("INSERT INTO users (id, username, auth_source, role, created_at) "
+                     "VALUES ('u2','alice','local','reader','t')")
+    with pytest.raises(Exception, match="users_role_check"):
+        conn.execute("INSERT INTO users (id, username, auth_source, role, created_at) "
+                     "VALUES ('u3','bob','local','root','t')")
+    conn.execute("INSERT INTO sessions (id_hash, user_id, csrf_token, created_at, expires_at, last_seen_at) "
+                 "VALUES ('h','u1','c','t','t','t')")
+    conn.execute("INSERT INTO api_tokens (id, user_id, name, token_hash, created_at, expires_at) "
+                 "VALUES ('k1','u1','ci','h1','t','t')")
+    with pytest.raises(Exception, match="api_tokens_token_hash_key"):
+        conn.execute("INSERT INTO api_tokens (id, user_id, name, token_hash, created_at, expires_at) "
+                     "VALUES ('k2','u1','ci','h1','t','t')")
+    conn.execute("DELETE FROM users WHERE id='u1'")                   # the account takes its sessions and tokens
+    assert conn.execute("SELECT COUNT(*) AS n FROM sessions").fetchone()["n"] == 0
+    assert conn.execute("SELECT COUNT(*) AS n FROM api_tokens").fetchone()["n"] == 0
+    for statement in history.load()[17].statements:                   # run again: nothing breaks, nothing is lost
+        conn.execute(statement)
+    assert conn.execute("SELECT COUNT(*) AS n FROM jobs").fetchone()["n"] == 1
     assert migrate.upgrade(conn).applied == []
 
 

@@ -19,6 +19,7 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from api.auth.deps import importing_user_id
 from api.body_limit import ENVELOPE_BYTES
 from api.logging_config import get_logger
 from api.main import limiter
@@ -264,7 +265,8 @@ async def ingest_text(request: Request, body: TextIngestRequest):
     )
 
     try:
-        return await asyncio.to_thread(start_job, job_id, dest, filename, tlp, pap, baseline=baseline)
+        return await asyncio.to_thread(start_job, job_id, dest, filename, tlp, pap, baseline=baseline,
+                                       imported_by=importing_user_id(request))
     except Exception:
         # Whatever stopped the job from starting, nothing else will ever delete the text (issue #439).
         dest.unlink(missing_ok=True)
@@ -396,7 +398,8 @@ async def ingest_url(request: Request, body: UrlIngestRequest):
     )
 
     try:
-        response = await asyncio.to_thread(start_job, job_id, text_dest, filename, tlp, pap, baseline=baseline)
+        response = await asyncio.to_thread(start_job, job_id, text_dest, filename, tlp, pap, baseline=baseline,
+                                           imported_by=importing_user_id(request))
     except Exception:
         # The job did not start, whatever the reason (the 503 queue refusal, or an error
         # in start_job): the archive, its text and its metadata go too (issue #439).

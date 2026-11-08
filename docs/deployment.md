@@ -75,6 +75,47 @@ not.
 **Do not put this on the internet as-is.** Options B and C below are the two
 ways to narrow who can reach it.
 
+## Authentication
+
+`AUTH_MODE` (default `off`) turns authentication on; the section above describes
+`off`. The API refuses to start with `AUTH_MODE=off` and an `API_HOST` that is
+not loopback, and the start log says which mode runs. To turn it on:
+
+1. Set `AUTH_MODE=local` in `.env` (`oidc` and `both` are read now, but sign-in
+   with an identity provider is not implemented yet: they refuse to start without
+   `OIDC_ISSUER_URL` and `OIDC_CLIENT_ID`).
+2. Create the first admin. The command prompts for the password twice, or reads it
+   from a file; it refuses if an admin exists unless `--force`:
+
+   ```bash
+   python -m api.admin create-admin --username alice
+   docker compose exec app python -m api.admin create-admin --username alice
+   ```
+
+3. Create the other accounts (`create-user --role analyst|reader`), and a token for
+   each script, shown once, valid 90 days unless `--days` says otherwise:
+
+   ```bash
+   python -m api.admin create-token --user alice --name nightly-import --days 30
+   curl -H "Authorization: Bearer ctp_..." http://localhost:8000/api/jobs
+   ```
+
+`list-users`, `set-password` and `disable` (`--enable` reverses it) complete the
+command. Roles: a `reader` reads reports, bundles and coverage; an `analyst` also
+imports, records review decisions, finalizes, exports and deletes the reports they
+imported; an `admin` also deletes any report and manages settings, the
+relationship policy and the thresholds. A report stored before authentication was
+turned on has no owner: only an admin deletes it. Five failed sign-ins for a
+username in 15 minutes lock that username for 15 minutes.
+
+Sessions and tokens travel in clear text over plain HTTP. Serve a shared instance
+behind TLS (option C below); the session cookie is `Secure`, so a browser does not
+send it back over plain HTTP, except from loopback.
+
+In the Docker stack the `app` container always binds `0.0.0.0`, so it starts only
+with `AUTH_MODE` other than `off`; compose publishes it on `127.0.0.1` unless
+`CTI_BIND` says otherwise.
+
 ## 3. Three ways to run it
 
 ### Option A — stay on loopback, reach it over SSH

@@ -2,7 +2,7 @@
 
 Date: 2026-11-08. Source: `contract/openapi.json` at commit `537054f` (60 entries, `GET /api/health` included), with the route functions in `api/routes/*.py` and `api/main.py`.
 
-Status: proposal for ADR-0097 work item 14; not enforced. Today the API has no authentication and no role check. The only write guard is `refuse_cross_site_writes` in `api/main.py`, which refuses browser cross-site requests. It is not an authorization control.
+Status: enforced since ADR-0097 work items 14 and 15, part A, when `AUTH_MODE` is not `off`; the table lives in `api/auth/permissions.py` and `tests/test_auth_permissions.py` fails for an operation without a role. With `AUTH_MODE=off` (the default) the API has no authentication and no role check. The inventory below is the 2026-11-08 one (60 operations); the operations added since are `POST /api/auth/login` (open), `POST /api/auth/logout` and `GET /api/auth/me` (reader). The write guard `refuse_cross_site_writes` in `api/main.py` refuses browser cross-site requests; it is not an authorization control.
 
 Roles, from ADR-0097 (Roles): `reader` < `analyst` < `admin`, each containing the one before. The minimal role in each row is the proposal, not the current state. Where a route mixes reads and writes, the stricter one applies.
 

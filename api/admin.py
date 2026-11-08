@@ -1,0 +1,141 @@
+"""Manage local accounts and API tokens from the command line (ADR-0097 items 14 and 15).
+
+    python -m api.admin create-admin --username alice            # prompts for the password twice
+    python -m api.admin create-admin --username alice --password-file /run/secrets/admin_password
+    python -m api.admin set-password --username alice
+    python -m api.admin disable --username alice                 # --enable reverses it
+    python -m api.admin list-users
+    python -m api.admin create-token --user alice --name ci --days 90
+
+It uses the database `DATABASE_URL` names and brings its schema to this code's
+version first, as the API does.  A password is read from a prompt or a file, never
+from an argument (the process list shows arguments) and is never printed; a token
+is printed once, on standard output, and cannot be read back.
+"""
+from __future__ import annotations
+
+import argparse
+import getpass
+import sys
+from pathlib import Path
+
+from api.auth import store
+from api.auth.config import DEFAULT_TOKEN_DAYS, ROLES
+
+
+def _read_password(password_file: str | None) -> str:
+    if password_file:
+        text = Path(password_file).read_text(encoding="utf-8")
+        return text.removesuffix("\n").removesuffix("\r")
+    first = getpass.getpass("Password: ")
+    if getpass.getpass("Password (again): ") != first:
+        raise store.AuthError("the two passwords differ")
+    return first
+
+
+def _create_admin(args: argparse.Namespace) -> int:
+    if store.admin_exists() and not args.force:
+        raise store.AuthError("an admin already exists; use --force to create another one")
+    user = store.create_user(args.username, "admin", password=_read_password(args.password_file),
+                             display_name=args.display_name or "")
+    print(f"admin {user.username} created")
+    return 0
+
+
+def _create_user(args: argparse.Namespace) -> int:
+    user = store.create_user(args.username, args.role, password=_read_password(args.password_file),
+                             display_name=args.display_name or "")
+    print(f"{user.role} {user.username} created")
+    return 0
+
+
+def _set_password(args: argparse.Namespace) -> int:
+    store.set_password(args.username, _read_password(args.password_file))
+    print(f"password of {args.username} changed; its sessions ended")
+    return 0
+
+
+def _disable(args: argparse.Namespace) -> int:
+    store.set_disabled(args.username, disabled=not args.enable)
+    print(f"{args.username} {'enabled' if args.enable else 'disabled'}")
+    return 0
+
+
+def _list_users(_args: argparse.Namespace) -> int:
+    users = store.list_users()
+    for u in users:
+        print(f"{u['username']:<24} {u['role']:<8} {u['auth_source']:<6} "
+              f"{'disabled' if u['disabled'] else 'active':<9} last sign-in: {u['last_login_at'] or '-'}")
+    if not users:
+        print("no users")
+    return 0
+
+
+def _create_token(args: argparse.Namespace) -> int:
+    user = store.find_user(args.user)
+    if user is None:
+        raise store.AuthError(f"no user {args.user!r}")
+    token, _ = store.create_token(user.id, args.name, days=args.days)
+    print("This token is shown once; store it now.", file=sys.stderr)
+    print(token)
+    return 0
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="python -m api.admin", description=__doc__.split("\n\n")[0])
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    def password_args(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--password-file", help="read the password from this file instead of prompting")
+
+    p = sub.add_parser("create-admin", help="create the first admin")
+    p.add_argument("--username", required=True)
+    p.add_argument("--display-name")
+    p.add_argument("--force", action="store_true", help="create another admin when one exists")
+    password_args(p)
+    p.set_defaults(run=_create_admin)
+
+    p = sub.add_parser("create-user", help="create a local account")
+    p.add_argument("--username", required=True)
+    p.add_argument("--role", choices=ROLES, default="reader")
+    p.add_argument("--display-name")
+    password_args(p)
+    p.set_defaults(run=_create_user)
+
+    p = sub.add_parser("set-password", help="change a local account's password")
+    p.add_argument("--username", required=True)
+    password_args(p)
+    p.set_defaults(run=_set_password)
+
+    p = sub.add_parser("disable", help="disable an account (ends its sessions, refuses its tokens)")
+    p.add_argument("--username", required=True)
+    p.add_argument("--enable", action="store_true", help="enable it again")
+    p.set_defaults(run=_disable)
+
+    p = sub.add_parser("list-users", help="list the accounts")
+    p.set_defaults(run=_list_users)
+
+    p = sub.add_parser("create-token", help="create an API token for a user")
+    p.add_argument("--user", required=True)
+    p.add_argument("--name", required=True, help="what the token is for")
+    p.add_argument("--days", type=int, default=DEFAULT_TOKEN_DAYS, help="lifetime in days (default 90)")
+    p.set_defaults(run=_create_token)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
+    from api.db import init_db
+    from api.logging_config import setup_logging
+
+    setup_logging()
+    init_db()
+    try:
+        return args.run(args)
+    except (store.AuthError, OSError, UnicodeDecodeError) as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

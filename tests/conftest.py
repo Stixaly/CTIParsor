@@ -92,6 +92,16 @@ def _llm_checks_at_their_defaults(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _authentication_off(monkeypatch):
+    """Authentication is off and the API binds to loopback, whatever the developer's
+    `.env` says (`api.db` loads it into os.environ at import): every route test
+    sends no credentials.  A test about authentication sets AUTH_MODE itself."""
+    monkeypatch.setenv("AUTH_MODE", "off")
+    monkeypatch.setenv("API_HOST", "127.0.0.1")
+    monkeypatch.delenv("SESSION_TTL_HOURS", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _figure_reading_off(monkeypatch):
     """Stage 1f is off, whatever the developer's `.env` says.  Its default is
     `auto`, which reads figures with the provider chosen for the text
@@ -359,3 +369,50 @@ def api_client():
     with patch("api.main.init_db"), patch("api.queue_loop.start_embedded"):
         with TestClient(api.main.app, raise_server_exceptions=True) as client:
             yield client
+
+
+# ── Authentication ──────────────────────────────────────────────────────────────
+
+AUTH_TEST_PASSWORD = "correct horse battery staple"
+
+
+@pytest.fixture()
+def auth_client(temp_db, monkeypatch):
+    """FastAPI TestClient with AUTH_MODE=local on the isolated temp database.
+
+    Served over https (the session cookie is Secure unless the request is plain
+    HTTP from loopback), so the client sends it back.  `make_user(role, name)`
+    creates an account whose password is AUTH_TEST_PASSWORD.
+    """
+    from fastapi.testclient import TestClient
+
+    import api.main
+
+    monkeypatch.setenv("AUTH_MODE", "local")
+    with patch("api.main.init_db"), patch("api.queue_loop.start_embedded"):
+        with TestClient(api.main.app, base_url="https://testserver") as client:
+            yield client
+
+
+@pytest.fixture()
+def make_user(temp_db):
+    from api.auth import store
+
+    def make(role: str, username: str | None = None) -> store.User:
+        return store.create_user(username or f"{role}-{uuid4().hex[:6]}", role, password=AUTH_TEST_PASSWORD)
+
+    return make
+
+
+@pytest.fixture()
+def sign_in(auth_client):
+    """sign_in(user) signs the client in with a password and returns the headers a
+    state-changing request needs (`X-CSRF-Token`)."""
+    def sign(user) -> dict[str, str]:
+        auth_client.cookies.clear()
+        response = auth_client.post("/api/auth/login",
+                                    json={"username": user.username, "password": AUTH_TEST_PASSWORD})
+        assert response.status_code == 200, response.text
+        return {"X-CSRF-Token": response.json()["csrf_token"]}
+
+    return sign

@@ -7,6 +7,7 @@ import filetype
 import magic
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
+from api.auth.deps import importing_user_id
 from api.body_limit import ENVELOPE_BYTES
 from api.main import limiter
 from api.paths import uploads_dir
@@ -246,7 +247,8 @@ def upload_file(
         baseline = read_baseline(
             read_baseline_file(baseline_stix.file) if baseline_stix is not None else None, baseline_report_id)
         tlp_level, pap_level = baseline_markings(baseline, tlp_level, pap_level)
-        return start_job(job_id, dest, file.filename or "unknown", tlp_level, pap_level, baseline=baseline)
+        return start_job(job_id, dest, file.filename or "unknown", tlp_level, pap_level, baseline=baseline,
+                         imported_by=importing_user_id(request))
     except BaseException:
         dest.unlink(missing_ok=True)
         raise
