@@ -138,7 +138,7 @@ file is missing".
 |---|---|---|
 | `pg-data-18` | every report: its text, entities, relationships, decisions, progress events, bundle, ledger and baseline (up to 20 MB); the detection-rule store | `docker system df -v` |
 | `cti-state` | `uploads/` (each source, up to 50 MB), `output/` (exported bundles, Stage 3 checkpoints) | `docker compose exec app du -sh /app/state/uploads /app/state/output` |
-| `cti-cache` | the models (2.6 GB) and corpora (0.7 GB) `bootstrap` downloads; it grows when they are downloaded again | `docker system df -v` |
+| `cti-cache` | the models (2.6 GB) and corpora (0.2 GB) `bootstrap` downloads; it grows when they are downloaded again | `docker system df -v` |
 
 - Nothing is deleted by default. Deleting a report deletes its rows and files;
   `JOB_RETENTION_DAYS` (0 = never) deletes the finished reports older than N
