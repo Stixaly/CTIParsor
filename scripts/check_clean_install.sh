@@ -577,7 +577,7 @@ DUMP="$(cd "$OLD_DIR" && ls ctiparsor-*.dump 2>/dev/null | head -1)"
 DAY="${DUMP#ctiparsor-}"; DAY="${DAY%.dump}"
 [ -n "$DAY" ] || abort "backup files" 0 "no ctiparsor-<date>.dump in $OLD_DIR"
 note backup_dump "$(( $(stat -c %s "$OLD_DIR/$DUMP") / 1048576 ))" sizes
-run_block CHECK_COMMANDS "$PROJECT" "$PORT" "s/YYYY-MM-DD/$DAY/g" || finish
+run_block CHECK_COMMANDS "$PROJECT" "$PORT" "s/YYYY-MM-DD-HHMMSS/$DAY/g" || finish
 UMASK_AFTER="$(. "$TMP/shell.state"; echo "$UMASK")"
 [ "$UMASK_AFTER" = "$UMASK_BEFORE" ] \
     && step "umask after the backup" PASS 0 "$UMASK_AFTER, as before it" \
@@ -649,7 +649,7 @@ fi
 # ── 5. The backup restored with the previous release, into an empty project ──
 say "restoring the backup with $PREV_VERSION ($RESTORED, 127.0.0.1:$RESTORED_PORT)"
 prose "$OLD_DIR"            # "from the old directory": its compose.yaml, .env and the backup files
-run_block RESTORE_COMMANDS "$RESTORED" "$RESTORED_PORT" "s/YYYY-MM-DD/$DAY/g" || finish
+run_block RESTORE_COMMANDS "$RESTORED" "$RESTORED_PORT" "s/YYYY-MM-DD-HHMMSS/$DAY/g" || finish
 note restore "$LAST_BLOCK_S" durations
 healthy "$RESTORED_PORT" && step "health restored" PASS 0 "GET /api/health ok on $PREV_VERSION, restored" \
     || abort "health restored" 0 "no healthy API on 127.0.0.1:$RESTORED_PORT after 300 s"

@@ -446,3 +446,16 @@ def test_no_public_document_names_a_maintainer_s_machine():
              for n, line in enumerate((ROOT / rel).read_text(encoding="utf-8").splitlines(), 1)
              if private.search(line)]
     assert found == []
+
+
+def test_the_backup_stamp_the_check_fills_in_is_the_one_docker_md_writes():
+    # docker.md names backups ctiparsor-YYYY-MM-DD-HHMMSS.dump; filling in only
+    # YYYY-MM-DD left "-HHMMSS" behind and the check looked for a file that
+    # does not exist (2026-11-08).
+    docker = (ROOT / "docs" / "docker.md").read_text(encoding="utf-8")
+    script = CHECK.read_text(encoding="utf-8")
+    for name in ("CHECK_COMMANDS", "RESTORE_COMMANDS"):
+        start = docker.index(f"scripts/check_backup_restore_docker.sh: {name}")
+        body = docker[start:].split("```", 2)[1]
+        assert set(re.findall(r"YYYY[-A-Z]*", body)) == {"YYYY-MM-DD-HHMMSS"}, name
+        assert re.search(rf'run_block {name} .*"s/YYYY-MM-DD-HHMMSS/\$DAY/g"', script), name
