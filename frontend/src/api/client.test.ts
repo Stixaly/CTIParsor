@@ -87,7 +87,7 @@ describe('fetchAttackIndex', () => {
       json: () => Promise.resolve({ tactics: [], techniques: [{ id: 'T1698', name: 'Indirect Prompt Injection', domain: 'enterprise-attack' }] }),
     })))
     const index = await fetchAttackIndex()
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith('/api/attack/index')
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith('/api/attack/index', { credentials: 'same-origin' })
     expect(index.release).toBe('20.0')
     expect(index.techniques.map(t => t.id)).toEqual(['T1698'])
   })

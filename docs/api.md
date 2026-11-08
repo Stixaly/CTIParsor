@@ -7,7 +7,7 @@ route matches gets a JSON 404, not the application page (`api/main.py`).
 ## Authentication
 
 With `AUTH_MODE=off` (the default) no route asks for credentials. With `AUTH_MODE=local`
-every route except `GET /api/health` and `POST /api/auth/login` does, and the role each
+every route except `GET /api/health`, `POST /api/auth/login` and `GET /api/auth/methods` does, and the role each
 operation needs (ADR-0097) is listed in [api-permissions.md](api-permissions.md) and held
 in `api/auth/permissions.py`; a test fails for an operation with no entry. `GET /metrics` keeps its
 own rule whatever the mode: loopback clients, or the `METRICS_TOKEN` bearer (see
@@ -21,8 +21,10 @@ own rule whatever the mode: loopback clients, or the `METRICS_TOKEN` bearer (see
   `DELETE` made with the cookie (403 without it). `POST /api/auth/logout` ends the session.
   A wrong password and an unknown username both answer 401 `Invalid username or password`; five
   failures for a username in 15 minutes answer 429 with `Retry-After` for 15 minutes.
+- `GET /api/auth/methods` (open) tells the sign-in page what to offer: `{ auth_mode, local, oidc }`.
+  `local` is true for `local` and `both`, `oidc` for `oidc` and `both`; with `AUTH_MODE=off` both are false.
 - Before any route runs, a request for `/api/...` or the docs (`/docs`, `/redoc`, `/openapi.json`) without a
-  valid session or token gets 401 (not for `GET /api/health` and `POST /api/auth/login`); the body is not read.
+  valid session or token gets 401 (not for `GET /api/health`, `POST /api/auth/login` and `GET /api/auth/methods`); the body is not read.
   `POST /api/auth/login` is also limited per client address (`LOGIN_RATE_LIMIT`, 429 with `Retry-After`).
   A request that slides the session sends the cookie again with the new `Max-Age`; the progress stream checks
   the session or token every 60 seconds and ends with a `done` event (`error: session ended`) when it no longer holds.

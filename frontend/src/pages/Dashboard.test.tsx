@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { BaselineIntake, Job } from '../types'
 import Dashboard from './Dashboard'
+import { AuthContext } from '../context/AuthContext'
 
 // A server that does not answer must not look like an empty Dashboard, and a
 // report that cannot be opened must say so.
@@ -152,5 +153,39 @@ describe('Dashboard — enrich jobs (ADR-0090)', () => {
     expect(await screen.findByText('lazarus.pdf')).toBeInTheDocument()
     expect(screen.getByTitle('Enriches an existing STIX 2.1 bundle (ADR-0090)')).toHaveTextContent('Enrich')
     expect(screen.getAllByText('Enrich')).toHaveLength(1)
+  })
+})
+
+describe('Dashboard — what a reader cannot do', () => {
+  const as = (role: 'reader' | 'analyst') => ({
+    status: 'signed-in' as const,
+    me: { auth_mode: 'local' as const, username: 'u', display_name: 'U', role, auth_source: 'local' as const, csrf_token: 'c' },
+    can: (minimum: 'reader' | 'analyst' | 'admin') => minimum === 'reader' || role === 'analyst',
+    setMe: () => undefined, signOut: () => Promise.resolve(), refresh: () => Promise.resolve(),
+  })
+
+  function renderAs(role: 'reader' | 'analyst') {
+    api.fetchJobs.mockResolvedValue([JOB])
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <AuthContext.Provider value={as(role)}>
+          <MemoryRouter initialEntries={['/dashboard']}>
+            <Routes><Route path="/dashboard" element={<Dashboard />} /></Routes>
+          </MemoryRouter>
+        </AuthContext.Provider>
+      </QueryClientProvider>,
+    )
+  }
+
+  it('a reader has no New report button', async () => {
+    renderAs('reader')
+    expect(await screen.findByText('apt29.pdf')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /New report/ })).not.toBeInTheDocument()
+  })
+
+  it('an analyst has it', async () => {
+    renderAs('analyst')
+    expect(await screen.findByRole('button', { name: /New report/ })).toBeInTheDocument()
   })
 })

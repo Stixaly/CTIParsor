@@ -20,6 +20,7 @@ PERMISSIONS: dict[tuple[str, str], str] = {
     ("GET", "/api/health"): OPEN,
     # Sessions (api/routes/auth.py): a sign-in cannot need to be signed in.
     ("POST", "/api/auth/login"): OPEN,
+    ("GET", "/api/auth/methods"): OPEN,
     ("POST", "/api/auth/logout"): "reader",
     ("GET", "/api/auth/me"): "reader",
     # attack.py, baselines.py

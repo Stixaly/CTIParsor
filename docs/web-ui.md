@@ -8,6 +8,19 @@ Chrome or Edge 111, Safari 16.4 or Firefox 128, or later (all from 2023–2024).
 An older browser skips the parts of the stylesheet it does not support
 (cascade layers, among them Tailwind's reset), and the pages look off.
 
+## Signing in
+
+With `AUTH_MODE=off` (the default) the interface has no sign-in page and no user menu. With
+authentication on, an address you open without a session goes to `/login?next=<the page>`. The page
+shows a username and password form when local accounts are on, and a "Sign in with your organisation"
+link when an identity provider is configured. After a sign-in you land on `next` when it is a path of
+this site, else on the dashboard. A wrong password reads "Invalid username or password."; five failures
+for a username lock it for 15 minutes, and the page says how long to wait. The sidebar shows your name
+and role and a "Sign out" button. The interface hides what your role cannot use (no "New report" for a
+reader; Policy and Settings only for an admin); the server refuses it in any case. When the session
+ends while you work (it lasts 12 hours from the last request), the next request takes you back to the
+sign-in page and then to where you were.
+
 ## Workflow
 
 ```

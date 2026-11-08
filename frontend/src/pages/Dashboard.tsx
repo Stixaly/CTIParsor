@@ -7,6 +7,7 @@ import type { Job, JobStatus } from '../types'
 import { JOB_STATUS_LABEL } from '../components/jobStatus'
 import ProgressModal from '../components/ProgressModal'
 import NewReportModal from '../components/NewReportModal'
+import { useAuth } from '../context/AuthContext'
 import { splitDrop } from '../components/dropFiles'
 import type { IgnoredFile } from '../components/dropFiles'
 import KanbanCard from '../components/dashboard/KanbanCard'
@@ -113,6 +114,8 @@ const noticeBtn: React.CSSProperties = { padding: '4px 10px', fontSize: 11.5 }
 
 export default function Dashboard() {
   const navigate = useNavigate()
+  // A reader cannot import (the server refuses it): no button, and a dropped file is ignored.
+  const canImport = useAuth().can('analyst')
   const qc = useQueryClient()
 
   // Local state.  Everything an ingestion needs — the source, the markings, the
@@ -207,6 +210,7 @@ export default function Dashboard() {
   const handlePageDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setPageDrag(false)
+    if (!canImport) return
     const files = Array.from(e.dataTransfer.files ?? [])
     splitDrop(files).then(({ report, bundle, ignored }) => {
       if (report || bundle || ignored.length > 0) openModal(report, bundle, ignored)
@@ -418,7 +422,7 @@ export default function Dashboard() {
 
         {/* Action row — the single entry point for ingestion (ADR-0029). */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <button
+          {canImport && <button
             ref={newReportRef}
             className="btn-primary"
             onClick={() => openModal(null)}
@@ -431,7 +435,7 @@ export default function Dashboard() {
           >
             <Plus size={14} strokeWidth={2.4} />
             New report
-          </button>
+          </button>}
           <span style={{ fontSize: 11, fontFamily: MONO, color: 'var(--ink-3)' }}>
             {loadFailed ? 'reports unavailable' : `${jobs.length} reports`}
           </span>

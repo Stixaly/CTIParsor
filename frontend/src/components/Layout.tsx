@@ -1,10 +1,21 @@
-import { NavLink, Outlet } from 'react-router-dom'
-import { LayoutDashboard, Link2, Settings as SettingsIcon, Tag } from 'lucide-react'
+import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
+import { LayoutDashboard, Link2, LogOut, Settings as SettingsIcon, Tag } from 'lucide-react'
 import ThemeSwitcher from './ThemeSwitcher'
+import { useAuth } from '../context/AuthContext'
 
 /** Sidebar shell used by Dashboard and Policy.
  *  Review and Graph are full-screen and rendered outside this layout. */
 export default function Layout() {
+  const auth = useAuth()
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const admin = auth.can('admin')
+  const signOut = async () => {
+    await auth.signOut()
+    queryClient.clear()
+    navigate('/login', { replace: true })
+  }
   return (
     <div className="t-app" style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
 
@@ -29,10 +40,10 @@ export default function Layout() {
         {/* Nav */}
         <nav style={{ flex: 1, padding: '12px 8px' }}>
           {[
-            { to: '/dashboard', icon: <LayoutDashboard size={15} />, label: 'Dashboard' },
-            { to: '/policy',    icon: <Link2 size={15} />,           label: 'Policy'    },
-            { to: '/settings',  icon: <SettingsIcon size={15} />,    label: 'Settings'  },
-          ].map(({ to, icon, label }) => (
+            { to: '/dashboard', icon: <LayoutDashboard size={15} />, label: 'Dashboard', show: true },
+            { to: '/policy',    icon: <Link2 size={15} />,           label: 'Policy',    show: admin },
+            { to: '/settings',  icon: <SettingsIcon size={15} />,    label: 'Settings',  show: admin },
+          ].filter(item => item.show).map(({ to, icon, label }) => (
             <NavLink
               key={to}
               to={to}
@@ -55,6 +66,20 @@ export default function Layout() {
             </NavLink>
           ))}
         </nav>
+
+        {/* Who is signed in — absent with authentication off */}
+        {auth.status === 'signed-in' && auth.me && (
+          <div style={{ borderTop: '1px solid var(--rule)', padding: '10px 12px', fontSize: 12.5 }}>
+            <div style={{ color: 'var(--ink)', fontWeight: 600, overflowWrap: 'anywhere' }}>
+              {auth.me.display_name || auth.me.username}
+            </div>
+            <div style={{ color: 'var(--ink-3)', marginBottom: 8 }}>{auth.me.role}</div>
+            <button type="button" className="btn-ghost" onClick={() => void signOut()}>
+              <LogOut size={13} />
+              Sign out
+            </button>
+          </div>
+        )}
 
         {/* Theme switcher */}
         <div style={{ borderTop: '1px solid var(--rule)', padding: '12px 12px 8px' }}>

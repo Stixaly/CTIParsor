@@ -37,7 +37,7 @@ describe('useMitreSearch', () => {
     serve('20.0', [T1059, T1698])
     const { result } = render()
     await waitFor(() => expect(result.current.ready).toBe(true))
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith('/api/attack/index')
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith('/api/attack/index', { credentials: 'same-origin' })
     expect(result.current.release).toBe('20.0')
     expect(result.current.search('T1698').map(e => e.id)).toEqual(['T1698'])
     expect(result.current.search('prompt injection').map(e => e.id)).toEqual(['T1698'])

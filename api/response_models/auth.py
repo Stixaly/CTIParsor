@@ -20,3 +20,9 @@ class Me(Response):
 
 class SignedOut(Response):
     signed_out: bool
+
+
+class SignInMethods(Response):
+    auth_mode: str = Field(description="AUTH_MODE: off, local, oidc or both.")
+    local: bool = Field(description="A username and password form signs a user in.")
+    oidc: bool = Field(description="Sign-in through the organisation's identity provider is on.")
