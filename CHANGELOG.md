@@ -90,6 +90,17 @@ theme.
   than `UPLOAD_MIN_FREE_MB` (default 1024) is free. Migration v0017 adds
   `jobs.attempts`.
 
+- **Load and failure recipe** (ADR-0097 work item 23).
+  `scripts/check_failure_recipe.py --i-know-this-stops-services` causes five
+  failures on a Compose stack (a worker killed mid-job, an LLM endpoint that
+  refuses, the database stopped, an upload with the disk below
+  `UPLOAD_MIN_FREE_MB`, the documented backup restored into an empty database)
+  and checks the data, the job state and the alert each must raise, with a
+  Markdown and a JSON report. An alert that cannot be judged (a disk with room,
+  a rule form the checker cannot read) is reported as not checked, never as
+  passed. `docs/releases/1.0-failure-recipe.md` says what each case proves; the
+  restore duration (RTO) comes from a real run.
+
 - **TTP self-verification (Stage 3f) is on by default in the code.** It was
   already `ENABLE_TTP_VERIFICATION=true` in `.env.example`; the code's fallback
   was `false`, so a process started without `.env` did not run it. Cost: about
