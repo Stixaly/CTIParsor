@@ -9,6 +9,20 @@ theme.
 
 ## [Unreleased]
 
+- **Stage 3d (relationship verification) and the document-level relation
+  pass (Stage 3doc) are on by default**, in the code and in `.env.example`
+  (`ENABLE_STIX_VERIFICATION=true`, `ENABLE_DOCUMENT_LEVEL_RELATIONS=true`);
+  `contract/config.json` records both as changed defaults. Cost: about 1.4
+  times the LLM calls for 3d, and one extra call over the whole report per
+  run for 3doc (billed calls with `anthropic`; minutes per long report on a
+  local model). **Bundles change** for the same report: 3d drops the claims it
+  cannot quote, and 3doc adds relationships between facts stated far apart.
+  To keep the previous behaviour, set `ENABLE_STIX_VERIFICATION=false` and
+  `ENABLE_DOCUMENT_LEVEL_RELATIONS=false`. `NER_PRECISION_FILTERS=true` and
+  `STIX_ENRICHMENT_ENABLED=true` are now written uncommented in
+  `.env.example`; their values, which the code already defaults to, are
+  unchanged.
+
 - **The in-house evaluation scores the exported bundle** (ADR-0096, ADR-0094
   item 6). `python -m evaluation inhouse-run` now keeps Stage 5 on and writes
   each report's bundle to `data/eval/inhouse-runs/<name>/bundles/` with its

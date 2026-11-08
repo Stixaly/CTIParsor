@@ -185,6 +185,10 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "A Windows system file in its own directory, a standard Unix file or registry key, a GUID, a "
      "device name or a messenger handle keeps its observable without an Indicator (ADR-0095)",
      "mapping"),
+    ("65fe436", "2026-11-08",
+     "Stage 3d relationship verification and the Stage 3doc whole-document relation pass run by "
+     "default (ENABLE_STIX_VERIFICATION, ENABLE_DOCUMENT_LEVEL_RELATIONS)",
+     "extraction"),
 )
 
 

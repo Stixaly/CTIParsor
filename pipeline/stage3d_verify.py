@@ -34,7 +34,7 @@ Cost:
   no relationships and are skipped.
 
 Configuration (via .env):
-  ENABLE_STIX_VERIFICATION=true   — enable verification (default: false)
+  ENABLE_STIX_VERIFICATION=true   — enable verification (default: true; false turns it off)
   STIX_VERIFY_MIN_RELS=1          — only verify chunks with ≥N relationships
                                     (skip low-yield chunks, default: 1)
   STIX_VERIFY_BATCH_SIZE=40       — claims per verification call
@@ -62,7 +62,7 @@ logger = get_logger(__name__)
 # Configuration
 # ---------------------------------------------------------------------------
 
-_VERIFY_ENABLED = env_bool("ENABLE_STIX_VERIFICATION")
+_VERIFY_ENABLED = env_bool("ENABLE_STIX_VERIFICATION", default=True)
 _VERIFY_MIN_RELS = env_int("STIX_VERIFY_MIN_RELS", default=1)
 # Claims per verification call.  Each answer carries a quote, so a document-
 # level pass with 100+ claims would outgrow the output-token ceiling in one

@@ -355,13 +355,13 @@
     "env ENABLE_DOCUMENT_LEVEL_RELATIONS": {
       "set": true,
       "values": [
-        "false"
+        "true"
       ]
     },
     "env ENABLE_STIX_VERIFICATION": {
       "set": true,
       "values": [
-        "false"
+        "true"
       ]
     },
     "env ENABLE_TTP_VERIFICATION": {
@@ -575,7 +575,7 @@
       ]
     },
     "env NER_PRECISION_FILTERS": {
-      "set": false,
+      "set": true,
       "values": [
         "true"
       ]
@@ -629,7 +629,7 @@
       ]
     },
     "env STIX_ENRICHMENT_ENABLED": {
-      "set": false,
+      "set": true,
       "values": [
         "true"
       ]

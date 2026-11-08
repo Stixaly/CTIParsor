@@ -201,7 +201,9 @@ def captured_env() -> dict[str, str]:
 
     `VISION_PROVIDER` is the one exception: unset or empty it means `auto`
     (ADR-0094), which sends figures to the text's provider, so the record says
-    `auto` instead of leaving the default to be inferred."""
+    `auto` instead of leaving the default to be inferred.  The same holds for
+    the two switches that are on by default (Stages 3d and 3doc): unset or
+    blank, they are recorded as `true`."""
     env = {}
     for var_name in _CAPTURED_ENV:
         val = os.getenv(var_name)
@@ -209,6 +211,9 @@ def captured_env() -> dict[str, str]:
             env[var_name] = val
     if not env.get("VISION_PROVIDER", "").strip():
         env["VISION_PROVIDER"] = "auto"
+    for var_name in ("ENABLE_STIX_VERIFICATION", "ENABLE_DOCUMENT_LEVEL_RELATIONS"):
+        if not env.get(var_name, "").strip():
+            env[var_name] = "true"
     return env
 
 
