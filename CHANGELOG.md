@@ -9,6 +9,17 @@ theme.
 
 ## [Unreleased]
 
+- **A run records the embedding model it loaded, and an evaluation run
+  refuses a fallback** (ADR-0094 item 13). The Stage 2c entry of the stage
+  report now carries `embedding` (the model requested, the one loaded, whether
+  that is a fallback, the model the cache was built for, the thresholds) and
+  `ttp_mode`; when the cache was built for another encoder the stage is
+  skipped with a reason naming both models and the rebuild command, instead
+  of "unavailable". `python -m evaluation run` and `inhouse-run` stop before
+  the first document on a fallback or a mismatched cache, write the status to
+  `run.json` (`embedding`), and refuse to resume a run on another loaded
+  model. An analyst's run goes on as before. No bundle changes.
+
 - **Stage 3d (relationship verification) and the document-level relation
   pass (Stage 3doc) are on by default**, in the code and in `.env.example`
   (`ENABLE_STIX_VERIFICATION=true`, `ENABLE_DOCUMENT_LEVEL_RELATIONS=true`);
