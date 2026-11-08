@@ -87,14 +87,17 @@ names a released image: the same digest as the `sha-` tag of the release's
 commit, with nothing rebuilt (ADR-0085). `X.Y` is set too and follows the highest
 patch release of that line. A registry tag name can be pushed again and a digest
 cannot change, so the Release notes give the digest, and `.env` pins it, as
-above (see [releasing.md](releasing.md)); for 0.5.0:
+above (see [releasing.md](releasing.md)); for 0.6.0:
 
 ```dotenv
 # .env
-CTI_IMAGE=ghcr.io/stixaly/ctiparsor@sha256:fbb49c4082bdbdc3d5cf9d46438d4f173ad734ad6d3f4883de38fbf75b09087f
+CTI_IMAGE=ghcr.io/stixaly/ctiparsor@sha256:7183e35d13b77c3a34af548e23fa768b4fe8be19fa2e81476e358a336c9b0df4
 ```
 
-0.5.0, the latest release, is the image of commit 7e45996, digest
+0.6.0, the latest release, is the image of commit 45aa96c, digest
+`sha256:7183e35d13b77c3a34af548e23fa768b4fe8be19fa2e81476e358a336c9b0df4`; on
+2026-11-08 the names `0.6.0`, `0.6` and `sha-45aa96cffec23e26134887cb39132a81a8ec91b1`
+all pointed to it. 0.5.0 is the image of commit 7e45996, digest
 `sha256:fbb49c4082bdbdc3d5cf9d46438d4f173ad734ad6d3f4883de38fbf75b09087f`; on
 2026-11-07 the names `0.5.0`, `0.5` and `sha-7e45996b40a1ec1731a630232a13ae597648b8ff`
 all pointed to it. 0.4.0 is the image of commit ea6ba55, digest
