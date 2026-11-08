@@ -10,8 +10,6 @@ from fastapi.testclient import TestClient
 import run_api
 from api.auth import config
 
-_OIDC = {"OIDC_ISSUER_URL": "https://idp.example/realms/cti", "OIDC_CLIENT_ID": "ctiparsor"}
-
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "127.0.1.1", "localhost", "LOCALHOST", "::1", "[::1]", " 127.0.0.1 "])
 def test_authentication_off_on_loopback_starts(monkeypatch, host):
@@ -53,18 +51,83 @@ def test_a_value_that_is_not_a_mode_is_refused_not_read_as_off(monkeypatch, valu
         config.check_startup("127.0.0.1")
 
 
+@pytest.fixture()
+def oidc_env(monkeypatch, tmp_path):
+    secret = tmp_path / "oidc-secret"
+    secret.write_text("s3cret\n")
+    values = {"OIDC_ISSUER_URL": "https://idp.example/realms/cti", "OIDC_CLIENT_ID": "ctiparsor",
+              "OIDC_CLIENT_SECRET_FILE": str(secret), "OIDC_REDIRECT_URI": "https://cti.example/api/auth/oidc/callback",
+              "OIDC_ROLE_MAP": "cti-admins=admin,cti-analysts=analyst,cti-readers=reader"}
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+    return values
+
+
 @pytest.mark.parametrize("mode", ["oidc", "both"])
-def test_oidc_modes_need_the_oidc_settings(monkeypatch, mode):
+def test_oidc_modes_start_with_every_setting(monkeypatch, mode, oidc_env):
     monkeypatch.setenv("AUTH_MODE", mode)
-    for name in _OIDC:
-        monkeypatch.delenv(name, raising=False)
-    with pytest.raises(config.AuthConfigError, match="OIDC_ISSUER_URL"):
-        config.check_startup("127.0.0.1")
-    monkeypatch.setenv("OIDC_ISSUER_URL", _OIDC["OIDC_ISSUER_URL"])
-    with pytest.raises(config.AuthConfigError):                    # the client id is missing
-        config.check_startup("127.0.0.1")
-    monkeypatch.setenv("OIDC_CLIENT_ID", _OIDC["OIDC_CLIENT_ID"])
     config.check_startup("0.0.0.0")
+    settings = config.oidc_settings()
+    assert settings.scopes == ("openid", "profile", "email") and settings.groups_claim == "groups"
+    assert settings.username_claim == "preferred_username"
+    assert settings.role_map == {"cti-admins": "admin", "cti-analysts": "analyst", "cti-readers": "reader"}
+
+
+@pytest.mark.parametrize("mode", ["oidc", "both"])
+@pytest.mark.parametrize("missing", ["OIDC_ISSUER_URL", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET_FILE",
+                                     "OIDC_REDIRECT_URI", "OIDC_ROLE_MAP"])
+def test_oidc_modes_refuse_a_missing_setting_naming_it(monkeypatch, mode, missing, oidc_env):
+    monkeypatch.setenv("AUTH_MODE", mode)
+    monkeypatch.delenv(missing)
+    with pytest.raises(config.AuthConfigError, match=missing):
+        config.check_startup("127.0.0.1")
+
+
+def test_oidc_modes_name_every_missing_setting_in_one_message(monkeypatch):
+    monkeypatch.setenv("AUTH_MODE", "oidc")
+    for name in ("OIDC_ISSUER_URL", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET_FILE", "OIDC_REDIRECT_URI",
+                 "OIDC_ROLE_MAP"):
+        monkeypatch.delenv(name, raising=False)
+    with pytest.raises(config.AuthConfigError) as exc:
+        config.check_startup("127.0.0.1")
+    for name in ("OIDC_ISSUER_URL", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET_FILE", "OIDC_REDIRECT_URI",
+                 "OIDC_ROLE_MAP"):
+        assert name in str(exc.value)
+
+
+@pytest.mark.parametrize("name, value, message", [
+    ("OIDC_ISSUER_URL", "http://idp.example/realms/cti", "OIDC_ISSUER_URL"),
+    ("OIDC_ISSUER_URL", "idp.example", "OIDC_ISSUER_URL"),
+    ("OIDC_REDIRECT_URI", "http://cti.example/cb", "OIDC_REDIRECT_URI"),
+    ("OIDC_REDIRECT_URI", "https://cti.example/cb#x", "fragment"),
+    ("OIDC_CLIENT_SECRET_FILE", "/nonexistent/secret", "OIDC_CLIENT_SECRET_FILE"),
+    ("OIDC_ROLE_MAP", "cti-admins=root", "OIDC_ROLE_MAP"),
+    ("OIDC_ROLE_MAP", "cti-admins", "OIDC_ROLE_MAP"),
+    ("OIDC_ROLE_MAP", "=admin", "OIDC_ROLE_MAP"),
+    ("OIDC_ROLE_MAP", " , ", "OIDC_ROLE_MAP"),
+    ("OIDC_SCOPES", "profile email", "openid"),
+])
+def test_oidc_modes_refuse_a_bad_setting(monkeypatch, oidc_env, name, value, message):
+    monkeypatch.setenv("AUTH_MODE", "both")
+    monkeypatch.setenv(name, value)
+    with pytest.raises(config.AuthConfigError, match=message):
+        config.check_startup("127.0.0.1")
+
+
+def test_an_empty_secret_file_is_refused(monkeypatch, oidc_env, tmp_path):
+    empty = tmp_path / "empty"
+    empty.write_text("\n")
+    monkeypatch.setenv("AUTH_MODE", "oidc")
+    monkeypatch.setenv("OIDC_CLIENT_SECRET_FILE", str(empty))
+    with pytest.raises(config.AuthConfigError, match="empty"):
+        config.check_startup("127.0.0.1")
+
+
+def test_a_localhost_issuer_may_use_http(monkeypatch, oidc_env):
+    monkeypatch.setenv("AUTH_MODE", "oidc")
+    monkeypatch.setenv("OIDC_ISSUER_URL", "http://localhost:8080/realms/cti")
+    monkeypatch.setenv("OIDC_REDIRECT_URI", "http://127.0.0.1:8000/api/auth/oidc/callback")
+    config.check_startup("127.0.0.1")
 
 
 @pytest.mark.parametrize("value", ["0", "-1", "abc", "inf", "nan"])

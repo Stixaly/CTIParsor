@@ -124,8 +124,8 @@ pipeline still produces valid STIX. ML models are downloaded once and cached.
 ## What this is NOT
 - Not yet a finished multi-user service. `AUTH_MODE=local` gives local accounts, three
   roles (`reader`, `analyst`, `admin`) checked on every route, server-side sessions with a
-  CSRF token, and hashed API tokens ([ADR-0097](docs/adr/0097-1-0-is-a-shared-service-for-one-team.md) items 14 and 15, part A). Not there yet:
-  sign-in with an identity provider (OIDC), the sign-in page of the web interface, the
+  CSRF token, hashed API tokens, and, with `AUTH_MODE=oidc` or `both`, sign-in with an OpenID Connect provider (code flow with PKCE; the role comes from the groups at each sign-in; no logout at the provider) ([ADR-0097](docs/adr/0097-1-0-is-a-shared-service-for-one-team.md) items 14 and 15, part A). Not there yet:
+  the sign-in page of the web interface, the
   admin screens for users and tokens, and the audit trail of who did what. Until they
   land, create accounts and tokens with `python -m api.admin`, and read the
   state-changing actions from the access log of your proxy. With `AUTH_MODE=off` (the

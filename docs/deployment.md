@@ -81,9 +81,9 @@ ways to narrow who can reach it.
 `off`. The API refuses to start with `AUTH_MODE=off` and an `API_HOST` that is
 not loopback, and the start log says which mode runs. To turn it on:
 
-1. Set `AUTH_MODE=local` in `.env` (`oidc` and `both` are read now, but sign-in
-   with an identity provider is not implemented yet: they refuse to start without
-   `OIDC_ISSUER_URL` and `OIDC_CLIENT_ID`).
+1. Set `AUTH_MODE=local` in `.env` for local accounts, `oidc` for sign-in with an
+   identity provider only, or `both` for the two (see
+   [Sign-in with an identity provider](#sign-in-with-an-identity-provider-oidc)).
 2. Create the first admin. The command prompts for the password twice, or reads it
    from a file; it refuses if an admin exists unless `--force`:
 
@@ -127,6 +127,76 @@ cookie is `Secure` when the request arrived over HTTPS (the scheme, or the proxy
 `X-Forwarded-Proto: https`), and is sent without `Secure` over plain HTTP, because
 Safari refuses a `Secure` cookie on `http://localhost`, which is how a Docker published
 port is reached. Over plain HTTP anyone on the path can read it.
+
+### Sign-in with an identity provider (OIDC)
+
+`AUTH_MODE=oidc` (identity provider only) or `both` (also local accounts, which is
+how the first admin and the API tokens are made) sign people in with any OpenID
+Connect provider. The API is a confidential client using the authorization code
+flow with PKCE (S256), `state` and `nonce`.
+
+1. At the identity provider, create a client for CTIParsor:
+   - type: confidential (it has a secret), standard flow (authorization code) only;
+   - valid redirect URI: exactly the callback URL, for example
+     `https://cti.example.org/api/auth/oidc/callback`. Use https; the address is the
+     one browsers reach CTIParsor on, so behind the `proxy` profile it is the proxy's;
+   - scopes `openid profile email`, and a claim that lists the user's groups
+     (`groups` by default) in the **ID token**.
+2. Write the client secret to a file the API can read, and mount it (a Docker
+   secret works). The secret is read from the file at each use; it is never an
+   environment variable.
+3. Set, in `.env` (all described in [configuration.md](configuration.md#authentication)):
+
+   ```env
+   AUTH_MODE=both
+   OIDC_ISSUER_URL=https://idp.example.org/realms/cti
+   OIDC_CLIENT_ID=ctiparsor
+   OIDC_CLIENT_SECRET_FILE=/run/secrets/oidc_client_secret
+   OIDC_REDIRECT_URI=https://cti.example.org/api/auth/oidc/callback
+   OIDC_ROLE_MAP=cti-admins=admin,cti-analysts=analyst,cti-readers=reader
+   ```
+
+   The API refuses to start if any of these is missing, if the issuer or redirect
+   URI is not https (`http://localhost` and `http://127.0.0.1` are accepted for
+   tests), if the secret file cannot be read or is empty, or if a role in the map is
+   not `reader`, `analyst` or `admin`. `OIDC_ISSUER_URL` must be the `issuer` of the
+   provider's discovery document, character for character.
+
+How it behaves:
+
+- The web interface sends the browser to `GET /api/auth/oidc/login?next=/path`; after
+  the provider authenticates the user, the callback creates the same session and
+  cookie as a local sign-in and sends the browser to `next` (a local path only; any
+  other value becomes `/`). A refusal sends the browser to `/login?error=<code>`:
+  `state`, `token`, `idp`, `denied`, `no_role`, `disabled`, `config`, `busy`.
+- The sign-in is tied to the browser that started it: `login` sets a cookie `ctiparsor_oidc` (`HttpOnly`, `SameSite=Lax`, 10 minutes) and the callback refuses a request without the matching cookie, so a link to someone else's callback does not sign you in as them.
+- The account is created at the first sign-in, named after `preferred_username`
+  (`OIDC_USERNAME_CLAIM`), else `email`, else `sub`. It is identified by the issuer
+  and `sub`, never by name: a username already taken, by a local account too, gets a
+  `-2` suffix, and nobody is signed in to a local account by an identity provider.
+- The role is recomputed from the groups at every sign-in; the highest mapped group
+  wins. A person with no mapped group is refused, and an existing account that lost
+  every group has its sessions ended. Disabling the account in CTIParsor
+  (`python -m api.admin disable`) refuses it too. A group removed at the provider
+  takes effect at the next sign-in, not in a session already open.
+- `POST /api/auth/logout` ends the CTIParsor session only. There is no logout at the
+  provider (no RP-initiated logout): the person stays signed in there.
+- The session cookie is `SameSite=Strict`, so the browser does not send it on the
+  redirect that follows the callback; the web interface asks `GET /api/auth/me` once
+  loaded, which carries it.
+- The discovery document and the keys are cached for an hour; an ID token with an
+  unknown `kid` fetches the keys once more. Only asymmetric signatures are accepted.
+  A group name cannot contain a comma. If the provider sends groups outside the ID
+  token (Entra ID with many groups), they are not read.
+
+Keycloak: create a client with *Client authentication* on and the callback as valid
+redirect URI, add a *Group Membership* mapper to the client scope (token claim name
+`groups`, *Full group path* off, added to the ID token), and use
+`https://HOST/realms/REALM` as issuer. Entra ID: register a web application with the
+callback as redirect URI, create a client secret, set *Groups claim* in *Token
+configuration* to the security groups (use *Group ID*, so the map is
+`<group object id>=admin`), and use `https://login.microsoftonline.com/TENANT/v2.0`
+as issuer.
 
 Start the API with `python run_api.py` or the Compose stack, the only supported
 launches: the start guard reads `API_HOST` (or `API_PUBLISHED_HOST`), and a bare

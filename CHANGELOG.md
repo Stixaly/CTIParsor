@@ -94,6 +94,18 @@ theme.
   a published address that is not loopback. Migration v0018 adds the account
   tables. OIDC, the sign-in page, the admin pages and the audit trail come next.
 
+- **Sign-in with an OpenID Connect provider** (ADR-0097 items 14 and 15,
+  part B). `AUTH_MODE=oidc` or `both` now works: the authorization-code flow
+  with PKCE, `state` and `nonce`, tied to the browser that started it by a
+  short-lived `ctiparsor_oidc` cookie. The ID token is checked against the
+  issuer's keys (signature, issuer, audience, expiry, nonce). The role comes
+  from the groups claim through `OIDC_ROLE_MAP` at every sign-in; no mapped
+  group, no sign-in. Accounts are created at the first sign-in, never merged
+  with a local one. New settings `OIDC_*` (the client secret is read from
+  `OIDC_CLIENT_SECRET_FILE`), routes `GET /api/auth/oidc/login` and
+  `/callback`, migration v0019 (`oidc_logins`), dependency `joserfc`. The
+  request log no longer prints query strings.
+
 - **The worker no longer logs a database backup after each report.** It never
   took one: both stores are PostgreSQL (ADR-0053) and `backup_db()` only
   logged where `pg_dump` is. The function is removed. Back up with `pg_dump`
@@ -117,6 +129,17 @@ theme.
   stop does not count. Uploads and ingests are refused with 507 when less
   than `UPLOAD_MIN_FREE_MB` (default 1024) is free. Migration v0017 adds
   `jobs.attempts`.
+
+- **Load and failure recipe** (ADR-0097 work item 23).
+  `scripts/check_failure_recipe.py --i-know-this-stops-services` causes five
+  failures on a Compose stack (a worker killed mid-job, an LLM endpoint that
+  refuses, the database stopped, an upload with the disk below
+  `UPLOAD_MIN_FREE_MB`, the documented backup restored into an empty database)
+  and checks the data, the job state and the alert each must raise, with a
+  Markdown and a JSON report. An alert that cannot be judged (a disk with room,
+  a rule form the checker cannot read) is reported as not checked, never as
+  passed. `docs/releases/1.0-failure-recipe.md` says what each case proves; the
+  restore duration (RTO) comes from a real run.
 
 - **TTP self-verification (Stage 3f) is on by default in the code.** It was
   already `ENABLE_TTP_VERIFICATION=true` in `.env.example`; the code's fallback

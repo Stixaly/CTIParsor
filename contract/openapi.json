@@ -574,6 +574,58 @@
         "boolean"
       ]
     },
+    "GET /api/auth/oidc/callback": {
+      "deprecated": false
+    },
+    "GET /api/auth/oidc/callback param:query:code": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/auth/oidc/callback param:query:error": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/auth/oidc/callback param:query:state": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/auth/oidc/callback response:302": {
+      "media": []
+    },
+    "GET /api/auth/oidc/callback response:403": {
+      "media": []
+    },
+    "GET /api/auth/oidc/callback response:404": {
+      "media": []
+    },
+    "GET /api/auth/oidc/login": {
+      "deprecated": false
+    },
+    "GET /api/auth/oidc/login param:query:next": {
+      "default": "/",
+      "required": false,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/auth/oidc/login response:302": {
+      "media": []
+    },
+    "GET /api/auth/oidc/login response:403": {
+      "media": []
+    },
+    "GET /api/auth/oidc/login response:404": {
+      "media": []
+    },
     "GET /api/auth/tokens": {
       "deprecated": false
     },

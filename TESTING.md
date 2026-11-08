@@ -880,6 +880,10 @@ CTIPARSOR_TEST_DATABASE_URL=postgresql://user:pw@host/db \
   python scripts/check_backup_restore.py --pg-container <the server's container>
 ```
 
+### Load and failure recipe (ADR-0097 item 23)
+
+`tests/test_failure_recipe.py` tests `scripts/check_failure_recipe.py` without Docker or network. It covers the alert evaluator on each form of `docs/monitoring/ctiparsor.rules.yml`, the report writing, each case with a passing and a failing path against a fake stack, the refusal without `--i-know-this-stops-services`, `--case` selection, and the command blocks against `docs/docker.md`. The recipe itself runs on a candidate stack, not in CI: see [docs/releases/1.0-failure-recipe.md](docs/releases/1.0-failure-recipe.md). Its results are its reports, not the test run.
+
 ### Clean install from the published image
 
 `scripts/check_clean_install.sh` is the clean install of ADR-0094 item 9: a

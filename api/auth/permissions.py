@@ -21,6 +21,8 @@ PERMISSIONS: dict[tuple[str, str], str] = {
     # Sessions (api/routes/auth.py): a sign-in cannot need to be signed in.
     ("POST", "/api/auth/login"): OPEN,
     ("GET", "/api/auth/methods"): OPEN,
+    ("GET", "/api/auth/oidc/login"): OPEN,
+    ("GET", "/api/auth/oidc/callback"): OPEN,
     ("POST", "/api/auth/logout"): "reader",
     ("GET", "/api/auth/me"): "reader",
     # admin.py: users and tokens. A token route under /api/auth/ only touches the caller's own tokens.
