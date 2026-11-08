@@ -169,3 +169,13 @@ reported. After the SBOM and the two attestations, it names that digest
 - Until the first push to `main` after the merge, GHCR's answer to the push
   and the artifact's round trip are unproven; `docs/releasing.md` ("The image
   main's CI publishes") gives the commands that compare the digests.
+
+**Seen on 2026-11-08, on the run of 0.6.0's commit** (`45aa96c`, CI run
+42470778393). The push and the artifact's round trip worked:
+- `container-image`'s archive index, `publish-image`'s read-back of
+  `sha-45aa96c…`, and GHCR's `sha-45aa96c…` and `0.6.0` tags are one digest,
+  `sha256:7183e35d…`;
+- GHCR serves the index whole, with the linux/amd64 image and its
+  `attestation-manifest`;
+- `gh attestation verify` passes for the SLSA provenance and the CycloneDX SBOM,
+  both signed by `ci.yml` on `refs/heads/main`.
