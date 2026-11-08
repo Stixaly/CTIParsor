@@ -8,8 +8,11 @@ secret-storage + loopback-guard work from ADR-0007.
 ADR-0019: Multi-format support (sigma/suricata/yara). Format availability is
 derived from the pipeline detection registry adapters (_ADAPTERS).
 """
+import itertools
+import string
 from pathlib import Path
-from urllib.parse import urlsplit
+from typing import overload
+from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -169,7 +172,113 @@ def _validate_git_remote(value: str) -> None:
     try:
         validate_url(value)
     except CaptureError as e:
-        raise HTTPException(400, f"'git' is not a safe remote: {e}") from e
+        raise HTTPException(400, _mask_text(f"'git' is not a safe remote: {e}")) from e
+
+
+#: Query parameters whose value is a credential when a corpus URL carries one.
+_SECRET_QUERY_PARAMS = frozenset({"token", "access_token", "private_token", "key", "sig"})
+_MASK = "***"
+#: Prefixes of GitHub and GitLab tokens.
+_TOKEN_PREFIXES = ("ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_", "glpat-")
+_TOKEN_CHARS = frozenset(string.ascii_letters + string.digits + "_-")
+#: Characters of the user in a scp-style `user@host:path` remote.
+_SCP_USER_CHARS = frozenset(string.ascii_letters + string.digits + "_.+-")
+
+
+def _looks_like_token(user: str) -> bool:
+    """A lone userinfo name (no password) that looks like a token: a known token
+    prefix, or a run of 20 or more token characters. Over-masking a long account
+    name is harmless; leaking a token is not.
+
+    Plain string code, no regex: CodeQL ties every pattern compiled through
+    `compile_pattern` to every match call, so a new pattern there reopens
+    py/polynomial-redos alerts elsewhere in this module.
+    """
+    if any(c.isspace() for c in user):
+        return False
+    if any(user.startswith(p) and len(user) > len(p) for p in _TOKEN_PREFIXES):
+        return True
+    return len(user) >= 20 and all(c in _TOKEN_CHARS for c in user)
+
+
+def _mask_url(url: str | None) -> str | None:
+    """Return `url` with its secret parts replaced by `***`, for responses only.
+
+    Masked: the password of the userinfo (`https://user:***@host`), a lone userinfo
+    name shaped like a token, and the value of each query parameter in
+    `_SECRET_QUERY_PARAMS`. The rest is kept as written. Storage and the fetch keep
+    the real URL. A URL with no secret comes back unchanged.
+    """
+    if not url:
+        return url
+    try:
+        parts = urlsplit(url)
+    except ValueError:   # unbalanced IPv6 brackets: nothing safe to show
+        return _MASK
+    netloc = parts.netloc
+    if "@" in netloc:
+        userinfo, _, hostport = netloc.rpartition("@")
+        user, colon, password = userinfo.partition(":")
+        if colon and password:
+            userinfo = f"{user}:{_MASK}"
+        elif not colon and _looks_like_token(user):
+            userinfo = _MASK
+        netloc = f"{userinfo}@{hostport}"
+    query = parts.query
+    if query:
+        pairs = []
+        for pair in query.split("&"):
+            name, eq, _value = pair.partition("=")
+            pairs.append(f"{name}={_MASK}" if eq and name.lower() in _SECRET_QUERY_PARAMS else pair)
+        query = "&".join(pairs)
+    return urlunsplit((parts.scheme, netloc, parts.path, query, parts.fragment))
+
+
+def _mask_word(word: str) -> str:
+    """Mask a URL, or the token-shaped user of a scp-style remote, in one word."""
+    found = [i for i in (word.find("https://"), word.find("http://")) if i != -1]
+    if found:
+        at = min(found)
+        return word[:at] + (_mask_url(word[at:]) or _MASK)
+    at = word.find("@")
+    if at > 0:
+        start = at
+        while start > 0 and word[start - 1] in _SCP_USER_CHARS:
+            start -= 1
+        if _looks_like_token(word[start:at]):
+            return word[:start] + _MASK + word[at:]
+    return word
+
+
+@overload
+def _mask_text(text: str) -> str: ...
+@overload
+def _mask_text(text: None) -> None: ...
+def _mask_text(text: str | None) -> str | None:
+    """Mask every URL in a message (a sync result or an error), with `_mask_url`.
+
+    A git error can echo the remote it failed on, with its token in the userinfo.
+    A scp-style `user@host:path` remote has no password, so only a token-shaped
+    user is masked; an address such as `ops@example.org` is kept. The text is cut
+    into runs of whitespace and of other characters, and each word is masked from
+    its URL to the end of the word.
+    """
+    if not text:
+        return text
+    return "".join(
+        "".join(run) if blank else _mask_word("".join(run))
+        for blank, run in itertools.groupby(text, str.isspace)
+    )
+
+
+def _refuse_masked_url(value: str | None, field: str) -> None:
+    """A URL that still holds the mask is a masked copy from a response, not a remote."""
+    if value and _MASK in value:
+        raise HTTPException(
+            400,
+            f"'{field}' contains '***', the masked form the settings API shows for a secret. "
+            "Enter the real URL, or the stored token is lost.",
+        )
 
 
 def _with_counts() -> list[dict]:
@@ -182,6 +291,10 @@ def _with_counts() -> list[dict]:
         it["enabled"] = it.get("enabled", True)
         it["adapter"] = it.get("adapter", "sigma")
         it["adapter_available"] = it["adapter"] in _ADAPTERS
+        # Responses only: the stored and fetched URLs keep their secrets.
+        for field in ("git", "tarball"):
+            if it.get(field):
+                it[field] = _mask_url(it[field])
     return items
 
 
@@ -237,6 +350,8 @@ def create_corpus(body: CorpusIn):
     if body.git and body.tarball:
         raise HTTPException(400, "provide either 'git' or 'tarball', not both")
 
+    _refuse_masked_url(body.git, "git")
+    _refuse_masked_url(body.tarball, "tarball")
     _validate_remote(body.git, "git")
     _validate_remote(body.tarball, "tarball")
     if body.tarball:
@@ -343,9 +458,10 @@ def sync_one_corpus(name: str):
 
     mismatch = clone_mismatch(corpus)
     if mismatch:
-        raise HTTPException(409, mismatch)
+        raise HTTPException(409, _mask_text(mismatch))
 
     ok, detail = sync_corpus(corpus)
+    detail = _mask_text(detail)
     if not ok:
         raise HTTPException(502, f"sync failed: {detail}")
 
@@ -356,7 +472,7 @@ def sync_one_corpus(name: str):
         # the rules it had: say so instead of reporting a success (#374).
         raise HTTPException(
             422,
-            f"downloaded, but not re-imported: {summary['skip_reasons'][name]}. "
+            f"downloaded, but not re-imported: {_mask_text(summary['skip_reasons'][name])}. "
             "The rules indexed before are kept.",
         )
     return {

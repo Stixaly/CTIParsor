@@ -9,6 +9,12 @@ theme.
 
 ## [Unreleased]
 
+- **`scripts/opencti_import_bundle.py`** imports any bundle into the
+  throwaway OpenCTI and reads every object back by STIX id: counts per type
+  (sent, found, missing, refused) in `output/opencti-import/<UTC time>/`, exit
+  0 only when nothing is missing or refused. The real-use protocol (ADR-0094
+  item 10) uses it for a real report's bundle.
+
 - **The Anthropic defaults move to the Claude 5 generation.** Text:
   `ANTHROPIC_MODEL` defaults to `claude-sonnet-5-5` (was `claude-sonnet-4-6`),
   in the code and in `.env.example`; figures: `VISION_PROVIDER=anthropic`, or
@@ -16,6 +22,12 @@ theme.
   `claude-haiku-4-5`). An `.env` that names a model keeps it. The default
   provider's measurement (ADR-0094 item 11) is made on these models.
   **Bundles change** for an install that relies on the defaults.
+
+- **Corpus URLs no longer show their secrets in the settings API.** A
+  token in a corpus `git` or `tarball` URL (in its password, or a `token`,
+  `access_token`, `private_token`, `key` or `sig` parameter) comes back as
+  `***`, and so does any URL in a sync or corpus error message. A create with
+  a `***` URL is refused with 400. The stored URL and the fetch are unchanged.
 
 - **A run records the embedding model it loaded, and an evaluation run
   refuses a fallback** (ADR-0094 item 13). The Stage 2c entry of the stage
@@ -45,6 +57,12 @@ theme.
   `contract/openapi.json` now records the response fields (compatible
   additions only, none breaking).
 
+- **`GET /metrics`** (ADR-0097 work item 18): Prometheus text format with
+  job, worker, queue-age, database, disk and backup metrics, for loopback
+  clients or a client with the `METRICS_TOKEN` bearer (serve it behind TLS).
+  `docs/monitoring/ctiparsor.rules.yml` has the alert rules, and
+  `docs/operations.md` the procedure for each alert.
+
 - **Stage 3d (relationship verification) and the document-level relation
   pass (Stage 3doc) are on by default**, in the code and in `.env.example`
   (`ENABLE_STIX_VERIFICATION=true`, `ENABLE_DOCUMENT_LEVEL_RELATIONS=true`);
@@ -63,6 +81,14 @@ theme.
   took one: both stores are PostgreSQL (ADR-0053) and `backup_db()` only
   logged where `pg_dump` is. The function is removed. Back up with `pg_dump`
   and the `cti-state` archive, as docs/docker.md describes.
+
+- **Bounds** (ADR-0097 work item 20). `GET /api/jobs` takes optional
+  `limit` and `cursor` (keyset pages, `X-Next-Cursor`); without them the list
+  is unchanged. A job whose lease is lost more than `JOB_MAX_ATTEMPTS` times
+  (default 3) is failed as "quarantined" instead of requeued; a clean worker
+  stop does not count. Uploads and ingests are refused with 507 when less
+  than `UPLOAD_MIN_FREE_MB` (default 1024) is free. Migration v0017 adds
+  `jobs.attempts`.
 
 - **TTP self-verification (Stage 3f) is on by default in the code.** It was
   already `ENABLE_TTP_VERIFICATION=true` in `.env.example`; the code's fallback

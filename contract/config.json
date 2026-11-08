@@ -100,6 +100,12 @@
         "7"
       ]
     },
+    "env BACKUP_STATUS_FILE": {
+      "set": false,
+      "values": [
+        "/app/backup-status/status.json"
+      ]
+    },
     "env BACKUP_TARGET": {
       "set": false,
       "values": [
@@ -466,6 +472,12 @@
         ""
       ]
     },
+    "env JOB_MAX_ATTEMPTS": {
+      "set": false,
+      "values": [
+        "3"
+      ]
+    },
     "env JOB_RETENTION_DAYS": {
       "set": false,
       "values": [
@@ -584,6 +596,12 @@
       "set": false,
       "values": [
         "10485760"
+      ]
+    },
+    "env METRICS_TOKEN": {
+      "set": false,
+      "values": [
+        ""
       ]
     },
     "env MISTRAL_API_KEY": {
@@ -794,6 +812,12 @@
       "set": true,
       "values": [
         "1"
+      ]
+    },
+    "env UPLOAD_MIN_FREE_MB": {
+      "set": false,
+      "values": [
+        "1024"
       ]
     },
     "env VISION_ASSUME_CAPABLE": {
