@@ -17,6 +17,12 @@ theme.
   provider's measurement (ADR-0094 item 11) is made on these models.
   **Bundles change** for an install that relies on the defaults.
 
+- **Corpus URLs no longer show their secrets in the settings API.** A
+  token in a corpus `git` or `tarball` URL (in its password, or a `token`,
+  `access_token`, `private_token`, `key` or `sig` parameter) comes back as
+  `***`, and so does any URL in a sync or corpus error message. A create with
+  a `***` URL is refused with 400. The stored URL and the fetch are unchanged.
+
 - **A run records the embedding model it loaded, and an evaluation run
   refuses a fallback** (ADR-0094 item 13). The Stage 2c entry of the stage
   report now carries `embedding` (the model requested, the one loaded, whether
