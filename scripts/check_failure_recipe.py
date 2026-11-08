@@ -65,6 +65,7 @@ RULES_FILE = ROOT / "docs" / "monitoring" / "ctiparsor.rules.yml"
 DEFAULT_COMPOSE = ROOT / "compose.yaml"
 FIXTURE = ROOT / "tests" / "fixtures" / "sample_report.txt"
 MIB = 1024 * 1024
+GIB = 1024 * MIB
 TERMINAL = ("completed", "for_review", "failed")
 CASE_ORDER = ("worker-killed", "llm-down", "database-down", "disk-nearly-full", "restore-drill")
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -153,6 +154,11 @@ def load_rules(path: Path = RULES_FILE) -> list[Rule]:
             continue
         field_name, value = key.group(1), key.group(2)
         if field_name == "expr":
+            if value[:1] in ("|", ">") or not value:
+                # A block scalar spans several lines this reader does not join:
+                # refuse rather than evaluate half an expression.
+                raise ValueError(f"{path}: rule {current['name']} has a multi-line expr; "
+                                 "write it on one line")
             current["expr"] = value
         elif field_name == "for":
             found = _DURATION.match(value)
@@ -937,6 +943,11 @@ def _inventory(stack: Stack) -> tuple[str, str]:
     return files, jobs
 
 
+#: The thresholds of CtiparsorDiskNearlyFull in docs/monitoring/ctiparsor.rules.yml.
+DISK_ALERT_MIN_FREE = 2 * 1024 ** 3
+DISK_ALERT_RATIO = 0.10
+
+
 def case_disk_nearly_full(run: Run) -> None:
     st = run.stack
     free = gauge(st.scrape(), "ctiparsor_state_dir_free_bytes")
@@ -954,6 +965,16 @@ def case_disk_nearly_full(run: Run) -> None:
     run.expect("the refusal says why", "Insufficient Storage" in text)
     run.expect("nothing was written: no file and no job", _inventory(st) == before)
     run.step("check the disk alert's condition on /metrics")
+    total = gauge(st.scrape(), "ctiparsor_state_dir_total_bytes")
+    if free >= DISK_ALERT_MIN_FREE and (total is None or free / total >= DISK_ALERT_RATIO):
+        # The 507 gate is a setting; the alert reads the real filesystem. With room
+        # on the disk the alert cannot fire, which proves nothing either way.
+        run.check("alert CtiparsorDiskNearlyFull", "not_checked",
+                  f"{free / GIB:.1f} GiB free"
+                  + (f" of {total / GIB:.1f} GiB" if total else "")
+                  + ": the alert fires below 10 % or 2 GiB; run this case on a state "
+                    "filesystem that is nearly full to check it")
+        return
     run.hold_alert("CtiparsorDiskNearlyFull")
 
 

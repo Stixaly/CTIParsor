@@ -529,11 +529,27 @@ def test_disk_nearly_full_passes_when_the_upload_is_refused_and_the_alert_holds(
     assert world.threshold_mb == 1025  # one MB above the 1024 MB free: the override was applied
 
 
-def test_disk_nearly_full_fails_when_the_disk_is_not_nearly_full(tmp_path):
+def test_disk_nearly_full_on_a_roomy_disk_checks_the_gate_and_not_the_alert(tmp_path):
     world = World()
     report = _run_case("disk-nearly-full", world, tmp_path)
-    assert report.status == "failed"
-    assert _checks(report)["alert CtiparsorDiskNearlyFull (severity warning, for 600 s)"] == "fail"
+    assert report.status == "not_checked", report.checks
+    checks = _checks(report)
+    assert checks["alert CtiparsorDiskNearlyFull"] == "not_checked"
+    assert checks["the upload is refused with 507"] == "pass"
+
+
+def test_the_threshold_constants_match_the_rules_file():
+    rule = next(r for r in cfr.load_rules() if r.name == "CtiparsorDiskNearlyFull")
+    assert str(cfr.DISK_ALERT_MIN_FREE) in rule.expr
+    assert f"< {cfr.DISK_ALERT_RATIO:.2f}" in rule.expr
+
+
+def test_a_multi_line_expr_is_refused(tmp_path):
+    rules = tmp_path / "rules.yml"
+    lines = ["groups:", "  - name: g", "    rules:", "      - alert: A", "        expr: |", "          up == 0", ""]
+    rules.write_text("\n".join(lines), encoding="utf-8")
+    with pytest.raises(ValueError, match="multi-line"):
+        cfr.load_rules(rules)
 
 
 # ── restore-drill ────────────────────────────────────────────────────────────
@@ -600,7 +616,7 @@ def test_a_whole_run_writes_the_reports_and_exits_by_the_outcome(monkeypatch, tm
     monkeypatch.setattr(cfr, "Stack", lambda base, compose, token: FakeStack(world, token))
     code = cfr.main(["--case", "disk-nearly-full", "--i-know-this-stops-services",
                      "--report-dir", str(tmp_path / "run")])
-    assert code == 1  # the disk is not nearly full: the alert check fails
+    assert code == 1  # the disk has room: the alert is not checked, so not a pass
     payload = json.loads((tmp_path / "run" / "report.json").read_text(encoding="utf-8"))
     assert payload["exit_code"] == 1
     assert payload["cases"][0]["name"] == "disk-nearly-full"
