@@ -143,7 +143,7 @@ pipeline still produces valid STIX. ML models are downloaded once and cached.
   asks for more, and no checkout keeps its credentials. OpenSSF Scorecard
   rates these practices weekly (README badge).
 - **Protected `main` (ADR-0078).** A change reaches `main` only through a
-  pull request whose 13 required checks pass: tests, audits, the image
+  pull request whose 14 required checks pass: tests, audits, the image
   build, CodeQL and the fuzzers. A CodeQL alert of medium severity or higher
   that the pull request adds blocks it. Force-push and deletion are blocked,
   and secret scanning with push protection is on.

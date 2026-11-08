@@ -250,3 +250,9 @@ Two rules first saved with the ruleset were removed the same day, because
 they would have blocked every pull request: a required check named
 `Dependabot`, which no pull request ever reports, and "require code quality
 results", which waits for GitHub Code Quality, not enabled here.
+
+**Note (2026-11-08):** the ruleset now requires 14 checks. The fourteenth is
+`Browser journey (Playwright, offline)` (job `browser-e2e`), added after the
+list above was read on 2026-10-10. Read through the API on 2026-11-08 with
+`gh api repos/Stixaly/CTIParsor/rulesets/19765507`: 14 lines. The count of
+13 above is the state of 2026-10-10 and is kept as written.
