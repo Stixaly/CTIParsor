@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from api.auth import config, oidc, store
 from api.auth.deps import SESSION_COOKIE, authenticate, cookie_secure, current_user, set_session_cookie
-from api.logging_config import get_logger
+from api.logging_config import get_logger, one_line
 from api.main import limiter
 from api.response_models.auth import Me, SignedOut
 
@@ -144,7 +144,7 @@ def _clear_binding(answer: RedirectResponse, request: Request) -> RedirectRespon
 def _refused(code: str, detail: str, request: Request | None = None) -> RedirectResponse:
     """Back to the sign-in page with a fixed code; the log has the reason, never a token.
     With `request` (the callback), the binding cookie is deleted in the same answer."""
-    logger.warning("[auth] OIDC sign-in refused (%s): %s", code, detail)
+    logger.warning("[auth] OIDC sign-in refused (%s): %s", code, one_line(detail))
     answer = _redirect(f"/login?error={code}")
     return _clear_binding(answer, request) if request is not None else answer
 

@@ -279,3 +279,10 @@ _setup_done = False
 if not _setup_done:
     setup_logging()
     _setup_done = True
+
+
+def one_line(value: object, limit: int = 200) -> str:
+    """A value from a request, safe to put in a log line: line breaks and other control
+    characters are written out, so it cannot forge a second line, and it is cut to `limit`."""
+    text = str(value)[:limit].replace("\\", "\\\\").replace("\r", "\\r").replace("\n", "\\n")
+    return "".join(ch if ch.isprintable() else f"\\x{ord(ch):02x}" for ch in text)
