@@ -94,6 +94,12 @@
         "20.0"
       ]
     },
+    "env AUDIT_RETENTION_DAYS": {
+      "set": false,
+      "values": [
+        "365"
+      ]
+    },
     "env AUTH_MODE": {
       "set": false,
       "values": [
@@ -644,6 +650,48 @@
       "set": false,
       "values": [
         "eng"
+      ]
+    },
+    "env OIDC_CLIENT_ID": {
+      "set": false,
+      "values": [
+        "ctiparsor"
+      ]
+    },
+    "env OIDC_CLIENT_SECRET_FILE": {
+      "set": false,
+      "values": [
+        "/run/secrets/oidc_client_secret"
+      ]
+    },
+    "env OIDC_GROUPS_CLAIM": {
+      "set": false,
+      "values": [
+        "groups"
+      ]
+    },
+    "env OIDC_ISSUER_URL": {
+      "set": false,
+      "values": [
+        "https://idp.example.org/realms/cti"
+      ]
+    },
+    "env OIDC_REDIRECT_URI": {
+      "set": false,
+      "values": [
+        "https://cti.example.org/api/auth/oidc/callback"
+      ]
+    },
+    "env OIDC_ROLE_MAP": {
+      "set": false,
+      "values": [
+        "cti-admins=admin,cti-analysts=analyst,cti-readers=reader"
+      ]
+    },
+    "env OIDC_USERNAME_CLAIM": {
+      "set": false,
+      "values": [
+        "preferred_username"
       ]
     },
     "env OLLAMA_API_KEY": {

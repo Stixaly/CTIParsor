@@ -94,6 +94,18 @@ theme.
   a published address that is not loopback. Migration v0018 adds the account
   tables. OIDC, the sign-in page, the admin pages and the audit trail come next.
 
+- **Sign-in with an OpenID Connect provider** (ADR-0097 items 14 and 15,
+  part B). `AUTH_MODE=oidc` or `both` now works: the authorization-code flow
+  with PKCE, `state` and `nonce`, tied to the browser that started it by a
+  short-lived `ctiparsor_oidc` cookie. The ID token is checked against the
+  issuer's keys (signature, issuer, audience, expiry, nonce). The role comes
+  from the groups claim through `OIDC_ROLE_MAP` at every sign-in; no mapped
+  group, no sign-in. Accounts are created at the first sign-in, never merged
+  with a local one. New settings `OIDC_*` (the client secret is read from
+  `OIDC_CLIENT_SECRET_FILE`), routes `GET /api/auth/oidc/login` and
+  `/callback`, migration v0019 (`oidc_logins`), dependency `joserfc`. The
+  request log no longer prints query strings.
+
 - **The worker no longer logs a database backup after each report.** It never
   took one: both stores are PostgreSQL (ADR-0053) and `backup_db()` only
   logged where `pg_dump` is. The function is removed. Back up with `pg_dump`
@@ -116,6 +128,16 @@ theme.
   are dropped. To keep the previous behaviour, set
   `ENABLE_TTP_VERIFICATION=false`. The run's recorded configuration shows the
   switch as `true` when it is unset.
+
+- **Audit trail** (ADR-0097 work item 17). Every state-changing API request
+  and every change made with `python -m api.admin` is recorded: who (user,
+  role, session or token), what (method, route, path parameters), the status
+  and outcome, the client address and the request id. Records are JSON lines
+  on the `ctiparsor.audit` logger and rows of the new `audit_events` table
+  (migration v0020); admins read them with `GET /api/audit`. A request or
+  response body, a query string, a header, a cookie, a token or a password is
+  never recorded. An anonymous request refused with 401 is a log line only.
+  `AUDIT_RETENTION_DAYS` (default 365, 0 keeps all) sets how long rows stay.
 
 - **The review page shows why a stage did not run**, and highlights a refusal
   by the TLP egress policy with what to do (mark the report CLEAR or GREEN, or

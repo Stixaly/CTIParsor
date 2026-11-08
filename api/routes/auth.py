@@ -11,10 +11,11 @@ import math
 import os
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
-from api.auth import config, store
+from api.auth import config, oidc, store
 from api.auth.deps import SESSION_COOKIE, authenticate, cookie_secure, current_user, set_session_cookie
 from api.logging_config import get_logger
 from api.main import limiter
@@ -114,3 +115,81 @@ def me(request: Request, user: store.User | None = Depends(current_user)):
         csrf = session.csrf_token if session else None
     return _me(user, csrf)
 
+
+
+# ── Sign-in with an identity provider (api/auth/oidc.py) ─────────────────────
+
+def _oidc_available() -> None:
+    mode = config.auth_mode()
+    if mode == "off":
+        raise HTTPException(404, "Authentication is off")
+    if not config.oidc_enabled():
+        raise HTTPException(403, "OIDC sign-in is not enabled")
+
+
+def _redirect(url: str) -> RedirectResponse:
+    return RedirectResponse(url, status_code=302, headers={"Cache-Control": "no-store"})
+
+
+OIDC_COOKIE = "ctiparsor_oidc"
+OIDC_COOKIE_PATH = "/api/auth/oidc"
+
+
+def _clear_binding(answer: RedirectResponse, request: Request) -> RedirectResponse:
+    answer.delete_cookie(OIDC_COOKIE, path=OIDC_COOKIE_PATH, httponly=True, samesite="lax",
+                         secure=cookie_secure(request))
+    return answer
+
+
+def _refused(code: str, detail: str, request: Request | None = None) -> RedirectResponse:
+    """Back to the sign-in page with a fixed code; the log has the reason, never a token.
+    With `request` (the callback), the binding cookie is deleted in the same answer."""
+    logger.warning("[auth] OIDC sign-in refused (%s): %s", code, detail)
+    answer = _redirect(f"/login?error={code}")
+    return _clear_binding(answer, request) if request is not None else answer
+
+
+@router.get("/oidc/login", status_code=302, responses={
+    302: {"description": "To the identity provider's authorization endpoint, or to /login?error=<code>."},
+    403: {"description": "OIDC sign-in is not enabled (AUTH_MODE is local)."},
+    404: {"description": "Authentication is off (AUTH_MODE=off)."},
+}, response_class=RedirectResponse)
+@limiter.limit(login_rate_limit)
+def oidc_login(request: Request, next_path: str = Query("/", alias="next")):
+    _oidc_available()
+    try:
+        url, binding = oidc.begin_login(next_path)
+    except oidc.OidcError as exc:
+        return _refused(exc.code, str(exc))
+    except config.AuthConfigError as exc:
+        return _refused("config", str(exc))
+    answer = _redirect(url)
+    # Lax, not Strict: the identity provider sends the browser back with a cross-site GET.
+    answer.set_cookie(OIDC_COOKIE, binding, max_age=int(store.OIDC_LOGIN_TTL.total_seconds()), httponly=True,
+                      samesite="lax", secure=cookie_secure(request), path=OIDC_COOKIE_PATH)
+    return answer
+
+
+@router.get("/oidc/callback", status_code=302, responses={
+    302: {"description": "To the page asked for, with the session cookie set, or to /login?error=<code>."},
+    403: {"description": "OIDC sign-in is not enabled (AUTH_MODE is local)."},
+    404: {"description": "Authentication is off (AUTH_MODE=off)."},
+}, response_class=RedirectResponse)
+@limiter.limit(login_rate_limit)
+def oidc_callback(request: Request, code: str | None = None, state: str | None = None,
+                  error: str | None = None):
+    _oidc_available()
+    if error:                                       # the identity provider refused; its text is not passed on
+        if state:
+            store.consume_oidc_login(state, request.cookies.get(OIDC_COOKIE))
+        return _refused("denied", f"the identity provider answered error={error[:64]!r}", request)
+    try:
+        user, next_path = oidc.complete_login(code, state, request.cookies.get(OIDC_COOKIE))
+    except oidc.OidcError as exc:
+        return _refused(exc.code, str(exc), request)
+    except config.AuthConfigError as exc:
+        return _refused("config", str(exc), request)
+    session_id, _ = store.create_session(user.id)
+    answer = _clear_binding(_redirect(next_path), request)
+    set_session_cookie(answer, session_id, cookie_secure(request))
+    return answer

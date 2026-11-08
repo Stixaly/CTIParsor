@@ -7,7 +7,7 @@ made by the admin command line (`api/admin.py`).  A record goes to two places:
   * a JSON line on standard output (standard error for a change made by the command line), through
     the logger `ctiparsor.audit`, always JSON
     whatever `LOG_FORMAT` says, for the log system the organisation already runs;
-  * a row of `audit_events` (migration 19), read by `GET /api/audit` (admin).
+  * a row of `audit_events` (migration 20), read by `GET /api/audit` (admin).
 
 A record holds what identifies the request and its answer: the time, the request id,
 the user (or none), how they signed in, the method, the route template (the raw path

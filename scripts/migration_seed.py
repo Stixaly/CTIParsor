@@ -562,7 +562,13 @@ def spec(stage4: Path = STAGE4) -> dict[str, list[dict[str, Any]]]:
         "login_failures": [
             {"username": "tomas@example.org", "attempted_at": _t(26, "08:29:50.000000")},
         ],
-        # The audit trail (version 19): a refused sign-in that names an account, a sign-in, a change
+        "oidc_logins": [
+            {"state_hash": hashlib.sha256(b"seeded-oidc-state").hexdigest(), "nonce": "c2VlZGVkLW5vbmNl",
+             "code_verifier": "c2VlZGVkLXBrY2UtdmVyaWZpZXI", "next_path": "/jobs",
+             "binding_hash": hashlib.sha256(b"seeded-oidc-binding").hexdigest(),
+             "created_at": _t(26, "08:30:00.000000"), "expires_at": _t(26, "08:40:00.000000")},
+        ],
+        # The audit trail (version 20): a refused sign-in that names an account, a sign-in, a change
         # by a request, and a change made by the command line.  The target is the JSON text.
         "audit_events": [
             {"at": _t(26, "08:29:50.000000"), "request_id": "seedlogin1", "user_id": None, "username": None,

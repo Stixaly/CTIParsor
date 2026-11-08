@@ -1,4 +1,4 @@
-"""Version 19 — the audit trail, `audit_events` (ADR-0097 item 17).
+"""Version 20 — the audit trail, `audit_events` (ADR-0097 item 17).
 
 One row per state-changing request to `/api` and per change made by `python -m api.admin`
 (api/audit.py), with the fields of the audit record.  No foreign key to `users`: a record
@@ -10,7 +10,7 @@ that does not write it keeps working."""
 from api.migrations import Migration, columns_exist, indexes_exist, tables_exist
 
 MIGRATION = Migration(
-    version=19,
+    version=20,
     name="audit",
     store="jobs",
     description="audit_events: one row per state-changing request and per command-line change",

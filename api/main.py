@@ -209,14 +209,14 @@ async def add_request_id(request: Request, call_next):
     # too, before it reaches a log line (log injection).
     request_id = request.scope.get(REQUEST_ID_SCOPE_KEY) or request_id_for(request.headers.get("x-request-id", ""))
     set_request_id(request_id)
-    logger.debug(f"Request started: {request.method} {request.url}")
+    logger.debug(f"Request started: {request.method} {request.url.path}")
 
     try:
         response = await call_next(request)
         return response
     finally:
         clear_request_id()
-        logger.debug(f"Request completed: {request.method} {request.url}")
+        logger.debug(f"Request completed: {request.method} {request.url.path}")
 
 
 # ---------------------------------------------------------------------------

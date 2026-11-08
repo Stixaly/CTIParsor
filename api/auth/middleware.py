@@ -4,8 +4,8 @@ FastAPI reads a JSON body or spools a multipart form before it solves the
 dependencies, so an anonymous `POST /api/upload` would be parsed before the
 access check refused it.  This pure ASGI middleware answers 401 first, to every
 request for `/api/...` (and the interactive docs) that carries no valid session
-cookie and no valid bearer token, except `GET /api/health` and
-`POST /api/auth/login`.  Roles and CSRF stay in the dependency
+cookie and no valid bearer token, except `GET /api/health`, `POST /api/auth/login` and the two
+OIDC redirects (`GET /api/auth/oidc/login`, `GET /api/auth/oidc/callback`).  Roles and CSRF stay in the dependency
 (`api/auth/deps.py`), which reuses the answer found here.
 
 It also hands the browser the new `Max-Age` when a request slid the session's
@@ -23,7 +23,8 @@ from api.auth import config
 from api.auth.deps import AUTH_SCOPE_KEY, SESSION_COOKIE, authenticate, cookie_secure, set_session_cookie
 
 # (method, path) that need no sign-in.
-OPEN_REQUESTS = frozenset({("GET", "/api/health"), ("POST", "/api/auth/login")})
+OPEN_REQUESTS = frozenset({("GET", "/api/health"), ("POST", "/api/auth/login"),
+                           ("GET", "/api/auth/oidc/login"), ("GET", "/api/auth/oidc/callback")})
 # Served by FastAPI itself, outside the routers.
 DOC_PATHS = frozenset({"/docs", "/docs/oauth2-redirect", "/redoc", "/openapi.json"})
 

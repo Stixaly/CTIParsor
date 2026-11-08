@@ -302,6 +302,176 @@
     "GET /api/attack/index response:404": {
       "media": []
     },
+    "GET /api/audit": {
+      "deprecated": false
+    },
+    "GET /api/audit param:query:cursor": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/audit param:query:limit": {
+      "default": 100,
+      "maximum": 500,
+      "minimum": 1,
+      "required": false,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/audit param:query:outcome": {
+      "enum": [
+        "error",
+        "ok",
+        "refused"
+      ],
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/audit param:query:route": {
+      "maxLength": 512,
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/audit param:query:since": {
+      "maxLength": 64,
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/audit param:query:until": {
+      "maxLength": 64,
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/audit param:query:user": {
+      "maxLength": 64,
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/audit response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/audit response:200[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/audit response:200[].at": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/audit response:200[].attempted": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/audit response:200[].auth": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/audit response:200[].client": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/audit response:200[].id": {
+      "required": true,
+      "types": [
+        "integer"
+      ]
+    },
+    "GET /api/audit response:200[].method": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/audit response:200[].outcome": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/audit response:200[].request_id": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/audit response:200[].role": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/audit response:200[].route": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/audit response:200[].status": {
+      "required": true,
+      "types": [
+        "integer",
+        "null"
+      ]
+    },
+    "GET /api/audit response:200[].target": {
+      "required": true,
+      "types": [
+        "null",
+        "object"
+      ]
+    },
+    "GET /api/audit response:200[].user_id": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/audit response:200[].username": {
+      "required": true,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
     "GET /api/auth/me": {
       "deprecated": false
     },
@@ -353,6 +523,58 @@
         "null",
         "string"
       ]
+    },
+    "GET /api/auth/oidc/callback": {
+      "deprecated": false
+    },
+    "GET /api/auth/oidc/callback param:query:code": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/auth/oidc/callback param:query:error": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/auth/oidc/callback param:query:state": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/auth/oidc/callback response:302": {
+      "media": []
+    },
+    "GET /api/auth/oidc/callback response:403": {
+      "media": []
+    },
+    "GET /api/auth/oidc/callback response:404": {
+      "media": []
+    },
+    "GET /api/auth/oidc/login": {
+      "deprecated": false
+    },
+    "GET /api/auth/oidc/login param:query:next": {
+      "default": "/",
+      "required": false,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/auth/oidc/login response:302": {
+      "media": []
+    },
+    "GET /api/auth/oidc/login response:403": {
+      "media": []
+    },
+    "GET /api/auth/oidc/login response:404": {
+      "media": []
     },
     "GET /api/baselines/status": {
       "deprecated": false
