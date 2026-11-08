@@ -9,6 +9,12 @@ theme.
 
 ## [Unreleased]
 
+- **`scripts/opencti_import_bundle.py`** imports any bundle into the
+  throwaway OpenCTI and reads every object back by STIX id: counts per type
+  (sent, found, missing, refused) in `output/opencti-import/<UTC time>/`, exit
+  0 only when nothing is missing or refused. The real-use protocol (ADR-0094
+  item 10) uses it for a real report's bundle.
+
 - **The Anthropic defaults move to the Claude 5 generation.** Text:
   `ANTHROPIC_MODEL` defaults to `claude-sonnet-5-5` (was `claude-sonnet-4-6`),
   in the code and in `.env.example`; figures: `VISION_PROVIDER=anthropic`, or
