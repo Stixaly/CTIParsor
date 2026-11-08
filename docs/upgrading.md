@@ -265,10 +265,10 @@ rebuild the corpus from the Settings page. The sizing table is in
 - `requeue at startup` only happens in role `all`. A container API never
   requeues; a job stuck in `processing` is requeued by a worker once its
   lease expires (180 s by default).
-- `backup_db()` no longer copies a file — both stores are PostgreSQL now
-  (ADR-0053), so it just logs a reminder to `pg_dump`. A backup is that dump
-  and an archive of `cti-state`, taken together
-  ([docs/docker.md](docker.md#data-and-backups)).
+- The worker no longer logs a database backup after each report. It never
+  took one: both stores are PostgreSQL now (ADR-0053). A backup is a `pg_dump`
+  of the database and an archive of `cti-state`, taken together by the
+  procedure in [docs/docker.md](docker.md#data-and-backups).
 - The optional `re2` guard is absent from every current install; it is a
   pre-existing packaging problem, tracked separately.
 - The bundle's recorded git revision comes from the image build argument in
