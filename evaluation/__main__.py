@@ -39,6 +39,7 @@ if str(_ROOT) not in sys.path:
 
 from evaluation import annoctr, attack, dedup, evidence, inhouse, metrics  # noqa: E402
 from pipeline import attack_data  # noqa: E402
+from pipeline.env_flags import env_bool  # noqa: E402
 
 DATA = _ROOT / "data"
 OUT = DATA / "eval"
@@ -209,6 +210,65 @@ def _stay_on_the_release(meta_path: Path, name: str) -> None:
                      f"resume it with ATTACK_RELEASE={began}, or start another run")
 
 
+def _embedding_in_use(meta_path: Path, name: str, options) -> dict:
+    """The embedding model this process runs Stage 2c with, checked before any
+    document: a run on a fallback model, without any model, or on a cache built
+    for another encoder would score something other than the configured system,
+    so it stops here (an analyst's run goes on and says so in its stage report),
+    and a run that already began resumes on the model its run.json recorded.
+    Returns what run.json records."""
+    if env_bool("SKIP_HEAVY_MODELS"):
+        status: dict = {"skipped": "SKIP_HEAVY_MODELS"}
+    elif "2c" in options.disabled:
+        status = {"skipped": "2c disabled"}
+    else:
+        status = _loaded_embedding(name, options)
+    if meta_path.exists():
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        began = (meta.get("embedding") or {}).get("loaded")
+        if began and "skipped" in status:
+            sys.exit(f"{name} began on the embedding model {began} and this process skips the "
+                     f"check ({status['skipped']}): resume it in the same setting, or start another run")
+        if began and began != status["loaded"]:
+            sys.exit(f"{name} began on the embedding model {began} and this process loaded "
+                     f"{status['loaded']}: resume it with TTP_EMBEDDING_MODEL={began}, "
+                     f"or start another run")
+        if "embedding" not in meta:        # a run from before this record: completed now
+            _write(meta_path, {**meta, "embedding": status})
+    return status
+
+
+def _loaded_embedding(name: str, options) -> dict:
+    """Load the encoder Stage 2c will use and refuse a fallback, no encoder or a
+    cache that does not match it (the select path or the detector, as the
+    orchestrator chooses)."""
+    from pipeline import stage2c_ttp_semantic as s2c
+    from pipeline.orchestrator import stage3_can_run
+    from pipeline.ttp_retrieval import retrieval_settings, retrieval_status
+
+    select = options.ttp_mode == "select" and stage3_can_run(options)
+    bm25 = select and retrieval_settings()["method"] == "bm25"
+    if not bm25:
+        s2c._load_model()
+    status = retrieval_status() if select else s2c.embedding_status()
+    cache = status["corpus_model"] if select else status["cache_model"]
+    rebuild = "retrieval" if select else "embeddings"
+    if status["fallback"]:
+        sys.exit(f"{name}: the embedding model {status['requested']} did not load, "
+                 f"{status['loaded']} was used instead: fix the model or set "
+                 f"TTP_EMBEDDING_MODEL, then start the run again")
+    if not bm25 and status["loaded"] is None:
+        sys.exit(f"{name}: no embedding model could be loaded ({status['requested']})")
+    if not status["cache_matches"]:
+        if cache is None:
+            sys.exit(f"{name}: no embedding cache: build it with "
+                     f"python scripts/build_indexes.py --only {rebuild}")
+        sys.exit(f"{name}: embedding cache built for {cache}, model in use "
+                 f"{status['loaded'] or status['requested']}: rebuild with "
+                 f"python scripts/build_indexes.py --only {rebuild}")
+    return status
+
+
 def cmd_run(args) -> None:
     from api.run_config import build_manifest
     from pipeline.orchestrator import Document, RunOptions, StageRequired, run_document
@@ -226,12 +286,13 @@ def cmd_run(args) -> None:
         os.environ["TTP_RETRIEVAL_EXCLUDE_CITED"] = str(excl)
     options = RunOptions.from_env(disabled=disabled,
                                   required=set() if args.allow_degraded else {"3"})
+    embedding = _embedding_in_use(meta_path, args.name, options)
     docs = _docs(args.split, args.limit)
     if not meta_path.exists():
         _write(meta_path, {"name": args.name, "split": args.split, "started": time.strftime("%Y-%m-%dT%H:%M:%S"),
                            "disabled": sorted(options.disabled), "required": sorted(options.required),
                            "consensus": options.consensus, "document_relations": options.document_relations,
-                           "ttp_mode": options.ttp_mode,
+                           "ttp_mode": options.ttp_mode, "embedding": embedding,
                            "manifest": build_manifest()})
     consecutive_required = 0
     for i, d in enumerate(docs, 1):
@@ -866,13 +927,16 @@ def cmd_preannotate(args) -> None:
 
 def cmd_inhouse_run(args) -> None:
     from api.run_config import build_manifest
+    from pipeline.orchestrator import RunOptions
 
     disabled = {s.strip() for s in (args.disable or "").split(",") if s.strip()}
     run_dir = OUT / "inhouse-runs" / args.name
     _stay_on_the_release(run_dir / "run.json", args.name)
+    embedding = _embedding_in_use(run_dir / "run.json", args.name,
+                                  RunOptions.from_env(disabled=disabled))
     if not (run_dir / "run.json").exists():
         _write(run_dir / "run.json", {"name": args.name, "format": 2, "disabled": sorted(disabled),
-                                      "manifest": build_manifest()})
+                                      "embedding": embedding, "manifest": build_manifest()})
     for d in inhouse.load():
         out = run_dir / "docs" / f"{d.doc_id}.json"
         if out.exists():

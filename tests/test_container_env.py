@@ -4,9 +4,8 @@ These tests lock down CTIPARSOR_GIT_REV resolution: git revision resolution
 prefers the local repository over the environment variable when available,
 falling back to it otherwise. `api.db._path_from_env`/`BACKUP_DIR`, and the
 `CTIPARSOR_DB_PATH` variable it used to also serve, were removed with SQLite
-(ADR-0053) — `CTIPARSOR_DB_BACKUP_DIR` no longer has anything to configure
-now that `backup_db()` just logs a `pg_dump` reminder rather than copying a
-local file.
+(ADR-0053). `CTIPARSOR_DB_BACKUP_DIR` no longer configures anything: no code
+copies a local database file, and backups are taken with `pg_dump` (docs/docker.md).
 """
 from __future__ import annotations
 

@@ -9,6 +9,35 @@ theme.
 
 ## [Unreleased]
 
+- **The Anthropic defaults move to the Claude 5 generation.** Text:
+  `ANTHROPIC_MODEL` defaults to `claude-sonnet-5-5` (was `claude-sonnet-4-6`),
+  in the code and in `.env.example`; figures: `VISION_PROVIDER=anthropic`, or
+  `auto` with `LLM_PROVIDER=anthropic`, reads them with `claude-haiku-5-5` (was
+  `claude-haiku-4-5`). An `.env` that names a model keeps it. The default
+  provider's measurement (ADR-0094 item 11) is made on these models.
+  **Bundles change** for an install that relies on the defaults.
+
+- **A run records the embedding model it loaded, and an evaluation run
+  refuses a fallback** (ADR-0094 item 13). The Stage 2c entry of the stage
+  report now carries `embedding` (the model requested, the one loaded, whether
+  that is a fallback, the model the cache was built for, the thresholds) and
+  `ttp_mode`; when the cache was built for another encoder the stage is
+  skipped with a reason naming both models and the rebuild command, instead
+  of "unavailable". `python -m evaluation run` and `inhouse-run` stop before
+  the first document on a fallback or a mismatched cache, write the status to
+  `run.json` (`embedding`), and refuse to resume a run on another loaded
+  model. An analyst's run goes on as before. No bundle changes.
+
+- **The API's responses are described in the OpenAPI schema** (ADR-0094
+  item 1's gap). Every JSON operation declares a response model, with
+  `extra="allow"` and `response_model_exclude_unset=True`: a field the model
+  does not declare is still returned, and a key a route leaves out stays out,
+  so **no response changes**. Values read from the database are typed loosely,
+  so a row stored by an older release still reads. The ZIP exports, the source
+  file, the bundle and the progress stream declare their media type instead.
+  `contract/openapi.json` now records the response fields (compatible
+  additions only, none breaking).
+
 - **Stage 3d (relationship verification) and the document-level relation
   pass (Stage 3doc) are on by default**, in the code and in `.env.example`
   (`ENABLE_STIX_VERIFICATION=true`, `ENABLE_DOCUMENT_LEVEL_RELATIONS=true`);
@@ -23,6 +52,11 @@ theme.
   `.env.example`; their values, which the code already defaults to, are
   unchanged.
 
+- **The worker no longer logs a database backup after each report.** It never
+  took one: both stores are PostgreSQL (ADR-0053) and `backup_db()` only
+  logged where `pg_dump` is. The function is removed. Back up with `pg_dump`
+  and the `cti-state` archive, as docs/docker.md describes.
+
 - **TTP self-verification (Stage 3f) is on by default in the code.** It was
   already `ENABLE_TTP_VERIFICATION=true` in `.env.example`; the code's fallback
   was `false`, so a process started without `.env` did not run it. Cost: about
@@ -32,6 +66,14 @@ theme.
   are dropped. To keep the previous behaviour, set
   `ENABLE_TTP_VERIFICATION=false`. The run's recorded configuration shows the
   switch as `true` when it is unset.
+
+- **`scripts/measure_default_provider.py`**, the billed measurement of the
+  default provider (ADR-0094 item 11): two AnnoCTR test runs and two in-house
+  runs at `LLM_TEMPERATURE=0` with figure reading on, then the spread between
+  the repetitions. It refuses a missing key, another provider or model, a
+  non-zero temperature or an existing run name. `--dry-run` prints the
+  commands; `--estimate` counts the calls and characters of a past run
+  (input tokens approximated from characters; prices as arguments).
 
 - **The in-house evaluation scores the exported bundle** (ADR-0096, ADR-0094
   item 6). `python -m evaluation inhouse-run` now keeps Stage 5 on and writes

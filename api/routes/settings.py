@@ -15,6 +15,14 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from api.db import get_rule_conn
+from api.response_models.settings import (
+    CorporaOut,
+    CorporaResult,
+    CorpusCreated,
+    FormatsOut,
+    RebuildOut,
+    SyncOut,
+)
 from pipeline.detection.builder import rebuild_store
 from pipeline.detection.registry import _ADAPTERS, add_corpus, merged_corpora, remove_corpus
 from pipeline.detection.store import corpus_counts
@@ -177,13 +185,13 @@ def _with_counts() -> list[dict]:
     return items
 
 
-@router.get("/corpora")
+@router.get("/corpora", response_model=CorporaOut, response_model_exclude_unset=True)
 def list_corpora():
     """List all configured corpora with their rule counts and adapter availability."""
     return {"corpora": _with_counts()}
 
 
-@router.get("/formats")
+@router.get("/formats", response_model=FormatsOut, response_model_exclude_unset=True)
 def list_formats():
     """List all known formats (compiled adapters + configured corpora) with stats."""
     items = _with_counts()
@@ -207,7 +215,7 @@ def list_formats():
     return {"formats": result}
 
 
-@router.post("/corpora")
+@router.post("/corpora", response_model=CorpusCreated, response_model_exclude_unset=True)
 def create_corpus(body: CorpusIn):
     """Add a new corpus to the local overlay. Validates adapter against available parsers."""
     name = body.name.strip()
@@ -272,7 +280,7 @@ def create_corpus(body: CorpusIn):
     return {"ok": True, "warning": warning, "corpora": _with_counts()}
 
 
-@router.delete("/corpora/{name}")
+@router.delete("/corpora/{name}", response_model=CorporaResult, response_model_exclude_unset=True)
 def delete_corpus(name: str):
     """Remove a corpus from the local overlay."""
     if not any(c.get("name") == name for c in merged_corpora(_CONFIG)):
@@ -281,7 +289,7 @@ def delete_corpus(name: str):
     return {"ok": True, "corpora": _with_counts()}
 
 
-@router.patch("/corpora/{name}")
+@router.patch("/corpora/{name}", response_model=CorporaResult, response_model_exclude_unset=True)
 def patch_corpus(name: str, body: CorpusPatch):
     """Enable or disable a corpus without losing its configuration.
 
@@ -303,7 +311,7 @@ def patch_corpus(name: str, body: CorpusPatch):
     return {"ok": True, "corpora": _with_counts()}
 
 
-@router.post("/corpora/{name}/sync")
+@router.post("/corpora/{name}/sync", response_model=SyncOut, response_model_exclude_unset=True)
 def sync_one_corpus(name: str):
     """Fetch ONE public corpus (git clone/pull, or tarball download — ADR-0015 §5),
     then re-ingest the store.
@@ -360,7 +368,7 @@ def sync_one_corpus(name: str):
     }
 
 
-@router.post("/corpora/rebuild")
+@router.post("/corpora/rebuild", response_model=RebuildOut, response_model_exclude_unset=True)
 def rebuild_corpora():
     """Re-ingest all enabled corpora from their existing local clones into the store.
 

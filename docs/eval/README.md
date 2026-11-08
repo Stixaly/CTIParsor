@@ -147,6 +147,16 @@ serve (Stage 3 is then `failed`, not an empty success).
   human-judged `support-sample`;
 * which stages ran, were skipped or failed, and seconds per report.
 
+## The embedding model a run loaded (ADR-0094)
+
+`run` and `inhouse-run` load the Stage 2c encoder before the first document and
+stop if it fell back to the legacy model or if the embedding (or retrieval)
+cache was built for another encoder: rebuild with
+`python scripts/build_indexes.py --only embeddings` (`--only retrieval` in
+select mode). The status is in `run.json` (`embedding`), and a run resumed on
+another loaded model is refused. With `SKIP_HEAVY_MODELS=1` the check is
+skipped and `run.json` says so.
+
 ## ATT&CK releases (ADR-0087)
 
 The gold is annotated with the ATT&CK of 2022. It is mapped through the
@@ -235,6 +245,43 @@ Reading a 19.2 / 20.0 comparison on this gold:
   word boundaries).
 * The paired comparison of the two tracks on dev, and how its difference splits:
   [attack-v20-2026-10.md](attack-v20-2026-10.md).
+
+## Measuring the default provider (ADR-0094 item 11)
+
+Decision 13 needs one recorded measure of `anthropic`, the default
+`LLM_PROVIDER`: two runs at `LLM_TEMPERATURE=0` on AnnoCTR test and two on the
+in-house set, with the spread between the two runs of each set published.
+`scripts/measure_default_provider.py` runs the four and writes the summary.
+
+```bash
+python scripts/measure_default_provider.py --dry-run     # the checks, then the commands; runs nothing
+python scripts/measure_default_provider.py               # the four runs, their scores, the spreads
+python scripts/measure_default_provider.py --estimate default-provider-inhouse-1 \
+    --price-in <USD per million input tokens> --price-out <USD per million output tokens>
+```
+
+* **It is billed.** Every LLM request of the four runs goes to Anthropic. The
+  script refuses to start unless `ANTHROPIC_API_KEY` is set, `LLM_PROVIDER` is
+  `anthropic` (or unset), `LLM_TEMPERATURE` is `0`, `VISION_PROVIDER` does not
+  turn figure reading off, `ANTHROPIC_MODEL` is the default, and none of the four
+  run names exists yet. The `.env` values count as the environment does for
+  `python -m evaluation`.
+* **AnnoCTR test is read once for this decision** (ADR-0060). A second
+  measurement on test is a new decision, not a repetition.
+* **Figure reading is on**: the in-house runs read the figures of each report
+  with the text's provider (ADR-0094 item 12).
+* **`--estimate NAME`** reads a run already made and counts its LLM requests and
+  the characters of each report. The records do not store tokens, so input
+  tokens are estimated at 4 characters a token (approximate, the prompt template
+  per call is not counted). Output tokens are not recorded: they are estimated
+  only with `--out-tokens-per-call`. Prices are arguments; none is written in the
+  code.
+* **A failed step stops the script** and writes no summary. The script has no
+  resume mode: the run directories already written keep their files, so finish
+  the remaining commands of the dry run by hand, then read the scores as above.
+* The summary goes to `data/eval/default-provider-<timestamp>.json` (git-ignored):
+  commit, provider, model, temperature, figure-reading setting, the scores of
+  each run, the spread of each metric, and the output of the in-house comparison.
 
 ## Ablations
 

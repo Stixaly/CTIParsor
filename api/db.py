@@ -138,20 +138,6 @@ def transaction(conn: DBConnection, *, snapshot: bool = False) -> Iterator[DBCon
     conn.commit()
 
 
-def backup_db() -> None:
-    """Log where the real backup tool is.
-
-    PostgreSQL holds both stores now (ADR-0053) — there is no local file left
-    for this process to copy. `pg_dump`/`pg_basebackup` is the operator's
-    tool, same guidance the job store already gave when it moved to
-    PostgreSQL (ADR-0045).
-    """
-    logger.info(
-        "[db] both stores are PostgreSQL - back them up with pg_dump "
-        "(see docs/docker.md); this function no longer copies a local file"
-    )
-
-
 # The schema is versioned (ADR-0077): api/migrations/ holds one module per
 # version since the first PostgreSQL job store, and api.migrate applies what a
 # database lacks.  These two tuples are only the concatenation of that history

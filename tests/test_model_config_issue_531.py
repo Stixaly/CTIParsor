@@ -34,7 +34,7 @@ def llm_env(monkeypatch):
 ])
 def test_each_provider_reads_its_own_model_variable_issue_531(llm_env, provider, variable):
     llm_env.setenv("LLM_PROVIDER", provider)
-    llm_env.setenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")     # what .env.example sets
+    llm_env.setenv("ANTHROPIC_MODEL", "claude-sonnet-5-5")     # what .env.example sets
     llm_env.setenv(variable, "the-chosen-model")
     assert PipelineConfig.from_env().llm.model == "the-chosen-model"
 

@@ -10,6 +10,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from api.body_limit import ENVELOPE_BYTES
 from api.main import limiter
 from api.paths import uploads_dir
+from api.response_models.upload import UploadResult
 from api.routes._common import (
     BASELINE_REFUSED,
     baseline_markings,
@@ -103,7 +104,8 @@ def _looks_like_html(chunk: bytes) -> bool:
     return True
 
 
-@router.post("/upload", responses=BASELINE_REFUSED)
+@router.post("/upload", response_model=UploadResult, response_model_exclude_unset=True,
+             responses=BASELINE_REFUSED)
 @limiter.limit("10/minute")
 def upload_file(
     request: Request,

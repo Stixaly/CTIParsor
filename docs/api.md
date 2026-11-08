@@ -4,6 +4,8 @@ Every route the FastAPI server exposes. The interactive OpenAPI docs are served
 by the running app at `http://localhost:8000/docs`. A path under `/api/` that no
 route matches gets a JSON 404, not the application page (`api/main.py`).
 
+The role each operation would need under ADR-0097 is listed in [api-permissions.md](api-permissions.md). It is a proposal; the API does not enforce it yet.
+
 ## Jobs
 
 | Method | Path | Description |

@@ -9,12 +9,23 @@ import json
 import re
 import zipfile
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
 
 from api.db import get_conn, get_rule_conn
+from api.response_models.coverage import (
+    ArtifactCoverage,
+    Coverage,
+    DetectionCorpora,
+    ProposalsForJob,
+    RuleFacets,
+    RuleLookupResult,
+    RulesForJob,
+    RulesForTechnique,
+)
 from api.routes._common import require_job, storable_text
 from pipeline.detection.artifacts import coverage_with_phases
 from pipeline.detection.coverage import (
@@ -33,6 +44,14 @@ from pipeline.detection.store import (
 
 router = APIRouter(prefix="/api", tags=["coverage"])
 
+#: Body of the export routes: a ZIP archive, not JSON (ADR-0020, ADR-0022).
+_ZIP_RESPONSE: dict[int | str, dict[str, Any]] = {
+    200: {
+        "content": {"application/zip": {}},
+        "description": "ZIP of the rule files, MANIFEST.json and README.txt (ADR-0020)",
+    },
+}
+
 
 # Two stores meet in this module (ADR-0045): `get_conn()` is the job store
 # (PostgreSQL when DATABASE_URL is set), `get_rule_conn()` the SQLite rule
@@ -40,14 +59,14 @@ router = APIRouter(prefix="/api", tags=["coverage"])
 # store as `jobs_conn`; without DATABASE_URL both are the same connection.
 
 
-@router.get("/jobs/{job_id}/coverage")
+@router.get("/jobs/{job_id}/coverage", response_model=Coverage, response_model_exclude_unset=True)
 def get_coverage(job_id: str):
     with get_conn() as jobs_conn:
         require_job(jobs_conn, job_id)
         return compute_for_job(get_rule_conn(), job_id, jobs_conn=jobs_conn)
 
 
-@router.get("/jobs/{job_id}/coverage/rules")
+@router.get("/jobs/{job_id}/coverage/rules", response_model=RulesForJob, response_model_exclude_unset=True)
 def get_coverage_report_rules(job_id: str):
     """All canonical Sigma rules linkable to this report, grouped by technique.
 
@@ -59,7 +78,7 @@ def get_coverage_report_rules(job_id: str):
         return rules_for_job(get_rule_conn(), job_id, jobs_conn=jobs_conn)
 
 
-@router.get("/jobs/{job_id}/detections/proposals")
+@router.get("/jobs/{job_id}/detections/proposals", response_model=ProposalsForJob, response_model_exclude_unset=True)
 def get_detection_proposals(job_id: str, limit: int = 200):
     """Rules ranked by what the report actually contains (ADR-0014).
 
@@ -75,7 +94,7 @@ def get_detection_proposals(job_id: str, limit: int = 200):
         return propose_for_job(get_rule_conn(), job_id, limit=limit, jobs_conn=jobs_conn)
 
 
-@router.get("/jobs/{job_id}/coverage/artifacts")
+@router.get("/jobs/{job_id}/coverage/artifacts", response_model=ArtifactCoverage, response_model_exclude_unset=True)
 def get_artifact_coverage(job_id: str):
     """Evidence-keyed coverage: artifacts score, ATT&CK locates (ADR-0025).
 
@@ -94,7 +113,11 @@ def get_artifact_coverage(job_id: str):
         return coverage_with_phases(get_rule_conn(), job_id, jobs_conn=jobs_conn)
 
 
-@router.get("/jobs/{job_id}/coverage/{technique_id}/rules")
+@router.get(
+    "/jobs/{job_id}/coverage/{technique_id}/rules",
+    response_model=RulesForTechnique,
+    response_model_exclude_unset=True,
+)
 def get_coverage_rules(job_id: str, technique_id: str):
     """License-aware drill-down: which rules cover this technique. No raw bodies."""
     with get_conn() as jobs_conn:
@@ -203,7 +226,7 @@ def _facet(rules: list[dict], key: str) -> list[dict]:
     return sorted(counts.values(), key=lambda x: (-x["rules"], x["value"]))
 
 
-@router.get("/jobs/{job_id}/detections/export/facets")
+@router.get("/jobs/{job_id}/detections/export/facets", response_model=RuleFacets, response_model_exclude_unset=True)
 def export_facets(job_id: str):
     """Per-axis rule counts and byte sizes for the export filter UI (ADR-0020).
 
@@ -370,7 +393,7 @@ def _zip_export(
     )
 
 
-@router.get("/jobs/{job_id}/detections/export")
+@router.get("/jobs/{job_id}/detections/export", responses=_ZIP_RESPONSE)
 def export_detections(
     job_id: str,
     format: list[str] | None = Query(None),
@@ -437,7 +460,7 @@ def _promoted_rules(conn, rule_ids: set[str]) -> list[dict]:
     ]
 
 
-@router.post("/jobs/{job_id}/detections/export")
+@router.post("/jobs/{job_id}/detections/export", responses=_ZIP_RESPONSE)
 def export_detections_selection(job_id: str, selection: ExportSelection):
     """Download exactly the requested rules as a ZIP (ADR-0022).
 
@@ -517,7 +540,7 @@ class RuleLookup(BaseModel):
         return ids
 
 
-@router.post("/rules/lookup")
+@router.post("/rules/lookup", response_model=RuleLookupResult, response_model_exclude_unset=True)
 def post_rule_lookup(lookup: RuleLookup):
     """Metadata for arbitrary canonical rule ids — and their bodies on demand.
 
@@ -555,7 +578,7 @@ def post_rule_lookup(lookup: RuleLookup):
         }
 
 
-@router.get("/detection-corpora")
+@router.get("/detection-corpora", response_model=DetectionCorpora, response_model_exclude_unset=True)
 def get_detection_corpora():
     with get_rule_conn() as conn:
         return {"corpora": corpus_counts(conn)}

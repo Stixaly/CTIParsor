@@ -192,6 +192,9 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
     ("84fa746", "2026-11-08",
      "Stage 3f technique verification runs by default (ENABLE_TTP_VERIFICATION)",
      "extraction"),
+    ("48ae014", "2026-11-08",
+     "The Anthropic defaults move to claude-sonnet-5-5 (text) and claude-haiku-5-5 (figures)",
+     "extraction"),
 )
 
 

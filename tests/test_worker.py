@@ -281,19 +281,17 @@ def test_a_run_keeps_the_owner_it_was_spawned_with(db, monkeypatch):
     assert _row(db)["status"] == "for_review"
 
 
-def test_a_failed_backup_does_not_fail_a_finished_run(db, monkeypatch, caplog):
+def test_a_finished_run_logs_no_backup(db, monkeypatch, caplog):
+    """The worker takes no backup (ADR-0053: pg_dump is the operator's job, docs/docker.md).
+    A finished report must not log a backup that never happened."""
     _job(db)
+    with caplog.at_level("INFO"):
+        _run(monkeypatch, _Result(bundle=_Bundle(), ledger={"entities": []}))
 
-    def backup_fails():
-        raise OSError("backup volume full")
-
-    monkeypatch.setattr(worker, "backup_db", backup_fails)
-    _run(monkeypatch, _Result(bundle=_Bundle(), ledger={"entities": []}))
-
-    row = _row(db)
-    assert row["status"] == "for_review" and json.loads(row["bundle_ledger_json"]) == {"entities": []}
+    assert _row(db)["status"] == "for_review"
     assert _events(db)[-1] == ("done", {"status": "for_review"})
-    assert "Database backup failed" in caplog.text
+    assert "backup completed" not in caplog.text
+    assert "backup" not in caplog.text.lower()
 
 
 # ── The subprocess ───────────────────────────────────────────────────────────
