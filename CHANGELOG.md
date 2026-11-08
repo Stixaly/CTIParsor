@@ -27,8 +27,8 @@ theme.
   so **no response changes**. Values read from the database are typed loosely,
   so a row stored by an older release still reads. The ZIP exports, the source
   file, the bundle and the progress stream declare their media type instead.
-  `contract/openapi.json` now records the response fields (850 compatible
-  differences, none breaking).
+  `contract/openapi.json` now records the response fields (compatible
+  additions only, none breaking).
 
 - **Stage 3d (relationship verification) and the document-level relation
   pass (Stage 3doc) are on by default**, in the code and in `.env.example`
