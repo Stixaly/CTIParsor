@@ -562,6 +562,11 @@ def spec(stage4: Path = STAGE4) -> dict[str, list[dict[str, Any]]]:
         "login_failures": [
             {"username": "tomas@example.org", "attempted_at": _t(26, "08:29:50.000000")},
         ],
+        "oidc_logins": [
+            {"state_hash": hashlib.sha256(b"seeded-oidc-state").hexdigest(), "nonce": "c2VlZGVkLW5vbmNl",
+             "code_verifier": "c2VlZGVkLXBrY2UtdmVyaWZpZXI", "next_path": "/jobs",
+             "created_at": _t(26, "08:30:00.000000"), "expires_at": _t(26, "08:40:00.000000")},
+        ],
         "jobs": _jobs(stage4),
         "entities": _entities(),
         "relationships": _relationships(),

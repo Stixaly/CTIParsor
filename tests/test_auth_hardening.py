@@ -59,6 +59,8 @@ def test_the_middleware_gate_matches_the_open_operations():
     from api.auth.middleware import is_gated
 
     assert not is_gated("GET", "/api/health") and not is_gated("POST", "/api/auth/login")
+    assert not is_gated("GET", "/api/auth/oidc/login") and not is_gated("GET", "/api/auth/oidc/callback")
+    assert is_gated("POST", "/api/auth/oidc/login")
     assert is_gated("POST", "/api/auth/logout") and is_gated("GET", "/api/jobs") and is_gated("GET", "/docs")
     assert not is_gated("GET", "/") and not is_gated("GET", "/assets/index.js")
 

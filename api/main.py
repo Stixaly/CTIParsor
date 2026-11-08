@@ -202,14 +202,14 @@ async def add_request_id(request: Request, call_next):
     # Validate format before using in logs to prevent log injection via header
     request_id = raw_id if _REQUEST_ID_RE.fullmatch(raw_id) else None
     set_request_id(request_id)
-    logger.debug(f"Request started: {request.method} {request.url}")
+    logger.debug(f"Request started: {request.method} {request.url.path}")
 
     try:
         response = await call_next(request)
         return response
     finally:
         clear_request_id()
-        logger.debug(f"Request completed: {request.method} {request.url}")
+        logger.debug(f"Request completed: {request.method} {request.url.path}")
 
 
 # ---------------------------------------------------------------------------

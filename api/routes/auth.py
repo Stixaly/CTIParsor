@@ -11,10 +11,11 @@ import math
 import os
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
-from api.auth import config, store
+from api.auth import config, oidc, store
 from api.auth.deps import SESSION_COOKIE, authenticate, cookie_secure, current_user, set_session_cookie
 from api.logging_config import get_logger
 from api.main import limiter
@@ -107,3 +108,64 @@ def me(request: Request, user: store.User | None = Depends(current_user)):
         csrf = session.csrf_token if session else None
     return _me(user, csrf)
 
+
+
+# ── Sign-in with an identity provider (api/auth/oidc.py) ─────────────────────
+
+def _oidc_available() -> None:
+    mode = config.auth_mode()
+    if mode == "off":
+        raise HTTPException(404, "Authentication is off")
+    if not config.oidc_enabled():
+        raise HTTPException(403, "OIDC sign-in is not enabled")
+
+
+def _redirect(url: str) -> RedirectResponse:
+    return RedirectResponse(url, status_code=302, headers={"Cache-Control": "no-store"})
+
+
+def _refused(code: str, detail: str) -> RedirectResponse:
+    """Back to the sign-in page with a fixed code; the log has the reason, never a token."""
+    logger.warning("[auth] OIDC sign-in refused (%s): %s", code, detail)
+    return _redirect(f"/login?error={code}")
+
+
+@router.get("/oidc/login", status_code=302, responses={
+    302: {"description": "To the identity provider's authorization endpoint, or to /login?error=<code>."},
+    403: {"description": "OIDC sign-in is not enabled (AUTH_MODE is local)."},
+    404: {"description": "Authentication is off (AUTH_MODE=off)."},
+}, response_class=RedirectResponse)
+@limiter.limit(login_rate_limit)
+def oidc_login(request: Request, next_path: str = Query("/", alias="next")):
+    _oidc_available()
+    try:
+        return _redirect(oidc.begin_login(next_path))
+    except oidc.OidcError as exc:
+        return _refused(exc.code, str(exc))
+    except config.AuthConfigError as exc:
+        return _refused("config", str(exc))
+
+
+@router.get("/oidc/callback", status_code=302, responses={
+    302: {"description": "To the page asked for, with the session cookie set, or to /login?error=<code>."},
+    403: {"description": "OIDC sign-in is not enabled (AUTH_MODE is local)."},
+    404: {"description": "Authentication is off (AUTH_MODE=off)."},
+}, response_class=RedirectResponse)
+@limiter.limit(login_rate_limit)
+def oidc_callback(request: Request, code: str | None = None, state: str | None = None,
+                  error: str | None = None):
+    _oidc_available()
+    if error:                                       # the identity provider refused; its text is not passed on
+        if state:
+            store.consume_oidc_login(state)
+        return _refused("denied", f"the identity provider answered error={error[:64]!r}")
+    try:
+        user, next_path = oidc.complete_login(code, state)
+    except oidc.OidcError as exc:
+        return _refused(exc.code, str(exc))
+    except config.AuthConfigError as exc:
+        return _refused("config", str(exc))
+    session_id, _ = store.create_session(user.id)
+    answer = _redirect(next_path)
+    set_session_cookie(answer, session_id, cookie_secure(request))
+    return answer

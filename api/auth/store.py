@@ -352,3 +352,50 @@ def revoke_token(token_id: str) -> bool:
     cur = get_conn().execute("UPDATE api_tokens SET revoked_at=? WHERE id=? AND revoked_at IS NULL",
                              (_ts(_now()), token_id))
     return cur.rowcount > 0
+
+
+# ── Sign-in with an identity provider (api/auth/oidc.py) ─────────────────────
+
+OIDC_LOGIN_TTL = timedelta(minutes=10)
+OIDC_LOGIN_CAP = 2000                       # pending requests at most: the login route is open
+
+
+def begin_oidc_login(state: str, nonce: str, code_verifier: str, next_path: str) -> bool:
+    """Remember a pending authorization request for 10 minutes, under the SHA-256 of
+    `state`.  Returns False, storing nothing, when OIDC_LOGIN_CAP are already pending."""
+    now = _now()
+    conn = get_conn()
+    conn.execute("DELETE FROM oidc_logins WHERE expires_at < ?", (_ts(now),))
+    if conn.execute("SELECT COUNT(*) AS n FROM oidc_logins").fetchone()["n"] >= OIDC_LOGIN_CAP:
+        return False
+    conn.execute("INSERT INTO oidc_logins (state_hash, nonce, code_verifier, next_path, created_at, expires_at) "
+                 "VALUES (?,?,?,?,?,?)",
+                 (hash_secret(state), nonce, code_verifier, next_path, _ts(now), _ts(now + OIDC_LOGIN_TTL)))
+    return True
+
+
+def consume_oidc_login(state: str) -> dict | None:
+    """The pending request for `state` as {nonce, code_verifier, next_path}, deleted in the
+    same statement so that it is read once; None when unknown, used or expired."""
+    row = get_conn().execute(
+        "DELETE FROM oidc_logins WHERE state_hash=? RETURNING nonce, code_verifier, next_path, expires_at",
+        (hash_secret(state),)).fetchone()
+    if row is None or _parse(row["expires_at"]) <= _now():
+        return None
+    return {"nonce": row["nonce"], "code_verifier": row["code_verifier"], "next_path": row["next_path"]}
+
+
+def find_oidc_user(subject: str) -> User | None:
+    row = get_conn().execute(f"SELECT {_USER_COLUMNS} FROM users WHERE auth_source='oidc' AND oidc_subject=?",
+                             (subject,)).fetchone()
+    return _user(row) if row else None
+
+
+def set_role(user_id: str, role: str) -> None:
+    if role not in ROLES:
+        raise AuthError(f"the role must be one of {', '.join(ROLES)}")
+    get_conn().execute("UPDATE users SET role=? WHERE id=?", (role, user_id))
+
+
+def end_sessions(user_id: str) -> None:
+    get_conn().execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
