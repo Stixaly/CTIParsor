@@ -515,3 +515,16 @@ def test_a_successful_sync_detail_hides_the_token_too(temp_db, temp_db_client, t
     assert r.status_code == 200, r.text
     assert r.json()["detail"] == "updated https://user:***@host/x.git/"
     assert "token@" not in r.text
+
+
+def test_mask_text_keeps_the_whitespace_and_the_quotes_of_a_git_error():
+    text = "fatal: unable to access\n\t'https://u:s3cret@git.example/x.git/': 403\n"
+    assert settings_mod._mask_text(text) == (
+        "fatal: unable to access\n\t'https://u:***@git.example/x.git/': 403\n"
+    )
+
+
+def test_mask_text_is_linear_on_long_runs():
+    # Runs that made the former `[A-Za-z0-9_.+-]+@\S+` pattern rescan the text.
+    for text in ("+" * 200_000, "a" * 200_000 + "@", " " * 200_000):
+        assert settings_mod._mask_text(text) in (text, "***@")

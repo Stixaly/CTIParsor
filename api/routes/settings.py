@@ -8,7 +8,10 @@ secret-storage + loopback-guard work from ADR-0007.
 ADR-0019: Multi-format support (sigma/suricata/yara). Format availability is
 derived from the pipeline detection registry adapters (_ADAPTERS).
 """
+import itertools
+import string
 from pathlib import Path
+from typing import overload
 from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import APIRouter, HTTPException
@@ -175,10 +178,27 @@ def _validate_git_remote(value: str) -> None:
 #: Query parameters whose value is a credential when a corpus URL carries one.
 _SECRET_QUERY_PARAMS = frozenset({"token", "access_token", "private_token", "key", "sig"})
 _MASK = "***"
-#: A lone userinfo name (no password) that looks like a token: a known token
-#: prefix, or a long run of token characters. Over-masking a long account name is
-#: harmless; leaking a token is not.
-_TOKEN_LIKE_USER_RE = compile_pattern(r"(?:gh[pousr]_|github_pat_|glpat-)\S+|[A-Za-z0-9_-]{20,}")
+#: Prefixes of GitHub and GitLab tokens.
+_TOKEN_PREFIXES = ("ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_", "glpat-")
+_TOKEN_CHARS = frozenset(string.ascii_letters + string.digits + "_-")
+#: Characters of the user in a scp-style `user@host:path` remote.
+_SCP_USER_CHARS = frozenset(string.ascii_letters + string.digits + "_.+-")
+
+
+def _looks_like_token(user: str) -> bool:
+    """A lone userinfo name (no password) that looks like a token: a known token
+    prefix, or a run of 20 or more token characters. Over-masking a long account
+    name is harmless; leaking a token is not.
+
+    Plain string code, no regex: CodeQL ties every pattern compiled through
+    `compile_pattern` to every match call, so a new pattern there reopens
+    py/polynomial-redos alerts elsewhere in this module.
+    """
+    if any(c.isspace() for c in user):
+        return False
+    if any(user.startswith(p) and len(user) > len(p) for p in _TOKEN_PREFIXES):
+        return True
+    return len(user) >= 20 and all(c in _TOKEN_CHARS for c in user)
 
 
 def _mask_url(url: str | None) -> str | None:
@@ -201,7 +221,7 @@ def _mask_url(url: str | None) -> str | None:
         user, colon, password = userinfo.partition(":")
         if colon and password:
             userinfo = f"{user}:{_MASK}"
-        elif not colon and _TOKEN_LIKE_USER_RE.fullmatch(user):
+        elif not colon and _looks_like_token(user):
             userinfo = _MASK
         netloc = f"{userinfo}@{hostport}"
     query = parts.query
@@ -214,28 +234,41 @@ def _mask_url(url: str | None) -> str | None:
     return urlunsplit((parts.scheme, netloc, parts.path, query, parts.fragment))
 
 
-#: A URL, or a scp-style `user@host:path` remote, inside free text such as a git error.
-_URL_IN_TEXT_RE = compile_pattern(r"https?://\S+|[A-Za-z0-9_.+-]+@\S+")
+def _mask_word(word: str) -> str:
+    """Mask a URL, or the token-shaped user of a scp-style remote, in one word."""
+    found = [i for i in (word.find("https://"), word.find("http://")) if i != -1]
+    if found:
+        at = min(found)
+        return word[:at] + (_mask_url(word[at:]) or _MASK)
+    at = word.find("@")
+    if at > 0:
+        start = at
+        while start > 0 and word[start - 1] in _SCP_USER_CHARS:
+            start -= 1
+        if _looks_like_token(word[start:at]):
+            return word[:start] + _MASK + word[at:]
+    return word
 
 
+@overload
+def _mask_text(text: str) -> str: ...
+@overload
+def _mask_text(text: None) -> None: ...
 def _mask_text(text: str | None) -> str | None:
     """Mask every URL in a message (a sync result or an error), with `_mask_url`.
 
     A git error can echo the remote it failed on, with its token in the userinfo.
     A scp-style `user@host:path` remote has no password, so only a token-shaped
-    user is masked; an address such as `ops@example.org` is kept.
+    user is masked; an address such as `ops@example.org` is kept. The text is cut
+    into runs of whitespace and of other characters, and each word is masked from
+    its URL to the end of the word.
     """
     if not text:
         return text
-
-    def _mask(match) -> str:
-        found = match.group(0)
-        if found.startswith(("http://", "https://")):
-            return _mask_url(found) or _MASK
-        user, _, rest = found.partition("@")
-        return f"{_MASK if _TOKEN_LIKE_USER_RE.fullmatch(user) else user}@{rest}"
-
-    return _URL_IN_TEXT_RE.sub(_mask, text)
+    return "".join(
+        "".join(run) if blank else _mask_word("".join(run))
+        for blank, run in itertools.groupby(text, str.isspace)
+    )
 
 
 def _refuse_masked_url(value: str | None, field: str) -> None:
