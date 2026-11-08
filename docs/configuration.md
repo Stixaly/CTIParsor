@@ -277,7 +277,7 @@ LLM_TIMEOUT=120
 # Stage 3d — Self-verification of relationships
 # Adds ~1.4× LLM calls.  The aCTIon paper reports 27% → 8% hallucination on its
 # own benchmark; CTIParsor's measured figure is the grounding harness's (docs/eval/)
-ENABLE_STIX_VERIFICATION=false
+ENABLE_STIX_VERIFICATION=true
 STIX_VERIFY_MIN_RELS=1
 
 # Stage 3f — Self-verification of TTPs (ADR-0011 Phase B).  Recommended ON:
@@ -478,7 +478,7 @@ relationships only, linking facts stated far apart ("X is a variant of Y" in
 paragraph 2, "Y is attributed to Z" in paragraph 40) — ADR-0057, ADR-0064.
 Measured on 7 real reports: about 60% more correct relationships, but only 40%
 of the ones it adds are strictly correct (vague `related-to`, generic
-endpoints). When Stage 3d is on, its result goes through 3d like the chunks'.
+endpoints). When Stage 3d is on, its result goes through 3d like the chunks'. On by default; `ENABLE_DOCUMENT_LEVEL_RELATIONS=false` turns it off.
 
 It needs a context window that fits the whole report and room for a long
 answer: on a 37 000-character report it wrote 50 000 characters, 11 minutes at
@@ -486,7 +486,7 @@ answer: on a 37 000-character report it wrote 50 000 characters, 11 minutes at
 call times out and adds nothing.
 
 ```env
-ENABLE_DOCUMENT_LEVEL_RELATIONS=false
+ENABLE_DOCUMENT_LEVEL_RELATIONS=true
 # Prompt ceiling for this pass only (largest report of this project's corpus: ~110k chars)
 # LLM_DOC_MAX_PROMPT_LENGTH=300000
 ```

@@ -752,13 +752,27 @@ from pipeline.stage3_llm import (  # noqa: E402
 
 
 class TestDocumentLevelRelationsFlag:
-    def test_off_by_default(self, monkeypatch):
+    def test_on_by_default(self, monkeypatch):
         monkeypatch.delenv("ENABLE_DOCUMENT_LEVEL_RELATIONS", raising=False)
+        assert document_level_relations_enabled() is True
+
+    def test_can_be_disabled(self, monkeypatch):
+        monkeypatch.setenv("ENABLE_DOCUMENT_LEVEL_RELATIONS", "false")
         assert document_level_relations_enabled() is False
 
-    def test_can_be_enabled(self, monkeypatch):
-        monkeypatch.setenv("ENABLE_DOCUMENT_LEVEL_RELATIONS", "true")
-        assert document_level_relations_enabled() is True
+
+class TestStage3dVerificationFlag:
+    def test_on_by_default(self, monkeypatch):
+        # conftest pins _VERIFY_ENABLED off; restore it at teardown, then
+        # re-read the module's switch with the variable unset.
+        import importlib
+
+        import pipeline.stage3d_verify as verify
+
+        monkeypatch.setattr(verify, "_VERIFY_ENABLED", verify._VERIFY_ENABLED)
+        monkeypatch.delenv("ENABLE_STIX_VERIFICATION", raising=False)
+        importlib.reload(verify)
+        assert verify.verify_enabled() is True
 
 
 class TestEnrichDocumentRelationsHappyPath:

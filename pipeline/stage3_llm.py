@@ -1749,7 +1749,7 @@ def enrich_chunk(
     # Stage 3d — self-verification of relationship claims (ADR-004 P3-A)
     # Sends a second LLM call to find the supporting sentence for each relationship.
     # Relationships without textual support are removed (reduces hallucination ~27%→8%).
-    # Only runs when ENABLE_STIX_VERIFICATION=true in .env (default: false).
+    # Runs unless ENABLE_STIX_VERIFICATION=false in .env (default: true).
     if result.relationships:
         from pipeline.stage3d_verify import verify_enabled, verify_relationships
         if verify_enabled() if verify_rels is None else verify_rels:
@@ -1899,10 +1899,11 @@ def enrich_all_chunks(
 
 def document_level_relations_enabled() -> bool:
     """True when the Stage 3 document-level relation pass (ADR-0057) should
-    run. Off by default, same convention as Stage 3d/3e/completion.long_distance
-    — a new capability ships opt-in until measured on real jobs."""
+    run. On by default (ADR-0057 shipped it opt-in until measured; the
+    maintainer turned it on, 2026-11-08); ENABLE_DOCUMENT_LEVEL_RELATIONS=false
+    turns it off."""
     from pipeline.env_flags import env_bool
-    return env_bool("ENABLE_DOCUMENT_LEVEL_RELATIONS", default=False)
+    return env_bool("ENABLE_DOCUMENT_LEVEL_RELATIONS", default=True)
 
 
 def enrich_document_relations(
@@ -1913,8 +1914,8 @@ def enrich_document_relations(
     verify_rels: bool | None = None,
 ) -> LLMEnrichmentResult:
     """
-    Stage 3 document-level relation pass (ADR-0057) — opt-in via
-    ENABLE_DOCUMENT_LEVEL_RELATIONS=true (see document_level_relations_enabled()).
+    Stage 3 document-level relation pass (ADR-0057) — on by default; switched
+    off by ENABLE_DOCUMENT_LEVEL_RELATIONS=false (see document_level_relations_enabled()).
 
     `verify_rels` switches Stage 3d for this call, as in enrich_chunk; None
     follows ENABLE_STIX_VERIFICATION.

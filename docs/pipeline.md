@@ -177,7 +177,7 @@ The boxes below give each stage in detail, in execution order.
 │  aCTIon paper: 27% → 8% hallucination on its benchmark; CTIParsor's│
 │  own figure is the grounding harness's (docs/eval), not this one   │
 │  Cost: ~1.4× total LLM calls (only chunks with ≥ 1 relationship)   │
-│  Enable: ENABLE_STIX_VERIFICATION=true in .env                      │
+│  On by default; ENABLE_STIX_VERIFICATION=false turns it off         │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
@@ -212,7 +212,7 @@ The boxes below give each stage in detail, in execution order.
 │    40% of the ones it adds are strictly correct                      │
 │  • Needs a context window that fits the report and a long timeout    │
 │  • Goes through 3d like the chunks when 3d is on                     │
-│  Enable: ENABLE_DOCUMENT_LEVEL_RELATIONS=true in .env                │
+│  On by default; ENABLE_DOCUMENT_LEVEL_RELATIONS=false turns it off  │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
@@ -681,7 +681,7 @@ read-only at run time).
 | Stage 2f — CVE enrichment | ✅ from the `cve_cache` table; ❌ the CIRCL lookup, opt-in with `CVE_ENRICHMENT=true` |
 | Stage 3 — Anthropic / Gemini / Mistral | ❌ requires internet |
 | Stage 3 — Ollama / vLLM / LM Studio | ✅ if the server is local |
-| Stage 3doc — document-level relations (opt-in) | ❌ requires an LLM provider |
+| Stage 3doc — document-level relations (on by default) | ❌ requires an LLM provider |
 | Stage 3r — baseline reconciliation (enrich mode only) | ✅ fully offline (pure; needs the analyst's STIX bundle) |
 | OCR (Tesseract) | ✅ local binary |
 | Web UI (frontend assets) | ✅ served from local dist/ |

@@ -16,7 +16,7 @@ OLD_SEMANTICS: list[tuple[str, bool, Callable[[str], bool], bool]] = [
      lambda v: v == "1", False),
     # stage3d / stage3f — read once at import into _VERIFY_ENABLED.
     ("ENABLE_STIX_VERIFICATION", False,
-     lambda v: v.lower() in ("true", "1", "yes"), False),
+     lambda v: v.lower() in ("true", "1", "yes"), True),
     ("ENABLE_TTP_VERIFICATION", False,
      lambda v: v.lower() in ("true", "1", "yes"), False),
     # stage3e — the strictest of the seven: only the literal "true".

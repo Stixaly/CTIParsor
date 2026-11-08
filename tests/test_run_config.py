@@ -117,6 +117,14 @@ def test_a_set_vision_provider_is_recorded_as_it_was_set(stages_imported, monkey
     assert run_config.captured_env()["VISION_PROVIDER"] == setting
 
 
+@pytest.mark.parametrize("name", ["ENABLE_STIX_VERIFICATION", "ENABLE_DOCUMENT_LEVEL_RELATIONS"])
+def test_an_unset_default_on_switch_is_recorded_as_true(stages_imported, monkeypatch, name):
+    """Unset, the switch is on (Stages 3d and 3doc): the record says so."""
+    monkeypatch.delenv(name, raising=False)
+    assert run_config.captured_env()[name] == "true"
+    assert run_config.build_run_config()["env"][name] == "true"
+
+
 # ── The record of a build (ADR-0086) ─────────────────────────────────────────
 
 def test_the_captured_environment_is_the_allow_list_only(monkeypatch):
