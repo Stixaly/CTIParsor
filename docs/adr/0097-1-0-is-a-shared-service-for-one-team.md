@@ -1,6 +1,7 @@
 # ADR-0097: 1.0 is a shared service for one team
 
-**Status:** Proposed (2026-11-08). The maintainer accepts it after reading it.
+**Status:** Accepted (2026-11-08), with the maintainer's answers to the design
+questions (see *Confirmed by the maintainer* below).
 **Date:** 2026-11-08
 **Deciders:** maintainer
 **Amends:** ADR-0094 (its decision on who 1.0 is for; its other decisions stay)
@@ -182,7 +183,7 @@ the database is configurable.
 ### Backups (decided by this ADR)
 
 A `backup` service, in a Compose profile, runs the documented `pg_dump` and the
-state archive on a schedule, to a mounted off-host target, keeps N copies, and
+state archive on a schedule, to a mounted off-host target, keeps 7 copies by default, and
 exposes its success or failure on `/metrics`. The operator sets the recovery
 point objective (RPO) and the recovery time objective (RTO). The defaults the
 documentation gives: a daily backup (RPO 24 h), and a restore whose duration
@@ -220,6 +221,25 @@ declare none, ADR-0094 item 1).
 - An end-to-end journey with a PDF import and a URL import, with the real
   models. ADR-0094 item 4 covers neither (it runs offline).
 
+### Confirmed by the maintainer (2026-11-08)
+
+The design points above were put to the maintainer as questions; each answer
+is the proposal written here:
+
+| Question | Answer |
+|---|---|
+| A report without a TLP marking | treated as TLP:AMBER (fail closed): refused towards an external provider until marked CLEAR or GREEN or processed by a local one |
+| Authentication off with a bind beyond loopback | the service refuses to start |
+| Who deletes a report | an analyst their own imports, an admin any; a migration records who imported each report, and a report stored before it has no owner, so only an admin deletes it |
+| `GET /api/queue/status` | signed-in users (reader); only `GET /api/health` stays open |
+| `/metrics` and alert rules | yes, reversing ADR-0048's rejection for this audience |
+| Scheduled backups | daily, 7 copies kept, both configurable |
+| `JOB_MAX_ATTEMPTS` | 3 |
+| Lifetime of an API token | 90 days by default, set at creation, revocable at any time |
+
+The other open questions of `docs/api-permissions.md` are settled in work
+item 14, operation by operation.
+
 ## Work items
 
 They continue the table of ADR-0094 (items 1 to 13). None is started on
@@ -232,7 +252,7 @@ They continue the table of ADR-0094 (items 1 to 13). None is started on
 | 16 | Egress policy: the TLP-to-provider rule in the text stages and in Stage 1f, a declared list of local addresses, the refusal and its reason, the decision in the run's record | AMBER and above never reach an external provider | not started |
 | 17 | Audit: the authenticated user on every state-changing action, JSON log lines, retention, the documented fields | decisions are attributed | not started |
 | 18 | Metrics and alert rules: `/metrics`, the Prometheus rules file, the procedure of each alert in `docs/operations.md` | an outage raises an alert | not started |
-| 19 | Scheduled backups: the `backup` service, the schedule, the off-host target, N copies, the metric, the documented RPO and RTO | a backup exists and is known to | not started |
+| 19 | Scheduled backups: the `backup` service, the daily schedule, the off-host target, 7 copies, the metric, the documented RPO and RTO | a backup exists and is known to | not started |
 | 20 | Bounds: `GET /api/jobs` pagination, `JOB_MAX_ATTEMPTS`, the free-disk refusal of uploads | a list, a loop and a full disk do not take the service down | not started |
 | 21 | The false backup log: remove "Database backup completed" from `api/worker.py` | the log says what happened | not started |
 | 22 | Response models for every operation and the SSE payloads, recorded by the contract snapshot | the stable contract covers the responses | not started |

@@ -110,7 +110,7 @@ pipeline still produces valid STIX. ML models are downloaded once and cached.
 
 ## What this is NOT
 - Not a multi-user / hosted service — there is no authn/authz. [ADR-0097](docs/adr/0097-1-0-is-a-shared-service-for-one-team.md)
-  (proposed on 2026-11-08) plans authentication, roles and an audit trail for
+  (accepted on 2026-11-08) plans authentication, roles and an audit trail for
   1.0; until its work items are done, this line stays true.
 - Not hardened for internet exposure — keep it on localhost or behind your own auth proxy.
   `API_HOST` in `.env` controls the bind address; see [docs/deployment.md](docs/deployment.md)
