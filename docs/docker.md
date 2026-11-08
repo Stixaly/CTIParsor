@@ -21,7 +21,7 @@ decisions behind the containerization itself.
   - `bootstrap`: one-shot initialisation (models, corpora, rule store), same image and hardening as `app`.
   - `ollama`: a local LLM with no published port, reachable by `app` at `http://ollama:11434`.
   - `proxy`: TLS + password (`nginx-unprivileged`) in front of `app`; the only thing worth publishing on a network.
-- **Not in the image**: the models (2.6 GB) and corpora (0.7 GB) are downloaded once into `cti-cache` by `bootstrap`, so a code change rebuilds in minutes. `docs/` and `tests/` are left out too.
+- **Not in the image**: the models (2.6 GB) and corpora (0.2 GB) are downloaded once into `cti-cache` by `bootstrap`, so a code change rebuilds in minutes. `docs/` and `tests/` are left out too.
 
 Known limits: no GPU (torch is the CPU build); `git` has no repository inside the container, so bundle-staleness checks (ADR-0035) answer "undecidable" and the revision recorded in each bundle comes from the `GIT_REV` build argument (`make docker-build` sets it, a bare `docker compose build` records nothing). Docker Desktop on Windows and docker-ce inside WSL2 both work; the repository may live on the Windows drive, the named volumes live in the Linux VM.
 
@@ -45,7 +45,7 @@ The full map with data flow and the reasoning is in [docs/architecture.md](archi
 
 - Docker Engine 24+ with BuildKit (default).
 - Docker Compose v2.24+ (`docker compose version`).
-- Disk space: ~5 GB for the image (4.7 GB unpacked, 1.2 GB to download), ~5 GB for volumes after bootstrap (`cti-cache` 3.2 GB, the database with its rule store 1.6 GB); an upgrade pulls the next image beside it.
+- Disk space: ~5 GB for the image (4.1 GB unpacked, 1.2 GB to download), ~5 GB for volumes after bootstrap (`cti-cache` 2.8 GB, the database with its rule store 1.6 GB; measured on 2026-11-08); an upgrade pulls the next image beside it.
 - RAM and CPU: every container declares a limit and a reservation in `compose.yaml`; the defaults below are measured for one report at a time and add up to about 10 GB and 8 CPUs for the always-on services. Override any of them in `.env` (`CTI_<SERVICE>_CPUS`, `CTI_<SERVICE>_MEMORY`).
 
 | Service | CPUs | Memory limit | Reserved | Why |

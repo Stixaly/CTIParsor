@@ -154,16 +154,16 @@ docker compose up -d
 docker compose --profile bootstrap run --rm bootstrap
 ```
 
-`pull` fetches the image by its digest (1.2 GB to download, 4.7 GB on disk)
+`pull` fetches the image by its digest (1.2 GB to download, 4.1 GB on disk)
 and those of PostgreSQL and the capture proxy. Pinned by digest, the image is
 never built instead: if the pull fails, `up` stops with `build tag cannot
 contain a digest`. `up -d` starts `app`, `worker`, `postgres` and
 `capture-proxy`; the web UI is at <http://127.0.0.1:8000>. `bootstrap`, once,
 downloads the models (2.6 GB) into the `cti-cache` volume, clones the
-detection corpora (0.7 GB) and builds the rule store of 88,000 rules in the
-database (1.6 GB): about 6 minutes on the clean install of
-[TESTING.md](TESTING.md#clean-install-from-the-published-image), the models
-in under 2 of them, without an `HF_TOKEN`. Restarting, upgrading to the next
+detection corpora (0.2 GB) and builds the rule store of 86,000 rules in the
+database (1.6 GB): about 3 minutes on the clean install of
+[TESTING.md](TESTING.md#clean-install-from-the-published-image) (2026-11-08),
+without an `HF_TOKEN`. Restarting, upgrading to the next
 release and backing up are in
 [docs/docker.md](docs/docker.md#day-to-day-operations) and
 [docs/upgrading.md](docs/upgrading.md#from-one-release-to-the-next).
