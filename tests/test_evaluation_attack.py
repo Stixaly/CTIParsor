@@ -595,7 +595,8 @@ def test_a_run_resumes_only_on_the_release_it_began_with(fake_pipeline, monkeypa
         fake_pipeline.ran.clear()
         for doc in (run_dir / "docs").glob("*.json"):
             doc.unlink()
-    assert (run_dir / "run.json").read_text(encoding="utf-8") == began               # not rewritten
+    # Not rewritten, but for the embedding record a run from before it gets at its first start.
+    assert {k: v for k, v in _read(run_dir / "run.json").items() if k != "embedding"} == json.loads(began)
 
 
 @pytest.mark.parametrize("command, kind, first", _COMMANDS)
@@ -620,6 +621,144 @@ def test_a_new_run_records_the_release_it_runs_on(fake_pipeline, monkeypatch, co
     _cli(monkeypatch, command, "--name", "fresh")
     meta = _read(fake_pipeline.out / kind / "fresh" / "run.json")
     assert meta["manifest"]["attack"]["release"] == "20.0" and fake_pipeline.ran
+
+
+# ── The embedding model a run loaded (ADR-0094 item 13) ──────────────────────
+
+_PRIMARY, _LEGACY = "ehsanaghaei/SecureBERT-Plus", "all-MiniLM-L6-v2"
+
+
+def _status(loaded=_PRIMARY, fallback=False, cache=_PRIMARY):
+    return {"requested": _PRIMARY, "loaded": loaded, "fallback": fallback, "corpus_model": cache,
+            "cache_model": cache, "cache_matches": cache == (loaded or _PRIMARY)}
+
+
+@pytest.fixture()
+def heavy(fake_pipeline, monkeypatch):
+    """Heavy models 'on' with a fake encoder: `heavy.status` is what the run finds."""
+    from pipeline import stage2c_ttp_semantic as s2c
+    from pipeline import ttp_retrieval
+
+    monkeypatch.delenv("SKIP_HEAVY_MODELS", raising=False)
+    box = SimpleNamespace(status=_status(), loads=0, ran=fake_pipeline.ran, out=fake_pipeline.out)
+
+    def load():
+        box.loads += 1
+
+    monkeypatch.setattr(s2c, "_load_model", load)
+    monkeypatch.setattr(s2c, "embedding_status", lambda: box.status)
+    monkeypatch.setattr(ttp_retrieval, "retrieval_status", lambda: box.status)
+    return box
+
+
+@pytest.mark.parametrize("command, kind, first", _COMMANDS)
+def test_a_run_on_a_fallback_model_stops_before_any_document(heavy, monkeypatch, command, kind, first):
+    heavy.status = _status(loaded=_LEGACY, fallback=True, cache=_LEGACY)
+    with pytest.raises(SystemExit, match=f"fresh: the embedding model {_PRIMARY} did not load, {_LEGACY} was used"):
+        _cli(monkeypatch, command, "--name", "fresh")
+    assert heavy.loads == 1 and heavy.ran == [] and not (heavy.out / kind / "fresh").exists()
+
+
+@pytest.mark.parametrize("command, kind, first", _COMMANDS)
+def test_a_run_on_a_cache_built_for_another_encoder_stops_before_any_document(
+        heavy, monkeypatch, command, kind, first):
+    heavy.status = _status(cache=_LEGACY)
+    with pytest.raises(SystemExit, match=f"fresh: embedding cache built for {_LEGACY}, model in use {_PRIMARY}"):
+        _cli(monkeypatch, command, "--name", "fresh")
+    assert heavy.ran == [] and not (heavy.out / kind / "fresh").exists()
+
+
+@pytest.mark.parametrize("command, kind, first", _COMMANDS)
+def test_a_run_with_a_matching_cache_records_the_status(heavy, monkeypatch, command, kind, first):
+    _cli(monkeypatch, command, "--name", "fresh")
+    assert heavy.ran
+    assert _read(heavy.out / kind / "fresh" / "run.json")["embedding"] == heavy.status
+
+
+@pytest.mark.parametrize("command, kind, first", _COMMANDS)
+def test_a_run_resumes_only_on_the_model_it_loaded(heavy, monkeypatch, command, kind, first):
+    run_dir = _begin(heavy.out, kind, "half", None)
+    meta = _read(run_dir / "run.json")
+    meta["embedding"] = _status(loaded=_LEGACY, cache=_LEGACY)
+    (run_dir / "run.json").write_text(json.dumps(meta), encoding="utf-8")
+
+    with pytest.raises(SystemExit, match=f"half began on the embedding model {_LEGACY} and this process loaded "
+                                         f"{_PRIMARY}: resume it with TTP_EMBEDDING_MODEL={_LEGACY}"):
+        _cli(monkeypatch, command, "--name", "half")
+    assert heavy.ran == []
+
+    heavy.status = _status(loaded=_LEGACY, cache=_LEGACY)          # the same model, even if it is not the requested
+    heavy.status["fallback"] = False
+    _cli(monkeypatch, command, "--name", "half")
+    assert heavy.ran
+
+
+def _set_embedding(run_dir, status):
+    meta = _read(run_dir / "run.json")
+    meta["embedding"] = status
+    (run_dir / "run.json").write_text(json.dumps(meta), encoding="utf-8")
+
+
+@pytest.mark.parametrize("command, kind, first", _COMMANDS)
+def test_a_run_with_2c_disabled_loads_nothing(heavy, monkeypatch, command, kind, first):
+    heavy.status = _status(loaded=_LEGACY, fallback=True, cache=_LEGACY)           # would refuse if read
+    _cli(monkeypatch, command, "--name", "fresh", "--disable", "2c")
+    assert heavy.loads == 0 and heavy.ran
+    assert _read(heavy.out / kind / "fresh" / "run.json")["embedding"] == {"skipped": "2c disabled"}
+
+
+@pytest.mark.parametrize("command, kind, first", _COMMANDS)
+def test_a_run_without_any_embedding_model_stops(heavy, monkeypatch, command, kind, first):
+    heavy.status = _status(loaded=None)
+    with pytest.raises(SystemExit, match=f"fresh: no embedding model could be loaded [(]{_PRIMARY}[)]"):
+        _cli(monkeypatch, command, "--name", "fresh")
+    assert heavy.ran == []
+
+
+@pytest.mark.parametrize("command, kind, first", _COMMANDS)
+def test_a_run_without_a_cache_says_to_build_it(heavy, monkeypatch, command, kind, first):
+    heavy.status = {**_status(), "cache_model": None, "corpus_model": None, "cache_matches": False}
+    with pytest.raises(SystemExit, match="fresh: no embedding cache: build it with"):
+        _cli(monkeypatch, command, "--name", "fresh")
+    assert heavy.ran == []
+
+
+@pytest.mark.parametrize("command, kind, first", _COMMANDS)
+def test_select_mode_without_an_llm_checks_the_detectors_cache(heavy, monkeypatch, command, kind, first):
+    """The orchestrator then runs the old detector; the check follows it."""
+    from pipeline import ttp_retrieval
+
+    monkeypatch.setattr("pipeline.orchestrator.stage3_can_run", lambda opts: False)
+    monkeypatch.setattr(ttp_retrieval, "retrieval_status", lambda: pytest.fail("the retrieval cache was checked"))
+    _cli(monkeypatch, command, "--name", "fresh")
+    assert heavy.ran
+
+
+@pytest.mark.parametrize("command, kind, first", _COMMANDS)
+def test_a_run_that_loaded_a_model_does_not_resume_with_the_check_skipped(
+        heavy, monkeypatch, command, kind, first):
+    run_dir = _begin(heavy.out, kind, "half", None)
+    _set_embedding(run_dir, _status())
+    monkeypatch.setenv("SKIP_HEAVY_MODELS", "1")
+    with pytest.raises(SystemExit, match=f"half began on the embedding model {_PRIMARY} and this process "
+                                         "skips the check [(]SKIP_HEAVY_MODELS[)]"):
+        _cli(monkeypatch, command, "--name", "half")
+    assert heavy.ran == []
+
+
+@pytest.mark.parametrize("command, kind, first", _COMMANDS)
+def test_a_run_from_before_the_record_gets_it_at_its_first_start(heavy, monkeypatch, command, kind, first):
+    run_dir = _begin(heavy.out, kind, "old", None)
+    assert "embedding" not in _read(run_dir / "run.json")
+    _cli(monkeypatch, command, "--name", "old")
+    assert _read(run_dir / "run.json")["embedding"] == heavy.status and heavy.ran
+
+
+@pytest.mark.parametrize("command, kind, first", _COMMANDS)
+def test_a_run_without_heavy_models_skips_the_check_and_says_so(fake_pipeline, monkeypatch, command, kind, first):
+    monkeypatch.setenv("SKIP_HEAVY_MODELS", "1")
+    _cli(monkeypatch, command, "--name", "fresh")
+    assert _read(fake_pipeline.out / kind / "fresh" / "run.json")["embedding"] == {"skipped": "SKIP_HEAVY_MODELS"}
 
 
 def test_inhouse_score_maps_with_the_release_of_the_run(world, monkeypatch):

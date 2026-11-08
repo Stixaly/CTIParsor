@@ -91,9 +91,14 @@ class StageOutcome:
     reason: str = ""
     seconds: float = 0.0
     counts: dict[str, int] = field(default_factory=dict)
+    # Non-numeric facts about the stage (Stage 2c: the embedding model and the
+    # TTP mode); merged into the report entry, absent when empty.
+    details: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict:
-        return asdict(self)
+        d = asdict(self)
+        d.update(d.pop("details"))
+        return d
 
 
 @dataclass
@@ -546,6 +551,13 @@ def synthesis_stats(bundle) -> dict | None:
 # ── The run ──────────────────────────────────────────────────────────────────
 
 
+def stage3_can_run(opts: RunOptions) -> bool:
+    """Stage 3 is enabled and its provider ready; with `ttp_mode == "select"`, this
+    is what makes Stage 2c retrieve candidates instead of detecting techniques."""
+    from pipeline.stage3_llm import _provider_ready
+    return "3" not in opts.disabled and _provider_ready()
+
+
 class _Run:
     """State of one run_document() call; one method per stage."""
 
@@ -558,9 +570,11 @@ class _Run:
     # -- bookkeeping ---------------------------------------------------------
 
     def record(self, stage: str, status: str, reason: str = "", seconds: float = 0.0,
+               details: Any = None,   # Any: **counts of a dict[str, int] must not read as a mismatch
                **counts: int) -> None:
         # One line: a reason may carry a driver's multi-line error message.
-        outcome = StageOutcome(stage, status, " ".join(reason.split()), round(seconds, 3), counts)
+        outcome = StageOutcome(stage, status, " ".join(reason.split()), round(seconds, 3), counts,
+                               details or {})
         self.r.stages.append(outcome)
         if status != RAN:
             log = logger.warning if status == FAILED else logger.info
@@ -569,15 +583,54 @@ class _Run:
             raise StageRequired(outcome)
 
     def gate(self, stage: str, available: Callable[[], bool] | None = None,
-             unavailable_reason: str = "model or index unavailable") -> bool:
-        """True if `stage` should run; otherwise records why it will not."""
+             unavailable_reason: str | Callable[[], str] = "model or index unavailable",
+             details: Callable[[], dict[str, Any]] | None = None,
+             disabled_details: dict[str, Any] | None = None) -> bool:
+        """True if `stage` should run; otherwise records why it will not.  The
+        reason may be computed when needed; `details` is recorded with an
+        unavailable skip and `disabled_details` with a disabled one."""
         if stage in self.opts.disabled:
-            self.record(stage, SKIPPED, "disabled")
+            self.record(stage, SKIPPED, "disabled", details=disabled_details)
             return False
         if available is not None and not available():
-            self.record(stage, SKIPPED, unavailable_reason)
+            reason = unavailable_reason() if callable(unavailable_reason) else unavailable_reason
+            self.record(stage, SKIPPED, reason, details=details() if details else None)
             return False
         return True
+
+    def _embedding_details(self, status: dict) -> dict[str, Any]:
+        """What Stage 2c's record carries: the embedding status and the TTP mode."""
+        return {"embedding": status, "ttp_mode": self.opts.ttp_mode}
+
+    def _embedding_reason(self, generic: str, rebuild: str) -> str:
+        """Why Stage 2c is unavailable: the encoder/cache mismatch when that is
+        the cause, else `generic`."""
+        from pipeline import stage2c_ttp_semantic as s2c
+
+        if rebuild == "retrieval":
+            from pipeline.ttp_retrieval import retrieval_status
+            status = retrieval_status()
+            cache = status["corpus_model"]
+        else:
+            status = s2c.embedding_status()
+            cache = status["cache_model"]
+        if cache is not None and not status["cache_matches"]:
+            in_use = status["loaded"] or status["requested"]
+            return (f"embedding cache built for {cache}, model in use {in_use}: "
+                    f"rebuild with python scripts/build_indexes.py --only {rebuild}")
+        return generic
+
+    @staticmethod
+    def _embedding_caveat(status: dict) -> str:
+        """What a Stage 2c that ran says about its encoder when it is not the one
+        requested or its cache is for another: "" otherwise."""
+        cache = status.get("corpus_model", status.get("cache_model"))
+        parts = []
+        if status["fallback"]:
+            parts.append(f"fallback to {status['loaded']}")
+        if not status["cache_matches"] and cache is not None:
+            parts.append(f"cache built for {cache}")
+        return "; ".join(parts)
 
     # -- stages --------------------------------------------------------------
 
@@ -734,17 +787,35 @@ class _Run:
 
         # Stage 2c — semantic TTP detection (verify mode), or candidate
         # retrieval for Stage 3f to select from (select mode, ADR-0072).
-        from pipeline.stage2c_ttp_semantic import detect_ttps_semantic, semantic_available
+        from pipeline.stage2c_ttp_semantic import detect_ttps_semantic, embedding_status, semantic_available
         offline_note = ""
+        off = {"ttp_mode": self.opts.ttp_mode}      # a disabled 2c loads and reads nothing
         if self.opts.ttp_mode == "select" and self._stage3_can_run():
-            from pipeline.ttp_retrieval import candidates_for_chunks, retrieval_available
-            if self.gate("2c", retrieval_available, "retrieval corpus or model unavailable "
-                         "(python scripts/build_indexes.py --only retrieval)"):
+            from pipeline.ttp_retrieval import (
+                candidates_for_chunks,
+                retrieval_available,
+                retrieval_status,
+            )
+            if self.gate("2c", retrieval_available,
+                         lambda: self._embedding_reason("retrieval corpus or model unavailable "
+                                                        "(python scripts/build_indexes.py "
+                                                        "--only retrieval)", "retrieval"),
+                         details=lambda: self._embedding_details(retrieval_status()),
+                         disabled_details=off):
                 t0 = time.monotonic()
                 self.r.ttp_candidates = candidates_for_chunks(self.r.chunks)
-                self.record("2c", RAN, "candidates only (select mode)", time.monotonic() - t0,
+                status = retrieval_status()
+                note = "; ".join(filter(None, ["candidates only (select mode)",
+                                               self._embedding_caveat(status)]))
+                self.record("2c", RAN, note, time.monotonic() - t0,
+                            details=self._embedding_details(status),
                             candidates=sum(len(c) for c in self.r.ttp_candidates))
-        elif self.gate("2c", semantic_available):
+        elif self.gate("2c", semantic_available,
+                       lambda: self._embedding_reason(
+                           "model or index unavailable (python scripts/build_indexes.py "
+                           "--only embeddings)", "embeddings"),
+                       details=lambda: self._embedding_details(embedding_status()),
+                       disabled_details=off):
             if self.opts.ttp_mode == "select":
                 # No LLM to select with: the old detector, said to be weaker.
                 offline_note = ("offline fallback (select mode without an LLM): "
@@ -758,7 +829,9 @@ class _Run:
                 if key not in keys:
                     entities.append(se)
                     keys.add(key)
-            self.record("2c", RAN, offline_note, time.monotonic() - t0,
+            status = embedding_status()
+            self.record("2c", RAN, "; ".join(filter(None, [offline_note, self._embedding_caveat(status)])),
+                        time.monotonic() - t0, details=self._embedding_details(status),
                         entities=len(self.r.semantic_ttps))
 
         # Stage 2d — CyNER.
@@ -813,8 +886,7 @@ class _Run:
         })
 
     def _stage3_can_run(self) -> bool:
-        from pipeline.stage3_llm import _provider_ready
-        return "3" not in self.opts.disabled and _provider_ready()
+        return stage3_can_run(self.opts)
 
     def enrich(self) -> None:
         from pipeline.stage3_llm import (
