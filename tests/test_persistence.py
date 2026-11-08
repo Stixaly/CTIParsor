@@ -64,17 +64,6 @@ _INSTANT_END = {"role": "end", "time_text": "2023-03-01T08:00:00Z",
                 "status": "verified"}
 
 
-# ── Backup ───────────────────────────────────────────────────────────────────
-
-def test_backup_db_logs_pg_dump_guidance(temp_db, caplog):
-    """Both stores are PostgreSQL now (ADR-0053): backup_db() no longer copies
-    a local file, it points the operator at pg_dump instead — confirm it runs
-    without error and says so, rather than silently doing nothing."""
-    with caplog.at_level("INFO"):
-        temp_db.backup_db()
-    assert "pg_dump" in caplog.text
-
-
 # ── Output bundle path is job-scoped (no cross-job collision) ─────────────────
 
 def test_bundle_output_path_is_job_scoped():

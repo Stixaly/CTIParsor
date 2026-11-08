@@ -25,7 +25,7 @@ from api.logging_config import get_logger
 logger = get_logger(__name__)
 
 from api.baseline_store import baseline_sha256, load_baseline, objects_by_id, validate_in_worker
-from api.db import _lock, backup_db, emit_progress, get_conn, now_iso, set_job_status, transaction
+from api.db import _lock, emit_progress, get_conn, now_iso, set_job_status, transaction
 from api.paths import output_dir, uploads_dir
 from api.run_config import BuildKind, build_record, run_build_record, utc_stamp
 from models.schemas import EntityType, RawEntity
@@ -740,13 +740,6 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str,
             return
 
         emit_progress(job_id, "done", {"status": "for_review"})
-
-        # Backup database after successful processing
-        try:
-            backup_db()
-            logger.info(f"[Worker] Database backup completed for job {job_id}")
-        except Exception as e:
-            logger.error(f"[Worker] Database backup failed: {e}")
 
     except RunAborted:
         return
