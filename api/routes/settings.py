@@ -169,7 +169,7 @@ def _validate_git_remote(value: str) -> None:
     try:
         validate_url(value)
     except CaptureError as e:
-        raise HTTPException(400, f"'git' is not a safe remote: {e}") from e
+        raise HTTPException(400, _mask_text(f"'git' is not a safe remote: {e}")) from e
 
 
 #: Query parameters whose value is a credential when a corpus URL carries one.
@@ -212,6 +212,40 @@ def _mask_url(url: str | None) -> str | None:
             pairs.append(f"{name}={_MASK}" if eq and name.lower() in _SECRET_QUERY_PARAMS else pair)
         query = "&".join(pairs)
     return urlunsplit((parts.scheme, netloc, parts.path, query, parts.fragment))
+
+
+#: A URL, or a scp-style `user@host:path` remote, inside free text such as a git error.
+_URL_IN_TEXT_RE = compile_pattern(r"https?://\S+|[A-Za-z0-9_.+-]+@\S+")
+
+
+def _mask_text(text: str | None) -> str | None:
+    """Mask every URL in a message (a sync result or an error), with `_mask_url`.
+
+    A git error can echo the remote it failed on, with its token in the userinfo.
+    A scp-style `user@host:path` remote has no password, so only a token-shaped
+    user is masked; an address such as `ops@example.org` is kept.
+    """
+    if not text:
+        return text
+
+    def _mask(match) -> str:
+        found = match.group(0)
+        if found.startswith(("http://", "https://")):
+            return _mask_url(found) or _MASK
+        user, _, rest = found.partition("@")
+        return f"{_MASK if _TOKEN_LIKE_USER_RE.fullmatch(user) else user}@{rest}"
+
+    return _URL_IN_TEXT_RE.sub(_mask, text)
+
+
+def _refuse_masked_url(value: str | None, field: str) -> None:
+    """A URL that still holds the mask is a masked copy from a response, not a remote."""
+    if value and _MASK in value:
+        raise HTTPException(
+            400,
+            f"'{field}' contains '***', the masked form the settings API shows for a secret. "
+            "Enter the real URL, or the stored token is lost.",
+        )
 
 
 def _with_counts() -> list[dict]:
@@ -283,6 +317,8 @@ def create_corpus(body: CorpusIn):
     if body.git and body.tarball:
         raise HTTPException(400, "provide either 'git' or 'tarball', not both")
 
+    _refuse_masked_url(body.git, "git")
+    _refuse_masked_url(body.tarball, "tarball")
     _validate_remote(body.git, "git")
     _validate_remote(body.tarball, "tarball")
     if body.tarball:
@@ -389,9 +425,10 @@ def sync_one_corpus(name: str):
 
     mismatch = clone_mismatch(corpus)
     if mismatch:
-        raise HTTPException(409, mismatch)
+        raise HTTPException(409, _mask_text(mismatch))
 
     ok, detail = sync_corpus(corpus)
+    detail = _mask_text(detail)
     if not ok:
         raise HTTPException(502, f"sync failed: {detail}")
 
@@ -402,7 +439,7 @@ def sync_one_corpus(name: str):
         # the rules it had: say so instead of reporting a success (#374).
         raise HTTPException(
             422,
-            f"downloaded, but not re-imported: {summary['skip_reasons'][name]}. "
+            f"downloaded, but not re-imported: {_mask_text(summary['skip_reasons'][name])}. "
             "The rules indexed before are kept.",
         )
     return {

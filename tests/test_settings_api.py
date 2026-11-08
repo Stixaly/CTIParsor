@@ -461,3 +461,57 @@ def test_sync_response_masks_the_corpus_urls(temp_db, temp_db_client, tmp_path, 
     assert r.status_code == 200, r.text
     assert r.json()["corpora"][0]["git"] == "https://x-access-token:***@github.com/org/demo.git"
     assert SECRET not in r.text
+
+
+# ── A masked URL is refused on input; URLs in messages are masked (TMASK, 2nd) ──
+
+
+@pytest.mark.parametrize("body", [
+    {"name": "extra", "git": "https://user:***@github.com/org/extra.git"},
+    {"name": "extra", "git": "https://github.com/org/extra.git?token=***"},
+    {"name": "extra", "tarball": "https://example.com/extra.tgz?sig=***"},
+])
+def test_create_refuses_a_masked_url_copied_back(temp_db, temp_db_client, tmp_path, monkeypatch, body):
+    cfg = _setup(tmp_path, monkeypatch)
+    r = temp_db_client.post("/api/settings/corpora", json=body)
+    assert r.status_code == 400 and "'***'" in r.json()["detail"]
+    assert "extra" not in _overlay_text(cfg) if (cfg.parent / "detection_corpora.local.yaml").exists() else True
+
+
+def test_mask_text_hides_urls_in_a_message():
+    text = "fatal: unable to access 'https://user:token@host/x.git/': 403; see https://h/x?token=SECRET"
+    assert settings_mod._mask_text(text) == (
+        "fatal: unable to access 'https://user:***@host/x.git/': 403; see https://h/x?token=***")
+
+
+def test_mask_text_hides_a_token_shaped_scp_user_and_keeps_the_rest():
+    assert settings_mod._mask_text("git@github.com:org/x.git") == "git@github.com:org/x.git"
+    assert settings_mod._mask_text("ghp_0123456789abcdefghijABCDEFGHIJ012345@github.com:org/x.git") == (
+        "***@github.com:org/x.git")
+    assert settings_mod._mask_text("contact ops@example.org") == "contact ops@example.org"
+    assert settings_mod._mask_text("plain text, no url") == "plain text, no url"
+    assert settings_mod._mask_text(None) is None
+
+
+def test_a_failed_sync_hides_the_token_of_the_remote_in_git_error(temp_db, temp_db_client, tmp_path, monkeypatch):
+    _registry(tmp_path, monkeypatch, "  - name: pub\n    git: https://user:token@host/x.git\n    path: ./corpora/pub\n")
+    monkeypatch.setattr(settings_mod, "clone_mismatch", lambda c: None)
+    monkeypatch.setattr(settings_mod, "sync_corpus",
+                        lambda c: (False, "fatal: unable to access 'https://user:token@host/x.git/': 403"))
+    r = temp_db_client.post("/api/settings/corpora/pub/sync")
+    assert r.status_code == 502
+    assert "user:***@host/x.git/" in r.json()["detail"]
+    assert "token" not in r.text
+
+
+def test_a_successful_sync_detail_hides_the_token_too(temp_db, temp_db_client, tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+    cfg = settings_mod._CONFIG
+    cfg.write_text(cfg.read_text(encoding="utf-8") + "    git: https://h/demo.git\n", encoding="utf-8")
+    monkeypatch.setattr(settings_mod, "clone_mismatch", lambda c: None)
+    monkeypatch.setattr(settings_mod, "sync_corpus",
+                        lambda c: (True, "updated https://user:token@host/x.git/"))
+    r = temp_db_client.post("/api/settings/corpora/demo/sync")
+    assert r.status_code == 200, r.text
+    assert r.json()["detail"] == "updated https://user:***@host/x.git/"
+    assert "token@" not in r.text
