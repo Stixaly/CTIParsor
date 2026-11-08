@@ -448,6 +448,12 @@
         ""
       ]
     },
+    "env JOB_MAX_ATTEMPTS": {
+      "set": false,
+      "values": [
+        "3"
+      ]
+    },
     "env JOB_RETENTION_DAYS": {
       "set": false,
       "values": [
@@ -782,6 +788,12 @@
       "set": true,
       "values": [
         "1"
+      ]
+    },
+    "env UPLOAD_MIN_FREE_MB": {
+      "set": false,
+      "values": [
+        "1024"
       ]
     },
     "env VISION_ASSUME_CAPABLE": {

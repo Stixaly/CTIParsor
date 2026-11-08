@@ -68,16 +68,16 @@ def test_a_seeded_release_migrates_with_every_value_kept(schema, monkeypatch, ve
     assert result.ok, "\n".join(mc.summary(result))
     assert result.applied == list(range(version + 1, history.latest_version() + 1))
     assert result.rows == sum(len(t.rows) for t in before.values()) and result.values > result.rows
-    if version == 11:                                       # v0.1.0: versions 12 to 16 apply
+    if version == 11:                                       # v0.1.0: versions 12 to 17 apply
         assert result.new_tables == ["job_baselines", "worker_heartbeats"]
         assert result.new_columns["jobs"] == ["review_revision", "bundle_review_revision", "bundle_build_json",
-                                              "pipeline_mode", "resolved_types_json"]
+                                              "pipeline_mode", "resolved_types_json", "attempts"]
         assert result.new_columns["rule_techniques"] == ["propagated"]
-        assert result.new_rows == {"schema_migrations": 5}
-    elif version == 13:                                     # v0.2.0: versions 14 to 16 apply
+        assert result.new_rows == {"schema_migrations": 6}
+    elif version == 13:                                     # v0.2.0: versions 14 to 17 apply
         assert (result.new_tables, result.new_columns, result.new_rows) == (
-            ["worker_heartbeats"], {"jobs": ["resolved_types_json"], "rule_techniques": ["propagated"]},
-            {"schema_migrations": 3})
+            ["worker_heartbeats"], {"jobs": ["resolved_types_json", "attempts"], "rule_techniques": ["propagated"]},
+            {"schema_migrations": 4})
     else:
         assert (result.new_tables, result.new_columns, result.new_rows) == ([], {}, {})
 
