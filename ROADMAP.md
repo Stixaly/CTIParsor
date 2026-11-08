@@ -47,13 +47,14 @@ evidence.
 
 1.0 is tagged when no [release blocker](docs/support-policy.md#release-blockers)
 is open (data loss, a lost review decision, an invalid export presented as
-validated, an unusable essential journey) and the twelve work items of
+validated, an unusable essential journey) and the thirteen work items of
 ADR-0094 are done: a contract snapshot, the migration from the last release,
 backup and restore, the browser journey, the in-house gold set, the
 measurement of the exported bundle, the worker status, the OpenCTI import of
 the candidate, the clean install from the published image, a freeze with real
-use, a recorded run with the default provider, and figure reading on by
-default. The state of each, what it
+use, a recorded run with the default provider, figure reading on by
+default, and a run's record of the models it actually loaded (item 13, added
+2026-11-08). The state of each, what it
 proves and what it does not cover are in the ADR's
 [action plan](docs/adr/0094-what-1-0-promises.md#action-plan); the
 [readiness checklist](docs/releases/1.0-readiness.md) records each gate on the
@@ -82,6 +83,44 @@ experimental row of the
   ([ADR-0094](docs/adr/0094-what-1-0-promises.md), decision 14). There is no
   connector and no import test today; a MISP-shaped STIX 2.1 bundle is
   accepted as a baseline to enrich.
+- **A quality track for extraction (1.1).** Proposed on 2026-11-08 and not
+  scheduled. Each step names what it should bring: better predictions, fewer
+  false positives, or a lower cost.
+  1. **The CyNER and GLiNER contributions, by entity type.** This comes first
+     because the evidence already points there: on AnnoCTR dev, CyNER produced
+     87 of the 98 false positive actors and 93 of the 132 false positive malware.
+     Four variants are compared with the rest of the pipeline unchanged: neither
+     model, CyNER, GLiNER, both. Per type, they show the right entities only one
+     model finds, the false positives it adds, and what the fusion loses.
+     A model stays on only for the types where it helps.
+  2. **ATT&CK retrieval encoders.** MiniLM (today's), ATTACK-BERT and a
+     cybersecurity sentence encoder, each with its vectors rebuilt on the same
+     corpus (descriptions and procedure examples). Measured with the existing
+     tools before any change:
+     - `python -m evaluation retrieval`: candidate recall per chunk at several k,
+       the rank of the right technique, the useless candidates, time and memory;
+     - `python -m evaluation ttp-errors` (ADR-0072): whether a technique is lost
+       at retrieval or at selection.
+
+     If the right techniques are already retrieved and then rejected, the
+     selection is the thing to fix, not the encoder. SecureBERT+ is a masked
+     language model, not a sentence encoder: it is not a candidate as is.
+  3. **Fusion rules by type and by kind of evidence.** No model wins
+     everywhere. The fusion keeps each mention's span, type, source, score and
+     competing proposals, and separates detection, typing and resolution. Raw
+     scores of two models are not compared; thresholds come from annotated
+     results.
+  4. **GLiNER's next version with explicit category definitions**, against
+     the best configuration of step 1: it needs an integration change, not
+     only a variable.
+  5. **Fine-tuning**, only for the errors that remain after steps 1 to 4. The
+     data is split by document into training, calibration and a final test.
+
+  The rule for every step: models and thresholds are chosen on AnnoCTR train
+  and dev. AnnoCTR test is read once per decision (ADR-0060), and the in-house
+  gold is never used to choose; it measures the release. The names of the
+  newer models (a "SecureBERT 2.0" bi-encoder, "GLiNER 2.5") must be checked
+  before the work starts.
 - **The air-gapped install.** No commitment in 1.0; CI checks only that the
   bundle's images come back from `docker save` and `docker load`.
 - **Reports in French.** The named-entity models are English, and no gold
