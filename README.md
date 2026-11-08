@@ -240,7 +240,7 @@ ran, were skipped (disabled, model missing, no LLM provider) or failed.
 | **3** LLM enrichment | Actors, malware, tools, TTPs, relationships with an evidence quote, targets, mitigations | with an LLM provider |
 | **3b** Hallucination filter | Fuzzy-matches every LLM-returned name against the source chunk | with Stage 3 |
 | **3d** Relationship verification | A second LLM call must quote the sentence supporting each relationship; what it cannot decide waits for an analyst, out of the bundle (ADR-0082) | on by default — `ENABLE_STIX_VERIFICATION` (false turns it off) |
-| **3f** TTP selection | Chooses the techniques among 2c's candidates and the LLM's proposals, each with a quote the code finds in the text; a failed call ships nothing (`TTP_MODE=verify`: checks the LLM's techniques after the fact) | on in `.env.example` — `ENABLE_TTP_VERIFICATION` |
+| **3f** TTP selection | Chooses the techniques among 2c's candidates and the LLM's proposals, each with a quote the code finds in the text; a failed call ships nothing (`TTP_MODE=verify`: checks the LLM's techniques after the fact) | on by default — `ENABLE_TTP_VERIFICATION` (false turns it off) |
 | **3e** Cross-model consensus | A second provider re-runs relationship-bearing chunks; agreement raises confidence | opt-in — `ENABLE_CONSENSUS` |
 | **3doc** Document-level relations | One call over the whole report for relationships between facts stated far apart | on by default — `ENABLE_DOCUMENT_LEVEL_RELATIONS` (false turns it off) |
 | **3c** ATT&CK normalisation | Canonical technique names and IDs, once per document; parent dropped when a sub-technique is present | always |

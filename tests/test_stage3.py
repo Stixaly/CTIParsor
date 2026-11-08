@@ -775,6 +775,20 @@ class TestStage3dVerificationFlag:
         assert verify.verify_enabled() is True
 
 
+class TestStage3fVerificationFlag:
+    def test_on_by_default(self, monkeypatch):
+        # Same as the 3d test: conftest pins _VERIFY_ENABLED off, restored at
+        # teardown; re-read the switch with the variable unset.
+        import importlib
+
+        import pipeline.stage3f_ttp_verify as verify
+
+        monkeypatch.setattr(verify, "_VERIFY_ENABLED", verify._VERIFY_ENABLED)
+        monkeypatch.delenv("ENABLE_TTP_VERIFICATION", raising=False)
+        importlib.reload(verify)
+        assert verify.verify_enabled() is True
+
+
 class TestEnrichDocumentRelationsHappyPath:
     def test_returns_llm_enrichment_result(self, mock_llm, sample_cti_text, sample_entities):
         result = enrich_document_relations(sample_cti_text, sample_entities)

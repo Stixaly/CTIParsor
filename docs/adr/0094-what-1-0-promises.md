@@ -310,6 +310,8 @@ package are not supported. The maintainer changed two of the proposed statuses:
   code's fallback (`pipeline/stage3f_ttp_verify.py`). Under decision 11's
   definition, the default is `true`. A process started without `.env` runs
   with `false`.
+  Update, 2026-11-08: both now say `true`; the code's fallback is `true` too,
+  so a process started without `.env` runs with it on.
 - **What this ADR does not change:** the code, the routes, the release
   workflow (ADR-0085), the evaluation protocol (ADR-0060).
 

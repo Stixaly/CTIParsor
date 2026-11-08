@@ -27,7 +27,7 @@ Scope — only single-signal TTPs are verified:
   profile close to Stage 3d's (~1.4× calls, not 2×).
 
 Configuration (via .env):
-  ENABLE_TTP_VERIFICATION=true   — enable verification (default: false)
+  ENABLE_TTP_VERIFICATION=true   — enable verification (default: true; false turns it off)
   TTP_VERIFY_MIN=1               — only verify when ≥N unverified TTPs (default: 1)
 
 Design note — circular import avoidance:
@@ -49,7 +49,7 @@ logger = get_logger(__name__)
 # Configuration
 # ---------------------------------------------------------------------------
 
-_VERIFY_ENABLED = env_bool("ENABLE_TTP_VERIFICATION")
+_VERIFY_ENABLED = env_bool("ENABLE_TTP_VERIFICATION", default=True)
 _VERIFY_MIN = env_int("TTP_VERIFY_MIN", default=1)
 
 

@@ -23,6 +23,16 @@ theme.
   `.env.example`; their values, which the code already defaults to, are
   unchanged.
 
+- **TTP self-verification (Stage 3f) is on by default in the code.** It was
+  already `ENABLE_TTP_VERIFICATION=true` in `.env.example`; the code's fallback
+  was `false`, so a process started without `.env` did not run it. Cost: about
+  1.4 times the LLM calls, as Stage 3d, since a technique with a high-confidence
+  semantic match is skipped. **Bundles change** for an install whose `.env`
+  does not set `ENABLE_TTP_VERIFICATION`: techniques without a quote in the text
+  are dropped. To keep the previous behaviour, set
+  `ENABLE_TTP_VERIFICATION=false`. The run's recorded configuration shows the
+  switch as `true` when it is unset.
+
 - **The in-house evaluation scores the exported bundle** (ADR-0096, ADR-0094
   item 6). `python -m evaluation inhouse-run` now keeps Stage 5 on and writes
   each report's bundle to `data/eval/inhouse-runs/<name>/bundles/` with its
