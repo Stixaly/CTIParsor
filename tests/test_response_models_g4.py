@@ -269,6 +269,12 @@ def test_a_full_policy_round_trips_unchanged(temp_db_client, temp_db):
     assert temp_db_client.get("/api/relationship-policy").json() == _FULL_POLICY
 
 
+def test_an_optional_key_the_policy_omits_stays_absent(temp_db_client, temp_db):
+    """A policy without `completion` or `rules` must not gain them as null."""
+    assert temp_db_client.put("/api/relationship-policy", json={"rules": []}).json() == {"rules": []}
+    assert temp_db_client.get("/api/relationship-policy").json() == {"rules": []}
+
+
 def test_a_policy_keeps_keys_and_versions_the_put_does_not_check(temp_db_client, temp_db):
     body = {"version": "beta", "custom": {"kept": [1, 2]}, "rules": []}
     assert temp_db_client.put("/api/relationship-policy", json=body).json() == body

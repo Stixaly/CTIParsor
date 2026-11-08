@@ -98,7 +98,7 @@ def _extract_synthesis_stats(bundle_json: str | None) -> dict | None:
     return None
 
 
-@router.get("/last-run", response_model=LastRun)
+@router.get("/last-run", response_model=LastRun, response_model_exclude_unset=True)
 def get_last_run() -> dict:
     """Synthesis accounting of the most recent bundle — what each pinned rule
     actually produced on the last run.

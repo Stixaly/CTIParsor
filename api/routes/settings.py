@@ -191,7 +191,7 @@ def list_corpora():
     return {"corpora": _with_counts()}
 
 
-@router.get("/formats", response_model=FormatsOut)
+@router.get("/formats", response_model=FormatsOut, response_model_exclude_unset=True)
 def list_formats():
     """List all known formats (compiled adapters + configured corpora) with stats."""
     items = _with_counts()
@@ -368,7 +368,7 @@ def sync_one_corpus(name: str):
     }
 
 
-@router.post("/corpora/rebuild", response_model=RebuildOut)
+@router.post("/corpora/rebuild", response_model=RebuildOut, response_model_exclude_unset=True)
 def rebuild_corpora():
     """Re-ingest all enabled corpora from their existing local clones into the store.
 

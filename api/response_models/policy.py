@@ -2,13 +2,15 @@
 
 The policy is stored as the body of the PUT, after the checks in `put_policy`.
 The GET returns that stored body, or the factory default `{version, global,
-rules}`.  Every optional key is absent when the body does not carry it, so the
-two policy routes use `response_model_exclude_unset=True`.  `version` is not
-checked by the PUT: it is typed as any JSON value.
+rules}`.  A stored body may predate those checks, so no enumerated value is a
+`Literal`: the expected values are listed in each description.  Every optional
+key is absent when the body does not carry it, so the two policy routes use
+`response_model_exclude_unset=True`.  `version` is not checked by the PUT: it is
+typed as any JSON value.
 """
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import Field, JsonValue
 
@@ -16,15 +18,15 @@ from api.response_models import Response
 
 
 class PolicyRule(Response):
-    src: str = Field(description="A STIX 2.1 object type, SDO or SCO.")
-    verb: str = Field(description="A STIX 2.1 relationship type.")
-    tgt: str
-    mode: Literal["pin", "auto"] | None = None
-    enabled: bool | None = None
+    src: str | None = Field(default=None, description="A STIX 2.1 object type, SDO or SCO.")
+    verb: str | None = Field(default=None, description="A STIX 2.1 relationship type.")
+    tgt: str | None = Field(default=None, description="A STIX 2.1 object type, SDO or SCO.")
+    mode: str | None = Field(default=None, description="'pin' or 'auto'.")
+    enabled: JsonValue = Field(default=None, description="true or false (default true).")
 
 
 class PinEvidence(Response):
-    mode: Literal["cooccurrence", "cartesian"] | None = None
+    mode: str | None = Field(default=None, description="'cooccurrence' (default) or 'cartesian'.")
     window: int | None = Field(default=None, description="Sentences apart, non-negative.")
 
 
@@ -39,15 +41,19 @@ class Completion(Response):
 
 
 class TemporalExport(Response):
-    mode: Literal["faithful", "day"] | None = None
+    mode: str | None = Field(default=None, description="'faithful' (default) or 'day'.")
 
 
 class RelationshipPolicy(Response):
     version: JsonValue = None
-    global_: Literal["enforce", "auto"] | None = Field(default=None, alias="global")
+    global_: str | None = Field(
+        default=None, alias="global", description="'enforce' (default) or 'auto'.",
+    )
     rules: list[PolicyRule] | None = None
     max_pinned_edges: int | None = None
-    pin_budget_mode: Literal["fair-share", "sequential"] | None = None
+    pin_budget_mode: str | None = Field(
+        default=None, description="'fair-share' (default) or 'sequential'.",
+    )
     pin_evidence: PinEvidence | None = None
     completion: Completion | None = None
     temporal_export: TemporalExport | None = None
