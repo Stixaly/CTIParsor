@@ -143,6 +143,66 @@ def test_non_loopback_client_gets_403(temp_db_client):
     assert "loopback" in resp.json()["detail"]
 
 
+_TOKEN = "canary-0f9e8d7c6b5a4938-metrics-token"
+
+
+def test_right_token_from_a_non_loopback_address_is_accepted(temp_db_client, monkeypatch):
+    monkeypatch.setenv("METRICS_TOKEN", _TOKEN)
+    resp = temp_db_client.get("/metrics", headers={"Authorization": f"Bearer {_TOKEN}"})
+    assert resp.status_code == 200
+    _, _, samples = parse(resp.text)
+    assert _value(samples, "ctiparsor_database_up") == 1
+
+
+def test_wrong_token_from_a_non_loopback_address_gets_403(temp_db_client, monkeypatch):
+    monkeypatch.setenv("METRICS_TOKEN", _TOKEN)
+    resp = temp_db_client.get("/metrics", headers={"Authorization": "Bearer not-the-token"})
+    assert resp.status_code == 403
+    assert _TOKEN not in resp.text
+
+
+def test_missing_token_from_a_non_loopback_address_gets_403(temp_db_client, monkeypatch):
+    monkeypatch.setenv("METRICS_TOKEN", _TOKEN)
+    resp = temp_db_client.get("/metrics")
+    assert resp.status_code == 403
+
+
+def test_a_wrong_token_is_refused_even_from_loopback(loopback_client, monkeypatch):
+    monkeypatch.setenv("METRICS_TOKEN", _TOKEN)
+    resp = loopback_client.get("/metrics", headers={"Authorization": "Bearer not-the-token"})
+    assert resp.status_code == 403
+
+
+def test_loopback_needs_no_token_when_one_is_configured(loopback_client, monkeypatch):
+    monkeypatch.setenv("METRICS_TOKEN", _TOKEN)
+    assert loopback_client.get("/metrics").status_code == 200
+
+
+def test_a_non_bearer_authorization_header_does_not_count(temp_db_client, monkeypatch):
+    monkeypatch.setenv("METRICS_TOKEN", _TOKEN)
+    resp = temp_db_client.get("/metrics", headers={"Authorization": f"Basic {_TOKEN}"})
+    assert resp.status_code == 403
+
+
+def test_empty_token_setting_keeps_the_loopback_rule(temp_db_client, monkeypatch):
+    monkeypatch.setenv("METRICS_TOKEN", "")
+    resp = temp_db_client.get("/metrics", headers={"Authorization": "Bearer "})
+    assert resp.status_code == 403
+
+
+def test_the_token_never_reaches_the_logs(temp_db_client, monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setenv("METRICS_TOKEN", _TOKEN)
+    caplog.set_level(logging.DEBUG)
+    good = temp_db_client.get("/metrics", headers={"Authorization": f"Bearer {_TOKEN}"})
+    bad = temp_db_client.get("/metrics", headers={"Authorization": "Bearer not-the-token"})
+    assert good.status_code == 200
+    assert bad.status_code == 403
+    assert _TOKEN not in caplog.text
+    assert _TOKEN not in good.text and _TOKEN not in bad.text
+
+
 def test_metrics_is_left_out_of_the_schema(temp_db_client):
     import api.main
 

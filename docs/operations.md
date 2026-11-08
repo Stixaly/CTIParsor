@@ -180,11 +180,11 @@ docker compose logs -f app worker
 ## Monitoring and alerts
 
 `GET /metrics` serves Prometheus text format (0.0.4). It is left out of the
-API schema. Until authentication exists, it answers only a client on loopback
-(127.0.0.0/8 or ::1) and returns 403 to any other, so a scraper must connect
-from loopback. A connection through Docker's published port usually arrives
-from the Docker network's gateway instead, and gets 403. Verify the scrape
-first:
+API schema. It answers a client on loopback (127.0.0.0/8 or ::1), and a client
+from anywhere that sends the `METRICS_TOKEN` bearer. Any other request gets
+403. A connection through Docker's published port usually arrives from the
+Docker network's gateway instead, so such a scraper needs the token. Verify the
+scrape first:
 
 ```bash
 curl -fsS http://127.0.0.1:8000/metrics
@@ -192,8 +192,28 @@ curl -fsS http://127.0.0.1:8000/metrics
 
 A Prometheus container can reach the app over loopback if it shares the app's
 network namespace (`network_mode: "service:app"` in Compose). This is not run
-on the stack by the project: check the scrape before relying on it. Work item
-14 adds an admin token for the scraper.
+on the stack by the project: check the scrape before relying on it.
+
+From another host, set `METRICS_TOKEN` in `.env` (generate it with
+`openssl rand -hex 32`), and send it as a bearer. The token is accepted from
+any address; without it, only loopback is. Serve the scrape through the
+`proxy` profile (TLS), never on a plain port, since the token travels in each
+request. Keep the token in a file that only Prometheus reads:
+
+```yaml
+scrape_configs:
+  - job_name: ctiparsor
+    scheme: https
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/ctiparsor-metrics-token
+    static_configs:
+      - targets: ["cti.example.org:443"]
+```
+
+Use the same value as `METRICS_TOKEN` in the file. Work item 14 adds an admin
+token for the scraper next to this one.
 
 The endpoint answers while the database is down: `ctiparsor_database_up` is
 0, and the metrics that need the database are left out.

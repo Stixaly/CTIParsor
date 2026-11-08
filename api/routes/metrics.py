@@ -3,9 +3,9 @@
 Text format 0.0.4, rendered here with the standard library only: no
 `prometheus_client`. The route is left out of the OpenAPI schema.
 
-Access: until authentication exists (work item 14 adds the admin token), only
-a client on loopback (127.0.0.0/8 or ::1) gets the metrics; any other client
-gets 403. A scraper therefore has to reach the app from its own loopback, see
+Access: a client on loopback (127.0.0.0/8 or ::1) gets the metrics. Any other
+client gets 403, unless METRICS_TOKEN is set and it sends that token as a
+bearer (see `_may_read`). Work item 14 adds the admin token next to it. See
 docs/operations.md (*Monitoring and alerts*).
 
 The endpoint answers when the database is down: `ctiparsor_database_up` is 0
@@ -16,6 +16,7 @@ that file is missing or unreadable they are left out too.
 
 from __future__ import annotations
 
+import hmac
 import ipaddress
 import json
 import math
@@ -38,6 +39,7 @@ logger = get_logger(__name__)
 
 CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 BACKUP_STATUS_ENV = "BACKUP_STATUS_FILE"
+METRICS_TOKEN_ENV = "METRICS_TOKEN"  # noqa: S105 - the name of the setting, not a secret
 DEFAULT_BACKUP_STATUS_FILE = "/app/backup-status/status.json"
 
 # Every status a job can hold (api/response_models/jobs.py). Emitted even at 0,
@@ -229,10 +231,37 @@ def _collect() -> list[Family]:
     return families
 
 
+def _bearer_credential(request: Request) -> str | None:
+    """The token of an `Authorization: Bearer <token>` header, or None."""
+    scheme, _, credential = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() != "bearer":
+        return None
+    return credential.strip()
+
+
+def _may_read(request: Request) -> bool:
+    """Loopback always; any address with the METRICS_TOKEN bearer.
+
+    METRICS_TOKEN empty (the default) keeps the loopback rule alone, and the
+    Authorization header is ignored. Once it is set, a bearer that does not
+    match is refused from every address, even loopback. The comparison is in
+    constant time. The token is never logged or put in a response.
+    Work item 14 adds the admin token next to this one.
+    """
+    expected = os.environ.get(METRICS_TOKEN_ENV, "")
+    if expected:
+        credential = _bearer_credential(request)
+        if credential is not None:
+            return hmac.compare_digest(credential.encode("utf-8"), expected.encode("utf-8"))
+    client = request.client.host if request.client else None
+    return _is_loopback(client)
+
+
 @router.get("/metrics", include_in_schema=False)
 def get_metrics(request: Request):
-    """Prometheus text format. Loopback clients only, until work item 14 adds the admin token."""
-    client = request.client.host if request.client else None
-    if not _is_loopback(client):
-        return JSONResponse({"detail": "metrics are served to loopback clients only"}, status_code=403)
+    """Prometheus text format. Loopback clients, or a client with METRICS_TOKEN."""
+    if not _may_read(request):
+        return JSONResponse(
+            {"detail": "metrics are served to loopback clients or with the metrics token"}, status_code=403
+        )
     return PlainTextResponse(render(_collect()), media_type=CONTENT_TYPE)

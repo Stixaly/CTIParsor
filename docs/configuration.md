@@ -685,10 +685,16 @@ filesystem is read-only, so a `LOG_FILE` has to point into a volume, e.g.
 # The status file the `backup` service writes; GET /metrics reads it for the
 # backup metrics.  A missing file leaves those metrics out.
 # BACKUP_STATUS_FILE=/app/backup-status/status.json
+# A secret: the bearer token for a scraper outside loopback.  Generate it with
+# openssl rand -hex 32.  Empty: only loopback clients can read GET /metrics.
+# METRICS_TOKEN=
 ```
 
-`GET /metrics` needs no setting: it is on by default and answers loopback
-clients only ([operations.md](operations.md#monitoring-and-alerts)).
+`GET /metrics` needs no other setting. It is on by default and answers loopback
+clients only. With `METRICS_TOKEN` set, a client that sends it as
+`Authorization: Bearer <token>` is accepted from any address; a wrong token is
+refused. Serve it only behind TLS, through the `proxy` profile
+([operations.md](operations.md#monitoring-and-alerts)).
 
 ## Expert tuning
 
