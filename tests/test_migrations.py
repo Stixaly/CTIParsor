@@ -247,7 +247,7 @@ def test_version_14_adds_an_empty_worker_table_and_leaves_a_running_job_with_its
 
     report = migrate.upgrade(conn)
 
-    assert report.applied == [14, 15, 16] and report.recognised == list(range(1, 14))
+    assert report.applied == [14, 15, 16, 17] and report.recognised == list(range(1, 14))
     assert conn.execute("SELECT COUNT(*) AS n FROM worker_heartbeats").fetchone()["n"] == 0
     job = conn.execute("SELECT status, worker_id, heartbeat_at FROM jobs").fetchone()
     assert tuple(job) == ("processing", "old-worker:7:a1b2c3", "t")   # the previous revision's worker keeps it
@@ -267,7 +267,7 @@ def test_version_15_adds_a_nullable_column_and_is_idempotent(schema):
 
     report = migrate.upgrade(conn)
 
-    assert report.applied == [15, 16] and report.recognised == list(range(1, 15))
+    assert report.applied == [15, 16, 17] and report.recognised == list(range(1, 15))
     assert conn.execute("SELECT resolved_types_json FROM jobs").fetchone()["resolved_types_json"] is None
     conn.execute("UPDATE jobs SET resolved_types_json='[]' WHERE id='j1'")
     for statement in history.load()[14].statements:                   # run again: nothing breaks, nothing is lost
@@ -284,12 +284,30 @@ def test_version_16_marks_the_inherited_techniques_and_is_idempotent(schema):
 
     report = migrate.upgrade(conn)
 
-    assert report.applied == [16] and report.recognised == list(range(1, 16))
+    assert report.applied == [16, 17] and report.recognised == list(range(1, 16))
     assert conn.execute("SELECT propagated FROM rule_techniques").fetchone()["propagated"] == 0   # an old row: its own
     conn.execute("UPDATE rule_techniques SET propagated=1")
     for statement in history.load()[15].statements:                   # run again: nothing breaks, nothing is lost
         conn.execute(statement)
     assert conn.execute("SELECT propagated FROM rule_techniques").fetchone()["propagated"] == 1
+    assert migrate.upgrade(conn).applied == []
+
+
+def test_version_17_adds_the_attempts_counter_at_zero_and_is_idempotent(schema):
+    conn = schema()
+    _legacy_at(conn, 16)
+    conn.execute("INSERT INTO jobs (id, original_filename, status, created_at, updated_at) "
+                 "VALUES ('j1','r.pdf','processing','t','t')")
+    assert not history.column_exists(conn, "jobs", "attempts")
+
+    report = migrate.upgrade(conn)
+
+    assert report.applied == [17] and report.recognised == list(range(1, 17))
+    assert conn.execute("SELECT attempts FROM jobs").fetchone()["attempts"] == 0   # an old job: a full allowance
+    conn.execute("UPDATE jobs SET attempts=2 WHERE id='j1'")
+    for statement in history.load()[16].statements:                   # run again: nothing breaks, nothing is lost
+        conn.execute(statement)
+    assert conn.execute("SELECT attempts FROM jobs").fetchone()["attempts"] == 2
     assert migrate.upgrade(conn).applied == []
 
 

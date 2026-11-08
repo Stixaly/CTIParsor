@@ -35,6 +35,8 @@ logger = get_logger(__name__)
 
 HEARTBEAT_S = env_int("WORKER_HEARTBEAT_S", default=30)
 LEASE_TIMEOUT_S = env_int("WORKER_LEASE_TIMEOUT_S", default=180)
+# A job whose lease expired is requeued while it has been claimed fewer times than this (ADR-0097 item 20).
+JOB_MAX_ATTEMPTS = env_int("JOB_MAX_ATTEMPTS", default=3)
 POLL_S = env_float("WORKER_POLL_S", default=2.0)
 DRAIN_S = env_int("WORKER_DRAIN_S", default=60)
 # How often to check for expired jobs (JOB_RETENTION_DAYS, api/routes/jobs.py).
@@ -123,8 +125,8 @@ def claim_next_queued(worker_id: str = WORKER_ID) -> tuple[str, str, str] | None
             job_id, original_filename = row[0], row[1]
             now = now_iso()
             update_cur = conn.execute(
-                "UPDATE jobs SET status='processing', worker_id=?, heartbeat_at=?, updated_at=? "
-                "WHERE id=? AND status='queued'",
+                "UPDATE jobs SET status='processing', worker_id=?, heartbeat_at=?, updated_at=?, "
+                "attempts = attempts + 1 WHERE id=? AND status='queued'",
                 (worker_id, now, now, job_id),
             )
 
@@ -176,17 +178,28 @@ def requeue_orphans(*, unconditional: bool = False) -> int:
             where = "status='processing' AND (heartbeat_at IS NULL OR heartbeat_at < ?)"
             params = (cutoff,)
 
-        # One statement, so the ids returned are exactly the rows this UPDATE
-        # requeued (a SELECT before it could list a row another loop had just
-        # taken over).  Each gets its own emit_progress below -- every other
-        # status transition in this module pairs a DB write with one, and
-        # without it a client polling a requeued job's SSE stream sees it
-        # simply stop producing events across a restart instead of an explicit
-        # signal that it is back in the queue.
+        # A job already claimed JOB_MAX_ATTEMPTS times is failed, not requeued
+        # (ADR-0097 item 20).  Quarantine runs first: a row it fails has left
+        # `processing`, so the requeue below cannot take it back.  Each UPDATE
+        # is one statement, so the rows returned are exactly the rows it changed
+        # (a SELECT before it could list a row another loop had just taken over).
+        # Each changed row gets its own emit_progress below -- every other
+        # status transition in this module pairs a DB write with one.
+        quarantined = conn.execute(
+            f"UPDATE jobs SET status='failed', worker_id=NULL, heartbeat_at=NULL, updated_at=? "
+            f"WHERE {where} AND attempts >= ? RETURNING id, attempts",
+            (now, *params, JOB_MAX_ATTEMPTS),
+        ).fetchall()
+        for row in quarantined:
+            jid, attempts = row[0], row[1]
+            message = f"quarantined after {attempts} attempts (JOB_MAX_ATTEMPTS)"
+            logger.warning(f"Job {jid} {message}")
+            emit_progress(jid, "done", {"status": "failed", "error": message})
+
         cur = conn.execute(
             f"UPDATE jobs SET status='queued', worker_id=NULL, heartbeat_at=NULL, updated_at=? "
-            f"WHERE {where} RETURNING id",
-            (now, *params),
+            f"WHERE {where} AND attempts < ? RETURNING id",
+            (now, *params, JOB_MAX_ATTEMPTS),
         )
         ids = [r[0] for r in cur.fetchall()]
         count = len(ids)

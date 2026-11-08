@@ -611,6 +611,15 @@ feature** (it was 50 MB). Behind another proxy, allow as much: 72 MiB, that is
 # WORKER_POLL_S=2
 # WORKER_DRAIN_S=60
 
+# A job whose lease expired is requeued while it has been claimed fewer times
+# than this (each claim counts one attempt); then it is marked failed with the
+# reason "quarantined after N attempts", not requeued (ADR-0097 item 20).
+# JOB_MAX_ATTEMPTS=3
+
+# Uploads and pasted text are refused with HTTP 507 while the disk that holds
+# uploads/ has less free space than this, in MB.  0 turns the check off.
+# UPLOAD_MIN_FREE_MB=1024
+
 # The file the worker touches on every poll: its liveness.  The compose
 # healthcheck reads the same variable and fails once the file is two minutes
 # old.  It must be writable (the container's /tmp is a tmpfs).
