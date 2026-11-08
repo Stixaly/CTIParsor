@@ -344,3 +344,187 @@ def test_a_successful_sync_reingests_the_store(temp_db, temp_db_client, tmp_path
 
     assert synced == ["demo"] and r["detail"] == "up to date"
     assert r["corpora"][0]["rules"] == 1                # rebuilt from the local clone
+
+
+# ── Secrets in corpus URLs are masked in responses only (TMASK) ─────────────
+
+SECRET = "ghp_SECRETVALUE0123456789abcdefABCDEF"
+
+
+@pytest.mark.parametrize("url,expected", [
+    # a password in the userinfo
+    ("https://user:ghp_SECRET@github.com/org/r.git", "https://user:***@github.com/org/r.git"),
+    ("https://x-access-token:ghp_SECRET@github.com/org/r.git",
+     "https://x-access-token:***@github.com/org/r.git"),
+    # a lone userinfo name shaped like a token
+    ("https://ghp_0123456789abcdefghijABCDEFGHIJ012345@github.com/org/r.git",
+     "https://***@github.com/org/r.git"),
+    ("https://glpat-abcdefghij0123456789@gitlab.com/org/r.git",
+     "https://***@gitlab.com/org/r.git"),
+    # the password of a userinfo that also has a port, and a password with a colon
+    ("https://user:ghp_SECRET@github.com:8443/org/r.git",
+     "https://user:***@github.com:8443/org/r.git"),
+    ("https://user:pa:ss@github.com/org/r.git", "https://user:***@github.com/org/r.git"),
+    # query parameters, matched case-insensitively, other parameters kept
+    ("https://github.com/org/r.git?token=SECRET&ref=main",
+     "https://github.com/org/r.git?token=***&ref=main"),
+    ("https://example.com/x.tgz?access_token=SECRET", "https://example.com/x.tgz?access_token=***"),
+    ("https://example.com/x.tgz?private_token=SECRET", "https://example.com/x.tgz?private_token=***"),
+    ("https://example.com/x.tgz?key=SECRET", "https://example.com/x.tgz?key=***"),
+    ("https://example.com/x.tgz?sig=SECRET&exp=1", "https://example.com/x.tgz?sig=***&exp=1"),
+    ("https://example.com/x.tgz?TOKEN=SECRET", "https://example.com/x.tgz?TOKEN=***"),
+    # the fragment is kept
+    ("https://example.com/x.tgz?sig=SECRET#part", "https://example.com/x.tgz?sig=***#part"),
+    # a userinfo and a query secret together
+    ("https://u:SECRET@example.com/x.tgz?token=SECRET",
+     "https://u:***@example.com/x.tgz?token=***"),
+])
+def test_masked_url_hides_each_secret_shape(url, expected):
+    assert settings_mod._mask_url(url) == expected
+
+
+@pytest.mark.parametrize("url", [
+    "https://github.com/org/r.git",
+    "https://example.com/rules.tar.gz?version=2&ref=main",
+    "https://user@github.com/org/r.git",          # a short lone user is a name, not a token
+    "https://user:@github.com/org/r.git",         # an empty password is no secret
+    "https://github.com/org/r.git?keyword=ok",    # 'keyword' is not 'key'
+    "",
+    None,
+])
+def test_url_without_a_secret_is_unchanged(url):
+    assert settings_mod._mask_url(url) == url
+
+
+def test_unparseable_url_is_fully_masked():
+    assert settings_mod._mask_url("https://[::1/x.tgz") == "***"
+
+
+def _overlay_text(cfg) -> str:
+    return (cfg.parent / "detection_corpora.local.yaml").read_text(encoding="utf-8")
+
+
+def test_corpora_list_masks_the_stored_secret_but_not_the_file(temp_db, temp_db_client, tmp_path, monkeypatch):
+    cfg = _setup(tmp_path, monkeypatch)
+    cfg.write_text(cfg.read_text(encoding="utf-8")
+                   + f"    git: https://x-access-token:{SECRET}@github.com/org/demo.git\n", encoding="utf-8")
+    body = temp_db_client.get("/api/settings/corpora").json()
+    assert body["corpora"][0]["git"] == "https://x-access-token:***@github.com/org/demo.git"
+    assert SECRET not in temp_db_client.get("/api/settings/corpora").text
+    assert SECRET in cfg.read_text(encoding="utf-8")   # the committed registry is what it was
+
+
+def test_created_corpus_is_masked_in_its_response_and_stored_whole(temp_db, temp_db_client, tmp_path, monkeypatch):
+    cfg = _setup(tmp_path, monkeypatch)
+    r = temp_db_client.post("/api/settings/corpora", json={
+        "name": "extra", "git": f"https://github.com/org/extra.git?token={SECRET}"})
+    assert r.status_code == 200, r.text
+    extra = next(c for c in r.json()["corpora"] if c["name"] == "extra")
+    assert extra["git"] == "https://github.com/org/extra.git?token=***"
+    assert SECRET not in r.text
+    assert SECRET in _overlay_text(cfg)
+
+
+def test_a_tarball_url_is_masked_in_the_single_corpus_patch_response(temp_db, temp_db_client, tmp_path, monkeypatch):
+    cfg = _setup(tmp_path, monkeypatch)
+    cfg.write_text(cfg.read_text(encoding="utf-8")
+                   + f"    tarball: https://example.com/demo.tgz?sig={SECRET}\n", encoding="utf-8")
+    r = temp_db_client.patch("/api/settings/corpora/demo", json={"enabled": False})
+    assert r.status_code == 200, r.text
+    assert r.json()["corpora"][0]["tarball"] == "https://example.com/demo.tgz?sig=***"
+    assert SECRET not in r.text
+    assert SECRET in _overlay_text(cfg)               # the PATCH wrote the real URL back unchanged
+
+
+def test_patch_round_trip_with_a_masked_url_keeps_the_stored_one(temp_db, temp_db_client, tmp_path, monkeypatch):
+    cfg = _setup(tmp_path, monkeypatch)
+    cfg.write_text(cfg.read_text(encoding="utf-8")
+                   + f"    git: https://x-access-token:{SECRET}@github.com/org/demo.git\n", encoding="utf-8")
+    masked = temp_db_client.get("/api/settings/corpora").json()["corpora"][0]["git"]
+    assert "***" in masked
+    # A client that sends the masked form back, as the list shows it. PATCH takes
+    # only `enabled`, so the mask is never written; the stored URL stays.
+    r = temp_db_client.patch("/api/settings/corpora/demo", json={"enabled": True, "git": masked})
+    assert r.status_code == 200, r.text
+    assert r.json()["corpora"][0]["git"] == masked
+    assert SECRET in _overlay_text(cfg)
+    assert "***" not in _overlay_text(cfg)
+
+
+def test_sync_response_masks_the_corpus_urls(temp_db, temp_db_client, tmp_path, monkeypatch):
+    cfg = _setup(tmp_path, monkeypatch)
+    cfg.write_text(cfg.read_text(encoding="utf-8")
+                   + f"    git: https://x-access-token:{SECRET}@github.com/org/demo.git\n", encoding="utf-8")
+    monkeypatch.setattr(settings_mod, "clone_mismatch", lambda c: None)
+    monkeypatch.setattr(settings_mod, "sync_corpus", lambda c: (True, "up to date"))
+    r = temp_db_client.post("/api/settings/corpora/demo/sync")
+    assert r.status_code == 200, r.text
+    assert r.json()["corpora"][0]["git"] == "https://x-access-token:***@github.com/org/demo.git"
+    assert SECRET not in r.text
+
+
+# ── A masked URL is refused on input; URLs in messages are masked (TMASK, 2nd) ──
+
+
+@pytest.mark.parametrize("body", [
+    {"name": "extra", "git": "https://user:***@github.com/org/extra.git"},
+    {"name": "extra", "git": "https://github.com/org/extra.git?token=***"},
+    {"name": "extra", "tarball": "https://example.com/extra.tgz?sig=***"},
+])
+def test_create_refuses_a_masked_url_copied_back(temp_db, temp_db_client, tmp_path, monkeypatch, body):
+    cfg = _setup(tmp_path, monkeypatch)
+    r = temp_db_client.post("/api/settings/corpora", json=body)
+    assert r.status_code == 400 and "'***'" in r.json()["detail"]
+    assert "extra" not in _overlay_text(cfg) if (cfg.parent / "detection_corpora.local.yaml").exists() else True
+
+
+def test_mask_text_hides_urls_in_a_message():
+    text = "fatal: unable to access 'https://user:token@host/x.git/': 403; see https://h/x?token=SECRET"
+    assert settings_mod._mask_text(text) == (
+        "fatal: unable to access 'https://user:***@host/x.git/': 403; see https://h/x?token=***")
+
+
+def test_mask_text_hides_a_token_shaped_scp_user_and_keeps_the_rest():
+    assert settings_mod._mask_text("git@github.com:org/x.git") == "git@github.com:org/x.git"
+    assert settings_mod._mask_text("ghp_0123456789abcdefghijABCDEFGHIJ012345@github.com:org/x.git") == (
+        "***@github.com:org/x.git")
+    assert settings_mod._mask_text("contact ops@example.org") == "contact ops@example.org"
+    assert settings_mod._mask_text("plain text, no url") == "plain text, no url"
+    assert settings_mod._mask_text(None) is None
+
+
+def test_a_failed_sync_hides_the_token_of_the_remote_in_git_error(temp_db, temp_db_client, tmp_path, monkeypatch):
+    _registry(tmp_path, monkeypatch, "  - name: pub\n    git: https://user:token@host/x.git\n    path: ./corpora/pub\n")
+    monkeypatch.setattr(settings_mod, "clone_mismatch", lambda c: None)
+    monkeypatch.setattr(settings_mod, "sync_corpus",
+                        lambda c: (False, "fatal: unable to access 'https://user:token@host/x.git/': 403"))
+    r = temp_db_client.post("/api/settings/corpora/pub/sync")
+    assert r.status_code == 502
+    assert "user:***@host/x.git/" in r.json()["detail"]
+    assert "token" not in r.text
+
+
+def test_a_successful_sync_detail_hides_the_token_too(temp_db, temp_db_client, tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+    cfg = settings_mod._CONFIG
+    cfg.write_text(cfg.read_text(encoding="utf-8") + "    git: https://h/demo.git\n", encoding="utf-8")
+    monkeypatch.setattr(settings_mod, "clone_mismatch", lambda c: None)
+    monkeypatch.setattr(settings_mod, "sync_corpus",
+                        lambda c: (True, "updated https://user:token@host/x.git/"))
+    r = temp_db_client.post("/api/settings/corpora/demo/sync")
+    assert r.status_code == 200, r.text
+    assert r.json()["detail"] == "updated https://user:***@host/x.git/"
+    assert "token@" not in r.text
+
+
+def test_mask_text_keeps_the_whitespace_and_the_quotes_of_a_git_error():
+    text = "fatal: unable to access\n\t'https://u:s3cret@git.example/x.git/': 403\n"
+    assert settings_mod._mask_text(text) == (
+        "fatal: unable to access\n\t'https://u:***@git.example/x.git/': 403\n"
+    )
+
+
+def test_mask_text_is_linear_on_long_runs():
+    # Runs that made the former `[A-Za-z0-9_.+-]+@\S+` pattern rescan the text.
+    for text in ("+" * 200_000, "a" * 200_000 + "@", " " * 200_000):
+        assert settings_mod._mask_text(text) in (text, "***@")
