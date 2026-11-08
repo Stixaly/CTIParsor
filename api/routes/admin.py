@@ -10,11 +10,11 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from api.auth import config, store
-from api.auth.deps import current_user
+from api.auth.deps import authenticate, current_user
 from api.logging_config import get_logger
 from api.response_models.admin import PasswordChanged, TokenCreated, TokenRecord, TokenRevoked, UserRecord
 
@@ -64,6 +64,14 @@ def _actor(user: store.User | None) -> store.User:
     if user is None:
         raise HTTPException(401, "Authentication required")
     return user
+
+
+def _signed_in(request: Request) -> None:
+    """A token is created from a signed-in session, never with a bearer token: a stolen
+    token must not mint others that outlive its revocation (up to 365 days)."""
+    _, session = authenticate(request)
+    if session is None:
+        raise HTTPException(403, "Create tokens from a signed-in session, not with a token")
 
 
 def _bad(exc: store.AuthError) -> HTTPException:
@@ -149,10 +157,12 @@ def list_all_tokens(_user_: store.User | None = Depends(current_user)):
 
 
 @router.post("/admin/tokens", response_model=TokenCreated, response_model_exclude_unset=True, status_code=201,
-             responses={**_OFF, 400: {"description": "A bad name."}, 404: {"description": "No such user."}})
-def create_token_for(body: NewToken, user: store.User | None = Depends(current_user)):
-    """A token for any user. The answer holds the token itself, once."""
+             responses={**_OFF, 400: {"description": "A bad name."}, 404: {"description": "No such user."},
+                        403: {"description": "Called with a bearer token instead of a signed-in session."}})
+def create_token_for(body: NewToken, request: Request, user: store.User | None = Depends(current_user)):
+    """A token for any user. The answer holds the token itself, once.  Needs a session."""
     _on()
+    _signed_in(request)
     target = _user(body.user_id)
     return _new_token(_actor(user), target["id"], target["username"], body.name, body.days)
 
@@ -176,10 +186,13 @@ def list_own_tokens(user: store.User | None = Depends(current_user)):
 
 
 @router.post("/auth/tokens", response_model=TokenCreated, response_model_exclude_unset=True, status_code=201,
-             responses={**_OFF, 400: {"description": "A bad name."}})
-def create_own_token(body: NewOwnToken, user: store.User | None = Depends(current_user)):
-    """A token for the signed-in user, with their role. The answer holds the token itself, once."""
+             responses={**_OFF, 400: {"description": "A bad name."},
+                        403: {"description": "Called with a bearer token instead of a signed-in session."}})
+def create_own_token(body: NewOwnToken, request: Request, user: store.User | None = Depends(current_user)):
+    """A token for the signed-in user, with their role. The answer holds the token itself, once.
+    Needs a session."""
     _on()
+    _signed_in(request)
     actor = _actor(user)
     return _new_token(actor, actor.id, actor.username, body.name, body.days)
 

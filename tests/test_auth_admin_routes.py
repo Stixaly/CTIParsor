@@ -276,3 +276,16 @@ def test_update_user_rejects_an_unknown_user_and_role(temp_db, make_user):
         store.update_user(user.id, role="boss")
     assert store.update_user(user.id, display_name="  ").display_name == "uma"
     assert store.user_record(user.id)["username"] == "uma" and store.user_record("nobody") is None
+
+
+def test_a_token_cannot_create_another_token(auth_client, make_user):
+    admin = make_user("admin", "tokenroot")
+    token, _ = store.create_token(admin.id, "ci")
+    headers = {"Authorization": f"Bearer {token}"}
+    own = auth_client.post("/api/auth/tokens", headers=headers, json={"name": "child", "days": 365})
+    assert own.status_code == 403 and "session" in own.json()["detail"]
+    other = auth_client.post("/api/admin/tokens", headers=headers,
+                             json={"user_id": admin.id, "name": "child", "days": 365})
+    assert other.status_code == 403
+    assert [t["name"] for t in store.list_tokens(user_id=admin.id)] == ["ci"]
+    assert auth_client.get("/api/auth/tokens", headers=headers).status_code == 200   # reading stays open to it

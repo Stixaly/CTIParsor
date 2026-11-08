@@ -37,7 +37,9 @@ own rule whatever the mode: loopback clients, or the `METRICS_TOKEN` bearer (see
 
   For any signed-in user, for their own tokens only (another user's id is a 404): `GET /api/auth/tokens`,
   `POST /api/auth/tokens` (`{ name, days? }`, same answer as the admin creation) and
-  `DELETE /api/auth/tokens/{id}`. A token made here carries the role of its user.
+  `DELETE /api/auth/tokens/{id}`. A token made here carries the role of its user. Both creations
+  (`POST /api/auth/tokens`, `POST /api/admin/tokens`) need a signed-in session: called with a bearer
+  token they answer 403, so a stolen token cannot mint others that outlive its revocation.
 - Before any route runs, a request for `/api/...` or the docs (`/docs`, `/redoc`, `/openapi.json`) without a
   valid session or token gets 401 (not for `GET /api/health`, `POST /api/auth/login` and `GET /api/auth/methods`); the body is not read.
   `POST /api/auth/login` is also limited per client address (`LOGIN_RATE_LIMIT`, 429 with `Retry-After`).
