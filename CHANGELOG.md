@@ -59,6 +59,14 @@ theme.
   `ENABLE_TTP_VERIFICATION=false`. The run's recorded configuration shows the
   switch as `true` when it is unset.
 
+- **`scripts/measure_default_provider.py`**, the billed measurement of the
+  default provider (ADR-0094 item 11): two AnnoCTR test runs and two in-house
+  runs at `LLM_TEMPERATURE=0` with figure reading on, then the spread between
+  the repetitions. It refuses a missing key, another provider or model, a
+  non-zero temperature or an existing run name. `--dry-run` prints the
+  commands; `--estimate` counts the calls and characters of a past run
+  (input tokens approximated from characters; prices as arguments).
+
 - **The in-house evaluation scores the exported bundle** (ADR-0096, ADR-0094
   item 6). `python -m evaluation inhouse-run` now keeps Stage 5 on and writes
   each report's bundle to `data/eval/inhouse-runs/<name>/bundles/` with its
