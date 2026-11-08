@@ -186,7 +186,7 @@ _PROVIDER = os.environ.get("LLM_PROVIDER", "anthropic").lower()
 #: the call site said `claude-3-5-sonnet-latest` while the log label and
 #: .env.example both said `claude-sonnet-4-6`, so the model actually used was not
 #: the one the logs reported. 3-5-sonnet is also several generations behind.
-_DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6"
+_DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5-5"
 
 # --- Lazy client initialization ---
 _anthropic_client = None

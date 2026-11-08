@@ -133,7 +133,7 @@ def prompt_with_context(page_text: str = "", global_context: str = "") -> str:
 # instead of an actionable one.  `vllm` defaults to VLLM_MODEL (see
 # _default_model), which is a name the operator configured, not a guess.
 _DEFAULT_MODEL: dict[str, str] = {
-    "anthropic": "claude-haiku-4-5",
+    "anthropic": "claude-haiku-5-5",
     "ollama": "qwen3.8",
 }
 

@@ -419,7 +419,7 @@ def test_auto_with_anthropic_reads_with_the_default_vision_model(monkeypatch, bu
     _every_model_sees(monkeypatch)
     b = get_backend()
     assert isinstance(b, vlm.AnthropicVisionBackend)
-    assert (b.name, b.model, b.max_concurrency) == ("anthropic", "claude-haiku-4-5", 4)
+    assert (b.name, b.model, b.max_concurrency) == ("anthropic", "claude-haiku-5-5", 4)
     assert builds == ["anthropic"]
 
 
@@ -446,7 +446,7 @@ def test_auto_with_anthropic_and_no_key_is_skipped_and_says_so(monkeypatch, capl
     monkeypatch.delenv("ANTHROPIC_API_KEY")
     with caplog.at_level(logging.INFO, logger="pipeline.vlm"):
         assert get_backend() is None
-    assert vlm.skip_reason() == "auto: anthropic/claude-haiku-4-5 unavailable (no ANTHROPIC_API_KEY)"
+    assert vlm.skip_reason() == "auto: anthropic/claude-haiku-5-5 unavailable (no ANTHROPIC_API_KEY)"
     assert [r.levelno for r in caplog.records] == [logging.INFO]
     assert "no ANTHROPIC_API_KEY" in caplog.text
 
@@ -722,7 +722,7 @@ def test_an_anthropic_probe_that_raised_is_asked_again(monkeypatch, builds):
 
     assert get_backend() is None
     assert vlm.skip_reason().startswith(
-        "auto: anthropic/claude-haiku-4-5 unavailable (the capability probe failed (ConnectionError")
+        "auto: anthropic/claude-haiku-5-5 unavailable (the capability probe failed (ConnectionError")
     assert get_backend() is not None
     assert builds == ["anthropic", "anthropic"]
 

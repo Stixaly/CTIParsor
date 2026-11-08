@@ -43,7 +43,7 @@
     "env ANTHROPIC_MODEL": {
       "set": true,
       "values": [
-        "claude-sonnet-4-6"
+        "claude-sonnet-5-5"
       ]
     },
     "env API_ALLOWED_HOSTS": {

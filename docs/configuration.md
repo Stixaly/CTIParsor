@@ -82,7 +82,7 @@ Set `LLM_PROVIDER` to choose your backend.
 ```env
 LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-xxxxxxx
-ANTHROPIC_MODEL=claude-sonnet-4-6
+ANTHROPIC_MODEL=claude-sonnet-5-5
 ```
 The system prompt is sent with `cache_control` so Anthropic caches it across
 chunks — it is identical on every call, which is what makes it cacheable at all.
@@ -222,7 +222,7 @@ another provider than the one chosen for the text, so under `auto` a run with
 Stage 3 disabled (`main.py --no-llm`, `PIPELINE_DISABLED_STAGES=3`,
 `evaluation inhouse-run --disable 3`) reads no figure either, and the stage report
 says so; a named `VISION_PROVIDER` is the operator's explicit choice and is not
-affected. A PDF costs up to 40 reads (`claude-haiku-4-5` by default on
+affected. A PDF costs up to 40 reads (`claude-haiku-5-5` by default on
 `anthropic`). An existing `.env` that says `VISION_PROVIDER=none` keeps figures off
 until it says `auto`.
 
@@ -232,7 +232,7 @@ until it says `auto`.
 #            below, on the model it would use if named here; gemini and
 #            lmstudio have no figure reader, so Stage 1f is skipped
 # none       Stage 1f is off; figures are not read
-# anthropic  default model claude-haiku-4-5
+# anthropic  default model claude-haiku-5-5
 # ollama     default model qwen3.8 — needs a model with the `vision`
 #            capability; check with: curl -s $OLLAMA_BASE_URL/api/tags
 # mistral    VISION_MODEL is REQUIRED — no default is assumed, because no
