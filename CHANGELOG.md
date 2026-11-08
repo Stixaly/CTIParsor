@@ -9,6 +9,32 @@ theme.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-08
+
+A minor release under ADR-0085 §8 because it changes bundle output: a
+legitimate observable named in a report (a Windows system binary or DLL, a
+standard Unix file, a standard registry key, a value no IoC type fits) keeps
+its observable but no longer gets an Indicator (ADR-0095). It also records the
+in-house evaluation set as gold (ADR-0094 item 5, done with limits).
+
+- **No schema migration**, no API change, and no configuration variable added
+  or removed. `BENIGN_IOC_FILTER=false` still turns the benign filtering off,
+  the new list included.
+- **Bundles change** for the same report (`BUNDLE_AFFECTING`, mapping): fewer
+  Indicators, with the reason in the ledger and on the Graph page.
+- **Evaluation scores can move:** an `iocs` false positive that the gold now
+  lists as an observable no longer counts.
+- Dependencies: `ollama/ollama` 0.40.14 in the `ollama` profile (was
+  0.40.12), frontend minor and patch updates, CI actions.
+
+**Upgrade notes.**
+
+- Nothing to migrate: pull the image and restart
+  ([docs/upgrading.md](docs/upgrading.md)).
+- Stored bundles are not rebuilt: finalize a report again, or run it again, to
+  drop the Indicators of legitimate observables. Indicators already imported
+  into OpenCTI stay there until you remove them.
+
 ### Changed
 
 - **A legitimate observable ships without an Indicator** (ADR-0095). A
