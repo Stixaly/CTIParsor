@@ -460,6 +460,12 @@
         "300000"
       ]
     },
+    "env LLM_LOCAL_HOSTS": {
+      "set": false,
+      "values": [
+        "localhost,ollama,host.docker.internal"
+      ]
+    },
     "env LLM_MAX_OUTPUT_TOKENS": {
       "set": false,
       "values": [
