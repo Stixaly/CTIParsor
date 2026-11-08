@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -45,10 +46,22 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 EVAL = REPO / "data" / "eval"
 
-# pipeline/stage3_llm.py reads the same defaults (LLM_PROVIDER, ANTHROPIC_MODEL);
-# tests/test_measure_default_provider.py keeps these equal to that source.
+# pipeline/stage3_llm.py holds the defaults (LLM_PROVIDER, ANTHROPIC_MODEL). The
+# model is read from that source, not copied here, so a change of the default
+# is measured without editing this script; tests/test_measure_default_provider.py
+# checks both against it.
 DEFAULT_PROVIDER = "anthropic"
-DEFAULT_MODEL = "claude-sonnet-4-6"
+
+
+def _code_default_model() -> str:
+    source = (REPO / "pipeline" / "stage3_llm.py").read_text(encoding="utf-8")
+    found = re.search(r'^_DEFAULT_ANTHROPIC_MODEL = "([^"]+)"', source, re.MULTILINE)
+    if found is None:
+        raise SystemExit("pipeline/stage3_llm.py: _DEFAULT_ANTHROPIC_MODEL not found")
+    return found.group(1)
+
+
+DEFAULT_MODEL = _code_default_model()
 
 ANNOCTR_RUNS = ("default-provider-annoctr-1", "default-provider-annoctr-2")
 INHOUSE_RUNS = ("default-provider-inhouse-1", "default-provider-inhouse-2")
