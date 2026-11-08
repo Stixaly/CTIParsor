@@ -530,6 +530,41 @@ def _load_model():
         return None
 
 
+def _cache_model() -> str | None:
+    """The model the embedding cache was built with: the manifest's, or the legacy
+    one when the manifest is absent (built before ADR-004) or unreadable.  None
+    when there is no cache (the embeddings or their metadata are missing)."""
+    if not attack_data.resolve(_EMB_PATH).exists() or not attack_data.resolve(_META_PATH).exists():
+        return None
+    manifest_path = attack_data.resolve(_MANIFEST_PATH)
+    if not manifest_path.exists():
+        return _LEGACY_MODEL
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        return manifest.get("model", _LEGACY_MODEL)
+    except (OSError, ValueError, AttributeError) as exc:
+        # Read as a pre-manifest cache: the model check then decides.
+        logger.warning(f"Embedding manifest unreadable, cache taken as built with "
+                       f"'{_LEGACY_MODEL}': {type(exc).__name__}: {exc}")
+        return _LEGACY_MODEL
+
+
+def embedding_status() -> dict:
+    """What this process uses for Stage 2c, without loading anything: the model
+    requested, the one actually loaded (None before a load), whether that is a
+    fallback, the model the cache was built with and the thresholds applied."""
+    loaded = _active_model
+    high, medium = _thresholds()
+    return {
+        "requested": _TTP_EMBEDDING_MODEL,
+        "loaded": loaded,
+        "fallback": loaded is not None and loaded != _TTP_EMBEDDING_MODEL,
+        "cache_model": (cache := _cache_model()),
+        "cache_matches": cache is not None and cache == (loaded or _TTP_EMBEDDING_MODEL),
+        "thresholds": {"high": high, "medium": medium},
+    }
+
+
 def _load_corpus() -> tuple | None:
     """
     The semantic corpus for the model in use and the enabled domains (see
@@ -557,24 +592,12 @@ def _load_corpus_for(enabled: frozenset[str] | None, model: str) -> tuple | None
     """
     emb_path = attack_data.resolve(_EMB_PATH)
     meta_path = attack_data.resolve(_META_PATH)
-    manifest_path = attack_data.resolve(_MANIFEST_PATH)
     if not emb_path.exists() or not meta_path.exists():
         logger.warning("Embedding cache not found — run: python scripts/build_indexes.py")
         return None
 
     # ── Manifest check — detect stale cache after model change ──────────────
-    if manifest_path.exists():
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            cache_model = manifest.get("model", _LEGACY_MODEL)
-        except (OSError, ValueError, AttributeError) as exc:
-            # Read as a pre-manifest cache: the model check below then decides.
-            logger.warning(f"Embedding manifest unreadable, cache taken as built with "
-                           f"'{_LEGACY_MODEL}': {type(exc).__name__}: {exc}")
-            cache_model = _LEGACY_MODEL
-    else:
-        # No manifest → cache was built before ADR-004; assume legacy model
-        cache_model = _LEGACY_MODEL
+    cache_model = _cache_model()
 
     if cache_model != model:
         logger.warning(
