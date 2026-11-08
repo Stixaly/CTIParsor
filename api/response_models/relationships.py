@@ -1,7 +1,32 @@
 """Response models of api/routes/relationships.py."""
-from typing import Any
-
 from api.response_models import Response
+
+
+class RelationshipDate(Response):
+    """One dated bound of a relationship: a TemporalAssertion, as the route dumps it.
+
+    Plain strings, not the pipeline's Literal types: a row stored before a
+    value was added must still be read. The values the code writes today are
+    in the descriptions.
+    """
+
+    id: str | None = None
+    role: str | None = None  # start | end
+    time_text: str | None = None  # the verbatim text; '' for an analyst entry
+    value: str | None = None  # EDTF, as far as it is fixed
+    precision: str | None = None  # e.g. year, month, day, instant
+    qualifier: str | None = None  # none, or a qualifier the code sets
+    first_last: str | None = None  # first | last
+    model_value: str | None = None
+    alternatives: list[str] | None = None
+    anchor: str | None = None  # explicit | document | none
+    anchor_source: str | None = None
+    anchor_value: str | None = None
+    evidence_label: str | None = None
+    status: str | None = None  # unresolved, verified, or as the code sets it
+    reason: str | None = None
+    doc_offset: int | None = None
+    origin: str | None = None  # llm | analyst | legacy
 
 
 class RelationshipOut(Response):
@@ -18,9 +43,9 @@ class RelationshipOut(Response):
     evidence_label: str  # observed | reported | assessed | inferred | gap
     start_time: str | None = None  # the bound an analyst view shows (ADR-0063)
     stop_time: str | None = None
-    # Free-form on purpose: each item is one TemporalAssertion dumped with
-    # exclude_none=True, so its keys vary (value, precision, role, origin, status, ...).
-    times: list[dict[str, Any]]
+    # Each item is a TemporalAssertion dumped with exclude_none=True: the keys
+    # the route leaves out stay out (response_model_exclude_unset).
+    times: list[RelationshipDate]
     decision_origin: str | None = None
     held_reason: str | None = None  # ADR-0082
     enrichment_status: str | None = None  # ADR-0090

@@ -178,7 +178,7 @@ def _row_to_dict(row) -> dict:
     }
 
 
-@router.get("", response_model=list[RelationshipOut])
+@router.get("", response_model=list[RelationshipOut], response_model_exclude_unset=True)
 def list_relationships(job_id: str):
     with get_conn() as conn:
         require_job(conn, job_id)
@@ -189,7 +189,7 @@ def list_relationships(job_id: str):
     return [_row_to_dict(r) for r in rows]
 
 
-@router.get("/valid-types", response_model=list[str])
+@router.get("/valid-types", response_model=list[str], response_model_exclude_unset=True)
 def get_valid_types(job_id: str):
     # The types are the same for every job. `job_id` comes from the router's
     # prefix: declared here, it is in the OpenAPI schema, which was otherwise
@@ -197,7 +197,7 @@ def get_valid_types(job_id: str):
     return VALID_REL_TYPES
 
 
-@router.post("", response_model=RelationshipOut)
+@router.post("", response_model=RelationshipOut, response_model_exclude_unset=True)
 def create_relationship(job_id: str, body: RelCreate):
     if body.relationship_type not in VALID_REL_TYPES:
         raise HTTPException(400, f"Unknown relationship_type '{body.relationship_type}'. "
@@ -247,7 +247,7 @@ def create_relationship(job_id: str, body: RelCreate):
     }
 
 
-@router.post("/bulk", response_model=RelationshipBulkResult)
+@router.post("/bulk", response_model=RelationshipBulkResult, response_model_exclude_unset=True)
 def bulk_update_relationships(job_id: str, body: RelBulk):
     """Accept, reject or reset the given relationships in one statement.
 
@@ -281,7 +281,7 @@ def bulk_update_relationships(job_id: str, body: RelBulk):
     return {"updated": updated, "action": body.action}
 
 
-@router.patch("/{rel_id}", response_model=RelationshipOut, responses=_IMPORTED_ROW)
+@router.patch("/{rel_id}", response_model=RelationshipOut, response_model_exclude_unset=True, responses=_IMPORTED_ROW)
 def update_relationship(job_id: str, rel_id: str, patch: RelPatch):
     # `is not None`, not truthiness: '' used to skip this check and was stored as the verb (issue #438).
     if patch.relationship_type is not None and patch.relationship_type not in VALID_REL_TYPES:
@@ -421,7 +421,8 @@ def update_relationship(job_id: str, rel_id: str, patch: RelPatch):
     return _row_to_dict(updated)
 
 
-@router.delete("/{rel_id}", response_model=RelationshipDeleted, responses=_IMPORTED_ROW)
+@router.delete("/{rel_id}", response_model=RelationshipDeleted, response_model_exclude_unset=True,
+               responses=_IMPORTED_ROW)
 def delete_relationship(job_id: str, rel_id: str):
     with _lock:
         with get_conn() as conn:

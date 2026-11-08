@@ -117,6 +117,24 @@ def test_relationship_operations_return_the_rows_they_describe(temp_db_client, j
     assert deleted.json() == {"deleted": rid}
 
 
+def test_an_optional_key_the_route_leaves_out_stays_out_of_the_response(temp_db_client, job):
+    # The route dumps each date with exclude_none=True: a key it leaves out must not come back as null.
+    base = f"/api/jobs/{job}/relationships"
+    made = temp_db_client.post(base, json={
+        "source_value": "APT29", "relationship_type": "uses", "target_value": "WellMess",
+        "start_time": "2023",
+    })
+    assert made.status_code == 200, made.text
+    [item] = made.json()["times"]
+    assert item["role"] == "start" and item["origin"] == "analyst"
+    assert "model_value" not in item and "reason" not in item and "doc_offset" not in item
+    assert "evidence_label" not in item and "first_last" not in item
+    assert item["id"] and item["value"] == "2023"
+
+    listed = temp_db_client.get(base).json()
+    assert listed[0]["times"] == [item]
+
+
 # ── overrides ──────────────────────────────────────────────────────────────────
 
 def _seed_rejections(db, value: str, etype: str, jobs: int) -> None:
