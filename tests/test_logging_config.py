@@ -160,3 +160,11 @@ def test_the_helpers_log_with_the_request_id(caplog):
     assert err_tb.exc_info is not None and err_tb.job == "j1" and err_tb.request_id == "rid"
     assert err.exc_info is None and err.levelno == logging.ERROR
     assert warn.levelno == logging.WARNING and warn.stage == "3" and warn.request_id == "rid"
+
+
+def test_one_line_cannot_forge_a_second_log_line():
+    forged = "abc\n[auth] admin signed in\r\x1b[31m\\n"
+    safe = lc.one_line(forged)
+    assert "\n" not in safe and "\r" not in safe and "\x1b" not in safe
+    assert safe == "abc\\n[auth] admin signed in\\r\\x1b[31m\\\\n"
+    assert lc.one_line("x" * 500) == "x" * 200 and lc.one_line("token-id", 4) == "toke"

@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from api.auth import config, store
 from api.auth.deps import authenticate, current_user
-from api.logging_config import get_logger
+from api.logging_config import get_logger, one_line
 from api.response_models.admin import PasswordChanged, TokenCreated, TokenRecord, TokenRevoked, UserRecord
 
 logger = get_logger(__name__)
@@ -173,7 +173,7 @@ def revoke_any_token(token_id: str, user: store.User | None = Depends(current_us
     _on()
     if not store.revoke_token(token_id):
         raise HTTPException(404, "No active token with that id")
-    logger.info("[admin] %s revoked token %s", _actor(user).username, token_id)
+    logger.info("[admin] %s revoked token %s", _actor(user).username, one_line(token_id))
     return {"revoked": token_id}
 
 
@@ -204,7 +204,7 @@ def revoke_own_token(token_id: str, user: store.User | None = Depends(current_us
     actor = _actor(user)
     if not store.revoke_token(token_id, user_id=actor.id):
         raise HTTPException(404, "No active token with that id")
-    logger.info("[admin] %s revoked their token %s", actor.username, token_id)
+    logger.info("[admin] %s revoked their token %s", actor.username, one_line(token_id))
     return {"revoked": token_id}
 
 
@@ -213,7 +213,8 @@ def _new_token(actor: store.User, user_id: str, username: str, name: str, days: 
         secret, token_id = store.create_token(user_id, name, days=days)
     except store.AuthError as exc:
         raise _bad(exc) from None
-    logger.info("[admin] %s created token %s (%r) for %s", actor.username, token_id, name[:64], username)
+    logger.info("[admin] %s created token %s (%s) for %s", actor.username, token_id, one_line(name, 64),
+                one_line(username))
     record = store.get_token(token_id)
     if record is None:
         raise HTTPException(500, "The token was created but cannot be read back")
