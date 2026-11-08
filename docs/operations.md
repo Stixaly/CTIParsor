@@ -165,6 +165,26 @@ file is missing".
   scripts/measure_cold_start.py` ([deployment.md](deployment.md#5-workers-and-memory)).
 - `API_QUEUE_MAX_DEPTH` bounds the wait: past it, uploads get a 503.
 
+## Backups
+
+With the `backup` profile on, the status of the last run is in the file
+`/backup-status/status.json` on the `cti-backup-status` volume, and the app
+reports it on `/metrics` (see [Monitoring and alerts](#monitoring-and-alerts)).
+Watch these:
+
+- `ok` is `false`, or `error` names a step. The run failed and kept every older
+  pair. Read the error, fix the cause (a full target, a wrong password file, a
+  database that was down), then run `docker compose --profile backup run --rm -e BACKUP_RUN_NOW=1 backup`.
+- `last_success` is older than a day. No run succeeded since then.
+- `file` is the newest pair. Check it with the commands in
+  [docker.md](docker.md#data-and-backups).
+- The free space of `BACKUP_TARGET`. `BACKUP_KEEP` pairs take the space of
+  that many dumps and archives. The backup does not check the free space
+  itself: a full target makes a run fail, and the run then says so.
+
+Routing a failure to a person is the operator's job: the status file and the
+metrics are what to alert on.
+
 ## Logs
 
 ```bash

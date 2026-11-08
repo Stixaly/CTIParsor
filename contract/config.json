@@ -6,6 +6,11 @@
     "compose service app": {
       "profiles": []
     },
+    "compose service backup": {
+      "profiles": [
+        "backup"
+      ]
+    },
     "compose service bootstrap": {
       "profiles": [
         "bootstrap"
@@ -30,6 +35,7 @@
     "compose service worker": {
       "profiles": []
     },
+    "compose volume cti-backup-status": {},
     "compose volume cti-cache": {},
     "compose volume cti-state": {},
     "compose volume ollama-models": {},
@@ -88,10 +94,28 @@
         "20.0"
       ]
     },
+    "env BACKUP_KEEP": {
+      "set": false,
+      "values": [
+        "7"
+      ]
+    },
     "env BACKUP_STATUS_FILE": {
       "set": false,
       "values": [
         "/app/backup-status/status.json"
+      ]
+    },
+    "env BACKUP_TARGET": {
+      "set": false,
+      "values": [
+        "/mnt/backups/ctiparsor"
+      ]
+    },
+    "env BACKUP_TIME": {
+      "set": false,
+      "values": [
+        "02:30"
       ]
     },
     "env BENIGN_IOC_FILTER": {
