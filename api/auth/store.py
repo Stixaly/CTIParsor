@@ -15,7 +15,7 @@ from uuid import uuid4
 
 from api.auth import passwords
 from api.auth.config import DEFAULT_TOKEN_DAYS, ROLE_RANK, ROLES, session_ttl_hours
-from api.db import get_conn
+from api.db import get_conn, transaction
 from pipeline.regex_safety import compile_pattern
 
 TOKEN_PREFIX = "ctp_"                      # noqa: S105 - the start of every token, not a secret
@@ -177,7 +177,7 @@ def check_credentials(username: str, password: str) -> User | None:
         return None
     if passwords.needs_rehash(row["password_hash"]):
         get_conn().execute("UPDATE users SET password_hash=? WHERE id=?",
-                           (passwords.hash_password(password), row["id"]))
+                           (passwords.rehash(password), row["id"]))
     return _user(row)
 
 
@@ -191,12 +191,28 @@ def _failure_key(username: str) -> str:
     return username.strip().lower()[:256]
 
 
-def record_failure(username: str) -> None:
+def begin_attempt(username: str) -> datetime | None:
+    """Count a sign-in attempt for `username` BEFORE its password is checked.
+
+    Returns when the lockout ends if the username is locked (LOCK_FAILURES attempts
+    within LOCK_WINDOW; the attempt is then refused and not counted), else None after
+    recording the attempt: the caller checks the password, and `clear_failures` on a
+    success.  The count and the insert run in one transaction under a per-username
+    lock, so a burst of parallel requests makes at most LOCK_FAILURES password checks.
+    Unknown usernames are counted too, so the lock does not tell which exist.
+    """
+    key = _failure_key(username)
     now = _now()
     conn = get_conn()
-    conn.execute("DELETE FROM login_failures WHERE attempted_at < ?", (_ts(now - 2 * LOCK_WINDOW),))
-    conn.execute("INSERT INTO login_failures (username, attempted_at) VALUES (?,?)",
-                 (_failure_key(username), _ts(now)))
+    with transaction(conn):
+        conn.execute("SELECT pg_advisory_xact_lock(hashtext('ctiparsor.login'), hashtext(?))", (key,))
+        conn.execute("DELETE FROM login_failures WHERE attempted_at < ?", (_ts(now - 2 * LOCK_WINDOW),))
+        rows = conn.execute("SELECT attempted_at FROM login_failures WHERE username=? ORDER BY attempted_at",
+                            (key,)).fetchall()
+        until = _lock_end([_parse(r["attempted_at"]) for r in rows], now)
+        if until is None:
+            conn.execute("INSERT INTO login_failures (username, attempted_at) VALUES (?,?)", (key, _ts(now)))
+    return until
 
 
 def clear_failures(username: str) -> None:
@@ -211,7 +227,10 @@ def locked_until(username: str) -> datetime | None:
     rows = get_conn().execute(
         "SELECT attempted_at FROM login_failures WHERE username=? AND attempted_at > ? ORDER BY attempted_at",
         (_failure_key(username), _ts(now - 2 * LOCK_WINDOW))).fetchall()
-    times = [_parse(r["attempted_at"]) for r in rows]
+    return _lock_end([_parse(r["attempted_at"]) for r in rows], now)
+
+
+def _lock_end(times: list[datetime], now: datetime) -> datetime | None:
     until = None
     for i in range(LOCK_FAILURES - 1, len(times)):
         if times[i] - times[i - LOCK_FAILURES + 1] <= LOCK_WINDOW:
@@ -228,6 +247,7 @@ class Session:
     user: User
     csrf_token: str
     expires_at: datetime
+    refreshed: bool = False       # find_session slid the expiry: the browser's cookie needs the new Max-Age
 
 
 def create_session(user_id: str) -> tuple[str, Session]:
@@ -260,11 +280,12 @@ def find_session(session_id: str) -> Session | None:
     expires = _parse(row["expires_at"])
     if expires <= now or row["disabled"]:
         return None
-    if now - _parse(row["last_seen_at"]) >= _TOUCH_EVERY:
+    refreshed = now - _parse(row["last_seen_at"]) >= _TOUCH_EVERY
+    if refreshed:
         expires = now + timedelta(hours=session_ttl_hours())
         get_conn().execute("UPDATE sessions SET last_seen_at=?, expires_at=? WHERE id_hash=?",
                            (_ts(now), _ts(expires), row["id_hash"]))
-    return Session(_user(row), row["csrf_token"], expires)
+    return Session(_user(row), row["csrf_token"], expires, refreshed)
 
 
 def delete_session(session_id: str) -> None:
@@ -313,6 +334,18 @@ def find_token_user(token: str) -> User | None:
     if row["last_used_at"] is None or now - _parse(row["last_used_at"]) >= _TOUCH_EVERY:
         get_conn().execute("UPDATE api_tokens SET last_used_at=? WHERE id=?", (_ts(now), row["token_id"]))
     return _user(row)
+
+
+def list_tokens(username: str | None = None) -> list[dict]:
+    """The tokens (never the secrets), newest first; those of one user when `username` is given."""
+    sql = ("SELECT t.id, t.name, u.username, t.created_at, t.expires_at, t.revoked_at, t.last_used_at "
+           "FROM api_tokens t JOIN users u ON u.id = t.user_id")
+    params: tuple = ()
+    if username is not None:
+        sql += " WHERE u.username=?"
+        params = (normalise_username(username),)
+    rows = get_conn().execute(sql + " ORDER BY t.created_at DESC", params).fetchall()
+    return [dict(zip(r.keys(), r, strict=True)) for r in rows]
 
 
 def revoke_token(token_id: str) -> bool:

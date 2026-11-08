@@ -13,10 +13,10 @@ not attach it by itself.
 """
 from __future__ import annotations
 
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Request, Response
 
 from api.auth import store
-from api.auth.config import auth_mode
+from api.auth.config import auth_mode, session_ttl_hours
 from api.auth.permissions import OPEN, required_role
 from api.logging_config import get_logger
 
@@ -24,6 +24,7 @@ logger = get_logger(__name__)
 
 SESSION_COOKIE = "ctiparsor_session"
 CSRF_HEADER = "X-CSRF-Token"
+AUTH_SCOPE_KEY = "ctiparsor_auth"      # where the middleware leaves its answer for the dependency
 _STATE_CHANGING = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
@@ -33,10 +34,26 @@ def route_template(request: Request) -> str | None:
     return getattr(route, "path", None)
 
 
-def authenticate(request: Request) -> tuple[store.User | None, store.Session | None]:
+def cookie_secure(request: Request) -> bool:
+    """Did the request arrive over HTTPS, by its scheme or by the proxy's
+    `X-Forwarded-Proto`?  Only then is the cookie `Secure`: a browser (Safari) refuses
+    a Secure cookie over http://localhost, which is how a published Docker port is reached."""
+    forwarded = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+    return request.url.scheme == "https" or forwarded == "https"
+
+
+def set_session_cookie(response: Response, session_id: str, secure: bool) -> None:
+    response.set_cookie(SESSION_COOKIE, session_id, max_age=int(session_ttl_hours() * 3600),
+                        httponly=True, samesite="strict", secure=secure, path="/")
+
+
+def authenticate(request: Request, fresh: bool = False) -> tuple[store.User | None, store.Session | None]:
     """(user, session) for the credentials on the request: the session is None for a
     bearer token.  (None, None) without credentials, or with ones that do not hold.
-    A bearer header that is refused is not retried as a cookie."""
+    A bearer header that is refused is not retried as a cookie.  The answer the
+    middleware already found is reused, unless `fresh` (a stream that checks again)."""
+    if not fresh and AUTH_SCOPE_KEY in request.scope:
+        return request.scope[AUTH_SCOPE_KEY]
     header = request.headers.get("authorization", "")
     if header:
         scheme, _, token = header.partition(" ")

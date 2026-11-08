@@ -19,6 +19,11 @@ in `api/auth/permissions.py`; a test fails for an operation with no entry.
   `DELETE` made with the cookie (403 without it). `POST /api/auth/logout` ends the session.
   A wrong password and an unknown username both answer 401 `Invalid username or password`; five
   failures for a username in 15 minutes answer 429 with `Retry-After` for 15 minutes.
+- Before any route runs, a request for `/api/...` or the docs (`/docs`, `/redoc`, `/openapi.json`) without a
+  valid session or token gets 401 (not for `GET /api/health` and `POST /api/auth/login`); the body is not read.
+  `POST /api/auth/login` is also limited per client address (`LOGIN_RATE_LIMIT`, 429 with `Retry-After`).
+  A request that slides the session sends the cookie again with the new `Max-Age`; the progress stream checks
+  the session or token every 60 seconds and ends with a `done` event (`error: session ended`) when it no longer holds.
 - **Scripts.** `Authorization: Bearer ctp_...`, a token made with `python -m api.admin create-token`
   (shown once, 90 days by default, revocable). It needs no CSRF token. A token that is unknown, revoked or
   expired, and one whose user is disabled, answers 401.

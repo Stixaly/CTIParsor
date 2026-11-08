@@ -27,6 +27,7 @@ logger = get_logger(__name__)
 
 from api.auth import config as auth_config
 from api.auth.deps import current_user
+from api.auth.middleware import AuthGateMiddleware
 from api.body_limit import DEFAULT_BUDGET_BYTES, BodyLimitMiddleware
 from api.db import get_conn, init_db
 from api.paths import output_dir, uploads_dir
@@ -74,6 +75,12 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("[startup] authentication is OFF (AUTH_MODE=off): single-analyst use on loopback only; "
                        "anyone who reaches the port has full access")
+        if not (os.environ.get("API_HOST") or "").strip() and not auth_config.published_host():
+            # Started by hand (a bare `uvicorn --host ...`): the guard above judged the default
+            # loopback, which is not what the socket may be bound to.
+            logger.warning("[startup] neither API_HOST nor API_PUBLISHED_HOST is set, so the start guard cannot "
+                           "know the bind address. Start the API with `python run_api.py` or the Compose stack, "
+                           "the only supported launches")
     # A bad STIX_TLP stops the process here, not at the first bundle — a
     # marking is never guessed (ADR-0073).
     from pipeline.stage4_stix_mapping import tlp_default
@@ -135,9 +142,14 @@ app.state.limiter = limiter
 
 @app.exception_handler(RateLimitExceeded)
 async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    try:
+        wait = int(exc.limit.limit.get_expiry()) if exc.limit else 60     # the window of the limit that was hit
+    except (AttributeError, TypeError, ValueError):
+        wait = 60
     return JSONResponse(
         status_code=429,
         content={"detail": "Too many requests. Please try again later."},
+        headers={"Retry-After": str(wait)},
     )
 
 
@@ -285,6 +297,10 @@ app.add_middleware(BodyLimitMiddleware, budgets={
     ("POST", "/api/ingest/url"): ingest.url_body_budget,
     ("POST", "/api/jobs/{job_id}/detections/export"): coverage.export_body_budget,
 }, default=lambda: DEFAULT_BUDGET_BYTES)
+
+# Before the body is read: an anonymous request for /api gets 401 here when authentication is on
+# (api/auth/middleware.py).  Added after the budgets, so it runs before them.
+app.add_middleware(AuthGateMiddleware)
 
 # Added last, so it runs first: an unknown Host is answered 400 before the
 # request-id middleware or the write guard see it.

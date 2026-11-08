@@ -48,6 +48,7 @@ MIGRATION = Migration(
         "CREATE TABLE IF NOT EXISTS login_failures ("
         " username TEXT NOT NULL, attempted_at TEXT NOT NULL)",
         "CREATE INDEX IF NOT EXISTS idx_login_failures_username ON login_failures(username, attempted_at)",
+        "CREATE INDEX IF NOT EXISTS idx_login_failures_attempted ON login_failures(attempted_at)",
         "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS imported_by TEXT",
     ),
 )

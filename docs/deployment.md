@@ -105,12 +105,27 @@ command. Roles: a `reader` reads reports, bundles and coverage; an `analyst` als
 imports, records review decisions, finalizes, exports and deletes the reports they
 imported; an `admin` also deletes any report and manages settings, the
 relationship policy and the thresholds. A report stored before authentication was
-turned on has no owner: only an admin deletes it. Five failed sign-ins for a
-username in 15 minutes lock that username for 15 minutes.
+turned on has no owner: only an admin deletes it. Five sign-in attempts for a
+username in 15 minutes lock that username for 15 minutes. The attempt is counted
+before the password is checked, so the lock also stops the account's real owner for
+those 15 minutes; `python -m api.admin set-password --username NAME` lifts it at once.
+Sign-in is also limited per client address (`LOGIN_RATE_LIMIT`, default `10/minute`).
+`python -m api.admin list-tokens` and `revoke-token --id ID` manage the tokens.
 
-Sessions and tokens travel in clear text over plain HTTP. Serve a shared instance
-behind TLS (option C below); the session cookie is `Secure`, so a browser does not
-send it back over plain HTTP, except from loopback.
+Sessions and tokens travel in clear text over plain HTTP. Authentication beyond the
+loopback address goes through the `proxy` profile (TLS, option C below): the session
+cookie is `Secure` when the request arrived over HTTPS (the scheme, or the proxy's
+`X-Forwarded-Proto: https`), and is sent without `Secure` over plain HTTP, because
+Safari refuses a `Secure` cookie on `http://localhost`, which is how a Docker published
+port is reached. Over plain HTTP anyone on the path can read it.
+
+Start the API with `python run_api.py` or the Compose stack, the only supported
+launches: the start guard reads `API_HOST` (or `API_PUBLISHED_HOST`), and a bare
+`uvicorn --host ...` gives it nothing to judge (the start log then warns).
+`API_PUBLISHED_HOST` is set by Compose from `CTI_BIND`; do not set it by hand.
+When authentication is on, a request for `/api` or the interactive docs (`/docs`,
+`/redoc`, `/openapi.json`) without a valid session or token gets 401 before its body
+is read.
 
 In the Docker stack the `app` container always binds `0.0.0.0`, so the guard judges
 the address compose publishes the port on (`CTI_BIND`, passed as `API_PUBLISHED_HOST`):

@@ -390,6 +390,8 @@ def auth_client(temp_db, monkeypatch):
     import api.main
 
     monkeypatch.setenv("AUTH_MODE", "local")
+    monkeypatch.setenv("LOGIN_RATE_LIMIT", "1000/minute")        # the many sign-ins of a test come from one address
+    api.main.limiter.reset()
     with patch("api.main.init_db"), patch("api.queue_loop.start_embedded"):
         with TestClient(api.main.app, base_url="https://testserver") as client:
             yield client

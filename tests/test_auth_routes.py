@@ -55,18 +55,28 @@ def test_a_sign_in_sets_a_hardened_session_cookie(auth_client, make_user):
     assert {"httponly", "secure", "samesite=strict", "path=/", "max-age=43200"} <= flags
 
 
-def test_the_cookie_is_not_secure_only_for_plain_http_from_loopback(temp_db, make_user, monkeypatch):
+def test_the_cookie_is_secure_only_when_the_request_came_over_https(temp_db, make_user, monkeypatch):
     import api.main
 
     monkeypatch.setenv("AUTH_MODE", "local")
+    monkeypatch.setenv("LOGIN_RATE_LIMIT", "1000/minute")
     user = make_user("reader")
+
+    def secure(client, **headers) -> bool:
+        return "secure" in client.post("/api/auth/login", headers=headers,
+                                       json={"username": user.username, "password": AUTH_TEST_PASSWORD}
+                                       ).headers["set-cookie"].lower()
+
     with patch("api.main.init_db"), patch("api.queue_loop.start_embedded"):
-        with TestClient(api.main.app, base_url="http://testserver", client=("127.0.0.1", 50000)) as local:
-            assert "secure" not in _login(local, user.username).headers["set-cookie"].lower()
-        with TestClient(api.main.app, base_url="http://testserver", client=("192.168.1.20", 50000)) as lan:
-            assert "secure" in _login(lan, user.username).headers["set-cookie"].lower()
+        # Plain HTTP: from loopback, or from the gateway address Docker's published port shows.
+        for ip in ("127.0.0.1", "172.18.0.1"):
+            with TestClient(api.main.app, base_url="http://testserver", client=(ip, 50000)) as plain:
+                assert not secure(plain)
+        with TestClient(api.main.app, base_url="http://testserver", client=("172.18.0.1", 50000)) as proxied:
+            assert secure(proxied, **{"X-Forwarded-Proto": "https"})
+            assert not secure(proxied, **{"X-Forwarded-Proto": "http"})
         with TestClient(api.main.app, base_url="https://testserver", client=("127.0.0.1", 50000)) as tls:
-            assert "secure" in _login(tls, user.username).headers["set-cookie"].lower()
+            assert secure(tls)
 
 
 def test_the_session_lifetime_follows_session_ttl_hours(auth_client, make_user, monkeypatch):
@@ -82,6 +92,52 @@ def test_the_database_keeps_the_hash_of_the_session_id_not_the_id(auth_client, m
         stored = [r["id_hash"] for r in conn.execute("SELECT id_hash FROM sessions").fetchall()]
     assert stored == [hashlib.sha256(session_id.encode()).hexdigest()]
     assert session_id not in stored
+
+
+def test_a_slid_session_sends_the_new_max_age_to_the_browser(auth_client, make_user, temp_db, monkeypatch):
+    monkeypatch.setenv("SESSION_TTL_HOURS", "2")
+    _login(auth_client, make_user("reader").username)
+    assert "set-cookie" not in auth_client.get("/api/auth/me").headers          # slid less than a minute ago
+    with temp_db.get_conn() as conn:
+        conn.execute("UPDATE sessions SET last_seen_at=?", (_past(0.01),))
+    response = auth_client.get("/api/jobs")
+    cookie = response.headers["set-cookie"].lower()
+    assert cookie.startswith("ctiparsor_session=") and "max-age=7200" in cookie
+    assert {"httponly", "secure", "samesite=strict", "path=/"} <= {p.strip() for p in cookie.split(";")}
+    assert "set-cookie" not in auth_client.get("/api/jobs").headers
+
+
+def test_a_failed_sign_in_never_logs_what_was_typed_as_the_username(auth_client, make_user, caplog):
+    user = make_user("reader")
+    typed = "hunter2-my-real-password"
+    with caplog.at_level("INFO"):
+        _login(auth_client, typed, "whatever it was")
+        _login(auth_client, user.username, "wrong password here")
+    for secret in (typed, "whatever it was", "wrong password here"):
+        assert secret not in caplog.text
+    assert "failed sign-in for <unknown>" in caplog.text
+    assert f"failed sign-in for {user.username}" in caplog.text
+
+
+def test_the_sixth_attempt_is_refused_before_any_password_check(auth_client, make_user, monkeypatch):
+    from api.auth import passwords
+
+    user = make_user("reader")
+    checks = []
+    real = passwords.verify
+    monkeypatch.setattr(passwords, "verify", lambda p, h: checks.append(1) or real(p, h))
+    codes = [_login(auth_client, user.username, "wrong password here").status_code for _ in range(7)]
+    assert codes == [401] * 5 + [429] * 2 and len(checks) == 5
+
+
+def test_sign_in_is_rate_limited_per_address(auth_client, make_user, monkeypatch):
+    import api.main
+
+    monkeypatch.setenv("LOGIN_RATE_LIMIT", "3/minute")
+    api.main.limiter.reset()
+    codes = [_login(auth_client, f"nobody{i}").status_code for i in range(5)]
+    assert codes == [401, 401, 401, 429, 429]
+    assert int(_login(auth_client, "nobody9").headers["retry-after"]) > 0
 
 
 def test_a_wrong_password_and_an_unknown_user_get_the_same_answer(auth_client, make_user):
@@ -243,6 +299,40 @@ def test_an_expired_revoked_unknown_or_malformed_token_is_401(auth_client, make_
 def test_a_refused_bearer_token_is_not_retried_as_the_cookie(auth_client, make_user):
     _login(auth_client, make_user("reader").username)
     assert auth_client.get("/api/jobs", headers={"Authorization": "Bearer ctp_wrong"}).status_code == 401
+
+
+def test_an_anonymous_upload_is_refused_before_the_body_is_parsed(auth_client, monkeypatch):
+    from unittest.mock import MagicMock
+
+    import api.routes.upload as upload
+
+    parsed = MagicMock()
+    monkeypatch.setattr(upload, "start_job", parsed)
+    monkeypatch.setattr(upload.magic, "from_buffer", parsed)
+    seen = []
+    from starlette.requests import Request
+
+    real_form = Request.form
+    monkeypatch.setattr(Request, "form", lambda self, *a, **k: seen.append(1) or real_form(self, *a, **k))
+    response = auth_client.post("/api/upload", files={"file": ("r.txt", io.BytesIO(_TEXT.encode()), "text/plain")})
+    assert response.status_code == 401
+    parsed.assert_not_called()
+    assert seen == []
+    assert auth_client.post("/api/ingest/text", json={"text": _TEXT}).status_code == 401
+    assert auth_client.get("/api/does-not-exist").status_code == 401
+
+
+def test_the_interactive_docs_need_a_session_when_authentication_is_on(auth_client, make_user, sign_in):
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert auth_client.get(path).status_code == 401, path
+    sign_in(make_user("reader"))
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert auth_client.get(path).status_code == 200, path
+
+
+def test_the_interactive_docs_are_open_with_authentication_off(temp_db_client):
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert temp_db_client.get(path).status_code == 200, path
 
 
 def test_a_disabled_user_loses_the_tokens(auth_client, make_user):

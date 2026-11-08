@@ -1,10 +1,13 @@
 import asyncio
 import json
+import time
 from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
+from api.auth import config as auth_config
+from api.auth.deps import authenticate
 from api.db import get_conn
 from api.routes._common import refuse_nul_id
 
@@ -28,6 +31,9 @@ _SSE: dict[int | str, dict[str, Any]] = {200: {
 # headroom so a legitimately long job still streams to completion.
 _POLL_INTERVAL_SECONDS = 0.5
 _MAX_STREAM_SECONDS = 2700  # 45 minutes
+# With authentication on, the session or token that opened the stream is checked again this often,
+# and the stream ends when it no longer holds (signed out, disabled, revoked, expired).
+_REAUTH_SECONDS = 60.0
 
 
 def _fetch_events_after(job_id: str, last_id: int) -> list[dict]:
@@ -78,6 +84,7 @@ async def progress_stream(job_id: str, request: Request):
         _MAX_NOT_FOUND = 6   # 6 × 0.5 s = 3 s grace window
 
         _elapsed = 0.0
+        _last_check = time.monotonic()
         while True:
             # Off the event loop: each read is a blocking psycopg call, made on every poll (0.5 s) for every
             # open stream.  Each pool thread keeps one cached connection for its life (api/db.py, not closed by
@@ -118,6 +125,15 @@ async def progress_stream(job_id: str, request: Request):
 
             await asyncio.sleep(_POLL_INTERVAL_SECONDS)
             _elapsed += _POLL_INTERVAL_SECONDS
+            if auth_config.enabled() and time.monotonic() - _last_check >= _REAUTH_SECONDS:
+                _last_check = time.monotonic()
+                user, _ = await asyncio.to_thread(authenticate, request, True)
+                if user is None:
+                    yield (
+                        "event: done\n"
+                        f"data: {json.dumps({'status': status or 'processing', 'error': 'session ended'})}\n\n"
+                    )
+                    return
 
     return StreamingResponse(
         generator(),

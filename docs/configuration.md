@@ -723,7 +723,14 @@ and publishes with `CTI_BIND` / `CTI_PORT`.
 # AUTH_MODE=off
 # Lifetime of a web session, in hours; each request slides it.
 # SESSION_TTL_HOURS=12
+# Sign-in attempts allowed per client address (slowapi syntax).
+# LOGIN_RATE_LIMIT=10/minute
 ```
+
+Five sign-in attempts for a username within 15 minutes lock it for 15 minutes; the
+attempt is counted before the password is checked, so the account's real owner is
+locked too, and `python -m api.admin set-password` unlocks it. Start the API with
+`python run_api.py` or Compose only; `API_PUBLISHED_HOST` is for Compose to set.
 
 `run_api.py` and the app's own start both check it: `AUTH_MODE=off` with an
 `API_HOST` that is not loopback stops the process with a message naming both

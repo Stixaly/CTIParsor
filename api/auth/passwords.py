@@ -42,5 +42,11 @@ def verify(password: str, stored_hash: str | None) -> bool:
     return ok and stored_hash is not None
 
 
+def rehash(password: str) -> str:
+    """A fresh hash of a password that has just been verified: no policy check, so an
+    account made under an older policy can still sign in."""
+    return _hasher.hash(password)
+
+
 def needs_rehash(stored_hash: str) -> bool:
     return _hasher.check_needs_rehash(stored_hash)

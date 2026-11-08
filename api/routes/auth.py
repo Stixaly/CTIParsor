@@ -8,14 +8,16 @@ token; a failed sign-in logs the username, cut to 64 characters, with `%r`.
 from __future__ import annotations
 
 import math
+import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from api.auth import config, store
-from api.auth.deps import SESSION_COOKIE, authenticate, current_user
+from api.auth.deps import SESSION_COOKIE, authenticate, cookie_secure, current_user, set_session_cookie
 from api.logging_config import get_logger
+from api.main import limiter
 from api.response_models.auth import Me, SignedOut
 
 logger = get_logger(__name__)
@@ -28,9 +30,9 @@ class LoginRequest(BaseModel):
     password: str
 
 
-def _plain_http_from_loopback(request: Request) -> bool:
-    client = request.client.host if request.client else ""
-    return request.url.scheme == "http" and config.is_loopback_host(client)
+def login_rate_limit() -> str:
+    """Sign-in requests per client address, a slowapi limit (LOGIN_RATE_LIMIT, default 10/minute)."""
+    return (os.getenv("LOGIN_RATE_LIMIT") or "").strip() or "10/minute"
 
 
 def _me(user: store.User | None, csrf_token: str | None) -> dict:
@@ -48,33 +50,37 @@ def _me(user: store.User | None, csrf_token: str | None) -> dict:
     401: {"description": "Wrong username or password (the same answer for an unknown username)."},
     403: {"description": "Local accounts are not enabled (AUTH_MODE is oidc)."},
     404: {"description": "Authentication is off (AUTH_MODE=off)."},
-    429: {"description": "Five failures for this username in 15 minutes; try again after Retry-After seconds."},
+    429: {"description": "Five failed attempts for this username in 15 minutes, or too many requests from "
+                         "this address; try again after Retry-After seconds."},
 })
+@limiter.limit(login_rate_limit)
 def login(body: LoginRequest, request: Request, response: Response):
     mode = config.auth_mode()
     if mode == "off":
         raise HTTPException(404, "Authentication is off")
     if not config.local_enabled():
         raise HTTPException(403, "Local sign-in is not enabled")
-    until = store.locked_until(body.username)
+    # The attempt is counted before the password is checked, under a lock per username.
+    until = store.begin_attempt(body.username)
     if until is not None:
+        logger.warning("[auth] sign-in refused, username locked: %s", _label(body.username))
         raise _locked(until)
     user = store.check_credentials(body.username, body.password)
     if user is None:
-        store.record_failure(body.username)
-        logger.warning("[auth] failed sign-in for %r", body.username[:64])
-        until = store.locked_until(body.username)
-        if until is not None:
-            logger.warning("[auth] sign-in locked for %r", body.username[:64])
+        logger.warning("[auth] failed sign-in for %s", _label(body.username))
         raise HTTPException(401, "Invalid username or password")
     store.clear_failures(body.username)
     store.mark_login(user.id)
     session_id, session = store.create_session(user.id)
-    response.set_cookie(
-        SESSION_COOKIE, session_id,
-        max_age=int(config.session_ttl_hours() * 3600),
-        httponly=True, samesite="strict", secure=not _plain_http_from_loopback(request), path="/")
+    set_session_cookie(response, session_id, cookie_secure(request))
     return _me(user, session.csrf_token)
+
+
+def _label(username: str) -> str:
+    """What a log line may say about a typed username: the name of an existing account,
+    else `<unknown>`.  The field can hold anything, a password included."""
+    known = store.find_user(username)
+    return known.username if known else "<unknown>"
 
 
 def _locked(until: datetime) -> HTTPException:
@@ -89,7 +95,7 @@ def logout(request: Request, response: Response, _user: store.User | None = Depe
     if cookie:
         store.delete_session(cookie)
     response.delete_cookie(SESSION_COOKIE, path="/", httponly=True, samesite="strict",
-                           secure=not _plain_http_from_loopback(request))
+                           secure=cookie_secure(request))
     return {"signed_out": True}
 
 

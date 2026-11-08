@@ -156,7 +156,7 @@ def test_failures_spread_over_more_than_the_window_do_not_lock(temp_db):
 
 
 def test_the_lock_is_per_username_and_not_case_sensitive(temp_db):
-    store.record_failure("Alice")
+    assert store.begin_attempt("Alice") is None
     _fail_at(temp_db, "alice", 1, 1, 1, 1)
     assert store.locked_until("ALICE")
     assert store.locked_until("bob") is None
@@ -167,9 +167,65 @@ def test_clear_failures_and_the_purge_of_old_rows(temp_db):
     store.clear_failures("alice")
     assert store.locked_until("alice") is None
     _fail_at(temp_db, "bob", 45)
-    store.record_failure("carol")
+    store.begin_attempt("carol")
     with temp_db.get_conn() as conn:
         assert [r["username"] for r in conn.execute("SELECT username FROM login_failures").fetchall()] == ["carol"]
+
+
+def test_an_attempt_is_counted_before_the_password_is_checked_and_a_sixth_is_refused(temp_db):
+    assert [store.begin_attempt("alice") for _ in range(5)] == [None] * 5
+    until = store.begin_attempt("alice")
+    assert until is not None and until > datetime.now(timezone.utc)
+    with temp_db.get_conn() as conn:                      # the refused attempt is not counted again
+        assert conn.execute("SELECT COUNT(*) AS n FROM login_failures").fetchone()["n"] == 5
+    store.clear_failures("alice")
+    assert store.begin_attempt("alice") is None
+
+
+def test_a_parallel_burst_gets_at_most_five_password_checks(temp_db):
+    import threading
+
+    allowed, lock = [], threading.Lock()
+    start = threading.Barrier(20)
+
+    def attempt():
+        start.wait()
+        until = store.begin_attempt("alice")
+        with lock:
+            allowed.append(until is None)
+
+    threads = [threading.Thread(target=attempt) for _ in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(allowed) == 20 and sum(allowed) == store.LOCK_FAILURES
+
+
+def test_a_sliding_session_says_it_slid(temp_db):
+    user = store.create_user("alice", "analyst", password=GOOD)
+    session_id, _ = store.create_session(user.id)
+    assert store.find_session(session_id).refreshed is False
+    with temp_db.get_conn() as conn:
+        conn.execute("UPDATE sessions SET last_seen_at=?", (_at(5),))
+    assert store.find_session(session_id).refreshed is True
+    assert store.find_session(session_id).refreshed is False
+
+
+def test_a_rehash_does_not_apply_the_password_policy():
+    assert passwords.rehash("short").startswith("$argon2id$")
+
+
+def test_tokens_are_listed_without_secrets_and_by_user(temp_db):
+    alice = store.create_user("alice", "analyst", password=GOOD)
+    bob = store.create_user("bob", "reader", password=GOOD)
+    token, token_id = store.create_token(alice.id, "ci")
+    store.create_token(bob.id, "other")
+    assert [t["name"] for t in store.list_tokens("Alice")] == ["ci"]
+    assert len(store.list_tokens()) == 2
+    assert all(token not in str(t.values()) and "token_hash" not in t for t in store.list_tokens())
+    store.revoke_token(token_id)
+    assert store.list_tokens("alice")[0]["revoked_at"]
 
 
 # ── Sessions ─────────────────────────────────────────────────────────────────
