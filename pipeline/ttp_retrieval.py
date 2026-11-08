@@ -622,10 +622,12 @@ def _production_retriever(corpus: str, method: str, exclude_cited: str) -> Retri
         if model is None or c.embeddings is None:
             logger.warning("Dense retrieval unavailable (encoder or embeddings missing)")
             return None
-        if corpus != "short" and c.model and c.model != s2c._TTP_EMBEDDING_MODEL:
-            logger.warning("Retrieval embeddings built with %r, TTP_EMBEDDING_MODEL is %r — "
+        # The model loaded, not the one requested: after a fallback the query
+        # vectors come from the former.
+        if corpus != "short" and c.model and c.model != s2c._active_model_name():
+            logger.warning("Retrieval embeddings built with %r, the embedding model in use is %r — "
                            "rebuild: python scripts/build_indexes.py --only retrieval",
-                           c.model, s2c._TTP_EMBEDDING_MODEL)
+                           c.model, s2c._active_model_name())
             return None
     return Retriever(c, method, model)
 
@@ -637,6 +639,40 @@ def retrieval_available() -> bool:
     if s["method"] != "bm25" and env_bool("SKIP_HEAVY_MODELS"):
         return False
     return _production_retriever(s["corpus"], s["method"], s["exclude_cited"]) is not None
+
+
+def retrieval_status() -> dict:
+    """The encoder the select path uses and the model its corpus was built
+    with, loading no model: `corpus_model` is None when there is no corpus (its
+    `cache_matches` is then False), it does not name its model, or the method
+    is BM25 (no encoder, `cache_matches` True)."""
+    from pipeline import stage2c_ttp_semantic as s2c
+
+    s = retrieval_settings()
+    loaded = s2c._active_model
+    in_use = loaded or s2c._TTP_EMBEDDING_MODEL
+    corpus_model = None
+    present = False                     # a corpus with embeddings to query
+    if s["method"] != "bm25":
+        if s["corpus"] == "short":
+            corpus_model = s2c._cache_model()
+            present = corpus_model is not None
+        else:
+            built = _built_corpus(str(attack_data.resolve(CORPUS_PATH)),
+                                  str(attack_data.resolve(EMBEDDINGS_PATH)))
+            present = built is not None and built.embeddings is not None
+            corpus_model = (built.model or None) if built is not None else None
+    return {
+        "requested": s2c._TTP_EMBEDDING_MODEL,
+        "loaded": loaded,
+        "fallback": loaded is not None and loaded != s2c._TTP_EMBEDDING_MODEL,
+        "corpus": s["corpus"],
+        "method": s["method"],
+        "corpus_model": corpus_model,
+        # As _production_retriever: BM25 needs no encoder, a corpus that does not
+        # name its model is taken as matching, no corpus is no match.
+        "cache_matches": s["method"] == "bm25" or (present and corpus_model in (None, in_use)),
+    }
 
 
 def candidates_for_chunks(chunks: Sequence[str]) -> list[list[TtpCandidate]]:
