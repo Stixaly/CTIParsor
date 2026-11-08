@@ -18,6 +18,7 @@ from fastapi import APIRouter
 
 from api.db import backend, get_conn
 from api.queue_loop import LEASE_TIMEOUT_S, role
+from api.response_models.queue import QueueStatus
 from api.worker import _QUEUE_MAX_DEPTH
 
 router = APIRouter(prefix="/api", tags=["queue"])
@@ -81,7 +82,7 @@ def _summary(workers: list[dict]) -> dict:
     }
 
 
-@router.get("/queue/status")
+@router.get("/queue/status", response_model=QueueStatus)
 def get_queue_status():
     """Return a snapshot of queue depth, job counts, and every worker loop's liveness."""
     with get_conn() as conn:

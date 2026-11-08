@@ -14,6 +14,14 @@ from api.baseline_store import EXCLUDED_LISTED
 from api.db import _lock, get_conn, now_iso, transaction
 from api.logging_config import get_logger
 from api.paths import output_dir, uploads_dir
+from api.response_models.jobs import (
+    BundleLedger,
+    DeleteResult,
+    FinalizeResult,
+    JobDetail,
+    JobSummary,
+    StatusResult,
+)
 from api.routes._common import require_job
 from api.worker import BundleInvalidError, FinalizeOvertaken, re_run_final_stages
 from pipeline.env_flags import env_int
@@ -98,7 +106,7 @@ def _stored_errors(raw: str | None) -> list[str]:
         return []
 
 
-@router.get("")
+@router.get("", response_model=list[JobSummary])
 def list_jobs():
     with get_conn() as conn:
         rows = conn.execute(
@@ -141,7 +149,7 @@ def _enrichment(conn, job_id: str) -> dict:
     return {"intake": intake, "validated": bool(base and base["validated"]), "counts": counts}
 
 
-@router.get("/{job_id}")
+@router.get("/{job_id}", response_model=JobDetail, response_model_exclude_unset=True)
 def get_job(job_id: str):
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
@@ -174,9 +182,14 @@ def get_job(job_id: str):
 
 
 _NO_BASELINE: dict[int | str, dict[str, Any]] = {404: {"description": "No such job, or a job with no baseline."}}
+# The two baseline routes answer the stored text as JSON: the bundle, or the intake (BaselineIntake).
+_BASELINE_JSON: dict[int | str, dict[str, Any]] = {200: {
+    "description": "The JSON text stored for the job (bytes as received, or the intake).",
+    "content": {"application/json": {}},
+}}
 
 
-@router.get("/{job_id}/baseline", responses=_NO_BASELINE)
+@router.get("/{job_id}/baseline", responses={**_NO_BASELINE, **_BASELINE_JSON})
 def get_baseline(job_id: str):
     """The STIX bundle the job was created from (ADR-0090), byte for byte, as a download."""
     with get_conn() as conn:
@@ -187,7 +200,7 @@ def get_baseline(job_id: str):
                     headers={"Content-Disposition": f"attachment; filename=\"{job_id}_baseline.json\""})
 
 
-@router.get("/{job_id}/baseline/intake", responses=_NO_BASELINE)
+@router.get("/{job_id}/baseline/intake", responses={**_NO_BASELINE, **_BASELINE_JSON})
 def get_baseline_intake(job_id: str):
     """What the intake made of the job's baseline, whole: the counts, every object left out and
     why, the reports, the markings.  `GET /api/jobs/{id}` carries the first of the exclusions."""
@@ -198,7 +211,7 @@ def get_baseline_intake(job_id: str):
     return Response(row["intake_json"], media_type="application/json")
 
 
-@router.patch("/{job_id}", responses=_BUNDLE_REFUSED)
+@router.patch("/{job_id}", response_model=StatusResult, responses=_BUNDLE_REFUSED)
 def update_job_status(job_id: str, patch: StatusPatch):
     """Set a job's status.  409 while a worker runs the job (#385, as DELETE does), and
     409 for `completed` while the stored bundle is one the STIX schemas refused (see finalize)."""
@@ -267,7 +280,7 @@ def update_job_status(job_id: str, patch: StatusPatch):
     return {"status": patch.status}
 
 
-@router.post("/{job_id}/finalize", responses=_BUNDLE_REFUSED)
+@router.post("/{job_id}/finalize", response_model=FinalizeResult, responses=_BUNDLE_REFUSED)
 def finalize_job(job_id: str, quick: bool = False):
     """
     Re-run Stages 4+5 and regenerate the STIX bundle.
@@ -385,7 +398,7 @@ def _delete_job(job_id: str) -> bool:
     return True
 
 
-@router.delete("/{job_id}")
+@router.delete("/{job_id}", response_model=DeleteResult)
 def delete_job(job_id: str):
     if not _delete_job(job_id):
         raise HTTPException(404, "Job not found")
@@ -450,7 +463,11 @@ _SOURCE_CSP = ("default-src 'none'; img-src data:; style-src 'unsafe-inline'; fo
 _PAGE_MIMES = {"text/html", "application/xhtml+xml", "image/svg+xml", "application/xml", "text/xml"}
 
 
-@router.get("/{job_id}/source")
+@router.get("/{job_id}/source", responses={200: {
+    "description": "The uploaded report: a PDF inline, or the type its suffix names (DOCX, HTML, text, "
+                   "Markdown); application/octet-stream for another suffix.",
+    "content": {"*/*": {}},
+}})
 def get_source_file(job_id: str):
     """
     Stream the original uploaded file back to the browser.
@@ -493,7 +510,14 @@ def get_source_file(job_id: str):
     )
 
 
-@router.get("/{job_id}/bundle", responses=_BUNDLE_REFUSED)
+@router.get("/{job_id}/bundle", responses={**_BUNDLE_REFUSED, 200: {
+    "description": "The stored STIX 2.1 bundle, as JSON.",
+    "content": {"application/json": {}},
+    "headers": {"X-Bundle-Validation": {
+        "description": "validated, unverified (JSON schemas missing) or unknown (built before the verdict was stored).",
+        "schema": {"type": "string"},
+    }},
+}})
 def get_bundle(job_id: str):
     """The stored bundle, with Stage 5's verdict in the `X-Bundle-Validation`
     header: validated, unverified (JSON schemas missing) or unknown (built
@@ -521,7 +545,7 @@ def get_bundle(job_id: str):
     return JSONResponse(bundle, headers={"X-Bundle-Validation": validation or "unknown"})
 
 
-@router.get("/{job_id}/bundle/ledger")
+@router.get("/{job_id}/bundle/ledger", response_model=BundleLedger, response_model_exclude_unset=True)
 def get_bundle_ledger(job_id: str):
     """What Stage 4 did with each entity and relationship row when it built the
     stored bundle (ADR-0061): what each became, what was rewritten, what was
