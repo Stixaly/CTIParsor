@@ -329,6 +329,23 @@ def test_version_18_adds_the_account_tables_and_a_nullable_owner_and_is_idempote
     for statement in history.load()[17].statements:                   # run again: nothing breaks, nothing is lost
         conn.execute(statement)
     assert conn.execute("SELECT COUNT(*) AS n FROM jobs").fetchone()["n"] == 1
+
+
+def test_version_17_adds_the_attempts_counter_at_zero_and_is_idempotent(schema):
+    conn = schema()
+    _legacy_at(conn, 16)
+    conn.execute("INSERT INTO jobs (id, original_filename, status, created_at, updated_at) "
+                 "VALUES ('j1','r.pdf','processing','t','t')")
+    assert not history.column_exists(conn, "jobs", "attempts")
+
+    report = migrate.upgrade(conn)
+
+    assert report.applied == [17, 18] and report.recognised == list(range(1, 17))
+    assert conn.execute("SELECT attempts FROM jobs").fetchone()["attempts"] == 0   # an old job: a full allowance
+    conn.execute("UPDATE jobs SET attempts=2 WHERE id='j1'")
+    for statement in history.load()[16].statements:                   # run again: nothing breaks, nothing is lost
+        conn.execute(statement)
+    assert conn.execute("SELECT attempts FROM jobs").fetchone()["attempts"] == 2
     assert migrate.upgrade(conn).applied == []
 
 

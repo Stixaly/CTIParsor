@@ -1,3 +1,4 @@
+import base64
 import json
 import mimetypes
 import re
@@ -6,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
@@ -108,26 +109,74 @@ def _stored_errors(raw: str | None) -> list[str]:
         return []
 
 
+_JOB_SUMMARY_COLUMNS = ("SELECT id, original_filename, status, tlp_level, pap_level, pipeline_mode, created_at, "
+                        "updated_at FROM jobs")
+_CURSOR_MALFORMED = "malformed cursor"
+
+
+def _summary(row) -> dict:
+    return {
+        "id": row["id"],
+        "original_filename": row["original_filename"],
+        "status": row["status"],
+        "tlp_level": row["tlp_level"],
+        "pap_level": row["pap_level"],
+        "pipeline_mode": row["pipeline_mode"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def _encode_cursor(created_at: str, job_id: str) -> str:
+    """The opaque `cursor` of a page: the (created_at, id) of its last job, base64url of JSON."""
+    raw = json.dumps([created_at, job_id], separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _decode_cursor(cursor: str) -> tuple[str, str]:
+    """(created_at, id) of a `cursor`; 400 when it is not one this endpoint wrote."""
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        value = json.loads(base64.b64decode(padded.encode("ascii"), altchars=b"-_", validate=True))
+    except (ValueError, TypeError):
+        raise HTTPException(400, _CURSOR_MALFORMED) from None
+    if not (isinstance(value, list) and len(value) == 2 and all(isinstance(v, str) for v in value)):
+        raise HTTPException(400, _CURSOR_MALFORMED)
+    return value[0], value[1]
+
+
 @router.get("", response_model=list[JobSummary], response_model_exclude_unset=True)
-def list_jobs():
+def list_jobs(
+    response: Response,
+    limit: int | None = Query(None, ge=1, le=500, description="Most jobs in this page (1-500)."),
+    cursor: str | None = Query(None, description="The X-Next-Cursor of the previous page."),
+):
+    """Every job, newest first.  Without `limit` the whole list, as before.  With `limit`, one page of at
+    most `limit` jobs, ordered by created_at DESC then id DESC; when more jobs follow, the response
+    header X-Next-Cursor holds the cursor of the next page (keyset pagination, no OFFSET)."""
+    if limit is None:
+        if cursor is not None:
+            raise HTTPException(400, "cursor needs limit")
+        with get_conn() as conn:
+            rows = conn.execute(_JOB_SUMMARY_COLUMNS + " ORDER BY created_at DESC").fetchall()
+        return [_summary(row) for row in rows]
+
+    sql = _JOB_SUMMARY_COLUMNS
+    params: list[Any] = []
+    if cursor is not None:
+        created_at, last_id = _decode_cursor(cursor)
+        sql += " WHERE (created_at < ? OR (created_at = ? AND id < ?))"
+        params += [created_at, created_at, last_id]
+    # One row more than the page: its presence says whether another page follows.
+    sql += " ORDER BY created_at DESC, id DESC LIMIT ?"
+    params.append(limit + 1)
     with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT id, original_filename, status, tlp_level, pap_level, pipeline_mode, created_at, updated_at "
-            "FROM jobs ORDER BY created_at DESC"
-        ).fetchall()
-    jobs = []
-    for row in rows:
-        jobs.append({
-            "id": row["id"],
-            "original_filename": row["original_filename"],
-            "status": row["status"],
-            "tlp_level": row["tlp_level"],
-            "pap_level": row["pap_level"],
-            "pipeline_mode": row["pipeline_mode"],
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-        })
-    return jobs
+        rows = conn.execute(sql, tuple(params)).fetchall()
+    page = rows[:limit]
+    if len(rows) > limit:
+        last = page[-1]
+        response.headers["X-Next-Cursor"] = _encode_cursor(last["created_at"], last["id"])
+    return [_summary(row) for row in page]
 
 
 def _enrichment(conn, job_id: str) -> dict:

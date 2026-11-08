@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from api.auth.deps import importing_user_id
 from api.body_limit import ENVELOPE_BYTES
+from api.disk_space import refuse_if_disk_is_short
 from api.logging_config import get_logger
 from api.main import limiter
 from api.paths import uploads_dir
@@ -249,6 +250,7 @@ async def ingest_text(request: Request, body: TextIngestRequest):
         slug = f"pasted-{_timestamp_slug()}"
     filename = slug + suffix
 
+    refuse_if_disk_is_short()
     job_id = str(uuid4())
     uploads = uploads_dir()
     uploads.mkdir(parents=True, exist_ok=True)
@@ -296,6 +298,7 @@ async def ingest_url(request: Request, body: UrlIngestRequest):
     baseline = await _read_baseline(body)
     tlp, pap = baseline_markings(baseline, tlp, pap)
 
+    refuse_if_disk_is_short()
     job_id = str(uuid4())
     uploads = uploads_dir()
     uploads.mkdir(parents=True, exist_ok=True)

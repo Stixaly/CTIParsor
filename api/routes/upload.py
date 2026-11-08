@@ -9,6 +9,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from api.auth.deps import importing_user_id
 from api.body_limit import ENVELOPE_BYTES
+from api.disk_space import refuse_if_disk_is_short
 from api.main import limiter
 from api.paths import uploads_dir
 from api.response_models.upload import UploadResult
@@ -150,6 +151,9 @@ def upload_file(
             400,
             f"Unsupported format '{suffix}'. Accepted: {', '.join(SUPPORTED)}"
         )
+
+    # Before a byte of the report is written: a nearly full disk refuses it (ADR-0097 item 20).
+    refuse_if_disk_is_short()
 
     # The request as a whole was held to `body_budget()` while it arrived
     # (api/body_limit.py): FastAPI has the form, both files spooled, before this
