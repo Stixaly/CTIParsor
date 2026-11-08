@@ -498,6 +498,8 @@ def fake_pipeline(runs, monkeypatch):
     ran: list[str] = []
 
     class Result:
+        validation = None
+
         def stage_report(self):
             return []
 
@@ -505,7 +507,7 @@ def fake_pipeline(runs, monkeypatch):
         ran.append(document.original_filename)
         return Result()
 
-    def run_file(path, disabled):
+    def run_file(path, disabled, output_path=None):
         ran.append(path.name)
         return Result()
 
@@ -666,9 +668,17 @@ def test_inhouse_score_of_a_complete_run_exits_0_and_names_nothing(world, monkey
     _cli(monkeypatch, "inhouse-score", "--name", "h")
     report = _read(run_dir / "score.json")
     iocs = {"tp": 2, "fp": 0, "fn": 0, "precision": 1.0, "recall": 1.0, "f1": 1.0}
-    assert report == {"run": "h", "documents": 2, "documents_failed": [], "documents_missing": [],
+    assert report == {"format": "inhouse-score/2", "source": "run", "run": "h",
+                      "run_manifest": {"attack": {"release": "19.2"}},
+                      "gold": {i: hashlib.sha256((world.out / "inhouse" / i / "gold.json").read_bytes()).hexdigest()
+                               for i in ("h1", "h2")},
+                      "documents": 2, "documents_failed": [], "documents_missing": [],
                       "micro": {"iocs": iocs}, "negatives": {"cases": 0, "violated": 0},
-                      "observables": {"cases": 0, "as_indicator": 0}}
+                      "observables": {"cases": 0, "as_indicator": 0},
+                      "per_document": {i: {"layers": ["iocs"], "iocs": {**iocs, "tp": 1},
+                                           "observables": {"cases": 0, "as_indicator": None, "items": []},
+                                           "negatives": {"cases": 0, "violated": 0, "violations": []}}
+                                       for i in ("h1", "h2")}}
     assert json.loads(capsys.readouterr().out) == report
 
 

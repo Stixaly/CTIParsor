@@ -167,6 +167,76 @@ def score(doc: InhouseDoc, pred: dict, canonical) -> dict:
     return out
 
 
+def score_bundle(doc: InhouseDoc, projection: dict, canonical) -> dict:
+    """`score`, from the bundle the release exports (evaluation.bundle.project)
+    instead of the runner's record.  Same output shape, plus `unsupported_patterns`
+    and `problems`."""
+    g = doc.gold
+    out: dict = {"layers": sorted(doc.layers)}
+    gold_ents = [(e["type"], e["value"], [e["value"], *e.get("aliases", [])]) for e in g.get("entities", [])]
+    # Every name a gold entity or IoC goes by -> the one name the relation ends meet on.
+    names: dict[str, str] = {}
+
+    def one(v: str) -> str:
+        return next(iter(metrics.norm_forms([v])))
+
+    for _, label, forms in gold_ents:
+        for f in metrics.norm_forms(forms):
+            names.setdefault(f, label)
+    for i in g.get("iocs", []):
+        names.setdefault(one(i["value"]), i["value"])
+
+    def end(forms: list[str]) -> str:
+        for f in forms:
+            if (n := names.get(one(f))) is not None:
+                return n
+        return forms[0]
+
+    def gold_end(v: str) -> str:
+        return names.get(one(v), v)
+
+    pred_r = {(end(r["source"]), r["type"], end(r["target"])) for r in projection["relations"]}
+    if "iocs" in doc.layers:
+        gold_i = {_ioc_norm(i["type"], i["value"]) for i in g.get("iocs", [])}
+        pred_i = {_ioc_norm(i["type"], i["value"]) for i in projection["iocs"]}
+        observable = {_obs_key(o["type"], o["value"]) for o in g.get("observables", [])}
+        pred_i = {p for p in pred_i if p in gold_i or _obs_key(*p) not in observable}
+        out["iocs"] = metrics.set_counts(pred_i, gold_i)
+        out["observables"] = _score_observables(g, {"bundle_indicated": projection["indicated"]})
+    if "entities" in doc.layers:
+        pred_e = [(e["type"], metrics.norm_forms(e["forms"])) for e in projection["entities"]]
+        gold_e = [(t, metrics.norm_forms(forms)) for t, _, forms in gold_ents]
+        scored = metrics.score_entity_forms(pred_e, gold_e)
+        # Exhaustive over its types: a type with nothing on either side is a row of zeros.
+        out["entities"] = {t: scored.get(t, metrics.Counts()) for t in sorted(ENTITY_LAYER_TYPES)}
+    if "techniques" in doc.layers:
+        kinds: dict[str, set[str]] = {}
+        for t in g.get("techniques", []):
+            kinds.setdefault(t["id"].upper(), set()).add(t.get("kind", "explicit"))
+        out["techniques"] = metrics.score_ttps(set(projection["techniques"]), kinds, canonical)
+    if "relations" in doc.layers:
+        gold_r = {(gold_end(r["source"]), r["type"], gold_end(r["target"])) for r in g.get("relations", [])}
+        out["relations"] = metrics.score_relations(pred_r, gold_r)
+
+    violations = []
+    pred_parents = {c.split(".", 1)[0] for t in projection["techniques"] if (c := canonical(t)) is not None}
+    pred_triples = {metrics.norm_triple(t) for t in pred_r}
+    for n in g.get("negatives", []):
+        if n.get("kind") == "technique":
+            c = canonical(n.get("id", "").upper())
+            if c is not None and c.split(".", 1)[0] in pred_parents:
+                violations.append(n)
+        elif n.get("kind") == "relation" and len(n.get("triple", [])) == 3:
+            s, r, o = n["triple"]
+            if metrics.norm_triple((gold_end(s), r, gold_end(o))) in pred_triples:
+                violations.append(n)
+    out["negatives"] = {"cases": len(g.get("negatives", [])), "violated": len(violations),
+                        "violations": violations}
+    out["unsupported_patterns"] = len(projection["unsupported_patterns"])
+    out["problems"] = list(projection["problems"])
+    return out
+
+
 def draft_from_run(doc_id: str, source_file: str, pred: dict) -> dict:
     """A pre-annotation from the pipeline's own output — to be corrected, not scored."""
     return {
