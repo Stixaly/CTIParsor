@@ -20,6 +20,7 @@ from api.auth.deps import SESSION_COOKIE, authenticate, cookie_secure, current_u
 from api.logging_config import get_logger, one_line
 from api.main import limiter
 from api.response_models.auth import Me, SignedOut, SignInMethods
+from api.routes._common import storable_text
 
 logger = get_logger(__name__)
 
@@ -64,12 +65,19 @@ def login(body: LoginRequest, request: Request, response: Response):
     # What the audit record may say about the name typed: the account it names, or nothing (api/audit.py).
     label = _label(body.username)
     request.state.audit_attempted = None if label == _UNKNOWN else label
+    # A NUL byte or a lone surrogate is in no account's name, and PostgreSQL refuses it: the answer is the
+    # wrong-password one, before the database sees it (#615).
+    if not _storable_username(body.username):
+        logger.warning("[auth] failed sign-in for %s", label)
+        raise HTTPException(401, "Invalid username or password")
     # The attempt is counted before the password is checked, under a lock per username.
     until = store.begin_attempt(body.username)
     if until is not None:
         logger.warning("[auth] sign-in refused, username locked: %s", label)
         raise _locked(until)
-    user = store.check_credentials(body.username, body.password)
+    # No stored password holds a lone surrogate (the password policy refuses one), so it is a wrong password,
+    # counted as one above, with no argon2 call (#615).  A NUL byte is a valid password character.
+    user = None if _lone_surrogate(body.password) else store.check_credentials(body.username, body.password)
     if user is None:
         logger.warning("[auth] failed sign-in for %s", label)
         raise HTTPException(401, "Invalid username or password")
@@ -82,6 +90,23 @@ def login(body: LoginRequest, request: Request, response: Response):
 
 
 _UNKNOWN = "<unknown>"
+
+
+def _storable_username(username: str) -> bool:
+    """False for a username PostgreSQL cannot hold: a NUL byte or a lone UTF-16 surrogate (#615)."""
+    try:
+        storable_text(username)
+    except ValueError:
+        return False
+    return True
+
+
+def _lone_surrogate(text: str) -> bool:
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return True
+    return False
 
 
 def _label(username: str) -> str:
