@@ -160,6 +160,18 @@
         "mistral"
       ]
     },
+    "env CORPUS_EXTRACT_MAX_BYTES": {
+      "set": false,
+      "values": [
+        "8589934592"
+      ]
+    },
+    "env CORPUS_TARBALL_MAX_BYTES": {
+      "set": false,
+      "values": [
+        "2147483648"
+      ]
+    },
     "env CTIPARSOR_CAPTURE_PROXY": {
       "set": false,
       "values": [
