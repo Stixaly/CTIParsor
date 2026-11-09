@@ -9,6 +9,10 @@ theme.
 
 ## [Unreleased]
 
+- **End-to-end journey with the real models** (ADR-0097 item 24, `scripts/check_model_journey.py`,
+  `docs/releases/1.0-model-journey.md`): a PDF upload and a URL capture on a running stack, checked for the
+  job's end, the stages and models that ran, the extraction and a STIX 2.1 bundle with no dangling
+  relationship. Its first run, on the CI image of `5aa3e32` with vLLM Qwen3.8 27B, passed every check.
 - **Robustness fixes for 27 reported issues (#609-#635).**
   - *API:* a NUL byte or a lone UTF-16 surrogate gets a 4xx, never a 500. This covers the login (the
     wrong-password 401), the admin user and token bodies, the own-token name, the jobs and audit
