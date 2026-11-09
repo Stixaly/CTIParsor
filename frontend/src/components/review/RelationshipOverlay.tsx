@@ -1,9 +1,10 @@
 import { useState, useLayoutEffect } from 'react'
-import type { Relationship } from '../../types'
+import type { Entity, Relationship } from '../../types'
 import { hashHue } from './tokens'
 
 interface Props {
   rels: Relationship[]
+  entities: Entity[]
   show: boolean
   focusedRelId?: string | null
 }
@@ -15,7 +16,7 @@ interface PathInfo {
   focused: boolean
 }
 
-export default function RelationshipOverlay({ rels, show, focusedRelId }: Props) {
+export default function RelationshipOverlay({ rels, entities, show, focusedRelId }: Props) {
   const [paths, setPaths] = useState<PathInfo[]>([])
   const [box, setBox] = useState({ w: 0, h: 0 })
 
@@ -28,11 +29,17 @@ export default function RelationshipOverlay({ rels, show, focusedRelId }: Props)
       const docRect = doc.getBoundingClientRect()
       setBox({ w: docRect.width, h: (doc as HTMLElement).scrollHeight })
 
+      // Key the marks by entity value, not by DOM text: a deobfuscated IoC
+      // ("evil.com") is shown as "evil[.]com" in the document, so its text
+      // never matches the relationship's source_value/target_value (#629).
+      const idToValue = new Map(entities.map(e => [e.id, e.value]))
       const marks = document.querySelectorAll<HTMLElement>('.doc mark[data-eid]')
       const valueRect: Record<string, DOMRect> = {}
       marks.forEach(m => {
-        const txt = (m.textContent ?? '').toLowerCase()
-        if (!valueRect[txt]) valueRect[txt] = m.getBoundingClientRect()
+        const eid = m.dataset.eid ?? ''
+        const val = idToValue.get(eid) ?? m.textContent ?? ''
+        const key = val.toLowerCase()
+        if (!valueRect[key]) valueRect[key] = m.getBoundingClientRect()
       })
 
       const relevant = rels.filter(r => r.accepted !== false)
@@ -85,7 +92,7 @@ export default function RelationshipOverlay({ rels, show, focusedRelId }: Props)
       window.removeEventListener('scroll', compute, true)
       window.removeEventListener('resize', compute)
     }
-  }, [rels, show, focusedRelId])
+  }, [rels, entities, show, focusedRelId])
 
   if (!show) return null
 

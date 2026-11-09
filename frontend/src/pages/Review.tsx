@@ -256,6 +256,8 @@ export default function Review() {
   const [relCreator, setRelCreator] = useState<RelCreatorState | null>(null)
   const [dragState, setDragState] = useState<{ srcId: string; from: Point; to: Point } | null>(null)
   const [relInDoc, setRelInDoc] = useState(false)
+  // The relationship last jumped to from the rail: its arrow is highlighted (#629).
+  const [focusedRelId, setFocusedRelId] = useState<string | null>(null)
   const dragStateRef = useRef<typeof dragState>(null)
   /** Brief "not found in text" hint shown when a focused entity has no text mark. */
   const [notInTextHint, setNotInTextHint] = useState<string | null>(null)
@@ -609,9 +611,10 @@ export default function Review() {
     }
   }, [orderedEntityIds, focusedId, docEntities])
 
-  const jumpToValue = (value: string) => {
+  const jumpToValue = (value: string, relId?: string) => {
     const match = localEntities.find(e => e.value === value)
     if (match) setFocusedId(match.id)
+    setFocusedRelId(relId ?? null)
   }
 
   // ── finalize ──────────────────────────────────────────────────────────────
@@ -678,7 +681,7 @@ export default function Review() {
       // silently omits exactly the rules the analyst chose to add.
       const res = promotedExtra.length === 0
         ? await apiFetch(detectionsExportUrl(jobId))
-        : await apiFetch(`/api/jobs/${jobId}/detections/export`, {
+        : await apiFetch(`/api/jobs/${encodeURIComponent(jobId)}/detections/export`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1011,6 +1014,7 @@ export default function Review() {
                 relEvidence={relEvidence}
                 relsForOverlay={localRels}
                 showRelArrows={relInDoc}
+                focusedRelId={focusedRelId}
                 onEntityNotInText={handleEntityNotInText}
               />
             )}

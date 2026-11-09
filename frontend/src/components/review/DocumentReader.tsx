@@ -26,6 +26,8 @@ interface Props {
   relEvidence: string[]
   relsForOverlay: Relationship[]
   showRelArrows: boolean
+  /** Relationship whose arrow is highlighted (#629). */
+  focusedRelId?: string | null
   /** Called when the focused entity has no occurrence in the document text. */
   onEntityNotInText?: (entityId: string) => void
 }
@@ -34,7 +36,7 @@ export default function DocumentReader({
   text, title, byline, entities, highlightStyle,
   focusedId, setFocusedId, setHoverEntity,
   onCreate, onMarkShiftClick, onMarkDragStart, onSelectionRelate,
-  relEvidence, relsForOverlay, showRelArrows,
+  relEvidence, relsForOverlay, showRelArrows, focusedRelId,
   onEntityNotInText,
 }: Props) {
   const ranges = useMemo(() => buildRanges(text, entities), [text, entities])
@@ -246,7 +248,7 @@ export default function DocumentReader({
       onMouseUp={handleMouseUp}
       onClick={() => setFocusedId(null)}
     >
-      <RelationshipOverlay rels={relsForOverlay} show={showRelArrows} />
+      <RelationshipOverlay rels={relsForOverlay} entities={entities} show={showRelArrows} focusedRelId={focusedRelId} />
       {title && <h1 className="doc-title">{title}</h1>}
       {byline && <p className="doc-byline">{byline}</p>}
       {paragraphs.map((p, i) => (
