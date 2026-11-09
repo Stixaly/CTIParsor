@@ -178,6 +178,16 @@ theme.
   commands; `--estimate` counts the calls and characters of a past run
   (input tokens approximated from characters; prices as arguments).
 
+- **The exported bundle is measured on the in-house set**
+  ([docs/eval/inhouse-bundle-2026-11.md](docs/eval/inhouse-bundle-2026-11.md),
+  ADR-0094 item 6). 0.6.0 and the 1.0 candidate, run at the same configuration
+  (vLLM Qwen3.8 27B, temperature 0, seed 13, Stages 3d, 3f and the
+  document-level relations on), export the same bundles on the 8 reports: no
+  regression. Per layer: IoCs F1 0.553, techniques 0.617, relations 0.110
+  (precision 0.063), malware precision 0.231, threat actors 0.274; 17 of 36
+  negative cases violated. `docs/support-policy.md` and the 1.0 readiness page
+  carry the figures.
+
 - **The in-house evaluation scores the exported bundle** (ADR-0096, ADR-0094
   item 6). `python -m evaluation inhouse-run` now keeps Stage 5 on and writes
   each report's bundle to `data/eval/inhouse-runs/<name>/bundles/` with its
