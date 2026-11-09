@@ -47,7 +47,7 @@ from api.logging_config import get_logger
 from models.schemas import EvidenceLabel
 from pipeline import attack_data
 from pipeline.env_flags import env_int
-from pipeline.llm_parse import fit_report
+from pipeline.llm_parse import JsonScan, ScanExhausted, fit_report
 from pipeline.regex_safety import compile_pattern
 from pipeline.ttp_retrieval import TtpCandidate
 
@@ -246,7 +246,7 @@ def parse_selection(raw: str) -> list[dict] | None:
     "(or [] if none)" before the real answer is not one (#378)."""
     if not raw:
         return None
-    decoder = json.JSONDecoder()
+    scan = JsonScan(raw)
     abstention: list[dict] | None = None
     i = 0
     while i < len(raw):
@@ -254,10 +254,14 @@ def parse_selection(raw: str) -> list[dict] | None:
             i += 1
             continue
         try:
-            obj, end = decoder.raw_decode(raw, i)
+            obj, end = scan.decode(i)
         except ValueError:
             i += 1
             continue
+        except ScanExhausted:
+            # Too deep, or too costly, to read: each later bracket inside it
+            # would be another slow decode.  Unparsable (#617).
+            return None
         if isinstance(obj, dict) and isinstance(obj.get("selected"), list):
             return [x for x in obj["selected"] if isinstance(x, dict)]
         if isinstance(obj, list) and all(isinstance(x, dict) for x in obj):
@@ -305,6 +309,9 @@ def salvage_selection(raw: str) -> list[dict] | None:
         # the model wrote a complete answer, then copies of it until the cut.
         json.JSONDecoder().raw_decode(raw, start)
         return None
+    except RecursionError:
+        # Too deep to read: not a salvageable answer (#617).
+        return None
     except ValueError:
         pass
     stack, _ = _unclosed_stack(raw[start:])
@@ -314,7 +321,7 @@ def salvage_selection(raw: str) -> list[dict] | None:
     for item in _extract_complete_array_items(raw, m.end()):
         try:
             obj = json.loads(item)
-        except ValueError:
+        except (ValueError, RecursionError):   # too deep: skip this item (#617)
             continue
         if isinstance(obj, dict):
             out.append(obj)

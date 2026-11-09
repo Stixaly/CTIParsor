@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import sys
+import argparse
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -165,13 +165,25 @@ def _print_table(stats: list[DocStat]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    if argv is None:
-        argv = sys.argv[1:]
-    if not argv:
-        argv = ["uploads", "input"]
+    parser = argparse.ArgumentParser(
+        description="Measure how much of a corpus is images (PDF and HTML)."
+    )
+    # default=None so an explicit path can be told apart from the default
+    # ["uploads", "input"], which may not exist (#611).
+    parser.add_argument("paths", nargs="*", default=None,
+                        help="PDF/HTML files or directories (non-recursive); default: uploads input")
+    args = parser.parse_args(argv)
+
+    if args.paths is None:
+        paths = ["uploads", "input"]
+    else:
+        paths = args.paths
+        for arg in paths:
+            if not Path(arg).exists():
+                parser.error(f"no such file or directory: {arg}")
 
     files: list[Path] = []
-    for arg in argv:
+    for arg in paths:
         p = Path(arg)
         if p.is_dir():
             for f in sorted(p.iterdir()):

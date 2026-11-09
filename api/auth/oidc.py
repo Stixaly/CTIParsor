@@ -281,7 +281,18 @@ def username_for(settings: config.OidcSettings, claims: dict, subject: str) -> s
     return candidate
 
 
+def _sanitised(text: str) -> str:
+    """`text` without its NUL bytes and lone surrogates, which PostgreSQL refuses (#635)."""
+    return text.replace("\x00", "").encode("utf-8", "ignore").decode("utf-8")
+
+
+def _storable(text: str) -> bool:
+    return _sanitised(text) == text
+
+
 def _account(settings: config.OidcSettings, claims: dict) -> store.User:
+    if not _storable(claims["sub"]):
+        raise OidcError("token", "id_token: the subject holds a NUL byte or a lone surrogate")
     subject = f"{settings.issuer}|{claims['sub']}"
     role = role_for(settings, claims)
     user = store.find_oidc_user(subject)
@@ -298,17 +309,19 @@ def _account(settings: config.OidcSettings, claims: dict) -> store.User:
             user = store.get_user(user.id) or user
         return user
     name = claims.get("name")
-    display = name.strip()[:128] if isinstance(name, str) else ""
+    # A NUL byte or a lone surrogate in the name is dropped: PostgreSQL refuses it (#635).
+    display = _sanitised(name).strip()[:128] if isinstance(name, str) else ""
     for _ in range(3):
         try:
             user = store.create_user(username_for(settings, claims, subject), role, auth_source="oidc",
                                      oidc_subject=subject, display_name=display)
         except store.AuthError:
             continue                                  # the name was taken between the check and the insert
-        except Exception:                             # noqa: BLE001 - a concurrent first sign-in of the same person
+        except Exception as exc:                      # noqa: BLE001 - a concurrent first sign-in of the same person
             user = store.find_oidc_user(subject)
             if user is None:
-                raise
+                # Not the answer of a race: a refusal the callback turns into /login?error=account (#635).
+                raise OidcError("account", f"account not created: {type(exc).__name__}") from exc
             return user
         logger.info("[auth] OIDC account %r created with role %s", user.username, role)
         return user

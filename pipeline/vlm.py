@@ -254,6 +254,8 @@ def _parse_payload(raw: str) -> dict:
         data, _ = json.JSONDecoder().raw_decode(s, start)
     except json.JSONDecodeError as e:
         raise ValueError(f"Invalid JSON: {e}") from e
+    except RecursionError as e:   # nested past the recursion limit (#617)
+        raise ValueError("Invalid JSON: nested too deeply") from e
 
     if not isinstance(data, dict):
         raise ValueError("Parsed JSON is not an object")

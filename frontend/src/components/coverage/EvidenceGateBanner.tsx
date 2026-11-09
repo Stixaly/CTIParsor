@@ -49,6 +49,9 @@ export default function EvidenceGateBanner({
     )
   }
 
+  // ruleTotal includes untagged (YARA) rules, tagTotal does not: compare like with like (#628).
+  const taggedWithEvidence = Math.max(0, ruleTotal - untaggedCount)
+
   const segments: React.ReactNode[] = []
   const ruleWord = ruleTotal === 1 ? 'rule' : 'rules'
   segments.push(
@@ -57,7 +60,7 @@ export default function EvidenceGateBanner({
     </span>,
   )
 
-  if (tagTotal > ruleTotal) {
+  if (tagTotal > taggedWithEvidence) {
     segments.push(<span key="sep1" style={{ color: 'var(--ink-4)' }}> · </span>)
     segments.push(<span key="tagged">of {tagTotal} ATT&CK-tagged</span>)
   }
@@ -104,7 +107,9 @@ export default function EvidenceGateBanner({
     )
   }
 
-  const pct = tagTotal > 0 ? Math.round((ruleTotal / tagTotal) * 100) : null
+  // Share of tagged rules with evidence, clamped to 0..100 (#628).
+  const pct =
+    tagTotal > 0 ? Math.min(100, Math.round((taggedWithEvidence / tagTotal) * 100)) : null
 
   return (
     <div

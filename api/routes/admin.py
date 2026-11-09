@@ -11,12 +11,13 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from api.auth import config, store
 from api.auth.deps import authenticate, current_user
 from api.logging_config import get_logger, one_line
 from api.response_models.admin import PasswordChanged, TokenCreated, TokenRecord, TokenRevoked, UserRecord
+from api.routes._common import storable_text
 
 logger = get_logger(__name__)
 
@@ -32,11 +33,24 @@ class NewUser(BaseModel):
     display_name: str = Field(default="", max_length=128)
     password: str
 
+    @field_validator("display_name")
+    @classmethod
+    def _no_nul_or_lone_surrogate(cls, v: str) -> str:
+        # PostgreSQL refuses these: a 422 here, a 500 at the INSERT otherwise (#634).
+        storable_text(v)
+        return v
+
 
 class UserPatch(BaseModel):
     role: Role | None = None
     disabled: bool | None = None
     display_name: str | None = Field(default=None, max_length=128)
+
+    @field_validator("display_name")
+    @classmethod
+    def _no_nul_or_lone_surrogate(cls, v: str | None) -> str | None:
+        # PostgreSQL refuses these: a 422 here, a 500 at the UPDATE otherwise (#616).
+        return storable_text(v)
 
 
 class NewPassword(BaseModel):
@@ -48,10 +62,24 @@ class NewToken(BaseModel):
     name: str
     days: int = Field(default=config.DEFAULT_TOKEN_DAYS, ge=1, le=365)
 
+    @field_validator("user_id", "name")
+    @classmethod
+    def _no_nul_or_lone_surrogate(cls, v: str) -> str:
+        # PostgreSQL refuses these: a 422 here, a 500 otherwise (#616, #633).
+        storable_text(v)
+        return v
+
 
 class NewOwnToken(BaseModel):
     name: str
     days: int = Field(default=config.DEFAULT_TOKEN_DAYS, ge=1, le=365)
+
+    @field_validator("name")
+    @classmethod
+    def _no_nul_or_lone_surrogate(cls, v: str) -> str:
+        # PostgreSQL refuses these: a 422 here, a 500 at the INSERT otherwise (#616).
+        storable_text(v)
+        return v
 
 
 def _on() -> None:

@@ -12,15 +12,17 @@ installs it from the PyTorch index first, and here it is already satisfied.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import re
-import sys
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 
 KEEP = {"torch"}            # installed from the PyTorch index, never from PyPI
 PIN = re.compile(r"^([A-Za-z0-9_.-]+)==([^\s;\\]+)")
+# Any algorithm pip accepts; a lock may carry sha512 or upper-case hex (#620).
+HASH = re.compile(r"--hash=(sha256|sha384|sha512):([0-9a-fA-F]+)")
 
 
 def pypi_hashes(name: str, version: str) -> list[str]:
@@ -32,6 +34,11 @@ def pypi_hashes(name: str, version: str) -> list[str]:
     if not hashes:
         raise SystemExit(f"{name}=={version}: PyPI lists no file for this release")
     return hashes
+
+
+def sha256_of(block: list[str]) -> list[str]:
+    """The sha256 digests of one pin's --hash lines, lower-cased; other algorithms are ignored (#620)."""
+    return sorted(h.lower() for line in block for algo, h in HASH.findall(line) if algo == "sha256")
 
 
 def rewrite(path: str) -> tuple[int, int]:
@@ -56,8 +63,7 @@ def rewrite(path: str) -> tuple[int, int]:
         if name.lower() in KEEP:
             continue
         new = found[(name, version)]
-        old = [re.search(r"sha256:([0-9a-f]{64})", line).group(1) for line in lines[start + 1:end]]
-        if sorted(old) != new:
+        if sha256_of(lines[start + 1:end]) != new:
             changed += 1
         hash_lines = [f"    --hash=sha256:{h} \\" for h in new]
         hash_lines[-1] = hash_lines[-1][:-2]
@@ -67,7 +73,15 @@ def rewrite(path: str) -> tuple[int, int]:
     return len(wanted), changed
 
 
-if __name__ == "__main__":
-    for lock in sys.argv[1:]:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Rewrite the hashes of PyPI pins in lock files to PyPI's sha256.")
+    parser.add_argument("locks", nargs="+", metavar="LOCK", help="lock file(s) to rewrite in place")
+    args = parser.parse_args(argv)
+    for lock in args.locks:
         total, changed = rewrite(lock)
         print(f"{lock}: {total} pins hashed from PyPI ({changed} differed from the resolver's)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -656,7 +656,7 @@ def _year_candidate(rest: str, anchor_day: date) -> str | None:
     for year in (anchor_day.year, anchor_day.year - 1):
         reading = _read_absolute(f"{rest} {year}", None)
         if reading is None or reading.status != "verified" or not reading.value:
-            return None
+            continue  # try the previous year, e.g. Feb 29 in a leap year (#612)
         w = window(reading.value)
         if w is not None and w[0].date() <= anchor_day:
             return reading.value

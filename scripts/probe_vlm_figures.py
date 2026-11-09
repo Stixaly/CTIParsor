@@ -11,7 +11,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pdfplumber
-from pdf2image import convert_from_path
+
+try:
+    from pdf2image import convert_from_path
+    _PDF2IMAGE_AVAILABLE = True
+except ImportError:  # only in requirements-full.txt (#610)
+    _PDF2IMAGE_AVAILABLE = False
 
 try:
     import anthropic
@@ -205,6 +210,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--render-only", action="store_true")
     parser.add_argument("--backend", choices=["ollama", "anthropic"], default="ollama")
     args = parser.parse_args(argv)
+
+    # After parse_args, so --help works without pdf2image (#610).
+    if not _PDF2IMAGE_AVAILABLE:
+        parser.error("pdf2image is required: pip install -r requirements/requirements-full.txt")
 
     if args.model is None:
         if args.backend == "ollama":

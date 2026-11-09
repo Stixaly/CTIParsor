@@ -25,7 +25,7 @@ from api.response_models.jobs import (
     JobSummary,
     StatusResult,
 )
-from api.routes._common import require_job
+from api.routes._common import require_job, storable_text
 from api.worker import BundleInvalidError, FinalizeOvertaken, re_run_final_stages
 from pipeline.env_flags import env_int
 from pipeline.orchestrator import STAGE_LABELS
@@ -143,6 +143,12 @@ def _decode_cursor(cursor: str) -> tuple[str, str]:
         raise HTTPException(400, _CURSOR_MALFORMED) from None
     if not (isinstance(value, list) and len(value) == 2 and all(isinstance(v, str) for v in value)):
         raise HTTPException(400, _CURSOR_MALFORMED)
+    # A NUL or a lone surrogate cannot reach the WHERE clause: PostgreSQL would fail with a 500 (#618).
+    for v in value:
+        try:
+            storable_text(v)
+        except ValueError:
+            raise HTTPException(400, _CURSOR_MALFORMED) from None
     return value[0], value[1]
 
 

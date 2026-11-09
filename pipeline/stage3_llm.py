@@ -16,7 +16,7 @@ from api.logging_config import get_logger
 from models.schemas import EvidenceLabel, RawEntity
 from pipeline import attack_data
 from pipeline.env_flags import env_int
-from pipeline.llm_parse import SPOTLIGHT_RULE, fit_report, strip_reasoning
+from pipeline.llm_parse import SPOTLIGHT_RULE, JsonScan, ScanExhausted, fit_report, strip_reasoning
 from pipeline.stage3f_ttp_select import TtpReview
 from pipeline.temporal import (
     ROLES as _TIME_ROLES,
@@ -1439,7 +1439,7 @@ def _try_extract_complete_items(text: str) -> dict | None:
         for raw in _extract_complete_array_items(text, m.end()):
             try:
                 items.append(json.loads(raw))
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, RecursionError):   # too deep: skip (#617)
                 continue
         if items:
             result[field] = items
@@ -1485,15 +1485,19 @@ def _parse_llm_response(raw_text: str) -> LLMEnrichmentResult | None:
     """
     # Use raw_decode() to find the first syntactically valid JSON object in
     # the LLM output, ignoring any surrounding prose or markdown fences.
-    decoder = json.JSONDecoder()
+    scan = JsonScan(raw_text)
     parsed_json: dict | None = None
     first = raw_text.find("{")
     for i, ch in enumerate(raw_text):
         if ch == "{":
             try:
-                obj, _ = decoder.raw_decode(raw_text, i)
+                obj, _ = scan.decode(i)
             except json.JSONDecodeError:
                 continue
+            except ScanExhausted:
+                # Too deep, or too costly, to read: stop scanning, as for a
+                # truncated answer, instead of retrying at each later "{" (#617).
+                break
             if isinstance(obj, dict):
                 # An object nested in an outer one that never closes is one
                 # TTP or relationship of a truncated answer, not the answer:
@@ -1515,7 +1519,7 @@ def _parse_llm_response(raw_text: str) -> LLMEnrichmentResult | None:
             try:
                 parsed_json = json.loads(completed)
                 logger.warning("LLM response was truncated — recovered by closing dangling structures")
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, RecursionError):   # too deep: unparsable (#617)
                 parsed_json = None
 
     # Still nothing — salvage whatever complete array items survived the cut.

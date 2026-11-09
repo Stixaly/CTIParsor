@@ -73,7 +73,11 @@ def normalise_username(username: str) -> str:
     AuthError for one that is empty, too long or holds a character outside
     letters, digits and `._@-`."""
     name = username.strip().lower()
-    if not _USERNAME_RE.fullmatch(name):
+    try:
+        matched = _USERNAME_RE.fullmatch(name)
+    except UnicodeEncodeError:                  # a lone surrogate: re2 cannot encode it, so it is no name (#616)
+        matched = None
+    if not matched:
         raise AuthError("a username has 1 to 64 characters: letters, digits and . _ @ - (not first)")
     return name
 

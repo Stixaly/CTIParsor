@@ -1,6 +1,17 @@
 import { fetchBundle } from '../api/client'
 
 /**
+ * Build the download filename from the job's source filename: the extension is
+ * stripped and `_stix.json` appended. A blank name, or one that is only an
+ * extension (e.g. ".pdf"), falls back to "bundle" (#630) so the file never
+ * ends up as a hidden `_stix.json`.
+ */
+export function bundleFilename(originalFilename?: string | null): string {
+  const base = (originalFilename ?? '').trim().replace(/\.[^.]+$/, '').trim()
+  return `${base || 'bundle'}_stix.json`
+}
+
+/**
  * Fetch a job's finalized STIX 2.1 bundle and trigger a browser download as a
  * pretty-printed JSON file named `<report>_stix.json`.
  *
@@ -21,7 +32,7 @@ export async function downloadBundle(
   const url    = URL.createObjectURL(blob)
   const a      = document.createElement('a')
   a.href     = url
-  a.download = `${(originalFilename ?? 'bundle').replace(/\.[^.]+$/, '')}_stix.json`
+  a.download = bundleFilename(originalFilename)
   document.body.appendChild(a); a.click()
   document.body.removeChild(a)
   // Defer revocation — revoking synchronously after click() breaks Firefox.

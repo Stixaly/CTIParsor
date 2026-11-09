@@ -63,7 +63,7 @@ def _no_store():
 
 def _ingest_line(capsys) -> str:
     with pytest.raises(SystemExit):
-        runpy.run_path(str(SCRIPT), run_name="check_stages_under_test")
+        runpy.run_path(str(SCRIPT), run_name="__main__")
     return next(line for line in capsys.readouterr().out.splitlines() if INGEST in line)
 
 

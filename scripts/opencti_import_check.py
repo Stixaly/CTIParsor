@@ -65,8 +65,12 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-from pycti import OpenCTIApiClient
-from pycti.utils.opencti_stix2_splitter import OpenCTIStix2Splitter
+try:  # pycti is optional (#622): the module, and --help of the scripts that use it, load without it
+    from pycti import OpenCTIApiClient
+    from pycti.utils.opencti_stix2_splitter import OpenCTIStix2Splitter
+except ImportError:
+    OpenCTIApiClient = None
+    OpenCTIStix2Splitter = None
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:   # run as a script: the repository root is not on the path
@@ -184,6 +188,8 @@ class Recorder:
 
 
 def make_client(url: str, token: str) -> OpenCTIApiClient:
+    if OpenCTIApiClient is None:
+        raise ImportError("pycti is not installed: this import needs the pycti venv of TESTING.md")
     return OpenCTIApiClient(url, token, log_level="error", perform_health_check=False)
 
 

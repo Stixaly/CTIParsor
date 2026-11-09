@@ -15,7 +15,8 @@ interface Props {
   onAccept: (id: string) => void
   onReject: (id: string) => void
   onReset: (id: string) => void
-  onJump: (value: string) => void
+  /** `relId`: the relationship whose end was clicked, so its arrow is highlighted (#629). */
+  onJump: (value: string, relId?: string) => void
   onChangeType: (id: string, type: string) => void
   onChangeDates: (id: string, patch: DatePatch) => void
   showInDoc: boolean
@@ -131,7 +132,7 @@ function RelCard({ r, onAccept, onReject, onReset, onJump, onChangeType, onChang
   onAccept: (id: string) => void
   onReject: (id: string) => void
   onReset: (id: string) => void
-  onJump: (v: string) => void
+  onJump: (v: string, relId?: string) => void
   onChangeType: (id: string, t: string) => void
   onChangeDates: (id: string, patch: DatePatch) => void
   getEntityType?: (value: string) => string | undefined
@@ -165,7 +166,7 @@ function RelCard({ r, onAccept, onReject, onReset, onJump, onChangeType, onChang
   return (
     <div className={`rel-card ${acceptedByPerson ? 'rok' : ''} ${r.accepted === false ? 'rno' : ''}`}>
       <div className="rel-line">
-        <button className="rel-node" onClick={() => onJump(r.source_value)}>
+        <button className="rel-node" onClick={() => onJump(r.source_value, r.id)}>
           {r.source_value}
         </button>
         {editing ? (
@@ -194,7 +195,7 @@ function RelCard({ r, onAccept, onReject, onReset, onJump, onChangeType, onChang
             {r.relationship_type} <span className="rel-edge-edit">✎</span>
           </button>
         )}
-        <button className="rel-node" onClick={() => onJump(r.target_value)}>
+        <button className="rel-node" onClick={() => onJump(r.target_value, r.id)}>
           {r.target_value}
         </button>
         <span className="rel-conf">{confPct(r.confidence)}%</span>

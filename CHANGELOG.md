@@ -9,6 +9,25 @@ theme.
 
 ## [Unreleased]
 
+- **Robustness fixes for 27 reported issues (#609-#635).**
+  - *API:* a NUL byte or a lone UTF-16 surrogate gets a 4xx, never a 500. This covers the login (the
+    wrong-password 401), the admin user and token bodies, the own-token name, the jobs and audit
+    cursors, the audit `user`/`route` filters and the OIDC claims. A failed OIDC account creation
+    redirects to `/login?error=account`.
+  - *Pipeline:* a corrupt PDF or DOCX is a `ValueError`. `main.py --input-dir` goes on after a file
+    that fails. A JSON answer nested past the recursion limit is unparsable rather than a failed
+    job, and `validate_bundle` returns an `invalid` verdict for one. Stage 4b handles dict STIX
+    objects. "February 29" without a year finds the previous leap year.
+  - *Detection:* `check_pattern` returns `unverified` for a type it has no parser for. Snort `pcre`
+    options survive a parse and re-serialisation. Corpus tarball sync is capped by the new
+    `CORPUS_TARBALL_MAX_BYTES` (2 GiB) and `CORPUS_EXTRACT_MAX_BYTES` (8 GiB) settings.
+  - *Web UI:* a new API token no longer shows "Copied" from the previous one. The coverage banner
+    stays at or below 100%. Relationship arrows reach deobfuscated IoCs, and the arrow of the
+    relationship clicked in the rail is highlighted. A bundle download is never named `_stix.json`.
+    The detection export POST encodes the job id.
+  - *Scripts:* `--help` and import work without optional dependencies, and missing coverage data
+    exits cleanly.
+
 - **`scripts/opencti_import_bundle.py`** imports any bundle into the
   throwaway OpenCTI and reads every object back by STIX id: counts per type
   (sent, found, missing, refused) in `output/opencti-import/<UTC time>/`, exit

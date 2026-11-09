@@ -15,11 +15,13 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from api.audit import stored_moment
 from api.db import get_conn
 from api.response_models.audit import AuditEvent
+from api.routes._common import storable_text
 
 router = APIRouter(prefix="/api/audit", tags=["audit"])
 
 _CURSOR_MALFORMED = "malformed cursor"
 _TIME_MALFORMED = "since and until are ISO 8601 times"
+_TEXT_UNSTORABLE = "user/route holds a character that cannot be stored"
 _COLUMNS = ("SELECT id, at, request_id, user_id, username, role, auth, method, route, target, status, "
             "outcome, client, attempted FROM audit_events")
 
@@ -39,7 +41,13 @@ def _decode_cursor(cursor: str) -> tuple[str, int]:
     if not (isinstance(value, list) and len(value) == 2 and isinstance(value[0], str)
             and isinstance(value[1], int) and not isinstance(value[1], bool)):
         raise HTTPException(400, _CURSOR_MALFORMED)
-    return value[0], value[1]
+    # The time is the stored text of a record (stored_moment gives it back unchanged); a NUL or a lone
+    # surrogate, or anything that is no ISO 8601 time, raises ValueError here, not in SQL (#632).
+    try:
+        at = stored_moment(value[0])
+    except ValueError:
+        raise HTTPException(400, _CURSOR_MALFORMED) from None
+    return at, value[1]
 
 
 def _event(row: Any) -> dict:
@@ -75,6 +83,12 @@ def list_audit(
 ):
     """The audit records, newest first (`at` DESC, then `id` DESC).  A page holds at most `limit`;
     when more follow, the header X-Next-Cursor holds the cursor of the next page."""
+    # PostgreSQL cannot store a NUL or a lone surrogate, so no record holds one: refuse it here (#632).
+    try:
+        storable_text(user)
+        storable_text(route)
+    except ValueError:
+        raise HTTPException(400, _TEXT_UNSTORABLE) from None
     clauses: list[str] = []
     params: list[Any] = []
     if user is not None:

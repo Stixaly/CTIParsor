@@ -119,7 +119,8 @@ export default function TokenPanel({ title, queryKey, load, create, revoke, user
   return (
     <section aria-labelledby={headingId} style={{ margin: '24px 0' }}>
       <h2 id={headingId} style={{ fontSize: 15, margin: '0 0 8px' }}>{title}</h2>
-      {created && <NewTokenNotice created={created} onDismiss={() => setCreated(null)} />}
+      {/* Keyed by token: a new token gets a fresh notice, so the "Copied" state of the previous one is not kept (#627). */}
+      {created && <NewTokenNotice key={created.id} created={created} onDismiss={() => setCreated(null)} />}
 
       <form onSubmit={submit} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 8 }}>
         {users && (

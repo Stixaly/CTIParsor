@@ -1,6 +1,7 @@
 import logging
 import os
 import zipfile
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -61,6 +62,23 @@ _MIN_CHARS_PER_PAGE = 50
 _DETECTION_SAMPLE_PAGES = 3
 
 
+def _read_corrupt_as_value_error(path: Path, reader: Callable[[Path], str], ext: str) -> str:
+    """Run a PDF/DOCX reader; a parser exception on a corrupt file becomes ValueError (#609).
+
+    The parsers (pdfplumber's PdfminerException, zipfile.BadZipFile, ...) raise
+    their own types, which callers do not expect.  ValueError (a size guard, say)
+    passes as-is; an OSError (missing file, no permission), MemoryError and
+    KeyboardInterrupt are not a corrupt file and are re-raised untouched.
+    """
+    try:
+        return reader(path)
+    except (ValueError, OSError, MemoryError, KeyboardInterrupt):
+        raise
+    except Exception as exc:
+        raise ValueError(f"{path.name}: unreadable or corrupt {ext} file "
+                         f"({type(exc).__name__}: {exc})") from exc
+
+
 def ingest(file_path: str) -> str:
     """
     Lit un fichier CTI (PDF, DOCX, HTML, TXT) et retourne le texte brut normalisé.
@@ -72,7 +90,7 @@ def ingest(file_path: str) -> str:
         Le texte extrait, nettoyé des espaces superflus
 
     Raises:
-        ValueError: si le format n'est pas supporté
+        ValueError: si le format n'est pas supporté, ou si le PDF/DOCX est illisible ou corrompu
         FileNotFoundError: si le fichier n'existe pas
     """
     path = Path(file_path)
@@ -82,10 +100,12 @@ def ingest(file_path: str) -> str:
 
     suffix = path.suffix.lower()
 
+    # HTML and text readers do not raise on corrupt input (#609): only the
+    # binary formats whose parsers raise their own exception types are wrapped.
     if suffix == ".pdf":
-        raw = _read_pdf(path)
+        raw = _read_corrupt_as_value_error(path, _read_pdf, "pdf")
     elif suffix == ".docx":
-        raw = _read_docx(path)
+        raw = _read_corrupt_as_value_error(path, _read_docx, "docx")
     elif suffix in (".html", ".htm"):
         raw = _read_html(path)
     elif suffix in (".txt", ".md"):

@@ -158,6 +158,12 @@ def validate_bundle(bundle_json: str, *, quiet: bool = False) -> ValidationResul
         if not quiet:
             logger.error(f"[Stage 5] Input is not a STIX bundle: {exc}")
         return ValidationResult(INVALID, [str(exc)])
+    except RecursionError as exc:
+        # JSON nested past the recursion limit in the stix2validator decoder (#613).
+        message = f"the bundle is nested too deeply to be read: {exc}"
+        if not quiet:
+            logger.error(f"[Stage 5] {message}")
+        return ValidationResult(INVALID, [message])
     if isinstance(results, list):
         message = "Root STIX document must be an object, not a list."
         if not quiet:
