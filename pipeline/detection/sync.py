@@ -27,6 +27,7 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit, urlunsplit
 
 from api.logging_config import get_logger
+from pipeline.env_flags import env_int
 from pipeline.regex_safety import compile_pattern
 from pipeline.security import is_contained
 from pipeline.web_capture import CaptureError, validate_url
@@ -36,6 +37,11 @@ logger = get_logger(__name__)
 MANIFEST_NAME = ".sync.json"     # written into `path` after a tarball fetch (ADR-0015 §5)
 _USER_AGENT = "cti-to-stix/1.0 (detection corpus sync)"
 _CHUNK = 1 << 20
+# Byte caps on a tarball download and on what its members add up to once extracted
+# (#614). Read at each call so the environment wins; a compromised host or a tar bomb
+# cannot fill the disk that holds the database and the uploads.
+_TARBALL_MAX_BYTES_DEFAULT = 2 << 30
+_EXTRACT_MAX_BYTES_DEFAULT = 8 << 30
 _MD5_RE = compile_pattern(r"^[0-9a-f]{32}$")
 # What reading a cut-off or damaged archive raises: EOFError from the stream, zlib's
 # and lzma's errors, gzip's BadGzipFile and tarfile's ReadError (#433).  Any other
@@ -226,18 +232,32 @@ def clone_mismatch(corpus: dict) -> str | None:
 
 def _download(url: str, dest: Path, *, timeout: int) -> int:
     """Stream `url` into `dest` in _CHUNK-sized blocks; returns the bytes written.
+    Refuses above CORPUS_TARBALL_MAX_BYTES (#614): on a declared Content-Length before
+    reading, and while streaming once the total passes it (the partial file is removed).
     Raises URLError/OSError — the caller decides what a failure means."""
+    cap = env_int("CORPUS_TARBALL_MAX_BYTES", default=_TARBALL_MAX_BYTES_DEFAULT)
     # The URL passed validate_url (fetch_tarball), each redirect too (_SAFE_OPENER).
     req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})  # noqa: S310 — see above
     with _SAFE_OPENER.open(req, timeout=timeout) as resp:
+        declared = (resp.headers.get("Content-Length") or "").strip()
+        if declared.isdigit() and int(declared) > cap:
+            raise urllib.error.URLError(
+                f"declared size {int(declared)} bytes is above CORPUS_TARBALL_MAX_BYTES ({cap})")
         total = 0
-        with open(dest, "wb") as f:
-            while True:
-                chunk = resp.read(_CHUNK)
-                if not chunk:
-                    break
-                f.write(chunk)
-                total += len(chunk)
+        try:
+            with open(dest, "wb") as f:
+                while True:
+                    chunk = resp.read(_CHUNK)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > cap:
+                        raise urllib.error.URLError(
+                            f"download exceeds CORPUS_TARBALL_MAX_BYTES ({cap})")
+                    f.write(chunk)
+        except BaseException:
+            dest.unlink(missing_ok=True)
+            raise
     return total
 
 
@@ -369,6 +389,12 @@ def fetch_tarball(corpus: dict, *, timeout: int = 900) -> tuple[bool, str]:
                 members, skipped = _safe_members(tar, staging)
                 if not members:
                     return False, "archive contains no extractable files"
+                # Refuse before writing anything if the members would extract past the cap (#614).
+                extract_cap = env_int("CORPUS_EXTRACT_MAX_BYTES", default=_EXTRACT_MAX_BYTES_DEFAULT)
+                extract_size = sum(m.size for m in members)
+                if extract_size > extract_cap:
+                    return _failed("archive too large when extracted", ValueError(
+                        f"members total {extract_size} bytes, above CORPUS_EXTRACT_MAX_BYTES ({extract_cap})"))
                 kwargs: dict = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
                 tar.extractall(staging, members=members, **kwargs)  # noqa: S202 — _safe_members + data filter
         except _TRUNCATED_ARCHIVE as e:

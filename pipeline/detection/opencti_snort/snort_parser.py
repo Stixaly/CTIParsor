@@ -1,7 +1,7 @@
 import collections
 import ipaddress
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from .snort_dicts import Dicts
 
@@ -475,19 +475,22 @@ class Sanitizer:
         return parsed
 
     @staticmethod
-    def pcre(value: list) -> List:
-        value_string = value[0]
-        if re.match(r'^"/.*/[ismxAEGRUBPHMCOIDKYS]+"$', value_string):
+    def pcre(value: Union[str, List]) -> Union[str, List]:
+        # The parser stores a pcre option as a str, but list input keeps its shape (#624).
+        if isinstance(value, list):
+            if not value:
+                return value
+            return [Sanitizer.pcre(value[0]), *value[1:]]
+        if not value:
             return value
-        if not str(value).startswith('"/') and value:
-            start = re.split(r'^"', value)
-            start[0] = '"/'
-            value = "".join(start)
-        if not re.search(r'(\/")$', value):
-            end = re.split(r'"$', value)
-            end[-1] = '/"'
-            value = "".join(end)
-        return value
+        body = value[1:] if value.startswith('"') else value
+        body = body[:-1] if body.endswith('"') else body
+        if not body.startswith("/"):
+            body = f"/{body}"
+        # Only add the closing slash when the regex does not already end with /flags (#624).
+        if not re.fullmatch(r"/.*/[ismxAEGRUBPHMCOIDKYS]*", body, re.DOTALL):
+            body = f"{body}/"
+        return f'"{body}"'
 
     @staticmethod
     def depth(options):
@@ -571,7 +574,11 @@ class SerializeRule:
         for _index, option in options.items():
             key, value = option
             if value:
-                option_value = f"{key}:{','.join(value)}"
+                # A pcre value is a plain str: joining it would put a comma between characters (#624).
+                if isinstance(value, str):
+                    option_value = f"{key}:{value}"
+                else:
+                    option_value = f"{key}:{','.join(value)}"
             else:
                 option_value = f"{key}"
             options_list.append(option_value)

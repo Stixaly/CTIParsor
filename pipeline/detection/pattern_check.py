@@ -66,9 +66,13 @@ def check_pattern(pattern_type: str, pattern: str) -> tuple[str, str | None]:
     A blank rule (empty, or only whitespace) is refused whatever its type, before
     the parser of its dialect is asked: the Sigma and Suricata parsers return an
     empty result on it without raising, and OpenCTI would take it as an Indicator
-    for no rule at all (#434).
+    for no rule at all (#434).  A type with no parser here (STIX, YARA, EQL...) is
+    unverified, not an exception (#626).
     """
-    library, parse = _CHECKERS[pattern_type]
+    checker = _CHECKERS.get(pattern_type)
+    if checker is None:
+        return UNVERIFIED, f"unsupported pattern type: {pattern_type}"
+    library, parse = checker
     if not pattern.strip():
         return REFUSED, "empty rule: nothing to parse"
     if pattern_type in ("suricata", "snort") and len(pattern) > _MAX_NET_RULE:
