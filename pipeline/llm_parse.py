@@ -61,6 +61,7 @@ def _drop_reasoning_blocks(text: str) -> tuple[str, bool]:
     decoder = json.JSONDecoder()
     kept: list[str] = []
     removed = False
+    too_deep = False
     i = 0
     while i < len(text):
         if text.startswith(_REASONING_OPEN, i):
@@ -72,11 +73,15 @@ def _drop_reasoning_blocks(text: str) -> tuple[str, bool]:
                 i += 1
             removed = True
             continue
-        if text[i] in "{[":
+        if text[i] in "{[" and not too_deep:
             try:
                 decoder.raw_decode(text, i)
-            except (json.JSONDecodeError, RecursionError):
+            except json.JSONDecodeError:
                 pass
+            except RecursionError:
+                # Too deep to read.  Stop decoding (each later bracket inside it
+                # would fail the same way, slowly), but keep removing <think> blocks (#617).
+                too_deep = True
             else:
                 break
         kept.append(text[i])
@@ -163,5 +168,9 @@ def parse_numbered_claims(raw: str, count: int) -> dict[int, dict] | None:
 
             except json.JSONDecodeError:
                 continue
+            except RecursionError:
+                # Nested past the recursion limit: each later "[" inside it
+                # would fail the same way, slowly.  Stop scanning (#617).
+                return None
 
     return None

@@ -258,6 +258,10 @@ def parse_selection(raw: str) -> list[dict] | None:
         except ValueError:
             i += 1
             continue
+        except RecursionError:
+            # Nested past the recursion limit: later brackets inside it would
+            # fail the same way, one slow decode each.  Unparsable (#617).
+            return None
         if isinstance(obj, dict) and isinstance(obj.get("selected"), list):
             return [x for x in obj["selected"] if isinstance(x, dict)]
         if isinstance(obj, list) and all(isinstance(x, dict) for x in obj):
@@ -305,6 +309,9 @@ def salvage_selection(raw: str) -> list[dict] | None:
         # the model wrote a complete answer, then copies of it until the cut.
         json.JSONDecoder().raw_decode(raw, start)
         return None
+    except RecursionError:
+        # Too deep to read: not a salvageable answer (#617).
+        return None
     except ValueError:
         pass
     stack, _ = _unclosed_stack(raw[start:])
@@ -314,7 +321,7 @@ def salvage_selection(raw: str) -> list[dict] | None:
     for item in _extract_complete_array_items(raw, m.end()):
         try:
             obj = json.loads(item)
-        except ValueError:
+        except (ValueError, RecursionError):   # too deep: skip this item (#617)
             continue
         if isinstance(obj, dict):
             out.append(obj)

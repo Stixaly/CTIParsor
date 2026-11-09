@@ -158,6 +158,9 @@ def _parse(raw: str) -> Optional[dict]:
                     return obj
             except json.JSONDecodeError:
                 continue
+            except RecursionError:
+                # Nested past the recursion limit: stop scanning (#617).
+                return None
     return None
 
 

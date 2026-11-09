@@ -1439,7 +1439,7 @@ def _try_extract_complete_items(text: str) -> dict | None:
         for raw in _extract_complete_array_items(text, m.end()):
             try:
                 items.append(json.loads(raw))
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, RecursionError):   # too deep: skip (#617)
                 continue
         if items:
             result[field] = items
@@ -1494,6 +1494,10 @@ def _parse_llm_response(raw_text: str) -> LLMEnrichmentResult | None:
                 obj, _ = decoder.raw_decode(raw_text, i)
             except json.JSONDecodeError:
                 continue
+            except RecursionError:
+                # Nested past the recursion limit: stop scanning, as for a
+                # truncated answer, instead of retrying at each later "{" (#617).
+                break
             if isinstance(obj, dict):
                 # An object nested in an outer one that never closes is one
                 # TTP or relationship of a truncated answer, not the answer:
@@ -1515,7 +1519,7 @@ def _parse_llm_response(raw_text: str) -> LLMEnrichmentResult | None:
             try:
                 parsed_json = json.loads(completed)
                 logger.warning("LLM response was truncated — recovered by closing dangling structures")
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, RecursionError):   # too deep: unparsable (#617)
                 parsed_json = None
 
     # Still nothing — salvage whatever complete array items survived the cut.
