@@ -6,16 +6,16 @@ route matches gets a JSON 404, not the application page (`api/main.py`).
 
 ## Authentication
 
-With `AUTH_MODE=off` (the default) no route asks for credentials. With `AUTH_MODE=local`
-every route except `GET /api/health`, `POST /api/auth/login`, `GET /api/auth/methods` and the two `/api/auth/oidc/` redirects does, and the role each
+With `AUTH_MODE=off` (the default) no route asks for credentials. With any other mode
+(`local`, `oidc`, `both`) every route except `GET /api/health`, `POST /api/auth/login`, `GET /api/auth/methods` and the two `/api/auth/oidc/` redirects does, and the role each
 operation needs (ADR-0097) is listed in [api-permissions.md](api-permissions.md) and held
 in `api/auth/permissions.py`; a test fails for an operation with no entry. `GET /metrics` keeps its
 own rule whatever the mode: loopback clients, or the `METRICS_TOKEN` bearer (see
 [operations.md](operations.md#monitoring-and-alerts)).
 
 - **Web interface.** `POST /api/auth/login` with `{ "username", "password" }` sets the cookie
-  `ctiparsor_session` (`HttpOnly`, `SameSite=Strict`, `Secure` unless the request is plain HTTP from
-  loopback, 12 hours sliding, `SESSION_TTL_HOURS`) and returns the same object as
+  `ctiparsor_session` (`HttpOnly`, `SameSite=Strict`, `Secure` when the request arrived over HTTPS (its scheme, or
+  `X-Forwarded-Proto: https` from a proxy), 12 hours sliding, `SESSION_TTL_HOURS`) and returns the same object as
   `GET /api/auth/me`: `{ auth_mode, username, display_name, role, auth_source, csrf_token }`.
   `csrf_token` is the one to send back in the `X-CSRF-Token` header on every `POST`, `PUT`, `PATCH` and
   `DELETE` made with the cookie (403 without it). `POST /api/auth/logout` ends the session.
@@ -26,7 +26,7 @@ own rule whatever the mode: loopback clients, or the `METRICS_TOKEN` bearer (see
   (code flow, PKCE S256, `state`, `nonce`). `GET /api/auth/oidc/callback?code=&state=`
   checks the state (single use, 10 minutes), exchanges the code, validates the ID token and answers 302 to
   `next` with the session cookie; any failure answers 302 to `/login?error=<code>` (`state`, `token`, `idp`,
-  `denied`, `no_role`, `disabled`, `config`, `busy`). Both are open and limited per client address
+  `denied`, `no_role`, `disabled`, `account` (no local account could be created for the sign-in), `config`, `busy`). Both are open and limited per client address
   (`LOGIN_RATE_LIMIT`); 404 with `AUTH_MODE=off`, 403 with `local`. `next` must be a local path, else `/`. The login sets a short-lived cookie `ctiparsor_oidc` (`HttpOnly`, `SameSite=Lax`, path `/api/auth/oidc`, 10 minutes) that ties the sign-in to the browser that started it; the callback refuses (`state`) a request without the matching cookie, and deletes it in every answer.
   `POST /api/auth/logout` ends the CTIParsor session only.
 - `GET /api/auth/methods` (open) tells the sign-in page what to offer: `{ auth_mode, local, oidc }`.
@@ -66,16 +66,16 @@ own rule whatever the mode: loopback clients, or the `METRICS_TOKEN` bearer (see
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/upload` | Upload a file (multipart `file=`) and queue it. Returns `{ job_id, filename, status }`, `status` being `queued` or `processing`; 503 when the queue is full (the uploaded file and the job's baseline, if any, are removed, and the job row stays, `failed`); any other error while the job starts also removes the uploaded file. Optional `baseline_stix` (a file) and `baseline_report_id` (a form field): a STIX 2.1 bundle to enrich (below) |
+| `POST` | `/api/upload` | Upload a file (multipart `file=`) and queue it. Returns `{ job_id, filename, status }`, `status` being `queued` or `processing`; 503 when the queue is full (the uploaded file and the job's baseline, if any, are removed, and the job row stays, `failed`); any other error while the job starts also removes the uploaded file. Refused before the file is written: 400 for an unsupported extension (or a file whose type cannot be read, or a `.txt`/`.md` that is not UTF-8), 415 for content whose type does not match the extension, 507 when the free space under the uploads directory is below `UPLOAD_MIN_FREE_MB` (1024 MB by default; `api/disk_space.py`). Optional `baseline_stix` (a file) and `baseline_report_id` (a form field): a STIX 2.1 bundle to enrich (below) |
 | `POST` | `/api/ingest/text` | Ingest pasted text (JSON `text`, optional `title`). Stored `.html`, `.md` or `.txt` by content — pasted markup is stripped, not ingested raw. 20 chars min, 2 MB max; 400 for a text that holds a NUL character or one with no UTF-8 form (a lone surrogate), before anything is written. 503 when the queue is full, as the upload answers: the written text is removed (and so for any other error while the job starts). Optional `baseline_bundle` (the TEXT of the STIX file) and `baseline_report_id` |
 | `POST` | `/api/ingest/url` | Render a URL with headless Chromium (JSON `url`, optional `enable_js`). Writes `{job_id}.pdf` (archive, shown in Review) and `{job_id}.txt` (rendered DOM text, ingested). 400 policy refusal · 502 unreachable or blank render · 503 Playwright absent, or the queue full (then the `.pdf`, the `.txt` and the metadata file are removed; so for any other error while the job starts) · 504 timeout. Optional `baseline_bundle` and `baseline_report_id`, checked before the capture |
-| `GET` | `/api/jobs` | List all jobs (with `pipeline_mode`) |
+| `GET` | `/api/jobs` | List all jobs (with `pipeline_mode`). Optional `limit` (1 to 500) returns one page, newest first; when more jobs follow, the `X-Next-Cursor` header holds the `cursor` of the next page. `cursor` without `limit` is 400. Without `limit`, the whole list |
 | `GET` | `/api/jobs/{id}` | Get a single job (includes entity/relationship counts, `pipeline_mode`, and for an `enrich` job an `enrichment` block, below). `stages` lists what each stage did, from the stage report the worker stored (`stage`, `label`, `status`: `ran`, `skipped` or `failed`, `reason`, and `egress` for a stage that sends the report out, ADR-0097); absent for a job with no stored report |
 | `GET` | `/api/jobs/{id}/baseline` | The STIX bundle the job was created from, as received, as a JSON download. 404 for a job with none |
 | `GET` | `/api/jobs/{id}/baseline/intake` | What the intake made of that bundle, whole: every object left out and why. 404 for a job with none |
 | `PATCH` | `/api/jobs/{id}` | Update status: `for_review`, `reviewing`, `completed` or `failed`. 400 for any other value, `uploaded` and `processing` included: the server sets those. 409 while a worker runs the job (`processing`, whatever its lease: the same refusal as DELETE, #385), and 409 for `completed` while the stored bundle is one Stage 5 refused (below) |
 | `DELETE` | `/api/jobs/{id}` | Delete job, all DB rows, and all associated files. 409 while a worker runs the job (`processing`): stop it or wait for it to finish |
-| `POST` | `/api/jobs/{id}/finalize` | Re-run Stages 4–5 on the accepted rows and store the bundle; sets status `completed`. `?quick=true` rebuilds the bundle and leaves the status alone (the rebuild the UI schedules after each edit). Returns `{ status, bundle_size, validation }`, `validation` being `validated`, `unverified` or `unknown` (Stage 5 did not run). 409 when Stage 5 refuses the rebuilt bundle (below). Two finalizes of one job can overlap: a build never replaces a bundle built from newer rows (below) |
+| `POST` | `/api/jobs/{id}/finalize` | Re-run Stages 4–5 on the accepted rows and store the bundle; sets status `completed`. `?quick=true` rebuilds the bundle and leaves the status alone (the rebuild the UI schedules after each edit). Returns `{ status, bundle_size, validation }`, `validation` being `validated`, `unverified` or `unknown` (Stage 5 did not run). 409 when Stage 5 refuses the rebuilt bundle (below). 409 `Review decisions changed during every rebuild; finalize again once the review settles` when a review decision lands during each of the four builds (the first and three rebuilds, `_MAX_REBUILDS` in `api/worker.py`); 500 `Finalize failed — check server logs` when the rebuild returns no bundle, which happens when the job row is not found at the rebuild's snapshot (`api/routes/jobs.py`). Two finalizes of one job can overlap: a build never replaces a bundle built from newer rows (below) |
 | `GET` | `/api/jobs/{id}/bundle` | Download the STIX 2.1 bundle JSON. The header `X-Bundle-Validation` carries Stage 5's verdict: `validated`, `unverified` (the JSON schemas were missing) or `unknown` (built before the verdict was stored). 409 when Stage 5 refused the bundle (below) |
 | `GET` | `/api/jobs/{id}/bundle/ledger` | What Stage 4 did with each entity and relationship row when it built the stored bundle (ADR-0061): what each became, what was rewritten or dropped and why, why each generated object exists. 404 when the bundle predates the ledger — a quick finalize writes one |
 | `GET` | `/api/jobs/{id}/source` | Stream the original uploaded file |
@@ -306,7 +306,7 @@ Relationship rows returned by the list route also carry `enrichment_status`,
 `baseline_stix_id` and `held_reason`, as entities do (see Entities above, and
 `docs/database-schema.md`). Stage 3d holds back a claim it could not decide.
 
-Valid `relationship_type` values: `uses`, `attributed-to`, `targets`, `indicates`, `mitigates`, `remediates`, `delivers`, `drops`, `downloads`, `exploits`, `originates-from`, `compromises`, `beacons-to`, `communicates-with`, `exfiltrates-to`, `controls`, `has`, `hosts`, `owns`, `authored-by`, `impersonates`, `located-at`, `resolves-to`, `belongs-to`, `variant-of`, `duplicate-of`, `derived-from`, `related-to`.
+Valid `relationship_type` values, the sorted list `GET /api/jobs/{id}/relationships/valid-types` returns (`STIX_RELATIONSHIP_TYPES` in `models/schemas.py`, 35 values): `analysis-of`, `attributed-to`, `authored-by`, `based-on`, `beacons-to`, `belongs-to`, `characterizes`, `communicates-with`, `compromises`, `consists-of`, `controls`, `delivers`, `derived-from`, `downloads`, `drops`, `duplicate-of`, `dynamic-analysis-of`, `exfiltrates-to`, `exploits`, `has`, `hosts`, `impersonates`, `indicates`, `investigates`, `located-at`, `mitigates`, `originates-from`, `owns`, `related-to`, `remediates`, `resolves-to`, `static-analysis-of`, `targets`, `uses`, `variant-of`.
 
 ## Relationship policy
 
@@ -522,7 +522,7 @@ amendment of 2026-10-19).
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/queue/status` | Backlog and worker liveness (ADR-0048, ADR-0094 item 7): job counts by status, oldest-queued age, every queue loop that runs (`busy`, `idle`, or `stale` once its heartbeat is older than `WORKER_LEASE_TIMEOUT_S`) and a summary of the live ones and their free slots ([operations.md](operations.md)). Unauthenticated, like every other GET route (SECURITY.md). |
+| `GET` | `/api/queue/status` | Backlog and worker liveness (ADR-0048, ADR-0094 item 7): job counts by status, oldest-queued age, every queue loop that runs (`busy`, `idle`, or `stale` once its heartbeat is older than `WORKER_LEASE_TIMEOUT_S`) and a summary of the live ones and their free slots ([operations.md](operations.md)). With `AUTH_MODE` other than `off` it needs a reader (`Authorization: Bearer ctp_…` or a session); only `GET /api/health` is open (`api/auth/permissions.py`). |
 | `GET` | `/api/health` | Liveness and readiness of the API: `{"status": "ok"}` with 200, or `{"status": "degraded", "detail": "job store unreachable"}` with **503** when the job store does not answer. The image's `HEALTHCHECK` calls it, and a host monitor should check the status code, not the body. It says nothing about the workers: `/api/queue/status` does. Unauthenticated. |
 
 ```json

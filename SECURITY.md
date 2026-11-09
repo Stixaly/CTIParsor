@@ -1,6 +1,8 @@
 # Security Model
 
-CTIParsor is a **local, single-user** tool for turning CTI reports into STIX. This
+CTIParsor turns CTI reports into STIX. With `AUTH_MODE=off` (the default) it is a
+**local, single-user** tool; with `local`, `oidc` or `both` it signs users in
+and checks a role per operation (ADR-0097). This
 document describes its security posture, the surfaces it exposes, and the
 deliberate limits. It is defensive in scope.
 
@@ -51,10 +53,13 @@ full access. (In the container stack the API process itself binds `0.0.0.0` — 
 container has no "localhost" of its own to bind — but the same guarantee is
 kept one layer out: compose publishes it on `127.0.0.1` on the *host* by
 default, so the reachability is identical, just enforced at a different
-point. See [docs/docker.md](docs/docker.md).) In particular, **no endpoint that writes a secret exists today** — the LLM
+point. See [docs/docker.md](docs/docker.md).) In particular, **no endpoint writes an LLM API key** — the LLM
 API-keys settings panel is deliberately deferred (ADR-0007 Slice 2) until it ships
 with a loopback-origin guard, write-only/masked key storage, and the client-reload
-hook. Do not add secret-writing endpoints without that hardening.
+hook. Do not add key-writing endpoints without that hardening. The authentication
+routes write three other secrets: account passwords, stored as Argon2id hashes
+(`api/auth/passwords.py`); API tokens and session ids, stored as SHA-256 hashes only
+(`api/auth/store.py`, `hash_secret`), so a copy of the database signs nobody in.
 
 ### 3. Secrets & data at rest
 All sensitive state is **gitignored**, never committed:
@@ -85,7 +90,8 @@ has the nested-unbounded-quantifier shape that makes backtracking
 exponential (see [ADR-0049](docs/adr/0049-redos-guard-actually-wired-in.md)'s
 validation record for the stress test). `google-re2` ships prebuilt wheels
 (cp312+, no toolchain); a platform without one just loses the guarantee on
-the other 12 patterns, silently — `setup.sh` warns at install time.
+the other 12 patterns, silently. `setup.sh` does not check for it;
+`scripts/docker_smoke.sh` warns when the image has no `re2`.
 
 ### 5. Detection-rule corpora
 Public corpuses are committed (`detection_corpora.yaml`); private ones live only in
@@ -117,14 +123,30 @@ body over its route's budget gets a 413 before the application reads the rest
 (`api/body_limit.py`).
 
 ## Offline by default
-No telemetry, no analytics, no outbound calls except the **optional** LLM provider
-(Anthropic/Mistral) — and Ollama keeps even that local. With no API key the
-pipeline still produces valid STIX. ML models are downloaded once and cached.
+No telemetry and no analytics. Each outbound call below is optional or started by an
+operator or an analyst; nothing else leaves the host:
+- **the LLM provider** named by `LLM_PROVIDER`: `anthropic`, `gemini` and `mistral`
+  are hosted, `vllm`, `ollama` and `lmstudio` are local. It serves Stage 3 and, under
+  `VISION_PROVIDER=auto` (the default), the figures of Stage 1f. A hosted provider gets
+  a report only when its TLP is CLEAR or GREEN (section 6);
+- **the OIDC issuer**, when `AUTH_MODE` is `oidc` or `both`: discovery, the token
+  exchange and the JWKS (`api/auth/oidc.py`);
+- **CIRCL** (`cve.circl.lu`), when `CVE_ENRICHMENT` is true; it is off by default
+  (`pipeline/stage2f_cve_enrichment.py`);
+- **the detection corpora**: `git` fetches of HTTPS remotes, with the ambient git
+  credentials (`scripts/sync_corpora.py`, `pipeline/detection/sync.py`);
+- **URLs an analyst submits** for capture (`POST /api/ingest/url`): the page and the
+  subresources its renderer requests (`pipeline/web_capture.py`);
+- **model downloads** from the Hugging Face hub, once, then cached (`docker/entrypoint.sh`).
+
+With no API key the pipeline still produces valid STIX.
 
 ## What this is NOT
 - Not yet a qualified multi-user service. `AUTH_MODE=local` gives local accounts, three
-  roles (`reader`, `analyst`, `admin`) checked on every route, server-side sessions with a
-  CSRF token, hashed API tokens, and, with `AUTH_MODE=oidc` or `both`, sign-in with an OpenID Connect provider (code flow with PKCE; the role comes from the groups at each sign-in; no logout at the provider) ([ADR-0097](docs/adr/0097-1-0-is-a-shared-service-for-one-team.md) items 14 and 15). The web interface has a sign-in page and admin screens for users and tokens, and every state-changing request is recorded in an audit trail, read with `GET /api/audit` or from the JSON lines on standard output (item 17; [docs/operations.md](docs/operations.md#audit-trail)). Not done yet: the 1.0 qualification of this service (the failure recipe and the journey with the real models run on the release candidate, [1.0-readiness.md](docs/releases/1.0-readiness.md)). With `AUTH_MODE=off` (the
+  roles (`reader`, `analyst`, `admin`) checked on every route except the open ones
+  (`/api/health`, the sign-in routes, listed in `api/auth/middleware.py`) and
+  `/metrics`, which has its own rule; server-side sessions with a CSRF token, hashed
+  API tokens, and, with `AUTH_MODE=oidc` or `both`, sign-in with an OpenID Connect provider (code flow with PKCE; the role comes from the groups at each sign-in; no logout at the provider) ([ADR-0097](docs/adr/0097-1-0-is-a-shared-service-for-one-team.md) items 14 and 15). The web interface has a sign-in page and admin screens for users and tokens, and every state-changing request is recorded in an audit trail, read with `GET /api/audit` or from the JSON lines on standard output (item 17; [docs/operations.md](docs/operations.md#audit-trail)). Not done yet: the 1.0 qualification of this service (the failure recipe and the journey with the real models run on the release candidate, [1.0-readiness.md](docs/releases/1.0-readiness.md)). With `AUTH_MODE=off` (the
   default) there is no authn/authz at all.
 - Not hardened for internet exposure — keep it on localhost or behind your own auth proxy.
   `API_HOST` in `.env` controls the bind address; see [docs/deployment.md](docs/deployment.md)

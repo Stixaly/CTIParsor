@@ -9,6 +9,10 @@ theme.
 
 ## [Unreleased]
 
+- **Docs caught up with authentication, egress and audit.** An audit of README and docs/ against the code
+  corrected the statements that said there is no authentication, the schema doc (migrations 17-20), the
+  TLP limit on hosted LLM providers (a key alone does not turn Stage 3 on under `STIX_TLP=amber`), the API
+  status codes and permissions, the diagrams, and stale counts and links.
 - **End-to-end journey with the real models** (ADR-0097 item 24, `scripts/check_model_journey.py`,
   `docs/releases/1.0-model-journey.md`): a PDF upload and a URL capture on a running stack, checked for the
   job's end, the stages and models that ran, the extraction and a STIX 2.1 bundle with no dangling

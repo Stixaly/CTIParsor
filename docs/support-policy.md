@@ -39,10 +39,11 @@ One person maintains the project. No promise on this page assumes a team.
 **This will change.** [ADR-0097](adr/0097-1-0-is-a-shared-service-for-one-team.md)
 (accepted on 2026-11-08) makes 1.0 a shared service for one
 team: one install shared by several users, behind authentication, with roles.
-Until its work items (14 to
-24) are done, the text above is the current state: no authentication, one
-analyst, and the install reachable from loopback only unless you add your own
-gate ([deployment.md](deployment.md)).
+The authentication it asks for is in the code, opt-in. With `AUTH_MODE=off`, the
+default, the text above is the current state: no authentication, one analyst, and
+an API that refuses to start on a bind address beyond loopback
+([deployment.md](deployment.md)). The 1.0 qualification of the shared service is
+not complete ([1.0-readiness.md](releases/1.0-readiness.md)).
 
 ## What 1.0 promises
 
@@ -65,8 +66,9 @@ Three things, and only these.
   extract different objects from one report. With the provider's default
   sampling, two runs of one configuration differed by 0.028 F1 on the AnnoCTR
   dev split ([eval/README.md](eval/README.md), *Run-to-run spread*).
-- **Several users.** There is no authentication and no access control
-  ([SECURITY.md](../SECURITY.md)).
+- **Several users.** With `AUTH_MODE=off` (the default) there is no authentication
+  and no access control ([SECURITY.md](../SECURITY.md)). Authentication is opt-in
+  (ADR-0097).
 - **An install other than Docker Compose**
   ([ADR-0054](adr/0054-full-docker-installation.md)).
 - **Fixes on an older version line, or a support duration**
@@ -442,7 +444,7 @@ evidence.
 | Named entities (malware, threat actors, tools, campaigns, places, sectors) | supported | English models; low precision on AnnoCTR test ([Quality](#quality-what-is-measured-and-published)) | `tests/test_stage2b_gazetteer.py`, `tests/test_stage2d_cyner.py`, `tests/test_stage2e_gliner.py`; AnnoCTR measurements in [eval/](eval/README.md) |
 | ATT&CK techniques | supported | ATT&CK 19.2 by default, 20.0 selectable (`ATTACK_RELEASE`); without an LLM, Stage 2c's detector replaces the selection ([configuration.md](configuration.md)) | `tests/test_ttp_select.py`, `tests/test_ttp_retrieval.py`; F1 0.690 on AnnoCTR test ([baseline-2026-10.md](eval/baseline-2026-10.md)) |
 | Relationships | supported | needs an LLM (Stage 3) | `tests/test_stage3d_verify.py`, `tests/test_relationships_api.py`. Against a gold set: not yet, items 5 and 6 |
-| Review and finalize | supported | no authentication; built for one analyst | `tests/test_jobs_routes.py`, `tests/test_entities_api.py`, `tests/test_relationships_api.py`, `tests/test_decisions.py`, `tests/test_held_for_review.py`, `tests/test_bundle_builds.py`. The browser journey (`scripts/check_browser_e2e.sh`, job `browser-e2e`, ADR-0094 item 4): in Chromium against the built interface, the API, its worker and PostgreSQL, offline, a report imported, its progress followed from the run's events, the page reloaded, rows accepted, rejected and retyped, the review completed and the bundle downloaded and checked; the same with the keyboard alone; an enrichment and its ledger, a failed report and its reason, a refused bundle (409); axe on each page (TESTING.md) |
+| Review and finalize | supported | with `AUTH_MODE=off` (the default), no authentication; with authentication on, the role of each operation (`api/auth/permissions.py`), and an analyst deletes only the reports they imported | `tests/test_jobs_routes.py`, `tests/test_entities_api.py`, `tests/test_relationships_api.py`, `tests/test_decisions.py`, `tests/test_held_for_review.py`, `tests/test_bundle_builds.py`. The browser journey (`scripts/check_browser_e2e.sh`, job `browser-e2e`, ADR-0094 item 4): in Chromium against the built interface, the API, its worker and PostgreSQL, offline, a report imported, its progress followed from the run's events, the page reloaded, rows accepted, rejected and retyped, the review completed and the bundle downloaded and checked; the same with the keyboard alone; an enrichment and its ledger, a failed report and its reason, a refused bundle (409); axe on each page (TESTING.md) |
 | STIX 2.1 export | supported | a bundle Stage 5 refuses is not served (409); `unverified` when the JSON schemas are missing | `tests/test_stage5.py`, `tests/test_stage4_reference.py` (six reference scenarios), `tests/test_stix_ids.py` |
 | Enrich an existing STIX 2.1 bundle ([ADR-0090](adr/0090-enriching-an-existing-stix-bundle.md)) | supported, on by default | STIX 2.1 only (2.0 is refused with 400); 20 MB; `STIX_ENRICHMENT_ENABLED=false` turns it off; OpenCTI- and MISP-shaped baselines checked on repository fixtures, not on live exports | `tests/test_baseline_*.py`; round trip and ablation on 7 real reports, 2026-10-25: 0 duplicate rows, 175 of 179 removed entries recovered ([TESTING.md](../TESTING.md)) |
 | Detection rules quoted in a report (YARA, Sigma, Suricata, Snort) | supported | a rule ships only if the parser OpenCTI uses accepts it; without that parser it ships `unverified` | `tests/test_yara_check.py`, `tests/test_pattern_check.py` |
@@ -456,7 +458,7 @@ evidence.
 | Air-gapped install ([ADR-0054](adr/0054-full-docker-installation.md)) | experimental | no commitment in 1.0 | CI checks only that the bundle's images come back from `docker save` and `docker load` (`scripts/check_offline_images.sh`) |
 | Reports in French | experimental | English NER models (spaCy `en_core_web_lg`, else `en_core_web_sm`); no French report in either gold set | — |
 | OCR of fully scanned PDFs | experimental | Tesseract, `OCR_LANG` default `eng`; no fully scanned report in the in-house set | `tests/test_stage1_pdf_paths.py` (routing); `tests/test_ingestion_structure.py` (one real OCR run, skipped without Tesseract and Poppler) |
-| Several analysts, authentication, access control | not supported | no authentication; the `proxy` profile adds TLS and one password ([deployment.md](deployment.md)) | — |
+| Several analysts, authentication, access control | not supported | opt-in: `AUTH_MODE=local`, `oidc` or `both` (ADR-0097), off by default; the `proxy` profile adds TLS and one password ([deployment.md](deployment.md)). The qualification of several users is pending ([1.0-readiness.md](releases/1.0-readiness.md)) | `tests/test_auth_permissions.py`, `tests/test_auth_routes.py` |
 | GPU | not supported | the image carries torch's CPU build | — |
 | A Python package, `pipeline/` as a library | not supported | no sdist, wheel or PyPI package (ADR-0085) | — |
 

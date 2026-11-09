@@ -40,8 +40,10 @@ pilot.
 - ATT&CK Mobile techniques are included (21 in all). The pipeline produces
   Enterprise only, so technique recall is lower, on purpose;
 - a new `observables` list holds legitimate items cited as indicators (a
-  Windows binary, say) and values without an IoC type; the loader and the
-  scorer do not use it yet;
+  Windows binary, say) and values without an IoC type; the scorer reads it
+  (`_score_observables` in `evaluation/inhouse.py`: each one is a case, and
+  `as_indicator` counts those the bundle gives an Indicator; see
+  [annotation-guide.md](annotation-guide.md), section 2.1);
 - malware versions are aliases of the family;
 - one technique (T1656) is absent from the local ATT&CK index.
 

@@ -2,6 +2,12 @@
 
 *Document daté : ses numéros de ligne sont ceux du commit `5314e4e`, et certains constats ont été corrigés depuis. Par exemple, le §5 indique que `NETWORK_TRAFFIC` devient un `Software` ; Stage 4 construit désormais un `network-traffic` ([ADR-0069](adr/0069-the-ui-the-policy-and-stage5-say-what-ships.md)).*
 
+*Points corrigés depuis `5314e4e` (les numéros de lignes cités ensuite sont ceux de `5314e4e`) :*
+
+- *§1 : l'interface ne propose `duplicate-of` et `derived-from` que pour un couple de même type (`frontend/src/stix/relConstraints.ts`, `commonVerbs`).*
+- *§8 : `indicates + uses → indicates` est retiré de la complétion (`pipeline/stage4b_graph_completion.py`, `_TRANSITIVE_RULES`; [ADR-0068](adr/0068-an-indicator-does-not-inherit-its-malwares-techniques.md)).*
+- *§9 : Stage 5 renvoie le statut `unverified` quand les schémas JSON sont absents (`pipeline/stage5_validation.py`, `ValidationResult(UNVERIFIED)`).*
+
 Revue du 2 octobre 2026, sur le commit `5314e4e`. Le code applicatif n'a pas été modifié.
 
 **Conclusion.** Le catalogue des relations recommandées est presque complet. Les principaux changements à faire concernent la fidélité des liens : le système réécrit certains verbes et certaines extrémités pour satisfaire sa politique interne, et cette politique est parfois présentée comme une obligation STIX. Je recommande de conserver les faits extraits, de distinguer les recommandations de la norme de ses exigences, puis de partager un seul catalogue entre extraction, interface, API et export.

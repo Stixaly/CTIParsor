@@ -234,10 +234,13 @@ which are left on **auto**.
   (`fair-share` by default, `sequential` for the legacy behaviour).
 - **Evidence gate** — the `pin_evidence` window: how many sentences apart two
   objects may be and still be pinned together.
-- **Completion** — the Stage 4b toggles (`alias`, `reference`, `transitive`,
-  `long_distance`, `fuzzy_alias`, `semantic_alias`, `max_new_edges`).
+- **Completion** has no editor here. The page sends the `completion` block back
+  unchanged on save (`frontend/src/pages/Policy.tsx`), so a block set through the API
+  survives. The Stage 4b toggles (`alias`, `reference`, `transitive`, `long_distance`,
+  `fuzzy_alias`, `semantic_alias`, `max_new_edges`) are set through the API, see
+  [Relationship policy](api.md#relationship-policy).
 
-Every field maps onto the payload documented under
+Each field the page edits maps onto the payload documented under
 [Relationship policy](api.md#relationship-policy); the page is a typed editor over it,
 and the last run's per-rule accounting is read back from
 `/api/relationship-policy/last-run`.

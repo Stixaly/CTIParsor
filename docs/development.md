@@ -47,6 +47,7 @@ be on the host besides Docker.
 | `make docker-up` | Start the container stack on `http://127.0.0.1:8000` |
 | `make docker-bootstrap` | One-shot in the container: download models, clone corpora, build the rule store |
 | `make docker-smoke` | Build, start and verify the image (health, non-root, read-only root, Chromium sandbox) |
+| `make db-upgrade` | Move the job and rule stores to the PostgreSQL major that `compose.yaml` names (`scripts/db_upgrade.sh`, ADR-0077 part B) |
 | `make docker-logs` / `make docker-down` | Follow the API logs / stop the stack (volumes are kept) |
 | `make docker-test` | Alias for `make test` |
 | `make docker-frontend-dev` | Start the Vite dev server with HMR, in a container — `http://localhost:5173` |
@@ -84,9 +85,11 @@ A failing run in CI uploads the input as the `fuzz-crash-<target>` artifact;
 
 ## Measure extraction quality (offline)
 
-Three benchmarks live in `tests/eval_pipeline.py` — recall (`ner`, `ate`) and a
+Four benchmarks live in `tests/eval_pipeline.py` — recall (`ner`, `ate`), a
 **hallucination-rate** benchmark (`grounding`) that scores how much emitted output
-is *not* supported by the source text (ADR-0012). It reuses the pipeline's own
+is *not* supported by the source text (ADR-0012), and `rel`, which scores the edges
+that Stage 4b (graph completion) adds against labelled accept and reject judgments
+(the built-in fixtures, or `--dataset`). `grounding` reuses the pipeline's own
 grounding primitive, runs fully offline, and can score reports you have already
 processed straight from the job store (`DATABASE_URL`):
 
@@ -157,6 +160,10 @@ CTIParsor/
 │   ├── stage4b_graph_completion.py # Alias merge + ATT&CK grounding + transitive (ADR-0013)
 │   ├── stage4c_long_distance.py   # LLM long-distance relation inferer (opt-in)
 │   ├── stix_rel_spec.py           # STIX 2.1 suggested-relationship table (spec guard)
+│   ├── markdown_text.py           # Report text inside a STIX description, as Markdown (ADR-0093)
+│   ├── object_mentions.py         # Descriptions of named objects, from the report sentences that name them (ADR-0093)
+│   ├── report_markdown.py         # The Report's description and attached file (ADR-0093)
+│   ├── edge_justification.py      # Why a relationship exists, as the description of its SRO (ADR-0093)
 │   ├── stage5_validation.py       # Bundle validation + export
 │   ├── baseline_stix.py           # Reads an analyst's STIX 2.1 baseline; Stage 3r matches the run to it, Stage 4 merges it into the bundle (ADR-0090)
 │   ├── bundle_revisions.py        # Which stored bundles predate an output fix, judged on the run or the build by the fix's scope (ADR-0035, ADR-0086)
@@ -164,6 +171,7 @@ CTIParsor/
 │   ├── vlm.py                     # Provider-agnostic vision backends + capability probe (ADR-0033)
 │   ├── vllm_options.py            # vLLM request options shared by Stage 3 and Stage 1f
 │   ├── llm_stats.py               # Counts what the LLM stages actually got back (ADR-0060)
+│   ├── egress.py                  # TLP egress policy: which provider may receive a report's content (ADR-0097)
 │   ├── figure_store.py            # report_figures / figure_reads persistence + span lookup
 │   ├── web_capture.py             # Render an arbitrary web page to PDF, safely (ADR-0029)
 │   ├── aliases.py                 # Alias canonicalisation for named entities (ADR-0012)
@@ -248,11 +256,19 @@ CTIParsor/
 │   ├── migrate_jobs_to_postgres.py # One-shot copy of a cti_stix.db job store into PostgreSQL (ADR-0045)
 │   ├── migrate_rules_to_postgres.py # The same for the rule store (ADR-0053)
 │   ├── build_gazetteer_policy.py  # The ordinary-word policy, pipeline/data/gazetteer_policy.json, from docs/gazetteer-ordinary-words.md
+│   ├── db_upgrade.sh              # Moves the stores to the PostgreSQL major compose.yaml names (ADR-0077 part B, make db-upgrade)
+│   ├── lock_pypi_hashes.py        # Gives each PyPI lock pin the sha256 of PyPI's own files (ADR-0080)
 │   │  ── checks and diagnostics ──
 │   ├── check_stages.py            # Diagnostic: which stages are available (make check)
 │   ├── check_doc_claims.py        # Doc drift guard: documented numbers vs source (make check-docs)
 │   ├── check_coverage.py          # Per-area coverage floors on top of the total one (make coverage)
 │   ├── contract.py                # Record (make contract) or check the stable contract in contract/ (ADR-0094 item 1)
+│   ├── check_backup_restore.py    # A backup restores into an empty install with every row and file (ADR-0094 item 3)
+│   ├── check_clean_install.sh     # The clean install from the published image, as the docs write it (ADR-0094 item 9); a release step, not CI
+│   ├── check_db_upgrade.sh        # make db-upgrade on both PostgreSQL 17 layouts, then the stack starts on it (ADR-0077 part B)
+│   ├── check_failure_recipe.py    # The load and failure recipe on a running Compose stack (ADR-0097 item 23)
+│   ├── check_model_journey.py     # The journey with a PDF, a URL and the real models on a running stack (ADR-0097 item 24)
+│   ├── check_requirement_floors.py # No requirement floor is a version with a known vulnerability (OSV, the scanner Scorecard uses)
 │   ├── check_browser_e2e.sh       # The browser journey: Playwright against the built UI, the API, its worker and PostgreSQL, offline (ADR-0094 item 4, TESTING.md)
 │   ├── browser_e2e_db.py          # Its database: create, seed the refused report, print the stage reports, drop
 │   ├── check_flag_equivalence.py  # env_bool vs the old per-flag parsing, value by value
@@ -293,6 +309,7 @@ CTIParsor/
 │   ├── probe_ttp_recall_caps.py   # Stage 2c's two recall caps on real reports (ADR-0023)
 │   ├── probe_vlm_figures.py       # Compare vision providers on a PDF's figures, no DB write
 │   ├── rebuild_bundle_provenance.py # Rebuild a bundle in memory, audit edge provenance
+│   ├── relation_fp_breakdown.py   # Where the relation false positives of an in-house bundle run come from (read only)
 │   ├── validate_artifact_coverage.py # Validation harness for artifact coverage (ADR-0025)
 │   ├── verify_ate_scorer.py       # Mutation harness for the ATE scorer (ADR-0023)
 │   └── verify_ner_scorer.py       # Mutation harness for the NER scorer
@@ -318,7 +335,22 @@ CTIParsor/
 │   ├── storage.py                 # Storage abstraction for pipeline job state
 │   ├── paths.py                   # Where uploads and bundles live (CTIPARSOR_UPLOADS_DIR / _OUTPUT_DIR)
 │   ├── logging_config.py          # Centralized logging configuration
+│   ├── admin.py                   # `python -m api.admin`: local accounts and API tokens from the command line (ADR-0097)
+│   ├── audit.py                   # The audit trail: one record per state-changing request, in audit_events and on stdout (ADR-0097 item 17)
+│   ├── disk_space.py              # Refuses an upload when the disk is nearly full (UPLOAD_MIN_FREE_MB, ADR-0097 item 20)
+│   ├── auth/                      # Authentication: AUTH_MODE off, local, oidc or both (ADR-0097)
+│   │   ├── config.py              # AUTH_MODE, the session lifetime and the start guard
+│   │   ├── deps.py                # current_user: the request's user, the permission table applied per operation
+│   │   ├── middleware.py          # The 401 check before a request body is read
+│   │   ├── oidc.py                # OpenID Connect sign-in: code flow with PKCE, ID token checked against the issuer's JWKS
+│   │   ├── passwords.py           # Argon2id hashes of local passwords
+│   │   ├── permissions.py         # The minimum role of every operation (reader, analyst, admin)
+│   │   └── store.py               # Users, sessions, API tokens and the sign-in lockout (migration 18)
 │   └── routes/
+│       ├── auth.py                # Sign-in, sign-out, "who am I", the caller's own API tokens (ADR-0097)
+│       ├── admin.py               # Users and API tokens, admin only (ADR-0097)
+│       ├── audit.py               # GET /api/audit, admin only (ADR-0097 item 17)
+│       ├── metrics.py             # GET /metrics, outside /api: loopback or METRICS_TOKEN (ADR-0097 item 18)
 │       ├── upload.py              # POST /api/upload (50 MB limit, streamed)
 │       ├── ingest.py              # POST /api/ingest/{text,url} — paste + URL capture
 │       ├── jobs.py                # CRUD /api/jobs + finalize + source + bundle + bundle ledger
@@ -343,13 +375,18 @@ CTIParsor/
 │   │   │   ├── Graph.tsx          # d3-force graph + relationship editor
 │   │   │   ├── Coverage.tsx       # Coverage matrix + granular rule selection
 │   │   │   ├── Settings.tsx       # Corpus management panel
-│   │   │   └── Policy.tsx         # Relationship policy editor (pin / auto, completion flags)
+│   │   │   ├── Policy.tsx         # Relationship policy editor (pin / auto rules)
+│   │   │   ├── Login.tsx          # Sign-in page: local account, and the identity provider when it is enabled (ADR-0097)
+│   │   │   ├── Access.tsx         # Users and API tokens, admin only (ADR-0097)
+│   │   │   └── Account.tsx        # The signed-in user's own page: who they are, their API tokens (ADR-0097)
 │   │   ├── components/
 │   │   │   ├── MarkdownPreview.tsx # VS Code-like .md renderer (react-markdown)
 │   │   │   ├── SourceViewer.tsx    # Inline original-file view (PDF/HTML/TXT/MD)
 │   │   │   ├── PdfViewer.tsx       # pdf.js pages + entity-highlight overlay
 │   │   │   ├── ProgressModal.tsx   # 5-stage SSE progress display
 │   │   │   ├── EntityPopover.tsx   # Entity type picker
+│   │   │   ├── RequireAuth.tsx     # Route guards: a signed-in user, and a role (ADR-0097)
+│   │   │   ├── TokenPanel.tsx      # The API token table and its creation form (ADR-0097)
 │   │   │   └── review/
 │   │   │       ├── DocumentReader.tsx  # Annotated text with entity marks
 │   │   │       ├── Marginalia.tsx      # Sidebar entity cards

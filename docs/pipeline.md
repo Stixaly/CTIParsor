@@ -184,7 +184,7 @@ The boxes below give each stage in detail, in execution order.
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
-│  Stage 3f — TTP SELF-VERIFICATION                       (optional)   │
+│  Stage 3f — TTP SELF-VERIFICATION                       (default on) │
 │  TTP analogue of 3d: second LLM call quotes the sentence describing │
 │  each technique's USE (with its expected ATT&CK tactic); unsupported │
 │  techniques are dropped. Semantic-corroborated TTPs are trusted and │
@@ -311,6 +311,12 @@ The boxes below give each stage in detail, in execution order.
 │  The verdict is stored with the bundle (jobs.bundle_validation):     │
 │  invalid is not served (409) and never completes a job (ADR-0084)    │
 └──────────────────────────────────────────────────────────────────────┘
+
+The file name depends on the entry point. The CLI (`main.py`) writes
+`output/{report}_bundle.json`; a batch run whose files share a stem keeps the
+extension in the name. The API worker writes `output/{report}_{job_id}_bundle.json`
+(`bundle_output_path` in `api/worker.py`), so two uploads with the same file
+name do not overwrite each other's export.
 
 On Finalize (web UI): Stages 4–5 run again on the accepted rows
 (`re_run_final_stages`), and the rebuilt bundle is stored with Stage 5's verdict
@@ -679,7 +685,7 @@ read-only at run time).
 | Stage 2e — GLiNER | ✅ after first model download (~1.8 GB cached) |
 | Stage 3b — hallucination filter | ✅ fully offline (rapidfuzz) |
 | Stage 3c — MITRE normalisation + merge precision | ✅ after `build_indexes.py` |
-| Stage 3f — TTP self-verification (opt-in) | ❌ requires an LLM provider |
+| Stage 3f — TTP self-verification (on by default; `ENABLE_TTP_VERIFICATION=false` turns it off) | ❌ requires an LLM provider |
 | Stage 2g — alias lists | ✅ fully offline (regex) |
 | Stage 2f — CVE enrichment | ✅ from the `cve_cache` table; ❌ the CIRCL lookup, opt-in with `CVE_ENRICHMENT=true` |
 | Stage 3 — Anthropic / Gemini / Mistral | ❌ requires internet |

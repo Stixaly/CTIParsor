@@ -138,8 +138,8 @@ bash scripts/docker_smoke.sh --no-build --job   # also process a sample report e
 | an input format | `pipeline/stage1_ingestion.py` + `SUPPORTED_EXTENSIONS` in `main.py` |
 | an IoC type | `models/schemas.py` (`EntityType`), `stage2_extraction.py`, `stage4_stix_mapping.py` |
 | a detection-rule format | a new `RuleCorpusAdapter` in `pipeline/detection/` + register it in `registry.py` |
-| an API route | `api/routes/`, then `app.include_router(...)` in `api/main.py` |
-| a frontend page | `frontend/src/pages/` + a route in `App.tsx` (+ a nav link in `Layout.tsx`) |
+| an API route | `api/routes/`; its module in `_ROUTERS` in `api/main.py` (mounted with `Depends(current_user)`); the role of each operation in `api/auth/permissions.py` (`tests/test_auth_permissions.py` fails without it); a row in [`docs/api-permissions.md`](docs/api-permissions.md) |
+| a frontend page | `frontend/src/pages/` + a route under `RequireAuth` in `App.tsx` (+ a nav link in `Layout.tsx`) |
 | a job-store or rule-store table, column, index, trigger or backfill | a new migration `api/migrations/vNNNN_<name>.py` (ADR-0077), never an edit of an applied one; a test in `tests/test_migrations.py`; document it in [`docs/database-schema.md`](docs/database-schema.md) |
 | queue / worker behaviour | `api/queue_loop.py` (the claim, lease, heartbeat) — `api/worker.py` only owns spawning the subprocess (ADR-0046) |
 | a compose service or resource limit | `compose.yaml`, then `docs/docker.md`'s sizing table and `.env.example` |

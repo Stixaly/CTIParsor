@@ -98,7 +98,7 @@ first URL-capture request to fail; `/api/ingest/url` responds 503 until then.
 | `requirements.lock.txt` | **Machine-generated** — exact versions of `requirements-full.txt`, resolved for Python 3.14 with CPU-only torch, every file's sha256 from PyPI; what the image installs | Never by hand — run `make lock` |
 | `requirements-torch.lock.txt` | **Machine-generated** — torch's CPU build and its hashes, from the PyTorch index | Never by hand — run `make lock` |
 | `requirements-ci.lock.txt` | **Machine-generated** — `requirements.txt` and `requirements-dev.txt` at the versions of `requirements.lock.txt`, with hashes; what CI's fast tests install | Never by hand — run `make lock` |
-| `requirements-dev.txt` | Pinned test / lint / type-check / fuzzing tools for CI: ruff, mypy, pytest-cov, reuse, schemathesis, atheris (Linux x86_64 only, ADR-0081), and `httpx` (a test imports it; the image has it through `openai`) | When you upgrade one of them on purpose |
+| `requirements-dev.txt` | Pinned test / lint / type-check / fuzzing tools for CI: ruff, mypy, pytest-cov, reuse, schemathesis, atheris (Linux x86_64 only, ADR-0081), and `httpx` (a test imports it; `requirements.txt` has it too, for the OIDC sign-in, ADR-0097) | When you upgrade one of them on purpose |
 | `requirements-audit.txt` / `.lock.txt` | pip-audit, pinned, and its hashed lock | When you upgrade pip-audit on purpose |
 | `requirements-uv.lock.txt` | **Machine-generated** — the uv `make lock` installs, by hash, to resolve the other locks | Never by hand — `make lock` keeps it, `make update-deps` upgrades it |
 | `requirements-opencti.txt` / `.lock.txt` | pycti, pinned to the OpenCTI of `docker/opencti-test/compose.yaml`, and its hashed lock (`make lock`): the venv of the OpenCTI check (TESTING.md), never the image or CI | When the check moves to another OpenCTI version: the pin, the lock and the compose file together |
@@ -158,7 +158,7 @@ make audit
 # 2. Upgrade Python packages within the capped ranges, re-run tests, re-lock
 make update-deps
 
-# 3. Review what changed: make update-deps rewrites all five Python locks
+# 3. Review what changed: make update-deps rewrites all six Python locks
 git diff --stat -- requirements/
 git diff requirements/requirements.lock.txt
 
@@ -214,7 +214,11 @@ When a new major ships (e.g., `numpy 3.0`), bump the cap in `requirements/requir
 make update-deps   # upgrades, runs tests, re-locks
 ```
 
-Four packages have explicit upper bounds today and why:
+Eleven packages have an explicit upper bound today: seven in `requirements.txt`,
+four in `requirements-full.txt`. The table gives the reasons for four.
+`jsonschema` and `parsuricata` have theirs in the runtime tables above.
+`yara-python`, `pysigma`, `PyYAML`, `psycopg` and `spacy` stop at their next major
+version; no reason is written down for those caps.
 
 | Package | Cap | Reason |
 |---|---|---|
