@@ -508,11 +508,31 @@ figure: 8 reports, AI-assisted annotation arbitrated by one maintainer, a
 pilot. Eight reports do not detect a small difference between two releases,
 so the results are given per document as well as in aggregate.
 
-**What is published today, and its limits.** Before 1.0 the figures are not
-measured on the exported bundle. The AnnoCTR runner turns off Stages 1f, 4
-and 5, and `inhouse-run` turns off Stage 5 (`evaluation/__main__.py`). The
-figures below describe Stages 1 to 3 at the commit their page names, with vLLM
-serving `Inferact/Qwen3.8-27B-NVFP4`:
+**What is published today, and its limits.** The exported bundle is measured
+on the in-house set since 2026-11-09
+([inhouse-bundle-2026-11.md](eval/inhouse-bundle-2026-11.md)): 0.6.0 and the
+1.0 candidate (`fe0b0f3`), vLLM serving `Inferact/Qwen3.8-27B-NVFP4`,
+`LLM_TEMPERATURE=0 LLM_SEED=13`, Stages 3d, 3f and the document-level relations
+on for both, figures off. The two releases export the same bundles, so every
+figure is the same for both:
+
+| Measure, in-house set, exported bundle (8 reports) | Precision / recall / F1 | Gold |
+|---|---|---|
+| IoCs | 0.492 / 0.630 / 0.553 | 249 |
+| Entities: threat actors | 0.274 / 0.870 / 0.417 | 23 |
+| Entities: malware | 0.231 / 0.923 / 0.370 | 104 |
+| Entities: tools | 0.663 / 0.529 / 0.589 | 119 |
+| Entities: campaigns | 0.000 / 0.000 / 0.000 | 12 |
+| Techniques | 0.598 / 0.638 / 0.617 | 229 |
+| Relations | 0.063 / 0.428 / 0.110 | 320 |
+
+The page gives the counts, the 17 of 36 negative cases violated, and each
+report. Not measured there: the default provider (`anthropic`, ADR-0094
+item 11), figure reading, and the commits after `fe0b0f3`.
+
+The AnnoCTR figures below describe Stages 1 to 3, not the bundle: the AnnoCTR
+runner turns off Stages 1f, 4 and 5 (`evaluation/__main__.py`). They are at the
+commit their page names, with the same vLLM server:
 
 | Measure, AnnoCTR test split | Value | Date | Page |
 |---|---|---|---|
@@ -521,14 +541,13 @@ serving `Inferact/Qwen3.8-27B-NVFP4`:
 | Threat actors: precision / recall | 0.259 / 0.967 | 2026-10-19 | same |
 | Locations: precision / recall | 0.505 / 0.545 | 2026-10-19 | same |
 
-IoCs and relationships have no published measurement yet: AnnoCTR does not
-annotate them, and the in-house gold (2026-11-07) is not yet scored on the
-exported bundle (ADR-0094 item 6, not built).
+AnnoCTR does not annotate IoCs or relationships: their only measurement is the
+in-house one above.
 
-One more limit, until the measurement of the exported bundle replaces the
-current scorer: the in-house entity score counts only the entity types the
-report's gold contains (`evaluation/inhouse.py`). A false positive of a type
-the report does not hold is not counted.
+The in-house score of Stages 1 to 3 (`inhouse-score` without `--from bundle`)
+counts only the entity types the report's gold contains
+(`evaluation/inhouse.py`). The bundle score counts them all: a report with no
+malware in its gold still has its exported malware counted as false positives.
 
 ## Release blockers
 
