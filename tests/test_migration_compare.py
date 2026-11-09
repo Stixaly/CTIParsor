@@ -68,20 +68,20 @@ def test_a_seeded_release_migrates_with_every_value_kept(schema, monkeypatch, ve
     assert result.ok, "\n".join(mc.summary(result))
     assert result.applied == list(range(version + 1, history.latest_version() + 1))
     assert result.rows == sum(len(t.rows) for t in before.values()) and result.values > result.rows
-    if version == 11:                                       # v0.1.0: versions 12 to 19 apply
-        assert result.new_tables == ["api_tokens", "job_baselines", "login_failures", "oidc_logins", "sessions",
-                                     "users",
-                                     "worker_heartbeats"]
+    if version == 11:                                       # v0.1.0: versions 12 to 20 apply
+        assert result.new_tables == ["api_tokens", "audit_events", "job_baselines", "login_failures", "oidc_logins",
+                                     "sessions", "users", "worker_heartbeats"]
         assert result.new_columns["jobs"] == ["review_revision", "bundle_review_revision", "bundle_build_json",
                                               "pipeline_mode", "resolved_types_json", "attempts",
                                               "imported_by"]
         assert result.new_columns["rule_techniques"] == ["propagated"]
-        assert result.new_rows == {"schema_migrations": 8}
-    elif version == 13:                                     # v0.2.0: versions 14 to 19 apply
+        assert result.new_rows == {"schema_migrations": 9}
+    elif version == 13:                                     # v0.2.0: versions 14 to 20 apply
         assert (result.new_tables, result.new_columns, result.new_rows) == (
-            ["api_tokens", "login_failures", "oidc_logins", "sessions", "users", "worker_heartbeats"],
+            ["api_tokens", "audit_events", "login_failures", "oidc_logins", "sessions", "users",
+             "worker_heartbeats"],
             {"jobs": ["resolved_types_json", "attempts", "imported_by"], "rule_techniques": ["propagated"]},
-            {"schema_migrations": 6})
+            {"schema_migrations": 7})
     else:
         assert (result.new_tables, result.new_columns, result.new_rows) == ([], {}, {})
 
@@ -139,11 +139,11 @@ def test_a_sequence_behind_its_column_is_a_difference(schema):
     migrate.upgrade(schema)
     seeded = ms.seed(schema)
     tables = mc.snapshot(schema)
-    assert mc.sequence_differences(schema, tables) == (2, [])
+    assert mc.sequence_differences(schema, tables) == (3, [])
     top = max(row["id"] for row in seeded.rows["review_decisions"])
     schema.execute_script("ALTER TABLE review_decisions ALTER COLUMN id RESTART WITH 1")   # as a rebuilt table's
     checked, stuck = mc.sequence_differences(schema, tables)
-    assert checked == 2 and [d.line() for d in stuck] == [
+    assert checked == 3 and [d.line() for d in stuck] == [
         f"review_decisions.id: its sequence gives 1 next, not above the highest value stored ({top}): "
         "the next row collides"]
     assert mc.sequence_differences(schema, ["jobs"]) == (0, [])             # only the tables named
@@ -244,7 +244,8 @@ def test_a_restore_that_loses_a_schema_object_or_a_sequence_s_place_is_caught(sc
     assert objects["column jobs.review_revision"] == "17: bigint not null default 0"
     assert objects["sequence review_decisions_id_seq"] == (
         "integer start 1 increment 1 min 1 max 2147483647 cache 1 owned by review_decisions.id")
-    assert sequences == {"sequence progress_events_id_seq state": "last_value 7, is_called True",
+    assert sequences == {"sequence audit_events_id_seq state": "last_value 4, is_called True",
+                         "sequence progress_events_id_seq state": "last_value 7, is_called True",
                          "sequence review_decisions_id_seq state": "last_value 6, is_called True"}
     assert mc.object_differences(objects, mc.schema_objects(schema)) == []
 

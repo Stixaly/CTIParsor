@@ -204,7 +204,8 @@ def test_a_password_file_others_can_read_is_warned_about(cli, tmp_path):
                        _password_file(tmp_path, mode=0o644))
     assert code == 0 and "can be read by other users" in err and AUTH_TEST_PASSWORD not in err
     code, _, err = cli("create-user", "--username", "bob", "--password-file", _password_file(tmp_path, mode=0o600))
-    assert code == 0 and err == ""
+    # stderr carries the audit line of the change (api/audit.py), not a warning
+    assert code == 0 and "can be read by other users" not in err and AUTH_TEST_PASSWORD not in err
 
 
 def test_an_empty_password_file_is_named(cli, tmp_path):

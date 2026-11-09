@@ -18,13 +18,20 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 # Initialize logging before importing other modules
-from api.logging_config import clear_request_id, get_logger, set_request_id, setup_logging
+from api.logging_config import (
+    REQUEST_ID_SCOPE_KEY,
+    clear_request_id,
+    get_logger,
+    request_id_for,
+    set_request_id,
+    setup_logging,
+)
 from pipeline import __version__
-from pipeline.regex_safety import compile_pattern
 
 setup_logging()
 logger = get_logger(__name__)
 
+from api.audit import AuditMiddleware
 from api.auth import config as auth_config
 from api.auth.deps import current_user
 from api.auth.middleware import AuthGateMiddleware
@@ -39,6 +46,7 @@ limiter = Limiter(key_func=get_remote_address)
 from api.routes import (
     admin,
     attack,
+    audit,
     auth,
     baselines,
     coverage,
@@ -194,14 +202,13 @@ async def refuse_nul_in_path(request: Request, call_next):
 
 
 # Request ID middleware for tracing
-_REQUEST_ID_RE = compile_pattern(r"^[a-zA-Z0-9\-_]{1,64}$")
-
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
     """Add a unique request ID to each request for tracing."""
-    raw_id = request.headers.get("x-request-id", "")
-    # Validate format before using in logs to prevent log injection via header
-    request_id = raw_id if _REQUEST_ID_RE.fullmatch(raw_id) else None
+    # The audit middleware (api/audit.py) runs outside this one and has already chosen the id,
+    # so the audit record and the log lines of a request agree.  The header is validated there
+    # too, before it reaches a log line (log injection).
+    request_id = request.scope.get(REQUEST_ID_SCOPE_KEY) or request_id_for(request.headers.get("x-request-id", ""))
     set_request_id(request_id)
     logger.debug(f"Request started: {request.method} {request.url.path}")
 
@@ -305,6 +312,11 @@ app.add_middleware(BodyLimitMiddleware, budgets={
 # (api/auth/middleware.py).  Added after the budgets, so it runs before them.
 app.add_middleware(AuthGateMiddleware)
 
+# The audit trail (ADR-0097 item 17): one record per state-changing request to /api, with its
+# status, including the 401 and 403 answers of the gate above.  Outside the gate, so it sees
+# what the gate decided; inside the Host check, so a refused Host writes no row.
+app.add_middleware(AuditMiddleware)
+
 # Added last, so it runs first: an unknown Host is answered 400 before the
 # request-id middleware or the write guard see it.
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=_ALLOWED_HOSTS, www_redirect=False)
@@ -327,7 +339,7 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=_ALLOWED_HOSTS, www_redi
 # each operation is in api/auth/permissions.py, and a router added without it
 # would be open.  `GET /api/health`, below, is the one open route.
 _ROUTERS = (jobs, llm, upload, ingest, entities, relationships, progress, policy, coverage, settings, queue,
-            thresholds, overrides, attack, baselines, auth, admin)
+            thresholds, overrides, attack, baselines, auth, admin, audit)
 for _module in _ROUTERS:
     app.include_router(_module.router, dependencies=[Depends(current_user)])
 # Routers with their own access rule instead of a user's role. `/metrics`: loopback,

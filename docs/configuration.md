@@ -795,6 +795,15 @@ and publishes with `CTI_BIND` / `CTI_PORT`.
 # LOGIN_RATE_LIMIT=10/minute
 ```
 
+Audit trail (ADR-0097 item 17): every state-changing request and command-line change is recorded
+(the fields are in [operations.md](operations.md#audit-trail)). Rows older than the retention are deleted:
+
+```env
+# Days a row of the audit table is kept.  Older rows are deleted, at most once an hour, by the API process.
+# 0 keeps every row.  The JSON lines on standard output are not deleted by CTIParsor.
+# AUDIT_RETENTION_DAYS=365
+```
+
 `AUTH_MODE=oidc` and `both` need the settings below (set up in
 [deployment.md](deployment.md#sign-in-with-an-identity-provider-oidc)). The API refuses
 to start without the first five, with a non-https issuer or redirect URI (`http` only

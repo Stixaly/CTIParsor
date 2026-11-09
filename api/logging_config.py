@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from pipeline.env_flags import env_int
+from pipeline.regex_safety import compile_pattern
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -66,6 +67,23 @@ def set_request_id(request_id: Optional[str] = None) -> str:
         request_id = str(uuid.uuid4())[:8]
     _request_id_var.set(request_id)
     return request_id
+
+
+_REQUEST_ID_RE = compile_pattern(r"^[a-zA-Z0-9\-_]{1,64}$")
+
+# The request id the audit middleware (api/audit.py) assigns, in the ASGI scope, so the
+# record and the log lines of one request carry the same id.
+REQUEST_ID_SCOPE_KEY = "ctiparsor.request_id"
+
+
+def request_id_for(raw: str) -> str:
+    """The request id for an `X-Request-ID` header value: the value when it is well formed
+    (letters, digits, `-` and `_`, up to 64), else a new id.  A header is never written to
+    a log line unchecked, which stops a log injection through it."""
+    if _REQUEST_ID_RE.fullmatch(raw):
+        return raw
+    import uuid
+    return str(uuid.uuid4())[:8]
 
 
 def get_request_id() -> str:

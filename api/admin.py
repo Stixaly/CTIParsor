@@ -21,6 +21,7 @@ import getpass
 import sys
 from pathlib import Path
 
+from api import audit
 from api.auth import store
 from api.auth.config import DEFAULT_TOKEN_DAYS, ROLES
 
@@ -46,6 +47,7 @@ def _create_admin(args: argparse.Namespace) -> int:
         raise store.AuthError("an admin already exists; use --force to create another one")
     user = store.create_user(args.username, "admin", password=_read_password(args.password_file),
                              display_name=args.display_name or "")
+    audit.record_cli("create-admin", {"username": user.username})
     print(f"admin {user.username} created")
     return 0
 
@@ -53,18 +55,21 @@ def _create_admin(args: argparse.Namespace) -> int:
 def _create_user(args: argparse.Namespace) -> int:
     user = store.create_user(args.username, args.role, password=_read_password(args.password_file),
                              display_name=args.display_name or "")
+    audit.record_cli("create-user", {"username": user.username})
     print(f"{user.role} {user.username} created")
     return 0
 
 
 def _set_password(args: argparse.Namespace) -> int:
     store.set_password(args.username, _read_password(args.password_file))
+    audit.record_cli("set-password", {"username": args.username})
     print(f"password of {args.username} changed; its sessions ended")
     return 0
 
 
 def _disable(args: argparse.Namespace) -> int:
     store.set_disabled(args.username, disabled=not args.enable)
+    audit.record_cli("disable", {"username": args.username, "enabled": args.enable})
     print(f"{args.username} {'enabled' if args.enable else 'disabled'}")
     return 0
 
@@ -83,7 +88,8 @@ def _create_token(args: argparse.Namespace) -> int:
     user = store.find_user(args.user)
     if user is None:
         raise store.AuthError(f"no user {args.user!r}")
-    token, _ = store.create_token(user.id, args.name, days=args.days)
+    token, token_id = store.create_token(user.id, args.name, days=args.days)
+    audit.record_cli("create-token", {"username": user.username, "token_id": token_id})
     print("This token is shown once; store it now.", file=sys.stderr)
     print(token)
     return 0
@@ -103,6 +109,7 @@ def _list_tokens(args: argparse.Namespace) -> int:
 def _revoke_token(args: argparse.Namespace) -> int:
     if not store.revoke_token(args.id):
         raise store.AuthError(f"no active token with the id {args.id!r}")
+    audit.record_cli("revoke-token", {"token_id": args.id})
     print(f"token {args.id} revoked")
     return 0
 
@@ -165,15 +172,17 @@ def main(argv: list[str] | None = None) -> int:
 
     setup_logging()
     database_errors: tuple[type[BaseException], ...] = (*DB_ERRORS, MigrationError, RuntimeError)
-    try:
-        init_db()
-        return args.run(args)
-    except (store.AuthError, OSError, UnicodeDecodeError, OverflowError) as exc:
-        print(f"refused: {exc}", file=sys.stderr)
-    except database_errors as exc:
-        print(f"database error: {str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__}",
-              file=sys.stderr)
-    return 1
+    # The audit lines of a change go to standard error: standard output carries the token of create-token.
+    with audit.lines_to(sys.stderr):
+        try:
+            init_db()
+            return args.run(args)
+        except (store.AuthError, OSError, UnicodeDecodeError, OverflowError) as exc:
+            print(f"refused: {exc}", file=sys.stderr)
+        except database_errors as exc:
+            print(f"database error: {str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__}",
+                  file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

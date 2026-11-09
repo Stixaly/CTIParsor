@@ -151,6 +151,16 @@ theme.
   `ENABLE_TTP_VERIFICATION=false`. The run's recorded configuration shows the
   switch as `true` when it is unset.
 
+- **Audit trail** (ADR-0097 work item 17). Every state-changing API request
+  and every change made with `python -m api.admin` is recorded: who (user,
+  role, session or token), what (method, route, path parameters), the status
+  and outcome, the client address and the request id. Records are JSON lines
+  on the `ctiparsor.audit` logger and rows of the new `audit_events` table
+  (migration v0020); admins read them with `GET /api/audit`. A request or
+  response body, a query string, a header, a cookie, a token or a password is
+  never recorded. An anonymous request refused with 401 is a log line only.
+  `AUDIT_RETENTION_DAYS` (default 365, 0 keeps all) sets how long rows stay.
+
 - **The review page shows why a stage did not run**, and highlights a refusal
   by the TLP egress policy with what to do (mark the report CLEAR or GREEN, or
   configure a local model). The New report dialog warns under the TLP picker

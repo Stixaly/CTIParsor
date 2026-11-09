@@ -94,6 +94,12 @@
         "20.0"
       ]
     },
+    "env AUDIT_RETENTION_DAYS": {
+      "set": false,
+      "values": [
+        "365"
+      ]
+    },
     "env AUTH_MODE": {
       "set": false,
       "values": [
