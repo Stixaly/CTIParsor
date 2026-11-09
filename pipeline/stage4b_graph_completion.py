@@ -70,6 +70,7 @@ mapping ledger.
 """
 from __future__ import annotations
 
+import datetime
 import functools
 import json
 import re
@@ -225,6 +226,11 @@ def _is_rel(obj) -> bool:
     return _otype(obj) == "relationship"
 
 
+def _has_id(obj) -> bool:
+    """True when the object carries an id, whether it is a dict or a stix2 object (#625)."""
+    return bool(stix_field(obj, "id"))
+
+
 def _rel_triple(rel) -> tuple[str, str, str]:
     return (rel.get("source_ref"), rel.get("relationship_type"), rel.get("target_ref"))
 
@@ -236,13 +242,27 @@ def _clone_with(obj, **overrides):
     and the original id/timestamps are preserved.  A property set to ``None`` in
     ``overrides`` is removed.
     """
-    d = json.loads(obj.serialize())
+    if isinstance(obj, dict):
+        # A dict SDO/SRO (#625) is copied as a dict, with its values formatted
+        # the way serialize() would format them, so both kinds read the same.
+        d = json.loads(json.dumps(obj, default=_stix_json_default))
+    else:
+        d = json.loads(obj.serialize())
     for k, v in overrides.items():
         if v is None:
             d.pop(k, None)
         else:
             d[k] = v
+    if isinstance(obj, dict):
+        return json.loads(json.dumps(d, default=_stix_json_default))
     return stix2.parse(d, allow_custom=True)
+
+
+def _stix_json_default(value):
+    """Format datetimes as stix2 does (what serialize() emits) for dict copies."""
+    if isinstance(value, datetime.datetime):
+        return stix2.utils.format_datetime(value)
+    raise TypeError(f"not JSON serialisable: {type(value).__name__}")
 
 
 def _norm_name(name: str) -> str:
@@ -319,7 +339,7 @@ def _merge_aliases(stix_objects: list, cfg: dict, stats: CompletionStats) -> Non
     # name/alias token -> list of (obj_id, type) that expose it
     token_owners: dict[tuple[str, str], list[str]] = {}
     for o in sdos:
-        find(o.id)
+        find(stix_field(o, "id"))
         names = [o.get("name", "")] + list(o.get("aliases", []) or [])
         for nm in names:
             if not nm or _IOC_GUARD.search(nm):
@@ -327,7 +347,7 @@ def _merge_aliases(stix_objects: list, cfg: dict, stats: CompletionStats) -> Non
             key = (_otype(o), _norm_name(nm))
             if not key[1]:
                 continue
-            token_owners.setdefault(key, []).append(o.id)
+            token_owners.setdefault(key, []).append(stix_field(o, "id"))
 
     for owners in token_owners.values():
         for other in owners[1:]:
@@ -351,7 +371,7 @@ def _merge_aliases(stix_objects: list, cfg: dict, stats: CompletionStats) -> Non
                         if not nj or _IOC_GUARD.search(nj):
                             continue
                         if fuzz.ratio(ni.lower(), nj.lower()) >= _FUZZY_THRESHOLD:
-                            union(group[i].id, group[j].id)
+                            union(stix_field(group[i], "id"), stix_field(group[j], "id"))
         except ImportError:
             stats.notes.append("fuzzy_alias requested but rapidfuzz missing")
 
@@ -374,7 +394,7 @@ def _merge_aliases(stix_objects: list, cfg: dict, stats: CompletionStats) -> Non
 
     clusters: dict[str, list] = {}
     for o in sdos:
-        clusters.setdefault(find(o.id), []).append(o)
+        clusters.setdefault(find(stix_field(o, "id")), []).append(o)
 
     remap: dict[str, str] = {}   # dup id -> canonical id
     canonical_ids: set[str] = set()
@@ -382,15 +402,15 @@ def _merge_aliases(stix_objects: list, cfg: dict, stats: CompletionStats) -> Non
         if len(members) < 2:
             continue
         canonical = max(
-            members, key=lambda m: (degree.get(m.id, 0), len(m.get("name", "")))
+            members, key=lambda m: (degree.get(stix_field(m, "id"), 0), len(m.get("name", "")))
         )
-        canonical_ids.add(canonical.id)
+        canonical_ids.add(stix_field(canonical, "id"))
         merged_aliases = set(canonical.get("aliases", []) or [])
         for m in members:
-            if m.id == canonical.id:
+            if stix_field(m, "id") == stix_field(canonical, "id"):
                 continue
-            remap[m.id] = canonical.id
-            stats.merged_names[m.id] = m.get("name", "")
+            remap[stix_field(m, "id")] = stix_field(canonical, "id")
+            stats.merged_names[stix_field(m, "id")] = m.get("name", "")
             merged_aliases.add(m.get("name", ""))
             merged_aliases.update(m.get("aliases", []) or [])
             stats.aliases_merged += 1
@@ -398,7 +418,7 @@ def _merge_aliases(stix_objects: list, cfg: dict, stats: CompletionStats) -> Non
         merged_aliases.discard(canonical.get("name", ""))
         if merged_aliases:
             new_can = _clone_with(canonical, aliases=sorted(a for a in merged_aliases if a))
-            _replace_obj(stix_objects, canonical.id, new_can)
+            _replace_obj(stix_objects, stix_field(canonical, "id"), new_can)
 
     if not remap:
         return
@@ -448,18 +468,18 @@ def _semantic_alias_pass(sdos: list, union: Callable[[str, str], None],
         for i in range(len(group)):
             for j in range(i + 1, len(group)):
                 if sims[i, j] >= _SEMANTIC_THRESHOLD:
-                    union(group[i].id, group[j].id)
+                    union(stix_field(group[i], "id"), stix_field(group[j], "id"))
 
 
 def _replace_obj(stix_objects: list, obj_id: str, new_obj) -> None:
     for i, o in enumerate(stix_objects):
-        if getattr(o, "id", None) == obj_id:
+        if stix_field(o, "id") == obj_id:
             stix_objects[i] = new_obj
             return
 
 
 def _drop_ids(stix_objects: list, ids: set[str]) -> None:
-    stix_objects[:] = [o for o in stix_objects if getattr(o, "id", None) not in ids]
+    stix_objects[:] = [o for o in stix_objects if stix_field(o, "id") not in ids]
 
 
 def _times_of(rel) -> list:
@@ -515,7 +535,7 @@ def _rewrite_refs(stix_objects: list, remap: dict[str, str],
             # self-loop created by the merge
             if stats is not None:
                 stats.removed_relationships.append(
-                    {"id": o.id, "reason": "self_loop_after_alias_merge"})
+                    {"id": stix_field(o, "id"), "reason": "self_loop_after_alias_merge"})
             continue
         key = (src, o.get("relationship_type"), tgt)
         if key in seen:
@@ -526,13 +546,13 @@ def _rewrite_refs(stix_objects: list, remap: dict[str, str],
                 out[kept_at[key]] = merged
             if stats is not None:
                 stats.removed_relationships.append(
-                    {"id": o.id, "reason": "duplicate_after_alias_merge", "kept": seen[key]})
+                    {"id": stix_field(o, "id"), "reason": "duplicate_after_alias_merge", "kept": seen[key]})
             continue
-        seen[key] = o.id
+        seen[key] = stix_field(o, "id")
         if src != o.get("source_ref") or tgt != o.get("target_ref"):
             o = _clone_with(o, source_ref=src, target_ref=tgt)
             if stats is not None:
-                stats.remapped_relationships[o.id] = (src, tgt)
+                stats.remapped_relationships[stix_field(o, "id")] = (src, tgt)
         kept_at[key] = len(out)
         out.append(o)
     stix_objects[:] = out
@@ -628,7 +648,7 @@ def _ground_reference(
     # them that way makes every downstream attribute access a type error.
     resolved: list[tuple[Any, str]] = []   # (sdo, attack_id)
     for o in stix_objects:
-        if _is_rel(o) or not hasattr(o, "id"):
+        if _is_rel(o) or not _has_id(o):
             continue
         aid = _attack_id_for(o)
         if aid:
@@ -639,7 +659,7 @@ def _ground_reference(
     existing = _existing_edges(stix_objects)
     for a, aid_a in resolved:
         for b, aid_b in resolved:
-            if a.id == b.id:
+            if stix_field(a, "id") == stix_field(b, "id"):
                 continue
             verb = pairs.get((aid_a, aid_b))
             if not verb:
@@ -649,7 +669,7 @@ def _ground_reference(
             if not rel_is_suggested(a_type, verb, b_type):
                 stats.skipped_not_suggested += 1
                 continue
-            key = (a.id, verb, b.id)
+            key = (stix_field(a, "id"), verb, stix_field(b, "id"))
             if key in existing:
                 continue
             rule = f"attack-reference:{aid_a}>{aid_b}"
@@ -695,8 +715,8 @@ def _make_inferred_rel(src, verb, tgt, confidence, rule_label, premises,
                        evidence_text="", label="inferred"):
     kwargs = dict(
         relationship_type=verb,
-        source_ref=src.id,
-        target_ref=tgt.id,
+        source_ref=stix_field(src, "id"),
+        target_ref=stix_field(tgt, "id"),
         confidence=max(0, min(100, int(confidence * 100))),
         allow_custom=True,
         x_evidence_label=label,
@@ -712,7 +732,7 @@ def _infer_transitive(
     stix_objects: list, pol_index: dict, cfg: dict, stats: CompletionStats,
     forbidden: Optional[dict[tuple[str, str, str], str]] = None,
 ) -> None:
-    id_to_obj = {o.id: o for o in stix_objects if hasattr(o, "id") and not _is_rel(o)}
+    id_to_obj = {stix_field(o, "id"): o for o in stix_objects if _has_id(o) and not _is_rel(o)}
     rels = [o for o in stix_objects if _is_rel(o)]
 
     # Adjacency: source_id -> list of (verb, target_id, rel_obj)
@@ -749,7 +769,7 @@ def _infer_transitive(
                 if key in existing:
                     continue
                 rule = f"transitive:{v_ab}+{v_bc}"
-                if _refuse(key, rule, [r_ab.id, r_bc.id], forbidden or {}, stats):
+                if _refuse(key, rule, [stix_field(r_ab, "id"), stix_field(r_bc, "id")], forbidden or {}, stats):
                     continue
                 if stats.total_added >= cfg["max_new_edges"]:
                     stats.capped = True
@@ -761,7 +781,7 @@ def _infer_transitive(
                 new_objs.append(
                     _make_inferred_rel(
                         a, v_ac, c, conf, rule,
-                        [r_ab.id, r_bc.id],
+                        [stix_field(r_ab, "id"), stix_field(r_bc, "id")],
                     )
                 )
                 existing.add(key)
@@ -821,7 +841,7 @@ def _infer_long_distance(
     Only SDOs (``LONG_DISTANCE_TYPES``) are candidates; an edge the model
     proposes to a non-SDO object is refused into ``stats.refused`` (issue #417)."""
     all_objs = {
-        o.id: o for o in stix_objects if hasattr(o, "id") and not _is_rel(o)
+        stix_field(o, "id"): o for o in stix_objects if _has_id(o) and not _is_rel(o)
     }
     id_to_obj = {
         i: o for i, o in all_objs.items() if _otype(o) in LONG_DISTANCE_TYPES
@@ -855,13 +875,13 @@ def _infer_long_distance(
             continue
         s = all_objs.get(edge.source_id)
         t = all_objs.get(edge.target_id)
-        if s is None or t is None or s.id == t.id:
+        if s is None or t is None or stix_field(s, "id") == stix_field(t, "id"):
             continue
         verb = _apply_pin(edge.verb, _otype(s), _otype(t), pol_index)
         if not rel_is_suggested(_otype(s), verb, _otype(t)):
             stats.skipped_not_suggested += 1
             continue
-        key = (s.id, verb, t.id)
+        key = (stix_field(s, "id"), verb, stix_field(t, "id"))
         if key in existing:
             continue
         if _otype(s) not in LONG_DISTANCE_TYPES or _otype(t) not in LONG_DISTANCE_TYPES:

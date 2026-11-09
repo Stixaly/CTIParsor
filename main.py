@@ -213,7 +213,13 @@ def run_directory(input_dir: str, output_dir: str, options: RunOptions | None = 
     for file in files:
         stem = file.stem if stems[file.stem.lower()] == 1 else f"{file.stem}_{file.suffix.lstrip('.')}"
         output_file = output_path / f"{stem}_bundle.json"
-        success = run_pipeline(str(file), str(output_file), options, policy_source)
+        # One file that raises an unexpected exception is a failure, not the end of
+        # the batch (#609): it is recorded as ✖ and the next files still run.
+        try:
+            success = run_pipeline(str(file), str(output_file), options, policy_source)
+        except Exception as exc:
+            print(f"      [ERREUR] {type(exc).__name__}: {exc}")
+            success = False
         results.append((file.name, success))
 
     # Final summary
