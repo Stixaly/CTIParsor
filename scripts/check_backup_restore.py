@@ -179,12 +179,41 @@ def read(url: str, connect: Any) -> Read:
         conn.close()
 
 
-def differences(source: Read, target: Read, label: str) -> list[str]:
-    """The target against the source, exactly; printed under `label`."""
+#: Append-only tables the app writes on its own: the audit trail records the
+#: read-back's state-changing requests (api/audit.py).  After the app's start,
+#: a row added there, and its id sequence moved forward, are expected; a row of
+#: the source missing or changed is not.
+APPEND_ONLY = ("audit_events",)
+
+
+def _last_value(state: str | None) -> int | None:
+    """N of "last_value N, is_called B" (`migration_compare.sequence_states`)."""
+    if not state or not state.startswith("last_value "):
+        return None
+    return int(state.split(",")[0].removeprefix("last_value "))
+
+
+def differences(source: Read, target: Read, label: str, appended: tuple[str, ...] = ()) -> list[str]:
+    """The target against the source, exactly, but for rows added to the
+    `appended` tables and their id sequence moved forward; printed under `label`."""
     result = migration_compare.compare(source.content, target.content, strict=True)
+    grown = [d for d in result.differences
+             if d.table in appended and d.key and not d.column and d.after == "row added"]
+    result.differences = [d for d in result.differences if d not in grown]
     for line in migration_compare.summary(result, label):
         print(line)
-    moved = migration_compare.object_differences(source.sequences, target.sequences)
+    for table in appended:
+        rows = sum(1 for d in grown if d.table == table)
+        if rows:
+            print(f"  appended to {table}: {rows} row(s), the record of the requests made since the start")
+    forward = set()
+    for table in appended:
+        name = f"sequence {table}_id_seq state"
+        old, new = _last_value(source.sequences.get(name)), _last_value(target.sequences.get(name))
+        if old is not None and new is not None and new > old:
+            forward.add(name)
+    moved = [d for d in migration_compare.object_differences(source.sequences, target.sequences)
+             if d.table not in forward]
     print(f"{label}, sequences: {len(source.sequences)}; "
           + (f"{len(moved)} difference(s)" if moved else "each one where the source's stood"))
     changed = migration_compare.object_differences(source.objects, target.objects)
@@ -287,7 +316,7 @@ def _check(admin_url: str, user: str, source: str, target: str, tmp: Path, pg: T
     problems += result["mismatches"]
 
     # 6. The app's start changed nothing, but db-identity.json.
-    problems += differences(before, read(url(target), connect), "after the app's start")
+    problems += differences(before, read(url(target), connect), "after the app's start", APPEND_ONLY)
     kept = {k: v for k, v in files.items() if k != f"file {IDENTITY_FILE}"}
     now = {k: v for k, v in state_tree(restored).items() if k != f"file {IDENTITY_FILE}"}
     changed_lines = [d.line() for d in migration_compare.object_differences(kept, now)]
