@@ -37,7 +37,8 @@ class NewUser(BaseModel):
     @classmethod
     def _no_nul_or_lone_surrogate(cls, v: str) -> str:
         # PostgreSQL refuses these: a 422 here, a 500 at the INSERT otherwise (#634).
-        return storable_text(v)
+        storable_text(v)
+        return v
 
 
 class UserPatch(BaseModel):
@@ -65,7 +66,8 @@ class NewToken(BaseModel):
     @classmethod
     def _no_nul_or_lone_surrogate(cls, v: str) -> str:
         # PostgreSQL refuses these: a 422 here, a 500 otherwise (#616, #633).
-        return storable_text(v)
+        storable_text(v)
+        return v
 
 
 class NewOwnToken(BaseModel):
@@ -76,7 +78,8 @@ class NewOwnToken(BaseModel):
     @classmethod
     def _no_nul_or_lone_surrogate(cls, v: str) -> str:
         # PostgreSQL refuses these: a 422 here, a 500 at the INSERT otherwise (#616).
-        return storable_text(v)
+        storable_text(v)
+        return v
 
 
 def _on() -> None:
