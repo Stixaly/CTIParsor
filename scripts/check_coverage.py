@@ -43,13 +43,18 @@ AREAS: dict[str, tuple[list[str], float]] = {
 
 def main() -> int:
     cov = coverage.Coverage()
-    cov.load()
     failed = False
-    for area, (files, floor) in AREAS.items():
-        pct = cov.report(include=files, file=io.StringIO())
-        ok = pct >= floor
-        failed |= not ok
-        print(f"{'ok  ' if ok else 'FAIL'} {area}: {pct:.1f}% (floor {floor}%)")
+    # No .coverage file, or one with no data: coverage raises NoDataError (#621).
+    try:
+        cov.load()
+        for area, (files, floor) in AREAS.items():
+            pct = cov.report(include=files, file=io.StringIO())
+            ok = pct >= floor
+            failed |= not ok
+            print(f"{'ok  ' if ok else 'FAIL'} {area}: {pct:.1f}% (floor {floor}%)")
+    except coverage.exceptions.CoverageException as exc:
+        print(f"check_coverage: no coverage data ({exc}). Run 'pytest --cov' first.", file=sys.stderr)
+        return 2
     return 1 if failed else 0
 
 

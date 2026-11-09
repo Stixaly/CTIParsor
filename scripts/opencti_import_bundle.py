@@ -47,7 +47,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:   # run as a script: the repository root is not on the path
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts import opencti_import_check as check  # pycti: the venv of TESTING.md, see the docstring
+from scripts import opencti_import_check as check  # pycti is imported lazily there, so --help works without it (#622)
 
 DEFAULT_URL = "http://127.0.0.1:4000"
 OUTPUT_ROOT = REPO_ROOT / "output" / "opencti-import"

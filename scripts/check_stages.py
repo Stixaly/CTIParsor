@@ -82,56 +82,61 @@ def detection_store() -> tuple[int, int] | None:
         return None
 
 
-rows: list[tuple[str, bool, str]] = [
-    ("Stage 1  — Document ingestion",      chk_import("pdfplumber"),   "pip install pdfplumber"),
-    ("Stage 2  — Regex IoC extraction",    chk_import("iocextract"),   "pip install iocextract"),
-    ("Stage 2b — Gazetteer NER",
-     chk_file("pipeline/data/gazetteer.json"), "make mitre"),
-    ("Stage 2c — Semantic TTP detection",
-     chk_import("sentence_transformers"), "pip install sentence-transformers"),
-    ("Stage 2c — Embedding cache",
-     chk_file("pipeline/data/mitre_embeddings.npy"), "make build-indexes"),
-    ("Stage 2d — CyNER NER",               chk_import("transformers"), "pip install transformers"),
-    ("Stage 3  — LLM enrichment",
-     chk_import("anthropic") or chk_import("openai"), "pip install anthropic"),
-    ("Stage 3c — MITRE TTP normalization",
-     chk_file("pipeline/data/mitre_index.json"), "make mitre"),
-    ("Stage 4  — STIX bundle generation",  chk_import("stix2"),        "pip install stix2"),
-    ("Stage 5  — STIX validation",
-     chk_import("stix2validator"), "pip install stix2-validator"),
-    ("Web API  — FastAPI backend",         chk_import("fastapi"),      "pip install fastapi"),
-    # ADR-0029.  The import succeeding only proves the Python package is there;
-    # Chromium still needs its system libraries, and without them it dies at
-    # launch with "error while loading shared libraries: libasound.so.2".
-    ("Ingest    — URL capture (Playwright)",
-     chk_browser(), "make install-capture"),
-]
+def main() -> int:
+    rows: list[tuple[str, bool, str]] = [
+        ("Stage 1  — Document ingestion",      chk_import("pdfplumber"),   "pip install pdfplumber"),
+        ("Stage 2  — Regex IoC extraction",    chk_import("iocextract"),   "pip install iocextract"),
+        ("Stage 2b — Gazetteer NER",
+         chk_file("pipeline/data/gazetteer.json"), "make mitre"),
+        ("Stage 2c — Semantic TTP detection",
+         chk_import("sentence_transformers"), "pip install sentence-transformers"),
+        ("Stage 2c — Embedding cache",
+         chk_file("pipeline/data/mitre_embeddings.npy"), "make build-indexes"),
+        ("Stage 2d — CyNER NER",               chk_import("transformers"), "pip install transformers"),
+        ("Stage 3  — LLM enrichment",
+         chk_import("anthropic") or chk_import("openai"), "pip install anthropic"),
+        ("Stage 3c — MITRE TTP normalization",
+         chk_file("pipeline/data/mitre_index.json"), "make mitre"),
+        ("Stage 4  — STIX bundle generation",  chk_import("stix2"),        "pip install stix2"),
+        ("Stage 5  — STIX validation",
+         chk_import("stix2validator"), "pip install stix2-validator"),
+        ("Web API  — FastAPI backend",         chk_import("fastapi"),      "pip install fastapi"),
+        # ADR-0029.  The import succeeding only proves the Python package is there;
+        # Chromium still needs its system libraries, and without them it dies at
+        # launch with "error while loading shared libraries: libasound.so.2".
+        ("Ingest    — URL capture (Playwright)",
+         chk_browser(), "make install-capture"),
+    ]
 
-_store = detection_store()
-rows.append((
-    "Coverage  — detection-rule store" + (f" ({_store[0]:,} rules)" if _store else ""),
-    _store is not None,
-    "make corpora && make detection-index",
-))
-if _store and _store[1]:
+    _store = detection_store()
     rows.append((
-        f"Coverage  — rule sizes ({_store[1]:,} rules unmeasured)",
-        False,
-        "make backfill-rules",
+        "Coverage  — detection-rule store" + (f" ({_store[0]:,} rules)" if _store else ""),
+        _store is not None,
+        "make corpora && make detection-index",
     ))
+    if _store and _store[1]:
+        rows.append((
+            f"Coverage  — rule sizes ({_store[1]:,} rules unmeasured)",
+            False,
+            "make backfill-rules",
+        ))
 
-all_ok = True
-for label, ok, fix in rows:
-    if ok:
-        print(f"  {GREEN}✔{NC}  {label}")
+    all_ok = True
+    for label, ok, fix in rows:
+        if ok:
+            print(f"  {GREEN}✔{NC}  {label}")
+        else:
+            print(f"  {YELLOW}–{NC}  {label}   →  {fix}")
+            all_ok = False
+
+    print()
+    if all_ok:
+        print(f"  {GREEN}All pipeline stages available.{NC}")
     else:
-        print(f"  {YELLOW}–{NC}  {label}   →  {fix}")
-        all_ok = False
+        print(f"  {YELLOW}Some stages need additional setup (see above).{NC}")
 
-print()
-if all_ok:
-    print(f"  {GREEN}All pipeline stages available.{NC}")
-else:
-    print(f"  {YELLOW}Some stages need additional setup (see above).{NC}")
+    return 0 if all_ok else 1
 
-sys.exit(0 if all_ok else 1)
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -26,12 +26,18 @@ type is compared too: integer 1 and boolean true are equal values in Python.
 from __future__ import annotations
 
 import json
+import sys
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:   # run as a file: the repository root is not on the path (#623)
+    sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.migration_seed import RUNNER_TABLES, primary_keys, quote, schema_columns
 
