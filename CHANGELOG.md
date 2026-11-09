@@ -9,6 +9,10 @@ theme.
 
 ## [Unreleased]
 
+- **End-to-end journey with the real models** (ADR-0097 item 24, `scripts/check_model_journey.py`,
+  `docs/releases/1.0-model-journey.md`): a PDF upload and a URL capture on a running stack, checked for the
+  job's end, the stages and models that ran, the extraction and a STIX 2.1 bundle with no dangling
+  relationship. Its first run, on the CI image of `5aa3e32` with vLLM Qwen3.8 27B, passed every check.
 - **Failure recipe run on the candidate** (ADR-0097 item 23, `docs/releases/1.0-failure-recipe.md`): on the CI
   image of `5aa3e32`, worker-killed, llm-down, database-down and restore-drill passed; disk-nearly-full was not
   checked (628.9 GiB free). The documented restore line took 6.7 s on a 26 MB dump.
