@@ -9,7 +9,7 @@ worth keeping are copied into `docs/eval/baseline-*.md`.
 | | AnnoCTR (public) | In-house set |
 |---|---|---|
 | What it measures | reading a clean text: techniques (explicit and implicit), malware, groups, tools, locations, sectors | the application on the original file: IoCs, relationships, ingestion losses, negative cases |
-| Size | 120 reports with the cyber layer: 70 train / 16 dev / 34 test | 10 to 20 reports to start (a pilot, not a verdict on small gains) |
+| Size | 120 reports with the cyber layer: 70 train / 16 dev / 34 test | 10 to 20 reports planned to start (a pilot, not a verdict on small gains); 8 gold reports on 2026-11-07, see [inhouse-set.md](inhouse-set.md) |
 | Not measured | IoCs, relationships, PDF/OCR/tables | — |
 | Guide | the AnnoCTR guidelines (in its repository) | [annotation-guide.md](annotation-guide.md) |
 

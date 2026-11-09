@@ -141,10 +141,14 @@ echo "CTI_IMAGE=ghcr.io/stixaly/ctiparsor@$digest" >> .env
 `setup.sh` writes `.env` from `.env.example` and a database password; it
 downloads and starts nothing. Choose the LLM provider in `.env` now
 ([Configuration](#configuration)). With `ANTHROPIC_API_KEY=` empty, Stage 3 is
-skipped and each bundle holds what the other stages found. The `.env` of 0.2.0
-holds a placeholder key instead (`sk-ant-xxxxxxxxxxxxxxxxxxxx`), which turns
-Stage 3 on and makes it fail on every report: empty it unless you set a real
-key (`sed -i 's/^ANTHROPIC_API_KEY=.*/ANTHROPIC_API_KEY=/' .env`). Releases
+skipped and each bundle holds what the other stages found. A key does not turn
+Stage 3 on by itself: `.env.example` ships `STIX_TLP=amber`, which refuses the
+hosted providers (anthropic, gemini, mistral), so Stage 3 is skipped there too.
+Set `STIX_TLP=clear` or `green`, or use a local provider, for Stage 3 to run
+([egress policy](docs/configuration.md#egress-policy-tlp)). The `.env` of 0.2.0
+holds a placeholder key instead (`sk-ant-xxxxxxxxxxxxxxxxxxxx`), which makes
+Stage 3 fail on every report wherever the TLP lets it run: empty it unless you
+set a real key (`sed -i 's/^ANTHROPIC_API_KEY=.*/ANTHROPIC_API_KEY=/' .env`). Releases
 after 0.2.0 ship it empty. Then, from the same directory:
 
 <!-- scripts/check_clean_install.sh: INSTALL_START -->
@@ -160,10 +164,12 @@ never built instead: if the pull fails, `up` stops with `build tag cannot
 contain a digest`. `up -d` starts `app`, `worker`, `postgres` and
 `capture-proxy`; the web UI is at <http://127.0.0.1:8000>. `bootstrap`, once,
 downloads the models (2.6 GB) into the `cti-cache` volume, clones the
-detection corpora (0.2 GB) and builds the rule store of 86,000 rules in the
-database (1.6 GB): about 3 minutes on the clean install of
-[TESTING.md](TESTING.md#clean-install-from-the-published-image) (2026-11-08),
-without an `HF_TOKEN`. Restarting, upgrading to the next
+detection corpora (0.2 GB) and builds the rule store of about 85,600 rules in the
+database (1.6 GB): 184 s for the first `bootstrap` in the clean-install check of
+2026-11-08 (0.6.0, then upgraded; [docs/releases/1.0-readiness.md](docs/releases/1.0-readiness.md)),
+and 387 s on the clean install of
+[TESTING.md](TESTING.md#clean-install-from-the-published-image) (2026-11-01,
+without an `HF_TOKEN`). Restarting, upgrading to the next
 release and backing up are in
 [docs/docker.md](docs/docker.md#day-to-day-operations) and
 [docs/upgrading.md](docs/upgrading.md#from-one-release-to-the-next).
@@ -237,7 +243,7 @@ ran, were skipped (disabled, model missing, no LLM provider) or failed.
 | **2d** CyNER 2.0 | DeBERTa-v3 cybersecurity NER — malware and threat groups | on by default — `CYNER_ENABLED` |
 | **2e** GLiNER | Zero-shot NER — sectors, campaigns, infrastructure, actors not yet in ATT&CK | on by default — `GLINER_ENABLED` |
 | **2g** Alias lists | Splits "X (aka Y, Z)" constructs into threat-actor names no dictionary knows yet | always |
-| **3** LLM enrichment | Actors, malware, tools, TTPs, relationships with an evidence quote, targets, mitigations | with an LLM provider |
+| **3** LLM enrichment | Actors, malware, tools, TTPs, relationships with an evidence quote, targets, mitigations | with an LLM provider that the TLP allows ([egress policy](docs/configuration.md#egress-policy-tlp)) |
 | **3b** Hallucination filter | Fuzzy-matches every LLM-returned name against the source chunk | with Stage 3 |
 | **3d** Relationship verification | A second LLM call must quote the sentence supporting each relationship; what it cannot decide waits for an analyst, out of the bundle (ADR-0082) | on by default — `ENABLE_STIX_VERIFICATION` (false turns it off) |
 | **3f** TTP selection | Chooses the techniques among 2c's candidates and the LLM's proposals, each with a quote the code finds in the text; a failed call ships nothing (`TTP_MODE=verify`: checks the LLM's techniques after the fact) | on by default — `ENABLE_TTP_VERIFICATION` (false turns it off) |
@@ -276,6 +282,7 @@ subgraph group_ingress["Ingress &amp; API"]
   node_api_gateway["FastAPI API<br/>[main.py]"]
   node_web_capture["Web Capture<br/>[web_capture.py]"]
   node_worker["Pipeline Worker<br/>[worker.py]"]
+  node_auth_gate["Auth Gate<br/>[api/auth/middleware.py]"]
 end
 
 subgraph group_pipeline["CTI Pipeline"]
@@ -283,6 +290,7 @@ subgraph group_pipeline["CTI Pipeline"]
   node_document_ingestion["Document Ingestion"]
   node_entity_extraction["Entity Extraction"]
   node_llm_enrichment["LLM Enrichment<br/>[stage3_llm.py]"]
+  node_egress_check["Egress Check<br/>[pipeline/egress.py]"]
   node_claim_verification["Claim Verification<br/>[stage3d_verify.py]"]
   node_mitre_normalization["MITRE Normalization<br/>[stage3c_mitre.py]"]
   node_baseline_reconciliation["Baseline Reconciliation<br/>[baseline_stix.py]"]
@@ -294,6 +302,7 @@ subgraph group_persistence["State &amp; Storage"]
   node_job_queue["Job Queue<br/>[queue_loop.py]"]
   node_job_store[("Job Store<br/>[db.py]")]
   node_baseline_store[("Baseline Store<br/>[baseline_store.py]")]
+  node_audit_store[("Audit Trail<br/>[api/audit.py]<br/>audit_events")]
 end
 
 subgraph group_ui["Analyst UI"]
@@ -314,7 +323,9 @@ node_web_source(("Web Source"))
 node_llm_provider(("LLM Provider"))
 node_corpus_sources(("Rule Sources"))
 
-node_analyst -->|"submits report (+ STIX bundle)"| node_api_gateway
+node_analyst -->|"submits report (+ STIX bundle)"| node_auth_gate
+node_auth_gate -->|"checks session or token"| node_api_gateway
+node_api_gateway -.->|"writes audit_events"| node_audit_store
 node_api_gateway -.->|"enrich: stores the bundle"| node_baseline_store
 node_web_source -.->|"serves page"| node_web_capture
 node_api_gateway -.->|"captures URL"| node_web_capture
@@ -326,7 +337,8 @@ node_worker -->|"runs pipeline"| node_document_ingestion
 node_cli_runner -->|"reads report"| node_document_ingestion
 node_document_ingestion -->|"passes text"| node_entity_extraction
 node_entity_extraction -->|"passes entities"| node_llm_enrichment
-node_llm_enrichment -.->|"requests enrichment"| node_llm_provider
+node_llm_enrichment -->|"checks TLP"| node_egress_check
+node_egress_check -.->|"allowed providers only"| node_llm_provider
 node_llm_enrichment -->|"passes claims"| node_claim_verification
 node_claim_verification -->|"passes claims"| node_mitre_normalization
 node_mitre_normalization -->|"maps techniques"| node_stix_builder
@@ -349,6 +361,9 @@ node_corpus_sources -.->|"syncs rules"| node_rule_store
 node_coverage_ui -->|"exports rules"| node_api_gateway
 
 click node_api_gateway "https://github.com/stixaly/ctiparsor/blob/main/api/main.py"
+click node_auth_gate "https://github.com/stixaly/ctiparsor/blob/main/api/auth/middleware.py"
+click node_egress_check "https://github.com/stixaly/ctiparsor/blob/main/pipeline/egress.py"
+click node_audit_store "https://github.com/stixaly/ctiparsor/blob/main/api/audit.py"
 click node_web_capture "https://github.com/stixaly/ctiparsor/blob/main/pipeline/web_capture.py"
 click node_job_queue "https://github.com/stixaly/ctiparsor/blob/main/api/queue_loop.py"
 click node_job_store "https://github.com/stixaly/ctiparsor/blob/main/api/db.py"
@@ -378,9 +393,9 @@ classDef toneMint fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#14532d
 classDef toneRose fill:#ffe4e6,stroke:#e11d48,stroke-width:1.5px,color:#881337
 classDef toneIndigo fill:#e0e7ff,stroke:#4f46e5,stroke-width:1.5px,color:#312e81
 classDef toneTeal fill:#ccfbf1,stroke:#0f766e,stroke-width:1.5px,color:#134e4a
-class node_api_gateway,node_web_capture,node_worker toneBlue
-class node_cli_runner,node_document_ingestion,node_entity_extraction,node_llm_enrichment,node_claim_verification,node_mitre_normalization,node_baseline_reconciliation,node_stix_builder,node_bundle_validation toneAmber
-class node_job_queue,node_job_store,node_baseline_store toneMint
+class node_api_gateway,node_web_capture,node_worker,node_auth_gate toneBlue
+class node_cli_runner,node_document_ingestion,node_entity_extraction,node_llm_enrichment,node_egress_check,node_claim_verification,node_mitre_normalization,node_baseline_reconciliation,node_stix_builder,node_bundle_validation toneAmber
+class node_job_queue,node_job_store,node_baseline_store,node_audit_store toneMint
 class node_review_ui,node_graph_ui,node_policy_ui toneRose
 class node_coverage_ui,node_settings_ui,node_coverage_engine,node_rule_store,node_analyst,node_web_source,node_llm_provider,node_corpus_sources toneIndigo
 ```
@@ -398,6 +413,7 @@ flowchart LR
         proxy["proxy (profile)<br/>nginx, TLS + password<br/>:8443"]
         app["app<br/>API + web UI<br/>:8000"]
         worker["worker x N<br/>the pipeline"]
+        bootstrap["bootstrap (run once)<br/>models, corpora, rule store"]
         capproxy["capture-proxy<br/>Squid egress filter<br/>:3128"]
     end
     subgraph backend ["network backend, internal, no route out"]
@@ -410,6 +426,8 @@ flowchart LR
     analyst -.->|"HTTP, 127.0.0.1 only"| app
     app --> pg
     worker --> pg
+    bootstrap --> pg
+    bootstrap -->|"model and corpus downloads"| internet
     worker --> ollama
     app -->|"URL capture"| capproxy -->|"public addresses only"| internet
     app -->|"corpus sync"| internet
@@ -464,6 +482,9 @@ For Review  ──►  Reviewing  ──►  Completed
 | **Policy** (`/policy`) | Choose which `source → verb → target` links are pinned, and how graph completion behaves |
 | **Coverage** (`/coverage/:jobId`) | Read the detection-coverage matrix, select rules, export them |
 | **Settings** (`/settings`) | Manage the detection-rule corpora |
+| **Login** (`/login`) | Sign in with a local account or the identity provider, when `AUTH_MODE` is not `off` |
+| **Account** (`/account`) | Your user and your own API tokens |
+| **Access** (`/access`) | Admin only: users, roles, and every API token |
 
 Page-by-page guide, keyboard shortcuts and auto-accept rules:
 [docs/web-ui.md](docs/web-ui.md).
@@ -537,9 +558,10 @@ Each report is scored against local rule corpora — a mix of **public** repos
 | Suricata | `.rules` | IDS · network sensor |
 | YARA | `.yar` | Scanner · files & memory |
 
-A real store is **52,481 Suricata**, **22,303 YARA** and **11,396 Sigma**
-rules, and coverage, drill-in and export keep the three languages distinct
-throughout (ADR-0015 / ADR-0022).
+A real store holds **85,639 rules in 12 corpora** (measured 2026-11-08, in
+[docs/releases/1.0-readiness.md](docs/releases/1.0-readiness.md)), and coverage,
+drill-in and export keep the three formats distinct throughout (ADR-0015 /
+ADR-0022).
 
 - **The Coverage page** lays the report's ATT&CK techniques out by tactic and
   colours each by a readiness score: rules in two or more corpora, in one, or
@@ -595,7 +617,11 @@ All configuration lives in `.env`, which `setup.sh` creates from
 With no provider configured (`ANTHROPIC_API_KEY` left empty, as
 `.env.example` ships it), Stage 3 is skipped and the pipeline still produces a
 valid STIX bundle from every offline stage. A key that is not a real one is
-worse: Stage 3 then runs and fails on every report.
+worse: where `STIX_TLP` allows a hosted provider, Stage 3 then runs and fails on
+every report. The shipped `STIX_TLP=amber` refuses the hosted providers before any
+call, so Stage 3 is skipped even with a key. Stage 3 runs with a configured
+provider under `STIX_TLP=clear` or `green`, or with a local provider under any
+TLP ([egress policy](docs/configuration.md#egress-policy-tlp)).
 
 Other settings worth knowing:
 
@@ -608,6 +634,7 @@ Other settings worth knowing:
 | `STIX_TLP`, `STIX_AUTHOR_NAME` | The marking and authoring identity stamped on every object |
 | `JOB_RETENTION_DAYS` | Delete finished reports older than N days — `0`, the default, keeps them until someone deletes them |
 | `DATABASE_URL` | PostgreSQL — set for you by `compose.yaml` |
+| `AUTH_MODE` | Sign-in: `off` (the default), `local`, `oidc` or `both`. With `off`, a `CTI_BIND` beyond `127.0.0.1` is refused at start; see [Authentication](docs/deployment.md#authentication) |
 
 Every variable, with its default and the reasoning behind it:
 [docs/configuration.md](docs/configuration.md).
@@ -630,14 +657,17 @@ Every variable, with its default and the reasoning behind it:
   the rule corpus in the `postgres` service (ADR-0045, ADR-0053), and the
   2.6 GB of models plus the corpora source clones on the rebuildable
   `cti-cache` volume;
-- publishes the API on **127.0.0.1 only**, the same posture as `run_api.py`;
-  the `proxy` profile adds TLS and a password in front (`docker compose
-  --profile proxy up -d`), the `ollama` profile a local LLM with no published
-  port;
+- publishes the API on **127.0.0.1 only** by default (`CTI_BIND`), the same
+  posture as `run_api.py`; the `proxy` profile adds TLS and a password in front
+  (`docker compose --profile proxy up -d`; you create its certificate, key and
+  htpasswd, see [docs/docker.md](docs/docker.md)), the `ollama` profile a local LLM
+  with no published port;
 - sends the URL tab's Chromium through `capture-proxy`, a Squid egress filter
   that only lets it reach public addresses;
-- adds isolation, **not authentication** — [docs/deployment.md §2](docs/deployment.md#2-what-no-authentication-actually-means)
-  applies unchanged.
+- adds isolation; the containers do not authenticate anyone. With the default
+  `AUTH_MODE=off`, [docs/deployment.md §2](docs/deployment.md#2-what-no-authentication-actually-means)
+  applies unchanged; `AUTH_MODE=local`, `oidc` or `both` turns on sign-in
+  ([Authentication](docs/deployment.md#authentication)).
 
 `bash scripts/docker_smoke.sh` builds, starts and verifies all of the above.
 

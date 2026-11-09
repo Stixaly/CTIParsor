@@ -21,7 +21,7 @@ install's data onto the container stack.
 | Job store (reports) | PostgreSQL (`DATABASE_URL`, mandatory — ADR-0053) | PostgreSQL 18, service `postgres` |
 | Rule store (detection corpus) | the same PostgreSQL database (ADR-0053) | the same `postgres` service |
 | Who runs the pipeline | the API process (`CTIPARSOR_ROLE=all`) | the `worker` containers (`CTIPARSOR_ROLE=worker`); the API only queues (`api`) |
-| Exposure | loopback by default (`API_HOST`) | loopback by default (`CTI_BIND`); `proxy` profile for TLS + password |
+| Exposure | loopback by default (`API_HOST`); a bind beyond loopback is refused at start unless `AUTH_MODE` is `local`, `oidc` or `both` | loopback by default (`CTI_BIND`), with the same start check; `proxy` profile for TLS + password |
 
 On a legacy host install the four-process split was opt-in: running
 `python -m api.queue_loop` as a service gave the same split without
@@ -37,7 +37,7 @@ up -d postgres` from this repo without starting anything else.
 flowchart LR
     subgraph frontend [network frontend - has egress]
         proxy["proxy (profile)\nnginx-unprivileged\nTLS + htpasswd :8443"]
-        app["app\nCTIPARSOR_ROLE=api\nFastAPI + React UI :8000"]
+        app["app\nCTIPARSOR_ROLE=api\nFastAPI + React UI :8000\nauth gate (AUTH_MODE)"]
         worker["worker x N\nCTIPARSOR_ROLE=worker\nqueue loop + pipeline subprocess"]
         bootstrap["bootstrap (profile)\none-shot: models, corpora, rule store"]
         capproxy["capture-proxy\nSquid egress filter :3128\nfor URL capture"]
@@ -79,12 +79,13 @@ flowchart LR
 | `app` | `ctiparsor` (this repo's `Dockerfile`) | serves the API and the built web UI on one port; accepts uploads, pasted text and URLs; queues them; serves progress (SSE), review, coverage, export; runs the corpus rebuild from the Settings page | nothing persistent of its own |
 | `worker` | same image, `command: worker` | claims queued reports, runs each in an isolated subprocess (models loaded there), writes entities, relationships, the bundle and progress events | its lease on the jobs it runs |
 | `postgres` | `postgres:18-alpine` | **both stores**: the job store (`jobs`, `entities`, `relationships`, `review_decisions`, `progress_events`, `relationship_policy`, `model_thresholds`, `entity_overrides`, `report_figures`, `figure_reads`, `cve_cache`) and, since ADR-0053, the detection-rule corpus (`detection_rules`, `rule_bytes`, `rule_techniques`, `rule_atoms`, `rule_related`, `rule_text`) | volume `pg-data-18` |
-| `cti-state` volume | — | `uploads/`, `output/`, `db-identity.json` (the PostgreSQL cluster each database was last seen on, ADR-0077), the private corpus overlay, and an empty `backups/` the entrypoint creates and nothing writes — no database file lives here any more | back it up with `pg-data-18`, at the same moment ([docker.md](docker.md#data-and-backups)) |
+| `cti-state` volume | — | `uploads/`, `output/`, `db-identity.json` (the PostgreSQL cluster each database was last seen on, ADR-0077), the private corpus overlay, and an empty `backups/` the entrypoint creates; the `backup` service writes its archives to `BACKUP_TARGET`, not here — no database file lives here any more | back it up with `pg-data-18`, at the same moment ([docker.md](docker.md#data-and-backups)) |
 | `cti-cache` volume | — | 2.6 GB of HuggingFace models, 0.2 GB of corpus clones | rebuildable with `bootstrap` |
 | `capture-proxy` | `ubuntu/squid` | forces the URL-capture tab's Chromium through an egress filter that refuses private, loopback and link-local destinations, closing the DNS-rebinding gap Python's own URL checks leave (`docker/squid/squid.conf`) | nothing persistent |
 | `proxy` (profile) | `nginxinc/nginx-unprivileged` | TLS termination and HTTP basic auth, the only thing meant to be published on a network | certs and htpasswd you provide |
 | `ollama` (profile) | `ollama/ollama` | a local LLM for Stage 3 and Stage 1f, reachable only from `app` and `worker` | volume `ollama-models` |
 | `bootstrap` (profile) | same image, `command: bootstrap` | one shot: creates the schema, downloads the models, clones the corpora, builds the rule store | — |
+| `backup` (profile `backup`) | `postgres:18-alpine`, the image `postgres` uses | a daily `pg_dump` of the database and a tar of `cti-state`, into `BACKUP_TARGET` (default `./backups`), keeping the newest `BACKUP_KEEP` (7) pairs at `BACKUP_TIME` (02:30 UTC); writes a status file read by `/metrics` | the archives in `BACKUP_TARGET` |
 
 ### What each container runs, and the code in it
 
@@ -161,8 +162,9 @@ outside the host reaches `postgres`: it publishes no port.
 
 | Destination | From | When | Turned off by |
 |---|---|---|---|
-| the LLM provider: `api.anthropic.com`, `generativelanguage.googleapis.com` or `api.mistral.ai` | `worker`: Stage 3 and the stages that call the LLM (3d, 3e, 3f, 3doc, 4c). `app`: Stage 4c on finalize, when the relationship policy enables long-distance links. | every report | a self-hosted provider: `LLM_PROVIDER=ollama`, `lmstudio` or `vllm` |
+| the LLM provider: `api.anthropic.com`, `generativelanguage.googleapis.com` or `api.mistral.ai` | `worker`: Stage 3 and the stages that call the LLM (3d, 3e, 3f, 3doc, 4c). `app`: Stage 4c on finalize, when the relationship policy enables long-distance links. | every report whose TLP lets it go to a hosted provider (CLEAR or GREEN; the default `STIX_TLP=amber` does not, `pipeline/egress.py`) | a self-hosted provider: `LLM_PROVIDER=ollama`, `lmstudio` or `vllm` |
 | the vision provider: the text's provider under `VISION_PROVIDER=auto` (the default), or the one `VISION_PROVIDER` names | `worker`: Stage 1f | a PDF's figures, up to 40 crops per report; not under `auto` when Stage 3 is disabled for the run. The transcriptions join the report text, so they also reach `CONSENSUS_PROVIDER` through Stage 3e's text when 3e runs | `VISION_PROVIDER=none` or `PIPELINE_DISABLED_STAGES=1f` |
+| the OIDC issuer (`OIDC_ISSUER_URL`): discovery, token exchange, JWKS | `app`, at sign-in (`api/auth/oidc.py`) | when `AUTH_MODE` is `oidc` or `both`, at each sign-in; the discovery document and the JWKS are cached for an hour | `AUTH_MODE=off` or `local` |
 | `huggingface.co` | `bootstrap`; `worker`, if the cache lacks a model | once per model: `all-MiniLM-L6-v2`, `CyNER-2.0-DeBERTa-v3-base`, `gliner_large-v2.1` | `HF_HUB_OFFLINE=1` (`setup.sh --offline` sets it), once the cache is filled |
 | `github.com` and `rules.emergingthreats.net`: the corpora listed in `detection_corpora.yaml` | `bootstrap`; `app` (Settings → Redownload) | on demand | `bootstrap --no-corpora` |
 | `cve.circl.lu` | `worker` (Stage 2f); `app` (finalize) | for a CVE not yet in the cache | `CVE_ENRICHMENT`, off by default |
@@ -252,7 +254,9 @@ Three properties fall out of this:
   subprocess; an OOM kill or a native crash ends that process, the worker's
   watcher marks the job `failed` and frees the slot. A worker that dies
   mid-report leaves a row whose lease expires; the next worker resumes it
-  from its Stage 3 checkpoint.
+  from its Stage 3 checkpoint. A job claimed `JOB_MAX_ATTEMPTS` times (default
+  3) is marked failed, not requeued, so a report that kills its worker every
+  time stops (ADR-0097 item 20).
 - **The UI never talks to a worker.** Progress, review and export all read
   the job store through the API, which is why the API can be restarted or
   scaled while reports run.
@@ -273,6 +277,7 @@ flags, the database password and the resource limits live together.
 | `WORKER_HEARTBEAT_S`, `WORKER_LEASE_TIMEOUT_S`, `WORKER_POLL_S`, `WORKER_DRAIN_S` | the lease and loop timings | same |
 | `CTI_BIND`, `CTI_PORT`, `CTI_TLS_BIND`, `CTI_TLS_PORT` | unused | where the host publishes the API and the proxy |
 | `CTI_<SERVICE>_CPUS`, `CTI_<SERVICE>_MEMORY` | unused | per-container limits (see §6) |
+| `JOB_MAX_ATTEMPTS` | the claims a job gets before it is failed, default 3 | same |
 | `API_HOST`, `API_PORT`, `API_RELOAD` | the bind address of the single process | forced by compose; the host side is `CTI_BIND` |
 
 ## 5. Security controls, and their limits
@@ -290,10 +295,14 @@ flags, the database password and the resource limits live together.
 | secrets excluded from the image (`.dockerignore`), passed by `env_file` | build | an image pushed to a registry carries no key and no report |
 | pinned base images, CPU-only torch, memory and CPU limits | build, compose | no `latest`, no 2.2 GB of CUDA wheels, no runaway container |
 
-What it does **not** do, stated plainly: the application has no
-authentication. Anyone who can reach the API port shares one workspace and
-can read, edit and delete every report. The proxy profile puts a password in
-front; it does not add users. Traffic between containers is not TLS (it never
+What it does **not** do, stated plainly: with `AUTH_MODE=off`, the default,
+the application has no authentication. Anyone who can reach the API port
+shares one workspace and can read, edit and delete every report. With
+`AUTH_MODE` set to `local`, `oidc` or `both`, every `/api` route needs a
+signed-in user or an API token, apart from `/api/health` and the sign-in
+routes, and each operation needs one of three roles,
+`reader`, `analyst` or `admin` ([docs/deployment.md](deployment.md#authentication)).
+The proxy profile puts a password in front; it does not add users. Traffic between containers is not TLS (it never
 leaves a private bridge on one host; see `docs/deployment.md` for the
 multi-host case). API keys are readable through `docker inspect` by whoever
 holds the Docker socket.
@@ -351,9 +360,8 @@ model itself:
 
 In the order the ADRs recommend: a browser container through Playwright's
 remote mode (moves the riskiest surface out of the container that holds the
-database credentials), TLS with certificate verification to PostgreSQL for
-deployments that span hosts, and authentication, which every ADR since 0036
-names as the missing piece.
+database credentials), and TLS with certificate verification to PostgreSQL for
+deployments that span hosts.
 
 ## See also
 

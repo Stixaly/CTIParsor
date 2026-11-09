@@ -22,6 +22,7 @@ whole file, so a change takes effect at the next `docker compose up -d`.
 - [Monitoring](#monitoring)
 - [Expert tuning](#expert-tuning)
 - [Web server and Docker Compose](#web-server-and-docker-compose)
+- [Authentication](#authentication)
 
 Every on/off flag below reads the same vocabulary, case- and whitespace-
 insensitive: `1`, `true`, `yes`, `on` enable; `0`, `false`, `no`, `off` disable.
@@ -62,6 +63,11 @@ The compose stack runs PostgreSQL for you (`docker compose up` starts a
 hardened `postgres` service; set `CTI_DB_PASSWORD` in `.env`). A backup is a
 `pg_dump` of that database, which holds both stores, and an archive of the
 `cti-state` volume, taken together ([docker.md](docker.md#data-and-backups)).
+
+Under Compose, `DATABASE_URL` is built from `CTI_DB_USER` and `CTI_DB_NAME`,
+both `ctiparsor` by default (`compose.yaml`). Changing either once the database
+volume exists does not change the server: alter the role in `psql`, or start
+from a fresh volume (`.env.example`, section 11).
 
 Every start of the API, of a worker and of `bootstrap` brings the schema up to
 date (ADR-0077). The first process to start migrates, under a PostgreSQL
@@ -676,6 +682,17 @@ feature** (it was 50 MB). Behind another proxy, allow as much: 72 MiB, that is
 `CTIPARSOR_ROLE` (`api`, `worker`, or `all` on a legacy host install) is set
 per service by `compose.yaml`; leave it alone.
 
+Corpus sync (`pipeline/detection/sync.py`) refuses a tarball whose download is
+above `CORPUS_TARBALL_MAX_BYTES` (default 2 GiB, 2147483648 bytes), and an
+archive whose members add up to more than `CORPUS_EXTRACT_MAX_BYTES` once
+extracted (default 8 GiB, 8589934592 bytes). A refused download's partial file is
+removed.
+
+```env
+# CORPUS_TARBALL_MAX_BYTES=2147483648
+# CORPUS_EXTRACT_MAX_BYTES=8589934592
+```
+
 Three more folders are set here (`api/paths.py`). Unset, each is a folder of
 that name at the project root:
 
@@ -724,6 +741,8 @@ and an image rebuild.
 # skips it.
 # ENV=development
 ```
+
+Unset, `ENV` is `development`, so the check runs (`pipeline/stage3_llm.py`).
 
 Under Docker, `docker compose logs -f app worker` reads stdout. The root
 filesystem is read-only, so a `LOG_FILE` has to point into a volume, e.g.
@@ -777,6 +796,8 @@ and [Advanced](#advanced).
 `API_HOST`, `API_PORT`, `API_WORKERS`, `API_RELOAD` and `FORWARDED_ALLOW_IPS`
 configure the single API process; under Docker, compose forces the first three
 and publishes with `CTI_BIND` / `CTI_PORT`.
+
+### Authentication
 
 `AUTH_MODE` (default `off`) turns authentication on (ADR-0097; how to set it up:
 [deployment.md](deployment.md#authentication)):
@@ -841,9 +862,14 @@ profile is not seen by the application: exposing it with `AUTH_MODE=off` leaves 
 proxy's basic authentication as the only control, which ADR-0097 does not recommend
 for a shared service.
 
-`API_ALLOWED_HOSTS` (default `localhost,127.0.0.1,[::1]`) is the list of
-`Host` names the API answers to; any other gets 400 before a handler runs,
-which is what stops DNS rebinding against an unauthenticated app. **List the
+### Other web server settings
+
+`API_ALLOWED_HOSTS` is the list of `Host` names the API answers to. Its code
+default is `localhost,127.0.0.1,[::1]` (`api/main.py`). Under Compose the default
+is `localhost,127.0.0.1,[::1],app` (`compose.yaml`), where `app` is the name the
+frontend-dev proxy sends. A value set in `.env` replaces either default. Any other
+`Host` gets 400 before a handler runs, which is what stops DNS rebinding against
+an unauthenticated app. **List the
 name or address you reach the app on** when it is not loopback: the LAN
 address behind `API_HOST=0.0.0.0`, the public name behind the `proxy`
 profile. `*.example.org` patterns work; `*` turns the check off. The same
@@ -873,8 +899,10 @@ published ports, image name, `CTI_INSTALL_CAPTURE`, per-container CPU and memory
 (`CTI_<SERVICE>_CPUS`, `CTI_<SERVICE>_MEMORY`) — are in sections 9 and 12 of
 `.env.example`, with what each exposure means in
 [docs/deployment.md](deployment.md) and the sizing in [docs/docker.md](docker.md).
+The `proxy` profile publishes HTTPS on `CTI_TLS_BIND` (default `0.0.0.0`) and
+`CTI_TLS_PORT` (default `8443`).
 
-Scheduled backups (profile `backup`, [docs/docker.md](docker.md#data-and-backups)) read three compose-level settings, all in section 12 of `.env.example`: `BACKUP_TARGET` (the host directory the backups go to; unset, the service refuses to back up), `BACKUP_TIME` (default `02:30`, UTC) and `BACKUP_KEEP` (default `7` pairs). The status file of the last run is read by the app's `/metrics` through `BACKUP_STATUS_FILE` (default `/app/backup-status/status.json` in the app container; a missing file means no backup is known).
+Scheduled backups (profile `backup`, [docs/docker.md](docker.md#data-and-backups)) read three compose-level settings, all in section 12 of `.env.example`: `BACKUP_TARGET` (the host directory the backups go to, with no default; unset, the service writes a failed status, `ok` false with the error "BACKUP_TARGET is not set", exits 1 and backs nothing up), `BACKUP_TIME` (default `02:30`, UTC) and `BACKUP_KEEP` (default `7` pairs). The status file of the last run is read by the app's `/metrics` through `BACKUP_STATUS_FILE` (default `/app/backup-status/status.json` in the app container; a missing file means no backup is known).
 
 `CTI_GIT_REV` (empty by default) is the build argument `GIT_REV`. The image
 records that revision in its `org.opencontainers.image.revision` label and as

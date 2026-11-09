@@ -210,11 +210,11 @@ Configuration is managed via the `.env` file (passed to the container via `env_f
 | `CTI_TLS_BIND` | `0.0.0.0` | Host address for TLS proxy |
 | `CTI_TLS_PORT` | `8443` | Host port for TLS proxy |
 | `WORKER_MAX_CONCURRENT` | `1` | Parallel reports (≈ 4.4 GB RAM each) |
-| `CTI_DB_PASSWORD` | **required** | Password of the `postgres` service; `openssl rand -hex 24`. Compose refuses to start without it. |
+| `CTI_DB_PASSWORD` | **required** | Password of the `postgres` service; `openssl rand -hex 24`. `make docker-up` and `setup.sh` write it to `.secrets/db_password`, the file the services that need it mount; a plain `docker compose up` does not check it (see *Data and backups*). |
 | `CTI_DB_USER` | `ctiparsor` | PostgreSQL role created on first start; the app connects as it |
 | `CTI_DB_NAME` | `ctiparsor` | Database created on first start |
 
-The app receives `DATABASE_URL=postgresql://<CTI_DB_USER>@postgres:5432/<CTI_DB_NAME>` and `PGPASSWORD` from compose itself; a `DATABASE_URL` in `.env` is ignored inside the stack. Every connection authenticates with `scram-sha-256` (local socket included), the server publishes no port, and only the `app` service shares its network. Changing `CTI_DB_USER` or `CTI_DB_PASSWORD` after the `pg-data` volume exists does not alter the server's role: run `ALTER ROLE ... PASSWORD ...` through `docker compose exec postgres psql`, or start from a fresh volume.
+The app receives `DATABASE_URL=postgresql://<CTI_DB_USER>@postgres:5432/<CTI_DB_NAME>` and its password from `/run/secrets/db_password`, which the entrypoint reads into `PGPASSWORD` (`docker/entrypoint.sh`); a `DATABASE_URL` in `.env` is ignored inside the stack. Every connection authenticates with `scram-sha-256` (local socket included), the server publishes no port, and only the `app` service shares its network. Changing `CTI_DB_USER` or `CTI_DB_PASSWORD` after the `pg-data` volume exists does not alter the server's role: run `ALTER ROLE ... PASSWORD ...` through `docker compose exec postgres psql`, or start from a fresh volume.
 
 ### Forced Values
 
@@ -325,7 +325,7 @@ Otherwise, the entrypoint fails with `ERROR: /app/state is not writable by uid 1
 By default, the API is bound to `127.0.0.1`.
 
 **Option 1: Expose API directly (Insecure)**
-Set `CTI_BIND=0.0.0.0` in `.env`. This exposes the API without authentication. Only use on trusted networks. See `docs/deployment.md` §2.
+Set `CTI_BIND=0.0.0.0` in `.env` and `AUTH_MODE=local` (or `oidc`, or `both`) first: with `AUTH_MODE=off`, the container stops at start when `CTI_BIND` is not loopback. Only use on trusted networks. See `docs/deployment.md` §2 and its Authentication section.
 
 **Option 2: TLS Proxy (Recommended)**
 ```bash
@@ -373,7 +373,7 @@ already is `127.0.0.1` and the default applies.
 | `no-new-privileges` | Setuid binaries cannot elevate privileges |
 | Seccomp profile (`docker/seccomp-chromium.json`) | Docker's default profile plus `clone`/`unshare`/`setns`/`chroot` without a capability requirement, so the Chromium **user-namespace sandbox stays on** instead of the usual `--no-sandbox` shortcut. Without it Chromium dies at launch (`Check failed: sys_chroot("/proc/self/fdinfo/")`) and the URL tab answers 503. The kernel still checks the capability in the caller's namespace: the container process has none, the sandbox zygote owns its own. |
 | `pids_limit: 4096` | Fork bombs from hostile documents are stopped |
-| Three networks, `backend` marked `internal` | The database has no route to the internet even if compromised; the proxy cannot reach the database or the LLM; the LLM cannot reach the database. Only `app` (and the one-shot `bootstrap`) sit on more than one network |
+| Three networks, `backend` marked `internal` | The database has no route to the internet even if compromised; the proxy cannot reach the database or the LLM; the LLM cannot reach the database. Only `app`, `worker` and the one-shot `bootstrap` sit on more than one network (and `dev`, when its profile runs) |
 | `capture-proxy` (Squid, `docker/squid/squid.conf`) | Chromium's own traffic for the URL-capture tab is forced through an egress filter that blocks private/loopback/link-local/reserved destination ranges — an independent, network-layer re-check of `pipeline/web_capture.py`'s SSRF policy that closes the DNS-rebinding gap `_dns_pin_arg`'s docstring documents (a subresource on another host, resolved a second, uncoordinated time by Chromium itself) |
 | Loopback bind by default | API reachable only from the host machine |
 | Secrets via `env_file` | Image pushed to registry contains no keys or reports |
@@ -381,7 +381,7 @@ already is `127.0.0.1` and the default applies.
 | Log rotation (5 × 50 MB) | Disk does not fill up |
 
 **What this does NOT do:**
-- No application-level authentication (see `docs/deployment.md` §2).
+- With the default `AUTH_MODE=off`, no application-level authentication (see `docs/deployment.md` §2).
 - API keys are visible in `docker inspect` for anyone with Docker socket access.
 - Database is stored in plaintext on the volume.
 
@@ -457,12 +457,12 @@ Not supported in the image (torch CPU only).
 | Symptom | Cause | Fix |
 |---|---|---|
 | `env file .env not found` | Missing `.env` | `cp .env.example .env` |
-| `required variable CTI_DB_PASSWORD is missing a value` | No database password | `echo "CTI_DB_PASSWORD=$(openssl rand -hex 24)" >> .env` |
+| `make docker-up` stops with `Set CTI_DB_PASSWORD in .env (e.g. openssl rand -hex 24, or just run: bash setup.sh)` | No database password in `.env` | `bash setup.sh` (it generates one when `.env` has none), or `echo "CTI_DB_PASSWORD=$(openssl rand -hex 24)" >> .env` then `make .secrets/db_password` |
 | `password authentication failed for user "ctiparsor"` | `CTI_DB_PASSWORD` changed after the `pg-data-18` volume was initialised | Restore the old value, or `docker compose down -v` to start a fresh database (deletes every report) |
 | Reports (or detection rules) processed before the PostgreSQL move are gone from the list | They are still in `cti_stix.db` on `cti-state` | Run the migration commands in *Data and backups* |
 | `docker compose pull` reports `denied` | The GHCR package is still private and you are not authenticated, or the first publish hasn't landed yet | `docker login ghcr.io`, or build locally with `docker compose build` |
 | `up` stops with `build tag cannot contain a digest` | The image `CTI_IMAGE` names by digest is not on this machine and could not be pulled: a mistyped digest, no network, or a host that is not x86-64 (the image is `linux/amd64` only) | Compare the digest with the Release notes; `docker compose pull` shows the registry's answer |
-| Backlog is unclear — is the queue actually backing up? | Watching logs is guesswork | `curl -s localhost:8000/api/queue/status \| python3 -m json.tool` — `queue.depth` against `queue.max_depth`, `queue.oldest_queued_seconds`, each worker's `state` (`busy`, `idle`, `stale`) and `worker_summary` (ADR-0048, [operations.md](operations.md)) |
+| Backlog is unclear — is the queue actually backing up? | Watching logs is guesswork | `curl -s localhost:8000/api/queue/status \| python3 -m json.tool` (with `AUTH_MODE` on, add `-H "Authorization: Bearer ctp_..."`) — `queue.depth` against `queue.max_depth`, `queue.oldest_queued_seconds`, each worker's `state` (`busy`, `idle`, `stale`) and `worker_summary` (ADR-0048, [operations.md](operations.md)) |
 | A report stays `queued` forever | No worker container is running (`docker compose ps worker`; `worker_summary.alive` is 0 in the queue status), or every worker is at `WORKER_MAX_CONCURRENT` (`idle_slots` is 0) | `docker compose up -d worker`, or `--scale worker=2`; watch `docker compose logs -f worker` |
 | A report sits in `processing` after a worker crash | The lease has not expired yet | It is requeued automatically after `WORKER_LEASE_TIMEOUT_S` (180 s) and resumes from its Stage 3 checkpoint |
 | `worker` is `unhealthy` | The supervisor loop has not touched its liveness file for two minutes: it hangs, or its heartbeat does not reach the job store | `docker compose logs worker`; usually the job store is unreachable (`Exception in stamp_worker`) |

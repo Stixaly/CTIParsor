@@ -25,7 +25,7 @@ Two consequences worth knowing up front:
   sets no CORS header at all (an earlier `allow_origins=["*"]` was removed),
   and the Vite dev server proxies `/api` so development is same-origin too.
 - **The API answers only to the hosts in `API_ALLOWED_HOSTS`** (default
-  `localhost,127.0.0.1,[::1]`) and refuses cross-site writes — the DNS
+  `localhost,127.0.0.1,[::1]`; the Compose stack adds `app`) and refuses cross-site writes — the DNS
   rebinding and CSRF defences an app without authentication needs. Every
   option below that exposes the app on another name or address says what to
   put there; forgetting it shows as `400 Invalid host header`.
@@ -50,15 +50,17 @@ docker compose up -d
 `CTI_BIND` defaults to `127.0.0.1` — reachable only from the machine itself.
 `0.0.0.0` accepts connections on every interface; you can also name a single
 interface address, e.g. `CTI_BIND=10.0.5.12`, which is usually what you want.
+With `AUTH_MODE=off` (the default), a `CTI_BIND` other than loopback stops the
+container at start: turn authentication on first ([Authentication](#authentication)).
 `docker compose logs -f app` shows where uvicorn is listening (always
 `0.0.0.0:8000` inside the container) — the address that matters is the one
 `CTI_BIND` publishes on the host, shown by `docker compose ps`.
 
 ## 2. What "no authentication" actually means
 
-CTIParsor has no authentication, no sessions, and no per-user ownership of
-anything. There is no `user_id` column, and no route checks who is calling.
-Every analyst who can reach the port shares **one** workspace:
+With `AUTH_MODE=off` (the default), CTIParsor has no authentication, no sessions,
+and no per-user ownership of anything. No route checks who is calling. Every
+analyst who can reach the port shares **one** workspace:
 
 - every report, entity and relationship is visible to everyone
 - anyone can edit, finalise or **delete** any job, including someone else's
@@ -66,14 +68,20 @@ Every analyst who can reach the port shares **one** workspace:
 - `POST /api/ingest/url` makes the server fetch a URL that the caller chooses
 - `POST /api/settings/corpora` and `/sync` make the server clone git repos
 
+With `AUTH_MODE` set to `local`, `oidc` or `both`, the points above change: a
+reader reads reports but changes none; an analyst edits and finalises reports,
+fetches URLs, and deletes only the reports they imported; an admin deletes any
+report, changes the pipeline policy and the corpora settings. Every signed-in user
+still reads every report. See [Authentication](#authentication).
+
 This is not a bug list — it is what a single-user tool looks like once several
 people can reach it. Whether that is acceptable depends entirely on who can
 route to the port. Among trusted colleagues on a segmented network it is often
 fine, and the shared workspace is arguably the point. On anything wider it is
 not.
 
-**Do not put this on the internet as-is.** Options B and C below are the two
-ways to narrow who can reach it.
+**Do not put this on the internet with `AUTH_MODE=off`.** Options B and C below
+narrow who can reach it; the Authentication section narrows who can use it.
 
 ## Authentication
 
@@ -92,7 +100,7 @@ not loopback, and the start log says which mode runs. To turn it on:
    docker compose exec app python -m api.admin create-admin --username alice
    ```
 
-3. Create the other accounts (`create-user --role analyst|reader`), and a token for
+3. Create the other accounts (`create-user --role reader|analyst|admin`; `reader` is the default), and a token for
    each script, shown once, valid 90 days unless `--days` says otherwise:
 
    ```bash
@@ -168,7 +176,8 @@ How it behaves:
   the provider authenticates the user, the callback creates the same session and
   cookie as a local sign-in and sends the browser to `next` (a local path only; any
   other value becomes `/`). A refusal sends the browser to `/login?error=<code>`:
-  `state`, `token`, `idp`, `denied`, `no_role`, `disabled`, `config`, `busy`.
+  `state`, `token`, `idp`, `denied`, `no_role`, `disabled`, `config`, `busy`, and
+  `account` (the account could not be created).
 - The sign-in is tied to the browser that started it: `login` sets a cookie `ctiparsor_oidc` (`HttpOnly`, `SameSite=Lax`, 10 minutes) and the callback refuses a request without the matching cookie, so a link to someone else's callback does not sign you in as them.
 - The account is created at the first sign-in, named after `preferred_username`
   (`OIDC_USERNAME_CLAIM`), else `email`, else `sub`. It is identified by the issuer
@@ -240,6 +249,7 @@ Pick the interface facing your analysts and restrict it to their subnet.
 # .env
 CTI_BIND=10.0.5.12
 CTI_PORT=8000
+AUTH_MODE=local      # or oidc, or both; the start guard refuses this bind with AUTH_MODE=off
 ```
 
 ```bash
@@ -248,7 +258,9 @@ sudo ufw allow from 10.0.5.0/24 to any port 8000 proto tcp
 ```
 
 Simple, and it keeps the port off every other network. It is still plaintext
-HTTP with no login, so anyone already inside that subnet has full access.
+HTTP, so the session cookie and the tokens travel in clear text inside that
+subnet; anyone there who has no account cannot get past the sign-in
+([Authentication](#authentication)).
 
 ### Option C — TLS + password proxy in front
 
@@ -283,11 +295,12 @@ command above makes.
 
 This gives you TLS and a gate, and it is the only option here where the
 credential is something other than "can you route to the port". Note what it
-does *not* give you: nginx authenticates people, but the application still has
-one shared workspace behind it. Everyone who logs in still sees, and can delete,
-everyone else's reports. Real per-user isolation would need authentication
-inside the application — a `user_id` on jobs and a check on every route. None of
-that exists today.
+does *not* give you. With `AUTH_MODE=off`, nginx authenticates people, but the
+application still has one shared workspace behind it: everyone who logs in sees,
+and can delete, everyone else's reports. With `AUTH_MODE` on, the application
+signs people in too ([Authentication](#authentication)): an analyst deletes only
+the reports they imported, an admin deletes any, and a reader deletes none. Every
+signed-in user still reads every report.
 
 The nginx config, with the SSE-buffering settings it needs (`proxy_buffering off`,
 `proxy_read_timeout 3600s`), is `docker/nginx/default.conf`, already wired into
@@ -426,8 +439,10 @@ each signal does not say.
       Windows drive under WSL2, move it to native Linux storage the same way
       `cti_stix.db` used to need — every page fault across a 9p/DrvFs mount
       is paid at query time, and no amount of tuning recovers it
-- [ ] You have decided which of options A/B/C applies, and everyone who can
-      reach the port is someone you would let delete any report
+- [ ] You have decided which of options A/B/C applies, and `AUTH_MODE`: with
+      `off`, everyone who can reach the port is someone you would let delete any
+      report; with `local`, `oidc` or `both`, the first admin is created
+      ([Authentication](#authentication))
 - [ ] Backups: a dump of the database (both stores, ADR-0053) AND an archive
       of the `cti-state` volume (uploaded sources, exported bundles), taken
       together with `app` and `worker` stopped, and one restore tried into an

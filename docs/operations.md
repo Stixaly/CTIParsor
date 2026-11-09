@@ -49,6 +49,10 @@ restarts a container that exits, not one that is `unhealthy`.
 curl -fsS http://127.0.0.1:8000/api/queue/status | python3 -m json.tool
 ```
 
+With `AUTH_MODE` set to `local`, `oidc` or `both`, this route needs a signed-in
+reader or a token: add `-H "Authorization: Bearer ctp_..."` to the `curl`. Only
+`/api/health` is open. With the default `AUTH_MODE=off`, no token is needed.
+
 ```json
 { "role": "api", "backend": "postgresql",
   "counts": { "queued": 0, "processing": 0, "failed": 0 },
@@ -299,8 +303,9 @@ scrape_configs:
       - targets: ["cti.example.org:443"]
 ```
 
-Use the same value as `METRICS_TOKEN` in the file. Work item 14 adds an admin
-token for the scraper next to this one.
+Use the same value as `METRICS_TOKEN` in the file. `/metrics` accepts only that
+token or a loopback client, whatever `AUTH_MODE` is: an API token (`ctp_…`) is
+not accepted there.
 
 The endpoint answers while the database is down: `ctiparsor_database_up` is
 0, and the metrics that need the database are left out.

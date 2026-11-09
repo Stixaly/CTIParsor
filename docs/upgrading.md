@@ -61,7 +61,8 @@ version 14 -> 16` (from 0.3.x) while `docker compose logs app worker` shows
 `schema at version 16, nothing to migrate`. `bootstrap` runs after every
 upgrade: it keeps the models already downloaded, fetches any the new
 release adds, updates the detection corpora and rebuilds the rule store
-(about 5 minutes on the clean install of [TESTING.md](../TESTING.md#clean-install-from-the-published-image),
+(272 s for an upgrade and 387 s on a clean install in the reference runs of
+[TESTING.md](../TESTING.md#clean-install-from-the-published-image), 2026-11-01,
 most of it the rule store).
 
 3. **Check**: `curl -fsS http://127.0.0.1:8000/api/health` (your `CTI_BIND`

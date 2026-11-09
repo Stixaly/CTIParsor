@@ -122,9 +122,12 @@ docker compose run --rm app python scripts/sync_corpora.py
 ```
 Clones/pulls each repo with a `git:` remote using your **ambient git auth** —
 public repos need none; private repos use your SSH agent / credential helper.
-Clones land under `./corpora/`, which in the `app`, `worker` and `bootstrap`
-containers is the `cti-cache` volume (in the `dev` container, the repo's own
-gitignored `corpora/`). No credentials are stored.
+Clones land under `./corpora/` (the `path:` of each corpus in
+`detection_corpora.yaml`). In the `app`, `worker` and `bootstrap` containers
+`./corpora` is a symlink to `/app/cache/corpora`, on the `cti-cache` volume
+(Dockerfile, `docker/entrypoint.sh`). From a checkout, and in the `dev`
+container, it is the repo's own gitignored `corpora/`. No credentials are
+stored.
 
 `bootstrap` runs this step and the next one for you; `docker compose --profile
 bootstrap run --rm bootstrap bootstrap --no-models` repeats both later without
@@ -136,6 +139,14 @@ published as a git repository) is downloaded, checked against its published
 pin, so the fetch records the URL and content hash in `<path>/.sync.json`
 (ADR-0015 §5). A failed download or checksum mismatch leaves the previous
 copy in place.
+
+Two byte caps apply (`pipeline/detection/sync.py`). `CORPUS_TARBALL_MAX_BYTES`
+(default 2 GiB) refuses a download whose `Content-Length` is above it, before
+reading, or whose stream passes it while reading; the partial file is deleted.
+`CORPUS_EXTRACT_MAX_BYTES` (default 8 GiB) refuses an archive whose members
+add up to more than it before anything is extracted. In both cases the
+previous copy stays in place, and the sync reports the failure without the
+reason, which goes to the server log.
 
 ## 3. Build the rule store
 
