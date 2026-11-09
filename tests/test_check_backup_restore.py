@@ -341,7 +341,7 @@ def test_check_runs_the_documented_commands_and_finds_everything_back(monkeypatc
     assert silent == [False, False, False, True, False]                       # pg_restore must print nothing
     out = capsys.readouterr().out
     for pattern in (r"restored: \d+ tables, \d+ rows, \d+ values compared; every one kept",
-                    r"restored, sequences: 2; each one where the source's stood",
+                    r"restored, sequences: 3; each one where the source's stood",
                     r"restored, schema: \d+ objects .*; each one defined as in the source",
                     r"restored, files: 12 files and directories; each one as in the source, byte for byte",
                     r"read-back: 7 values read back through the routes; every one as seeded",

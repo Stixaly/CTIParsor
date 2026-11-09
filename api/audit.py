@@ -178,7 +178,7 @@ def record_cli(command: str, target: dict[str, Any]) -> None:
     """A change made by `python -m api.admin`: the OS user who ran it, no request, no client."""
     try:
         username: str | None = getpass.getuser()
-    except Exception:
+    except Exception:  # noqa: BLE001 — no OS user name (a container without one): the record keeps a null username
         username = None
     write({
         "at": timestamp(_now()),
