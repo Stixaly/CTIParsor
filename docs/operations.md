@@ -319,6 +319,7 @@ The endpoint answers while the database is down: `ctiparsor_database_up` is
 The alert rules are in `docs/monitoring/ctiparsor.rules.yml`. Each alert below
 names its rule. Routing the alerts to people (Alertmanager, mail, chat) is the
 operator's to set up.
+The failure cases that check these alerts, and the restore drill, are in [1.0-failure-recipe.md](releases/1.0-failure-recipe.md).
 
 ### No live worker
 

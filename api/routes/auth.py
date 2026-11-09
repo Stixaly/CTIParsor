@@ -19,7 +19,7 @@ from api.auth import config, oidc, store
 from api.auth.deps import SESSION_COOKIE, authenticate, cookie_secure, current_user, set_session_cookie
 from api.logging_config import get_logger, one_line
 from api.main import limiter
-from api.response_models.auth import Me, SignedOut
+from api.response_models.auth import Me, SignedOut, SignInMethods
 
 logger = get_logger(__name__)
 
@@ -95,6 +95,13 @@ def _locked(until: datetime) -> HTTPException:
     wait = max(1, math.ceil((until - datetime.now(timezone.utc)).total_seconds()))
     return HTTPException(429, "Too many failed sign-in attempts; try again later",
                          headers={"Retry-After": str(wait)})
+
+
+@router.get("/methods", response_model=SignInMethods)
+def methods():
+    """How the sign-in page may sign a user in; open, so it can be asked before a sign-in."""
+    mode = config.auth_mode()
+    return {"auth_mode": mode, "local": config.local_enabled(), "oidc": mode in ("oidc", "both")}
 
 
 @router.post("/logout", response_model=SignedOut)

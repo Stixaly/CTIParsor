@@ -13,7 +13,7 @@ import {
   createRelationship, updateRelationship, bulkUpdateRelationships,
   finalizeJob, finalizeJobQuick, sourceUrl, bulkUpdateEntities,
   fetchCoverageReportRules, detectionsExportUrl,
-  errorDetail, fetchThresholds, BundleRefusedError,
+  errorDetail, fetchThresholds, BundleRefusedError, apiFetch,
 } from '../api/client'
 import { downloadBundle } from '../stix/downloadBundle'
 import type { ClientDecisionOrigin, Entity, Job, Relationship } from '../types'
@@ -677,8 +677,8 @@ export default function Review() {
       // explicit id list is the only correct request — otherwise the ZIP
       // silently omits exactly the rules the analyst chose to add.
       const res = promotedExtra.length === 0
-        ? await fetch(detectionsExportUrl(jobId))
-        : await fetch(`/api/jobs/${jobId}/detections/export`, {
+        ? await apiFetch(detectionsExportUrl(jobId))
+        : await apiFetch(`/api/jobs/${jobId}/detections/export`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

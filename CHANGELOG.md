@@ -111,6 +111,17 @@ theme.
   logged where `pg_dump` is. The function is removed. Back up with `pg_dump`
   and the `cti-state` archive, as docs/docker.md describes.
 
+- **Sign-in and access management in the web interface** (ADR-0097 items 14
+  and 15, parts C and D). With `AUTH_MODE` on, the interface has a sign-in
+  page (local account and, when configured, the organisation's provider), a
+  user menu with Sign out, and returns to the page you were on after a 401;
+  controls a role cannot use are hidden (the server still decides). Admins get
+  an Access page (create users, change roles, disable, set passwords, create
+  and revoke any token) and every user a My tokens page; a token is shown once,
+  and is created only from a signed-in session, never with another token. New
+  routes `GET /api/auth/methods` (open), `/api/admin/users`, `/api/admin/tokens`
+  and `/api/auth/tokens`. With `AUTH_MODE=off` nothing changes.
+
 - **Bounds** (ADR-0097 work item 20). `GET /api/jobs` takes optional
   `limit` and `cursor` (keyset pages, `X-Next-Cursor`); without them the list
   is unchanged. A job whose lease is lost more than `JOB_MAX_ATTEMPTS` times
@@ -118,6 +129,17 @@ theme.
   stop does not count. Uploads and ingests are refused with 507 when less
   than `UPLOAD_MIN_FREE_MB` (default 1024) is free. Migration v0017 adds
   `jobs.attempts`.
+
+- **Load and failure recipe** (ADR-0097 work item 23).
+  `scripts/check_failure_recipe.py --i-know-this-stops-services` causes five
+  failures on a Compose stack (a worker killed mid-job, an LLM endpoint that
+  refuses, the database stopped, an upload with the disk below
+  `UPLOAD_MIN_FREE_MB`, the documented backup restored into an empty database)
+  and checks the data, the job state and the alert each must raise, with a
+  Markdown and a JSON report. An alert that cannot be judged (a disk with room,
+  a rule form the checker cannot read) is reported as not checked, never as
+  passed. `docs/releases/1.0-failure-recipe.md` says what each case proves; the
+  restore duration (RTO) comes from a real run.
 
 - **TTP self-verification (Stage 3f) is on by default in the code.** It was
   already `ENABLE_TTP_VERIFICATION=true` in `.env.example`; the code's fallback

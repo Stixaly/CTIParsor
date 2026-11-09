@@ -1,5 +1,57 @@
 {
   "entries": {
+    "DELETE /api/admin/tokens/{}": {
+      "deprecated": false
+    },
+    "DELETE /api/admin/tokens/{} param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "DELETE /api/admin/tokens/{} response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "object"
+      ]
+    },
+    "DELETE /api/admin/tokens/{} response:200.revoked": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "DELETE /api/admin/tokens/{} response:404": {
+      "media": []
+    },
+    "DELETE /api/auth/tokens/{}": {
+      "deprecated": false
+    },
+    "DELETE /api/auth/tokens/{} param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "DELETE /api/auth/tokens/{} response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "object"
+      ]
+    },
+    "DELETE /api/auth/tokens/{} response:200.revoked": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "DELETE /api/auth/tokens/{} response:404": {
+      "media": []
+    },
     "DELETE /api/jobs/{}": {
       "deprecated": false
     },
@@ -273,6 +325,145 @@
         "string"
       ]
     },
+    "GET /api/admin/tokens": {
+      "deprecated": false
+    },
+    "GET /api/admin/tokens response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/admin/tokens response:200[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/admin/tokens response:200[].created_at": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/admin/tokens response:200[].expires_at": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/admin/tokens response:200[].id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/admin/tokens response:200[].last_used_at": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/admin/tokens response:200[].name": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/admin/tokens response:200[].revoked_at": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/admin/tokens response:200[].user_id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/admin/tokens response:200[].username": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/admin/tokens response:404": {
+      "media": []
+    },
+    "GET /api/admin/users": {
+      "deprecated": false
+    },
+    "GET /api/admin/users response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/admin/users response:200[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/admin/users response:200[].auth_source": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/admin/users response:200[].created_at": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/admin/users response:200[].disabled": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "GET /api/admin/users response:200[].display_name": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/admin/users response:200[].id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/admin/users response:200[].last_login_at": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/admin/users response:200[].role": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/admin/users response:200[].username": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/admin/users response:404": {
+      "media": []
+    },
     "GET /api/attack/index": {
       "deprecated": false
     },
@@ -524,6 +715,35 @@
         "string"
       ]
     },
+    "GET /api/auth/methods": {
+      "deprecated": false
+    },
+    "GET /api/auth/methods response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/auth/methods response:200.auth_mode": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/auth/methods response:200.local": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "GET /api/auth/methods response:200.oidc": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
     "GET /api/auth/oidc/callback": {
       "deprecated": false
     },
@@ -574,6 +794,76 @@
       "media": []
     },
     "GET /api/auth/oidc/login response:404": {
+      "media": []
+    },
+    "GET /api/auth/tokens": {
+      "deprecated": false
+    },
+    "GET /api/auth/tokens response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "array"
+      ]
+    },
+    "GET /api/auth/tokens response:200[]": {
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "GET /api/auth/tokens response:200[].created_at": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/auth/tokens response:200[].expires_at": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/auth/tokens response:200[].id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/auth/tokens response:200[].last_used_at": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/auth/tokens response:200[].name": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/auth/tokens response:200[].revoked_at": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "GET /api/auth/tokens response:200[].user_id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/auth/tokens response:200[].username": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "GET /api/auth/tokens response:404": {
       "media": []
     },
     "GET /api/baselines/status": {
@@ -4157,6 +4447,114 @@
         "string"
       ]
     },
+    "PATCH /api/admin/users/{}": {
+      "deprecated": false
+    },
+    "PATCH /api/admin/users/{} body": {
+      "media": [
+        "application/json"
+      ],
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "PATCH /api/admin/users/{} body.disabled": {
+      "required": false,
+      "types": [
+        "boolean",
+        "null"
+      ]
+    },
+    "PATCH /api/admin/users/{} body.display_name": {
+      "maxLength": 128,
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/admin/users/{} body.role": {
+      "enum": [
+        "admin",
+        "analyst",
+        "reader"
+      ],
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/admin/users/{} param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/admin/users/{} response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "object"
+      ]
+    },
+    "PATCH /api/admin/users/{} response:200.auth_source": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/admin/users/{} response:200.created_at": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/admin/users/{} response:200.disabled": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "PATCH /api/admin/users/{} response:200.display_name": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/admin/users/{} response:200.id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/admin/users/{} response:200.last_login_at": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "PATCH /api/admin/users/{} response:200.role": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/admin/users/{} response:200.username": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "PATCH /api/admin/users/{} response:404": {
+      "media": []
+    },
+    "PATCH /api/admin/users/{} response:409": {
+      "media": []
+    },
     "PATCH /api/jobs/{}": {
       "deprecated": false
     },
@@ -4941,6 +5339,277 @@
         "boolean"
       ]
     },
+    "POST /api/admin/tokens": {
+      "deprecated": false
+    },
+    "POST /api/admin/tokens body": {
+      "media": [
+        "application/json"
+      ],
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/admin/tokens body.days": {
+      "default": 90,
+      "maximum": 365.0,
+      "minimum": 1.0,
+      "required": false,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/admin/tokens body.name": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/admin/tokens body.user_id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/admin/tokens response:201": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/admin/tokens response:201.created_at": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/admin/tokens response:201.expires_at": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/admin/tokens response:201.id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/admin/tokens response:201.last_used_at": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/admin/tokens response:201.name": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/admin/tokens response:201.revoked_at": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/admin/tokens response:201.token": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/admin/tokens response:201.user_id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/admin/tokens response:201.username": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/admin/tokens response:400": {
+      "media": []
+    },
+    "POST /api/admin/tokens response:403": {
+      "media": []
+    },
+    "POST /api/admin/tokens response:404": {
+      "media": []
+    },
+    "POST /api/admin/users": {
+      "deprecated": false
+    },
+    "POST /api/admin/users body": {
+      "media": [
+        "application/json"
+      ],
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/admin/users body.display_name": {
+      "default": "",
+      "maxLength": 128,
+      "required": false,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/admin/users body.password": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/admin/users body.role": {
+      "enum": [
+        "admin",
+        "analyst",
+        "reader"
+      ],
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/admin/users body.username": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/admin/users response:201": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/admin/users response:201.auth_source": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/admin/users response:201.created_at": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/admin/users response:201.disabled": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "POST /api/admin/users response:201.display_name": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/admin/users response:201.id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/admin/users response:201.last_login_at": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/admin/users response:201.role": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/admin/users response:201.username": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/admin/users response:400": {
+      "media": []
+    },
+    "POST /api/admin/users response:404": {
+      "media": []
+    },
+    "POST /api/admin/users response:409": {
+      "media": []
+    },
+    "POST /api/admin/users/{}/password": {
+      "deprecated": false
+    },
+    "POST /api/admin/users/{}/password body": {
+      "media": [
+        "application/json"
+      ],
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/admin/users/{}/password body.password": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/admin/users/{}/password param:path:0": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/admin/users/{}/password response:200": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/admin/users/{}/password response:200.id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/admin/users/{}/password response:200.sessions_ended": {
+      "required": true,
+      "types": [
+        "boolean"
+      ]
+    },
+    "POST /api/admin/users/{}/password response:200.username": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/admin/users/{}/password response:400": {
+      "media": []
+    },
+    "POST /api/admin/users/{}/password response:404": {
+      "media": []
+    },
     "POST /api/auth/login": {
       "deprecated": false
     },
@@ -5042,6 +5711,106 @@
       "types": [
         "boolean"
       ]
+    },
+    "POST /api/auth/tokens": {
+      "deprecated": false
+    },
+    "POST /api/auth/tokens body": {
+      "media": [
+        "application/json"
+      ],
+      "required": true,
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/auth/tokens body.days": {
+      "default": 90,
+      "maximum": 365.0,
+      "minimum": 1.0,
+      "required": false,
+      "types": [
+        "integer"
+      ]
+    },
+    "POST /api/auth/tokens body.name": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/auth/tokens response:201": {
+      "media": [
+        "application/json"
+      ],
+      "types": [
+        "object"
+      ]
+    },
+    "POST /api/auth/tokens response:201.created_at": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/auth/tokens response:201.expires_at": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/auth/tokens response:201.id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/auth/tokens response:201.last_used_at": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/auth/tokens response:201.name": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/auth/tokens response:201.revoked_at": {
+      "required": false,
+      "types": [
+        "null",
+        "string"
+      ]
+    },
+    "POST /api/auth/tokens response:201.token": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/auth/tokens response:201.user_id": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/auth/tokens response:201.username": {
+      "required": true,
+      "types": [
+        "string"
+      ]
+    },
+    "POST /api/auth/tokens response:400": {
+      "media": []
+    },
+    "POST /api/auth/tokens response:403": {
+      "media": []
+    },
+    "POST /api/auth/tokens response:404": {
+      "media": []
     },
     "POST /api/baselines/inspect": {
       "deprecated": false

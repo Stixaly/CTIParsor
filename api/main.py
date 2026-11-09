@@ -44,6 +44,7 @@ from api.paths import output_dir, uploads_dir
 limiter = Limiter(key_func=get_remote_address)
 
 from api.routes import (
+    admin,
     attack,
     audit,
     auth,
@@ -338,7 +339,7 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=_ALLOWED_HOSTS, www_redi
 # each operation is in api/auth/permissions.py, and a router added without it
 # would be open.  `GET /api/health`, below, is the one open route.
 _ROUTERS = (jobs, llm, upload, ingest, entities, relationships, progress, policy, coverage, settings, queue,
-            thresholds, overrides, attack, baselines, auth, audit)
+            thresholds, overrides, attack, baselines, auth, admin, audit)
 for _module in _ROUTERS:
     app.include_router(_module.router, dependencies=[Depends(current_user)])
 # Routers with their own access rule instead of a user's role. `/metrics`: loopback,

@@ -8,6 +8,34 @@ Chrome or Edge 111, Safari 16.4 or Firefox 128, or later (all from 2023–2024).
 An older browser skips the parts of the stylesheet it does not support
 (cascade layers, among them Tailwind's reset), and the pages look off.
 
+## Signing in
+
+With `AUTH_MODE=off` (the default) the interface has no sign-in page and no user menu. With
+authentication on, an address you open without a session goes to `/login?next=<the page>`. The page
+shows a username and password form when local accounts are on, and a "Sign in with your organisation"
+link when an identity provider is configured. After a sign-in you land on `next` when it is a path of
+this site, else on the dashboard. A wrong password reads "Invalid username or password."; five failures
+for a username lock it for 15 minutes, and the page says how long to wait. The sidebar shows your name
+and role and a "Sign out" button. The interface hides what your role cannot use (no "New report" for a
+reader; Policy and Settings only for an admin); the server refuses it in any case. When the session
+ends while you work (it lasts 12 hours from the last request), the next request takes you back to the
+sign-in page and then to where you were.
+
+## Access and My tokens
+
+With authentication on, every user has a "My tokens" page (sidebar): the tokens made for their own
+account, a form to create one (a name, and 1 to 365 days, 90 by default) and a Revoke button. A new token is
+shown once, in a box with a Copy button and the warning that it will not be shown again; the page keeps
+only its name, dates and last use. A token carries its user's role.
+
+An admin also has an Access page. The Users table lists every account with its role, source (local or
+identity provider), state and last sign-in. From it an admin creates a local user (username, display name,
+role, a password of 12 characters or more), changes a role, disables or enables an account (disabling asks
+first, ends the user's sessions and revokes no token), and sets a local user's password (it ends their
+sessions and lifts their sign-in lock). Your own row cannot be disabled or demoted. The Tokens table lists
+every token, creates one for a user and revokes one (it asks first). The server's error messages are shown
+as they come. With `AUTH_MODE=off` neither page exists.
+
 ## Workflow
 
 ```

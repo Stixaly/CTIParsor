@@ -7,7 +7,7 @@ route matches gets a JSON 404, not the application page (`api/main.py`).
 ## Authentication
 
 With `AUTH_MODE=off` (the default) no route asks for credentials. With `AUTH_MODE=local`
-every route except `GET /api/health`, `POST /api/auth/login` and the two `/api/auth/oidc/` redirects does, and the role each
+every route except `GET /api/health`, `POST /api/auth/login`, `GET /api/auth/methods` and the two `/api/auth/oidc/` redirects does, and the role each
 operation needs (ADR-0097) is listed in [api-permissions.md](api-permissions.md) and held
 in `api/auth/permissions.py`; a test fails for an operation with no entry. `GET /metrics` keeps its
 own rule whatever the mode: loopback clients, or the `METRICS_TOKEN` bearer (see
@@ -23,14 +23,33 @@ own rule whatever the mode: loopback clients, or the `METRICS_TOKEN` bearer (see
   failures for a username in 15 minutes answer 429 with `Retry-After` for 15 minutes.
 - **OIDC** (`AUTH_MODE=oidc` or `both`; [deployment.md](deployment.md#sign-in-with-an-identity-provider-oidc)).
   `GET /api/auth/oidc/login?next=/path` answers 302 to the provider's authorization endpoint
-  (code flow, PKCE S256, `state`, `nonce`) and sets no cookie. `GET /api/auth/oidc/callback?code=&state=`
+  (code flow, PKCE S256, `state`, `nonce`). `GET /api/auth/oidc/callback?code=&state=`
   checks the state (single use, 10 minutes), exchanges the code, validates the ID token and answers 302 to
   `next` with the session cookie; any failure answers 302 to `/login?error=<code>` (`state`, `token`, `idp`,
   `denied`, `no_role`, `disabled`, `config`, `busy`). Both are open and limited per client address
   (`LOGIN_RATE_LIMIT`); 404 with `AUTH_MODE=off`, 403 with `local`. `next` must be a local path, else `/`. The login sets a short-lived cookie `ctiparsor_oidc` (`HttpOnly`, `SameSite=Lax`, path `/api/auth/oidc`, 10 minutes) that ties the sign-in to the browser that started it; the callback refuses (`state`) a request without the matching cookie, and deletes it in every answer.
   `POST /api/auth/logout` ends the CTIParsor session only.
+- `GET /api/auth/methods` (open) tells the sign-in page what to offer: `{ auth_mode, local, oidc }`.
+  `local` is true for `local` and `both`, `oidc` for `oidc` and `both`; with `AUTH_MODE=off` both are false.
+- **Users and tokens** (404 `Authentication is off` for all of them with `AUTH_MODE=off`). For an `admin`:
+
+  | Method | Path | Description |
+  |---|---|---|
+  | `GET` | `/api/admin/users` | Every user: `id`, `username`, `display_name`, `auth_source`, `role`, `disabled`, `created_at`, `last_login_at`. Never a hash |
+  | `POST` | `/api/admin/users` | Create a local user `{ username, role, display_name?, password }` (201). The password policy of the CLI applies (12 characters or more). 400 for a bad username, a weak password, or when local accounts are off (`AUTH_MODE=oidc`); 409 for a username that is taken |
+  | `PATCH` | `/api/admin/users/{id}` | `{ role?, disabled?, display_name? }`. Disabling ends the user's sessions and revokes no token: a disabled user's tokens are refused until the account is enabled again. 409 when an admin disables or demotes themself, and when the change would leave no enabled admin |
+  | `POST` | `/api/admin/users/{id}/password` | `{ password }`: set a local user's password. It ends that user's sessions and clears their sign-in lock. 400 for a weak password and for an OIDC user |
+  | `GET` | `/api/admin/tokens` | Every token: `id`, `name`, `user_id`, `username`, `created_at`, `expires_at`, `revoked_at`, `last_used_at`. Never the secret or its hash |
+  | `POST` | `/api/admin/tokens` | `{ user_id, name, days? }` (1 to 365, default 90) → 201 with the record and `token`, the only time the token is sent. 404 for an unknown user |
+  | `DELETE` | `/api/admin/tokens/{id}` | Revoke a token. 404 when there is no active token with that id |
+
+  For any signed-in user, for their own tokens only (another user's id is a 404): `GET /api/auth/tokens`,
+  `POST /api/auth/tokens` (`{ name, days? }`, same answer as the admin creation) and
+  `DELETE /api/auth/tokens/{id}`. A token made here carries the role of its user. Both creations
+  (`POST /api/auth/tokens`, `POST /api/admin/tokens`) need a signed-in session: called with a bearer
+  token they answer 403, so a stolen token cannot mint others that outlive its revocation.
 - Before any route runs, a request for `/api/...` or the docs (`/docs`, `/redoc`, `/openapi.json`) without a
-  valid session or token gets 401 (not for `GET /api/health`, `POST /api/auth/login` and the two OIDC routes); the body is not read.
+  valid session or token gets 401 (not for `GET /api/health`, `POST /api/auth/login`, `GET /api/auth/methods` and the two OIDC routes); the body is not read.
   `POST /api/auth/login` is also limited per client address (`LOGIN_RATE_LIMIT`, 429 with `Retry-After`).
   A request that slides the session sends the cookie again with the new `Max-Age`; the progress stream checks
   the session or token every 60 seconds and ends with a `done` event (`error: session ended`) when it no longer holds.

@@ -122,9 +122,9 @@ No telemetry, no analytics, no outbound calls except the **optional** LLM provid
 pipeline still produces valid STIX. ML models are downloaded once and cached.
 
 ## What this is NOT
-- Not yet a finished multi-user service. `AUTH_MODE=local` gives local accounts, three
+- Not yet a qualified multi-user service. `AUTH_MODE=local` gives local accounts, three
   roles (`reader`, `analyst`, `admin`) checked on every route, server-side sessions with a
-  CSRF token, hashed API tokens, and, with `AUTH_MODE=oidc` or `both`, sign-in with an OpenID Connect provider (code flow with PKCE; the role comes from the groups at each sign-in; no logout at the provider) ([ADR-0097](docs/adr/0097-1-0-is-a-shared-service-for-one-team.md) items 14 and 15), and an audit trail of each state-changing request, read with `GET /api/audit` or from the JSON lines on standard output (item 17; [docs/operations.md](docs/operations.md#audit-trail)). Not there yet: the sign-in page of the web interface and the admin screens for users and tokens. Until they land, create accounts and tokens with `python -m api.admin`. With `AUTH_MODE=off` (the
+  CSRF token, hashed API tokens, and, with `AUTH_MODE=oidc` or `both`, sign-in with an OpenID Connect provider (code flow with PKCE; the role comes from the groups at each sign-in; no logout at the provider) ([ADR-0097](docs/adr/0097-1-0-is-a-shared-service-for-one-team.md) items 14 and 15). The web interface has a sign-in page and admin screens for users and tokens, and every state-changing request is recorded in an audit trail, read with `GET /api/audit` or from the JSON lines on standard output (item 17; [docs/operations.md](docs/operations.md#audit-trail)). Not done yet: the 1.0 qualification of this service (the failure recipe and the journey with the real models run on the release candidate, [1.0-readiness.md](docs/releases/1.0-readiness.md)). With `AUTH_MODE=off` (the
   default) there is no authn/authz at all.
 - Not hardened for internet exposure — keep it on localhost or behind your own auth proxy.
   `API_HOST` in `.env` controls the bind address; see [docs/deployment.md](docs/deployment.md)
