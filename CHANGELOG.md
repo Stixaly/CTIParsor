@@ -9,6 +9,9 @@ theme.
 
 ## [Unreleased]
 
+- **Where the relation false positives come from** (`docs/eval/relation-false-positives-2026-11.md`, `scripts/relation_fp_breakdown.py`). Of the 2,041 false positives of the in-house bundle run, 66.3 % are
+  the co-mention `targets` links (every threat actor of a report to every target it names, none true), 17.0 %
+  Stage 4b ATT&CK-reference and transitive edges. Relations quoted from the report have a precision of 0.307.
 - **Robustness fixes for 27 reported issues (#609-#635).**
   - *API:* a NUL byte or a lone UTF-16 surrogate gets a 4xx, never a 500. This covers the login (the
     wrong-password 401), the admin user and token bodies, the own-token name, the jobs and audit
