@@ -9,6 +9,9 @@ theme.
 
 ## [Unreleased]
 
+- **Failure recipe run on the candidate** (ADR-0097 item 23, `docs/releases/1.0-failure-recipe.md`): on the CI
+  image of `5aa3e32`, worker-killed, llm-down, database-down and restore-drill passed; disk-nearly-full was not
+  checked (628.9 GiB free). The documented restore line took 6.7 s on a 26 MB dump.
 - **Where the relation false positives come from** (`docs/eval/relation-false-positives-2026-11.md`, `scripts/relation_fp_breakdown.py`). Of the 2,041 false positives of the in-house bundle run, 66.3 % are
   the co-mention `targets` links (every threat actor of a report to every target it names, none true), 17.0 %
   Stage 4b ATT&CK-reference and transitive edges. Relations quoted from the report have a precision of 0.307.
