@@ -23,7 +23,7 @@ from typing import Callable, Optional
 from api.logging_config import get_logger
 from models.schemas import STIX_RELATIONSHIP_TYPES
 from pipeline.evidence_span import stated_in, words
-from pipeline.llm_parse import fit_report, strip_reasoning
+from pipeline.llm_parse import JsonScan, ScanExhausted, fit_report, strip_reasoning
 from pipeline.stage4b_graph_completion import LONG_DISTANCE_TYPES, InferredEdge
 from pipeline.stix_access import field
 
@@ -149,18 +149,17 @@ def _parse(raw: str) -> Optional[dict]:
     `<think>` block of a reasoning model is dropped first (#503): a draft
     object in it is not the answer."""
     cleaned = strip_reasoning(raw)
-    decoder = json.JSONDecoder()
+    scan = JsonScan(cleaned)
     for i, ch in enumerate(cleaned):
         if ch == "{":
             try:
-                obj, _ = decoder.raw_decode(cleaned, i)
+                obj, _ = scan.decode(i)
                 if isinstance(obj, dict):
                     return obj
             except json.JSONDecodeError:
                 continue
-            except RecursionError:
-                # Nested past the recursion limit: stop scanning (#617).
-                return None
+            except ScanExhausted:
+                return None         # too deep, or too costly, to read (#617)
     return None
 
 

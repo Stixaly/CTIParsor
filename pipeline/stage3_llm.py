@@ -16,7 +16,7 @@ from api.logging_config import get_logger
 from models.schemas import EvidenceLabel, RawEntity
 from pipeline import attack_data
 from pipeline.env_flags import env_int
-from pipeline.llm_parse import SPOTLIGHT_RULE, fit_report, strip_reasoning
+from pipeline.llm_parse import SPOTLIGHT_RULE, JsonScan, ScanExhausted, fit_report, strip_reasoning
 from pipeline.stage3f_ttp_select import TtpReview
 from pipeline.temporal import (
     ROLES as _TIME_ROLES,
@@ -1485,17 +1485,17 @@ def _parse_llm_response(raw_text: str) -> LLMEnrichmentResult | None:
     """
     # Use raw_decode() to find the first syntactically valid JSON object in
     # the LLM output, ignoring any surrounding prose or markdown fences.
-    decoder = json.JSONDecoder()
+    scan = JsonScan(raw_text)
     parsed_json: dict | None = None
     first = raw_text.find("{")
     for i, ch in enumerate(raw_text):
         if ch == "{":
             try:
-                obj, _ = decoder.raw_decode(raw_text, i)
+                obj, _ = scan.decode(i)
             except json.JSONDecodeError:
                 continue
-            except RecursionError:
-                # Nested past the recursion limit: stop scanning, as for a
+            except ScanExhausted:
+                # Too deep, or too costly, to read: stop scanning, as for a
                 # truncated answer, instead of retrying at each later "{" (#617).
                 break
             if isinstance(obj, dict):

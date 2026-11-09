@@ -47,7 +47,7 @@ from api.logging_config import get_logger
 from models.schemas import EvidenceLabel
 from pipeline import attack_data
 from pipeline.env_flags import env_int
-from pipeline.llm_parse import fit_report
+from pipeline.llm_parse import JsonScan, ScanExhausted, fit_report
 from pipeline.regex_safety import compile_pattern
 from pipeline.ttp_retrieval import TtpCandidate
 
@@ -246,7 +246,7 @@ def parse_selection(raw: str) -> list[dict] | None:
     "(or [] if none)" before the real answer is not one (#378)."""
     if not raw:
         return None
-    decoder = json.JSONDecoder()
+    scan = JsonScan(raw)
     abstention: list[dict] | None = None
     i = 0
     while i < len(raw):
@@ -254,13 +254,13 @@ def parse_selection(raw: str) -> list[dict] | None:
             i += 1
             continue
         try:
-            obj, end = decoder.raw_decode(raw, i)
+            obj, end = scan.decode(i)
         except ValueError:
             i += 1
             continue
-        except RecursionError:
-            # Nested past the recursion limit: later brackets inside it would
-            # fail the same way, one slow decode each.  Unparsable (#617).
+        except ScanExhausted:
+            # Too deep, or too costly, to read: each later bracket inside it
+            # would be another slow decode.  Unparsable (#617).
             return None
         if isinstance(obj, dict) and isinstance(obj.get("selected"), list):
             return [x for x in obj["selected"] if isinstance(x, dict)]
