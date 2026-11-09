@@ -111,6 +111,17 @@ theme.
   logged where `pg_dump` is. The function is removed. Back up with `pg_dump`
   and the `cti-state` archive, as docs/docker.md describes.
 
+- **Sign-in and access management in the web interface** (ADR-0097 items 14
+  and 15, parts C and D). With `AUTH_MODE` on, the interface has a sign-in
+  page (local account and, when configured, the organisation's provider), a
+  user menu with Sign out, and returns to the page you were on after a 401;
+  controls a role cannot use are hidden (the server still decides). Admins get
+  an Access page (create users, change roles, disable, set passwords, create
+  and revoke any token) and every user a My tokens page; a token is shown once,
+  and is created only from a signed-in session, never with another token. New
+  routes `GET /api/auth/methods` (open), `/api/admin/users`, `/api/admin/tokens`
+  and `/api/auth/tokens`. With `AUTH_MODE=off` nothing changes.
+
 - **Bounds** (ADR-0097 work item 20). `GET /api/jobs` takes optional
   `limit` and `cursor` (keyset pages, `X-Next-Cursor`); without them the list
   is unchanged. A job whose lease is lost more than `JOB_MAX_ATTEMPTS` times

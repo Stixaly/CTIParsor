@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { checkSession } from '../api/client'
 import type { PartialGraphEvent, ProgressEvent } from '../types'
 
 // Maximum number of consecutive SSE errors before giving up on the stream.
@@ -55,6 +56,9 @@ export function useSSE(jobId: string | null) {
     // Only close and mark done after repeated consecutive errors — a single
     // error is usually a transient network blip; EventSource will auto-reconnect.
     es.onerror = () => {
+      // The browser does not retry a refused stream (readyState CLOSED): a 401 ends the
+      // session, and asking /api/auth/me says so (the client then goes to /login).
+      if (es.readyState === 2) void checkSession()
       errorCountRef.current += 1
       if (errorCountRef.current >= MAX_ERRORS) {
         setLost(true)

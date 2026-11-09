@@ -11,6 +11,7 @@ import hmac
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Any
 from uuid import uuid4
 
 from api.auth import passwords
@@ -27,6 +28,14 @@ _USERNAME_RE = compile_pattern(r"[a-z0-9][a-z0-9._@-]{0,63}")
 
 class AuthError(ValueError):
     """A request to change accounts that is refused; the message is for the operator."""
+
+
+class UsernameTakenError(AuthError):
+    """An account with that username exists."""
+
+
+class LastAdminError(AuthError):
+    """The change would leave no enabled admin."""
 
 
 @dataclass(frozen=True)
@@ -102,7 +111,7 @@ def create_user(username: str, role: str, *, password: str | None = None, displa
         raise AuthError("auth_source must be local or oidc")
     conn = get_conn()
     if conn.execute("SELECT 1 FROM users WHERE username=?", (name,)).fetchone():
-        raise AuthError(f"the username {name!r} is taken")
+        raise UsernameTakenError(f"the username {name!r} is taken")
     uid = str(uuid4())
     conn.execute(
         "INSERT INTO users (id, username, display_name, auth_source, oidc_subject, password_hash, role, "
@@ -127,9 +136,47 @@ def find_user(username: str) -> User | None:
 
 def list_users() -> list[dict]:
     rows = get_conn().execute(
-        "SELECT username, display_name, auth_source, role, disabled, created_at, last_login_at "
+        "SELECT id, username, display_name, auth_source, role, disabled, created_at, last_login_at "
         "FROM users ORDER BY username").fetchall()
     return [dict(zip(r.keys(), r, strict=True)) for r in rows]
+
+
+def user_record(user_id: str) -> dict | None:
+    """One row of `list_users`, or None."""
+    row = get_conn().execute(
+        "SELECT id, username, display_name, auth_source, role, disabled, created_at, last_login_at "
+        "FROM users WHERE id=?", (user_id,)).fetchone()
+    return dict(zip(row.keys(), row, strict=True)) if row else None
+
+
+def update_user(user_id: str, *, role: str | None = None, disabled: bool | None = None,
+                display_name: str | None = None) -> User:
+    """Change an account's role, disabled flag and display name (what is None stays).
+    Disabling ends the account's sessions; its tokens stay in the table but are refused
+    while it is disabled, and work again when it is enabled.  Raises AuthError for an
+    unknown user or role, and LastAdminError when the change would leave no enabled admin."""
+    user = get_user(user_id)
+    if user is None:
+        raise AuthError("no such user")
+    if role is not None and role not in ROLES:
+        raise AuthError(f"the role must be one of {', '.join(ROLES)}")
+    name = user.display_name if display_name is None else display_name.strip() or user.username
+    new_role = user.role if role is None else role
+    new_disabled = user.disabled if disabled is None else disabled
+    conn = get_conn()
+    with transaction(conn):
+        # One change at a time, so two admins cannot each remove the other.
+        conn.execute("SELECT pg_advisory_xact_lock(hashtext('ctiparsor.admins'))")
+        if user.role == "admin" and not user.disabled and (new_role != "admin" or new_disabled):
+            others = conn.execute("SELECT 1 FROM users WHERE role='admin' AND disabled=0 AND id<>?",
+                                  (user_id,)).fetchone()
+            if others is None:
+                raise LastAdminError("this is the last enabled admin; make another admin first")
+        conn.execute("UPDATE users SET role=?, disabled=?, display_name=? WHERE id=?",
+                     (new_role, 1 if new_disabled else 0, name, user_id))
+        if new_disabled:
+            conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+    return User(user.id, user.username, name, user.auth_source, new_role, new_disabled)
 
 
 def admin_exists() -> bool:
@@ -336,22 +383,40 @@ def find_token_user(token: str) -> User | None:
     return _user(row)
 
 
-def list_tokens(username: str | None = None) -> list[dict]:
-    """The tokens (never the secrets), newest first; those of one user when `username` is given."""
-    sql = ("SELECT t.id, t.name, u.username, t.created_at, t.expires_at, t.revoked_at, t.last_used_at "
-           "FROM api_tokens t JOIN users u ON u.id = t.user_id")
-    params: tuple = ()
+_SELECT_API_TOKENS = ("SELECT t.id, t.name, t.user_id, u.username, t.created_at, t.expires_at, t.revoked_at, "
+                 "t.last_used_at FROM api_tokens t JOIN users u ON u.id = t.user_id")
+
+
+def list_tokens(username: str | None = None, *, user_id: str | None = None) -> list[dict]:
+    """The tokens (never the secrets), newest first; those of one user when `username`
+    or `user_id` is given."""
+    sql = _SELECT_API_TOKENS
+    params: tuple[Any, ...] = ()
     if username is not None:
         sql += " WHERE u.username=?"
         params = (normalise_username(username),)
+    elif user_id is not None:
+        sql += " WHERE t.user_id=?"
+        params = (user_id,)
     rows = get_conn().execute(sql + " ORDER BY t.created_at DESC", params).fetchall()
     return [dict(zip(r.keys(), r, strict=True)) for r in rows]
 
 
-def revoke_token(token_id: str) -> bool:
-    cur = get_conn().execute("UPDATE api_tokens SET revoked_at=? WHERE id=? AND revoked_at IS NULL",
-                             (_ts(_now()), token_id))
-    return cur.rowcount > 0
+def get_token(token_id: str) -> dict | None:
+    """One token's record (never the secret), or None."""
+    row = get_conn().execute(_SELECT_API_TOKENS + " WHERE t.id=?", (token_id,)).fetchone()
+    return dict(zip(row.keys(), row, strict=True)) if row else None
+
+
+def revoke_token(token_id: str, *, user_id: str | None = None) -> bool:
+    """Revoke a token that is not revoked yet; with `user_id`, only if it is that user's.
+    False when there is nothing to revoke."""
+    sql = "UPDATE api_tokens SET revoked_at=? WHERE id=? AND revoked_at IS NULL"
+    params: tuple[Any, ...] = (_ts(_now()), token_id)
+    if user_id is not None:
+        sql += " AND user_id=?"
+        params += (user_id,)
+    return get_conn().execute(sql, params).rowcount > 0
 
 
 # ── Sign-in with an identity provider (api/auth/oidc.py) ─────────────────────

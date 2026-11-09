@@ -473,3 +473,16 @@ def test_with_authentication_off_the_owner_stays_empty(temp_db_client, temp_db):
     assert response.status_code == 200
     with temp_db.get_conn() as conn:
         assert conn.execute("SELECT imported_by FROM jobs").fetchone()["imported_by"] is None
+
+
+# ── Sign-in methods (the login page) ─────────────────────────────────────────
+
+def test_the_sign_in_methods_are_open_and_follow_auth_mode(auth_client, monkeypatch):
+    assert auth_client.get("/api/auth/methods").json() == {"auth_mode": "local", "local": True, "oidc": False}
+    for mode, local, oidc in (("oidc", False, True), ("both", True, True)):
+        monkeypatch.setenv("AUTH_MODE", mode)
+        assert auth_client.get("/api/auth/methods").json() == {"auth_mode": mode, "local": local, "oidc": oidc}
+
+
+def test_the_sign_in_methods_with_authentication_off(temp_db_client):
+    assert temp_db_client.get("/api/auth/methods").json() == {"auth_mode": "off", "local": False, "oidc": False}

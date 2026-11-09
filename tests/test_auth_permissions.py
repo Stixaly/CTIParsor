@@ -40,8 +40,8 @@ def test_every_route_file_is_included_with_the_access_check():
 def test_every_role_is_a_known_one_and_only_health_login_and_the_oidc_redirects_are_open():
     assert {role for role in PERMISSIONS.values()} <= {OPEN, *ROLES}
     assert sorted(op for op, role in PERMISSIONS.items() if role == OPEN) == [
-        ("GET", "/api/auth/oidc/callback"), ("GET", "/api/auth/oidc/login"), ("GET", "/api/health"),
-        ("POST", "/api/auth/login")]
+        ("GET", "/api/auth/methods"), ("GET", "/api/auth/oidc/callback"), ("GET", "/api/auth/oidc/login"),
+        ("GET", "/api/health"), ("POST", "/api/auth/login")]
 
 
 def test_an_operation_that_is_not_listed_has_no_role():

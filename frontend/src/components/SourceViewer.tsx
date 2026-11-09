@@ -12,6 +12,7 @@
  * Splitting the dispatch out of Review.tsx keeps that file focused on review
  * state and makes `sourceKind` unit-testable.
  */
+import { apiFetch } from '../api/client'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { FileText, Loader2, AlertTriangle } from 'lucide-react'
 import PdfViewer from './PdfViewer'
@@ -106,7 +107,7 @@ function TextSource({ url, filename, entities, focusedId, onFocusEntity, onEntit
     let cancelled = false
     setText(null); setError(null)
     markRefs.current = {}
-    fetch(url)
+    apiFetch(url)
       .then(res => { if (!res.ok) throw new Error(`${res.status}`); return res.text() })
       .then(t => { if (!cancelled) setText(t) })
       .catch(() => { if (!cancelled) setError('Could not load the source file.') })

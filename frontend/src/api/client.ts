@@ -1,6 +1,17 @@
 import type { Job, Entity, Relationship, StixBundle, BundleLedger, CoverageResult, CoverageRule, CoverageReportRules, DetectionProposals, DetectionCorpus, CorpusConfig, CorpusRebuildSummary, CorpusSyncResult, FormatInfo, ExportFacets, ExportSelection, ExportAxis, LastRun, RuleLookupResult, ThresholdsInfo, AttackIndex, MitreEntry, BaselineIntake, BaselineStatus, EgressPreview } from '../types'
 
+import { sessionEnded, withCsrf } from './session'
+
 const BASE = '/api'
+
+/** `fetch` for the API: sends the session cookie, adds the CSRF token to a write,
+ *  and sends the browser to the sign-in page on a 401 (src/api/session.ts). */
+export async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  const headers = withCsrf(init.method, init.headers)
+  const res = await fetch(input, { ...init, ...(headers ? { headers } : {}), credentials: 'same-origin' })
+  if (res.status === 401) sessionEnded()
+  return res
+}
 
 /** The STIX 2.1 schemas refused the bundle (409 from GET /bundle, POST /finalize
  *  and PATCH /jobs/{id}).  It exists, so it is not "not built yet"; and it is
@@ -44,8 +55,8 @@ function refusedErrors(body: string): string[] | null {
   return null
 }
 
-async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+export async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await apiFetch(`${BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...init?.headers },
     ...init,
   })
@@ -56,6 +67,16 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(`${res.status}: ${msg}`)
   }
   return res.json()
+}
+
+/** Ask the server whether the session still holds; a 401 sends the browser to /login.
+ *  For a stream (EventSource) that was refused and tells nothing else. */
+export async function checkSession(): Promise<void> {
+  try {
+    await apiFetch(`${BASE}/auth/me`)
+  } catch {
+    // Unreachable server: nothing to learn
+  }
 }
 
 // Jobs
@@ -104,7 +125,7 @@ export async function uploadFile(file: File, options?: UploadOptions): Promise<{
   if (options?.papLevel) form.append('pap_level', options.papLevel)
   if (options?.baselineStix) form.append('baseline_stix', options.baselineStix)
   if (options?.baselineReportId) form.append('baseline_report_id', options.baselineReportId)
-  const res = await fetch(`${BASE}/upload`, { method: 'POST', body: form })
+  const res = await apiFetch(`${BASE}/upload`, { method: 'POST', body: form })
   if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`)
   return res.json()
 }
@@ -118,7 +139,7 @@ export async function inspectBaseline(file: File, reportId?: string): Promise<Ba
   const form = new FormData()
   form.append('file', file)
   if (reportId) form.append('report_id', reportId)
-  const res = await fetch(`${BASE}/baselines/inspect`, { method: 'POST', body: form })
+  const res = await apiFetch(`${BASE}/baselines/inspect`, { method: 'POST', body: form })
   if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`)
   return res.json()
 }
@@ -193,7 +214,7 @@ export const bulkUpdateRelationships = (
 /** The ATT&CK index of the release the API runs (ADR-0087): the selected
  *  track's mitre_index.json, its version in the X-Attack-Release header. */
 export async function fetchAttackIndex(): Promise<AttackIndex> {
-  const res = await fetch(`${BASE}/attack/index`)
+  const res = await apiFetch(`${BASE}/attack/index`)
   if (!res.ok) throw new Error(`${res.status}: ${await res.text().catch(() => res.statusText)}`)
   const body = await res.json() as { techniques?: MitreEntry[]; tactics?: MitreEntry[] }
   return {
@@ -280,7 +301,7 @@ export async function downloadExportSelection(
   jobId: string,
   ruleIds: string[],
 ): Promise<{ blob: Blob; filename: string }> {
-  const res = await fetch(`${BASE}/jobs/${encodeURIComponent(jobId)}/detections/export`, {
+  const res = await apiFetch(`${BASE}/jobs/${encodeURIComponent(jobId)}/detections/export`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ rule_ids: ruleIds }),

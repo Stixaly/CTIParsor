@@ -68,6 +68,15 @@ vi.mock('../api/client', async () => ({
   sourceUrl: (id: string) => `/api/jobs/${id}/source`,
   detectionsExportUrl: (id: string) => `/api/jobs/${id}/detections/export`,
   errorDetail: (e: unknown) => String(e),
+  apiFetch: (input: string, init?: RequestInit) => globalThis.fetch(input, { ...init, credentials: 'same-origin' }),
+}))
+
+// The whole App is rendered below: authentication is off, as it is by default.
+vi.mock('../api/auth', async importOriginal => ({
+  ...(await importOriginal<typeof import('../api/auth')>()),
+  fetchMe: () => Promise.resolve({
+    auth_mode: 'off', username: null, display_name: null, role: null, auth_source: null, csrf_token: null,
+  }),
 }))
 
 // The source tab pulls in pdf.js, which needs canvas APIs jsdom does not have.
@@ -445,7 +454,7 @@ describe('Review — the Detection rules export follows promotions (#366)', () =
     await opened()
     fireEvent.click(await screen.findByRole('button', { name: /Detection rules · 3/ }))
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1))
-    expect(fetchSpy).toHaveBeenCalledWith('/api/jobs/job-1/detections/export')
+    expect(fetchSpy).toHaveBeenCalledWith('/api/jobs/job-1/detections/export', { credentials: 'same-origin' })
   }, 20_000)
 })
 

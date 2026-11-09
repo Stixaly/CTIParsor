@@ -7,6 +7,11 @@ import Graph from './pages/Graph'
 import Coverage from './pages/Coverage'
 import Policy from './pages/Policy'
 import Settings from './pages/Settings'
+import Login from './pages/Login'
+import Access from './pages/Access'
+import Account from './pages/Account'
+import { AuthProvider } from './context/AuthContext'
+import { RequireAuth, RequireRole, RequireSession } from './components/RequireAuth'
 
 // Keyed by job: another job remounts the review, so nothing from the last one
 // (bootstrap refs, "review completed", "bundle outdated") carries over (#450).
@@ -19,20 +24,35 @@ function ReviewForJob() {
 export default function App() {
   return (
     <ThemeProvider>
-      <Routes>
-        {/* ── Sidebar layout — Dashboard + Policy ── */}
-        <Route element={<Layout />}>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/policy"    element={<Policy />} />
-          <Route path="/settings"  element={<Settings />} />
-        </Route>
+      <AuthProvider>
+        <Routes>
+          {/* ── Sign-in — outside the layout, and open ── */}
+          <Route path="/login" element={<Login />} />
 
-        {/* ── Full-screen — Review + Graph (no sidebar) ── */}
-        <Route path="/review/:jobId" element={<ReviewForJob />} />
-        <Route path="/graph/:jobId"  element={<Graph />} />
-        <Route path="/coverage/:jobId" element={<Coverage />} />
-      </Routes>
+          <Route element={<RequireAuth />}>
+            {/* ── Sidebar layout — Dashboard + Policy ── */}
+            <Route element={<Layout />}>
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route element={<RequireRole role="admin" />}>
+                <Route path="/policy"    element={<Policy />} />
+                <Route path="/settings"  element={<Settings />} />
+              </Route>
+              <Route element={<RequireSession />}>
+                <Route path="/account"   element={<Account />} />
+                <Route element={<RequireRole role="admin" />}>
+                  <Route path="/access"  element={<Access />} />
+                </Route>
+              </Route>
+            </Route>
+
+            {/* ── Full-screen — Review + Graph (no sidebar) ── */}
+            <Route path="/review/:jobId" element={<ReviewForJob />} />
+            <Route path="/graph/:jobId"  element={<Graph />} />
+            <Route path="/coverage/:jobId" element={<Coverage />} />
+          </Route>
+        </Routes>
+      </AuthProvider>
     </ThemeProvider>
   )
 }
