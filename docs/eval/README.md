@@ -339,6 +339,7 @@ Measurement pages that the sections above do not link:
 - [baseline-2026-09.md](baseline-2026-09.md) — the shipped pipeline on the AnnoCTR dev split (16 reports), the reference that later changes are compared with.
 - [baseline-2026-10.md](baseline-2026-10.md) — the LLM selector (`TTP_MODE=select`, ADR-0072) against the best configuration measured so far, on dev; the test split is run once.
 - [inhouse-bundle-2026-11.md](inhouse-bundle-2026-11.md) — the exported bundle on the 8 in-house reports, 0.6.0 against the 1.0 candidate at the same configuration (2026-11-09): the same bundles, so the same figures.
+- [relation-false-positives-2026-11.md](relation-false-positives-2026-11.md) — where the 2,041 relation false positives of the 1.0 candidate run come from: producing method, inference rule, relationship type, endpoints, gold link, and a 30-sample reading against the text (2026-11-09).
 - [gazetteer-policy-2026-10.md](gazetteer-policy-2026-10.md) — Stage 2b with and without the gazetteer's ordinary-word policy, on AnnoCTR train and dev.
 - [ner-precision-2026-10.md](ner-precision-2026-10.md) — the CyNER and spaCy precision filters (ADR-0088), designed on train and measured on dev; two adopted.
 - [ner-malware-2026-10.md](ner-malware-2026-10.md) — one malware-precision lead, measured once on AnnoCTR test (2026-10-19): not adopted.
