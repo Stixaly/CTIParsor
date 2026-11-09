@@ -13,6 +13,12 @@ theme.
   `docs/releases/1.0-model-journey.md`): a PDF upload and a URL capture on a running stack, checked for the
   job's end, the stages and models that ran, the extraction and a STIX 2.1 bundle with no dangling
   relationship. Its first run, on the CI image of `5aa3e32` with vLLM Qwen3.8 27B, passed every check.
+- **Failure recipe run on the candidate** (ADR-0097 item 23, `docs/releases/1.0-failure-recipe.md`): on the CI
+  image of `5aa3e32`, worker-killed, llm-down, database-down and restore-drill passed; disk-nearly-full was not
+  checked (628.9 GiB free). The documented restore line took 6.7 s on a 26 MB dump.
+- **Where the relation false positives come from** (`docs/eval/relation-false-positives-2026-11.md`, `scripts/relation_fp_breakdown.py`). Of the 2,041 false positives of the in-house bundle run, 66.3 % are
+  the co-mention `targets` links (every threat actor of a report to every target it names, none true), 17.0 %
+  Stage 4b ATT&CK-reference and transitive edges. Relations quoted from the report have a precision of 0.307.
 - **Robustness fixes for 27 reported issues (#609-#635).**
   - *API:* a NUL byte or a lone UTF-16 surrogate gets a 4xx, never a 500. This covers the login (the
     wrong-password 401), the admin user and token bodies, the own-token name, the jobs and audit
