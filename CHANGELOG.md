@@ -9,6 +9,9 @@ theme.
 
 ## [Unreleased]
 
+- **Failure recipe run on the candidate** (ADR-0097 item 23, `docs/releases/1.0-failure-recipe.md`): on the CI
+  image of `5aa3e32`, worker-killed, llm-down, database-down and restore-drill passed; disk-nearly-full was not
+  checked (628.9 GiB free). The documented restore line took 6.7 s on a 26 MB dump.
 - **Robustness fixes for 27 reported issues (#609-#635).**
   - *API:* a NUL byte or a lone UTF-16 surrogate gets a 4xx, never a 500. This covers the login (the
     wrong-password 401), the admin user and token bodies, the own-token name, the jobs and audit
