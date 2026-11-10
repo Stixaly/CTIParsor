@@ -85,6 +85,31 @@ extracted was in the bundle). Observables: 0 of 15 exported as an Indicator.
 The per-report figures are the same for 0.6.0. A cell with a gold of 0
 (`0/0`) has an F1 of 0 by convention: its false positives are what it measures.
 
+## The candidate at 5aa3e32 (2026-11-09)
+
+The candidate above (`fe0b0f3`) predates authentication, the egress policy
+and the audit trail (ADR-0097). The same run was made again on `5aa3e32`,
+`main` once those were merged, to measure the release candidate itself.
+
+| | |
+|---|---|
+| Commit | `5aa3e32` (`main` on 2026-11-09) |
+| Image of that commit | `ghcr.io/stixaly/ctiparsor@sha256:ff0c3e88e403fc9dc1ad46332f517444154a39d793de9e5f656683f3f86df559` (`sha-5aa3e327c841a728bfa31213f1c4a413b32a97aa`, attestation verified with `gh attestation verify`) |
+| Run | `inhouse-bundle-5aa3e32`, 2026-11-09 20:31 to 2026-11-10 01:43 UTC, 8 of 8 reports |
+| Settings | the same as both runs above; extraction prompt fingerprint `606528fb5beba5c6` |
+
+The run is from the source at that commit, not inside the image; the digest
+names the image the same commit builds.
+
+**Result.** `inhouse-compare` of `inhouse-bundle-candidate` against
+`inhouse-bundle-5aa3e32` gives a delta of 0 on every layer, in the aggregate
+and per report: every figure of the tables above holds for `5aa3e32`. The
+bundles hold the same objects with the same content, and the same
+relationships (source, type, target and description) on all 8 reports; only
+the identifiers and timestamps of the relationships and of the report object
+differ, which each build generates. ADR-0097 changes who may run and read a
+report, not what is extracted from it.
+
 ## Reading
 
 - **The comparison.** No regression and no gain between 0.6.0 and the

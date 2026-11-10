@@ -9,6 +9,9 @@ theme.
 
 ## [Unreleased]
 
+- **The 1.0 candidate measured on `5aa3e32`** (`docs/eval/inhouse-bundle-2026-11.md`): the in-house set scored on
+  the exported bundle gives the same figures as `fe0b0f3` on every layer; authentication, egress and audit change no
+  extraction.
 - **Docs caught up with authentication, egress and audit.** An audit of README and docs/ against the code
   corrected the statements that said there is no authentication, the schema doc (migrations 17-20), the
   TLP limit on hosted LLM providers (a key alone does not turn Stage 3 on under `STIX_TLP=amber`), the API
