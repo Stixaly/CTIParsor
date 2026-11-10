@@ -9,6 +9,48 @@ theme.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-10
+
+A minor release under ADR-0085 §8: it adds schema migrations and API
+operations, and changes bundle output. It carries the shared-service work of
+ADR-0097: opt-in authentication (local accounts, OpenID Connect), roles per
+operation, an audit trail, the TLP egress policy, `/metrics`, scheduled
+backups and bounds on the queue, with the qualification runs of the 1.0
+candidate (failure recipe, the journey with the real models, the in-house
+measurement on the exported bundle).
+
+- **Schema migrations 17 to 20**, applied at start: `jobs.attempts` (17); the
+  account tables and `jobs.imported_by` (18); `oidc_logins` (19);
+  `audit_events` (20). Back up before upgrading (docs/upgrading.md).
+- **API**: the sign-in, account, admin and audit operations, `GET /metrics`,
+  optional pagination of `GET /api/jobs`, 507 on a nearly full disk, and the
+  response models in the OpenAPI schema. With `AUTH_MODE=off`, the default,
+  every route answers as before.
+- **Configuration added**: `AUTH_MODE`, `SESSION_TTL_HOURS`,
+  `LOGIN_RATE_LIMIT`, `OIDC_*`, `AUDIT_RETENTION_DAYS`, `LLM_LOCAL_HOSTS`,
+  `JOB_MAX_ATTEMPTS`, `UPLOAD_MIN_FREE_MB`, `METRICS_TOKEN`, `BACKUP_*`,
+  `CORPUS_TARBALL_MAX_BYTES`, `CORPUS_EXTRACT_MAX_BYTES`.
+- **Bundles change** for the same report: Stages 3d, 3doc and 3f run by
+  default, and the Anthropic defaults move to the Claude 5 generation.
+
+**Upgrade notes.**
+
+- **A hosted LLM no longer receives an AMBER report.** An unmarked report is
+  AMBER (`STIX_TLP=amber`), and AMBER, AMBER+STRICT and RED go only to a local
+  provider. With `anthropic`, `gemini` or `mistral`, Stage 3 is then skipped,
+  with the reason in the stage report. Mark the report CLEAR or GREEN, set
+  `STIX_TLP`, or use a local model.
+- **`AUTH_MODE=off` refuses a published address that is not loopback.** A
+  stack with `CTI_BIND` beyond 127.0.0.1 does not start until `AUTH_MODE` is
+  `local`, `oidc` or `both` (docs/deployment.md, *Authentication*). Create the
+  first admin with `python -m api.admin create-admin --username <name>`.
+- More LLM calls per report: about 1.4 times for 3d and 3f each, and one
+  whole-report call for 3doc. Set `ENABLE_STIX_VERIFICATION=false`,
+  `ENABLE_DOCUMENT_LEVEL_RELATIONS=false` or `ENABLE_TTP_VERIFICATION=false` to
+  keep the 0.6.0 behaviour.
+- A local model needs a longer `LLM_TIMEOUT` than the 120 s default: the
+  failure recipe's stack timed out at 120 s with Qwen3.8 27B and ran at 600 s.
+
 - **The 1.0 candidate measured on `5aa3e32`** (`docs/eval/inhouse-bundle-2026-11.md`): the in-house set scored on
   the exported bundle gives the same figures as `fe0b0f3` on every layer; authentication, egress and audit change no
   extraction.
