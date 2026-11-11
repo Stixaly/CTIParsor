@@ -871,14 +871,20 @@ class _Run:
         # novel actors and malware ("0-CTI", CY4GATE 2025 — ADR-0004 P2-A).
         from pipeline.stage2e_gliner import (
             _merge_gliner_into,
-            extract_gliner_entities,
             gliner_available,
+            gliner_unavailable_reason,
+            run_gliner,
         )
-        if self.gate("2e", gliner_available):
+        if self.gate("2e", gliner_available, unavailable_reason=gliner_unavailable_reason):
             t0 = time.monotonic()
-            self.r.gliner = extract_gliner_entities(text)
+            gliner_run = run_gliner(text)
+            self.r.gliner = gliner_run.entities
             entities = _merge_gliner_into(entities, self.r.gliner)
-            self.record("2e", RAN, "", time.monotonic() - t0, entities=len(self.r.gliner))
+            # `ran` only when the model was asked and answered (ADR-0098).
+            failure = gliner_run.failure()
+            self.record("2e", FAILED if failure else RAN, failure or gliner_run.note(),
+                        time.monotonic() - t0, entities=len(self.r.gliner),
+                        chunks=gliner_run.chunks, chunks_unanswered=gliner_run.unanswered)
 
         # Stage 2g — "X (aka Y, Z)" alias lists, deterministic.
         from pipeline.stage2g_alias_list import extract_alias_list_entities

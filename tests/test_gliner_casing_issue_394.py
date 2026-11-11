@@ -11,14 +11,12 @@ from pipeline import stage2e_gliner
 
 
 class _FakeGLiNER:
-    """Mimics GLiNER.predict_entities for a list of chunks: one list per chunk."""
+    """Mimics GLiNER.inference for a list of chunks: one list per chunk."""
 
     def __init__(self, predictions: list[dict]):
         self.predictions = predictions
 
-    def predict_entities(self, texts, labels, threshold, **kw):
-        if isinstance(texts, str):
-            return list(self.predictions)
+    def inference(self, texts, labels, threshold=0.5, **kw):
         return [list(self.predictions) for _ in texts]
 
 
@@ -29,6 +27,8 @@ def _default_cutoff(source, entity_type, default):
 def _stub(monkeypatch, predictions: list[dict]) -> None:
     monkeypatch.setattr(stage2e_gliner, "_load_gliner", lambda: _FakeGLiNER(predictions))
     monkeypatch.setattr(stage2e_gliner, "get_threshold", _default_cutoff)
+    # The six labels, whatever GLINER_ENTITY_TYPES says in the environment (ADR-0098).
+    monkeypatch.setattr(stage2e_gliner, "_GLINER_LABELS", list(stage2e_gliner._LABEL_MAP))
 
 
 # ── _recover_casing: whole words only ────────────────────────────────────────

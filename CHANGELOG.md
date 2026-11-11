@@ -9,6 +9,20 @@ theme.
 
 ## [Unreleased]
 
+- **Stage 2e (GLiNER) never asked its model** (ADR-0098). gliner 0.2.29's
+  `predict_entities` takes one string and returns `[]` for a list of chunks,
+  without an error: the stage recorded `ran` with 0 entities for every report.
+  A batch now goes through GLiNER's batch API, an answer that is not one list
+  per chunk is asked again chunk by chunk, and the stage report says `failed`
+  when the model did not load or answered nothing. The entry counts `chunks`
+  and `chunks_unanswered`.
+- **Configuration added**: `GLINER_ENTITY_TYPES`, the entity types Stage 2e
+  asks for (`identity`, `location`, `campaign`, `infrastructure`, `malware`,
+  `threat_actor`). Empty, the default: the stage is skipped
+  (`disabled: GLINER_ENTITY_TYPES names no entity type`) and its model is not
+  loaded, so bundles stay what they were. Naming a type adds entities to the
+  bundles; the measures per type are in the ADR.
+
 ## [0.7.0] - 2026-11-10
 
 A minor release under ADR-0085 §8: it adds schema migrations and API

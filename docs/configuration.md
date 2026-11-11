@@ -200,6 +200,13 @@ CYNER_ENABLED=true
 GLINER_MODEL=urchade/gliner_large-v2.1
 GLINER_THRESHOLD=0.40
 GLINER_ENABLED=true
+# ADR-0098 — the entity types Stage 2e asks its model for, separated by commas,
+# among: identity (targeted sectors), location (targeted countries), campaign,
+# infrastructure, malware, threat_actor.  Empty: the stage is skipped
+# ("disabled: GLINER_ENTITY_TYPES names no entity type") and its model is not
+# loaded.  Naming a type adds entities to the bundles: the measures per type
+# are in the ADR.
+GLINER_ENTITY_TYPES=
 
 # ADR-0051 — per-(source, entity_type) cutoffs calibrated from the analysts'
 # accept/reject decisions override GLINER_THRESHOLD / CyNER's 0.70 once stored
