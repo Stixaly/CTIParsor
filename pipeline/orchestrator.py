@@ -412,6 +412,13 @@ def chunk_size_for(doc_len: int) -> int:
     return 3000
 
 
+# "Key techniques" in the document summary: only semantic TTPs at or above the
+# review threshold (0.55, see docs/pipeline.md), and at most five of them —
+# more would drown the summary the LLM reads before every chunk.
+SUMMARY_TTP_MIN_CONFIDENCE = 0.55
+SUMMARY_TTP_TOP_N = 5
+
+
 def build_doc_context(gazetteer_entities: list, cyner_entities: list,
                       gliner_entities: list, semantic_ttp_entities: list) -> str:
     """A concise document-level entity summary passed to every LLM chunk call.
@@ -434,9 +441,10 @@ def build_doc_context(gazetteer_entities: list, cyner_entities: list,
         lines.append(f"Threat actors: {', '.join(actor_names)}")
 
     top_ttps = sorted(
-        [e for e in semantic_ttp_entities if e.mitre_id and e.confidence >= 0.55],
+        [e for e in semantic_ttp_entities
+         if e.mitre_id and e.confidence >= SUMMARY_TTP_MIN_CONFIDENCE],
         key=lambda x: x.confidence, reverse=True,
-    )[:5]
+    )[:SUMMARY_TTP_TOP_N]
     if top_ttps:
         lines.append(f"Key techniques: {', '.join(f'{e.value} ({e.mitre_id})' for e in top_ttps)}")
 
