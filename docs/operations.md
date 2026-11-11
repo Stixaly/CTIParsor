@@ -158,7 +158,10 @@ file is missing".
 ## Sizing
 
 - `WORKER_MAX_CONCURRENT` (default 1, in the code as in Compose): the reports
-  one worker runs at once. Each holds about 4.4 GB, mostly GLiNER.
+  one worker runs at once. Each holds about 4.4 GB, mostly GLiNER. The figure
+  was measured with the GLiNER model loaded; a run loads it only when
+  `GLINER_ENTITY_TYPES` names a type (ADR-0098), and the figure without it is
+  not measured.
 - `CTI_WORKER_MEMORY` (default `6g`): the worker's memory limit. Size it
   `WORKER_MAX_CONCURRENT × 4.4 GB + 1 GB`. Past it, the OOM killer takes a
   report's subprocess and that report fails; the worker goes on.

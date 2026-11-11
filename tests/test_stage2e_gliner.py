@@ -1,8 +1,13 @@
 """Stage 2e — GLiNER parsing with a stubbed model (no ~800 MB download).
 
-Locks the per-type cutoff contract of ADR-0051: GLiNER's predict_entities()
-takes one threshold for every label, so the model is asked for the lowest
-cutoff in force and each prediction is then held to its own type's cutoff.
+Locks the per-type cutoff contract of ADR-0051: GLiNER takes one threshold for
+every label, so the model is asked for the lowest cutoff in force and each
+prediction is then held to its own type's cutoff.
+
+And ADR-0098: a batch of chunks goes through GLiNER's batch API, an answer
+that is not one list per chunk is never read as "nothing found", the stage
+report says `ran` only when the model answered, and GLINER_ENTITY_TYPES names
+the entity types asked for.
 """
 from __future__ import annotations
 
@@ -16,17 +21,30 @@ from pipeline import stage2e_gliner
 
 
 class _FakeGLiNER:
-    """Mimics GLiNER.predict_entities for a list of chunks: one list per chunk."""
+    """Mimics gliner 0.2.29: `inference` answers a list of chunks with one list
+    per chunk; `predict_entities` answers one string and, given a list, returns
+    [] without raising."""
 
     def __init__(self, predictions: list[dict]):
         self.predictions = predictions
         self.calls: list[dict] = []
 
-    def predict_entities(self, texts, labels, threshold, **kw):
-        self.calls.append({"texts": texts, "labels": labels, "threshold": threshold})
-        if isinstance(texts, str):
-            return list(self.predictions)
+    def inference(self, texts, labels, threshold=0.5, **kw):
+        self.calls.append({"api": "inference", "texts": texts, "labels": labels, "threshold": threshold})
         return [list(self.predictions) for _ in texts]
+
+    def predict_entities(self, text, labels, threshold=0.5, **kw):
+        self.calls.append({"api": "predict_entities", "texts": text, "labels": labels,
+                           "threshold": threshold})
+        if not isinstance(text, str):
+            return []
+        return list(self.predictions)
+
+
+@pytest.fixture(autouse=True)
+def _every_entity_type(monkeypatch):
+    """The six labels, whatever GLINER_ENTITY_TYPES says in the environment."""
+    monkeypatch.setattr(stage2e_gliner, "_GLINER_LABELS", list(stage2e_gliner._LABEL_MAP))
 
 
 def _pred(label: str, score: float, text: str) -> dict:
@@ -203,70 +221,285 @@ def test_without_the_gliner_library_the_stage_is_unavailable(monkeypatch):
         stage2e_gliner._load_gliner.cache_clear()
 
 
-class _NoBatchGLiNER(_FakeGLiNER):
-    """A model whose batch call fails: each chunk is retried on its own, and a
-    chunk that fails again contributes nothing instead of sinking the others."""
-
-    def predict_entities(self, texts, labels, threshold, **kw):
-        if not isinstance(texts, str):
-            raise RuntimeError("batch API broken")
-        if "Broken" in texts:
-            raise RuntimeError("cannot read this chunk")
-        return super().predict_entities(texts, labels, threshold, **kw)
+_TWO_CHUNKS = "Emotet spread through the mail again.   Qakbot followed it a week later."
 
 
-def test_a_failing_batch_falls_back_to_one_call_per_chunk(monkeypatch):
-    fake = _NoBatchGLiNER([_pred("malware family", 0.9, "Emotet")])
+def _two_chunks(monkeypatch, fake) -> None:
+    """*fake* as the model, and windows of 40 characters: _TWO_CHUNKS is one batch of two."""
     monkeypatch.setattr(stage2e_gliner, "_load_gliner", lambda: fake)
     monkeypatch.setattr(stage2e_gliner, "get_threshold", _default_cutoff)
     monkeypatch.setattr(stage2e_gliner, "_CHUNK_CHARS", 40)
     monkeypatch.setattr(stage2e_gliner, "_OVERLAP_CHARS", 0)
+    monkeypatch.setattr(stage2e_gliner, "_BATCH_SIZE", 4)      # whatever GLINER_BATCH_SIZE says
+
+
+def test_a_batch_of_chunks_goes_through_the_batch_api(monkeypatch):
+    """The regression of ADR-0098.  gliner 0.2.29's predict_entities() takes one
+    string and returns [] for a list, without raising: the stage called it with
+    the batch, read [] as "no entity", and recorded `ran` with 0 entities for
+    every report."""
+    fake = _FakeGLiNER([_pred("malware family", 0.9, "Emotet")])
+    _two_chunks(monkeypatch, fake)
+
+    run = stage2e_gliner.run_gliner(_TWO_CHUNKS)
+
+    assert [r.value for r in run.entities] == ["Emotet"]
+    assert [(c["api"], type(c["texts"])) for c in fake.calls] == [("inference", list)]
+    assert len(fake.calls[0]["texts"]) == 2
+    assert (run.loaded, run.chunks, run.answered, run.retried_batches) == (True, 2, 2, 0)
+    assert run.failure() == "" and run.note() == ""
+    assert [r.value for r in stage2e_gliner.extract_gliner_entities(_TWO_CHUNKS)] == ["Emotet"]
+
+
+def test_a_gliner_without_inference_is_asked_through_batch_predict_entities(monkeypatch):
+    """Before `inference`, the batch API was batch_predict_entities (requirements
+    ask for gliner>=0.2.0)."""
+    class _Older:
+        def __init__(self):
+            self.batches: list[list[str]] = []
+
+        def batch_predict_entities(self, texts, labels, flat_ner=True, threshold=0.5, multi_label=False):
+            self.batches.append(texts)
+            return [[_pred("malware family", 0.9, text.split()[0])] for text in texts]
+
+        def predict_entities(self, text, labels, **kw):
+            return []
+
+    fake = _Older()
+    _two_chunks(monkeypatch, fake)
+
+    results = stage2e_gliner.extract_gliner_entities(_TWO_CHUNKS)
+
+    assert sorted(r.value for r in results) == ["Emotet", "Qakbot"]
+    assert [len(batch) for batch in fake.batches] == [2]
+
+
+class _NoBatchGLiNER(_FakeGLiNER):
+    """A model whose batch call fails: each chunk is retried on its own, and a
+    chunk that fails again contributes nothing instead of sinking the others."""
+
+    def inference(self, texts, labels, threshold=0.5, **kw):
+        raise RuntimeError("batch API broken")
+
+    def predict_entities(self, text, labels, threshold=0.5, **kw):
+        if "Broken" in text:
+            raise RuntimeError("cannot read this chunk")
+        return super().predict_entities(text, labels, threshold, **kw)
+
+
+def test_a_failing_batch_falls_back_to_one_call_per_chunk(monkeypatch):
+    fake = _NoBatchGLiNER([_pred("malware family", 0.9, "Emotet")])
+    _two_chunks(monkeypatch, fake)
 
     text = "Emotet spread through the mail again.   Broken chunk that the model rejects."
-    results = stage2e_gliner.extract_gliner_entities(text)
+    run = stage2e_gliner.run_gliner(text)
 
-    assert [r.value for r in results] == ["Emotet"]
+    assert [r.value for r in run.entities] == ["Emotet"]
     assert len(fake.calls) == 1            # the one chunk that answered
+    # The stage ran, and its report names the chunk it could not read.
+    assert (run.chunks, run.answered, run.unanswered, run.retried_batches) == (2, 1, 1, 1)
+    assert run.failure() == ""
+    assert run.note() == ("1 of 2 chunks unanswered: RuntimeError: cannot read this chunk; "
+                          "1 batch answers refused, asked again chunk by chunk")
 
 
 class _ShortBatchGLiNER(_FakeGLiNER):
     """A batch answered with fewer lists than chunks: a flat list, the shape a
     one-chunk call returns.  Asked one chunk at a time, it reads each."""
 
-    def predict_entities(self, texts, labels, threshold, **kw):
+    def inference(self, texts, labels, threshold=0.5, **kw):
         self.calls.append({"texts": texts})
-        if not isinstance(texts, str):
-            return [_pred("malware family", 0.9, "Emotet")]
-        return [_pred("malware family", 0.9, texts.split()[0])]
+        return [_pred("malware family", 0.9, "Emotet")]
+
+    def predict_entities(self, text, labels, threshold=0.5, **kw):
+        self.calls.append({"texts": text})
+        return [_pred("malware family", 0.9, text.split()[0])]
 
 
 def test_a_batch_answer_short_of_its_chunks_is_retried_per_chunk(monkeypatch):
     """Zipped as it came, the flat answer would stand for the first chunk and
     the second chunk's Qakbot would be dropped without a word."""
     fake = _ShortBatchGLiNER([])
-    monkeypatch.setattr(stage2e_gliner, "_load_gliner", lambda: fake)
-    monkeypatch.setattr(stage2e_gliner, "get_threshold", _default_cutoff)
-    monkeypatch.setattr(stage2e_gliner, "_CHUNK_CHARS", 40)
-    monkeypatch.setattr(stage2e_gliner, "_OVERLAP_CHARS", 0)
+    _two_chunks(monkeypatch, fake)
 
-    text = "Emotet spread through the mail again.   Qakbot followed it a week later."
-    results = stage2e_gliner.extract_gliner_entities(text)
+    results = stage2e_gliner.extract_gliner_entities(_TWO_CHUNKS)
 
     assert sorted(r.value for r in results) == ["Emotet", "Qakbot"]
     assert [type(c["texts"]) for c in fake.calls] == [list, str, str]
 
 
-@pytest.mark.parametrize("raw", [[], [_pred("malware family", 0.9, "Emotet")]])
-def test_degenerate_batch_shapes_are_normalised(monkeypatch, raw):
-    """An empty answer, or a flat list for a one-chunk batch, is not an error."""
-    class _Flat:
-        def predict_entities(self, texts, labels, threshold, **kw):
-            return list(raw)
+@pytest.mark.parametrize("raw", [[], [_pred("malware family", 0.9, "Emotet")], None, [None]])
+def test_a_batch_answer_of_another_shape_is_never_read_as_nothing_found(monkeypatch, raw):
+    """[] for a batch is how the stage went silent: one list per chunk is the
+    only answer accepted, and anything else sends each chunk on its own."""
+    class _Shapeless:
+        def inference(self, texts, labels, **kw):
+            return raw
 
-    monkeypatch.setattr(stage2e_gliner, "_load_gliner", lambda: _Flat())
+        def predict_entities(self, text, labels, **kw):
+            return [_pred("malware family", 0.9, "Qakbot")]
+
+    monkeypatch.setattr(stage2e_gliner, "_load_gliner", lambda: _Shapeless())
     monkeypatch.setattr(stage2e_gliner, "get_threshold", _default_cutoff)
-    values = [r.value for r in stage2e_gliner.extract_gliner_entities("Emotet again.")]
-    assert values == [p["text"] for p in raw]
+
+    run = stage2e_gliner.run_gliner("Qakbot again.")
+
+    assert [r.value for r in run.entities] == ["Qakbot"]
+    assert (run.chunks, run.answered, run.retried_batches) == (1, 1, 1)
+    assert run.note() == "1 batch answers refused, asked again chunk by chunk"
+
+
+@pytest.mark.parametrize("single", [RuntimeError("no such API"), [["nested"]], "text"])
+def test_a_model_that_answers_no_chunk_did_not_run(monkeypatch, single):
+    """Loaded, asked, and silent on both APIs: the run says so instead of
+    "0 entities"."""
+    class _Silent:
+        def inference(self, texts, labels, **kw):
+            return []
+
+        def predict_entities(self, text, labels, **kw):
+            if isinstance(single, Exception):
+                raise single
+            return single
+
+    _two_chunks(monkeypatch, _Silent())
+
+    run = stage2e_gliner.run_gliner(_TWO_CHUNKS)
+
+    assert run.entities == [] and (run.loaded, run.chunks, run.answered) == (True, 2, 0)
+    assert run.failure().startswith("the model answered none of the 2 chunks: ")
+
+
+def test_a_text_with_nothing_to_ask_is_a_run_not_a_failure(monkeypatch):
+    fake = _FakeGLiNER([])
+    _two_chunks(monkeypatch, fake)
+    run = stage2e_gliner.run_gliner("   \n ")
+    assert (run.loaded, run.chunks, run.failure(), fake.calls) == (True, 0, "", [])
+
+
+def test_a_model_that_did_not_load_is_a_failure_of_the_run(monkeypatch):
+    monkeypatch.setattr(stage2e_gliner, "_load_gliner", lambda: None)
+    run = stage2e_gliner.run_gliner("Emotet again.")
+    assert run.entities == [] and run.failure() == "the model could not be loaded"
+
+
+# ── GLINER_ENTITY_TYPES: the entity types asked for ──────────────────────────
+
+def test_the_setting_names_entity_types_and_gives_their_labels():
+    labels = stage2e_gliner._labels_for
+    assert labels(None) == [] and labels("") == [] and labels(" , ") == []
+    assert labels("location,identity") == ["targeted sector", "targeted country"]     # _LABEL_MAP's order
+    assert labels(" Campaign , threat-actor ,THREAT_ACTOR") == ["threat actor group", "attack campaign"]
+    assert labels(",".join(e.value for e in stage2e_gliner._LABEL_MAP.values())) == list(stage2e_gliner._LABEL_MAP)
+
+
+def test_a_name_that_is_not_an_entity_type_is_left_out_with_a_warning(monkeypatch):
+    warnings: list[str] = []
+    monkeypatch.setattr(stage2e_gliner.logger, "warning", warnings.append)
+    assert stage2e_gliner._labels_for("identity,sector,tool") == ["targeted sector"]
+    assert len(warnings) == 1 and "sector, tool" in warnings[0]
+
+
+def test_only_the_named_types_are_asked_for_and_kept(monkeypatch):
+    fake = _FakeGLiNER([
+        _pred("targeted sector", 0.8, "healthcare"),
+        _pred("malware family", 0.9, "Emotet"),            # a label the model was not asked for
+    ])
+    monkeypatch.setattr(stage2e_gliner, "_load_gliner", lambda: fake)
+    monkeypatch.setattr(stage2e_gliner, "get_threshold", _default_cutoff)
+    monkeypatch.setattr(stage2e_gliner, "_GLINER_LABELS", ["targeted sector", "targeted country"])
+
+    results = stage2e_gliner.extract_gliner_entities("Emotet hit the healthcare sector.")
+
+    assert [(r.value, r.entity_type) for r in results] == [("healthcare", EntityType.IDENTITY)]
+    assert fake.calls[0]["labels"] == ["targeted sector", "targeted country"]
+
+
+def test_with_no_entity_type_the_stage_is_off_and_loads_nothing(fake_gliner_lib, monkeypatch):
+    monkeypatch.setattr(stage2e_gliner, "_GLINER_LABELS", [])
+    assert stage2e_gliner.gliner_available() is False
+    assert stage2e_gliner.gliner_unavailable_reason() == "disabled: GLINER_ENTITY_TYPES names no entity type"
+    run = stage2e_gliner.run_gliner("Emotet again.")
+    assert run.entities == [] and run.failure() == "GLINER_ENTITY_TYPES names no entity type"
+    assert fake_gliner_lib.calls == []                     # a run loads no model
+    # The loader itself still loads: scripts/measure_cold_start.py weighs the model with it.
+    assert stage2e_gliner._load_gliner() == "model"
+
+
+def test_the_other_reasons_the_stage_is_unavailable_keep_their_wording(fake_gliner_lib, monkeypatch):
+    assert stage2e_gliner.gliner_available() is True
+    monkeypatch.setattr(stage2e_gliner, "_GLINER_ENABLED", False)
+    assert stage2e_gliner.gliner_unavailable_reason() == "model or index unavailable"
+    monkeypatch.setattr(stage2e_gliner, "_GLINER_LABELS", [])
+    assert stage2e_gliner.gliner_unavailable_reason() == "model or index unavailable"
+    monkeypatch.setattr(stage2e_gliner, "_GLINER_ENABLED", True)
+    monkeypatch.setattr(stage2e_gliner, "_SKIP_HEAVY", True)
+    assert stage2e_gliner.gliner_unavailable_reason() == "model or index unavailable"
+
+
+# ── The stage report (orchestrator) ──────────────────────────────────────────
+
+def _run_document(monkeypatch):
+    """A run of _TWO_CHUNKS whose other model stages and LLM are off."""
+    from pipeline.orchestrator import Document, RunOptions, run_document
+
+    for module in ("pipeline.stage2c_ttp_semantic", "pipeline.stage2d_cyner"):
+        monkeypatch.setattr(f"{module}._SKIP_HEAVY", True)
+    options = RunOptions(disabled=frozenset({"1f", "2f", "3"}), consensus=False, document_relations=False,
+                         verify_relationships=False, verify_ttps=False, llm_parallelism=1)
+    return run_document(Document(text=_TWO_CHUNKS, original_filename="r.txt"), options)
+
+
+def _stage_2e(monkeypatch, model):
+    """The run, and its Stage 2e entry, with *model* as the GLiNER model."""
+    monkeypatch.setattr(stage2e_gliner, "gliner_available", lambda: True)
+    _two_chunks(monkeypatch, model)
+    result = _run_document(monkeypatch)
+    return result, result.outcome("2e")
+
+
+def test_the_stage_report_says_ran_with_what_the_model_was_asked(monkeypatch):
+    result, outcome = _stage_2e(monkeypatch, _FakeGLiNER([_pred("malware family", 0.9, "Emotet")]))
+    assert (outcome.status, outcome.reason) == ("ran", "")
+    assert outcome.counts == {"entities": 1, "chunks": 2, "chunks_unanswered": 0}
+    assert [e.value for e in result.gliner] == ["Emotet"]
+
+
+def test_the_stage_report_says_failed_when_the_model_answered_nothing(monkeypatch):
+    """What the report said for a month: `ran`, 0 entities, 0.003 s."""
+    class _Silent:
+        def inference(self, texts, labels, **kw):
+            return []
+
+        def predict_entities(self, text, labels, **kw):
+            raise TypeError("one string, not this")
+
+    _result, outcome = _stage_2e(monkeypatch, _Silent())
+    assert outcome.status == "failed"
+    assert outcome.reason == "the model answered none of the 2 chunks: TypeError: one string, not this"
+    assert outcome.counts == {"entities": 0, "chunks": 2, "chunks_unanswered": 2}
+
+
+def test_the_stage_report_says_failed_when_the_model_did_not_load(monkeypatch):
+    """gliner_available() only says the library is there: a model that then
+    fails to load used to be `ran` with 0 entities."""
+    _result, outcome = _stage_2e(monkeypatch, None)
+    assert (outcome.status, outcome.reason) == ("failed", "the model could not be loaded")
+
+
+def test_the_stage_report_says_why_the_stage_is_off_without_an_entity_type(monkeypatch):
+    from scripts.smoke_stage_report import judge
+
+    monkeypatch.setattr(stage2e_gliner, "_SKIP_HEAVY", False)
+    monkeypatch.setattr(stage2e_gliner, "_GLINER_ENABLED", True)
+    monkeypatch.setattr(stage2e_gliner, "_GLINER_LABELS", [])
+
+    outcome = _run_document(monkeypatch).outcome("2e")
+
+    assert (outcome.status, outcome.reason) == (
+        "skipped", "disabled: GLINER_ENTITY_TYPES names no entity type")
+    # Off by configuration: docker_smoke.sh --job accepts it for a required stage.
+    assert judge([outcome.as_dict()], ["2e"])[1] == []
 
 
 def test_a_blob_with_one_early_space_is_not_cut_into_a_crawl_of_tiny_chunks():

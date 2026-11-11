@@ -478,6 +478,12 @@
         "true"
       ]
     },
+    "env GLINER_ENTITY_TYPES": {
+      "set": true,
+      "values": [
+        ""
+      ]
+    },
     "env GLINER_MODEL": {
       "set": true,
       "values": [

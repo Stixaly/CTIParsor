@@ -21,7 +21,7 @@ Why GLiNER alongside CyNER + Gazetteer?
     and novel malware variants described in prose.
   • GLiNER fills these gaps by accepting new label descriptions at runtime.
 
-Entity types detected (chosen to avoid overlap with CyNER / gazetteer):
+Entity types the stage can ask for (GLINER_ENTITY_TYPES names the ones it does):
   malware family      → EntityType.MALWARE        (novel/unnamed malware)
   threat actor group  → EntityType.THREAT_ACTOR   (new APT groups)
   targeted sector     → EntityType.IDENTITY        (STIX identity = org/sector)
@@ -30,9 +30,10 @@ Entity types detected (chosen to avoid overlap with CyNER / gazetteer):
   attack infrastructure → EntityType.INFRASTRUCTURE
 
 Model configuration (via .env):
-  GLINER_MODEL     = urchade/gliner_large-v2.1   (~800 MB, best zero-shot NER accuracy)
-  GLINER_THRESHOLD = 0.40                         (lower than supervised NER: zero-shot)
-  GLINER_ENABLED   = true                         (set false to disable stage)
+  GLINER_MODEL        = urchade/gliner_large-v2.1   (~800 MB, best zero-shot NER accuracy)
+  GLINER_THRESHOLD    = 0.40                         (lower than supervised NER: zero-shot)
+  GLINER_ENABLED      = true                         (set false to disable stage)
+  GLINER_ENTITY_TYPES =                              (the types asked for; none = stage off, ADR-0098)
 
 The model is downloaded from HuggingFace Hub on first use and cached locally.
 """
@@ -42,7 +43,8 @@ import functools
 import os
 import re
 import warnings
-from typing import Iterator
+from dataclasses import dataclass, field
+from typing import Any, Iterator
 
 # Initialize logging
 from api.logging_config import get_logger
@@ -83,7 +85,25 @@ _LABEL_MAP: dict[str, EntityType] = {
     "attack campaign":       EntityType.CAMPAIGN,
     "attack infrastructure": EntityType.INFRASTRUCTURE,
 }
-_GLINER_LABELS = list(_LABEL_MAP.keys())
+
+
+def _labels_for(raw: str | None) -> list[str]:
+    """The labels of `_LABEL_MAP` whose entity type *raw* names (the value of
+    GLINER_ENTITY_TYPES: entity types separated by commas), in `_LABEL_MAP`'s
+    order.  Unset or blank names none.  A name that is not one of the six types
+    is left out with a warning."""
+    known = {etype.value for etype in _LABEL_MAP.values()}
+    wanted = {token.strip().lower().replace("-", "_") for token in (raw or "").split(",")} - {""}
+    unknown = sorted(wanted - known)
+    if unknown:
+        logger.warning(f"GLINER_ENTITY_TYPES: {', '.join(unknown)} not among "
+                       f"{', '.join(sorted(known))}; left out")
+    return [label for label, etype in _LABEL_MAP.items() if etype.value in wanted]
+
+
+# ADR-0098 — the labels the model is asked for.  No default set: until
+# GLINER_ENTITY_TYPES names a type, the stage is off and the model is not loaded.
+_GLINER_LABELS = _labels_for(os.getenv("GLINER_ENTITY_TYPES"))
 
 # ── Text chunking ─────────────────────────────────────────────────────────────
 # GLiNER medium supports up to 384 subword tokens.  CTI prose averages ~0.35
@@ -100,9 +120,9 @@ _OVERLAP_CHARS  = 200   # proportionally wider to avoid missing cross-boundary s
 _MIN_CHUNK_CHARS = _CHUNK_CHARS // 4
 
 # ── Batched inference ─────────────────────────────────────────────────────────
-# GLiNER's predict_entities() accepts a list[str] as well as a single str.
-# Processing N chunks as one batch amortises the Python→model transfer cost
-# and leverages ONNX/PyTorch batch efficiency.
+# N chunks go to the model as one batch, through GLiNER's batch API (see
+# _ask_batch): it amortises the Python→model transfer cost and leverages
+# ONNX/PyTorch batch efficiency.  predict_entities() is for one string.
 # Set GLINER_BATCH_SIZE=1 to disable batching (useful for debugging).
 _BATCH_SIZE = env_int("GLINER_BATCH_SIZE", default=4)
 
@@ -134,6 +154,9 @@ def _load_gliner():
     """
     Load the GLiNER model (cached in memory after first call).
     Returns None if the gliner library is not installed or the model fails to load.
+    Not gated on GLINER_ENTITY_TYPES: a run with no type to ask for never gets
+    here (gliner_available, run_gliner), and scripts/measure_cold_start.py
+    calls this to weigh the model.
     """
     if _SKIP_HEAVY or not _GLINER_ENABLED:
         return None
@@ -156,8 +179,9 @@ def _load_gliner():
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def gliner_available() -> bool:
-    """Return True if the gliner library is installed, GLINER_ENABLED=true, and SKIP_HEAVY_MODELS is not set."""
-    if _SKIP_HEAVY or not _GLINER_ENABLED:
+    """Return True if the gliner library is installed, GLINER_ENABLED=true,
+    GLINER_ENTITY_TYPES names a type, and SKIP_HEAVY_MODELS is not set."""
+    if _SKIP_HEAVY or not _GLINER_ENABLED or not _GLINER_LABELS:
         return False
     try:
         import gliner  # noqa: F401
@@ -166,82 +190,162 @@ def gliner_available() -> bool:
         return False
 
 
+def gliner_unavailable_reason() -> str:
+    """What the stage report says when gliner_available() is False.  A stage
+    that is on with no entity type to ask for is off by configuration, and
+    says so with the word the smoke test accepts ("disabled")."""
+    if not _SKIP_HEAVY and _GLINER_ENABLED and not _GLINER_LABELS:
+        return "disabled: GLINER_ENTITY_TYPES names no entity type"
+    return "model or index unavailable"
+
+
+@dataclass
+class GLiNERRun:
+    """What one pass of the stage over a text did, for the stage report: the
+    entities, and whether the model was asked and answered (ADR-0098)."""
+
+    entities: list[RawEntity] = field(default_factory=list)
+    loaded: bool = False          # there was a model and a label to ask it for
+    chunks: int = 0               # non-empty windows of the text
+    answered: int = 0             # windows with a well-formed answer from the model
+    retried_batches: int = 0      # batch answers refused, asked again chunk by chunk
+    error: str = ""               # why nothing was loaded, or the last unanswered chunk's error
+
+    @property
+    def unanswered(self) -> int:
+        return self.chunks - self.answered
+
+    def failure(self) -> str:
+        """Why the stage cannot be recorded as run, "" when it can: no model,
+        or a model that answered none of the chunks it was given."""
+        if not self.loaded:
+            return self.error or "the model was not loaded"
+        if self.chunks and not self.answered:
+            return f"the model answered none of the {self.chunks} chunks: {self.error}"
+        return ""
+
+    def note(self) -> str:
+        """What a stage that ran still has to say: chunks left unanswered, and
+        batches the batch API did not answer."""
+        parts = []
+        if self.unanswered:
+            parts.append(f"{self.unanswered} of {self.chunks} chunks unanswered: {self.error}")
+        if self.retried_batches:
+            parts.append(f"{self.retried_batches} batch answers refused, asked again chunk by chunk")
+        return "; ".join(parts)
+
+
+def _checked_chunk(raw: Any) -> list[dict]:
+    """*raw* if it is the answer for one chunk, a list of prediction dicts;
+    else ValueError."""
+    if isinstance(raw, list) and all(isinstance(pred, dict) for pred in raw):
+        return raw
+    raise ValueError(f"expected a list of predictions, got {_shape(raw)}")
+
+
+def _shape(raw: Any) -> str:
+    if not isinstance(raw, list):
+        return type(raw).__name__
+    kinds = ", ".join(sorted({type(item).__name__ for item in raw}))
+    return f"a list of {len(raw)}" + (f" ({kinds})" if kinds else "")
+
+
+def _ask_batch(model: Any, texts: list[str], labels: list[str], threshold: float) -> list[list[dict]]:
+    """One list of predictions per text, from GLiNER's batch API, or ValueError.
+
+    `inference` is that API (gliner 0.2.29); `batch_predict_entities` is its
+    older name, deprecated there and the only one before it.  Not
+    `predict_entities`: it takes one string, wraps its argument in a list, and
+    for a list of texts returns [] without raising — a stage that read that as
+    "no entity" recorded `ran` with a model it had never asked (ADR-0098).
+
+    The answer is held to its shape, one list for each text: an empty or flat
+    answer is an error here, never "nothing found"."""
+    ask = getattr(model, "inference", None)
+    if callable(ask):
+        raw = ask(texts, labels, flat_ner=True, threshold=threshold, multi_label=False,
+                  batch_size=len(texts))
+    else:
+        raw = model.batch_predict_entities(texts, labels, flat_ner=True, threshold=threshold,
+                                           multi_label=False)
+    if not isinstance(raw, list) or len(raw) != len(texts):
+        raise ValueError(f"expected one list of predictions for each of {len(texts)} chunks, "
+                         f"got {_shape(raw)}")
+    return [_checked_chunk(preds) for preds in raw]
+
+
 def extract_gliner_entities(text: str) -> list[RawEntity]:
     """
     Run GLiNER over *text* using the configured entity labels and return
     zero-shot CTI named entities.
+
+    Returns an empty list if GLiNER is not available or no entities are found.
+    run_gliner() also says whether the model answered.
+    """
+    return run_gliner(text).entities
+
+
+def run_gliner(text: str) -> GLiNERRun:
+    """
+    Run GLiNER over *text* for the labels of GLINER_ENTITY_TYPES; return the
+    entities and what the model was asked (see GLiNERRun).
 
     The function processes the text in overlapping windows to avoid token-limit
     issues with long CTI reports (PDFs, DOCX).
 
     Results are deduplicated by (value.lower(), entity_type) keeping the
     highest-confidence occurrence of each span.
-
-    Returns an empty list if GLiNER is not available or no entities are found.
     """
+    labels = list(_GLINER_LABELS)
+    if not labels:
+        return GLiNERRun(error="GLINER_ENTITY_TYPES names no entity type")
     model = _load_gliner()
     if model is None:
-        return []
+        return GLiNERRun(error="the model could not be loaded")
+    label_map = {label: _LABEL_MAP[label] for label in labels}
 
     # ADR-0051 — one cutoff per entity type, calibrated from analyst decisions
-    # when a `model_thresholds` row exists, else GLINER_THRESHOLD.  GLiNER's
-    # predict_entities() takes a single threshold for every label, so the model
-    # is asked for the lowest of them and each prediction is then held to its
-    # own type's cutoff below.
-    cutoff = {etype: get_threshold("gliner", etype.value, _GLINER_THRESHOLD) for etype in _LABEL_MAP.values()}
+    # when a `model_thresholds` row exists, else GLINER_THRESHOLD.  GLiNER
+    # takes a single threshold for every label, so the model is asked for the
+    # lowest of them and each prediction is then held to its own type's cutoff
+    # below.
+    cutoff = {etype: get_threshold("gliner", etype.value, _GLINER_THRESHOLD) for etype in label_map.values()}
     model_threshold = min(_GLINER_THRESHOLD, *cutoff.values())
 
     # ── Batched inference ─────────────────────────────────────────────────────
-    # Collect non-empty chunks, then call model.predict_entities() in batches
-    # of _BATCH_SIZE.  When given a list, GLiNER returns list[list[dict]].
-    # Falls back to single-string calls if the batch API raises.
+    # Collect non-empty chunks, then ask the model in batches of _BATCH_SIZE.
+    # A batch that raises, or whose answer is not one list per chunk, is asked
+    # again one chunk at a time.
     # best[key] = (score, context_snippet, span_text)
     best: dict[tuple[str, EntityType], tuple[float, str, str]] = {}
 
     # Build the flat list of (chunk_text, char_offset) upfront
     all_chunks = [(t, off) for t, off in _iter_chunks(text) if t.strip()]
+    run = GLiNERRun(loaded=True, chunks=len(all_chunks))
 
     for batch_start in range(0, len(all_chunks), _BATCH_SIZE):
         batch      = all_chunks[batch_start : batch_start + _BATCH_SIZE]
         batch_texts = [t for t, _ in batch]
 
         try:
-            raw = model.predict_entities(
-                batch_texts,
-                _GLINER_LABELS,
-                threshold=model_threshold,
-                flat_ner=True,
-                multi_label=False,
-            )
-            # When input is list[str], output should be list[list[dict]].
-            # Guard against two degenerate shapes:
-            #   • single-item batch → model returns flat list[dict] instead of list[list[dict]]
-            #   • empty result     → model returns [] regardless of batch size
-            if raw and not isinstance(raw[0], list):
-                # Flat list for a single-chunk call — wrap it
-                batch_preds = [raw]
-            elif not raw:
-                # Empty result: no entities found — produce one empty list per chunk
-                batch_preds = [[] for _ in batch]
-            else:
-                batch_preds = raw
-            # A flat list for a many-chunk batch, or one list short: zipped
-            # against the chunks it would drop the last ones' entities.
-            if len(batch_preds) != len(batch):
-                raise ValueError(f"{len(batch_preds)} answers for {len(batch)} chunks")
+            batch_preds = _ask_batch(model, batch_texts, labels, model_threshold)
+            run.answered += len(batch)
         except Exception as e:
             logger.warning(f"Batch inference error (falling back to single): {e}")
+            run.retried_batches += 1
             # Per-chunk fallback
             batch_preds = []
             for chunk_text, char_offset in batch:
                 try:
-                    batch_preds.append(model.predict_entities(
-                        chunk_text, _GLINER_LABELS,
+                    batch_preds.append(_checked_chunk(model.predict_entities(
+                        chunk_text, labels,
                         threshold=model_threshold,
                         flat_ner=True, multi_label=False,
-                    ))
+                    )))
+                    run.answered += 1
                 except Exception as e2:
                     logger.error(f"Inference error at offset {char_offset}: {e2}")
+                    run.error = f"{type(e2).__name__}: {e2}"
                     batch_preds.append([])
 
         for predictions, (chunk_text, _offset) in zip(batch_preds, batch, strict=True):
@@ -250,7 +354,7 @@ def extract_gliner_entities(text: str) -> list[RawEntity]:
                 score = float(pred.get("score", 0.0))
                 value = pred.get("text", "").strip()
 
-                etype = _LABEL_MAP.get(label)
+                etype = label_map.get(label)
                 if etype is None:
                     continue
                 if not value or len(value) < 3:
@@ -287,7 +391,8 @@ def extract_gliner_entities(text: str) -> list[RawEntity]:
         ))
 
     results.sort(key=lambda x: x.confidence, reverse=True)
-    return drop_denied(results)
+    run.entities = drop_denied(results)
+    return run
 
 
 def _span_text(chunk_text: str, pred: dict, value: str) -> str:
