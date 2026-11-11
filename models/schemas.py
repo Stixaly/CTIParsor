@@ -1,3 +1,40 @@
+"""Shared schemas: the vocabulary the pipeline stages and the API both use.
+
+- ``EntityType`` — every kind of entity an extractor may emit, grouped by
+  the STIX 2.1 object it becomes: the SCOs (``ipv4``, ``domain``, ``file``,
+  …), CVE → the ``vulnerability`` SDO, ATT&CK → ``ttp``, the single
+  category that maps to the ``attack-pattern`` SDO, and the named SDOs
+  (``malware``, ``threat_actor``, …). ``TECHNIQUE``, ``TACTIC`` and
+  ``PROCEDURE`` are deprecated values kept only so entities already
+  stored keep parsing; new extractions emit ``ttp`` and carry the
+  tactic/technique distinction in the entity's ``mitre_id``.
+- ``STIX_RELATIONSHIP_TYPES`` — the canonical set of STIX 2.1
+  relationship (SRO) verbs. It is the single source of truth the STIX
+  builder (pipeline/stage4) and the relationship-editing API
+  (api/routes/relationships) both validate against, so the two cannot
+  drift apart.
+- ``EvidenceLabel`` — a NATO/Admiralty-style grade of how well a source
+  supports a claim, carried by relationships so an analyst can tell a
+  directly observed fact from an LLM inference at the same confidence.
+- ``RawEntity`` — one extracted entity before it becomes STIX: its value
+  and type, the extractor's confidence, where it came from (``source``:
+  ``ioc``, ``gazetteer`` or ``llm``) and its evidence.
+
+Optional fields are typed ``… | None`` with a ``None`` default, and
+``None`` always means "not present", never a sentinel value:
+``mitre_id`` is set only for ATT&CK entities, and the ``evidence_*``
+fields (ADR-0028) only when the extractor captured a verbatim quote —
+``evidence_start`` stays ``None`` when that quote could not be located
+in the report. ``context``, by contrast, is always present (possibly
+empty): it is the extractor's summary, not a quote, and is not locatable
+in the report.
+
+Consumers: the pipeline stages emit and pass ``RawEntity`` records and
+build STIX from these types; the API validates against the same
+definitions (api/routes for entities, relationships and thresholds,
+api/worker).
+"""
+
 from enum import Enum
 
 from pydantic import BaseModel

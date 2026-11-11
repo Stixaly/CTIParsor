@@ -60,6 +60,17 @@ def _docs(split: str, limit: int | None = None) -> list[annoctr.AnnoctrDoc]:
 # ── prepare ──────────────────────────────────────────────────────────────────
 
 def cmd_prepare(args) -> None:
+    """The registry step: what the corpus holds and how its gold maps.
+
+    Reads the AnnoCTR documents (general-only ones included) and writes
+    three files under data/eval/: annoctr-registry.json (the annotated
+    layers per document), attack-mapping.json — attack-mapping-<release>.json
+    when --attack-release names a non-default release — (each gold
+    technique id resolved against that ATT&CK catalogue), and
+    near-duplicates.json (pairs at or above --threshold, 0.5 by default;
+    each --corpus folder of .txt reports joins the check as its own
+    group).  Prints the per-split counts, the mapping statuses and the
+    cross-group duplicate pairs."""
     docs = annoctr.load(include_general_only=True)
     reg = annoctr.registry(docs)
     _write(OUT / "annoctr-registry.json", reg)
@@ -270,6 +281,19 @@ def _loaded_embedding(name: str, options) -> dict:
 
 
 def cmd_run(args) -> None:
+    """Run the application's pipeline on one split (--split, dev by
+    default; --limit caps the documents) and record what it predicts.
+
+    Writes data/eval/runs/<name>/run.json once (options, embedding,
+    manifest) and one docs/<doc_id>.json per document — the predictions,
+    the stage report and the seconds taken, or the error.  The command is
+    resumable: a document whose file exists is skipped.  Stages 1f, 4 and
+    5 are always off, plus any --disable ids; stage 3 is required unless
+    --allow-degraded, and two documents in a row failing on it stop the
+    run (exit 2) — that is the setup, not the document.  Unless
+    TTP_RETRIEVAL_EXCLUDE_CITED is already set, the cited-procedure
+    exclusions are written to data/eval/annoctr-cited-exclude.txt and the
+    variable pointed at it (ADR-0072)."""
     from api.run_config import build_manifest
     from pipeline.orchestrator import Document, RunOptions, StageRequired, run_document
 
@@ -413,6 +437,16 @@ def per_doc_scores(name: str, release: str | None = None) -> dict:
 
 
 def cmd_score(args) -> None:
+    """Score a run: TTPs, entities and evidence against the AnnoCTR gold.
+
+    Reads data/eval/runs/<name>/run.json and its docs/*.json (the split
+    comes from the run) and writes the report as score.json in the run
+    folder — score-attack-<release>.json instead when --attack-release
+    maps the gold with another release than the run's own.  The report
+    holds the TTP micro and per-document scores (plus the gold +
+    literal-ids sensitivity check), strict and lenient entity scores per
+    type, the evidence summary, per-stage outcomes and LLM health; the
+    headline numbers are printed."""
     s = per_doc_scores(args.name, args.attack_release)
     modified = _modified_files(args.name, s["meta"])
     rows, preds, docs, canonical = s["rows"], s["preds"], s["docs"], s["canonical"]
@@ -558,6 +592,16 @@ def cmd_ttp_errors(args) -> None:
 # ── compare ──────────────────────────────────────────────────────────────────
 
 def cmd_compare(args) -> None:
+    """Paired bootstrap between two runs on the documents both scored.
+
+    --task is ttp (default) or an entity type; --resamples sets the
+    bootstrap draws (2000 by default).  Both runs must have run on the
+    same ATT&CK release, or --attack-release must say which release the
+    gold is mapped against for both.  Writes
+    data/eval/compare/<a>__vs__<b>__<task>.json (an __attack-<release>
+    suffix when a release is imposed) and prints, for F1, precision and
+    recall, the observed difference b − a with its 95% CI and
+    P(not better).  Exits when no document was scored by both runs."""
     release = _shared_release(args.a, args.b, args.attack_release)
     a, b = per_doc_scores(args.a, release), per_doc_scores(args.b, release)
     modified = {"a": _modified_files(args.a, a["meta"]), "b": _modified_files(args.b, b["meta"])}
@@ -587,6 +631,14 @@ def cmd_compare(args) -> None:
 # ── attack-diff, release-effect ──────────────────────────────────────────────
 
 def cmd_attack_diff(args) -> None:
+    """What changed between two ATT&CK releases, technique by technique.
+
+    Compares the STIX of data/attack-stix/v<old>/ and
+    data/attack-stix/v<new>/ (--old, --new) and writes
+    data/eval/attack-diff-<old>-<new>.json: per domain, the active counts
+    on both sides and the techniques new, no longer active, renamed, with
+    a changed description, and the procedure counts.  The new and retired
+    ids are printed."""
     old, new = attack.release_version(args.old), attack.release_version(args.new)
     diff = attack.release_diff(attack.release_dir(old, DATA), attack.release_dir(new, DATA))
     path = OUT / f"attack-diff-{old}-{new}.json"
@@ -784,6 +836,18 @@ def _chunk_recall(docs, retriever, gate: bool, spec: str, canonical, cand_id) ->
 
 
 def cmd_retrieval(args) -> None:
+    """Candidate recall of technique retrieval, with no LLM involved.
+
+    For every combination of --corpus kind (short, description,
+    procedure, both), --method (dense, bm25, minrank, rrf) and --gate
+    (keyword gate on/off), measures how many gold techniques the ranked
+    candidates contain per passage and per document at each k of --k
+    (1,5,10,20,25 by default) on --split.  The procedures MITRE wrote
+    from AnnoCTR reports are excluded unless --keep-cited; --corpus-dir
+    reads a corpus built elsewhere, --chunk adds per-chunk candidate
+    lists (k_per_passage:cap), and dense methods exit when the embedding
+    model is unavailable.  Writes data/eval/retrieval-<split>.json
+    (-<name> appended when --name is given)."""
     from evaluation import retrieval as rv
     from pipeline import stage2c_ttp_semantic as s2c
     from pipeline import ttp_retrieval as tr
@@ -874,6 +938,11 @@ def cmd_retrieval(args) -> None:
 # ── support-sample ───────────────────────────────────────────────────────────
 
 def cmd_support_sample(args) -> None:
+    """A CSV of evidence quotes from a run, sampled for a person to judge.
+
+    Runs the same evidence check as `score` on the run --name and writes
+    --n quotes (50 by default) to data/eval/runs/<name>/support-sample.csv;
+    prints how many were written.  Nothing else is written."""
     s = per_doc_scores(args.name)
     rows = []
     for doc_id in s["rows"]:
@@ -909,6 +978,13 @@ def _run_file(path: Path, disabled: set[str], output_path: str | None = None):
 
 
 def cmd_preannotate(args) -> None:
+    """Draft the gold.json of an in-house report, to be corrected by hand.
+
+    Copies the report file into the in-house corpus as
+    <doc-id>/source<suffix> (--doc-id names the folder), runs the
+    pipeline on it and writes the predictions as that folder's gold.json
+    with status "pre-annotation".  Refuses (exit) when a gold.json already
+    exists: an annotation is never overwritten."""
     import shutil
 
     src = Path(args.file)
@@ -926,6 +1002,14 @@ def cmd_preannotate(args) -> None:
 
 
 def cmd_inhouse_run(args) -> None:
+    """Run the pipeline on the in-house reports, from their original files.
+
+    Writes data/eval/inhouse-runs/<name>/run.json once and, per report,
+    docs/<doc_id>.json (predictions, stage report, validation) plus the
+    STIX bundle stage 5 wrote under bundles/ — its file name and SHA-256
+    are recorded, `<id>_invalid.json` when the schemas refused it.
+    Resumable like `run`: a document whose file exists is skipped.
+    --disable turns extra stages off; stage 3 is required."""
     from api.run_config import build_manifest
     from pipeline.orchestrator import RunOptions
 
@@ -1223,6 +1307,12 @@ def cmd_hard_docs(args) -> None:
 
 
 def cmd_agreement(args) -> None:
+    """Two independent annotations of one report, layer by layer.
+
+    Reads the two annotation files a and b and prints, for each layer
+    annotated in both, the F1 with the counts (in both, only in b, only
+    in a).  Writes nothing; exits when no layer is annotated in both
+    files."""
     a = json.loads(Path(args.a).read_text(encoding="utf-8"))
     b = json.loads(Path(args.b).read_text(encoding="utf-8"))
     result = inhouse.agreement(a, b)
@@ -1249,6 +1339,13 @@ def _attack_release_option(p, default: str) -> None:
 
 
 def main() -> None:
+    """Entry point of `python -m evaluation`: parse and dispatch.
+
+    Loads .env first (ATTACK_RELEASE may come from it; a variable already
+    set in the environment wins), builds one subparser per command —
+    each binds its arguments to the cmd_* function of the same step —
+    and calls it.  A subcommand is required; every command writes under
+    data/eval/."""
     # Before the first ATT&CK file is read: ATTACK_RELEASE may be set in .env,
     # and a variable already set in the environment still wins (as in main.py).
     load_dotenv(_ROOT / ".env")

@@ -1,3 +1,39 @@
+"""Pipeline configuration: ``PipelineConfig`` and the variables it reads.
+
+``PipelineConfig`` groups the three sub-configs of a run — ``ChunkConfig``
+(how a report is split), ``LLMConfig`` (the Stage 3 provider) and
+``ValidationConfig`` (the confidence and evidence gates) — plus the data
+and output directories. ``PipelineConfig.from_env()`` is the entry point
+that builds one from the environment; it reads exactly these variables:
+
+======================= =========================== =====================
+Field                   Environment variable        Default when unset
+======================= =========================== =====================
+``chunk.max_chars``     ``CHUNK_MAX_CHARS``         3000
+``chunk.overlap``       ``CHUNK_OVERLAP``           400
+``llm.provider``        ``LLM_PROVIDER``            ``anthropic``
+``llm.model``           ``<PROVIDER>_MODEL``,       ``claude-sonnet-5-5``
+                        then ``LLM_MODEL``
+``llm.timeout_seconds`` ``LLM_TIMEOUT``             120
+``llm.max_retries``     ``LLM_MAX_RETRIES``         3
+======================= =========================== =====================
+
+``<PROVIDER>_MODEL`` is the model variable of the provider the run uses —
+``ANTHROPIC_MODEL``, ``VLLM_MODEL``, ``OLLAMA_MODEL``… (#531) — and
+``LLM_MODEL`` is only the fallback when the provider names none. Every
+other field (``llm.temperature``, ``llm.circuit_breaker_threshold``, the
+whole ``validation`` block, ``data_dir``, ``output_dir``) comes from the
+class defaults: ``from_env`` reads no variable for it.
+
+Example: with ``LLM_PROVIDER=ollama`` and ``OLLAMA_MODEL=mistral`` in the
+environment, ``PipelineConfig.from_env().llm`` is an ``LLMConfig`` with
+provider ``ollama`` and model ``mistral``, and the chunk and validation
+blocks keep their defaults apart from any ``CHUNK_*`` variable set.
+
+docs/configuration.md is the operator reference for the variables the
+running services read.
+"""
+
 from __future__ import annotations
 
 import os
