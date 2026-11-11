@@ -323,6 +323,22 @@ sudo chown -R 1001:1001 ./data/state
 ```
 Otherwise, the entrypoint fails with `ERROR: /app/state is not writable by uid 1001`.
 
+**Building the image with your own uid/gid:**
+The `1001` above is a default, not a requirement. The Dockerfile takes four build arguments:
+
+| Build argument | Default | Purpose |
+|---|---|---|
+| `APP_UID` | `1001` | uid of the non-root user the container runs as |
+| `APP_GID` | `1001` | gid of that user's group |
+| `INSTALL_CAPTURE` | `true` | Install Chromium for the URL-capture tab |
+| `GIT_REV` | empty | Revision recorded in the bundles built into the image |
+
+`INSTALL_CAPTURE` and `GIT_REV` can also be set from `.env` as `CTI_INSTALL_CAPTURE` and `CTI_GIT_REV` (see *Configuration* above); `APP_UID` and `APP_GID` cannot — they only exist as build arguments. To run the container as your own host user, so a bind-mounted `./data/state` is writable with no `chown` at all, rebuild the image with your ids:
+
+```bash
+docker build --build-arg APP_UID=$(id -u) --build-arg APP_GID=$(id -g) -t ctiparsor:local .
+```
+
 ## Reaching it from other machines
 
 By default, the API is bound to `127.0.0.1`.
