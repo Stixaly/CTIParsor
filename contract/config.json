@@ -377,9 +377,9 @@
       ]
     },
     "env CYNER_ENABLED": {
-      "set": true,
+      "set": false,
       "values": [
-        "true"
+        "false"
       ]
     },
     "env CYNER_MODEL": {

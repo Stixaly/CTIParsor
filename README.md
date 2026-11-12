@@ -240,7 +240,7 @@ ran, were skipped (disabled, model missing, no LLM provider) or failed.
 | **2** Regex IoCs | IPs, domains, URLs, emails, MACs, ASNs, paths, registry keys, hashes, CVEs, raw ATT&CK IDs | always |
 | **2b** Gazetteer NER | Aho-Corasick scan for the malware, tools and groups ATT&CK knows | always |
 | **2c** TTP candidates | Retrieves ranked ATT&CK candidates per passage (descriptions and procedure examples, BM25 and dense) for 3f to choose from; with `TTP_MODE=verify`, emits techniques by sentence-transformer similarity instead | always |
-| **2d** CyNER 2.0 | DeBERTa-v3 cybersecurity NER — malware and threat groups | on by default — `CYNER_ENABLED` |
+| **2d** CyNER 2.0 | DeBERTa-v3 cybersecurity NER — malware and threat groups | off by default — `CYNER_ENABLED=true` turns it on (ADR-0099) |
 | **2e** GLiNER | Zero-shot NER — sectors, campaigns, infrastructure, actors not yet in ATT&CK | when `GLINER_ENTITY_TYPES` names a type (none by default) — `GLINER_ENABLED` |
 | **2g** Alias lists | Splits "X (aka Y, Z)" constructs into threat-actor names no dictionary knows yet | always |
 | **3** LLM enrichment | Actors, malware, tools, TTPs, relationships with an evidence quote, targets, mitigations | with an LLM provider that the TLP allows ([egress policy](docs/configuration.md#egress-policy-tlp)) |

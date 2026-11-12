@@ -265,13 +265,13 @@ def test_stage_three_allowed_by_egress_but_without_a_provider_call_fails(stack, 
 
 def test_a_model_skipped_for_heavy_models_fails_check_three(stack, sample_pdf, tmp_path):
     wire_happy(stack)
-    stages = replace_stage(good_stages(), "2d", status="skipped", reason="model or index unavailable")
+    stages = replace_stage(good_stages(), "2e", status="skipped", reason="model or index unavailable")
     stack.job_states[PDF_JOB] = [job_detail(PDF_JOB, stages=stages)]
     code, report_dir = run(stack, sample_pdf, tmp_path, "--required-stages", "3")
     assert code == 1
     check = checks_of(load(report_dir), "pdf")["3 models ran"]
     assert check["status"] == "fail"
-    assert "stage 2d skipped: model or index unavailable" in check["detail"]
+    assert "stage 2e skipped: model or index unavailable" in check["detail"]
     assert checks_of(load(report_dir), "pdf")["2 required stages ran"]["status"] == "pass"
 
 

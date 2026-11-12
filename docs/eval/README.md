@@ -343,6 +343,7 @@ Measurement pages that the sections above do not link:
 - [gazetteer-policy-2026-10.md](gazetteer-policy-2026-10.md) — Stage 2b with and without the gazetteer's ordinary-word policy, on AnnoCTR train and dev.
 - [ner-precision-2026-10.md](ner-precision-2026-10.md) — the CyNER and spaCy precision filters (ADR-0088), designed on train and measured on dev; two adopted.
 - [ner-malware-2026-10.md](ner-malware-2026-10.md) — one malware-precision lead, measured once on AnnoCTR test (2026-10-19): not adopted.
+- [ner-swap-2026-11.md](ner-swap-2026-11.md) — Stage 2d (CyNER) against a candidate model in its seat and against no cyber NER, offline and end to end on AnnoCTR dev and the 8 in-house reports (2026-11-10 and 11); the basis of ADR-0099.
 - [selection-cut-off-2026-10.md](selection-cut-off-2026-10.md) — Stage 3f selection answers cut off at `LLM_MAX_OUTPUT_TOKENS` on dev, and the fix that keeps their complete choices (technique F1 0.584 → 0.610).
 - [selection-loop-2026-10.md](selection-loop-2026-10.md) — the Stage 3f selection loop (about one call in 65 on AnnoCTR dev) and three changes measured against it.
 - [selection-once-2026-10.md](selection-once-2026-10.md) — a sentence added to the selection prompt, "write that object once, then stop", as a follow-up to selection-loop-2026-10.
