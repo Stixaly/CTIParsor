@@ -203,7 +203,8 @@ def captured_env() -> dict[str, str]:
     (ADR-0094), which sends figures to the text's provider, so the record says
     `auto` instead of leaving the default to be inferred.  The same holds for
     the switches that are on by default (Stages 3d, 3f and 3doc): unset or
-    blank, they are recorded as `true`."""
+    blank, they are recorded as `true`; CYNER_ENABLED, off by default
+    (ADR-0099), is recorded as `false`."""
     env = {}
     for var_name in _CAPTURED_ENV:
         val = os.getenv(var_name)
@@ -215,6 +216,8 @@ def captured_env() -> dict[str, str]:
                      "ENABLE_DOCUMENT_LEVEL_RELATIONS"):
         if not env.get(var_name, "").strip():
             env[var_name] = "true"
+    if not env.get("CYNER_ENABLED", "").strip():
+        env["CYNER_ENABLED"] = "false"
     return env
 
 

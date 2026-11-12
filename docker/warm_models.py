@@ -38,8 +38,8 @@ def warm_cyner() -> bool:
     """Download / verify the CyNER named-entity model."""
     label = "cyner"
     model_id = os.getenv("CYNER_MODEL", "PranavaKailash/CyNER-2.0-DeBERTa-v3-base")
-    if not env_bool("CYNER_ENABLED", default=True):
-        print(f"  SKIP {label}: disabled by CYNER_ENABLED=false")
+    if not env_bool("CYNER_ENABLED", default=False):
+        print(f"  SKIP {label}: off unless CYNER_ENABLED=true")
         return True
     try:
         from transformers import pipeline

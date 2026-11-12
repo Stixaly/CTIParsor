@@ -860,8 +860,12 @@ class _Run:
                         entities=len(self.r.semantic_ttps))
 
         # Stage 2d — CyNER.
-        from pipeline.stage2d_cyner import cyner_available, extract_cyner_entities
-        if self.gate("2d", cyner_available):
+        from pipeline.stage2d_cyner import (
+            cyner_available,
+            cyner_unavailable_reason,
+            extract_cyner_entities,
+        )
+        if self.gate("2d", cyner_available, unavailable_reason=cyner_unavailable_reason):
             t0 = time.monotonic()
             self.r.cyner = extract_cyner_entities(text)
             entities = BaseExtractionStage.merge_into(entities, self.r.cyner)

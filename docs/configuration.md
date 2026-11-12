@@ -183,7 +183,7 @@ TTP_EMBEDDING_MODEL=all-MiniLM-L6-v2
 #                             # cosine gap from the top match
 
 # Stage 2d — CyNER 2.0 cybersecurity NER (DeBERTa-v3; model card F1 91.88%, not measured here)
-CYNER_ENABLED=true
+# CYNER_ENABLED=false   # off by default (ADR-0099); true runs the stage
 # CYNER_MODEL=PranavaKailash/CyNER-2.0-DeBERTa-v3-base   # default; override to swap models
 
 # Stage 2 and 2d, precision filters (ADR-0088, docs/eval/ner-precision-2026-10.md):

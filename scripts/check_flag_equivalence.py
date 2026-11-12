@@ -22,9 +22,10 @@ OLD_SEMANTICS: list[tuple[str, bool, Callable[[str], bool], bool]] = [
     # stage3e — the strictest of the seven: only the literal "true".
     ("ENABLE_CONSENSUS", False,
      lambda v: v.strip().lower() == "true", False),
-    # stage2d / stage2e — default ON, an unrecognised value stayed ON.
-    ("CYNER_ENABLED", True,
-     lambda v: v.lower() not in ("false", "0", "no"), True),
+    # stage2d — default OFF since ADR-0099: only a truthy value turns it on.
+    ("CYNER_ENABLED", False,
+     lambda v: v.strip().lower() in ("1", "true", "yes", "on"), False),
+    # stage2e — default ON, an unrecognised value stayed ON.
     ("GLINER_ENABLED", True,
      lambda v: v.lower() not in ("false", "0", "no"), True),
     # stage2c — measurement escape hatches, read on every call.

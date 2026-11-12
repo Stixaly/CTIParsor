@@ -87,8 +87,9 @@ records for it, verified from its repository when the corpus was added.
 
 ## Models downloaded at bootstrap
 
-`docker/warm_models.py`, run by `bootstrap`, downloads three models from the
-Hugging Face Hub into the `cti-cache` volume. They are not in this repository
+`docker/warm_models.py`, run by `bootstrap`, downloads up to three models from
+the Hugging Face Hub into the `cti-cache` volume: CyNER only when
+`CYNER_ENABLED=true` (off by default, ADR-0099). They are not in this repository
 or in the image. The licence is the one each model's card declares
 (`cardData.license` of `https://huggingface.co/api/models/<id>`), read on
 2026-11-01, and likewise for the base model and the training dataset a card
