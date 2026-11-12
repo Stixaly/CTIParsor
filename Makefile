@@ -106,6 +106,7 @@ check: .secrets/db_password
 ## Verify every number claimed in README.md still matches the source of truth
 check-docs: .secrets/db_password
 	$(DEV_RUN) python scripts/check_doc_claims.py
+	$(DEV_RUN) python scripts/check_doc_links.py
 
 ## Record the stable contract (docs/support-policy.md, ADR-0094 item 1) in
 ## contract/*.json: the API's OpenAPI schema, main.py's arguments and the

@@ -9,7 +9,7 @@
 reverses part of [ADR-0037](0037-scaling-to-30-40-users.md) (Option C,
 narrowed) and part of [ADR-0045](0045-postgresql-for-the-job-store.md)
 (Options C and D, both rejected); builds on
-[ADR-0031](0031-provenance-based-rule-dedup.md) (FTS5 for the rule corpus)
+[ADR-0031](0031-brand-evidence-from-campaign-domains.md) (FTS5 for the rule corpus)
 and [ADR-0022](0022-per-format-coverage-breakdown.md) (the `INDEXED BY`
 planner hint)
 
