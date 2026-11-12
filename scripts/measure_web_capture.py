@@ -1,3 +1,22 @@
+"""Measure the PDF capture of the URL tab on real CTI publishing pages.
+
+Each URL is captured to a PDF with Playwright and Chromium, as the URL tab does,
+and the capture is measured: the time taken, the size of the PDF, and the IOC-like
+strings (IPv4, SHA-256, MD5, domains, CVE and ATT&CK ids) that the page text
+contains and that the PDF text still contains (retention). The default URLs are
+a spread of publishing stacks: a WordPress blog with a table of contents, a
+vendor blog behind a CDN, a static site generator and a government advisory.
+The script fetches the URLs, so it needs network access.
+
+Usage: python scripts/measure_web_capture.py [URL ...] [--enable-js]
+       [--timeout-ms N] [--json FILE] [--keep]
+
+--enable-js captures with JavaScript on, the setting the URL tab uses; --keep
+writes the PDFs to output/web_capture_samples instead of a temporary folder;
+--json writes the measurements to FILE.
+Exit status: 2 when Playwright is not installed, 0 when at least one capture
+succeeded, 1 otherwise.
+"""
 from __future__ import annotations
 
 import argparse

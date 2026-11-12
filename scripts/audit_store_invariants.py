@@ -1,3 +1,17 @@
+"""Audit the job and rule stores, read only.
+
+Runs the invariants over the PostgreSQL stores: the dedup clusters and the
+normalised, non-trivial atoms of the rule store, the rule bytes and dedup
+keys, and the bundle revision recorded for each job (ADR-0086). Each
+invariant prints OK, FAIL or SKIP (its table or column is missing) with its
+count. The checks only read; none of them writes to the database. It reads
+DATABASE_URL the way the API does.
+
+Usage: python scripts/audit_store_invariants.py
+
+Exit status: 1 when an invariant of severity "error" fails, 0 otherwise.
+Invariants of severity "warn" are printed but do not change the exit status.
+"""
 from __future__ import annotations
 
 import argparse

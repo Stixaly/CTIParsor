@@ -1,3 +1,18 @@
+"""Measure how much of a corpus is images, and how many of them are icons.
+
+For each PDF and HTML document under the given paths (default: the uploads
+and input folders, not recursive) it counts the embedded images and classifies
+each one: an icon when a side is under 48 pt or the image covers under 2 % of
+its page, a banner when it is more than six times wider than high, a figure
+otherwise. The HTML pages carry no page area, so their images are classified
+with an area of 0: every HTML image whose sides are at least 48 pt is then an
+icon. The table gives one row per document, with the totals per kind, the
+figures per 10 pages and the inline image bytes of HTML. Read only.
+
+Usage: python scripts/measure_image_surface.py [PATH ...]
+
+Exit status: 1 when no document is found, 0 otherwise.
+"""
 from __future__ import annotations
 
 import argparse

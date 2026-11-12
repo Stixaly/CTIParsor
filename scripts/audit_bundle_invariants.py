@@ -1,3 +1,17 @@
+"""Audit the STIX bundles stored for each job, read only.
+
+Loads every stored bundle, runs the invariant checks of this module (object
+ids, relationship references and types, indicator patterns, timestamps,
+confidence range, orphan objects) and prints one line per invariant, then
+the object counts of each job and the bundle staleness report (ADR-0035).
+The script never writes to the database. It reads DATABASE_URL the way the
+API does.
+
+Usage: python scripts/audit_bundle_invariants.py [--job PREFIX ...]
+
+--job keeps only the jobs whose id starts with PREFIX (repeatable).
+Exit status: 1 when an invariant of severity "error" fails, 0 otherwise.
+"""
 from __future__ import annotations
 
 import argparse

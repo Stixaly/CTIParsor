@@ -1,3 +1,22 @@
+"""Stage 1f trade-offs on the PDFs of a folder: text extraction and figure crops.
+
+Question A, text: for each PDF, the text that markitdown extracts (the
+ingestion path) against the text that pdfplumber extracts, with the number of
+entity observables that Stage 2 finds in each, and the number found in both.
+
+Question B, figures: for each figure that pdfplumber finds on a page, the size
+of the full page rendered as PNG against the size of the figure crop, in bytes
+and in pixels. A figure is kept when a side is at least 48 pt, it covers at
+least 2 % of its page and its aspect ratio is at most 6 (the Tier 0 triage of
+ADR-0032, the constants of this module). Question A prints one table for all
+the PDFs; Question B prints one table per document.
+
+Usage: python scripts/measure_stage1f_tradeoffs.py [PATH ...] [--dpi N]
+       [--max-figures N] [--save-crops DIR] [--skip-text] [--skip-crops]
+
+PATH defaults to the uploads folder (not recursive). PDFs over 200 MB are
+skipped. Exit status: 1 when no PDF is found, 0 otherwise.
+"""
 from __future__ import annotations
 
 import argparse

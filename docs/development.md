@@ -256,6 +256,7 @@ CTIParsor/
 │   ├── migrate_jobs_to_postgres.py # One-shot copy of a cti_stix.db job store into PostgreSQL (ADR-0045)
 │   ├── migrate_rules_to_postgres.py # The same for the rule store (ADR-0053)
 │   ├── build_gazetteer_policy.py  # The ordinary-word policy, pipeline/data/gazetteer_policy.json, from docs/gazetteer-ordinary-words.md
+│   ├── make_pdf_table_fixtures.py # Regenerates tests/fixtures/pdf_tables/ with Playwright's Chromium; the PDFs are committed and CI does not run it
 │   ├── db_upgrade.sh              # Moves the stores to the PostgreSQL major compose.yaml names (ADR-0077 part B, make db-upgrade)
 │   ├── lock_pypi_hashes.py        # Gives each PyPI lock pin the sha256 of PyPI's own files (ADR-0080)
 │   │  ── checks and diagnostics ──
@@ -303,7 +304,7 @@ CTIParsor/
 │   ├── measure_pin_allocation.py  # Pin edges under sequential vs fair-share budgets (ADR-0026)
 │   ├── measure_relevance.py       # Proposed-rule relevance on real reports
 │   ├── measure_review_revision_trigger.py # Row vs statement trigger for review_revision, in a throwaway schema (ADR-0086)
-│   ├── measure_stage1f_tradeoffs.py # Crop vs whole page: tokens, latency, kind accuracy
+│   ├── measure_stage1f_tradeoffs.py # Stage 1f: markitdown vs pdfplumber text, and figure crop vs whole page (PNG bytes and pixels)
 │   ├── measure_ttp_vs_observable_coverage.py # Technique coverage vs evidence-backed coverage
 │   ├── measure_web_capture.py     # PDF capture and ingestion quality of the URL tab
 │   ├── probe_ttp_recall_caps.py   # Stage 2c's two recall caps on real reports (ADR-0023)

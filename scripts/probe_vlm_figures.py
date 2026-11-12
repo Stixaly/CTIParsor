@@ -1,3 +1,21 @@
+"""Ask a vision model about the figures of PDF pages. Writes nothing to the database.
+
+Scores each page of each PDF by the share of the page covered by its images and
+keeps the pages where that share is at least 5 %, the highest first per PDF.
+Each chosen page is rendered to PNG and sent to a model with a prompt that asks
+for three things only: the kind of object, the text it carries verbatim and the
+directed edges it draws. The prompt forbids prose so that the answers compare
+across models. Backends: ollama (the default, at OLLAMA_BASE_URL, model qwen3.8)
+and anthropic (needs the anthropic SDK and ANTHROPIC_API_KEY, model claude-opus-5).
+The answers are printed; the rendered PNG files are kept under --out.
+
+Usage: python scripts/probe_vlm_figures.py [PATH ...] [--backend ollama|anthropic]
+       [--model M] [--per-pdf N] [--limit N] [--dpi N] [--out DIR] [--render-only]
+
+PATH defaults to the uploads folder (not recursive). --render-only renders the
+pages and skips the model calls. Exit status: 1 when the anthropic SDK is
+missing or no figured page is found, 0 otherwise.
+"""
 from __future__ import annotations
 
 import argparse
