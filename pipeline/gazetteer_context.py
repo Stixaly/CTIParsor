@@ -70,10 +70,12 @@ def _load() -> tuple[dict, str | None]:
 
 
 def rules_version() -> str | None:
+    """Short hash of the constructions file, or None when the file cannot be read."""
     return _load()[1]
 
 
 def form_rule(name_key: str) -> dict:
+    """The construction rule of one ambiguous form, or an empty dict when the file has none."""
     return _load()[0].get("forms", {}).get(name_key, {})
 
 

@@ -214,6 +214,7 @@ class CompletionStats:
 
     @property
     def total_added(self) -> int:
+        """The relationships added by the three completion passes: reference, transitive and long-distance."""
         return self.reference_added + self.transitive_added + self.long_distance_added
 
 

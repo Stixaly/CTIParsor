@@ -299,6 +299,7 @@ def _stem(tok: str) -> str:
 
 
 def tokenize(text: str) -> list[str]:
+    """The lower-cased, stemmed tokens of the text, without stopwords and one-letter tokens."""
     return [_stem(t) for t in _TOKEN.findall(text.lower()) if t not in _STOPWORDS and len(t) > 1]
 
 
@@ -365,6 +366,7 @@ class Corpus:
     version: str                      # ties a cache or a result to its corpus
 
     def select(self, keep: list[int]) -> Corpus:
+        """A new corpus holding the entries at the indices in keep, in that order."""
         emb = self.embeddings[keep] if self.embeddings is not None else None
         return Corpus([self.ids[i] for i in keep], [self.names[i] for i in keep],
                       [self.kinds[i] for i in keep], [self.domains[i] for i in keep],
@@ -633,6 +635,7 @@ def _production_retriever(corpus: str, method: str, exclude_cited: str) -> Retri
 
 
 def retrieval_available() -> bool:
+    """True when the retrieval settings name a known corpus and method, and that retriever can be built. With SKIP_HEAVY_MODELS only the BM25 method is available."""
     s = retrieval_settings()
     if s["corpus"] not in CORPORA or s["method"] not in METHODS:
         return False

@@ -1,3 +1,14 @@
+"""Stage 3: LLM extraction of threat-intelligence entities and relationships.
+
+Each chunk of a report is sent to the configured provider (LLM_PROVIDER: anthropic,
+mistral, gemini, ollama, lmstudio or vllm) with a system prompt.  The JSON answer
+is parsed into an LLMEnrichmentResult: malware, threat actors, TTPs, relationships
+with their dates, and the IoC associations.  The Pydantic models in this module
+define the expected shape of an answer.  Text is sanitised before it enters a
+prompt (_sanitize_text_for_prompt()), and a failed call is retried with tenacity.
+The document-level relationship pass and the provider clients live here too.
+"""
+
 import json
 import os
 import re

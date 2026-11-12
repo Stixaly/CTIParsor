@@ -91,6 +91,7 @@ _FAMILY = {"threat-actor": "actor", "intrusion-set": "actor", "malware": "softwa
 
 
 def family(stix_type: str) -> str:
+    """The family of a STIX type, as the baseline groups it (the type itself when unmapped)."""
     return _FAMILY.get(stix_type, stix_type)
 
 
@@ -694,6 +695,7 @@ class BaselineIndex:
         return carrier if carrier.sco_id is not None else None
 
     def to_json(self) -> str:
+        """Serialise the index to a compact JSON string: entries, relations and the id sets, sorted."""
         return json.dumps({
             "version": self.version, "sha256": self.sha256, "bundle_id": self.bundle_id,
             "entries": [_entry_to_dict(e) for e in self.entries],

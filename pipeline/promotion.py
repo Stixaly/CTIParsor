@@ -67,6 +67,7 @@ class Candidate:
     sources: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
+        """The candidate as a plain dict, from dataclasses.asdict()."""
         return asdict(self)
 
 
@@ -115,6 +116,7 @@ def compute_candidates(
     min_jobs: int = DEFAULT_MIN_JOBS,
     share: float = DEFAULT_SHARE,
 ) -> list[Candidate]:
+    """Turn analyst decisions into deny and promote candidates. Each decision is (value, entity type, source, accepted, job id), where accepted is 1, 0 or None. A deny needs enough rejections in enough reports, with a rejected share of at least share. A promote needs enough accepted or manual decisions, a gazetteer type, a term the gazetteer does not know, a minimum length, and no generic fragment."""
     from pipeline.stage2d_cyner import _is_generic_fragment
 
     tallies: dict[tuple[str, str], _Tally] = {}
@@ -166,6 +168,7 @@ def _row(r) -> dict:
 
 
 def list_overrides(conn, *, status: str | None = None, action: str | None = None) -> list[dict]:
+    """The rows of entity_overrides, optionally filtered by status and action, ordered by action, entity type and term."""
     clauses, params = [], []
     if status:
         clauses.append("status=?")
@@ -254,6 +257,7 @@ def apply_candidates(conn, candidates: list[Candidate], now: str) -> int:
 
 
 def set_status(conn, override_id: str, status: str, now: str) -> dict | None:
+    """Set the status of one override and its update time. Return the updated row, or None when no row has that id."""
     cur = conn.execute(
         "UPDATE entity_overrides SET status=?, updated_at=? WHERE id=?", (status, now, override_id)
     )
@@ -264,6 +268,7 @@ def set_status(conn, override_id: str, status: str, now: str) -> dict | None:
 
 
 def activate_all_candidates(conn, now: str) -> int:
+    """Set every candidate override to active. Return the number of rows changed."""
     cur = conn.execute(
         "UPDATE entity_overrides SET status='active', updated_at=? WHERE status='candidate'", (now,)
     )
@@ -322,6 +327,7 @@ def add_manual(conn, term: str, entity_type: str, action: str, now: str, *,
 
 
 def delete_override(conn, override_id: str) -> bool:
+    """Delete one override row. Return True when the row existed."""
     cur = conn.execute("DELETE FROM entity_overrides WHERE id=?", (override_id,))
     conn.commit()
     return cur.rowcount > 0

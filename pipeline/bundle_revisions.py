@@ -1,3 +1,11 @@
+"""Bundle staleness: which pipeline fixes a stored bundle predates.
+
+BUNDLE_AFFECTING lists the commits that changed what Stages 1 to 5 output, with
+the scope of each fix (ADR-0086).  git_rev_of() reads the revision a run was
+built at, is_ancestor() and resolve_commit() ask git about it, and stale_entries()
+and audit_staleness() compare those revisions with the list.
+"""
+
 # pipeline/bundle_revisions.py
 from __future__ import annotations
 

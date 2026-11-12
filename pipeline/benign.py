@@ -85,6 +85,7 @@ _PUBLIC_RESOLVERS = frozenset({
 
 
 def enabled() -> bool:
+    """True when BENIGN_IOC_FILTER is on, which is the default."""
     return env_bool("BENIGN_IOC_FILTER", default=True)
 
 

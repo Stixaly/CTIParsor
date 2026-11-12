@@ -71,9 +71,11 @@ class Anchor(BaseModel):
 
     @property
     def publication_grade(self) -> bool:
+        """True when the anchor may resolve a relative expression such as last month. Every source except file metadata qualifies (ADR-0063)."""
         return self.source not in _WEAK_ANCHORS
 
     def day(self) -> date:
+        """The anchor value as a date."""
         return date.fromisoformat(self.value[:10])
 
 
@@ -107,6 +109,7 @@ class DocumentTime:
 
     @classmethod
     def build(cls, text: str, anchor: Anchor | None) -> DocumentTime:
+        """Build the document's time context: the anchor, and the folded text in which quotes are located."""
         return cls(anchor=anchor, folded_text=fold(text or "")[0])
 
 
@@ -152,6 +155,7 @@ def fold(text: str) -> tuple[str, list[int]]:
 
 
 def fold_text(text: str) -> str:
+    """The text folded for quote matching (see fold()), without the offset map."""
     return fold(text)[0]
 
 
@@ -1168,12 +1172,14 @@ def legacy_assertions(start: str | None, stop: str | None) -> list[TemporalAsser
 
 
 def times_to_json(times: list[TemporalAssertion]) -> str | None:
+    """The assertions as a JSON list for storage. None when there are none."""
     if not times:
         return None
     return json.dumps([a.model_dump(mode="json", exclude_none=True) for a in times])
 
 
 def times_from_json(raw: str | None) -> list[TemporalAssertion]:
+    """Read assertions stored as JSON. Invalid JSON gives an empty list, and an item that no longer validates is dropped. Both cases are logged."""
     if not raw:
         return []
     try:
@@ -1207,6 +1213,7 @@ def display_bounds(times: list[TemporalAssertion]) -> tuple[str | None, str | No
 
 
 def status_counts(times: list[TemporalAssertion]) -> dict[str, int]:
+    """Count the assertions by status: verified, ambiguous, unresolved and conflict."""
     counts: dict[str, int] = {}
     for a in times:
         counts[a.status] = counts.get(a.status, 0) + 1

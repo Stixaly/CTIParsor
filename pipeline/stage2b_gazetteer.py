@@ -448,7 +448,9 @@ class GazetteerStage(BaseExtractionStage):
         pass
 
     def available(self) -> bool:
+        """True when the MITRE index file exists and SKIP_HEAVY_MODELS is off."""
         return attack_data.resolve(_INDEX_PATH).exists() and not _SKIP_HEAVY
 
     def extract(self, text: str) -> list[RawEntity]:
+        """Return the gazetteer matches of the text (match_gazetteer())."""
         return match_gazetteer(text)
