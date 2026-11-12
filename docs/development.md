@@ -262,7 +262,7 @@ CTIParsor/
 │   ├── check_stages.py            # Diagnostic: which stages are available (make check)
 │   ├── check_doc_claims.py        # Doc drift guard: documented numbers vs source (make check-docs)
 │   ├── check_coverage.py          # Per-area coverage floors on top of the total one (make coverage)
-│   ├── contract.py                # Record (make contract) or check the stable contract in contract/ (ADR-0094 item 1)
+│   ├── contract.py                # Record (make contract) or check the stable contract in contract/ (ADR-0094 item 1; five surfaces, formats.json included)
 │   ├── check_backup_restore.py    # A backup restores into an empty install with every row and file (ADR-0094 item 3)
 │   ├── check_clean_install.sh     # The clean install from the published image, as the docs write it (ADR-0094 item 9); a release step, not CI
 │   ├── check_db_upgrade.sh        # make db-upgrade on both PostgreSQL 17 layouts, then the stack starts on it (ADR-0077 part B)

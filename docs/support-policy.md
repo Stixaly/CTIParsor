@@ -133,11 +133,27 @@ Its limits: 47 of the 60 operations publish no schema for their success
 response and 12 an object without fields, so the fields they return are not
 recorded; only `POST /api/baselines/inspect` declares its own. The 409 body
 above is not in the schema either: its responses declare no content. The job
-statuses, the `X-Bundle-Validation` values, the SSE event names and the layout
-of the export archive are strings in the code, not in the schema: route tests
-check them and the 409 body (`tests/test_jobs_routes.py`,
-`tests/test_api_routes.py`, `tests/test_detection_coverage.py`), the contract
-does not.
+statuses and the `X-Bundle-Validation` values are recorded in the schema as
+enumerations (the `status` of a job, and the header of `GET /api/jobs/{id}/bundle`),
+so a value removed from either is a breaking change. The SSE event names and
+the layout of the export archive are recorded in `contract/formats.json` (see
+below). Route tests still check the 409 body (`tests/test_jobs_routes.py`,
+`tests/test_api_routes.py`, `tests/test_detection_coverage.py`); the contract
+does not record it.
+
+`contract/formats.json` holds the strings a client reads, which are not in the
+schema:
+
+- **The SSE event names** (`sse event <name>`): `connected`, then the stored
+  progress types `queued`, `stage`, `partial_graph` and `done`
+  (`api/db.py`, `api/routes/progress.py`), with whether a job stores each one.
+  The frontend's listeners must name only these (`tests/test_contract_formats.py`).
+- **The detection export ZIP** (`api/routes/coverage.py`): the manifest and
+  readme names, the `rules` directory, and the file extension of each format
+  (`sigma`, `suricata`, `yara`) and of any other.
+
+Renaming one of these is a breaking change, and so is any change to its
+recorded value; a name added is compatible.
 
 ### Command line
 
@@ -336,19 +352,22 @@ Varies, and is not a breaking change:
 - the names and descriptions of ATT&CK objects, as the selected ATT&CK release
   states them.
 
-Evidence today: `contract/stix.json` is read from the six Stage 4 reference
+Evidence today: `contract/stix.json` is read from the seven Stage 4 reference
 bundles (`tests/fixtures/stage4_reference/expected/`, which
 `tests/test_stage4_reference.py` keeps equal to the code): each custom
 property found there with its JSON types, and the id of each object known by
 a name, a value, a key, a pattern, hashes or a definition (not a
 relationship), named by scenario, type and that property; a random id (the
-Report's) is recorded as `random` (86 ids, 6 of them random, and 12
-properties on 2026-11-01). The `offline` scenario holds techniques no Stage 3
-entry lists, as the offline profile exports them. A changed id is a breaking change: an identity rule
+Report's) is recorded as `random` (87 ids, 7 of them random, and 13
+properties on 2026-11-12). The `offline` scenario holds techniques no Stage 3
+entry lists, as the offline profile exports them. The `opencti_enriched`
+scenario enriches the OpenCTI baseline of `tests/fixtures/baselines/`
+(ADR-0090): its Report is re-issued with `x_ctiparsor_enrichment`, which is
+recorded. The objects it keeps from the baseline are not recorded: a baseline
+object is kept as received, so its id is the upstream's, not one CTIParsor
+computes. A changed id is a breaking change: an identity rule
 changed. An id that becomes random, or stops being random, is a changed id.
 An object a scenario no longer yields is not a breaking change.
-`x_ctiparsor_enrichment` is in none of these bundles (only an enriched bundle
-carries it, and none is checked in): it is not checked yet.
 
 ## Breaking changes and deprecation
 

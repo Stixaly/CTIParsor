@@ -25,6 +25,7 @@ import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import get_args
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -32,6 +33,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from api.db import get_conn
 from api.logging_config import get_logger
 from api.paths import state_dir
+from api.response_models.jobs import JobStatus
 from api.routes.queue import _seconds_since, load_workers
 
 router = APIRouter(tags=["metrics"])
@@ -44,7 +46,7 @@ DEFAULT_BACKUP_STATUS_FILE = "/app/backup-status/status.json"
 
 # Every status a job can hold (api/response_models/jobs.py). Emitted even at 0,
 # so a series does not disappear when its count falls to zero.
-JOB_STATUSES = ("uploaded", "queued", "processing", "for_review", "reviewing", "completed", "failed")
+JOB_STATUSES: tuple[str, ...] = get_args(JobStatus)
 WORKER_STATES = ("busy", "idle", "stale")
 
 

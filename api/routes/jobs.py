@@ -597,12 +597,17 @@ def get_source_file(job_id: str):
     )
 
 
+# The values of the `X-Bundle-Validation` header: Stage 5's verdict as stored (`validated`, `unverified`),
+# or `unknown` when none is stored (a NULL `bundle_validation`).  An `invalid` bundle is a 409, never a header.
+BUNDLE_VALIDATION_VALUES = ("validated", "unverified", "unknown")
+
+
 @router.get("/{job_id}/bundle", responses={**_BUNDLE_REFUSED, 200: {
     "description": "The stored STIX 2.1 bundle, as JSON.",
     "content": {"application/json": {}},
     "headers": {"X-Bundle-Validation": {
         "description": "validated, unverified (JSON schemas missing) or unknown (built before the verdict was stored).",
-        "schema": {"type": "string"},
+        "schema": {"type": "string", "enum": list(BUNDLE_VALIDATION_VALUES)},
     }},
 }})
 def get_bundle(job_id: str):

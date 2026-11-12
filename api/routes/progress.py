@@ -8,10 +8,16 @@ from fastapi.responses import StreamingResponse
 
 from api.auth import config as auth_config
 from api.auth.deps import authenticate
-from api.db import get_conn
+from api.db import EVENT_DONE, STORED_EVENTS, get_conn
 from api.routes._common import refuse_nul_id
 
 router = APIRouter(prefix="/api/jobs", tags=["progress"])
+
+# The names of the stream's events: `connected` (sent here, never stored), then the stored progress types.
+# Recorded in contract/formats.json; the frontend's EventSource listeners name only these
+# (tests/test_contract_formats.py).
+EVENT_CONNECTED = "connected"
+SSE_EVENTS = (EVENT_CONNECTED, *STORED_EVENTS)
 
 # The stream is text/event-stream, not JSON, so it has no response_model.  Each frame is
 # `id:` (progress events only), `event:` and `data:` (a JSON text).
@@ -75,7 +81,7 @@ async def progress_stream(job_id: str, request: Request):
         last_id = _parse_last_event_id(request)
         done_sent = False
         # Send initial connection confirmation
-        yield f"event: connected\ndata: {json.dumps({'job_id': job_id})}\n\n"
+        yield f"event: {EVENT_CONNECTED}\ndata: {json.dumps({'job_id': job_id})}\n\n"
 
         # Bug 5 fix: the SSE client may connect fractionally before the job row
         # is committed (race between upload handler and the first SSE poll).
@@ -96,20 +102,20 @@ async def progress_stream(job_id: str, request: Request):
                 yield f"id: {ev['id']}\nevent: {ev['event_type']}\ndata: {ev['data']}\n\n"
                 last_id = ev["id"]
 
-                if ev["event_type"] == "done":
+                if ev["event_type"] == EVENT_DONE:
                     done_sent = True
                     return
 
             status = await asyncio.to_thread(_fetch_job_status, job_id)
             if status in ("for_review", "completed", "failed"):
                 if not done_sent:
-                    yield f"event: done\ndata: {json.dumps({'status': status})}\n\n"
+                    yield f"event: {EVENT_DONE}\ndata: {json.dumps({'status': status})}\n\n"
                 return
             if status is None:
                 _not_found_retries += 1
                 if _not_found_retries >= _MAX_NOT_FOUND:
                     # Job genuinely does not exist — close the stream
-                    yield f"event: done\ndata: {json.dumps({'status': 'failed', 'error': 'job not found'})}\n\n"
+                    yield f"event: {EVENT_DONE}\ndata: {json.dumps({'status': 'failed', 'error': 'job not found'})}\n\n"
                     return
                 # else: wait and retry — the row may not be committed yet
 
@@ -118,7 +124,7 @@ async def progress_stream(job_id: str, request: Request):
             # so the client stops waiting and can re-poll the job status.
             if _elapsed >= _MAX_STREAM_SECONDS:
                 yield (
-                    "event: done\n"
+                    f"event: {EVENT_DONE}\n"
                     f"data: {json.dumps({'status': status or 'processing', 'error': 'progress stream timed out'})}\n\n"
                 )
                 return
@@ -130,7 +136,7 @@ async def progress_stream(job_id: str, request: Request):
                 user, _ = await asyncio.to_thread(authenticate, request, True)
                 if user is None:
                     yield (
-                        "event: done\n"
+                        f"event: {EVENT_DONE}\n"
                         f"data: {json.dumps({'status': status or 'processing', 'error': 'session ended'})}\n\n"
                     )
                     return

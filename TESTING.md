@@ -692,6 +692,10 @@ one file each, and `tests/test_contract.py` runs
 - `stix.json`: read from the Stage 4 reference bundles above, the custom
   properties with their JSON types, and the ids of their objects (`random`
   for a random one, such as the Report's).
+- `formats.json`: the SSE event names (`api/routes/progress.py`, `SSE_EVENTS`)
+  and the layout of the detection export ZIP (`api/routes/coverage.py`).
+  `tests/test_contract_formats.py` checks that the frontend listens only to
+  the recorded event names.
 
 Each difference is `breaking`, `default` or `compatible`, by the rules of the
 support policy (`tests/test_contract_rules.py` checks each rule both ways); any

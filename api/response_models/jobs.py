@@ -12,13 +12,17 @@ from pydantic import Field, JsonValue
 
 from api.response_models import Response as ApiResponse
 
+# Every status a job row holds: the values the code writes to `jobs.status` (set_job_status, _finalize_job,
+# the queue loop and the worker). The metrics route emits one series per value (api/routes/metrics.py).
+JobStatus = Literal["uploaded", "queued", "processing", "for_review", "reviewing", "completed", "failed"]
+
 
 class JobSummary(ApiResponse):
     """One entry of GET /api/jobs."""
 
     id: str
     original_filename: str
-    status: str = Field(description="uploaded, queued, processing, for_review, reviewing, completed or failed.")
+    status: JobStatus = Field(description="uploaded, queued, processing, for_review, reviewing, completed or failed.")
     tlp_level: str | None
     pap_level: str | None
     pipeline_mode: str = Field(description="full, or enrich when the job was created from a baseline (ADR-0090).")
@@ -91,7 +95,7 @@ class JobDetail(ApiResponse):
 
     id: str
     original_filename: str
-    status: str
+    status: JobStatus
     report_text: str | None
     tlp_level: str | None
     pap_level: str | None
@@ -113,7 +117,7 @@ class StatusResult(ApiResponse):
 class FinalizeResult(ApiResponse):
     """POST /api/jobs/{id}/finalize."""
 
-    status: str = Field(description="The job's status after the rebuild.")
+    status: JobStatus = Field(description="The job's status after the rebuild.")
     bundle_size: int = Field(description="The length of the rebuilt bundle JSON.")
     validation: str = Field(description="validated, unverified (JSON schemas missing), unknown, or the stored verdict.")
 

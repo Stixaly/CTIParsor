@@ -165,6 +165,15 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# The progress event types a job stores (`progress_events.event_type`, written by emit_progress).  The SSE
+# stream of api/routes/progress.py sends each one under its own name, so a rename here is a rename on the wire.
+EVENT_QUEUED = "queued"
+EVENT_STAGE = "stage"
+EVENT_PARTIAL_GRAPH = "partial_graph"
+EVENT_DONE = "done"
+STORED_EVENTS = (EVENT_QUEUED, EVENT_STAGE, EVENT_PARTIAL_GRAPH, EVENT_DONE)
+
+
 def emit_progress(job_id: str, event_type: str, data: dict) -> None:
     import json
     with _lock:

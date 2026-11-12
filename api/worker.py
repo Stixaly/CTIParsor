@@ -25,7 +25,7 @@ from api.logging_config import get_logger
 logger = get_logger(__name__)
 
 from api.baseline_store import baseline_sha256, load_baseline, objects_by_id, validate_in_worker
-from api.db import _lock, emit_progress, get_conn, now_iso, set_job_status, transaction
+from api.db import EVENT_DONE, EVENT_QUEUED, _lock, emit_progress, get_conn, now_iso, set_job_status, transaction
 from api.paths import output_dir, uploads_dir
 from api.run_config import BuildKind, build_record, run_build_record, utc_stamp
 from models.schemas import EntityType, RawEntity
@@ -739,7 +739,7 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str,
                                  baseline_sha256=baseline_sha256(job_id) if loaded is not None else None))):
             return
 
-        emit_progress(job_id, "done", {"status": "for_review"})
+        emit_progress(job_id, EVENT_DONE, {"status": "for_review"})
 
     except RunAborted:
         return
@@ -747,18 +747,18 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str,
         # The baseline cannot be used (ADR-0090): the analyst's bundle is at fault, not the
         # code, so the reason is the message and there is no traceback to read.
         if _finalize_job(job_id, "failed", _owner_worker_id):
-            emit_progress(job_id, "done", {"status": "failed", "error": str(exc)})
+            emit_progress(job_id, EVENT_DONE, {"status": "failed", "error": str(exc)})
         logger.warning(f"[Worker] job {job_id}: the baseline cannot be used: {exc}")
     except TimeoutError as exc:
         error_msg = str(exc)
         if _finalize_job(job_id, "failed", _owner_worker_id):
-            emit_progress(job_id, "done", {"status": "failed", "error": error_msg})
+            emit_progress(job_id, EVENT_DONE, {"status": "failed", "error": error_msg})
         logger.error(f"[Worker TIMEOUT] job {job_id}: {error_msg}")
     except Exception as exc:
         import traceback
         error_msg = traceback.format_exc()
         if _finalize_job(job_id, "failed", _owner_worker_id):
-            emit_progress(job_id, "done", {"status": "failed", "error": str(exc)})
+            emit_progress(job_id, EVENT_DONE, {"status": "failed", "error": str(exc)})
         logger.error(f"[Worker ERROR] job {job_id}: {error_msg}")
     finally:
         # No need to reset RLIMIT_AS — this subprocess is about to exit.  The
@@ -876,7 +876,7 @@ def _spawn_job(job_id: str, file_path: str, original_filename: str,
             logger.error(f"[Worker] Subprocess for job {jid} crashed: {reason}")
             try:
                 if _finalize_job(jid, "failed", owner_worker_id):
-                    emit_progress(jid, "done", {
+                    emit_progress(jid, EVENT_DONE, {
                         "status": "failed",
                         "error": (
                             f"Pipeline worker process terminated unexpectedly ({reason}). "
@@ -928,7 +928,7 @@ def run_pipeline_async(job_id: str, file_path: str, original_filename: str) -> s
             with get_conn() as conn:
                 conn.execute("DELETE FROM job_baselines WHERE job_id=?", (job_id,))
                 conn.commit()
-        emit_progress(job_id, "done", {
+        emit_progress(job_id, EVENT_DONE, {
             "status": "failed",
             "error": f"Queue is full ({_QUEUE_MAX_DEPTH} jobs waiting) — try again later"
         })
@@ -936,7 +936,7 @@ def run_pipeline_async(job_id: str, file_path: str, original_filename: str) -> s
         return "rejected"
 
     set_job_status(job_id, "queued")
-    emit_progress(job_id, "queued", {
+    emit_progress(job_id, EVENT_QUEUED, {
         "status": "queued",
         "position": queue_loop.count_queued()
     })

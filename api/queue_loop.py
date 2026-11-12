@@ -26,7 +26,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from api.db import emit_progress, get_conn, now_iso, set_job_status
+from api.db import EVENT_DONE, EVENT_STAGE, emit_progress, get_conn, now_iso, set_job_status
 from api.logging_config import get_logger, setup_logging
 from pipeline import __version__
 from pipeline.env_flags import env_float, env_int
@@ -138,7 +138,7 @@ def claim_next_queued(worker_id: str = WORKER_ID) -> tuple[str, str, str] | None
             file_path = _upload_path_for(job_id)
             if file_path is None:
                 set_job_status(job_id, "failed")
-                emit_progress(job_id, "done", {"status": "failed", "error": "uploaded file is missing"})
+                emit_progress(job_id, EVENT_DONE, {"status": "failed", "error": "uploaded file is missing"})
                 continue
 
             # Every other status transition in this module pairs a DB write
@@ -149,7 +149,7 @@ def claim_next_queued(worker_id: str = WORKER_ID) -> tuple[str, str, str] | None
             # away during a model cold start. No `stage` number: this isn't
             # one of the 5 pipeline stages, and ProgressModal.tsx uses a
             # present `stage` key to drive its 1-5 stage tracker.
-            emit_progress(job_id, "stage", {"label": "Processing started"})
+            emit_progress(job_id, EVENT_STAGE, {"label": "Processing started"})
             return (job_id, file_path, original_filename)
 
         logger.warning("Failed to claim next queued job after 10 attempts")
@@ -194,7 +194,7 @@ def requeue_orphans(*, unconditional: bool = False) -> int:
             jid, attempts = row[0], row[1]
             message = f"quarantined after {attempts} attempts (JOB_MAX_ATTEMPTS)"
             logger.warning(f"Job {jid} {message}")
-            emit_progress(jid, "done", {"status": "failed", "error": message})
+            emit_progress(jid, EVENT_DONE, {"status": "failed", "error": message})
 
         cur = conn.execute(
             f"UPDATE jobs SET status='queued', worker_id=NULL, heartbeat_at=NULL, updated_at=? "
@@ -209,7 +209,7 @@ def requeue_orphans(*, unconditional: bool = False) -> int:
                 f"({'unconditional' if unconditional else 'lease expired'})"
             )
             for jid in ids:
-                emit_progress(jid, "stage", {"label": "Requeued after a restart"})
+                emit_progress(jid, EVENT_STAGE, {"label": "Requeued after a restart"})
         return count
     except Exception as exc:
         logger.error(f"Exception in requeue_orphans: {exc}")
@@ -370,7 +370,7 @@ class WorkerLoop:
                 with self._lock:
                     self._handles.pop(job_id, None)
                 set_job_status(job_id, "failed")
-                emit_progress(job_id, "done", {
+                emit_progress(job_id, EVENT_DONE, {
                     "status": "failed", "error": f"could not start the pipeline process: {exc}",
                 })
                 logger.error(f"Failed to start job {job_id}: {exc}")
